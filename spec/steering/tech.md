@@ -24,9 +24,15 @@ Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-serv
                                                                        └─► redis:6379  ◄── external-materials-service
                                                                                        (TWSE / FinMind / NASDAQ / FundClear / IMF)
 Host tools ──► 127.0.0.1:9090 (API Gateway) ─┬──► bff:8080
-Tailscale ──► HTTPS :9090（僅九條 exact path）──┘──► external-materials-service:8080
+Tailscale ──► HTTPS :9090（僅九條 exact path）──┘
+                                                     bff:8080 ──► business-services:8080
+                                                         └──► external-materials-service:8080（僅 `/api/quotes*` raw 19 欄讀取）
 external-materials-service ──銀行交易時段每 2 秒──► redis:6379（USD/TWD session heartbeat + spot）
 ```
+
+`/api/quotes` 與 `/api/quotes/one` 仍是同名的兩條 9090 exact route；Requirement 108 只將其 upstream
+改為 BFF 公開市場聚合。BFF 讀 external-materials 的 raw Redis quote，其他四頁籤資料經 business
+唯讀 API 取得；不得讓 Tailscale／gateway 直達 external-materials，也不得在這兩條路徑讀取個人資產資料。
 
 ---
 

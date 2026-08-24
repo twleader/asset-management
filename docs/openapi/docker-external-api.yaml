@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.3.0
+  version: 1.4.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的九條精確路徑：
     八條唯讀 GET ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
@@ -33,13 +33,14 @@ paths:
     get:
       tags: [公開報價]
       operationId: listLatestQuotes
-      summary: 列出 Redis 中的最新報價
+      summary: 列出快取報價與四頁籤公開市場資料
       description: |
-        market 省略時掃描台股、美股、英股；price index 讀取失敗時該市場沒有結果，個別 price key
-        missing／malformed／讀取失敗時只省略該筆，不觸發抓價或資料庫 fallback。價格有效後會 best-effort
-        讀 matching `price:etfnav:*`；NAV enrichment missing／malformed／讀取失敗只讓
-        `premiumDiscountPct=null`，不會省略有效報價。price 的 `tradingDate`／`updatedAt` 不是 NAV 時點，
-        NAV key TTL 為 96 小時且與 price producer 並非同一個 tick。
+        BFF 只 relay external-materials Redis raw `LatestQuote` 的既有 19 欄，並在其後固定加入
+        `marketData.chart`、`quoteDetail`、`etfConstituents`、`dividends` 四個公開市場資料 child。
+        market 省略時掃描台股、美股、英股；raw index 的順序、空快取 `[]` 與 raw 讀取語意不變。
+        `marketData` 不讀、也不含 configured admin、使用者、帳戶、券商、個人持股／成本／交易／快照／配置。
+        台股 `quoteDetail` 是 request-time Yahoo snapshot，只能作此巢狀市場顯示，不寫 Redis／DB／SSE，
+        也不用於估值、損益、下單、警示或任何個人資產判斷。
       parameters:
         - name: market
           in: query
@@ -49,6 +50,18 @@ paths:
             type: string
             enum: [台股, 美股, 英股]
           example: 台股
+        - name: start
+          in: query
+          required: false
+          description: 與 end 同時提供的 ISO 日期；控制每筆 chart 的共同起日，最早為台北今天往前十年。
+          schema: {type: string, format: date}
+          example: '2025-01-15'
+        - name: end
+          in: query
+          required: false
+          description: 與 start 同時提供的 ISO 日期；不得晚於台北今天。兩者皆省略時為近一年。
+          schema: {type: string, format: date}
+          example: '2026-01-15'
       responses:
         '200':
           description: 最新報價陣列；可能為空。
@@ -57,7 +70,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/LatestQuote'
+                  $ref: '#/components/schemas/DetailedLatestQuote'
               examples:
                 synthetic:
                   summary: 去識別化合成範例
@@ -81,6 +94,17 @@ paths:
                       source: SYNTHETIC_EXAMPLE
                       quoteStatus: LIVE
                       premiumDiscountPct: 0.07
+                      marketData:
+                        chart: {status: NO_DATA, message: '目前無走勢資料', requestedStart: '2025-01-15', requestedEnd: '2026-01-15', series: {dates: [], prices: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], latest: null, daily: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}, weekly: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}}, intraday: {status: NO_DATA, message: '目前無分時資料', tradingDate: null, ticks: []}}
+                        quoteDetail: {stockCode: EXM-TW-ETF, stockName: 範例 ETF, market: 台股, supported: true, available: false, source: null, message: '行情五檔暫時不可用', sourceTime: null, fetchedAt: null, marketStatus: null, price: null, previousClose: null, openPrice: null, highPrice: null, lowPrice: null, averagePrice: null, change: null, changePercent: null, turnoverYi: null, volumeLots: null, previousVolumeLots: null, amplitudePercent: null, innerVolumeLots: null, outerVolumeLots: null, innerPercent: null, outerPercent: null, bidTotalLots: null, askTotalLots: null, levels: []}
+                        etfConstituents: {stockCode: EXM-TW-ETF, market: 台股, supported: false, source: null, asOfDate: null, message: 'ETF 成分股資料暫時不可用', holdings: []}
+                        dividends: {stockCode: EXM-TW-ETF, market: 台股, source: null, message: '股利資料暫時不可用', rows: []}
+        '400':
+          description: start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              example: {type: 'about:blank', title: Public quote data unavailable, status: 400, detail: 報價日期參數不合法, instance: /api/quotes}
         '502':
           $ref: '#/components/responses/NginxBadGateway'
         '504':
@@ -89,12 +113,11 @@ paths:
     get:
       tags: [公開報價]
       operationId: getLatestQuote
-      summary: 查詢單一標的的最新報價
+      summary: 查詢單一標的的快取報價與四頁籤公開市場資料
       description: |
-        只讀目前 Redis cache；price key cache miss 或 price 讀取、解析失敗回 204，不查資料庫且不觸發外部抓取。
-        價格有效後會 best-effort 讀 matching `price:etfnav:*`；NAV enrichment missing／malformed／讀取失敗
-        仍回 200，只讓 `premiumDiscountPct=null`。price 的 `tradingDate`／`updatedAt` 不是 NAV 時點，
-        NAV key TTL 為 96 小時且與 price producer 並非同一個 tick。
+        只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
+        raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child。所有 child fail-soft，
+        不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、交易或資產快照。
       parameters:
         - name: code
           in: query
@@ -111,32 +134,39 @@ paths:
             type: string
             enum: [台股, 美股, 英股]
           example: 台股
+        - name: start
+          in: query
+          required: false
+          description: 與 end 同時提供的 ISO chart 起日；兩者皆省略時為台北今天往前一年。
+          schema: {type: string, format: date}
+          example: '2025-01-15'
+        - name: end
+          in: query
+          required: false
+          description: 與 start 同時提供的 ISO chart 迄日；最長十年且不得晚於台北今天。
+          schema: {type: string, format: date}
+          example: '2026-01-15'
       responses:
         '200':
           description: Redis 命中的最新報價。
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LatestQuote'
+                $ref: '#/components/schemas/DetailedLatestQuote'
               examples:
                 synthetic:
                   summary: 去識別化合成範例
-                  value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30.123456789', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null}
+                  value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30.123456789', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null, marketData: {chart: {status: NO_DATA, message: '目前無走勢資料', requestedStart: '2025-01-15', requestedEnd: '2026-01-15', series: {dates: [], prices: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], latest: null, daily: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}, weekly: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}}, intraday: {status: NO_DATA, message: '目前無分時資料', tradingDate: null, ticks: []}}, quoteDetail: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, supported: true, available: false, source: null, message: '行情五檔暫時不可用', sourceTime: null, fetchedAt: null, marketStatus: null, price: null, previousClose: null, openPrice: null, highPrice: null, lowPrice: null, averagePrice: null, change: null, changePercent: null, turnoverYi: null, volumeLots: null, previousVolumeLots: null, amplitudePercent: null, innerVolumeLots: null, outerVolumeLots: null, innerPercent: null, outerPercent: null, bidTotalLots: null, askTotalLots: null, levels: []}, etfConstituents: {stockCode: EXM-TW-001, market: 台股, supported: false, source: null, asOfDate: null, message: 'ETF 成分股資料暫時不可用', holdings: []}, dividends: {stockCode: EXM-TW-001, market: 台股, source: null, message: '股利資料暫時不可用', rows: []}}}
         '204':
           description: Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。
         '400':
-          description: code 或 market 缺少時由 Spring 綁定層產生的基本錯誤。
+          description: code／market 缺少，或 start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。
           content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SpringBasicError'
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
               examples:
                 missingMarket:
-                  value:
-                    timestamp: '2026-01-15T02:15:30.000Z'
-                    status: 400
-                    error: Bad Request
-                    path: /api/quotes/one
+                  value: {type: 'about:blank', title: Public quote data unavailable, status: 400, detail: 報價日期參數不合法, instance: /api/quotes/one}
         '502':
           $ref: '#/components/responses/NginxBadGateway'
         '504':
@@ -680,6 +710,277 @@ components:
         premiumDiscountPct:
           type: [number, 'null']
           description: 百分點數值，正值為溢價、負值為折價，例如 0.07 表示溢價 0.07%。只轉交 `price:etfnav:*` 的同名來源欄位；缺值時不以 price 與 nav 反推。一般股票與目前不帶官方折溢價的美股 ETF 為 null。required 僅表示 property 固定出現，不代表非 null；price 的 updatedAt／tradingDate 不是 NAV 時點，NAV key TTL 為 96 小時且與 price producer 非同 tick。本 API 不另提供 nav／navAsOf。
+      additionalProperties: false
+    DetailedLatestQuote:
+      type: object
+      description: "Requirement 108 的 host response：raw LatestQuote 19 欄依原始 record 順序保留，僅在最後加入固定 marketData。只含公開市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。"
+      required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus, premiumDiscountPct, marketData]
+      properties:
+        stockCode: {type: [string, 'null']}
+        stockName: {type: [string, 'null']}
+        market: {type: [string, 'null'], enum: [台股, 美股, 英股, null]}
+        price: {type: [number, 'null']}
+        previousClose: {type: [number, 'null']}
+        priceChange: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        buyPrice: {type: [number, 'null']}
+        sellPrice: {type: [number, 'null']}
+        openPrice: {type: [number, 'null']}
+        highPrice: {type: [number, 'null']}
+        lowPrice: {type: [number, 'null']}
+        volume: {type: [integer, 'null'], format: int64}
+        tradingDate: {type: [string, 'null']}
+        updatedAt: {type: [string, 'null'], pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'}
+        closed: {type: [boolean, 'null']}
+        source: {type: [string, 'null']}
+        quoteStatus: {type: [string, 'null']}
+        premiumDiscountPct: {type: [number, 'null']}
+        marketData: {$ref: '#/components/schemas/PublicQuoteMarketData'}
+      additionalProperties: false
+    PublicQuoteMarketData:
+      type: object
+      description: 固定四個畫面頁籤的公開市場投影；任一 child 不可用時仍存在，採 typed fallback。
+      required: [chart, quoteDetail, etfConstituents, dividends]
+      properties:
+        chart: {$ref: '#/components/schemas/ChartMarketData'}
+        quoteDetail: {$ref: '#/components/schemas/PublicQuoteDetail'}
+        etfConstituents: {$ref: '#/components/schemas/PublicEtfConstituents'}
+        dividends: {$ref: '#/components/schemas/PublicDividendHistory'}
+      additionalProperties: false
+    ChartMarketData:
+      type: object
+      description: history/indicator 共用 aggregation；status 不描述 intraday。NO_DATA 與 UNAVAILABLE 都回 canonical empty series。
+      required: [status, message, requestedStart, requestedEnd, series, intraday]
+      properties:
+        status: {type: string, enum: [AVAILABLE, NO_DATA, UNAVAILABLE]}
+        message: {type: [string, 'null'], description: 一般化 client-safe 訊息，不含上游 URL、HTML 或例外。}
+        requestedStart: {type: string, format: date}
+        requestedEnd: {type: string, format: date}
+        series: {$ref: '#/components/schemas/ChartSeries'}
+        intraday: {$ref: '#/components/schemas/IntradayMarketData'}
+      additionalProperties: false
+    IntradayMarketData:
+      type: object
+      description: 指定 raw tradingDate 的 pure-read 分時 outcome；非 AVAILABLE 的 ticks 固定為空陣列。
+      required: [status, message, tradingDate, ticks]
+      properties:
+        status: {type: string, enum: [AVAILABLE, NO_DATA, UNAVAILABLE]}
+        message: {type: [string, 'null']}
+        tradingDate: {type: [string, 'null'], format: date}
+        ticks:
+          type: array
+          items: {$ref: '#/components/schemas/IntradayTick'}
+      additionalProperties: false
+    IntradayTick:
+      type: object
+      required: [time, price]
+      properties:
+        time: {type: string, description: ISO local date-time；市場當地時間。}
+        price: {type: number}
+      additionalProperties: false
+    ChartSeries:
+      type: object
+      description: StockAnalysisDialog 共用的對齊日線／日K／週K、MA、KD/J、MACD、RSI、乖離率、威廉值與 latest。
+      required: [dates, prices, ma5, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9, latest, daily, weekly]
+      properties:
+        dates: {$ref: '#/components/schemas/DateStringSeries'}
+        prices: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma5: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma60: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma240: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        k: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        d: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        j9: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        k3d2: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsv: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ema12: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ema26: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        dif: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        macd: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        osc: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsi5: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsi10: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        bias10: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        bias20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        b10b20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        wr9: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        latest: {$ref: '#/components/schemas/NullableChartLatest'}
+        daily: {$ref: '#/components/schemas/ChartFrame'}
+        weekly: {$ref: '#/components/schemas/ChartFrame'}
+      additionalProperties: false
+    DateStringSeries:
+      type: array
+      items: {type: string, format: date}
+    NullableChartLatest:
+      anyOf:
+        - {$ref: '#/components/schemas/ChartLatest'}
+        - {type: 'null'}
+    ChartLatest:
+      type: object
+      required: [ma5, ma20, ma60, ma240, k, d, j9, k3d2, rsv, prevK, prevD, prevJ9, prevK3d2, prevRsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9, prevEma12, prevEma26, prevDif, prevMacd, prevRsi5, prevRsi10, prevBias10, prevBias20, prevB10b20, prevWr9]
+      properties:
+        ma5: {type: [number, 'null']}
+        ma20: {type: [number, 'null']}
+        ma60: {type: [number, 'null']}
+        ma240: {type: [number, 'null']}
+        k: {type: [number, 'null']}
+        d: {type: [number, 'null']}
+        j9: {type: [number, 'null']}
+        k3d2: {type: [number, 'null']}
+        rsv: {type: [number, 'null']}
+        prevK: {type: [number, 'null']}
+        prevD: {type: [number, 'null']}
+        prevJ9: {type: [number, 'null']}
+        prevK3d2: {type: [number, 'null']}
+        prevRsv: {type: [number, 'null']}
+        ema12: {type: [number, 'null']}
+        ema26: {type: [number, 'null']}
+        dif: {type: [number, 'null']}
+        macd: {type: [number, 'null']}
+        osc: {type: [number, 'null']}
+        rsi5: {type: [number, 'null']}
+        rsi10: {type: [number, 'null']}
+        bias10: {type: [number, 'null']}
+        bias20: {type: [number, 'null']}
+        b10b20: {type: [number, 'null']}
+        wr9: {type: [number, 'null']}
+        prevEma12: {type: [number, 'null']}
+        prevEma26: {type: [number, 'null']}
+        prevDif: {type: [number, 'null']}
+        prevMacd: {type: [number, 'null']}
+        prevRsi5: {type: [number, 'null']}
+        prevRsi10: {type: [number, 'null']}
+        prevBias10: {type: [number, 'null']}
+        prevBias20: {type: [number, 'null']}
+        prevB10b20: {type: [number, 'null']}
+        prevWr9: {type: [number, 'null']}
+      additionalProperties: false
+    ChartFrame:
+      type: object
+      required: [dates, opens, highs, lows, closes, ma5, ma20, ma60, ma240, k, d, j9, k3d2, rsv, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9, currentClose, previousClose, latest]
+      properties:
+        dates: {$ref: '#/components/schemas/DateStringSeries'}
+        opens: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        highs: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        lows: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        closes: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma5: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma60: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ma240: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        k: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        d: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        j9: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        k3d2: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsv: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ema12: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        ema26: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        dif: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        macd: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        osc: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsi5: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        rsi10: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        bias10: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        bias20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        b10b20: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        wr9: {$ref: '#/components/schemas/NullableDecimalSeries'}
+        currentClose: {type: [number, 'null']}
+        previousClose: {type: [number, 'null']}
+        latest: {$ref: '#/components/schemas/NullableChartLatest'}
+      additionalProperties: false
+    PublicQuoteDetail:
+      type: object
+      description: 台股 Yahoo 同時間點摘要／內外盤／五檔 snapshot；非台股或 0000 為 typed unsupported，零 Yahoo request。
+      required: [stockCode, stockName, market, supported, available, source, message, sourceTime, fetchedAt, marketStatus, price, previousClose, openPrice, highPrice, lowPrice, averagePrice, change, changePercent, turnoverYi, volumeLots, previousVolumeLots, amplitudePercent, innerVolumeLots, outerVolumeLots, innerPercent, outerPercent, bidTotalLots, askTotalLots, levels]
+      properties:
+        stockCode: {type: [string, 'null']}
+        stockName: {type: [string, 'null']}
+        market: {type: [string, 'null']}
+        supported: {type: boolean}
+        available: {type: boolean}
+        source: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+        sourceTime: {type: [string, 'null'], format: date-time}
+        fetchedAt: {type: [string, 'null'], format: date-time}
+        marketStatus: {type: [string, 'null']}
+        price: {type: [number, 'null']}
+        previousClose: {type: [number, 'null']}
+        openPrice: {type: [number, 'null']}
+        highPrice: {type: [number, 'null']}
+        lowPrice: {type: [number, 'null']}
+        averagePrice: {type: [number, 'null']}
+        change: {type: [number, 'null']}
+        changePercent: {type: [number, 'null']}
+        turnoverYi: {type: [number, 'null']}
+        volumeLots: {type: [integer, 'null'], format: int64}
+        previousVolumeLots: {type: [integer, 'null'], format: int64}
+        amplitudePercent: {type: [number, 'null']}
+        innerVolumeLots: {type: [integer, 'null'], format: int64}
+        outerVolumeLots: {type: [integer, 'null'], format: int64}
+        innerPercent: {type: [number, 'null']}
+        outerPercent: {type: [number, 'null']}
+        bidTotalLots: {type: [integer, 'null'], format: int64}
+        askTotalLots: {type: [integer, 'null'], format: int64}
+        levels: {type: array, items: {$ref: '#/components/schemas/OrderBookLevel'}}
+      additionalProperties: false
+    OrderBookLevel:
+      type: object
+      required: [level, bidPrice, bidVolumeLots, askPrice, askVolumeLots]
+      properties:
+        level: {type: integer, minimum: 1, maximum: 5}
+        bidPrice: {type: [number, 'null']}
+        bidVolumeLots: {type: [integer, 'null'], format: int64}
+        askPrice: {type: [number, 'null']}
+        askVolumeLots: {type: [integer, 'null'], format: int64}
+      additionalProperties: false
+    PublicEtfConstituents:
+      type: object
+      description: ETF 發行人公開成分股。外層刻意不用 holdings；內層既有 holdings[] 僅代表發行人公開成分，不是使用者持股。
+      required: [stockCode, market, supported, source, asOfDate, message, holdings]
+      properties:
+        stockCode: {type: [string, 'null']}
+        market: {type: [string, 'null']}
+        supported: {type: boolean}
+        source: {type: [string, 'null']}
+        asOfDate: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+        holdings: {type: array, items: {$ref: '#/components/schemas/EtfConstituent'}}
+      additionalProperties: false
+    EtfConstituent:
+      type: object
+      required: [stockCode, stockName, weight, shares]
+      properties:
+        stockCode: {type: [string, 'null']}
+        stockName: {type: [string, 'null']}
+        weight: {type: [number, 'null']}
+        shares: {type: [number, 'null'], description: 發行人公開成分股股數；不是個人持有股數。}
+      additionalProperties: false
+    PublicDividendHistory:
+      type: object
+      description: DB-only readonly 十年股利完整 envelope；不觸發 sync、projection 或任何寫入。
+      required: [stockCode, market, source, message, rows]
+      properties:
+        stockCode: {type: [string, 'null']}
+        market: {type: [string, 'null']}
+        source: {type: [string, 'null']}
+        message: {type: [string, 'null']}
+        rows: {type: array, items: {$ref: '#/components/schemas/PublicDividendRow'}}
+      additionalProperties: false
+    PublicDividendRow:
+      type: object
+      required: [year, cashDividend, stockDividend, exDividendDate, yieldPct, cashPaymentDate, stockPaymentDate, fillDays, previousClose, exRightsDate]
+      properties:
+        year: {type: [integer, 'null'], format: int32}
+        cashDividend: {type: [number, 'null']}
+        stockDividend: {type: [number, 'null']}
+        exDividendDate: {type: [string, 'null'], format: date}
+        yieldPct: {type: [number, 'null']}
+        cashPaymentDate: {type: [string, 'null'], format: date}
+        stockPaymentDate: {type: [string, 'null'], format: date}
+        fillDays: {type: [integer, 'null'], format: int32}
+        previousClose: {type: [number, 'null']}
+        exRightsDate: {type: [string, 'null'], format: date}
       additionalProperties: false
     MarketIndexResponse:
       type: object

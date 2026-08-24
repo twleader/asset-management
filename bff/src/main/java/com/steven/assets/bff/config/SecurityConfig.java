@@ -74,9 +74,11 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
                                 "/actuator/health", "/actuator/info").permitAll()
-                        // Requirements 67/68/70/78/79/86：只有六支 BFF 精確 GET 可由 api-gateway 匿名讀取；
-                        // quotes 由 Nginx 直接轉 external-materials，不在 BFF 放行。
+                        // Requirements 67/68/70/78/79/86/108：僅列出的 exact GET 可由 api-gateway 匿名讀取；
+                        // quotes 是 Task 372 的 public market aggregation，不能放寬成 /api/quotes/**。
                         .pathMatchers(HttpMethod.GET,
+                                "/api/quotes",
+                                "/api/quotes/one",
                                 "/api/public/market-index",
                                 "/api/assets/latest",
                                 "/api/public/exchange-rate/usd-twd",

@@ -6,6 +6,8 @@
 
 ## 背景
 
+> **歷史拓撲快照（Task 328 落地時）：**以下「目前」、「五條」及「quote upstream 為 external-materials-service」的敘述，記錄的是 Task 328 當時的正式拓撲，保留供追溯而不改寫當時事實。Requirement 108／Task 372 後的**現況**由該需求治理：9090/Tailscale 仍是九條 exact path，但兩條 quote path 改為 gateway → BFF public aggregation → raw external＋受限 business readonly bridge；raw `LatestQuote` 仍為 19 欄，對外回應才增加 `marketData`。
+
 目前 Docker 外部 API 分散在三個入口：external-materials-service 以
 `127.0.0.1:8082` 直接映射整個 Spring Boot process、BFF 以 `0.0.0.0:8080` 映射、frontend
 Nginx 的 generic `/api/` 又可代理 BFF public route。第一種做法雖只綁 loopback，仍讓同 process

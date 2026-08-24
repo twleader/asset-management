@@ -39,6 +39,15 @@ public record ChartSeriesDto(
         DailyFrame daily,
         WeeklyFrame weekly) {
 
+    /** Requirement 108 的固定空 frame：所有 list 非 null、numeric/latest 為 null。 */
+    public static ChartSeriesDto empty() {
+        return new ChartSeriesDto(
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null);
+    }
+
     public ChartSeriesDto(List<String> dates, List<BigDecimal> prices, List<BigDecimal> ma5, List<BigDecimal> ma20,
                           List<BigDecimal> ma60, List<BigDecimal> ma240, List<BigDecimal> k, List<BigDecimal> d,
                           List<BigDecimal> j9, List<BigDecimal> k3d2, List<BigDecimal> rsv, List<BigDecimal> ema12,
