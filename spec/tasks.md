@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–368）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–371）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -367,6 +367,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 366 | 交易雷達結果新增「匯出到 blog」輸出通道：頁首手動按鈕＋沿用既有時間點的排程自動發布，公開全發到 `twleader.blogspot.com`（Blogger API v3 OAuth2，沿用既有登入用 Client），限主要管理者啟用（Requirement 102） | [tasks/t366_trading_radar_blog_publish.md](tasks/t366_trading_radar_blog_publish.md) |
 | 367 | 重產 `db/schema.sql` 稽核基準線（74→85 張表，另補 7 張既有表的欄位／索引漂移），並以 `spec-check.sh` B10 呼叫新測試 `scripts/tests/schema-sql-drift-test.sh` 建立機械防漂移閘門（含跨 worktree 的嚴重度分流）；同步統一 spec-auditor／arch-auditor 對該檔互相矛盾的指引（Requirement 103；避讓當下 Task 364／365 與 Requirement 100／101 尚在別的 worktree 在途，其後皆已 landed） | [tasks/t367_schema_sql_drift_guard.md](tasks/t367_schema_sql_drift_guard.md) |
 | 368 | `db/schema.sql` 定性為 DB schema 的**唯一標準**：刪掉 Task 367 留下的「仍須以 `psql`／`databasechangelog` 複驗」與 B10 `DRIFT_HINT` 那套「停下回報、不得重產」判斷程序，處置一律改為「重產本檔」；只改定性與處置文字，不動任何機制（Requirement 104） | [tasks/t368_schema_sql_single_standard.md](tasks/t368_schema_sql_single_standard.md) |
+| 369 | 儀表板「股價/漲跌(%)」欄位在 `priceChange` 缺值時整包消失——改為股價與漲跌%各自獨立降級（Requirement 105） | [tasks/t369_dashboard_price_change_restore.md](tasks/t369_dashboard_price_change_restore.md) |
+| 370 | 台股十秒富邦優先行情與最新快照持久化（Requirement 106） | [tasks/t370_tw_live_priority_persistence.md](tasks/t370_tw_live_priority_persistence.md) |
+| 371 | 僅富邦庫存同步實際可寫入（`READY` + inventory sync enabled + TW LIVE disabled）時保護富邦台股 source rows；其餘狀態完整手動快照 PUT 均視為 payload-owned 並確實寫入（Requirement 90／Task 371 補充） | [tasks/t371_manual_fubon_snapshot_save.md](tasks/t371_manual_fubon_snapshot_save.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
