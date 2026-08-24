@@ -46,6 +46,14 @@ class PortfolioReadRequest(BaseModel):
 class QuoteReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     codes: list[StrictStr]
+    purpose: StrictStr
+
+    @field_validator("purpose")
+    @classmethod
+    def valid_purpose(cls, value: str) -> str:
+        if value not in {"LIVE", "INVENTORY"}:
+            raise ValueError("INVALID_PURPOSE")
+        return value
 
 
 def _sdk_version() -> str:
@@ -187,7 +195,7 @@ def create_app(
         _config: ConfigSnapshot = Depends(authorize),
     ) -> dict[str, object]:
         try:
-            result = await quotes.read(request.codes)
+            result = await quotes.read(request.codes, request.purpose)
         except SdkCallError as exc:
             outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED
             outcome_counters.increment(outcome)

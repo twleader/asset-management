@@ -2,6 +2,8 @@ package com.steven.assets.integration.fubon;
 
 public enum FubonOutcome {
     DISABLED,
+    INVENTORY_SYNC_DISABLED,
+    INVENTORY_SYNC_CAPACITY_CONFLICT,
     MISCONFIGURED,
     CALENDAR_UNKNOWN,
     ACCOUNTING_FAILED,

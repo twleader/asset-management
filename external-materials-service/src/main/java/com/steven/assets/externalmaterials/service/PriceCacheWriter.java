@@ -81,8 +81,8 @@ public class PriceCacheWriter {
     }
 
     /**
-     * Live producer entry point. Valid actual trades may update their own day-H/L bucket before
-     * the latest-key decision; that bucket is the one explicitly specified stale-write exception.
+     * Generic legacy producer entry point. Taiwan priority LIVE uses {@link #writeTaiwanLive}
+     * below; other markets retain their established aggregation behavior.
      */
     public CacheWriteOutcome write(
             PriceResult result, boolean markClosed, boolean aggregateHighLow) {
@@ -102,11 +102,10 @@ public class PriceCacheWriter {
             mergedHigh = mergeHigh(result.highPrice(), aggregate.high());
             mergedLow = mergeLow(result.lowPrice(), aggregate.low());
         }
-
         String status = markClosed ? "PREVIOUS_CLOSE" : "LIVE";
         CacheWriteOutcome outcome = executeLatestWrite(
                 result, result.tradingDate(), result.freshnessInstant(), status, markClosed,
-                mergedHigh, mergedLow);
+                mergedHigh, mergedLow, false);
         if (outcome == CacheWriteOutcome.WRITTEN && !markClosed && actualTrade) {
             LocalDateTime tickTime = LocalDateTime.ofInstant(
                     result.freshnessInstant(), MarketClock.zoneOf(result.market()));
@@ -116,12 +115,43 @@ public class PriceCacheWriter {
         return outcome;
     }
 
+    /** Taiwan priority pipeline uses the common strict-newer Lua primitive for every provider. */
+    public CacheWriteOutcome writeTaiwanLive(PriceResult result, boolean fubonSourceOhlc) {
+        if (!positive(result) || !timed(result)) return CacheWriteOutcome.FAILED;
+        BigDecimal high = result.highPrice();
+        BigDecimal low = result.lowPrice();
+        if (!fubonSourceOhlc) {
+            IntradayHighLowTracker.HighLow current = hlTracker.get(
+                    result.stockCode(), result.market(), result.tradingDate());
+            if (current == null) current = IntradayHighLowTracker.HighLow.EMPTY;
+            high = mergeHigh(high, max(current.high(), result.price()));
+            low = mergeLow(low, min(current.low(), result.price()));
+        }
+        CacheWriteOutcome outcome = executeLatestWrite(result, result.tradingDate(), result.freshnessInstant(),
+                "LIVE", false, high, low, true);
+        if (outcome == CacheWriteOutcome.WRITTEN && isActualTrade(result)) {
+            if (!fubonSourceOhlc) {
+                hlTracker.observe(result.stockCode(), result.market(), result.tradingDate(), result.price());
+            }
+            LocalDateTime tickTime = LocalDateTime.ofInstant(result.freshnessInstant(), MarketClock.TW_ZONE);
+            tickStore.appendTick(result.stockCode(), result.market(), result.tradingDate(), tickTime, result.price());
+        }
+        return outcome;
+    }
+
+    private static BigDecimal max(BigDecimal left, BigDecimal right) {
+        return left == null || right.compareTo(left) > 0 ? right : left;
+    }
+    private static BigDecimal min(BigDecimal left, BigDecimal right) {
+        return left == null || right.compareTo(left) < 0 ? right : left;
+    }
+
     /** Verified close producer entry point; the observation itself is the date/time authority. */
     public CacheWriteOutcome writeVerifiedClose(PriceResult result) {
         if (!positive(result)) return CacheWriteOutcome.SKIPPED_INVALID_PRICE;
         if (!timed(result)) return CacheWriteOutcome.FAILED;
         return executeLatestWrite(result, result.tradingDate(), result.freshnessInstant(),
-                "VERIFIED_CLOSE", true, result.highPrice(), result.lowPrice());
+                "VERIFIED_CLOSE", true, result.highPrice(), result.lowPrice(), false);
     }
 
     /** Compatibility overload: an independently supplied date can only corroborate the observation. */
@@ -149,7 +179,7 @@ public class PriceCacheWriter {
                 null, null, null, null, previousClose, null, null, null,
                 datedClose.date(), retrievalInstant);
         return executeLatestWrite(observation, datedClose.date(), retrievalInstant,
-                "PREVIOUS_CLOSE", true, null, null);
+                "PREVIOUS_CLOSE", true, null, null, false);
     }
 
     /**
@@ -219,7 +249,8 @@ public class PriceCacheWriter {
             String quoteStatus,
             boolean closed,
             BigDecimal highPrice,
-            BigDecimal lowPrice) {
+            BigDecimal lowPrice,
+            boolean strictNewer) {
         String code = result.stockCode();
         String market = result.market();
         String key = "price:" + market + ":" + code;
@@ -230,10 +261,11 @@ public class PriceCacheWriter {
         try {
             String json = MAPPER.writeValueAsString(payload);
             @SuppressWarnings("unchecked")
-            List<Object> reply = redis.execute(
-                    MONOTONIC_WRITE,
-                    List.of(key, indexKey),
-                    json, code, Long.toString(LIVE_TTL.toSeconds()), PRICE_UPDATE_CHANNEL);
+            List<Object> reply = strictNewer
+                    ? redis.execute(MONOTONIC_WRITE, List.of(key, indexKey), json, code,
+                    Long.toString(LIVE_TTL.toSeconds()), PRICE_UPDATE_CHANNEL, "1")
+                    : redis.execute(MONOTONIC_WRITE, List.of(key, indexKey), json, code,
+                    Long.toString(LIVE_TTL.toSeconds()), PRICE_UPDATE_CHANNEL);
             if (reply == null || reply.size() != 4) {
                 log.warn("Redis 單調寫入回傳格式錯誤 {} {}: {}", market, code, reply);
                 return CacheWriteOutcome.FAILED;
@@ -245,6 +277,10 @@ public class PriceCacheWriter {
                         market, code, tradingDate, payload.get("updatedAt"), quoteStatus,
                         stringValue(reply.get(1)), stringValue(reply.get(2)), stringValue(reply.get(3)));
                 return CacheWriteOutcome.REJECTED_STALE;
+            }
+            if (status == 2L && strictNewer) {
+                log.warn("台股 priority LIVE 拒絕損壞的 current Redis 行情 {} {}", market, code);
+                return CacheWriteOutcome.FAILED;
             }
             log.warn("Redis 單調寫入未知 status {} {}: {}", market, code, status);
             return CacheWriteOutcome.FAILED;

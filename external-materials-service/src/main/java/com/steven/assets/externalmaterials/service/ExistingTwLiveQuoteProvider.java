@@ -3,15 +3,15 @@ package com.steven.assets.externalmaterials.service;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import java.util.Set;
 
-/** Disabled-mode strategy backed by the bounded two-wave Task 350 MIS batch client. */
+/**
+ * Legacy test fixture only. Task 370 routes every production Taiwan LIVE round through
+ * {@link TwLiveQuoteDispatcher}, which persists the canonical database snapshot before Redis.
+ */
 @Slf4j
-@Component
-@ConditionalOnProperty(prefix = "fubon", name = "enabled", havingValue = "false", matchIfMissing = true)
+@Deprecated(forRemoval = false)
 public class ExistingTwLiveQuoteProvider implements TwLiveQuoteProvider {
 
     private final PriceFetchClient client;

@@ -128,8 +128,8 @@ public class SchedulePublicBffController {
 
             // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
-                    "盤中每 2 分鐘查 TWSE MIS，更新上市／上櫃持股與觀察清單「個股」即時價至 Redis；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
-                    "交易日 09:00–13:30 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
+                    "盤中每 10 秒依序查富邦證券 API、TWSE MIS、Yahoo，寫入 Redis 與最新盤中 snapshot；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
+                    "交易日 09:00–13:30 每 10 秒", "*/10 * 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股大盤即時點位（盤中）",
                     "盤中每 2 分鐘更新台股大盤（0000）即時點位至 Redis（來源 Yahoo ^TWII 5 分 K）；與「台股個股即時價（盤中）」刻意同頻率，但標的與來源皆不同，非重複排程（Task 228）",
                     "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),

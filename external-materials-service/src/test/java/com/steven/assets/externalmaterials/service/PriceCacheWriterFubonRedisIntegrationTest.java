@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -36,6 +37,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -115,6 +117,178 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS)).isEqualTo(-2);
         assertThat(ticks()).isEmpty();
         assertNoMessage();
+    }
+
+    @Test
+    void taiwanPriorityStrictEqualRejectsWithoutRedisTickOrDayHlMutation() throws Exception {
+        PriceResult first = observation("2026-08-21T05:00:00Z").result().withTiming(DATE, Instant.parse("2026-08-21T05:00:00Z"));
+        PriceResult equal = new PriceResult("2330", "台股", new BigDecimal("101"), null, null, "Yahoo", "台積電",
+                null, null, null, new BigDecimal("99"), null, null, null, DATE, Instant.parse("2026-08-21T05:00:00Z"));
+        PriceResult older = new PriceResult("2330", "台股", new BigDecimal("98"), null, null, "TWSE_MIS", "台積電",
+                null, null, null, new BigDecimal("99"), null, null, null, DATE, Instant.parse("2026-08-21T04:59:59Z"));
+        assertThat(writer.writeTaiwanLive(first, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        awaitMessages(1); messages.clear();
+        String before = redis.opsForValue().get(priceKey());
+        long ticksBefore = ticks().size();
+        Long latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+        Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+        assertThat(redis.opsForSet().members(indexKey())).containsExactly("2330");
+        assertThat(writer.writeTaiwanLive(equal, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(older, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(before);
+        assertThat(redis.opsForSet().members(indexKey())).containsExactly("2330");
+        assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(latestTtlBefore);
+        assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(indexTtlBefore);
+        assertThat(ticks()).hasSize((int) ticksBefore);
+        verify(highLowTracker, never()).observe(any(), any(), any(), any());
+        assertNoMessage();
+    }
+
+    @Test
+    void taiwanPriorityAcceptsStrictlyNewerFubonThenMisThenYahooButNeverRegressesAcrossSources() throws Exception {
+        PriceResult fubon = live("FUBON_INTRADAY", "2026-08-21T05:00:00Z", "100");
+        PriceResult mis = live("TWSE_MIS", "2026-08-21T05:01:00Z", "101");
+        PriceResult yahoo = live("Yahoo", "2026-08-21T05:02:00Z", "102");
+
+        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        awaitMessages(3); messages.clear();
+        String latest = redis.opsForValue().get(priceKey());
+        int ticksBefore = ticks().size();
+
+        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(latest);
+        assertThat(MAPPER.readTree(latest).path("source").asText()).isEqualTo("Yahoo");
+        assertThat(ticks()).hasSize(ticksBefore);
+        verify(highLowTracker).observe("2330", "台股", DATE, new BigDecimal("101"));
+        verify(highLowTracker).observe("2330", "台股", DATE, new BigDecimal("102"));
+        assertNoMessage();
+    }
+
+    @Test
+    void taiwanPriorityMalformedCurrentFailsClosedWithNoLatestIndexTtlPublishTickOrDayHlMutation() throws Exception {
+        for (String malformed : List.of(
+                "not-json",
+                currentPayload("TWSE_MIS", false, "LIVE", "2026-02-30", "2026-08-21T13:00:00"),
+                currentPayload("TWSE_MIS", false, "LIVE", DATE.toString(), "2026-08-21T25:00:00"),
+                currentPayload("TWSE_MIS", false, " ", DATE.toString(), "2026-08-21T13:00:00"))) {
+            setUp();
+            redis.opsForValue().set(priceKey(), malformed, Duration.ofMinutes(25));
+            redis.opsForSet().add(indexKey(), "sentinel-index-member");
+            redis.expire(indexKey(), Duration.ofMinutes(20));
+            Long latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+            Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+
+            assertThat(writer.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:01:00Z", "101"), false))
+                    .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+
+            assertThat(redis.opsForValue().get(priceKey())).isEqualTo(malformed);
+            assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
+            assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(latestTtlBefore);
+            assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(indexTtlBefore);
+            assertThat(ticks()).isEmpty();
+            verify(highLowTracker, never()).observe(any(), any(), any(), any());
+            assertNoMessage();
+        }
+    }
+
+    @Test
+    void taiwanPriorityRejectsDamagedCurrentIdentityAndCoreSchemaWithoutAnySideEffect() throws Exception {
+        List<Consumer<ObjectNode>> corruptions = List.of(
+                node -> node.remove("stockCode"),
+                node -> node.put("stockCode", "2317"),
+                node -> node.put("market", "美股"),
+                node -> node.put("closed", "false"),
+                node -> node.remove("price"),
+                node -> node.put("price", "101"),
+                node -> node.remove("source"),
+                node -> node.put("source", " "));
+        for (Consumer<ObjectNode> corruption : corruptions) {
+            setUp();
+            ObjectNode malformed = (ObjectNode) MAPPER.readTree(currentPayload(
+                    "TWSE_MIS", false, "LIVE", DATE.toString(), "2026-08-21T13:00:00"));
+            corruption.accept(malformed);
+            String raw = MAPPER.writeValueAsString(malformed);
+            redis.opsForValue().set(priceKey(), raw, Duration.ofMinutes(25));
+            redis.opsForSet().add(indexKey(), "sentinel-index-member");
+            redis.expire(indexKey(), Duration.ofMinutes(20));
+            Long latestTtl = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
+            Long indexTtl = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
+
+            assertThat(writer.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:01:00Z", "101"), false))
+                    .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+
+            assertThat(redis.opsForValue().get(priceKey())).isEqualTo(raw);
+            assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
+            assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(latestTtl);
+            assertThat(redis.getExpire(indexKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(indexTtl);
+            assertThat(ticks()).isEmpty();
+            verify(highLowTracker, never()).observe(any(), any(), any(), any());
+            assertNoMessage();
+        }
+    }
+
+    @Test
+    void nonStrictVerifiedCloseRetainsLegacyMalformedCurrentRepairBehavior() throws Exception {
+        redis.opsForValue().set(priceKey(), "{not-json", Duration.ofMinutes(25));
+
+        assertThat(writer.writeVerifiedClose(live("TWSE", "2026-08-21T05:01:00Z", "101")))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        assertThat(MAPPER.readTree(redis.opsForValue().get(priceKey())).path("quoteStatus").asText())
+                .isEqualTo("VERIFIED_CLOSE");
+    }
+
+    @Test
+    void realRedisDayHlTracksOnlyAcceptedMisYahooAndSurvivesRejectedOrVerifiedCloseCases() throws Exception {
+        PriceCacheWriter realWriter = new PriceCacheWriter(redis, mock(StockSourceQuery.class),
+                new IntradayHighLowTracker(redis), new IntradayTickStore(redis));
+        PriceResult fubon = live("FUBON_INTRADAY", "2026-08-21T05:00:00Z", "100");
+        PriceResult mis = live("TWSE_MIS", "2026-08-21T05:01:00Z", "101");
+        PriceResult yahoo = live("Yahoo", "2026-08-21T05:02:00Z", "102");
+
+        assertThat(realWriter.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(redis.hasKey(dayHlKey())).isFalse();
+        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        String dayHl = redis.opsForValue().get(dayHlKey());
+        Long dayHlTtlBefore = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
+        assertThat(MAPPER.readTree(dayHl).path("high").asText()).isEqualTo("102");
+        assertThat(MAPPER.readTree(dayHl).path("low").asText()).isEqualTo("101");
+
+        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHl);
+        assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(dayHlTtlBefore);
+
+        PriceResult verified = live("TWSE", "2026-08-21T05:03:00Z", "103");
+        assertThat(realWriter.writeVerifiedClose(verified)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        String verifiedPayload = redis.opsForValue().get(priceKey());
+        assertThat(realWriter.writeTaiwanLive(live("Yahoo", "2026-08-21T05:04:00Z", "104"), false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(redis.opsForValue().get(priceKey())).isEqualTo(verifiedPayload);
+        assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHl);
+
+        redis.opsForValue().set(priceKey(), "not-json", Duration.ofMinutes(25));
+        String dayHlBeforeMalformed = redis.opsForValue().get(dayHlKey());
+        Long malformedDayHlTtl = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
+        assertThat(realWriter.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:05:00Z", "105"), false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+        assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHlBeforeMalformed);
+        assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(malformedDayHlTtl);
+
+        ObjectNode badCore = (ObjectNode) MAPPER.readTree(verifiedPayload);
+        badCore.put("closed", "false");
+        redis.opsForValue().set(priceKey(), MAPPER.writeValueAsString(badCore), Duration.ofMinutes(25));
+        String dayHlBeforeCoreReject = redis.opsForValue().get(dayHlKey());
+        Long coreRejectDayHlTtl = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
+        assertThat(realWriter.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:06:00Z", "106"), false))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+        assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHlBeforeCoreReject);
+        assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(coreRejectDayHlTtl);
     }
 
     @Test
@@ -558,6 +732,13 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         return new ProviderTimedPriceObservation(result, instant.atZone(MarketClock.TW_ZONE).toLocalDate(), instant);
     }
 
+    private static PriceResult live(String source, String timestamp, String price) {
+        Instant instant = Instant.parse(timestamp);
+        return new PriceResult("2330", "台股", new BigDecimal(price), null, null, source, "台積電",
+                null, null, new BigDecimal(price), new BigDecimal("99"), new BigDecimal(price), new BigDecimal(price),
+                10L, DATE, instant);
+    }
+
     private static String currentPayload(
             String source,
             boolean closed,
@@ -586,6 +767,10 @@ class PriceCacheWriterFubonRedisIntegrationTest {
 
     private static String tickKey() {
         return "price:ticks:台股:2330:" + DATE;
+    }
+
+    private static String dayHlKey() {
+        return "price:dayhl:台股:2330:" + DATE;
     }
 
     private static List<JsonNode> ticks() throws Exception {

@@ -36,7 +36,7 @@ public final class FubonDtos {
             @JsonDeserialize(using = ExactSharesDeserializer.class) long shares,
             CanonicalFubonDecimal costPrice) {}
 
-    public record QuoteReadRequest(List<String> codes) {}
+    public record QuoteReadRequest(List<String> codes, String purpose) {}
 
     public record QuoteBatchResponse(String batchId, List<QuoteItem> quotes, Map<String, Long> counters) {
         public QuoteBatchResponse(String batchId, List<QuoteItem> quotes) {

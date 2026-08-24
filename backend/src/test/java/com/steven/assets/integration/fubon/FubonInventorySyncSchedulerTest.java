@@ -52,6 +52,18 @@ class FubonInventorySyncSchedulerTest {
     }
 
     @Test
+    void featureGatePrecedesConfigTokenAndCalendarReads() {
+        FubonConfigState config = mock(FubonConfigState.class);
+        MarketDataService calendar = mock(MarketDataService.class);
+        FubonInventorySyncService sync = mock(FubonInventorySyncService.class);
+        when(sync.inventoryFeatureGate(false)).thenReturn(mock(FubonDtos.SyncResponse.class));
+        new FubonInventorySyncScheduler(config, calendar, sync, CLOCK).scheduledInventorySync();
+        verify(config, never()).snapshot();
+        verify(calendar, never()).isTwTradingDayKnown(TODAY);
+        verify(sync, never()).syncScheduledAfterCalendar(TODAY);
+    }
+
+    @Test
     void falseEmptyAndCalendarExceptionAllFailClosedBeforeAdapter() {
         for (Optional<Boolean> answer : new Optional[]{Optional.of(false), Optional.empty()}) {
             FubonConfigState config = config(FubonConfigState.State.READY);
