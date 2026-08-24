@@ -6,6 +6,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.ReactorResourceFactory;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.codec.ClientCodecConfigurer;
@@ -22,14 +23,18 @@ public class WebClientConfig {
     @Value("${business-services.url}")
     private String businessServicesUrl;
 
-    @Bean
+    @Value("${external-materials.base-url:http://external-materials-service:8080}")
+    private String externalMaterialsUrl;
+
+    @Bean("businessServicesClient")
+    @Primary
     public WebClient businessServicesClient(WebClient.Builder builder,
                                             ObjectProvider<ReactorResourceFactory> resourceFactory) {
         ExchangeStrategies strategies = ExchangeStrategies.builder()
                 .codecs((ClientCodecConfigurer cfg) ->
                         cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
-        return builder
+        return builder.clone()
                 // DNS 快取上限（Task 208，理由見 DnsCacheConfig）：gateway 那條由 HttpClientCustomizer 套，
                 // 這條 WebClient 是另一個 HttpClient 實例，必須在此明確套用，否則 business-services
                 // 容器重建換 IP 後這條路徑仍會卡 Docker DNS 的 600s TTL。
@@ -41,6 +46,44 @@ public class WebClientConfig {
                 .baseUrl(businessServicesUrl)
                 .exchangeStrategies(strategies)
                 .filter(tenantHeaderFilter())
+                .build();
+    }
+
+    /**
+     * Requirement 108：只讀 external-materials 原始 19 欄報價的 no-tenant client。
+     * 不掛 {@link #tenantHeaderFilter()}，不可從 Reactor context 讀身分或附加 X-User-*。
+     */
+    @Bean("publicQuoteRawClient")
+    public WebClient publicQuoteRawClient(WebClient.Builder builder,
+                                          ObjectProvider<ReactorResourceFactory> resourceFactory) {
+        return publicMarketClient(builder, resourceFactory, externalMaterialsUrl, "public-quote-raw");
+    }
+
+    /**
+     * Requirement 108：只供 public quote aggregation 呼叫明列 market-only business read endpoint。
+     * 它不是 browser-facing BFF client，故同樣不攜帶任何 tenant identity。
+     */
+    @Bean("publicMarketDataBusinessClient")
+    public WebClient publicMarketDataBusinessClient(WebClient.Builder builder,
+                                                    ObjectProvider<ReactorResourceFactory> resourceFactory) {
+        return publicMarketClient(builder, resourceFactory, businessServicesUrl, "public-market-data");
+    }
+
+    private WebClient publicMarketClient(WebClient.Builder builder,
+                                         ObjectProvider<ReactorResourceFactory> resourceFactory,
+                                         String baseUrl,
+                                         String clientName) {
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+                .codecs((ClientCodecConfigurer cfg) ->
+                        cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+        // clone 是安全邊界的一部分：不可因其他 bean 在 shared Builder 掛 filter，讓公開 client
+        // 意外帶上 tenantHeaderFilter。
+        return builder.clone()
+                .clientConnector(new ReactorClientHttpConnector(
+                        DnsCacheConfig.applyDnsCacheLimit(sharedHttpClient(resourceFactory), clientName)))
+                .baseUrl(baseUrl)
+                .exchangeStrategies(strategies)
                 .build();
     }
 

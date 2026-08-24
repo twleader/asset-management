@@ -10,7 +10,7 @@ OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 
 MANIFEST = {
-  ['GET', '/api/quotes'] => %w[200 502 504],
+  ['GET', '/api/quotes'] => %w[200 400 502 504],
   ['GET', '/api/quotes/one'] => %w[200 204 400 502 504],
   ['GET', '/api/public/market-index'] => %w[200 400 500 502 504],
   ['GET', '/api/assets/latest'] => %w[200 404 500 502 503 504],
@@ -69,6 +69,7 @@ end
 
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
+assert!(document.dig('info', 'version') == '1.4.0', 'Requirement 108 後 OpenAPI info.version 必須為 1.4.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -193,5 +194,89 @@ market_response = document.dig('components', 'schemas', 'MarketIndexResponse', '
 assert!(market_response.dig('supportedMarkets', 'minItems') == 10 &&
         market_response.dig('supportedMarkets', 'maxItems') == 10,
         'MarketIndexResponse.supportedMarkets 必須固定 10 項')
+
+# Requirement 108：兩條既有 quote path 只改 host response decorator，不新增 gateway route。
+quote_list = openapi_routes.fetch(['GET', '/api/quotes'])
+quote_one = openapi_routes.fetch(['GET', '/api/quotes/one'])
+assert!(quote_list.fetch('parameters').map { |p| p.fetch('name') } == %w[market start end],
+        '/api/quotes 必須只含 market/start/end 三個 query parameter')
+assert!(quote_one.fetch('parameters').map { |p| p.fetch('name') } == %w[code market start end],
+        '/api/quotes/one 必須只含 code/market/start/end 四個 query parameter')
+assert!(quote_list.dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'type' => 'array', 'items' => {'$ref' => '#/components/schemas/DetailedLatestQuote'}},
+        '/api/quotes 200 必須是 DetailedLatestQuote array')
+assert!(quote_one.dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'$ref' => '#/components/schemas/DetailedLatestQuote'},
+        '/api/quotes/one 200 必須精確引用 DetailedLatestQuote')
+
+schemas = document.dig('components', 'schemas')
+detailed = schemas.fetch('DetailedLatestQuote')
+raw_quote_keys = %w[stockCode stockName market price previousClose priceChange changePercent buyPrice sellPrice openPrice highPrice lowPrice volume tradingDate updatedAt closed source quoteStatus premiumDiscountPct]
+assert!(detailed.fetch('required') == raw_quote_keys + ['marketData'],
+        'DetailedLatestQuote required 必須是原始 19 欄後唯一 marketData')
+assert!(detailed.fetch('properties').keys == raw_quote_keys + ['marketData'],
+        'DetailedLatestQuote property 宣告順序必須保留原始 19 欄再加 marketData')
+assert!(detailed.fetch('additionalProperties') == false,
+        'DetailedLatestQuote 不可用 loose additionalProperties')
+
+market_data = schemas.fetch('PublicQuoteMarketData')
+assert!(market_data.fetch('required') == %w[chart quoteDetail etfConstituents dividends],
+        'marketData 必須固定四個 child，不能省略或加入個人資料 child')
+assert!(market_data.fetch('properties').keys == %w[chart quoteDetail etfConstituents dividends],
+        'marketData 只能宣告四個公開市場 child')
+
+chart = schemas.fetch('ChartMarketData')
+assert!(chart.fetch('required') == %w[status message requestedStart requestedEnd series intraday],
+        'ChartMarketData required shape 漂移')
+assert!(chart.dig('properties', 'status', 'enum') == %w[AVAILABLE NO_DATA UNAVAILABLE],
+        'ChartMarketData.status 必須是固定三態')
+assert!(chart.dig('properties', 'message', 'type').sort == ['null', 'string'],
+        'ChartMarketData.message 必須明確 nullable')
+assert!(chart.dig('properties', 'series', '$ref') == '#/components/schemas/ChartSeries',
+        'ChartMarketData.series 必須為 typed ChartSeries')
+
+chart_latest = schemas.fetch('ChartLatest')
+chart_latest_keys = %w[ma5 ma20 ma60 ma240 k d j9 k3d2 rsv prevK prevD prevJ9 prevK3d2 prevRsv ema12 ema26 dif macd osc rsi5 rsi10 bias10 bias20 b10b20 wr9 prevEma12 prevEma26 prevDif prevMacd prevRsi5 prevRsi10 prevBias10 prevBias20 prevB10b20 prevWr9]
+assert!(chart_latest.fetch('required') == chart_latest_keys,
+        'ChartLatest required 必須精確對應 Java record 欄位與大小寫')
+assert!(chart_latest.fetch('properties').keys == chart_latest_keys,
+        'ChartLatest properties 必須精確對應 Java record 欄位與大小寫')
+assert!(chart_latest.fetch('additionalProperties') == false,
+        'ChartLatest 不可用 loose additionalProperties')
+chart_latest.fetch('properties').each do |name, property|
+  assert!(property['type'].sort == %w[null number],
+          "ChartLatest.#{name} 必須為 nullable number")
+end
+
+intraday = schemas.fetch('IntradayMarketData')
+assert!(intraday.fetch('required') == %w[status message tradingDate ticks],
+        'IntradayMarketData required shape 漂移')
+assert!(intraday.dig('properties', 'status', 'enum') == %w[AVAILABLE NO_DATA UNAVAILABLE],
+        'IntradayMarketData.status 必須是固定三態')
+assert!(intraday.dig('properties', 'message', 'type').sort == ['null', 'string'] &&
+        intraday.dig('properties', 'tradingDate', 'type').sort == ['null', 'string'],
+        'IntradayMarketData message/tradingDate 必須明確 nullable')
+assert!(intraday.dig('properties', 'ticks', 'type') == 'array' &&
+        intraday.dig('properties', 'ticks', 'items', '$ref') == '#/components/schemas/IntradayTick',
+        'IntradayMarketData.ticks 必須是 typed non-null array')
+
+etf = schemas.fetch('PublicEtfConstituents')
+assert!(etf.dig('properties', 'holdings', 'items', '$ref') == '#/components/schemas/EtfConstituent',
+        'etfConstituents.holdings 只能是公開發行人成分股 typed array')
+assert!(schemas.fetch('EtfConstituent').dig('properties', 'shares', 'description').include?('不是個人'),
+        'ETF shares 必須明確標示不是個人持股')
+
+forbidden = %w[configuredAdmin personalHoldings portfolio assetSnapshot user account broker costPrice investmentCost currentValue transaction allocation advice]
+forbidden.each do |field|
+  assert!(!detailed.fetch('properties').key?(field) && !market_data.fetch('properties').key?(field),
+          "公開 quote schema 不可含個人資料欄位 #{field}")
+end
+
+nginx = File.read(NGINX)
+assert!(nginx.scan(/set \$quotes_upstream bff:8080;/).length == 2,
+        '兩條 exact quote gateway location 都必須改 proxy BFF')
+assert!(!nginx.match?(/location = \/api\/quotes \{[^}]*external-materials-service:8080/m) &&
+        !nginx.match?(/location = \/api\/quotes\/one \{[^}]*external-materials-service:8080/m),
+        'quote gateway 不可仍直接送 external-materials')
 
 puts 'PASS: 9090 gateway/OpenAPI 九路 parity、response manifest、parameters、examples 與 refs 完整'

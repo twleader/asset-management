@@ -40,6 +40,21 @@ public class IntradayTickStore {
 
     public record TickPoint(String time, BigDecimal price) {}
 
+    /**
+     * Requirement 108／Task 372 專用的純讀結果。
+     *
+     * <p>既有 {@link #getTicks(String, String, LocalDate)} 為了相容舊走勢圖，刻意把單列
+     * 壞資料與 Redis 讀取例外都靜默降級成空清單；公開市場投影則必須分辨「確實沒有資料」與
+     * 「快取不可用／內容損壞」，所以另立這個 immutable outcome，絕不改變舊方法的語意。</p>
+     */
+    public enum TickReadStatus { DATA, EMPTY, UNAVAILABLE, MALFORMED }
+
+    public record TickReadOutcome(LocalDate tradingDate, TickReadStatus readStatus, List<TickPoint> ticks) {
+        public TickReadOutcome {
+            ticks = ticks == null ? List.of() : List.copyOf(ticks);
+        }
+    }
+
     /** 盤中 polling：append 一筆真實成交 tick。 */
     public void appendTick(String code, String market, LocalDate tradingDate,
                            LocalDateTime time, BigDecimal price) {
@@ -131,6 +146,46 @@ public class IntradayTickStore {
             log.warn("getTicks {} {} {}: {}", market, code, tradingDate, e.getMessage());
         }
         return out;
+    }
+
+    /**
+     * 只讀指定 Redis bucket，且嚴格驗證每一列；不選日期、不 refresh、不寫入。
+     *
+     * <p>任一列 JSON、時間、價格不合法都不能混入部分資料，避免 consumer 把殘缺 session
+     * 誤當成可用分時圖。Redis 操作例外與空 LIST 也必須分開回報，供上游做 typed fallback。</p>
+     */
+    public TickReadOutcome readTicksOutcome(String code, String market, LocalDate tradingDate) {
+        String key = key(code, market, tradingDate);
+        try {
+            List<String> rows = redis.opsForList().range(key, 0, -1);
+            if (rows == null || rows.isEmpty()) {
+                return new TickReadOutcome(tradingDate, TickReadStatus.EMPTY, List.of());
+            }
+
+            List<TickPoint> ticks = new ArrayList<>(rows.size());
+            for (String json : rows) {
+                try {
+                    JsonNode node = MAPPER.readTree(json);
+                    String time = node.path("t").asText(null);
+                    String rawPrice = node.path("p").asText(null);
+                    if (time == null || rawPrice == null) {
+                        return new TickReadOutcome(tradingDate, TickReadStatus.MALFORMED, List.of());
+                    }
+                    LocalDateTime parsedTime = LocalDateTime.parse(time);
+                    BigDecimal price = new BigDecimal(rawPrice);
+                    if (!tradingDate.equals(parsedTime.toLocalDate()) || price.signum() <= 0) {
+                        return new TickReadOutcome(tradingDate, TickReadStatus.MALFORMED, List.of());
+                    }
+                    ticks.add(new TickPoint(time, price));
+                } catch (Exception invalidRow) {
+                    return new TickReadOutcome(tradingDate, TickReadStatus.MALFORMED, List.of());
+                }
+            }
+            return new TickReadOutcome(tradingDate, TickReadStatus.DATA, ticks);
+        } catch (Exception unavailable) {
+            log.warn("readTicksOutcome unavailable {} {} {}", market, code, tradingDate);
+            return new TickReadOutcome(tradingDate, TickReadStatus.UNAVAILABLE, List.of());
+        }
     }
 
     /**

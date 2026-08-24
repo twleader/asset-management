@@ -2,11 +2,9 @@ package com.steven.assets.bff.stockanalysis;
 
 import com.steven.assets.bff.stockanalysis.dto.ChartSeriesDto;
 import com.steven.assets.bff.stockanalysis.dto.EtfHoldingsDto;
-import com.steven.assets.bff.stockanalysis.dto.IndicatorPointDto;
-import com.steven.assets.bff.stockanalysis.dto.PricePointDto;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -15,7 +13,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDate;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -43,15 +40,23 @@ import java.util.List;
 @Slf4j
 @RestController
 @RequestMapping("/api/bff/stock-analysis")
-@RequiredArgsConstructor
 public class StockAnalysisChartBffController {
 
     private final WebClient businessServicesClient;
+    private final StockAnalysisChartDataService chartDataService;
 
-    private static final ParameterizedTypeReference<List<PricePointDto>> PRICE_LIST =
-            new ParameterizedTypeReference<>() {};
-    private static final ParameterizedTypeReference<List<IndicatorPointDto>> INDICATOR_LIST =
-            new ParameterizedTypeReference<>() {};
+    @Autowired
+    public StockAnalysisChartBffController(
+            @Qualifier("businessServicesClient") WebClient businessServicesClient,
+            StockAnalysisChartDataService chartDataService) {
+        this.businessServicesClient = businessServicesClient;
+        this.chartDataService = chartDataService;
+    }
+
+    /** 供既有單元測試以 stub WebClient 建立；正式 Spring 一律走共用 service bean。 */
+    StockAnalysisChartBffController(WebClient businessServicesClient) {
+        this(businessServicesClient, new StockAnalysisChartDataService());
+    }
 
     /**
      * 走勢圖上下兩個 pane 的完整資料，日期已聯集對齊。
@@ -65,37 +70,9 @@ public class StockAnalysisChartBffController {
             @RequestParam String start,
             @RequestParam String end) {
 
-        Mono<List<PricePointDto>> pricesMono = businessServicesClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/market-data/history/stock")
-                        .queryParam("code", code)
-                        .queryParam("market", market)
-                        .queryParam("start", start)
-                        .queryParam("end", end)
-                        .build())
-                .retrieve()
-                .bodyToMono(PRICE_LIST)
-                .onErrorResume(e -> {
-                    log.warn("chart-series: history/stock failed for {} {}", code, market, e);
-                    return Mono.just(Collections.emptyList());
-                });
-
-        Mono<List<IndicatorPointDto>> indicatorsMono = businessServicesClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/market-data/indicators/series")
-                        .queryParam("code", code)
-                        .queryParam("market", market)
-                        .queryParam("start", start)
-                        .queryParam("end", end)
-                        .build())
-                .retrieve()
-                .bodyToMono(INDICATOR_LIST)
-                .onErrorResume(e -> {
-                    log.warn("chart-series: indicators/series failed for {} {}", code, market, e);
-                    return Mono.just(Collections.emptyList());
-                });
-
-        LocalDate requestedStart = LocalDate.parse(start);
-        return Mono.zip(pricesMono, indicatorsMono)
-                .map(t -> ChartSeriesAligner.align(t.getT1(), t.getT2(), requestedStart));
+        return chartDataService.fetch(businessServicesClient, code, market,
+                        LocalDate.parse(start), LocalDate.parse(end))
+                .map(StockAnalysisChartDataService.ChartFetchResult::series);
     }
 
     /**

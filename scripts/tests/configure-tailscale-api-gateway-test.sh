@@ -79,11 +79,11 @@ done
 case "$url" in
   */api/quotes)
     endpoint=quotes
-    body='[{"stockCode":"2330","market":"台股"}]'
+    body='[{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}}}]'
     ;;
   */api/quotes/one)
     endpoint=quote-one
-    body='{"stockCode":"2330","market":"台股"}'
+    body='{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}}}'
     ;;
   *'/api/public/market-index?'*)
     endpoint=market-index

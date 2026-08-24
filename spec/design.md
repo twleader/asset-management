@@ -604,6 +604,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 | GET | `/internal/stock-name?code=&market=` | 股票名稱查詢（台股 FinMind / 美股 Yahoo / 英股 Yahoo `.L`），回 `{name}`（查無回空字串）。為警示建立時的 canonical name 權威來源，見 Service 層 `StockAlertService` 的 `assertNameMatchesCode` 守門 |
 | GET | `/internal/intraday-5m?code=&market=&daysBack=5` | 盤中 5 分鐘 K 線（`daysBack` 預設 5），回 `List<IntradayBar>`。供 `StockAlertService` 警示觸發補抓 |
 | GET | `/internal/intraday-ticks?code=&market=&date=` | 「當日」走勢圖分時 tick 序列，回 `List<TickPoint>`。`date` 選填；省略時的預設 bucket 規則、cold-start refresh 與非交易日不 cold-start 的守則，見「StockAnalysisBffRoutes」的 `/api/bff/stock-analysis/intraday-ticks`（Task 153） |
+| GET | `/internal/intraday-ticks-readonly?code=&market=&date=` | Requirement 108／Task 372 的 exact 純讀分時 outcome；date 必填，只由新 `IntradayTickStore.readTicksOutcome`（或等價）讀指定 bucket，回 `{tradingDate,readStatus,ticks}`，絕不選日期、refresh、外呼、寫 Redis／DB 或 publish |
 | GET | `/internal/quote-detail?code=&market=` | Requirement 87／Task 348 行情五檔展示 snapshot；request-time 解析 Yahoo 台股 `quote.data`，回 typed available/unavailable，不寫 Redis／DB |
 
 **交易日 / 休市：**
@@ -631,7 +632,7 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 |--------|------|------|
 | GET | `/internal/valuation/twse-daily?date=` | 台股歷史估值單日快照（TWSE `rwd/zh/afterTrading/BWIBBU_d?date=&selectType=ALL&response=json`，短 UA `Mozilla/5.0`），回該日全上市個股的 PE／PB／殖利率。**Requirement 61／Task 278**。**抓取實作與合規 Javadoc 隨新 client 類別落在本服務**（見下方 business `/internal` 表的警語） |
 
-#### external-materials-service 公開報價 API（`PublicQuoteController`，僅經 api-gateway 對 host 可達，Requirement 66）
+#### external-materials-service 原始報價快取 API（`PublicQuoteController`，由 BFF 封裝後經 api-gateway 對 host 可達，Requirement 66／108）
 
 > `PublicQuoteController` 的「公開」只表示 operation 本身不要求 OAuth／session；network topology 仍是內網服務。Task 328 移除 `external-materials-service` 的 host port，故 host 不再能繞過 gateway 直連同 process 的 `/internal/*`。外部工具只能經 `api-gateway:9090` 的兩條 exact quote route，其他 `/internal/*` 永遠不在 allowlist。
 
@@ -639,24 +640,77 @@ POST /internal/repair/history?market=%E5%8F%B0%E8%82%A1&from=2026-06-01&to=2026-
 
 | Method | Path | 說明 |
 |--------|------|------|
-| GET | `/api/quotes?market=` | 列出目前 Redis 快取的所有最新報價；`market` 選填（`台股`／`美股`／`英股`其一），省略時回三市場全部（含 `price:台股:0000` 大盤——與個股共用同一 key schema，見上方「Redis key schema」）。查無快取（Redis 為空）回**空陣列**，非錯誤 |
-| GET | `/api/quotes/one?code=&market=` | 查詢單一標的最新報價，`code`／`market` 皆必填（缺一由 Spring 綁定層回 400）。價格 Redis 命中回 200 + 報價 JSON；價格 cache miss 回 **204 No Content**。matching ETF NAV cache miss／錯誤不改 status，只讓 `premiumDiscountPct=null`。全程**不** fallback 查 DB、**不**觸發抓取，與 `/internal/*` 既有帶 cold-start 副作用的端點（例如 `/internal/intraday-ticks`）刻意不同語意 |
+| GET | `/api/quotes?market=&start=&end=` | 對 host 的公開回應由 BFF 保留原始 Redis row 的 19 個 top-level 欄位，並為每筆加入 `marketData` 四頁籤市場投影；`market` 選填（`台股`／`美股`／`英股`其一），省略時回三市場全部（含 `price:台股:0000` 大盤——與個股共用同一 key schema，見上方「Redis key schema」）。`start/end` 同時選填時控制共同走勢窗口，兩者省略為近一年。查無快取（Redis 為空）仍回**空陣列**，非錯誤 |
+| GET | `/api/quotes/one?code=&market=&start=&end=` | 對 host 的公開回應由 BFF 保留原始 Redis 19 欄並加入 `marketData`；`code`／`market` 皆必填（缺一或日期參數不合法回 400）。價格 Redis 命中回 200；價格 cache miss 維持 **204 No Content**。matching ETF NAV cache miss／錯誤不改 status，只讓 `premiumDiscountPct=null`。原始 quote 本身全程**不** fallback 查 DB、**不**觸發抓取；其下 `marketData` 的各子區塊依下一節各自唯讀／fail-soft 規則取得 |
 
-回應 JSON 欄位（`LatestQuote` record）共 19 欄：`stockCode`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`stockName`／`source`／`tradingDate`／`updatedAt`／`closed`／`quoteStatus`／`premiumDiscountPct`。前 18 欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`；最後一欄是 nullable `BigDecimal` 百分點，只取 matching `price:etfnav:*` payload 的同名來源欄位，正數為溢價、負數為折價，不由 quote price 與 NAV 重算。即使值為 `null`，property 仍固定出現在 list／one JSON。解析維持手動 `JsonNode` helper，不依賴 Jackson record 自動反序列化。
+回應 JSON 的既有 top-level `LatestQuote` record 19 欄依 raw record 宣告順序為：`stockCode`／`stockName`／`market`／`price`／`previousClose`／`priceChange`／`changePercent`／`buyPrice`／`sellPrice`／`openPrice`／`highPrice`／`lowPrice`／`volume`／`tradingDate`／`updatedAt`／`closed`／`source`／`quoteStatus`／`premiumDiscountPct`。前 18 欄語意與型別比照 `backend` 端 `PriceQueryService.LivePrice`；最後一欄是 nullable `BigDecimal` 百分點，只取 matching `price:etfnav:*` payload 的同名來源欄位，正數為溢價、負數為折價，不由 quote price 與 NAV 重算。即使值為 `null`，property 仍固定出現在 list／one JSON。Requirement 108 只在這 19 欄外加一個固定 `marketData` object，絕不把原欄包裝、刪除、改名或改以 display-price fallback。原始解析維持手動 `JsonNode` helper，不依賴 Jackson record 自動反序列化。
 
 **與 `/api/market-data/prices`（business-services，經 BFF，`StockPriceService.getAllPrices` → `PriceQueryService.getAllDisplayPrices`／`getDisplayPrice` 依市場階段解析——台股另有 session-phase 與 `close_source` 信任來源過濾，僅非台股標的才退化為 `getLive`，見「Live 行情（Redis）」段落對 `getLive`／`getDisplayPrice` 分工的既有記載）語意不同**：本端點純讀 Redis、無上述 display-phase 邏輯與 DB fallback，`/api/quotes/one` 的 204 就是唯一的「查無」訊號——維運者查詢兩者查到不同結果是預期行為（display 路徑可能給出信任來源過濾後的收盤值，本端點缺 cache 就是 204），不代表系統異常。
 
-**不需要應用層身份驗證**（唯讀公開市場報價；外層由 Tailscale identity/TLS、loopback bind 與 Nginx allowlist 保護，理由見 Requirement 66，與 `TreasuryYieldController` 的 token／ADMIN 雙重驗證要求不同）。**business-services／BFF／前端不消費此端點**——既有即時報價路徑繼續走 `PriceQueryService` 直讀 Redis，不改道；本端點只服務經 `api-gateway:9090` 的 Docker 外工具／維運監看。
+**不需要應用層身份驗證**（唯讀公開市場報價；外層由 Tailscale identity/TLS、loopback bind 與 Nginx allowlist 保護，理由見 Requirement 66，與 `TreasuryYieldController` 的 token／ADMIN 雙重驗證要求不同）。既有 browser／business 即時報價路徑繼續走 `PriceQueryService` 直讀 Redis，不改道；**唯一例外**是 Requirement 108 的 BFF public aggregation，在 container network 內讀本 controller 的 raw 19 欄後封裝成同 path 的 host response。本端點不因而成為個人資產、估值或交易資料來源。
 
-#### business-services Internal API（手動觸發，不排程、不進 BFF、不進前端）
+##### Requirement 108：`/api/quotes*` 的市場資料封裝（不新增第十條 allowlist）
 
-> business-services 的 `/internal` **現有 controller mapping** 包含 `UserAdminController` 的 `/internal/users`、純讀分鐘級的 `/internal/backtest/rules` 與 Treasury proxy/refresh；新增前必須再次以 controller mapping 實查更新本表，不得沿用歷史盤點。現有端點的授權拓撲不能以一個 blanket `AdminGateInterceptor` 描述：Treasury business proxy/refresh 由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護；**`/internal/backtest/rules` 是唯一例外：純讀、分鐘級、只在 asset-net 內呼叫，刻意不掛 AdminGate，也不進 BFF；business 8080 不映射 host，故容器內驗收以 network boundary 為授權邊界。若日後對外映射 8080，必須先新增明確 AdminGate/token 保護再開放。** Requirement 61／Task 278 的估值回補目前仍是**規劃端點、尚無 controller mapping**；實作該任務時才可新增路徑，且必須同時把它納入 `AdminGateInterceptor.addPathPatterns`，不得把規劃描述當成已存在的安全保護。
+`api-gateway` 保留原本兩個 exact path／method 與 Tailscale handler，但 upstream 從 `external-materials-service` 改為 BFF 的 `PublicQuoteMarketDataController`。controller 只委派 `PublicQuoteMarketDataService`；service 注入兩顆專用、container-only、沒有 `TenantIdentity`／`X-User-*` filter 的 WebClient：(1) `publicQuoteRawClient` 只向 `external-materials-service:8080/api/quotes{,/one}` 讀既有 raw list／one；(2) `publicMarketDataBusinessClient` 只向明列的 business market-data read endpoint 取四頁籤資料。不得由 BFF 直讀 Redis、DB、Yahoo、configured-admin 或用 `PriceQueryService` display result 偷換資料來源。原始 list 的 order、market filter、空 array 和 one 的 204 都由 raw source 決定。
+
+```text
+api-gateway:9090 exact GET /api/quotes{,/one}
+  └─ PublicQuoteMarketDataController → PublicQuoteMarketDataService
+       ├─ publicQuoteRawClient → external-materials /api/quotes{,/one}       # raw 19 欄 only
+       └─ publicMarketDataBusinessClient → business-services
+            ├─ /api/market-data/history/stock + /indicators/series            # 共用 chart aggregation
+            ├─ /api/market-data/quote-detail                                  # request-time Yahoo typed snapshot
+            ├─ /api/market-data/etf-holdings                                  # 發行人公開成分股
+            ├─ /internal/public-market-data/dividends-readonly-result          # 完整 DB-only envelope
+            └─ /internal/public-market-data/intraday-ticks-readonly
+                  └─ external-materials /internal/intraday-ticks-readonly      # read-only tick outcome
+```
+
+每一個成功 raw row 固定得到下列 market-only object（所有列出的 property 都是 required；nullable 僅依明示處）：
+
+```text
+marketData
+  chart: ChartMarketData
+    status: AVAILABLE | NO_DATA | UNAVAILABLE
+    message: nullable sanitized string
+    requestedStart: LocalDate
+    requestedEnd: LocalDate
+    series: ChartSeriesDto             // 永不為 null；失敗／無資料用 canonical empty
+    intraday: IntradayMarketData
+      status: AVAILABLE | NO_DATA | UNAVAILABLE
+      message: nullable sanitized string
+      tradingDate: nullable LocalDate
+      ticks: List<IntradayTick>        // 永不為 null；非 AVAILABLE 固定 []
+  quoteDetail: QuoteDetailDto.Response // 台股 Yahoo 同時間點五檔；其他市場 typed unsupported
+  etfConstituents: EtfHoldingsDto       // 外層固定市場名稱；其既有 holdings[] 是發行人公開成分股，不是個人持股
+  dividends: DividendHistoryResult       // 固定 10 年、DB-only readonly
+```
+
+`ChartMarketData.status` 只描述 history＋indicator 的共用 chart aggregation。兩者都成功但沒有資料為 `NO_DATA`；兩者都不可用為 `UNAVAILABLE`；若價格或指標其中一側成功，保留現有 partial alignment，為 `AVAILABLE` 並回實際 `ChartSeriesDto`。`NO_DATA`／`UNAVAILABLE` 的 `series` 是 canonical empty（所有 flat／frame list `[]`，numeric／latest null，daily／weekly 使用既有 empty frame），`message` 只可為一般化 client-safe 文案。popup 的 `/api/bff/stock-analysis/chart-series` 仍直接回 `ChartSeriesDto`，但與 public service 共用同一個 history＋indicator fetch／align service，controller 不互相呼叫、不得演化出第二套 MA/KD 計算。
+
+`start/end` 必須同時存在或同時缺省；缺省由 BFF `Clock` 的 Asia/Taipei today 形成 `[today.minusYears(1), today]`，明確 range 最長十年，format／順序／future 違規回 400。`IntradayMarketData` 只取 raw quote 的 ISO `tradingDate`：可解析且落在該 validated range 才呼叫 readonly bridge；否則不呼叫下游，回 `NO_DATA`、`tradingDate=null`、`ticks=[]`。target 有效時，bridge 的 `readStatus=DATA`（非空且資料合法）為 `AVAILABLE`，`EMPTY` 為 `NO_DATA`，`UNAVAILABLE`／`MALFORMED` 或 BFF→business transport／timeout／schema 問題為 `UNAVAILABLE`；非 AVAILABLE 均以 `ticks=[]` 和消毒 message 回覆。不得用既有 `/api/market-data/intraday-ticks` 或 `/internal/intraday-ticks`，因其 GET path 有 cold-start refresh 副作用。
+
+`GET /internal/public-market-data/dividends-readonly-result?code=&market=&years=` 是新、只在 container network 使用的 backend exact endpoint：它驗證現有 code／market 和 `years=1..10`，只回 `DividendHistoryService.findFromDbReadOnly` 的完整 `DividendHistoryResult`。它刻意不位於 `/api/market-data/**`，避免既有 `MarketDataBffRoutes` 將它 proxy 給已登入 frontend；不得新增 BFF route/controller，frontend Nginx 也不得 proxy `/internal/**`。既有 `/api/market-data/dividends-readonly` 的 bare `List<DividendRow>` 完全不變；public service 固定傳 `years=10`。
+
+`GET /internal/public-market-data/intraday-ticks-readonly?code=&market=&date=` 也只在 container network 使用，date 必填，僅 proxy external `GET /internal/intraday-ticks-readonly`。為不把 Redis 故障偽裝成空資料，external 新增 immutable pure-read `TickReadOutcome`（或等價）而非改動既有 `getTicks`：`readStatus=DATA` 代表非空且每列有效、`EMPTY` 代表 Redis 成功但 list 無值、`UNAVAILABLE` 代表 Redis 操作例外、`MALFORMED` 代表任何 list value 的 JSON／time／price 不合法；非 `DATA` 時 `ticks=[]`，不含原始 exception／payload。external bridge 回 `{tradingDate,readStatus,ticks}`，backend 原樣回安全 outcome，BFF 才映射公開三態。outcome reader／bridge 只用 exact date 讀 tick store，不得選交易日、查歷史、refresh、對外 HTTP、Redis/DB write 或 publish；既有 `getTicks` 保持其 silent-skip compatibility，不得藉本任務改變。兩條新 bridge 都不進 BFF `MarketDataBffRoutes`、BFF controller／permitAll、Nginx／Tailscale／frontend／gateway OpenAPI allowlist。
+
+Yahoo quote-detail 是 Requirement 87 的具名例外；Requirement 108 進一步、但僅在這個 nested market projection 中允許它。它仍是 request-time snapshot、沒有 Redis/DB/SSE/排程寫入，仍不能用於估值、損益、下單、警示或個人資產決策。非台股或 `0000` 必須在 external boundary 前回 `supported=false, available=false`、零 Yahoo request。公開外層欄位固定命名為 `etfConstituents`，避免與 `asset_snapshot.stock_holding` 或使用者投資部位混淆；重用的 `EtfHoldingsDto.holdings[]` 不改名，且只代表 ETF 發行人公開成分股，不能載入或詮釋為使用者持股。
+
+每列的 chart-series、intraday、quoteDetail、etfConstituents、dividends 必須平行啟動，無 retry；production defaults 是 raw quote 3 秒、chart-series 7 秒、quoteDetail 7 秒、ETF 5 秒、dividends 3 秒、intraday 2 秒，列級 deadline 7 秒。list 用最多 8 併行的 `flatMapSequential`（或等價）開始 enrichment，保留 raw order。從 controller 收到 request 起算的 global deadline 固定 50 秒（可只在測試以受限設定值縮短，不得在 production 放寬）；deadline 到時取消未完成 IO，以每列事先建好的 fallback `marketData` 合併所有未完成／未開始 row，然後立即回覆。raw source 成功時，不得因 detail deadline 遺失任何 row；50 秒保留至少 10 秒於 Nginx 60 秒 read timeout 的前後緣。
+
+此 DTO 樹完全不得含 configured-admin 或個人資料：無 user/account/broker/snapshot/holding id、持有股數、成本、損益、交易、配置或建議。ETF 成分股下的發行人公開 `shares` 是唯一可存在的同名語意，且只能位於 `etfConstituents` 子樹。
+
+#### business-services Internal API（容器內運維與受限資料 bridge；不提供 frontend route）
+
+> business-services 的 `/internal` **現有 controller mapping** 包含 `UserAdminController` 的 `/internal/users`、純讀分鐘級的 `/internal/backtest/rules` 與 Treasury proxy/refresh；新增前必須再次以 controller mapping 實查更新本表，不得沿用歷史盤點。現有端點的授權拓撲不能以一個 blanket `AdminGateInterceptor` 描述：Treasury business proxy/refresh 由 business AdminGate 保護，external Treasury 查詢則另由 shared token＋ADMIN role filter 保護。**不掛 AdminGate 的精確例外只有三個 mapping：`/internal/backtest/rules`，以及 Requirement 108 的 `GET /internal/public-market-data/dividends-readonly-result`、`GET /internal/public-market-data/intraday-ticks-readonly`。**後兩者不是 BFF 的 browser-facing route：只有 `PublicQuoteMarketDataService` 的具名 no-tenant outbound WebClient 在 asset-net 內呼叫，BFF 沒有 inbound controller／route／proxy 可把它們交給 frontend；兩者不接受 owner、只回公開市場資料，且不得加入 `AdminGateInterceptor.addPathPatterns` 或用 `/internal/public-market-data/**` 建立寬鬆 bypass。business 8080 不映射 host，故這些例外以精確 mapping、BFF route denial 與 container network 為邊界；若日後對外映射 8080，必須先重新設計明確的服務間保護再開放。Requirement 61／Task 278 的估值回補目前仍是**規劃端點、尚無 controller mapping**；實作該任務時才可新增路徑，且必須同時把它納入 `AdminGateInterceptor.addPathPatterns`，不得把規劃描述當成已存在的安全保護。
 
 > ⚠ **本表的端點一律不得自行對外發 HTTP。** `spec/steering/structure.md` 的架構鐵則明訂「❌ business-services 直接打外部行情 / NAV / 配息 API（**一律經 external-materials**）」與「抓價邏輯不寄宿在 business-services」。需要外部資料時一律比照 `MacroHistoryService.refreshUsIndexDaily()` 的既有模式——經 `priceServiceClient` proxy 至 external-materials 的 `/internal/*`，再於 business 端 upsert。
 
 | Method | Path | 說明 |
 |--------|------|------|
 | POST | `/internal/backtest/rules` | 交易雷達規則回測（**Requirement 56／Task 273**）。逐日切片餵給同一支 `TradingRadarRuleEngine`，量測各述詞在 `+5`／`+20`／`+60`／`+240` 交易日的前瞻報酬分布與同標的同期間基準。可指定標的子集與日期區間；同一輸入得同一輸出。**純讀 DB ＋ 記憶體運算，不對外發任何請求**，故不涉上述鐵則。**分鐘級運算，刻意不掛任何使用者請求路徑**（掛上會拖垮交易雷達頁），消費者是「調門檻時的維護者」而非每日使用者 |
+| GET | `/internal/public-market-data/dividends-readonly-result?code=&market=&years=` | Requirement 108／Task 372 的 exact public-market bridge。只讓 `PublicQuoteMarketDataService` 的 no-tenant outbound client 在 asset-net 內取完整 `DividendHistoryResult`；驗證 `years=1..10`、只呼叫 `findFromDbReadOnly`，不 cold-sync／寫入。刻意不掛 AdminGate，但沒有 BFF inbound route、frontend proxy 或 9090 path。 |
+| GET | `/internal/public-market-data/intraday-ticks-readonly?code=&market=&date=` | Requirement 108／Task 372 的 exact public-market bridge。只讓同一具名 no-tenant outbound client 在 asset-net 內 proxy external safe tick outcome；date 必填、不得重用 cold-start path、不得寫入。刻意不掛 AdminGate，但沒有 BFF inbound route、frontend proxy 或 9090 path。 |
 | POST | `/internal/macro/treasury-yield/refresh?year=YYYY` | 美債殖利率手動回補／補救（**Requirement 58／Task 275**）：proxy 至 ext-materials 的官方優先整批端點後 append/upsert immutable batches；省略 year 刷新 current year，受明確 `/internal/macro/treasury-yield/**` ADMIN gate 保護。 |
 | POST | `/internal/valuation/backfill?from=&to=` | **規劃中、尚未實作／尚未受 AdminGate 保護**的台股歷史估值回補編排端（**Requirement 61／Task 278**）。實作後逐日呼叫 external-materials 的 `/internal/valuation/twse-daily?date=`（**抓取與短 UA 落在該服務，business 端不得自行 curl TWSE**），取回後 upsert `stock_valuation_daily`；低頻單次、可指定起訖日、可從中斷處續跑，並須同步加入 `AdminGateInterceptor.addPathPatterns`。**不得新增 `@Scheduled`**，故排程列表頁不需新增項目 |
 
@@ -8364,8 +8418,8 @@ host tool / tailnet identity
 
 | Method | Path | Upstream | Owner／副作用 |
 |---|---|---|---|
-| GET | `/api/quotes` | external-materials-service | 全域 Redis，只讀 |
-| GET | `/api/quotes/one` | external-materials-service | 全域 Redis，只讀 |
+| GET | `/api/quotes` | BFF（內部讀 external-materials raw Redis） | 全域市場資料，只讀；每列保留 19 欄並加 `marketData`，無個人資產 |
+| GET | `/api/quotes/one` | BFF（內部讀 external-materials raw Redis） | 全域市場資料，只讀；保留 204 cache-miss 語意，無個人資產 |
 | GET | `/api/public/market-index` | BFF | 全域，只讀 |
 | GET | `/api/assets/latest` | BFF | configured admin，只讀 |
 | GET | `/api/public/exchange-rate/usd-twd` | BFF | 全域，只讀 |
@@ -8834,7 +8888,7 @@ Java `FubonTwLiveQuoteProvider`將sanitized DTO轉為immutable observation；`tr
 
 跨provider切換另有一次性takeover。Java只有在`FUBON_ENABLED=true`、`marketOpenAuthorized=true`且本輪normalized actual batch通過時才傳`allowProviderTakeover=true`。Lua除先驗market-open flag，仍要求(a)incoming tradingDate晚於current date；或(b)同日current精確為`source='TWSE' AND closed=false AND quoteStatus='LIVE'` **且 `incomingTuple > currentTuple`**，才可回`PROVIDER_TAKEOVER`。同日 older/equal、official close、PREVIOUS_CLOSE、unknown/non-TWSE-live source都不得takeover；current一旦是Fubon即永遠strict tuple。禁止JVM`GET→compare→SET`，Python不得寫Redis。兩支 Lua 的分層契約已合併為同一時間單調權威，不存在互相倒退的繞過路徑。
 
-公開 `/api/quotes` 與 `/api/quotes/one` 的 19 欄 JSON、HTTP status、Redis key、TTL與 `price-update` channel 不變。enabled/no-config、adapter timeout、trial、wrong-date、malformed、older/equal等失敗只保留上一筆 cache；若完全沒有 cache，consumer 依既有 missing 語意處理，不拿 MIS/Yahoo/昨收冒充。Task 352 同次估值必須直接從 normalized batch 的成功 actual-trade quote 建值，不以 Redis 舊值繞過全批 no-write。
+公開 raw quote 的 `LatestQuote` 仍是 19 欄 JSON，Redis key、TTL與 `price-update` channel 不變。enabled/no-config、adapter timeout、trial、wrong-date、malformed、older/equal等失敗只保留上一筆 cache；若完全沒有 cache，consumer 依既有 missing 語意處理，不拿 MIS/Yahoo/昨收冒充。**Requirement 108／Task 372 的唯一對外包裝層覆寫：**9090 同名 exact GET 在 raw 19 欄後增加 `marketData`，並因 `start`／`end` 驗證可回 400；它不變更 raw record、raw 值、raw one miss 204 或 raw list 空 `[]`。Yahoo 只可出現在巢狀 `marketData.quoteDetail`，不得回寫 cache 或參與任何估值。Task 352 同次估值必須直接從 normalized batch 的成功 actual-trade quote 建值，不以 Redis 舊值繞過全批 no-write。
 
 ### 驗證設計
 
@@ -8847,7 +8901,7 @@ adapter fixture要用官方raw `previousClose/openPrice/highPrice/lowPrice`，�
 
 這個功能直接擴充跨頁共用的 `StockAnalysisDialog`，不在 Dashboard、交易雷達或其他父 view 各做一套。頁籤名稱為「行情五檔」，排列在「走勢圖」之後，只對 `market="台股"` 且 `stockCode!="0000"` 顯示。美股、英股與指數沒有同一份可比較的台股五檔資料契約，故不顯示空頁籤。
 
-既有 `price:{market}:{code}` Redis payload 只有一檔 `buyPrice/sellPrice`，沒有五檔量、內外盤、均價、昨量或成交金額；若把它與另一來源的 orderbook 拼在一起，摘要與委託簿會落在不同時間點。因此新頁籤使用 Yahoo 台股 server-rendered quote page 的**單一 request-time snapshot**，同一 payload 一次取得摘要、內外盤與 `orderbook`。這是已同步登記在 `CLAUDE.md` 與 `spec/steering/structure.md` 的「登入後行情五檔展示 snapshot」具名、限縮例外：它不是權威即時價，不能供估值、損益、下單、警示、SSE、`/api/quotes*`、9090 公開 API 或其他 consumer 使用。此資料只在該頁籤顯示，不寫 Redis／DB、不 publish SSE、不新增排程。第一次切入頁籤才抓；同一次 dialog 已成功載入後切走再切回不重抓，只有「重新整理」明確重抓。其他即時價仍只走 Redis，收盤價仍只走 `stock_price_history`。
+既有 `price:{market}:{code}` Redis payload 只有一檔 `buyPrice/sellPrice`，沒有五檔量、內外盤、均價、昨量或成交金額；若把它與另一來源的 orderbook 拼在一起，摘要與委託簿會落在不同時間點。因此新頁籤使用 Yahoo 台股 server-rendered quote page 的**單一 request-time snapshot**，同一 payload 一次取得摘要、內外盤與 `orderbook`。這是已同步登記在 `CLAUDE.md` 與 `spec/steering/structure.md` 的「登入後行情五檔展示 snapshot」具名、限縮例外：它不是權威即時價，不能供估值、損益、下單、警示、SSE、任何其他 `/api/quotes*` consumer 或其他 consumer 使用。**唯一例外是 Requirement 108／Task 372 對外回應的巢狀 `marketData.quoteDetail` 市場投影；它同樣不可帶入個人資料或作任何決策。**此資料只在該頁籤顯示，不寫 Redis／DB、不 publish SSE、不新增排程。第一次切入頁籤才抓；同一次 dialog 已成功載入後切走再切回不重抓，只有「重新整理」明確重抓。其他即時價仍只走 Redis，收盤價仍只走 `stock_price_history`。
 
 ### 分層與 sequence
 

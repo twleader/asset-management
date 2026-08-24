@@ -367,6 +367,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 366 | 交易雷達結果新增「匯出到 blog」輸出通道：頁首手動按鈕＋沿用既有時間點的排程自動發布，公開全發到 `twleader.blogspot.com`（Blogger API v3 OAuth2，沿用既有登入用 Client），限主要管理者啟用（Requirement 102） | [tasks/t366_trading_radar_blog_publish.md](tasks/t366_trading_radar_blog_publish.md) |
 | 367 | 重產 `db/schema.sql` 稽核基準線（74→85 張表，另補 7 張既有表的欄位／索引漂移），並以 `spec-check.sh` B10 呼叫新測試 `scripts/tests/schema-sql-drift-test.sh` 建立機械防漂移閘門（含跨 worktree 的嚴重度分流）；同步統一 spec-auditor／arch-auditor 對該檔互相矛盾的指引（Requirement 103；避讓當下 Task 364／365 與 Requirement 100／101 尚在別的 worktree 在途，其後皆已 landed） | [tasks/t367_schema_sql_drift_guard.md](tasks/t367_schema_sql_drift_guard.md) |
 | 368 | `db/schema.sql` 定性為 DB schema 的**唯一標準**：刪掉 Task 367 留下的「仍須以 `psql`／`databasechangelog` 複驗」與 B10 `DRIFT_HINT` 那套「停下回報、不得重產」判斷程序，處置一律改為「重產本檔」；只改定性與處置文字，不動任何機制（Requirement 104） | [tasks/t368_schema_sql_single_standard.md](tasks/t368_schema_sql_single_standard.md) |
+| 372 | 9090 單檔與快取清單報價 API 在保留 19 個既有欄位下，經 BFF 的 no-tenant 市場聚合補齊四個頁籤資料；新增 readonly 股利／分時 bridge 且嚴禁個人資產資料（Requirement 108；Task 370／371 由在途 worktree 占用） | [tasks/t372_public_quote_market_detail.md](tasks/t372_public_quote_market_detail.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

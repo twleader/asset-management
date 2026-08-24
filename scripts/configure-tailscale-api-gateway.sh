@@ -184,7 +184,7 @@ fi
 quotes_json="$work_dir/quotes.json"
 quotes_headers="$work_dir/quotes.headers"
 get_200 "$LOCAL_BASE/api/quotes" "$quotes_json" '本機 /api/quotes' "$quotes_headers"
-read -r quote_code quote_market < <(python3 - "$quotes_json" <<'PY'
+quote_identity="$(python3 - "$quotes_json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 if not isinstance(data, list):
@@ -195,9 +195,29 @@ first = data[0]
 code, market = first.get("stockCode"), first.get("market")
 if not isinstance(code, str) or not code or not isinstance(market, str) or not market:
     raise SystemExit("報價首筆缺少合法 stockCode/market")
+raw_keys = ("stockCode", "stockName", "market", "price", "previousClose", "priceChange",
+            "changePercent", "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice",
+            "volume", "tradingDate", "updatedAt", "closed", "source", "quoteStatus",
+            "premiumDiscountPct")
+if any(key not in first for key in raw_keys):
+    raise SystemExit("報價首筆缺少原始 19 欄")
+market_data = first.get("marketData")
+if not isinstance(market_data, dict) or set(market_data) != {"chart", "quoteDetail", "etfConstituents", "dividends"}:
+    raise SystemExit("報價首筆缺少固定 marketData 四個 child")
+chart = market_data["chart"]
+if not isinstance(chart, dict) or chart.get("status") not in {"AVAILABLE", "NO_DATA", "UNAVAILABLE"}:
+    raise SystemExit("報價首筆 chart 狀態不合法")
+intraday = chart.get("intraday")
+if not isinstance(intraday, dict) or intraday.get("status") not in {"AVAILABLE", "NO_DATA", "UNAVAILABLE"} or not isinstance(intraday.get("ticks"), list):
+    raise SystemExit("報價首筆 intraday shape 不合法")
 print(code, market)
 PY
-) || die 'NO_QUOTE_SENTINEL 或 quote list 契約錯誤；不會 reset Serve。'
+)" || die 'NO_QUOTE_SENTINEL 或 quote list 契約錯誤；不會 reset Serve。'
+quote_code=''
+quote_market=''
+read -r quote_code quote_market <<<"$quote_identity"
+[[ -n "$quote_code" && -n "$quote_market" ]] || \
+  die 'NO_QUOTE_SENTINEL 或 quote list 契約錯誤；不會 reset Serve。'
 
 quote_one_json="$work_dir/quote-one.json"
 quote_one_headers="$work_dir/quote-one.headers"
@@ -211,10 +231,25 @@ fi
   die "本機 /api/quotes/one 必須回 HTTP 200，實際為 ${quote_one_status}；不會 reset Serve。"
 grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$quote_one_headers" || \
   die '本機 /api/quotes/one Content-Type 不是 application/json；不會 reset Serve。'
-python3 - "$quote_one_json" "$quote_code" "$quote_market" <<'PY' || die '/api/quotes/one payload 與 quote list 首筆不一致。'
+python3 - "$quote_one_json" "$quote_code" "$quote_market" <<'PY' || die '/api/quotes/one payload 與 quote list 首筆不一致或缺完整市場資料。'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 if not isinstance(data, dict) or data.get("stockCode") != sys.argv[2] or data.get("market") != sys.argv[3]:
+    raise SystemExit(1)
+raw_keys = ("stockCode", "stockName", "market", "price", "previousClose", "priceChange",
+            "changePercent", "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice",
+            "volume", "tradingDate", "updatedAt", "closed", "source", "quoteStatus",
+            "premiumDiscountPct")
+if any(key not in data for key in raw_keys):
+    raise SystemExit(1)
+market_data = data.get("marketData")
+if not isinstance(market_data, dict) or set(market_data) != {"chart", "quoteDetail", "etfConstituents", "dividends"}:
+    raise SystemExit(1)
+chart = market_data.get("chart")
+if not isinstance(chart, dict) or chart.get("status") not in {"AVAILABLE", "NO_DATA", "UNAVAILABLE"}:
+    raise SystemExit(1)
+intraday = chart.get("intraday")
+if not isinstance(intraday, dict) or intraday.get("status") not in {"AVAILABLE", "NO_DATA", "UNAVAILABLE"} or not isinstance(intraday.get("ticks"), list):
     raise SystemExit(1)
 PY
 
