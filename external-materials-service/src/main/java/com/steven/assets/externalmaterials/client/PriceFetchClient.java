@@ -517,6 +517,78 @@ public class PriceFetchClient {
         return Optional.ofNullable(fetchTwBatch(List.of(stockCode)).resolved().get(stockCode));
     }
 
+    /** Third-tier Taiwan LIVE fallback. Receipt time is never substituted for Yahoo's market time. */
+    public Optional<PriceResult> getYahooTwLivePrice(String stockCode) {
+        for (String suffix : List.of(".TW", ".TWO")) {
+            try {
+                String body = fetchYahooTwLiveChartBody(stockCode, suffix);
+                JsonNode result = mapper.readTree(body).path("chart").path("result").path(0);
+                Optional<PriceResult> quote = parseYahooTwLiveChart(stockCode, result, clock.instant());
+                if (quote.isPresent()) return quote;
+            } catch (Exception ignored) { }
+        }
+        return Optional.empty();
+    }
+
+    /** Package seam for the suffix fallback contract; production uses bounded Yahoo curl retrieval. */
+    String fetchYahooTwLiveChartBody(String stockCode, String suffix) throws Exception {
+        return curlGetWithRetry("https://query2.finance.yahoo.com/v8/finance/chart/"
+                + stockCode + suffix + "?interval=1m&range=1d", 0);
+    }
+
+    /**
+     * Yahoo metadata can be a stale indicative value. Taiwan LIVE fallback therefore accepts only
+     * the latest current-session, non-future one-minute bar with a positive close and traded volume.
+     */
+    static Optional<PriceResult> parseYahooTwLiveChart(String stockCode, JsonNode result, Instant now) {
+        if (stockCode == null || result == null || now == null) return Optional.empty();
+        JsonNode timestamps = result.path("timestamp");
+        JsonNode quote = result.path("indicators").path("quote").path(0);
+        JsonNode closes = quote.path("close");
+        JsonNode volumes = quote.path("volume");
+        if (!timestamps.isArray() || !closes.isArray() || !volumes.isArray()) return Optional.empty();
+        LocalDate today = now.atZone(MarketClock.TW_ZONE).toLocalDate();
+        int latestIndex = -1;
+        Instant latest = null;
+        for (int i = 0; i < Math.min(timestamps.size(), Math.min(closes.size(), volumes.size())); i++) {
+            JsonNode timestamp = timestamps.get(i);
+            if (timestamp == null || !timestamp.isIntegralNumber()) continue;
+            Instant instant;
+            try {
+                instant = Instant.ofEpochSecond(timestamp.longValue());
+            } catch (RuntimeException ignored) {
+                continue;
+            }
+            BigDecimal close = jsonDecimal(closes.get(i));
+            long volume = volumes.get(i).asLong(0);
+            if (close == null || close.signum() <= 0 || volume <= 0
+                    || instant.isAfter(now.plusSeconds(30))
+                    || !today.equals(instant.atZone(MarketClock.TW_ZONE).toLocalDate())) continue;
+            if (latest == null || instant.isAfter(latest)) {
+                latest = instant;
+                latestIndex = i;
+            }
+        }
+        if (latestIndex < 0) return Optional.empty();
+
+        JsonNode meta = result.path("meta");
+        BigDecimal price = jsonDecimal(closes.get(latestIndex));
+        BigDecimal previous = jsonDecimal(meta.path("chartPreviousClose"));
+        BigDecimal open = jsonDecimal(valueAt(quote.path("open"), latestIndex));
+        BigDecimal high = jsonDecimal(valueAt(quote.path("high"), latestIndex));
+        BigDecimal low = jsonDecimal(valueAt(quote.path("low"), latestIndex));
+        Long volume = volumes.get(latestIndex).longValue();
+        String name = meta.path("shortName").asText("");
+        return Optional.of(new PriceResult(stockCode, "台股", price,
+                previous == null ? null : price.subtract(previous), null, "Yahoo",
+                name.isBlank() ? null : name, null, null, open, previous, high, low, volume,
+                today, latest));
+    }
+
+    private static JsonNode valueAt(JsonNode values, int index) {
+        return values.isArray() && index < values.size() ? values.get(index) : null;
+    }
+
     /** Fetch all requested Taiwan quotes in at most two bounded global MIS waves. */
     public TwQuoteBatchSummary fetchTwBatch(Collection<String> requestedCodes) {
         LinkedHashSet<String> requested = new LinkedHashSet<>();

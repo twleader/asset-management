@@ -52,8 +52,8 @@ class QuoteService:
         self._monotonic = monotonic
         self._state_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENCY)
-        self._cache: dict[str, CachedQuote] = {}
-        self._inflight: dict[str, asyncio.Future[dict[str, object]]] = {}
+        self._cache: dict[tuple[str, str], CachedQuote] = {}
+        self._inflight: dict[tuple[str, str], asyncio.Future[dict[str, object]]] = {}
         self._call_starts: deque[float] = deque()
         self._circuit_until = 0.0
 
@@ -75,11 +75,13 @@ class QuoteService:
             normalized.append(code)
         return normalized
 
-    async def read(self, raw_codes: list[str]) -> dict[str, object]:
+    async def read(self, raw_codes: list[str], purpose: str = "LIVE") -> dict[str, object]:
         codes = self.normalize_codes(raw_codes)
+        if purpose not in {"LIVE", "INVENTORY"}:
+            raise QuoteError("INVALID_PURPOSE")
         try:
             values = await asyncio.wait_for(
-                asyncio.gather(*(self._read_one(code) for code in codes)),
+                asyncio.gather(*(self._read_one(code, purpose) for code in codes)),
                 timeout=self.ENDPOINT_TIMEOUT_SECONDS,
             )
         except TimeoutError:
@@ -90,11 +92,12 @@ class QuoteService:
             "quotes": values,
         }
 
-    async def _read_one(self, code: str) -> dict[str, object]:
+    async def _read_one(self, code: str, purpose: str) -> dict[str, object]:
         owner = False
         now_date = self._now().astimezone(TW_ZONE).date().isoformat()
+        key = (purpose, code)
         async with self._state_lock:
-            cached = self._cache.get(code)
+            cached = self._cache.get(key) if purpose == "INVENTORY" else None
             if cached is not None:
                 quote = cached.value.get("quote")
                 if (
@@ -103,11 +106,11 @@ class QuoteService:
                     and quote.get("tradingDate") == now_date
                 ):
                     return cached.value
-                self._cache.pop(code, None)
-            future = self._inflight.get(code)
+                self._cache.pop(key, None)
+            future = self._inflight.get(key)
             if future is None:
                 future = asyncio.get_running_loop().create_future()
-                self._inflight[code] = future
+                self._inflight[key] = future
                 owner = True
         if not owner:
             return await asyncio.shield(future)
@@ -116,7 +119,8 @@ class QuoteService:
             value = await self._fetch_one(code)
             async with self._state_lock:
                 if value.get("status") == "SUCCESS":
-                    self._cache[code] = CachedQuote(self._monotonic() + self.CACHE_SECONDS, value)
+                    if purpose == "INVENTORY":
+                        self._cache[key] = CachedQuote(self._monotonic() + self.CACHE_SECONDS, value)
             future.set_result(value)
             return value
         except asyncio.CancelledError:
@@ -136,7 +140,7 @@ class QuoteService:
             return failure
         finally:
             async with self._state_lock:
-                self._inflight.pop(code, None)
+                self._inflight.pop(key, None)
 
     async def _fetch_one(self, code: str) -> dict[str, object]:
         budget_reason = await self._reserve_budget()

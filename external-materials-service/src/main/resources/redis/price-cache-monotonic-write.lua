@@ -9,6 +9,7 @@ local payload = ARGV[1]
 local member = ARGV[2]
 local ttl_text = ARGV[3]
 local channel = ARGV[4]
+local strict_newer = ARGV[5] == '1'
 
 local function redis_type(key)
   local value = redis.call('TYPE', key)
@@ -160,6 +161,7 @@ local existing_time = nil
 local existing_status = ''
 local existing_object = nil
 local should_write = true
+local existing_malformed = false
 
 if existing_raw then
   local existing_ok, existing = pcall(cjson.decode, existing_raw)
@@ -177,6 +179,32 @@ if existing_raw then
       existing_status = normalized_status
     end
 
+    if not valid_date(existing_date) or existing_time == nil or status_rank(existing_status) == 0 then
+      existing_malformed = true
+    end
+
+    -- Strict Taiwan priority LIVE must never treat a syntactically timed but structurally
+    -- damaged latest value as a valid watermark. Optional display fields may be absent, but
+    -- identity and core quote fields are mandatory and must match this incoming symbol/market.
+    if strict_newer then
+      local existing_code = existing['stockCode']
+      local existing_market = existing['market']
+      local incoming_code = incoming['stockCode']
+      local incoming_market = incoming['market']
+      local existing_price = existing['price']
+      local existing_source = existing['source']
+      if type(incoming_code) ~= 'string' or trim(incoming_code) == ''
+          or type(incoming_market) ~= 'string' or trim(incoming_market) == ''
+          or type(existing_code) ~= 'string' or existing_code ~= incoming_code
+          or type(existing_market) ~= 'string' or existing_market ~= incoming_market
+          or type(existing['closed']) ~= 'boolean'
+          or type(existing_price) ~= 'number' or existing_price ~= existing_price
+          or existing_price == math.huge or existing_price == -math.huge or existing_price <= 0
+          or type(existing_source) ~= 'string' or trim(existing_source) == '' then
+        existing_malformed = true
+      end
+    end
+
     if valid_date(existing_date) then
       if existing_date > incoming_date then
         should_write = false
@@ -185,13 +213,23 @@ if existing_raw then
         local existing_rank = status_rank(existing_status)
         if incoming_rank < existing_rank then
           should_write = false
-        elseif existing_time ~= nil and incoming_time < existing_time then
+        elseif existing_time ~= nil and (incoming_time < existing_time
+            or (strict_newer and incoming_time == existing_time)) then
           -- Time remains monotonic even when evidence status is upgraded.
           should_write = false
         end
       end
     end
+  else
+    existing_malformed = true
   end
+end
+
+-- Task 370 Taiwan priority LIVE passes strict_newer=1. A damaged current record must not be
+-- "repaired" by accepting a new live observation because Java would then append tick/day-HL.
+-- Legacy/non-Taiwan callers deliberately retain their prior repair behavior.
+if strict_newer and existing_malformed then
+  return {2, existing_date, existing_time_raw, existing_status}
 end
 
 if not should_write then

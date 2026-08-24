@@ -144,7 +144,7 @@ grep -v '^\\restrict\|^\\unrestrict' "$raw_dump" > "$fresh_dump" || true
 
 # ── 4. 逐位元全文比對 ─────────────────────────────────────────────
 if cmp -s "$body_file" "$fresh_dump"; then
-  echo "PASS: $schema_rel（去除專案檔頭後）逐位元等於 $container 此刻的 pg_dump 輸出"
+  echo "PASS: ${schema_rel}（去除專案檔頭後）逐位元等於 $container 此刻的 pg_dump 輸出"
   echo "      表數：$actual_tables 張（檔頭宣告一致）"
   exit 0
 fi

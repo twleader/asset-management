@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -77,6 +79,87 @@ class PriceProducerTimestampTest {
         assertThat(client(http, clock)
                 .getUsClosingPriceFromFinMind("VOO", LocalDate.of(2026, 8, 21))).isEmpty();
         assertThat(clock.calls()).isZero();
+    }
+
+    @Test
+    void yahooTaiwanFallbackUsesLatestTradedOneMinuteBarInsteadOfMetadata() throws Exception {
+        Instant now = Instant.parse("2026-08-24T02:05:00Z");
+        long earlier = Instant.parse("2026-08-24T02:03:00Z").getEpochSecond();
+        long latest = Instant.parse("2026-08-24T02:04:00Z").getEpochSecond();
+        JsonNode chart = MAPPER.readTree("""
+                {"meta":{"regularMarketPrice":999,"regularMarketTime":1,"chartPreviousClose":100,"shortName":"台積電"},
+                 "timestamp":[%d,%d],
+                 "indicators":{"quote":[{"close":[101,102],"volume":[10,20],
+                 "open":[100,101],"high":[101,103],"low":[99,100]}]}}
+                """.formatted(earlier, latest));
+
+        PriceFetchClient.PriceResult quote = PriceFetchClient
+                .parseYahooTwLiveChart("2330", chart, now).orElseThrow();
+
+        assertThat(quote.price()).isEqualByComparingTo("102");
+        assertThat(quote.freshnessInstant()).isEqualTo(Instant.ofEpochSecond(latest));
+        assertThat(quote.volume()).isEqualTo(20L);
+    }
+
+    @Test
+    void yahooTaiwanFallbackRejectsMetadataOnlyFutureAndNoTradeBarsThenAllowsTwoSuffixCandidate() throws Exception {
+        Instant now = Instant.parse("2026-08-24T02:05:00Z");
+        JsonNode metaOnly = MAPPER.readTree("""
+                {"meta":{"regularMarketPrice":101,"regularMarketTime":1787537100},"timestamp":[],"indicators":{"quote":[{}]}}
+                """);
+        JsonNode future = MAPPER.readTree("""
+                {"timestamp":[1787537160],"indicators":{"quote":[{"close":[101],"volume":[10]}]}}
+                """);
+        JsonNode noTrade = MAPPER.readTree("""
+                {"timestamp":[1787537040],"indicators":{"quote":[{"close":[101],"volume":[0]}]}}
+                """);
+        JsonNode twoCandidate = MAPPER.readTree("""
+                {"meta":{"shortName":"櫃買"},"timestamp":[1787537040],
+                 "indicators":{"quote":[{"close":[101],"volume":[10],"open":[100]}]}}
+                """);
+
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", metaOnly, now)).isEmpty();
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", future, now)).isEmpty();
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", noTrade, now)).isEmpty();
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", twoCandidate, now)).isPresent();
+    }
+
+    @Test
+    void yahooTaiwanLiveActuallyFallsBackFromTwToTwoWhenTwHasNoTradedBar() {
+        Instant now = Instant.parse("2026-08-24T02:05:00Z");
+        List<String> suffixes = new ArrayList<>();
+        PriceFetchClient client = new PriceFetchClient("", mock(HttpClient.class), Clock.fixed(now, ZoneOffset.UTC), null,
+                duration -> { }, System::nanoTime, () -> Executors.newSingleThreadExecutor()) {
+            @Override String fetchYahooTwLiveChartBody(String code, String suffix) {
+                suffixes.add(suffix);
+                return ".TW".equals(suffix)
+                        ? "{\"chart\":{\"result\":[{\"meta\":{\"regularMarketPrice\":999},\"timestamp\":[],\"indicators\":{\"quote\":[{}]}}]}}"
+                        : "{\"chart\":{\"result\":[{\"timestamp\":[1787537040],\"indicators\":{\"quote\":[{\"close\":[101],\"volume\":[10]}]}}]}}";
+            }
+        };
+
+        PriceFetchClient.PriceResult quote = client.getYahooTwLivePrice("2330").orElseThrow();
+
+        assertThat(suffixes).containsExactly(".TW", ".TWO");
+        assertThat(quote.price()).isEqualByComparingTo("101");
+    }
+
+    @Test
+    void yahooTaiwanLiveAllowsThirtySecondClockSkewButRejectsThirtyOneSecondsAndOverflowEpoch() throws Exception {
+        Instant now = Instant.parse("2026-08-24T02:05:00Z");
+        JsonNode thirtySeconds = MAPPER.readTree("""
+                {"timestamp":[%d],"indicators":{"quote":[{"close":[101],"volume":[10]}]}}
+                """.formatted(now.plusSeconds(30).getEpochSecond()));
+        JsonNode thirtyOneSeconds = MAPPER.readTree("""
+                {"timestamp":[%d],"indicators":{"quote":[{"close":[101],"volume":[10]}]}}
+                """.formatted(now.plusSeconds(31).getEpochSecond()));
+        JsonNode overflow = MAPPER.readTree("""
+                {"timestamp":[9223372036854775807],"indicators":{"quote":[{"close":[101],"volume":[10]}]}}
+                """);
+
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", thirtySeconds, now)).isPresent();
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", thirtyOneSeconds, now)).isEmpty();
+        assertThat(PriceFetchClient.parseYahooTwLiveChart("2330", overflow, now)).isEmpty();
     }
 
     private static PriceFetchClient client(HttpClient http, Clock clock) {

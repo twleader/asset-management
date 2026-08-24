@@ -8754,7 +8754,7 @@ host secrets/fubon/
     └── internal-service-token   # Python + backend + external 共用
 ```
 
-Python 掛 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro`；backend/external 只掛 `shared/`。`.env.example` 只可出現 `FUBON_ENABLED=false` 與 `FUBON_SECRETS_DIR_HOST=./secrets/fubon`，不得出現 token／personal id／key／password 的 literal。上述 host 目錄與秘密檔必須被 Git 忽略；build context 亦須排除。
+Python 掛 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro`；backend/external 只掛 `shared/`。Requirement 106 的 `.env.example` 可出現三個非秘密 flag：`FUBON_ENABLED=true`、`FUBON_TW_LIVE_QUOTES_ENABLED=true`、`FUBON_INVENTORY_SYNC_ENABLED=false`，以及 `FUBON_SECRETS_DIR_HOST=./secrets/fubon`，不得出現 token／personal id／key／password 的 literal。上述 host 目錄與秘密檔必須被 Git 忽略；build context 亦須排除。
 
 `secrets/fubon/README.md` 只列檔名、權限、掛載關係與官方先決步驟，不放 example secret value；空白模板也只顯示檔名，不建立帶假值的 credential file。README 必須要求使用者在 API key 第一次使用前，先依富邦官方流程以一般帳密＋憑證完成首次連線測試。本服務沒有「一般登入密碼」設定或檔名，永不接收、保存或使用下單帳戶登入密碼；只接受已啟用且具必要唯讀權限的 API key、personal id、PFX 與 PFX password。官方先決流程未完成或權限不足皆視為 functional misconfiguration，503/no-write。
 
@@ -8817,7 +8817,7 @@ raw quantity每欄須為`0..9,999,999,999` exact integer，且加總用checked a
 
 提交前在 transaction 外先驗完整 batch與同次 quotes。為避免Fubon局部replace與既有完整snapshot update互相lost-update，零schema新增共用`AssetSnapshotMutationLock`（命名可等價），底層repository提供真正`PESSIMISTIC_WRITE`的`findByIdForUpdate`及owner-latest lock query。`AssetService.updateSnapshot`、Fubon sync以及任何直接改同一snapshot child／aggregate的既有路徑，都必須在transaction第一個DB動作依snapshot id相同順序經此入口鎖住`asset_snapshot` row，取得後才讀children／clear／rebuild／aggregate；普通`findById`、先讀children再鎖、只靠process mutex都不符合。transaction 內：
 
-1. 透過上述owner-latest pessimistic query鎖定configured admin最新snapshot；要求存在、`snapshotDate == 台北今日`，不自動建立或roll date。完整update取得同一row lock後，Fubon scope視為server-owned：用locked current Fubon rows覆蓋／排除較早request或persistence-context帶來的Fubon rows，禁止clear/rebuild復活舊部位；非Fubon payload仍維持既有完整update語意。create新snapshot因row尚不存在不假裝鎖，但既有同日期unique/gate不變。
+1. 透過上述owner-latest pessimistic query鎖定configured admin最新snapshot；要求存在、`snapshotDate == 台北今日`，不自動建立或roll date。完整update的第一個 DB operation 仍是同一row lock；lock 成功後先完成 tenant／owner 驗證、snapshot-date unique gate 與本次 PUT 最終 effectiveSnapshotDate 的必要驗證／設定，並建立不可變 `SnapshotUpdateTarget(snapshotId, ownerUserId, effectiveSnapshotDate)`。才經 Fubon integration ownership adapter 一次取得並固定使用 immutable decision。富邦台股只有同時符合 `FubonConfigState.State.READY && FUBON_INVENTORY_SYNC_ENABLED=true && FUBON_TW_LIVE_QUOTES_ENABLED=false`、target owner 是 `UserAdminService.configuredAdmin()` 的 ACTIVE configured admin、target `snapshotId` 是該 owner 依**最終 effectiveSnapshotDate**由 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 同一 owner-latest predicate 解析的實際 target，且 effectiveSnapshotDate 等於 Asia/Taipei 今日，才視為 `SOURCE_OWNED`，用 locked current Fubon rows 覆蓋／排除較早 request 或 persistence-context 帶來的同 scope rows，禁止 clear/rebuild 復活舊部位；其他一律 `PAYLOAD_OWNED`，包含 capability flags 不可用、歷史 snapshot、非 configured-admin owner、或 PUT 將原同步 target 改成非今日 effective date。port decision 後才讀 children／broker／reference data；非富邦 scope仍維持既有完整update語意。create新snapshot因row尚不存在不假裝鎖，但既有同日期unique/gate不變。
 2. 要求 active broker `code='fubon'` 已存在；找不到 seed 則 rollback/no-write。
 3. 僅定位該 snapshot 中 `(broker.code='fubon', market='台股')` 的 rows；先保留可一對一沿用欄位，再局部 replace。不得觸碰不同 broker、不同 market、fund/deposit，也不得呼叫 `AssetService.updateSnapshot()` 的全量 clear 路徑。
 4. 新rows的`shares`為已對帳exact integer。以未捨入BigDecimal先算`costPrice.multiply(shares)`與`trustedFubonTradePrice.multiply(shares)`，各自最後才`setScale(2, HALF_UP)`成TWD `investmentCost/currentValue`，之後要求result `precision<=20`才可寫`NUMERIC(20,2)`；不得先round operand，operand各自合法但乘積overflow仍rollback。`originalCurrencyValue`、`transactionType`、`transactionDate`及StockHolding實際欄名`transactionExchangeRate`皆精確設null，mapping test逐欄斷言。
@@ -8826,6 +8826,41 @@ raw quantity每欄須為`0..9,999,999,999` exact integer，且加總用checked a
 7. 把 `AssetService` 既有 aggregate formulas 抽成單一可共用 calculator，原 CRUD 與 sync 都呼叫它；replace 與 aggregate update 同一 transaction commit。禁止複製另一套 total formula。
 
 目前運行 DB 與 master changelog 已確認 `asset_snapshot`、`stock_holding` 與 broker FK 足以表達結果，且 `DataInitializer` 已有 `fubon/富邦證券` seed。本需求不新增 audit/provenance table或衍生欄位，不產生 Liquibase changeset；account fingerprint 只屬 transient correlation，不落 DB。backend/external目前沒有MeterRegistry/Actuator基線，本需求不為此擴依賴；以固定enum reason、每輪structured summary與process-local`EnumMap<Outcome,LongAdder>`（Python為固定key counter）觀測，counter只由既有internal health/config或manual sanitized summary揭露，不新增host/public metrics endpoint。
+
+#### Task 371 補充：富邦台股手動完整 PUT 的 capability-aware scope ownership
+
+Task 352 的同步局部 replace 只在同步**實際可寫入且實際會鎖到這個 target**時才必須保護 Fubon source rows；`READY` 或 flags 單獨不足以表示如此。除了 `DISABLED`／`MISCONFIGURED`，tracked default `FUBON_ENABLED=true`／`FUBON_TW_LIVE_QUOTES_ENABLED=true`／`FUBON_INVENTORY_SYNC_ENABLED=false` 沒有 inventory writer，而兩個 consumer flags 同時 true 是 `INVENTORY_SYNC_CAPACITY_CONFLICT`。即使 flags 可用，historical snapshot、非 configured-admin owner、或這次 PUT 將日期改為非台北今日也不是 Fubon writer 的 owner-latest target。完整 PUT 的 ownership matrix 固定如下：
+
+| Fubon config state | effective inventory sync／TW LIVE | lock 後 immutable update target | 富邦台股 scope／完整 PUT 行為 |
+| --- | --- | --- | --- |
+| `DISABLED`／`MISCONFIGURED` | 任意 | 任意 | `PAYLOAD_OWNED`：以完整 payload replace／persist |
+| `READY` | sync=false／任意 LIVE | 任意 | `PAYLOAD_OWNED`：同步 disabled；包括 tracked default 的 live=true 情況 |
+| `READY` | sync=true／LIVE=true | 任意 | `PAYLOAD_OWNED`：`INVENTORY_SYNC_CAPACITY_CONFLICT`，inventory 無 writer |
+| `READY` | sync=true／LIVE=false | historical、non-configured-admin、final effective date 非今日，或 `snapshotId` 不等於 Fubon preflight／writer 的同一 owner-latest target | `PAYLOAD_OWNED`：以完整 payload replace／persist |
+| `READY` | sync=true／LIVE=false | owner 為 `UserAdminService.configuredAdmin()` 的 ACTIVE configured admin、`snapshotId` 與 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 依**最終 effectiveSnapshotDate**選出的同一 owner-latest target 相同，且 effectiveSnapshotDate=Asia/Taipei 今日 | `SOURCE_OWNED`：唯一實際 target，保留 lock 後 DB rows、略過 stale payload 同 scope rows |
+| 其他 broker／market | 不適用 | 不適用 | `PAYLOAD_OWNED`：維持既有完整 PUT |
+
+ownership contract 位於 service layer（例如 `SnapshotStockScopeOwnershipPort`），並回傳本次 transaction 固定使用的 immutable decision。它先接收 `SnapshotUpdateTarget(snapshotId, ownerUserId, effectiveSnapshotDate)`，再對 `(market, brokerCode)` 回覆 `PAYLOAD_OWNED`／`SOURCE_OWNED`。`AssetService` 在 lock 後完成目標驗證／日期設定後才呼叫 port；Fubon integration adapter 是唯一實作此 port、一次擷取 `FubonConfigState.snapshot().state()` 與兩個 effective feature flags，並以和 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 完全相同的 owner-latest target predicate 檢查 target eligibility、再產生 decision 的位置：
+
+```text
+AssetService
+  ├── AssetSnapshotMutationLock.lockById(id)       (first DB operation)
+  ├── validate tenant + snapshot-date unique gate
+  ├── set final effectiveSnapshotDate
+  └── SnapshotStockScopeOwnershipPort.capture(
+        SnapshotUpdateTarget(snapshotId, ownerUserId, effectiveSnapshotDate))
+                    ▲
+                    │ implements
+FubonSnapshotStockScopeOwnershipAdapter
+  └── capture once after lock:
+      FubonConfigState.snapshot().state()
+      inventory-sync-enabled / tw-live-quotes-enabled
+      same preflight/writer owner-latest target eligibility
+```
+
+`AssetService` 不得依賴 Fubon config、SDK、secret directory 或任何 `integration.fubon` concrete class。它在 transaction 第一個 DB operation `AssetSnapshotMutationLock.lockById(id)` 成功後，必須先做既有 tenant／owner checks、snapshot-date unique gate 與 final effective date 的必要設定，才以 immutable target 取得 ownership decision；此後才讀 children、broker、reference data 並以同一個 decision 重建所有 children，同一 transaction 不得重新讀 state、flag 或 target eligibility，也不得用變更前 snapshotDate 判斷 latest target。PAYLOAD_OWNED 時刪除舊 scope 並 materialize payload rows，完整持久化 shares、investmentCost、currentValue、transactionType、transactionDate、transactionExchangeRate、currency、dividend metadata 與 display order；SOURCE_OWNED 時只有 capability、configured-admin owner、同一 owner-latest `snapshotId`、以及 final effectiveSnapshotDate=台北今日四項均成立才保留 locked Fubon rows，並跳過 payload 的同 scope rows。deposits／funds、stock master upsert、rollback 與 `SnapshotAggregateCalculator` 的單一 total formula 均不變。
+
+`FubonInventoryWriter` 與完整 PUT 一律經相同的 PostgreSQL `AssetSnapshotMutationLock`，不用 JVM mutex。只有完整 SOURCE_OWNED actual target 需要讓「Fubon replace 先取得 lock」與反向順序中的第二 transaction 在第一個釋鎖後讀最新 managed scope，保留 Fubon source row、non-Fubon row 與正確 totals。驗證固定涵蓋：`DISABLED`、`MISCONFIGURED`、tracked default（`READY` + `FUBON_ENABLED=true`／LIVE=true／inventory=false）及 capacity conflict（`READY` + LIVE=true／inventory=true）皆做 `00865B` payload-owned DB readback；flags 可用但 historical target、flags 可用但 non-configured-admin target、以及原同步 target 被 PUT 改為非今日 final effective date 也都必須 DB readback 為 payload-owned。唯一完整實際 target（`READY` + LIVE=false／inventory=true + configured admin + same owner-latest target + final date today）才驗 stale-payload 保護與真 PostgreSQL/Testcontainers 的兩個獨立 transaction／latch 雙向 lock-race。不得以 DTO success、H2 或 mock repository 代替。實作後須通過 Maven backend suite、business-services 無快取 rebuild/recreate、BFF restart 與 healthcheck；本補充不新增 schema、Liquibase、API、BFF/frontend contract、排程或任何 broker write capability。
 
 
 
@@ -9565,3 +9600,126 @@ function getPriceCell(row) {
 ```
 
 `selectedSnapshotId` 與 `store.latestSnapshot`（`frontend/src/stores/assetStore.js` 既有 getter，`snapshots[0]`）皆為既有欄位，不需新增狀態。選歷史快照（`selectedSnapshotId` 不等於最新快照 id）時 `isLatestSnapshotView` 為 `false`，維持既有「只顯示凍結收盤價、不帶漲跌%」行為不變。`priceNumberColor(row)` 與 `getRealtimePrice(row)` 完全不受此修正影響——休市時股價數字仍依既有邏輯顯示灰色（非 live），本修正只讓漲跌%不再被錯誤地一併清空。
+
+### Requirement 106／Task 370：十秒台股 LIVE fallback chain 與持久化最新 snapshot
+
+富邦目前公開市場資料只描述台灣證券市場。因此此設計**不**對美股送富邦 request，也不把美股既有 2 分鐘 producer 改成 10 秒。`FUBON_ENABLED` 是 adapter 主開關，`FUBON_TW_LIVE_QUOTES_ENABLED` 才控制台股三來源鏈，`FUBON_INVENTORY_SYNC_ENABLED` 則獨立控制庫存同步；後兩者不得以市場代碼或主開關暗中互相啟用。未來需先有官方美股 actual-trade endpoint 與可驗證來源 timestamp，另立需求完成市場 adapter、速率容量與測試，再評估美股十秒更新。
+
+#### 決策與邊界
+
+Task 353 的「`FUBON_ENABLED` 二選一 provider，enabled 時不 fallback」不再符合目前需求，改為單一的逐檔來源鏈。
+
+Requirement 106 只覆寫 `market='台股'`、非 `0000` 的 priority LIVE path：Requirement 85 的台股個股 2 分鐘 cron/catalog 改為 10 秒；Requirement 91 的 enabled-only/no-fallback、30 秒 LIVE success cache、100 檔 silent cap 與 provider-takeover Lua 改為下列三來源協調器；Requirement 89 的同時間 LIVE 可接受、以及 stale actual-trade 仍可寫 `price:dayhl:*` 的例外也改為 strict newer 和零副作用。Requirement 89 的 MIS actual-trade `d+t` freshness／`tlong` 診斷規則、`VERIFIED_CLOSE`、正式收盤流程與非台股 producer 全部保留。富邦已驗證 source OHLC 保持權威，accepted Fubon 只 append tick、不進 day-H/L tracker。
+
+設定與額度不能共用含混的 enabled 語意。`FUBON_ENABLED` 只表示 adapter 可以讀取 mounted secret 並提供唯讀能力；`FUBON_TW_LIVE_QUOTES_ENABLED` 才授權 external 的十秒台股 LIVE producer；`FUBON_INVENTORY_SYNC_ENABLED` 才授權 business 的排程與手動庫存同步。`.env.example` 固定為前兩者 true、inventory false。inventory disabled 時，scheduler 和 manual service 在呼叫 portfolio 或 quote 前便回固定 typed outcome，零 adapter／SDK／DB side effect。兩個 consumer 都設 true 是明確 configuration conflict：inventory 一律 fail closed，不把原本 40×6=240 calls/min 的 LIVE budget 稀釋或以 adapter rate failure 掩飾。要回到庫存同步時，使用者必須明確把 live flag 關閉，再開 inventory flag；master flag false 時兩者都只回既有 disabled/misconfigured typed outcome。adapter quote wire 必須以 required `purpose=LIVE|INVENTORY` 區分：LIVE 永不讀／寫跨輪 success cache，仍可對同 `(purpose, code)` single-flight；inventory-only 才保留既有 30 秒 cache，且不得回給 LIVE。
+
+來源鏈如下：
+
+```text
+FUBON_ENABLED=true && FUBON_TW_LIVE_QUOTES_ENABLED=true:
+  Fubon normalized actual-trade quote
+       └─ 未取得「可接受的新 observation」才進 TWSE MIS
+            └─ 未取得「可接受的新 observation」才進 Yahoo
+
+FUBON_ENABLED=false or FUBON_TW_LIVE_QUOTES_ENABLED=false:
+  TWSE MIS
+       └─ 未取得「可接受的新 observation」才進 Yahoo
+```
+
+「可接受」同時要求來源合約有效、真實成交價為正、來源時間可驗證且屬台北當日，並在寫入端通過嚴格時間單調 gate。來源順序只安排嘗試先後；Fubon 不得以較舊 timestamp 壓回 Redis 或 DB 中由 MIS/Yahoo 取得的較新成交。
+
+台股盤中最新值新增 durable `stock_intraday_quote`，目的是保存一份可查證的**最新盤中 snapshot**，而不是把每十秒資料灌成未界定保留期的 tick history，也不是取代正式日線。`stock_price_history` 的今日列仍只由 `ClosePersister` 盤後權威流程寫入；這可避免把富邦／MIS／Yahoo 的盤中 last trade 誤標為正式收盤。既有 Redis `price:ticks:*` 仍是走勢圖的 bounded intraday series，不能拿新資料表替代。
+
+#### 資料模型
+
+```sql
+stock_intraday_quote
+  stock_code           VARCHAR(20)    NOT NULL
+  market               VARCHAR(20)    NOT NULL
+  trading_date         DATE           NOT NULL
+  provider_updated_at  TIMESTAMPTZ    NOT NULL
+  source               VARCHAR(64)    NOT NULL
+  actual_price         NUMERIC(20,10) NOT NULL
+  previous_close       NUMERIC(20,10) NULL
+  open_price           NUMERIC(20,10) NULL
+  high_price           NUMERIC(20,10) NULL
+  low_price            NUMERIC(20,10) NULL
+  buy_price            NUMERIC(20,10) NULL
+  sell_price           NUMERIC(20,10) NULL
+  volume               BIGINT         NULL
+  PRIMARY KEY (stock_code, market)
+```
+
+每個 nullable 價格欄只可為 null 或正數，`actual_price` 必須正數，`volume` 為 null 或非負整數；CHECK 另強制 `provider_updated_at AT TIME ZONE 'Asia/Taipei'` 的日期等於 `trading_date`。不存 `stock_name`（同一名稱事實只屬 `stock` 主檔），也不存 `price_change`／`change_percent`（皆可由價與昨收推導）。
+
+富邦正規化 payload 的完整 mapping 如下；MIS／Yahoo 有提供且通過驗證的同名值也走同一欄，未提供為 null、不可沿用前一來源的值：
+
+| 正規化欄位 | 持久化位置 |
+|---|---|
+| `stockCode, market` | composite primary key |
+| `tradingDate, updatedAt, source` | `trading_date, provider_updated_at, source` |
+| `actualPrice, previousClose, openPrice, highPrice, lowPrice, buyPrice, sellPrice, volume` | 對應 `*_price`／`volume` 欄 |
+| `stockName` | 僅在此 snapshot 原子 upsert 成功後，更新 `stock.name` |
+| `priceChange, changePercent, closed, quoteStatus` | 不入 DB；前兩者由 Redis payload 即時計算，後兩者是 cache state |
+
+原子 upsert 是唯一 mutation primitive：
+
+```sql
+INSERT INTO stock_intraday_quote (...)
+VALUES (...)
+ON CONFLICT (stock_code, market) DO UPDATE
+SET trading_date = EXCLUDED.trading_date,
+    provider_updated_at = EXCLUDED.provider_updated_at,
+    source = EXCLUDED.source,
+    actual_price = EXCLUDED.actual_price,
+    previous_close = EXCLUDED.previous_close,
+    open_price = EXCLUDED.open_price,
+    high_price = EXCLUDED.high_price,
+    low_price = EXCLUDED.low_price,
+    buy_price = EXCLUDED.buy_price,
+    sell_price = EXCLUDED.sell_price,
+    volume = EXCLUDED.volume
+WHERE EXCLUDED.provider_updated_at > stock_intraday_quote.provider_updated_at
+RETURNING stock_code;
+```
+
+回傳列數為零就代表 equal/older，呼叫端不得更新 `stock.name`。寫 snapshot 與名稱更新放進同一 transaction；因此名稱也只會隨被接受的較新 observation 前進。
+
+#### 十秒 producer 與時間單調
+
+```text
+PricePoller.scheduledTwIntradayUpdate
+  cron */10 * 9-13 * * MON-FRI, Asia/Taipei
+  → collectHeldStockCodes ∪ stock_alert，排除 0000
+  → TwLiveQuoteDispatcher known-open authorization + in-flight gate
+  → PriorityTwLiveQuoteProvider
+       1. Fubon（enabled 且未進 rate-limit circuit 時）
+       2. MIS（逐檔尚未接受）
+       3. Yahoo（逐檔尚未接受）
+  → for every valid observation:
+       A. DB stock_intraday_quote atomic newer-wins upsert → canonical row
+       B. only after A succeeds/returns canonical row: common Redis latest-key write
+       C. only an accepted Redis write appends tick / advances permitted day-HL
+```
+
+來源 timestamps 的唯一真相：
+
+| 來源 | 價格 | freshness |
+|---|---|---|
+| Fubon | 已驗證 `lastTrade` 或 `closePrice` actual trade | adapter 回傳的 UTC `updatedAt` |
+| TWSE MIS | `z` | strict `d+t` actual-trade instant；`tlong` 只作更新時間診斷，不能推進 freshness |
+| Yahoo | 當日 regular-market/latest-bar 實際成交價 | 上游回傳的 epoch time，不能用 HTTP receipt time |
+
+共用 Redis Lua 以 `tradingDate`、同日 `updatedAt` 做 lexicographic timestamp watermark；同日比較必須是嚴格 `>`。一筆相同或較舊資料不得刷新 TTL、發 SSE、更新 index、tick 或 day-HL。`VERIFIED_CLOSE` 是同日不可降級的權威 status，即使外部 LIVE observation 的 time 較晚也不得覆蓋。
+
+PostgreSQL 是 durable canonical；Redis 是它的單調 read-model，兩者不是分散式 transaction。先做 DB upsert：APPLIED 回新 canonical row，STALE_OR_EQUAL 回既有 canonical row，FAILED 則本輪不碰 Redis。只有取得 canonical row 才呼叫 Redis common writer；因此 DB 成功／Redis 暫失敗時，下次同 timestamp 以 DB row 補 Redis，DB equal 但 raw payload 不同時絕不拿 raw 回灌。Redis 已有較新 legacy tuple 或 `VERIFIED_CLOSE` 時可拒絕 DB row，但不得反寫 DB，也不把已 DB APPLIED 的 source 當成需要 fallback。這使 Redis 永不因本 pipeline 領先 DB，兩端仍各自以嚴格 timestamp 防舊資料覆寫。
+
+MIS/Yahoo 的日內 high/low 必須改成「先唯讀取既有 aggregate、只在 latest-key atomic write 成功後才 observe」：payload 可合併現有 aggregate 和本次成交，但 stale/equal observation 沒有任何 H/L 寫入權。富邦 payload 使用來源已驗證 high/low、不寫 day-H/L tracker。所有 tick 都只跟著 accepted latest-key write。
+
+#### 富邦 API 節流與可用性
+
+富邦官方日內行情 API 的限制為 300 requests/min；adapter 保留較保守的 process-wide 240/min budget與 429 circuit。十秒排程每個 normal round 最多可起 40 個富邦逐檔 calls，剛好保證六輪滾動視窗不超過 240。富邦成功結果不得使用跨輪 30 秒 cache，因它會把「每十秒抓」退化成重播舊報價；僅保留同時呼叫的 in-flight coalescing。adapter 必須把 `RATE_LIMITED`、`RATE_LIMIT_CIRCUIT_OPEN`、`RATE_LIMIT_BUDGET_EXHAUSTED` 保留為 typed per-code outcome；coordinator 收到後設至少 60 秒的 local skip-until。已知 skip window 內不得打 Java→Fubon HTTP或 SDK quote，整批直接走 MIS→Yahoo；冷啟第一次 status probe 只能讓 adapter 回 circuit outcome，adapter 自己仍不得產生 SDK quote call。
+
+目前 universe 不超過 40 時，每檔每 10 秒都先走 Fubon。輸入先依 code 穩定字典序正規化，dispatcher 不得保留 100 檔靜默截斷；超過 40 時以 cursor round-robin 選出最多 40 檔，未入選者該輪直接從 MIS 開始並記錄 capacity outcome；下一輪必須從上次結尾接續，不能固定只服務前 40。MIS fallback 若超過它的 320 code request cap，必須分為多個保序 batch 並合併每個 code 的 outcome。Fubon 回 rate/circuit outcome 時設 local skip，已知 circuit 期間直接 MIS→Yahoo，並在 circuit 到期後才恢復嘗試。
+
+不增加新的公開 HTTP endpoint、Redis key schema、SSE schema 或任何下單能力；Fubon adapter 繼續只允許查詢，沒有 order/modify/cancel 呼叫。

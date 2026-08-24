@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -47,6 +49,7 @@ class AssetServiceTest {
     @Mock FundClassOverrideRepository fundClassOverrideRepo;
     @Mock com.steven.assets.security.TenantGuard tenantGuard;
     @Mock AssetSnapshotMutationLock snapshotMutationLock;
+    @Mock SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
     @Spy SnapshotAggregateCalculator aggregateCalculator = new SnapshotAggregateCalculator();
 
     @InjectMocks AssetService service;
@@ -57,6 +60,7 @@ class AssetServiceTest {
     void setUp() {
         snapshot = new AssetSnapshot();
         snapshot.setId(1L);
+        snapshot.setOwnerUserId(9L);
         snapshot.setSnapshotDate(LocalDate.of(2024, 1, 31));
         snapshot.setDeposits(new ArrayList<>());
         snapshot.setFunds(new ArrayList<>());
@@ -86,6 +90,25 @@ class AssetServiceTest {
                 .hasMessageContaining("找不到快照 ID");
 
         verify(snapshotRepo, never()).delete(any());
+    }
+
+    @Test
+    void updateSnapshot_先鎖定並以最終日期擷取一次ownershipDecision() {
+        LocalDate finalDate = LocalDate.of(2024, 2, 1);
+        when(snapshotMutationLock.lockById(1L)).thenReturn(snapshot);
+        when(stockScopeOwnershipPort.capture(any())).thenReturn(SnapshotStockScopeOwnership.payloadOwned());
+        when(snapshotRepo.save(snapshot)).thenReturn(snapshot);
+
+        service.updateSnapshot(1L, new com.steven.assets.dto.AssetSnapshotDto.CreateSnapshotRequest(
+                finalDate, BigDecimal.ONE, "updated", List.of(), List.of(), List.of()));
+
+        InOrder order = inOrder(snapshotMutationLock, tenantGuard, snapshotRepo, stockScopeOwnershipPort);
+        order.verify(snapshotMutationLock).lockById(1L);
+        order.verify(tenantGuard).assertOwned(9L);
+        order.verify(snapshotRepo).existsBySnapshotDate(finalDate);
+        ArgumentCaptor<SnapshotUpdateTarget> target = ArgumentCaptor.forClass(SnapshotUpdateTarget.class);
+        order.verify(stockScopeOwnershipPort).capture(target.capture());
+        assertThat(target.getValue()).isEqualTo(new SnapshotUpdateTarget(1L, 9L, finalDate));
     }
 
     // ---- recalcAllDividends ----

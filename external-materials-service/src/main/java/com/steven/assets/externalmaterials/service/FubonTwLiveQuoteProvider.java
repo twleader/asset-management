@@ -4,16 +4,16 @@ import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient.BatchResult;
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient.BatchStatus;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Set;
 
-/** Enabled-mode strategy. It never owns or invokes an MIS/Yahoo fallback. */
+/**
+ * Legacy test fixture only. Task 370 routes every production Taiwan LIVE round through
+ * {@link TwLiveQuoteDispatcher}, which persists the canonical database snapshot before Redis.
+ */
 @Slf4j
-@Component
-@ConditionalOnProperty(prefix = "fubon", name = "enabled", havingValue = "true")
+@Deprecated(forRemoval = false)
 public class FubonTwLiveQuoteProvider implements TwLiveQuoteProvider {
 
     private final FubonNormalizedQuoteClient client;

@@ -211,14 +211,26 @@ def test_additional_decimal_volume_book_and_diagnostic_time_rejections(mutate, r
     assert read_one(raw)["reason"] == reason
 
 
-def test_cache_and_single_flight_share_one_sdk_call():
+def test_live_never_uses_success_cache_but_same_request_is_single_flight():
     async def scenario():
         gateway = Gateway(delay=0.05)
         service = QuoteService(gateway, now=fixed_now)
-        first, second = await asyncio.gather(service.read(["2330"]), service.read(["2330"]))
-        third = await service.read(["2330"])
+        first, second = await asyncio.gather(service.read(["2330"], "LIVE"), service.read(["2330"], "LIVE"))
+        third = await service.read(["2330"], "LIVE")
         assert first["quotes"] == second["quotes"] == third["quotes"]
-        assert gateway.calls == 1
+        assert gateway.calls == 2
+
+    asyncio.run(scenario())
+
+
+def test_inventory_alone_keeps_30_second_success_cache_and_never_leaks_into_live():
+    async def scenario():
+        gateway = Gateway()
+        service = QuoteService(gateway, now=fixed_now)
+        await service.read(["2330"], "INVENTORY")
+        await service.read(["2330"], "INVENTORY")
+        await service.read(["2330"], "LIVE")
+        assert gateway.calls == 2
 
     asyncio.run(scenario())
 

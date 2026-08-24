@@ -42,6 +42,7 @@ public class FubonInventorySyncScheduler {
     public void scheduledInventorySync() {
         if (!inFlight.compareAndSet(false, true)) return;
         try {
+            if (syncService.inventoryFeatureGate(false) != null) return;
             FubonConfigState.State state = configState.snapshot().state();
             if (state != FubonConfigState.State.READY) {
                 syncService.localConfigOutcome(false, state);
