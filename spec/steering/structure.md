@@ -510,7 +510,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 106 個 Requirements（最新編號為 108）
+├── requirements.md       # 107 個 Requirements（最新編號為 108）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–372）＋尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
