@@ -125,6 +125,34 @@ class TwLiveQuoteDispatcherProductionPathTest {
     }
 
     @Test
+    void sameFortyCodeFubonBatchSubmitsBookToIndependentWriterWithoutSecondProviderCall() {
+        PriceFetchClient prices = mock(PriceFetchClient.class);
+        FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
+        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubonProvider = mock(ObjectProvider.class);
+        when(fubonProvider.getIfAvailable()).thenReturn(fubon);
+        PriceResult raw = quote("2330", new BigDecimal("100"));
+        ProviderTimedPriceObservation observation = new ProviderTimedPriceObservation(raw, raw.tradingDate(), raw.freshnessInstant());
+        com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult book = orderBook();
+        when(fubon.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
+                FubonNormalizedQuoteClient.BatchStatus.SUCCESS, List.of(observation), 1, 0, Map.of(), Map.of("2330", book)));
+        StockSourceQuery source = appliedSource(raw);
+        PriceCacheWriter genericWriter = mock(PriceCacheWriter.class);
+        when(genericWriter.writeTaiwanLive(any(), anyBoolean())).thenReturn(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        TwFubonOrderBookRoundWriter orderBookWriter = mock(TwFubonOrderBookRoundWriter.class);
+        @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> orderBookProvider = mock(ObjectProvider.class);
+        when(orderBookProvider.getIfAvailable()).thenReturn(orderBookWriter);
+        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(openClock(), prices, fubonProvider, source,
+                genericWriter, new TwLiveQuoteOutcomeCounters(), orderBookProvider, true, true);
+
+        dispatcher.refresh(Set.of("2330"));
+
+        verify(fubon, times(1)).fetch(List.of("2330"));
+        verify(orderBookWriter).submit(Map.of("2330", book));
+        verify(prices, never()).fetchTwBatch(anyList());
+        verify(prices, never()).getYahooTwLivePrice(any());
+    }
+
+    @Test
     void fubonWholeBatchMisconfiguredFallsThroughToMisThenYahoo() {
         PriceFetchClient prices = mock(PriceFetchClient.class);
         FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
@@ -218,5 +246,19 @@ class TwLiveQuoteDispatcherProductionPathTest {
         when(source.persistIntradayQuote(any())).thenReturn(new StockSourceQuery.IntradayPersistenceResult(
                 StockSourceQuery.IntradayPersistenceResult.Status.APPLIED, canonical));
         return source;
+    }
+    private static com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult orderBook() {
+        List<com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.OrderBookLevel> levels =
+                java.util.stream.IntStream.rangeClosed(1, 5).mapToObj(level ->
+                        new com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.OrderBookLevel(level,
+                                BigDecimal.valueOf(100 - level), (long) level,
+                                BigDecimal.valueOf(100 + level), (long) level)).toList();
+        return new com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult(
+                "2330", "台積電", "台股", true, true, "FUBON_BOOKS", null,
+                Instant.parse("2026-08-24T02:00:00Z"), Instant.parse("2026-08-24T02:00:01Z"), "OPEN",
+                BigDecimal.valueOf(100), BigDecimal.valueOf(99), BigDecimal.valueOf(100),
+                BigDecimal.valueOf(101), BigDecimal.valueOf(98), BigDecimal.valueOf(100),
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, 1L, null, BigDecimal.ONE,
+                null, null, null, null, 15L, 15L, levels);
     }
 }

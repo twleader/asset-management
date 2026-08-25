@@ -70,7 +70,7 @@ public class MarketDataController {
         return ResponseEntity.ok(marketDataService.getDividendRate(code, market));
     }
 
-    /** 行情五檔展示的 Yahoo 同時間點 snapshot；controller 僅驗參數並代理。 */
+    /** 行情五檔展示的富邦十秒 cached snapshot；controller 僅驗參數並代理。 */
     @GetMapping("/quote-detail")
     public ResponseEntity<QuoteDetailDto.Response> getQuoteDetail(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,

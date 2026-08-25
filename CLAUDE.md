@@ -306,7 +306,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 - **依賴反轉**：業務邏輯依賴抽象（interface），不依賴具體實作。外部系統（行情 API、Redis、Excel 解析）以介面隔離，實作放在最外層，方便替換與測試。
 - **領域模型獨立**：Entity / 領域物件不得依賴 Web 層（HttpServletRequest、DTO 等）；DTO 與 Entity 分離，不得把 JPA Entity 直接當 API 回傳格式。
 - **跨層禁令**：前端不得直接呼叫 business service（一律走 BFF，見下方 BFF 規範）；business service 不得直連外部行情 API（即時價走 Redis、收盤價走 `stock_price_history`）。
-- **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348；Requirement 108／Task 372 的唯一公開巢狀覆寫）**：登入後跨頁共用 `StockAnalysisDialog` 的「行情五檔」可由使用者第一次切頁或按「重新整理」時，經頁面專屬 exact BFF → business proxy → `external-materials-service` request-time 抓一份 Yahoo 台股摘要＋orderbook 的同時間點展示 snapshot。這份資料**不是本系統的權威即時價**，不得供估值、損益、下單、警示、SSE 或其他 consumer 使用；business 只 proxy／fail-soft，不直連 Yahoo，外部 IO 仍只在 external。唯一例外是 Requirement 108 的 exact `GET /api/quotes`／`GET /api/quotes/one`：BFF 只可把同一 typed snapshot 放入固定的 `marketData.quoteDetail` 子樹作公開市場顯示，且不得讀 configured-admin、任何使用者／帳戶／券商／持股／成本／交易／快照／投資組合資料，不得將 snapshot 用於任何其他 consumer 或決策。此展示 snapshot 不進 Redis／DB、不背景輪詢；其 `price` 只在該頁籤或上述巢狀市場投影內與同一份五檔一起呈現，不得取代既有 Redis 即時價或 `stock_price_history` 收盤價。
+- **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348；Requirement 108／Task 372；Requirement 109／Task 373）**：登入後跨頁共用 `StockAnalysisDialog` 與公開 `marketData.quoteDetail` 都只能讀 `external-materials-service` 的同一個 typed `FUBON_BOOKS` snapshot。snapshot 僅由 Requirement 106 已授權的台股十秒 LIVE round 的**同一批富邦行情**取得，先寫 PostgreSQL canonical row、再寫專用 `price:quote-detail:{market}:{code}` Redis key；query path 是 Redis → DB pure read，禁止 request-time 向 Yahoo、富邦、dispatcher、worker 或 writer 外呼。這份資料**不是本系統的權威即時價**，不得供估值、損益、下單、警示、SSE 或其他 consumer 使用；business 只 proxy／fail-soft。唯一公開投影仍是 exact `GET /api/quotes`／`GET /api/quotes/one` 的固定 `marketData.quoteDetail` 子樹，且不得讀 configured-admin、任何使用者／帳戶／券商／持股／成本／交易／快照／投資組合資料，不得將 snapshot 用於任何其他 consumer 或決策。專用 key 不得取代既有 Redis 即時價或 `stock_price_history` 收盤價，也不得寫 generic price index、ticks、day-H/L 或 `price-update`。
 - **可測試性**：業務邏輯必須能在不啟動 Spring context、不連資料庫的情況下單元測試。
 
 ### 資料庫完整正規化
@@ -357,7 +357,7 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - 前端 view 一律走自己頁面對應的 BFF endpoint，不直接呼叫 business service `/api/{resource}`
 - BFF 負責跨服務 aggregation、預先計算 / 排序 / 過濾，前端只負責 render
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
-- **具名、限縮例外（Requirements 66–68／70／71／77／78／79／86／108；Tasks 317、325、327、328、329、336、337、338、347、372）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 九條路由（八條唯讀 GET ＋ 一條寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 exact `GET /api/quotes`、`GET /api/quotes/one`、`GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today` 與 `POST /api/public/crawler-data/rescan` 匿名放行；quotes 的 BFF 只可用 no-tenant container client 讀 external-materials 原始 Redis 19 欄，並以同樣無身份的 business 唯讀 market endpoints 加入 market-only `marketData`（chart／Yahoo 五檔／ETF 發行人成分／readonly 股利與分時）；不得查或回傳 configured-admin、個人持股／成本／交易／快照。禁止 `/api/**`／descendant wildcard 與同路徑其他 method。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同 `fetchAndExportNow()` 的匿名版本。交易雷達公開端點固定以 configured-admin 為 owner，必須清除 Reactor 呼叫者身分並顯式傳遞 tenant headers，只能走不寫入 snapshot／Redis／DB 的 current-read 路徑。Frontend 對九路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
+- **具名、限縮例外（Requirements 66–68／70／71／77／78／79／86／108／109；Tasks 317、325、327、328、329、336、337、338、347、372、373）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 九條路由（八條唯讀 GET ＋一條寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 只對 exact `GET /api/quotes`、`GET /api/quotes/one`、`GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today` 與 `POST /api/public/crawler-data/rescan` 匿名放行；quotes 的 BFF 只可用 no-tenant container client 讀 external-materials 原始 Redis 19 欄，並以同樣無身份的 business 唯讀 market endpoints 加入 market-only `marketData`（chart／富邦十秒 cached 五檔／ETF 發行人成分／readonly 股利與分時）；不得查或回傳 configured-admin、個人持股／成本／交易／快照。禁止 `/api/**`／descendant wildcard 與同路徑其他 method。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同 `fetchAndExportNow()` 的匿名版本。交易雷達公開端點固定以 configured-admin 為 owner，必須清除 Reactor 呼叫者身分並顯式傳遞 tenant headers，只能走不寫入 snapshot／Redis／DB 的 current-read 路徑。Frontend 對九路 exact／matrix 變體回 404，view 不得援引此例外。Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
 
 **2. 同義欄位、同一 business service API**
 
@@ -409,9 +409,9 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（107 個 Requirements；最新編號為 108） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（108 個 Requirements；最新編號為 109） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
-| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–372）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
+| `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–373）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296 以各自 `spec/tasks/tNNN_*.md` 為準 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
 | `spec/tasks/tNNN_*.md` | 自足任務檔（Task 201 之後的新任務） |
 | `spec/tasks/archive/` | Task 1–200 歷史，已凍結不再修改 |

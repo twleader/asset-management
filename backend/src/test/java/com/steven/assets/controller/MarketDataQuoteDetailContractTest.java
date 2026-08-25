@@ -53,7 +53,7 @@ class MarketDataQuoteDetailContractTest {
     }
 
     private static QuoteDetailDto.Response response(Long bid, Long ask) {
-        return new QuoteDetailDto.Response("2330", "台積電", "台股", true, true, "YAHOO_TW", null,
+        return new QuoteDetailDto.Response("2330", "台積電", "台股", true, true, "FUBON_BOOKS", null,
                 Instant.parse("2026-08-21T01:00:00Z"), Instant.parse("2026-08-21T01:02:00Z"), "OPEN",
                 BigDecimal.valueOf(100), BigDecimal.valueOf(99), BigDecimal.valueOf(99), BigDecimal.valueOf(101), BigDecimal.valueOf(98), null,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.TEN, 1L, 2L, BigDecimal.ONE, 3L, 4L, BigDecimal.ONE, BigDecimal.ONE,

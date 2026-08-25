@@ -201,14 +201,104 @@ def test_precision20_scale10_volume_zero_and_official_54538_are_exact():
         (lambda raw: raw.update(previousClose=-1), "NON_POSITIVE_DECIMAL"),
         (lambda raw: raw.update(highPrice="1e2"), "NON_CANONICAL_DECIMAL"),
         (lambda raw: raw["total"].update(tradeVolume=-1), "INTEGER_RANGE_EXCEEDED"),
-        (lambda raw: raw["bids"][0].update(price="0"), "NON_POSITIVE_DECIMAL"),
-        (lambda raw: raw.update(lastUpdated="not-microseconds"), "INVALID_PROVIDER_TIMESTAMP"),
     ],
 )
-def test_additional_decimal_volume_book_and_diagnostic_time_rejections(mutate, reason):
+def test_additional_decimal_and_volume_rejections(mutate, reason):
     raw = quote_raw()
     mutate(raw)
     assert read_one(raw)["reason"] == reason
+
+
+def _complete_book(raw):
+    raw["bids"] = [
+        {"price": f"{100 - index / 10:.1f}", "size": index}
+        for index in range(5)
+    ]
+    raw["asks"] = [
+        {"price": f"{100.2 + index / 10:.1f}", "size": index + 10}
+        for index in range(5)
+    ]
+
+
+def test_complete_five_level_order_book_uses_its_own_microsecond_timestamp():
+    raw = quote_raw(timestamp=int(fixed_now().timestamp()) * 1_000_000 - 900_000)
+    _complete_book(raw)
+    raw["lastUpdated"] = int(fixed_now().timestamp()) * 1_000_000 - 123_456
+    raw["avgPrice"] = "100.15"
+    raw["total"].update(
+        tradeValue="4226000000",
+        tradeVolumeAtBid=18921,
+        tradeVolumeAtAsk=20781,
+    )
+
+    quote = read_one(raw)["quote"]
+
+    assert quote["updatedAt"] == "2026-08-21T04:59:59.100000Z"
+    assert quote["orderBook"] == {
+        "bookUpdatedAt": "2026-08-21T04:59:59.876544Z",
+        "averagePrice": "100.15",
+        "turnoverYi": "42.26",
+        "innerVolumeLots": 18921,
+        "outerVolumeLots": 20781,
+        "levels": [
+            {"level": 1, "bidPrice": "100.0", "bidVolumeLots": 0, "askPrice": "100.2", "askVolumeLots": 10},
+            {"level": 2, "bidPrice": "99.9", "bidVolumeLots": 1, "askPrice": "100.3", "askVolumeLots": 11},
+            {"level": 3, "bidPrice": "99.8", "bidVolumeLots": 2, "askPrice": "100.4", "askVolumeLots": 12},
+            {"level": 4, "bidPrice": "99.7", "bidVolumeLots": 3, "askPrice": "100.5", "askVolumeLots": 13},
+            {"level": 5, "bidPrice": "99.6", "bidVolumeLots": 4, "askPrice": "100.6", "askVolumeLots": 14},
+        ],
+    }
+
+
+def test_invalid_optional_book_never_rejects_actual_price():
+    raw = quote_raw()
+    raw["lastUpdated"] = "not-microseconds"
+    result = read_one(raw)
+    assert result["status"] == "SUCCESS"
+    assert "orderBook" not in result["quote"]
+
+    raw = quote_raw()
+    _complete_book(raw)
+    raw["bids"] = [
+        {"price": "100.0" if index % 2 == 0 else "100.00", "size": 1}
+        for index in range(5)
+    ]
+    result = read_one(raw)
+    assert result["status"] == "SUCCESS"
+    assert "orderBook" not in result["quote"]
+
+    raw = quote_raw()
+    _complete_book(raw)
+    raw["bids"][1] = {"price": None, "size": 2}
+    result = read_one(raw)
+    assert result["status"] == "SUCCESS"
+    assert "orderBook" not in result["quote"]
+
+
+def test_empty_paired_slots_and_invalid_summaries_are_optional_only():
+    raw = quote_raw()
+    _complete_book(raw)
+    raw["bids"][2] = {"price": None, "size": None}
+    raw["asks"][2] = {"price": None, "size": None}
+    raw["avgPrice"] = "0"
+    raw["total"].update(tradeValue="-1", tradeVolumeAtBid=-1, tradeVolumeAtAsk="not-an-integer")
+
+    quote = read_one(raw)["quote"]
+
+    assert quote["orderBook"]["levels"][2] == {
+        "level": 3, "bidPrice": None, "bidVolumeLots": None, "askPrice": None, "askVolumeLots": None,
+    }
+    assert quote["orderBook"]["averagePrice"] is None
+    assert quote["orderBook"]["turnoverYi"] is None
+    assert quote["orderBook"]["innerVolumeLots"] is None
+    assert quote["orderBook"]["outerVolumeLots"] is None
+
+
+def test_future_or_wrong_day_book_is_omitted_without_touching_actual_trade():
+    raw = quote_raw()
+    _complete_book(raw)
+    raw["lastUpdated"] = int(fixed_now().timestamp()) * 1_000_000 + 1
+    assert "orderBook" not in read_one(raw)["quote"]
 
 
 def test_live_never_uses_success_cache_but_same_request_is_single_flight():

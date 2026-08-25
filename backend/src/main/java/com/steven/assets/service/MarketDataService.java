@@ -118,11 +118,17 @@ public class MarketDataService {
             QuoteDetailDto.Response result = priceServiceClient.get().uri(uriBuilder -> uriBuilder.path("/internal/quote-detail")
                             .queryParam("code", stockCode).queryParam("market", market).build())
                     .retrieve().bodyToMono(QuoteDetailDto.Response.class).block();
-            if (result != null) return result;
+            if (result != null && result.available() && "FUBON_BOOKS".equals(result.source())) return result;
+            if (result != null && !result.supported()) return unavailable(stockCode, market, false, "此市場不支援行情五檔");
         } catch (Exception e) {
             log.warn("呼叫 /internal/quote-detail 失敗 {} {}: {}", market, stockCode, e.getClass().getSimpleName());
         }
-        return new QuoteDetailDto.Response(stockCode, null, market, true, false, "YAHOO_TW", "暫時無法取得行情五檔",
+        return unavailable(stockCode, market, true, "暫時無法取得行情五檔");
+    }
+
+    private static QuoteDetailDto.Response unavailable(
+            String stockCode, String market, boolean supported, String message) {
+        return new QuoteDetailDto.Response(stockCode, null, market, supported, false, null, message,
                 null, null, "UNKNOWN", null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, List.<QuoteDetailDto.OrderBookLevel>of());
     }

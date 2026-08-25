@@ -30,6 +30,7 @@ public class TwLiveQuoteDispatcher {
     private final StockSourceQuery source;
     private final PriceCacheWriter writer;
     private final TwLiveQuoteOutcomeCounters counters;
+    private final ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter;
     private final boolean fubonEnabled;
     private final boolean fubonLiveEnabled;
     /** Compatibility seam for pre-370 unit fixtures; production always uses the coordinator path. */
@@ -43,16 +44,26 @@ public class TwLiveQuoteDispatcher {
                                  ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
                                  StockSourceQuery source, PriceCacheWriter writer,
                                  TwLiveQuoteOutcomeCounters counters,
+                                 ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
                                  @Value("${fubon.enabled:false}") boolean fubonEnabled,
                                  @Value("${fubon.tw-live-quotes-enabled:false}") boolean fubonLiveEnabled) {
         this.clock = clock; this.prices = prices; this.fubonClient = fubonClient; this.source = source;
         this.writer = writer; this.counters = counters; this.fubonEnabled = fubonEnabled;
-        this.fubonLiveEnabled = fubonLiveEnabled; this.legacyProvider = null;
+        this.orderBookWriter = orderBookWriter; this.fubonLiveEnabled = fubonLiveEnabled; this.legacyProvider = null;
+    }
+
+    /** Existing production-path test seam; real Spring wiring uses the constructor above. */
+    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
+                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
+                          StockSourceQuery source, PriceCacheWriter writer,
+                          TwLiveQuoteOutcomeCounters counters,
+                          boolean fubonEnabled, boolean fubonLiveEnabled) {
+        this(clock, prices, fubonClient, source, writer, counters, null, fubonEnabled, fubonLiveEnabled);
     }
 
     TwLiveQuoteDispatcher(MarketClock clock, TwLiveQuoteProvider provider, TwLiveQuoteOutcomeCounters counters) {
         this.clock = clock; this.prices = null; this.fubonClient = null; this.source = null; this.writer = null;
-        this.counters = counters; this.fubonEnabled = false; this.fubonLiveEnabled = false; this.legacyProvider = provider;
+        this.counters = counters; this.orderBookWriter = null; this.fubonEnabled = false; this.fubonLiveEnabled = false; this.legacyProvider = provider;
     }
 
     public TwLiveQuoteBatchResult refresh(Set<String> rawCodes) { return refresh(rawCodes, authorize()); }
@@ -87,7 +98,8 @@ public class TwLiveQuoteDispatcher {
         FubonNormalizedQuoteClient fubon = fubonEnabled && fubonLiveEnabled && System.nanoTime() >= fubonSkipUntilNanos
                 ? fubonClient.getIfAvailable() : null;
         if (fubon != null && !pending.isEmpty()) {
-            FubonNormalizedQuoteClient.BatchResult batch = fubon.fetch(selectFubonCodes(codes));
+            List<String> fubonCodes = selectFubonCodes(codes);
+            FubonNormalizedQuoteClient.BatchResult batch = fubon.fetch(fubonCodes);
             if (isRateLimited(batch)) {
                 fubonSkipUntilNanos = Math.max(fubonSkipUntilNanos,
                         System.nanoTime() + TimeUnit.SECONDS.toNanos(60));
@@ -99,6 +111,9 @@ public class TwLiveQuoteDispatcher {
                 if (outcome.dbFailed) { pending.remove(code); failed++; }
                 else if (outcome.dbApplied) { pending.remove(code); succeeded++; if (outcome.redisWritten) written++; }
             }
+            // This is a non-queued, isolated sink: its slow DB/Redis work cannot retain this
+            // dispatcher's generic inFlight guard or trigger an extra provider request.
+            submitFubonOrderBooks(batch.orderBooks());
         }
         for (List<String> chunk : chunks(new ArrayList<>(pending), PriceFetchClient.MAX_REQUESTED_CODES)) {
             PriceFetchClient.TwQuoteBatchSummary summary = prices.fetchTwBatch(chunk);
@@ -152,6 +167,12 @@ public class TwLiveQuoteDispatcher {
         for (int i = 0; i < FUBON_CODES_PER_ROUND; i++) selected.add(all.get((fubonCursor + i) % all.size()));
         fubonCursor = (fubonCursor + FUBON_CODES_PER_ROUND) % all.size();
         return selected;
+    }
+    private void submitFubonOrderBooks(
+            java.util.Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> snapshots) {
+        if (orderBookWriter == null || snapshots == null || snapshots.isEmpty()) return;
+        TwFubonOrderBookRoundWriter writer = orderBookWriter.getIfAvailable();
+        if (writer != null) writer.submit(snapshots);
     }
     private static List<String> normalizedCodes(Collection<String> raw) {
         TreeSet<String> sorted = new TreeSet<>();

@@ -133,6 +133,7 @@ public class FubonNormalizedQuoteClient {
             }
 
             List<ProviderTimedPriceObservation> observations = new ArrayList<>();
+            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks = new LinkedHashMap<>();
             Map<String, String> failureReasons = new LinkedHashMap<>();
             int rejected = 0;
             for (JsonNode row : rows) {
@@ -154,14 +155,19 @@ public class FubonNormalizedQuoteClient {
                     continue;
                 }
                 try {
-                    observations.add(quoteMapper.map(code, row.get("quote")));
+                    FubonNormalizedQuoteMapper.MappedQuote mapped = quoteMapper.mapWithOrderBook(code, row.get("quote"));
+                    observations.add(mapped.observation());
+                    if (mapped.orderBook() != null) {
+                        orderBooks.put(code, mapped.orderBook());
+                    }
                 } catch (FubonNormalizedQuoteMapper.MappingException ex) {
                     rejected++;
                     failureReasons.put(code, ex.reason());
                 }
             }
             BatchStatus status = rejected == 0 ? BatchStatus.SUCCESS : BatchStatus.PARTIAL_FAILURE;
-            return new BatchResult(status, List.copyOf(observations), codes.size(), rejected, Map.copyOf(failureReasons));
+            return new BatchResult(status, List.copyOf(observations), codes.size(), rejected,
+                    Map.copyOf(failureReasons), Map.copyOf(orderBooks));
         } catch (Exception ex) {
             return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
         }
@@ -230,14 +236,19 @@ public class FubonNormalizedQuoteClient {
             List<ProviderTimedPriceObservation> observations,
             int requested,
             int rejected,
-            Map<String, String> failureReasons
+            Map<String, String> failureReasons,
+            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks
     ) {
         public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
+                           int requested, int rejected, Map<String, String> failureReasons) {
+            this(status, observations, requested, rejected, failureReasons, Map.of());
+        }
+        public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
                            int requested, int rejected) {
-            this(status, observations, requested, rejected, Map.of());
+            this(status, observations, requested, rejected, Map.of(), Map.of());
         }
         static BatchResult failed(BatchStatus status, int requested) {
-            return new BatchResult(status, List.of(), requested, requested, Map.of());
+            return new BatchResult(status, List.of(), requested, requested, Map.of(), Map.of());
         }
     }
 
