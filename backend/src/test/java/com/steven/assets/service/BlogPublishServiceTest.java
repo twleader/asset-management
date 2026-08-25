@@ -71,14 +71,14 @@ class BlogPublishServiceTest {
         TradingRadarExportSetting s = setting(1L, null);
         when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(s));
         httpClient.stub("POST", "https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts",
-                new GoogleHttpClient.Response(200, "{\"id\":\"POST1\",\"url\":\"https://twleader.blogspot.com/p1.html\"}"));
+                new GoogleHttpClient.Response(200, "{\"id\":\"POST1\",\"url\":\"https://myrader.blogspot.com/p1.html\"}"));
 
         BlogPublishService.PublishResult result = service.publish(1L, EMPTY_SNAPSHOT);
 
         assertThat(result.success()).isTrue();
-        assertThat(result.postUrl()).isEqualTo("https://twleader.blogspot.com/p1.html");
+        assertThat(result.postUrl()).isEqualTo("https://myrader.blogspot.com/p1.html");
         assertThat(s.getBlogLastPostId()).isEqualTo("POST1");
-        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://twleader.blogspot.com/p1.html");
+        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://myrader.blogspot.com/p1.html");
         assertThat(s.getBlogLastRunAt()).isNotNull();
         assertThat(httpClient.calls).containsExactly("POST https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts?isDraft=false");
     }
@@ -90,13 +90,13 @@ class BlogPublishServiceTest {
         TradingRadarExportSetting s = setting(1L, "POST1");
         when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(s));
         httpClient.stub("PUT", "https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts/POST1",
-                new GoogleHttpClient.Response(200, "{\"url\":\"https://twleader.blogspot.com/p1-updated.html\"}"));
+                new GoogleHttpClient.Response(200, "{\"url\":\"https://myrader.blogspot.com/p1-updated.html\"}"));
 
         BlogPublishService.PublishResult result = service.publish(1L, EMPTY_SNAPSHOT);
 
         assertThat(result.success()).isTrue();
         assertThat(s.getBlogLastPostId()).isEqualTo("POST1"); // 不變
-        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://twleader.blogspot.com/p1-updated.html");
+        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://myrader.blogspot.com/p1-updated.html");
         assertThat(httpClient.calls).containsExactly("PUT https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts/POST1");
     }
 
@@ -109,13 +109,13 @@ class BlogPublishServiceTest {
         httpClient.stub("PUT", "https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts/STALE-POST",
                 new GoogleHttpClient.Response(404, "{}"));
         httpClient.stub("POST", "https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts",
-                new GoogleHttpClient.Response(200, "{\"id\":\"POST2\",\"url\":\"https://twleader.blogspot.com/p2.html\"}"));
+                new GoogleHttpClient.Response(200, "{\"id\":\"POST2\",\"url\":\"https://myrader.blogspot.com/p2.html\"}"));
 
         BlogPublishService.PublishResult result = service.publish(1L, EMPTY_SNAPSHOT);
 
         assertThat(result.success()).isTrue();
         assertThat(s.getBlogLastPostId()).isEqualTo("POST2");
-        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://twleader.blogspot.com/p2.html");
+        assertThat(s.getBlogLastPostUrl()).isEqualTo("https://myrader.blogspot.com/p2.html");
     }
 
     // ===== publish：ensureAccessToken 失敗 =====
@@ -159,12 +159,12 @@ class BlogPublishServiceTest {
         TradingRadarExportSetting s = setting(1L, null);
         when(settingRepo.findByOwnerUserId(1L)).thenReturn(Optional.of(s));
         httpClient.stub("POST", "https://www.googleapis.com/blogger/v3/blogs/BLOG1/posts",
-                new GoogleHttpClient.Response(200, "{\"id\":\"POST1\",\"url\":\"https://twleader.blogspot.com/p1.html\"}"));
+                new GoogleHttpClient.Response(200, "{\"id\":\"POST1\",\"url\":\"https://myrader.blogspot.com/p1.html\"}"));
 
         BlogPublishService.PublishResult result = service.publishLatest(1L);
 
         assertThat(result.success()).isTrue();
-        assertThat(result.postUrl()).isEqualTo("https://twleader.blogspot.com/p1.html");
+        assertThat(result.postUrl()).isEqualTo("https://myrader.blogspot.com/p1.html");
     }
 
     /** 依 method + URL 前綴回傳假回應；未設定則回 500，避免測試誤打到未預期端點卻無感通過。 */

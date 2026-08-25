@@ -9255,11 +9255,11 @@ BFF `TodayMarketAnalysisBffController` 的 `Mono.zip` passthrough 形狀不變�
 
 後端：`LocalMarketAnalysisEngineTest`／`MarketAnalysisServiceLocalEngineTest` 新增斷言——`factorGroups` 四個清單與既有 `twContext`（`twFragments`＋`volumeFragments` 合併後的字串）／`usContext` 語意一致（逐條比對子句而非整段字串相等）；`volumeSignal()` 敘述不再出現在 `twFragments`；量能訊號缺值時 `twVolume` 為空陣列；LLM 路徑 `factorGroups` 恆為 `null`、DB `factor_groups` 恆為 `NULL`；`MarketAnalysisDto.from()` 對 `NULL`／空白／損毀 JSON 三種情形皆回傳 `null`；`applyLocalResult` 序列化後可經 `MarketAnalysisDto.from()` round-trip 還原；既有 `twContext`／`summary` 字串斷言不因拆分 `twFragments`／`volumeFragments` 而回歸。
 
-## Requirement 102／Task 366：交易雷達結果匯出到 Blogger（新增 blog 輸出通道）
+## Requirement 102／Task 366、Task 374：交易雷達結果匯出到 Blogger（發布目標為 myrader.blogspot.com）
 
 交易雷達既有兩個輸出通道——瀏覽器手動下載 Excel（Requirement 48）與排程自動寫入伺服器目錄／Google Drive
 （Task 231／Requirement 51）。本 Requirement 新增第三個通道：把同一份快照的**精簡摘要版**發布/更新到
-使用者自己的公開 Blogger 部落格 `https://twleader.blogspot.com/`。與既有兩個通道的關鍵差異：既有通道
+使用者自己的公開 Blogger 部落格 `https://myrader.blogspot.com/`。與既有兩個通道的關鍵差異：既有通道
 輸出**完整鑑識欄位**（190+ 欄，供使用者自己回溯稽核），本通道輸出**公開可讀摘要**（大盤卡／個股三軌動作
 與分數／公開資訊），且目的地是**全機唯一、綁定特定 Google 帳號**的外部服務，故啟用權限比照既有 Google
 Drive 同步先例，只限主要管理者（`ADMIN_EMAIL`／`isConfiguredAdmin`）。
@@ -9333,7 +9333,7 @@ GET /api/bff/trading-radar/blog-oauth/callback?code&state   （BFF，需 APP_CON
             3. refresh_token 缺漏 → 302 導回 ?blogOauth=error&reason=missing_refresh_token
                （AC1.2 的訊息：先前已同意過，需重新走一次本功能產生的連結——本功能連結固定帶
                prompt=consent，正常情況不會發生）
-            4. GET https://www.googleapis.com/blogger/v3/blogs/byurl?url=https://twleader.blogspot.com/
+            4. GET https://www.googleapis.com/blogger/v3/blogs/byurl?url=https://myrader.blogspot.com/
                （Bearer access_token）→ blogId
             5. GET https://www.googleapis.com/blogger/v3/users/self（Bearer access_token）
                → 顯示用帳號資訊（displayName／url），僅供設定頁顯示，不參與任何授權判斷
@@ -9358,6 +9358,9 @@ GET /api/bff/trading-radar/blog-oauth/callback?code&state   （BFF，需 APP_CON
    直接連到的來源（例如 Tailscale 為本機自動核發的 `https://<裝置>.<tailnet>.ts.net` 網域）——
    **不需要永久公開**，只在做這次一次性授權時需要能連得到；連接完成後即便該網域之後打不通，
    已存的 `refresh_token` 仍可正常續期與發布（回 AC1／AC2 的邏輯與外部網域無關）。
+5. 確認在 Google 同意畫面所選的 `shi.chihung@gmail.com` 對
+   `https://myrader.blogspot.com/` 具有 Blogger 管理權；callback 的 `blogs/byurl` 查詢失敗時不得保存
+   token 或沿用先前目的地的 `blogId`。
 
 **為何新增 `APP_PUBLIC_BASE_URL` 而不沿用既有 `forward-headers-strategy: framework` 機制**
 （`bff/src/main/resources/application.yml:3-4`，讓 BFF 的 `oauth2Login` 從 `X-Forwarded-Proto/Host`
@@ -9390,7 +9393,7 @@ Blogger 目的地）：
 
 | 表 | 欄位 | 說明 |
 |---|---|---|
-| `blog_publish_credential` | `id`（`BIGINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`，見下方說明）／`blog_id`（Blogger 內部 blog ID，`byurl` 解析所得）／`blog_url`（固定 `https://twleader.blogspot.com/`，供設定頁顯示與未來若換部落格時可讀出目前綁定的是哪一個）／`account_label`（Google `users/self` 回傳的顯示名稱，**僅供 UI 顯示，不參與任何授權或權限判斷**）／`access_token`／`access_token_expires_at`／`refresh_token`／`needs_reconnect`（boolean，預設 `false`）／`connected_at`／`updated_at` | **DB 層以 `CHECK (id = 1)` 強制全表恆只有一列**，service 層一律以固定 `id=1` 查/寫（找不到就以 `id=1` 新增，找到就更新同一列），插入第二列在 DB 層即被拒絕 |
+| `blog_publish_credential` | `id`（`BIGINT PRIMARY KEY DEFAULT 1 CHECK (id = 1)`，見下方說明）／`blog_id`（Blogger 內部 blog ID，`byurl` 解析所得）／`blog_url`（固定 `https://myrader.blogspot.com/`，供設定頁顯示）／`account_label`（Google `users/self` 回傳的顯示名稱，**僅供 UI 顯示，不參與任何授權或權限判斷**）／`access_token`／`access_token_expires_at`／`refresh_token`／`needs_reconnect`（boolean，預設 `false`）／`connected_at`／`updated_at` | **DB 層以 `CHECK (id = 1)` 強制全表恆只有一列**，service 層一律以固定 `id=1` 查/寫（找不到就以 `id=1` 新增，找到就更新同一列），插入第二列在 DB 層即被拒絕 |
 
 **本表刻意不採用「既有 `ExportScheduleSetting`／`TradingRadarExportSetting` 靠 `UNIQUE(owner_user_id)` 保證一使用者一列」的既有寫法**——那個既有先例本身就有 DB 層 UNIQUE 約束兜底，不是純應用層 upsert；而本表連 `owner_user_id` 這種天然業務鍵都沒有（全域單例，沒有 owner 概念），若比照既有先例卻略去對應的 DB 層約束，防護反而比既有先例更弱。並發情境（callback 被重放、雙分頁同時完成連接、容器 recreate 中途）下若只靠應用層判斷「有沒有既有列」再決定新增或更新，會出現競速寫出兩列的視窗；`CHECK (id = 1)` 讓「只能有一列」在 DB 層即為不可違反的事實（第二次 `INSERT id=1` 直接違反 PK/CHECK 而失敗），比 `UNIQUE(owner_user_id)` 更直接（本表沒有第二個維度可以 UNIQUE），寫入端一律用 `findById(1L)` 定位這一列，不存在不確定挑到哪一列的問題。
 
@@ -9405,8 +9408,59 @@ Blogger 目的地）：
 | `blog_last_run_at` | timestamp, nullable | 上次「判斷是否要發布」的時間（含成功／失敗／跳過），語意比照 `gdrive_last_run_at` |
 | `blog_last_status` | varchar(512), nullable | 上次發布結果的可讀文字，與 `lastRunStatus`／`gdriveLastStatus` 刻意分離、不得併入——三個通道的成敗必須各自可分辨 |
 
+**Task 374 的啟用防線與分層：**新增 `TradingRadarBlogSettingsService`，由它注入
+`TradingRadarExportSettingRepository`、`BlogOAuthService` 與 `BlogPublishOutputSupport`，承接
+`status(ownerId)` 聚合、configured-admin mutation 授權與 `setEnabled(ownerId, enabled)` upsert；
+`TradingRadarBlogController` 只保留 HTTP request/response 與 service 委派，移除兩個 repository 注入。
+`blog_enabled=true` 除了既有主要管理者權限外，還必須由
+`BlogOAuthService.isCurrentDestinationConnected()`（或等價的 service 層唯讀判定）確認 id=1 credential 的
+`blogId` 與 `refreshToken` 非空、`needsReconnect=false`、`blogUrl` 精確等於
+`https://myrader.blogspot.com/`。不合格時 settings service 丟 `IllegalArgumentException`
+（既有 `GlobalExceptionHandler` 對應 400），且不得建立／儲存 owner setting。`GET /blog-status` 的
+`connected` 也重用同一判定，避免 UI 把不完整或舊目的地 credential 顯示為已連接。
+
 Changeset：`backend/src/main/resources/db/changelog/changes/v1.112.0-trading-radar-blog-publish.sql`，
 於 `db.changelog-master.yaml` 新增一筆 `include`（緊接 `v1.111.0-dividend-event-uniqueness.sql` 之後）。
+
+### Task 374：固定目的地由 twleader.blogspot.com 切換為 myrader.blogspot.com
+
+這是**安全切換**而不是單純替換畫面文字。初版全域憑證的 `blogId`／refresh token 與
+`trading_radar_export_setting.blog_last_post_id` 都代表舊目的地；若沿用，下一次排程可能對舊 blog
+發 `PUT`，或用原本授權發布到錯誤的公開站點。因此新增 Liquibase changeset
+`v1.115.0-trading-radar-blog-destination-myrader.sql`，在 master changelog 緊接 `v1.114.0-stock-intraday-order-book.sql` 後註冊，
+內容固定為：
+
+```sql
+ALTER TABLE blog_publish_credential
+    ALTER COLUMN blog_url SET DEFAULT 'https://myrader.blogspot.com/';
+
+DELETE FROM blog_publish_credential;
+
+UPDATE trading_radar_export_setting
+SET blog_enabled = FALSE,
+    blog_last_post_id = NULL,
+    blog_last_post_url = NULL,
+    blog_last_run_at = NULL,
+    blog_last_status = NULL;
+```
+
+changeset 僅做本機資料庫操作，**不得**呼叫 Google 或 Blogger API。刪除憑證是刻意的 fail-closed 行為：
+部署後 `GET /blog-status` 以新 URL 回覆 `connected=false`，所有 owner 的排程同步開關為 false；唯一可恢復
+發布的流程是主要管理者重新走 OAuth、以 `shi.chihung@gmail.com` 查得 `myrader` 的新 `blogId`，再手動開啟
+同步。因 `blog_last_post_id` 已清空，成功重新連接後的首次發布一律對新 `blogId` 呼叫 `POST` 建立文章，
+不可能更新初版的文章。
+
+`BlogOAuthService` 的固定 lookup URL、`BlogPublishCredential.blogUrl` builder 預設值、callback 成功時寫入的
+`blogUrl`、`TradingRadarBlogController` 未連接 fallback、前端設定卡 fallback 和公開發布確認文案都必須使用
+同一個完整 URL `https://myrader.blogspot.com/`。本次不提供輸入欄位或可設定的 URL，也不保留舊 URL 的
+runtime fallback。changeset 套用後須依 `db/schema.sql` 檔頭的程序重產 schema-only 基準線，使
+`blog_publish_credential.blog_url` 的 DEFAULT 與運行中資料庫一致。
+
+**重新啟用不可被繞過：**migration 清除 credential 且將所有 owner 的 `blog_enabled` 設為 false 後，
+`PUT /blog-enabled {enabled:true}` 必走 `TradingRadarBlogSettingsService` 的 service 層啟用防線，credential 缺漏、`needsReconnect=true`、
+`blogId`／`refreshToken` 缺漏或 `blogUrl` 非固定新 URL 都回 400、零 setting mutation。OAuth callback 成功時
+明確寫入新 URL 與 credential，但不得觸碰任何 `TradingRadarExportSetting.blogEnabled`；因此 callback 後仍是
+false，主管理者必須再送一次合法的 enable 請求。這個防線不放在 controller 內自行查／判斷 repository。
 
 ### 建立/更新文章（不逐日新增貼文）
 
@@ -9513,7 +9567,7 @@ blog 發布**——語意是驗證本機／Drive 落點，不是公開發布，�
 | `GET /api/(bff/)trading-radar/blog-oauth/callback` | `APP_CONFIGURED_ADMIN`（瀏覽器整頁導向帶既有 session cookie，非匿名端點） | Google 導回後換 token、resolve blogId，直接回 302 導回前端頁面，Gateway 原樣轉發 |
 | `POST /api/(bff/)trading-radar/blog-oauth/disconnect` | `APP_CONFIGURED_ADMIN` | 清除已存憑證 |
 | `GET /api/(bff/)trading-radar/blog-status` | `APP_CONFIGURED_ADMIN` | 回連接狀態（`connected`／`accountLabel`／`blogUrl`）、`blogEnabled`、上次發布時間與狀態、文章網址。與畫面可見性（`v-if="auth.isConfiguredAdmin"`）一致，不額外開放給一般使用者 |
-| `PUT /api/(bff/)trading-radar/blog-enabled` | `APP_CONFIGURED_ADMIN` | 切換 `blog_enabled`（body `{enabled: boolean}`） |
+| `PUT /api/(bff/)trading-radar/blog-enabled` | `APP_CONFIGURED_ADMIN` | 切換 `blog_enabled`（body `{enabled: boolean}`）；`true` 必須通過 Task 374 新站有效 credential 判定，否則回 400、零 setting mutation |
 | `POST /api/(bff/)trading-radar/blog-publish` | `APP_CONFIGURED_ADMIN` | 手動立即發布/更新（前端已完成確認對話框後才呼叫） |
 
 `GET /api/trading-radar/blog-status` 的回應**不得包含** `access_token`／`refresh_token` 明碼——這是
@@ -9535,7 +9589,7 @@ blog 發布**——語意是驗證本機／Drive 落點，不是公開發布，�
 `TradingRadarView.vue`：
 - `.header-actions` 新增〔匯出到 blog〕按鈕（`v-if="auth.isConfiguredAdmin"`），緊接既有〔重新整理〕。
   點擊 → 未連接時提示並捲動到設定卡；已連接時彈 `ElMessageBox.confirm` 說明「即將公開發布/更新到
-  `https://twleader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，確認後才呼叫
+  `https://myrader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，確認後才呼叫
   `POST /api/bff/trading-radar/blog-publish`。
 - 新增〔匯出到 Blog 設定〕卡片（`v-if="auth.isConfiguredAdmin"`），緊接既有〔匯出輸出檔案設定〕卡片之後：
   未連接時顯示〔連接 Blogger 帳號〕按鈕（`window.location.href = (await api).url`，整頁導向）；已連接
@@ -9554,6 +9608,10 @@ blog 發布**——語意是驗證本機／Drive 落點，不是公開發布，�
 `BlogPublishService` 的單元測試（`postId` 為空走建立、非空走更新、更新 404 回退建立並覆寫 `postId`）；
 既有 `TradingRadarExportScheduleServiceTest` 新增案例：`blog_enabled=true` 時排程完成後呼叫發布、發布擲例外
 不影響既有本機／Drive 狀態欄位。
+
+Task 374 另新增 settings-service／交易雷達 Blog HTTP boundary 單元測試：credential 缺漏、需要重連、
+目的地 URL 不符時 enable=true 回 400 且 settings service 不寫 setting；正確的 myrader credential 時才儲存
+true；OAuth callback 自身不會把 migration 後的 setting 自動開啟。
 
 前端無元件測試框架（同 Requirement 95 前例），改以 `/run-stack` 實機驗證，見 requirements.md
 Requirement 102 的 AC9。

@@ -928,14 +928,14 @@
     </el-card>
 
     <!--
-      匯出到 blog（Requirement 102 / Task 366）：把交易雷達精簡摘要公開發布到 twleader.blogspot.com。
+      匯出到 blog（Requirement 102 / Task 366、374）：把交易雷達精簡摘要公開發布到 myrader.blogspot.com。
       僅「主要管理者」可見可設——blog 是全機唯一、綁定特定 Google 帳號的目的地。真正的閘門在後端。
     -->
     <el-card v-if="auth.isConfiguredAdmin" id="blog-publish-card" shadow="never" class="sched-card">
       <template #header>
         <div class="card-head">
           <span class="card-title">匯出到 Blog 設定</span>
-          <span class="card-sub">交易雷達精簡摘要公開發布到 {{ blogStatus.blogUrl || 'https://twleader.blogspot.com/' }}</span>
+          <span class="card-sub">交易雷達精簡摘要公開發布到 {{ blogStatus.blogUrl || 'https://myrader.blogspot.com/' }}</span>
         </div>
       </template>
 
@@ -1183,7 +1183,7 @@ const dirPicker = reactive({
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 const auth = useAuthStore()
 
-// 匯出到 blog（Requirement 102 / Task 366）：發布到 twleader.blogspot.com，僅主要管理者可見可用
+// 匯出到 blog（Requirement 102 / Task 366、374）：發布到 myrader.blogspot.com，僅主要管理者可見可用
 const publishingBlog = ref(false)
 const connectingBlog = ref(false)
 const disconnectingBlog = ref(false)
@@ -1191,7 +1191,7 @@ const savingBlogEnabled = ref(false)
 const blogStatus = reactive({
   connected: false,
   accountLabel: '',
-  blogUrl: 'https://twleader.blogspot.com/',
+  blogUrl: 'https://myrader.blogspot.com/',
   blogEnabled: false,
   lastRunAt: null,
   lastStatus: null,
@@ -1901,7 +1901,7 @@ async function onPublishBlog() {
   }
   try {
     await ElMessageBox.confirm(
-      '即將把交易雷達目前結果公開發布/更新到 https://twleader.blogspot.com/，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議，確定要發布嗎？',
+      '即將把交易雷達目前結果公開發布/更新到 https://myrader.blogspot.com/，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議，確定要發布嗎？',
       '公開發布確認',
       { confirmButtonText: '確定發布', cancelButtonText: '取消', type: 'warning' }
     )

@@ -3962,10 +3962,10 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   不處理 Requirement 98／Task 362 已另案處理的九項市場數值特徵與美債殖利率零權重揭露；不新增
   `@Scheduled`；不變更任何 API 路徑或 9090／Tailscale 路由；不動 `db/changelog/`（本次無 DB schema 變更）。
 
-### Requirement 102／Task 366: 交易雷達結果新增「匯出到 blog」輸出通道，發布到 twleader.blogspot.com
+### Requirement 102／Task 366、Task 374: 交易雷達結果新增「匯出到 blog」輸出通道，發布到 myrader.blogspot.com
 
 **User Story:** 作為使用者，我想把交易雷達的每日結果（大盤總覽、個股三軌分數與加減碼建議、台美公開資訊）
-發布到我自己的公開 Blogger 部落格 `https://twleader.blogspot.com/`，一方面留一份可從任何裝置瀏覽的歷史紀錄，
+發布到我自己的公開 Blogger 部落格 `https://myrader.blogspot.com/`，一方面留一份可從任何裝置瀏覽的歷史紀錄，
 一方面練習公開揭露自己的判斷依據。我要能在頁面上按一顆按鈕立即發布/更新一次，也要能像既有 Excel 排程一樣，
 設定好之後每天自動發布，不必每天手動按。
 
@@ -3987,15 +3987,20 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   比照既有 Google Drive 同步開關的既有先例（`GdriveOutputSupport.isDriveAllowedFor`）——理由相同：
   blog 是全機唯一一個、綁定特定 Google 帳號的目的地，非該帳號擁有者的使用者若也能觸發，會把不屬於自己的
   資料發布到別人看得到、且與自己無關的公開網址上。
-- **blog 擁有帳號與 App 登入帳號是兩個不同的 Google 帳號**（2026-08-23 使用者澄清）：本 App 既有的
+- **blog 擁有帳號與 App 登入帳號是兩個不同的 Google 帳號**（2026-08-24 使用者確認）：本 App 既有的
   Google 登入（`GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，BFF `oauth2Login`）與 `ADMIN_EMAIL`
-  （主要管理者）目前設定為 `tw.leader@gmail.com`；而 `twleader.blogspot.com` 這個 Blogger 部落格是以
-  **`shi.chihung@gmail.com`** 建立、歸屬於該帳號。這兩者**不需要是同一個 Google 帳號**——OAuth
+  （主要管理者）目前設定為 `tw.leader@gmail.com`；而 `myrader.blogspot.com` 的 Blogger 管理者為
+  **`shi.chihung@gmail.com`**。這兩者**不需要是同一個 Google 帳號**——OAuth
   授權同意畫面是瀏覽器對 Google 的獨立互動，與「目前登入本 App 的是誰」無關；`tw.leader@gmail.com`
   以主要管理者身分登入本 App 後，點擊〔連接 Blogger 帳號〕，瀏覽器導去 Google 同意畫面時，使用者可
   自行在該畫面**切換或登入 `shi.chihung@gmail.com`** 完成同意，取得的 refresh token 綁定的是
   `shi.chihung@gmail.com` 這個 Blogger 帳號，與觸發連接動作的 App 登入身分（`tw.leader@gmail.com`）
   各自獨立、互不影響。
+- **目的地切換（2026-08-24，Task 374）**：初版的 `twleader.blogspot.com` 不再是有效發布目的地；
+  既有 OAuth 憑證、已存 `blogId`、已發布文章的 `postId`／網址與排程啟用狀態都不得帶往
+  `myrader.blogspot.com`。部署 migration 必須先使舊憑證失效、關閉所有既有 `blog_enabled`、清除所有
+  舊文章追蹤欄位，再由主要管理者以 `shi.chihung@gmail.com` 重新完成 OAuth；在重新連接與重新啟用前，
+  排程不得呼叫 Blogger 發布 API。這不是可由 UI 直接切換的使用者輸入，也不支援任意 blog URL。
 - **OAuth2 憑證：沿用既有登入用的 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`**（2026-08-23 使用者選定），
   不新建第二組 OAuth Client。這組 Client 目前只用於 BFF 的 Gmail 登入（`docker-compose.yml:340-341`
   的 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`，`application.yml` 的 `spring.security.oauth2.client`
@@ -4053,7 +4058,7 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
      `prompt=consent`，故正常情況不會遇到，只在使用者繞過本功能自行組網址時才會發生，訊息需講清楚
      成因而非只顯示原始錯誤字串）。
   3. 換到 `refresh_token` 後，以新拿到的 `access_token` 呼叫 Blogger API
-     `GET /blogger/v3/blogs/byurl?url=https://twleader.blogspot.com/` 解析出 `blogId`，
+     `GET /blogger/v3/blogs/byurl?url=https://myrader.blogspot.com/` 解析出 `blogId`，
      連同 `access_token`／`refresh_token`／`access_token` 到期時間、方才呼叫者於 Google 端顯示的
      帳號資訊（供設定頁顯示「已連接：xxx@gmail.com」），一併存入新增的**全域單列**設定資料表
      （不綁定 `owner_user_id`，語意與 rclone remote 一致——全機只有一個 blog 目的地）。**該表用
@@ -4077,7 +4082,7 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   1. 若尚未完成 AC1 的連接（無有效 `refresh_token`），彈出提示並附〔前往設定〕捷徑（捲動或導向
      AC6 的設定卡片），不呼叫任何發布端點。
   2. 若已連接，先彈出確認對話框，文案需清楚說明「即將把交易雷達目前結果公開發布/更新到
-     `https://twleader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，
+     `https://myrader.blogspot.com/`，任何人皆可瀏覽，內容含個股代號、三軌分數與加減碼建議」，
      使用者按下確認後才呼叫發布端點；取消則不送出任何請求。
   3. 發布端點以**當下最新一次背景重算的快照**（與既有〔重新整理〕〔匯出 Excel〕共用的
      `TradingRadarSnapshotStore` 讀法一致，不得為了本功能另外重算一次或改變既有快照時效）組出
@@ -4097,8 +4102,8 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   4. 建立或更新成功後，把 `postId`／文章網址／本次發布時間／狀態文字寫回設定資料列，供 AC6
      的設定卡片顯示。
 - [ ] **AC5（排程自動發布，沿用既有時間點）**：`trading_radar_export_setting` 新增
-  `blog_enabled`（boolean，預設 `false`，**只有 `isDriveAllowedFor` 同一套主要管理者判定為真時才能
-  設為 `true`**，語意與 `gdrive_enabled` 完全比照）。`TradingRadarExportScheduleService`
+  `blog_enabled`（boolean，預設 `false`，**只有 `isDriveAllowedFor` 同一套主要管理者判定為真、且全域
+  Blogger credential 是目前固定目的地的有效連接時才能設為 `true`**，語意與 `gdrive_enabled` 完全比照）。`TradingRadarExportScheduleService`
   既有的 `runScheduled(...)`（`trading_radar_export_time` 到點觸發、當日 guard、非交易日不動作等
   既有規則**一個都不改**）在本機 Excel／JSON 落檔與（啟用時）Google Drive 上傳完成之後，若
   `blog_enabled` 為真，額外呼叫本次新增的發布邏輯（AC4 的建立/更新流程），並把結果寫進
@@ -4107,6 +4112,13 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   Drive 失敗是正常且必須可分辨的狀態」的既有先例（`TradingRadarExportScheduleService.applyGdriveStatus`
   的既有註解）。`run-now`（立即匯出到目錄，既有既有按鈕）**不觸發** blog 發布——那顆按鈕語意是
   「驗證本機／Drive 落點」，不是公開發布，本 Requirement 不擴大其既有語意。
+  Task 374 新增的 `TradingRadarBlogSettingsService` 必須承接 `blog-status` 聚合與 `blog-enabled` setting
+  upsert；`TradingRadarBlogController` 只做 HTTP request/response 轉換與 service 委派，**不得**再直接注入
+  `BlogPublishCredentialRepository` 或 `TradingRadarExportSettingRepository`。設定 service 的 `enabled=true`
+  必須先確認 id=1 credential 的 `blogId`／`refreshToken` 非空、`needsReconnect=false`、`blogUrl` 精確等於
+  `https://myrader.blogspot.com/`；任一條不符即以 `400 Bad Request` 拒絕且不得建立或寫回任何
+  `trading_radar_export_setting`。重新 OAuth callback 成功只寫 credential、**不**把任何 owner 的
+  `blog_enabled` 改回 true；主管理者必須在 callback 後再次明確啟用。
 - [ ] **AC6（設定卡片）**：新增〔匯出到 Blog 設定〕卡片，**只有 `auth.isConfiguredAdmin` 為真時才顯示
   整張卡片**，緊接在既有〔匯出輸出檔案設定〕卡片之後。內容：
   1. 連接狀態：已連接時顯示 Google 端回報的帳號資訊與最近一次發布的文章網址（可點擊開新分頁）；
@@ -4146,6 +4158,10 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   4. `TradingRadarExportScheduleServiceTest` 新增或修改案例：`blog_enabled=true` 時排程完成本機／
      Drive 產出後會呼叫發布邏輯；發布邏輯擲例外時既有本機／Drive 狀態欄位與檔案仍正常寫入，
      不因發布失敗而回滾。
+  5. Task 374 新增 settings-service／HTTP boundary 單元測試：migration 後或 credential 缺漏、
+     `needsReconnect=true`、`blogUrl` 不符固定目的地時，`PUT /blog-enabled {enabled:true}` 必回 400、
+     settings service 不得寫入設定；有效新站 credential 時才可寫為 true，且 OAuth callback 本身不會
+     自動開啟任何 owner 的同步。
 - [ ] **AC9（驗證，含使用者需手動完成的前置設定）**：
   1. `/run-stack` 重建並 recreate `business-services`／`bff`／`frontend`，`mvn test` 全綠。
   2. 使用者需先於 Google Cloud Console 完成〈前置準備〉三項（新增 redirect URI、啟用 Blogger API v3、
@@ -4153,13 +4169,30 @@ PE／PB／殖利率三個 `Component` 的 `contribution` 取算術平均，成�
   3. 完成前置準備後，登入本 App（`tw.leader@gmail.com`，主要管理者）進交易雷達頁，於新設定卡片按
      〔連接 Blogger 帳號〕，於 Google 同意畫面切換／登入 `shi.chihung@gmail.com` 完成授權，導回後
      設定卡片顯示已連接帳號資訊。
-  4. 按頁首〔匯出到 blog〕，確認彈出對話框並確認後，`https://twleader.blogspot.com/` 出現/更新
+  4. 按頁首〔匯出到 blog〕，確認彈出對話框並確認後，`https://myrader.blogspot.com/` 出現/更新
      該篇文章，內容通過 AC7 的白名單檢查（人工核對不含三類禁止元素、不含絕對路徑、不含
      Drive／Blogger 連接狀態）。
   5. 開啟設定卡片的「同步發布到 blog」開關並儲存；等待既有〔匯出執行時間設定〕下一個到點時間，
      確認 Excel／JSON 落檔（與既有 Drive 同步，如已啟用）照常完成後，blog 文章同步更新、
      `blog_last_run_at`／`blog_last_status` 隨之更新。
-- [ ] **AC10（不在本次範圍）**：不建立第二組 OAuth Client；不支援發布到除 `twleader.blogspot.com`
+- [ ] **AC10（目的地切換 migration，Task 374）**：新增並在 master changelog 註冊
+  `v1.115.0-trading-radar-blog-destination-myrader.sql`，順序在 `v1.114.0-stock-intraday-order-book.sql` 之後，且只做下列本機資料
+  遷移，**不得**在 migration 或啟動時呼叫 Google／Blogger API：
+  1. 將 `blog_publish_credential.blog_url` 的資料庫預設值改為
+     `https://myrader.blogspot.com/`。
+  2. `DELETE FROM blog_publish_credential`，完整清除初版目的地的 `blogId`、access／refresh token、
+     帳號標籤與連接時間；不得保留或嘗試 refresh 舊 token。
+  3. 對所有 `trading_radar_export_setting` 列設定 `blog_enabled = false`，並將
+     `blog_last_post_id`、`blog_last_post_url`、`blog_last_run_at`、`blog_last_status` 全部設為 `NULL`。
+     不得保留舊 blog 的文章 ID，否則下一次可能對錯誤目的地走 `PUT` 更新。
+  4. 新版 `BlogOAuthService` 的固定 lookup URL、`BlogPublishCredential` 預設值、未連接
+     `blog-status` 回覆、前端設定卡 fallback 與公開發布確認文案皆必須是
+     `https://myrader.blogspot.com/`；OAuth callback 成功時必須顯式寫入該 `blogUrl`，不只依賴 Java
+     builder 預設值。
+  5. migration 後設定頁必須顯示「未連接」，同步開關為關閉；此時 `PUT /blog-enabled {enabled:true}`
+     必回 400 且不寫設定。重新連接成功後同步開關仍為關閉，只有主管理者再次明確啟用才可變 true；
+     第一次發布必須因 `blog_last_post_id` 為空而對新取得的 `blogId` 發 `POST` 建立文章，不得更新舊站文章。
+- [ ] **AC11（不在本次範圍）**：不建立第二組 OAuth Client；不支援發布到除 `myrader.blogspot.com`
   以外的其他 blog／其他帳號；不支援多篇歷史文章歸檔（同一目的地固定只維護一篇，見 AC4）；
   不對 blog 文章內容加上任何互動式 JS（排序／篩選皆不做，見〈逐項展開優先用原生
   `<details>/<summary>`〉）；不新增或變更任何 9090／Tailscale 公開路由；不影響既有

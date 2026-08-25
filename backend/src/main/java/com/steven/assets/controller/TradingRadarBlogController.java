@@ -1,15 +1,12 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.dto.TradingRadarBlogDto;
-import com.steven.assets.model.BlogPublishCredential;
-import com.steven.assets.model.TradingRadarExportSetting;
-import com.steven.assets.repository.BlogPublishCredentialRepository;
-import com.steven.assets.repository.TradingRadarExportSettingRepository;
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.BlogOAuthService;
 import com.steven.assets.service.BlogPublishOutputSupport;
 import com.steven.assets.service.BlogPublishService;
+import com.steven.assets.service.TradingRadarBlogSettingsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,8 +43,7 @@ public class TradingRadarBlogController {
     private final BlogPublishOutputSupport blogOutputSupport;
     private final BlogOAuthService blogOAuthService;
     private final BlogPublishService blogPublishService;
-    private final BlogPublishCredentialRepository credentialRepo;
-    private final TradingRadarExportSettingRepository settingRepo;
+    private final TradingRadarBlogSettingsService blogSettingsService;
     private final CurrentUserContext currentUser;
 
     @GetMapping("/blog-oauth/authorize-url")
@@ -83,21 +79,14 @@ public class TradingRadarBlogController {
     @GetMapping("/blog-status")
     public TradingRadarBlogDto.StatusResponse status() {
         Long ownerId = currentUser.hasUser() ? currentUser.getEffectiveUserId() : null;
-        return buildStatus(ownerId);
+        return blogSettingsService.status(ownerId);
     }
 
     @PutMapping("/blog-enabled")
     public TradingRadarBlogDto.StatusResponse setEnabled(@RequestBody TradingRadarBlogDto.EnabledRequest req) {
         long ownerId = requireOwnerId();
         boolean enabled = req != null && req.enabled();
-        if (enabled) {
-            requireAllowed(ownerId);
-        }
-        TradingRadarExportSetting setting = settingRepo.findByOwnerUserId(ownerId)
-                .orElseGet(() -> TradingRadarExportSetting.builder().ownerUserId(ownerId).build());
-        setting.setBlogEnabled(enabled);
-        settingRepo.save(setting);
-        return buildStatus(ownerId);
+        return blogSettingsService.setEnabled(ownerId, enabled);
     }
 
     @PostMapping("/blog-publish")
@@ -115,22 +104,6 @@ public class TradingRadarBlogController {
     }
 
     // ===== 共用小工具 =====
-
-    private TradingRadarBlogDto.StatusResponse buildStatus(Long ownerId) {
-        BlogPublishCredential cred = credentialRepo.findById(1L).orElse(null);
-        boolean connected = cred != null
-                && cred.getRefreshToken() != null && !cred.getRefreshToken().isBlank()
-                && !cred.isNeedsReconnect();
-        TradingRadarExportSetting setting = ownerId == null ? null : settingRepo.findByOwnerUserId(ownerId).orElse(null);
-        return new TradingRadarBlogDto.StatusResponse(
-                connected,
-                cred == null ? null : cred.getAccountLabel(),
-                cred == null ? "https://twleader.blogspot.com/" : cred.getBlogUrl(),
-                setting != null && setting.isBlogEnabled(),
-                setting == null || setting.getBlogLastRunAt() == null ? null : setting.getBlogLastRunAt().toString(),
-                setting == null ? null : setting.getBlogLastStatus(),
-                setting == null ? null : setting.getBlogLastPostUrl());
-    }
 
     private void requireAllowed(Long ownerId) {
         if (!blogOutputSupport.isBlogAllowedFor(ownerId)) {
