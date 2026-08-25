@@ -43,6 +43,7 @@ import static org.mockito.Mockito.when;
 class BlogOAuthServiceTest {
 
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
+    private static final String OLD_DESTINATION = "https://twleader." + "blogspot.com/";
 
     @Mock private BlogPublishCredentialRepository credentialRepo;
 
@@ -151,6 +152,9 @@ class BlogOAuthServiceTest {
         assertThat(saved.getAccessToken()).isEqualTo("AT1");
         assertThat(saved.getRefreshToken()).isEqualTo("RT1");
         assertThat(saved.getAccountLabel()).isEqualTo("Chihung Shi");
+        assertThat(saved.getBlogUrl()).isEqualTo("https://myrader.blogspot.com/");
+        assertThat(httpClient.calls).contains(
+                "GET https://www.googleapis.com/blogger/v3/blogs/byurl?url=https%3A%2F%2Fmyrader.blogspot.com%2F");
     }
 
     @Test
@@ -165,6 +169,57 @@ class BlogOAuthServiceTest {
         assertThat(result.success()).isFalse();
         assertThat(result.reason()).isEqualTo("missing_refresh_token");
         verify(credentialRepo, never()).save(any());
+    }
+
+    // ===== isCurrentDestinationConnected =====
+
+    @Test
+    void 沒有credential時不是目前目的地有效連接() {
+        when(credentialRepo.findById(1L)).thenReturn(Optional.empty());
+
+        assertThat(service.isCurrentDestinationConnected()).isFalse();
+        assertThat(service.currentDestinationStatus().blogUrl()).isEqualTo("https://myrader.blogspot.com/");
+    }
+
+    @Test
+    void needsReconnect時不是目前目的地有效連接() {
+        when(credentialRepo.findById(1L)).thenReturn(Optional.of(credential("BLOG1", "RT1",
+                "https://myrader.blogspot.com/", true)));
+
+        assertThat(service.isCurrentDestinationConnected()).isFalse();
+    }
+
+    @Test
+    void 缺blogId或refreshToken時不是目前目的地有效連接() {
+        when(credentialRepo.findById(1L)).thenReturn(Optional.of(credential(" ", "RT1",
+                "https://myrader.blogspot.com/", false)));
+        assertThat(service.isCurrentDestinationConnected()).isFalse();
+
+        when(credentialRepo.findById(1L)).thenReturn(Optional.of(credential("BLOG1", " ",
+                "https://myrader.blogspot.com/", false)));
+        assertThat(service.isCurrentDestinationConnected()).isFalse();
+    }
+
+    @Test
+    void 舊目的地網址時不是目前目的地有效連接() {
+        when(credentialRepo.findById(1L)).thenReturn(Optional.of(credential("BLOG1", "RT1",
+                OLD_DESTINATION, false)));
+
+        assertThat(service.isCurrentDestinationConnected()).isFalse();
+    }
+
+    @Test
+    void 完整新目的地credential才是有效連接() {
+        when(credentialRepo.findById(1L)).thenReturn(Optional.of(credential("BLOG1", "RT1",
+                "https://myrader.blogspot.com/", false)));
+
+        assertThat(service.isCurrentDestinationConnected()).isTrue();
+    }
+
+    private static BlogPublishCredential credential(String blogId, String refreshToken, String blogUrl,
+                                                     boolean needsReconnect) {
+        return BlogPublishCredential.builder().id(1L).blogId(blogId).refreshToken(refreshToken)
+                .blogUrl(blogUrl).needsReconnect(needsReconnect).build();
     }
 
     // ===== ensureAccessToken =====

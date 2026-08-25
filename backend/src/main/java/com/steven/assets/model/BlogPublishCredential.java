@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 /**
  * Blogger OAuth 憑證與連接狀態（Requirement 102 / Task 366）。<b>全域單例</b>，不是 per-owner 設定——
- * 部落格 {@code twleader.blogspot.com} 全機只有一份、綁定 {@code shi.chihung@gmail.com} 這一個 Google
+ * 部落格 {@code myrader.blogspot.com} 全機只有一份、綁定 {@code shi.chihung@gmail.com} 這一個 Google
  * 帳號，與觸發「連接 Blogger 帳號」動作的本 App 登入身分（主要管理者 {@code tw.leader@gmail.com}）
  * 是兩個獨立帳號，故本表沒有 {@code owner_user_id} 這種業務鍵，<b>不套 {@code @Filter(ownerFilter)}</b>。
  *
@@ -39,10 +39,10 @@ public class BlogPublishCredential {
     @Column(name = "blog_id", length = 64)
     private String blogId;
 
-    /** 目標部落格網址；固定值，僅供顯示。 */
+    /** 目標部落格網址；固定為 {@code https://myrader.blogspot.com/}，僅供顯示。 */
     @Column(name = "blog_url", nullable = false, length = 512)
     @Builder.Default
-    private String blogUrl = "https://twleader.blogspot.com/";
+    private String blogUrl = "https://myrader.blogspot.com/";
 
     /** Google 帳號顯示名稱（{@code users/self} 的 {@code displayName}），純供 UI 顯示。 */
     @Column(name = "account_label", length = 255)

@@ -41,8 +41,8 @@ public class BlogOAuthService {
     private static final String AUTH_BASE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
     private static final String TOKEN_URL = "https://oauth2.googleapis.com/token";
     private static final String BLOGGER_SCOPE = "https://www.googleapis.com/auth/blogger";
-    /** twleader.blogspot.com 的公開網址，供 {@code blogs/byurl} 反解 blogId；固定值，非使用者輸入。 */
-    private static final String BLOG_URL = "https://twleader.blogspot.com/";
+    /** myrader.blogspot.com 的公開網址，供 {@code blogs/byurl} 反解 blogId；固定值，非使用者輸入。 */
+    private static final String BLOG_URL = "https://myrader.blogspot.com/";
     private static final String CALLBACK_PATH = "/api/bff/trading-radar/blog-oauth/callback";
 
     private final BlogPublishCredentialRepository credentialRepo;
@@ -71,6 +71,12 @@ public class BlogOAuthService {
 
     /** OAuth callback 處理結果；{@code reason} 只在 {@code success=false} 時有值。 */
     public record CallbackResult(boolean success, String reason) {}
+
+    /**
+     * 可安全回傳給設定頁的固定目的地連接狀態；不含任何 access／refresh token。
+     * {@code blogUrl} 永遠是目前唯一允許的目的地，不回傳舊 credential 中的歷史 URL。
+     */
+    public record DestinationStatus(boolean connected, String accountLabel, String blogUrl) {}
 
     /**
      * 產生 Google 同意畫面導向網址，並記錄一個新 {@code state}（10 分鐘後過期，一次性消費）。
@@ -187,6 +193,7 @@ public class BlogOAuthService {
         cred.setAccessTokenExpiresAt(LocalDateTime.now(TAIPEI).plusSeconds(expiresIn));
         cred.setRefreshToken(refreshToken);
         cred.setAccountLabel(displayName);
+        cred.setBlogUrl(BLOG_URL);
         cred.setNeedsReconnect(false);
         if (cred.getConnectedAt() == null) {
             cred.setConnectedAt(LocalDateTime.now(TAIPEI));
@@ -195,6 +202,27 @@ public class BlogOAuthService {
         credentialRepo.save(cred);
 
         return new CallbackResult(true, null);
+    }
+
+    /**
+     * 僅在全域 id=1 credential 完整且精確對應目前固定目的地時，才視為可用連接。
+     * 舊目的地或不完整 credential 一律 fail-closed，不能用來重新開啟排程發布。
+     */
+    public boolean isCurrentDestinationConnected() {
+        return currentDestinationStatus().connected();
+    }
+
+    /**
+     * 提供 settings service 組合 HTTP 狀態時使用的安全唯讀資料；不讓 controller 直接讀 repository。
+     */
+    public DestinationStatus currentDestinationStatus() {
+        BlogPublishCredential cred = credentialRepo.findById(1L).orElse(null);
+        boolean connected = cred != null
+                && nonBlank(cred.getBlogId())
+                && nonBlank(cred.getRefreshToken())
+                && !cred.isNeedsReconnect()
+                && BLOG_URL.equals(cred.getBlogUrl());
+        return new DestinationStatus(connected, cred == null ? null : cred.getAccountLabel(), BLOG_URL);
     }
 
     /**
@@ -274,6 +302,10 @@ public class BlogOAuthService {
 
     private static boolean isSuccess(GoogleHttpClient.Response resp) {
         return resp.statusCode() >= 200 && resp.statusCode() < 300;
+    }
+
+    private static boolean nonBlank(String value) {
+        return value != null && !value.isBlank();
     }
 
     private static String urlEncode(String s) {

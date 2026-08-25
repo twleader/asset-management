@@ -16,7 +16,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 /**
- * 把交易雷達快照的精簡摘要版發布/更新到 {@code twleader.blogspot.com}（Requirement 102 / Task 366）。
+ * 把交易雷達快照的精簡摘要版發布/更新到 {@code myrader.blogspot.com}（Requirement 102 / Task 366、374）。
  *
  * <p>{@link #publishLatest} 供手動發布（{@code POST /blog-publish}）呼叫，查快照與「查無快照」的
  * 業務判斷封裝在這裡——controller 不得直接呼叫 {@link TradingRadarSnapshotStore} 自己判斷。
