@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -77,6 +78,7 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.marketData().chart().requestedEnd().toString()).isEqualTo("2026-08-24");
         assertThat(quote.marketData().chart().intraday().status()).isEqualTo(DataStatus.AVAILABLE);
         assertThat(quote.marketData().quoteDetail().available()).isTrue();
+        assertThat(quote.marketData().quoteDetail().source()).isEqualTo("FUBON_BOOKS");
         assertThat(quote.marketData().etfConstituents().holdings()).singleElement()
                 .extracting("stockCode", "shares").containsExactly("1101", new java.math.BigDecimal("12"));
         assertThat(quote.marketData().dividends().rows()).singleElement()
@@ -197,8 +199,47 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.marketData().chart().intraday().ticks()).isEmpty();
         assertThat(quote.marketData().quoteDetail().supported()).isTrue();
         assertThat(quote.marketData().quoteDetail().available()).isFalse();
+        assertThat(quote.marketData().quoteDetail().source()).isNull();
+        assertThat(quote.marketData().quoteDetail().marketStatus()).isEqualTo("UNKNOWN");
+        assertThat(quote.marketData().quoteDetail().message()).isEqualTo("暫時無法取得行情五檔");
         assertThat(quote.marketData().etfConstituents().supported()).isTrue();
         assertThat(quote.marketData().dividends().rows()).singleElement();
+    }
+
+    @Test
+    void nonFubonQuoteDetailPayloadIsNormalizedToTypedUnavailable() {
+        PublicQuoteMarketDataService service = service(
+                request -> ok(rawQuote("2330", "台股", "2026-08-24")),
+                request -> {
+                    if ("/api/market-data/quote-detail".equals(request.url().getPath())) {
+                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
+                                + "\"available\":true,\"source\":\"YAHOO_TW\",\"marketStatus\":\"OPEN\",\"levels\":[]}");
+                    }
+                    return marketResponse(request);
+                });
+
+        DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.marketData().quoteDetail().supported()).isTrue();
+        assertThat(quote.marketData().quoteDetail().available()).isFalse();
+        assertThat(quote.marketData().quoteDetail().source()).isNull();
+        assertThat(quote.marketData().quoteDetail().marketStatus()).isEqualTo("UNKNOWN");
+        assertThat(quote.marketData().quoteDetail().levels()).isEmpty();
+        assertThat(quote.marketData().quoteDetail().message()).isEqualTo("暫時無法取得行情五檔");
+    }
+
+    @Test
+    void productionQuoteDetailTimeoutDefaultIsTwoSeconds() {
+        java.lang.reflect.Constructor<?> constructor = java.util.Arrays.stream(
+                        PublicQuoteMarketDataService.class.getConstructors())
+                .filter(candidate -> candidate.getParameterCount() == 13)
+                .findFirst()
+                .orElseThrow();
+
+        Value timeout = constructor.getParameters()[6].getAnnotation(Value.class);
+
+        assertThat(timeout).isNotNull();
+        assertThat(timeout.value()).isEqualTo("${public-quote.timeout.quote-detail-seconds:2}");
     }
 
     @Test
@@ -248,7 +289,7 @@ class PublicQuoteMarketDataServiceTest {
                     + "\"ticks\":[{\"time\":\"2026-08-24T09:00:00\",\"price\":100.5}]}" );
             case "/api/market-data/quote-detail" -> ok("{"
                     + "\"stockCode\":\"2330\",\"stockName\":\"台積電\",\"market\":\"台股\","
-                    + "\"supported\":true,\"available\":true,\"source\":\"YAHOO_TW\",\"levels\":[]}");
+                    + "\"supported\":true,\"available\":true,\"source\":\"FUBON_BOOKS\",\"levels\":[]}");
             case "/api/market-data/etf-holdings" -> ok("{"
                     + "\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
                     + "\"source\":\"ISSUER\",\"asOfDate\":\"2026-08-23\",\"message\":null,"

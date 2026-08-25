@@ -7,7 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -233,10 +233,6 @@ class QuoteService:
         if trading_date != now.astimezone(TW_ZONE).date().isoformat():
             raise QuoteError("STALE_PROVIDER_DATE")
 
-        last_updated = raw_field(raw, "lastUpdated")
-        if last_updated is not None:
-            self._microsecond_instant(last_updated)
-
         actual_decimal = Decimal(actual_price)
         open_decimal = Decimal(open_price)
         high_decimal = Decimal(high_price)
@@ -246,14 +242,16 @@ class QuoteService:
         if high_decimal < max(open_decimal, actual_decimal) or low_decimal > high_decimal:
             raise QuoteError("INVALID_OHLC_RELATION")
 
-        buy_price = self._book_price(raw_field(raw, "bids"), "INVALID_BID_BOOK")
-        sell_price = self._book_price(raw_field(raw, "asks"), "INVALID_ASK_BOOK")
+        # Best bid/ask is optional display metadata.  It must not invalidate a verified
+        # actual trade merely because one optional order-book side is malformed.
+        buy_price = self._book_price(raw_field(raw, "bids"))
+        sell_price = self._book_price(raw_field(raw, "asks"))
         total = raw_field(raw, "total")
         if total is None:
             raise QuoteError("MISSING_VOLUME")
         volume = exact_integer(raw_field(total, "tradeVolume"), upper=MAX_VOLUME)
 
-        return {
+        normalized = {
             "stockCode": requested_code,
             "stockName": name.strip(),
             "market": "台股",
@@ -271,6 +269,105 @@ class QuoteService:
             "closed": False,
             "quoteStatus": "LIVE",
         }
+        # Five-level data is a separate, optional projection from the exact same raw
+        # Fubon response.  A malformed/incomplete book deliberately omits only this
+        # projection; the established actual-price contract above remains intact.
+        order_book = self._normalized_order_book(raw, now, trading_date)
+        if order_book is not None:
+            normalized["orderBook"] = order_book
+        return normalized
+
+    def _normalized_order_book(
+        self, raw: object, now: datetime, trading_date: str
+    ) -> dict[str, object] | None:
+        try:
+            book_updated_at = self._microsecond_instant(raw_field(raw, "lastUpdated"))
+            if book_updated_at > now:
+                return None
+            if book_updated_at.astimezone(TW_ZONE).date().isoformat() != trading_date:
+                return None
+            bids = self._complete_book_side(raw_field(raw, "bids"))
+            asks = self._complete_book_side(raw_field(raw, "asks"))
+            if bids is None or asks is None:
+                return None
+            total = raw_field(raw, "total")
+            return {
+                "bookUpdatedAt": book_updated_at.isoformat().replace("+00:00", "Z"),
+                "averagePrice": self._optional_positive_decimal(raw_field(raw, "avgPrice")),
+                "turnoverYi": self._turnover_yi(raw_field(total, "tradeValue")),
+                "innerVolumeLots": self._optional_integer(raw_field(total, "tradeVolumeAtBid")),
+                "outerVolumeLots": self._optional_integer(raw_field(total, "tradeVolumeAtAsk")),
+                "levels": [
+                    {
+                        "level": index + 1,
+                        "bidPrice": bids[index][0],
+                        "bidVolumeLots": bids[index][1],
+                        "askPrice": asks[index][0],
+                        "askVolumeLots": asks[index][1],
+                    }
+                    for index in range(5)
+                ],
+            }
+        except (QuoteError, NumericError):
+            return None
+
+    @staticmethod
+    def _complete_book_side(book: object) -> list[tuple[str | None, int | None]] | None:
+        if not isinstance(book, list) or len(book) < 5:
+            return None
+        normalized: list[tuple[str | None, int | None]] = []
+        # Decimal equality deliberately collapses textual scale variants such as
+        # ``100.0`` and ``100.00``: they are one price level, not two.
+        seen_prices: set[Decimal] = set()
+        for raw_level in book[:5]:
+            raw_price = raw_field(raw_level, "price")
+            raw_size = raw_field(raw_level, "size")
+            # Fubon emits fixed slots.  An empty slot is valid only as an all-null
+            # pair; a half slot cannot be persisted safely.
+            if raw_price is None or raw_size is None:
+                if raw_price is None and raw_size is None:
+                    normalized.append((None, None))
+                    continue
+                return None
+            price = canonical_decimal(raw_price)
+            lots = exact_integer(raw_size, upper=MAX_VOLUME)
+            decimal_price = Decimal(price)
+            if decimal_price in seen_prices:
+                return None
+            seen_prices.add(decimal_price)
+            normalized.append((price, lots))
+        return normalized
+
+    @staticmethod
+    def _optional_positive_decimal(value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            return canonical_decimal(value)
+        except NumericError:
+            return None
+
+    @staticmethod
+    def _optional_integer(value: object) -> int | None:
+        if value is None:
+            return None
+        try:
+            return exact_integer(value, upper=MAX_VOLUME)
+        except NumericError:
+            return None
+
+    @staticmethod
+    def _turnover_yi(value: object) -> str | None:
+        if value is None:
+            return None
+        try:
+            raw_value = Decimal(canonical_decimal(value, positive=False))
+        except NumericError:
+            return None
+        return format(
+            (raw_value / Decimal("100000000")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+            "f",
+        )
 
     def _actual_trade(self, raw: object) -> tuple[str, datetime]:
         candidates: list[tuple[str, datetime]] = []
@@ -326,18 +423,18 @@ class QuoteService:
         return parsed if parsed >= 0 and parsed != float("inf") else None
 
     @staticmethod
-    def _book_price(book: object, reason: str) -> str | None:
+    def _book_price(book: object) -> str | None:
         if not isinstance(book, list):
-            raise QuoteError(reason)
+            return None
         if not book:
             return None
-        normalized: list[str] = []
-        for level in book:
-            price = raw_field(level, "price")
-            if price is None:
-                raise QuoteError(reason)
-            normalized.append(canonical_decimal(price))
-        return normalized[0]
+        price = raw_field(book[0], "price")
+        if price is None:
+            return None
+        try:
+            return canonical_decimal(price)
+        except NumericError:
+            return None
 
     @staticmethod
     def _failure(code: str, reason: str) -> dict[str, object]:

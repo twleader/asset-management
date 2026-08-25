@@ -146,6 +146,69 @@ class FubonNormalizedQuoteClientTest {
     }
 
     @Test
+    void completeOptionalBookUsesBookTimestampWithoutChangingActualPriceObservation() throws Exception {
+        ObjectNode root = responseRoot();
+        ObjectNode quote = (ObjectNode) successRow("2330").get("quote");
+        quote.put("updatedAt", "2026-08-21T04:59:58Z");
+        ObjectNode book = quote.putObject("orderBook");
+        book.put("bookUpdatedAt", "2026-08-21T04:59:59.123456Z");
+        book.put("averagePrice", "100.15");
+        book.put("turnoverYi", "42.26");
+        book.put("innerVolumeLots", 9);
+        book.put("outerVolumeLots", 11);
+        var levels = book.putArray("levels");
+        for (int level = 1; level <= 5; level++) {
+            ObjectNode row = levels.addObject();
+            row.put("level", level);
+            row.put("bidPrice", "100." + level);
+            row.put("bidVolumeLots", level);
+            row.put("askPrice", "101." + level);
+            row.put("askVolumeLots", level + 10);
+        }
+        ObjectNode wrapper = root.withArray("quotes").addObject();
+        wrapper.put("stockCode", "2330");
+        wrapper.put("status", "SUCCESS");
+        wrapper.putNull("reason");
+        wrapper.set("quote", quote);
+
+        var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
+                .fetch(List.of("2330"));
+
+        assertThat(result.status()).isEqualTo(BatchStatus.SUCCESS);
+        assertThat(result.observations()).singleElement().satisfies(observation ->
+                assertThat(observation.providerUpdatedAt()).isEqualTo(Instant.parse("2026-08-21T04:59:58Z")));
+        assertThat(result.orderBooks()).containsOnlyKeys("2330");
+        var snapshot = result.orderBooks().get("2330");
+        assertThat(snapshot.source()).isEqualTo("FUBON_BOOKS");
+        assertThat(snapshot.sourceTime()).isEqualTo(Instant.parse("2026-08-21T04:59:59.123456Z"));
+        assertThat(snapshot.levels()).hasSize(5);
+        assertThat(snapshot.bidTotalLots()).isEqualTo(15L);
+        assertThat(snapshot.askTotalLots()).isEqualTo(65L);
+    }
+
+    @Test
+    void malformedOptionalBookDoesNotRejectItsValidActualPrice() throws Exception {
+        ObjectNode root = responseRoot();
+        ObjectNode row = successRow("2330");
+        ObjectNode book = ((ObjectNode) row.get("quote")).putObject("orderBook");
+        book.put("bookUpdatedAt", "2026-08-21T05:00:00Z");
+        ObjectNode half = book.putArray("levels").addObject();
+        half.put("level", 1);
+        half.put("bidPrice", "100");
+        half.putNull("bidVolumeLots");
+        half.putNull("askPrice");
+        half.putNull("askVolumeLots");
+        root.withArray("quotes").add(row);
+
+        var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
+                .fetch(List.of("2330"));
+
+        assertThat(result.status()).isEqualTo(BatchStatus.SUCCESS);
+        assertThat(result.observations()).hasSize(1);
+        assertThat(result.orderBooks()).isEmpty();
+    }
+
+    @Test
     void non200MalformedCoverageAndDuplicateRowsRejectWholeBatch() throws Exception {
         Path token = tokenFile();
         assertThat(client(token, new FubonNormalizedQuoteClient.RawResponse(503, "{}"))

@@ -371,6 +371,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 370 | 台股十秒富邦優先行情與最新快照持久化（Requirement 106） | [tasks/t370_tw_live_priority_persistence.md](tasks/t370_tw_live_priority_persistence.md) |
 | 371 | 僅富邦庫存同步實際可寫入（`READY` + inventory sync enabled + TW LIVE disabled）時保護富邦台股 source rows；其餘狀態完整手動快照 PUT 均視為 payload-owned 並確實寫入（Requirement 90／Task 371 補充） | [tasks/t371_manual_fubon_snapshot_save.md](tasks/t371_manual_fubon_snapshot_save.md) |
 | 372 | 9090 單檔與快取清單報價 API 在保留 19 個既有欄位下，經 BFF 的 no-tenant 市場聚合補齊四個頁籤資料；新增 readonly 股利／分時 bridge 且嚴禁個人資產資料（Requirement 108） | [tasks/t372_public_quote_market_detail.md](tasks/t372_public_quote_market_detail.md) |
+| 373 | 台股最佳五檔由既有十秒富邦行情同批取得，DB canonical 後寫專用 Redis，所有 consumer 改為 pure read（Requirement 109） | [tasks/t373_redis_order_book_snapshot.md](tasks/t373_redis_order_book_snapshot.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

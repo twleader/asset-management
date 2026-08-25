@@ -1,16 +1,18 @@
-# [t348] 股票分析 popup 新增台股行情五檔頁籤
+# [t348] 股票分析 popup 新增台股行情五檔頁籤（歷史任務紀錄；資料管線已由 t373 取代）
 
-**對應 Requirements:** Requirement 87（股票分析 popup 台股行情五檔）
+**對應 Requirements:** Requirement 87（歷史 UI／Yahoo 方案；現行資料管線為 Requirement 109／t373）
 **前置任務:** 無（沿用既有跨頁共用 `StockAnalysisDialog` 與 `/api/bff/stock-analysis/*`）
 **Liquibase changeset:** 無
 
-## 背景
+> **歷史邊界：**本檔完整保留 Task 348 當時的 Yahoo request-time 實作計畫，供追溯而非派工。以下所有 Yahoo、`YAHOO_TW`、HTML parser、request-time、12 秒 timeout、以及「不得寫 PostgreSQL／Redis」的內容，**均非現行 acceptance criteria，禁止據此實作或測試**。現行五檔的完整 wire、DB、Redis、pure-read、timeout、服務重建與驗收一律以 `t373_redis_order_book_snapshot.md` 為準；只有既有 popup 的 layout／局部錯誤 state 可作歷史 UI 參考。
+
+## 背景（歷史）
 
 跨頁共用的股票分析 popup 現有「走勢圖」、ETF「持股明細」與「股利歷史」頁籤，但沒有參考畫面中的成交摘要、內外盤與最佳五檔。現有 Redis `price:{market}:{code}` 只有一檔 `buyPrice/sellPrice`，沒有五檔量、內外盤、均價、昨量或成交金額；不能把它與另一來源的 orderbook 混合，否則畫面各區塊會是不同時間點。
 
 本任務改用 Yahoo 台股 quote 頁面的單一 server-rendered `quote.data` snapshot，第一次切入新頁籤時 request-time 取得，畫面重整才再抓；資料不寫 Redis／DB、不新增排程。這是已登記在 `CLAUDE.md` 與 `spec/steering/structure.md` 的具名、限縮例外：只供登入後「行情五檔」展示，不是權威即時價，不得供估值、損益、下單、警示、SSE、`/api/quotes*`、9090 公開 API 或其他 consumer 使用；其他即時價仍只走 Redis、收盤價仍只走 `stock_price_history`。Requirement 86／Task 347 已被另一個在途 worktree 佔用，故本任務使用 348。
 
-## 要做什麼
+## 要做什麼（歷史紀錄，非現行待辦）
 
 ### external-materials-service：抓取與安全解析
 

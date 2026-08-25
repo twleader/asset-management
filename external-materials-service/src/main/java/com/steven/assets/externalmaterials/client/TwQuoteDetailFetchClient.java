@@ -3,7 +3,6 @@ package com.steven.assets.externalmaterials.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -19,9 +18,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-/** Yahoo 台股 quote.data 的一次性展示 snapshot；不快取、不寫入 Redis/DB。 */
+/**
+ * Task 348 的 Yahoo parser historical implementation.  It is deliberately not a Spring bean
+ * and no current endpoint/worker injects or calls it; Task 373 serves only cached FUBON_BOOKS.
+ */
 @Slf4j
-@Component
+@Deprecated(forRemoval = false)
 public class TwQuoteDetailFetchClient {
     private static final Pattern CODE = Pattern.compile("^[A-Za-z0-9.\\-]{1,12}$");
     private static final String MARKER = "\"quote\":{\"data\":";

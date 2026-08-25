@@ -71,7 +71,7 @@ public class PublicQuoteMarketDataService {
             @Qualifier("publicQuoteClock") Clock clock,
             @Value("${public-quote.timeout.raw-seconds:3}") long rawTimeoutSeconds,
             @Value("${public-quote.timeout.chart-seconds:7}") long chartTimeoutSeconds,
-            @Value("${public-quote.timeout.quote-detail-seconds:7}") long quoteDetailTimeoutSeconds,
+            @Value("${public-quote.timeout.quote-detail-seconds:2}") long quoteDetailTimeoutSeconds,
             @Value("${public-quote.timeout.etf-seconds:5}") long etfTimeoutSeconds,
             @Value("${public-quote.timeout.dividends-seconds:3}") long dividendsTimeoutSeconds,
             @Value("${public-quote.timeout.intraday-seconds:2}") long intradayTimeoutSeconds,
@@ -296,6 +296,7 @@ public class PublicQuoteMarketDataService {
                         .build())
                 .retrieve()
                 .bodyToMono(QuoteDetail.class)
+                .map(detail -> normalizeQuoteDetail(raw, detail))
                 .timeout(quoteDetailTimeout)
                 .switchIfEmpty(Mono.error(new IllegalStateException("quote detail body unavailable")));
     }
@@ -348,14 +349,25 @@ public class PublicQuoteMarketDataService {
     }
 
     private QuoteDetail unavailableQuoteDetail(RawLatestQuote raw) {
-        return emptyQuoteDetail(raw, isTaiwanQuoteDetailSupported(raw), "行情五檔暫時不可用");
+        return emptyQuoteDetail(raw, isTaiwanQuoteDetailSupported(raw), "暫時無法取得行情五檔");
     }
 
     private QuoteDetail emptyQuoteDetail(RawLatestQuote raw, boolean supported, String message) {
         return new QuoteDetail(raw.stockCode(), raw.stockName(), raw.market(), supported, false,
-                null, message, null, null, null,
+                null, message, null, null, "UNKNOWN",
                 null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, List.of());
+    }
+
+    /** Fail closed if an upstream proxy ever regresses to a request-time/unknown source. */
+    private QuoteDetail normalizeQuoteDetail(RawLatestQuote raw, QuoteDetail detail) {
+        if (detail != null && detail.available() && "FUBON_BOOKS".equals(detail.source())) {
+            return detail;
+        }
+        if (detail != null && !detail.supported()) {
+            return unsupportedQuoteDetail(raw);
+        }
+        return unavailableQuoteDetail(raw);
     }
 
     private EtfHoldingsDto unavailableEtf(RawLatestQuote raw) {
