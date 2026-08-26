@@ -10,11 +10,18 @@ from fubon_broker_service.config import ConfigLoader
 TOKEN = "TEST_INTERNAL_TOKEN_SENTINEL"
 
 
-def ready_config(tmp_path: Path, *, branch: str | None = None, account: str | None = None) -> ConfigLoader:
+def ready_config(
+    tmp_path: Path,
+    *,
+    branch: str | None = None,
+    account: str | None = None,
+    taiex_index_stream_enabled: str = "false",
+    taiex_index_symbol: str = "",
+) -> ConfigLoader:
     sdk = tmp_path / "sdk"
     shared = tmp_path / "shared"
-    sdk.mkdir()
-    shared.mkdir()
+    sdk.mkdir(exist_ok=True)
+    shared.mkdir(exist_ok=True)
     (sdk / "personal-id").write_text("TEST_PERSONAL_ID_SENTINEL", encoding="utf-8")
     (sdk / "api-key").write_text("TEST_API_KEY_SENTINEL", encoding="utf-8")
     (sdk / "certificate.pfx").write_bytes(b"not-a-real-certificate")
@@ -24,7 +31,12 @@ def ready_config(tmp_path: Path, *, branch: str | None = None, account: str | No
         (sdk / "account-branch-no").write_text(branch, encoding="utf-8")
     if account is not None:
         (sdk / "account-number").write_text(account, encoding="utf-8")
-    return ConfigLoader(tmp_path, lambda: "true")
+    return ConfigLoader(
+        tmp_path,
+        lambda: "true",
+        lambda: taiex_index_stream_enabled,
+        lambda: taiex_index_symbol,
+    )
 
 
 def response(data, success: bool = True, code: object | None = None):

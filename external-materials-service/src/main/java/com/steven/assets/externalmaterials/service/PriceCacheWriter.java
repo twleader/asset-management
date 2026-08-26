@@ -139,6 +139,17 @@ public class PriceCacheWriter {
         return outcome;
     }
 
+    /**
+     * Requirement 116's TAIEX current-state projection.  Unlike equity LIVE this path deliberately
+     * has no tick, volume, bid/ask or local day high/low semantics; it only invokes the existing
+     * strict-newer latest-key Lua fence after PostgreSQL has committed the canonical row.
+     */
+    public CacheWriteOutcome writeTaiwanIndexLive(PriceResult result) {
+        if (!validTaiwanIndexLive(result)) return CacheWriteOutcome.FAILED;
+        return executeLatestWrite(result, result.tradingDate(), result.freshnessInstant(),
+                "LIVE", false, null, null, true);
+    }
+
     private static BigDecimal max(BigDecimal left, BigDecimal right) {
         return left == null || right.compareTo(left) > 0 ? right : left;
     }
@@ -351,6 +362,16 @@ public class PriceCacheWriter {
                 || result.volume() == null || result.volume() < 0) return false;
         return observation.tradingDate().equals(
                 observation.providerUpdatedAt().atZone(MarketClock.TW_ZONE).toLocalDate());
+    }
+
+    private static boolean validTaiwanIndexLive(PriceResult result) {
+        if (!positive(result) || !timed(result)) return false;
+        if (!"0000".equals(result.stockCode()) || !"台股".equals(result.market())
+                || !"FUBON_INDICES".equals(result.source())) return false;
+        if (result.buyPrice() != null || result.sellPrice() != null || result.highPrice() != null
+                || result.lowPrice() != null || result.volume() != null) return false;
+        return result.tradingDate().equals(
+                result.freshnessInstant().atZone(MarketClock.TW_ZONE).toLocalDate());
     }
 
     private static ProviderWriteOutcome parseProviderOutcome(String raw) {

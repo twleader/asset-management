@@ -137,4 +137,29 @@ class TaiexIndexPollerTest {
 
         assertThat(captor.getValue().previousClose()).isEqualByComparingTo("19800.00");
     }
+
+    @Test
+    void todayFubonCanonicalStateRepairsCacheWithoutYahooCall() {
+        FubonTaiexIndexStore store = mock(FubonTaiexIndexStore.class);
+        TaiexIndexPoller fubonFirst = new TaiexIndexPoller(macroClient, writer, source, clock, store);
+        Instant sourceTime = TODAY.atTime(10, 0).atZone(MarketClock.TW_ZONE).toInstant();
+        FubonTaiexIndexStore.CanonicalIndex canonical = new FubonTaiexIndexStore.CanonicalIndex(
+                "0000", "IR0001", "TWSE", TODAY, sourceTime,
+                new BigDecimal("22345.67"), "FUBON_INDICES");
+        when(store.findForTradingDate(TODAY)).thenReturn(new FubonTaiexIndexStore.FindResult(
+                FubonTaiexIndexStore.ReadStatus.FOUND, canonical));
+        when(source.loadRecentTaiexCloses(2)).thenReturn(List.of(
+                new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("22000.00"))));
+
+        fubonFirst.updateOnce();
+
+        verify(macroClient, never()).fetchIndexIntradayDay("TWSE");
+        org.mockito.ArgumentCaptor<PriceResult> cached = org.mockito.ArgumentCaptor.forClass(PriceResult.class);
+        verify(writer).writeTaiwanIndexLive(cached.capture());
+        assertThat(cached.getValue().price()).isEqualByComparingTo("22345.67");
+        assertThat(cached.getValue().source()).isEqualTo("FUBON_INDICES");
+        assertThat(cached.getValue().highPrice()).isNull();
+        assertThat(cached.getValue().lowPrice()).isNull();
+        assertThat(cached.getValue().volume()).isNull();
+    }
 }

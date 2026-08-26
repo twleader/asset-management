@@ -96,6 +96,28 @@ class PriceCacheWriterTest {
     }
 
     @Test
+    void fubonTaiwanIndexUsesStrictNewerLuaWithoutTicksOrDayHighLow() throws Exception {
+        PriceResult index = new PriceResult(
+                "0000", "台股", new BigDecimal("22345.67"), null, null, "FUBON_INDICES", "台股大盤",
+                null, null, null, new BigDecimal("22000.00"), null, null, null, DATE, INSTANT);
+
+        assertThat(writer.writeTaiwanIndexLive(index))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        Object[] args = capturedArgs();
+        assertThat(args).hasSize(5);
+        assertThat(args[4]).isEqualTo("1");
+        JsonNode payload = MAPPER.readTree((String) args[0]);
+        assertThat(payload.path("source").asText()).isEqualTo("FUBON_INDICES");
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("LIVE");
+        assertThat(payload.path("closed").asBoolean()).isFalse();
+        assertThat(payload.has("highPrice")).isFalse();
+        assertThat(payload.has("lowPrice")).isFalse();
+        assertThat(payload.has("volume")).isFalse();
+        verifyNoInteractions(highLow, ticks);
+    }
+
+    @Test
     void nonPositivePriceSkipsAllRedisBeforeHighLow() {
         PriceResult invalid = new PriceResult(
                 "2330", "台股", BigDecimal.ZERO, null, null, "TWSE", null,

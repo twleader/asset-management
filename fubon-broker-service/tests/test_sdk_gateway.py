@@ -18,6 +18,10 @@ class Intraday:
         self.events.append(f"quote:{symbol}")
         return {"symbol": symbol}
 
+    def tickers(self, *, type, exchange):
+        self.events.append(f"tickers:{type}:{exchange}")
+        return response([{"symbol": "IR0001", "exchange": "TWSE", "type": "INDEX"}])
+
 
 class FakeSdk:
     def __init__(self, events, *, auth_fail=False, init_fail=False, multiple_accounts=False):
@@ -197,3 +201,16 @@ def test_quote_rate_limit_preserves_retry_after_without_retrying(tmp_path):
 
     assert captured.value.retry_after_seconds == 125.0
     assert events.count("rate-limit:2330") == 1
+
+
+def test_taiex_symbol_is_verified_against_official_index_tickers_before_stream_use(tmp_path):
+    events = []
+    gateway = SdkGateway(
+        ready_config(tmp_path), sdk_factory=lambda: FakeSdk(events), sleeper=lambda _seconds: None
+    )
+
+    gateway.verify_taiex_index_symbol("IR0001")
+
+    assert events[:3] == ["login", "init_realtime", "tickers:INDEX:TWSE"]
+    with pytest.raises(SdkCallError, match="TAIEX_INDEX_SYMBOL_UNVERIFIED"):
+        gateway.verify_taiex_index_symbol("NOT_TAIEX")

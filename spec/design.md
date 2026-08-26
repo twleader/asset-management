@@ -10005,3 +10005,109 @@ GET /api/quotes/one
 `fubonSupported`/`fubonAvailable`/`fubonMessage` make the support and read state explicit; the remaining Fubon fields are null unless a stored row exists. `fubonResponseStatus=FAILURE` preserves the typed failure reason while the one shared quote-field set stays raw-cache-derived. `fubonReturnedOrderBook` is the bounded normalized response book and can retain null slots; it is deliberately not synonymous with the pre-existing strict complete canonical `quoteDetail`, whose source/revision/availability contract remains unchanged. The process-global 13-key response `counters` has no bridge or public `DetailedLatestQuote` field. No second public `quote`, `fubonQuote`, `actualPrice`, OHLC, buy/sell, volume, source/date/status, or other same-business-meaning field is allowed. `DetailedLatestQuote` is exclusively the single-quote DTO and appends these top-level fields after all existing fields. Add immutable `ListedLatestQuote`, containing precisely the former 24 fields in their existing order (raw 19, `marketData`, direct `quoteDetail`/`bidLevels`/`askLevels`/`dividendHistory`): `PublicQuoteMarketDataController.list`, `PublicQuoteMarketDataService.list` and all list-enrichment/fallback generics return it, and `/api/quotes` OpenAPI array items reference it. Thus the list DTO, JSON key/order and fan-out remain exactly as before, with zero bridge calls and no latency/capacity change. BFF timeout, bad bridge body or unavailable storage maps only the Fubon fields to their typed unavailable state—never to a vendor call, a cache repair, or a failed outer response. The OpenAPI schema explicitly describes every nested field, null meaning, status/reason format, five-level ordering and the no-request-time-I/O boundary.
 
 No new 9090 route, public business route, history-retention API, or SDK payload expansion is authorised. Future endpoint fields still require a contract/spec update before being exposed publicly.
+
+### Requirement 116／Task 381：富邦 `indices` WebSocket 台股大盤即時 current-state
+
+此需求只補上盤中大盤點數的 realtime producer，不能改變完成日 K 的權威。`twse_index_daily_history` 仍由既有盤後流程維護，`TaiexIndexPoller` 仍是 Yahoo 五分鐘 fallback；新增資料只描述「目前收到的富邦台股大盤事件」。既有 public 9090 contract、BFF、frontend 和 broker inventory flow 都不變。
+
+#### 受限資料流與所有權
+
+富邦 proprietary SDK 仍然只存在 Python adapter。adapter **不** push／POST 到 Spring；external-materials 主動建立一條 token-authenticated HTTP GET，SSE body 是既有 response 的持續 read-only content，這維持服務相依方向與「adapter 不反向呼叫 Spring」規則。
+
+```text
+Fubon official SDK WebSocket
+    │  channel=indices, symbol=<configured exact TAIEX symbol>
+    ▼
+fubon-broker-service
+    ├─ validates/normalizes only {symbol, exchange, type, index, time}
+    ├─ one process-local latest event + authorized SSE fan-out
+    └─ GET /internal/market-data/taiex-index/stream  ◄───────┐
+          (no DB, Redis, Spring call, order SDK)              │ token-authenticated GET
+                                                               │
+external-materials-service                                    │
+    ├─ FubonTaiexIndexStreamClient ───────────────────────────┘
+    ├─ FubonTaiexIndexIngestionService
+    │      DB atomic strict-newer upsert
+    │         ▼
+    │   fubon_taiex_index_latest
+    │         ▼ only canonical/newer row
+    └─ PriceCacheWriter.writeTaiwanIndexLive
+           ▼
+       price:台股:0000 (existing Lua strict-newer latest cache)
+```
+
+The stream is internal Docker-network-only; it has no host mapping, gateway proxy, wildcard route or public documentation. The adapter route uses the exact existing `X-Internal-Service-Token` policy. It returns sanitised `401 TOKEN_REQUIRED` / `403 TOKEN_INVALID`, and disabled or invalid configuration returns a sanitised `503`; its FastAPI OpenAPI/docs remain disabled.
+
+#### Configuration and identity gate
+
+Both Docker services receive these non-secret environment values, mirrored into their native configuration:
+
+```text
+FUBON_TAIEX_INDEX_STREAM_ENABLED=false
+FUBON_TAIEX_INDEX_SYMBOL=
+```
+
+The effective condition is `FUBON_ENABLED=true && FUBON_TAIEX_INDEX_STREAM_ENABLED=true && valid configured symbol && ready shared-token config`. When either non-secret flag is false or the symbol is invalid, Python creates no SDK WebSocket and Java neither reads the token nor opens/retries an SSE connection; health remains UP and no storage mutation occurs. Once those non-secret checks pass, Java may lazily and without logging the token value read the token file solely to determine readiness; a missing/empty token is sanitized misconfiguration with zero SDK, SSE GET/retry, DB and Redis work. When enabled, `FUBON_TAIEX_INDEX_SYMBOL` must be a nonblank, bounded ASCII market symbol (maximum 64 characters) and must be identical on both sides. Deployment resolves the actual Taiwan weighted-index symbol using the official `intraday/tickers?type=INDEX&exchange=TWSE` response; an illustrative vendor-document symbol is not a default and is never silently substituted.
+
+The adapter only accepts the official `indices` message data whose properties are exactly `symbol`, `exchange`, `type`, `index`, and `time`; it requires the configured symbol, `TWSE`, `INDEX`, a finite canonical positive decimal index with precision ≤20 and scale 0–10, and a positive integer Unix epoch microsecond value. It parses the vendor JSON number without float round-trip and emits `index` as a canonical decimal **string**; bool, null, scientific notation, non-finite, leading-plus/leading-zero noncanonical, over-precision and over-scale values are rejected before fan-out. The Java parser applies the same string grammar and numeric limits before `BigDecimal`/DB conversion. The adapter emits only this exact SSE payload:
+
+```text
+event: taiex-index
+id: <time in epoch microseconds>
+data: {"symbol":"<configured>","exchange":"TWSE","type":"INDEX","index":"<canonical decimal string>","time":<integer>}
+
+```
+
+The SSE response is `text/event-stream; charset=utf-8`, `Cache-Control: no-store` and no proxy buffering. On a new authorised consumer, adapter may send its single in-memory latest valid event once; it does not claim to offer replay/history. Its SDK callback merely validates and fan-outs; it never does DB, Redis, HTTP POST, order, accounting or blocking consumer work. A bounded reconnect loop re-runs `connect()` then the same `subscribe({channel: 'indices', symbol: configuredSymbol})` after disconnect/error. Process shutdown stops the loop and disconnects/cleans the client.
+
+#### Consumer validation and strict source-time fence
+
+`FubonTaiexIndexStreamClient` is a Spring lifecycle component that opens one authenticated GET only under the effective condition above, parses only `event: taiex-index` frames, rejects duplicate/unknown/missing JSON fields and reconnects with bounded exponential backoff on network failure, EOF or sanitized non-2xx. It does not call the SDK or write storage itself. It passes a typed immutable event to `FubonTaiexIndexIngestionService`.
+
+`time` is converted exactly from microseconds to `Instant` (`seconds = floorDiv(time, 1_000_000)`, `nanos = floorMod(time, 1_000_000) * 1_000`). The same instant produces `tradingDate` in `Asia/Taipei`. Consumer rejects an event when its local trading date is not today or its instant exceeds `Clock.instant()+30 seconds`; Java receipt time is never a substitute freshness value. The only freshness comparator is provider instant `>`; price magnitude, network order and receipt order never affect it.
+
+The dedicated canonical table is deliberately narrow:
+
+```sql
+fubon_taiex_index_latest
+  index_code           VARCHAR(20) PRIMARY KEY CHECK (index_code = '0000')
+  provider_symbol      VARCHAR(64) NOT NULL
+  exchange             VARCHAR(20) NOT NULL CHECK (exchange = 'TWSE')
+  trading_date         DATE NOT NULL
+  provider_updated_at  TIMESTAMPTZ NOT NULL
+  index_point          NUMERIC(30,10) NOT NULL CHECK (index_point > 0)
+  source               VARCHAR(32) NOT NULL CHECK (source = 'FUBON_INDICES')
+  CHECK ((provider_updated_at AT TIME ZONE 'Asia/Taipei')::date = trading_date)
+```
+
+`FubonTaiexIndexStore.persist` uses one transaction-bound PostgreSQL conditional upsert, never a Java read-compare-write. The table's `NUMERIC(30,10)` can carry a 20-digit integer plus 10 decimal places, while the adapter/Java gate still limits each source value to total precision ≤20 and scale ≤10 so PostgreSQL never rounds or widens a provider value. The store runs in an independent transaction (`REQUIRES_NEW` or equivalent `TransactionTemplate`) and returns an `APPLIED` canonical row only **after that transaction has committed**; Redis must never execute inside this transaction or before its commit:
+
+```sql
+INSERT INTO fubon_taiex_index_latest (...)
+VALUES (...)
+ON CONFLICT (index_code) DO UPDATE
+SET provider_symbol=EXCLUDED.provider_symbol,
+    exchange=EXCLUDED.exchange,
+    trading_date=EXCLUDED.trading_date,
+    provider_updated_at=EXCLUDED.provider_updated_at,
+    index_point=EXCLUDED.index_point,
+    source=EXCLUDED.source
+WHERE EXCLUDED.provider_updated_at > fubon_taiex_index_latest.provider_updated_at
+RETURNING ...;
+```
+
+If the conditional update returns no row, the same transactional path reads and returns the existing canonical row tagged `STALE_OR_EQUAL`. `FAILED` or a DB write/commit failure means no cache call; the ingestion wrapper itself remains outside an ambient transaction, so a later unrelated caller rollback cannot surround this DB/cache sequence. This table holds one current point only; it never updates `twse_index_daily_history`, and it carries no token, account, owner, position, proprietary raw object or event history.
+
+#### DB-first Redis projection and recovery
+
+For an `APPLIED` row, ingestion first constructs a `PriceResult` from the **canonical DB row**: `0000`, `台股`, `FUBON_INDICES`, `LIVE`, `closed=false`, `tradingDate`, and the same provider instant. It gets `previousClose` only from the latest completed `twse_index_daily_history` record strictly before that trading date. The index has no bid/ask, volume, intraday tick stream or local high/low aggregate, so those are null and `writeTaiwanIndexLive` must call the existing latest-quote Lua primitive with `strict_newer=true` without calling `IntradayTickStore` or `IntradayHighLowTracker`.
+
+The existing Lua script remains the second, independent time fence. Same-date LIVE needs a strictly newer `updatedAt`, and `VERIFIED_CLOSE` has higher rank and cannot be downgraded. Therefore every stale/equal **raw input** produces no DB update, no Redis overwrite, no TTL refresh, no Redis publication and no tick/day-HL mutation. The single recovery exception is a Redis failure after a DB-committed `APPLIED` row: when a later SSE event is exactly equal to that canonical provider time, ingestion may reread the canonical DB row and invoke the writer outside the DB transaction. The strict Lua write has no effect when Redis is equal/newer, but repairs a missing/older cache. An older or equal raw payload is never used for repair.
+
+#### Yahoo fallback coexistence
+
+`TaiexIndexPoller.updateOnce()` first reads `fubon_taiex_index_latest` for `LocalDate.now(Asia/Taipei)`. If a current canonical row exists, it passes only that row through the same strict index cache writer and returns without calling Yahoo. If no current Fubon row exists, it retains all current behaviour: fetch Yahoo `TWSE` day bars, require today’s date and a positive timed latest close, obtain previous close strictly before the bar date from completed daily history, then write the existing non-tick/non-local-H/L index payload. Consequently disconnect, disabled config and rejected events do not clear the cache and do not prevent the existing two-minute fallback.
+
+#### Test and deployment contract
+
+Adapter unit tests use a fake websocket SDK and prove event filtering, exact SSE bytes/headers, latest replay, token checks, main/stream flags or missing symbol zero SDK access, decimal precision/scale rejection, reconnect/resubscribe, shutdown and no order import/call. Java tests use deterministic streams/fake clocks plus PostgreSQL/Redis integration: main flag false zero token/GET, valid flags/symbol plus missing or empty token gives sanitized no-GET misconfiguration, source-time microseconds, identity/date/future and decimal gates (including a 20-digit integer with no DB rounding), conditional DB races, DB write/commit failure zero cache write, raw stale/equal no mutation, canonical equal-time cache repair, Lua refusal against newer cache/verified close, no tick/day-HL, and Fubon-first/Yahoo fallback choice. Migration `v1.118.0-fubon-taiex-index-stream.sql` is registered in the central changelog; after it is applied through `business-services`, `db/schema.sql` is regenerated from the actual compose database before the schema drift test runs.

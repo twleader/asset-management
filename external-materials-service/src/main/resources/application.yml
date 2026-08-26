@@ -28,6 +28,9 @@ fubon:
   enabled: ${FUBON_ENABLED:false}
   base-url: ${FUBON_BASE_URL:http://fubon-broker-service:8080}
   shared-token-path: ${FUBON_SHARED_TOKEN_PATH:/run/secrets/fubon/shared/internal-service-token}
+  taiex-index-stream:
+    enabled: ${FUBON_TAIEX_INDEX_STREAM_ENABLED:false}
+    symbol: ${FUBON_TAIEX_INDEX_SYMBOL:}
 
 asset:
   internal:

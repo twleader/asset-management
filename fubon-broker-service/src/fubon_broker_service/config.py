@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+
+_INDEX_SYMBOL = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,9 @@ class ConfigSnapshot:
     account_branch_no: str | None = field(default=None, repr=False)
     account_number: str | None = field(default=None, repr=False)
     internal_service_token: str | None = field(default=None, repr=False)
+    taiex_index_stream_enabled: bool = False
+    taiex_index_symbol: str | None = None
+    taiex_index_stream_reason: str | None = None
 
     def __repr__(self) -> str:
         return f"ConfigSnapshot(enabled={self.enabled!r}, state={self.state!r}, reason={self.reason!r})"
@@ -47,18 +54,44 @@ class ConfigSnapshot:
 class ConfigLoader:
     """Loads mounted files lazily. No credential is accepted from HTTP or environment."""
 
-    def __init__(self, root: Path, enabled_reader: Callable[[], str | None]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        enabled_reader: Callable[[], str | None],
+        taiex_index_stream_enabled_reader: Callable[[], str | None] | None = None,
+        taiex_index_symbol_reader: Callable[[], str | None] | None = None,
+    ) -> None:
         self._root = root
         self._enabled_reader = enabled_reader
+        self._taiex_index_stream_enabled_reader = (
+            taiex_index_stream_enabled_reader or (lambda: "false")
+        )
+        self._taiex_index_symbol_reader = taiex_index_symbol_reader or (lambda: "")
 
     @classmethod
     def from_environment(cls) -> "ConfigLoader":
-        return cls(Path("/run/secrets/fubon"), lambda: os.getenv("FUBON_ENABLED", "false"))
+        return cls(
+            Path("/run/secrets/fubon"),
+            lambda: os.getenv("FUBON_ENABLED", "false"),
+            lambda: os.getenv("FUBON_TAIEX_INDEX_STREAM_ENABLED", "false"),
+            lambda: os.getenv("FUBON_TAIEX_INDEX_SYMBOL", ""),
+        )
 
     def load(self) -> ConfigSnapshot:
         enabled_raw = (self._enabled_reader() or "false").strip().lower()
         enabled_valid = enabled_raw in {"true", "false"}
         enabled = enabled_raw == "true"
+        stream_enabled_raw = (self._taiex_index_stream_enabled_reader() or "false").strip().lower()
+        stream_enabled_valid = stream_enabled_raw in {"true", "false"}
+        stream_enabled = stream_enabled_raw == "true"
+        raw_symbol = (self._taiex_index_symbol_reader() or "").strip()
+        stream_symbol = raw_symbol if _INDEX_SYMBOL.fullmatch(raw_symbol) else None
+        if not stream_enabled_valid:
+            stream_reason = "INVALID_TAIEX_INDEX_STREAM_FLAG"
+        elif stream_enabled and stream_symbol is None:
+            stream_reason = "INVALID_TAIEX_INDEX_SYMBOL"
+        else:
+            stream_reason = None
 
         personal_id = self._read_text("sdk/personal-id")
         api_key = self._read_text("sdk/api-key")
@@ -103,6 +136,9 @@ class ConfigLoader:
             account_branch_no=account_branch_no,
             account_number=account_number,
             internal_service_token=internal_service_token,
+            taiex_index_stream_enabled=stream_enabled,
+            taiex_index_symbol=stream_symbol,
+            taiex_index_stream_reason=stream_reason,
         )
 
     def _read_text(self, relative: str) -> str | None:
