@@ -103,29 +103,39 @@ class FubonNormalizedQuoteClientTest {
     }
 
     @Test
-    void strictDecimalVolumeAndTimeMatrixRejectsEachMalformedSuccessRow() throws Exception {
+    void structurallyMalformedSuccessRowsRejectTheWholeEnvelope() throws Exception {
         Path token = tokenFile();
-        List<java.util.function.Consumer<ObjectNode>> corruptions = List.of(
-                quote -> quote.put("actualPrice", 100.1),
-                quote -> quote.put("actualPrice", "1E+2"),
-                quote -> quote.put("actualPrice", "10000000000.0000000000"),
-                quote -> quote.put("actualPrice", "0.00000000001"),
-                quote -> quote.put("volume", -1),
-                quote -> quote.put("volume", new java.math.BigInteger("9223372036854775808")),
-                quote -> quote.put("tradingDate", "2026-08-20"),
-                quote -> quote.put("updatedAt", "2026-08-21T05:00:31Z"),
-                quote -> quote.put("source", "TWSE"),
-                quote -> quote.put("closed", true));
+        record Corruption(java.util.function.Consumer<ObjectNode> apply, BatchStatus expected) {}
+        List<Corruption> corruptions = List.of(
+                new Corruption(quote -> quote.put("actualPrice", 100.1), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("actualPrice", "1E+2"), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("actualPrice", "10000000000.0000000000"), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("actualPrice", "0.00000000001"), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("volume", -1), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("volume", new java.math.BigInteger("9223372036854775808")),
+                        BatchStatus.INVALID_RESPONSE),
+                // These are structurally legal endpoint rows, but are intentionally ineligible for
+                // the established current-price mapper.  Their full normalized row must survive.
+                new Corruption(quote -> quote.put("tradingDate", "2026-08-20"), BatchStatus.PARTIAL_FAILURE),
+                new Corruption(quote -> quote.put("updatedAt", "2026-08-21T05:00:31Z"), BatchStatus.PARTIAL_FAILURE),
+                new Corruption(quote -> quote.put("source", "TWSE"), BatchStatus.INVALID_RESPONSE),
+                new Corruption(quote -> quote.put("closed", true), BatchStatus.PARTIAL_FAILURE));
 
-        for (java.util.function.Consumer<ObjectNode> corruption : corruptions) {
+        for (Corruption corruption : corruptions) {
             ObjectNode root = responseRoot();
             ObjectNode row = successRow("2330");
-            corruption.accept((ObjectNode) row.get("quote"));
+            corruption.apply().accept((ObjectNode) row.get("quote"));
             root.withArray("quotes").add(row);
             var result = client(token, new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
                     .fetch(List.of("2330"));
-            assertThat(result.status()).isEqualTo(BatchStatus.PARTIAL_FAILURE);
+            assertThat(result.status()).isEqualTo(corruption.expected());
             assertThat(result.observations()).isEmpty();
+            if (corruption.expected() == BatchStatus.INVALID_RESPONSE) {
+                assertThat(result.envelope()).isNull();
+            } else {
+                assertThat(result.envelope()).isNotNull();
+                assertThat(result.envelope().responseRows()).containsKey("2330");
+            }
         }
     }
 
@@ -187,7 +197,7 @@ class FubonNormalizedQuoteClientTest {
     }
 
     @Test
-    void malformedOptionalBookDoesNotRejectItsValidActualPrice() throws Exception {
+    void malformedOptionalBookRejectsTheWholeEnvelopeBeforePriceMapping() throws Exception {
         ObjectNode root = responseRoot();
         ObjectNode row = successRow("2330");
         ObjectNode book = ((ObjectNode) row.get("quote")).putObject("orderBook");
@@ -203,9 +213,9 @@ class FubonNormalizedQuoteClientTest {
         var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
                 .fetch(List.of("2330"));
 
-        assertThat(result.status()).isEqualTo(BatchStatus.SUCCESS);
-        assertThat(result.observations()).hasSize(1);
-        assertThat(result.orderBooks()).isEmpty();
+        assertThat(result.status()).isEqualTo(BatchStatus.INVALID_RESPONSE);
+        assertThat(result.observations()).isEmpty();
+        assertThat(result.envelope()).isNull();
     }
 
     @Test
@@ -215,6 +225,10 @@ class FubonNormalizedQuoteClientTest {
             ObjectNode quote = (ObjectNode) successRow("2330").get("quote");
             ObjectNode book = quote.putObject("orderBook");
             book.put("bookUpdatedAt", "2026-08-21T05:00:00Z");
+            book.putNull("averagePrice");
+            book.putNull("turnoverYi");
+            book.putNull("innerVolumeLots");
+            book.putNull("outerVolumeLots");
             var levels = book.putArray("levels");
             for (int level = 1; level <= 5; level++) {
                 ObjectNode row = levels.addObject();
@@ -227,6 +241,7 @@ class FubonNormalizedQuoteClientTest {
             ObjectNode wrapper = root.withArray("quotes").addObject();
             wrapper.put("stockCode", "2330");
             wrapper.put("status", "SUCCESS");
+            wrapper.putNull("reason");
             wrapper.set("quote", quote);
 
             var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
@@ -244,6 +259,10 @@ class FubonNormalizedQuoteClientTest {
             ObjectNode quote = (ObjectNode) successRow("2330").get("quote");
             ObjectNode book = quote.putObject("orderBook");
             book.put("bookUpdatedAt", bookTime);
+            book.putNull("averagePrice");
+            book.putNull("turnoverYi");
+            book.putNull("innerVolumeLots");
+            book.putNull("outerVolumeLots");
             var levels = book.putArray("levels");
             for (int level = 1; level <= 5; level++) {
                 ObjectNode row = levels.addObject();
@@ -256,6 +275,7 @@ class FubonNormalizedQuoteClientTest {
             ObjectNode wrapper = root.withArray("quotes").addObject();
             wrapper.put("stockCode", "2330");
             wrapper.put("status", "SUCCESS");
+            wrapper.putNull("reason");
             wrapper.set("quote", quote);
 
             var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
@@ -320,6 +340,13 @@ class FubonNormalizedQuoteClientTest {
     private static ObjectNode responseRoot() {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("batchId", "fixture-batch");
+        ObjectNode counters = root.putObject("counters");
+        for (String name : List.of(
+                "DISABLED", "MISCONFIGURED", "CALENDAR_UNKNOWN", "ACCOUNTING_FAILED", "RECONCILE_FAILED",
+                "QUOTE_FAILED", "NO_OWNER", "NO_TODAY_SNAPSHOT", "BROKER_MISSING", "DRY_RUN", "SUCCESS",
+                "EMPTY_CLEARED", "ROLLED_BACK")) {
+            counters.put(name, 0);
+        }
         root.putArray("quotes");
         return root;
     }

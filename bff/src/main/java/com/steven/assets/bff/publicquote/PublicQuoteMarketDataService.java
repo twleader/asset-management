@@ -4,9 +4,12 @@ import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.ChartMarketDat
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DataStatus;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DetailedLatestQuote;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DividendHistory;
+import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.FubonReturnedOrderBook;
+import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.FubonReturnedOrderBookLevel;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.IntradayBridgeResponse;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.IntradayMarketData;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.IntradayTick;
+import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.ListedLatestQuote;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.MarketData;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.QuoteDetail;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.RawLatestQuote;
@@ -31,12 +34,15 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -66,6 +72,7 @@ public class PublicQuoteMarketDataService {
     private final Duration etfTimeout;
     private final Duration dividendsTimeout;
     private final Duration intradayTimeout;
+    private final Duration fubonLiveResponseTimeout;
     private final Duration rowTimeout;
     private final Duration globalTimeout;
     private final int listConcurrency;
@@ -84,11 +91,13 @@ public class PublicQuoteMarketDataService {
             @Value("${public-quote.timeout.intraday-seconds:2}") long intradayTimeoutSeconds,
             @Value("${public-quote.timeout.row-seconds:7}") long rowTimeoutSeconds,
             @Value("${public-quote.timeout.global-seconds:50}") long globalTimeoutSeconds,
-            @Value("${public-quote.list-concurrency:8}") int listConcurrency) {
+            @Value("${public-quote.list-concurrency:8}") int listConcurrency,
+            @Value("${public-quote.timeout.fubon-live-response-seconds:2}") long fubonLiveResponseTimeoutSeconds) {
         this(rawQuoteClient, marketDataClient, chartDataService, clock,
                 seconds(rawTimeoutSeconds), seconds(chartTimeoutSeconds), seconds(quoteDetailTimeoutSeconds),
                 seconds(etfTimeoutSeconds), seconds(dividendsTimeoutSeconds), seconds(intradayTimeoutSeconds),
-                seconds(rowTimeoutSeconds), seconds(globalTimeoutSeconds), listConcurrency);
+                seconds(rowTimeoutSeconds), seconds(globalTimeoutSeconds), listConcurrency,
+                seconds(fubonLiveResponseTimeoutSeconds));
     }
 
     PublicQuoteMarketDataService(
@@ -105,6 +114,26 @@ public class PublicQuoteMarketDataService {
             Duration rowTimeout,
             Duration globalTimeout,
             int listConcurrency) {
+        this(rawQuoteClient, marketDataClient, chartDataService, clock, rawTimeout, chartTimeout, quoteDetailTimeout,
+                etfTimeout, dividendsTimeout, intradayTimeout, rowTimeout, globalTimeout, listConcurrency,
+                Duration.ofSeconds(2));
+    }
+
+    PublicQuoteMarketDataService(
+            WebClient rawQuoteClient,
+            WebClient marketDataClient,
+            StockAnalysisChartDataService chartDataService,
+            Clock clock,
+            Duration rawTimeout,
+            Duration chartTimeout,
+            Duration quoteDetailTimeout,
+            Duration etfTimeout,
+            Duration dividendsTimeout,
+            Duration intradayTimeout,
+            Duration rowTimeout,
+            Duration globalTimeout,
+            int listConcurrency,
+            Duration fubonLiveResponseTimeout) {
         this.rawQuoteClient = rawQuoteClient;
         this.marketDataClient = marketDataClient;
         this.chartDataService = chartDataService;
@@ -115,12 +144,13 @@ public class PublicQuoteMarketDataService {
         this.etfTimeout = etfTimeout;
         this.dividendsTimeout = dividendsTimeout;
         this.intradayTimeout = intradayTimeout;
+        this.fubonLiveResponseTimeout = fubonLiveResponseTimeout;
         this.rowTimeout = rowTimeout;
         this.globalTimeout = globalTimeout;
         this.listConcurrency = Math.min(8, Math.max(1, listConcurrency));
     }
 
-    public Mono<List<DetailedLatestQuote>> list(String market, String start, String end) {
+    public Mono<List<ListedLatestQuote>> list(String market, String start, String end) {
         Instant requestStarted = clock.instant();
         DateRange range = validateRange(start, end);
         return fetchRawList(market)
@@ -131,7 +161,7 @@ public class PublicQuoteMarketDataService {
         Instant requestStarted = clock.instant();
         DateRange range = validateRange(start, end);
         return fetchRawOne(code, market)
-                .flatMap(raw -> enrichRow(raw, range)
+                .flatMap(raw -> enrichSingleRow(raw, range)
                         .timeout(remaining(requestStarted), Mono.just(fallbackQuote(raw, range))));
     }
 
@@ -191,13 +221,13 @@ public class PublicQuoteMarketDataService {
                 && !(error instanceof PublicQuoteRawTimeoutException);
     }
 
-    private Mono<List<DetailedLatestQuote>> enrichList(
+    private Mono<List<ListedLatestQuote>> enrichList(
             List<RawLatestQuote> rows, DateRange range, Instant requestStarted) {
         List<RawLatestQuote> immutableRows = List.copyOf(rows);
-        ConcurrentMap<Integer, DetailedLatestQuote> completed = new ConcurrentHashMap<>();
-        Mono<List<DetailedLatestQuote>> allRows = Flux.range(0, immutableRows.size())
-                .flatMapSequential(index -> enrichRow(immutableRows.get(index), range)
-                                .onErrorReturn(fallbackQuote(immutableRows.get(index), range))
+        ConcurrentMap<Integer, ListedLatestQuote> completed = new ConcurrentHashMap<>();
+        Mono<List<ListedLatestQuote>> allRows = Flux.range(0, immutableRows.size())
+                .flatMapSequential(index -> enrichListedRow(immutableRows.get(index), range)
+                                .onErrorReturn(fallbackListedQuote(immutableRows.get(index), range))
                                 .doOnNext(result -> completed.put(index, result)),
                         listConcurrency)
                 .collectList();
@@ -205,32 +235,42 @@ public class PublicQuoteMarketDataService {
                 completedOrFallback(immutableRows, range, completed)));
     }
 
-    private List<DetailedLatestQuote> completedOrFallback(
+    private List<ListedLatestQuote> completedOrFallback(
             List<RawLatestQuote> rows,
             DateRange range,
-            ConcurrentMap<Integer, DetailedLatestQuote> completed) {
-        List<DetailedLatestQuote> response = new ArrayList<>(rows.size());
+            ConcurrentMap<Integer, ListedLatestQuote> completed) {
+        List<ListedLatestQuote> response = new ArrayList<>(rows.size());
         for (int index = 0; index < rows.size(); index++) {
-            response.add(completed.getOrDefault(index, fallbackQuote(rows.get(index), range)));
+            response.add(completed.getOrDefault(index, fallbackListedQuote(rows.get(index), range)));
         }
         return List.copyOf(response);
     }
 
-    /** 五個 child 同時訂閱；列級 timeout 只把本列降為預建 fallback。 */
-    private Mono<DetailedLatestQuote> enrichRow(RawLatestQuote raw, DateRange range) {
-        DetailedLatestQuote fallback = fallbackQuote(raw, range);
-        Mono<ChartMarketData> chart = fetchChart(raw, range)
-                .onErrorReturn(fallback.marketData().chart());
-        Mono<QuoteDetail> quoteDetail = fetchQuoteDetail(raw)
-                .onErrorReturn(fallback.marketData().quoteDetail());
+    /** List rows keep their historical four-child fan-out and make zero Fubon-bridge calls. */
+    private Mono<ListedLatestQuote> enrichListedRow(RawLatestQuote raw, DateRange range) {
+        ListedLatestQuote fallback = fallbackListedQuote(raw, range);
+        Mono<ChartMarketData> chart = fetchChart(raw, range).onErrorReturn(fallback.marketData().chart());
+        Mono<QuoteDetail> quoteDetail = fetchQuoteDetail(raw).onErrorReturn(fallback.marketData().quoteDetail());
         Mono<EtfHoldingsDto> etfConstituents = fetchEtfConstituents(raw)
                 .onErrorReturn(fallback.marketData().etfConstituents());
-        Mono<DividendHistory> dividends = fetchDividends(raw)
-                .onErrorReturn(fallback.marketData().dividends());
-
+        Mono<DividendHistory> dividends = fetchDividends(raw).onErrorReturn(fallback.marketData().dividends());
         return Mono.zip(chart, quoteDetail, etfConstituents, dividends)
+                .map(tuple -> listed(raw, new MarketData(tuple.getT1(), tuple.getT2(), tuple.getT3(), tuple.getT4())))
+                .timeout(rowTimeout, Mono.just(fallback));
+    }
+
+    /** Single quote only: the safe Fubon bridge joins the existing four child reads in parallel. */
+    private Mono<DetailedLatestQuote> enrichSingleRow(RawLatestQuote raw, DateRange range) {
+        DetailedLatestQuote fallback = fallbackQuote(raw, range);
+        Mono<ChartMarketData> chart = fetchChart(raw, range).onErrorReturn(fallback.marketData().chart());
+        Mono<QuoteDetail> quoteDetail = fetchQuoteDetail(raw).onErrorReturn(fallback.marketData().quoteDetail());
+        Mono<EtfHoldingsDto> etfConstituents = fetchEtfConstituents(raw)
+                .onErrorReturn(fallback.marketData().etfConstituents());
+        Mono<DividendHistory> dividends = fetchDividends(raw).onErrorReturn(fallback.marketData().dividends());
+        Mono<FubonProjection> fubon = fetchFubonLiveResponse(raw).onErrorReturn(fallbackFubon(raw));
+        return Mono.zip(chart, quoteDetail, etfConstituents, dividends, fubon)
                 .map(tuple -> detailed(raw, new MarketData(
-                        tuple.getT1(), tuple.getT2(), tuple.getT3(), tuple.getT4())))
+                                tuple.getT1(), tuple.getT2(), tuple.getT3(), tuple.getT4()), tuple.getT5()))
                 .timeout(rowTimeout, Mono.just(fallback));
     }
 
@@ -335,11 +375,32 @@ public class PublicQuoteMarketDataService {
                 .switchIfEmpty(Mono.error(new IllegalStateException("dividend body unavailable")));
     }
 
+    /** No-tenant, container-internal pure read.  This never reaches a vendor or a dispatcher. */
+    private Mono<FubonProjection> fetchFubonLiveResponse(RawLatestQuote raw) {
+        if (!isFubonSupported(raw)) return Mono.just(fallbackFubon(raw));
+        return rawQuoteClient.get()
+                .uri(builder -> builder.path("/internal/fubon-live-response")
+                        .queryParam("code", raw.stockCode()).queryParam("market", raw.market()).build())
+                .retrieve()
+                .bodyToMono(FubonBridgeResponse.class)
+                .map(response -> normalizeFubon(raw, response))
+                .timeout(fubonLiveResponseTimeout)
+                .switchIfEmpty(Mono.just(fallbackFubon(raw)));
+    }
+
     private DetailedLatestQuote fallbackQuote(RawLatestQuote raw, DateRange range) {
         IntradayMarketData intraday = initialIntradayFallback(raw, range);
         ChartMarketData chart = new ChartMarketData(DataStatus.UNAVAILABLE, "市場資料暫時不可用",
                 range.start(), range.end(), ChartSeriesDto.empty(), intraday);
-        return detailed(raw, new MarketData(chart, unavailableQuoteDetail(raw), unavailableEtf(raw), unavailableDividends(raw)));
+        return detailed(raw, new MarketData(chart, unavailableQuoteDetail(raw), unavailableEtf(raw), unavailableDividends(raw)),
+                fallbackFubon(raw));
+    }
+
+    private ListedLatestQuote fallbackListedQuote(RawLatestQuote raw, DateRange range) {
+        IntradayMarketData intraday = initialIntradayFallback(raw, range);
+        ChartMarketData chart = new ChartMarketData(DataStatus.UNAVAILABLE, "市場資料暫時不可用",
+                range.start(), range.end(), ChartSeriesDto.empty(), intraday);
+        return listed(raw, new MarketData(chart, unavailableQuoteDetail(raw), unavailableEtf(raw), unavailableDividends(raw)));
     }
 
     private IntradayMarketData initialIntradayFallback(RawLatestQuote raw, DateRange range) {
@@ -392,6 +453,11 @@ public class PublicQuoteMarketDataService {
         return "台股".equals(raw.market()) && !"0000".equals(raw.stockCode());
     }
 
+    private boolean isFubonSupported(RawLatestQuote raw) {
+        return isTaiwanQuoteDetailSupported(raw) && raw.stockCode() != null
+                && raw.stockCode().matches("^[0-9]{4,6}[A-Z]?$");
+    }
+
     private Optional<LocalDate> tradingDateWithin(String rawTradingDate, DateRange range) {
         try {
             LocalDate parsed = LocalDate.parse(rawTradingDate);
@@ -404,15 +470,121 @@ public class PublicQuoteMarketDataService {
         }
     }
 
-    private DetailedLatestQuote detailed(RawLatestQuote raw, MarketData marketData) {
+    private ListedLatestQuote listed(RawLatestQuote raw, MarketData marketData) {
         QuoteDetail quoteDetail = marketData.quoteDetail();
         DividendHistory dividendHistory = marketData.dividends();
-        return new DetailedLatestQuote(
+        return new ListedLatestQuote(
                 raw.stockCode(), raw.stockName(), raw.market(), raw.price(), raw.previousClose(), raw.priceChange(),
                 raw.changePercent(), raw.buyPrice(), raw.sellPrice(), raw.openPrice(), raw.highPrice(), raw.lowPrice(),
                 raw.volume(), raw.tradingDate(), raw.updatedAt(), raw.closed(), raw.source(), raw.quoteStatus(),
                 raw.premiumDiscountPct(), marketData, quoteDetail,
                 projectBookSide(quoteDetail, true), projectBookSide(quoteDetail, false), dividendHistory);
+    }
+
+    private DetailedLatestQuote detailed(RawLatestQuote raw, MarketData marketData, FubonProjection fubon) {
+        RawLatestQuote shared = matchingFubonQuote(raw, fubon);
+        QuoteDetail quoteDetail = marketData.quoteDetail();
+        DividendHistory dividendHistory = marketData.dividends();
+        return new DetailedLatestQuote(
+                shared.stockCode(), shared.stockName(), shared.market(), shared.price(), shared.previousClose(),
+                shared.priceChange(), shared.changePercent(), shared.buyPrice(), shared.sellPrice(), shared.openPrice(),
+                shared.highPrice(), shared.lowPrice(), shared.volume(), shared.tradingDate(), shared.updatedAt(),
+                shared.closed(), shared.source(), shared.quoteStatus(), shared.premiumDiscountPct(), marketData, quoteDetail,
+                projectBookSide(quoteDetail, true), projectBookSide(quoteDetail, false), dividendHistory,
+                fubon.supported(), fubon.available(), fubon.message(), fubon.receivedAt(), fubon.batchId(),
+                fubon.status(), fubon.reason(), fubon.returnedOrderBook());
+    }
+
+    /**
+     * Treat bridge input as untrusted at this boundary.  It can only enrich the distinct metadata
+     * and raw returned book; a malformed response becomes a child-local typed unavailable result.
+     */
+    private FubonProjection normalizeFubon(RawLatestQuote raw, FubonBridgeResponse value) {
+        if (value == null || value.supported() != isFubonSupported(raw)) return fallbackFubon(raw);
+        if (!value.supported()) return fallbackFubon(raw);
+        if (!value.available()) {
+            return new FubonProjection(true, false, safeMessage(value.message()), null, null, null, null, null, null);
+        }
+        if (value.receivedAt() == null || value.batchId() == null || value.batchId().isBlank()) return fallbackFubon(raw);
+        if ("FAILURE".equals(value.status()) && value.quote() == null && validFailureReason(value.reason())) {
+            return new FubonProjection(true, true, null, value.receivedAt(), value.batchId(), "FAILURE", value.reason(), null, null);
+        }
+        if (!"SUCCESS".equals(value.status()) || value.reason() != null || !validFubonQuote(raw, value.quote())) {
+            return fallbackFubon(raw);
+        }
+        FubonReturnedOrderBook book = toReturnedOrderBook(value.quote().orderBook());
+        if (value.quote().orderBook() != null && book == null) return fallbackFubon(raw);
+        return new FubonProjection(true, true, null, value.receivedAt(), value.batchId(), "SUCCESS", null,
+                value.quote(), book);
+    }
+
+    private FubonProjection fallbackFubon(RawLatestQuote raw) {
+        return isFubonSupported(raw)
+                ? new FubonProjection(true, false, "暫時無法取得富邦即時回應", null, null, null, null, null, null)
+                : new FubonProjection(false, false, "此市場不支援富邦台股即時回應", null, null, null, null, null, null);
+    }
+
+    private static String safeMessage(String message) {
+        return message == null || message.isBlank() || message.length() > 120 ? "暫時無法取得富邦即時回應" : message;
+    }
+
+    private static boolean validFailureReason(String value) {
+        return value != null && value.matches("^[A-Z_]{1,64}$");
+    }
+
+    private boolean validFubonQuote(RawLatestQuote raw, FubonBridgeQuote quote) {
+        return quote != null && Objects.equals(raw.stockCode(), quote.stockCode()) && Objects.equals(raw.market(), quote.market())
+                && quote.stockName() != null && !quote.stockName().isBlank()
+                && positive(quote.actualPrice()) && positive(quote.previousClose()) && positive(quote.openPrice())
+                && positive(quote.highPrice()) && positive(quote.lowPrice()) && quote.volume() != null && quote.volume() >= 0
+                && quote.updatedAt() != null && quote.tradingDate() != null && "FUBON_INTRADAY".equals(quote.source())
+                && quote.closed() != null && "LIVE".equals(quote.quoteStatus());
+    }
+
+    /** Only a provenance/time-identical SUCCESS may supply the existing single-copy quote fields. */
+    private RawLatestQuote matchingFubonQuote(RawLatestQuote raw, FubonProjection fubon) {
+        FubonBridgeQuote quote = fubon.quote();
+        if (!fubon.available() || !"SUCCESS".equals(fubon.status()) || quote == null
+                || !Objects.equals(raw.source(), quote.source()) || !Objects.equals(raw.tradingDate(), quote.tradingDate())
+                || !sameMarketInstant(raw.updatedAt(), quote.updatedAt())) return raw;
+        BigDecimal change = quote.actualPrice().subtract(quote.previousClose());
+        BigDecimal percentage = quote.previousClose().signum() <= 0 ? null
+                : change.multiply(HUNDRED).divide(quote.previousClose(), 6, RoundingMode.HALF_UP);
+        return new RawLatestQuote(raw.stockCode(), quote.stockName(), raw.market(), quote.actualPrice(),
+                quote.previousClose(), change, percentage, quote.buyPrice(), quote.sellPrice(), quote.openPrice(),
+                quote.highPrice(), quote.lowPrice(), quote.volume(), quote.tradingDate(), raw.updatedAt(), quote.closed(),
+                quote.source(), quote.quoteStatus(), raw.premiumDiscountPct());
+    }
+
+    private static boolean sameMarketInstant(String rawUpdatedAt, Instant fubonUpdatedAt) {
+        if (fubonUpdatedAt == null || rawUpdatedAt == null || rawUpdatedAt.isBlank()) return false;
+        try { return Instant.parse(rawUpdatedAt).equals(fubonUpdatedAt); }
+        catch (DateTimeParseException ignored) {
+            try { return OffsetDateTime.parse(rawUpdatedAt).toInstant().equals(fubonUpdatedAt); }
+            catch (DateTimeParseException ignoredAgain) {
+                try {
+                    return LocalDateTime.parse(rawUpdatedAt)
+                            .atZone(PublicQuoteMarketDataConfiguration.TAIPEI).toInstant().equals(fubonUpdatedAt);
+                } catch (DateTimeParseException invalid) { return false; }
+            }
+        }
+    }
+
+    private static FubonReturnedOrderBook toReturnedOrderBook(FubonBridgeOrderBook source) {
+        if (source == null || source.bookUpdatedAt() == null || source.levels() == null || source.levels().size() != 5) {
+            return null;
+        }
+        List<FubonReturnedOrderBookLevel> levels = new ArrayList<>();
+        for (int index = 0; index < 5; index++) {
+            FubonBridgeOrderBookLevel level = source.levels().get(index);
+            if (level == null || level.level() != index + 1
+                    || (level.bidPrice() == null) != (level.bidVolumeLots() == null)
+                    || (level.askPrice() == null) != (level.askVolumeLots() == null)) return null;
+            levels.add(new FubonReturnedOrderBookLevel(level.level(), level.bidPrice(), level.bidVolumeLots(),
+                    level.askPrice(), level.askVolumeLots()));
+        }
+        return new FubonReturnedOrderBook(source.bookUpdatedAt(), source.averagePrice(), source.turnoverYi(),
+                source.innerVolumeLots(), source.outerVolumeLots(), levels);
     }
 
     /**
@@ -592,6 +764,65 @@ public class PublicQuoteMarketDataService {
     private static Duration seconds(long seconds) {
         return Duration.ofSeconds(Math.max(1, seconds));
     }
+
+    /** Internal external-materials bridge transfer shape; never returned directly by 9090. */
+    record FubonBridgeResponse(
+            boolean supported,
+            boolean available,
+            String message,
+            Instant receivedAt,
+            String batchId,
+            String status,
+            String reason,
+            FubonBridgeQuote quote) {}
+
+    record FubonBridgeQuote(
+            String stockCode,
+            String stockName,
+            String market,
+            BigDecimal actualPrice,
+            BigDecimal previousClose,
+            BigDecimal openPrice,
+            BigDecimal highPrice,
+            BigDecimal lowPrice,
+            BigDecimal buyPrice,
+            BigDecimal sellPrice,
+            Long volume,
+            Instant updatedAt,
+            String tradingDate,
+            String source,
+            Boolean closed,
+            String quoteStatus,
+            FubonBridgeOrderBook orderBook) {}
+
+    record FubonBridgeOrderBook(
+            Instant bookUpdatedAt,
+            BigDecimal averagePrice,
+            BigDecimal turnoverYi,
+            Long innerVolumeLots,
+            Long outerVolumeLots,
+            List<FubonBridgeOrderBookLevel> levels) {
+        FubonBridgeOrderBook { levels = levels == null ? List.of() : List.copyOf(levels); }
+    }
+
+    record FubonBridgeOrderBookLevel(
+            int level,
+            BigDecimal bidPrice,
+            Long bidVolumeLots,
+            BigDecimal askPrice,
+            Long askVolumeLots) {}
+
+    /** Prevalidated bridge state, separated from its nested transfer quote to avoid public duplication. */
+    private record FubonProjection(
+            boolean supported,
+            boolean available,
+            String message,
+            Instant receivedAt,
+            String batchId,
+            String status,
+            String reason,
+            FubonBridgeQuote quote,
+            FubonReturnedOrderBook returnedOrderBook) {}
 
     private record DateRange(LocalDate start, LocalDate end) {}
 

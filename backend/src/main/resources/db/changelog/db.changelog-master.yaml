@@ -383,3 +383,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.116.0-yahoo-order-book-fallback.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.117.0-fubon-live-quote-response.sql
+      relativeToChangelogFile: false

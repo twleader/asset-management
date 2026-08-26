@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -37,6 +38,11 @@ public class MarketClock {
     MarketClock(MarketCalendar calendar, Clock clock) {
         this.calendar = calendar;
         this.clock = clock;
+    }
+
+    /** Shared controllable receipt clock for LIVE producer state that must be ordered by arrival. */
+    public Instant instant() {
+        return clock.instant();
     }
 
     /** 市場別 → 該市場時區。 */

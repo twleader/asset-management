@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DataStatus;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DetailedLatestQuote;
+import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.ListedLatestQuote;
 import com.steven.assets.bff.stockanalysis.StockAnalysisChartDataService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +37,9 @@ class PublicQuoteMarketDataServiceTest {
             "stockCode", "stockName", "market", "price", "previousClose", "priceChange", "changePercent",
             "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice", "volume", "tradingDate",
             "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct");
+    private static final List<String> FUBON_DETAIL_KEYS = List.of(
+            "fubonSupported", "fubonAvailable", "fubonMessage", "fubonReceivedAt", "fubonBatchId",
+            "fubonResponseStatus", "fubonFailureReason", "fubonReturnedOrderBook");
 
     @Test
     void oneRelaysAllRawFieldsThenDirectNormalizedFieldsWithoutAdditionalRequests() {
@@ -73,6 +77,9 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.source()).isEqualTo("REDIS");
         assertThat(quote.quoteStatus()).isEqualTo("LIVE");
         assertThat(quote.premiumDiscountPct()).hasToString("0.25");
+        assertThat(quote.fubonSupported()).isTrue();
+        assertThat(quote.fubonAvailable()).isFalse();
+        assertThat(quote.fubonMessage()).isEqualTo("暫時無法取得富邦即時回應");
 
         assertThat(quote.marketData().chart().status()).isEqualTo(DataStatus.AVAILABLE);
         assertThat(quote.marketData().chart().requestedStart().toString()).isEqualTo("2026-08-01");
@@ -97,16 +104,19 @@ class PublicQuoteMarketDataServiceTest {
         JsonNode json = new ObjectMapper().findAndRegisterModules().valueToTree(quote);
         List<String> keys = new ArrayList<>();
         json.fieldNames().forEachRemaining(keys::add);
-        assertThat(keys).containsExactlyElementsOf(concat(RAW_KEYS,
-                "marketData", "quoteDetail", "bidLevels", "askLevels", "dividendHistory"));
+        List<String> detailedKeys = concat(RAW_KEYS,
+                "marketData", "quoteDetail", "bidLevels", "askLevels", "dividendHistory");
+        detailedKeys.addAll(FUBON_DETAIL_KEYS);
+        assertThat(keys).containsExactlyElementsOf(detailedKeys);
         List<String> childKeys = new ArrayList<>();
         json.path("marketData").fieldNames().forEachRemaining(childKeys::add);
         assertThat(childKeys).containsExactly("chart", "quoteDetail", "etfConstituents", "dividends");
         assertThat(json.toString()).doesNotContain("AssetSnapshot", "StockHolding", "costPrice", "investmentCost",
                 "currentValue", "transaction", "userId", "owner");
 
-        assertThat(rawRequests).singleElement().satisfies(request -> {
-            assertThat(request.url().getPath()).isEqualTo("/api/quotes/one");
+        assertThat(rawRequests).extracting(request -> request.url().getPath())
+                .containsExactlyInAnyOrder("/api/quotes/one", "/internal/fubon-live-response");
+        assertThat(rawRequests).allSatisfy(request -> {
             assertThat(request.headers()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status");
         });
         assertThat(marketRequests).extracting(request -> request.url().getPath()).containsExactlyInAnyOrder(
@@ -159,13 +169,105 @@ class PublicQuoteMarketDataServiceTest {
                         + rawQuote("2330", "台股", "2026-08-24") + "]"),
                 PublicQuoteMarketDataServiceTest::marketResponse);
 
-        List<DetailedLatestQuote> rows = ordered.list("台股", "2026-08-01", "2026-08-24").block();
+        List<ListedLatestQuote> rows = ordered.list("台股", "2026-08-01", "2026-08-24").block();
 
-        assertThat(rows).extracting(DetailedLatestQuote::stockCode).containsExactly("0050", "2330");
+        assertThat(rows).extracting(ListedLatestQuote::stockCode).containsExactly("0050", "2330");
 
         PublicQuoteMarketDataService empty = service(request -> ok("[]"),
                 PublicQuoteMarketDataServiceTest::marketResponse);
         assertThat(empty.list("台股", null, null).block()).isEmpty();
+    }
+
+    @Test
+    void listUsesTheFrozenListedDtoAndNeverCallsTheFubonResponseBridge() {
+        List<ClientRequest> rawRequests = new ArrayList<>();
+        PublicQuoteMarketDataService service = service(request -> {
+            rawRequests.add(request);
+            if ("/internal/fubon-live-response".equals(request.url().getPath())) {
+                throw new AssertionError("list must not fan out to the Fubon bridge");
+            }
+            return ok("[" + rawQuote("2330", "台股", "2026-08-24") + "]");
+        }, PublicQuoteMarketDataServiceTest::marketResponse);
+
+        ListedLatestQuote row = service.list("台股", "2026-08-01", "2026-08-24").block().getFirst();
+
+        JsonNode json = new ObjectMapper().findAndRegisterModules().valueToTree(row);
+        List<String> keys = new ArrayList<>();
+        json.fieldNames().forEachRemaining(keys::add);
+        assertThat(keys).containsExactlyElementsOf(concat(RAW_KEYS,
+                "marketData", "quoteDetail", "bidLevels", "askLevels", "dividendHistory"));
+        assertThat(json.toString()).doesNotContain("fubonSupported", "fubonAvailable", "fubonReturnedOrderBook", "counters");
+        assertThat(rawRequests).extracting(request -> request.url().getPath()).containsExactly("/api/quotes");
+    }
+
+    @Test
+    void matchingFubonSuccessEnrichesTheOneSharedTopLevelQuoteAndKeepsRawNav() {
+        List<ClientRequest> rawRequests = new ArrayList<>();
+        PublicQuoteMarketDataService service = service(request -> {
+            rawRequests.add(request);
+            return switch (request.url().getPath()) {
+                case "/api/quotes/one" -> ok(rawQuote("2330", "台股", "2026-08-24")
+                        .replace("\"source\":\"REDIS\"", "\"source\":\"FUBON_INTRADAY\""));
+                case "/internal/fubon-live-response" -> ok(fubonSuccess("FUBON_INTRADAY", "2026-08-24T02:00:00Z"));
+                default -> throw new AssertionError("unexpected raw path " + request.url().getPath());
+            };
+        }, PublicQuoteMarketDataServiceTest::marketResponse);
+
+        DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.fubonSupported()).isTrue();
+        assertThat(quote.fubonAvailable()).isTrue();
+        assertThat(quote.fubonBatchId()).isEqualTo("batch-380");
+        assertThat(quote.fubonResponseStatus()).isEqualTo("SUCCESS");
+        assertThat(quote.fubonFailureReason()).isNull();
+        assertThat(quote.price()).isEqualByComparingTo("101.50");
+        assertThat(quote.previousClose()).isEqualByComparingTo("100.00");
+        assertThat(quote.priceChange()).isEqualByComparingTo("1.50");
+        assertThat(quote.changePercent()).isEqualByComparingTo("1.500000");
+        assertThat(quote.source()).isEqualTo("FUBON_INTRADAY");
+        assertThat(quote.premiumDiscountPct()).isEqualByComparingTo("0.25");
+        assertThat(quote.fubonReturnedOrderBook().levels()).hasSize(5);
+        assertThat(quote.fubonReturnedOrderBook().levels().get(1).bidPrice()).isNull();
+        JsonNode json = new ObjectMapper().findAndRegisterModules().valueToTree(quote);
+        assertThat(json.toString()).doesNotContain("\"counters\"", "\"fubonQuote\"", "\"fubonLiveResponse\"");
+        assertThat(rawRequests).extracting(request -> request.url().getPath())
+                .containsExactlyInAnyOrder("/api/quotes/one", "/internal/fubon-live-response");
+    }
+
+    @Test
+    void mismatchedOrFailureFubonRowsNeverReplaceRawQuoteFields() {
+        AtomicInteger bridgeCalls = new AtomicInteger();
+        PublicQuoteMarketDataService mismatched = service(request -> switch (request.url().getPath()) {
+            case "/api/quotes/one" -> ok(rawQuote("2330", "台股", "2026-08-24"));
+            case "/internal/fubon-live-response" -> {
+                bridgeCalls.incrementAndGet();
+                yield ok(fubonSuccess("FUBON_INTRADAY", "2026-08-24T02:00:00Z"));
+            }
+            default -> throw new AssertionError("unexpected raw path " + request.url().getPath());
+        }, PublicQuoteMarketDataServiceTest::marketResponse);
+
+        DetailedLatestQuote mismatch = mismatched.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+        assertThat(mismatch.fubonAvailable()).isTrue();
+        assertThat(mismatch.fubonResponseStatus()).isEqualTo("SUCCESS");
+        assertThat(mismatch.price()).isEqualByComparingTo("100.50");
+        assertThat(mismatch.source()).isEqualTo("REDIS");
+        assertThat(mismatch.premiumDiscountPct()).isEqualByComparingTo("0.25");
+
+        PublicQuoteMarketDataService failure = service(request -> switch (request.url().getPath()) {
+            case "/api/quotes/one" -> ok(rawQuote("2330", "台股", "2026-08-24"));
+            case "/internal/fubon-live-response" -> ok("{\"supported\":true,\"available\":true,\"message\":null,"
+                    + "\"receivedAt\":\"2026-08-24T02:00:01Z\",\"batchId\":\"batch-failure\","
+                    + "\"status\":\"FAILURE\",\"reason\":\"QUOTE_FAILED\",\"quote\":null}");
+            default -> throw new AssertionError("unexpected raw path " + request.url().getPath());
+        }, PublicQuoteMarketDataServiceTest::marketResponse);
+
+        DetailedLatestQuote failed = failure.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+        assertThat(failed.fubonAvailable()).isTrue();
+        assertThat(failed.fubonResponseStatus()).isEqualTo("FAILURE");
+        assertThat(failed.fubonFailureReason()).isEqualTo("QUOTE_FAILED");
+        assertThat(failed.price()).isEqualByComparingTo("100.50");
+        assertThat(failed.premiumDiscountPct()).isEqualByComparingTo("0.25");
+        assertThat(bridgeCalls).hasValue(1);
     }
 
     @Test
@@ -334,7 +436,7 @@ class PublicQuoteMarketDataServiceTest {
     void productionQuoteDetailTimeoutDefaultIsTwoSeconds() {
         java.lang.reflect.Constructor<?> constructor = java.util.Arrays.stream(
                         PublicQuoteMarketDataService.class.getConstructors())
-                .filter(candidate -> candidate.getParameterCount() == 13)
+                .filter(candidate -> candidate.getParameterCount() == 14)
                 .findFirst()
                 .orElseThrow();
 
@@ -419,6 +521,24 @@ class PublicQuoteMarketDataServiceTest {
                 + "\"lowPrice\":99.00,\"volume\":123456,\"tradingDate\":\"" + tradingDate + "\","
                 + "\"updatedAt\":\"2026-08-24T10:00:00+08:00\",\"closed\":false,\"source\":\"REDIS\","
                 + "\"quoteStatus\":\"LIVE\",\"premiumDiscountPct\":0.25}";
+    }
+
+    private static String fubonSuccess(String source, String updatedAt) {
+        return "{\"supported\":true,\"available\":true,\"message\":null,"
+                + "\"receivedAt\":\"2026-08-24T02:00:01Z\",\"batchId\":\"batch-380\","
+                + "\"status\":\"SUCCESS\",\"reason\":null,\"quote\":{"
+                + "\"stockCode\":\"2330\",\"stockName\":\"台積電\",\"market\":\"台股\","
+                + "\"actualPrice\":101.50,\"previousClose\":100.00,\"openPrice\":100.50,"
+                + "\"highPrice\":102.00,\"lowPrice\":99.50,\"buyPrice\":101.00,\"sellPrice\":102.00,"
+                + "\"volume\":54321,\"updatedAt\":\"" + updatedAt + "\",\"tradingDate\":\"2026-08-24\","
+                + "\"source\":\"" + source + "\",\"closed\":false,\"quoteStatus\":\"LIVE\","
+                + "\"orderBook\":{\"bookUpdatedAt\":\"2026-08-24T02:00:00Z\",\"averagePrice\":101.25,"
+                + "\"turnoverYi\":12.34,\"innerVolumeLots\":10,\"outerVolumeLots\":12,\"levels\":["
+                + "{\"level\":1,\"bidPrice\":101,\"bidVolumeLots\":1,\"askPrice\":102,\"askVolumeLots\":2},"
+                + "{\"level\":2,\"bidPrice\":null,\"bidVolumeLots\":null,\"askPrice\":103,\"askVolumeLots\":3},"
+                + "{\"level\":3,\"bidPrice\":99,\"bidVolumeLots\":4,\"askPrice\":104,\"askVolumeLots\":5},"
+                + "{\"level\":4,\"bidPrice\":98,\"bidVolumeLots\":6,\"askPrice\":105,\"askVolumeLots\":7},"
+                + "{\"level\":5,\"bidPrice\":97,\"bidVolumeLots\":8,\"askPrice\":106,\"askVolumeLots\":9}]}}}";
     }
 
     private static String completeBook(String source) {

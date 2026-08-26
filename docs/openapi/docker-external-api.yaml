@@ -42,6 +42,8 @@ paths:
         `askLevels`、`dividendHistory` 供批次程式使用。
         market 省略時掃描台股、美股、英股；raw index 的順序、空快取 `[]` 與 raw 讀取語意不變。
         `marketData` 不讀、也不含 configured admin、使用者、帳戶、券商、個人持股／成本／交易／快照／配置。
+        list 固定使用 `ListedLatestQuote` 的既有 24 欄，零 Fubon full-response bridge calls；不新增 Fubon
+        metadata、failure、raw returned order-book 或 process-global counters。
         台股 `quoteDetail`／direct 五檔來自 producer 已保存的同一 immutable canonical snapshot：富邦是每十秒
         round 的 primary，只有該 round 的 selected code 缺有效完整五檔時，獨立 Yahoo worker 才會非同步逐檔
         fallback。available snapshot 的 source 僅可能為 `FUBON_BOOKS` 或 `YAHOO_TW`，兩者都必須是完整五檔，
@@ -77,7 +79,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/DetailedLatestQuote'
+                  $ref: '#/components/schemas/ListedLatestQuote'
               examples:
                 synthetic:
                   summary: 去識別化合成範例
@@ -128,9 +130,12 @@ paths:
       description: |
         只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
         raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
-        normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。台股五檔只讀 producer 已保存的
+        normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。single response 只在最後追加去重的
+        Fubon metadata、failure state 與 raw returned order-book，沒有 nested Fubon quote 或 global counters。台股五檔只讀 producer 已保存的
         `FUBON_BOOKS` primary 或受限 `YAHOO_TW` fallback canonical snapshot；回應不會在 request-time 外呼、
-        寫入或修復快取。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
+        寫入或修復快取。stored Fubon SUCCESS 只有 source、tradingDate、normalized updatedAt 都等於 raw cache
+        canonical quote 時才可填入同一份既有 top-level quote fields；不符合時 raw fields 與獨立 ETF NAV
+        `premiumDiscountPct` 完全保留。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
         交易或資產快照。
       parameters:
         - name: code
@@ -1025,12 +1030,13 @@ components:
           type: [number, 'null']
           description: required nullable number；百分點數值，正值為溢價、負值為折價，例如 0.07 表示溢價 0.07%。只轉交 `price:etfnav:*` 的同名來源欄位；缺值時不以 price 與 nav 反推。一般股票與目前不帶官方折溢價的美股 ETF 為 null。price 的 updatedAt／tradingDate 不是 NAV 時點，NAV key TTL 為 96 小時且與 price producer 非同 tick。本 API 不另提供 nav／navAsOf。
       additionalProperties: false
-    DetailedLatestQuote:
+    LatestQuoteShared:
       type: object
-      description: Requirement 110 的 host response class。前 19 個 raw LatestQuote attribute 依原始 record 順序
-        固定保留，後接 required 的 marketData 與同一 immutable canonical snapshot 投影的 direct quoteDetail、
-        bidLevels、askLevels、dividendHistory。每個 required attribute 都固定出現；其型別含 null 時表示來源／
-        child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
+      description: 供 `ListedLatestQuote` 與 `DetailedLatestQuote` 共用的既有 24 個 top-level quote fields。前 19 個
+        raw LatestQuote attribute 依原始 record 順序固定保留，後接 required 的 marketData 與同一 immutable
+        canonical snapshot 投影的 direct quoteDetail、bidLevels、askLevels、dividendHistory。每個 required attribute
+        都固定出現；其型別含 null 時表示來源／child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、
+        成本、交易、快照、配置或建議。
       required:
       - stockCode
       - stockName
@@ -1182,6 +1188,117 @@ components:
         dividendHistory:
           "$ref": "#/components/schemas/PublicDividendHistory"
           description: required `PublicDividendHistory` nested class；與 marketData.dividends 相同的 immutable readonly 公開股利資料，非個人股利紀錄。
+    ListedLatestQuote:
+      description: GET `/api/quotes` 專用既有 list response class；只投影 `LatestQuoteShared` 的固定 24 欄，零
+        Fubon full-response bridge calls。最外層 `unevaluatedProperties=false` 使 list wire response 不可加入額外欄位。
+      allOf:
+        - $ref: '#/components/schemas/LatestQuoteShared'
+          description: list 固定保留 shared quote fields 的名稱、順序與語義。
+      unevaluatedProperties: false
+    DetailedLatestQuote:
+      description: GET `/api/quotes/one` 專用 response class。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
+      allOf:
+        - $ref: '#/components/schemas/LatestQuoteShared'
+          description: 原始 24 個 shared quote fields 依相同名稱和順序保留；list 與 single 的 shared quote semantics 相同。
+        - type: object
+          description: 單檔 full-response projection 的新增欄位；每個狀態欄固定出現，nullable 欄位以 null 表示沒有已保存 response。
+          required: [fubonSupported, fubonAvailable, fubonMessage, fubonReceivedAt, fubonBatchId, fubonResponseStatus, fubonFailureReason, fubonReturnedOrderBook]
+          properties:
+            fubonSupported:
+              type: boolean
+              description: required boolean；台股非 `0000` 為 true，非台股或 `0000` 為 false；false 時不讀 full-response DB/Redis。
+            fubonAvailable:
+              type: boolean
+              description: required boolean；true 代表讀到已保存 SUCCESS 或 FAILURE normalized response；false 代表無保存列或 child failure，不觸發 vendor I/O。
+            fubonMessage:
+              type: [string, 'null']
+              description: required nullable client-safe read-state message；available 時通常為 null，unavailable／unsupported 時解釋原因，不含上游 URL、帳戶或例外細節。
+            fubonReceivedAt:
+              type: [string, 'null']
+              format: date-time
+              description: required nullable UTC receipt instant；這是 DB canonical full-response 收到的微秒時點，不是 quote updatedAt、Redis SET 時點或交易時間。
+            fubonBatchId:
+              type: [string, 'null']
+              pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+              description: required nullable normalized adapter batchId；只有已保存 response 才有值，非 SDK token、帳戶或持股識別。
+            fubonResponseStatus:
+              type: [string, 'null']
+              enum: [SUCCESS, FAILURE, null]
+              description: required nullable normalized row status；SUCCESS 有合法 shared-quote source/date/time gate，FAILURE 保留 typed failure reason，null 表示 unavailable 或 unsupported。
+            fubonFailureReason:
+              type: [string, 'null']
+              pattern: '^[A-Z_]{1,64}$'
+              description: required nullable typed normalized failure reason；只在 fubonResponseStatus=FAILURE 時有值，SUCCESS、unavailable 與 unsupported 為 null。
+            fubonReturnedOrderBook:
+              description: required nullable typed raw normalized Fubon returned order-book；它可保留 fixed null slots，與 strict canonical quoteDetail 不可互換。
+              anyOf:
+                - $ref: '#/components/schemas/FubonReturnedOrderBook'
+                  description: 已保存 SUCCESS normalized row 的 raw returned book；不是 strict canonical quoteDetail。
+                - type: 'null'
+                  description: FAILURE、無 book、unavailable 或 unsupported 時的 null；不以 generic best bid/ask 補值。
+      unevaluatedProperties: false
+    FubonReturnedOrderBook:
+      type: object
+      description: 已驗證並保存的 normalized Fubon optional orderBook。它忠實保留五個 fixed slots 的 null pair，故不同於只接受完整正值五檔的 `PublicQuoteDetail`／direct quoteDetail；既不回填 generic price，也不改寫 canonical book revision。
+      required: [bookUpdatedAt, averagePrice, turnoverYi, innerVolumeLots, outerVolumeLots, levels]
+      properties:
+        bookUpdatedAt:
+          type: string
+          format: date-time
+          description: required UTC normalized book update instant；此 book 自己的來源時點，可能與 shared quote updatedAt 不同。
+        averagePrice:
+          type: [number, 'null']
+          description: required nullable normalized average price；adapter 未提供時為 null，不從成交量或價格反推。
+        turnoverYi:
+          type: [number, 'null']
+          description: required nullable normalized turnover in 億元；adapter 未提供時為 null，不由 volume 推算。
+        innerVolumeLots:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: required nullable normalized inner-volume lots；null 表示 adapter 未提供，0 是合法實際值。
+        outerVolumeLots:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: required nullable normalized outer-volume lots；null 表示 adapter 未提供，0 是合法實際值。
+        levels:
+          type: array
+          minItems: 5
+          maxItems: 5
+          description: required exactly five fixed level slots in ascending level 1 through 5；bid/ask price and lots each are paired null or a normalized nonnegative lot with positive price.
+          items:
+            $ref: '#/components/schemas/FubonReturnedOrderBookLevel'
+            description: Fubon normalized returned order-book 的一個固定順位 slot。
+      additionalProperties: false
+    FubonReturnedOrderBookLevel:
+      type: object
+      description: FubonReturnedOrderBook 的單一 fixed slot；每一側的 price 與 volume 必同時為 null 或同時有值，null 不表示零價或可由其他來源補齊。
+      required: [level, bidPrice, bidVolumeLots, askPrice, askVolumeLots]
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: required fixed integer level；levels 陣列依序恰為 1、2、3、4、5。
+        bidPrice:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: required nullable normalized bid price；與 bidVolumeLots 成對為 null 或正價格。
+        bidVolumeLots:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: required nullable normalized bid lots；與 bidPrice 成對為 null 或非負整數。
+        askPrice:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: required nullable normalized ask price；與 askVolumeLots 成對為 null 或正價格。
+        askVolumeLots:
+          type: [integer, 'null']
+          format: int64
+          minimum: 0
+          description: required nullable normalized ask lots；與 askPrice 成對為 null 或非負整數。
       additionalProperties: false
     PublicQuoteMarketData:
       type: object

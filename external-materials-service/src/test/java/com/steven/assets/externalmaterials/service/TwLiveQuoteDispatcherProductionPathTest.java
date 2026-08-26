@@ -136,6 +136,7 @@ class TwLiveQuoteDispatcherProductionPathTest {
         when(fubon.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
                 FubonNormalizedQuoteClient.BatchStatus.SUCCESS, List.of(observation), 1, 0, Map.of(), Map.of("2330", book)));
         StockSourceQuery source = appliedSource(raw);
+        allowAllTaiwanCodes(source);
         PriceCacheWriter genericWriter = mock(PriceCacheWriter.class);
         when(genericWriter.writeTaiwanLive(any(), anyBoolean())).thenReturn(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
         TwFubonOrderBookRoundWriter orderBookWriter = mock(TwFubonOrderBookRoundWriter.class);
@@ -163,21 +164,23 @@ class TwLiveQuoteDispatcherProductionPathTest {
         FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
         @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubonProvider = mock(ObjectProvider.class);
         when(fubonProvider.getIfAvailable()).thenReturn(fubon);
-        when(fubon.fetch(List.of("2330", "AAPL"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.PARTIAL_FAILURE, List.of(), 2, 2, Map.of(), Map.of()));
+        when(fubon.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
+                FubonNormalizedQuoteClient.BatchStatus.PARTIAL_FAILURE, List.of(), 1, 1, Map.of(), Map.of()));
         @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> fubonBookProvider = mock(ObjectProvider.class);
         TwYahooOrderBookFallbackRoundWriter yahooBookWriter = mock(TwYahooOrderBookFallbackRoundWriter.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBookProvider = mock(ObjectProvider.class);
         when(yahooBookProvider.getIfAvailable()).thenReturn(yahooBookWriter);
 
-        new TwLiveQuoteDispatcher(openClock(), prices, fubonProvider, mock(StockSourceQuery.class),
+        StockSourceQuery source = mock(StockSourceQuery.class);
+        allowAllTaiwanCodes(source);
+        new TwLiveQuoteDispatcher(openClock(), prices, fubonProvider, source,
                 mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(), fubonBookProvider, yahooBookProvider, true, true)
                 .refresh(Set.of("2330", "AAPL", "0000"));
 
         verify(yahooBookWriter).submit(List.of("2330"));
-        verify(fubon).fetch(List.of("2330", "AAPL"));
+        verify(fubon).fetch(List.of("2330"));
         // The existing generic chain remains exactly one normal batch; Yahoo best-five adds no price-provider call.
-        verify(prices).fetchTwBatch(List.of("2330", "AAPL"));
+        verify(prices).fetchTwBatch(List.of("2330"));
     }
 
     @Test
@@ -261,7 +264,19 @@ class TwLiveQuoteDispatcherProductionPathTest {
     private static TwLiveQuoteDispatcher dispatcher(MarketClock clock, PriceFetchClient prices,
             ObjectProvider<FubonNormalizedQuoteClient> fubon, StockSourceQuery source, PriceCacheWriter writer,
             boolean enabled, boolean live) {
+        allowAllTaiwanCodes(source);
         return new TwLiveQuoteDispatcher(clock, prices, fubon, source, writer, new TwLiveQuoteOutcomeCounters(), enabled, live);
+    }
+
+    /** Legacy capacity tests intentionally make every possible Taiwan code part of the test radar. */
+    private static void allowAllTaiwanCodes(StockSourceQuery source) {
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked") Set<String> radar = invocation.getArgument(0);
+            for (int code = 1; code <= 9_999; code++) {
+                radar.add(String.format("%04d", code));
+            }
+            return null;
+        }).when(source).collectTwRadarCodes(any());
     }
     private static MarketClock openClock() { MarketClock clock = mock(MarketClock.class); when(clock.isTwMarketOpenKnown()).thenReturn(Optional.of(true)); return clock; }
     private static void noMisOrYahoo(PriceFetchClient prices) { when(prices.fetchTwBatch(anyList())).thenReturn(emptyMis()); when(prices.getYahooTwLivePrice(any())).thenReturn(Optional.empty()); }

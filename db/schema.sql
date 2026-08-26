@@ -45,8 +45,8 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres 容器，2026-08-23
--- 產生當下表數：89 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump＋隔離 v1.117 套用，2026-08-26
+-- 產生當下表數：90 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -986,6 +986,24 @@ CREATE TABLE public.foreign_stock_daily_history (
     stock_code character varying(16) NOT NULL,
     trading_date date NOT NULL,
     close_point numeric(18,4) NOT NULL
+);
+
+
+--
+-- Name: fubon_tw_live_quote_response; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_tw_live_quote_response (
+    stock_code character varying(20) NOT NULL,
+    market character varying(20) NOT NULL,
+    received_at timestamp with time zone NOT NULL,
+    batch_id character varying(64) NOT NULL,
+    counters jsonb NOT NULL,
+    response_row jsonb NOT NULL,
+    CONSTRAINT ck_fubon_tw_live_quote_response_batch_id CHECK ((btrim((batch_id)::text) <> ''::text)),
+    CONSTRAINT ck_fubon_tw_live_quote_response_counters_object CHECK ((jsonb_typeof(counters) = 'object'::text)),
+    CONSTRAINT ck_fubon_tw_live_quote_response_market CHECK (((market)::text = '台股'::text)),
+    CONSTRAINT ck_fubon_tw_live_quote_response_row_object CHECK ((jsonb_typeof(response_row) = 'object'::text))
 );
 
 
@@ -3519,6 +3537,14 @@ ALTER TABLE ONLY public.payment_category
 
 ALTER TABLE ONLY public.payment_category
     ADD CONSTRAINT payment_category_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: fubon_tw_live_quote_response pk_fubon_tw_live_quote_response; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_tw_live_quote_response
+    ADD CONSTRAINT pk_fubon_tw_live_quote_response PRIMARY KEY (stock_code, market);
 
 
 --

@@ -9876,3 +9876,132 @@ MIS/Yahoo 的日內 high/low 必須改成「先唯讀取既有 aggregate、只�
 目前 universe 不超過 40 時，每檔每 10 秒都先走 Fubon。輸入先依 code 穩定字典序正規化，dispatcher 不得保留 100 檔靜默截斷；超過 40 時以 cursor round-robin 選出最多 40 檔，未入選者該輪直接從 MIS 開始並記錄 capacity outcome；下一輪必須從上次結尾接續，不能固定只服務前 40。MIS fallback 若超過它的 320 code request cap，必須分為多個保序 batch 並合併每個 code 的 outcome。Fubon 回 rate/circuit outcome 時設 local skip，已知 circuit 期間直接 MIS→Yahoo，並在 circuit 到期後才恢復嘗試。
 
 不增加新的公開 HTTP endpoint、Redis key schema、SSE schema 或任何下單能力；Fubon adapter 繼續只允許查詢，沒有 order/modify/cancel 呼叫。
+
+### Requirement 115／Task 380：交易雷達 scoped Fubon LIVE 與完整回應 mirror
+
+Requirement 115 對 Requirement 106 作出兩個精確收窄：台股即時 producer 的**全部**外呼 candidate（不只是 Fubon）改為「每檔同時屬於本 round 輸入與今日交易雷達」，以及為完整 internal response mirror 允許一組新 dedicated Redis key。它保留交易時間、in-flight、circuit、40 檔 Fubon 容量、effective radar codes 的 Fubon→MIS→Yahoo fallback 與既有 generic quote／tick／SSE／day-H/L key 語意；它不再允許非雷達 code 走任一台股即時 provider。這不擴及歷史回補、正式收盤或其他明確不同功能。唯一公開契約變更是既有 9090 `GET /api/quotes/one` 的 additive, de-duplicated top-level Fubon metadata/order-book fields on `DetailedLatestQuote`。
+
+#### 雷達邊界與 producer flow
+
+`StockSourceQuery.collectTwRadarCodes` 是唯一集合 authority。它以每個 owner 最新 snapshot 的台股持股聯集台股 `stock_alert`，並於 SQL/collector boundary 排除 `0000`。每一個 dispatcher entry 都把它作為同一個 second boundary，而不是只有 `TwRadarRefreshService` 自己先查一次：
+
+```text
+normalised dispatcher input C
+  └─ R = collectTwRadarCodes()                   # per-owner latest TW holdings ∪ TW alerts − 0000
+     E = stable-sort(C ∩ R)                      # the only live-market-data candidate set
+     R empty / collector error / E empty → zero Fubon/MIS/Yahoo HTTP and zero book work
+  └─ pending E only
+       when FUBON_ENABLED && FUBON_TW_LIVE_QUOTES_ENABLED && adapter available:
+         fair cursor chooses at most 40 only from E
+         Fubon accepted price removes only its code from pending
+       all remaining E members continue existing MIS → Yahoo actual-price fallback
+       every C \ E member terminates without an external live-quote request
+```
+
+`R` never leaves the service as a tenant/owner/holding result. The request body contains only the stable selected code list and `purpose=LIVE`. A collector exception is fail closed for **all Taiwan live market-data providers**: it cannot fall back to `collectHeldStockCodes`, an older Redis value, a user-facing radar response, or any guessed universe. It terminates this dispatcher round with zero Fubon/MIS/Yahoo/book work. The selected Fubon list is the only eligible Fubon order-book and same-round Yahoo-book fallback candidate list; the larger effective set `E` is the only eligible generic MIS/Yahoo actual-price list.
+
+The backend inventory adapter remains a different consumer: its `FubonHttpClient.readTwQuotes` sends `purpose=INVENTORY` under the existing inventory flag/capacity contract. It does not receive a radar set, does not write this mirror, and cannot be widened into a market-data producer by this feature.
+
+#### 完整標準化回應的 durable mirror
+
+The endpoint already deliberately returns a bounded normalized JSON response rather than the proprietary SDK object:
+
+```json
+{
+  "batchId": "...",
+  "quotes": [
+    {
+      "stockCode": "2330",
+      "status": "SUCCESS|FAILURE",
+      "reason": null,
+      "quote": { "all normalized quote fields, optional orderBook": "..." }
+    }
+  ],
+  "counters": { "fixed adapter outcome counters": 0 }
+}
+```
+
+`FubonNormalizedQuoteClient` separates **lossless wire validation** from the existing canonical-price mapper. It enables strict duplicate-key detection before materializing JSON: a legal root is exactly `batchId`, `counters`, `quotes`, with `batchId` matching `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`; each row is exactly `stockCode`, `status`, `reason`, `quote`. The root must additionally contain a `counters` object with exactly these 13 nonnegative `int64` names and no others: `DISABLED`, `MISCONFIGURED`, `CALENDAR_UNKNOWN`, `ACCOUNTING_FAILED`, `RECONCILE_FAILED`, `QUOTE_FAILED`, `NO_OWNER`, `NO_TODAY_SNAPSHOT`, `BROKER_MISSING`, `DRY_RUN`, `SUCCESS`, `EMPTY_CLEARED`, `ROLLED_BACK`. A row status is exactly `SUCCESS` or `FAILURE`; SUCCESS requires `reason=null` and an object quote, while FAILURE requires `quote=null` and a reason matching `^[A-Z_]{1,64}$`. Before persistence, a SUCCESS quote is checked losslessly for its exact known field set, row/requested-code identity, literal Taiwan market/source/`LIVE` status, canonical decimal and nonnegative integer types, ISO trading date, RFC3339 instant, boolean, and nullable rules. Its optional book must have only its known fields and exactly five fixed `level=1..5` slots; each bid/ask price+lot pair is both null or a canonical positive price plus nonnegative int64 lot. Any duplicate/unknown/ill-typed quote property, wrong inner code/market, or malformed nullable book slot rejects the complete envelope rather than storing an arbitrary JSONB shape. Only **after** that gate does the existing mapper decide current-date/closed/OHLC actual-price eligibility and strict complete-book eligibility. Thus a structurally legal stale/closed/partial-book normalized row is retained exactly even when it produces no generic observation or canonical book. Once the HTTP-200 envelope has passed all boundary checks, it retains a typed immutable representation of the exact `batchId`, complete counters object, and each full row JSON. Duplicate or unknown root/row property, invalid batch id, missing/extra/negative/nonintegral counter, duplicate/missing/request-mismatched code, invalid status/reason relation, or oversize body never produces this representation and must not be persisted as raw JSON.
+
+The new latest-state table is intentionally separate from `stock_intraday_quote`:
+
+```sql
+fubon_tw_live_quote_response
+  stock_code    VARCHAR(20) NOT NULL
+  market        VARCHAR(20) NOT NULL CHECK (market = '台股')
+  received_at   TIMESTAMPTZ NOT NULL
+  batch_id      VARCHAR(64) NOT NULL
+  counters      JSONB NOT NULL CHECK (jsonb_typeof(counters) = 'object')
+  response_row  JSONB NOT NULL CHECK (jsonb_typeof(response_row) = 'object')
+  PRIMARY KEY (stock_code, market)
+```
+
+`response_row` is the whole normalized per-code row, including nullable `quote`; `batchId` and the response-wide `counters` are copied alongside every requested code so any stored code can be inspected without reconstructing a prior batch. This is the latest durable response state—not a per-ten-second event archive—and is deliberately free of owner, account, token, SDK raw payload, or broker data.
+
+One batch persists all its requested rows in a single DB transaction. The timestamp used for the response-state upsert is one microsecond-precision dispatcher receipt time for that batch; `(stock_code, market)` only advances when `EXCLUDED.received_at > current.received_at`. The transaction returns the canonical rows, including stale rereads. Only those DB-returned rows can be mirrored to Redis:
+
+```text
+PostgreSQL fubon_tw_live_quote_response canonical row
+  → price:fubon-live-response:台股:{stockCode} (24 h TTL, DB receipt-time strict fence)
+```
+
+The Redis envelope contains exactly the canonical `receivedAt`, `batchId`, `counters`, and `responseRow`. A delayed or equal receipt must neither overwrite nor refresh TTL. It is never added to `price:{market}:{code}`, `price:quote-detail:*`, any index, tick list or channel; it only feeds the separately bounded, pure-read single-quote projection described below. A Redis failure leaves the DB canonical response intact and later response processing retries the mirror from DB; a DB failure invalidates the entire Fubon batch for price/book processing so only the effective radar set starts the normal MIS/Yahoo chain. The cache fence is tested under real interleaving, not just sequential rows: A(t1) commits then pauses before mirror; B(t2) commits and mirrors; A's delayed Lua write is rejected. If B's mirror fails while delayed A remains in Redis, the read bridge compares DB `receivedAt` and returns B's DB canonical row, never A.
+
+#### 與既有 canonical projections 的關係
+
+The mirror is an auditable copy of the **returned normalized row**. It is not an alternate price authority:
+
+| Returned content | Durable/current projection |
+|---|---|
+| `batchId`, `counters`, `status`, `reason`, every `quote` field including optional/incomplete book | `fubon_tw_live_quote_response.response_row` plus its Redis mirror |
+| Valid actual trade, name, OHLC, best buy/sell, volume, source/date/time | existing `stock_intraday_quote`, `stock.name`, generic latest Redis payload |
+| Valid complete five-level book | existing canonical order-book header/levels and `price:quote-detail:*` |
+
+Consequently an accepted, well-formed response with an equal/older actual-trade time still advances the dedicated response receipt mirror, while it must leave generic price DB/Redis, tick, day-H/L, SSE, and complete-book canonical revision untouched. Conversely, an incomplete `orderBook` is retained in `response_row` but cannot pass the strict five-level mapper/store or masquerade as a `FUBON_BOOKS` snapshot. This preserves both the user's complete-data requirement and the strict price monotonicity contract.
+
+#### 9090 `GET /api/quotes/one` full-response projection
+
+The stored response is exposed only through the already allowlisted single-quote route, never through `GET /api/quotes` list. `external-materials-service` adds one Docker-network-only exact bridge:
+
+```text
+GET /internal/fubon-live-response?code={code}&market={market}
+  → validate Taiwan/non-0000 identity
+  → Redis candidate (`price:fubon-live-response:*`)
+  → PostgreSQL current `received_at` validation
+  → matching cache OR DB canonical row OR typed unavailable
+```
+
+This bridge performs no repair/write/vendor I/O. It returns a typed safe envelope rather than arbitrary JSONB:
+
+```text
+FubonLiveResponse
+  supported, available, message
+  receivedAt, batchId
+  status, reason
+  quote
+    stockCode, stockName, market
+    actualPrice, previousClose, openPrice, highPrice, lowPrice
+    buyPrice, sellPrice, volume, updatedAt, tradingDate, source, closed, quoteStatus
+    orderBook?
+      bookUpdatedAt, averagePrice, turnoverYi, innerVolumeLots, outerVolumeLots
+      levels[]: level, bidPrice?, bidVolumeLots?, askPrice?, askVolumeLots?
+```
+
+The full 13-key `counters` object is persistently retained in the DB/Redis mirror, but the bridge deliberately does not return it: it is adapter-wide process telemetry with accounting/portfolio lifecycle outcomes, not a per-stock market field, and no public/no-tenant route may disclose it. A success response has `available=true`, `status=SUCCESS`, a null reason, and a complete standardized `quote`; a stored failure has `available=true`, `status=FAILURE`, typed reason, and `quote=null`. A Taiwan non-`0000` response miss is `supported=true, available=false`; unsupported market or `0000` is `supported=false, available=false`. `orderBook` is intentionally not revalidated as a complete five-level snapshot for this surface: it reflects the saved normalized response and may contain the original nullable fixed slots. The established `quoteDetail`/direct five-book surface remains the strict complete canonical projection.
+
+The BFF keeps its first raw quote read and its raw-cache `204` behavior. Only after a raw quote exists, the **single quote** enrichment fan-out adds this no-tenant external bridge to the existing chart/quote-detail/ETF/dividend reads. The bridge's `quote` is an internal transfer shape, not a public duplicate. It may supply the already-existing top-level quote fields exactly once (`actualPrice → price`; `priceChange`/`changePercent` are derived only from that same row's price/previous close) **only** when a stored `SUCCESS` row has the same source and trading date as the raw cache canonical quote and the two `updatedAt` representations parse to the same market instant. A date/source/time mismatch—including a prior-day mirror or newer MIS/Yahoo raw quote—leaves the raw fields intact, so the response mirror never becomes a price authority. `premiumDiscountPct` always stays the independent raw ETF-NAV value because Fubon has no equivalent. It appends only the semantically distinct response metadata and the raw, potentially incomplete book:
+
+```text
+GET /api/quotes/one
+  shared quote fields (one copy: stored Fubon SUCCESS row only when raw provenance/time match; otherwise raw cache)
+  marketData
+    chart, quoteDetail, etfConstituents, dividends (unchanged)
+  direct quoteDetail/bidLevels/askLevels/dividendHistory (unchanged)
+  fubonSupported, fubonAvailable, fubonMessage
+  fubonReceivedAt, fubonBatchId
+  fubonResponseStatus, fubonFailureReason, fubonReturnedOrderBook
+```
+
+`fubonSupported`/`fubonAvailable`/`fubonMessage` make the support and read state explicit; the remaining Fubon fields are null unless a stored row exists. `fubonResponseStatus=FAILURE` preserves the typed failure reason while the one shared quote-field set stays raw-cache-derived. `fubonReturnedOrderBook` is the bounded normalized response book and can retain null slots; it is deliberately not synonymous with the pre-existing strict complete canonical `quoteDetail`, whose source/revision/availability contract remains unchanged. The process-global 13-key response `counters` has no bridge or public `DetailedLatestQuote` field. No second public `quote`, `fubonQuote`, `actualPrice`, OHLC, buy/sell, volume, source/date/status, or other same-business-meaning field is allowed. `DetailedLatestQuote` is exclusively the single-quote DTO and appends these top-level fields after all existing fields. Add immutable `ListedLatestQuote`, containing precisely the former 24 fields in their existing order (raw 19, `marketData`, direct `quoteDetail`/`bidLevels`/`askLevels`/`dividendHistory`): `PublicQuoteMarketDataController.list`, `PublicQuoteMarketDataService.list` and all list-enrichment/fallback generics return it, and `/api/quotes` OpenAPI array items reference it. Thus the list DTO, JSON key/order and fan-out remain exactly as before, with zero bridge calls and no latency/capacity change. BFF timeout, bad bridge body or unavailable storage maps only the Fubon fields to their typed unavailable state—never to a vendor call, a cache repair, or a failed outer response. The OpenAPI schema explicitly describes every nested field, null meaning, status/reason format, five-level ordering and the no-request-time-I/O boundary.
+
+No new 9090 route, public business route, history-retention API, or SDK payload expansion is authorised. Future endpoint fields still require a contract/spec update before being exposed publicly.

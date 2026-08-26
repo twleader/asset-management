@@ -1,6 +1,7 @@
 package com.steven.assets.bff.publicquote;
 
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DetailedLatestQuote;
+import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.ListedLatestQuote;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,7 +21,7 @@ public class PublicQuoteMarketDataController {
     private final PublicQuoteMarketDataService service;
 
     @GetMapping
-    public Mono<List<DetailedLatestQuote>> list(
+    public Mono<List<ListedLatestQuote>> list(
             @RequestParam(required = false) String market,
             @RequestParam(required = false) String start,
             @RequestParam(required = false) String end) {

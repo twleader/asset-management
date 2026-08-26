@@ -1,5 +1,7 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -19,8 +21,11 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -41,6 +46,28 @@ public class FubonNormalizedQuoteClient {
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final String NORMALIZED_PATH = "/internal/market-data/tw-quotes";
     private static final String TOKEN_HEADER = "X-Internal-Service-Token";
+    private static final Pattern BATCH_ID = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$");
+    private static final Pattern FAILURE_REASON = Pattern.compile("^[A-Z_]{1,64}$");
+    private static final Pattern CANONICAL_DECIMAL = Pattern.compile("^(0|[1-9][0-9]*)(?:\\.[0-9]+)?$");
+    private static final Set<String> ROOT_FIELDS = Set.of("batchId", "counters", "quotes");
+    private static final Set<String> ROW_FIELDS = Set.of("stockCode", "status", "reason", "quote");
+    private static final Set<String> QUOTE_FIELDS = Set.of(
+            "stockCode", "stockName", "market", "actualPrice", "previousClose", "openPrice", "highPrice",
+            "lowPrice", "buyPrice", "sellPrice", "volume", "updatedAt", "tradingDate", "source", "closed",
+            "quoteStatus", "orderBook");
+    private static final Set<String> REQUIRED_QUOTE_FIELDS = Set.of(
+            "stockCode", "stockName", "market", "actualPrice", "previousClose", "openPrice", "highPrice",
+            "lowPrice", "buyPrice", "sellPrice", "volume", "updatedAt", "tradingDate", "source", "closed",
+            "quoteStatus");
+    private static final Set<String> ORDER_BOOK_FIELDS = Set.of(
+            "bookUpdatedAt", "averagePrice", "turnoverYi", "innerVolumeLots", "outerVolumeLots", "levels");
+    private static final Set<String> ORDER_BOOK_LEVEL_FIELDS = Set.of(
+            "level", "bidPrice", "bidVolumeLots", "askPrice", "askVolumeLots");
+    /** Adapter outcome order is a contract, not an open-ended telemetry map. */
+    private static final List<String> COUNTER_NAMES = List.of(
+            "DISABLED", "MISCONFIGURED", "CALENDAR_UNKNOWN", "ACCOUNTING_FAILED", "RECONCILE_FAILED",
+            "QUOTE_FAILED", "NO_OWNER", "NO_TODAY_SNAPSHOT", "BROKER_MISSING", "DRY_RUN", "SUCCESS",
+            "EMPTY_CLEARED", "ROLLED_BACK");
 
     private final String baseUrl;
     private final String tokenPath;
@@ -59,7 +86,11 @@ public class FubonNormalizedQuoteClient {
         this.baseUrl = baseUrl;
         this.tokenPath = tokenPath;
         this.transport = transport;
-        this.mapper = new ObjectMapper();
+        // A normal tree parser silently accepts duplicate JSON keys.  The mirror keeps a lossless,
+        // auditable normalized response, so duplicate keys must be rejected before anything is mapped.
+        this.mapper = new ObjectMapper(JsonFactory.builder()
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build());
         this.quoteMapper = new FubonNormalizedQuoteMapper(clock);
     }
 
@@ -113,17 +144,19 @@ public class FubonNormalizedQuoteClient {
         try {
             JsonNode root = mapper.readTree(body);
             JsonNode batchId = root == null ? null : root.get("batchId");
+            JsonNode counters = root == null ? null : root.get("counters");
             JsonNode rows = root == null ? null : root.get("quotes");
-            if (root == null || !root.isObject() || batchId == null || !batchId.isTextual()
-                    || batchId.textValue().isBlank() || rows == null || !rows.isArray()) {
+            if (!hasExactly(root, ROOT_FIELDS) || batchId == null || !batchId.isTextual()
+                    || !BATCH_ID.matcher(batchId.textValue()).matches() || rows == null || !rows.isArray()) {
                 return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
             }
+            String countersJson = validateCounters(counters);
 
             Set<String> requested = new LinkedHashSet<>(codes);
             Set<String> seen = new HashSet<>();
             for (JsonNode row : rows) {
                 JsonNode code = row == null ? null : row.get("stockCode");
-                if (row == null || !row.isObject() || code == null || !code.isTextual()
+                if (!hasExactly(row, ROW_FIELDS) || code == null || !code.isTextual()
                         || !requested.contains(code.textValue()) || !seen.add(code.textValue())) {
                     return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
                 }
@@ -135,27 +168,31 @@ public class FubonNormalizedQuoteClient {
             List<ProviderTimedPriceObservation> observations = new ArrayList<>();
             Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks = new LinkedHashMap<>();
             Map<String, String> failureReasons = new LinkedHashMap<>();
+            Map<String, String> responseRows = new LinkedHashMap<>();
             int rejected = 0;
             for (JsonNode row : rows) {
                 String code = row.get("stockCode").textValue();
                 JsonNode status = row.get("status");
                 if (status == null || !status.isTextual()) {
-                    rejected++;
-                    failureReasons.put(code, "INVALID_STATUS");
-                    continue;
+                    return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
                 }
                 if ("FAILURE".equals(status.textValue())) {
+                    if (!validFailureRow(row)) return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
                     rejected++;
-                    failureReasons.put(code, failureReason(row));
+                    failureReasons.put(code, row.get("reason").textValue());
+                    responseRows.put(code, mapper.writeValueAsString(row));
                     continue;
                 }
                 if (!"SUCCESS".equals(status.textValue())) {
-                    rejected++;
-                    failureReasons.put(code, "INVALID_STATUS");
-                    continue;
+                    return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
                 }
+                JsonNode quote = row.get("quote");
+                if (!validSuccessRow(code, row, quote)) return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
+                // The raw validated row is retained even if the established current-price mapper later
+                // rejects it as stale, closed, future, or an incomplete canonical five-book.
+                responseRows.put(code, mapper.writeValueAsString(row));
                 try {
-                    FubonNormalizedQuoteMapper.MappedQuote mapped = quoteMapper.mapWithOrderBook(code, row.get("quote"));
+                    FubonNormalizedQuoteMapper.MappedQuote mapped = quoteMapper.mapWithOrderBook(code, quote);
                     observations.add(mapped.observation());
                     if (mapped.orderBook() != null) {
                         orderBooks.put(code, mapped.orderBook());
@@ -167,17 +204,149 @@ public class FubonNormalizedQuoteClient {
             }
             BatchStatus status = rejected == 0 ? BatchStatus.SUCCESS : BatchStatus.PARTIAL_FAILURE;
             return new BatchResult(status, List.copyOf(observations), codes.size(), rejected,
-                    Map.copyOf(failureReasons), Map.copyOf(orderBooks));
+                    Map.copyOf(failureReasons), Map.copyOf(orderBooks),
+                    new ValidatedEnvelope(batchId.textValue(), countersJson, Map.copyOf(responseRows)));
         } catch (Exception ex) {
             return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
         }
     }
 
-    private static String failureReason(JsonNode row) {
-        JsonNode value = row.get("reason");
-        if (value == null || !value.isTextual()) return "QUOTE_FAILED";
-        String reason = value.textValue();
-        return reason.matches("[A-Z_]{1,64}") ? reason : "QUOTE_FAILED";
+    private String validateCounters(JsonNode counters) throws Exception {
+        if (!hasExactly(counters, Set.copyOf(COUNTER_NAMES))) throw new IllegalArgumentException("invalid counters");
+        for (String name : COUNTER_NAMES) {
+            JsonNode value = counters.get(name);
+            if (value == null || !value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+                throw new IllegalArgumentException("invalid counter");
+            }
+        }
+        return mapper.writeValueAsString(counters);
+    }
+
+    private static boolean validFailureRow(JsonNode row) {
+        JsonNode reason = row.get("reason");
+        JsonNode quote = row.get("quote");
+        return reason != null && reason.isTextual() && FAILURE_REASON.matcher(reason.textValue()).matches()
+                && quote != null && quote.isNull();
+    }
+
+    private static boolean validSuccessRow(String requestedCode, JsonNode row, JsonNode quote) {
+        return row.get("reason") != null && row.get("reason").isNull()
+                && quote != null && validQuote(requestedCode, quote);
+    }
+
+    private static boolean validQuote(String requestedCode, JsonNode quote) {
+        if (!quote.isObject() || !QUOTE_FIELDS.containsAll(fieldNames(quote))
+                || !fieldNames(quote).containsAll(REQUIRED_QUOTE_FIELDS)) return false;
+        if (!requiredText(quote, "stockCode", requestedCode) || !requiredText(quote, "stockName", null)
+                || !"台股".equals(text(quote, "market")) || !"FUBON_INTRADAY".equals(text(quote, "source"))
+                || !"LIVE".equals(text(quote, "quoteStatus")) || !booleanValue(quote, "closed")) return false;
+        if (!positiveDecimal(quote, "actualPrice") || !positiveDecimal(quote, "previousClose")
+                || !positiveDecimal(quote, "openPrice") || !positiveDecimal(quote, "highPrice")
+                || !positiveDecimal(quote, "lowPrice") || !nullablePositiveDecimal(quote, "buyPrice")
+                || !nullablePositiveDecimal(quote, "sellPrice") || !nonNegativeLong(quote, "volume")) return false;
+        if (!isoDate(quote, "tradingDate") || !instant(quote, "updatedAt")) return false;
+        JsonNode book = quote.get("orderBook");
+        return book == null || validOrderBook(book);
+    }
+
+    private static boolean validOrderBook(JsonNode book) {
+        if (!hasExactly(book, ORDER_BOOK_FIELDS) || !instant(book, "bookUpdatedAt")
+                || !nullablePositiveDecimal(book, "averagePrice") || !nullableNonNegativeDecimal(book, "turnoverYi")
+                || !nullableNonNegativeLong(book, "innerVolumeLots") || !nullableNonNegativeLong(book, "outerVolumeLots")) {
+            return false;
+        }
+        JsonNode levels = book.get("levels");
+        if (levels == null || !levels.isArray() || levels.size() != 5) return false;
+        for (int index = 0; index < 5; index++) {
+            JsonNode level = levels.get(index);
+            if (!hasExactly(level, ORDER_BOOK_LEVEL_FIELDS) || level.get("level") == null
+                    || !level.get("level").isIntegralNumber() || !level.get("level").canConvertToInt()
+                    || level.get("level").intValue() != index + 1
+                    || !pairedNullableBookSide(level, "bidPrice", "bidVolumeLots")
+                    || !pairedNullableBookSide(level, "askPrice", "askVolumeLots")) return false;
+        }
+        return true;
+    }
+
+    private static boolean pairedNullableBookSide(JsonNode level, String price, String lots) {
+        JsonNode priceValue = level.get(price);
+        JsonNode lotsValue = level.get(lots);
+        boolean noPrice = priceValue == null || priceValue.isNull();
+        boolean noLots = lotsValue == null || lotsValue.isNull();
+        if (noPrice || noLots) return noPrice && noLots;
+        return canonicalDecimal(priceValue, true) && lotsValue.isIntegralNumber()
+                && lotsValue.canConvertToLong() && lotsValue.longValue() >= 0;
+    }
+
+    private static boolean hasExactly(JsonNode node, Set<String> expected) {
+        return node != null && node.isObject() && fieldNames(node).equals(expected);
+    }
+
+    private static Set<String> fieldNames(JsonNode node) {
+        if (node == null || !node.isObject()) return Set.of();
+        Set<String> fields = new HashSet<>();
+        node.fieldNames().forEachRemaining(fields::add);
+        return fields;
+    }
+
+    private static String text(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && value.isTextual() ? value.textValue() : null;
+    }
+
+    private static boolean requiredText(JsonNode object, String field, String expected) {
+        String value = text(object, field);
+        return value != null && !value.isBlank() && (expected == null || expected.equals(value));
+    }
+
+    private static boolean booleanValue(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && value.isBoolean();
+    }
+
+    private static boolean isoDate(JsonNode object, String field) {
+        try { LocalDate.parse(text(object, field)); return true; }
+        catch (Exception invalid) { return false; }
+    }
+
+    private static boolean instant(JsonNode object, String field) {
+        try { Instant.parse(text(object, field)); return true; }
+        catch (Exception invalid) { return false; }
+    }
+
+    private static boolean positiveDecimal(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && canonicalDecimal(value, true);
+    }
+
+    private static boolean nullablePositiveDecimal(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && (value.isNull() || canonicalDecimal(value, true));
+    }
+
+    private static boolean nullableNonNegativeDecimal(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && (value.isNull() || canonicalDecimal(value, false));
+    }
+
+    private static boolean canonicalDecimal(JsonNode value, boolean positive) {
+        if (!value.isTextual() || !CANONICAL_DECIMAL.matcher(value.textValue()).matches()) return false;
+        try {
+            BigDecimal decimal = new BigDecimal(value.textValue());
+            return (positive ? decimal.signum() > 0 : decimal.signum() >= 0)
+                    && decimal.precision() <= 20 && decimal.scale() >= 0 && decimal.scale() <= 10;
+        } catch (NumberFormatException invalid) { return false; }
+    }
+
+    private static boolean nonNegativeLong(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && value.isIntegralNumber() && value.canConvertToLong() && value.longValue() >= 0;
+    }
+
+    private static boolean nullableNonNegativeLong(JsonNode object, String field) {
+        JsonNode value = object.get(field);
+        return value != null && (value.isNull() || (value.isIntegralNumber() && value.canConvertToLong()
+                && value.longValue() >= 0));
     }
 
     private URI endpointUri() {
@@ -237,18 +406,31 @@ public class FubonNormalizedQuoteClient {
             int requested,
             int rejected,
             Map<String, String> failureReasons,
-            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks
+            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks,
+            ValidatedEnvelope envelope
     ) {
         public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
                            int requested, int rejected, Map<String, String> failureReasons) {
-            this(status, observations, requested, rejected, failureReasons, Map.of());
+            this(status, observations, requested, rejected, failureReasons, Map.of(), null);
         }
         public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
                            int requested, int rejected) {
-            this(status, observations, requested, rejected, Map.of(), Map.of());
+            this(status, observations, requested, rejected, Map.of(), Map.of(), null);
+        }
+        public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
+                           int requested, int rejected, Map<String, String> failureReasons,
+                           Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks) {
+            this(status, observations, requested, rejected, failureReasons, orderBooks, null);
         }
         static BatchResult failed(BatchStatus status, int requested) {
-            return new BatchResult(status, List.of(), requested, requested, Map.of(), Map.of());
+            return new BatchResult(status, List.of(), requested, requested, Map.of(), Map.of(), null);
+        }
+    }
+
+    /** Exact validated wire envelope.  The JSON strings are only normalized adapter output, never SDK raw data. */
+    public record ValidatedEnvelope(String batchId, String countersJson, Map<String, String> responseRows) {
+        public ValidatedEnvelope {
+            responseRows = responseRows == null ? Map.of() : Map.copyOf(responseRows);
         }
     }
 

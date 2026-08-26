@@ -37,7 +37,7 @@ Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管
 
 | # | Method | Path | operationId | 摘要 | 成功回應 |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | `GET` | `/api/quotes` | `listLatestQuotes` | 列出快取報價與四頁籤公開市場資料 | 200 application/json: array of DetailedLatestQuote |
+| 1 | `GET` | `/api/quotes` | `listLatestQuotes` | 列出快取報價與四頁籤公開市場資料 | 200 application/json: array of ListedLatestQuote |
 | 2 | `GET` | `/api/quotes/one` | `getLatestQuote` | 查詢單一標的的快取報價與四頁籤公開市場資料 | 200 application/json: DetailedLatestQuote<br>204  |
 | 3 | `GET` | `/api/public/market-index` | `getPublicMarketIndex` | 取得大盤日線或當日分時圖表 | 200 application/json: MarketIndexResponse |
 | 4 | `GET` | `/api/assets/latest` | `getLatestAssets` | 取得主要管理者的最新完整資產 | 200 application/json: LatestAssetsResponse |
@@ -60,6 +60,8 @@ BFF 只 relay external-materials Redis raw `LatestQuote` 的既有 19 欄，並�
 `askLevels`、`dividendHistory` 供批次程式使用。
 market 省略時掃描台股、美股、英股；raw index 的順序、空快取 `[]` 與 raw 讀取語意不變。
 `marketData` 不讀、也不含 configured admin、使用者、帳戶、券商、個人持股／成本／交易／快照／配置。
+list 固定使用 `ListedLatestQuote` 的既有 24 欄，零 Fubon full-response bridge calls；不新增 Fubon
+metadata、failure、raw returned order-book 或 process-global counters。
 台股 `quoteDetail`／direct 五檔來自 producer 已保存的同一 immutable canonical snapshot：富邦是每十秒
 round 的 primary，只有該 round 的 selected code 缺有效完整五檔時，獨立 Yahoo worker 才會非同步逐檔
 fallback。available snapshot 的 source 僅可能為 `FUBON_BOOKS` 或 `YAHOO_TW`，兩者都必須是完整五檔，
@@ -79,7 +81,7 @@ canonical；絕不在 request-time 向 Yahoo、富邦、dispatcher 或 worker �
 
 | Status | Content／schema | 說明 |
 | --- | --- | --- |
-| `200` | application/json: array of DetailedLatestQuote | 最新報價陣列；可能為空。 |
+| `200` | application/json: array of ListedLatestQuote | 最新報價陣列；可能為空。 |
 | `400` | application/problem+json: ProblemDetail | start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。 |
 | `502` | text/html: NginxErrorHtml | HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
@@ -88,9 +90,12 @@ canonical；絕不在 request-time 向 Yahoo、富邦、dispatcher 或 worker �
 
 只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
 raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
-normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。台股五檔只讀 producer 已保存的
+normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。single response 只在最後追加去重的
+Fubon metadata、failure state 與 raw returned order-book，沒有 nested Fubon quote 或 global counters。台股五檔只讀 producer 已保存的
 `FUBON_BOOKS` primary 或受限 `YAHOO_TW` fallback canonical snapshot；回應不會在 request-time 外呼、
-寫入或修復快取。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
+寫入或修復快取。stored Fubon SUCCESS 只有 source、tradingDate、normalized updatedAt 都等於 raw cache
+canonical quote 時才可填入同一份既有 top-level quote fields；不符合時 raw fields 與獨立 ETF NAV
+`premiumDiscountPct` 完全保留。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
 交易或資產快照。
 
 #### Query 參數
@@ -348,9 +353,9 @@ Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或
 
 型別：`string`。
 
-### `DetailedLatestQuote`
+### `LatestQuoteShared`
 
-Requirement 110 的 host response class。前 19 個 raw LatestQuote attribute 依原始 record 順序 固定保留，後接 required 的 marketData 與同一 immutable canonical snapshot 投影的 direct quoteDetail、 bidLevels、askLevels、dividendHistory。每個 required attribute 都固定出現；其型別含 null 時表示來源／ child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
+供 `ListedLatestQuote` 與 `DetailedLatestQuote` 共用的既有 24 個 top-level quote fields。前 19 個 raw LatestQuote attribute 依原始 record 順序固定保留，後接 required 的 marketData 與同一 immutable canonical snapshot 投影的 direct quoteDetail、bidLevels、askLevels、dividendHistory。每個 required attribute 都固定出現；其型別含 null 時表示來源／child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、 成本、交易、快照、配置或建議。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
@@ -378,6 +383,43 @@ Requirement 110 的 host response class。前 19 個 raw LatestQuote attribute �
 | `bidLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: BookSideLevel item；買方一側的正價格與正 int64 張數，沿陣列維持買價由高到低。 | required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的買方最佳五檔；至多五筆，按價格嚴格遞減，任一不完整／未核准 snapshot 時為空陣列。 |
 | `askLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: BookSideLevel item；賣方一側的正價格與正 int64 張數，沿陣列維持賣價由低到高。 | required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的賣方最佳五檔；至多五筆，按價格嚴格遞增，任一不完整／未核准 snapshot 時為空陣列。 |
 | `dividendHistory` | 是 | `PublicDividendHistory` | 否 |  | required `PublicDividendHistory` nested class；與 marketData.dividends 相同的 immutable readonly 公開股利資料，非個人股利紀錄。 |
+
+### `ListedLatestQuote`
+
+GET `/api/quotes` 專用既有 list response class；只投影 `LatestQuoteShared` 的固定 24 欄，零 Fubon full-response bridge calls。最外層 `unevaluatedProperties=false` 使 list wire response 不可加入額外欄位。
+
+型別：`schema`。
+
+### `DetailedLatestQuote`
+
+GET `/api/quotes/one` 專用 response class。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
+
+型別：`schema`。
+
+### `FubonReturnedOrderBook`
+
+已驗證並保存的 normalized Fubon optional orderBook。它忠實保留五個 fixed slots 的 null pair，故不同於只接受完整正值五檔的 `PublicQuoteDetail`／direct quoteDetail；既不回填 generic price，也不改寫 canonical book revision。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `bookUpdatedAt` | 是 | `string (date-time)` | 否 |  | required UTC normalized book update instant；此 book 自己的來源時點，可能與 shared quote updatedAt 不同。 |
+| `averagePrice` | 是 | `number | null` | 是 |  | required nullable normalized average price；adapter 未提供時為 null，不從成交量或價格反推。 |
+| `turnoverYi` | 是 | `number | null` | 是 |  | required nullable normalized turnover in 億元；adapter 未提供時為 null，不由 volume 推算。 |
+| `innerVolumeLots` | 是 | `integer | null (int64)` | 是 | minimum: 0 | required nullable normalized inner-volume lots；null 表示 adapter 未提供，0 是合法實際值。 |
+| `outerVolumeLots` | 是 | `integer | null (int64)` | 是 | minimum: 0 | required nullable normalized outer-volume lots；null 表示 adapter 未提供，0 是合法實際值。 |
+| `levels` | 是 | `array of FubonReturnedOrderBookLevel` | 否 | minItems: 5<br>maxItems: 5<br>items: FubonReturnedOrderBookLevel<br>items 說明: Fubon normalized returned order-book 的一個固定順位 slot。 | required exactly five fixed level slots in ascending level 1 through 5；bid/ask price and lots each are paired null or a normalized nonnegative lot with positive price. |
+
+### `FubonReturnedOrderBookLevel`
+
+FubonReturnedOrderBook 的單一 fixed slot；每一側的 price 與 volume 必同時為 null 或同時有值，null 不表示零價或可由其他來源補齊。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `level` | 是 | `integer` | 否 | minimum: 1<br>maximum: 5 | required fixed integer level；levels 陣列依序恰為 1、2、3、4、5。 |
+| `bidPrice` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | required nullable normalized bid price；與 bidVolumeLots 成對為 null 或正價格。 |
+| `bidVolumeLots` | 是 | `integer | null (int64)` | 是 | minimum: 0 | required nullable normalized bid lots；與 bidPrice 成對為 null 或非負整數。 |
+| `askPrice` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | required nullable normalized ask price；與 askVolumeLots 成對為 null 或正價格。 |
+| `askVolumeLots` | 是 | `integer | null (int64)` | 是 | minimum: 0 | required nullable normalized ask lots；與 askPrice 成對為 null 或非負整數。 |
 
 ### `PublicQuoteMarketData`
 
