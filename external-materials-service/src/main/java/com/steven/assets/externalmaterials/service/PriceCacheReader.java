@@ -15,8 +15,9 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * 唯讀 Redis 即時行情 cache，供 host 對外查詢 API
- * ({@link com.steven.assets.externalmaterials.controller.PublicQuoteController}) 使用。
+ * 唯讀 Redis 即時行情 cache，供 asset-net 內 BFF public aggregation 經
+ * {@link com.steven.assets.externalmaterials.controller.PublicQuoteController} 讀取；Docker host
+ * 只經 {@code 127.0.0.1:9090 -> api-gateway -> BFF} 存取公開報價。
  *
  * 與 {@link PriceCacheWriter} 職責相反：只讀不寫，不觸發外部抓取、不寫入 Redis、不 PUBLISH。
  * Price key schema 與寫入者見 {@link PriceCacheWriter} class Javadoc（Requirement 66）；

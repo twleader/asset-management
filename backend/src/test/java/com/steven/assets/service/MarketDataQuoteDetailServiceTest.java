@@ -2,8 +2,14 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.QuoteDetailDto;
 import com.sun.net.httpserver.HttpServer;
+import java.time.Duration;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,12 +20,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MarketDataQuoteDetailServiceTest {
     private HttpServer server;
     private final AtomicReference<Reply> reply = new AtomicReference<>();
+    private final AtomicReference<CountDownLatch> responseGate = new AtomicReference<>();
+    private CountDownLatch stalledRequestObserved;
     private MarketDataService service;
 
     @BeforeEach
     void start() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/internal/quote-detail", exchange -> {
+            CountDownLatch gate = responseGate.get();
+            if (gate != null) {
+                stalledRequestObserved.countDown();
+                try {
+                    gate.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    exchange.close();
+                }
+                return;
+            }
             Reply r = reply.get();
             byte[] body = r.body.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -28,6 +48,7 @@ class MarketDataQuoteDetailServiceTest {
             exchange.close();
         });
         server.start();
+        stalledRequestObserved = new CountDownLatch(1);
         service = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null);
     }
 
@@ -73,6 +94,31 @@ class MarketDataQuoteDetailServiceTest {
         assertThat(unknown.available()).isFalse();
         assertThat(unknown.source()).isNull();
         assertThat(unknown.levels()).isEmpty();
+    }
+
+    @Test
+    void stalledQuoteDetailBridge在嚴格兩秒後failSoft且不靠sleep() throws Exception {
+        assertThat(MarketDataService.QUOTE_DETAIL_TIMEOUT).isEqualTo(Duration.ofSeconds(2));
+        CountDownLatch releaseResponse = new CountDownLatch(1);
+        responseGate.set(releaseResponse);
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<QuoteDetailDto.Response> response = caller.submit(() -> service.getQuoteDetail("2330", "台股"));
+
+            assertThat(stalledRequestObserved.await(1, TimeUnit.SECONDS)).isTrue();
+            QuoteDetailDto.Response result = response.get(4, TimeUnit.SECONDS);
+
+            assertThat(result.supported()).isTrue();
+            assertThat(result.available()).isFalse();
+            assertThat(result.source()).isNull();
+            assertThat(result.marketStatus()).isEqualTo("UNKNOWN");
+            assertThat(result.levels()).isEmpty();
+        } finally {
+            releaseResponse.countDown();
+            responseGate.set(null);
+            caller.shutdownNow();
+            caller.awaitTermination(1, TimeUnit.SECONDS);
+        }
     }
 
     private static String completeSnapshot(String source) {

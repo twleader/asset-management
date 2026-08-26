@@ -60,7 +60,7 @@ public class EtfNavPoller {
         }, "etf-nav-warmup").start();
     }
 
-    /** 台股盤中每 2 分鐘：奇數分鐘執行，與偶數分鐘的股價排程錯開。 */
+    /** 台股盤中每 2 分鐘；交易雷達台股價格 producer 已改為每 10 秒，不再依賴奇偶分鐘錯開。 */
     @Scheduled(cron = "0 1/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTwUpdate() {
         if (!enabled || !clock.isTwMarketOpen()) return;

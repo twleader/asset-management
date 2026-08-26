@@ -128,11 +128,11 @@ public class SchedulePublicBffController {
 
             // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
-                    "盤中每 10 秒依序查富邦證券 API、TWSE MIS、Yahoo，寫入 Redis 與最新盤中 snapshot；不含大盤 0000，該筆由「台股大盤即時點位（盤中）」負責",
+                    "盤中每 10 秒只查今日交易雷達內台股（最新持股 ∪ 觀察清單，排除 0000），依序查富邦證券 API、TWSE MIS、Yahoo，寫入 Redis 與最新盤中 snapshot；大盤 0000 由「台股大盤即時點位（盤中）」負責",
                     "交易日 09:00–13:30 每 10 秒", "*/10 * 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股大盤即時點位（盤中）",
-                    "盤中每 2 分鐘更新台股大盤（0000）即時點位至 Redis（來源 Yahoo ^TWII 5 分 K）；與「台股個股即時價（盤中）」刻意同頻率，但標的與來源皆不同，非重複排程（Task 228）",
-                    "交易日 09:00–13:00 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
+                    "盤中每 2 分鐘更新台股大盤（0000）即時點位至 Redis（來源 Yahoo ^TWII 5 分 K）；這是獨立大盤節拍，交易雷達台股個股即時價為每 10 秒，標的與來源皆不同（Task 228）",
+                    "交易日 09:00–13:30 每 2 分鐘", "0 0/2 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "美股即時價（盤中）",
                     "盤中每 2 分鐘更新美股即時價至 Redis",
                     "交易日 09:00–16:00 每 2 分鐘", "0 0/2 9-16 * * MON-FRI", NYC),

@@ -240,7 +240,7 @@ services:
       start_period: 30s
 
   # ── External Materials Service ─────────────────────────────
-  # 集中所有「向外部抓資料」的邏輯：盤中 2 分鐘抓股價寫 Redis、盤後寫
+  # 集中所有「向外部抓資料」的邏輯：盤中台股交易雷達每 10 秒富邦→MIS→Yahoo、美／英股每 2 分鐘抓股價寫 Redis、盤後寫
   # stock_price_history、每日抓股利寫 stock_dividend_history。
   # /api/quotes 只經 api-gateway:9090 對 host 提供；其餘 /internal/* 僅 docker network 可達，
   # business-services 透過 docker network 內部呼叫。
