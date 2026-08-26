@@ -90,6 +90,7 @@ class SdkGateway:
         self._sdk: object | None = None
         self._account: SelectedAccount | None = None
         self._stock_client: object | None = None
+        self._websocket_stock_client: object | None = None
         self._config_digest: bytes | None = None
         self._session_cleaned = True
         self._runtime_misconfigured = False
@@ -180,6 +181,54 @@ class SdkGateway:
                 raise SdkCallError("QUOTE_TRANSPORT_FAILED") from None
         raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
 
+    def realtime_stock_websocket(self) -> object:
+        """Returns the read-only market-data websocket client from the existing SDK session."""
+        config = self._require_config()
+        self._ensure_session(config)
+        with self._session_lock:
+            client = self._websocket_stock_client
+        if client is None:
+            self._mark_misconfigured()
+            raise SdkCallError("INDICES_CLIENT_UNAVAILABLE", misconfigured=True)
+        return client
+
+    def verify_taiex_index_symbol(self, symbol: str) -> None:
+        """Verifies the deployment-selected Taiwan index against the official tickers catalog."""
+        if not isinstance(symbol, str) or not symbol:
+            raise SdkCallError("INVALID_TAIEX_INDEX_SYMBOL", misconfigured=True)
+        config = self._require_config()
+        self._ensure_session(config)
+        with self._session_lock:
+            client = self._stock_client
+        intraday = raw_field(client, "intraday") if client is not None else None
+        tickers = raw_field(intraday, "tickers") if intraday is not None else None
+        if not callable(tickers):
+            self._mark_misconfigured()
+            raise SdkCallError("INDEX_TICKERS_UNAVAILABLE", misconfigured=True)
+        try:
+            response = self._run_bounded(
+                lambda: tickers(type="INDEX", exchange="TWSE"),
+                self.QUOTE_CALL_TIMEOUT_SECONDS,
+                "INDEX_TICKERS_TIMEOUT",
+            )
+            if self._response_auth_invalid(response):
+                raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+            if raw_field(response, "is_success") is False:
+                raise SdkCallError("INDEX_TICKERS_REJECTED", misconfigured=True)
+            rows = raw_field(response, "data") if raw_field(response, "is_success") is True else response
+            if not isinstance(rows, list):
+                raise SdkCallError("INDEX_TICKERS_INVALID", misconfigured=True)
+            for row in rows:
+                if (raw_field(row, "symbol") == symbol
+                        and raw_field(row, "exchange") == "TWSE"
+                        and raw_field(row, "type") == "INDEX"):
+                    return
+            raise SdkCallError("TAIEX_INDEX_SYMBOL_UNVERIFIED", misconfigured=True)
+        except SdkCallError:
+            raise
+        except Exception:
+            raise SdkCallError("INDEX_TICKERS_TRANSPORT_FAILED") from None
+
     def shutdown(self) -> None:
         with self._session_lock:
             self._cleanup_locked()
@@ -240,12 +289,15 @@ class SdkGateway:
                 marketdata = raw_field(sdk, "marketdata")
                 rest_client = raw_field(marketdata, "rest_client") if marketdata is not None else None
                 stock_client = raw_field(rest_client, "stock") if rest_client is not None else None
+                websocket_client = raw_field(marketdata, "websocket_client") if marketdata is not None else None
+                websocket_stock_client = raw_field(websocket_client, "stock") if websocket_client is not None else None
                 if stock_client is None:
                     raise SdkCallError("REALTIME_CLIENT_MISSING", misconfigured=True)
 
                 self._sdk = sdk
                 self._account = selected
                 self._stock_client = stock_client
+                self._websocket_stock_client = websocket_stock_client
                 self._config_digest = digest
                 self._session_cleaned = False
                 self._runtime_misconfigured = False
@@ -354,12 +406,14 @@ class SdkGateway:
             self._sdk = None
             self._account = None
             self._stock_client = None
+            self._websocket_stock_client = None
             self._config_digest = None
             self._session_cleaned = True
             return
         self._sdk = None
         self._account = None
         self._stock_client = None
+        self._websocket_stock_client = None
         self._config_digest = None
         self._session_cleaned = True
         for method_name in ("logout", "shutdown"):

@@ -9,7 +9,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
 
 from .config import ConfigLoader, ConfigSnapshot
@@ -18,6 +18,7 @@ from .portfolio import PortfolioError, PortfolioService
 from .quotes import QuoteError, QuoteService
 from .redaction import install_log_redaction, redact_mapping
 from .sdk_gateway import SdkCallError, SdkGateway
+from .taiex_index_stream import TaiexIndexStream, TaiexIndexStreamError
 
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,11 @@ INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token"
 # it reaches any handler. Installed on every logger this service actually
 # uses (module-level loggers are per-module and do not inherit filters from
 # ancestors during propagation, so each one is attached explicitly).
-install_log_redaction(logger, logging.getLogger("fubon_broker_service.sdk_gateway"))
+install_log_redaction(
+    logger,
+    logging.getLogger("fubon_broker_service.sdk_gateway"),
+    logging.getLogger("fubon_broker_service.taiex_index_stream"),
+)
 
 
 class PortfolioReadRequest(BaseModel):
@@ -71,16 +76,19 @@ def create_app(
     portfolio_service: PortfolioService | None = None,
     quote_service: QuoteService | None = None,
     counters: OutcomeCounters | None = None,
+    taiex_index_stream: TaiexIndexStream | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
     sdk_gateway = gateway or SdkGateway(loader)
     portfolio = portfolio_service or PortfolioService(sdk_gateway)
     quotes = quote_service or QuoteService(sdk_gateway)
     outcome_counters = counters or OutcomeCounters()
+    index_stream = taiex_index_stream or TaiexIndexStream(sdk_gateway)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        index_stream.shutdown()
         sdk_gateway.shutdown()
 
     application = FastAPI(
@@ -92,6 +100,7 @@ def create_app(
     application.state.config_loader = loader
     application.state.sdk_gateway = sdk_gateway
     application.state.outcome_counters = outcome_counters
+    application.state.taiex_index_stream = index_stream
 
     @application.middleware("http")
     async def sanitized_exception_boundary(request, call_next):
@@ -166,7 +175,11 @@ def create_app(
         return {
             "configState": effective_state,
             "presence": current.presence.public_dict(),
-            "capabilities": {"portfolioRead": ready, "twQuotes": ready},
+            "capabilities": {
+                "portfolioRead": ready,
+                "twQuotes": ready,
+                "taiexIndexStream": ready and TaiexIndexStream.configured(current),
+            },
         }
 
     @application.post("/internal/portfolio/read")
@@ -211,6 +224,19 @@ def create_app(
             outcome_counters.increment(Outcome.SUCCESS)
         result["counters"] = outcome_counters.snapshot()
         return result
+
+    @application.get("/internal/market-data/taiex-index/stream")
+    async def taiex_index_sse(_config: ConfigSnapshot = Depends(authorize)) -> StreamingResponse:
+        try:
+            index_stream.ensure_started(_config)
+        except TaiexIndexStreamError as exc:
+            outcome_counters.increment(Outcome.MISCONFIGURED)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        return StreamingResponse(
+            index_stream.events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
 
     return application
 

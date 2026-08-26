@@ -171,6 +171,7 @@ bff/src/main/java/com/steven/assets/bff/
    - **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348；Requirement 108／Task 372；Requirement 109／Task 373；Requirement 110／Task 375；Requirement 114／Task 379）**：登入後共用 `StockAnalysisDialog`、`/api/quotes*` 的 `marketData.quoteDetail` 與同一 response 的 direct `quoteDetail`／`bidLevels`／`askLevels` 都只讀同一個 typed persisted snapshot。它只由 `TwLiveQuoteDispatcher` 已授權十秒台股 round 建立：完整 Fubon snapshot 是 primary `FUBON_BOOKS`，只有該輪 selected code 缺完整 Fubon book 才可由 bounded 8-code fair-cursor Yahoo worker 寫完整 `YAHOO_TW` fallback。PostgreSQL 以 atomic comparator/revision 寫 canonical row，Redis 只接受 strict-newer DB revision；query path 將 Redis 當 candidate，必以 PostgreSQL current revision 驗證後才回 cache，否則回完整 DB canonical，仍是 pure read。禁止 request-time Yahoo／富邦／dispatcher／writer 外呼，也不得寫 generic quote、index、tick、day-H/L 或 SSE。它不是權威即時價，不能供估值、損益、下單、警示或 SSE 使用；direct batch projection 只提供同一份市場五檔供累計深度判讀，無個人資產資料。business 只能 proxy／fail-soft；該頁籤與 direct batch projection 以外的即時價仍只走 Redis、收盤價仍只走 `stock_price_history`。
    - **Requirement 114／Task 379 current-state rule for order books:** The FUBON-only source statement above is superseded for the existing ten-second producer and for the source eligibility of the same immutable direct quote projections. A selected Taiwan code without a valid complete Fubon book in that exact batch may go to a separate bounded Yahoo worker, whose only successful source is `YAHOO_TW`; valid Fubon books remain primary `FUBON_BOOKS`. Both must be complete, single-source five-level snapshots and only those two sources may appear on an available nested/direct response. PostgreSQL atomically applies the only source-aware comparator (same source strictly newer; Fubon may replace Yahoo; Yahoo may replace Fubon only with a strictly newer source time) and assigns a strictly increasing canonical revision. Redis accepts only a strict-newer DB revision, while reader validates that revision with PostgreSQL before serving cache. Yahoo uses an 8-code fair cursor plus typed outcomes: only HTTP 404 may advance a serial `.TW` probe to `.TWO`; a valid matching 2xx snapshot is FOUND regardless of `TAI`/`TWO`, while any other failure is not a suffix fallback. This does not create request-time vendor I/O: `/api/quotes*`, BFF, business and quote-detail reader only perform Redis/DB pure reads, and unavailable/unsupported results keep `source=null`. It never authorizes generic price writes, orders, valuation, alerts, SSE, or personal data.
    - **Requirement 115／Task 380 Taiwan LIVE radar projection:** `TwLiveQuoteDispatcher` may pass only the current input ∩ current per-owner Taiwan radar (latest holding snapshot ∪ Taiwan alert, excluding `0000`) to **any** Taiwan live market-data provider: Fubon `purpose=LIVE`, MIS, Yahoo and book workers. Radar-empty/read-error causes zero Taiwan live external request, not the old generic MIS→Yahoo path. A validated full normalized Fubon per-code response is DB-canonical then mirrored in its dedicated Redis key, preserving batch/status/reason/quote, complete adapter-wide counters and optional incomplete book data without becoming generic quote/tick/SSE data or containing owner/account/SDK secret payload. The existing 9090 `GET /api/quotes/one` may use one container-internal Redis/DB pure-read bridge to populate existing `DetailedLatestQuote` quote fields once from stored Fubon SUCCESS data only when source/trading-date/normalized timestamp match the raw canonical quote; otherwise raw remains authority and `premiumDiscountPct` remains independent raw NAV data. It appends only distinct Fubon metadata/failure/raw-returned-book fields; adapter-wide counters are never bridge/9090/no-tenant output. It must not create a synonymous nested quote or repeat price/OHLC/source/status fields. It never vendor-calls, cache-repairs, reads personal data or changes `GET /api/quotes` list shape.
+   - **Requirement 116／Task 381 Fubon TAIEX stream:** Fubon `indices` WebSocket remains inside the Python adapter, which serves only the exact token-protected internal response stream `GET /internal/market-data/taiex-index/stream`; external-materials actively opens that GET and is the sole PostgreSQL／Redis writer. This is a read-only SSE response to an existing consumer request, never an adapter POST/reverse call. It is active only with `FUBON_ENABLED=true`, the dedicated stream flag, a valid deployment-resolved `intraday/tickers?type=INDEX&exchange=TWSE` symbol, and ready shared-token config; otherwise neither SDK nor Java GET/retry starts. Adapter holds one read-only subscription and only normalizes `{symbol,exchange,type,index,time}` to precision≤20/scale≤10 canonical decimal string; it never exposes raw SDK data or writes DB/Redis. Consumer uses source epoch microseconds as the only freshness authority, commits `fubon_taiex_index_latest` in an independent DB transaction before strict-newer `price:台股:0000`, never appends index ticks/day-HL or overwrites completed daily history. Raw stale/equal input cannot mutate cache; only an equal-time reread committed canonical DB row may repair missing/older Redis through the same Lua fence. Existing Yahoo two-minute index poll is fallback-only: a current Fubon DB row repairs Redis with no Yahoo request; absent Fubon state keeps current Yahoo behavior. No 9090/BFF/gateway/public route is added.
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
    - **具名例外第一組（Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
@@ -393,12 +394,13 @@ fubon-broker-service/
 │   ├── config.py              # mounted-file config state（lazy、fail closed）
 │   ├── security.py            # internal token constant-time verify＋redaction
 │   ├── sdk_gateway.py         # login/accounting/init_realtime/session lifecycle
+│   ├── taiex_index_stream.py  # official indices WS → in-memory normalized internal SSE fan-out
 │   └── models.py              # normalized decimal-string wire DTO
 └── tests/                     # fake SDK/adapter；永不需要真實憑證
 ```
 
-- proprietary SDK 只存在這個 Python service；Spring modules 經 `X-Internal-Service-Token` 主動 pull normalized internal API，不直接 import SDK。
-- **券商 API 下單絕對禁令：**服務唯讀，只允許 health/config、portfolio dry-read、台股 intraday quote；不得透過 SDK、HTTP、internal route、排程或腳本建立、送出、買入、賣出、改單、撤單或重送委託，也不得 import、包裝、暴露或間接觸發 order APIs。此禁令不因 internal token、角色、feature flag 或 `dryRun` 值而有例外；憑證必須可驗證為唯讀，否則服務維持 disabled/fail closed。服務不連 PostgreSQL／Redis、不反向呼叫 business。
+- proprietary SDK 只存在這個 Python service；Spring modules 經 `X-Internal-Service-Token` 主動 pull normalized internal API，不直接 import SDK。允許的 internal surface 是 health/config、portfolio dry-read、台股 intraday quote，以及 Requirement 116 唯一的 `GET /internal/market-data/taiex-index/stream`：後者是 external-materials 主動建立的 token-protected SSE GET，adapter 只在已建立 response 裡 fan-out normalized index data，絕不是 reverse call。
+- **券商 API 下單絕對禁令：**服務唯讀，只允許 health/config、portfolio dry-read、台股 intraday quote 和上述 normalized index SSE；不得透過 SDK、HTTP、internal route、排程或腳本建立、送出、買入、賣出、改單、撤單或重送委託，也不得 import、包裝、暴露或間接觸發 order APIs。此禁令不因 internal token、角色、feature flag 或 `dryRun` 值而有例外；憑證必須可驗證為唯讀，否則服務維持 disabled/fail closed。服務不連 PostgreSQL／Redis、不反向呼叫任何 Spring service。
 - Compose 固定 `platform: linux/amd64`、無 host port、只接 `asset-net`、non-root/read-only/tmpfs/drop capabilities。官方 zip/wheel 安裝媒介不入 Git/build context/final image；hash 驗證後安裝的 runtime package可存在final image。
 - `secrets/fubon/sdk/` 只掛Python；Java services只可掛`secrets/fubon/shared/`。disabled或misconfigured時process/service仍healthy，functional feature回typed failure、零外呼/零寫入。
 - business-services 是庫存 persistence與tenant/transaction owner；external-materials-service是Redis live quote唯一writer。Python不得跨越這兩個責任邊界。
@@ -512,9 +514,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 114 個 Requirements（最新編號為 115）
+├── requirements.md       # 115 個 Requirements（最新編號為 116）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–380）＋尚未歸檔的 201 起區段
+├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–380）＋尚未歸檔的 201 起區段；Task 381 在自足任務檔
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
@@ -567,7 +569,7 @@ frontend ──► bff ──► business-services ──► postgres
                           ├──► redis ◄── external-materials-service ──► (external APIs)
                           │              └────────────► postgres (fund_nav / stock_price_history / ...)
                           └──► fubon-broker-service ◄── external-materials-service
-                                      │                 （兩者只主動 pull normalized API）
+                                      │                 （external-materials 主動 pull normalized API／SSE response）
                                       └──► Fubon API
 
 api-gateway:9090／Tailscale exact public quotes ──► bff
@@ -579,5 +581,6 @@ api-gateway:9090／Tailscale exact public quotes ──► bff
 - ❌ frontend 直接打 business-services、external-materials-service 或 fubon-broker-service
 - ❌ business-services 直接打外部行情 / NAV / 配息 API（一律經 external-materials）
 - ❌ external-materials-service 反向呼叫 business-services
-- ❌ 任何 service 透過券商 API／SDK 下單、買賣、改單、撤單或重送委託（含 fubon-broker-service）；亦不得寫 PostgreSQL／Redis或反向呼叫任一Spring service
+- ❌ 任何 service 透過券商 API／SDK 下單、買賣、改單、撤單或重送委託（含 fubon-broker-service）
+- ❌ fubon-broker-service 寫 PostgreSQL／Redis、以 HTTP POST／callback 反向呼叫任一 Spring service，或把 proprietary SDK raw data／secret／account payload 跨出 adapter
 - ❌ 任何 service 跨層直接讀對方資料庫表（除非由 SDD 明確設計）

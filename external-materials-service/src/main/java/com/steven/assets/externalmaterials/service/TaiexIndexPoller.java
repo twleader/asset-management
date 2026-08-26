@@ -6,6 +6,7 @@ import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -27,7 +28,6 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TaiexIndexPoller {
 
     private static final String TAIEX_CODE = "0000";
@@ -37,6 +37,30 @@ public class TaiexIndexPoller {
     private final PriceCacheWriter writer;
     private final StockSourceQuery source;
     private final MarketClock clock;
+    private final FubonTaiexIndexStore fubonIndexStore;
+
+    @Autowired
+    public TaiexIndexPoller(
+            MacroDataFetchClient macroClient,
+            PriceCacheWriter writer,
+            StockSourceQuery source,
+            MarketClock clock,
+            FubonTaiexIndexStore fubonIndexStore) {
+        this.macroClient = macroClient;
+        this.writer = writer;
+        this.source = source;
+        this.clock = clock;
+        this.fubonIndexStore = fubonIndexStore;
+    }
+
+    /** Compatibility constructor for existing package-level unit tests. */
+    TaiexIndexPoller(
+            MacroDataFetchClient macroClient,
+            PriceCacheWriter writer,
+            StockSourceQuery source,
+            MarketClock clock) {
+        this(macroClient, writer, source, clock, null);
+    }
 
     /** 盤中輪詢：週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘；這是獨立大盤 cadence，交易雷達台股個股為每 10 秒。 */
     @Scheduled(cron = "0 0/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
@@ -51,6 +75,14 @@ public class TaiexIndexPoller {
 
     /** package-private：供測試直接呼叫，略過 cron/isTwMarketOpen 判斷。 */
     void updateOnce() {
+        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
+        if (fubonIndexStore != null) {
+            FubonTaiexIndexStore.FindResult current = fubonIndexStore.findForTradingDate(today);
+            if (current.status() == FubonTaiexIndexStore.ReadStatus.FOUND && current.canonical() != null) {
+                writer.writeTaiwanIndexLive(fubonPriceResult(current.canonical()));
+                return;
+            }
+        }
         DayQuote quote = macroClient.fetchIndexIntradayDay("TWSE");
 
         // 日期守門（Task 263）：來源回傳橫跨最近五個交易日，「最新交易日」不等於「今日」——
@@ -62,7 +94,6 @@ public class TaiexIndexPoller {
         // 查無有效點位／非今日：本輪不寫，保留 Redis 上一輪真實值（比照個股 TWSE z='-' 的既有
         // 慣例，不得以昨收或空值覆寫；見 PricePoller.updatePrices 對 Optional.empty() 的處理）。
         if (quote == null || quote.latestClose() == null || quote.freshnessInstant() == null) return;
-        LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         if (!today.equals(quote.date())) {
             log.debug("大盤點位屬 {} 非今日 {}，本輪不寫入", quote.date(), today);
             return;
@@ -97,5 +128,21 @@ public class TaiexIndexPoller {
         // 本地聚合的存在理由是「外部 API 不提供 dayrange」（NASDAQ 對 ETF 的 keyStats 為 null），
         // 對 Yahoo 5 分 K 不成立；且聚合的 max/min 語意使誤入的極值無法被後續正確值修正。
         writer.write(result, false, false);
+    }
+
+    private PriceResult fubonPriceResult(FubonTaiexIndexStore.CanonicalIndex canonical) {
+        return new PriceResult(
+                TAIEX_CODE, TW_MARKET, canonical.indexPoint(), null, null, "FUBON_INDICES", "台股大盤",
+                null, null, null, previousCloseBefore(canonical.tradingDate()), null, null, null,
+                canonical.tradingDate(), canonical.providerUpdatedAt());
+    }
+
+    private BigDecimal previousCloseBefore(LocalDate tradingDate) {
+        List<StockSourceQuery.ClosePoint> rows = source.loadRecentTaiexCloses(2);
+        for (int index = rows.size() - 1; index >= 0; index--) {
+            StockSourceQuery.ClosePoint row = rows.get(index);
+            if (row.date().isBefore(tradingDate)) return row.close();
+        }
+        return null;
     }
 }

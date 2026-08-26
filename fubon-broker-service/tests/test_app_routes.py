@@ -78,7 +78,7 @@ def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
     assert gateway.shutdown_calls == 1
 
 
-def test_exact_four_routes_auth_and_methods(tmp_path):
+def test_exact_five_routes_auth_and_methods(tmp_path):
     client, _gateway, portfolio, quotes = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     assert {(route.path, frozenset(route.methods or ())) for route in client.app.routes} == {
@@ -86,6 +86,7 @@ def test_exact_four_routes_auth_and_methods(tmp_path):
         ("/internal/config", frozenset({"GET"})),
         ("/internal/portfolio/read", frozenset({"POST"})),
         ("/internal/market-data/tw-quotes", frozenset({"POST"})),
+        ("/internal/market-data/taiex-index/stream", frozenset({"GET"})),
     }
     with client:
         assert client.get("/internal/health").status_code == 200
@@ -104,6 +105,7 @@ def test_exact_four_routes_auth_and_methods(tmp_path):
         assert client.get("/not-allowed").status_code == 404
         assert client.post("/internal/health").status_code == 405
         assert client.get("/internal/portfolio/read", headers=headers).status_code == 405
+        assert client.get("/internal/market-data/taiex-index/stream", headers=headers).status_code == 503
     assert portfolio.calls == quotes.calls == 1
 
 

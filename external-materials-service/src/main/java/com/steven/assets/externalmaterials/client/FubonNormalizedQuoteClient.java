@@ -17,10 +17,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -103,7 +99,7 @@ public class FubonNormalizedQuoteClient {
         }
 
         URI endpoint = endpointUri();
-        String token = readToken();
+        String token = FubonSharedTokenReader.read(tokenPath);
         if (endpoint == null || token == null) {
             return BatchResult.failed(BatchStatus.MISCONFIGURED, codes.size());
         }
@@ -360,17 +356,6 @@ public class FubonNormalizedQuoteClient {
             }
             return URI.create(base.toString().replaceAll("/$", "") + NORMALIZED_PATH);
         } catch (IllegalArgumentException ex) {
-            return null;
-        }
-    }
-
-    private String readToken() {
-        try {
-            Path path = Path.of(tokenPath == null ? "" : tokenPath);
-            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) return null;
-            String value = Files.readString(path, StandardCharsets.UTF_8).trim();
-            return value.isEmpty() ? null : value;
-        } catch (InvalidPathException | java.io.IOException | SecurityException ex) {
             return null;
         }
     }
