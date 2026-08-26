@@ -29,6 +29,10 @@ class PublicTradingRadarSecurityTest {
         client.get().uri("/api/public/trading-radar/today")
                 .exchange()
                 .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        client.get().uri(builder -> builder.path("/api/public/trading-radar/stock")
+                        .queryParam("stockCode", "2330").queryParam("market", "台股").build())
+                .exchange()
+                .expectStatus().isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
     }
 
     @Test
@@ -38,6 +42,9 @@ class PublicTradingRadarSecurityTest {
         client.put().uri(path).exchange().expectStatus().isUnauthorized();
         client.patch().uri(path).exchange().expectStatus().isUnauthorized();
         client.delete().uri(path).exchange().expectStatus().isUnauthorized();
+        client.post().uri(builder -> builder.path("/api/public/trading-radar/stock")
+                        .queryParam("stockCode", "2330").queryParam("market", "台股").build())
+                .exchange().expectStatus().isUnauthorized();
     }
 
     @Test
@@ -45,6 +52,8 @@ class PublicTradingRadarSecurityTest {
         client.get().uri("/api/public/trading-radar/today/extra")
                 .exchange().expectStatus().isUnauthorized();
         client.get().uri("/api/public/trading-radar/today/")
+                .exchange().expectStatus().isUnauthorized();
+        client.get().uri("/api/public/trading-radar/stock/extra")
                 .exchange().expectStatus().isUnauthorized();
         client.get().uri("/api/bff/trading-radar")
                 .exchange().expectStatus().isUnauthorized();

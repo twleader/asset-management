@@ -8,8 +8,8 @@
 
 | 元件 | 技術 | Port | 對外 | 角色 |
 |------|------|------|------|------|
-| **Frontend** | Vue 3 + Vite 5 + Element Plus + Nginx | 80 | ✅ | SPA；九條 external-only API 明確回 404 |
-| **API Gateway** | Nginx Alpine（non-root） | 9090 | ✅（僅 `127.0.0.1`） | Docker 外部九條 exact route（八 GET ＋ 一 POST）唯一入口；每條須有完整 OpenAPI 3 契約 |
+| **Frontend** | Vue 3 + Vite 5 + Element Plus + Nginx | 80 | ✅ | SPA；十二條 external-only API 明確回 404 |
+| **API Gateway** | Nginx Alpine（non-root） | 9090 | ✅（僅 `127.0.0.1`） | Docker 外部十二條 exact route（十一 GET ＋ 一 POST）唯一入口；每條須有完整 OpenAPI 3 契約 |
 | **BFF** | Spring Boot 3.4.4 + Spring Cloud Gateway | 8080 | ❌ 僅內網 | 前端應用 API 入口；一頁面一 controller |
 | **Business Services（backend）** | Spring Boot 3.4.4 + Spring Data JPA | 8080 | ❌ 僅內網 | 領域邏輯、JPA 持久化 |
 | **External Materials Service** | Spring Boot 3.4.4 + WebFlux | 8080 | ❌ 僅內網 | 抓股價／NAV／配息／匯率，寫 Redis & DB |
@@ -24,7 +24,7 @@ Browser ──► nginx:80 (Frontend) ──► bff:8080 ──► business-serv
                                                                        └─► redis:6379  ◄── external-materials-service
                                                                                        (TWSE / FinMind / NASDAQ / FundClear / IMF)
 Host tools ──► 127.0.0.1:9090 (API Gateway) ─┬──► bff:8080
-Tailscale ──► HTTPS :9090（僅九條 exact path）──┘
+Tailscale ──► HTTPS :9090（僅十二條 exact path）──┘
                                                      bff:8080 ──► business-services:8080
                                                          └──► external-materials-service:8080（僅 `/api/quotes*` raw 19 欄讀取）
 external-materials-service ──銀行交易時段每 2 秒──► redis:6379（USD/TWD session heartbeat + spot）
@@ -208,11 +208,12 @@ cd frontend
 - **business-services 不打外部行情 API。** 全部委派給 `external-materials-service` 寫 Redis / DB，business-services 只讀。
 - **BFF 為前端唯一入口。** 前端不直接打 business-services；所有 `/api/*` 經 BFF 路由。
 - **Docker 外部 API 只經 9090 exact allowlist。** BFF 與 external service 不發布 host port；host 只綁
-  loopback `127.0.0.1:9090`，current allowlist 精確為八支 GET：`/api/quotes`、`/api/quotes/one`、
+  loopback `127.0.0.1:9090`，current allowlist 精確為十一支 GET：`/api/quotes`、`/api/quotes/one`、
   `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`、
   `/api/public/market-analysis/today`、`/api/public/portfolio-advice/latest`、
-  `/api/public/trading-radar/today`，以及唯一一支 POST `/api/public/crawler-data/rescan`。
-  Tailscale Serve 只掛相同九條 method/path，不使用 root／`/api/` proxy、Funnel 或公網 listener。
+  `/api/public/trading-radar/today`、`/api/public/trading-radar/stock`、
+  `/api/public/transactions`、`/api/public/trading-calendar`，以及唯一一支 POST `/api/public/crawler-data/rescan`。
+  Tailscale Serve 只掛相同十二條 method/path，不使用 root／`/api/` proxy、Funnel 或公網 listener。
   每一支掛載到 9090 的 API 都必須在同一 task/commit 具備完整 OpenAPI 3 operation，gateway 與
   `docs/openapi/docker-external-api.yaml` 的 method/path 集合必須以 contract test 雙向精確相等；
   Swagger UI／YAML 本身不掛到 9090。

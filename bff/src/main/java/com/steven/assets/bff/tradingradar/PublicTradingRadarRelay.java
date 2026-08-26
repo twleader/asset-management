@@ -1,23 +1,24 @@
 package com.steven.assets.bff.tradingradar;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 /**
- * Business 成功回應的 HTTP-neutral relay value。
+ * 已驗證的交易雷達 JSON 合約。
  *
- * <p>只攜帶 controller 必須保留的 status code、Content-Type 字串與原始 bytes；不讓 service
- * 組裝 {@code ResponseEntity}，也不提供 Location 等其他 upstream header 的 relay 通道。
- * byte array 在建構與讀取時都複製，避免 record 的內容被外部修改。</p>
+ * <p>不保留 upstream status、Content-Type 或 raw bytes。controller 只會把 detached JSON tree
+ * 以自己的 {@code 200 application/json} 合約輸出。</p>
  */
-public record PublicTradingRadarRelay(int statusCode, String contentType, byte[] body) {
+public record PublicTradingRadarRelay(JsonNode body) {
 
     public PublicTradingRadarRelay {
-        if (statusCode < 200 || statusCode >= 300) {
-            throw new IllegalArgumentException("relay status must be successful");
+        if (body == null || !body.isObject()) {
+            throw new IllegalArgumentException("relay body must be a JSON object");
         }
-        body = body == null ? null : body.clone();
+        body = body.deepCopy();
     }
 
     @Override
-    public byte[] body() {
-        return body == null ? null : body.clone();
+    public JsonNode body() {
+        return body.deepCopy();
     }
 }

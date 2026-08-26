@@ -4,6 +4,7 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PublicMarketDataReadOnlyService;
+import com.steven.assets.service.PublicTradingCalendarService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -26,6 +27,7 @@ class InternalPublicMarketDataControllerTest {
     @Autowired MockMvc mvc;
     @MockBean DividendHistoryService dividendHistoryService;
     @MockBean PublicMarketDataReadOnlyService readOnlyService;
+    @MockBean PublicTradingCalendarService calendarService;
     @MockBean CurrentUserContext currentUserContext;
 
     @Test

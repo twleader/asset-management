@@ -22,4 +22,7 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
      * {@code records} 於客戶端切換，故 repository 不另設日期區間查詢。
      */
     List<AssetTransaction> findAllByOrderByTradeDateDesc();
+
+    /** Public readonly history fixes equal-date ordering by id so repeated reads are deterministic. */
+    List<AssetTransaction> findAllByOrderByTradeDateDescIdDesc();
 }

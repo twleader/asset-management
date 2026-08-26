@@ -21,6 +21,30 @@ public class PublicTradingRadarExceptionAdvice {
                 "Trading radar unavailable", "主要管理者不可用");
     }
 
+    @ExceptionHandler(PublicTradingRadarRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidRequest(PublicTradingRadarRequestException ignored) {
+        return problem(HttpStatus.BAD_REQUEST,
+                "Invalid trading radar request", "股票代號或市場別格式不合法");
+    }
+
+    @ExceptionHandler(PublicTradingRadarStockNotFoundException.class)
+    public ResponseEntity<ProblemDetail> notFound(PublicTradingRadarStockNotFoundException ignored) {
+        return problem(HttpStatus.NOT_FOUND,
+                "Trading radar stock not found", "今日交易雷達找不到指定股票");
+    }
+
+    @ExceptionHandler(PublicTradingRadarTimeoutException.class)
+    public ResponseEntity<ProblemDetail> timeout(PublicTradingRadarTimeoutException ignored) {
+        return problem(HttpStatus.GATEWAY_TIMEOUT,
+                "Trading radar timeout", "今日交易雷達服務逾時");
+    }
+
+    @ExceptionHandler(PublicTradingRadarPayloadException.class)
+    public ResponseEntity<ProblemDetail> invalidPayload(PublicTradingRadarPayloadException ignored) {
+        return problem(HttpStatus.BAD_GATEWAY,
+                "Trading radar downstream failure", "今日交易雷達暫時無法取得，請稍後再試");
+    }
+
     @ExceptionHandler(WebClientResponseException.class)
     public ResponseEntity<ProblemDetail> downstream(WebClientResponseException ignored) {
         return problem(HttpStatus.BAD_GATEWAY,

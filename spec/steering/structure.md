@@ -167,8 +167,8 @@ bff/src/main/java/com/steven/assets/bff/
 
 1. **一個前端頁面 → 一個資料夾 + 一支 Controller（或 Gateway route）。** 即使純 passthrough 也要建立。
 2. **前端頁面 BFF 路徑前綴：** `/api/bff/{page-name}/...`。Gateway route 將 `/api/bff/{page}/**` rewrite 為 `/api/{resource}/**`。
-   - **具名、限縮例外（Requirements 67／68／70／71／78／79／86／108／109；Tasks 317／325／327／329／337／338／347／372／373）**：BFF 只對匿名唯讀的 exact `GET /api/quotes`、`GET /api/quotes/one`、`GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today`（後三條依序由 Requirements 79／86 新增；`portfolio-advice/latest` 與 `trading-radar/today` 都是 owner-scoped，固定走 configured-admin bootstrap 並顯式帶 tenant header；交易雷達公開讀取不得保存 export snapshot），以及 Requirement 71／Task 329 新增的 exact `POST /api/public/crawler-data/rescan`（唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流，語意等同既有 ADMIN 端點「立即抓取並匯出」的匿名版本）放行；Docker host 必須經 Requirement 66／Task 328 的 Nginx `api-gateway` `127.0.0.1:9090`，BFF 本身不發布 host port。Quotes 由 BFF 的 no-tenant container clients 讀 external-materials 原始 19 欄，再從明列的 business readonly market endpoints 加入公開市場 `marketData`；不得讀或回傳 configured-admin、個人持股／成本／交易／快照。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。每個 9090 exact path/method 都必須在 `docs/openapi/docker-external-api.yaml` 有同 commit 的完整 OpenAPI 3 operation，gateway 與文件 path/method 集合必須機械相等。USD/TWD 的每 2 秒外部抓取與 live Redis producer只屬於 `external-materials-service`，business/BFF 僅唯讀 cache/DB 與聚合。
-   - **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348；Requirement 108／Task 372 僅限巢狀公開投影；Requirement 109／Task 373）**：登入後共用 `StockAnalysisDialog` 與 `/api/quotes*` 的 `marketData.quoteDetail` 都只讀同一個 typed `FUBON_BOOKS` snapshot。它只能由 `TwLiveQuoteDispatcher` 已授權十秒台股 round 的同一富邦 batch 建立，必須先寫 PostgreSQL canonical row 再寫 dedicated Redis `price:quote-detail:{market}:{code}`；query path 是 Redis → DB pure read，禁止 request-time Yahoo／富邦／dispatcher／writer 外呼，也不得寫 generic quote、index、tick、day-H/L 或 SSE。它不是權威即時價，不能供估值、損益、下單、警示、SSE 或其他頁面／consumer 使用；公開投影仍只作市場顯示、無個人資產資料。business 只能 proxy／fail-soft；該頁籤以外的即時價仍只走 Redis、收盤價仍只走 `stock_price_history`。
+   - **具名、限縮例外（Requirements 67／68／70／71／78／79／86／108–113；Tasks 317／325／327／329／337／338／347／372／373／375–378）**：BFF 只對十二條 manifest 的 exact path/method 開放：十一條 GET `GET /api/quotes`、`GET /api/quotes/one`、`GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today`、`GET /api/public/trading-radar/stock`、`GET /api/public/transactions`、`GET /api/public/trading-calendar`，以及唯一 POST `/api/public/crawler-data/rescan`。`portfolio-advice/latest`、兩支交易雷達及交易紀錄是 owner-scoped：固定走 configured-admin bootstrap、顯式 tenant header 和 cleared caller identity；雷達 `today` 是第一頁 typed list，`stock` 只回當次 current-read exact `(stockCode,market)` full detail，交易紀錄只讀保存的 ledger。交易日曆是 global no-tenant market-data read，不得 bootstrap owner。Quotes 由 BFF no-tenant container clients 讀 external-materials 原始 19 欄，再從明列 business readonly market endpoints 加入公開市場 `marketData`，並可由同一 immutable result 追加 `quoteDetail`、`bidLevels`、`askLevels`、`dividendHistory`；不得讀或回傳個人持股／成本／交易／快照。禁止任何 wildcard／descendant、同路徑其他 method與前端 view 援引；Controller 仍只委派 service，BFF 不直查 DB 或外部行情。每個 9090 exact path/method 都必須在 `docs/openapi/docker-external-api.yaml` 有同 commit 的完整 OpenAPI 3 operation，gateway 與文件 path/method 集合必須機械相等；YAML 每次變更都必須重產本專案 Swagger Markdown 並覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`，且對 API、input、output 和所有 class attribute 提供具體說明。USD/TWD 的每 2 秒外部抓取與 live Redis producer只屬於 `external-materials-service`，business/BFF 僅唯讀 cache/DB 與聚合。
+   - **具名、限縮的行情五檔資料來源例外（Requirement 87／Task 348；Requirement 108／Task 372；Requirement 109／Task 373；Requirement 110／Task 375）**：登入後共用 `StockAnalysisDialog`、`/api/quotes*` 的 `marketData.quoteDetail` 與同一 response 的 direct `quoteDetail`／`bidLevels`／`askLevels` 都只讀同一個 typed `FUBON_BOOKS` snapshot。它只能由 `TwLiveQuoteDispatcher` 已授權十秒台股 round 的同一富邦 batch 建立，必須先寫 PostgreSQL canonical row 再寫 dedicated Redis `price:quote-detail:{market}:{code}`；query path 是 Redis → DB pure read，禁止 request-time Yahoo／富邦／dispatcher／writer 外呼，也不得寫 generic quote、index、tick、day-H/L 或 SSE。它不是權威即時價，不能供估值、損益、下單、警示或 SSE 使用；direct batch projection 只提供同一份市場五檔供累計深度判讀，無個人資產資料。business 只能 proxy／fail-soft；該頁籤與 direct batch projection 以外的即時價仍只走 Redis、收盤價仍只走 `stock_price_history`。
 3. **跨頁共用邏輯放 `bff/common/`。** 如 `SnapshotEnricher`（注入歷史收盤價、合併 broker rows）。
 4. **同義欄位 → 同一支 business service API。** BFF 不在不同頁重複呼叫不同 endpoint 取同義值。
    - **具名例外第一組（Task 285／286）：台股大盤的均線（MA5/20/60/240）目前有三份實作**——
@@ -370,14 +370,14 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 ### 4.4 Docker 外部 API Gateway `api-gateway/`
 
 `api-gateway` 是獨立、非 root、deny-by-default 的 Nginx image，host 唯一 mapping 為
-`127.0.0.1:9090:9090`。它轉送九條 exact route：八條唯讀 GET（quotes 兩條到 BFF，BFF 再讀 external service 原始快取；
- market-index、assets/latest、USD/TWD、market-analysis/today、portfolio-advice/latest、trading-radar/today 亦到 BFF；
-後三條由 Requirements 79／86、Tasks 338／347 新增；兩支 owner-scoped API 固定解析 configured admin）＋ 一條寫入 POST
+`127.0.0.1:9090:9090`。它轉送十二條 exact route：十一條唯讀 GET（quotes 兩條到 BFF，BFF 再讀 external service 原始快取；
+ market-index、assets/latest、USD/TWD、market-analysis/today、portfolio-advice/latest、交易雷達 `today` 列表／`stock` 明細、configured-admin 交易紀錄、global 交易日曆亦到 BFF；
+後六條由 Requirements 79／86／111–113、Tasks 338／347／376–378 新增；portfolio advice、兩支雷達及交易紀錄固定解析 configured admin，日曆不選 tenant）＋ 一條寫入 POST
 （`/api/public/crawler-data/rescan` 到 BFF，Requirement 71／Task 329；唯一有外部抓取副作用的
 例外，經 business 端 30 秒全域 Redis 冷卻節流）；其餘回 `404`，同 exact path 非合法 method 回 `405`。
-Tailscale Serve 只掛相同九條 exact path，包含公開 USD/TWD 匯率與第六條寫入路由；禁止
-root／`/api/` proxy、Funnel、自簽憑證與另加 OAuth。九條 path/method 必須與版本控管的完整
-OpenAPI 3 契約機械對齊；Swagger 文件本身不新增 9090 route。
+Tailscale Serve 只掛相同十二條 exact path，包含公開 USD/TWD 匯率與第六條寫入路由；禁止
+root／`/api/` proxy、Funnel、自簽憑證與另加 OAuth。十二條 path/method 必須與版本控管的完整
+OpenAPI 3 契約機械對齊；Swagger 文件須由該 YAML 重產並在每次 9090 API 修改時覆寫 SRPP 標準文件，但文件本身不新增 9090 route。
 
 ### 4.5 Fubon Broker Service `fubon-broker-service/`
 
@@ -510,9 +510,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 108 個 Requirements（最新編號為 109）
+├── requirements.md       # 112 個 Requirements（最新編號為 113）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–373）＋尚未歸檔的 201 起區段
+├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–378）＋尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

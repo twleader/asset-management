@@ -1,5 +1,6 @@
 package com.steven.assets.bff.config;
 
+import com.steven.assets.bff.publicapi.PublicContractJsonFixtures;
 import com.steven.assets.bff.security.AuthConstants;
 import com.steven.assets.bff.security.BusinessUserClient;
 import com.steven.assets.bff.security.TenantIdentity;
@@ -12,7 +13,6 @@ import reactor.netty.DisposableServer;
 import reactor.netty.http.server.HttpServer;
 import reactor.util.context.Context;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -24,8 +24,7 @@ class PublicTradingRadarConfiguredAdminContextTest {
     private static final String ADMIN_JSON = """
             {"id":1,"email":"owner@example.invalid","role":"ADMIN","status":"ACTIVE","protectedAdmin":true}
             """;
-    private static final String RADAR_JSON =
-            "{\"ruleVersion\":\"TW_RULES_V14\",\"score\":0.12345678901234567890}";
+    private static final String RADAR_JSON = PublicContractJsonFixtures.TRADING_RADAR_LIST;
 
     private record CapturedRequest(
             String method, String uri, String userId, String role, String status) {}
@@ -51,9 +50,7 @@ class PublicTradingRadarConfiguredAdminContextTest {
                 var response = service.today().contextWrite(context).block();
 
                 assertThat(response).isNotNull();
-                assertThat(response.statusCode()).isEqualTo(HttpStatus.PARTIAL_CONTENT.value());
-                assertThat(response.contentType()).isEqualTo("application/json;charset=UTF-8");
-                assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo(RADAR_JSON);
+                assertThat(response.body().toString()).isEqualTo(RADAR_JSON);
             }
 
             List<CapturedRequest> bootstraps = calls.stream()
@@ -66,7 +63,7 @@ class PublicTradingRadarConfiguredAdminContextTest {
             });
 
             List<CapturedRequest> radarCalls = calls.stream()
-                    .filter(r -> "/api/trading-radar/current".equals(r.uri())).toList();
+                    .filter(r -> "/internal/public-trading-radar/current/list".equals(r.uri())).toList();
             assertThat(radarCalls).hasSize(3).allSatisfy(radar -> {
                 assertThat(radar.method()).isEqualTo("GET");
                 assertThat(radar.userId()).isEqualTo("1");
@@ -87,8 +84,7 @@ class PublicTradingRadarConfiguredAdminContextTest {
                             request.requestHeaders().get(AuthConstants.HDR_USER_ROLE),
                             request.requestHeaders().get(AuthConstants.HDR_USER_STATUS)));
                     boolean bootstrap = "/internal/users/configured-admin".equals(request.uri());
-                    response.status(bootstrap ? HttpStatus.OK.value()
-                                    : HttpStatus.PARTIAL_CONTENT.value())
+                    response.status(HttpStatus.OK.value())
                             .header("Content-Type", bootstrap
                                     ? MediaType.APPLICATION_JSON_VALUE
                                     : "application/json;charset=UTF-8");

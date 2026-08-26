@@ -33,18 +33,19 @@ stop and say so rather than silently falling back.
 | `business-services` | `backend/` | (none) | 8080 | Spring Boot, internal only |
 | `external-materials-service` | `external-materials-service/` | (none) | 8080 | scrapers + Redis writer |
 | `bff` | `bff/` | (none) | 8080 | Spring Cloud Gateway — browser application API entry |
-| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Nine exact routes (8 GET + 1 POST); Tailscale mounts the same nine |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Twelve exact routes (11 GET + 1 POST); Tailscale mounts the same twelve |
 | `frontend` | `frontend/` | **80** | 80 | Nginx serving Vite build |
 
 Browser entry: `http://localhost/` (frontend) → authenticated application APIs at `bff:8080`.
-Docker-external API entry: `http://127.0.0.1:9090` → nine exact routes. Tailscale Serve
-exposes the same nine exact paths.
+Docker-external API entry: `http://127.0.0.1:9090` → twelve exact routes. Tailscale Serve
+exposes the same twelve exact paths.
 
 - Local/Tailscale GET routes: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`,
   `/api/assets/latest`, `/api/public/exchange-rate/usd-twd`, `/api/public/market-analysis/today`,
-  `/api/public/portfolio-advice/latest`, `/api/public/trading-radar/today`.
+  `/api/public/portfolio-advice/latest`, `/api/public/trading-radar/today`,
+  `/api/public/trading-radar/stock`, `/api/public/transactions`, `/api/public/trading-calendar`.
 - Local/Tailscale POST route: `/api/public/crawler-data/rescan` (the only route with an external-fetch side effect).
-- Tailscale mounts the same nine exact paths only. Never mount `/`, `/api/`, or any extra handler;
+- Tailscale mounts the same twelve exact paths only. Never mount `/`, `/api/`, or any extra handler;
   never use Funnel, self-signed certificates, another OAuth proxy, or a public host port.
 - Host 8080/8082 must have no listener. Check BFF health from its container and quote/BFF behavior through 9090.
 
