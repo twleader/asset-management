@@ -131,6 +131,8 @@ final class FubonNormalizedQuoteMapper {
             List<TwQuoteDetailFetchClient.OrderBookLevel> levels = new ArrayList<>(5);
             Set<BigDecimal> bidPrices = new HashSet<>();
             Set<BigDecimal> askPrices = new HashSet<>();
+            BigDecimal previousBid = null;
+            BigDecimal previousAsk = null;
             for (int index = 0; index < 5; index++) {
                 JsonNode level = levelsNode.get(index);
                 if (level == null || !level.isObject() || !level.has("level")
@@ -141,12 +143,16 @@ final class FubonNormalizedQuoteMapper {
                 BookSide bid = bookSide(level, "bidPrice", "bidVolumeLots");
                 BookSide ask = bookSide(level, "askPrice", "askVolumeLots");
                 if (bid == null || ask == null
-                        || (bid.price() != null && !bidPrices.add(bid.price().stripTrailingZeros()))
-                        || (ask.price() != null && !askPrices.add(ask.price().stripTrailingZeros()))) {
+                        || !bidPrices.add(bid.price().stripTrailingZeros())
+                        || !askPrices.add(ask.price().stripTrailingZeros())
+                        || (previousBid != null && previousBid.compareTo(bid.price()) <= 0)
+                        || (previousAsk != null && previousAsk.compareTo(ask.price()) >= 0)) {
                     return null;
                 }
                 levels.add(new TwQuoteDetailFetchClient.OrderBookLevel(
                         index + 1, bid.price(), bid.volumeLots(), ask.price(), ask.volumeLots()));
+                previousBid = bid.price();
+                previousAsk = ask.price();
             }
 
             PriceResult price = observation.result();
@@ -227,16 +233,14 @@ final class FubonNormalizedQuoteMapper {
         return value.longValue();
     }
 
-    /** A fixed Fubon slot is either a valid pair or an all-null pair. */
+    /** A best-five snapshot is useful only when both sides of every fixed level are positive. */
     private static BookSide bookSide(JsonNode level, String priceField, String lotsField) {
         JsonNode rawPrice = level.get(priceField);
         JsonNode rawLots = level.get(lotsField);
         boolean missingPrice = rawPrice == null || rawPrice.isNull();
         boolean missingLots = rawLots == null || rawLots.isNull();
-        if (missingPrice || missingLots) {
-            return missingPrice && missingLots ? new BookSide(null, null) : null;
-        }
-        if (!rawLots.isIntegralNumber() || !rawLots.canConvertToLong() || rawLots.longValue() < 0) return null;
+        if (missingPrice || missingLots
+                || !rawLots.isIntegralNumber() || !rawLots.canConvertToLong() || rawLots.longValue() <= 0) return null;
         try {
             return new BookSide(positiveDecimal(level, priceField, false), rawLots.longValue());
         } catch (MappingException invalid) {

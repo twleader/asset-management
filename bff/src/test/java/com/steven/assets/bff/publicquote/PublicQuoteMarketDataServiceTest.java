@@ -82,8 +82,8 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.marketData().quoteDetail().source()).isEqualTo("FUBON_BOOKS");
         assertThat(quote.quoteDetail()).isSameAs(quote.marketData().quoteDetail());
         assertThat(quote.dividendHistory()).isSameAs(quote.marketData().dividends());
-        assertThat(quote.bidLevels()).isEmpty();
-        assertThat(quote.askLevels()).isEmpty();
+        assertThat(quote.bidLevels()).hasSize(5);
+        assertThat(quote.askLevels()).hasSize(5);
         assertThat(quote.marketData().etfConstituents().holdings()).singleElement()
                 .extracting("stockCode", "shares").containsExactly("1101", new java.math.BigDecimal("12"));
         assertThat(quote.marketData().dividends().rows()).singleElement()
@@ -218,13 +218,12 @@ class PublicQuoteMarketDataServiceTest {
     }
 
     @Test
-    void nonFubonQuoteDetailPayloadIsNormalizedToTypedUnavailable() {
+    void completeYahooQuoteDetailProjectsTheSameOrderedDirectFiveSides() {
         PublicQuoteMarketDataService service = service(
                 request -> ok(rawQuote("2330", "台股", "2026-08-24")),
                 request -> {
                     if ("/api/market-data/quote-detail".equals(request.url().getPath())) {
-                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
-                                + "\"available\":true,\"source\":\"YAHOO_TW\",\"marketStatus\":\"OPEN\",\"levels\":[]}");
+                        return ok(completeBook("YAHOO_TW"));
                     }
                     return marketResponse(request);
                 });
@@ -232,13 +231,22 @@ class PublicQuoteMarketDataServiceTest {
         DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
 
         assertThat(quote.marketData().quoteDetail().supported()).isTrue();
-        assertThat(quote.marketData().quoteDetail().available()).isFalse();
-        assertThat(quote.marketData().quoteDetail().source()).isNull();
-        assertThat(quote.marketData().quoteDetail().marketStatus()).isEqualTo("UNKNOWN");
-        assertThat(quote.marketData().quoteDetail().levels()).isEmpty();
-        assertThat(quote.marketData().quoteDetail().message()).isEqualTo("暫時無法取得行情五檔");
-        assertThat(quote.bidLevels()).isEmpty();
-        assertThat(quote.askLevels()).isEmpty();
+        assertThat(quote.marketData().quoteDetail().available()).isTrue();
+        assertThat(quote.marketData().quoteDetail().source()).isEqualTo("YAHOO_TW");
+        assertThat(quote.marketData().quoteDetail().marketStatus()).isEqualTo("OPEN");
+        assertThat(quote.marketData().quoteDetail().levels()).hasSize(5);
+        assertThat(quote.bidLevels()).extracting("price", "size").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("100"), 10L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("99"), 9L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("98"), 8L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("97"), 7L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("96"), 6L));
+        assertThat(quote.askLevels()).extracting("price", "size").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("101"), 11L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("102"), 12L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("103"), 13L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("104"), 14L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("105"), 15L));
     }
 
     @Test
@@ -249,13 +257,7 @@ class PublicQuoteMarketDataServiceTest {
                 request -> {
                     if ("/api/market-data/quote-detail".equals(request.url().getPath())) {
                         quoteDetailCalls.incrementAndGet();
-                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
-                                + "\"available\":true,\"source\":\"FUBON_BOOKS\",\"levels\":["
-                                + "{\"level\":1,\"bidPrice\":100,\"bidVolumeLots\":10,\"askPrice\":101,\"askVolumeLots\":11},"
-                                + "{\"level\":2,\"bidPrice\":99,\"bidVolumeLots\":9,\"askPrice\":102,\"askVolumeLots\":12},"
-                                + "{\"level\":3,\"bidPrice\":98,\"bidVolumeLots\":8,\"askPrice\":103,\"askVolumeLots\":13},"
-                                + "{\"level\":4,\"bidPrice\":97,\"bidVolumeLots\":7,\"askPrice\":104,\"askVolumeLots\":14},"
-                                + "{\"level\":5,\"bidPrice\":96,\"bidVolumeLots\":6,\"askPrice\":105,\"askVolumeLots\":15}]}");
+                        return ok(completeBook("FUBON_BOOKS"));
                     }
                     return marketResponse(request);
                 });
@@ -279,7 +281,7 @@ class PublicQuoteMarketDataServiceTest {
     }
 
     @Test
-    void bookProjectionKeepsOrderedPartialSideButFailsClosedForOnlyTheUnorderedSide() {
+    void incompleteOrUnorderedBookFailsClosedForBothDirectSides() {
         PublicQuoteMarketDataService service = service(
                 request -> ok(rawQuote("2330", "台股", "2026-08-24")),
                 request -> {
@@ -297,10 +299,7 @@ class PublicQuoteMarketDataServiceTest {
         DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
 
         assertThat(quote.bidLevels()).isEmpty();
-        assertThat(quote.askLevels()).extracting("price", "size").containsExactly(
-                org.assertj.core.groups.Tuple.tuple(new BigDecimal("101"), 1L),
-                org.assertj.core.groups.Tuple.tuple(new BigDecimal("102"), 2L),
-                org.assertj.core.groups.Tuple.tuple(new BigDecimal("103"), 3L));
+        assertThat(quote.askLevels()).isEmpty();
     }
 
     @Test
@@ -390,9 +389,7 @@ class PublicQuoteMarketDataServiceTest {
             case "/internal/public-market-data/intraday-ticks-readonly" -> ok("{"
                     + "\"tradingDate\":\"2026-08-24\",\"readStatus\":\"DATA\","
                     + "\"ticks\":[{\"time\":\"2026-08-24T09:00:00\",\"price\":100.5}]}" );
-            case "/api/market-data/quote-detail" -> ok("{"
-                    + "\"stockCode\":\"2330\",\"stockName\":\"台積電\",\"market\":\"台股\","
-                    + "\"supported\":true,\"available\":true,\"source\":\"FUBON_BOOKS\",\"levels\":[]}");
+            case "/api/market-data/quote-detail" -> ok(completeBook("FUBON_BOOKS"));
             case "/api/market-data/etf-holdings" -> ok("{"
                     + "\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
                     + "\"source\":\"ISSUER\",\"asOfDate\":\"2026-08-23\",\"message\":null,"
@@ -422,6 +419,19 @@ class PublicQuoteMarketDataServiceTest {
                 + "\"lowPrice\":99.00,\"volume\":123456,\"tradingDate\":\"" + tradingDate + "\","
                 + "\"updatedAt\":\"2026-08-24T10:00:00+08:00\",\"closed\":false,\"source\":\"REDIS\","
                 + "\"quoteStatus\":\"LIVE\",\"premiumDiscountPct\":0.25}";
+    }
+
+    private static String completeBook(String source) {
+        return "{"
+                + "\"stockCode\":\"2330\",\"stockName\":\"台積電\",\"market\":\"台股\","
+                + "\"supported\":true,\"available\":true,\"source\":\"" + source + "\","
+                + "\"sourceTime\":\"2026-08-24T01:00:00Z\",\"fetchedAt\":\"2026-08-24T01:00:01Z\","
+                + "\"marketStatus\":\"OPEN\",\"price\":100,\"previousClose\":99,\"levels\":["
+                + "{\"level\":1,\"bidPrice\":100,\"bidVolumeLots\":10,\"askPrice\":101,\"askVolumeLots\":11},"
+                + "{\"level\":2,\"bidPrice\":99,\"bidVolumeLots\":9,\"askPrice\":102,\"askVolumeLots\":12},"
+                + "{\"level\":3,\"bidPrice\":98,\"bidVolumeLots\":8,\"askPrice\":103,\"askVolumeLots\":13},"
+                + "{\"level\":4,\"bidPrice\":97,\"bidVolumeLots\":7,\"askPrice\":104,\"askVolumeLots\":14},"
+                + "{\"level\":5,\"bidPrice\":96,\"bidVolumeLots\":6,\"askPrice\":105,\"askVolumeLots\":15}]}";
     }
 
     private static List<String> concat(List<String> values, String... extras) {

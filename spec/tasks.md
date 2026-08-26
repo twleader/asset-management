@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–378）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–379）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -377,6 +377,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 376 | 9090 交易雷達拆分首頁列表與指定股票展開明細，並以完整 OpenAPI 3 屬性字典重產 SRPP 標準文件（Requirement 111） | [tasks/t376_9090_openapi_radar_split.md](tasks/t376_9090_openapi_radar_split.md) |
 | 377 | 9090 唯讀查 configured-admin 交易紀錄，支援全年、單一年份或日期區間與畫面買賣彙總（Requirement 112） | [tasks/t377_9090_transaction_history.md](tasks/t377_9090_transaction_history.md) |
 | 378 | 9090 以指定單一年份回傳完整台／美／英交易日曆與市場狀態（Requirement 113） | [tasks/t378_9090_trading_calendar.md](tasks/t378_9090_trading_calendar.md) |
+| 379 | 富邦十秒報價缺有效完整最佳五檔時，以 Yahoo 背景補抓為 YAHOO_TW canonical snapshot，既有 9090 純讀提供（Requirement 114） | [tasks/t379_yahoo_order_book_fallback.md](tasks/t379_yahoo_order_book_fallback.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

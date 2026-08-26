@@ -29,11 +29,11 @@ class QuoteDetailCacheTest {
         var snapshot = snapshot();
         String token = QuoteDetailCache.sourceUpdatedEpochMicros(snapshot.sourceTime());
         when(values.get(QuoteDetailCache.key("台股", "2330"))).thenReturn(mapper.writeValueAsString(Map.of(
-                "sourceUpdatedEpochMicros", token, "snapshot", snapshot)));
+                "canonicalRevision", "7", "sourceUpdatedEpochMicros", token, "snapshot", snapshot)));
 
         var result = new QuoteDetailCache(redis, mapper).find("2330", "台股");
 
-        assertThat(result).isPresent().get().extracting(TwQuoteDetailFetchClient.QuoteDetailResult::source)
+        assertThat(result).isPresent().get().extracting(value -> value.snapshot().source())
                 .isEqualTo("FUBON_BOOKS");
         verify(values).get(QuoteDetailCache.key("台股", "2330"));
         verifyNoMoreInteractions(values);
@@ -48,7 +48,7 @@ class QuoteDetailCacheTest {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         var snapshot = snapshot();
         when(values.get(QuoteDetailCache.key("台股", "2330"))).thenReturn(mapper.writeValueAsString(Map.of(
-                "sourceUpdatedEpochMicros", "1", "snapshot", snapshot)));
+                "canonicalRevision", "7", "sourceUpdatedEpochMicros", "1", "snapshot", snapshot)));
 
         var result = new QuoteDetailCache(redis, mapper).find("2330", "台股");
 
@@ -57,14 +57,36 @@ class QuoteDetailCacheTest {
         verifyNoMoreInteractions(values);
     }
 
+    @Test
+    void legacyPayloadWithoutCanonicalRevisionIsACacheMissWhileYahooSnapshotIsAllowed() throws Exception {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        var yahoo = snapshot("YAHOO_TW");
+        assertThat(QuoteDetailCache.validSnapshot(yahoo)).isTrue();
+        when(values.get(QuoteDetailCache.key("台股", "2330"))).thenReturn(mapper.writeValueAsString(Map.of(
+                "sourceUpdatedEpochMicros", QuoteDetailCache.sourceUpdatedEpochMicros(yahoo.sourceTime()),
+                "snapshot", yahoo)));
+
+        assertThat(new QuoteDetailCache(redis, mapper).find("2330", "台股")).isEmpty();
+        verify(values).get(QuoteDetailCache.key("台股", "2330"));
+        verifyNoMoreInteractions(values);
+    }
+
     private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot() {
+        return snapshot("FUBON_BOOKS");
+    }
+
+    private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot(String source) {
         List<TwQuoteDetailFetchClient.OrderBookLevel> levels = java.util.stream.IntStream.rangeClosed(1, 5)
                 .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
                         BigDecimal.valueOf(100 - level), (long) level,
                         BigDecimal.valueOf(100 + level), (long) (level + 10)))
                 .toList();
         return new TwQuoteDetailFetchClient.QuoteDetailResult(
-                "2330", "台積電", "台股", true, true, "FUBON_BOOKS", null,
+                "2330", "台積電", "台股", true, true, source, null,
                 Instant.parse("2026-08-21T05:00:00.123456Z"), Instant.parse("2026-08-21T05:00:01Z"), "OPEN",
                 BigDecimal.valueOf(100), BigDecimal.valueOf(99), BigDecimal.valueOf(100),
                 BigDecimal.valueOf(101), BigDecimal.valueOf(98), BigDecimal.valueOf(100),

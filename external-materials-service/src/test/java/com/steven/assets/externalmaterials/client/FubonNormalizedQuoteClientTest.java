@@ -160,7 +160,7 @@ class FubonNormalizedQuoteClientTest {
         for (int level = 1; level <= 5; level++) {
             ObjectNode row = levels.addObject();
             row.put("level", level);
-            row.put("bidPrice", "100." + level);
+            row.put("bidPrice", "100." + (6 - level));
             row.put("bidVolumeLots", level);
             row.put("askPrice", "101." + level);
             row.put("askVolumeLots", level + 10);
@@ -206,6 +206,64 @@ class FubonNormalizedQuoteClientTest {
         assertThat(result.status()).isEqualTo(BatchStatus.SUCCESS);
         assertThat(result.observations()).hasSize(1);
         assertThat(result.orderBooks()).isEmpty();
+    }
+
+    @Test
+    void zeroLotsOrUnorderedFubonBookIsExcludedWithoutRejectingActualPrice() throws Exception {
+        for (boolean zeroLots : List.of(true, false)) {
+            ObjectNode root = responseRoot();
+            ObjectNode quote = (ObjectNode) successRow("2330").get("quote");
+            ObjectNode book = quote.putObject("orderBook");
+            book.put("bookUpdatedAt", "2026-08-21T05:00:00Z");
+            var levels = book.putArray("levels");
+            for (int level = 1; level <= 5; level++) {
+                ObjectNode row = levels.addObject();
+                row.put("level", level);
+                row.put("bidPrice", zeroLots ? "100." + (6 - level) : "100");
+                row.put("bidVolumeLots", zeroLots && level == 3 ? 0 : level);
+                row.put("askPrice", "101." + level);
+                row.put("askVolumeLots", level);
+            }
+            ObjectNode wrapper = root.withArray("quotes").addObject();
+            wrapper.put("stockCode", "2330");
+            wrapper.put("status", "SUCCESS");
+            wrapper.set("quote", quote);
+
+            var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
+                    .fetch(List.of("2330"));
+
+            assertThat(result.observations()).hasSize(1);
+            assertThat(result.orderBooks()).isEmpty();
+        }
+    }
+
+    @Test
+    void futureOrWrongTaiwanDateBookIsExcludedWithoutRejectingActualPrice() throws Exception {
+        for (String bookTime : List.of("2026-08-21T05:00:00.000001Z", "2026-08-20T05:00:00Z")) {
+            ObjectNode root = responseRoot();
+            ObjectNode quote = (ObjectNode) successRow("2330").get("quote");
+            ObjectNode book = quote.putObject("orderBook");
+            book.put("bookUpdatedAt", bookTime);
+            var levels = book.putArray("levels");
+            for (int level = 1; level <= 5; level++) {
+                ObjectNode row = levels.addObject();
+                row.put("level", level);
+                row.put("bidPrice", "100." + (6 - level));
+                row.put("bidVolumeLots", level);
+                row.put("askPrice", "101." + level);
+                row.put("askVolumeLots", level);
+            }
+            ObjectNode wrapper = root.withArray("quotes").addObject();
+            wrapper.put("stockCode", "2330");
+            wrapper.put("status", "SUCCESS");
+            wrapper.set("quote", quote);
+
+            var result = client(tokenFile(), new FubonNormalizedQuoteClient.RawResponse(200, root.toString()))
+                    .fetch(List.of("2330"));
+
+            assertThat(result.observations()).hasSize(1);
+            assertThat(result.orderBooks()).isEmpty();
+        }
     }
 
     @Test
