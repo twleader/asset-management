@@ -34,6 +34,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class MarketDataService {
 
+    /** Bound the internal pure-read bridge so a stalled peer remains a child-local failure. */
+    static final Duration QUOTE_DETAIL_TIMEOUT = Duration.ofSeconds(2);
+
     /** 美東時區，供 {@link #mostRecentCompletedUsTradingDay(Instant)} 換算「當地今天」。 */
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
 
@@ -117,7 +120,7 @@ public class MarketDataService {
         try {
             QuoteDetailDto.Response result = priceServiceClient.get().uri(uriBuilder -> uriBuilder.path("/internal/quote-detail")
                             .queryParam("code", stockCode).queryParam("market", market).build())
-                    .retrieve().bodyToMono(QuoteDetailDto.Response.class).block();
+                    .retrieve().bodyToMono(QuoteDetailDto.Response.class).timeout(QUOTE_DETAIL_TIMEOUT).block();
             if (approvedQuoteDetailSnapshot(result, stockCode, market)) return result;
             if (result != null && !result.supported()) return unavailable(stockCode, market, false, "此市場不支援行情五檔");
         } catch (Exception e) {

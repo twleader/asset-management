@@ -38,7 +38,7 @@ public class TaiexIndexPoller {
     private final StockSourceQuery source;
     private final MarketClock clock;
 
-    /** 盤中輪詢：週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘，與個股 PricePoller.scheduledTwIntradayUpdate 同頻率。 */
+    /** 盤中輪詢：週一～五 09:00–13:30 Asia/Taipei，每 2 分鐘；這是獨立大盤 cadence，交易雷達台股個股為每 10 秒。 */
     @Scheduled(cron = "0 0/2 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTaiexIntradayUpdate() {
         if (!clock.isTwMarketOpen()) return;

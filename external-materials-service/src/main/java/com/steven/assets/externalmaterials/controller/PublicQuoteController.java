@@ -12,13 +12,13 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 對外（docker host）唯讀查詢最新報價（Requirement 66）。
+ * asset-net 內原始最新報價唯讀 reader（Requirement 66）。
  *
  * <p>與全庫其餘既有 {@code /internal/*} 端點不同，本 controller 刻意掛在獨立命名空間，
- * 供 docker host 直接呼叫（見 {@code docker-compose.yml} 的 {@code external-materials-service}
- * 服務新增的 {@code ports} 映射，僅綁 {@code 127.0.0.1}）。純讀 Redis 既有快取，
- * 不觸發外部抓取、不寫入任何資料、不需要身份驗證（唯讀公開市場報價 ＋ 僅 loopback，
- * 理由見 {@code spec/requirements.md} Requirement 66）。
+ * 供 gateway 後的既有 BFF public aggregation 讀取。Docker host 僅能經
+ * {@code 127.0.0.1:9090 -> api-gateway -> BFF} 存取同名公開端點；本 service 沒有 host ports
+ * 映射。純讀 Redis 既有快取，不觸發外部抓取、不寫入任何資料、不需要身份驗證（公開市場資料，
+ * 理由見 {@code spec/requirements.md} Requirement 66／108）。
  */
 @RestController
 @RequestMapping("/api/quotes")

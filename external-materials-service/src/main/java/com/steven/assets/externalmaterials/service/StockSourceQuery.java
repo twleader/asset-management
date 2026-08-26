@@ -84,7 +84,7 @@ public class StockSourceQuery {
      * 本系統為多租戶，且 Requirement 35 每日把各 owner 的最新快照日期都釘成當日，於是多位 owner 的
      * 最新快照必然同日、tie-break 由 Postgres 任意決定。實測 2026-07-29：owner 1 的快照 id 15 有 35 筆
      * 台股持股、owner 2 的 id 18 只有 2 筆，Postgres 挑中 id 18，使 {@code 2885}（元大金，只在 owner 1
-     * 持股、不在觀察清單）既不被每 2 分鐘的 {@code PricePoller.scheduledTwIntradayUpdate} 抓價、
+     * 持股、不在觀察清單）既不被當時每 2 分鐘的 {@code PricePoller.scheduledTwIntradayUpdate} 抓價、
      * 也不被 16:00 的 {@code ClosePersister.verifyTwCloseWithFinMind} 校正收盤，前端因而顯示前一交易日
      * 的假收盤（63.50，實際 07-29 收盤 62.2）。</p>
      *
@@ -136,9 +136,10 @@ public class StockSourceQuery {
      * 取每位 owner 的最新快照（同 owner 同日多筆時再以 id 決勝，結果具決定性）。範圍仍是全庫——
      * Redis 行情快取本就是跨租戶共用的市場資料，且回應不回傳任何檔數或代號，不構成租戶洩漏。</p>
      *
-     * <p><b>刻意不改 {@link #collectHeldStockCodes} 本身</b>：它同時服務每 2 分鐘的
+     * <p><b>Task 249 當時刻意不改 {@link #collectHeldStockCodes} 本身</b>：它當時服務每 2 分鐘的
      * {@code PricePoller.scheduledTwIntradayUpdate} 與 {@code refreshAll()}，放大其範圍會改變背景排程
-     * 對外部 API 的請求量，屬另一個決定。</p>
+     * 對外部 API 的請求量，屬另一個決定。現行台股 LIVE 由 dispatcher 以 input ∩ 交易雷達 effective set
+     * 每 10 秒執行，見 Requirement 115／Task 380。</p>
      *
      * <p><b>（Task 257 已推翻上一段）</b>實測改為 per-owner 後台股僅 18 → 19 檔、美股與英股不變，
      * 請求量幾無變化；{@link #collectHeldStockCodes} 現已改為同一口徑。上一段保留為當時的決策記錄。</p>

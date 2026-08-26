@@ -14,7 +14,7 @@
 
       <el-alert type="info" :closable="false" style="margin-bottom:16px">
         <template #title>
-          盤中（台股 09:00–13:30、美股 09:30–16:00 ET、英股 08:00–16:30 LON）每次股價更新（每 2 分鐘）即時檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
+          盤中（台股交易雷達內標的 09:00–13:30 每 10 秒、美股 09:30–16:00 ET／英股 08:00–16:30 LON 每 2 分鐘）每次股價更新即時檢查，條件符合時記錄觸發時間與股價（同一條件 24 小時內不重複觸發）。
         </template>
       </el-alert>
 
@@ -358,7 +358,7 @@
       <el-alert type="warning" :closable="false" style="margin-bottom:14px">
         <template #title>
           <span style="line-height:1.7">
-            所有條件在同一次檢查中<strong>同時成立</strong>才觸發（AND）。任一條件成立就要通知的話，請改用個別的「新增警示」。複合條件不做盤中回溯補抓，只在每 2 分鐘的即時檢查判定。
+            所有條件在同一次檢查中<strong>同時成立</strong>才觸發（AND）。任一條件成立就要通知的話，請改用個別的「新增警示」。複合條件不做盤中回溯補抓，只在收到即時股價更新時判定。
           </span>
         </template>
       </el-alert>

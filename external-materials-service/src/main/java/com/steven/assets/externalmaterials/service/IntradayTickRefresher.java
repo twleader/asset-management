@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * 盤後外部資料源覆寫 Redis tick LIST。
  *
- * 動機：盤中 {@link PricePoller} 每 2 分鐘輪詢只在「真實成交」時寫 tick；遇 z='-'（兩 tick 之間
+ * 動機：盤中交易雷達台股由 {@link TwLiveQuoteDispatcher} 每 10 秒、美／英股由 {@link PricePoller}
+ * 每 2 分鐘輪詢，且只在「真實成交」時寫 tick；遇 z='-'（兩 tick 之間
  * 無新成交的 5 秒視窗）會 skip，原始累積 LIST 可能跳號。盤後抓 FinMind / Yahoo 全天完整 K 線
  * 覆寫，補回所有時間點，前端「當日」走勢圖即顯示權威來源的完整曲線。
  *
