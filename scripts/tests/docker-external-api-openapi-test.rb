@@ -212,15 +212,21 @@ walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
 end
 
-# RFC ProblemDetail / Spring default errors 允許擴充欄位；其餘固定 object 必須關閉
+# RFC ProblemDetail / Spring default errors 允許擴充欄位；`LatestQuoteShared` 是唯一由 outer
+# unevaluatedProperties 關閉的 allOf base，不能自行 additionalProperties:false，否則 Detailed 會
+# 在 shared 子 schema 就拒絕它的合法 Fubon additions。其餘固定 object 必須關閉
 # additionalProperties，真正的 map 則必須以 typed schema 描述 value。
 dynamic_objects = Set['ProblemDetail', 'SpringBasicError', 'SpringWebFluxBasicError']
+outer_closed_composition_bases = Set['LatestQuoteShared']
 document.dig('components', 'schemas').each do |name, schema|
   next unless schema.is_a?(Hash) && schema['type'] == 'object'
 
   additional = schema['additionalProperties']
   if dynamic_objects.include?(name)
     assert!(additional == true, "#{name}: 擴充型 error schema 應明確允許 extension members")
+  elsif outer_closed_composition_bases.include?(name)
+    assert!(!schema.key?('additionalProperties'),
+            "#{name}: allOf base 不可自行 additionalProperties:false，必須由 outer unevaluatedProperties 關閉")
   elsif schema.key?('properties')
     assert!(additional == false, "#{name}: 固定 object 必須 additionalProperties: false")
   else
@@ -324,31 +330,45 @@ assert!(quote_list.fetch('parameters').map { |p| p.fetch('name') } == %w[market 
 assert!(quote_one.fetch('parameters').map { |p| p.fetch('name') } == %w[code market start end],
         '/api/quotes/one 必須只含 code/market/start/end 四個 query parameter')
 assert!(quote_list.dig('responses', '200', 'content', 'application/json', 'schema') ==
-          {'type' => 'array', 'items' => {'$ref' => '#/components/schemas/DetailedLatestQuote'}},
-        '/api/quotes 200 必須是 DetailedLatestQuote array')
+          {'type' => 'array', 'items' => {'$ref' => '#/components/schemas/ListedLatestQuote'}},
+        '/api/quotes 200 必須是既有 ListedLatestQuote array')
 assert!(quote_one.dig('responses', '200', 'content', 'application/json', 'schema') ==
           {'$ref' => '#/components/schemas/DetailedLatestQuote'},
         '/api/quotes/one 200 必須精確引用 DetailedLatestQuote')
 
 schemas = document.dig('components', 'schemas')
 detailed = schemas.fetch('DetailedLatestQuote')
+listed = schemas.fetch('ListedLatestQuote')
+shared_quote = schemas.fetch('LatestQuoteShared')
 raw_quote_keys = %w[stockCode stockName market price previousClose priceChange changePercent buyPrice sellPrice openPrice highPrice lowPrice volume tradingDate updatedAt closed source quoteStatus premiumDiscountPct]
-assert!(detailed.fetch('required') == raw_quote_keys + %w[marketData quoteDetail bidLevels askLevels dividendHistory],
-        'DetailedLatestQuote required 必須是原始 19 欄後 marketData/direct quote fields')
-assert!(detailed.fetch('properties').keys == raw_quote_keys + %w[marketData quoteDetail bidLevels askLevels dividendHistory],
-        'DetailedLatestQuote property 宣告順序必須保留原始 19 欄、marketData、direct fields')
-assert!(detailed.fetch('additionalProperties') == false,
-        'DetailedLatestQuote 不可用 loose additionalProperties')
-assert!(detailed.dig('properties', 'quoteDetail', '$ref') == '#/components/schemas/PublicQuoteDetail',
+assert!(shared_quote.fetch('required') == raw_quote_keys + %w[marketData quoteDetail bidLevels askLevels dividendHistory],
+        'LatestQuoteShared required 必須保留原始 19 欄後 marketData/direct quote fields')
+assert!(shared_quote.fetch('properties').keys == raw_quote_keys + %w[marketData quoteDetail bidLevels askLevels dividendHistory],
+        'LatestQuoteShared property 宣告順序必須保留原始 19 欄、marketData、direct fields')
+assert!(listed.dig('allOf', 0, '$ref') == '#/components/schemas/LatestQuoteShared' &&
+        listed.fetch('unevaluatedProperties') == false && !listed.key?('additionalProperties'),
+        'ListedLatestQuote 必須於 shared fields 評估後以 outer unevaluatedProperties 關閉額外欄位')
+assert!(shared_quote.dig('properties', 'quoteDetail', '$ref') == '#/components/schemas/PublicQuoteDetail',
         'root quoteDetail 必須是 typed PublicQuoteDetail')
 %w[bidLevels askLevels].each do |side|
-  property = detailed.dig('properties', side)
+  property = shared_quote.dig('properties', side)
   assert!(property['type'] == 'array' && property['maxItems'] == 5 &&
           property.dig('items', '$ref') == '#/components/schemas/BookSideLevel',
           "#{side} 必須是至多五筆 typed BookSideLevel")
 end
-assert!(detailed.dig('properties', 'dividendHistory', '$ref') == '#/components/schemas/PublicDividendHistory',
+assert!(shared_quote.dig('properties', 'dividendHistory', '$ref') == '#/components/schemas/PublicDividendHistory',
         'root dividendHistory 必須是 typed PublicDividendHistory')
+assert!(detailed.fetch('allOf').length == 2 && detailed.dig('allOf', 0, '$ref') == '#/components/schemas/LatestQuoteShared' &&
+        detailed.fetch('unevaluatedProperties') == false && !detailed.fetch('allOf').last.key?('additionalProperties'),
+        'DetailedLatestQuote 必須與 additions 合併後才以 outer unevaluatedProperties 關閉額外欄位')
+fubon_fields = %w[fubonSupported fubonAvailable fubonMessage fubonReceivedAt fubonBatchId fubonResponseStatus fubonFailureReason fubonReturnedOrderBook]
+detailed_addition = detailed.fetch('allOf').last
+assert!(detailed_addition.fetch('required') == fubon_fields && detailed_addition.fetch('properties').keys == fubon_fields,
+        'DetailedLatestQuote 必須只追加去重 Fubon metadata/order-book fields')
+assert!(detailed_addition.dig('properties', 'fubonResponseStatus', 'enum') == ['SUCCESS', 'FAILURE', nil],
+        'Fubon response status 必須是 SUCCESS/FAILURE/null')
+assert!(detailed_addition.dig('properties', 'fubonReturnedOrderBook', 'anyOf', 0, '$ref') == '#/components/schemas/FubonReturnedOrderBook',
+        'Fubon returned book 必須是 typed schema，不能是 arbitrary JSON')
 
 market_data = schemas.fetch('PublicQuoteMarketData')
 assert!(market_data.fetch('required') == %w[chart quoteDetail etfConstituents dividends],
@@ -415,7 +435,7 @@ assert!(quote_detail.dig('properties', 'levels', 'maxItems') == 5 &&
         quote_detail.dig('properties', 'levels', 'description').include?('恰好五筆'),
         'PublicQuoteDetail.levels 文件必須說明完整 snapshot 的五筆限制')
 %w[bidLevels askLevels].each do |side|
-  description = detailed.dig('properties', side, 'description')
+  description = shared_quote.dig('properties', side, 'description')
   assert!(description.include?('FUBON_BOOKS') && description.include?('YAHOO_TW') &&
           description.include?('至多五筆'),
           "#{side} 文件必須說明兩個 approved source 與最大五筆")
@@ -486,8 +506,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 79,
-        "全量 strict audit 預期 79 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 83,
+        "全量 strict audit 預期 83 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -507,7 +527,8 @@ end
 
 forbidden = %w[configuredAdmin personalHoldings portfolio assetSnapshot user account broker costPrice investmentCost currentValue transaction allocation advice]
 forbidden.each do |field|
-  assert!(!detailed.fetch('properties').key?(field) && !market_data.fetch('properties').key?(field),
+  assert!(!shared_quote.fetch('properties').key?(field) &&
+          !detailed_addition.fetch('properties').key?(field) && !market_data.fetch('properties').key?(field),
           "公開 quote schema 不可含個人資料欄位 #{field}")
 end
 

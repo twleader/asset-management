@@ -44,6 +44,13 @@ class TwLivePersistencePgRedisIntegrationTest {
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             jdbc.execute("CREATE TABLE stock (code varchar(20), market varchar(20), name varchar(80), PRIMARY KEY(code,market))");
             applyActualV113Migration(jdbc);
+            // The production dispatcher now takes its second, fail-closed boundary directly from
+            // the real trading-radar tables.  Keep this integration fixture on that path rather
+            // than bypassing it with a mock collector.
+            jdbc.execute("CREATE TABLE asset_snapshot (id bigint, owner_user_id bigint, snapshot_date date)");
+            jdbc.execute("CREATE TABLE stock_holding (stock_code varchar(20), market varchar(20), snapshot_id bigint)");
+            jdbc.execute("CREATE TABLE stock_alert (stock_code varchar(20), market varchar(20))");
+            jdbc.update("INSERT INTO stock_alert (stock_code, market) VALUES ('2330', '台股')");
             jdbc.update("INSERT INTO stock VALUES ('2330','台股','舊名')");
             StockSourceQuery source = transactionalProxy(jdbc, dataSource);
 

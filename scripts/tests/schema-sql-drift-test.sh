@@ -62,27 +62,27 @@ list_tables() {  # $1 = sql 檔
 
 # ── 0. 檔案存在 ────────────────────────────────────────────────────
 if [ ! -f "$schema_file" ]; then
-  echo "FAIL: 找不到 $schema_rel —— 稽核基準線遺失"
+  echo "FAIL: 找不到 ${schema_rel} —— 稽核基準線遺失"
   exit 1
 fi
 
 # ── 1. 檔頭／pg_dump 本體的分界（不得寫死行號）────────────────────
 marker_line="$(grep -nxF -- "$DUMP_MARKER" "$schema_file" | head -1 | cut -d: -f1)"
 if [ -z "$marker_line" ]; then
-  echo "FAIL: $schema_rel 找不到整行等於「$DUMP_MARKER」的行 —— 檔頭結構已被破壞，無法切出 pg_dump 本體"
+  echo "FAIL: ${schema_rel} 找不到整行等於「${DUMP_MARKER}」的行 —— 檔頭結構已被破壞，無法切出 pg_dump 本體"
   echo "      預期結構：專案檔頭 → 「--」 → 「$DUMP_MARKER」 → 「--」 → pg_dump 本體"
   print_regen
   exit 1
 fi
 body_start=$((marker_line - 1))
 if [ "$body_start" -lt 1 ]; then
-  echo "FAIL: $schema_rel 的「$DUMP_MARKER」出現在第 1 行，前面沒有專案檔頭 —— 檔頭結構已被破壞"
+  echo "FAIL: ${schema_rel} 的「${DUMP_MARKER}」出現在第 1 行，前面沒有專案檔頭 —— 檔頭結構已被破壞"
   print_regen
   exit 1
 fi
 prev_line="$(sed -n "${body_start}p" "$schema_file")"
 if [ "$prev_line" != "--" ]; then
-  echo "FAIL: $schema_rel 第 ${body_start} 行（「$DUMP_MARKER」的前一行）應恰為「--」，實際為：$prev_line"
+  echo "FAIL: ${schema_rel} 第 ${body_start} 行（「${DUMP_MARKER}」的前一行）應恰為「--」，實際為：${prev_line}"
   echo "      —— 檔頭結構已被破壞，無法可靠切出 pg_dump 本體"
   print_regen
   exit 1
@@ -97,14 +97,14 @@ tail -n "+${body_start}" "$schema_file" > "$body_file"
 actual_tables="$(grep -c '^CREATE TABLE' "$schema_file")"
 declared_tables="$(grep -oE '產生當下表數：[0-9]+ 張' "$header_file" | grep -oE '[0-9]+' | head -1)"
 if [ -z "$declared_tables" ]; then
-  echo "FAIL: $schema_rel 檔頭缺「產生當下表數：N 張」宣告行，請依 Task 367.2 補上"
-  echo "      實際 CREATE TABLE 張數：$actual_tables"
+  echo "FAIL: ${schema_rel} 檔頭缺「產生當下表數：N 張」宣告行，請依 Task 367.2 補上"
+  echo "      實際 CREATE TABLE 張數：${actual_tables}"
   echo "      （此為離線檢查，與運行中 DB 無關）"
   print_regen
   exit 1
 fi
 if [ "$declared_tables" != "$actual_tables" ]; then
-  echo "FAIL: $schema_rel 檔頭宣告「產生當下表數：${declared_tables} 張」，但檔案實際有 ${actual_tables} 個 CREATE TABLE"
+  echo "FAIL: ${schema_rel} 檔頭宣告「產生當下表數：${declared_tables} 張」，但檔案實際有 ${actual_tables} 個 CREATE TABLE"
   echo "      —— 檔案疑似被手改而未重產。此為離線檢查，本項失敗並不代表與運行中 DB 不一致。"
   print_regen
   exit 1
@@ -112,12 +112,12 @@ fi
 
 # ── 3. 取此刻運行中 DB 的 pg_dump（失敗一律轉成離開碼 2）──────────
 if ! command -v docker >/dev/null 2>&1; then
-  echo "SKIP: 找不到 docker 指令 —— $schema_rel 是否漂移「無法查證」"
+  echo "SKIP: 找不到 docker 指令 —— ${schema_rel} 是否漂移「無法查證」"
   exit 2
 fi
 running="$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null)"
 if [ "$running" != "true" ]; then
-  echo "SKIP: 容器 $container 不在運行（docker inspect 回「${running:-查無此容器}」）—— $schema_rel 是否漂移「無法查證」"
+  echo "SKIP: 容器 ${container} 不在運行（docker inspect 回「${running:-查無此容器}」）—— ${schema_rel} 是否漂移「無法查證」"
   echo "      可用 SCHEMA_DRIFT_CONTAINER 覆寫容器名。"
   exit 2
 fi
@@ -128,12 +128,12 @@ docker exec "$container" pg_dump -U "$db_user" -d "$db_name" \
   --schema-only --no-owner --no-privileges > "$raw_dump" 2>"$dump_err"
 dump_status=$?
 if [ "$dump_status" -ne 0 ]; then
-  echo "SKIP: 在 $container 執行 pg_dump 失敗（離開碼 $dump_status）—— $schema_rel 是否漂移「無法查證」"
+  echo "SKIP: 在 ${container} 執行 pg_dump 失敗（離開碼 ${dump_status}）—— ${schema_rel} 是否漂移「無法查證」"
   sed 's/^/      /' "$dump_err"
   exit 2
 fi
 if [ ! -s "$raw_dump" ]; then
-  echo "SKIP: 在 $container 執行 pg_dump 得到空輸出 —— $schema_rel 是否漂移「無法查證」"
+  echo "SKIP: 在 ${container} 執行 pg_dump 得到空輸出 —— ${schema_rel} 是否漂移「無法查證」"
   exit 2
 fi
 
@@ -144,31 +144,31 @@ grep -v '^\\restrict\|^\\unrestrict' "$raw_dump" > "$fresh_dump" || true
 
 # ── 4. 逐位元全文比對 ─────────────────────────────────────────────
 if cmp -s "$body_file" "$fresh_dump"; then
-  echo "PASS: ${schema_rel}（去除專案檔頭後）逐位元等於 $container 此刻的 pg_dump 輸出"
-  echo "      表數：$actual_tables 張（檔頭宣告一致）"
+  echo "PASS: ${schema_rel}（去除專案檔頭後）逐位元等於 ${container} 此刻的 pg_dump 輸出"
+  echo "      表數：${actual_tables} 張（檔頭宣告一致）"
   exit 0
 fi
 
-echo "FAIL: $schema_rel 與運行中 DB（$container）的 schema 不一致 —— 稽核基準線已漂移"
+echo "FAIL: $schema_rel 與運行中 DB（${container}）的 schema 不一致 —— 稽核基準線已漂移"
 echo
 
 added="$(diff "$body_file" "$fresh_dump" | grep -c '^>' || true)"
 removed="$(diff "$body_file" "$fresh_dump" | grep -c '^<' || true)"
-echo "  差異行數：新增 ${added:-0} 行、刪除 ${removed:-0} 行（相對現行 $schema_rel）"
+echo "  差異行數：新增 ${added:-0} 行、刪除 ${removed:-0} 行（相對現行 ${schema_rel}）"
 
 only_db="$(comm -13 <(list_tables "$body_file") <(list_tables "$fresh_dump"))"
 only_file="$(comm -23 <(list_tables "$body_file") <(list_tables "$fresh_dump"))"
 if [ -n "$only_db" ]; then
-  echo "  僅存在於運行中 DB（$schema_rel 缺這些表）："
+  echo "  僅存在於運行中 DB（${schema_rel} 缺這些表）："
   printf '%s\n' "$only_db" | sed 's/^/    - /'
 else
   echo "  僅存在於運行中 DB：（無）"
 fi
 if [ -n "$only_file" ]; then
-  echo "  僅存在於 $schema_rel（運行中 DB 沒有這些表）："
+  echo "  僅存在於 ${schema_rel}（運行中 DB 沒有這些表）："
   printf '%s\n' "$only_file" | sed 's/^/    - /'
 else
-  echo "  僅存在於 $schema_rel：（無）"
+  echo "  僅存在於 ${schema_rel}：（無）"
 fi
 echo "  （表名兩個方向都相同時，漂移在欄位／預設值／CHECK／索引定義上——本檢查是全文比對）"
 
@@ -184,6 +184,6 @@ if [ "${non_version_changes:-0}" -eq 0 ]; then
 fi
 
 echo
-echo "  ※ $schema_rel 是 DB schema 的唯一標準，不一致代表「本檔已過期」，依下列指令重產即可。"
+echo "  ※ ${schema_rel} 是 DB schema 的唯一標準，不一致代表「本檔已過期」，依下列指令重產即可。"
 print_regen
 exit 1

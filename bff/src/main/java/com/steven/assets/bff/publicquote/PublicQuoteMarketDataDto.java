@@ -35,12 +35,58 @@ public final class PublicQuoteMarketDataDto {
             String quoteStatus,
             BigDecimal premiumDiscountPct) {}
 
-    /** top-level declaration order 固定為 raw 19 欄、marketData 與 direct normalized market fields。 */
+    /**
+     * List contract: the former 24 fields and their declaration order are frozen.  A list must not
+     * fan out to the Fubon full-response bridge, both to preserve its shape and its bounded latency.
+     */
     @JsonPropertyOrder({
             "stockCode", "stockName", "market", "price", "previousClose", "priceChange", "changePercent",
             "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice", "volume", "tradingDate",
             "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct", "marketData",
             "quoteDetail", "bidLevels", "askLevels", "dividendHistory"
+    })
+    public record ListedLatestQuote(
+            String stockCode,
+            String stockName,
+            String market,
+            BigDecimal price,
+            BigDecimal previousClose,
+            BigDecimal priceChange,
+            BigDecimal changePercent,
+            BigDecimal buyPrice,
+            BigDecimal sellPrice,
+            BigDecimal openPrice,
+            BigDecimal highPrice,
+            BigDecimal lowPrice,
+            Long volume,
+            String tradingDate,
+            String updatedAt,
+            Boolean closed,
+            String source,
+            String quoteStatus,
+            BigDecimal premiumDiscountPct,
+            MarketData marketData,
+            QuoteDetail quoteDetail,
+            List<BookSideLevel> bidLevels,
+            List<BookSideLevel> askLevels,
+            DividendHistory dividendHistory) {
+        public ListedLatestQuote {
+            bidLevels = bidLevels == null ? List.of() : List.copyOf(bidLevels);
+            askLevels = askLevels == null ? List.of() : List.copyOf(askLevels);
+        }
+    }
+
+    /**
+     * Single-quote-only contract.  The Fubon projection has only metadata and the returned raw
+     * book; shared quote concepts remain the one existing top-level copy above.
+     */
+    @JsonPropertyOrder({
+            "stockCode", "stockName", "market", "price", "previousClose", "priceChange", "changePercent",
+            "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice", "volume", "tradingDate",
+            "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct", "marketData",
+            "quoteDetail", "bidLevels", "askLevels", "dividendHistory",
+            "fubonSupported", "fubonAvailable", "fubonMessage", "fubonReceivedAt", "fubonBatchId",
+            "fubonResponseStatus", "fubonFailureReason", "fubonReturnedOrderBook"
     })
     public record DetailedLatestQuote(
             String stockCode,
@@ -66,7 +112,15 @@ public final class PublicQuoteMarketDataDto {
             QuoteDetail quoteDetail,
             List<BookSideLevel> bidLevels,
             List<BookSideLevel> askLevels,
-            DividendHistory dividendHistory) {
+            DividendHistory dividendHistory,
+            boolean fubonSupported,
+            boolean fubonAvailable,
+            String fubonMessage,
+            Instant fubonReceivedAt,
+            String fubonBatchId,
+            String fubonResponseStatus,
+            String fubonFailureReason,
+            FubonReturnedOrderBook fubonReturnedOrderBook) {
         public DetailedLatestQuote {
             bidLevels = bidLevels == null ? List.of() : List.copyOf(bidLevels);
             askLevels = askLevels == null ? List.of() : List.copyOf(askLevels);
@@ -138,6 +192,26 @@ public final class PublicQuoteMarketDataDto {
     }
 
     public record OrderBookLevel(
+            int level,
+            BigDecimal bidPrice,
+            Long bidVolumeLots,
+            BigDecimal askPrice,
+            Long askVolumeLots) {}
+
+    /** Raw normalized Fubon response book.  Nullable side slots intentionally remain visible. */
+    public record FubonReturnedOrderBook(
+            Instant bookUpdatedAt,
+            BigDecimal averagePrice,
+            BigDecimal turnoverYi,
+            Long innerVolumeLots,
+            Long outerVolumeLots,
+            List<FubonReturnedOrderBookLevel> levels) {
+        public FubonReturnedOrderBook {
+            levels = levels == null ? List.of() : List.copyOf(levels);
+        }
+    }
+
+    public record FubonReturnedOrderBookLevel(
             int level,
             BigDecimal bidPrice,
             Long bidVolumeLots,
