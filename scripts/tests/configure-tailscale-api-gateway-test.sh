@@ -26,7 +26,7 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"}}}}}'
+    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"}}}}}'
   else
     printf '%s\n' '{}'
   fi
@@ -79,11 +79,11 @@ done
 case "$url" in
   */api/quotes)
     endpoint=quotes
-    body='[{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}}}]'
+    body='[{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}},"quoteDetail":{},"bidLevels":[],"askLevels":[],"dividendHistory":{}}]'
     ;;
   */api/quotes/one)
     endpoint=quote-one
-    body='{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}}}'
+    body='{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}},"quoteDetail":{},"bidLevels":[],"askLevels":[],"dividendHistory":{}}'
     ;;
   *'/api/public/market-index?'*)
     endpoint=market-index
@@ -115,6 +115,29 @@ case "$url" in
     endpoint=trading-radar
     body='{"ruleVersion":"TW_RULES_V14","actionPolicyVersion":"EVIDENCE_GATE_V1","generatedAt":"2026-08-21T12:00:00+08:00","market":{},"usMarket":{},"stocks":[],"skippedNonTwStocks":0,"publicInformation":[]}'
     ;;
+  *'/api/public/trading-radar/stock?'*)
+    endpoint=trading-radar-stock-error
+    body='{"title":"Invalid trading radar request","status":400}'
+    ;;
+  */api/public/transactions)
+    endpoint=transactions
+    body='{"selection":{"mode":"ALL","year":null,"start":null,"end":null},"allTimeSummary":{},"summary":{},"yearSummaries":[],"records":[]}'
+    ;;
+  *'/api/public/trading-calendar?'*)
+    endpoint=trading-calendar
+    calendar_year="${url##*=}"
+    body="$(python3 - "$calendar_year" <<'PY'
+import calendar, json, sys
+year = int(sys.argv[1])
+print(json.dumps({
+    "year": year, "generatedAt": "2026-08-26T12:00:00+08:00", "timezone": "Asia/Taipei",
+    "availableYears": [year - 1, year, year + 1], "minYear": year - 1, "maxYear": year + 1,
+    "markets": [], "availability": {}, "tradingDayCount": {}, "holidays": {},
+    "days": [{}] * (366 if calendar.isleap(year) else 365), "marketStatus": {}
+}, ensure_ascii=False))
+PY
+)"
+    ;;
   *)
     printf 'unexpected URL: %s\n' "$url" >&2
     exit 2
@@ -125,6 +148,13 @@ if [[ "$endpoint" == rescan ]]; then
   printf '%s' "$body" >"$output_file"
   printf 'HTTP/1.1 405 Method Not Allowed\r\nAllow: POST\r\n\r\n' >"$headers_file"
   printf '405'
+  exit 0
+fi
+
+if [[ "$endpoint" == trading-radar-stock-error ]]; then
+  printf '%s' "$body" >"$output_file"
+  printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\n\r\n' >"$headers_file"
+  printf '400'
   exit 0
 fi
 
@@ -175,7 +205,7 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 9 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 12 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -183,6 +213,8 @@ run_content_type_failure quotes '本機 /api/quotes Content-Type 不是 applicat
 run_content_type_failure quote-one '本機 /api/quotes/one Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure market-index '本機 market-index Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure trading-radar '本機今日交易雷達 Content-Type 不是 application/json；不會 reset Serve。'
+run_content_type_failure transactions '本機交易紀錄 Content-Type 不是 application/json；不會 reset Serve。'
+run_content_type_failure trading-calendar '本機交易日曆 Content-Type 不是 application/json；不會 reset Serve。'
 run_success
 
-printf '%s\n' 'PASS: 九路 preflight Content-Type／reset fail-closed regression'
+printf '%s\n' 'PASS: 十二路 preflight Content-Type／reset fail-closed regression'

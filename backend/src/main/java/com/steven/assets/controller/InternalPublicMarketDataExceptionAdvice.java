@@ -1,5 +1,6 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.service.InvalidPublicTradingCalendarRequestException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -19,6 +20,13 @@ public class InternalPublicMarketDataExceptionAdvice {
     public ResponseEntity<ProblemDetail> invalidRequestParameter(Exception ignored) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "市場資料參數不合法");
         problem.setTitle("Invalid public market data request");
+        return ResponseEntity.badRequest().body(problem);
+    }
+
+    @ExceptionHandler(InvalidPublicTradingCalendarRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidCalendarYear(InvalidPublicTradingCalendarRequestException ignored) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "交易日曆年度不合法");
+        problem.setTitle("Invalid public trading calendar request");
         return ResponseEntity.badRequest().body(problem);
     }
 }

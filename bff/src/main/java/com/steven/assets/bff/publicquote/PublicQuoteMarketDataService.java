@@ -25,13 +25,18 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -45,6 +50,8 @@ import java.util.concurrent.TimeoutException;
  */
 @Service
 public class PublicQuoteMarketDataService {
+
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private static final ParameterizedTypeReference<List<RawLatestQuote>> RAW_LIST =
             new ParameterizedTypeReference<>() {};
@@ -323,6 +330,7 @@ public class PublicQuoteMarketDataService {
                         .build())
                 .retrieve()
                 .bodyToMono(DividendHistory.class)
+                .map(this::normalizeDividendHistory)
                 .timeout(dividendsTimeout)
                 .switchIfEmpty(Mono.error(new IllegalStateException("dividend body unavailable")));
     }
@@ -377,7 +385,7 @@ public class PublicQuoteMarketDataService {
 
     private DividendHistory unavailableDividends(RawLatestQuote raw) {
         return new DividendHistory(raw.stockCode(), raw.market(), null,
-                "股利資料暫時不可用", List.of());
+                "股利資料暫時不可用", List.of(), List.of());
     }
 
     private boolean isTaiwanQuoteDetailSupported(RawLatestQuote raw) {
@@ -397,11 +405,133 @@ public class PublicQuoteMarketDataService {
     }
 
     private DetailedLatestQuote detailed(RawLatestQuote raw, MarketData marketData) {
+        QuoteDetail quoteDetail = marketData.quoteDetail();
+        DividendHistory dividendHistory = marketData.dividends();
         return new DetailedLatestQuote(
                 raw.stockCode(), raw.stockName(), raw.market(), raw.price(), raw.previousClose(), raw.priceChange(),
                 raw.changePercent(), raw.buyPrice(), raw.sellPrice(), raw.openPrice(), raw.highPrice(), raw.lowPrice(),
                 raw.volume(), raw.tradingDate(), raw.updatedAt(), raw.closed(), raw.source(), raw.quoteStatus(),
-                raw.premiumDiscountPct(), marketData);
+                raw.premiumDiscountPct(), marketData, quoteDetail,
+                projectBookSide(quoteDetail, true), projectBookSide(quoteDetail, false), dividendHistory);
+    }
+
+    /**
+     * 五檔只可由同一個 {@code FUBON_BOOKS} quote-detail snapshot 投影；絕不以 raw buy/sell
+     * 或任何其他 source 補值。缺值／零量略過後仍可保留有序 partial side，任一亂序則該 side fail closed。
+     */
+    private List<PublicQuoteMarketDataDto.BookSideLevel> projectBookSide(QuoteDetail detail, boolean bid) {
+        if (detail == null || !detail.available() || !"FUBON_BOOKS".equals(detail.source())) {
+            return List.of();
+        }
+        List<PublicQuoteMarketDataDto.BookSideLevel> projected = new ArrayList<>();
+        for (PublicQuoteMarketDataDto.OrderBookLevel level : detail.levels()) {
+            if (level == null) {
+                continue;
+            }
+            BigDecimal price = bid ? level.bidPrice() : level.askPrice();
+            Long size = bid ? level.bidVolumeLots() : level.askVolumeLots();
+            if (price == null || price.compareTo(BigDecimal.ZERO) <= 0 || size == null || size <= 0) {
+                continue;
+            }
+            projected.add(new PublicQuoteMarketDataDto.BookSideLevel(price, size));
+            if (projected.size() == 5) {
+                break;
+            }
+        }
+        for (int index = 1; index < projected.size(); index++) {
+            int compared = projected.get(index - 1).price().compareTo(projected.get(index).price());
+            if ((bid && compared <= 0) || (!bid && compared >= 0)) {
+                return List.of();
+            }
+        }
+        return List.copyOf(projected);
+    }
+
+    /**
+     * 將既有 readonly 股利 child 正規化一次後，同一 instance 同時掛在 nested 與 direct field。
+     * 現金殖利率永遠以該 row 的前收計算；年度殖利率則以 anchor date 由新到舊第一筆有前收的
+     * row 為唯一候選，候選非正值即 null，不能往較舊 row 尋找正值。
+     */
+    private DividendHistory normalizeDividendHistory(DividendHistory source) {
+        List<PublicQuoteMarketDataDto.DividendRow> rows = source.rows().stream()
+                .map(this::normalizeDividendRow)
+                .toList();
+        return new DividendHistory(source.stockCode(), source.market(), source.source(), source.message(), rows,
+                annualDividendSummaries(rows));
+    }
+
+    private PublicQuoteMarketDataDto.DividendRow normalizeDividendRow(
+            PublicQuoteMarketDataDto.DividendRow row) {
+        return new PublicQuoteMarketDataDto.DividendRow(
+                row.year(), row.cashDividend(), row.stockDividend(), row.exDividendDate(), row.yieldPct(),
+                row.cashPaymentDate(), row.stockPaymentDate(), row.fillDays(), row.previousClose(),
+                row.exRightsDate(), cashYieldPct(row.cashDividend(), row.previousClose()));
+    }
+
+    private List<PublicQuoteMarketDataDto.AnnualDividendSummary> annualDividendSummaries(
+            List<PublicQuoteMarketDataDto.DividendRow> rows) {
+        Map<Integer, List<IndexedDividendRow>> byYear = new LinkedHashMap<>();
+        for (int index = 0; index < rows.size(); index++) {
+            PublicQuoteMarketDataDto.DividendRow row = rows.get(index);
+            if (row.year() != null) {
+                byYear.computeIfAbsent(row.year(), ignored -> new ArrayList<>())
+                        .add(new IndexedDividendRow(index, row));
+            }
+        }
+        return byYear.entrySet().stream()
+                .sorted(Map.Entry.<Integer, List<IndexedDividendRow>>comparingByKey(Comparator.reverseOrder()))
+                .map(entry -> annualDividendSummary(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private PublicQuoteMarketDataDto.AnnualDividendSummary annualDividendSummary(
+            Integer year, List<IndexedDividendRow> entries) {
+        BigDecimal cashDividend = entries.stream()
+                .map(entry -> zeroIfNull(entry.row().cashDividend()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal stockDividend = entries.stream()
+                .map(entry -> zeroIfNull(entry.row().stockDividend()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        Optional<PublicQuoteMarketDataDto.DividendRow> yieldCandidate = entries.stream()
+                .sorted(Comparator.comparing((IndexedDividendRow entry) -> anchorDate(entry.row()))
+                        .reversed().thenComparingInt(IndexedDividendRow::index))
+                .map(IndexedDividendRow::row)
+                .filter(row -> row.previousClose() != null)
+                .findFirst();
+        BigDecimal cashYieldPct = yieldCandidate
+                .map(row -> cashYieldPct(cashDividend, row.previousClose()))
+                .orElse(null);
+        return new PublicQuoteMarketDataDto.AnnualDividendSummary(
+                year, cashDividend, stockDividend, cashYieldPct);
+    }
+
+    private LocalDate anchorDate(PublicQuoteMarketDataDto.DividendRow row) {
+        LocalDate exDividend = parseIsoDate(row.exDividendDate());
+        return exDividend != null ? exDividend : Optional.ofNullable(parseIsoDate(row.exRightsDate()))
+                .orElse(LocalDate.MIN);
+    }
+
+    private LocalDate parseIsoDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException invalid) {
+            return null;
+        }
+    }
+
+    private BigDecimal cashYieldPct(BigDecimal cashDividend, BigDecimal previousClose) {
+        if (previousClose == null || previousClose.compareTo(BigDecimal.ZERO) <= 0) {
+            return null;
+        }
+        return zeroIfNull(cashDividend).multiply(HUNDRED)
+                .divide(previousClose, 6, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal zeroIfNull(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     private DateRange validateRange(String rawStart, String rawEnd) {
@@ -440,6 +570,8 @@ public class PublicQuoteMarketDataService {
     }
 
     private record DateRange(LocalDate start, LocalDate end) {}
+
+    private record IndexedDividendRow(int index, PublicQuoteMarketDataDto.DividendRow row) {}
 
     private record ChartContent(DataStatus status, String message, ChartSeriesDto series) {
         static ChartContent noData() {

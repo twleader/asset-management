@@ -12,6 +12,9 @@ readonly -a SERVE_PATHS=(
   '/api/public/market-analysis/today'
   '/api/public/portfolio-advice/latest'
   '/api/public/trading-radar/today'
+  '/api/public/trading-radar/stock'
+  '/api/public/transactions'
+  '/api/public/trading-calendar'
 )
 
 die() {
@@ -32,6 +35,21 @@ get_200() {
   [[ "$status" == 200 ]] || die "$label 必須回 HTTP 200，實際為 ${status}；不會 reset Serve。"
   grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$headers_file" || \
     die "$label Content-Type 不是 application/json；不會 reset Serve。"
+}
+
+get_400_json() {
+  local url=$1
+  local output_file=$2
+  local label=$3
+  local headers_file=$4
+  local -a curl_args=(-sS -D "$headers_file" -o "$output_file" -w '%{http_code}')
+  local status
+  if ! status="$(curl "${curl_args[@]}" "$url")"; then
+    die "$label transport 失敗；不會 reset Serve。"
+  fi
+  [[ "$status" == 400 ]] || die "$label 必須回 HTTP 400，實際為 ${status}；不會 reset Serve。"
+  grep -Eiq '^content-type:[[:space:]]*application/(problem\+)?json([;[:space:]]|$)' "$headers_file" || \
+    die "$label Content-Type 不是 JSON；不會 reset Serve。"
 }
 
 # 第六條路由（POST /api/public/crawler-data/rescan）語意是「立即抓取並匯出」的免登入版本，
@@ -152,6 +170,9 @@ expected = {
     "/api/public/market-analysis/today": "http://127.0.0.1:9090/api/public/market-analysis/today",
     "/api/public/portfolio-advice/latest": "http://127.0.0.1:9090/api/public/portfolio-advice/latest",
     "/api/public/trading-radar/today": "http://127.0.0.1:9090/api/public/trading-radar/today",
+    "/api/public/trading-radar/stock": "http://127.0.0.1:9090/api/public/trading-radar/stock",
+    "/api/public/transactions": "http://127.0.0.1:9090/api/public/transactions",
+    "/api/public/trading-calendar": "http://127.0.0.1:9090/api/public/trading-calendar",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -162,7 +183,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的九條 path handler")
+    raise SystemExit("必須精確只有本任務管理的十二條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -201,6 +222,9 @@ raw_keys = ("stockCode", "stockName", "market", "price", "previousClose", "price
             "premiumDiscountPct")
 if any(key not in first for key in raw_keys):
     raise SystemExit("報價首筆缺少原始 19 欄")
+direct_keys = ("quoteDetail", "bidLevels", "askLevels", "dividendHistory")
+if any(key not in first for key in direct_keys):
+    raise SystemExit("報價首筆缺少 direct 行情／五檔／股利欄位")
 market_data = first.get("marketData")
 if not isinstance(market_data, dict) or set(market_data) != {"chart", "quoteDetail", "etfConstituents", "dividends"}:
     raise SystemExit("報價首筆缺少固定 marketData 四個 child")
@@ -241,6 +265,8 @@ raw_keys = ("stockCode", "stockName", "market", "price", "previousClose", "price
             "volume", "tradingDate", "updatedAt", "closed", "source", "quoteStatus",
             "premiumDiscountPct")
 if any(key not in data for key in raw_keys):
+    raise SystemExit(1)
+if any(key not in data for key in ("quoteDetail", "bidLevels", "askLevels", "dividendHistory")):
     raise SystemExit(1)
 market_data = data.get("marketData")
 if not isinstance(market_data, dict) or set(market_data) != {"chart", "quoteDetail", "etfConstituents", "dividends"}:
@@ -320,7 +346,7 @@ trading_radar_json="$work_dir/trading-radar.json"
 trading_radar_headers="$work_dir/trading-radar.headers"
 get_200 "$LOCAL_BASE/api/public/trading-radar/today" "$trading_radar_json" \
   '本機今日交易雷達' "$trading_radar_headers"
-python3 - "$trading_radar_json" <<'PY' || die '今日交易雷達 payload 不符合已核准契約。'
+radar_selector="$(python3 - "$trading_radar_json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 required = {
@@ -333,9 +359,82 @@ if not isinstance(data["market"], dict) or not isinstance(data["usMarket"], dict
     raise SystemExit(1)
 if not isinstance(data["stocks"], list) or not isinstance(data["publicInformation"], list):
     raise SystemExit(1)
+if not data["stocks"]:
+    print("EMPTY")
+    raise SystemExit(0)
+first = data["stocks"][0]
+code, market = first.get("stockCode"), first.get("market")
+if not isinstance(code, str) or not code or not isinstance(market, str) or not market:
+    raise SystemExit(1)
+print(code, market)
+PY
+ )" || die '今日交易雷達 payload 不符合已核准契約。'
+
+if [[ "$radar_selector" == "EMPTY" ]]; then
+  radar_stock_error_json="$work_dir/trading-radar-stock-error.json"
+  radar_stock_error_headers="$work_dir/trading-radar-stock-error.headers"
+  get_400_json "$LOCAL_BASE/api/public/trading-radar/stock?stockCode=&market=" \
+    "$radar_stock_error_json" '本機交易雷達空 selector' "$radar_stock_error_headers"
+else
+  radar_stock_code=''
+  radar_stock_market=''
+  read -r radar_stock_code radar_stock_market <<<"$radar_selector"
+  radar_stock_json="$work_dir/trading-radar-stock.json"
+  radar_stock_headers="$work_dir/trading-radar-stock.headers"
+  radar_stock_status="$(curl -sS --get --data-urlencode "stockCode=$radar_stock_code" \
+    --data-urlencode "market=$radar_stock_market" -D "$radar_stock_headers" -o "$radar_stock_json" -w '%{http_code}' \
+    "$LOCAL_BASE/api/public/trading-radar/stock")" || \
+    die '本機交易雷達指定股票 transport 失敗；不會 reset Serve。'
+  [[ "$radar_stock_status" == 200 ]] || \
+    die "本機交易雷達指定股票必須回 HTTP 200，實際為 ${radar_stock_status}；不會 reset Serve。"
+  grep -Eiq '^content-type:[[:space:]]*application/json([;[:space:]]|$)' "$radar_stock_headers" || \
+    die '本機交易雷達指定股票 Content-Type 不是 application/json；不會 reset Serve。'
+  python3 - "$radar_stock_json" "$radar_stock_code" "$radar_stock_market" <<'PY' || \
+    die '本機交易雷達指定股票 payload 與首頁 selector 不一致。'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+stock = data.get("stock") if isinstance(data, dict) else None
+if not isinstance(stock, dict) or stock.get("stockCode") != sys.argv[2] or stock.get("market") != sys.argv[3]:
+    raise SystemExit(1)
+PY
+fi
+
+transactions_json="$work_dir/transactions.json"
+transactions_headers="$work_dir/transactions.headers"
+get_200 "$LOCAL_BASE/api/public/transactions" "$transactions_json" '本機交易紀錄' "$transactions_headers"
+python3 - "$transactions_json" <<'PY' || die '交易紀錄 payload 不符合已核准契約。'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+required = {"selection", "allTimeSummary", "summary", "yearSummaries", "records"}
+if not isinstance(data, dict) or not required.issubset(data):
+    raise SystemExit(1)
+if not isinstance(data["records"], list) or not isinstance(data["yearSummaries"], list):
+    raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機九路 API preflight 通過，開始更新 path-scoped Serve…\n'
+calendar_year="$(python3 - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+print(datetime.now(ZoneInfo("Asia/Taipei")).year)
+PY
+)"
+calendar_json="$work_dir/trading-calendar.json"
+calendar_headers="$work_dir/trading-calendar.headers"
+get_200 "$LOCAL_BASE/api/public/trading-calendar?year=$calendar_year" "$calendar_json" \
+  '本機交易日曆' "$calendar_headers"
+python3 - "$calendar_json" "$calendar_year" <<'PY' || die '交易日曆 payload 不符合已核准契約。'
+import calendar, json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+year = int(sys.argv[2])
+required = {"year", "generatedAt", "timezone", "availableYears", "minYear", "maxYear", "markets",
+            "availability", "tradingDayCount", "holidays", "days", "marketStatus"}
+if not isinstance(data, dict) or not required.issubset(data) or data.get("year") != year:
+    raise SystemExit(1)
+if data.get("timezone") != "Asia/Taipei" or len(data.get("days", [])) != (366 if calendar.isleap(year) else 365):
+    raise SystemExit(1)
+PY
+
+printf '現有 Serve 設定所有權與本機十二路 API preflight 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -363,7 +462,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期九條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十二條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

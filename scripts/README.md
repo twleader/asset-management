@@ -5,9 +5,10 @@
 | `db-export.sh` / `db-import.sh` | PostgreSQL 安全匯出／清空現有 volume 後還原 |
 | `git-hooks/commit-msg` | SDD 同步檢查——只驗「`spec/` 有無變更」（見 CLAUDE.md）。用 commit-msg 而非 pre-commit，是因為只有這個階段讀得到本次 commit 訊息，`[skip-spec]` 才判斷得準 |
 | `spec-check.sh` | spec 變更的機械前置檢查：編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移、spec 是否拿 `db/changelog/*.sql` 當 DB 現況基準線，並執行 9090 gateway/OpenAPI 防漂移契約與 `db/schema.sql` 防漂移契約（B10）。實作前搭配 `/spec-review` 使用 |
-| `configure-tailscale-api-gateway.sh` | 九路本機 API 的 status／Content-Type／payload preflight、Serve 所有權與 TOCTOU 檢查通過後，才設定九條 path-scoped Tailscale HTTPS handler |
-| `tests/configure-tailscale-api-gateway-test.sh` | 以假的 curl／Tailscale CLI 驗證 quotes list／one／market-index／trading-radar 的 `200 text/plain` 在 reset 前 fail closed，並驗正常路徑只設定九條 handler |
-| `tests/docker-external-api-openapi-test.rb` | 只用 Ruby stdlib YAML 驗證 9090 Nginx exact path+method 與 OpenAPI 九路雙向相等、response status manifest、parameters、schemas、examples 與 local refs；可直接執行 `ruby scripts/tests/docker-external-api-openapi-test.rb` |
+| `configure-tailscale-api-gateway.sh` | 十二路本機 API 的 status／Content-Type／payload preflight、Serve 所有權與 TOCTOU 檢查通過後，才設定十二條 path-scoped Tailscale HTTPS handler（十一 GET、唯一 POST） |
+| `tests/configure-tailscale-api-gateway-test.sh` | 以假的 curl／Tailscale CLI 驗證所有 public GET（含 quotes、雷達 list/detail、交易紀錄、交易日曆）的 `200 text/plain` 在 reset 前 fail closed，並驗正常路徑只設定十二條 handler |
+| `render-9090-openapi-docs.rb` | 只讀 `docs/openapi/docker-external-api.yaml`，決定性產生 worktree 與 SRPP 的兩份位元組一致 9090 Swagger Markdown；`--check` 只驗證是否已同步 |
+| `tests/docker-external-api-openapi-test.rb` | 只用 Ruby stdlib YAML 驗證 9090 Nginx exact path+method 與 OpenAPI 十二路雙向相等、response status manifest、parameters、schemas、examples、完整 attribute descriptions 與 local refs；可直接執行 `ruby scripts/tests/docker-external-api-openapi-test.rb` |
 | `tests/schema-sql-drift-test.sh` | 驗證 `db/schema.sql`（去除專案檔頭後）逐位元等於此刻 `asset-postgres` 的 `pg_dump --schema-only` 輸出，並離線檢查檔頭「產生當下表數：N 張」宣告；離開碼三態 `0` 同步／`1` 已證實漂移／`2` 無法查證（docker 不可用或容器未運行），由 `spec-check.sh` 的 B10 依離開碼與本次是否碰到 schema／changelog 分流 BLOCK 或 CHECK。容器名可用 `SCHEMA_DRIFT_CONTAINER` 覆寫 |
 
 一般使用者安裝、首次啟動、日常維運與發行前檢查請見 [`../INSTALLATION.md`](../INSTALLATION.md)。

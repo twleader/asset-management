@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–371）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–378）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -373,6 +373,10 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 372 | 9090 單檔與快取清單報價 API 在保留 19 個既有欄位下，經 BFF 的 no-tenant 市場聚合補齊四個頁籤資料；新增 readonly 股利／分時 bridge 且嚴禁個人資產資料（Requirement 108） | [tasks/t372_public_quote_market_detail.md](tasks/t372_public_quote_market_detail.md) |
 | 373 | 台股最佳五檔由既有十秒富邦行情同批取得，DB canonical 後寫專用 Redis，所有 consumer 改為 pure read（Requirement 109） | [tasks/t373_redis_order_book_snapshot.md](tasks/t373_redis_order_book_snapshot.md) |
 | 374 | 交易雷達 Blogger 發布目的地安全切換至 `myrader.blogspot.com`：清除舊 OAuth 憑證與文章追蹤、關閉所有同步開關，再由主要管理者重新授權啟用（Requirement 102） | [tasks/t374_trading_radar_blog_destination_myrader.md](tasks/t374_trading_radar_blog_destination_myrader.md) |
+| 375 | 9090 報價在保留既有市場投影下，直接提供批次可讀最佳五檔、完整行情與含年度彙總的股利歷史（Requirement 110） | [tasks/t375_9090_direct_quote_batch_fields.md](tasks/t375_9090_direct_quote_batch_fields.md) |
+| 376 | 9090 交易雷達拆分首頁列表與指定股票展開明細，並以完整 OpenAPI 3 屬性字典重產 SRPP 標準文件（Requirement 111） | [tasks/t376_9090_openapi_radar_split.md](tasks/t376_9090_openapi_radar_split.md) |
+| 377 | 9090 唯讀查 configured-admin 交易紀錄，支援全年、單一年份或日期區間與畫面買賣彙總（Requirement 112） | [tasks/t377_9090_transaction_history.md](tasks/t377_9090_transaction_history.md) |
+| 378 | 9090 以指定單一年份回傳完整台／美／英交易日曆與市場狀態（Requirement 113） | [tasks/t378_9090_trading_calendar.md](tasks/t378_9090_trading_calendar.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

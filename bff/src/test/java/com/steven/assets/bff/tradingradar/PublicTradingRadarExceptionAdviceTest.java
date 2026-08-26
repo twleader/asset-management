@@ -1,6 +1,7 @@
 package com.steven.assets.bff.tradingradar;
 
 import com.steven.assets.bff.common.BusinessErrorAdvice;
+import com.steven.assets.bff.publicapi.PublicContractJsonFixtures;
 import com.steven.assets.bff.security.BusinessUserClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -58,6 +59,53 @@ class PublicTradingRadarExceptionAdviceTest {
     }
 
     @Test
+    void successfulHtmlMalformedEmptyAndSchemaMismatchedBodiesAreSanitized502ForBothShapes() {
+        for (Payload payload : new Payload[]{
+                new Payload(MediaType.TEXT_HTML, "<html>" + SENTINEL + "</html>"),
+                new Payload(MediaType.APPLICATION_JSON, "{\"ruleVersion\":"),
+                new Payload(MediaType.APPLICATION_JSON, "{\"ruleVersion\":\"TW_RULES_V17\"}"),
+                new Payload(MediaType.APPLICATION_JSON, "")}) {
+            WebTestClient client = client(ADMIN_JSON, HttpStatus.OK, payload.body(), false, payload.contentType());
+
+            client.get().uri("/api/public/trading-radar/today")
+                    .exchange()
+                    .expectStatus().isEqualTo(HttpStatus.BAD_GATEWAY)
+                    .expectBody()
+                    .jsonPath("$.status").isEqualTo(502)
+                    .jsonPath("$.title").isEqualTo("Trading radar downstream failure")
+                    .consumeWith(result -> assertThat(text(result.getResponseBodyContent()))
+                            .doesNotContain(SENTINEL, "payload is invalid", "JSON contract mismatch"));
+
+            client.get().uri(uri -> uri.path("/api/public/trading-radar/stock")
+                            .queryParam("stockCode", "2330").queryParam("market", "台股").build())
+                    .exchange()
+                    .expectStatus().isEqualTo(HttpStatus.BAD_GATEWAY)
+                    .expectBody()
+                    .jsonPath("$.status").isEqualTo(502)
+                    .jsonPath("$.title").isEqualTo("Trading radar downstream failure")
+                    .consumeWith(result -> assertThat(text(result.getResponseBodyContent()))
+                            .doesNotContain(SENTINEL, "payload is invalid", "JSON contract mismatch"));
+        }
+    }
+
+    @Test
+    void validListRowWithNullableFundamentalAndWeeklyIndicatorsIsReserializedAsApplicationJson() {
+        WebTestClient client = client(ADMIN_JSON, HttpStatus.OK,
+                PublicContractJsonFixtures.TRADING_RADAR_LIST_WITH_NULLABLE_STOCK,
+                false, MediaType.parseMediaType("application/json;charset=UTF-8"));
+
+        client.get().uri("/api/public/trading-radar/today")
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().contentType(MediaType.APPLICATION_JSON)
+                .expectBody()
+                .jsonPath("$.ruleVersion").isEqualTo("TW_RULES_V17")
+                .jsonPath("$.stocks[0].stockCode").isEqualTo("2330")
+                .jsonPath("$.stocks[0].fundamental").doesNotExist()
+                .jsonPath("$.stocks[0].weeklyIndicators").doesNotExist();
+    }
+
+    @Test
     void missingOrInactiveConfiguredAdminIsFixed503() {
         for (String bootstrap : new String[]{
                 null,
@@ -107,6 +155,12 @@ class PublicTradingRadarExceptionAdviceTest {
 
     private static WebTestClient client(
             String bootstrapBody, HttpStatus radarStatus, String radarBody, boolean transportFailure) {
+        return client(bootstrapBody, radarStatus, radarBody, transportFailure, MediaType.APPLICATION_JSON);
+    }
+
+    private static WebTestClient client(
+            String bootstrapBody, HttpStatus radarStatus, String radarBody, boolean transportFailure,
+            MediaType radarContentType) {
         WebClient downstream = WebClient.builder()
                 .baseUrl("http://business.invalid")
                 .exchangeFunction(request -> {
@@ -122,7 +176,7 @@ class PublicTradingRadarExceptionAdviceTest {
                         return Mono.error(new WebClientException(SENTINEL) {});
                     }
                     ClientResponse.Builder response = ClientResponse.create(radarStatus)
-                            .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                            .header(HttpHeaders.CONTENT_TYPE, radarContentType.toString())
                             .body(radarBody);
                     if (radarStatus.is3xxRedirection()) {
                         response.header(HttpHeaders.LOCATION,
@@ -163,4 +217,6 @@ class PublicTradingRadarExceptionAdviceTest {
     private static String text(byte[] bytes) {
         return bytes == null ? "" : new String(bytes, StandardCharsets.UTF_8);
     }
+
+    private record Payload(MediaType contentType, String body) {}
 }

@@ -15,6 +15,7 @@ import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,7 +38,7 @@ class PublicQuoteMarketDataServiceTest {
             "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct");
 
     @Test
-    void oneRelaysAllRawFieldsInOrderAndAddsExactlyFourPublicMarketChildren() {
+    void oneRelaysAllRawFieldsThenDirectNormalizedFieldsWithoutAdditionalRequests() {
         List<ClientRequest> rawRequests = new ArrayList<>();
         List<ClientRequest> marketRequests = new ArrayList<>();
         PublicQuoteMarketDataService service = service(
@@ -79,15 +80,25 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.marketData().chart().intraday().status()).isEqualTo(DataStatus.AVAILABLE);
         assertThat(quote.marketData().quoteDetail().available()).isTrue();
         assertThat(quote.marketData().quoteDetail().source()).isEqualTo("FUBON_BOOKS");
+        assertThat(quote.quoteDetail()).isSameAs(quote.marketData().quoteDetail());
+        assertThat(quote.dividendHistory()).isSameAs(quote.marketData().dividends());
+        assertThat(quote.bidLevels()).isEmpty();
+        assertThat(quote.askLevels()).isEmpty();
         assertThat(quote.marketData().etfConstituents().holdings()).singleElement()
                 .extracting("stockCode", "shares").containsExactly("1101", new java.math.BigDecimal("12"));
         assertThat(quote.marketData().dividends().rows()).singleElement()
                 .extracting("year", "exRightsDate").containsExactly(2025, "2025-07-01");
+        assertThat(quote.dividendHistory().rows()).singleElement()
+                .extracting("cashYieldPct").isEqualTo(new BigDecimal("1.000000"));
+        assertThat(quote.dividendHistory().annualSummaries()).singleElement()
+                .extracting("year", "cashDividend", "stockDividend", "cashYieldPct")
+                .containsExactly(2025, new BigDecimal("5"), BigDecimal.ZERO, new BigDecimal("1.000000"));
 
         JsonNode json = new ObjectMapper().findAndRegisterModules().valueToTree(quote);
         List<String> keys = new ArrayList<>();
         json.fieldNames().forEachRemaining(keys::add);
-        assertThat(keys).containsExactlyElementsOf(concat(RAW_KEYS, "marketData"));
+        assertThat(keys).containsExactlyElementsOf(concat(RAW_KEYS,
+                "marketData", "quoteDetail", "bidLevels", "askLevels", "dividendHistory"));
         List<String> childKeys = new ArrayList<>();
         json.path("marketData").fieldNames().forEachRemaining(childKeys::add);
         assertThat(childKeys).containsExactly("chart", "quoteDetail", "etfConstituents", "dividends");
@@ -226,6 +237,98 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(quote.marketData().quoteDetail().marketStatus()).isEqualTo("UNKNOWN");
         assertThat(quote.marketData().quoteDetail().levels()).isEmpty();
         assertThat(quote.marketData().quoteDetail().message()).isEqualTo("暫時無法取得行情五檔");
+        assertThat(quote.bidLevels()).isEmpty();
+        assertThat(quote.askLevels()).isEmpty();
+    }
+
+    @Test
+    void fubonBookSnapshotProjectsBothOrderedFiveSidesFromTheSameQuoteDetail() {
+        AtomicInteger quoteDetailCalls = new AtomicInteger();
+        PublicQuoteMarketDataService service = service(
+                request -> ok(rawQuote("2330", "台股", "2026-08-24")),
+                request -> {
+                    if ("/api/market-data/quote-detail".equals(request.url().getPath())) {
+                        quoteDetailCalls.incrementAndGet();
+                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
+                                + "\"available\":true,\"source\":\"FUBON_BOOKS\",\"levels\":["
+                                + "{\"level\":1,\"bidPrice\":100,\"bidVolumeLots\":10,\"askPrice\":101,\"askVolumeLots\":11},"
+                                + "{\"level\":2,\"bidPrice\":99,\"bidVolumeLots\":9,\"askPrice\":102,\"askVolumeLots\":12},"
+                                + "{\"level\":3,\"bidPrice\":98,\"bidVolumeLots\":8,\"askPrice\":103,\"askVolumeLots\":13},"
+                                + "{\"level\":4,\"bidPrice\":97,\"bidVolumeLots\":7,\"askPrice\":104,\"askVolumeLots\":14},"
+                                + "{\"level\":5,\"bidPrice\":96,\"bidVolumeLots\":6,\"askPrice\":105,\"askVolumeLots\":15}]}");
+                    }
+                    return marketResponse(request);
+                });
+
+        DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.quoteDetail()).isSameAs(quote.marketData().quoteDetail());
+        assertThat(quote.bidLevels()).extracting("price", "size").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("100"), 10L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("99"), 9L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("98"), 8L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("97"), 7L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("96"), 6L));
+        assertThat(quote.askLevels()).extracting("price", "size").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("101"), 11L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("102"), 12L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("103"), 13L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("104"), 14L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("105"), 15L));
+        assertThat(quoteDetailCalls).hasValue(1);
+    }
+
+    @Test
+    void bookProjectionKeepsOrderedPartialSideButFailsClosedForOnlyTheUnorderedSide() {
+        PublicQuoteMarketDataService service = service(
+                request -> ok(rawQuote("2330", "台股", "2026-08-24")),
+                request -> {
+                    if ("/api/market-data/quote-detail".equals(request.url().getPath())) {
+                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"supported\":true,"
+                                + "\"available\":true,\"source\":\"FUBON_BOOKS\",\"levels\":["
+                                + "{\"level\":1,\"bidPrice\":100,\"bidVolumeLots\":1,\"askPrice\":101,\"askVolumeLots\":1},"
+                                + "{\"level\":2,\"bidPrice\":101,\"bidVolumeLots\":1,\"askPrice\":102,\"askVolumeLots\":0},"
+                                + "{\"level\":3,\"bidPrice\":99,\"bidVolumeLots\":0,\"askPrice\":102,\"askVolumeLots\":2},"
+                                + "{\"level\":4,\"bidPrice\":98,\"bidVolumeLots\":3,\"askPrice\":103,\"askVolumeLots\":3}]}");
+                    }
+                    return marketResponse(request);
+                });
+
+        DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.bidLevels()).isEmpty();
+        assertThat(quote.askLevels()).extracting("price", "size").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("101"), 1L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("102"), 2L),
+                org.assertj.core.groups.Tuple.tuple(new BigDecimal("103"), 3L));
+    }
+
+    @Test
+    void dividendRowsAndAnnualSummariesUseTheSpecifiedCashYieldAnchors() {
+        PublicQuoteMarketDataService service = service(
+                request -> ok(rawQuote("2330", "台股", "2026-08-24")),
+                request -> {
+                    if ("/internal/public-market-data/dividends-readonly-result".equals(request.url().getPath())) {
+                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"source\":\"DB\",\"message\":null,\"rows\":["
+                                + "{\"year\":2026,\"cashDividend\":1,\"stockDividend\":0,\"exDividendDate\":\"2026-08-18\",\"previousClose\":null},"
+                                + "{\"year\":2026,\"cashDividend\":0.66,\"stockDividend\":0,\"exDividendDate\":\"2026-05-19\",\"previousClose\":27.80},"
+                                + "{\"year\":2026,\"cashDividend\":0.42,\"stockDividend\":0.10,\"exDividendDate\":null,\"exRightsDate\":\"2026-02-26\",\"previousClose\":24},"
+                                + "{\"year\":2025,\"cashDividend\":0.40,\"stockDividend\":0,\"exDividendDate\":\"2025-11-18\",\"previousClose\":0},"
+                                + "{\"year\":2025,\"cashDividend\":0.50,\"stockDividend\":0,\"exDividendDate\":\"2025-05-19\",\"previousClose\":20}]}");
+                    }
+                    return marketResponse(request);
+                });
+
+        DetailedLatestQuote quote = service.one("2330", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.dividendHistory()).isSameAs(quote.marketData().dividends());
+        assertThat(quote.dividendHistory().rows()).extracting("cashYieldPct").containsExactly(
+                null, new BigDecimal("2.374101"), new BigDecimal("1.750000"), null, new BigDecimal("2.500000"));
+        assertThat(quote.dividendHistory().annualSummaries()).extracting(
+                "year", "cashDividend", "stockDividend", "cashYieldPct").containsExactly(
+                org.assertj.core.groups.Tuple.tuple(2026, new BigDecimal("2.08"), new BigDecimal("0.10"),
+                        new BigDecimal("7.482014")),
+                org.assertj.core.groups.Tuple.tuple(2025, new BigDecimal("0.90"), BigDecimal.ZERO, null));
     }
 
     @Test
@@ -321,9 +424,9 @@ class PublicQuoteMarketDataServiceTest {
                 + "\"quoteStatus\":\"LIVE\",\"premiumDiscountPct\":0.25}";
     }
 
-    private static List<String> concat(List<String> values, String last) {
+    private static List<String> concat(List<String> values, String... extras) {
         List<String> result = new ArrayList<>(values);
-        result.add(last);
+        result.addAll(List.of(extras));
         return result;
     }
 }

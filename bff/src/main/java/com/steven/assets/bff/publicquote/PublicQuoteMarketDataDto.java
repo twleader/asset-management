@@ -35,11 +35,12 @@ public final class PublicQuoteMarketDataDto {
             String quoteStatus,
             BigDecimal premiumDiscountPct) {}
 
-    /** top-level declaration order 固定為 raw 19 欄，再加唯一 marketData。 */
+    /** top-level declaration order 固定為 raw 19 欄、marketData 與 direct normalized market fields。 */
     @JsonPropertyOrder({
             "stockCode", "stockName", "market", "price", "previousClose", "priceChange", "changePercent",
             "buyPrice", "sellPrice", "openPrice", "highPrice", "lowPrice", "volume", "tradingDate",
-            "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct", "marketData"
+            "updatedAt", "closed", "source", "quoteStatus", "premiumDiscountPct", "marketData",
+            "quoteDetail", "bidLevels", "askLevels", "dividendHistory"
     })
     public record DetailedLatestQuote(
             String stockCode,
@@ -61,7 +62,16 @@ public final class PublicQuoteMarketDataDto {
             String source,
             String quoteStatus,
             BigDecimal premiumDiscountPct,
-            MarketData marketData) {}
+            MarketData marketData,
+            QuoteDetail quoteDetail,
+            List<BookSideLevel> bidLevels,
+            List<BookSideLevel> askLevels,
+            DividendHistory dividendHistory) {
+        public DetailedLatestQuote {
+            bidLevels = bidLevels == null ? List.of() : List.copyOf(bidLevels);
+            askLevels = askLevels == null ? List.of() : List.copyOf(askLevels);
+        }
+    }
 
     public record MarketData(
             ChartMarketData chart,
@@ -134,15 +144,20 @@ public final class PublicQuoteMarketDataDto {
             BigDecimal askPrice,
             Long askVolumeLots) {}
 
+    /** 正規化後可直接供批次使用的一側五檔；price 與 size 均為正值。 */
+    public record BookSideLevel(BigDecimal price, Long size) {}
+
     /** 完整 readonly dividend envelope，保留 source/message 與四個日期欄位。 */
     public record DividendHistory(
             String stockCode,
             String market,
             String source,
             String message,
-            List<DividendRow> rows) {
+            List<DividendRow> rows,
+            List<AnnualDividendSummary> annualSummaries) {
         public DividendHistory {
             rows = rows == null ? List.of() : List.copyOf(rows);
+            annualSummaries = annualSummaries == null ? List.of() : List.copyOf(annualSummaries);
         }
     }
 
@@ -156,7 +171,15 @@ public final class PublicQuoteMarketDataDto {
             String stockPaymentDate,
             Integer fillDays,
             BigDecimal previousClose,
-            String exRightsDate) {}
+            String exRightsDate,
+            BigDecimal cashYieldPct) {}
+
+    /** 同年度的現金／股票股利合計，以及依最新可用除息基準價計算的現金殖利率。 */
+    public record AnnualDividendSummary(
+            Integer year,
+            BigDecimal cashDividend,
+            BigDecimal stockDividend,
+            BigDecimal cashYieldPct) {}
 
     /** backend safe bridge JSON；非 DATA 時 ticks 必須為空。 */
     record IntradayBridgeResponse(LocalDate tradingDate, String readStatus, List<IntradayTick> ticks) {

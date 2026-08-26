@@ -3,6 +3,8 @@ package com.steven.assets.controller;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PublicMarketDataReadOnlyService;
+import com.steven.assets.service.PublicTradingCalendarService;
+import com.steven.assets.dto.PublicTradingCalendarDto;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Requirement 108／Task 372：只供 asset-net 內 no-tenant BFF client 使用的兩條 exact 市場資料 bridge。
@@ -34,6 +37,7 @@ public class InternalPublicMarketDataController {
 
     private final DividendHistoryService dividendHistoryService;
     private final PublicMarketDataReadOnlyService readOnlyService;
+    private final PublicTradingCalendarService calendarService;
 
     /**
      * 保留完整 readonly dividend envelope；既有 /api/market-data/dividends-readonly 的 bare array 不變。
@@ -53,5 +57,12 @@ public class InternalPublicMarketDataController {
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return ResponseEntity.ok(readOnlyService.readIntradayTicks(code, market, date));
+    }
+
+    /** Selected-year global calendar only; no tenant, refresh, export, or per-day authority fetches. */
+    @GetMapping("/trading-calendar")
+    public ResponseEntity<PublicTradingCalendarDto.PublicTradingCalendarResponse> tradingCalendar(
+            @RequestParam(required = false) List<String> year) {
+        return ResponseEntity.ok(calendarService.current(year));
     }
 }

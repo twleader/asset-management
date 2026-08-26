@@ -1,5 +1,6 @@
 package com.steven.assets.bff.tradingradar;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -7,7 +8,6 @@ import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.nio.charset.StandardCharsets;
 import java.lang.reflect.ParameterizedType;
 import java.util.Arrays;
 
@@ -22,9 +22,8 @@ class PublicTradingRadarControllerTest {
 
     @Test
     void controllerOnlyDelegatesAndBuildsTheSuccessfulHttpResponse() {
-        byte[] bytes = "{\"ruleVersion\":\"TW_RULES_V14\"}".getBytes(StandardCharsets.UTF_8);
-        PublicTradingRadarRelay relay = new PublicTradingRadarRelay(
-                HttpStatus.PARTIAL_CONTENT.value(), "application/json;charset=UTF-8", bytes);
+        var payload = JsonNodeFactory.instance.objectNode().put("ruleVersion", "TW_RULES_V14");
+        PublicTradingRadarRelay relay = new PublicTradingRadarRelay(payload);
         PublicTradingRadarService service = mock(PublicTradingRadarService.class);
         when(service.today()).thenReturn(Mono.just(relay));
         PublicTradingRadarController controller = new PublicTradingRadarController(service);
@@ -32,11 +31,10 @@ class PublicTradingRadarControllerTest {
         var response = controller.today().block();
 
         assertThat(response).isNotNull();
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.PARTIAL_CONTENT);
-        assertThat(response.getHeaders().getContentType())
-                .isEqualTo(MediaType.parseMediaType("application/json;charset=UTF-8"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
         assertThat(response.getHeaders()).doesNotContainKey(HttpHeaders.LOCATION);
-        assertThat(response.getBody()).containsExactly(bytes);
+        assertThat(response.getBody()).isEqualTo(payload);
         verify(service).today();
         verifyNoMoreInteractions(service);
         assertThat(Arrays.stream(PublicTradingRadarController.class.getDeclaredFields())
@@ -51,12 +49,12 @@ class PublicTradingRadarControllerTest {
         assertThat(returnType.getRawType()).isEqualTo(Mono.class);
         assertThat(returnType.getActualTypeArguments()).containsExactly(PublicTradingRadarRelay.class);
 
-        byte[] source = {1, 2, 3};
-        PublicTradingRadarRelay relay = new PublicTradingRadarRelay(206, null, source);
-        source[0] = 9;
-        byte[] firstRead = relay.body();
-        firstRead[1] = 9;
+        var source = JsonNodeFactory.instance.objectNode().put("value", 1);
+        PublicTradingRadarRelay relay = new PublicTradingRadarRelay(source);
+        source.put("value", 9);
+        var firstRead = relay.body();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) firstRead).put("value", 9);
 
-        assertThat(relay.body()).containsExactly(1, 2, 3);
+        assertThat(relay.body().path("value").asInt()).isEqualTo(1);
     }
 }
