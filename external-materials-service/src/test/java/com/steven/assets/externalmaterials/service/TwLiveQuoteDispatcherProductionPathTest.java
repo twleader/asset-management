@@ -141,15 +141,43 @@ class TwLiveQuoteDispatcherProductionPathTest {
         TwFubonOrderBookRoundWriter orderBookWriter = mock(TwFubonOrderBookRoundWriter.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> orderBookProvider = mock(ObjectProvider.class);
         when(orderBookProvider.getIfAvailable()).thenReturn(orderBookWriter);
+        TwYahooOrderBookFallbackRoundWriter yahooBookWriter = mock(TwYahooOrderBookFallbackRoundWriter.class);
+        @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBookProvider = mock(ObjectProvider.class);
+        when(yahooBookProvider.getIfAvailable()).thenReturn(yahooBookWriter);
         TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(openClock(), prices, fubonProvider, source,
-                genericWriter, new TwLiveQuoteOutcomeCounters(), orderBookProvider, true, true);
+                genericWriter, new TwLiveQuoteOutcomeCounters(), orderBookProvider, yahooBookProvider, true, true);
 
         dispatcher.refresh(Set.of("2330"));
 
         verify(fubon, times(1)).fetch(List.of("2330"));
         verify(orderBookWriter).submit(Map.of("2330", book));
+        verify(yahooBookWriter, never()).submit(anyList());
         verify(prices, never()).fetchTwBatch(anyList());
         verify(prices, never()).getYahooTwLivePrice(any());
+    }
+
+    @Test
+    void selectedCodeMissingThisRoundsFubonBookSubmitsOnlyThatTaiwanCodeToYahooWorker() {
+        PriceFetchClient prices = mock(PriceFetchClient.class);
+        noMisOrYahoo(prices);
+        FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
+        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubonProvider = mock(ObjectProvider.class);
+        when(fubonProvider.getIfAvailable()).thenReturn(fubon);
+        when(fubon.fetch(List.of("2330", "AAPL"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
+                FubonNormalizedQuoteClient.BatchStatus.PARTIAL_FAILURE, List.of(), 2, 2, Map.of(), Map.of()));
+        @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> fubonBookProvider = mock(ObjectProvider.class);
+        TwYahooOrderBookFallbackRoundWriter yahooBookWriter = mock(TwYahooOrderBookFallbackRoundWriter.class);
+        @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBookProvider = mock(ObjectProvider.class);
+        when(yahooBookProvider.getIfAvailable()).thenReturn(yahooBookWriter);
+
+        new TwLiveQuoteDispatcher(openClock(), prices, fubonProvider, mock(StockSourceQuery.class),
+                mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(), fubonBookProvider, yahooBookProvider, true, true)
+                .refresh(Set.of("2330", "AAPL", "0000"));
+
+        verify(yahooBookWriter).submit(List.of("2330"));
+        verify(fubon).fetch(List.of("2330", "AAPL"));
+        // The existing generic chain remains exactly one normal batch; Yahoo best-five adds no price-provider call.
+        verify(prices).fetchTwBatch(List.of("2330", "AAPL"));
     }
 
     @Test

@@ -118,7 +118,7 @@ public class MarketDataService {
             QuoteDetailDto.Response result = priceServiceClient.get().uri(uriBuilder -> uriBuilder.path("/internal/quote-detail")
                             .queryParam("code", stockCode).queryParam("market", market).build())
                     .retrieve().bodyToMono(QuoteDetailDto.Response.class).block();
-            if (result != null && result.available() && "FUBON_BOOKS".equals(result.source())) return result;
+            if (approvedQuoteDetailSnapshot(result, stockCode, market)) return result;
             if (result != null && !result.supported()) return unavailable(stockCode, market, false, "此市場不支援行情五檔");
         } catch (Exception e) {
             log.warn("呼叫 /internal/quote-detail 失敗 {} {}: {}", market, stockCode, e.getClass().getSimpleName());
@@ -131,6 +131,42 @@ public class MarketDataService {
         return new QuoteDetailDto.Response(stockCode, null, market, supported, false, null, message,
                 null, null, "UNKNOWN", null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, List.<QuoteDetailDto.OrderBookLevel>of());
+    }
+
+    /** Only a complete, persisted producer snapshot may cross this no-request-time-vendor boundary. */
+    private static boolean approvedQuoteDetailSnapshot(
+            QuoteDetailDto.Response detail, String requestedCode, String requestedMarket) {
+        if (detail == null || requestedCode == null || requestedMarket == null || !detail.supported() || !detail.available()
+                || !requestedCode.equals(detail.stockCode()) || !requestedMarket.equals(detail.market())
+                || !("FUBON_BOOKS".equals(detail.source()) || "YAHOO_TW".equals(detail.source()))
+                || detail.stockName() == null || detail.stockName().isBlank()
+                || detail.sourceTime() == null || detail.fetchedAt() == null || !"OPEN".equals(detail.marketStatus())
+                || !positive(detail.price()) || !positive(detail.previousClose())
+                || detail.levels() == null || detail.levels().size() != 5) {
+            return false;
+        }
+        BigDecimal previousBid = null;
+        BigDecimal previousAsk = null;
+        java.util.Set<BigDecimal> bids = new java.util.HashSet<>();
+        java.util.Set<BigDecimal> asks = new java.util.HashSet<>();
+        for (int index = 0; index < 5; index++) {
+            QuoteDetailDto.OrderBookLevel level = detail.levels().get(index);
+            if (level == null || level.level() != index + 1 || !positive(level.bidPrice()) || !positive(level.askPrice())
+                    || level.bidVolumeLots() == null || level.bidVolumeLots() <= 0
+                    || level.askVolumeLots() == null || level.askVolumeLots() <= 0
+                    || !bids.add(level.bidPrice().stripTrailingZeros()) || !asks.add(level.askPrice().stripTrailingZeros())
+                    || (previousBid != null && previousBid.compareTo(level.bidPrice()) <= 0)
+                    || (previousAsk != null && previousAsk.compareTo(level.askPrice()) >= 0)) {
+                return false;
+            }
+            previousBid = level.bidPrice();
+            previousAsk = level.askPrice();
+        }
+        return true;
+    }
+
+    private static boolean positive(BigDecimal value) {
+        return value != null && value.signum() > 0;
     }
 
     // ─── 殖利率（1 小時 in-memory cache + proxy）───────────────────────────────

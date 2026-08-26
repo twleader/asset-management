@@ -1,157 +1,254 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import org.junit.jupiter.api.Test;
+
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TwQuoteDetailFetchClientTest {
-    private static final Instant NOW = Instant.parse("2026-08-21T01:02:03Z");
+
+    private static final Instant NOW = Instant.parse("2026-08-26T03:05:00Z");
 
     @Test
-    void fetch釘住Yahoo請求TAI映射算術padding總量與固定時間() throws Exception {
-        HttpClient http = mock(HttpClient.class);
-        stub(http, 200, html(data("TAI", "open", "2026-08-21T01:00:00Z", "0", "2.0", "3", "3")));
-        TwQuoteDetailFetchClient.QuoteDetailResult result = client(http).fetch("2330", "台股");
-        ArgumentCaptor<HttpRequest> request = ArgumentCaptor.forClass(HttpRequest.class);
-        verify(http).send(request.capture(), any(HttpResponse.BodyHandler.class));
-        assertThat(request.getValue().uri().toString()).isEqualTo("https://tw.stock.yahoo.com/quote/2330.TW");
-        // HTTP/1.1 是 client builder 設定，HttpRequest 本身不會回填 version；以下釘住可觀測的 request 合約。
-        assertThat(request.getValue().timeout()).contains(java.time.Duration.ofSeconds(12));
-        assertThat(request.getValue().headers().firstValue("User-Agent")).hasValueSatisfying(v -> assertThat(v).contains("AssetManagementQuoteDetail/1.0"));
-        assertThat(request.getValue().headers().firstValue("Accept-Encoding")).contains("identity");
-        assertThat(result.available()).isTrue();
-        assertThat(result.stockName()).isEqualTo("台積電");
-        assertThat(result.fetchedAt()).isEqualTo(NOW);
-        assertThat(result.sourceTime()).isEqualTo(Instant.parse("2026-08-21T01:00:00Z"));
-        assertThat(result.marketStatus()).isEqualTo("OPEN");
-        assertThat(result.price()).isEqualByComparingTo("100");
-        assertThat(result.previousClose()).isEqualByComparingTo("100");
-        assertThat(result.openPrice()).isEqualByComparingTo("99");
-        assertThat(result.highPrice()).isEqualByComparingTo("110");
-        assertThat(result.lowPrice()).isEqualByComparingTo("90");
-        assertThat(result.averagePrice()).isEqualByComparingTo("100");
-        assertThat(result.change()).isZero();
-        assertThat(result.changePercent()).isZero();
-        assertThat(result.turnoverYi()).isEqualByComparingTo("0.00");
-        assertThat(result.volumeLots()).isZero();
-        assertThat(result.previousVolumeLots()).isZero();
-        assertThat(result.innerVolumeLots()).isEqualTo(3L);
-        assertThat(result.outerVolumeLots()).isEqualTo(4L);
-        assertThat(result.amplitudePercent()).isEqualByComparingTo("20.00");
-        assertThat(result.innerPercent()).isEqualByComparingTo("42.86");
-        assertThat(result.outerPercent()).isEqualByComparingTo("57.14");
-        assertThat(result.levels()).hasSize(5);
-        assertThat(result.levels().get(0).bidVolumeLots()).isEqualTo(2L);
-        assertThat(result.levels().get(1).bidVolumeLots()).isNull();
-        assertThat(result.bidTotalLots()).isEqualTo(2L);
-        assertThat(result.askTotalLots()).isEqualTo(3L);
+    void matchingTwoExchangeOnTwUrlIsFoundWithStrictCompleteFiveLevels() {
+        ScriptedTransport transport = new ScriptedTransport(response(200, html(data("TWO", "2330", true))));
+
+        TwQuoteDetailFetchClient.YahooProbeOutcome outcome = client(transport).probeTw("2330");
+
+        assertThat(outcome.kind()).isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+        assertThat(outcome.snapshot().source()).isEqualTo("YAHOO_TW");
+        assertThat(outcome.snapshot().marketStatus()).isEqualTo("OPEN");
+        assertThat(outcome.snapshot().levels()).hasSize(5);
+        assertThat(transport.urls).containsExactly("https://tw.stock.yahoo.com/quote/2330.TW");
     }
 
     @Test
-    void TWOcloseClosedUnknown與無regularMarketTime均依規格映射() throws Exception {
-        HttpClient http = mock(HttpClient.class);
-        stub(http, 200, html(data("TWO", "close", null, "1", "0", "0", "0")));
-        assertThat(client(http).fetch("2330", "台股").marketStatus()).isEqualTo("CLOSED");
-        stub(http, 200, html(data("TWO", "closed", null, "1", "0", "0", "0")));
-        assertThat(client(http).fetch("2330", "台股").marketStatus()).isEqualTo("CLOSED");
-        stub(http, 200, html(data("TWO", "auction", "not-an-instant", "1", "0", "0", "0")));
-        TwQuoteDetailFetchClient.QuoteDetailResult unknown = client(http).fetch("2330", "台股");
-        assertThat(unknown.marketStatus()).isEqualTo("UNKNOWN");
-        assertThat(unknown.sourceTime()).isNull();
+    void onlyHttp404IsStructuralMissAndCompatibilityFetchThenUsesTwo() {
+        ScriptedTransport transport = new ScriptedTransport(response(404, "not found"), response(404, "not found"),
+                response(200, html(data("TWO", "2330", true))));
+        TwQuoteDetailFetchClient client = client(transport);
+
+        assertThat(client.probeTw("2330").kind())
+                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.STRUCTURAL_MISS);
+        assertThat(client.fetch("2330", "台股").available()).isTrue();
+        assertThat(transport.urls).containsExactly(
+                "https://tw.stock.yahoo.com/quote/2330.TW",
+                "https://tw.stock.yahoo.com/quote/2330.TW",
+                "https://tw.stock.yahoo.com/quote/2330.TWO");
     }
 
     @Test
-    void totals全null局部null與合法零必須保留() throws Exception {
-        HttpClient http = mock(HttpClient.class);
-        stub(http, 200, html(data("TAI", "open", null, "1", "null", "null", "null")));
-        TwQuoteDetailFetchClient.QuoteDetailResult empty = client(http).fetch("2330", "台股");
-        assertThat(empty.bidTotalLots()).isNull();
-        assertThat(empty.askTotalLots()).isNull();
-        stub(http, 200, html(data("TAI", "open", null, "1", "0.0", "null", "0")));
-        TwQuoteDetailFetchClient.QuoteDetailResult partial = client(http).fetch("2330", "台股");
-        assertThat(partial.bidTotalLots()).isZero();
-        assertThat(partial.askTotalLots()).isNull();
-    }
-
-    @Test
-    void identityCoreSchema和傳輸失敗一律typedUnavailable() throws Exception {
-        HttpClient http = mock(HttpClient.class);
-        for (String broken : new String[]{
-                data("NAS", "open", null, "1", "1", "1", "1"),
-                data("TAI", "open", null, "1", "1", "1", "1").replace("\"systexId\":\"2330\"", "\"systexId\":\"9999\""),
-                data("TAI", "open", null, "1", "1", "1", "1").replace("\"currency\":\"TWD\"", "\"currency\":\"USD\""),
-                data("TAI", "open", null, "1", "1", "1", "1").replace("\"price\":{\"raw\":100}", "\"price\":null"),
-                data("TAI", "open", null, "1", "1", "1", "1").replace("\"regularMarketPreviousClose\":{\"raw\":100}", "\"regularMarketPreviousClose\":{}"),
-                data("TAI", "open", null, "1", "1", "1", "1").replace("\"orderbook\":[", "\"orderbook\":{")}) {
-            stub(http, 200, html(broken));
-            assertThat(client(http).fetch("2330", "台股").available()).isFalse();
+    void non404AndAnyStrictValidationFailureAreTransientOrInvalid() {
+        for (String malformed : List.of(
+                data("TAI", "9999", true),
+                data("TAI", "2330", false),
+                data("TAI", "2330", true).replace("\"marketStatus\":\"open\"", "\"marketStatus\":\"closed\""),
+                data("TAI", "2330", true).replace("\"bidVolK\":1", "\"bidVolK\":0"),
+                data("TAI", "2330", true).replace("\"bid\":99", "\"bid\":100"),
+                data("TAI", "2330", true).replace("2026-08-26T03:00:00Z", "2026-08-25T03:00:00Z"))) {
+            ScriptedTransport transport = new ScriptedTransport(response(200, html(malformed)));
+            assertThat(client(transport).probeTw("2330").kind())
+                    .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
         }
-        stub(http, 503, "nope");
-        assertThat(client(http).fetch("2330", "台股").available()).isFalse();
-        stub(http, 200, "x".repeat(2 * 1024 * 1024 + 1));
-        assertThat(client(http).fetch("2330", "台股").available()).isFalse();
-        stub(http, 200, "\"quote\":{\"data\":{\"x\":1");
-        assertThat(client(http).fetch("2330", "台股").available()).isFalse();
-        stub(http, 200, "\"quote\":{\"data\":{} \"quote\":{\"data\":{}");
-        assertThat(client(http).fetch("2330", "台股").available()).isFalse();
+        assertThat(client(new ScriptedTransport(response(429, "busy"))).probeTw("2330").kind())
+                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
     }
 
     @Test
-    void optional摘要與單格壞資料僅為null不降級核心完整snapshot() throws Exception {
-        HttpClient http = mock(HttpClient.class);
-        String optionalBroken = data("TAI", "open", null, "x", "not-a-number", "4", "x")
-                .replace("\"regularMarketOpen\":{\"raw\":99}", "\"regularMarketOpen\":{\"raw\":0}")
-                .replace("\"avgPrice\":100", "\"avgPrice\":null");
-        stub(http, 200, html(optionalBroken));
-        TwQuoteDetailFetchClient.QuoteDetailResult result = client(http).fetch("2330", "台股");
-        assertThat(result.available()).isTrue();
-        assertThat(result.openPrice()).isNull();
-        assertThat(result.averagePrice()).isNull();
-        assertThat(result.turnoverYi()).isNull();
-        assertThat(result.levels().getFirst().bidVolumeLots()).isNull();
-        assertThat(result.levels().getFirst().askVolumeLots()).isEqualTo(4L);
-        assertThat(result.bidTotalLots()).isNull();
-        assertThat(result.askTotalLots()).isEqualTo(4L);
+    void bodyCapAcceptsTwoMibMinusOneAndRejectsTwoMibPlusOneWithoutParsing() {
+        String valid = html(data("TAI", "2330", true));
+        String under = valid + " ".repeat(TwQuoteDetailFetchClient.MAX_BODY_BYTES - valid.getBytes(StandardCharsets.UTF_8).length);
+        String over = valid + " ".repeat(TwQuoteDetailFetchClient.MAX_BODY_BYTES + 1 - valid.getBytes(StandardCharsets.UTF_8).length);
+
+        assertThat(client(new ScriptedTransport(response(200, under))).probeTw("2330").kind())
+                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+        assertThat(client(new ScriptedTransport(response(200, over))).probeTw("2330").kind())
+                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
     }
 
     @Test
-    void 非台股或0000零外呼且scanner拒絕duplicateMarker() {
-        HttpClient http = mock(HttpClient.class);
-        TwQuoteDetailFetchClient c = client(http);
-        assertThat(c.fetch("AAPL", "美股").supported()).isFalse();
-        assertThat(c.fetch("0000", "台股").supported()).isFalse();
-        verifyNoInteractions(http);
-        assertThat(TwQuoteDetailFetchClient.extractQuoteData("root.App={x:undefined,\"quote\":{\"data\":{\"x\":\"{ }\\\"\"}}}")).isEqualTo("{\"x\":\"{ }\\\"\"}");
-        assertThat(TwQuoteDetailFetchClient.extractQuoteData("\"quote\":{\"data\":{} \"quote\":{\"data\":{}")).isNull();
+    void invalidCodeHasZeroOutboundCallsAndMarkerScannerRejectsDuplicateMarker() {
+        ScriptedTransport transport = new ScriptedTransport();
+        TwQuoteDetailFetchClient client = client(transport);
+
+        assertThat(client.probeTw("AAPL").kind())
+                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+        assertThat(transport.urls).isEmpty();
+        assertThat(TwQuoteDetailFetchClient.extractQuoteData("x\"quote\":{\"data\":{} x\"quote\":{\"data\":{}"))
+                .isNull();
     }
 
-    private static TwQuoteDetailFetchClient client(HttpClient http) {
-        return new TwQuoteDetailFetchClient(http, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+    @Test
+    void slowJdkBodyReadReturnsAtDeadlineAndClosesWithoutWaitingForTheReaderThread() throws Exception {
+        CloseUnblocksButInterruptDoesNotInputStream body = new CloseUnblocksButInterruptDoesNotInputStream();
+        long started = System.nanoTime();
+
+        assertThatThrownBy(() -> TwQuoteDetailFetchClient.JdkTransport.readAtMost(
+                body, TwQuoteDetailFetchClient.MAX_BODY_BYTES, Duration.ofMillis(75)))
+                .isInstanceOf(TimeoutException.class);
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+        assertThat(body.closed.await(1, TimeUnit.SECONDS)).isTrue();
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    private static void stub(HttpClient http, int status, String body) throws Exception {
-        HttpResponse response = mock(HttpResponse.class);
-        when(response.statusCode()).thenReturn(status);
-        when(response.body()).thenReturn(body);
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
+    @Test
+    void timedOutPhysicalCallsRetainTheFourGlobalSlotsUntilTheyActuallyEnd() throws Exception {
+        InterruptIgnoringTransport transport = new InterruptIgnoringTransport();
+        TwQuoteDetailFetchClient client = new TwQuoteDetailFetchClient(transport, new ObjectMapper(),
+                Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(100));
+        ExecutorService callers = Executors.newFixedThreadPool(5);
+        List<Future<TwQuoteDetailFetchClient.YahooProbeOutcome>> outcomes = new ArrayList<>();
+        try {
+            long started = System.nanoTime();
+            for (int index = 0; index < 5; index++) {
+                outcomes.add(callers.submit(() -> client.probeTw("2330")));
+            }
+            assertThat(transport.firstFourStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            for (Future<TwQuoteDetailFetchClient.YahooProbeOutcome> outcome : outcomes) {
+                assertThat(outcome.get(2, TimeUnit.SECONDS).kind())
+                        .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+            }
+
+            // The fifth caller and a successor probe cannot turn a timed-out logical request into
+            // a fifth physical request while the four interrupt-ignoring transports are still live.
+            assertThat(transport.calls).hasValue(4);
+            assertThat(transport.active).hasValue(4);
+            assertThat(client.probeTw("2330").kind())
+                    .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+            assertThat(transport.calls).hasValue(4);
+            assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+
+            transport.release.countDown();
+            assertThat(transport.allPhysicalCallsEnded.await(2, TimeUnit.SECONDS)).isTrue();
+            TwQuoteDetailFetchClient.YahooProbeOutcome recovered = null;
+            long recoveryDeadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
+            while (System.nanoTime() < recoveryDeadline) {
+                recovered = client.probeTw("2330");
+                if (recovered.kind() == TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND) break;
+                Thread.yield();
+            }
+            assertThat(recovered).isNotNull();
+            assertThat(recovered.kind()).isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+            assertThat(transport.calls).hasValue(5);
+        } finally {
+            transport.release.countDown();
+            callers.shutdownNow();
+        }
     }
 
-    private static String html(String json) { return "root.App={undefined,\"quote\":{\"data\":" + json + "},tail:undefined}"; }
+    private static TwQuoteDetailFetchClient client(ScriptedTransport transport) {
+        return new TwQuoteDetailFetchClient(transport, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+    }
 
-    private static String data(String exchange, String status, String time, String turnover, String bid, String ask, String in) {
-        String regularTime = time == null ? "" : ",\"regularMarketTime\":\"" + time + "\"";
-        return "{\"systexId\":\"2330\",\"symbolName\":\"台積電\",\"currency\":\"TWD\",\"exchange\":\"" + exchange + "\",\"marketStatus\":\"" + status + "\"" + regularTime
-                + ",\"price\":{\"raw\":100},\"regularMarketPreviousClose\":{\"raw\":100},\"regularMarketOpen\":{\"raw\":99},\"regularMarketDayHigh\":{\"raw\":110},\"regularMarketDayLow\":{\"raw\":90},\"avgPrice\":100,\"change\":{\"raw\":0},\"changePercent\":\"0%\",\"turnoverM\":\"" + turnover + "\",\"volumeK\":\"0.0\",\"previousVolumeK\":\"0\",\"inMarket\":\"" + in + "\",\"outMarket\":\"4\",\"orderbook\":[{\"bid\":100,\"bidVolK\":\"" + bid + "\",\"ask\":101,\"askVolK\":\"" + ask + "\"}]}";
+    private static TwQuoteDetailFetchClient.RawResponse response(int status, String body) {
+        return new TwQuoteDetailFetchClient.RawResponse(status, body.getBytes(StandardCharsets.UTF_8), false);
+    }
+
+    private static String html(String json) {
+        return "root.App={undefined,\"quote\":{\"data\":" + json + "},tail:undefined}";
+    }
+
+    private static String data(String exchange, String code, boolean complete) {
+        StringBuilder levels = new StringBuilder("[");
+        int count = complete ? 5 : 4;
+        for (int index = 0; index < count; index++) {
+            if (index > 0) levels.append(',');
+            levels.append("{\"bid\":").append(100 - index)
+                    .append(",\"bidVolK\":").append(index + 1)
+                    .append(",\"ask\":").append(101 + index)
+                    .append(",\"askVolK\":").append(index + 11).append('}');
+        }
+        levels.append(']');
+        return "{\"systexId\":\"" + code + "\",\"symbolName\":\"台積電\","
+                + "\"currency\":\"TWD\",\"exchange\":\"" + exchange + "\","
+                + "\"marketStatus\":\"open\",\"regularMarketTime\":\"2026-08-26T03:00:00Z\","
+                + "\"price\":{\"raw\":100},\"regularMarketPreviousClose\":{\"raw\":99},"
+                + "\"regularMarketOpen\":{\"raw\":99},\"regularMarketDayHigh\":{\"raw\":101},"
+                + "\"regularMarketDayLow\":{\"raw\":98},\"orderbook\":" + levels + "}";
+    }
+
+    private static final class ScriptedTransport implements TwQuoteDetailFetchClient.Transport {
+        private final ArrayDeque<TwQuoteDetailFetchClient.RawResponse> responses = new ArrayDeque<>();
+        private final List<String> urls = new ArrayList<>();
+
+        private ScriptedTransport(TwQuoteDetailFetchClient.RawResponse... values) {
+            for (TwQuoteDetailFetchClient.RawResponse value : values) responses.add(value);
+        }
+
+        @Override
+        public TwQuoteDetailFetchClient.RawResponse get(java.net.URI endpoint, java.time.Duration timeout) {
+            urls.add(endpoint.toString());
+            assertThat(timeout).isEqualTo(TwQuoteDetailFetchClient.PROBE_TIMEOUT);
+            return responses.removeFirst();
+        }
+    }
+
+    /** A hostile stream that proves the timeout path does not join a reader that ignores interrupt. */
+    private static final class CloseUnblocksButInterruptDoesNotInputStream extends InputStream {
+        private final CountDownLatch closed = new CountDownLatch(1);
+
+        @Override
+        public int read() {
+            while (closed.getCount() > 0) {
+                try {
+                    closed.await();
+                } catch (InterruptedException ignored) {
+                    // Deliberately remain blocked until close(); this models a stalled body reader.
+                }
+            }
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
+        }
+    }
+
+    /** A transport which remains physically active after FutureTask cancellation. */
+    private static final class InterruptIgnoringTransport implements TwQuoteDetailFetchClient.Transport {
+        private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicInteger active = new AtomicInteger();
+        private final CountDownLatch firstFourStarted = new CountDownLatch(4);
+        private final CountDownLatch allPhysicalCallsEnded = new CountDownLatch(4);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        @Override
+        public TwQuoteDetailFetchClient.RawResponse get(java.net.URI endpoint, Duration timeout) {
+            calls.incrementAndGet();
+            active.incrementAndGet();
+            firstFourStarted.countDown();
+            try {
+                while (release.getCount() > 0) {
+                    try {
+                        release.await();
+                    } catch (InterruptedException ignored) {
+                        // Deliberately keep the physical transport live after cancellation.
+                    }
+                }
+                return response(200, html(data("TAI", "2330", true)));
+            } finally {
+                active.decrementAndGet();
+                allPhysicalCallsEnded.countDown();
+            }
+        }
     }
 }

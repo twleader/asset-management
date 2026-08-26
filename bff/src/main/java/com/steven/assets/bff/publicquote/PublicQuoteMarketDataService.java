@@ -367,9 +367,9 @@ public class PublicQuoteMarketDataService {
                 null, null, null, null, null, null, null, null, null, List.of());
     }
 
-    /** Fail closed if an upstream proxy ever regresses to a request-time/unknown source. */
+    /** Fail closed if an upstream proxy ever regresses to a request-time or unknown-source payload. */
     private QuoteDetail normalizeQuoteDetail(RawLatestQuote raw, QuoteDetail detail) {
-        if (detail != null && detail.available() && "FUBON_BOOKS".equals(detail.source())) {
+        if (isApprovedCompleteBook(detail)) {
             return detail;
         }
         if (detail != null && !detail.supported()) {
@@ -416,35 +416,59 @@ public class PublicQuoteMarketDataService {
     }
 
     /**
-     * 五檔只可由同一個 {@code FUBON_BOOKS} quote-detail snapshot 投影；絕不以 raw buy/sell
-     * 或任何其他 source 補值。缺值／零量略過後仍可保留有序 partial side，任一亂序則該 side fail closed。
+     * 五檔只可由同一個完整 persisted {@code FUBON_BOOKS}/{@code YAHOO_TW} snapshot 投影；
+     * 絕不以 raw buy/sell 補值，也不把半邊／零量／亂序資料投影成 direct levels。
      */
     private List<PublicQuoteMarketDataDto.BookSideLevel> projectBookSide(QuoteDetail detail, boolean bid) {
-        if (detail == null || !detail.available() || !"FUBON_BOOKS".equals(detail.source())) {
+        if (!isApprovedCompleteBook(detail)) {
             return List.of();
         }
         List<PublicQuoteMarketDataDto.BookSideLevel> projected = new ArrayList<>();
         for (PublicQuoteMarketDataDto.OrderBookLevel level : detail.levels()) {
-            if (level == null) {
-                continue;
-            }
             BigDecimal price = bid ? level.bidPrice() : level.askPrice();
             Long size = bid ? level.bidVolumeLots() : level.askVolumeLots();
-            if (price == null || price.compareTo(BigDecimal.ZERO) <= 0 || size == null || size <= 0) {
-                continue;
-            }
             projected.add(new PublicQuoteMarketDataDto.BookSideLevel(price, size));
-            if (projected.size() == 5) {
-                break;
-            }
-        }
-        for (int index = 1; index < projected.size(); index++) {
-            int compared = projected.get(index - 1).price().compareTo(projected.get(index).price());
-            if ((bid && compared <= 0) || (!bid && compared >= 0)) {
-                return List.of();
-            }
         }
         return List.copyOf(projected);
+    }
+
+    private boolean isApprovedCompleteBook(QuoteDetail detail) {
+        Instant now = clock.instant();
+        if (detail == null || !detail.supported() || !detail.available() || detail.stockCode() == null
+                || !detail.stockCode().matches("^[0-9]{4,6}[A-Z]?$") || "0000".equals(detail.stockCode())
+                || detail.stockName() == null || detail.stockName().isBlank() || !"台股".equals(detail.market())
+                || !("FUBON_BOOKS".equals(detail.source()) || "YAHOO_TW".equals(detail.source()))
+                || detail.sourceTime() == null || detail.sourceTime().isAfter(now)
+                || !detail.sourceTime().atZone(PublicQuoteMarketDataConfiguration.TAIPEI).toLocalDate()
+                .equals(now.atZone(PublicQuoteMarketDataConfiguration.TAIPEI).toLocalDate())
+                || detail.fetchedAt() == null || !"OPEN".equals(detail.marketStatus())
+                || !positive(detail.price()) || !positive(detail.previousClose())
+                || detail.levels() == null || detail.levels().size() != 5) {
+            return false;
+        }
+        BigDecimal previousBid = null;
+        BigDecimal previousAsk = null;
+        java.util.Set<BigDecimal> bids = new java.util.HashSet<>();
+        java.util.Set<BigDecimal> asks = new java.util.HashSet<>();
+        for (int index = 0; index < 5; index++) {
+            PublicQuoteMarketDataDto.OrderBookLevel level = detail.levels().get(index);
+            if (level == null || level.level() != index + 1 || level.bidPrice() == null || level.askPrice() == null
+                    || level.bidPrice().compareTo(BigDecimal.ZERO) <= 0 || level.askPrice().compareTo(BigDecimal.ZERO) <= 0
+                    || level.bidVolumeLots() == null || level.askVolumeLots() == null
+                    || level.bidVolumeLots() <= 0 || level.askVolumeLots() <= 0
+                    || !bids.add(level.bidPrice().stripTrailingZeros()) || !asks.add(level.askPrice().stripTrailingZeros())
+                    || (previousBid != null && previousBid.compareTo(level.bidPrice()) <= 0)
+                    || (previousAsk != null && previousAsk.compareTo(level.askPrice()) >= 0)) {
+                return false;
+            }
+            previousBid = level.bidPrice();
+            previousAsk = level.askPrice();
+        }
+        return true;
+    }
+
+    private static boolean positive(BigDecimal value) {
+        return value != null && value.signum() > 0;
     }
 
     /**

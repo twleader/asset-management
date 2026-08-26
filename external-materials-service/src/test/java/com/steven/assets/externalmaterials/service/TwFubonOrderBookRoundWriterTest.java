@@ -28,13 +28,14 @@ class TwFubonOrderBookRoundWriterTest {
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         var snapshot = snapshot("2026-08-21T05:00:00Z");
+        var canonical = new IntradayOrderBookSnapshotStore.CanonicalSnapshot(snapshot, 1L);
         when(store.isPersistable(snapshot)).thenReturn(true);
-        when(store.persist(snapshot)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.applied(snapshot));
+        when(store.persist(snapshot)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.applied(canonical));
 
         new TwFubonOrderBookRoundWriter(executor, store, cache).submit(Map.of("2330", snapshot));
 
         verify(store).persist(snapshot);
-        verify(cache).writeStrictNewer(snapshot);
+        verify(cache).writeStrictNewer(canonical);
     }
 
     @Test
@@ -43,14 +44,15 @@ class TwFubonOrderBookRoundWriterTest {
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         var stale = snapshot("2026-08-21T05:00:00Z");
-        var canonical = snapshot("2026-08-21T05:00:00.000001Z");
+        var canonical = new IntradayOrderBookSnapshotStore.CanonicalSnapshot(
+                snapshot("2026-08-21T05:00:00.000001Z"), 7L);
         when(store.isPersistable(stale)).thenReturn(true);
         when(store.persist(stale)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.stale(canonical));
 
         new TwFubonOrderBookRoundWriter(executor, store, cache).submit(Map.of("2330", stale));
 
         verify(cache).writeStrictNewer(canonical);
-        verify(cache, never()).writeStrictNewer(stale);
+        verify(cache, never()).writeStrictNewer(new IntradayOrderBookSnapshotStore.CanonicalSnapshot(stale, 1L));
     }
 
     @Test

@@ -2246,12 +2246,14 @@ CREATE TABLE public.stock_intraday_order_book (
     previous_volume_lots bigint,
     inner_volume_lots bigint,
     outer_volume_lots bigint,
+    canonical_revision bigint NOT NULL,
+    CONSTRAINT ck_stock_intraday_order_book_canonical_revision CHECK ((canonical_revision > 0)),
     CONSTRAINT ck_stock_intraday_order_book_date CHECK ((((source_updated_at AT TIME ZONE 'Asia/Taipei'::text))::date = trading_date)),
     CONSTRAINT ck_stock_intraday_order_book_lots CHECK ((((volume_lots IS NULL) OR (volume_lots >= 0)) AND ((previous_volume_lots IS NULL) OR (previous_volume_lots >= 0)) AND ((inner_volume_lots IS NULL) OR (inner_volume_lots >= 0)) AND ((outer_volume_lots IS NULL) OR (outer_volume_lots >= 0)))),
     CONSTRAINT ck_stock_intraday_order_book_market CHECK (((market)::text = '台股'::text)),
     CONSTRAINT ck_stock_intraday_order_book_optional_price CHECK ((((open_price IS NULL) OR (open_price > (0)::numeric)) AND ((high_price IS NULL) OR (high_price > (0)::numeric)) AND ((low_price IS NULL) OR (low_price > (0)::numeric)) AND ((average_price IS NULL) OR (average_price >= (0)::numeric)) AND ((turnover_yi IS NULL) OR (turnover_yi >= (0)::numeric)))),
     CONSTRAINT ck_stock_intraday_order_book_required_price CHECK (((actual_price > (0)::numeric) AND (previous_close > (0)::numeric))),
-    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = 'FUBON_BOOKS'::text)),
+    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = ANY ((ARRAY['FUBON_BOOKS'::character varying, 'YAHOO_TW'::character varying])::text[]))),
     CONSTRAINT ck_stock_intraday_order_book_status CHECK (((market_status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLOSED'::character varying, 'UNKNOWN'::character varying])::text[])))
 );
 
@@ -2264,15 +2266,13 @@ CREATE TABLE public.stock_intraday_order_book_level (
     stock_code character varying(20) NOT NULL,
     market character varying(20) NOT NULL,
     level smallint NOT NULL,
-    bid_price numeric(20,10),
-    bid_volume_lots bigint,
-    ask_price numeric(20,10),
-    ask_volume_lots bigint,
-    CONSTRAINT ck_stock_intraday_order_book_level_ask_pair CHECK (((ask_price IS NULL) = (ask_volume_lots IS NULL))),
-    CONSTRAINT ck_stock_intraday_order_book_level_bid_pair CHECK (((bid_price IS NULL) = (bid_volume_lots IS NULL))),
-    CONSTRAINT ck_stock_intraday_order_book_level_lots CHECK ((((bid_volume_lots IS NULL) OR (bid_volume_lots >= 0)) AND ((ask_volume_lots IS NULL) OR (ask_volume_lots >= 0)))),
+    bid_price numeric(20,10) NOT NULL,
+    bid_volume_lots bigint NOT NULL,
+    ask_price numeric(20,10) NOT NULL,
+    ask_volume_lots bigint NOT NULL,
+    CONSTRAINT ck_stock_intraday_order_book_level_lots CHECK (((bid_volume_lots > 0) AND (ask_volume_lots > 0))),
     CONSTRAINT ck_stock_intraday_order_book_level_number CHECK (((level >= 1) AND (level <= 5))),
-    CONSTRAINT ck_stock_intraday_order_book_level_price CHECK ((((bid_price IS NULL) OR (bid_price > (0)::numeric)) AND ((ask_price IS NULL) OR (ask_price > (0)::numeric))))
+    CONSTRAINT ck_stock_intraday_order_book_level_price CHECK (((bid_price > (0)::numeric) AND (ask_price > (0)::numeric)))
 );
 
 

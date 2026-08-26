@@ -403,6 +403,29 @@ assert!(book_level.fetch('required') == %w[price size] && book_level.fetch('addi
 assert!(book_level.dig('properties', 'price', 'exclusiveMinimum') == 0 &&
         book_level.dig('properties', 'size', 'minimum') == 1,
         'BookSideLevel 必須只允許正價格與正量')
+quote_detail = schemas.fetch('PublicQuoteDetail')
+quote_source = quote_detail.dig('properties', 'source')
+assert!(quote_source.fetch('enum') == ['FUBON_BOOKS', 'YAHOO_TW', nil],
+        'PublicQuoteDetail.source 只能是 FUBON_BOOKS、YAHOO_TW 或 unavailable null')
+assert!(quote_source.fetch('description').include?('FUBON_BOOKS') &&
+        quote_source.fetch('description').include?('YAHOO_TW') &&
+        quote_source.fetch('description').include?('null'),
+        'PublicQuoteDetail.source 文件必須解釋兩個來源與 unavailable null')
+assert!(quote_detail.dig('properties', 'levels', 'maxItems') == 5 &&
+        quote_detail.dig('properties', 'levels', 'description').include?('恰好五筆'),
+        'PublicQuoteDetail.levels 文件必須說明完整 snapshot 的五筆限制')
+%w[bidLevels askLevels].each do |side|
+  description = detailed.dig('properties', side, 'description')
+  assert!(description.include?('FUBON_BOOKS') && description.include?('YAHOO_TW') &&
+          description.include?('至多五筆'),
+          "#{side} 文件必須說明兩個 approved source 與最大五筆")
+end
+assert!(quote_list.fetch('description').include?('每十秒') && quote_list.fetch('description').include?('Yahoo') &&
+        quote_list.fetch('description').include?('request-time'),
+        '/api/quotes 文件必須說明十秒 Fubon primary、Yahoo producer fallback 與 pure read')
+assert!(quote_one.fetch('description').include?('FUBON_BOOKS') && quote_one.fetch('description').include?('YAHOO_TW') &&
+        quote_one.fetch('description').include?('request-time'),
+        '/api/quotes/one 文件必須說明兩個來源與不做 request-time vendor I/O')
 dividend_history = schemas.fetch('PublicDividendHistory')
 assert!(dividend_history.fetch('required') == %w[stockCode market source message rows annualSummaries],
         'PublicDividendHistory 必須有 annualSummaries')
@@ -467,6 +490,19 @@ assert!(reachable_schemas.length == 79,
         "全量 strict audit 預期 79 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
+end
+
+# The user-facing Markdown renderer publishes every declared component, not only schemas currently
+# reached by a success response.  Error/legacy response classes are therefore contractual too: a
+# later route may reference them without silently losing every attribute's explanation.
+schemas.each do |name, schema|
+  assert_schema_descriptions!(schema, "components.schemas.#{name}")
+end
+document.dig('components', 'responses').each do |name, response|
+  concrete_description!(response, "components.responses.#{name}", 'response')
+  response.fetch('content', {}).each do |media_type, media|
+    assert!(media['schema'].is_a?(Hash), "components.responses.#{name} #{media_type}: 缺 response schema")
+  end
 end
 
 forbidden = %w[configuredAdmin personalHoldings portfolio assetSnapshot user account broker costPrice investmentCost currentValue transaction allocation advice]

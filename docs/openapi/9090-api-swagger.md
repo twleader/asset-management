@@ -60,8 +60,12 @@ BFF 只 relay external-materials Redis raw `LatestQuote` 的既有 19 欄，並�
 `askLevels`、`dividendHistory` 供批次程式使用。
 market 省略時掃描台股、美股、英股；raw index 的順序、空快取 `[]` 與 raw 讀取語意不變。
 `marketData` 不讀、也不含 configured admin、使用者、帳戶、券商、個人持股／成本／交易／快照／配置。
-台股 `quoteDetail` 是富邦十秒 LIVE round 先寫 PostgreSQL、再寫 dedicated Redis 的 `FUBON_BOOKS` snapshot；
-查詢只讀 Redis/DB、不會 request-time 向 Yahoo、富邦或行情 worker 外呼，也不用於估值、損益、下單、警示或任何個人資產判斷。
+台股 `quoteDetail`／direct 五檔來自 producer 已保存的同一 immutable canonical snapshot：富邦是每十秒
+round 的 primary，只有該 round 的 selected code 缺有效完整五檔時，獨立 Yahoo worker 才會非同步逐檔
+fallback。available snapshot 的 source 僅可能為 `FUBON_BOOKS` 或 `YAHOO_TW`，兩者都必須是完整五檔，
+不會以 generic buy/sell 或跨來源欄位拼湊。查詢只把 Redis 當 revision-verified candidate 並讀 PostgreSQL
+canonical；絕不在 request-time 向 Yahoo、富邦、dispatcher 或 worker 外呼／寫入，也不用於估值、損益、
+下單、警示或任何個人資產判斷。
 
 #### Query 參數
 
@@ -77,15 +81,17 @@ market 省略時掃描台股、美股、英股；raw index 的順序、空快取
 | --- | --- | --- |
 | `200` | application/json: array of DetailedLatestQuote | 最新報價陣列；可能為空。 |
 | `400` | application/problem+json: ProblemDetail | start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。 |
-| `502` | text/html: NginxErrorHtml | Nginx 無法連接或取得 upstream 回應；gateway 不攔截、不改寫成 JSON 或空 200。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `502` | text/html: NginxErrorHtml | HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 2. `GET /api/quotes/one`
 
 只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
 raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
-normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有 child fail-soft，
-不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、交易或資產快照。
+normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。台股五檔只讀 producer 已保存的
+`FUBON_BOOKS` primary 或受限 `YAHOO_TW` fallback canonical snapshot；回應不會在 request-time 外呼、
+寫入或修復快取。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
+交易或資產快照。
 
 #### Query 參數
 
@@ -103,8 +109,8 @@ normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有
 | `200` | application/json: DetailedLatestQuote | Redis 命中的最新報價。 |
 | `204` |  | Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。 |
 | `400` | application/problem+json: ProblemDetail | code／market 缺少，或 start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。 |
-| `502` | text/html: NginxErrorHtml | Nginx 無法連接或取得 upstream 回應；gateway 不攔截、不改寫成 JSON 或空 200。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `502` | text/html: NginxErrorHtml | HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 3. `GET /api/public/market-index`
 
@@ -125,7 +131,7 @@ normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有
 | `400` | application/problem+json: ProblemDetail | market 或 range 不在合法集合。 |
 | `500` | application/json: SpringWebFluxBasicError | closePoint 為非法數字或發生其他未被 typed 502 捕捉的 shaping error 時，由 Spring WebFlux 基本錯誤處理回傳；不是 ProblemDetail。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 判定下游 payload 格式錯誤，或 Nginx 無法連上 upstream。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 4. `GET /api/assets/latest`
 
@@ -140,7 +146,7 @@ normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有
 | `500` | application/problem+json: ProblemDetail | Business 聚合發生未預期錯誤，例如 snapshot identity 不一致。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 驗證到空、malformed 或 identity 不一致的成功 payload，或 Nginx 無法連上 upstream。 |
 | `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 5. `GET /api/public/exchange-rate/usd-twd`
 
@@ -153,7 +159,7 @@ normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有
 | `200` | application/json: UsdTwdResponse | 固定 USD/TWD metadata、即期狀態與非空歷史。 |
 | `404` | application/problem+json: ProblemDetail | History 為零列，或 live/spot 完全不存在。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 下游 transport、HTTP、decode、null 或資料契約驗證失敗，或 Nginx 無法連上 upstream。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 6. `POST /api/public/crawler-data/rescan`
 
@@ -170,7 +176,7 @@ HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `
 | `405` | text/html: NginxErrorHtml | 非 POST method；帶 `Allow: POST`。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 的 scoped advice 把 business 非 2xx 消毒成固定文案，或 Nginx 無法連上 upstream。 |
 | `503` | application/problem+json: ProblemDetail | BFF 連不上 business（transport 失敗）；固定文案，不帶出下游訊息。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 7. `GET /api/public/market-analysis/today`
 
@@ -188,7 +194,7 @@ BFF 走 `.retrieve().bodyToMono(...)`，故 business 的非 2xx 一律由 scoped
 | `200` | application/json: MarketAnalysisResponse | 最近一筆分析；尚無資料時為 status=NONE 的占位物件。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 的 scoped advice 把 business 非 2xx 消毒成固定文案，或 Nginx 無法連上 upstream。 |
 | `503` | application/problem+json: ProblemDetail | BFF 連不上 business（transport 失敗）；固定文案，不帶出下游訊息。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 8. `GET /api/public/portfolio-advice/latest`
 
@@ -207,7 +213,7 @@ context 身分，故不接受 ownerId、email、cookie 或 `X-User-*` 作為租�
 | `200` | application/json: PortfolioAdviceResponse | 最新一筆建議；尚無資料時為 status=NONE 的占位物件。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | bootstrap lookup 的 business 非 2xx 被 scoped advice 消毒成固定文案，或 Nginx 無法連上 upstream。 |
 | `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用（具名 503，不是 404），或 BFF 連不上 business。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 9. `GET /api/public/trading-radar/today`
 
@@ -233,7 +239,7 @@ Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI
 | `200` | application/json: TradingRadarListResponse | 第一屏全域資料與每檔收合列；stocks 可為空。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | Business 的任何非 2xx 被 scoped advice 消毒，或 Nginx 無法連上 upstream。 |
 | `503` | application/problem+json: ProblemDetail | Configured admin 不存在、不合法或 bootstrap／downstream transport 失敗。 |
-| `504` | text/html: NginxErrorHtml | Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 10. `GET /api/public/trading-radar/stock`
 
@@ -344,45 +350,45 @@ Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或
 
 ### `DetailedLatestQuote`
 
-Requirement 110 的 host response：raw LatestQuote 19 欄依原始 record 順序保留，接著是固定 marketData 與同一份正規化 child 的 direct quoteDetail／五檔／股利。只含市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
+Requirement 110 的 host response class。前 19 個 raw LatestQuote attribute 依原始 record 順序 固定保留，後接 required 的 marketData 與同一 immutable canonical snapshot 投影的 direct quoteDetail、 bidLevels、askLevels、dividendHistory。每個 required attribute 都固定出現；其型別含 null 時表示來源／ child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `stockCode` | 是 | `string | null` | 是 |  | raw LatestQuote 的標的代號。 |
-| `stockName` | 是 | `string | null` | 是 |  | raw LatestQuote 的標的名稱。 |
-| `market` | 是 | `string | null` | 是 | enum: `台股`, `美股`, `英股`, null | raw LatestQuote 的市場。 可用值固定為 `台股`、`美股`、`英股`、null。 |
-| `price` | 是 | `number | null` | 是 |  | raw LatestQuote 的最新成交價。 |
-| `previousClose` | 是 | `number | null` | 是 |  | raw LatestQuote 的前一交易日收盤價。 |
-| `priceChange` | 是 | `number | null` | 是 |  | raw LatestQuote 的價格變動。 |
-| `changePercent` | 是 | `number | null` | 是 |  | raw LatestQuote 的價格變動百分點。 |
-| `buyPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的最佳買入價，不作為 five-book fallback。 |
-| `sellPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的最佳賣出價，不作為 five-book fallback。 |
-| `openPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的開盤價。 |
-| `highPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的當日最高價。 |
-| `lowPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的當日最低價。 |
-| `volume` | 是 | `integer | null (int64)` | 是 |  | raw LatestQuote 的成交量。 |
-| `tradingDate` | 是 | `string | null` | 是 |  | raw LatestQuote 的交易日字串。 |
-| `updatedAt` | 是 | `string | null` | 是 | pattern: ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$ | raw LatestQuote 的來源更新時點字串，沒有 UTC offset 時仍照原值保留。 |
-| `closed` | 是 | `boolean | null` | 是 |  | raw LatestQuote 指示市場是否已收盤。 |
-| `source` | 是 | `string | null` | 是 |  | raw LatestQuote 的來源字串。 |
-| `quoteStatus` | 是 | `string | null` | 是 |  | raw LatestQuote 的行情狀態字串。 |
-| `premiumDiscountPct` | 是 | `number | null` | 是 |  | raw LatestQuote best-effort ETF 溢折價百分點。 |
-| `marketData` | 是 | `PublicQuoteMarketData` | 否 |  | 固定四個既有公開市場 child 的 nested container。 |
-| `quoteDetail` | 是 | `PublicQuoteDetail` | 否 |  | 與 marketData.quoteDetail 同一份 immutable 正規化行情 snapshot。 |
-| `bidLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: 一筆正價格、正量的買方 order-book level。 | 僅由 available FUBON_BOOKS snapshot 投影的買方最佳五檔；永遠非 null，亂序或不可用時為空陣列。 |
-| `askLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: 一筆正價格、正量的賣方 order-book level。 | 僅由 available FUBON_BOOKS snapshot 投影的賣方最佳五檔；永遠非 null，亂序或不可用時為空陣列。 |
-| `dividendHistory` | 是 | `PublicDividendHistory` | 否 |  | 與 marketData.dividends 同一份 immutable 正規化 readonly 股利資料。 |
+| `stockCode` | 是 | `string | null` | 是 |  | raw LatestQuote 的標的代號；required nullable string，來源無法提供代號時為 null，不能由名稱推測。 |
+| `stockName` | 是 | `string | null` | 是 |  | raw LatestQuote 的顯示名稱；required nullable string，缺來源名稱時為 null，不是使用者持股名稱。 |
+| `market` | 是 | `string | null` | 是 | enum: `台股`, `美股`, `英股`, null | raw LatestQuote 的市場；required nullable enum，只能是 `台股`、`美股`、`英股` 或 null，null 表示 raw source 未分類。 |
+| `price` | 是 | `number | null` | 是 |  | raw LatestQuote 的最新成交價；required nullable number，null 表示 raw price cache 沒有可驗證值，非零價或估算值。 |
+| `previousClose` | 是 | `number | null` | 是 |  | raw LatestQuote 的前一交易日收盤價；required nullable number，null 表示來源未提供，不能以今日價格回推。 |
+| `priceChange` | 是 | `number | null` | 是 |  | raw LatestQuote 相對前收的絕對價格變動；required nullable number，正負方向依來源，null 表示未計算。 |
+| `changePercent` | 是 | `number | null` | 是 |  | raw LatestQuote 相對前收的價格變動百分點；required nullable number，例如 0.75 代表上漲 0.75%，null 表示未計算。 |
+| `buyPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的單一最佳買入價；required nullable number，絕不補成五檔或作為 Yahoo fallback 輸入。 |
+| `sellPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的單一最佳賣出價；required nullable number，絕不補成五檔或作為 Yahoo fallback 輸入。 |
+| `openPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的當日開盤價；required nullable number，來源未提供時為 null。 |
+| `highPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的當日最高價；required nullable number，來源未提供時為 null。 |
+| `lowPrice` | 是 | `number | null` | 是 |  | raw LatestQuote 的當日最低價；required nullable number，來源未提供時為 null。 |
+| `volume` | 是 | `integer | null (int64)` | 是 |  | raw LatestQuote 的成交量；required nullable int64，單位與來源相同，null 表示未提供。 |
+| `tradingDate` | 是 | `string | null` | 是 |  | raw LatestQuote 的交易日字串；required nullable string，格式由 raw source 保留，null 表示來源沒有交易日。 |
+| `updatedAt` | 是 | `string | null` | 是 | pattern: ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$ | raw LatestQuote 的來源更新時點；required nullable string，pattern 為無 UTC offset 的 ISO local date-time，來源無時點時為 null。 |
+| `closed` | 是 | `boolean | null` | 是 |  | raw LatestQuote 指示市場是否已收盤；required nullable boolean，null 表示來源未表態而非 false。 |
+| `source` | 是 | `string | null` | 是 |  | raw LatestQuote 的來源識別；required nullable string，非固定 enum，null 表示 raw cache 沒有來源值。 |
+| `quoteStatus` | 是 | `string | null` | 是 |  | raw LatestQuote 的行情狀態；required nullable string，非固定 enum，null 表示 raw source 未提供狀態。 |
+| `premiumDiscountPct` | 是 | `number | null` | 是 |  | raw LatestQuote best-effort ETF 溢折價百分點；required nullable number，正值為溢價、負值為折價，null 不可由 price 與 NAV 回推。 |
+| `marketData` | 是 | `PublicQuoteMarketData` | 否 |  | required `PublicQuoteMarketData` nested class；固定四個公開市場 child，child 個別 unavailable 仍保留 typed fallback。 |
+| `quoteDetail` | 是 | `PublicQuoteDetail` | 否 |  | required `PublicQuoteDetail` nested class；與 marketData.quoteDetail 是同一 immutable canonical snapshot，不得與 bidLevels／askLevels 混用不同 source 或 revision。 |
+| `bidLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: BookSideLevel item；買方一側的正價格與正 int64 張數，沿陣列維持買價由高到低。 | required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的買方最佳五檔；至多五筆，按價格嚴格遞減，任一不完整／未核准 snapshot 時為空陣列。 |
+| `askLevels` | 是 | `array of BookSideLevel` | 否 | maxItems: 5<br>items: BookSideLevel<br>items 說明: BookSideLevel item；賣方一側的正價格與正 int64 張數，沿陣列維持賣價由低到高。 | required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的賣方最佳五檔；至多五筆，按價格嚴格遞增，任一不完整／未核准 snapshot 時為空陣列。 |
+| `dividendHistory` | 是 | `PublicDividendHistory` | 否 |  | required `PublicDividendHistory` nested class；與 marketData.dividends 相同的 immutable readonly 公開股利資料，非個人股利紀錄。 |
 
 ### `PublicQuoteMarketData`
 
-固定四個畫面頁籤的公開市場投影；任一 child 不可用時仍存在，採 typed fallback。
+DetailedLatestQuote.marketData 的 required nested class，固定四個畫面頁籤公開市場投影。每個 required child 固定出現；child 的 nullable attribute／空陣列表達各自資料 unavailable，並不影響 raw quote。 此 class 不含 configured-admin、使用者、帳戶、持股、成本或交易資料。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `chart` | 是 | `ChartMarketData` | 否 |  | 價格圖表與技術指標的公開市場 child。 |
-| `quoteDetail` | 是 | `PublicQuoteDetail` | 否 |  | 正規化的行情細節與原始五檔順位。 |
-| `etfConstituents` | 是 | `PublicEtfConstituents` | 否 |  | ETF 公開成分標的 child。 |
-| `dividends` | 是 | `PublicDividendHistory` | 否 |  | 股利歷史與年度加總 child。 |
+| `chart` | 是 | `ChartMarketData` | 否 |  | required `ChartMarketData` nested class；價格圖表與技術指標公開市場 child，自己的 status/message 表達可用性。 |
+| `quoteDetail` | 是 | `PublicQuoteDetail` | 否 |  | required `PublicQuoteDetail` nested class；完整來源驗證後的行情細節與 paired 五檔，與 root quoteDetail 是同一 immutable snapshot。 |
+| `etfConstituents` | 是 | `PublicEtfConstituents` | 否 |  | required `PublicEtfConstituents` nested class；ETF 發行人公開成分標的 child，不是使用者持股。 |
+| `dividends` | 是 | `PublicDividendHistory` | 否 |  | required `PublicDividendHistory` nested class；公開股利歷史與年度加總 child，不是個人入帳紀錄。 |
 
 ### `ChartMarketData`
 
@@ -540,60 +546,60 @@ StockAnalysisDialog 共用的對齊日線／日K／週K、MA、KD/J、MACD、RSI
 
 ### `PublicQuoteDetail`
 
-台股富邦十秒 LIVE cached 摘要／內外盤／五檔 snapshot；非台股或 0000 為 typed unsupported，零上游 request。可用 source 固定為 FUBON_BOOKS，讀取順序為 dedicated Redis 後 canonical PostgreSQL。
+台股完整 paired 五檔與同來源摘要的 required nested class。富邦是每十秒 LIVE producer primary； 只有同輪 selected code 缺有效完整五檔時，獨立 Yahoo worker 才以 `YAHOO_TW` 非同步 fallback。available=true 時 source 僅能為 `FUBON_BOOKS` 或 `YAHOO_TW`，且五個 level 皆正價、正量、bid 遞減／ask 遞增； available=false 時 source 與行情 attribute 為 null、levels 為空。非台股或 0000 是 typed unsupported，零 上游 request。read path 只以 Redis 作 candidate 並以 PostgreSQL revision 驗證，絕不 request-time vendor I/O 或 cache repair。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `stockCode` | 是 | `string | null` | 是 |  | 交易所或來源使用的標的代號。 |
-| `stockName` | 是 | `string | null` | 是 |  | 供畫面與批次辨識的標的名稱。 |
-| `market` | 是 | `string | null` | 是 |  | 標的所屬市場或交易所範圍。 |
-| `supported` | 是 | `boolean` | 否 |  | 此標的或來源是否屬於服務支援範圍。 |
-| `available` | 是 | `boolean` | 否 |  | 本次回應是否有可用內容。 |
-| `source` | 是 | `string | null` | 是 |  | 正規化行情或五檔快照的來源識別。 |
-| `message` | 是 | `string | null` | 是 |  | 可安全顯示給呼叫端的可用性或失敗說明。 |
-| `sourceTime` | 是 | `string | null (date-time)` | 是 |  | 公開來源標示的行情時間點。 |
-| `fetchedAt` | 是 | `string | null (date-time)` | 是 |  | 服務擷取或寫入此內容的時間點。 |
-| `marketStatus` | 是 | `string | null` | 是 | enum: `OPEN`, `CLOSED`, `UNKNOWN`, null | 三個市場目前的開收盤狀態。 可用值固定為 `OPEN`、`CLOSED`、`UNKNOWN`、null。 |
-| `price` | 是 | `number | null` | 是 |  | 目前或該時間點的成交／估值價格。 |
-| `previousClose` | 是 | `number | null` | 是 |  | 前一交易日或前一時間框架的收盤價。 |
-| `openPrice` | 是 | `number | null` | 是 |  | 當日開盤成交價。 |
-| `highPrice` | 是 | `number | null` | 是 |  | 當日最高成交價。 |
-| `lowPrice` | 是 | `number | null` | 是 |  | 當日最低成交價。 |
-| `averagePrice` | 是 | `number | null` | 是 |  | 當日成交加權平均價格。 |
-| `change` | 是 | `number | null` | 是 |  | 相對比較基準的絕對變動。 |
-| `changePercent` | 是 | `number | null` | 是 |  | 相對比較基準的變動百分比。 |
-| `turnoverYi` | 是 | `number | null` | 是 |  | 當日成交金額，以億元為單位。 |
-| `volumeLots` | 是 | `integer | null (int64)` | 是 |  | 以張為單位的成交量。 |
-| `previousVolumeLots` | 是 | `integer | null (int64)` | 是 |  | 前一交易日以張為單位的成交量。 |
-| `amplitudePercent` | 是 | `number | null` | 是 |  | 當日高低價振幅百分比。 |
-| `innerVolumeLots` | 是 | `integer | null (int64)` | 是 |  | 內盤成交量，以張為單位。 |
-| `outerVolumeLots` | 是 | `integer | null (int64)` | 是 |  | 外盤成交量，以張為單位。 |
-| `innerPercent` | 是 | `number | null` | 是 |  | 內盤成交量占比。 |
-| `outerPercent` | 是 | `number | null` | 是 |  | 外盤成交量占比。 |
-| `bidTotalLots` | 是 | `integer | null (int64)` | 是 |  | 五檔買方掛單張數合計。 |
-| `askTotalLots` | 是 | `integer | null (int64)` | 是 |  | 五檔賣方掛單張數合計。 |
-| `levels` | 是 | `array of OrderBookLevel` | 否 | items: OrderBookLevel<br>items 說明: 陣列中的單一元素：來源提供的五檔買賣順位；不是 root bidLevels／askLevels 的替代來源。 | 來源提供的五檔買賣順位；不是 root bidLevels／askLevels 的替代來源。 |
+| `stockCode` | 是 | `string | null` | 是 |  | required nullable string；交易所或來源使用的標的代號，unsupported／unavailable identity 無法安全確認時為 null。 |
+| `stockName` | 是 | `string | null` | 是 |  | required nullable string；供畫面與批次辨識的來源標的名稱，available snapshot 必為非空，否則為 null。 |
+| `market` | 是 | `string | null` | 是 |  | required nullable string；標的所屬市場範圍，available 台股 snapshot 為 `台股`，unsupported identity 時可為 null。 |
+| `supported` | 是 | `boolean` | 否 |  | required boolean；true 代表請求是可處理的台股非 0000 code，false 是 typed unsupported，不代表有五檔。 |
+| `available` | 是 | `boolean` | 否 |  | required boolean；true 僅代表完整且已核准 source snapshot 可用，false 時不可使用任何行情或五檔 attribute。 |
+| `source` | 是 | `string | null` | 是 | enum: `FUBON_BOOKS`, `YAHOO_TW`, null | required nullable enum；available=true 時僅 `FUBON_BOOKS`（富邦十秒 primary）或 `YAHOO_TW`（同輪缺完整 Fubon book 的 producer fallback），null 表示 unsupported 或 unavailable，絕不接受其他來源。 |
+| `message` | 是 | `string | null` | 是 |  | required nullable string；available=false／unsupported 時可安全顯示的原因，available=true 通常為 null；不含 vendor response 或個人資料。 |
+| `sourceTime` | 是 | `string | null (date-time)` | 是 |  | required nullable RFC 3339 date-time；available snapshot 的公開來源行情時點，必為台灣當日且非未來；unavailable 時為 null。 |
+| `fetchedAt` | 是 | `string | null (date-time)` | 是 |  | required nullable RFC 3339 date-time；服務取得並保存 canonical snapshot 的時點，非呼叫此 API 的時間；unavailable 時為 null。 |
+| `marketStatus` | 是 | `string | null` | 是 | enum: `OPEN`, `CLOSED`, `UNKNOWN`, null | required nullable enum；`OPEN` 是可用完整 canonical snapshot 的 producer market status，`CLOSED` 保留為來源相容值，`UNKNOWN` 代表 unavailable，null 是 unsupported identity 未知。 |
+| `price` | 是 | `number | null` | 是 |  | required nullable number；available snapshot 的正成交價，null 表示不可用；不是估值、建議價格或 generic quote 補值。 |
+| `previousClose` | 是 | `number | null` | 是 |  | required nullable number；available snapshot 的正前一交易日收盤價，null 表示不可用，不能由 price 推算。 |
+| `openPrice` | 是 | `number | null` | 是 |  | required nullable number；同來源當日開盤成交價，來源未提供或 unavailable 時為 null。 |
+| `highPrice` | 是 | `number | null` | 是 |  | required nullable number；同來源當日最高成交價，來源未提供或 unavailable 時為 null。 |
+| `lowPrice` | 是 | `number | null` | 是 |  | required nullable number；同來源當日最低成交價，來源未提供或 unavailable 時為 null。 |
+| `averagePrice` | 是 | `number | null` | 是 |  | required nullable number；同來源當日成交均價，來源未提供或 unavailable 時為 null。 |
+| `change` | 是 | `number | null` | 是 |  | required nullable number；同來源相對前收的絕對變動，正負方向依來源，無法驗證時為 null。 |
+| `changePercent` | 是 | `number | null` | 是 |  | required nullable number；同來源相對前收的變動百分點，例如 0.55 表示 0.55%，無法驗證時為 null。 |
+| `turnoverYi` | 是 | `number | null` | 是 |  | required nullable number；同來源當日成交金額，以億元為單位，無來源值時為 null。 |
+| `volumeLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；同來源以張為單位的成交量，無來源值時為 null。 |
+| `previousVolumeLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；同來源前一交易日以張為單位的成交量，無來源值時為 null。 |
+| `amplitudePercent` | 是 | `number | null` | 是 |  | required nullable number；由同來源高低價與前收得出的當日振幅百分點，必要輸入缺失時為 null。 |
+| `innerVolumeLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；同來源內盤成交量（張），無來源值時為 null，不是委託簿買量。 |
+| `outerVolumeLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；同來源外盤成交量（張），無來源值時為 null，不是委託簿賣量。 |
+| `innerPercent` | 是 | `number | null` | 是 |  | required nullable number；內盤占內外盤成交量合計的百分比，分母無效時為 null。 |
+| `outerPercent` | 是 | `number | null` | 是 |  | required nullable number；外盤占內外盤成交量合計的百分比，分母無效時為 null。 |
+| `bidTotalLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；available snapshot 五個 bid level 的正張數合計，unavailable 時為 null。 |
+| `askTotalLots` | 是 | `integer | null (int64)` | 是 |  | required nullable int64；available snapshot 五個 ask level 的正張數合計，unavailable 時為 null。 |
+| `levels` | 是 | `array of OrderBookLevel` | 否 | maxItems: 5<br>items: OrderBookLevel<br>items 說明: OrderBookLevel item；同一 source／revision 的 paired bid/ask level，level 由 1 到 5 遞進，不能與 root direct side array 交叉拼接。 | required non-null array；available=true 時恰好五筆 `OrderBookLevel`，level 1..5、bid price 嚴格遞減、ask price 嚴格遞增且全部正；available=false／unsupported 時為空，最多五筆。 |
 
 ### `OrderBookLevel`
 
-同時承載買方與賣方價格／張數的五檔順位。
+PublicQuoteDetail.levels 的 paired five-book item class。只存在於 available=true 的完整同來源 snapshot； required attribute 均為非 null 正值，level 依 1..5 排序，bid 與 ask 不可由不同 source、不同 revision 或 generic quote 拼合。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `level` | 是 | `integer` | 否 | minimum: 1<br>maximum: 5 | 由最佳價向外遞進的五檔順位。 |
-| `bidPrice` | 是 | `number | null` | 是 |  | 該五檔順位的買方掛單價格。 |
-| `bidVolumeLots` | 是 | `integer | null (int64)` | 是 |  | 該五檔順位的買方掛單張數。 |
-| `askPrice` | 是 | `number | null` | 是 |  | 該五檔順位的賣方掛單價格。 |
-| `askVolumeLots` | 是 | `integer | null (int64)` | 是 |  | 該五檔順位的賣方掛單張數。 |
+| `level` | 是 | `integer` | 否 | minimum: 1<br>maximum: 5 | required integer 1..5；由最佳價向外遞進的 paired 五檔順位，levels array 依此嚴格遞增。 |
+| `bidPrice` | 是 | `number` | 否 | exclusiveMinimum: 0 | required non-null positive number；該順位買方掛單價格，level 增加時價格嚴格遞減。 |
+| `bidVolumeLots` | 是 | `integer (int64)` | 否 | minimum: 1 | required non-null positive int64；該順位買方掛單張數，以張為單位。 |
+| `askPrice` | 是 | `number` | 否 | exclusiveMinimum: 0 | required non-null positive number；該順位賣方掛單價格，level 增加時價格嚴格遞增。 |
+| `askVolumeLots` | 是 | `integer (int64)` | 否 | minimum: 1 | required non-null positive int64；該順位賣方掛單張數，以張為單位。 |
 
 ### `BookSideLevel`
 
-direct bidLevels 或 askLevels 的單側 order-book 值；只保留可用的正價與正 lot size。
+root `bidLevels` 或 `askLevels` 的單側 item class；只由同一 available `FUBON_BOOKS`／`YAHOO_TW` complete canonical snapshot 投影。兩個 required attribute 都是非 null 正值；bid array 由高到低、ask array 由低到高。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `price` | 是 | `number` | 否 | exclusiveMinimum: 0 | 該側掛單價格，必為正數。 |
-| `size` | 是 | `integer (int64)` | 否 | minimum: 1 | 該側掛單張數，必為正整數。 |
+| `price` | 是 | `number` | 否 | exclusiveMinimum: 0 | required non-null positive number；該側一個五檔順位的掛單價格。 |
+| `size` | 是 | `integer (int64)` | 否 | minimum: 1 | required non-null positive int64；該側一個五檔順位的掛單張數，以張為單位。 |
 
 ### `PublicEtfConstituents`
 

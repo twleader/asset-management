@@ -31,6 +31,7 @@ public class TwLiveQuoteDispatcher {
     private final PriceCacheWriter writer;
     private final TwLiveQuoteOutcomeCounters counters;
     private final ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter;
+    private final ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooOrderBookFallbackWriter;
     private final boolean fubonEnabled;
     private final boolean fubonLiveEnabled;
     /** Compatibility seam for pre-370 unit fixtures; production always uses the coordinator path. */
@@ -45,11 +46,14 @@ public class TwLiveQuoteDispatcher {
                                  StockSourceQuery source, PriceCacheWriter writer,
                                  TwLiveQuoteOutcomeCounters counters,
                                  ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
+                                 ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooOrderBookFallbackWriter,
                                  @Value("${fubon.enabled:false}") boolean fubonEnabled,
                                  @Value("${fubon.tw-live-quotes-enabled:false}") boolean fubonLiveEnabled) {
         this.clock = clock; this.prices = prices; this.fubonClient = fubonClient; this.source = source;
         this.writer = writer; this.counters = counters; this.fubonEnabled = fubonEnabled;
-        this.orderBookWriter = orderBookWriter; this.fubonLiveEnabled = fubonLiveEnabled; this.legacyProvider = null;
+        this.orderBookWriter = orderBookWriter;
+        this.yahooOrderBookFallbackWriter = yahooOrderBookFallbackWriter;
+        this.fubonLiveEnabled = fubonLiveEnabled; this.legacyProvider = null;
     }
 
     /** Existing production-path test seam; real Spring wiring uses the constructor above. */
@@ -58,12 +62,23 @@ public class TwLiveQuoteDispatcher {
                           StockSourceQuery source, PriceCacheWriter writer,
                           TwLiveQuoteOutcomeCounters counters,
                           boolean fubonEnabled, boolean fubonLiveEnabled) {
-        this(clock, prices, fubonClient, source, writer, counters, null, fubonEnabled, fubonLiveEnabled);
+        this(clock, prices, fubonClient, source, writer, counters, null, null, fubonEnabled, fubonLiveEnabled);
+    }
+
+    /** Existing test seam for the Fubon writer only. */
+    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
+                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
+                          StockSourceQuery source, PriceCacheWriter writer,
+                          TwLiveQuoteOutcomeCounters counters,
+                          ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
+                          boolean fubonEnabled, boolean fubonLiveEnabled) {
+        this(clock, prices, fubonClient, source, writer, counters, orderBookWriter, null, fubonEnabled, fubonLiveEnabled);
     }
 
     TwLiveQuoteDispatcher(MarketClock clock, TwLiveQuoteProvider provider, TwLiveQuoteOutcomeCounters counters) {
         this.clock = clock; this.prices = null; this.fubonClient = null; this.source = null; this.writer = null;
-        this.counters = counters; this.orderBookWriter = null; this.fubonEnabled = false; this.fubonLiveEnabled = false; this.legacyProvider = provider;
+        this.counters = counters; this.orderBookWriter = null; this.yahooOrderBookFallbackWriter = null;
+        this.fubonEnabled = false; this.fubonLiveEnabled = false; this.legacyProvider = provider;
     }
 
     public TwLiveQuoteBatchResult refresh(Set<String> rawCodes) { return refresh(rawCodes, authorize()); }
@@ -114,6 +129,7 @@ public class TwLiveQuoteDispatcher {
             // This is a non-queued, isolated sink: its slow DB/Redis work cannot retain this
             // dispatcher's generic inFlight guard or trigger an extra provider request.
             submitFubonOrderBooks(batch.orderBooks());
+            submitYahooOrderBookFallback(fubonCodes, batch.orderBooks().keySet());
         }
         for (List<String> chunk : chunks(new ArrayList<>(pending), PriceFetchClient.MAX_REQUESTED_CODES)) {
             PriceFetchClient.TwQuoteBatchSummary summary = prices.fetchTwBatch(chunk);
@@ -173,6 +189,20 @@ public class TwLiveQuoteDispatcher {
         if (orderBookWriter == null || snapshots == null || snapshots.isEmpty()) return;
         TwFubonOrderBookRoundWriter writer = orderBookWriter.getIfAvailable();
         if (writer != null) writer.submit(snapshots);
+    }
+    /** A candidate is decided only by this round's selected Fubon result, never by API/DB/Redis state. */
+    private void submitYahooOrderBookFallback(List<String> selectedFubonCodes, Set<String> validFubonBookCodes) {
+        if (yahooOrderBookFallbackWriter == null || selectedFubonCodes == null || selectedFubonCodes.isEmpty()) return;
+        List<String> candidates = selectedFubonCodes.stream()
+                .filter(TwLiveQuoteDispatcher::isTaiwanCode)
+                .filter(code -> validFubonBookCodes == null || !validFubonBookCodes.contains(code))
+                .toList();
+        if (candidates.isEmpty()) return;
+        TwYahooOrderBookFallbackRoundWriter fallback = yahooOrderBookFallbackWriter.getIfAvailable();
+        if (fallback != null) fallback.submit(candidates);
+    }
+    private static boolean isTaiwanCode(String code) {
+        return code != null && code.matches("^[0-9]{4,6}[A-Z]?$") && !"0000".equals(code);
     }
     private static List<String> normalizedCodes(Collection<String> raw) {
         TreeSet<String> sorted = new TreeSet<>();

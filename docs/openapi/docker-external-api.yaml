@@ -42,8 +42,12 @@ paths:
         `askLevels`、`dividendHistory` 供批次程式使用。
         market 省略時掃描台股、美股、英股；raw index 的順序、空快取 `[]` 與 raw 讀取語意不變。
         `marketData` 不讀、也不含 configured admin、使用者、帳戶、券商、個人持股／成本／交易／快照／配置。
-        台股 `quoteDetail` 是富邦十秒 LIVE round 先寫 PostgreSQL、再寫 dedicated Redis 的 `FUBON_BOOKS` snapshot；
-        查詢只讀 Redis/DB、不會 request-time 向 Yahoo、富邦或行情 worker 外呼，也不用於估值、損益、下單、警示或任何個人資產判斷。
+        台股 `quoteDetail`／direct 五檔來自 producer 已保存的同一 immutable canonical snapshot：富邦是每十秒
+        round 的 primary，只有該 round 的 selected code 缺有效完整五檔時，獨立 Yahoo worker 才會非同步逐檔
+        fallback。available snapshot 的 source 僅可能為 `FUBON_BOOKS` 或 `YAHOO_TW`，兩者都必須是完整五檔，
+        不會以 generic buy/sell 或跨來源欄位拼湊。查詢只把 Redis 當 revision-verified candidate 並讀 PostgreSQL
+        canonical；絕不在 request-time 向 Yahoo、富邦、dispatcher 或 worker 外呼／寫入，也不用於估值、損益、
+        下單、警示或任何個人資產判斷。
       parameters:
         - name: market
           in: query
@@ -124,8 +128,10 @@ paths:
       description: |
         只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
         raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
-        normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。所有 child fail-soft，
-        不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、交易或資產快照。
+        normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。台股五檔只讀 producer 已保存的
+        `FUBON_BOOKS` primary 或受限 `YAHOO_TW` fallback canonical snapshot；回應不會在 request-time 外呼、
+        寫入或修復快取。所有 child fail-soft，不會遮蔽有效 raw quote；本 API 不會回傳目前使用者的持股、成本、
+        交易或資產快照。
       parameters:
         - name: code
           in: query
@@ -880,16 +886,39 @@ components:
       additionalProperties: true
     SpringBasicError:
       type: object
-      description: Spring Boot 預設 `/error` 對缺少必填 request parameter 的 JSON。部署設定可能另加 message、errors 或 trace。
+      description: Spring Boot 預設 `/error` 對缺少必填 request parameter 的 JSON response class。timestamp、status、error、path 四個 required attribute 一定出現；message、errors、trace 為部署可選 nullable 診斷欄位，additionalProperties=true 表示框架也可能加入其他 extension member。
       required: [timestamp, status, error, path]
       properties:
-        timestamp: {type: string, format: date-time}
-        status: {type: integer, format: int32, const: 400}
-        error: {type: string, const: Bad Request}
-        path: {type: string, const: /api/quotes/one}
-        message: {type: [string, 'null']}
-        errors: {type: [array, 'null'], items: {type: object}}
-        trace: {type: [string, 'null']}
+        timestamp:
+          type: string
+          format: date-time
+          description: required non-null RFC 3339 date-time；Spring 建立此 400 error response 的伺服器時間，不是行情來源時間。
+        status:
+          type: integer
+          format: int32
+          const: 400
+          description: required non-null int32 constant `400`；本 response class 僅代表 Bad Request。
+        error:
+          type: string
+          const: Bad Request
+          description: required non-null string constant `Bad Request`；Spring 對 HTTP 400 的穩定文字名稱。
+        path:
+          type: string
+          const: /api/quotes/one
+          description: required non-null string constant `/api/quotes/one`；產生此 parameter error 的 9090 request path。
+        message:
+          type: [string, 'null']
+          description: optional nullable string；部署若啟用安全訊息才帶出參數錯誤說明，null 或缺席不代表請求成功。
+        errors:
+          type: [array, 'null']
+          description: optional nullable array；部署若提供欄位級驗證細節時的 error item 清單，null 或缺席代表沒有公開細項。
+          items:
+            type: object
+            additionalProperties: true
+            description: errors array 的一個 framework-defined validation item；鍵和值由 Spring/validator 決定，絕不作為固定個人資料 schema。
+        trace:
+          type: [string, 'null']
+          description: optional nullable string；僅開發診斷設定可能提供的 stack trace，正式部署通常為 null 或缺席，呼叫端不得依賴。
       additionalProperties: true
     SpringWebFluxBasicError:
       type: object
@@ -932,38 +961,76 @@ components:
       description: Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或換行逐字固定。
     LatestQuote:
       type: object
-      description: "`PriceCacheReader.LatestQuote` 的 19 個欄位。前 18 欄逐欄解析 price payload，`premiumDiscountPct` 則從獨立 ETF NAV cache best-effort 併入；每個 record property 都固定存在，但來源欄位缺失或不可解析時可為 null。source 與 quoteStatus 刻意是自由字串。"
+      description: "`PriceCacheReader.LatestQuote` 的 19 個 required record attribute response class。前 18 欄逐欄解析 price payload，`premiumDiscountPct` 則從獨立 ETF NAV cache best-effort 併入；每個 property 固定出現，但 type 含 null 表示來源欄位缺失或不可解析。source 與 quoteStatus 刻意是自由字串。"
       required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus, premiumDiscountPct]
       properties:
-        stockCode: {type: [string, 'null']}
-        stockName: {type: [string, 'null']}
-        market: {type: [string, 'null'], enum: [台股, 美股, 英股, null]}
-        price: {type: [number, 'null']}
-        previousClose: {type: [number, 'null']}
-        priceChange: {type: [number, 'null']}
-        changePercent: {type: [number, 'null'], description: 百分比數值，例如 1.25 表示 1.25%。}
-        buyPrice: {type: [number, 'null']}
-        sellPrice: {type: [number, 'null']}
-        openPrice: {type: [number, 'null']}
-        highPrice: {type: [number, 'null']}
-        lowPrice: {type: [number, 'null']}
-        volume: {type: [integer, 'null'], format: int64}
-        tradingDate: {type: [string, 'null'], description: 通常為 ISO local date；來源字串會照實保留。}
+        stockCode:
+          type: [string, 'null']
+          description: required nullable string；行情 cache 的標的代號，來源無法安全提供時為 null，不能由名稱猜測。
+        stockName:
+          type: [string, 'null']
+          description: required nullable string；行情 cache 的公開顯示名稱，來源缺值時為 null，絕不是使用者自訂持股名稱。
+        market:
+          type: [string, 'null']
+          enum: [台股, 美股, 英股, null]
+          description: required nullable enum；只可為 `台股`、`美股`、`英股` 或 null，null 表示 raw cache 未分類市場。
+        price:
+          type: [number, 'null']
+          description: required nullable number；來源最新成交價，null 表示沒有可驗證行情，非估值或預設零。
+        previousClose:
+          type: [number, 'null']
+          description: required nullable number；來源前一交易日收盤價，null 表示來源沒有前收，不能由當日價格回推。
+        priceChange:
+          type: [number, 'null']
+          description: required nullable number；來源相對前收的絕對變動，正負依來源定義，null 表示未計算。
+        changePercent:
+          type: [number, 'null']
+          description: required nullable number；來源相對前收的百分點，例如 1.25 代表 1.25%，null 表示未計算。
+        buyPrice:
+          type: [number, 'null']
+          description: required nullable number；來源提供的一個最佳買入價，絕不 padding 成最佳五檔或作為 Yahoo fallback 輸入。
+        sellPrice:
+          type: [number, 'null']
+          description: required nullable number；來源提供的一個最佳賣出價，絕不 padding 成最佳五檔或作為 Yahoo fallback 輸入。
+        openPrice:
+          type: [number, 'null']
+          description: required nullable number；來源當日開盤價，來源缺值時為 null。
+        highPrice:
+          type: [number, 'null']
+          description: required nullable number；來源當日最高價，來源缺值時為 null。
+        lowPrice:
+          type: [number, 'null']
+          description: required nullable number；來源當日最低價，來源缺值時為 null。
+        volume:
+          type: [integer, 'null']
+          format: int64
+          description: required nullable int64；來源成交量，單位依 market producer 保留，null 表示未提供。
+        tradingDate:
+          type: [string, 'null']
+          description: required nullable string；來源交易日字串，通常為 ISO local date 但照原值保留，null 表示無交易日。
         updatedAt:
           type: [string, 'null']
-          description: 可信來源 quote timestamp；來源無 timestamp 時為本機成功取得 response／DB row 的時間，統一轉為台北 ISO local date-time且沒有 UTC offset。它不是 Redis SET 完成時間；新 producer 固定輸出 9 位奈秒，reader仍相容舊有分鐘／秒／1–9位小數格式。
+          description: required nullable string；可信來源 quote timestamp，pattern 為無 UTC offset 的台北 ISO local date-time。來源無 timestamp 時為本機成功取得 response／DB row 的時間；不是 Redis SET 完成時間。新 producer 固定輸出 9 位奈秒，reader仍相容舊有分鐘／秒／1–9位小數格式。
           pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?$'
-        closed: {type: [boolean, 'null']}
-        source: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
-        quoteStatus: {type: [string, 'null'], description: 自由字串；不可假設固定 enum。}
+        closed:
+          type: [boolean, 'null']
+          description: required nullable boolean；來源是否標記該市場已收盤，null 表示來源未知而非 false。
+        source:
+          type: [string, 'null']
+          description: required nullable string；raw quote producer 的自由來源識別，非固定 enum，null 表示無來源值。
+        quoteStatus:
+          type: [string, 'null']
+          description: required nullable string；raw quote producer 的自由行情狀態，非固定 enum，null 表示無狀態值。
         premiumDiscountPct:
           type: [number, 'null']
-          description: 百分點數值，正值為溢價、負值為折價，例如 0.07 表示溢價 0.07%。只轉交 `price:etfnav:*` 的同名來源欄位；缺值時不以 price 與 nav 反推。一般股票與目前不帶官方折溢價的美股 ETF 為 null。required 僅表示 property 固定出現，不代表非 null；price 的 updatedAt／tradingDate 不是 NAV 時點，NAV key TTL 為 96 小時且與 price producer 非同 tick。本 API 不另提供 nav／navAsOf。
+          description: required nullable number；百分點數值，正值為溢價、負值為折價，例如 0.07 表示溢價 0.07%。只轉交 `price:etfnav:*` 的同名來源欄位；缺值時不以 price 與 nav 反推。一般股票與目前不帶官方折溢價的美股 ETF 為 null。price 的 updatedAt／tradingDate 不是 NAV 時點，NAV key TTL 為 96 小時且與 price producer 非同 tick。本 API 不另提供 nav／navAsOf。
       additionalProperties: false
     DetailedLatestQuote:
       type: object
-      description: Requirement 110 的 host response：raw LatestQuote 19 欄依原始 record 順序保留，接著是固定
-        marketData 與同一份正規化 child 的 direct quoteDetail／五檔／股利。只含市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
+      description: Requirement 110 的 host response class。前 19 個 raw LatestQuote attribute 依原始 record 順序
+        固定保留，後接 required 的 marketData 與同一 immutable canonical snapshot 投影的 direct quoteDetail、
+        bidLevels、askLevels、dividendHistory。每個 required attribute 都固定出現；其型別含 null 時表示來源／
+        child unavailable，並非省略。只含公開市場資料，絕不含個人持股、帳戶、成本、交易、快照、配置或建議。
       required:
       - stockCode
       - stockName
@@ -994,12 +1061,12 @@ components:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的標的代號。
+          description: raw LatestQuote 的標的代號；required nullable string，來源無法提供代號時為 null，不能由名稱推測。
         stockName:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的標的名稱。
+          description: raw LatestQuote 的顯示名稱；required nullable string，缺來源名稱時為 null，不是使用者持股名稱。
         market:
           type:
           - string
@@ -1009,116 +1076,118 @@ components:
           - 美股
           - 英股
           -
-          description: raw LatestQuote 的市場。 可用值固定為 `台股`、`美股`、`英股`、null。
+          description: raw LatestQuote 的市場；required nullable enum，只能是 `台股`、`美股`、`英股` 或 null，null 表示 raw source 未分類。
         price:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的最新成交價。
+          description: raw LatestQuote 的最新成交價；required nullable number，null 表示 raw price cache 沒有可驗證值，非零價或估算值。
         previousClose:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的前一交易日收盤價。
+          description: raw LatestQuote 的前一交易日收盤價；required nullable number，null 表示來源未提供，不能以今日價格回推。
         priceChange:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的價格變動。
+          description: raw LatestQuote 相對前收的絕對價格變動；required nullable number，正負方向依來源，null 表示未計算。
         changePercent:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的價格變動百分點。
+          description: raw LatestQuote 相對前收的價格變動百分點；required nullable number，例如 0.75 代表上漲 0.75%，null 表示未計算。
         buyPrice:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的最佳買入價，不作為 five-book fallback。
+          description: raw LatestQuote 的單一最佳買入價；required nullable number，絕不補成五檔或作為 Yahoo fallback 輸入。
         sellPrice:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的最佳賣出價，不作為 five-book fallback。
+          description: raw LatestQuote 的單一最佳賣出價；required nullable number，絕不補成五檔或作為 Yahoo fallback 輸入。
         openPrice:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的開盤價。
+          description: raw LatestQuote 的當日開盤價；required nullable number，來源未提供時為 null。
         highPrice:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的當日最高價。
+          description: raw LatestQuote 的當日最高價；required nullable number，來源未提供時為 null。
         lowPrice:
           type:
           - number
           - 'null'
-          description: raw LatestQuote 的當日最低價。
+          description: raw LatestQuote 的當日最低價；required nullable number，來源未提供時為 null。
         volume:
           type:
           - integer
           - 'null'
           format: int64
-          description: raw LatestQuote 的成交量。
+          description: raw LatestQuote 的成交量；required nullable int64，單位與來源相同，null 表示未提供。
         tradingDate:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的交易日字串。
+          description: raw LatestQuote 的交易日字串；required nullable string，格式由 raw source 保留，null 表示來源沒有交易日。
         updatedAt:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的來源更新時點字串，沒有 UTC offset 時仍照原值保留。
+          description: raw LatestQuote 的來源更新時點；required nullable string，pattern 為無 UTC offset 的 ISO local date-time，來源無時點時為 null。
           pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,9})?)?$"
         closed:
           type:
           - boolean
           - 'null'
-          description: raw LatestQuote 指示市場是否已收盤。
+          description: raw LatestQuote 指示市場是否已收盤；required nullable boolean，null 表示來源未表態而非 false。
         source:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的來源字串。
+          description: raw LatestQuote 的來源識別；required nullable string，非固定 enum，null 表示 raw cache 沒有來源值。
         quoteStatus:
           type:
           - string
           - 'null'
-          description: raw LatestQuote 的行情狀態字串。
+          description: raw LatestQuote 的行情狀態；required nullable string，非固定 enum，null 表示 raw source 未提供狀態。
         premiumDiscountPct:
           type:
           - number
           - 'null'
-          description: raw LatestQuote best-effort ETF 溢折價百分點。
+          description: raw LatestQuote best-effort ETF 溢折價百分點；required nullable number，正值為溢價、負值為折價，null 不可由 price 與 NAV 回推。
         marketData:
           "$ref": "#/components/schemas/PublicQuoteMarketData"
-          description: 固定四個既有公開市場 child 的 nested container。
+          description: required `PublicQuoteMarketData` nested class；固定四個公開市場 child，child 個別 unavailable 仍保留 typed fallback。
         quoteDetail:
           "$ref": "#/components/schemas/PublicQuoteDetail"
-          description: 與 marketData.quoteDetail 同一份 immutable 正規化行情 snapshot。
+          description: required `PublicQuoteDetail` nested class；與 marketData.quoteDetail 是同一 immutable canonical snapshot，不得與 bidLevels／askLevels 混用不同 source 或 revision。
         bidLevels:
           type: array
-          description: 僅由 available FUBON_BOOKS snapshot 投影的買方最佳五檔；永遠非 null，亂序或不可用時為空陣列。
+          description: required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的買方最佳五檔；至多五筆，按價格嚴格遞減，任一不完整／未核准 snapshot 時為空陣列。
           maxItems: 5
           items:
             "$ref": "#/components/schemas/BookSideLevel"
-            description: 一筆正價格、正量的買方 order-book level。
+            description: BookSideLevel item；買方一側的正價格與正 int64 張數，沿陣列維持買價由高到低。
         askLevels:
           type: array
-          description: 僅由 available FUBON_BOOKS snapshot 投影的賣方最佳五檔；永遠非 null，亂序或不可用時為空陣列。
+          description: required non-null array，僅由 available `FUBON_BOOKS` 或 `YAHOO_TW` 完整 canonical snapshot 直接投影的賣方最佳五檔；至多五筆，按價格嚴格遞增，任一不完整／未核准 snapshot 時為空陣列。
           maxItems: 5
           items:
             "$ref": "#/components/schemas/BookSideLevel"
-            description: 一筆正價格、正量的賣方 order-book level。
+            description: BookSideLevel item；賣方一側的正價格與正 int64 張數，沿陣列維持賣價由低到高。
         dividendHistory:
           "$ref": "#/components/schemas/PublicDividendHistory"
-          description: 與 marketData.dividends 同一份 immutable 正規化 readonly 股利資料。
+          description: required `PublicDividendHistory` nested class；與 marketData.dividends 相同的 immutable readonly 公開股利資料，非個人股利紀錄。
       additionalProperties: false
     PublicQuoteMarketData:
       type: object
-      description: 固定四個畫面頁籤的公開市場投影；任一 child 不可用時仍存在，採 typed fallback。
+      description: DetailedLatestQuote.marketData 的 required nested class，固定四個畫面頁籤公開市場投影。每個
+        required child 固定出現；child 的 nullable attribute／空陣列表達各自資料 unavailable，並不影響 raw quote。
+        此 class 不含 configured-admin、使用者、帳戶、持股、成本或交易資料。
       required:
       - chart
       - quoteDetail
@@ -1127,16 +1196,16 @@ components:
       properties:
         chart:
           "$ref": "#/components/schemas/ChartMarketData"
-          description: 價格圖表與技術指標的公開市場 child。
+          description: required `ChartMarketData` nested class；價格圖表與技術指標公開市場 child，自己的 status/message 表達可用性。
         quoteDetail:
           "$ref": "#/components/schemas/PublicQuoteDetail"
-          description: 正規化的行情細節與原始五檔順位。
+          description: required `PublicQuoteDetail` nested class；完整來源驗證後的行情細節與 paired 五檔，與 root quoteDetail 是同一 immutable snapshot。
         etfConstituents:
           "$ref": "#/components/schemas/PublicEtfConstituents"
-          description: ETF 公開成分標的 child。
+          description: required `PublicEtfConstituents` nested class；ETF 發行人公開成分標的 child，不是使用者持股。
         dividends:
           "$ref": "#/components/schemas/PublicDividendHistory"
-          description: 股利歷史與年度加總 child。
+          description: required `PublicDividendHistory` nested class；公開股利歷史與年度加總 child，不是個人入帳紀錄。
       additionalProperties: false
     ChartMarketData:
       type: object
@@ -1685,8 +1754,11 @@ components:
       description: 單一日線或週線時間框架的價格、技術指標與最新摘要。
     PublicQuoteDetail:
       type: object
-      description: 台股富邦十秒 LIVE cached 摘要／內外盤／五檔 snapshot；非台股或 0000 為 typed unsupported，零上游
-        request。可用 source 固定為 FUBON_BOOKS，讀取順序為 dedicated Redis 後 canonical PostgreSQL。
+      description: 台股完整 paired 五檔與同來源摘要的 required nested class。富邦是每十秒 LIVE producer primary；
+        只有同輪 selected code 缺有效完整五檔時，獨立 Yahoo worker 才以 `YAHOO_TW` 非同步 fallback。available=true
+        時 source 僅能為 `FUBON_BOOKS` 或 `YAHOO_TW`，且五個 level 皆正價、正量、bid 遞減／ask 遞增；
+        available=false 時 source 與行情 attribute 為 null、levels 為空。非台股或 0000 是 typed unsupported，零
+        上游 request。read path 只以 Redis 作 candidate 並以 PostgreSQL revision 驗證，絕不 request-time vendor I/O 或 cache repair。
       required:
       - stockCode
       - stockName
@@ -1722,45 +1794,49 @@ components:
           type:
           - string
           - 'null'
-          description: 交易所或來源使用的標的代號。
+          description: required nullable string；交易所或來源使用的標的代號，unsupported／unavailable identity 無法安全確認時為 null。
         stockName:
           type:
           - string
           - 'null'
-          description: 供畫面與批次辨識的標的名稱。
+          description: required nullable string；供畫面與批次辨識的來源標的名稱，available snapshot 必為非空，否則為 null。
         market:
           type:
           - string
           - 'null'
-          description: 標的所屬市場或交易所範圍。
+          description: required nullable string；標的所屬市場範圍，available 台股 snapshot 為 `台股`，unsupported identity 時可為 null。
         supported:
           type: boolean
-          description: 此標的或來源是否屬於服務支援範圍。
+          description: required boolean；true 代表請求是可處理的台股非 0000 code，false 是 typed unsupported，不代表有五檔。
         available:
           type: boolean
-          description: 本次回應是否有可用內容。
+          description: required boolean；true 僅代表完整且已核准 source snapshot 可用，false 時不可使用任何行情或五檔 attribute。
         source:
           type:
           - string
           - 'null'
-          description: 正規化行情或五檔快照的來源識別。
+          enum:
+          - FUBON_BOOKS
+          - YAHOO_TW
+          -
+          description: required nullable enum；available=true 時僅 `FUBON_BOOKS`（富邦十秒 primary）或 `YAHOO_TW`（同輪缺完整 Fubon book 的 producer fallback），null 表示 unsupported 或 unavailable，絕不接受其他來源。
         message:
           type:
           - string
           - 'null'
-          description: 可安全顯示給呼叫端的可用性或失敗說明。
+          description: required nullable string；available=false／unsupported 時可安全顯示的原因，available=true 通常為 null；不含 vendor response 或個人資料。
         sourceTime:
           type:
           - string
           - 'null'
           format: date-time
-          description: 公開來源標示的行情時間點。
+          description: required nullable RFC 3339 date-time；available snapshot 的公開來源行情時點，必為台灣當日且非未來；unavailable 時為 null。
         fetchedAt:
           type:
           - string
           - 'null'
           format: date-time
-          description: 服務擷取或寫入此內容的時間點。
+          description: required nullable RFC 3339 date-time；服務取得並保存 canonical snapshot 的時點，非呼叫此 API 的時間；unavailable 時為 null。
         marketStatus:
           type:
           - string
@@ -1770,112 +1846,115 @@ components:
           - CLOSED
           - UNKNOWN
           -
-          description: 三個市場目前的開收盤狀態。 可用值固定為 `OPEN`、`CLOSED`、`UNKNOWN`、null。
+          description: required nullable enum；`OPEN` 是可用完整 canonical snapshot 的 producer market status，`CLOSED` 保留為來源相容值，`UNKNOWN` 代表 unavailable，null 是 unsupported identity 未知。
         price:
           type:
           - number
           - 'null'
-          description: 目前或該時間點的成交／估值價格。
+          description: required nullable number；available snapshot 的正成交價，null 表示不可用；不是估值、建議價格或 generic quote 補值。
         previousClose:
           type:
           - number
           - 'null'
-          description: 前一交易日或前一時間框架的收盤價。
+          description: required nullable number；available snapshot 的正前一交易日收盤價，null 表示不可用，不能由 price 推算。
         openPrice:
           type:
           - number
           - 'null'
-          description: 當日開盤成交價。
+          description: required nullable number；同來源當日開盤成交價，來源未提供或 unavailable 時為 null。
         highPrice:
           type:
           - number
           - 'null'
-          description: 當日最高成交價。
+          description: required nullable number；同來源當日最高成交價，來源未提供或 unavailable 時為 null。
         lowPrice:
           type:
           - number
           - 'null'
-          description: 當日最低成交價。
+          description: required nullable number；同來源當日最低成交價，來源未提供或 unavailable 時為 null。
         averagePrice:
           type:
           - number
           - 'null'
-          description: 當日成交加權平均價格。
+          description: required nullable number；同來源當日成交均價，來源未提供或 unavailable 時為 null。
         change:
           type:
           - number
           - 'null'
-          description: 相對比較基準的絕對變動。
+          description: required nullable number；同來源相對前收的絕對變動，正負方向依來源，無法驗證時為 null。
         changePercent:
           type:
           - number
           - 'null'
-          description: 相對比較基準的變動百分比。
+          description: required nullable number；同來源相對前收的變動百分點，例如 0.55 表示 0.55%，無法驗證時為 null。
         turnoverYi:
           type:
           - number
           - 'null'
-          description: 當日成交金額，以億元為單位。
+          description: required nullable number；同來源當日成交金額，以億元為單位，無來源值時為 null。
         volumeLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 以張為單位的成交量。
+          description: required nullable int64；同來源以張為單位的成交量，無來源值時為 null。
         previousVolumeLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 前一交易日以張為單位的成交量。
+          description: required nullable int64；同來源前一交易日以張為單位的成交量，無來源值時為 null。
         amplitudePercent:
           type:
           - number
           - 'null'
-          description: 當日高低價振幅百分比。
+          description: required nullable number；由同來源高低價與前收得出的當日振幅百分點，必要輸入缺失時為 null。
         innerVolumeLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 內盤成交量，以張為單位。
+          description: required nullable int64；同來源內盤成交量（張），無來源值時為 null，不是委託簿買量。
         outerVolumeLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 外盤成交量，以張為單位。
+          description: required nullable int64；同來源外盤成交量（張），無來源值時為 null，不是委託簿賣量。
         innerPercent:
           type:
           - number
           - 'null'
-          description: 內盤成交量占比。
+          description: required nullable number；內盤占內外盤成交量合計的百分比，分母無效時為 null。
         outerPercent:
           type:
           - number
           - 'null'
-          description: 外盤成交量占比。
+          description: required nullable number；外盤占內外盤成交量合計的百分比，分母無效時為 null。
         bidTotalLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 五檔買方掛單張數合計。
+          description: required nullable int64；available snapshot 五個 bid level 的正張數合計，unavailable 時為 null。
         askTotalLots:
           type:
           - integer
           - 'null'
           format: int64
-          description: 五檔賣方掛單張數合計。
+          description: required nullable int64；available snapshot 五個 ask level 的正張數合計，unavailable 時為 null。
         levels:
           type: array
+          maxItems: 5
           items:
             "$ref": "#/components/schemas/OrderBookLevel"
-            description: 陣列中的單一元素：來源提供的五檔買賣順位；不是 root bidLevels／askLevels 的替代來源。
-          description: 來源提供的五檔買賣順位；不是 root bidLevels／askLevels 的替代來源。
+            description: OrderBookLevel item；同一 source／revision 的 paired bid/ask level，level 由 1 到 5 遞進，不能與 root direct side array 交叉拼接。
+          description: required non-null array；available=true 時恰好五筆 `OrderBookLevel`，level 1..5、bid price 嚴格遞減、ask price 嚴格遞增且全部正；available=false／unsupported 時為空，最多五筆。
       additionalProperties: false
     OrderBookLevel:
       type: object
+      description: PublicQuoteDetail.levels 的 paired five-book item class。只存在於 available=true 的完整同來源 snapshot；
+        required attribute 均為非 null 正值，level 依 1..5 排序，bid 與 ask 不可由不同 source、不同 revision 或 generic quote 拼合。
       required:
       - level
       - bidPrice
@@ -1887,34 +1966,30 @@ components:
           type: integer
           minimum: 1
           maximum: 5
-          description: 由最佳價向外遞進的五檔順位。
+          description: required integer 1..5；由最佳價向外遞進的 paired 五檔順位，levels array 依此嚴格遞增。
         bidPrice:
-          type:
-          - number
-          - 'null'
-          description: 該五檔順位的買方掛單價格。
+          type: number
+          exclusiveMinimum: 0
+          description: required non-null positive number；該順位買方掛單價格，level 增加時價格嚴格遞減。
         bidVolumeLots:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
-          description: 該五檔順位的買方掛單張數。
+          minimum: 1
+          description: required non-null positive int64；該順位買方掛單張數，以張為單位。
         askPrice:
-          type:
-          - number
-          - 'null'
-          description: 該五檔順位的賣方掛單價格。
+          type: number
+          exclusiveMinimum: 0
+          description: required non-null positive number；該順位賣方掛單價格，level 增加時價格嚴格遞增。
         askVolumeLots:
-          type:
-          - integer
-          - 'null'
+          type: integer
           format: int64
-          description: 該五檔順位的賣方掛單張數。
+          minimum: 1
+          description: required non-null positive int64；該順位賣方掛單張數，以張為單位。
       additionalProperties: false
-      description: 同時承載買方與賣方價格／張數的五檔順位。
     BookSideLevel:
       type: object
-      description: direct bidLevels 或 askLevels 的單側 order-book 值；只保留可用的正價與正 lot size。
+      description: root `bidLevels` 或 `askLevels` 的單側 item class；只由同一 available `FUBON_BOOKS`／`YAHOO_TW`
+        complete canonical snapshot 投影。兩個 required attribute 都是非 null 正值；bid array 由高到低、ask array 由低到高。
       required:
       - price
       - size
@@ -1922,12 +1997,12 @@ components:
         price:
           type: number
           exclusiveMinimum: 0
-          description: 該側掛單價格，必為正數。
+          description: required non-null positive number；該側一個五檔順位的掛單價格。
         size:
           type: integer
           format: int64
           minimum: 1
-          description: 該側掛單張數，必為正整數。
+          description: required non-null positive int64；該側一個五檔順位的掛單張數，以張為單位。
       additionalProperties: false
     PublicEtfConstituents:
       type: object
@@ -4589,21 +4664,38 @@ components:
       additionalProperties: false
     TradingRadarResponse:
       type: object
-      description: "`TradingRadarDto.Response` 的八個固定 record properties；公開路徑與登入後畫面共用此 DTO。"
+      description: "`TradingRadarDto.Response` 的八個 required fixed record attribute response class；公開路徑與登入後畫面共用此 DTO。array child 的 item $ref、順序與可空性均由各 property schema 明定，內容是市場分析結果而非個人持倉或下單指令。"
       required: [ruleVersion, actionPolicyVersion, generatedAt, market, usMarket, stocks, skippedNonTwStocks, publicInformation]
       properties:
-        ruleVersion: {type: string, description: 當前規則版本。}
-        actionPolicyVersion: {type: string, description: 當前動作政策版本。}
-        generatedAt: {type: string, format: date-time}
-        market: {$ref: '#/components/schemas/MarketSummary'}
-        usMarket: {$ref: '#/components/schemas/MarketSummary'}
+        ruleVersion: {type: string, description: required non-null string；產生本雷達結果的規則版本，供結果可追溯與比較。}
+        actionPolicyVersion: {type: string, description: required non-null string；決定 action label 的政策版本，非使用者設定值。}
+        generatedAt:
+          type: string
+          format: date-time
+          description: required non-null RFC 3339 date-time；此 TradingRadarResponse 完成產生的服務時間。
+        market:
+          $ref: '#/components/schemas/MarketSummary'
+          description: required non-null `MarketSummary` nested class；台股市場摘要，所有 required child 與 nullable semantics 由 referenced schema 定義。
+        usMarket:
+          $ref: '#/components/schemas/MarketSummary'
+          description: required non-null `MarketSummary` nested class；美股市場摘要，所有 required child 與 nullable semantics 由 referenced schema 定義。
         stocks:
           type: array
-          items: {$ref: '#/components/schemas/StockDecision'}
-        skippedNonTwStocks: {type: integer, format: int32, minimum: 0}
+          description: required non-null array of `StockDecision` items；本輪台股決策清單，保留 engine 輸出排序；空陣列代表本輪沒有可公開的台股 decision。
+          items:
+            $ref: '#/components/schemas/StockDecision'
+            description: StockDecision item；一檔台股的完整決策 nested class，attribute purpose/type/nullability 由 referenced schema 定義。
+        skippedNonTwStocks:
+          type: integer
+          format: int32
+          minimum: 0
+          description: required non-null int32 minimum 0；因本雷達不處理非台股而略過的標的筆數。
         publicInformation:
           type: array
-          items: {$ref: '#/components/schemas/PublicInformationItem'}
+          description: required non-null array of `PublicInformationItem` items；本輪可公開資訊，保留 producer 排序；空陣列表示無可公開項目。
+          items:
+            $ref: '#/components/schemas/PublicInformationItem'
+            description: PublicInformationItem item；一筆公開資訊 nested class，attribute purpose/type/nullability 由 referenced schema 定義。
       additionalProperties: false
     MarketSummary:
       type: object
@@ -6676,13 +6768,13 @@ components:
       description: 可公開引用的市場、公司或產業資訊項目。
   responses:
     NginxBadGateway:
-      description: Nginx 無法連接或取得 upstream 回應；gateway 不攔截、不改寫成 JSON 或空 200。
+      description: HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。
       content:
         text/html:
           schema: {$ref: '#/components/schemas/NginxErrorHtml'}
           example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
     NginxGatewayTimeout:
-      description: Nginx upstream timeout（gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒）；不是 RFC 7807 JSON。
+      description: HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。
       content:
         text/html:
           schema: {$ref: '#/components/schemas/NginxErrorHtml'}

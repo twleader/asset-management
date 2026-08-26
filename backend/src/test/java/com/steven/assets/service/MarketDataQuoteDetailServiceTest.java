@@ -35,14 +35,11 @@ class MarketDataQuoteDetailServiceTest {
 
     @Test
     void proxy成功時完整透傳總量與時間型別() {
-        reply.set(new Reply(200, """
-                {"stockCode":"2330","stockName":"台積電","market":"台股","supported":true,"available":true,"source":"FUBON_BOOKS","message":null,
-                "sourceTime":"2026-08-21T01:00:00Z","fetchedAt":"2026-08-21T01:02:00Z","marketStatus":"OPEN","price":100,"previousClose":99,
-                "bidTotalLots":0,"askTotalLots":7,"levels":[]}"""));
+        reply.set(new Reply(200, completeSnapshot("FUBON_BOOKS")));
         QuoteDetailDto.Response result = service.getQuoteDetail("2330", "台股");
         assertThat(result.available()).isTrue();
-        assertThat(result.bidTotalLots()).isZero();
-        assertThat(result.askTotalLots()).isEqualTo(7L);
+        assertThat(result.bidTotalLots()).isEqualTo(15L);
+        assertThat(result.askTotalLots()).isEqualTo(65L);
         assertThat(result.sourceTime().toString()).isEqualTo("2026-08-21T01:00:00Z");
     }
 
@@ -60,19 +57,35 @@ class MarketDataQuoteDetailServiceTest {
     }
 
     @Test
-    void nonFubonAvailablePayloadIsAlsoFailSoftAndNeverLeaksYahooSource() {
-        reply.set(new Reply(200, """
-                {"stockCode":"2330","market":"台股","supported":true,"available":true,
-                "source":"YAHOO_TW","marketStatus":"OPEN","levels":[]}
-                """));
+    void completeYahooAvailablePayloadIsProxiedButUnknownSourceRemainsFailSoft() {
+        reply.set(new Reply(200, completeSnapshot("YAHOO_TW")));
 
         QuoteDetailDto.Response result = service.getQuoteDetail("2330", "台股");
 
         assertThat(result.supported()).isTrue();
-        assertThat(result.available()).isFalse();
-        assertThat(result.source()).isNull();
-        assertThat(result.marketStatus()).isEqualTo("UNKNOWN");
-        assertThat(result.levels()).isEmpty();
+        assertThat(result.available()).isTrue();
+        assertThat(result.source()).isEqualTo("YAHOO_TW");
+        assertThat(result.marketStatus()).isEqualTo("OPEN");
+        assertThat(result.levels()).hasSize(5);
+
+        reply.set(new Reply(200, completeSnapshot("UNTRUSTED")));
+        QuoteDetailDto.Response unknown = service.getQuoteDetail("2330", "台股");
+        assertThat(unknown.available()).isFalse();
+        assertThat(unknown.source()).isNull();
+        assertThat(unknown.levels()).isEmpty();
+    }
+
+    private static String completeSnapshot(String source) {
+        return """
+                {"stockCode":"2330","stockName":"台積電","market":"台股","supported":true,"available":true,
+                "source":"%s","message":null,"sourceTime":"2026-08-21T01:00:00Z","fetchedAt":"2026-08-21T01:02:00Z",
+                "marketStatus":"OPEN","price":100,"previousClose":99,"bidTotalLots":15,"askTotalLots":65,"levels":[
+                {"level":1,"bidPrice":100,"bidVolumeLots":1,"askPrice":101,"askVolumeLots":11},
+                {"level":2,"bidPrice":99,"bidVolumeLots":2,"askPrice":102,"askVolumeLots":12},
+                {"level":3,"bidPrice":98,"bidVolumeLots":3,"askPrice":103,"askVolumeLots":13},
+                {"level":4,"bidPrice":97,"bidVolumeLots":4,"askPrice":104,"askVolumeLots":14},
+                {"level":5,"bidPrice":96,"bidVolumeLots":5,"askPrice":105,"askVolumeLots":15}]}
+                """.formatted(source);
     }
 
     private record Reply(int status, String body) {}
