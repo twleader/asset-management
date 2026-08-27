@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.9.0
+  version: 1.10.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十二條精確路徑：
-    十一條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
+    十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
     ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十二條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    十一條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    十二條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -27,7 +27,7 @@ servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的十二條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的十三條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -420,7 +420,7 @@ paths:
       operationId: triggerPublicCrawlerRescan
       summary: 免登入觸發爬蟲重新搜尋
       description: |
-        十二條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+        十三條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
         「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
         HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
         本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -853,6 +853,73 @@ paths:
             text/html:
               schema: {$ref: '#/components/schemas/NginxErrorHtml'}
               example: "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+  /api/public/commodity-prices:
+    get:
+      tags: [公開商品行情]
+      operationId: getPublicCommodityPrices
+      summary: 一次取得 WTI、Brent 與黃金的已持久化報價
+      description: |
+        Global no-tenant 的純唯讀 batch 路徑；每個合法 request 只透過 BFF 的 no-tenant container client
+        讀一次既有 business `GET /api/market-data/commodity/live`，由該聚合既有的 Redis spot cache 與
+        PostgreSQL 前收投影固定三個 slot。它不讀 caller identity、owner、帳戶、持股、交易或 broker，
+        不直接讀 Redis/DB，且絕不 request-time 呼叫 Yahoo、Fubon、refresh、排程或任何寫入。
+        不接受 named query parameter 或 GET body；bare trailing `?` 視同沒有 query。個別 slot 的 null 是
+        該 persisted spot 不可用，仍是合法 200，不能解讀成零價、停盤、refresh 或整個 downstream 失敗。
+      responses:
+        '200':
+          description: 固定順序 WTI、BRENT、GOLD 的 immutable persisted quote slots；任一 slot 可為 null。
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommodityPriceBatchResponse'}
+              examples:
+                persistedSpotWithOneMiss:
+                  summary: WTI、Brent 有已保存 spot，黃金 slot 暫時不可用的合成範例
+                  value:
+                    marketOpen: false
+                    quotes:
+                      WTI: {commodityCode: WTI, unit: USD_PER_BARREL, price: 82.45, change: 1.20, changePercent: 1.48, sessionDate: '2026-08-28', quoteTime: '2026-08-28T20:59:59Z', polledAt: '2026-08-28T20:59:31Z', status: LIVE, dayHigh: 82.99, dayLow: 80.71, provider: YAHOO_FINANCE_CHART}
+                      BRENT: {commodityCode: BRENT, unit: USD_PER_BARREL, price: 85.10, change: null, changePercent: null, sessionDate: '2026-08-28', quoteTime: '2026-08-28T20:59:58Z', polledAt: '2026-08-28T20:59:30Z', status: STALE, dayHigh: null, dayLow: 84.00, provider: YAHOO_FINANCE_CHART}
+                      GOLD: null
+        '400':
+          description: 有任何 named、空值、重複或多值 query parameter，或 GET 帶 positive Content-Length／Transfer-Encoding body；BFF local gate 零 downstream request。
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/PublicCommodityPriceProblemDetail'}
+              example: {type: 'about:blank', title: Invalid commodity price request, status: 400, detail: 不支援 query parameter 或 request body, instance: /api/public/commodity-prices}
+        '405':
+          description: "Gateway 對這條 known exact path 的非 GET method 回應；帶 `Allow: GET`，不會轉送 BFF。"
+          headers:
+            Allow:
+              description: 此 exact path 唯一允許的 HTTP method；值固定為 GET。
+              schema: {type: string, const: GET}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><head><title>405 Not Allowed</title></head><body><center><h1>405 Not Allowed</h1></center><hr><center>nginx</center></body></html>"
+        '502':
+          description: BFF 將 business non-2xx、空／HTML／malformed 或違反固定 slot invariants 的成功 body 消毒為 ProblemDetail；若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/PublicCommodityPriceProblemDetail'}
+              example: {type: 'about:blank', title: Commodity prices downstream failure, status: 502, detail: 商品報價暫時無法取得, instance: /api/public/commodity-prices}
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: BFF 的唯一 no-tenant business connection/transport 無法建立；回應不含 downstream URL、exception 或 tenant 資訊。
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/PublicCommodityPriceProblemDetail'}
+              example: {type: 'about:blank', title: Commodity prices service unavailable, status: 503, detail: 商品報價服務暫時無法連線, instance: /api/public/commodity-prices}
+        '504':
+          description: BFF 對唯一 business GET 的五秒 timeout 會回 ProblemDetail；Nginx upstream timeout 則是並列 text/html gateway alternative。
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/PublicCommodityPriceProblemDetail'}
+              example: {type: 'about:blank', title: Commodity prices timeout, status: 504, detail: 商品報價服務逾時, instance: /api/public/commodity-prices}
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
 components:
   schemas:
     ProblemDetail:
@@ -889,6 +956,146 @@ components:
           - 'null'
           description: 發生問題的 request path/URI reference。
       additionalProperties: true
+    PublicCommodityPriceProblemDetail:
+      type: object
+      description: Commodity batch BFF 自產且不含 extension 的固定 RFC 7807 問題物件；502/504 的 Nginx text/html 另列於 operation response，不可混同。
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - instance
+      properties:
+        type:
+          type: string
+          const: about:blank
+          description: 固定 RFC 問題類型 URI `about:blank`。
+        title:
+          type: string
+          enum: [Invalid commodity price request, Commodity prices downstream failure, Commodity prices service unavailable, Commodity prices timeout]
+          description: 固定錯誤標題；可用值為 `Invalid commodity price request`、`Commodity prices downstream failure`、`Commodity prices service unavailable`、`Commodity prices timeout`。
+        status:
+          type: integer
+          format: int32
+          enum: [400, 502, 503, 504]
+          description: 對應固定 title/detail 的 HTTP 狀態碼；可用值為 `400`、`502`、`503`、`504`。
+        detail:
+          type: string
+          enum: [不支援 query parameter 或 request body, 商品報價暫時無法取得, 商品報價服務暫時無法連線, 商品報價服務逾時]
+          description: 固定、已消毒的繁體中文說明；可用值為 `不支援 query parameter 或 request body`、`商品報價暫時無法取得`、`商品報價服務暫時無法連線`、`商品報價服務逾時`。
+        instance:
+          type: string
+          const: /api/public/commodity-prices
+          description: 固定發生問題的 public commodity batch request path `/api/public/commodity-prices`。
+      additionalProperties: false
+    CommodityPriceBatchResponse:
+      type: object
+      description: Global no-tenant 的 immutable commodity batch response；只投影既有 Redis spot 與 PostgreSQL 前收聚合，不做 request-time vendor I/O、refresh 或任何寫入。
+      required:
+      - marketOpen
+      - quotes
+      properties:
+        marketOpen:
+          type: boolean
+          description: 既有 commodity session key 是否存在；不代表三個 spot 都有值或資料必然新鮮。
+        quotes:
+          $ref: '#/components/schemas/CommodityPriceSlots'
+          description: 固定 WTI、BRENT、GOLD 順序的三個 persisted quote slots；每個 slot 必存在但可為 null。
+      additionalProperties: false
+    CommodityPriceSlots:
+      type: object
+      description: 固定三個 commodity slot 的封閉物件；JSON property 順序永遠為 WTI、BRENT、GOLD，null 只表示該一個 persisted spot 無法安全讀取。
+      required:
+      - WTI
+      - BRENT
+      - GOLD
+      properties:
+        WTI:
+          description: WTI 原油已持久化報價；null 表示 WTI spot cache miss 或其 stored payload 未通過既有嚴格 gate。
+          anyOf:
+          - $ref: '#/components/schemas/CommodityPriceQuote'
+            description: WTI non-null slot 的完整 immutable typed commodity quote。
+          - type: 'null'
+            description: WTI persisted spot 不可用時保留的 null slot，不是零價或 downstream failure。
+        BRENT:
+          description: Brent 原油已持久化報價；null 表示 Brent spot cache miss 或其 stored payload 未通過既有嚴格 gate。
+          anyOf:
+          - $ref: '#/components/schemas/CommodityPriceQuote'
+            description: BRENT non-null slot 的完整 immutable typed commodity quote。
+          - type: 'null'
+            description: BRENT persisted spot 不可用時保留的 null slot，不是零價或 downstream failure。
+        GOLD:
+          description: 黃金已持久化報價；null 表示 GOLD spot cache miss 或其 stored payload 未通過既有嚴格 gate。
+          anyOf:
+          - $ref: '#/components/schemas/CommodityPriceQuote'
+            description: GOLD non-null slot 的完整 immutable typed commodity quote。
+          - type: 'null'
+            description: GOLD persisted spot 不可用時保留的 null slot，不是零價或 downstream failure。
+      additionalProperties: false
+    CommodityPriceQuote:
+      type: object
+      description: 單一 code 的 immutable persisted commodity live quote；BFF 對 business payload 做 strict enum、正數、時間與 nullable-pair validation 後才輸出。
+      required:
+      - commodityCode
+      - unit
+      - price
+      - change
+      - changePercent
+      - sessionDate
+      - quoteTime
+      - polledAt
+      - status
+      - dayHigh
+      - dayLow
+      - provider
+      properties:
+        commodityCode:
+          type: string
+          enum: [WTI, BRENT, GOLD]
+          description: 此 quote 所屬的 slot code；可用值為 `WTI`、`BRENT`、`GOLD`，且必與外層 property 相同。
+        unit:
+          type: string
+          enum: [USD_PER_BARREL, USD_PER_TROY_OUNCE]
+          description: 固定計價單位；WTI/BRENT 為 `USD_PER_BARREL`，GOLD 為 `USD_PER_TROY_OUNCE`。
+        price:
+          type: number
+          exclusiveMinimum: 0
+          description: 必為正數的最新已持久化 spot price；不會以歷史收盤或零值補造。
+        change:
+          type: [number, 'null']
+          description: 相對既有前收的絕對變動；與 changePercent 必同時為 finite number 或同時為 null。
+        changePercent:
+          type: [number, 'null']
+          description: 相對既有前收的百分比變動；與 change 必同時為 finite number 或同時為 null。
+        sessionDate:
+          type: string
+          format: date
+          description: 此已持久化 commodity session 所屬的 ISO 8601 日期。
+        quoteTime:
+          type: string
+          format: date-time
+          description: provider 報價時間的 RFC 3339 instant，不是 BFF request time。
+        polledAt:
+          type: string
+          format: date-time
+          description: 既有 producer 成功輪詢／寫入 spot 的 RFC 3339 instant。
+        status:
+          type: string
+          enum: [LIVE, STALE, SETTLED]
+          description: 已持久化 spot 狀態；可用值為 `LIVE`、`STALE`、`SETTLED`，其來源是既有 producer 而非 BFF 推測。
+        dayHigh:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: producer 提供時必為正數的 session 日內高點；null 表示未提供，不得由 API 估算。
+        dayLow:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: producer 提供時必為正數的 session 日內低點；null 表示未提供，不得由 API 估算。
+        provider:
+          type: string
+          minLength: 1
+          description: 非空白的已持久化行情 provider provenance；只揭露來源識別，不觸發該 provider request-time 查詢。
+      additionalProperties: false
     SpringBasicError:
       type: object
       description: Spring Boot 預設 `/error` 對缺少必填 request parameter 的 JSON response class。timestamp、status、error、path 四個 required attribute 一定出現；message、errors、trace 為部署可選 nullable 診斷欄位，additionalProperties=true 表示框架也可能加入其他 extension member。

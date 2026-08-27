@@ -15,6 +15,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/trading-radar/stock'
   '/api/public/transactions'
   '/api/public/trading-calendar'
+  '/api/public/commodity-prices'
 )
 
 die() {
@@ -50,6 +51,21 @@ get_400_json() {
   [[ "$status" == 400 ]] || die "$label 必須回 HTTP 400，實際為 ${status}；不會 reset Serve。"
   grep -Eiq '^content-type:[[:space:]]*application/(problem\+)?json([;[:space:]]|$)' "$headers_file" || \
     die "$label Content-Type 不是 JSON；不會 reset Serve。"
+}
+
+get_400_json_get_body() {
+  local url=$1
+  local output_file=$2
+  local label=$3
+  local headers_file=$4
+  local -a curl_args=(-sS -X GET -H 'Content-Length: 1' --data-binary 'x' -D "$headers_file" -o "$output_file" -w '%{http_code}')
+  local status
+  if ! status="$(curl "${curl_args[@]}" "$url")"; then
+    die "$label transport 失敗；不會 reset Serve。"
+  fi
+  [[ "$status" == 400 ]] || die "$label 必須回 HTTP 400，實際為 ${status}；不會 reset Serve。"
+  grep -Eiq '^content-type:[[:space:]]*application/problem\+json([;[:space:]]|$)' "$headers_file" || \
+    die "$label Content-Type 不是 application/problem+json；不會 reset Serve。"
 }
 
 # 第六條路由（POST /api/public/crawler-data/rescan）語意是「立即抓取並匯出」的免登入版本，
@@ -173,6 +189,7 @@ expected = {
     "/api/public/trading-radar/stock": "http://127.0.0.1:9090/api/public/trading-radar/stock",
     "/api/public/transactions": "http://127.0.0.1:9090/api/public/transactions",
     "/api/public/trading-calendar": "http://127.0.0.1:9090/api/public/trading-calendar",
+    "/api/public/commodity-prices": "http://127.0.0.1:9090/api/public/commodity-prices",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -183,7 +200,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的十二條 path handler")
+    raise SystemExit("必須精確只有本任務管理的十三條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -434,7 +451,60 @@ if data.get("timezone") != "Asia/Taipei" or len(data.get("days", [])) != (366 if
     raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機十二路 API preflight 通過，開始更新 path-scoped Serve…\n'
+commodity_json="$work_dir/commodity-prices.json"
+commodity_headers="$work_dir/commodity-prices.headers"
+get_200 "$LOCAL_BASE/api/public/commodity-prices" "$commodity_json" '本機商品批次報價' "$commodity_headers"
+python3 - "$commodity_json" <<'PY' || die '商品批次報價 payload 不符合已核准固定三-slot 契約。'
+import json, math, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+if not isinstance(data, dict) or list(data) != ["marketOpen", "quotes"] or type(data.get("marketOpen")) is not bool:
+    raise SystemExit(1)
+quotes = data.get("quotes")
+if not isinstance(quotes, dict) or list(quotes) != ["WTI", "BRENT", "GOLD"]:
+    raise SystemExit(1)
+units = {"WTI": "USD_PER_BARREL", "BRENT": "USD_PER_BARREL", "GOLD": "USD_PER_TROY_OUNCE"}
+required = {"commodityCode", "unit", "price", "change", "changePercent", "sessionDate", "quoteTime", "polledAt", "status", "dayHigh", "dayLow", "provider"}
+for code, quote in quotes.items():
+    if quote is None:
+        continue
+    if not isinstance(quote, dict) or set(quote) != required or quote.get("commodityCode") != code or quote.get("unit") != units[code]:
+        raise SystemExit(1)
+    if not isinstance(quote.get("price"), (int, float)) or isinstance(quote.get("price"), bool) or not math.isfinite(quote["price"]) or quote["price"] <= 0:
+        raise SystemExit(1)
+    if (quote.get("change") is None) != (quote.get("changePercent") is None):
+        raise SystemExit(1)
+    if quote.get("status") not in {"LIVE", "STALE", "SETTLED"} or not isinstance(quote.get("provider"), str) or not quote["provider"].strip():
+        raise SystemExit(1)
+    for field in ("dayHigh", "dayLow"):
+        value = quote.get(field)
+        if value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or value <= 0):
+            raise SystemExit(1)
+PY
+
+commodity_query_json="$work_dir/commodity-prices-query.json"
+commodity_query_headers="$work_dir/commodity-prices-query.headers"
+get_400_json "$LOCAL_BASE/api/public/commodity-prices?unexpected=1" "$commodity_query_json" \
+  '本機商品批次報價 query gate' "$commodity_query_headers"
+commodity_body_json="$work_dir/commodity-prices-body.json"
+commodity_body_headers="$work_dir/commodity-prices-body.headers"
+get_400_json_get_body "$LOCAL_BASE/api/public/commodity-prices" "$commodity_body_json" \
+  '本機商品批次報價 GET body gate' "$commodity_body_headers"
+python3 - "$commodity_query_json" "$commodity_body_json" <<'PY' || die '商品批次報價 request gate 沒有回固定 ProblemDetail。'
+import json, sys
+expected = {
+    "type": "about:blank",
+    "title": "Invalid commodity price request",
+    "status": 400,
+    "detail": "不支援 query parameter 或 request body",
+    "instance": "/api/public/commodity-prices",
+}
+for filename in sys.argv[1:]:
+    data = json.load(open(filename, encoding="utf-8"))
+    if data != expected:
+        raise SystemExit(1)
+PY
+
+printf '現有 Serve 設定所有權與本機十三路 API preflight 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -462,7 +532,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十二條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十三條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

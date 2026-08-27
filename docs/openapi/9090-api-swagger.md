@@ -7,22 +7,22 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.9.0` |
-| 對外路徑 | 12 條：11 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.10.0` |
+| 對外路徑 | 13 條：12 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十二條精確路徑：
-十一條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 是 global no-tenant）
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
+十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
 ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十二條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-十一條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+十二條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 暴露文件端點。
@@ -49,6 +49,7 @@ Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管
 | 10 | `GET` | `/api/public/trading-radar/stock` | `getPublicTradingRadarStockDetail` | 取得今日交易雷達指定股票的展開資料 | 200 application/json: TradingRadarStockDetailResponse |
 | 11 | `GET` | `/api/public/transactions` | `getPublicTransactionHistory` | 取得 configured-admin 的唯讀交易紀錄 | 200 application/json: PublicTransactionHistoryResponse |
 | 12 | `GET` | `/api/public/trading-calendar` | `getPublicTradingCalendar` | 取得指定年度台、美、英交易日曆 | 200 application/json: PublicTradingCalendarResponse |
+| 13 | `GET` | `/api/public/commodity-prices` | `getPublicCommodityPrices` | 一次取得 WTI、Brent 與黃金的已持久化報價 | 200 application/json: CommodityPriceBatchResponse |
 
 ## 路由詳情
 
@@ -168,7 +169,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 6. `POST /api/public/crawler-data/rescan`
 
-十二條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+十三條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
 「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
 HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
 本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -320,6 +321,26 @@ selector。year 必須是 Asia/Taipei 當年加減一年內的一個四位年份
 | `503` | application/problem+json: ProblemDetail | BFF 無法連線 business。 |
 | `504` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 五秒 timeout 或 Nginx gateway timeout。 |
 
+### 13. `GET /api/public/commodity-prices`
+
+Global no-tenant 的純唯讀 batch 路徑；每個合法 request 只透過 BFF 的 no-tenant container client
+讀一次既有 business `GET /api/market-data/commodity/live`，由該聚合既有的 Redis spot cache 與
+PostgreSQL 前收投影固定三個 slot。它不讀 caller identity、owner、帳戶、持股、交易或 broker，
+不直接讀 Redis/DB，且絕不 request-time 呼叫 Yahoo、Fubon、refresh、排程或任何寫入。
+不接受 named query parameter 或 GET body；bare trailing `?` 視同沒有 query。個別 slot 的 null 是
+該 persisted spot 不可用，仍是合法 200，不能解讀成零價、停盤、refresh 或整個 downstream 失敗。
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: CommodityPriceBatchResponse | 固定順序 WTI、BRENT、GOLD 的 immutable persisted quote slots；任一 slot 可為 null。 |
+| `400` | application/problem+json: PublicCommodityPriceProblemDetail | 有任何 named、空值、重複或多值 query parameter，或 GET 帶 positive Content-Length／Transfer-Encoding body；BFF local gate 零 downstream request。 |
+| `405` | text/html: NginxErrorHtml | Gateway 對這條 known exact path 的非 GET method 回應；帶 `Allow: GET`，不會轉送 BFF。 |
+| `502` | application/problem+json: PublicCommodityPriceProblemDetail; text/html: NginxErrorHtml | BFF 將 business non-2xx、空／HTML／malformed 或違反固定 slot invariants 的成功 body 消毒為 ProblemDetail；若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。 |
+| `503` | application/problem+json: PublicCommodityPriceProblemDetail | BFF 的唯一 no-tenant business connection/transport 無法建立；回應不含 downstream URL、exception 或 tenant 資訊。 |
+| `504` | application/problem+json: PublicCommodityPriceProblemDetail; text/html: NginxErrorHtml | BFF 對唯一 business GET 的五秒 timeout 會回 ProblemDetail；Nginx upstream timeout 則是並列 text/html gateway alternative。 |
+
 ## Schema 欄位
 
 ### `ProblemDetail`
@@ -333,6 +354,56 @@ Spring `ProblemDetail` 的 RFC 7807/9457 JSON；可帶 RFC extension members。
 | `status` | 是 | `integer (int32)` | 否 | minimum: 400<br>maximum: 599 | 此次問題回應的 HTTP 狀態碼。 |
 | `detail` | 是 | `string | null` | 是 |  | 此次錯誤的說明。 |
 | `instance` | 是 | `string | null` | 是 |  | 發生問題的 request path/URI reference。 |
+
+### `PublicCommodityPriceProblemDetail`
+
+Commodity batch BFF 自產且不含 extension 的固定 RFC 7807 問題物件；502/504 的 Nginx text/html 另列於 operation response，不可混同。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `type` | 是 | `string` | 否 | enum: `about:blank` | 固定 RFC 問題類型 URI `about:blank`。 |
+| `title` | 是 | `string` | 否 | enum: `Invalid commodity price request`, `Commodity prices downstream failure`, `Commodity prices service unavailable`, `Commodity prices timeout` | 固定錯誤標題；可用值為 `Invalid commodity price request`、`Commodity prices downstream failure`、`Commodity prices service unavailable`、`Commodity prices timeout`。 |
+| `status` | 是 | `integer (int32)` | 否 | enum: `400`, `502`, `503`, `504` | 對應固定 title/detail 的 HTTP 狀態碼；可用值為 `400`、`502`、`503`、`504`。 |
+| `detail` | 是 | `string` | 否 | enum: `不支援 query parameter 或 request body`, `商品報價暫時無法取得`, `商品報價服務暫時無法連線`, `商品報價服務逾時` | 固定、已消毒的繁體中文說明；可用值為 `不支援 query parameter 或 request body`、`商品報價暫時無法取得`、`商品報價服務暫時無法連線`、`商品報價服務逾時`。 |
+| `instance` | 是 | `string` | 否 | enum: `/api/public/commodity-prices` | 固定發生問題的 public commodity batch request path `/api/public/commodity-prices`。 |
+
+### `CommodityPriceBatchResponse`
+
+Global no-tenant 的 immutable commodity batch response；只投影既有 Redis spot 與 PostgreSQL 前收聚合，不做 request-time vendor I/O、refresh 或任何寫入。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `marketOpen` | 是 | `boolean` | 否 |  | 既有 commodity session key 是否存在；不代表三個 spot 都有值或資料必然新鮮。 |
+| `quotes` | 是 | `CommodityPriceSlots` | 否 |  | 固定 WTI、BRENT、GOLD 順序的三個 persisted quote slots；每個 slot 必存在但可為 null。 |
+
+### `CommodityPriceSlots`
+
+固定三個 commodity slot 的封閉物件；JSON property 順序永遠為 WTI、BRENT、GOLD，null 只表示該一個 persisted spot 無法安全讀取。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `WTI` | 是 | `CommodityPriceQuote | null` | 是 |  | WTI 原油已持久化報價；null 表示 WTI spot cache miss 或其 stored payload 未通過既有嚴格 gate。 |
+| `BRENT` | 是 | `CommodityPriceQuote | null` | 是 |  | Brent 原油已持久化報價；null 表示 Brent spot cache miss 或其 stored payload 未通過既有嚴格 gate。 |
+| `GOLD` | 是 | `CommodityPriceQuote | null` | 是 |  | 黃金已持久化報價；null 表示 GOLD spot cache miss 或其 stored payload 未通過既有嚴格 gate。 |
+
+### `CommodityPriceQuote`
+
+單一 code 的 immutable persisted commodity live quote；BFF 對 business payload 做 strict enum、正數、時間與 nullable-pair validation 後才輸出。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `commodityCode` | 是 | `string` | 否 | enum: `WTI`, `BRENT`, `GOLD` | 此 quote 所屬的 slot code；可用值為 `WTI`、`BRENT`、`GOLD`，且必與外層 property 相同。 |
+| `unit` | 是 | `string` | 否 | enum: `USD_PER_BARREL`, `USD_PER_TROY_OUNCE` | 固定計價單位；WTI/BRENT 為 `USD_PER_BARREL`，GOLD 為 `USD_PER_TROY_OUNCE`。 |
+| `price` | 是 | `number` | 否 | exclusiveMinimum: 0 | 必為正數的最新已持久化 spot price；不會以歷史收盤或零值補造。 |
+| `change` | 是 | `number | null` | 是 |  | 相對既有前收的絕對變動；與 changePercent 必同時為 finite number 或同時為 null。 |
+| `changePercent` | 是 | `number | null` | 是 |  | 相對既有前收的百分比變動；與 change 必同時為 finite number 或同時為 null。 |
+| `sessionDate` | 是 | `string (date)` | 否 |  | 此已持久化 commodity session 所屬的 ISO 8601 日期。 |
+| `quoteTime` | 是 | `string (date-time)` | 否 |  | provider 報價時間的 RFC 3339 instant，不是 BFF request time。 |
+| `polledAt` | 是 | `string (date-time)` | 否 |  | 既有 producer 成功輪詢／寫入 spot 的 RFC 3339 instant。 |
+| `status` | 是 | `string` | 否 | enum: `LIVE`, `STALE`, `SETTLED` | 已持久化 spot 狀態；可用值為 `LIVE`、`STALE`、`SETTLED`，其來源是既有 producer 而非 BFF 推測。 |
+| `dayHigh` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | producer 提供時必為正數的 session 日內高點；null 表示未提供，不得由 API 估算。 |
+| `dayLow` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | producer 提供時必為正數的 session 日內低點；null 表示未提供，不得由 API 估算。 |
+| `provider` | 是 | `string` | 否 |  | 非空白的已持久化行情 provider provenance；只揭露來源識別，不觸發該 provider request-time 查詢。 |
 
 ### `SpringWebFluxBasicError`
 
