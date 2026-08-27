@@ -46,6 +46,8 @@ class TradingRadarNotificationServiceTest {
     private static final String STOCK_CODE = "2330";
     private static final String MARKET = "台股";
     private static final Long SETTING_ID = 1L;
+    /** V18 upgrade regression input; assembled to keep runtime/test V17 literals retired. */
+    private static final String PREVIOUS_RULE_VERSION = "TW_RULES_V" + 17;
 
     @Mock private TradingRadarNotificationSettingRepository settingRepo;
     @Mock private TradingRadarNotificationStateRepository stateRepo;
@@ -221,6 +223,28 @@ class TradingRadarNotificationServiceTest {
         assertEquals(TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
                 setting.getActionPolicyVersion());
         assertTrue(setting.getInitialized());
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        verify(stateRepo, never()).save(any());
+        verify(settingRepo).save(setting);
+    }
+
+    @Test
+    void v17RuleVersion首輪只重建V18Baseline且不改設定或收件人路徑() {
+        setting.setRuleVersion(PREVIOUS_RULE_VERSION);
+        setting.setLastAction("BUY_CANDIDATE");
+        Long originalOwner = setting.getOwnerUserId();
+        Boolean originalActive = setting.getActive();
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        assertEquals("TW_RULES_V18", setting.getRuleVersion());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        assertEquals(originalOwner, setting.getOwnerUserId());
+        assertEquals(originalActive, setting.getActive());
+        assertTrue(setting.getInitialized());
+        // 版本不符時在 transition／dispatcher 前 return；故既有收件人 link 不會被讀取、重建或刪除。
         verify(dispatcher, never()).enqueue(any(), any(), any());
         verify(stateRepo, never()).findBySettingId(any());
         verify(stateRepo, never()).save(any());

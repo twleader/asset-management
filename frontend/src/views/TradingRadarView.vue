@@ -26,7 +26,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">{{ marketCardTab }}大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V17' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V18' }}</el-tag>
           </div>
           <div class="as-of-group">
             <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
@@ -187,6 +187,20 @@
         </el-tab-pane>
       </el-tabs>
 
+      <div class="holding-period-focus" aria-label="本次資金預定持有期">
+        <div>
+          <div class="holding-period-title">本次資金預定持有期</div>
+          <div v-if="selectedHorizon == null" class="holding-period-note">{{ HOLDING_PERIOD_PROMPT }}</div>
+          <div v-else class="holding-period-note">已聚焦{{ selectedHorizonPresentation?.label }}；其餘兩軌仍完整顯示，不會合成單一建議。</div>
+        </div>
+        <el-radio-group v-model="selectedHorizon" size="small">
+          <el-radio-button v-for="option in HOLDING_PERIOD_OPTIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </el-radio-button>
+        </el-radio-group>
+        <el-button v-if="selectedHorizon != null" text size="small" @click="selectedHorizon = HOLDING_PERIOD_STATES.NONE">清除聚焦</el-button>
+      </div>
+
       <el-alert
         v-if="marketTab === '美股'"
         type="info"
@@ -208,7 +222,7 @@
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-panel">
-              <div class="evidence-summary" v-if="row.shortEvidenceConfidence != null || row.swingEvidenceConfidence != null || row.mediumEvidenceConfidence != null">
+              <div class="evidence-summary">
                 <div class="confirm-grid">
                   <div class="confirm-item">
                     <span>一周證據信心</span>
@@ -227,14 +241,16 @@
                     <strong>{{ row.shortDownsideRisk == null ? '—' : row.shortDownsideRisk }} ／ {{ row.swingDownsideRisk == null ? '—' : row.swingDownsideRisk }} ／ {{ row.mediumDownsideRisk == null ? '—' : row.mediumDownsideRisk }}</strong>
                     <small>風險覆蓋 {{ row.shortRiskCoverage == null ? '—' : fmtPct(row.shortRiskCoverage * 100) }} ／ {{ row.swingRiskCoverage == null ? '—' : fmtPct(row.swingRiskCoverage * 100) }} ／ {{ row.mediumRiskCoverage == null ? '—' : fmtPct(row.mediumRiskCoverage * 100) }}</small>
                   </div>
-                  <div class="confirm-item">
-                    <span>1周~1月 候選／實際動作</span>
-                    <strong>{{ row.swingCandidateAction || '—' }} → {{ row.swingAction || '—' }}</strong>
-                  </div>
-                  <div class="confirm-item">
-                    <span>1月~6月 候選／實際動作</span>
-                    <strong>{{ row.candidateAction || '—' }} → {{ row.action || '—' }}</strong>
-                    <small v-if="row.evidence?.actionGateReasons?.length">{{ row.evidence.actionGateReasons.join('；') }}</small>
+                  <div
+                    v-for="decision in presentAllHorizonDecisions(row, selectedHorizon)"
+                    :key="`${row.market}-${row.stockCode}-${decision.horizon}`"
+                    class="confirm-item action-decision-card"
+                    :class="{ 'action-decision-card-focused': decision.selected }"
+                  >
+                    <span>{{ decision.label }} 候選／實際動作</span>
+                    <strong>{{ decision.candidateAction || '—' }} → {{ decision.action || '—' }}</strong>
+                    <el-tag v-if="decision.selected" size="small" type="primary" effect="plain">本次持有期聚焦</el-tag>
+                    <small v-if="decision.selected">{{ completedCandleDisclosure(row) }}</small>
                   </div>
                   <div class="confirm-item dividend-confirm-item" v-if="row.evidence?.nextDistributionStatus">
                     <span>下一配息（已知時點）· {{ row.evidence.nextDistributionStatus }}</span>
@@ -262,6 +278,7 @@
                     <small v-if="row.evidence.nextDistributionMissingReason">證據說明：{{ row.evidence.nextDistributionMissingReason }}</small>
                   </div>
                 </div>
+                <div class="completed-candle-disclosure">{{ completedCandleDisclosure(row) }}</div>
               </div>
               <div class="confirm-grid">
                 <div class="confirm-item">
@@ -295,7 +312,7 @@
                 </div>
                 <div class="confirm-item">
                   <span>KD</span><strong>K {{ fmtNumber(row.kValue, 1) }} / D {{ fmtNumber(row.dValue, 1) }}</strong>
-                  <small>完成日 K：{{ row.asOfDate || '—' }}</small>
+                  <small>完成日 K：{{ row.dailyCandle?.asOfDate || '資料不足' }}</small>
                 </div>
                 <div class="confirm-item"><span>J9</span><strong>{{ fmtNumber(row.extendedIndicators?.j9, 2) }}</strong></div>
                 <div class="confirm-item"><span>MACD／DIF／OSC</span><strong>{{ fmtNumber(row.extendedIndicators?.macd, 2) }}／{{ fmtNumber(row.extendedIndicators?.dif, 2) }}／{{ fmtNumber(row.extendedIndicators?.osc, 2) }}</strong></div>
@@ -329,7 +346,7 @@
                     <strong>{{ row.dailyCandle.lowerShadowRatio == null ? '—' : Math.round(row.dailyCandle.lowerShadowRatio * 100) + '%' }}</strong>
                   </div>
                 </div>
-                <div v-else class="muted">舊快照尚未含日K 棒欄位，請重新整理。</div>
+                <div v-else class="muted">完成日 K 資料不足；舊快照尚未含日K 棒欄位時請重新整理。</div>
               </div>
 
               <div class="fundamental-panel">
@@ -623,6 +640,13 @@
                   <div v-else class="muted">目前沒有額外風險提醒。</div>
                 </el-col>
               </el-row>
+              <div v-if="row.evidence?.actionGateReasons?.length" class="action-gate-panel">
+                <div class="action-gate-title">動作閘門／風險</div>
+                <div class="action-gate-note">這是 1月~6月 → 一周 → 1周~1月的稽核彙總，不是任一軌支持訊號或允許動作依據。</div>
+                <ul class="reason-list">
+                  <li v-for="(item, i) in row.evidence.actionGateReasons" :key="`agr-${row.stockCode}-${i}`">{{ item }}</li>
+                </ul>
+              </div>
               <div v-if="row.counterTrendState && row.counterTrendState !== 'NONE'" class="counter-trend-panel">
                 <div class="counter-trend-head">
                   <div>
@@ -650,7 +674,7 @@
                 </el-row>
               </div>
               <div class="updated-at">
-                行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.asOfDate || '—' }}
+                行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.dailyCandle?.asOfDate || '資料不足' }}
                 <span v-if="row.distributionAdjusted">　·　技術價基：還原權息／分割</span>
               </div>
             </div>
@@ -802,7 +826,9 @@
             <div class="score-inline" :style="{ color: priceColor(row.weeklyIndicators?.changePercent) }">{{ fmtPct(row.weeklyIndicators?.changePercent) }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="asOfDate" label="完成日 K" width="115" />
+        <el-table-column label="完成日 K" width="115">
+          <template #default="{ row }">{{ row.dailyCandle?.asOfDate || '資料不足' }}</template>
+        </el-table-column>
         <el-table-column label="通知" width="105" align="center" fixed="right">
           <template #default="{ row }">
             <el-button size="small" :icon="Bell" @click.stop="openNotification(row)">設定</el-button>
@@ -821,7 +847,7 @@
       :closable="false"
       show-icon
       title="規則式決策輔助，不是獲利保證"
-      description="評分只比較市場上的獲利機會，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數只描述目前位置相對於自身歷史的獲利機會，不是獲利機率，也不是報酬預測；TW_RULES_V16 與 TW_RULES_V17 為不同規則版本，兩者的分數不可直接比較。"
+      description="評分只比較市場上的相對位置，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數不是獲利機率或報酬預測；TW_RULES_V17 與 TW_RULES_V18 為不同規則版本，分數不可直接比較。V18 是訊號分類與閱讀改善，不代表任何獲利保證。"
     />
 
     <el-card shadow="never" class="sched-card">
@@ -1156,6 +1182,14 @@ import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
 import { projectValuationEvidence } from '@/utils/valuationEvidence'
+import {
+  HOLDING_PERIOD_OPTIONS,
+  HOLDING_PERIOD_PROMPT,
+  HOLDING_PERIOD_STATES,
+  completedCandleDisclosure,
+  presentAllHorizonDecisions,
+  presentHorizonDecision
+} from '@/utils/tradingRadarDecisionPresentation'
 
 const router = useRouter()
 const route = useRoute()
@@ -1213,7 +1247,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V17' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V18' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -1249,6 +1283,9 @@ const usStale = computed(() => !!usMarket.value.stale)
 const stocks = computed(() => radar.value.stocks || [])
 // 我的台股決策改為台股／美股兩個分頁（Requirement 64 / Task 295），比照 WatchStockView.vue 的 marketTab 模式
 const marketTab = ref('台股')
+// 此選擇只影響畫面聚焦；不寫入 localStorage、query、store、後端或快照，也不改動三軌資料。
+const selectedHorizon = ref(HOLDING_PERIOD_STATES.NONE)
+const selectedHorizonPresentation = computed(() => presentHorizonDecision({}, selectedHorizon.value, selectedHorizon.value))
 const twStocks = computed(() => stocks.value.filter(s => s.market === '台股'))
 const usStocks = computed(() => stocks.value.filter(s => s.market === '美股'))
 const currentStocks = computed(() => marketTab.value === '美股' ? usStocks.value : twStocks.value)
@@ -2085,6 +2122,9 @@ onUnmounted(() => {
 .info-item a:hover { text-decoration: underline; }
 .info-item small { color: #64748b; }
 .stocks-card { margin-top: 16px; }
+.holding-period-focus { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -2px 0 14px; padding: 12px 14px; border: 1px solid #bfdbfe; border-radius: 9px; background: #eff6ff; }
+.holding-period-title { color: #1e3a8a; font-size: 13px; font-weight: 700; }
+.holding-period-note { margin-top: 3px; color: #475569; font-size: 12px; }
 .us-market-note { margin-bottom: 14px; }
 .stock-code { font-weight: 750; color: #0f172a; }
 .stock-name { margin-top: 2px; color: #64748b; font-size: 12px; }
@@ -2103,6 +2143,13 @@ onUnmounted(() => {
 .confirm-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .confirm-item { border: 1px solid #e2e8f0; border-radius: 8px; background: white; padding: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .confirm-item span, .confirm-item small { color: #64748b; font-size: 12px; }
+.action-decision-card { border-left: 4px solid #cbd5e1; }
+.action-decision-card-focused { border-color: #60a5fa; border-left-color: #2563eb; background: #eff6ff; box-shadow: 0 0 0 1px #93c5fd; }
+.completed-candle-disclosure { margin-top: 10px; color: #475569; font-size: 12px; line-height: 1.6; }
+.action-gate-panel { margin-top: 18px; padding: 14px 16px; border: 1px solid #f59e0b; border-radius: 9px; background: #fffbeb; }
+.action-gate-title { color: #92400e; font-size: 14px; font-weight: 700; }
+.action-gate-note { margin-top: 4px; color: #78350f; font-size: 12px; line-height: 1.55; }
+.action-gate-panel .reason-list { margin: 8px 0 0; }
 /* Task 357／357.7b：下一配息四個日期（除息／除權／發放股息／發放股權）各自獨立標籤，
    不得擠成一行——2 欄 × 2 列，小螢幕（見下方 @media）再降為單欄，避免標籤與日期黏在一起難以分辨是哪個。 */
 .dividend-confirm-item { width: 100%; grid-column: 1 / -1; }

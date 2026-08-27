@@ -398,6 +398,34 @@ public final class TradingRadarEvidenceConfidenceResolver {
                     && price.meets(horizon, .70) && market.meets(horizon, .70);
         }
 
+        /**
+         * Horizon-local evidence-gate diagnostics.
+         *
+         * <p>{@link #reasons()} is the legacy, unlabelled compatibility list.  It deliberately
+         * remains unchanged because direct callers already consume it, but it is not safe to use
+         * for a specific holding horizon: one item may have failed only another horizon's
+         * coverage/freshness check.  The action gate must use this accessor instead so each
+         * diagnostic retains its originating horizon.</p>
+         *
+         * <p>The fixed group order makes the output deterministic.  Dividend-event disclosure
+         * keeps the existing five-session SHORT and twenty-session SWING/MEDIUM windows; it is
+         * included here as risk/disclosure evidence and does not alter confidence or action.</p>
+         */
+        public List<String> gateReasons(Horizon horizon) {
+            Objects.requireNonNull(horizon, "horizon");
+            List<String> local = new ArrayList<>();
+            for (Group group : List.of(Group.PRICE_TECHNICAL, Group.MARKET_LIQUIDITY,
+                    Group.VALUATION, Group.FINANCIAL_OPERATING, Group.ASSET_SPECIFIC)) {
+                GroupEvidence groupEvidence = group(group);
+                if (groupEvidence != null && groupEvidence.participates()
+                        && !groupEvidence.meets(horizon, .70)) {
+                    local.add(group.name() + " coverage/freshness 未達 70%，不支持買進候選。 ");
+                }
+            }
+            addDividendReason(local, dividendEvent, horizon);
+            return List.copyOf(local);
+        }
+
         public Risk risk(Horizon horizon) {
             return switch (horizon) {
                 case SHORT -> shortRisk;

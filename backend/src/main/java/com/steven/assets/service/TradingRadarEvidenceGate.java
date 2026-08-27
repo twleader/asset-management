@@ -30,16 +30,39 @@ public final class TradingRadarEvidenceGate {
             TradingRadarRuleEngine.Action mediumAction,
             TradingRadarRuleEngine.Action shortAction,
             TradingRadarRuleEngine.Action swingAction,
-            List<String> reasons,
+            List<String> mediumDiagnostics,
+            List<String> shortDiagnostics,
+            List<String> swingDiagnostics,
             TradingRadarRuleEngine.Action candidateMediumAction,
             TradingRadarRuleEngine.Action candidateShortAction,
             TradingRadarRuleEngine.Action candidateSwingAction
     ) {
+        public GatedActions {
+            mediumDiagnostics = dedupe(mediumDiagnostics == null ? List.of() : mediumDiagnostics);
+            shortDiagnostics = dedupe(shortDiagnostics == null ? List.of() : shortDiagnostics);
+            swingDiagnostics = dedupe(swingDiagnostics == null ? List.of() : swingDiagnostics);
+        }
+
+        /**
+         * Backward-compatible audit metadata, not a horizon-specific support or risk list.
+         *
+         * <p>Callers that expose {@code actionGateReasons} retain one stable, distinct list in
+         * medium → short → swing order.  Production/rule-engine assembly must instead consume
+         * the corresponding local diagnostic accessor.</p>
+         */
+        public List<String> reasons() {
+            List<String> audit = new ArrayList<>(mediumDiagnostics);
+            audit.addAll(shortDiagnostics);
+            audit.addAll(swingDiagnostics);
+            return dedupe(audit);
+        }
+
+        /** Two-track source compatibility: a missing swing track is never inferred from short. */
         public GatedActions(TradingRadarRuleEngine.Action mediumAction,
                             TradingRadarRuleEngine.Action shortAction,
                             TradingRadarRuleEngine.Action swingAction,
                             List<String> reasons) {
-            this(mediumAction, shortAction, swingAction, reasons,
+            this(mediumAction, shortAction, swingAction, reasons, reasons, List.of(),
                     mediumAction, shortAction, swingAction);
         }
     }
@@ -60,22 +83,33 @@ public final class TradingRadarEvidenceGate {
             boolean held,
             TradingRadarAssetProfileResolver.AssetProfile profile) {
         if (profile == null || !profile.bond() || profile.currencyDataComplete()) {
-            return new GatedActions(mediumAction, shortAction, swingAction, List.of());
+            return new GatedActions(mediumAction, shortAction, swingAction,
+                    List.of(), List.of(), List.of(),
+                    mediumAction, shortAction, swingAction);
         }
-        List<String> reasons = new ArrayList<>();
+        List<String> mediumDiagnostics = new ArrayList<>();
+        List<String> shortDiagnostics = new ArrayList<>();
+        List<String> swingDiagnostics = new ArrayList<>();
         TradingRadarRuleEngine.Action fallback = held
                 ? TradingRadarRuleEngine.Action.HOLD
                 : TradingRadarRuleEngine.Action.WATCH;
-        TradingRadarRuleEngine.Action gatedMedium = downgradeBuy(mediumAction, fallback, reasons);
-        TradingRadarRuleEngine.Action gatedShort = downgradeBuy(shortAction, fallback, reasons);
-        TradingRadarRuleEngine.Action gatedSwing = downgradeBuy(swingAction, fallback, reasons);
-        gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
-        gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
-        gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
-        if (!reasons.isEmpty()) {
-            reasons.add("底層外幣債券幣別資料不完整，三軌買進／加碼／試單閘門關閉；不以 TWD 猜測。 ");
+        TradingRadarRuleEngine.Action gatedMedium = downgradeBuy(
+                mediumAction, fallback, mediumDiagnostics);
+        TradingRadarRuleEngine.Action gatedShort = downgradeBuy(
+                shortAction, fallback, shortDiagnostics);
+        TradingRadarRuleEngine.Action gatedSwing = downgradeBuy(
+                swingAction, fallback, swingDiagnostics);
+        gatedMedium = downgradeRiskExit(gatedMedium, fallback, mediumDiagnostics);
+        gatedShort = downgradeRiskExit(gatedShort, fallback, shortDiagnostics);
+        gatedSwing = downgradeRiskExit(gatedSwing, fallback, swingDiagnostics);
+        if (hasDiagnostics(mediumDiagnostics, shortDiagnostics, swingDiagnostics)) {
+            String allTrackClose = "底層外幣債券幣別資料不完整，三軌買進／加碼／試單閘門關閉；不以 TWD 猜測。 ";
+            mediumDiagnostics.add(allTrackClose);
+            shortDiagnostics.add(allTrackClose);
+            if (swingAction != null) swingDiagnostics.add(allTrackClose);
         }
-        return new GatedActions(gatedMedium, gatedShort, gatedSwing, List.copyOf(reasons),
+        return new GatedActions(gatedMedium, gatedShort, gatedSwing,
+                mediumDiagnostics, shortDiagnostics, swingDiagnostics,
                 mediumAction, shortAction, swingAction);
     }
 
@@ -121,83 +155,95 @@ public final class TradingRadarEvidenceGate {
             TradingRadarEvidenceConfidenceResolver.Evidence evidence,
             BigDecimal confidenceThreshold) {
         GatedActions currencyGated = apply(mediumAction, shortAction, swingAction, held, profile);
-        List<String> reasons = new ArrayList<>(currencyGated.reasons());
+        List<String> mediumDiagnostics = new ArrayList<>(currencyGated.mediumDiagnostics());
+        List<String> shortDiagnostics = new ArrayList<>(currencyGated.shortDiagnostics());
+        List<String> swingDiagnostics = new ArrayList<>(currencyGated.swingDiagnostics());
         TradingRadarRuleEngine.Action fallback = held
                 ? TradingRadarRuleEngine.Action.HOLD : TradingRadarRuleEngine.Action.WATCH;
         TradingRadarRuleEngine.Action gatedMedium = currencyGated.mediumAction();
         TradingRadarRuleEngine.Action gatedShort = currencyGated.shortAction();
         TradingRadarRuleEngine.Action gatedSwing = currencyGated.swingAction();
         if (evidence == null) {
-            reasons.add("證據 confidence 未建立，買進／減碼／出場候選保守降級。 ");
-            gatedMedium = downgradeBuy(gatedMedium, fallback, reasons);
-            gatedShort = downgradeBuy(gatedShort, fallback, reasons);
-            gatedSwing = downgradeBuy(gatedSwing, fallback, reasons);
-            gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
-            gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
-            gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
+            String unavailable = "證據 confidence 未建立，買進／減碼／出場候選保守降級。 ";
+            mediumDiagnostics.add(unavailable);
+            shortDiagnostics.add(unavailable);
+            if (swingAction != null) swingDiagnostics.add(unavailable);
+            gatedMedium = downgradeBuy(gatedMedium, fallback, mediumDiagnostics);
+            gatedShort = downgradeBuy(gatedShort, fallback, shortDiagnostics);
+            gatedSwing = downgradeBuy(gatedSwing, fallback, swingDiagnostics);
+            gatedMedium = downgradeRiskExit(gatedMedium, fallback, mediumDiagnostics);
+            gatedShort = downgradeRiskExit(gatedShort, fallback, shortDiagnostics);
+            gatedSwing = downgradeRiskExit(gatedSwing, fallback, swingDiagnostics);
         } else {
             if (!evidence.dividendEventComplete()) {
                 // Public-event/dividend evidence contributes to risk/disclosure;
                 // it is not a universal opportunity hard gate.
-                reasons.add("配息事件 evidence 缺漏／過期／不完整，僅列風險揭露；不改變 opportunity action。 ");
+                String incompleteDividend = "配息事件 evidence 缺漏／過期／不完整，僅列風險揭露；不改變 opportunity action。 ";
+                mediumDiagnostics.add(incompleteDividend);
+                shortDiagnostics.add(incompleteDividend);
+                if (swingAction != null) swingDiagnostics.add(incompleteDividend);
             }
             double threshold = confidenceThreshold == null ? .70
                     : Math.max(0.0, Math.min(1.0, confidenceThreshold.doubleValue()));
             boolean mediumEvidenceOpen = mediumOpen(evidence, profile, threshold);
             boolean shortEvidenceOpen = shortOpen(evidence, threshold);
             if (isBuy(gatedMedium) && !mediumEvidenceOpen) {
-                reasons.addAll(evidence.reasons());
-                reasons.add("中期 evidence gate 未達 PRICE／MARKET／適用基本面完整度或候選 confidence 門檻。 ");
+                mediumDiagnostics.addAll(evidence.gateReasons(
+                        TradingRadarEvidenceConfidenceResolver.Horizon.MEDIUM));
+                mediumDiagnostics.add("中期 evidence gate 未達 PRICE／MARKET／適用基本面完整度或候選 confidence 門檻。 ");
                 gatedMedium = fallback;
             }
             if (isBuy(gatedShort) && !shortEvidenceOpen) {
-                reasons.addAll(evidence.reasons());
-                reasons.add("短期 evidence gate 未達 PRICE／MARKET／適用資產完整度或候選 confidence 門檻。 ");
+                shortDiagnostics.addAll(evidence.gateReasons(
+                        TradingRadarEvidenceConfidenceResolver.Horizon.SHORT));
+                shortDiagnostics.add("短期 evidence gate 未達 PRICE／MARKET／適用資產完整度或候選 confidence 門檻。 ");
                 gatedShort = fallback;
             }
             // Risk-reducing candidates are actionable only when the same mandatory
             // observations are complete.  Keep candidateMedium/ShortAction above
             // unchanged so the API still discloses the rule-engine opportunity.
             if (!mediumEvidenceOpen) {
-                gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
+                gatedMedium = downgradeRiskExit(gatedMedium, fallback, mediumDiagnostics);
             }
             if (!shortEvidenceOpen) {
-                gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
+                gatedShort = downgradeRiskExit(gatedShort, fallback, shortDiagnostics);
             }
             boolean mediumRiskOpen = riskEvidenceOpen(evidence,
                     TradingRadarEvidenceConfidenceResolver.Horizon.MEDIUM, profile);
             boolean shortRiskOpen = riskEvidenceOpen(evidence,
                     TradingRadarEvidenceConfidenceResolver.Horizon.SHORT, profile);
             if (!mediumRiskOpen) {
-                reasons.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
+                mediumDiagnostics.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
                         + "中期減碼／出場僅保留候選揭露。 ");
-                gatedMedium = downgradeRiskExit(gatedMedium, fallback, reasons);
+                gatedMedium = downgradeRiskExit(gatedMedium, fallback, mediumDiagnostics);
             }
             if (!shortRiskOpen) {
-                reasons.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
+                shortDiagnostics.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
                         + "短期減碼／出場僅保留候選揭露。 ");
-                gatedShort = downgradeRiskExit(gatedShort, fallback, reasons);
+                gatedShort = downgradeRiskExit(gatedShort, fallback, shortDiagnostics);
             }
             // 1周~1月 軌：呼叫端沒有提供時完全不判定，既有兩軌的 reasons 逐位不變。
             if (swingAction != null) {
                 boolean swingEvidenceOpen = swingOpen(evidence, profile, threshold);
                 if (isBuy(gatedSwing) && !swingEvidenceOpen) {
-                    reasons.addAll(evidence.reasons());
-                    reasons.add("1周~1月 evidence gate 未達 PRICE／MARKET／適用資產完整度或候選 confidence 門檻。 ");
+                    swingDiagnostics.addAll(evidence.gateReasons(
+                            TradingRadarEvidenceConfidenceResolver.Horizon.SWING));
+                    swingDiagnostics.add("1周~1月 evidence gate 未達 PRICE／MARKET／適用資產完整度或候選 confidence 門檻。 ");
                     gatedSwing = fallback;
                 }
                 if (!swingEvidenceOpen) {
-                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
+                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, swingDiagnostics);
                 }
                 if (!riskEvidenceOpen(evidence,
                         TradingRadarEvidenceConfidenceResolver.Horizon.SWING, profile)) {
-                    reasons.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
+                    swingDiagnostics.add("必要下檔風險 evidence 不完整（risk coverage 或 bond beta/riskUnit 未達標），"
                             + "1周~1月 減碼／出場僅保留候選揭露。 ");
-                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, reasons);
+                    gatedSwing = downgradeRiskExit(gatedSwing, fallback, swingDiagnostics);
                 }
             }
         }
-        return new GatedActions(gatedMedium, gatedShort, gatedSwing, dedupe(reasons),
+        return new GatedActions(gatedMedium, gatedShort, gatedSwing,
+                mediumDiagnostics, shortDiagnostics, swingDiagnostics,
                 mediumAction, shortAction, swingAction);
     }
 
@@ -274,6 +320,13 @@ public final class TradingRadarEvidenceGate {
 
     private static List<String> dedupe(List<String> values) {
         return values.stream().filter(v -> v != null && !v.isBlank()).distinct().toList();
+    }
+
+    private static boolean hasDiagnostics(List<String> mediumDiagnostics,
+                                          List<String> shortDiagnostics,
+                                          List<String> swingDiagnostics) {
+        return !mediumDiagnostics.isEmpty() || !shortDiagnostics.isEmpty()
+                || !swingDiagnostics.isEmpty();
     }
 
     private static TradingRadarRuleEngine.Action downgradeBuy(

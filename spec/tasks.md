@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–380）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–382）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -379,6 +379,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 378 | 9090 以指定單一年份回傳完整台／美／英交易日曆與市場狀態（Requirement 113） | [tasks/t378_9090_trading_calendar.md](tasks/t378_9090_trading_calendar.md) |
 | 379 | 富邦十秒報價缺有效完整最佳五檔時，以 Yahoo 背景補抓為 YAHOO_TW canonical snapshot，既有 9090 純讀提供（Requirement 114） | [tasks/t379_yahoo_order_book_fallback.md](tasks/t379_yahoo_order_book_fallback.md) |
 | 380 | 台股即時行情僅查今日交易雷達，完整富邦 normalized response DB/Redis 保存並以去重欄位投影至單檔 9090 quote（Requirement 115） | [tasks/t380_fubon_radar_live_response.md](tasks/t380_fubon_radar_live_response.md) |
+| 381 | 富邦 `indices` WebSocket 台股大盤即時 current-state，DB committed first 後嚴格投影既有 Redis（Requirement 116） | [tasks/t381_fubon_taiex_index_stream.md](tasks/t381_fubon_taiex_index_stream.md) |
+| 382 | 校正交易雷達 evidence gate 風險分類、三軌候選／實際動作可讀性與 V18 持有期聚焦（Requirement 117） | [tasks/t382_radar_decision_clarity.md](tasks/t382_radar_decision_clarity.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

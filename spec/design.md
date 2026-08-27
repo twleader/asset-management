@@ -10111,3 +10111,59 @@ The existing Lua script remains the second, independent time fence. Same-date LI
 #### Test and deployment contract
 
 Adapter unit tests use a fake websocket SDK and prove event filtering, exact SSE bytes/headers, latest replay, token checks, main/stream flags or missing symbol zero SDK access, decimal precision/scale rejection, reconnect/resubscribe, shutdown and no order import/call. Java tests use deterministic streams/fake clocks plus PostgreSQL/Redis integration: main flag false zero token/GET, valid flags/symbol plus missing or empty token gives sanitized no-GET misconfiguration, source-time microseconds, identity/date/future and decimal gates (including a 20-digit integer with no DB rounding), conditional DB races, DB write/commit failure zero cache write, raw stale/equal no mutation, canonical equal-time cache repair, Lua refusal against newer cache/verified close, no tick/day-HL, and Fubon-first/Yahoo fallback choice. Migration `v1.118.0-fubon-taiex-index-stream.sql` is registered in the central changelog; after it is applied through `business-services`, `db/schema.sql` is regenerated from the actual compose database before the schema drift test runs.
+
+### Requirement 117／Task 382：交易雷達決策分類校正與 V18 持有期聚焦
+
+本需求不建立第四種策略，也不調整既有三軌的計分或交易規則。它修正的是「同一個安全閘門訊息在不同輸出欄位被賦予相反語意」的組裝缺陷，並讓使用者主動指明本次資金的持有期，以讀取既存的三軌結果。這是決策可讀性與保守風險揭露的改進，不是預測模型或績效升級。
+
+#### 後端資料語意：引擎、gate 與 DTO 的單向組裝
+
+`TradingRadarRuleEngine.evaluateStock(...)` 仍是唯一產生三軌 `score`、candidate action、baseline/final action、support `reasons` 與 `risks` 的規則引擎。`TradingRadarEvidenceGate.apply(...)` 不參與計分；它只保留原始 candidate 並在 PRICE／MARKET／資產／下檔風險證據不足時把可執行 action 往 `WATCH` 或 `HOLD` 保守降級。因此它的 diagnostics 是 adverse safety evidence，絕不能被當成「支持訊號」。
+
+`TradingRadarService.buildStock(...)` 是唯一的 API/snapshot/notification 共用組裝點，採下列固定映射，避免頁面、匯出或通知出現不同結論：
+
+```text
+TradingRadarRuleEngine.StockResult
+  medium reasons/risks ─┐
+  short  reasons/risks ─┼── preserve each horizon and its existing order
+  swing  reasons/risks ─┘
+TradingRadarEvidenceGate.GatedActions
+  medium diagnostics ─────► append only to medium risks
+  short  diagnostics ─────► append only to short risks
+  swing  diagnostics ─────► append only to swing risks
+  candidate/final action ► existing respective DTO fields, unchanged
+  reasons() audit union ──► RadarEvidence.actionGateReasons (audit metadata)
+```
+
+`GatedActions` 需持有三份不可為 null、stable-distinct 的 horizon-local diagnostics；僅一個 horizon 的 evidence/risk failure 或 candidate downgrade 只能寫入那一份。明確宣告三軌皆關閉的共同缺漏才可放進每個**有提供**的 horizon；未提供 swing 的兩軌相容入口仍回空 swing list。record 現有 `reasons()` accessor 保留為 medium→short→swing 的 stable-distinct audit union，以維持 `RadarEvidence.actionGateReasons` API shape；它不是任何一軌的 support/risk source list。
+
+local diagnostic 的來源不可再是未標記的 `Evidence.reasons()`。`Evidence.gateReasons(Horizon)` 是純 accessor，按 PRICE_TECHNICAL、MARKET_LIQUIDITY、VALUATION、FINANCIAL_OPERATING、ASSET_SPECIFIC 固定順序，只回傳該 group participates 且未達**該 horizon** 70% coverage/freshness 的既有 group 文案；再取該 horizon 的既有 dividend event reason（SHORT=5 個交易日，SWING/MEDIUM=20 個交易日）。它不改 `Evidence.reasons()` 的歷史 direct-caller output，也不重算 confidence／action。Gate 只在既有 buy candidate evidence close 分支用這個 local accessor 取代全域 list；既有 incomplete-dividend 共同「僅列風險揭露」句、`evidence == null` 與外幣債券幣別不完整等明確共同 close，則各加入每個有提供的 horizon local list。每次 buy/risk candidate downgrade、confidence threshold 或 risk coverage failure 都直接寫入被影響 horizon 的 list，絕不從文案文字解析 horizon。
+
+組裝不得對引擎原有清單做全域 sort/dedupe，因那會產生另一個可觀察輸出改變；只以既有 append 順序把 horizon-local diagnostics 加入相對 risk list。`RadarEvidence.actionGateReasons` 保持 API shape，前端需放在三軌 action cards 外的獨立「動作閘門／風險」區塊，明示它是 medium→short→swing 的稽核彙總、不是任一軌的支持訊號或允許動作依據。沒有 DTO、snapshot schema、DB、Redis 或 API route 變更。
+
+同一 gate 也有兩個非 production consumer，不能留下 union-to-all 的語意岔路：`TradingRadarRuleEngine.evaluateBaseline(...)` 的 offline 三軌 `StockResult` 依序附加 medium/short/swing local list；V13 candidate 的 `applyCandidateActionPolicy(...)` 已知道 `Horizon`，只可把 medium 或 short local list加入該 candidate `risks`（SWING 本來禁止進 V13 candidate）。它們不影響今日 production score/action，卻是回測／校準對照的可觀察 diagnostics，必須與 V18 的 horizon 語意一致。
+
+#### V18 的版本與通知語意
+
+雖然分數與動作逐位不變，reason/risk 的公開 payload 分類會改變，故 production `RULE_VERSION` 從 V17 升 V18；這與只影響畫面文案的純揭露不同。現有 `TradingRadarNotificationService` 已以 `ruleVersion` 不相等視為未初始化，故本需求只升引擎常數，不增加 migration 或特殊 reset：首個 V18 evaluation 寫回 baseline、保留訂閱資料且不寄 transition email。`ACTION_POLICY_VERSION` 仍是 `EVIDENCE_GATE_V1`，因 gate 判定邏輯與其 policy version 均未改。
+
+版本字面同步的 runtime surface 是引擎常數、DTO/服務 Javadoc、前端初始/fallback/免責文字、既有 version assertions 與 9090 OpenAPI examples。只改目前執行或生成的 V17 字面；過往 specs 仍保留 V17 的歷史證據。`docs/openapi/docker-external-api.yaml` `info.version` 由 1.8.0 升至 1.9.0 時，`scripts/tests/docker-external-api-openapi-test.rb` 的 assertion 必同步 1.9.0；兩處 `actionGateReasons` property/item description 都改成三軌 adverse gate/risk audit union，明說不是任一 horizon support source 或允許動作依據。`ruby scripts/render-9090-openapi-docs.rb` 是唯一可寫入 repo 與 SRPP Swagger Markdown mirror 的流程，之後以 `--check` 驗證兩份都由 YAML 衍生。
+
+#### 前端持有期聚焦（presentation-only）
+
+`TradingRadarView.vue` 使用一個不持久化的 `ref` 保存 `selectedHorizon`：初始 `null`，可選 `SHORT`、`SWING` 或 `MEDIUM`。可測試的 key/label/field mapping 放在 `frontend/src/utils/tradingRadarDecisionPresentation.js`，由 view 匯入；helper 只取 response 既有欄位，不能算分、猜動作、寫 storage 或呼叫 API。
+
+```text
+null   → 顯示「先選擇本次資金預定持有期」；三軌等權並列
+SHORT  → 聚焦 一周:          shortCandidateAction → shortAction
+SWING  → 聚焦 1周~1月:       swingCandidateAction → swingAction
+MEDIUM → 聚焦 1月~6月:       candidateAction      → action
+```
+
+聚焦區塊和展開 evidence summary 都保留全部三條候選→實際動作列；選擇只增加 highlight/說明，不移除另兩軌、不改 table source data。這個限制把 Requirement 93 的「系統不知道使用者資金安排」落實到 UI。選擇器附近以及聚焦摘要都顯示已完成日 K 說明：止跌與避免追價是後端既有 `completedChangePercent` 所用完成日 K，日期必取 `row.dailyCandle?.asOfDate`。top-level `row.asOfDate` 是 accepted quote 的 trading date，盤中可為當日，不能稱為完成日 K 或作為 helper 的 completed-K input；盤中 `price`/`changePercent` 僅做展示。`dailyCandle?.asOfDate` 缺失時 helper/view 顯示資料不足而非暗示訊號即時重算，測試須讓 live quote date 與 completed-K date 不同以防退化。
+
+#### 驗證與非目標
+
+後端 regression fixture 必走完整 `TradingRadarService` 組裝，故能同時檢查 medium、short、swing 三個 DTO list 的分類，而不只測 gate 本身。Gate/resolver unit test 另以真正跨軌差異的 fixture 逐字驗 `Evidence.gateReasons(Horizon)`、local lists 與 medium→short→swing union，並驗 legacy `Evidence.reasons()` 沒有被用來路由；再以三軌共同缺漏 fixture 驗每個有提供 track 的共同風險揭露。另一組既有引擎 fixtures 保留 V17 的 score/candidate/final-action assertions，防止「修分類」偷偷改到 rule weights/thresholds/action mapping；notification test 明確驗 V18 first baseline has no dispatch。前端 Node test 對 helper 驗四種 selection、三軌正確 field pair、未選擇提示、`dailyCandle?.asOfDate` completed-K disclosure、live quote date 不同與 dailyCandle 缺失；Vite build 覆蓋 template/import。OpenAPI contract test 驗 1.9.0 及 action-gate description，renderer `--check` 驗 generated mirrors。
+
+禁止修改任何 `TradingRadarRuleEngine` 因子、權重、門檻、`actionFor`、V13 promotion/holdout、BacktestService 假設或行情資料流。本需求不做績效承諾；未來的報酬導向調參必另以成本後、時間切分的 walk-forward/holdout evidence 設計、審查與驗證。部署只需 rebuild/recreate `business-services` 和 `frontend`，再重啟 BFF；並用真正 Compose runtime 的 9090 existing public radar readback 驗證 V18。若 Docker/資料現況無法提供 runtime readback，測試通過不等於 runtime 完成，必在完成報告分開記錄。

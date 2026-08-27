@@ -158,7 +158,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.8.0', 'Tasks 375–378 後 OpenAPI info.version 必須為 1.8.0')
+assert!(document.dig('info', 'version') == '1.9.0', 'Task 382 後 OpenAPI info.version 必須為 1.9.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }

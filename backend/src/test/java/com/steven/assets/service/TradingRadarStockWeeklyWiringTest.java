@@ -173,6 +173,34 @@ class TradingRadarStockWeeklyWiringTest {
     }
 
     @Test
+    @DisplayName("382.1：production DTO 的 gate 診斷只能進風險，不能被誤列為中期支持訊號")
+    void productionMapsGateDiagnosticsToRisksNotSupportReasons() {
+        stubBaseline();
+        stubLongSeries();
+
+        TradingRadarDto.StockDecision decision = decision();
+        List<String> gateDiagnostics = decision.evidence().actionGateReasons();
+        List<String> supportReasons = new ArrayList<>();
+        supportReasons.addAll(decision.reasons());
+        supportReasons.addAll(decision.shortReasons());
+        supportReasons.addAll(decision.swingReasons());
+        List<String> risks = new ArrayList<>();
+        risks.addAll(decision.risks());
+        risks.addAll(decision.shortRisks());
+        risks.addAll(decision.swingRisks());
+
+        assertThat(gateDiagnostics)
+                .as("fixture 必須真的關閉至少一項 evidence/risk gate，不能用 empty list 假裝證明 mapping")
+                .isNotEmpty();
+        assertThat(supportReasons)
+                .as("gate 失敗是風險診斷；不得出現在任何 horizon 的支持訊號，實得=%s", supportReasons)
+                .doesNotContainAnyElementsOf(gateDiagnostics);
+        assertThat(risks)
+                .as("audit union 的每一項都必須仍可在相對應的風險欄位找到，實得=%s", risks)
+                .containsAll(gateDiagnostics);
+    }
+
+    @Test
     @DisplayName("356.6a：週K 生效時三軌 reasons 應出現週MA 位置敘述，而不是只有日線敘述")
     void weeklyFactorsProduceTheirOwnNarrative() {
         stubBaseline();

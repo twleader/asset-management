@@ -110,7 +110,7 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(policy.action()).isEqualTo(baseline.action());
         assertThat(production).isEqualTo(baseline);
         // Task 360：production 版號已升 TW_RULES_V16，不再等於 RuleParameters 的任何一個標籤；
-        // Task 365 再升為 TW_RULES_V17（估值因子標籤與風險文案修正，與 RuleParameters 命名空間無關）。
+        // Task 382 再升為 TW_RULES_V18（gate 診斷分類修正，與 RuleParameters 命名空間無關）。
         // RuleParameters 的 V12／V13 是 calibration／candidate 命名空間，production 不得竊用——
         // 尤其 V13_VERSION 是 evaluateCandidate() 的 guard（不符即 throw），
         // 把它當 production 版號會讓「這是不是 candidate」的判別式失效。
@@ -266,6 +266,42 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(seventy.action()).isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
         assertThat(eighty.action()).isEqualTo(TradingRadarRuleEngine.Action.WATCH);
         assertThat(eighty.risks()).anyMatch(text -> text.contains("V13_CONFIDENCE_GATE"));
+    }
+
+    @Test
+    void baselineAndV13CandidateKeepEvidenceGateDiagnosticsOnTheirOwnTracks() {
+        var input = strongCandidateInput(false);
+        var closedEvidence = closedEvidenceContext(new BigDecimal("0.02"));
+
+        var baseline = engine.evaluateBaseline(input, closedEvidence);
+        assertThat(baseline.reasons()).noneMatch(text -> text.contains("evidence gate"));
+        assertThat(baseline.shortReasons()).noneMatch(text -> text.contains("evidence gate"));
+        assertThat(baseline.swingReasons()).noneMatch(text -> text.contains("evidence gate"));
+        assertThat(baseline.risks()).anyMatch(text -> text.contains("中期減碼／出場"));
+        assertThat(baseline.risks()).noneMatch(text -> text.contains("短期減碼／出場")
+                || text.contains("1周~1月 減碼／出場"));
+        assertThat(baseline.shortRisks()).anyMatch(text -> text.contains("短期減碼／出場"));
+        assertThat(baseline.shortRisks()).noneMatch(text -> text.contains("中期減碼／出場")
+                || text.contains("1周~1月 減碼／出場"));
+        assertThat(baseline.swingRisks()).anyMatch(text -> text.contains("1周~1月 減碼／出場"));
+        assertThat(baseline.swingRisks()).noneMatch(text -> text.contains("中期減碼／出場")
+                || text.contains("短期減碼／出場"));
+
+        RuleParameters candidate = RuleParameters.v13DisabledCandidate(
+                "LOCAL_GATE_DIAGNOSTICS",
+                new RuleParameters.ActionThresholds(3, 2, 1, 0),
+                new RuleParameters.ActionThresholds(3, 2, 1, 0),
+                new BigDecimal("0.70"), new BigDecimal("100"), Map.of(),
+                RuleParameters.BondRateCandidate.v12Fallback());
+        var v13 = engine.evaluateCandidate(input, candidate, closedEvidence);
+
+        assertThat(v13.risks()).anyMatch(text -> text.contains("中期 evidence gate"));
+        assertThat(v13.risks()).noneMatch(text -> text.contains("短期 evidence gate"));
+        assertThat(v13.shortRisks()).anyMatch(text -> text.contains("短期 evidence gate"));
+        assertThat(v13.shortRisks()).noneMatch(text -> text.contains("中期 evidence gate"));
+        assertThat(v13.swingRisks())
+                .as("V13 candidate 機制不處理 SWING，不能把兩軌診斷塞進去")
+                .noneMatch(text -> text.contains("evidence gate"));
     }
 
     @Test
