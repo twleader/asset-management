@@ -26,7 +26,8 @@ MANIFEST = {
   ['GET', '/api/public/trading-radar/today'] => %w[200 502 503 504],
   ['GET', '/api/public/trading-radar/stock'] => %w[200 400 404 502 503 504],
   ['GET', '/api/public/transactions'] => %w[200 400 502 503 504],
-  ['GET', '/api/public/trading-calendar'] => %w[200 400 502 503 504]
+  ['GET', '/api/public/trading-calendar'] => %w[200 400 502 503 504],
+  ['GET', '/api/public/commodity-prices'] => %w[200 400 405 502 503 504]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -41,7 +42,8 @@ OPERATION_IDS = {
   ['GET', '/api/public/trading-radar/today'] => 'getPublicTradingRadarTodayList',
   ['GET', '/api/public/trading-radar/stock'] => 'getPublicTradingRadarStockDetail',
   ['GET', '/api/public/transactions'] => 'getPublicTransactionHistory',
-  ['GET', '/api/public/trading-calendar'] => 'getPublicTradingCalendar'
+  ['GET', '/api/public/trading-calendar'] => 'getPublicTradingCalendar',
+  ['GET', '/api/public/commodity-prices'] => 'getPublicCommodityPrices'
 }.freeze
 
 def assert!(condition, message)
@@ -158,7 +160,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.9.0', 'Task 382 後 OpenAPI info.version 必須為 1.9.0')
+assert!(document.dig('info', 'version') == '1.10.0', 'Task 383 後 OpenAPI info.version 必須為 1.10.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -199,14 +201,14 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '十二路 operationId 必須與 Requirement 111 manifest 完全一致')
+        '十三路 operationId 必須與 Requirement 118 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與十二路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與十三路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與十二路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與十三路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -310,6 +312,85 @@ assert!(calendar.fetch('parameters').map { |parameter| parameter.fetch('name') }
 assert!(calendar.dig('responses', '200', 'content', 'application/json', 'schema') ==
           {'$ref' => '#/components/schemas/PublicTradingCalendarResponse'},
         'trading-calendar 200 必須精確引用 PublicTradingCalendarResponse')
+
+commodity = openapi_routes.fetch(['GET', '/api/public/commodity-prices'])
+assert!(commodity.fetch('parameters', []).empty? && !commodity.key?('requestBody'),
+        'commodity-prices 不可宣告 query parameter 或 request body')
+assert!(commodity.dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'$ref' => '#/components/schemas/CommodityPriceBatchResponse'},
+        'commodity-prices 200 必須精確引用固定 CommodityPriceBatchResponse')
+assert!(commodity.dig('responses', '405', 'headers', 'Allow', 'schema') ==
+          {'type' => 'string', 'const' => 'GET'},
+        'commodity-prices 非 GET 必須由 gateway 回 Allow: GET')
+%w[502 504].each do |status|
+  content = commodity.dig('responses', status, 'content')
+  assert!(content.keys.to_set == Set['application/problem+json', 'text/html'],
+          "commodity-prices #{status} 必須同時文件化 BFF ProblemDetail 與 Nginx HTML alternative")
+end
+assert!(commodity.dig('responses', '503', 'content').keys == ['application/problem+json'],
+        'commodity-prices 503 只可為 BFF transport ProblemDetail')
+
+schemas = document.dig('components', 'schemas')
+commodity_batch = schemas.fetch('CommodityPriceBatchResponse')
+assert!(commodity_batch.fetch('required') == %w[marketOpen quotes] &&
+        commodity_batch.fetch('properties').keys == %w[marketOpen quotes] &&
+        commodity_batch.fetch('additionalProperties') == false,
+        'CommodityPriceBatchResponse 必須是封閉的 marketOpen/quotes immutable object')
+assert!(commodity_batch.dig('properties', 'marketOpen', 'type') == 'boolean' &&
+        commodity_batch.dig('properties', 'quotes', '$ref') == '#/components/schemas/CommodityPriceSlots',
+        'CommodityPriceBatchResponse 必須宣告 boolean marketOpen 與 typed slots')
+commodity_slots = schemas.fetch('CommodityPriceSlots')
+assert!(commodity_slots.fetch('required') == %w[WTI BRENT GOLD] &&
+        commodity_slots.fetch('properties').keys == %w[WTI BRENT GOLD] &&
+        commodity_slots.fetch('additionalProperties') == false,
+        'CommodityPriceSlots 必須固定依序存在 WTI/BRENT/GOLD 三個可空 slot')
+commodity_slots.fetch('properties').each do |code, property|
+  variants = property.fetch('anyOf')
+  assert!(variants.length == 2 && variants.first['$ref'] == '#/components/schemas/CommodityPriceQuote' &&
+          variants.last['type'] == 'null', "#{code} 必須是 typed quote 或 null slot")
+end
+commodity_quote = schemas.fetch('CommodityPriceQuote')
+commodity_quote_keys = %w[commodityCode unit price change changePercent sessionDate quoteTime polledAt status dayHigh dayLow provider]
+assert!(commodity_quote.fetch('required') == commodity_quote_keys &&
+        commodity_quote.fetch('properties').keys == commodity_quote_keys &&
+        commodity_quote.fetch('additionalProperties') == false,
+        'CommodityPriceQuote 必須保留完整 immutable property 順序與封閉 shape')
+assert!(commodity_quote.dig('properties', 'commodityCode', 'enum') == %w[WTI BRENT GOLD],
+        'CommodityPriceQuote.commodityCode 必須只允許三個固定 commodity code')
+assert!(commodity_quote.dig('properties', 'unit', 'enum') == %w[USD_PER_BARREL USD_PER_TROY_OUNCE],
+        'CommodityPriceQuote.unit 必須文件化原油與黃金固定單位')
+assert!(commodity_quote.dig('properties', 'price', 'exclusiveMinimum') == 0,
+        'CommodityPriceQuote.price 必須為正數')
+%w[change changePercent].each do |field|
+  assert!(commodity_quote.dig('properties', field, 'type').sort == %w[null number],
+          "CommodityPriceQuote.#{field} 必須明確 nullable number")
+end
+assert!(commodity_quote.dig('properties', 'sessionDate', 'format') == 'date' &&
+        commodity_quote.dig('properties', 'quoteTime', 'format') == 'date-time' &&
+        commodity_quote.dig('properties', 'polledAt', 'format') == 'date-time',
+        'CommodityPriceQuote 必須保留 sessionDate 與兩個 RFC3339 instant')
+assert!(commodity_quote.dig('properties', 'status', 'enum') == %w[LIVE STALE SETTLED],
+        'CommodityPriceQuote.status 必須只允許已持久化的 LIVE/STALE/SETTLED')
+%w[dayHigh dayLow].each do |field|
+  assert!(commodity_quote.dig('properties', field, 'type').sort == %w[null number] &&
+          commodity_quote.dig('properties', field, 'exclusiveMinimum') == 0,
+          "CommodityPriceQuote.#{field} 必須是 nullable positive number")
+end
+commodity_problem = schemas.fetch('PublicCommodityPriceProblemDetail')
+assert!(commodity_problem.fetch('additionalProperties') == false &&
+        commodity_problem.fetch('required') == %w[type title status detail instance],
+        'commodity BFF ProblemDetail 必須是無 extension 的固定 object')
+assert!(commodity_problem.dig('properties', 'type', 'const') == 'about:blank' &&
+        commodity_problem.dig('properties', 'instance', 'const') == '/api/public/commodity-prices',
+        'commodity BFF ProblemDetail 必須固定 about:blank 與 instance path')
+assert!(commodity_problem.dig('properties', 'title', 'enum') == [
+          'Invalid commodity price request', 'Commodity prices downstream failure',
+          'Commodity prices service unavailable', 'Commodity prices timeout'
+        ], 'commodity BFF ProblemDetail title 必須是四個固定消毒標題')
+assert!(commodity_problem.dig('properties', 'detail', 'enum') == [
+          '不支援 query parameter 或 request body', '商品報價暫時無法取得',
+          '商品報價服務暫時無法連線', '商品報價服務逾時'
+        ], 'commodity BFF ProblemDetail detail 必須是四個固定消毒文案')
 
 catalog = document.dig('components', 'schemas', 'MarketOption', 'properties')
 expected_codes = %w[TWSE TPEX DJI SPX IXIC SOX FTSE DAX KOSPI N225]
@@ -506,8 +587,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 83,
-        "全量 strict audit 預期 83 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 87,
+        "全量 strict audit 預期 87 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -545,11 +626,11 @@ MANIFEST.each_key do |(_method, path)|
           "frontend 必須 exact deny 9090 route #{path}")
 end
 bff_security = File.read(BFF_SECURITY)
-%w[/api/public/trading-radar/stock /api/public/transactions /api/public/trading-calendar].each do |path|
+%w[/api/public/trading-radar/stock /api/public/transactions /api/public/trading-calendar /api/public/commodity-prices].each do |path|
   assert!(bff_security.include?("\"#{path}\""), "BFF SecurityConfig 缺 exact anonymous GET #{path}")
 end
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
 assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且兩份文件必須 byte-identical')
 
-puts 'PASS: 9090 gateway/OpenAPI 十二路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 十三路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'

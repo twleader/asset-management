@@ -74,7 +74,7 @@ public class SecurityConfig {
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
                                 "/actuator/health", "/actuator/info").permitAll()
-                        // Requirements 67/68/70/78/79/86/108：僅列出的 exact GET 可由 api-gateway 匿名讀取；
+                        // Requirements 67/68/70/78/79/86/108/118：僅列出的 exact GET 可由 api-gateway 匿名讀取；
                         // quotes 是 Task 372 的 public market aggregation，不能放寬成 /api/quotes/**。
                         .pathMatchers(HttpMethod.GET,
                                 "/api/quotes",
@@ -87,7 +87,8 @@ public class SecurityConfig {
                                 "/api/public/trading-radar/today",
                                 "/api/public/trading-radar/stock",
                                 "/api/public/transactions",
-                                "/api/public/trading-calendar").permitAll()
+                                "/api/public/trading-calendar",
+                                "/api/public/commodity-prices").permitAll()
                         // Requirement 71：公開觸發重新搜尋，第六條 Nginx 9090 路由，唯一有寫入副作用的匿名端點；
                         // 30 秒全域冷卻在 business 端（CrawlerExportPathService.publicRescan()），BFF 層不重複防護。
                         .pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()

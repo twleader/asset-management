@@ -26,7 +26,7 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"}}}}}'
+    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"}}}}}'
   else
     printf '%s\n' '{}'
   fi
@@ -51,15 +51,20 @@ set -Eeuo pipefail
 output_file=''
 headers_file=''
 url=''
+request_body=''
 while (($#)); do
   case "$1" in
-    -o|-D|-w|--data-urlencode)
+    -o|-D|-w|--data-urlencode|--data-binary)
       option=$1
       value=${2:?}
       case "$option" in
         -o) output_file=$value ;;
         -D) headers_file=$value ;;
+        --data-binary) request_body=$value ;;
       esac
+      shift 2
+      ;;
+    -X|-H)
       shift 2
       ;;
     -sS|--get)
@@ -138,6 +143,19 @@ print(json.dumps({
 PY
 )"
     ;;
+  *'/api/public/commodity-prices?'*)
+    endpoint=commodity-invalid
+    body='{"type":"about:blank","title":"Invalid commodity price request","status":400,"detail":"不支援 query parameter 或 request body","instance":"/api/public/commodity-prices"}'
+    ;;
+  */api/public/commodity-prices)
+    if [[ -n "$request_body" ]]; then
+      endpoint=commodity-invalid
+      body='{"type":"about:blank","title":"Invalid commodity price request","status":400,"detail":"不支援 query parameter 或 request body","instance":"/api/public/commodity-prices"}'
+    else
+      endpoint=commodity
+      body='{"marketOpen":false,"quotes":{"WTI":null,"BRENT":null,"GOLD":null}}'
+    fi
+    ;;
   *)
     printf 'unexpected URL: %s\n' "$url" >&2
     exit 2
@@ -152,6 +170,13 @@ if [[ "$endpoint" == rescan ]]; then
 fi
 
 if [[ "$endpoint" == trading-radar-stock-error ]]; then
+  printf '%s' "$body" >"$output_file"
+  printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\n\r\n' >"$headers_file"
+  printf '400'
+  exit 0
+fi
+
+if [[ "$endpoint" == commodity-invalid ]]; then
   printf '%s' "$body" >"$output_file"
   printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\n\r\n' >"$headers_file"
   printf '400'
@@ -205,7 +230,7 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 12 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 13 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -215,6 +240,7 @@ run_content_type_failure market-index '本機 market-index Content-Type 不是 a
 run_content_type_failure trading-radar '本機今日交易雷達 Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure transactions '本機交易紀錄 Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure trading-calendar '本機交易日曆 Content-Type 不是 application/json；不會 reset Serve。'
+run_content_type_failure commodity '本機商品批次報價 Content-Type 不是 application/json；不會 reset Serve。'
 run_success
 
-printf '%s\n' 'PASS: 十二路 preflight Content-Type／reset fail-closed regression'
+printf '%s\n' 'PASS: 十三路 preflight Content-Type、commodity request gate／reset fail-closed regression'

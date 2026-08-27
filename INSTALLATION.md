@@ -477,12 +477,12 @@ curl -fsS http://127.0.0.1:9090/api/quotes
 
 看到 JSON array（可為空）代表本機 API gateway 與 quote upstream 正常。
 
-Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十二條 exact route——
-十一條唯讀 GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
+Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十三條 exact route——
+十二條唯讀 GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
 `/api/assets/latest`、`/api/public/exchange-rate/usd-twd`、
 `/api/public/market-analysis/today`、`/api/public/portfolio-advice/latest`、
 `/api/public/trading-radar/today`、`/api/public/trading-radar/stock`、
-`/api/public/transactions`、`/api/public/trading-calendar`，
+`/api/public/transactions`、`/api/public/trading-calendar`、`/api/public/commodity-prices`，
 以及一條寫入 POST：`/api/public/crawler-data/rescan`（免登入觸發重新搜尋，
 經 business 端 30 秒全域冷卻節流）。BFF 8080 與 external-materials 8082
 不再發布到 host。
@@ -490,7 +490,8 @@ Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十�
 `trading-radar/today` 固定讀取 `.env` 主要管理者的持倉／觀察清單，回傳首頁收合列表與頁首資料；
 `trading-radar/stock` 才依 `stockCode`、`market` 回傳單一標的完整展開資料與證據；
 任何能到達本機 loopback 或獲准 Tailscale identity 的人都可免登入讀取，請勿將
-9090 暴露到公網。十二支 API 的完整 OpenAPI 3.1 契約在
+9090 暴露到公網。`commodity-prices` 每次只讀既有已持久化 WTI、BRENT、GOLD spot，固定三個 slot；
+它不接受 query 或 GET body，也不會 refresh 或 request-time 外呼。十三支 API 的完整 OpenAPI 3.1 契約在
 `docs/openapi/docker-external-api.yaml`；由該 YAML 產生、供人閱讀的標準文件同時位於
 `docs/openapi/9090-api-swagger.md` 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`；Swagger UI 與 YAML 本身並沒有掛在 9090。
 
@@ -588,21 +589,22 @@ FINMIND_TOKEN=你的Token
 ### 8.5 Tailscale 私網 HTTPS（選用）
 
 先安裝 Tailscale 並在 app 中登入同一個 tailnet；macOS 可使用
-`brew install --cask tailscale-app`。確認上述十二條本機 API 都健康後執行：
+`brew install --cask tailscale-app`。確認上述十三條本機 API 都健康後執行：
 
 ```bash
 scripts/configure-tailscale-api-gateway.sh
 ```
 
-腳本在任何 Serve reset 前，會為十二支本機 API 各自保存 response headers/body：十一條唯讀 GET 逐支
+腳本在任何 Serve reset 前，會為十三支本機 API 各自保存 response headers/body：十二條唯讀 GET 逐支
 要求 HTTP 200、`application/json` 與既定 payload 契約，寫入用的 `crawler-data/rescan` 則只以 GET
 驗證回 `405` 帶 `Allow: POST`（刻意不發 POST，避免每次執行都真的觸發一輪對外抓取）；任一路失敗即
-停止且不會 reset。可先執行
-`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與十二路成功流程。
+停止且不會 reset。commodity batch 另會驗證 `marketOpen` boolean、固定 WTI／BRENT／GOLD slots，及 query／GET-body
+request gate 的 400 ProblemDetail。可先執行
+`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與十三路成功流程。
 
-腳本只會建立十二條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
+腳本只會建立十三條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
 assets/latest、USD/TWD 公開匯率、crawler-data/rescan、market-analysis/today、
-portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactions、trading-calendar。
+portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactions、trading-calendar、commodity-prices。
 不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。

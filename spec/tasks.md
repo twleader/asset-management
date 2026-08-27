@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–382）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–383）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -381,6 +381,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 380 | 台股即時行情僅查今日交易雷達，完整富邦 normalized response DB/Redis 保存並以去重欄位投影至單檔 9090 quote（Requirement 115） | [tasks/t380_fubon_radar_live_response.md](tasks/t380_fubon_radar_live_response.md) |
 | 381 | 富邦 `indices` WebSocket 台股大盤即時 current-state，DB committed first 後嚴格投影既有 Redis（Requirement 116） | [tasks/t381_fubon_taiex_index_stream.md](tasks/t381_fubon_taiex_index_stream.md) |
 | 382 | 校正交易雷達 evidence gate 風險分類、三軌候選／實際動作可讀性與 V18 持有期聚焦（Requirement 117） | [tasks/t382_radar_decision_clarity.md](tasks/t382_radar_decision_clarity.md) |
+| 383 | 9090 以一支唯讀批次 API 提供 WTI、Brent 與黃金已持久化即時報價，並同步 Swagger 與 SRPP 文件（Requirement 118） | [tasks/t383_public_commodity_prices_9090.md](tasks/t383_public_commodity_prices_9090.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 
