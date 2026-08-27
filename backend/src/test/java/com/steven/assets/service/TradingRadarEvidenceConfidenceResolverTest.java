@@ -548,6 +548,26 @@ class TradingRadarEvidenceConfidenceResolverTest {
     }
 
     @Test
+    void gateReasonsAreHorizonLocalWhileLegacyReasonsStayByteForByteCompatible() {
+        var evidence = crossHorizonGateEvidence();
+
+        assertEquals(List.of(
+                        "PRICE_TECHNICAL coverage/freshness 未達 70%，不支持買進候選。 ",
+                        "決策時點前已知未來 1 個配息事件（5 個交易日內）。"),
+                evidence.gateReasons(TradingRadarEvidenceConfidenceResolver.Horizon.SHORT));
+        assertEquals(List.of(
+                        "ASSET_SPECIFIC coverage/freshness 未達 70%，不支持買進候選。 ",
+                        "決策時點前已知未來 2 個配息事件（20 個交易日內）。"),
+                evidence.gateReasons(TradingRadarEvidenceConfidenceResolver.Horizon.SWING));
+        assertEquals(List.of(
+                        "VALUATION coverage/freshness 未達 70%，不支持買進候選。 ",
+                        "決策時點前已知未來 2 個配息事件（20 個交易日內）。"),
+                evidence.gateReasons(TradingRadarEvidenceConfidenceResolver.Horizon.MEDIUM));
+        assertEquals(List.of("legacy global compatibility"), evidence.reasons(),
+                "gateReasons 不得讀取、解析或改寫既有 global compatibility list");
+    }
+
+    @Test
     void swingRiskIsItsOwnObjectWithAnExplicitTwentySessionDividendWindow() {
         var profile = TradingRadarAssetProfileResolver.resolve(
                 "2330", "台股", "一般股票", null, null, "GROWTH", null, null, null);
@@ -633,6 +653,33 @@ class TradingRadarEvidenceConfidenceResolverTest {
                         new DividendEventEvidenceResolver.Resolution(
                                 DividendEventEvidenceResolver.Status.MISSING, null, 0, 0,
                                 null, null, null, "test resolver omitted dividend evidence")));
+    }
+
+    private static TradingRadarEvidenceConfidenceResolver.Evidence crossHorizonGateEvidence() {
+        var risk = new TradingRadarEvidenceConfidenceResolver.Risk(0, 1.0, List.of());
+        return new TradingRadarEvidenceConfidenceResolver.Evidence(Map.of(
+                TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL,
+                gateGroup(TradingRadarEvidenceConfidenceResolver.Group.PRICE_TECHNICAL, .60, .90, .90),
+                TradingRadarEvidenceConfidenceResolver.Group.MARKET_LIQUIDITY,
+                gateGroup(TradingRadarEvidenceConfidenceResolver.Group.MARKET_LIQUIDITY, .90, .90, .90),
+                TradingRadarEvidenceConfidenceResolver.Group.VALUATION,
+                gateGroup(TradingRadarEvidenceConfidenceResolver.Group.VALUATION, .90, .90, .60),
+                TradingRadarEvidenceConfidenceResolver.Group.FINANCIAL_OPERATING,
+                gateGroup(TradingRadarEvidenceConfidenceResolver.Group.FINANCIAL_OPERATING, .90, .90, .90),
+                TradingRadarEvidenceConfidenceResolver.Group.ASSET_SPECIFIC,
+                gateGroup(TradingRadarEvidenceConfidenceResolver.Group.ASSET_SPECIFIC, .90, .60, .90)),
+                100, 100, 100, risk, risk, risk,
+                List.of("legacy global compatibility"), dividendResolution(1, 2), null);
+    }
+
+    private static TradingRadarEvidenceConfidenceResolver.GroupEvidence gateGroup(
+            TradingRadarEvidenceConfidenceResolver.Group group,
+            double shortCoverage,
+            double swingCoverage,
+            double mediumCoverage) {
+        return new TradingRadarEvidenceConfidenceResolver.GroupEvidence(
+                group, List.of(), shortCoverage, swingCoverage, mediumCoverage,
+                true, true, true, true, true, true, 1, false, true);
     }
 
     private static TradingRadarEvidenceConfidenceResolver.Evidence resolve(

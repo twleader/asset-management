@@ -178,8 +178,7 @@ class TreasuryYieldServiceTest {
      * Task 360：production 版號升為 {@code TW_RULES_V16}（J 值因子極性修正——KD／J 與
      * 週線動能的 J 位置分量改由標準 J {@code 3K − 2D} 現算，不再餵入顯示慣例 {@code j9 = 3D − 2K}），
      * 與 {@link RuleParameters} 的 calibration／candidate 命名空間維持分家（Task 342 起）。
-     * Task 365 再升為 {@code TW_RULES_V17}（估值因子權重表標籤與風險文案修正：「PE 自身分位」實為
-     * PE／PB／殖利率三者算術平均，與本檔的 J 值極性修正無關）。
+     * Task 382 再升為 {@code TW_RULES_V18}（gate 診斷改列各自持有期的風險，與本檔的 J 值極性修正無關）。
      *
      * <p>{@code v12Default()} 仍是 {@code TW_RULES_V12}——那是回測 baseline 參數集，
      * 本次未改動任何個股參數值，故不得跟著改（改了會擴散到十餘個呼叫點且零語意收益）。
@@ -187,8 +186,8 @@ class TreasuryYieldServiceTest {
      * production 竊用會讓「這是不是 candidate」的判別式失效。</p>
      */
     @Test
-    void productionRuleVersion升V17而v12Default仍為回測baseline標籤() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V17");
+    void productionRuleVersion升V18而v12Default仍為回測baseline標籤() {
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V18");
         assertThat(RuleParameters.v12Default().ruleVersion()).isEqualTo("TW_RULES_V12");
         assertThat(TradingRadarRuleEngine.RULE_VERSION).isNotEqualTo(RuleParameters.V13_VERSION);
         assertThat(RuleParameters.v12Default().ruleVersion()).isNotEqualTo(RuleParameters.V13_VERSION);

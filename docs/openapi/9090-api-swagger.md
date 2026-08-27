@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.8.0` |
+| 契約版本 | `1.9.0` |
 | 對外路徑 | 12 條：11 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -1488,7 +1488,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `mediumRiskCoverage` | 是 | `number | null (double)` | 是 |  | 中期風險證據的覆蓋比例。 |
 | `candidateAction` | 是 | `string | null` | 是 |  | 主要時間框架建議採用的候選動作。 |
 | `shortCandidateAction` | 是 | `string | null` | 是 |  | 短期時間框架建議採用的候選動作。 |
-| `actionGateReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：阻擋或允許策略動作的檢核原因。 | 阻擋或允許策略動作的檢核原因。 |
+| `actionGateReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：三軌動作閘門／風險稽核彙總的一項不利診斷；不是任一軌 support source（支持訊號來源）或允許動作依據。 | 三軌動作閘門／風險稽核彙總（medium→short→swing 的 stable-distinct union）；不是任一軌 support source（支持訊號來源）或允許動作依據。 |
 | `etfPremiumLivePct` | 是 | `number | null` | 是 |  | 即時 ETF 溢折價百分比。 |
 | `etfPremiumLiveNavAsOf` | 是 | `string | null` | 是 |  | 台股與美股來源格式不同，不宣告 date-time format。 |
 | `swingAction` | 是 | `string | null` | 是 |  | 1周~1月 軌動作自由字串；未供給該軌時為 null。 |
@@ -1627,7 +1627,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `premiumSource` | 是 | `string | null` | 是 |  | ETF 溢折價的公開來源。 |
 | `premiumStale` | 是 | `boolean` | 否 |  | ETF 溢折價是否超過新鮮度門檻。 |
 | `assetProfile` | 是 | `AssetProfile | null` | 是 |  | 標的分類、商品型態與幣別辨識上下文。 |
-| `actionGateReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：阻擋或允許策略動作的檢核原因。 | 阻擋或允許策略動作的檢核原因。 |
+| `actionGateReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：三軌動作閘門／風險稽核彙總的一項不利診斷；不是任一軌 support source（支持訊號來源）或允許動作依據。 | 三軌動作閘門／風險稽核彙總（medium→short→swing 的 stable-distinct union）；不是任一軌 support source（支持訊號來源）或允許動作依據。 |
 | `evidenceGroups` | 是 | `object` | 否 |  | 按名稱索引的證據群組。 |
 | `marketFeatures` | 是 | `object` | 否 |  | 按市場代碼索引的大盤特徵證據。 |
 | `shortEvidenceConfidence` | 是 | `integer | null (int32)` | 是 |  | 短期證據的信心分數。 |

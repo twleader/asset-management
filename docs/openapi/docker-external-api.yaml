@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.8.0
+  version: 1.9.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十二條精確路徑：
     十一條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 是 global no-tenant）
@@ -626,7 +626,7 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V17
+                    ruleVersion: TW_RULES_V18
                     actionPolicyVersion: EVIDENCE_GATE_V1
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:
@@ -691,7 +691,7 @@ paths:
               schema: {$ref: '#/components/schemas/TradingRadarStockDetailResponse'}
               examples:
                 synthetic:
-                  value: {ruleVersion: TW_RULES_V17, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null}}
+                  value: {ruleVersion: TW_RULES_V18, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null}}
         '400':
           description: 缺少、重複或格式不合法的 stockCode／market；不會呼叫 configured-admin 或 business。
           content:
@@ -5489,8 +5489,8 @@ components:
           type: array
           items:
             type: string
-            description: 陣列中的單一元素：阻擋或允許策略動作的檢核原因。
-          description: 阻擋或允許策略動作的檢核原因。
+            description: 陣列中的單一元素：三軌動作閘門／風險稽核彙總的一項不利診斷；不是任一軌 support source（支持訊號來源）或允許動作依據。
+          description: 三軌動作閘門／風險稽核彙總（medium→short→swing 的 stable-distinct union）；不是任一軌 support source（支持訊號來源）或允許動作依據。
         etfPremiumLivePct:
           type:
           - number
@@ -6193,8 +6193,8 @@ components:
           type: array
           items:
             type: string
-            description: 陣列中的單一元素：阻擋或允許策略動作的檢核原因。
-          description: 阻擋或允許策略動作的檢核原因。
+            description: 陣列中的單一元素：三軌動作閘門／風險稽核彙總的一項不利診斷；不是任一軌 support source（支持訊號來源）或允許動作依據。
+          description: 三軌動作閘門／風險稽核彙總（medium→short→swing 的 stable-distinct union）；不是任一軌 support source（支持訊號來源）或允許動作依據。
         evidenceGroups:
           type: object
           additionalProperties:

@@ -558,8 +558,8 @@ class TradingRadarRuleEngineTest {
      * 正規化未動，但使用者可觀察行為有實質變化即升版。</p>
      */
     @Test
-    void ruleVersion_isV17() {
-        assertEquals("TW_RULES_V17", TradingRadarRuleEngine.RULE_VERSION);
+    void ruleVersion_isV18() {
+        assertEquals("TW_RULES_V18", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══

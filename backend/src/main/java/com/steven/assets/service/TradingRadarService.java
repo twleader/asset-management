@@ -749,7 +749,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V17（Task 365，估值標籤修正）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V18（Task 382，gate 診斷風險分類修正）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1053,15 +1053,15 @@ public class TradingRadarService {
                 reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
             }
             reasons.addAll(result.reasons());
-            reasons.addAll(gated.reasons());
             List<String> risks = new ArrayList<>(result.risks());
+            risks.addAll(gated.mediumDiagnostics());
             List<String> shortReasons = new ArrayList<>();
             if (technical.distributionAdjusted()) {
                 shortReasons.add("MA／KD、擴充指標與相對量已使用同一份還原權息／分割序列。 ");
             }
             shortReasons.addAll(result.shortReasons());
             List<String> shortRisks = new ArrayList<>(result.shortRisks());
-            shortRisks.addAll(gated.reasons());
+            shortRisks.addAll(gated.shortDiagnostics());
             // Task 356.1b-2：swing 軌必須比照既有兩軌加入還原權息揭露句，否則同一頁三軌
             // 中兩軌有揭露、一軌沒有。
             // 出處就是這裡——**引擎不產生任何還原字串**：evaluateStock 的三軌 reasons 只寫
@@ -1075,7 +1075,7 @@ public class TradingRadarService {
             }
             swingReasons.addAll(nullSafe(result.swingReasons()));
             List<String> swingRisks = new ArrayList<>(nullSafe(result.swingRisks()));
-            swingRisks.addAll(gated.reasons());
+            swingRisks.addAll(gated.swingDiagnostics());
             if (!TWD.equals(currency) && fx.asOfDate() == null) {
                 String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
                 risks.add(missingFx);
