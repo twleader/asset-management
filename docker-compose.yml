@@ -413,6 +413,12 @@ services:
       TZ: ${APP_TZ:-Asia/Taipei}
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      # 自簽 HTTPS 憑證；缺檔時容器啟動會自動產生 localhost-only 預設值（見
+      # frontend/docker-entrypoint-tls.sh）。對外公網 IP／網域請用
+      # scripts/generate-self-signed-frontend-cert.sh 產生後 recreate 本容器。
+      - ${FRONTEND_TLS_SECRETS_DIR_HOST:-./secrets/frontend-tls}:/run/secrets/frontend-tls
     depends_on:
       bff:
         condition: service_healthy

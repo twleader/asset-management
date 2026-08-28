@@ -609,6 +609,31 @@ portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactio
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。
 
+### 8.6 前端網站自簽憑證 HTTPS（選用，無網域只有固定 IP 時）
+
+適用情境：沒有正式網域，只想用一個固定 IP（例如公網 IP 或內網 IP）讓網站以 HTTPS
+存取。前端 `frontend` 容器預設就會監聽 443，且啟動時若沒有提供憑證會自動產生一組
+`localhost`／`127.0.0.1` 專用的預設自簽憑證，只供本機測試。要換成你自己的 IP 或
+網域，執行：
+
+```bash
+scripts/generate-self-signed-frontend-cert.sh <你的 IP 或網域>
+docker compose -p asset-management up -d --force-recreate frontend
+```
+
+之後可用 `https://<你的 IP 或網域>` 連線。詳見 `secrets/frontend-tls/README.md`。
+
+**這是自簽憑證，不是任何憑證機構簽發**，瀏覽器會顯示「不受信任」警告，需手動選擇
+「進階 → 繼續前往」，這是預期行為。若要讓其他裝置或網際網路連得到這個 IP，還需要
+自行完成路由器 port forwarding（443，視需要也含 80）與防火牆規則設定——這是本系統
+之外的網路環境設定，本專案的腳本與容器都不會、也不能代為變更路由器或防火牆，請自行
+評估對外開放的風險。
+
+已知限制：若計畫透過這個公網 IP 用 Gmail 帳號登入本系統，Google OAuth 的 redirect URI
+驗證規則不接受裸 IP（`localhost` 除外），該登入流程可能無法通過 Google Cloud Console
+驗證；純瀏覽公開頁面或 9090 唯讀 API 不受影響。詳見 `.env.example` 裡 `Gmail OAuth2 登入`
+段落的說明。
+
 ---
 
 ## 9. 日常啟動、停止與查看狀態
@@ -706,10 +731,11 @@ docker compose -p asset-management logs --tail=200 frontend bff business-service
 
 先找第一個不是 running／healthy 的服務。不要一看到錯誤就刪除 volume。
 
-若 80 或 9090 已被其他程式使用，macOS／Ubuntu 可查：
+若 80、443 或 9090 已被其他程式使用，macOS／Ubuntu 可查：
 
 ```bash
 lsof -nP -iTCP:80 -sTCP:LISTEN
+lsof -nP -iTCP:443 -sTCP:LISTEN
 lsof -nP -iTCP:9090 -sTCP:LISTEN
 ```
 
@@ -814,9 +840,13 @@ docker compose -p asset-management logs --tail=200 bff
 
 ### 12.3 本機連線安全
 
-預設網址是 `http://localhost`，本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 80、9090、5432；遠端只使用上述 Tailscale Serve，禁止 Funnel。
+預設網址是 `http://localhost`，本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 9090、5432；9090 遠端只使用上述 Tailscale Serve，禁止 Funnel。
 
-若要讓其他電腦或網際網路存取，必須另行規劃 HTTPS、網域、防火牆、反向代理、備份與更新責任；不要直接把本機連接埠對外公開。
+若要讓其他電腦或網際網路存取網站本身，前端 `443` 已支援自簽憑證 HTTPS（見 8.6），
+但實際對外開放（路由器 port forwarding、防火牆規則）仍是使用者自行規劃與操作的
+網路環境設定，本專案不會代為變更；請自行評估風險，並留意自簽憑證沒有憑證機構
+背書、無法防止主動式中間人攻擊，只適合信任連線來源的場景。不要直接把資料庫等
+其他連接埠對外公開。
 
 ---
 
