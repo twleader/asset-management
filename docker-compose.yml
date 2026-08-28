@@ -346,6 +346,8 @@ services:
     build:
       context: ./bff
       dockerfile: Dockerfile
+      additional_contexts:
+        openapi-contract: ./docs/openapi
     container_name: asset-bff
     restart: unless-stopped
     environment:
