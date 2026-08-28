@@ -255,8 +255,13 @@ const mainMenuItems = computed(() => [
       { path: '/trading-calendar', title: '交易日曆', icon: 'AlarmClock' },
       { path: '/exchange-rate', title: '台幣兌美元', icon: 'Money' },
       { path: '/commodity-price', title: '油價金價', icon: 'Sunny' },
+      { path: '/crawler-data', title: '爬蟲資訊查詢', icon: 'Search' }
+    ]
+  },
+  {
+    index: 'system-info', title: '系統資訊', icon: 'Monitor',
+    children: [
       { path: '/schedule-list', title: '排程列表', icon: 'Clock' },
-      { path: '/crawler-data', title: '爬蟲資訊查詢', icon: 'Search' },
       { path: '/open-api', title: '開放 API', icon: 'Connection' }
     ]
   },
