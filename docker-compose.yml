@@ -412,7 +412,6 @@ services:
       # Task 252：僅為 nginx access log 可讀性；前端時間顯示由瀏覽器本地時區決定，與此無關。
       TZ: ${APP_TZ:-Asia/Taipei}
     ports:
-      - "80:80"
       - "443:443"
     volumes:
       # 自簽 HTTPS 憑證；缺檔時容器啟動會自動產生 localhost-only 預設值（見
