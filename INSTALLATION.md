@@ -353,7 +353,7 @@ EXPORT_OUTPUT_DIR_HOST=${HOME}
 - `ADMIN_EMAIL` 必須是你稍後實際登入的完整 Google 帳號，英文字母大小寫不影響判定。
 - `POSTGRES_PASSWORD` 建議用密碼管理器產生至少 24 字元；為避免 `.env` 解析問題，可使用英文字母、數字、底線與連字號。
 - `EXPORT_OUTPUT_DIR_HOST=${HOME}` 會使用目前使用者的家目錄，通常不必修改。
-- 前端固定只提供 HTTPS（80 未對外開放，見 8.6），本機也要用 `https://localhost` 存取；`SESSION_COOKIE_SECURE` 請直接設為 `true`。
+- 本機使用 `http://localhost` 時，`SESSION_COOKIE_SECURE` 保持未設定或 `false`；只有完成 HTTPS 部署後才改成 `true`。
 
 用以下指令確認家目錄：
 
@@ -406,7 +406,7 @@ External 應用程式在 Testing 狀態只允許 Test users 使用；限制與�
 5. 在 Authorized redirect URIs 加入以下完整網址：
 
 ```text
-https://localhost/login/oauth2/code/google
+http://localhost/login/oauth2/code/google
 ```
 
 6. 建立後複製 Client ID 與 Client Secret。
@@ -497,7 +497,7 @@ Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十�
 
 ### 6.3 開啟系統並登入
 
-1. 用瀏覽器開啟 `https://localhost`（自簽憑證，瀏覽器會顯示「不受信任」警告，選「進階 → 繼續前往」即可，這是預期行為，見 8.6）。
+1. 用瀏覽器開啟 [http://localhost](http://localhost)。
 2. 選擇 Google 登入。
 3. **一定要使用 `.env` 的 `ADMIN_EMAIL` 帳號登入。**
 4. 第一次登入後，該帳號會自動建立為 `ADMIN`、`ACTIVE`，並在使用者管理頁標示「主要管理者」。
@@ -609,12 +609,12 @@ portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactio
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。
 
-### 8.6 前端網站自簽憑證 HTTPS
+### 8.6 前端網站自簽憑證 HTTPS（選用，無網域只有固定 IP 時）
 
-前端只提供 HTTPS，**不監聽 80**，包含本機存取（`https://localhost`）也一樣。
-`frontend` 容器啟動時若沒有提供憑證，會自動產生一組 `localhost`／`127.0.0.1`
-專用的預設自簽憑證，供本機測試。要換成你自己的公網 IP 或網域（選用，只有要讓其他
-裝置或網際網路連進來時才需要），執行：
+適用情境：沒有正式網域，只想用一個固定 IP（例如公網 IP 或內網 IP）讓網站以 HTTPS
+存取。前端 `frontend` 容器預設就會監聽 443，且啟動時若沒有提供憑證會自動產生一組
+`localhost`／`127.0.0.1` 專用的預設自簽憑證，只供本機測試。要換成你自己的 IP 或
+網域，執行：
 
 ```bash
 scripts/generate-self-signed-frontend-cert.sh <你的 IP 或網域>
@@ -624,16 +624,14 @@ docker compose -p asset-management up -d --force-recreate frontend
 之後可用 `https://<你的 IP 或網域>` 連線。詳見 `secrets/frontend-tls/README.md`。
 
 **這是自簽憑證，不是任何憑證機構簽發**，瀏覽器會顯示「不受信任」警告，需手動選擇
-「進階 → 繼續前往」，這是預期行為，包含 `https://localhost` 也一樣會出現這個警告。
-若要讓其他裝置或網際網路連得到這台機器，還需要自行完成路由器 port forwarding（443）
-與防火牆規則設定——這是本系統之外的網路環境設定，本專案的腳本與容器都不會、也不能
-代為變更路由器或防火牆，請自行評估對外開放的風險。
+「進階 → 繼續前往」，這是預期行為。若要讓其他裝置或網際網路連得到這個 IP，還需要
+自行完成路由器 port forwarding（443，視需要也含 80）與防火牆規則設定——這是本系統
+之外的網路環境設定，本專案的腳本與容器都不會、也不能代為變更路由器或防火牆，請自行
+評估對外開放的風險。
 
-已知限制：Google OAuth 的 redirect URI 驗證規則不接受裸 IP（`localhost` 除外），若計畫
-用 Gmail 帳號登入，必須用網域（例如路由器內建的免費 DDNS，如華碩路由器的
-`*.asuscomm.com`）而不是純 IP，並在 Google Cloud Console 的「已授權的重新導向 URI」
-另外登記該網域對應的完整網址，例如 `https://你的網域/login/oauth2/code/google`；純瀏覽
-公開頁面或 9090 唯讀 API 不受此限制影響。詳見 `.env.example` 裡 `Gmail OAuth2 登入`
+已知限制：若計畫透過這個公網 IP 用 Gmail 帳號登入本系統，Google OAuth 的 redirect URI
+驗證規則不接受裸 IP（`localhost` 除外），該登入流程可能無法通過 Google Cloud Console
+驗證；純瀏覽公開頁面或 9090 唯讀 API 不受影響。詳見 `.env.example` 裡 `Gmail OAuth2 登入`
 段落的說明。
 
 ---
@@ -746,11 +744,10 @@ lsof -nP -iTCP:9090 -sTCP:LISTEN
 確認 Google Console 登記的是完全相同的：
 
 ```text
-https://localhost/login/oauth2/code/google
+http://localhost/login/oauth2/code/google
 ```
 
-請固定從 `https://localhost` 開啟，不要改用 `https://127.0.0.1`，也不要漏看 `http`／`https` 的差異。
-Google 對 scheme、host 逐字比對，`http://localhost` 與 `https://localhost` 會被視為不同網址。
+請固定從 `http://localhost` 開啟，不要改用 `http://127.0.0.1`。Google 會把它們視為不同網址。
 
 ### 11.6 Google 顯示沒有權限或應用程式仍在測試
 
@@ -843,7 +840,7 @@ docker compose -p asset-management logs --tail=200 bff
 
 ### 12.3 本機連線安全
 
-預設網址是 `https://localhost`（前端只提供 HTTPS，80 未對外開放），本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 9090、5432；9090 遠端只使用上述 Tailscale Serve，禁止 Funnel。
+預設網址是 `http://localhost`，本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 9090、5432；9090 遠端只使用上述 Tailscale Serve，禁止 Funnel。
 
 若要讓其他電腦或網際網路存取網站本身，前端 `443` 已支援自簽憑證 HTTPS（見 8.6），
 但實際對外開放（路由器 port forwarding、防火牆規則）仍是使用者自行規劃與操作的

@@ -18,6 +18,6 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker-entrypoint-tls.sh /docker-entrypoint.d/40-frontend-tls-fallback.sh
 RUN chmod +x /docker-entrypoint.d/40-frontend-tls-fallback.sh
 
-EXPOSE 443
+EXPOSE 80 443
 
 CMD ["nginx", "-g", "daemon off;"]
