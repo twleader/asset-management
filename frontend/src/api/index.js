@@ -398,6 +398,11 @@ export const bffApi = {
       api.post('/bff/crawler-data/export/fetch-and-run-now', null, { timeout: 70000, skipErrorToast: true })
   },
 
+  // OpenApi（公開資訊 → 開放 API 文件）
+  openApi: {
+    contract: () => api.get('/bff/open-api/contract', { responseType: 'text', skipErrorToast: true })
+  },
+
   // SnapshotList
   snapshotList: {
     getAll:      () => api.get('/bff/snapshot-list'),

@@ -87,6 +87,12 @@ const router = createRouter({
       meta: { title: '爬蟲資訊查詢', icon: 'Search' }
     },
     {
+      path: '/open-api',
+      name: 'OpenApi',
+      component: () => import('@/views/OpenApiView.vue'),
+      meta: { title: '開放 API', icon: 'Connection' }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),

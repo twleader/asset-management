@@ -10198,3 +10198,27 @@ The downstream timeout is exactly five seconds. The scoped exception advice writ
 PublicCommodityPriceExceptionAdvice must be RestControllerAdvice(assignableTypes = PublicCommodityPriceController.class) with Order(Ordered.HIGHEST_PRECEDENCE). That precedence is a public-data boundary: the existing global BusinessErrorAdvice may relay WebClientResponseException raw status/body, so this controller must win and sanitize every business non-2xx. The controller test registers both advice classes, uses a sentinel raw upstream non-2xx body, and proves the fixed 502 ProblemDetail contains neither that sentinel nor any upstream content.
 
 OpenAPI defines a fixed CommodityPriceBatchResponse, CommodityPriceSlots, and CommodityPriceQuote rather than a free-form map. It documents the unit enum, nullable values, three-slot ordering, status provenance, and the persisted-read/no-side-effect boundary. docs/openapi/docker-external-api.yaml remains the single source. Its renderer produces both checked-in Swagger Markdown and the SRPP copy byte-for-byte. The manifest test, renderer, gateway test, Tailscale script test, CLAUDE.md, and structure steering document use the same thirteen-route current-state declaration and a non-conflicting monotonically increased OpenAPI minor version.
+
+## Requirement 119 Design — Authenticated OpenAPI documentation view
+
+The public-information UI reads the existing external OpenAPI contract through a protected page-specific BFF endpoint rather than treating a source-tree file or port 9090 as a browser asset server:
+
+~~~text
+docs/openapi/docker-external-api.yaml (only source)
+                 │ named Docker build context + Maven resource
+                 ▼
+BFF classpath docker-external-api.yaml
+                 │ GET /api/bff/open-api/contract (existing authenticated policy)
+                 ▼
+frontend bffApi.openApi.contract() → pure YAML parser → OpenApiView
+~~~
+
+`OpenApiContractBffController` owns only `GET /api/bff/open-api/contract` and delegates byte retrieval to `OpenApiContractService`. The service reads the one UTF-8 classpath resource and has no database, Redis, WebClient, business-service, external-vendor, file-write, scheduler, broker, transaction, tenant, user, account, or token dependency. The route intentionally receives no `permitAll` exception: existing `anyExchange().authenticated()` protects it. It is not an external public API and therefore creates no port 9090 route, gateway mapping, Tailscale Serve entry, frontend nginx 9090 allowlist entry, OpenAPI `paths` entry, or Swagger Markdown regeneration.
+
+The Maven build explicitly includes both the normal `src/main/resources` directory and the external `../docs/openapi` directory, selecting only `docker-external-api.yaml`. The BFF Dockerfile consumes a Compose named context called `openapi-contract`, copies `docker-external-api.yaml` to `/docs/openapi/` before `mvn package`, and Maven packages that file directly into the jar. There is no committed mirror under BFF or frontend. This makes a mismatch build-visible and preserves `docs/openapi/docker-external-api.yaml` as the single checked-in source.
+
+`OpenApiView` uses the existing authenticated axios abstraction only. It requests text once when mounted, clears its previous presentation before a failure state, and never fetches `/docs`, calls port 9090, assembles executable examples, accepts tokens, or offers a Try it action. A small pure parser isolates the top-level `paths:` block, finds root path nodes and their HTTP operation children from indentation, and retains each operation's original YAML fragment. It derives title, version, server URLs, endpoint rows, and operation total from the loaded content; the current 13-operation expectation exists only in tests. Missing required top-level sections or malformed path/operation structure causes a fail-closed error rather than a stale or hand-authored list.
+
+The view places an `el-collapse` row for every extracted operation. Row headers show a color-coded method, path, and summary; expanded content shows the exact YAML fragment containing its description, parameters, request body, responses, and schema references. A separate read-only full-contract drawer exposes the complete raw YAML, including `components`. A short static disclosure states that this is documentation, calls are constrained by the documented loopback/Tailscale audience, and the existing POST crawler rescan can have external-fetch side effects. No UI control can invoke it.
+
+Focused tests cover parser extraction with a minimal fixture, fail-closed malformed input, the current contract's complete 13-operation set, BFF resource content and response type, routing visibility, and the absence of any direct 9090 call. Runtime validation rebuilds only BFF and frontend from the feature worktree, proves the packaged resource matches the source file, verifies unauthenticated BFF protection, and uses the authenticated UI to expand an operation without issuing any port 9090 POST.
