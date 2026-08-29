@@ -3,6 +3,7 @@ package com.steven.assets.controller;
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.TenantAccessException;
 import com.steven.assets.security.UnauthenticatedException;
+import com.steven.assets.service.BackupRemoteUnavailableException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -38,6 +39,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ProblemDetail handleBadRequest(IllegalArgumentException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    /** DB 備份 remote 的 config／auth／raw-root 守門失敗（Requirement 15 / Task 388）→ 503。 */
+    @ExceptionHandler(BackupRemoteUnavailableException.class)
+    public ProblemDetail handleBackupRemoteUnavailable(BackupRemoteUnavailableException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
     }
 
     /**

@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–389）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -386,8 +386,9 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 385 | 富邦台股成交紀錄同步排程：比照既有庫存同步節拍，盤中每 30 分鐘唯讀查詢富邦成交紀錄，冪等新增系統尚未記錄的交易到交易紀錄（Requirement 120） | [tasks/t385_fubon_trade_sync.md](tasks/t385_fubon_trade_sync.md) |
 | 386 | 系統資訊「富邦證 API」頁：BFF 內建靜態清單盤點富邦 SDK 全部唯讀查詢能力（52 筆，含已串接與未串接），可展開看請求／回應明細（Requirement 121） | [tasks/t386_fubon_api_documentation_view.md](tasks/t386_fubon_api_documentation_view.md) |
 | 387 | Google 登入固定顯示帳號選擇器：Authorization Request 加 `prompt=select_account`，避免瀏覽器同時登入多個 Gmail 帳號時悄悄沿用非預期帳號（Requirement 122） | [tasks/t387_google_login_account_chooser.md](tasks/t387_google_login_account_chooser.md) |
-| 388 | 富邦 ETF 成分股持股明細——抓取與落地基礎設施：交易日 08:50／15:30 查詢今日交易雷達台股 ETF，原始回應落地保存（Requirement 123） | [tasks/t388_fubon_etf_holdings_sync.md](tasks/t388_fubon_etf_holdings_sync.md) |
-| 389 | 富邦 ETF 成分股持股明細——欄位解析、讀取端切換、清理舊爬蟲：取代既有 MoneyDJ 台股來源（Requirement 123） | [tasks/t389_fubon_etf_holdings_cutover.md](tasks/t389_fubon_etf_holdings_cutover.md) |
+| 388 | 修復 DB 備份 remote 授權熱重載、錯帳號 fail-closed 守門與逐筆 durable rotation（Requirement 15／52） | [tasks/t388_backup_remote_safety_reload.md](tasks/t388_backup_remote_safety_reload.md) |
+| 389 | 富邦 ETF 成分股持股明細——抓取與落地基礎設施：交易日 08:50／15:30 查詢今日交易雷達台股 ETF，原始回應落地保存（Requirement 123） | [tasks/t389_fubon_etf_holdings_sync.md](tasks/t389_fubon_etf_holdings_sync.md) |
+| 390 | 富邦 ETF 成分股持股明細——欄位解析、讀取端切換、清理舊爬蟲：取代既有 MoneyDJ 台股來源（Requirement 123） | [tasks/t390_fubon_etf_holdings_cutover.md](tasks/t390_fubon_etf_holdings_cutover.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

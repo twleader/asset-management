@@ -1,6 +1,6 @@
-# [t388] 富邦 ETF 成分股持股明細——抓取與落地基礎設施
+# [t389] 富邦 ETF 成分股持股明細——抓取與落地基礎設施
 
-**對應 Requirements:** Requirement 123（富邦「ETF 成分股持股明細查詢」排程串接，取代既有 MoneyDJ／Yahoo 爬蟲來源；本任務只做抓取與落地，欄位解析與讀取端切換是 Task 389）
+**對應 Requirements:** Requirement 123（富邦「ETF 成分股持股明細查詢」排程串接，取代既有 MoneyDJ／Yahoo 爬蟲來源；本任務只做抓取與落地，欄位解析與讀取端切換是 Task 390）
 **前置任務:** 無
 **Liquibase changeset:** `v1.120.0-fubon-etf-holdings-snapshot.sql`（實際版號以建檔當下 `bash scripts/spec-check.sh` 核對過的最新版號為準，撞號時依既有編號避讓慣例調整）
 
@@ -17,7 +17,7 @@ class Ownership(BaseRest):
 
 `BaseRest.request()` 是純 HTTP GET 轉發（`requests.get(url, headers=...)`），回傳 `response.json()`，沒有任何欄位驗證或轉換。也就是說，**唯一能知道確切回應欄位名稱的方法，是在具備真實富邦憑證、`FUBON_ENABLED=true` 的環境對一支已知 ETF 做一次真實呼叫**。本次撰寫規格時的開發環境 `FUBON_ENABLED=false`，無法核實。
 
-因此本任務**刻意只做「與欄位無關」的部分**：把富邦回應原封不動存成 JSON，不解析、不重新命名任何欄位。排程、feature flag、交易日判斷、雷達範圍查詢、資料落地全部可以在不知道確切欄位名稱的情況下完成並獨立驗收（下 SQL 查詢就能確認資料落地了、排程確實有在跑）。把原始 JSON 轉成結構化 `EtfHolding` 清單、切換既有 `MarketDataService.getEtfHoldings()` 的讀取路徑、清理舊爬蟲，是 Task 389 的範圍（依賴真實環境核實欄位，本任務不做）。
+因此本任務**刻意只做「與欄位無關」的部分**：把富邦回應原封不動存成 JSON，不解析、不重新命名任何欄位。排程、feature flag、交易日判斷、雷達範圍查詢、資料落地全部可以在不知道確切欄位名稱的情況下完成並獨立驗收（下 SQL 查詢就能確認資料落地了、排程確實有在跑）。把原始 JSON 轉成結構化 `EtfHolding` 清單、切換既有 `MarketDataService.getEtfHoldings()` 的讀取路徑、清理舊爬蟲，是 Task 390 的範圍（依賴真實環境核實欄位，本任務不做）。
 
 系統既有「今日交易雷達」的**官方跨使用者定義**（Requirement 115／Task 380）目前只在 `external-materials-service` 的 `StockSourceQuery.collectTwRadarCodes(Set<String> twCodes)` 有實作：
 
@@ -85,7 +85,7 @@ def quote(self, code: str) -> object:
 
 ## 要做什麼
 
-- [ ] **388.1 `fubon-broker-service` 新增 `SdkGateway.read_etf_holdings()`。** 在 `fubon-broker-service/src/fubon_broker_service/sdk_gateway.py` 新增方法，結構比照上方節錄的既有 `quote()`（複製其 session 取得、`_stock_client` 使用、`_run_bounded` 逾時包裝、`auth_invalid`／`rate_limited` 重試邏輯），但改為：
+- [ ] **389.1 `fubon-broker-service` 新增 `SdkGateway.read_etf_holdings()`。** 在 `fubon-broker-service/src/fubon_broker_service/sdk_gateway.py` 新增方法，結構比照上方節錄的既有 `quote()`（複製其 session 取得、`_stock_client` 使用、`_run_bounded` 逾時包裝、`auth_invalid`／`rate_limited` 重試邏輯），但改為：
   ```python
   def read_etf_holdings(self, symbol: str) -> object:
       for attempt in range(2):
@@ -126,11 +126,11 @@ def quote(self, code: str) -> object:
   ```
   **不得**經過 `_accounting_lock`／`_wait_for_accounting_budget()`；`QUOTE_CALL_TIMEOUT_SECONDS` 沿用既有常數，不新增獨立 timeout 常數（除非既有常數語意明顯不合用，若不合用需在完成報告說明原因並改用新常數）。
 
-- [ ] **388.2 新增 `POST /internal/market-data/etf-holdings` route。** 在 `fubon-broker-service/src/fubon_broker_service/app.py` 新增（比照既有 `/internal/market-data/tw-quotes` 的 Pydantic model／`Depends(authorize)`／outcome counters／`sanitized_exception_boundary` 慣例）：request body Pydantic model `{"codes": list[str]}`（1..50 檔，`ConfigDict(extra="forbid", strict=True)`）；對每一檔呼叫 `gateway.read_etf_holdings(code)`，成功時把回應**原封不動**（不重新命名、不篩選、不轉型欄位）序列化為 JSON 字串放進該檔的 `rawResponseJson`；失敗（含 timeout／auth invalid／transport failure）該檔 `status="FAILURE"`、`reason=<消毒後的錯誤代碼>`。回應形狀：`{"batchId": "...", "holdings": [{"stockCode": "0050", "status": "SUCCESS"|"FAILURE", "reason": "...", "rawResponseJson": "..."}], "counters": {...}}`。既有三態語意（`DISABLED`／`MISCONFIGURED`／token 缺漏或錯誤）與既有 `/internal/market-data/tw-quotes` 完全一致（本路由沿用既有 `Depends(authorize)` 的三態語意，不新增獨立驗證機制）。
+- [ ] **389.2 新增 `POST /internal/market-data/etf-holdings` route。** 在 `fubon-broker-service/src/fubon_broker_service/app.py` 新增（比照既有 `/internal/market-data/tw-quotes` 的 Pydantic model／`Depends(authorize)`／outcome counters／`sanitized_exception_boundary` 慣例）：request body Pydantic model `{"codes": list[str]}`（1..50 檔，`ConfigDict(extra="forbid", strict=True)`）；對每一檔呼叫 `gateway.read_etf_holdings(code)`，成功時把回應**原封不動**（不重新命名、不篩選、不轉型欄位）序列化為 JSON 字串放進該檔的 `rawResponseJson`；失敗（含 timeout／auth invalid／transport failure）該檔 `status="FAILURE"`、`reason=<消毒後的錯誤代碼>`。回應形狀：`{"batchId": "...", "holdings": [{"stockCode": "0050", "status": "SUCCESS"|"FAILURE", "reason": "...", "rawResponseJson": "..."}], "counters": {...}}`。既有三態語意（`DISABLED`／`MISCONFIGURED`／token 缺漏或錯誤）與既有 `/internal/market-data/tw-quotes` 完全一致（本路由沿用既有 `Depends(authorize)` 的三態語意，不新增獨立驗證機制）。
 
-- [ ] **388.3 `fubon-broker-service` 測試。** 新增測試（比照既有 `tests/test_quotes.py` 的結構，非 `tests/test_trades.py`——本次無帳務 raw identity 驗證）：mock `gateway.read_etf_holdings` 驗證成功／失敗兩種路徑正確映射到 response 的 `status`／`reason`／`rawResponseJson`；驗證 request body 校驗（`codes` 為空、超過 50 檔、非法欄位皆回 400）；驗證未帶 token 回 401／403、`DISABLED`／`MISCONFIGURED` 狀態回 503。`tests/test_app_routes.py` 的 `test_exact_six_routes_auth_and_methods` 需同步更新為 7 條 route（新增這一條），測試名稱視需要調整（如改為 `test_exact_seven_routes_auth_and_methods`）。並同步更新 `spec/tasks/t386_fubon_api_documentation_view.md` **`## 背景` 小節**（第 9、20 行附近，各自提到「目前對外暴露 6 支 HTTP endpoint」「不只列出已串接的 6 支 HTTP endpoint」）的「6 支」字樣改為「7 支」——**這是 Task 388 對 t386 的唯一必要更新**（把「已串接」狀態改成 `true` 是 Task 389 的範圍，因為要等欄位解析完成才算真正串接完；但 route 數從 6 條變 7 條是 Task 388 造成的事實，必須同步，否則 t386 的「## 背景」小節會立刻與程式碼不符）。t386.md 全文並未出現 `test_exact_six_routes_auth_and_methods` 這個 Python 測試名稱本身，不需要在 t386.md 裡另外更新它。
+- [ ] **389.3 `fubon-broker-service` 測試。** 新增測試（比照既有 `tests/test_quotes.py` 的結構，非 `tests/test_trades.py`——本次無帳務 raw identity 驗證）：mock `gateway.read_etf_holdings` 驗證成功／失敗兩種路徑正確映射到 response 的 `status`／`reason`／`rawResponseJson`；驗證 request body 校驗（`codes` 為空、超過 50 檔、非法欄位皆回 400）；驗證未帶 token 回 401／403、`DISABLED`／`MISCONFIGURED` 狀態回 503。`tests/test_app_routes.py` 的 `test_exact_six_routes_auth_and_methods` 需同步更新為 7 條 route（新增這一條），測試名稱視需要調整（如改為 `test_exact_seven_routes_auth_and_methods`）。並同步更新 `spec/tasks/t386_fubon_api_documentation_view.md` **`## 背景` 小節**（第 9、20 行附近，各自提到「目前對外暴露 6 支 HTTP endpoint」「不只列出已串接的 6 支 HTTP endpoint」）的「6 支」字樣改為「7 支」——**這是 Task 389 對 t386 的唯一必要更新**（把「已串接」狀態改成 `true` 是 Task 390 的範圍，因為要等欄位解析完成才算真正串接完；但 route 數從 6 條變 7 條是 Task 389 造成的事實，必須同步，否則 t386 的「## 背景」小節會立刻與程式碼不符）。t386.md 全文並未出現 `test_exact_six_routes_auth_and_methods` 這個 Python 測試名稱本身，不需要在 t386.md 裡另外更新它。
 
-- [ ] **388.4 backend 新增 `FubonBrokerClient.readEtfHoldings()` 與 `FubonDtos` 型別。** `FubonBrokerClient` 介面新增：
+- [ ] **389.4 backend 新增 `FubonBrokerClient.readEtfHoldings()` 與 `FubonDtos` 型別。** `FubonBrokerClient` 介面新增：
   ```java
   FubonDtos.CallResult<FubonDtos.EtfHoldingsBatchResponse> readEtfHoldings(List<String> codes);
   ```
@@ -149,7 +149,7 @@ def quote(self, code: str) -> object:
   ```
   `rawResponseJson` 為不可變 `String`，**不得**用 `Map`／`JsonNode` 代替；只需能被 Jackson 反序列化成字串（若 Python 端該欄位本身就是字串化的 JSON，`String` 欄位直接對應即可，不需自訂 deserializer）。
 
-- [ ] **388.5 新增 Liquibase changeset 與資料表。** 新增 `backend/src/main/resources/db/changelog/changes/v1.120.0-fubon-etf-holdings-snapshot.sql`（版號先跑 `bash scripts/spec-check.sh` 核對是否已被佔用，若已被佔用依既有編號避讓慣例往後遞補並更新本任務檔與所有引用處）：
+- [ ] **389.5 新增 Liquibase changeset 與資料表。** 新增 `backend/src/main/resources/db/changelog/changes/v1.120.0-fubon-etf-holdings-snapshot.sql`（版號先跑 `bash scripts/spec-check.sh` 核對是否已被佔用，若已被佔用依既有編號避讓慣例往後遞補並更新本任務檔與所有引用處）：
   ```sql
   CREATE TABLE fubon_etf_holdings_snapshot (
       etf_stock_code    VARCHAR(20) NOT NULL,
@@ -164,7 +164,7 @@ def quote(self, code: str) -> object:
   ```
   同 key 覆寫（比照既有 `fubon_taiex_index_latest`——`PRIMARY KEY (index_code)`，不含日期欄位——的「同 key 覆寫、只留最新一筆」慣例；**不是** `etf_nav_history`，該表用 `UNIQUE (stock_code, market, nav_date)` 逐日各留一筆，語意恰恰相反，是刻意保留歷史的表，不適用於本次設計）——本表只保存「目前最新一次抓取結果」，不做時間序列。新增對應 JPA Entity（`FubonEtfHoldingsSnapshot`，`@Id private String etfStockCode`）與 `FubonEtfHoldingsSnapshotRepository`（`JpaRepository<FubonEtfHoldingsSnapshot, String>`，或視需要加 `findByEtfStockCode`，`@Id` 查詢本身即可用 `findById`）。完成後依 `db/schema.sql` 檔頭「重新產生」段重產該檔，並以 `bash scripts/tests/schema-sql-drift-test.sh` 確認回 0。此表不透過任何 API／DTO 對外暴露。
 
-- [ ] **388.6 新增 `FubonEtfHoldingsSyncScheduler` 與 `FubonEtfHoldingsSyncService`（`com.steven.assets.integration.fubon` package）。** Scheduler 比照既有 `FubonTradeSyncScheduler` 的骨架：獨立 process-local `AtomicBoolean inFlight`（`compareAndSet` single-flight，`finally` 釋放），兩個獨立 `@Scheduled` 方法：
+- [ ] **389.6 新增 `FubonEtfHoldingsSyncScheduler` 與 `FubonEtfHoldingsSyncService`（`com.steven.assets.integration.fubon` package）。** Scheduler 比照既有 `FubonTradeSyncScheduler` 的骨架：獨立 process-local `AtomicBoolean inFlight`（`compareAndSet` single-flight，`finally` 釋放），兩個獨立 `@Scheduled` 方法：
   ```java
   @Scheduled(cron = "0 50 8 * * MON-FRI", zone = "Asia/Taipei")
   public void syncMorning() { runIfNotInFlight(); }
@@ -176,12 +176,12 @@ def quote(self, code: str) -> object:
   1. 讀新增獨立 `@Value("${fubon.etf-holdings-sync-enabled:false}")` feature flag；`false` 直接 no-op（不呼叫 configState、calendar 或 adapter）。
   2. `FubonConfigState.snapshot().state()` 必須為 `READY`，否則 no-op。
   3. 呼叫既有 `MarketDataService.isTwTradingDayKnown(today)`（`Asia/Taipei` 今日），只有明確 `Optional.of(true)` 才繼續，`Optional.empty()`／`Optional.of(false)` 一律 no-op（`RuntimeException` 視為 `Optional.empty()`，比照既有 `FubonTradeSyncScheduler`／`FubonInventorySyncScheduler` 用法）。
-  4. 呼叫 388.7 的雷達 ETF 代碼查詢；空集合直接 no-op（不算錯誤）。
+  4. 呼叫 389.7 的雷達 ETF 代碼查詢；空集合直接 no-op（不算錯誤）。
   5. 超過 50 檔時分批呼叫 `readEtfHoldings`（每批 ≤50），逐批合併結果；50 檔以內單批呼叫即可。
   6. 逐檔依 `status` upsert 進 `fubon_etf_holdings_snapshot`：`SUCCESS` 寫 `success=true, raw_response_json=<rawResponseJson>, reason=NULL, fetched_at=now(), updated_at=now()`；`FAILURE` 寫 `success=false, raw_response_json=NULL, reason=<reason>, fetched_at=now(), updated_at=now()`。單檔失敗不影響其他檔，也不中止本輪其餘代碼。
   `docker-compose.yml` 的 `business-services` 服務 `environment` 區塊新增一行 `FUBON_ETF_HOLDINGS_SYNC_ENABLED: ${FUBON_ETF_HOLDINGS_SYNC_ENABLED:-false}`（緊鄰既有 `FUBON_TRADE_SYNC_ENABLED` passthrough，第 170 行附近）；`.env`／`.env.example` 新增 `FUBON_ETF_HOLDINGS_SYNC_ENABLED=false`（緊鄰既有 `FUBON_TRADE_SYNC_ENABLED=false`）。
 
-- [ ] **388.7 雷達 ETF 代碼查詢。** 在 `FubonEtfHoldingsSyncService`（或獨立小型 helper，視程式碼整潔度自行判斷，不強制分檔）新增方法，SQL 語意與 `external-materials-service` 的 `StockSourceQuery.collectTwRadarCodes` 完全等價（可用 `JdbcTemplate` 或等價 JPA native query）：
+- [ ] **389.7 雷達 ETF 代碼查詢。** 在 `FubonEtfHoldingsSyncService`（或獨立小型 helper，視程式碼整潔度自行判斷，不強制分檔）新增方法，SQL 語意與 `external-materials-service` 的 `StockSourceQuery.collectTwRadarCodes` 完全等價（可用 `JdbcTemplate` 或等價 JPA native query）：
   ```sql
   SELECT stock_code FROM stock_holding WHERE market = '台股'
     AND snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot
@@ -191,7 +191,7 @@ def quote(self, code: str) -> object:
   ```
   排除 `0000`；取得候選集合後，只保留 `MarketDataService.isEtf(code, "台股")` 為 `true`（`code.startsWith("00")`）的代碼。方法簽章建議 `Set<String> collectTwRadarEtfCodes()`，回傳空集合視為合法（雷達目前沒有任何台股 ETF）。
 
-- [ ] **388.8 登錄排程列表與測試。** `SchedulePublicBffController.JOBS` 新增一筆：
+- [ ] **389.8 登錄排程列表與測試。** `SchedulePublicBffController.JOBS` 新增一筆：
   ```java
   new ScheduledJobDto(BUSINESS, "券商庫存", "富邦 ETF 成分股持股同步",
           "以隔離的富邦官方 Linux SDK 唯讀查詢今日交易雷達範圍內的台股 ETF 成分股持股明細，"
@@ -200,7 +200,7 @@ def quote(self, code: str) -> object:
   ```
   `SchedulePublicBffControllerTest` 的「項目數正確()」測試：**先跑現行測試取得當下真實基準值**（不得假設是某個寫死的數字），總數與 `BUSINESS` 分類數各加一。為 `FubonEtfHoldingsSyncService` 新增單元測試（檔名比照既有慣例：Service 名稱後綴加 Test；mock `FubonBrokerClient`／`FubonConfigState`／`MarketDataService`／repository）：驗證 feature flag off 時 no-op（零呼叫）；`configState` 非 READY 時 no-op；交易日判斷回 `empty`／`false` 時 no-op；雷達代碼為空集合時 no-op；成功／失敗混合回應正確 upsert 對應列且互不影響；超過 50 檔時正確分批。
 
-- [ ] **388.9 不在本次範圍。** 不解析 `raw_response_json` 內容（欄位名稱未核實，不得臆測）；不修改 `MarketDataService.getEtfHoldings()` 既有行為；不刪除 `external-materials-service` 既有 MoneyDJ／Yahoo 爬蟲程式碼；不新增手動觸發端點；不新增使用者可調整的排程時間或觸發按鈕；不做任何下單、改單、圈存或轉帳類 API 呼叫；不影響既有富邦庫存同步／成交同步／TW LIVE 報價／大盤指數串流的邏輯或 feature flag。
+- [ ] **389.9 不在本次範圍。** 不解析 `raw_response_json` 內容（欄位名稱未核實，不得臆測）；不修改 `MarketDataService.getEtfHoldings()` 既有行為；不刪除 `external-materials-service` 既有 MoneyDJ／Yahoo 爬蟲程式碼；不新增手動觸發端點；不新增使用者可調整的排程時間或觸發按鈕；不做任何下單、改單、圈存或轉帳類 API 呼叫；不影響既有富邦庫存同步／成交同步／TW LIVE 報價／大盤指數串流的邏輯或 feature flag。
 
 ## 驗證
 

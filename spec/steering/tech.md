@@ -133,7 +133,7 @@ cd frontend
 | **Yahoo FX** | USD/TWD 中間價備援 | 無 | 兩家銀行皆失敗時才用，`buy=sell=mid` 且公開 API 標 `INDICATIVE` |
 | **FinMind TaiwanExchangeRate** | 匯率歷史／收盤後對帳 | `FINMIND_TOKEN`（可匿名但限流） | 17:00 寫 `exchange_rate_history`，不負責 2 秒 live cache |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
-| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[gdrive-crypt]` | read-only volume 掛入 **business-services**；檔名與內容皆加密 |
+| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[GoogleDriver]`＋`[gdrive-crypt]` | read-only volume 掛入 **business-services**；`BackupService` 每個 remote workflow 依 source fingerprint 熱重載 `/tmp/rclone.conf`，並先驗 exact raw backing root；檔名與內容皆加密 |
 | **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 245 |
 
 > **單一 config 檔的已知取捨（使用者明示的決定）**：`~/.config/rclone/rclone.conf` 同時含
@@ -156,8 +156,12 @@ cd frontend
 > 當天 15:30／15:53／16:02 三次，最後那次在容器 recreate 後 1 分鐘內就讓掛載又 dangling。
 > 掛目錄後新檔即時可見；但**若 `~/.config/rclone` 目錄本身被替換**（`mv` 重建、還原備份、換機）仍會 dangling。
 >
-> **仍須 `--force-recreate` 才會用到新設定**：兩支 client 在啟動時複製到 `/tmp` 後執行期不重讀
-> （刻意不做熱重載，理由是範圍控制而非 token 新舊）。驗證掛載不可只用 `ls`，要實際讀取。
+> **config lifecycle 依用途分流，不可再一概寫成 startup-only**：Drive 輸出用的兩支 `GDriveOutput`
+> client（`RcloneClient`／`ProcessGdriveUploader`）仍只在啟動時複製到 `/tmp/rclone-output.conf`，執行期不重讀；
+> host 重新授權 `GDriveOutput:` 後仍須 `--force-recreate` 對應容器。DB 備份專用 `BackupService` 則在啟動時
+> 與**每個** manual／scheduled／restore／sync／rotate remote workflow 重讀 source bytes，以 last-loaded source
+> fingerprint 判斷是否原子熱重載 `/tmp/rclone.conf`；host reconnect `GoogleDriver:` 後下一次 workflow 自動載入，
+> 無須 recreate `business-services`。兩者都禁止用 `ls` 代替實際讀取 source。
 >
 > **`[GDriveOutput]` 的 token 必須含 `refresh_token`**：缺了的話 access_token 一過期（實測約 1 小時）即回
 > `token expired and there's no refresh token`，且**無法自動續期**——2026-07-28 的實際事故。
@@ -244,6 +248,7 @@ cd frontend
 ### 5.4 備份／還原
 
 - **工具：** `pg_dump` / `pg_restore` + `rclone gdrive-crypt`，皆透過 `ProcessBuilder` 呼叫。
+- **備份 config lifecycle：** `/etc/rclone/rclone.conf` 是唯讀 source，`/tmp/rclone.conf` 是 writable snapshot；`BackupService` 在每個 remote workflow 以 last-loaded source SHA-256 fingerprint 判斷原子熱重載，並於任何 crypt copy／list／delete 前 exact 驗證 raw `GoogleDriver:asset-management-backup` 已存在。workflow 入口的主動 fingerprint reload 不消耗 auth recovery；進 `INITIAL_GATE` 時 recovery budget 仍未使用，只有後續 auth failure 且 source 再次 changed 才可消耗一次。此規則只適用 DB 備份；`GDriveOutput` 仍為 startup-only。
 - **保留代數（DB `backup_setting` 表單列）：** daily 50 / weekly 5 / manual 5（自救點不計入）。
 - **儲存設定當下立即套用 retention**，不等下一次排程。
 - **還原流程：** 自動先建 `asset_auto-pre-restore_*.dump` 自救點 → 跑 pg_restore → 前端遮罩 → HikariCP 自動重連。
@@ -298,7 +303,7 @@ git config core.hooksPath scripts/git-hooks
 | `REDIS_HOST` / `REDIS_PORT` | 由 compose 注入（redis / 6379） |
 | `FINMIND_TOKEN` | FinMind Bearer token（選填，未設則匿名） |
 | `BUSINESS_SERVICES_URL` | BFF 路由目標（compose 設 `http://business-services:8080`） |
-| `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（host `~/.config/rclone` **目錄**唯讀掛入 `/etc/rclone`，值指向其中的 `rclone.conf`；掛目錄而非單檔的理由見 §4 的 Task 247 條）。程式啟動時各自複製到 `/tmp` 可寫副本（`BackupService` → `/tmp/rclone.conf`、Drive 輸出 → `/tmp/rclone-output.conf`；rclone 續期 OAuth token 需寫回，實測 token 幾乎每次呼叫都已過期），實際呼叫時以 per-process 覆寫指定 |
+| `RCLONE_CONFIG` | business 與 ext 皆為 `/etc/rclone/rclone.conf`（host `~/.config/rclone` **目錄**唯讀掛入 `/etc/rclone`，值指向其中的 `rclone.conf`；掛目錄而非單檔的理由見 §4 的 Task 247 條）。實際 rclone 皆以 per-process 覆寫指向 `/tmp` 可寫副本（token 續期需寫回）：`BackupService` 的 `/tmp/rclone.conf` 在啟動及每個 backup remote workflow 依 source fingerprint 熱重載；Drive 輸出的 `/tmp/rclone-output.conf` 仍只在各 client 啟動時複製、執行期不重讀 |
 | `GDRIVE_OUTPUT_REMOTE` | Drive 輸出用的 remote 名稱（預設 `GDriveOutput`）；需先由使用者以 `rclone config create GDriveOutput drive scope=drive` 建立（**`scope=drive` 是必要的**——`drive.file` 只看得到 rclone 自己建的檔案，列不出使用者手動建的目錄）。**現行為自訂 OAuth client**，授權時務必帶 `--drive-auth-url "…?prompt=consent"`（否則拿不到 refresh_token，見 §4）。Requirement 50 / Task 245、Requirement 52 / Task 247 |
 
 ---
