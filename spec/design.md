@@ -828,6 +828,8 @@ src/
   - 輪替策略：`daily/` 保留 50 份、`weekly/` 保留 5 份、`manual/` 保留 5 份（自救點不計入）
   - 輪替觸發點：(a) 每次排程／手動備份成功上傳後對該資料夾跑一次；(b) `updateSetting()` 儲存後對三個資料夾各跑一次（讓使用者調降保留代數時立即套用，不需等到下一次排程）。rotate 失敗以 `try/catch` 包住只記 log，不讓設定儲存 API 失敗
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
+  - rclone config lifecycle（Task 388）：`/etc/rclone/rclone.conf` 是唯讀 source，`/tmp/rclone.conf` 是 rclone 可自行續期寫回的 writable snapshot。啟動時及每個 remote workflow 都以 source bytes 的 SHA-256 對比「上次成功載入的 source fingerprint」；不得拿會被 rclone 改寫的 writable snapshot 反向比較。source 變更時以同 filesystem temp＋`0600`＋`ATOMIC_MOVE`原子替換，單一 fair reentrant lock 序列化 fingerprint、重載、raw-root 守門與所有使用該 snapshot 的 rclone 子行程。
+  - remote identity gate（Task 388）：手動／排程備份、restore／sync／rotate 在 crypt copy／list／delete 前必須先以 raw `GoogleDriver:` 唯讀驗證 exact `asset-management-backup/` 已存在。錯帳號或缺 root 時不自動建目錄、不碰 crypt remote 或 DB index；sync 尤其不得將錯帳號的空列表當成權威狀態清掉 `backup_record`。
 - `WatchStockService`: 觀察清單 view 服務（不再對應實體表）。`findAll()` 由 `StockAlertRepository.findDistinctStockCodeMarket()` 取得去重 (stockCode, market) 清單後，整合 Redis live 報價（透過 `PriceQueryService`）、技術指標（`TechnicalIndicatorService.computeAll()` 回傳 `FullIndicators`：月線 MA20／季線 MA60／年線 MA240／K／D，填入 `WatchStockDto.Response` 的 `monthlyMa`／`quarterlyMa`／`annualMa`／`kValue`／`dValue`）與該股票最近一次 StockAlert 觸發資訊；`reorder(orderedStockKeys)` 拖曳重排時把每個股票所有 alert 的 `displayOrder` 整組依新順序重新指派；不提供 delete 入口（移除觀察一律由 `StockAlertService.delete` 在「警示條件」頁逐筆刪除）。**「警示」欄顯示窗**：最近觸發（時間／股價／月線／季線／年線／KD）與「警示條件」紅字只顯示落在 `StockAlertService.FRESHNESS_TRADING_DAYS`（= 2，最後交易日及前一日）內的觸發，cutoff 由 `recentTradingDayCutoff(market, 2)` 取 `stock_price_history` 最近 2 個 distinct `trading_date` 之較早一天午夜；與警示頁 `StockAlertService.toResponse` 共用同一常數確保兩頁口徑一致（同義欄位同一來源）。此 UI 顯示窗與 `stock_alert_trigger` 保留 30 天為兩個獨立概念。**「警示條件」欄的 MA% 觸發價**：`buildConditions()` 把已算好的 `FullIndicators` 一併傳給 `StockAlertService.buildLabel(alert, ind)`，`MA_*_PCT` 且 threshold≠0 的條件於 label 附換算後的觸發價（`對應均線 × (1 ± pct/100)`，如「高於季線 20%（360）」），重用同一份即時均線值、不另查（Task 146，詳 Requirement 16）。**複合 AND 群組（Task 253）**：`buildConditions()` 把 `group_id` 相同的成員合併成**一條** `Condition`（label 以 `" 且 "`（前後各一個半形空白）串接、`triggered` 取該群組的 `lastTriggeredAt` 而非成員的），不再逐條列出——否則使用者在觀察頁看到的是散開的多條，看不出那是「同時成立才觸發」；「警示」欄的最近觸發彙總（`lastAlert`）亦需納入該股票所有群組的 `lastTriggeredAt` 一併取 max。**`0000` 台股大盤走 `toIndexResponse` 特例分支**（見下方「觀察清單 0000 的盤中報價來源」）
 
 **觀察清單 `0000` 的盤中報價來源（Task 263）：** `toIndexResponse` 原本一律讀 `twse_index_daily_history` 最新一筆並寫死 `closed=true`。完成日 K 的今日列要等 `TwseIndexPoller` 的 14:00 排程才入庫，故 09:00–14:00 整個盤中「最新一筆」恆為**昨日**——實測 2026-07-31 13:41 該列的股價／開盤／最高／最低逐欄等於 7/30 完成日 K，而同一列的月線／季線／年線／KD 由 `computeAllForTaiex()` 算出、已含當日即時點位，畫面同時呈現「今天的指標」與「昨天的股價」。現行規則：
@@ -2660,12 +2662,14 @@ TTL 實測為 **600 秒**（原始封包 TTL 欄位 `0x00000258`），故舊 IP 
 
 ### 概念
 
-兩條獨立的備份軌道：
+備份由 `business-services` 內的 Spring 排程與 UI 手動入口共用同一支 `BackupService`；**現行沒有 host launchd 備份軌道**：
 
 | 軌道 | 觸發 | 目的 | 儲存位置 | 保留 |
 |------|------|------|---------|------|
-| 排程備份（既有） | host 端 launchd 每日 05:00 | 災難復原 | `gdrive-crypt:backups/{daily,weekly,monthly}/` | 15 / 4 / 6 |
-| 手動備份（新增） | UI 按鈕觸發 | 排程失敗時補救、還原前自救點 | `gdrive-crypt:backups/manual/` | 5（自救點不計入） |
+| 台股 daily | Spring `@Scheduled("0 30 15 * * MON-FRI", zone="Asia/Taipei")`；只在台股交易日執行 | 收盤後災難復原 | `gdrive-crypt:backups/daily/asset_daily_tw_*.dump` | daily 共用 50 |
+| 美股 daily | Spring `@Scheduled("0 0 7 * * TUE-SAT", zone="Asia/Taipei")`；前一日為美股交易日才執行 | 美股收盤後災難復原 | `gdrive-crypt:backups/daily/asset_daily_us_*.dump` | daily 共用 50 |
+| weekly | Spring `@Scheduled("0 0 5 * * SUN", zone="Asia/Taipei")` | 每週災難復原 | `gdrive-crypt:backups/weekly/asset_weekly_*.dump` | 5 |
+| 手動／還原前自救 | UI `POST /api/backups`／restore 內部觸發 | 排程失敗補救、破壞性還原前自救 | `gdrive-crypt:backups/manual/` | 手動 5；自救點不計入 |
 
 還原來源涵蓋四個資料夾，使用者可從任一備份點還原。
 
@@ -2683,28 +2687,45 @@ TTL 實測為 **600 秒**（原始封包 TTL 欄位 `0x00000258`），故舊 IP 
    ├─ BackupController
    ├─ BackupService
    │    ├─ ProcessBuilder → pg_dump  -h postgres -U $POSTGRES_USER -d $POSTGRES_DB --format=custom --compress=9
-   │    ├─ ProcessBuilder → rclone   rcat / copy / lsjson / delete
+   │    ├─ config lifecycle → source SHA-256 / atomic writable snapshot / single fair lock
+   │    ├─ raw identity gate → rclone lsf --dirs-only GoogleDriver: ≋ exact asset-management-backup/
+   │    ├─ ProcessBuilder → rclone copy / lsjson / deletefile（全部經過上述守門）
    │    └─ ProcessBuilder → pg_restore -h postgres ... --clean --if-exists
    ▼
 [postgres container]   [Google Drive via rclone crypt]
 ```
 
-容器內需安裝 `postgresql-client`（提供 pg_dump / pg_restore）與 `rclone`，rclone 設定以 read-only volume 從 host 掛入：
+容器內需安裝 `postgresql-client`（提供 pg_dump / pg_restore）與 `rclone`。compose 將 host rclone **目錄**以 read-only 掛入 `/etc/rclone`（目錄掛載才看得到 host 端原子 rename 後的新檔）：
 ```yaml
+environment:
+  RCLONE_CONFIG: /etc/rclone/rclone.conf
 volumes:
-  - ${HOME}/.config/rclone:/root/.config/rclone:ro
+  - ${HOME}/.config/rclone:/etc/rclone:ro
 ```
+
+`BackupService` 不直接讓 rclone 寫上述唯讀 source；實際子行程一律以 per-process `RCLONE_CONFIG=/tmp/rclone.conf` 使用可寫 snapshot。
 
 ### API 端點
 
 | Method | Path | 說明 | Request | Response |
 |--------|------|------|---------|----------|
 | `POST` | `/api/backups` | 觸發手動備份 | （無 body） | `{ filename, sizeBytes, uploadedAt }` |
-| `GET`  | `/api/backups` | 列出所有遠端備份 | （無） | `BackupItem[]` |
+| `GET`  | `/api/backups` | 從 `backup_record` 列出本地索引（DB-only，不連 remote） | （無） | `BackupItem[]` |
 | `POST` | `/api/backups/restore` | 從指定備份還原 | `{ folder, filename, confirmation: "確認還原" }` | `{ status, preRestoreBackup }` |
 | `GET`  | `/api/backups/settings` | 取得保留代數設定（含排程開關） | （無） | `{ manualRetention, dailyRetention, weeklyRetention, backupEnabled }` |
 | `PUT`  | `/api/backups/settings` | 更新保留代數設定（含排程開關） | `{ manualRetention, dailyRetention, weeklyRetention, backupEnabled }` | 同上 |
 | `POST` | `/api/backups/sync` | 從 Google Drive 同步本地索引：upsert 缺漏 / 清孤兒 | （無） | `SyncResponse` |
+
+remote 錯誤映射（Task 388）：
+
+| 條件 | HTTP | ProblemDetail 要求 |
+|---|---:|---|
+| `/etc/rclone/rclone.conf` 不可讀／無法原子安裝 writable snapshot | `503` | 說明 host config 不可用並可直接重試；不顯示 config 內容 |
+| raw `GoogleDriver:` 下 exact `asset-management-backup/` 不存在 | `503` | 指引確認 reconnect 選了含既有備份樹的正確帳號，並明言不會自動建立 |
+| auth failure 且 source 未變，或 source 變更後原子 reload＋單次 retry 仍失敗 | `503` | 提供安全的 `GoogleDriver:` reconnect／自動 reload 指引，不回 token／secret／未清洗 stderr |
+| 主要備份已 upload 且 DB record 已 durable commit，後續 rotate unavailable | 保留主要操作的 `2xx`；scheduled 無 HTTP | 只記清洗後 warning；不得把已成功的新備份反轉成失敗 |
+
+前三類在主要操作尚未成功時，由 backup-specific remote-unavailable exception 交給 `GlobalExceptionHandler` 明確處理，不得落入 generic `500`。post-commit rotate failure 則在 maintenance boundary 內轉為安全 warning，不送進 handler。參數白名單／確認字串錯誤繼續映射 `400`；本修復不改 API path、request／response DTO 或前端互動。
 
 `BackupItem` 結構：
 ```json
@@ -2719,27 +2740,47 @@ volumes:
 
 ### 後端流程
 
+**共用 remote session（所有 copy / lsjson / deletefile 的前置條件）**
+1. 取得 backup remote 的單一 fair reentrant lock；讀取 `/etc/rclone/rclone.conf` bytes 並計算 SHA-256。
+2. fingerprint 與 `lastLoadedSourceFingerprint` 不同時，才以同一份 bytes 寫同 filesystem 唯一 temp、設 `0600`、再 `ATOMIC_MOVE + REPLACE_EXISTING` 安裝成 `/tmp/rclone.conf`；成功後才更新 fingerprint。source 未變時絕不用它覆寫可能已被 rclone 續期的 writable snapshot。這一步是 workflow-entry 主動同步，即使真的 reload 也**不消耗 auth recovery**；完成後才建立 state 並令 `recoveryConsumed=false`。因此同一 workflow 可先有一次入口 reload，稍後 auth failure 且 source 再次 changed 時再有一次 recovery reload。
+3. 進入非遞迴 state machine 的 `INITIAL_GATE`。以 `/tmp/rclone.conf` 對 raw `GoogleDriver:` 做 dirs-only 唯讀列舉，exact match `asset-management-backup/`。root 缺失或非 auth failure 立即拋 backup remote 503，**不得**進入 crypt remote。若 gate 為 auth failure，重讀 source；fingerprint 未變即停止，變更時才原子 recovery reload、把 `recoveryConsumed=true`，接著執行一次 `FINAL_GATE`。`FINAL_GATE` 關閉自癒，無論何種失敗都立即停止；它是該 workflow 的第二次且最後一次 gate。
+4. gate 通過後進入 `CRYPT_COMMAND`。只有 `recoveryConsumed=false` 時，某支 target crypt command auth failure 才可重讀 source；fingerprint 未變即停止，變更時才原子 recovery reload 並消耗 recovery，先跑一次關閉自癒的 `VALIDATION_GATE`，通過後將**同一支 target command**恰好重試一次。該 target 最多 original＋retry 共 2 attempts；sync 前 N−1 支成功 list 或 rotate 前 N−1 支成功 delete 不計入 target attempts。若 initial gate 已消耗 recovery，或 validation／target retry／同 workflow 後續 crypt 再遇 auth failure，一律立即停止，不再 reload、gate 或 retry；非 auth failure 直接停止。helper 不得遞迴，且不得有 loop／backoff。
+5. workflow 完整生命期都持有同一把鎖，所以鎖內不可能由另一執行緒安裝新 config；設計中沒有跨執行緒 generation retry 分支。最後才釋放鎖。`sync` 的四個 folder 列舉改為同 session 序列執行，不共用 writable config 並行跑 rclone。
+
+state machine 的 calls 是可測契約：每個 workflow gate 總數最多 2（initial＋final 或 initial＋validation）；每支發生 auth failure 的 target crypt command 最多 2 attempts（original＋retry），不是把整個 workflow 的 crypt commands 總數限制為 2。第 N 支 sync list／rotate delete 成為 target 時，前 N−1 支成功 commands 各一次照常保留；target retry 失敗後第 N+1 起零呼叫。若入口 fingerprint changed，主動 reload 後仍以 recovery 未消耗開始；測試須再讓 target auth fail 且 source 二次 changed，斷言同 workflow 恰有入口 reload 1＋recovery reload 1、gate 最多 2、target attempts 2。
+
 **Backup (`POST /api/backups`)**
 1. 產生時間戳 `YYYYMMDD_HHMMSS`
 2. 暫存檔 `/tmp/asset_manual_${ts}.dump`
 3. 執行 `pg_dump --format=custom --compress=9 --no-owner --no-acl`，stdout 重導至暫存檔
-4. 執行 `rclone copy /tmp/asset_manual_${ts}.dump gdrive-crypt:backups/manual/`
-5. 列出 `manual/` 內 `asset_manual_*.dump`（排除 `auto-pre-restore`），保留最新 5 份，刪除其餘
-6. 刪除暫存檔
-7. 回傳成功訊息
+4. 進入共用 remote session：先熱重載＋raw-root 守門，通過後才執行 `rclone copy /tmp/asset_manual_${ts}.dump gdrive-crypt:backups/manual/`
+5. copy 成功後，在 rotate 前以獨立 transaction durable commit 新 `backup_record`；至此主要備份已成功
+6. 執行 retention rotate maintenance；入口重新通過 raw-root gate 後才可刪除。rotation unavailable 只記清洗後 warning，不 rollback 第 5 步、不把 manual 的成功改回 503，也不把 scheduled 本次備份標成失敗
+7. 刪除暫存檔並回傳成功訊息。排程備份共用同一流程，只替換 folder／prefix／retention
+
+**Rotate（備份成功後或 `PUT /api/backups/settings`）**
+1. 每個 folder rotation 先開一個 verified remote session；入口 config／raw-root gate 未通過時，該次 rotation 零 remote／DB mutation。
+2. gate 通過後依 DB 既有排序取得超出 retention 的 rows，逐筆執行 exact `deletefile`，不把整個迴圈包在會於尾端一起 rollback 的單一 transaction。
+3. 該筆 remote delete 成功，或 rclone 明確回報該 exact object 已不存在時，才以獨立可提交 transaction 刪除對應 `backup_record`；完成後才處理下一筆。
+4. 第一筆無法自癒的 remote unavailable 立即停止該 folder：失敗 row 與其後 rows 保持不動；先前已成功的 remote delete 與 DB-row commit 保留、不 rollback。主要備份與設定已先 durable commit，因此只記安全 warning；設定儲存沿用既有契約繼續嘗試其他 folder。
 
 **List (`GET /api/backups`)**
-1. 對 `daily/` `weekly/` `monthly/` `manual/` 各執行 `rclone lsjson --files-only`
-2. 合併結果，標註 `folder` 欄位，依 `ModTime` 由新到舊排序
-3. 解析檔名前綴判斷 `isAutoPreRestore`
+1. 只讀 `backup_record`，依 `modified_at` 新→舊排序後投影 `BackupItem`。
+2. 本路徑不讀 rclone、不取 remote lock、不做 raw-root 守門。remote 與 DB 對齊只由使用者明確觸發的 `POST /api/backups/sync` 執行。
+
+**Sync (`POST /api/backups/sync`)**
+1. 進入共用 remote session，raw root 未通過即回 503，不執行任何 crypt `lsjson`。
+2. 根目錄已驗證後，在同 session 依序列舉 `manual/` `daily/` `weekly/` `monthly/`；個別子目錄 `directory not found` 才視為該 folder 空清單。
+3. 四個列舉全部成功後才做 upsert／清孤兒；任一 remote 錯誤則整個 transactional workflow 不得刪任何 `backup_record`。
 
 **Restore (`POST /api/backups/restore`)**
 1. 驗證 `confirmation === "確認還原"`，否則回 400
-2. 執行手動備份流程（自救點），檔名 `asset_auto-pre-restore_${ts}.dump`，**不**做 5 份輪替
-3. `rclone copy gdrive-crypt:backups/${folder}/${filename} /tmp/`
-4. `pg_restore --clean --if-exists --no-owner --no-acl -h postgres -U $user -d $db /tmp/${filename}`
-5. 刪除暫存檔
-6. 回傳成功（不需重啟 backend，HikariCP 會自動重連）
+2. 先進入共用 remote session 驗證 config／raw root；失敗即停止，不建自救點、不執行 `pg_restore`
+3. 執行手動備份流程（自救點），檔名 `asset_auto-pre-restore_${ts}.dump`，**不**做 5 份輪替；上傳成功後才進下一步
+4. 再經 raw-root 守門後執行 `rclone copy gdrive-crypt:backups/${folder}/${filename} /tmp/`
+5. 下載成功才執行 `pg_restore --clean --if-exists --no-owner --no-acl -h postgres -U $user -d $db /tmp/${filename}`
+6. 刪除暫存檔
+7. 回傳成功（不需重啟 backend，HikariCP 會自動重連）
 
 ### 安全
 
@@ -2747,6 +2788,9 @@ volumes:
 - `pg_restore --clean` 期間 backend 對 DB 的請求會短暫失敗，前端 UI 加遮罩防止使用者誤觸
 - 備份檔在 Google Drive 上由 rclone crypt 加密，檔名與內容皆不可讀
 - 後端僅透過 ProcessBuilder 執行**白名單**指令，不接受使用者輸入拼接命令
+- raw `GoogleDriver:asset-management-backup` 是每次 remote workflow 的 fail-closed 身分守門，不存在時程式不得用 copy／mkdir 建立，避免在 reconnect 選錯帳號時建出第二棵假備份樹
+- backup remote 的 auth／config／root 錯誤只能對外回清洗後的 503。任何 log／ProblemDetail 都不得含 config 內容、access/refresh token、client secret、crypt password 或 Bearer value；只可提供不含密密的 reconnect、exact-root 驗證與「直接重試即自動 reload」指引
+- redaction fixture 必含非空 `client_id`、`client_secret`、`token = {"access_token":...}`、`password2` 與 Bearer sentinel；對外 detail／exception／log 必須找不到 sentinel value。runtime 掃描只有在敏感 key 後出現 `=`／`:` 與非空 value 時才命中，單純安全指引提到鍵名不算洩密
 
 ### 前端
 
@@ -3578,13 +3622,15 @@ POST /api/bff/crawler-data/export/fetch-and-run-now     → POST /api/crawler-ex
 
   | 用途 | 唯讀掛入 | 可寫副本 | 使用者 | ext | business |
   |---|---|---|---|---|---|
-  | DB 備份／還原 | `/etc/rclone/rclone.conf` | `/tmp/rclone.conf` | `BackupService` | 掛（但不使用） | 掛 |
+  | DB 備份／還原 | `/etc/rclone/rclone.conf`（source） | `/tmp/rclone.conf`（source-fingerprint hot-reload snapshot） | `BackupService` | 掛（但不使用） | 掛／使用 |
   | Drive 輸出／目錄列舉 | `/etc/rclone/rclone.conf` | `/tmp/rclone-output.conf` | `RcloneClient`／`ProcessGdriveUploader` | 掛 | 掛 |
+
+  DB 備份的 remote 身分不能只靠 crypt remote name：每個 manual／scheduled／restore／sync／rotate workflow 都在 crypt copy／list／delete 前，先以當次 writable snapshot 對 raw `GoogleDriver:` 做 dirs-only 唯讀列舉並 exact match `asset-management-backup/`。該 root 不存在代表可能 reconnect 到錯帳號；主要操作尚未成功時程式以 503 fail closed，不呼叫會自動建目錄的 crypt copy、不清 `backup_record`。主要備份已 durable commit 後的 rotate gate 失敗則停止 rotation、零 rotate mutation 並記安全 warning，不反轉主要成功。
 
   **代價**：`external-materials-service`（全 stack 唯一對外打第三方者：TWSE／NASDAQ／FinMind／新聞爬蟲，攻擊面最大）也讀得到備份的 OAuth refresh token 與 crypt 解密密碼——即具備**解密整庫財務備份**的能力。原設計為分離兩份以避免此擴權；改為共用是為省下第二份檔案的維護與搬機成本，且實測兩個 remote 為**同一個 Google 帳號**（`rclone about` 的 Total／Used 一致），分離的實際收益本就有限。**若要復原隔離**：host 上仍保留只含 `[GDriveOutput]` 的 `~/.config/rclone/rclone-gdrive-output.conf`，把 compose 兩處掛載與 `RCLONE_CONFIG` 改回 `/etc/rclone/rclone-output.conf`、兩支 client 的 `CONFIG_SOURCE` 一併改回即可（**Task 247 後掛載粒度已是目錄，復原時要一併改回單檔掛載**——但那會重新引入下方所述的 dangling inode）。
 - **兩份可寫副本刻意分開**（`/tmp/rclone.conf` vs `/tmp/rclone-output.conf`）：來源同一份，但各自續期自己的 access token、互不覆寫。
 - **掛目錄而非單檔（Requirement 52 / Task 247）**：compose 兩處掛的是 `${HOME}/.config/rclone:/etc/rclone:ro`（目錄），**不是** `…/rclone.conf:/etc/rclone/rclone.conf:ro`（單檔）。`RCLONE_CONFIG` 與兩支 client 的 `CONFIG_SOURCE` 仍為 `/etc/rclone/rclone.conf`、值不變。原因：`rclone config` 寫設定是「寫新檔＋rename」原子替換，**單檔掛載下替換後容器內舊 inode 的 link count 歸零**——2026-07-28 實測兩容器皆 `stat` 看得到（`links=0`）而 `cat` 回 `ENOENT`，使得「使用者去 host 重新授權」對執行中的容器完全無效。**這是常態而非例外**：rclone 每次續期 OAuth token 都會重寫 config，實測當天 15:30／15:53／16:02 三次原子替換，其中 16:02 那次發生在容器 recreate 後 1 分鐘內、掛載當場又 dangling。掛目錄後該路徑每次經目錄查找解析，新檔即時可見。**限縮**：消除的是「單檔替換」造成的 dangling；若 `~/.config/rclone` **目錄本身**被替換（`mv` 後重建、還原備份、換機搬設定），掛載仍指向舊目錄 inode，同一失效模式往上搬一層，屆時仍須 recreate。副作用：該目錄下其他檔（`rclone-gdrive-output.conf`、`rclone.conf.bak-before-merge`）一併唯讀進入容器；不擴大權限面，因為單一 config 檔的共用取捨已使兩容器都讀得到同一組憑證。
-- **掛目錄不等於免重啟**：兩支 client 都在啟動時複製一份到 `/tmp` 後**執行期不再重讀來源**，故 host 重新授權後仍須 recreate 容器才生效。**刻意不做 config 熱重載**——理由是範圍控制（需要 watch／輪詢與並發保護，收益只有省一次 recreate）；**不要以「重載會覆蓋較新的 token」為理由**，那個理由撐不住：token 健康時 rclone 會自己再 refresh、只多一次網路往返，token 缺 `refresh_token` 時從來源重載反而正是想要的行為。改變的只是失效模式：從「`ls` 看得到卻讀不到」的怪症狀，變成「用的是舊 token」這種自檢會直接指名的狀況。驗證掛載時仍不可只用 `ls`，要實際讀取（`head -c 1 <file> >/dev/null && grep -o '^\[.*\]' <file>`）。
+- **掛目錄不等於所有 client 都自動熱重載（Requirement 15 / Task 388 限縮覆寫）**：`GDriveOutput` 的 `RcloneClient`／`ProcessGdriveUploader` 仍在啟動時複製到 `/tmp/rclone-output.conf`、執行期不重讀 source，host 重新授權後仍須 recreate 對應容器；Requirement 52 的 L1/L2/L3 自檢與 best-effort 語意不變。**DB 備份專用 `BackupService` / `/tmp/rclone.conf` 不再適用這個 startup-only 取捨**：它在啟動時與每個 remote workflow 重讀 source bytes，以 `lastLoadedSourceFingerprint` 判斷是否原子 reload；不比較會被 rclone 續期改寫的 writable snapshot。host reconnect `GoogleDriver:` 後下一次備份操作即自動載入，無須 recreate `business-services`。讀 source／atomic replace／raw-root gate／rclone subprocess 共用單一 fair reentrant lock；任一失敗保留舊 snapshot 與舊 fingerprint。驗證掛載時仍不可只用 `ls`，要實際讀取（`head -c 1 <file> >/dev/null && grep -o '^\[.*\]' <file>`）。
 - **可用性自檢三層 ＋ 兩個時機（Requirement 52 / Task 247）**：**全部只寫 WARN log、不阻止啟動、不阻止設定儲存、不影響 `configReady` 與任何既有判定**。三層各自對應一種 2026-07-28 實際發生過的失敗，缺一層就會漏掉其中一種：
 
   | 層 | 檢查 | 擋掉的失敗 | 為何不能省 |
