@@ -5,6 +5,7 @@ import logging
 import platform
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -19,6 +20,7 @@ from .quotes import QuoteError, QuoteService
 from .redaction import install_log_redaction, redact_mapping
 from .sdk_gateway import SdkCallError, SdkGateway
 from .taiex_index_stream import TaiexIndexStream, TaiexIndexStreamError
+from .trades import TradeReadError, TradeReadService
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +63,18 @@ class QuoteReadRequest(BaseModel):
         return value
 
 
+class TradeReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    startDate: StrictStr
+    endDate: StrictStr
+
+    @field_validator("startDate", "endDate")
+    @classmethod
+    def valid_iso_date(cls, value: str) -> str:
+        date.fromisoformat(value)  # raises ValueError -> 400 via RequestValidationError
+        return value
+
+
 def _sdk_version() -> str:
     for distribution in ("fubon-neo", "fubon_neo"):
         try:
@@ -75,6 +89,7 @@ def create_app(
     gateway: SdkGateway | None = None,
     portfolio_service: PortfolioService | None = None,
     quote_service: QuoteService | None = None,
+    trade_service: TradeReadService | None = None,
     counters: OutcomeCounters | None = None,
     taiex_index_stream: TaiexIndexStream | None = None,
 ) -> FastAPI:
@@ -82,6 +97,7 @@ def create_app(
     sdk_gateway = gateway or SdkGateway(loader)
     portfolio = portfolio_service or PortfolioService(sdk_gateway)
     quotes = quote_service or QuoteService(sdk_gateway)
+    trades = trade_service or TradeReadService(sdk_gateway)
     outcome_counters = counters or OutcomeCounters()
     index_stream = taiex_index_stream or TaiexIndexStream(sdk_gateway)
 
@@ -223,6 +239,29 @@ def create_app(
         else:
             outcome_counters.increment(Outcome.SUCCESS)
         result["counters"] = outcome_counters.snapshot()
+        return result
+
+    @application.post("/internal/trades/read")
+    def trades_read(
+        request: TradeReadRequest,
+        _config: ConfigSnapshot = Depends(authorize),
+    ) -> dict[str, object]:
+        start = date.fromisoformat(request.startDate)
+        end = date.fromisoformat(request.endDate)
+        if start > end or (end - start).days > 7:
+            raise HTTPException(status_code=400, detail=redact_mapping({"reason": "INVALID_DATE_RANGE"}))
+        try:
+            result = trades.read(request.startDate, request.endDate, _config.internal_service_token or "")
+        except SdkCallError as exc:
+            outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
+            outcome_counters.increment(outcome)
+            logger.warning("Fubon filled-trades read failed reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except TradeReadError as exc:
+            outcome_counters.increment(Outcome.RECONCILE_FAILED)
+            logger.warning("Fubon filled-trades reconciliation rejected reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.SUCCESS)
         return result
 
     @application.get("/internal/market-data/taiex-index/stream")

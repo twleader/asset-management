@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–384）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–385）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -383,6 +383,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 382 | 校正交易雷達 evidence gate 風險分類、三軌候選／實際動作可讀性與 V18 持有期聚焦（Requirement 117） | [tasks/t382_radar_decision_clarity.md](tasks/t382_radar_decision_clarity.md) |
 | 383 | 9090 以一支唯讀批次 API 提供 WTI、Brent 與黃金已持久化即時報價，並同步 Swagger 與 SRPP 文件（Requirement 118） | [tasks/t383_public_commodity_prices_9090.md](tasks/t383_public_commodity_prices_9090.md) |
 | 384 | 公開資訊新增「開放 API」：登入後由 BFF 讀取唯一 9090 OpenAPI 契約、動態列出並展開 Swagger（Requirement 119） | [tasks/t384_open_api_documentation_view.md](tasks/t384_open_api_documentation_view.md) |
+| 385 | 富邦台股成交紀錄同步排程：比照既有庫存同步節拍，盤中每 30 分鐘唯讀查詢富邦成交紀錄，冪等新增系統尚未記錄的交易到交易紀錄（Requirement 120） | [tasks/t385_fubon_trade_sync.md](tasks/t385_fubon_trade_sync.md) |
 
 > **註：Task 229–263、268、293–296 以各自任務檔為準。**
 

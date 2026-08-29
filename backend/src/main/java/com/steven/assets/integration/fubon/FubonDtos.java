@@ -83,4 +83,24 @@ public final class FubonDtos {
             Long snapshotId,
             String reason,
             Map<FubonOutcome, Long> counters) {}
+
+    public record TradeReadRequest(String startDate, String endDate) {}
+
+    public record TradeBatchResponse(
+            String batchId,
+            LocalDate startDate,
+            LocalDate endDate,
+            String accountFingerprint,
+            boolean emptyConfirmed,
+            List<FilledTrade> trades) {}
+
+    public record FilledTrade(
+            String stockCode,
+            String side,
+            long filledQty,
+            CanonicalFubonDecimal filledPrice,
+            CanonicalFubonDecimal filledAvgPrice,
+            LocalDate filledDate,
+            String filledTime,
+            String filledNo) {}
 }

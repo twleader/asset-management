@@ -125,6 +125,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股現股庫存同步",
                     "以隔離的富邦官方 Linux SDK 唯讀對帳 configured admin 現股庫存，交易日內只局部替換最新快照的富邦台股持股",
                     "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 當日成交紀錄，新增系統尚未記錄的交易到交易紀錄，以富邦成交序號防止重複新增，不覆寫既有紀錄",
+                    "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
 
             // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",

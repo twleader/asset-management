@@ -143,6 +143,71 @@ class SdkGateway:
                     raise SdkCallError("ACCOUNTING_TRANSPORT_FAILED") from None
             raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
 
+    def selected_account(self) -> SelectedAccount:
+        """Read-only accessor for the currently selected account identity.
+
+        Reuses the same cached session as read_accounting_pair/read_filled_trades
+        (a cache hit does no SDK I/O); never invokes an accounting or stock
+        method itself. Exists so downstream raw-row validation (matching a
+        filled-trade row's account/branch_no against the selected account)
+        does not have to duplicate _ensure_session's account-selection logic.
+        """
+        config = self._require_config()
+        return self._ensure_session(config)
+
+    def read_filled_trades(self, start_date: str, end_date: str) -> object:
+        """Narrow, read-only access to sdk.stock.filled_history only.
+
+        Deliberately does NOT go through _accounting_call: that helper only
+        resolves sdk.accounting.<method_name> and calls it with a single
+        `account` argument, while filled_history lives under the sdk.stock
+        namespace and needs extra start_date/end_date arguments -- the two
+        call shapes are incompatible, and forcing this through _accounting_call
+        would mix the "accounting" namespace resolution with "stock".
+
+        sdk.stock is also the SAME namespace that holds place_order,
+        cancel_order, modify_price, modify_quantity, batch_place_order and
+        batch_cancel_order (the SDK's order/trading API). To keep this
+        integration's reachable surface strictly read-only, this method
+        resolves and invokes exactly one attribute on that namespace
+        ("filled_history") and never returns, caches, or otherwise exposes
+        the `stock` object itself to any caller.
+        """
+        with self._accounting_lock:
+            for attempt in range(2):
+                config = self._require_config()
+                account = self._ensure_session(config)
+                self._wait_for_accounting_budget()
+                with self._session_lock:
+                    sdk = self._sdk
+                stock = raw_field(sdk, "stock") if sdk is not None else None
+                filled_history = raw_field(stock, "filled_history") if stock is not None else None
+                if not callable(filled_history):
+                    self._mark_misconfigured()
+                    raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
+                try:
+                    response = self._run_bounded(
+                        lambda: filled_history(account.raw, start_date, end_date),
+                        self.ACCOUNT_CALL_TIMEOUT_SECONDS,
+                        "FILLED_HISTORY_TIMEOUT",
+                    )
+                    if self._response_auth_invalid(response):
+                        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                    return response
+                except SdkCallError as exc:
+                    if exc.auth_invalid and attempt == 0:
+                        with self._session_lock:
+                            self._invalidate_locked()
+                        continue
+                    raise
+                except Exception as exc:
+                    if self._exception_is_auth_invalid(exc) and attempt == 0:
+                        with self._session_lock:
+                            self._invalidate_locked()
+                        continue
+                    raise SdkCallError("FILLED_HISTORY_TRANSPORT_FAILED") from None
+            raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+
     def quote(self, code: str) -> object:
         for attempt in range(2):
             config = self._require_config()

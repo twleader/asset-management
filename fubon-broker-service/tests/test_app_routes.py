@@ -9,6 +9,8 @@ import fubon_broker_service.app as app_module
 from fubon_broker_service.app import create_app
 from fubon_broker_service.config import ConfigLoader
 from fubon_broker_service.redaction import redact, redact_mapping
+from fubon_broker_service.sdk_gateway import SdkCallError
+from fubon_broker_service.trades import TradeReadError
 
 from helpers import TOKEN, ready_config
 
@@ -52,6 +54,23 @@ class Quotes:
         return {"batchId": "batch", "quotes": [{"stockCode": codes[0], "status": "SUCCESS"}]}
 
 
+class Trades:
+    def __init__(self):
+        self.calls = 0
+
+    def read(self, start_date, end_date, internal_token):
+        self.calls += 1
+        assert internal_token
+        return {
+            "batchId": "trade-batch",
+            "startDate": start_date,
+            "endDate": end_date,
+            "accountFingerprint": "fingerprint",
+            "emptyConfirmed": True,
+            "trades": [],
+        }
+
+
 class ExplodingPortfolio:
     def read(self):
         raise RuntimeError("TEST_PERSONAL_ID_SENTINEL TEST_API_KEY_SENTINEL")
@@ -61,12 +80,13 @@ def client_for(loader):
     gateway = Gateway()
     portfolio = Portfolio()
     quotes = Quotes()
-    application = create_app(loader, gateway, portfolio, quotes)
-    return TestClient(application), gateway, portfolio, quotes
+    trades = Trades()
+    application = create_app(loader, gateway, portfolio, quotes, trades)
+    return TestClient(application), gateway, portfolio, quotes, trades
 
 
 def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
-    client, gateway, portfolio, quotes = client_for(ConfigLoader(tmp_path, lambda: "false"))
+    client, gateway, portfolio, quotes, trades = client_for(ConfigLoader(tmp_path, lambda: "false"))
     with client:
         response = client.get("/internal/health")
         assert response.status_code == 200
@@ -74,18 +94,19 @@ def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
         assert response.json()["status"] == "UP"
         assert response.json()["configState"] == "NOT_CONFIGURED"
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == 0
     assert gateway.shutdown_calls == 1
 
 
-def test_exact_five_routes_auth_and_methods(tmp_path):
-    client, _gateway, portfolio, quotes = client_for(ready_config(tmp_path))
+def test_exact_six_routes_auth_and_methods(tmp_path):
+    client, _gateway, portfolio, quotes, trades = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     assert {(route.path, frozenset(route.methods or ())) for route in client.app.routes} == {
         ("/internal/health", frozenset({"GET"})),
         ("/internal/config", frozenset({"GET"})),
         ("/internal/portfolio/read", frozenset({"POST"})),
         ("/internal/market-data/tw-quotes", frozenset({"POST"})),
+        ("/internal/trades/read", frozenset({"POST"})),
         ("/internal/market-data/taiex-index/stream", frozenset({"GET"})),
     }
     with client:
@@ -99,18 +120,24 @@ def test_exact_five_routes_auth_and_methods(tmp_path):
         assert client.get("/internal/config", headers=headers).status_code == 200
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True}).status_code == 200
         assert client.post("/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}).status_code == 200
+        assert client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
+        ).status_code == 200
+        assert client.post("/internal/trades/read", json={"startDate": "2026-08-21", "endDate": "2026-08-21"}).status_code == 401
         assert client.get("/docs").status_code == 404
         assert client.get("/redoc").status_code == 404
         assert client.get("/openapi.json").status_code == 404
         assert client.get("/not-allowed").status_code == 404
         assert client.post("/internal/health").status_code == 405
         assert client.get("/internal/portfolio/read", headers=headers).status_code == 405
+        assert client.get("/internal/trades/read", headers=headers).status_code == 405
         assert client.get("/internal/market-data/taiex-index/stream", headers=headers).status_code == 503
     assert portfolio.calls == quotes.calls == 1
+    assert trades.calls == 1
 
 
 def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
-    client, _gateway, portfolio, _quotes = client_for(ready_config(tmp_path))
+    client, _gateway, portfolio, _quotes, _trades = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": False}).status_code == 400
@@ -122,32 +149,94 @@ def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
     assert portfolio.calls == 0
 
 
+def test_trades_read_rejects_malformed_dates_and_oversized_ranges(tmp_path):
+    client, _gateway, _portfolio, _quotes, trades = client_for(ready_config(tmp_path))
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with client:
+        assert client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "not-a-date", "endDate": "2026-08-21"}
+        ).status_code == 400
+        assert client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026/08/21"}
+        ).status_code == 400
+        assert client.post(
+            "/internal/trades/read",
+            headers=headers,
+            json={"startDate": "2026-08-21", "endDate": "2026-08-21", "dryRun": True},
+        ).status_code == 400
+        response = client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-22", "endDate": "2026-08-21"}
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["reason"] == "INVALID_DATE_RANGE"
+        response = client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-01", "endDate": "2026-08-09"}
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["reason"] == "INVALID_DATE_RANGE"
+        # exactly 7 days apart is within bounds
+        assert client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-01", "endDate": "2026-08-08"}
+        ).status_code == 200
+    assert trades.calls == 1
+
+
+def test_trades_read_maps_reconciliation_failure_to_sanitized_503(tmp_path):
+    class RejectingTrades:
+        def read(self, start_date, end_date, internal_token):
+            raise TradeReadError("RECONCILE_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), RejectingTrades())
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with TestClient(application) as client:
+        response = client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"reason": "RECONCILE_FAILED"}}
+
+
+def test_trades_read_maps_sdk_call_error_to_sanitized_503(tmp_path):
+    class FailingTrades:
+        def read(self, start_date, end_date, internal_token):
+            raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), FailingTrades())
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with TestClient(application) as client:
+        response = client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"reason": "FILLED_HISTORY_UNAVAILABLE"}}
+
+
 def test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured(tmp_path):
     loader = ready_config(tmp_path)
     (tmp_path / "shared" / "internal-service-token").unlink()
-    client, _gateway, portfolio, quotes = client_for(loader)
+    client, _gateway, portfolio, quotes, trades = client_for(loader)
     with client:
         health = client.get("/internal/health")
         assert health.status_code == 200
         assert health.json()["configState"] == "MISCONFIGURED"
         assert client.get("/internal/config").status_code == 503
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == 0
 
 
 def test_invalid_enabled_flag_is_misconfigured_not_disabled(tmp_path):
-    client, _gateway, portfolio, quotes = client_for(ConfigLoader(tmp_path, lambda: "not-a-boolean"))
+    client, _gateway, portfolio, quotes, trades = client_for(ConfigLoader(tmp_path, lambda: "not-a-boolean"))
     with client:
         health = client.get("/internal/health")
         functional = client.get("/internal/config")
     assert health.json()["configState"] == "MISCONFIGURED"
     assert functional.status_code == 503
     assert functional.json() == {"detail": {"reason": "INVALID_ENABLED_FLAG"}}
-    assert portfolio.calls == quotes.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == 0
 
 
 def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp_path):
-    client, gateway, portfolio, quotes = client_for(ready_config(tmp_path))
+    client, gateway, portfolio, quotes, trades = client_for(ready_config(tmp_path))
     gateway.runtime_misconfigured = True
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
@@ -157,12 +246,15 @@ def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp
         assert client.post(
             "/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}
         ).status_code == 503
-    assert portfolio.calls == quotes.calls == 0
+        assert client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
+        ).status_code == 503
+    assert portfolio.calls == quotes.calls == trades.calls == 0
 
 
 def test_unexpected_exception_is_sanitized_before_response_and_log(tmp_path, caplog):
     gateway = Gateway()
-    application = create_app(ready_config(tmp_path), gateway, ExplodingPortfolio(), Quotes())
+    application = create_app(ready_config(tmp_path), gateway, ExplodingPortfolio(), Quotes(), Trades())
     headers = {"X-Internal-Service-Token": TOKEN}
     with TestClient(application) as client:
         response = client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True})

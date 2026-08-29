@@ -90,6 +90,35 @@ def unrealized_row(
     }
 
 
+def filled_trade_row(
+    *,
+    date: str = "2026-08-21",
+    account_number: str = "00001234567",
+    branch: str = "001",
+    code: str = "2330",
+    order_type: str = "Stock",
+    buy_sell: str = "Buy",
+    filled_qty: object = 1000,
+    filled_price: object = "600.5",
+    filled_avg_price: object = "600.5",
+    filled_time: str = "09:30:15.123",
+    filled_no: str = "F00000001",
+):
+    return {
+        "date": date,
+        "account": account_number,
+        "branch_no": branch,
+        "stock_no": code,
+        "order_type": order_type,
+        "buy_sell": buy_sell,
+        "filled_qty": filled_qty,
+        "filled_price": filled_price,
+        "filled_avg_price": filled_avg_price,
+        "filled_time": filled_time,
+        "filled_no": filled_no,
+    }
+
+
 def fixed_now() -> datetime:
     return datetime(2026, 8, 21, 5, 0, 0, tzinfo=UTC)
 
