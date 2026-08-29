@@ -10513,3 +10513,70 @@ public record FubonApiInfoDto(
 頁面仍不提供任何可觸發實際請求的互動元件（無「試打 API」、無 curl 產生器），未串接項目的存在本身即是本次擴充的核心訴求（讓使用者看到 SDK 還有什麼查詢能力），但呈現上必須與「可下單」徹底切割。
 
 維護提醒：`fubon-broker-service/src/fubon_broker_service/app.py` 新增、刪除或修改對外 endpoint，或 `FUBON_SDK_URL`／wheel 版本升級改變 `sdk.accounting`／`sdk.stock`／`sdk.marketdata` 命名空間方法時，必須重新以本節「盤點方法」的內省步驟核對並更新 `FubonApiInfoBffController` 的靜態清單；controller 內以 Javadoc 明確標註此提醒。
+
+---
+
+## Requirement 123／Task 388–389：富邦 ETF 成分股持股明細排程串接
+
+### 定位與既有元件重用
+
+延續 Requirement 121 盤點出的「未串接」清單，把 `marketdata.rest_client.stock.ownership.etf_holdings` 從文件盤點提升為真正的資料管線，取代 `external-materials-service` 既有的 MoneyDJ（台股）／Yahoo（美股）ETF 成分股爬蟲中的**台股**部分。整體資料流：
+
+```text
+FubonEtfHoldingsSyncScheduler（08:50／15:30，交易日）
+        │ 雷達 ETF 代碼（backend 端等價 collectTwRadarCodes + isEtf 過濾）
+        ▼
+FubonEtfHoldingsSyncService → FubonHttpClient.readEtfHoldings(codes)
+        │ POST /internal/market-data/etf-holdings
+        ▼
+fubon-broker-service（SdkGateway.read_etf_holdings，比照既有 quote() 結構，
+        走 marketdata.rest_client.stock，不經 _accounting_lock）
+        │ 原始 JSON 逐檔回傳（欄位未核實，不重新命名）
+        ▼
+fubon_etf_holdings_snapshot（PK=etf_stock_code，同 key 覆寫，raw_response_json JSONB）
+        │ Task 389：FubonEtfHoldingsParser（欄位對應待真實環境核實後定案）
+        ▼
+MarketDataService.getEtfHoldings(code, market)
+        │ 台股 → 讀本表；美股 → 維持既有 external-materials-service Yahoo/FinMind 路徑
+        ▼
+（既有不變）GET /api/market-data/etf-holdings → BFF → StockAnalysisDialog.vue／DashboardBffController look-through
+```
+
+**下游 BFF／前端契約完全不變**——`MarketDataService.EtfHoldingsResult`／`EtfHolding` 兩個 record 的欄位形狀沿用既有定義，只換掉 `getEtfHoldings()` 內部對台股請求的資料來源，`StockAnalysisChartBffController`、`DashboardBffController`、`StockAnalysisDialog.vue` 皆不需要改動。這是刻意的最小化變更半徑設計：既有大量下游呼叫端只認這兩個 record 的欄位，不認資料實際從哪裡來。
+
+### 雷達範圍：backend 端等價實作而非跨服務呼叫
+
+`external-materials-service` 的 `StockSourceQuery.collectTwRadarCodes(Set<String>)`（Requirement 115／Task 380 定義的官方「今日交易雷達」跨 owner 聯集）是唯一的權威實作，但它活在另一個 service。本功能選擇**在 backend 端用等價 SQL 重新實作**，而非讓 backend 對 `external-materials-service` 發一支新的內部 HTTP 呼叫，原因：
+
+1. `stock_holding`／`asset_snapshot`／`stock_alert` 三張表都是 backend 的 JPA Entity 所在，backend 本來就是這些表的權威擁有者（`external-materials-service` 是用 `JdbcTemplate` 直讀同一個 PostgreSQL 實例，屬於既有的跨服務唯讀資料庫存取模式，不是 backend 反向依賴 external-materials-service）。
+2. 新增 backend → external-materials-service 的內部 HTTP 呼叫會建立一條新的服務間依賴（且方向奇怪：Fubon 排程屬於 backend 既有的整合模組，若還要繞去 external-materials-service 拿雷達清單，等於 backend 為了算「查哪幾檔」而依賴一個原本只做行情抓取的服務）。
+3. 代價是與 `collectTwRadarCodes` 邏輯重複（兩處平行維護），但範圍極窄（一段固定 SQL + 一個 `startsWith("00")` 過濾），且本專案已有先例：`TradingRadarService`（backend，per-owner）與 `StockSourceQuery`（external-materials-service，跨 owner）本來就是兩份獨立實作，各自服務不同用途。本次是在既有「兩份平行實作」的格局下，新增第三份窄範圍等價查詢，不是新增一種前所未有的耦合模式。
+
+ETF 判定沿用 `MarketDataService.isEtf(code, "台股")`（`code.startsWith("00")`）——這是既有程式碼裡對台股 ETF 判斷最常用的 heuristic（`TradingRadarAssetProfileResolver` 對台股也採同一條規則），非資料庫權威欄位，本次不新增 `is_etf` 欄位或修改 `stock` 表。
+
+### `marketdata.rest_client.stock` 不需要與 `FUBON_TW_LIVE_QUOTES_ENABLED` 互斥
+
+Requirement 120（成交同步）與 LIVE 報價互斥（`TRADE_SYNC_CAPACITY_CONFLICT`）的根因是兩者都要佔用**同一個富邦 SDK session 的帳務／委託序列化資源**（`_accounting_lock`）。本功能與既有 `quote()`（供 LIVE 報價使用）同屬 `marketdata.rest_client.stock` 這條線，但這條線本身**不經過** `_accounting_lock`，只共用 `_run_bounded` 的 `_blocking_slots`（`MAX_BLOCKING_CALLS=4`）併發限流——多個 marketdata REST 呼叫本來就設計成可併發。本排程一天只跑兩次、每次僅查當日雷達範圍內的少量 ETF 代碼（相對於 LIVE 報價每 10 秒查詢整個雷達範圍的所有台股），資源峰值遠低於既有 LIVE 報價批次，故不設互斥旗標，僅仰賴既有併發限流保護 fubon-broker-service 不被瞬間打爆。
+
+### 未知欄位的資料庫設計：先存原始 JSON，解析延後到核實之後
+
+`db/schema.sql` 新表 `fubon_etf_holdings_snapshot`：
+
+```sql
+CREATE TABLE fubon_etf_holdings_snapshot (
+    etf_stock_code      VARCHAR(20) NOT NULL,
+    market               VARCHAR(10) NOT NULL DEFAULT '台股',
+    fetched_at           TIMESTAMP NOT NULL,
+    success               BOOLEAN NOT NULL,
+    reason                VARCHAR(50),
+    raw_response_json    JSONB,
+    updated_at            TIMESTAMP NOT NULL DEFAULT now(),
+    PRIMARY KEY (etf_stock_code)
+);
+```
+
+同 key 覆寫（比照既有 `fubon_taiex_index_latest`——`PRIMARY KEY (index_code)`，不含日期欄位——的「同 key 覆寫、只留最新一筆」慣例；`etf_nav_history` 用 `UNIQUE (stock_code, market, nav_date)` 逐日留存歷史，語意相反，不適用於本次）——前端只需要「目前最新一次的成分股組成」，不需要成分股歷史序列（成分股本身變動極慢，且本表不是給任何時間序列分析用）。`raw_response_json` 保存 Fubon 回應的逐字 JSON；Task 389 的解析函式從這欄位讀取並轉換，**解析邏輯與資料落地邏輯分離**的好處是：一旦真實環境核實出正確欄位名稱、或發現解析邏輯需要調整，只需要修正解析函式並重新讀取既有 `raw_response_json`，不必重新觸發排程、不必等下一個交易日才能修正錯誤的解析結果。
+
+### `FubonEtfHoldingsParser`（Task 389）核實前的防呆設計
+
+解析函式必須明確區分「尚未核實過欄位名稱」與「核實過但這筆資料解析失敗」兩種狀態，兩者都必須 fail-soft（回傳空清單＋不可用訊息），差別在於錯誤訊息文字要誠實反映「尚未核實」而非「解析失敗」，避免維運者誤判成資料品質問題而非開發期已知限制。核實完成後，函式內的欄位對應必須以程式碼註解明確記錄核實依據（時間、呼叫的 ETF 代碼、原始回應片段），讓日後審查者可以不需要重新打一次真實 API 就能確認欄位命名不是憑空捏造。
