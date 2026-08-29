@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -8,6 +10,23 @@ from fubon_broker_service.config import ConfigLoader
 from fubon_broker_service.sdk_gateway import SdkCallError, SdkGateway
 
 from helpers import account, ready_config, response
+
+
+class AttributeAccessSpy:
+    """Wraps an object and records every attribute name accessed through it.
+
+    `_target`/`accessed` are installed directly into __dict__ so normal
+    attribute lookup finds them without ever going through __getattr__ (which
+    would otherwise both recurse and pollute the access log).
+    """
+
+    def __init__(self, target):
+        object.__setattr__(self, "_target", target)
+        object.__setattr__(self, "accessed", [])
+
+    def __getattr__(self, name):
+        self.accessed.append(name)
+        return getattr(self._target, name)
 
 
 class Intraday:
@@ -24,15 +43,46 @@ class Intraday:
 
 
 class FakeSdk:
-    def __init__(self, events, *, auth_fail=False, init_fail=False, multiple_accounts=False):
+    def __init__(
+        self,
+        events,
+        *,
+        auth_fail=False,
+        init_fail=False,
+        multiple_accounts=False,
+        filled_history_auth_fail=False,
+    ):
         self.events = events
         self.auth_fail = auth_fail
         self.init_fail = init_fail
         self.multiple_accounts = multiple_accounts
+        self.filled_history_auth_fail = filled_history_auth_fail
         self.accounting = SimpleNamespace(
             inventories=self.inventories,
             unrealized_gains_and_loses=self.unrealized,
         )
+        self.stock = AttributeAccessSpy(
+            SimpleNamespace(
+                filled_history=self.filled_history,
+                place_order=self._trading_forbidden,
+                cancel_order=self._trading_forbidden,
+                modify_price=self._trading_forbidden,
+                modify_quantity=self._trading_forbidden,
+                batch_place_order=self._trading_forbidden,
+                batch_cancel_order=self._trading_forbidden,
+            )
+        )
+
+    def filled_history(self, _account, start_date, end_date):
+        self.events.append(f"filled_history:{start_date}:{end_date}")
+        if self.filled_history_auth_fail:
+            self.filled_history_auth_fail = False
+            return response(None, success=False, code=401)
+        return response([])
+
+    @staticmethod
+    def _trading_forbidden(*_args, **_kwargs):
+        raise AssertionError("a trading/order SDK method must never be invoked by read_filled_trades")
 
     def apikey_login(self, *_args):
         self.events.append("login")
@@ -201,6 +251,127 @@ def test_quote_rate_limit_preserves_retry_after_without_retrying(tmp_path):
 
     assert captured.value.retry_after_seconds == 125.0
     assert events.count("rate-limit:2330") == 1
+
+
+def test_read_filled_trades_only_ever_accesses_filled_history_attribute(tmp_path):
+    events = []
+    sdk = FakeSdk(events)
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: sdk, sleeper=lambda _seconds: None)
+
+    result = gateway.read_filled_trades("2026-08-21", "2026-08-21")
+
+    assert sdk.stock.accessed == ["filled_history"]
+    assert events == ["login", "init_realtime", "filled_history:2026-08-21:2026-08-21"]
+    assert result.data == []
+
+
+def test_read_filled_trades_does_not_use_accounting_call(tmp_path):
+    """Proves the narrow stock.filled_history path is independent of _accounting_call.
+
+    _accounting_call only resolves sdk.accounting.<name> with a single
+    `account` argument; if read_filled_trades accidentally routed through it,
+    inventories/unrealized would be invoked instead of filled_history (or the
+    call would blow up on the extra start_date/end_date arguments).
+    """
+    events = []
+    sdk = FakeSdk(events)
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: sdk, sleeper=lambda _seconds: None)
+    gateway.read_filled_trades("2026-08-21", "2026-08-21")
+    assert "inventories" not in events
+    assert "unrealized" not in events
+
+
+def test_read_filled_trades_never_exposes_the_stock_object_itself(tmp_path):
+    events = []
+    sdk = FakeSdk(events)
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: sdk, sleeper=lambda _seconds: None)
+    result = gateway.read_filled_trades("2026-08-21", "2026-08-21")
+    assert result is not sdk.stock
+    assert not hasattr(gateway, "_trade_client")
+    assert not hasattr(gateway, "stock")
+
+
+def test_read_filled_trades_auth_invalid_reconnects_then_reruns_once(tmp_path):
+    events = []
+    sdks = [
+        FakeSdk(events, filled_history_auth_fail=True),
+        FakeSdk(events),
+    ]
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: sdks.pop(0), sleeper=lambda _seconds: None)
+
+    gateway.read_filled_trades("2026-08-21", "2026-08-21")
+
+    assert events.count("login") == 2
+    assert events.count("filled_history:2026-08-21:2026-08-21") == 2
+    first_cleanup = events.index("logout")
+    second_login = [index for index, value in enumerate(events) if value == "login"][1]
+    assert first_cleanup < second_login
+
+
+def test_read_filled_trades_gives_up_after_second_auth_failure(tmp_path):
+    events = []
+    persistent_events = []
+
+    class AlwaysAuthFail(FakeSdk):
+        def filled_history(self, _account, start_date, end_date):
+            persistent_events.append("filled_history")
+            return response(None, success=False, code=401)
+
+    gateway = SdkGateway(
+        ready_config(tmp_path),
+        sdk_factory=lambda: AlwaysAuthFail(events),
+        sleeper=lambda _seconds: None,
+    )
+    with pytest.raises(SdkCallError, match="AUTH_SESSION_INVALID"):
+        gateway.read_filled_trades("2026-08-21", "2026-08-21")
+    assert len(persistent_events) == 2
+
+
+def test_read_filled_trades_serializes_through_accounting_lock(tmp_path):
+    concurrency = {"current": 0, "max": 0}
+    lock = threading.Lock()
+
+    class SerializingFakeSdk(FakeSdk):
+        def filled_history(self, _account, start_date, end_date):
+            with lock:
+                concurrency["current"] += 1
+                concurrency["max"] = max(concurrency["max"], concurrency["current"])
+            time.sleep(0.05)
+            with lock:
+                concurrency["current"] -= 1
+            return response([])
+
+    events = []
+    sdk = SerializingFakeSdk(events)
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: sdk, sleeper=lambda _seconds: None)
+
+    threads = [
+        threading.Thread(target=lambda: gateway.read_filled_trades("2026-08-21", "2026-08-21"))
+        for _ in range(3)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert concurrency["max"] == 1
+
+
+def test_read_filled_trades_shares_accounting_budget_pool_with_accounting_call(tmp_path):
+    waits = []
+    sdk = FakeSdk([])
+    gateway = SdkGateway(
+        ready_config(tmp_path),
+        sdk_factory=lambda: sdk,
+        monotonic=lambda: 0.0,
+        sleeper=lambda seconds: waits.append(seconds),
+    )
+    # Exhaust the shared 5-calls/sec budget via the existing accounting path.
+    for _ in range(5):
+        gateway._wait_for_accounting_budget()
+    assert waits == []
+    gateway.read_filled_trades("2026-08-21", "2026-08-21")
+    assert waits and waits[0] > 0
 
 
 def test_taiex_symbol_is_verified_against_official_index_tickers_before_stream_use(tmp_path):

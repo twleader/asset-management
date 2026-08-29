@@ -10222,3 +10222,225 @@ The Maven build explicitly includes both the normal `src/main/resources` directo
 The view places an `el-collapse` row for every extracted operation. Row headers show a color-coded method, path, and summary; expanded content shows the exact YAML fragment containing its description, parameters, request body, responses, and schema references. A separate read-only full-contract drawer exposes the complete raw YAML, including `components`. A short static disclosure states that this is documentation, calls are constrained by the documented loopback/Tailscale audience, and the existing POST crawler rescan can have external-fetch side effects. No UI control can invoke it.
 
 Focused tests cover parser extraction with a minimal fixture, fail-closed malformed input, the current contract's complete 13-operation set, BFF resource content and response type, routing visibility, and the absence of any direct 9090 call. Runtime validation rebuilds only BFF and frontend from the feature worktree, proves the packaged resource matches the source file, verifies unauthenticated BFF protection, and uses the authenticated UI to expand an operation without issuing any port 9090 POST.
+
+---
+
+## Requirement 120／Task 385：富邦台股成交紀錄同步排程
+
+### 定位與既有元件重用
+
+本需求是 Requirement 90／Task 352（`FubonInventorySyncScheduler`）的姊妹排程：相同交易日節拍（`0 5,35 9-13 * * MON-FRI`，Asia/Taipei）、相同 `MarketDataService.isTwTradingDayKnown` 三態日曆 gate、相同 `UserAdminService.configuredAdmin()` owner 解析、相同 `FubonConfigState` READY gate、與既有 `FubonInternalTokenFilter` **結構相同但獨立**的手動端點保護模式（見下方「手動驗證端點」小節——既有 filter 的 `shouldNotFilter` 硬編碼 exact-path 只認 inventory-sync 那一條 path，不能原樣套用到新 path，必須新增一支 sibling filter，不是直接沿用同一實例）。不重造這些機制，只新增「查什麼」與「寫什麼」：查 `sdk.stock.filled_history`（成交紀錄），寫 `asset_transaction`（交易紀錄，Requirement 49）而非 `asset_snapshot`/`stock_holding`。
+
+```text
+business-services                              fubon-broker-service
+  FubonTradeSyncScheduler (cron 同 inventory)     SdkGateway.read_filled_trades()
+       │ tradeSyncFeatureGate → configState        │ 共用既有 _accounting_lock
+       │ → isTwTradingDayKnown                      │ （與 inventories／unrealized 同一
+       ▼                                            │  帳務 lane，序列化執行、共守 5/sec）
+  FubonTradeSyncService                             ▼
+       │ readFilledTrades(today, today)   ──▶  POST /internal/trades/read
+       │ 驗 raw identity／decimal／qty edge
+       │ resolveNameLocalOnly per code
+       │ existsByOwnerUserIdAndBrokerFilledNo
+       ▼
+  AssetTransaction（新增列，source=FUBON_SYNC）
+```
+
+`FUBON_TRADE_SYNC_ENABLED`、`FUBON_INVENTORY_SYNC_ENABLED`、`FUBON_TW_LIVE_QUOTES_ENABLED` 三個 feature flag 各自獨立宣告（`.env.example` 新增第三個）。`docker-compose.yml` 對 `business-services` 的環境變數是逐條白名單（既有 `FUBON_INVENTORY_SYNC_ENABLED`／`FUBON_TW_LIVE_QUOTES_ENABLED` 各自明確一行 passthrough），故必須同步新增 `FUBON_TRADE_SYNC_ENABLED: ${FUBON_TRADE_SYNC_ENABLED:-false}` 這一行，否則 `.env` 設定不會傳入容器。互斥矩陣沿用 Requirement 90 已建立的原則——任何會與 LIVE quote provider 爭同一 SDK session 的功能都與其互斥，同帳務 lane 的功能彼此不互斥：
+
+| `FUBON_TRADE_SYNC_ENABLED` | `FUBON_INVENTORY_SYNC_ENABLED` | `FUBON_TW_LIVE_QUOTES_ENABLED` | 結果 |
+|---|---|---|---|
+| false | 任意 | 任意 | trade sync no-op（`TRADE_SYNC_DISABLED`） |
+| true | 任意 | true | trade sync no-op（`TRADE_SYNC_CAPACITY_CONFLICT`） |
+| true | 任意 | false | trade sync 正常執行（與 inventory sync 是否同時 true 無關，兩者共用帳務 lane mutex 依序跑） |
+
+### Python adapter：窄範圍唯讀成交查詢
+
+`SdkGateway.read_filled_trades(start_date, end_date)` 共用既有 `read_accounting_pair()` 的鎖與 retry 語意，但**不經過** `_accounting_call`——該既有 helper（`sdk_gateway.py` 現有簽章 `_accounting_call(self, method_name: str, account: object) -> object`）內部固定 `raw_field(raw_field(sdk, "accounting"), method_name)` 解析路徑並以 `lambda: method(account)` 單一參數呼叫，只服務 `sdk.accounting.*`；`filled_history` 屬於 `sdk.stock` 命名空間且需要額外的 `start_date`／`end_date` 參數，兩者介面不相容，**不得**擴充或誤用 `_accounting_call` 去呼叫它（那會把該 helper 的命名空間解析從 `accounting` 混用到 `stock`，牴觸本任務窄範圍唯讀的訴求）。新增獨立的呼叫路徑，直接解析並呼叫 `stock.filled_history`：
+
+```python
+def read_filled_trades(self, start_date: str, end_date: str) -> object:
+    with self._accounting_lock:                      # 與 inventories/unrealized 同一把鎖，序列化執行
+        for attempt in range(2):
+            config = self._require_config()
+            account = self._ensure_session(config)
+            self._wait_for_accounting_budget()     # 共守既有帳務 5 calls/sec 上限（與 _accounting_call 同一預算池）
+            with self._session_lock:
+                sdk = self._sdk
+            stock = raw_field(sdk, "stock") if sdk is not None else None
+            filled_history = raw_field(stock, "filled_history") if stock is not None else None
+            if not callable(filled_history):
+                self._mark_misconfigured()
+                raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
+            try:
+                response = self._run_bounded(
+                    lambda: filled_history(account.raw, start_date, end_date),
+                    self.ACCOUNT_CALL_TIMEOUT_SECONDS, "FILLED_HISTORY_TIMEOUT")
+                if self._response_auth_invalid(response):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                return response
+            except SdkCallError as exc:
+                if exc.auth_invalid and attempt == 0:
+                    with self._session_lock:
+                        self._invalidate_locked()
+                    continue
+                raise
+        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+```
+
+實作必須只對 `sdk` 的 `stock` 屬性存取 `filled_history` 這一個方法（`raw_field(raw_field(sdk, "stock"), "filled_history")`），不得把整個 `stock` client 物件回傳或暴露給呼叫端；新增測試以 fake SDK 的 `stock` 物件包一層 spy，斷言整個呼叫過程只讀過 `filled_history` 這一個屬性，未存取 `place_order`／`cancel_order`／`batch_place_order` 等任何其他屬性。
+
+新路由 `POST /internal/trades/read`：
+
+```python
+class TradeReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    startDate: StrictStr
+    endDate: StrictStr
+
+    @field_validator("startDate", "endDate")
+    @classmethod
+    def valid_iso_date(cls, value: str) -> str:
+        date.fromisoformat(value)   # raises ValueError → 400 via RequestValidationError
+        return value
+```
+
+Route handler 驗 `startDate <= endDate` 且 `(endDate - startDate).days <= 7`（超界回 `400`，reason `INVALID_DATE_RANGE`），其餘 config/token/misconfigured 語意與既有兩支 functional route 相同（複用 `authorize` dependency）。
+
+**已知與待核實欄位。** 官方 `filled_history` docstring 範例明確列出 `date`、`filled_no`、`filled_avg_price`、`filled_qty`、`filled_price`、`order_type`、`filled_time`（`order_type` 範例值為 `Stock`，與既有 `unrealized_gains_and_loses` 的 `order_type` 同一列舉）；`FilledData` 的完整欄位數與其餘欄位（標的代號、買賣別、帳號、分公司代號）在本文件撰寫當下未能以真實 SDK 呼叫核實確切屬性名稱（環境無可用憑證）。implementer 必須在 `fubon-broker-service` image（已含 hash 驗證安裝的 `fubon_neo` 2.2.9）內，比照既有 `portfolio.py` 對 `unrealized_gains_and_loses` 核實 `account`／`branch_no`／`order_type`／`buy_sell` 命名的方式（`dir()`／實際 session 呼叫／官方文件），核實 `filled_history` 回傳列上標的代號、買賣別、帳號、分公司代號的確切屬性名稱，並將核實結果寫入程式與測試 fixture 的固定字面值（禁止用猜測字串或防禦性 `getattr` 迴避）。核實不到任一必要欄位時，equivalent 到「該欄位不存在」，對應列即整批 no-write（見下段）。
+
+Raw row 驗證順序（比照 Requirement 90 的「fingerprint 之前先驗 raw identity」原則）：
+
+1. `order_type` 精確等於 `Stock`（非 Stock 一律整批 no-write）。
+2. `account`／`branch_no` 精確等於 `_ensure_session` 選出的 `SelectedAccount.raw` 對應欄位。
+3. `date` 落在 `[start_date, end_date]`（inclusive）。
+4. 買賣別對應官方 `BSAction` 的 Buy／Sell 兩值之一。
+
+任一列未通過即整批（本次呼叫全部列）視為 `RECONCILE_FAILED` 等價的無效批次，不得只丟棄該列後繼續處理其餘列——避免「部分列驗證失敗代表 adapter 對 raw schema 的假設已經錯誤」時仍信任其餘列。通過後，`filled_price`／`filled_avg_price` 走既有 `Decimal(str(value))` → canonical decimal string 規則；`filled_qty` 走既有 exact-integer 規則（`0..9,999,999,999`，回應層只接受 `1..9,999,999,999`，0 股成交無意義）；`filled_no` 要求非空字串、長度 ≤ 50。
+
+### Backend：DTO、client、service、writer
+
+```java
+public interface FubonBrokerClient {
+    FubonDtos.CallResult<FubonDtos.PortfolioResponse> readPortfolio();
+    FubonDtos.CallResult<FubonDtos.QuoteBatchResponse> readTwQuotes(List<String> codes);
+    FubonDtos.CallResult<FubonDtos.TradeBatchResponse> readFilledTrades(LocalDate start, LocalDate end);
+}
+
+record TradeBatchResponse(
+    String batchId, LocalDate startDate, LocalDate endDate,
+    String accountFingerprint, boolean emptyConfirmed, List<FilledTrade> trades) {}
+
+record FilledTrade(
+    String stockCode, String side,              // "Buy" | "Sell"
+    long filledQty, CanonicalFubonDecimal filledPrice, CanonicalFubonDecimal filledAvgPrice,
+    LocalDate filledDate, String filledTime, String filledNo) {}
+```
+
+`FubonTradeSyncService`（精神上類比 `FubonInventorySyncService` 的 gate-短路與「manual 端點自行重驗日曆」設計，但輸出對象是 `asset_transaction` 而非 `asset_snapshot`，且方法回傳型別（裸 `FubonTradeOutcome` enum）與 `syncManual`／`syncScheduledAfterCalendar` 的委派呼叫圖是本任務刻意的新設計，**不是**逐一比照既有程式碼結構——`FubonInventorySyncService.syncManual` 實際是獨立流程、不委派至 `syncScheduledAfterCalendar`）：
+
+```text
+tradeSyncFeatureGate(dryRun)
+  !tradeSyncEnabled            → TRADE_SYNC_DISABLED
+  liveQuotesEnabled            → TRADE_SYNC_CAPACITY_CONFLICT
+  else                         → null（放行）
+
+localConfigGate(dryRun)                         // 供 syncManual／syncScheduledAfterCalendar 共用
+  featureGate = tradeSyncFeatureGate(dryRun)
+  featureGate != null          → featureGate
+  configState != READY         → MISCONFIGURED
+  else                         → null（放行）
+
+syncManual(dryRun)                              // 供 FubonTradeSyncController 呼叫，不信任呼叫端
+  localConfigGate(dryRun) != null → 對應 outcome，return
+  today = LocalDate.now(TW_ZONE)
+  tradingDay = marketDataService.isTwTradingDayKnown(today)   // 自行重驗，不假設已驗過
+  !tradingDay.orElse(false)    → CALENDAR_UNKNOWN
+  else                         → syncScheduledAfterCalendar(today, dryRun)
+
+syncScheduledAfterCalendar(today, dryRun)       // 供 scheduler 呼叫；scheduler 呼叫前已驗過 gate/日曆
+  localConfigGate(dryRun) != null → 對應 outcome，return（defense-in-depth，即使呼叫端已驗過一次）
+  owner = configuredAdmin()    → 缺席／非 ACTIVE／非 admin 皆 NO_OWNER   // configuredAdmin() 本身不過濾，需自行檢查 isActive()/isAdmin()
+  broker code='fubon' 存在 且 active=true?  → 否則 BROKER_MISSING        // 比照既有 preflightCommit 的 active 過濾
+  call readFilledTrades(today, today)
+  validate batch               → 失敗 TRADE_FAILED
+  emptyConfirmed && empty      → NO_NEW_TRADES（合法：今日尚無成交）
+  for each valid trade:
+    name = StockMasterService.resolveNameLocalOnly(code, "台股")
+    name == null                → 跳過此列（不算失敗，下一輪重試）
+    exists(ownerId, filledNo)?  → 跳過（冪等）
+    else                        → 加入本輪待寫入清單
+  dryRun=true                  → DRY_RUN（不進入寫入）
+  dryRun=false 且待寫入清單非空  → 單一 @Transactional 內批次新增       → SUCCESS / ROLLED_BACK
+  dryRun=false 且待寫入清單為空  → SUCCESS（本輪查到的成交都已同步過）
+```
+
+`FubonTradeSyncScheduler` 呼叫 `syncScheduledAfterCalendar(today, false)`（呼叫前已自行做過 feature gate／configState／日曆三層 short-circuit，見上方排程骨架）；`FubonTradeSyncController`（385.8）呼叫 `syncManual(dryRun)`，兩者共用 `localConfigGate` 但各自負責一次日曆驗證，互不假設對方已驗證過。
+
+新增 `AssetTransaction` 列的欄位映射（單一 owner 的單一 broker，皆為固定值或直接映射，不臆測）：
+
+| 欄位 | 值 |
+|---|---|
+| `transactionType` | `side=="Buy"` → `"買"`；`side=="Sell"` → `"賣"` |
+| `assetType` | `"股票"` |
+| `assetName` | `StockMasterService.resolveNameLocalOnly(stockCode, "台股")` |
+| `assetCode` | `stockCode` |
+| `market` | `"台股"` |
+| `currency` | `"TWD"` |
+| `channel` | `"富邦證券"` |
+| `tradeDate` | `filledDate` |
+| `shares` | `filledQty` |
+| `price` | `filledAvgPrice`（成交均價，一筆委託可能多次分批成交；若同一 `filledNo` 已代表單次成交明細則直接對應 `filledPrice`，實作時以官方欄位語意為準，兩者其一即可但須全案一致，不得混用） |
+| `amount` | 未捨入 `price.multiply(shares)`，最後 `setScale(2, HALF_UP)` |
+| `fee`／`transactionTax`／`exchangeRate`／`notes` | `null`（SDK 未提供，不估算） |
+| `source` | `"FUBON_SYNC"` |
+| `brokerFilledNo` | `filledNo` |
+
+`AssetTransactionRepository` 新增：
+
+```java
+boolean existsByOwnerUserIdAndBrokerFilledNo(Long ownerUserId, String brokerFilledNo);
+```
+
+不使用 `@Filter(ownerFilter)`（背景排程無 request-scoped session 綁定該 filter），改以顯式 `ownerUserId` 參數化查詢，比照既有「多租戶 `@Filter` 只在 HTTP request context 生效、背景流程一律顯式帶 owner」的專案慣例。
+
+### `asset_transaction` schema 變更
+
+新增 Liquibase changeset（版號接續現有最新 `v1.118.0`；建檔時以 `bash scripts/spec-check.sh` 核對實際最新版號，避免撞號）：
+
+```sql
+ALTER TABLE asset_transaction
+    ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+    ADD COLUMN broker_filled_no VARCHAR(50);
+
+ALTER TABLE asset_transaction
+    ADD CONSTRAINT asset_transaction_source_check CHECK (source IN ('MANUAL', 'FUBON_SYNC'));
+
+CREATE UNIQUE INDEX ux_asset_transaction_owner_broker_filled_no
+    ON asset_transaction (owner_user_id, broker_filled_no)
+    WHERE broker_filled_no IS NOT NULL;
+```
+
+`source` 的 DB `DEFAULT` 只在裸 SQL `INSERT` 缺欄時生效；JPA 一律送出完整欄位列表，故 `AssetTransaction` entity 端必須以 `@Builder.Default private String source = "MANUAL";` 明確預設，確保既有 `AssetTransactionService.createAssetTransaction`（builder 不設 `source`）與新的 `FubonTradeSyncService`（builder 顯式設 `source="FUBON_SYNC"`）行為分歧但都正確。partial unique index 是唯一的資料庫層防重複新增保證；application 層的 `existsByOwnerUserIdAndBrokerFilledNo` 檢查 + 排程 in-flight guard 是第一道防線，唯一索引是併發/重跑情境下的最後防線（違反時 insert 拋 `DataIntegrityViolationException`，service 層需捕捉並視同「已存在、跳過」而非拋出至排程外層）。
+
+完成後依 `db/schema.sql` 檔頭「重新產生」段重產該檔，並以 `bash scripts/tests/schema-sql-drift-test.sh` 確認回 0。
+
+### 手動驗證端點與 outcome 觀測
+
+`POST /internal/brokers/fubon/trade-sync?dryRun=true|false`（預設 `true`）。既有 `FubonInternalTokenFilter.shouldNotFilter` 硬編碼 exact-path 只認 `/internal/brokers/fubon/inventory-sync`，對其他 path 直接放行、不驗 token；因此新增**一支獨立** `FubonTradeInternalTokenFilter`（同一 constant-time token 比較與 exact-path `shouldNotFilter` 結構，`PATH` 改指向 `/internal/brokers/fubon/trade-sync`，unavailable 回應改綁本節的 `FubonTradeOutcome`／`FubonTradeOutcomeCounters`），不與既有 filter 共用實例。Controller 呼叫 `FubonTradeSyncService.syncManual(dryRun)`（見上一節 pseudocode）；`dryRun=true` 只跑到「驗證＋比對是否已存在」，不執行寫入 transaction；`dryRun=false` 執行完整流程，且 `syncManual` 內部自行重驗一次 feature gate、configState 與日曆，不信任呼叫端。response：
+
+```json
+{"outcome":"SUCCESS","dryRun":false,"batchId":"...","tradeCount":3,"insertedCount":2,"skippedExistingCount":1,"skippedNameUnresolvedCount":0,"reason":"SUCCESS","counters":{...}}
+```
+
+`FubonTradeOutcome`（獨立 enum，不擴充既有 `FubonOutcome`）：`DISABLED、TRADE_SYNC_DISABLED、TRADE_SYNC_CAPACITY_CONFLICT、MISCONFIGURED、CALENDAR_UNKNOWN、TRADE_FAILED、NO_OWNER、BROKER_MISSING、DRY_RUN、SUCCESS、NO_NEW_TRADES、ROLLED_BACK`，以獨立 `EnumMap<FubonTradeOutcome,LongAdder>` process-local 累計，不新增 Actuator/Micrometer 依賴、不新增 host/public metrics endpoint。
+
+`SchedulePublicBffController.JOBS` 新增一筆（`BUSINESS`、分類沿用既有「券商庫存」）：
+
+```java
+new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
+        "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 當日成交紀錄，新增系統尚未記錄的交易到交易紀錄，以富邦成交序號防止重複新增，不覆寫既有紀錄",
+        "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
+```
+
+`項目數正確()` 測試斷言的總數與 `BUSINESS` 分類計數同步各加一（依實作當下該測試現行值為基準，不假設本文件寫作當下的舊數字）。

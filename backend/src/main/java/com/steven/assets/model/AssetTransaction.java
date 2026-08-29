@@ -107,6 +107,28 @@ public class AssetTransaction {
     @Column(length = 500)
     private String notes;
 
+    /**
+     * 來源（{@code MANUAL} / {@code FUBON_SYNC}；Requirement 120 / Task 385）。
+     *
+     * <p>既有 {@code AssetTransactionService.createAssetTransaction}／{@code updateAssetTransaction}
+     * 的 builder 不設本欄，一律落此 {@code @Builder.Default}；{@code FubonTradeSyncService} 顯式設為
+     * {@code FUBON_SYNC}。DB {@code DEFAULT 'MANUAL'} 只在裸 SQL INSERT 缺欄時生效，JPA 一律送出完整
+     * 欄位列表，故必須在 entity 端明確預設，否則既有手動流程會靜默寫入 {@code NULL} 而非 {@code MANUAL}。
+     */
+    @Builder.Default
+    @Column(nullable = false, length = 20)
+    private String source = "MANUAL";
+
+    /**
+     * 富邦成交序號（{@code source=FUBON_SYNC} 時才有值；Requirement 120 / Task 385）。
+     *
+     * <p>與 {@code owner_user_id} 組成 partial unique index
+     * {@code ux_asset_transaction_owner_broker_filled_no}（{@code WHERE broker_filled_no IS NOT NULL}），
+     * 是排程冪等新增的資料庫層最後防線；手動輸入的既有交易此欄恆為 {@code NULL}，不受此唯一限制約束。
+     */
+    @Column(name = "broker_filled_no", length = 50)
+    private String brokerFilledNo;
+
     /** 年度，由 tradeDate 即時衍生（不建 DB 欄位）。 */
     @Transient
     public Integer getYear() {

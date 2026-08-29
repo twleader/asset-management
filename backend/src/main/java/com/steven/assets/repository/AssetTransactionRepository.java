@@ -2,6 +2,7 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.AssetTransaction;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -25,4 +26,24 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
 
     /** Public readonly history fixes equal-date ordering by id so repeated reads are deterministic. */
     List<AssetTransaction> findAllByOrderByTradeDateDescIdDesc();
+
+    /**
+     * Idempotency check for the Fubon filled-trade sync (Requirement 120 / Task 385). Owner is
+     * passed explicitly rather than relying on the tenant filter — this method is called both by
+     * the background scheduler (no request context, filter never applies) and by the manual
+     * {@code /internal/brokers/fubon/trade-sync} endpoint, which has an HTTP request context but
+     * no {@code X-User-*} tenant identity. In that second case {@link
+     * com.steven.assets.security.TenantFilterAspect} fail-closes {@code ownerFilter} to an
+     * impossible owner id, which would make a normal derived-query call on this {@code @Filter}-
+     * annotated entity always return false regardless of the real data. A native query bypasses
+     * Hibernate's {@code @Filter} entirely so the explicit {@code ownerUserId} parameter is the
+     * only thing that decides the result, on every calling path.
+     */
+    @Query(value = """
+        SELECT EXISTS (
+            SELECT 1 FROM asset_transaction
+            WHERE owner_user_id = :ownerUserId AND broker_filled_no = :brokerFilledNo
+        )
+        """, nativeQuery = true)
+    boolean existsByOwnerUserIdAndBrokerFilledNo(Long ownerUserId, String brokerFilledNo);
 }

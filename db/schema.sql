@@ -185,7 +185,10 @@ CREATE TABLE public.asset_transaction (
     exchange_rate numeric(10,4),
     notes character varying(500),
     fee numeric(15,2),
-    transaction_tax numeric(15,2)
+    transaction_tax numeric(15,2),
+    source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
+    broker_filled_no character varying(50),
+    CONSTRAINT asset_transaction_source_check CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 
 
@@ -4621,6 +4624,13 @@ CREATE UNIQUE INDEX uk_dividend_event ON public.stock_dividend_history USING btr
 --
 
 CREATE UNIQUE INDEX uk_news_headline_dedupe ON public.news_headline USING btree (dedupe_key);
+
+
+--
+-- Name: ux_asset_transaction_owner_broker_filled_no; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX ux_asset_transaction_owner_broker_filled_no ON public.asset_transaction USING btree (owner_user_id, broker_filled_no) WHERE (broker_filled_no IS NOT NULL);
 
 
 --

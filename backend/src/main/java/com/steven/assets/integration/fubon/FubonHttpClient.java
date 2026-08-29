@@ -8,6 +8,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 
 /** Typed adapter client. Error bodies and exception text are intentionally never logged. */
@@ -69,6 +70,30 @@ public class FubonHttpClient implements FubonBrokerClient {
                     .bodyValue(new FubonDtos.QuoteReadRequest(List.copyOf(codes), "INVENTORY"))
                     .retrieve()
                     .bodyToMono(FubonDtos.QuoteBatchResponse.class)
+                    .timeout(timeout)
+                    .block();
+            return response != null
+                    ? FubonDtos.CallResult.success(response)
+                    : FubonDtos.CallResult.failure("EMPTY_RESPONSE");
+        } catch (WebClientResponseException exception) {
+            return FubonDtos.CallResult.failure(httpReason(exception.getStatusCode()));
+        } catch (Exception exception) {
+            return FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
+        }
+    }
+
+    @Override
+    public FubonDtos.CallResult<FubonDtos.TradeBatchResponse> readFilledTrades(LocalDate start, LocalDate end) {
+        FubonConfigState.Snapshot config = configState.snapshot();
+        FubonDtos.CallResult<FubonDtos.TradeBatchResponse> gate = gate(config);
+        if (gate != null) return gate;
+        try {
+            FubonDtos.TradeBatchResponse response = client.post()
+                    .uri("/internal/trades/read")
+                    .header(TOKEN_HEADER, config.token())
+                    .bodyValue(new FubonDtos.TradeReadRequest(start.toString(), end.toString()))
+                    .retrieve()
+                    .bodyToMono(FubonDtos.TradeBatchResponse.class)
                     .timeout(timeout)
                     .block();
             return response != null
