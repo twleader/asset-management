@@ -262,7 +262,8 @@ const mainMenuItems = computed(() => [
     index: 'system-info', title: '系統資訊', icon: 'Monitor',
     children: [
       { path: '/schedule-list', title: '排程列表', icon: 'Clock' },
-      { path: '/open-api', title: '開放 API', icon: 'Connection' }
+      { path: '/open-api', title: '開放 API', icon: 'Connection' },
+      { path: '/fubon-api', title: '富邦證 API', icon: 'Coin' }
     ]
   },
   { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }

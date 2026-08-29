@@ -10445,3 +10445,71 @@ new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
 ```
 
 `項目數正確()` 測試斷言的總數與 `BUSINESS` 分類計數同步各加一（依實作當下該測試現行值為基準，不假設本文件寫作當下的舊數字）。
+
+---
+
+## Requirement 121／Task 386：系統資訊「富邦證 API」頁——SDK 全量唯讀查詢盤點（含已串接與未串接）
+
+「系統資訊」分組第三個頁面自最初版本擴大範圍：不只列出本系統已串接的富邦 API，還盤點富邦官方 SDK（`fubon_neo` 2.2.9，Docker 內以 hash-verified wheel 安裝於 `fubon-broker-service` 容器）目前已驗證存在、且**確認為唯讀查詢**的所有方法，並標示每一筆是否已被本系統串接。資料模式仍是 BFF 內建**人工維護的靜態清單**（比照「排程列表」，而非「開放 API」頁的動態解析——`fubon-broker-service` 本身停用 Swagger/OpenAPI 且無 host port，沒有可解析的契約檔）。
+
+```text
+FubonApiInfoBffController（程式碼常數清單，52 筆：8 已串接 + 44 未串接）
+                 │ GET /api/bff/fubon-api（既有 authenticated 保護）
+                 ▼
+frontend bffApi.fubonApi.get() → FubonApiView（表格 + type="expand" 展開明細）
+```
+
+### 盤點方法與可查證性基準
+
+清單內容不是憑空列舉，而是在容器內直接 `docker exec` 進 `fubon-broker-service`、以 Python 內省已安裝的 SDK 物件取得的真實方法清單，逐一核對是否為唯讀：
+
+- `sdk.accounting`（`Accounting` 類別）：`dir()` 列出 7 個方法，逐一讀取 `__doc__`，全部為查詢用途（無任何寫入方法）。
+- `sdk.stock`（`Stock` 類別）：`dir()` 列出 43 個方法。**依方法語意逐一分類**，寫入／交易類（`place_order`、`cancel_order`、`modify_price`、`modify_quantity`、`batch_place_order`、`batch_cancel_order`、`batch_modify_price`、`batch_modify_quantity`、`cancel_condition_orders`、`single_condition`、`single_condition_day_trade`、`single_condition_stop`、`multi_condition`、`multi_condition_day_trade`、`multi_condition_stop`、`make_modify_price_obj`、`make_modify_quantity_obj`、`reserve_cash`、`reserve_stock`、`transfer_stock`、`time_slice_order`、`trail_profit`，共 22 個）**整批排除、不進入本頁清單**；`time_slice_order`／`trail_profit` 因與確認為查詢的 `get_time_slice_order`／`get_trail_order`／`get_trail_history` 成對出現、且無 `get_` 前綴，依既有 `place_order`/`modify_price` 等寫入方法的命名慣例判定為寫入方法的高信心（非 100% 確定，因兩者 docstring 皆為空）而保守排除，不列入唯讀清單。其餘 21 個查詢類方法（含 `filled_history`）全數收錄。
+- `sdk.marketdata.rest_client.stock`：`fugle_marketdata` 套件（`fugle-marketdata==2.5.0rc5`，`fubon_neo.sdk` 內 `from fugle_marketdata import FugleAPIError` 引用的獨立套件）原始碼可直接讀取（非編譯二進位），`rest/stock/{intraday,historical,snapshot,technical,corporate_actions,ownership}.py` 六個子模組共 20 個方法，全部是透過 `BaseRest.request()`（純 HTTP GET 轉發）取得行情資料的唯讀查詢，無任何寫入方法。
+- `sdk.marketdata.websocket_client.stock`：既有已串接的大盤指數即時串流（`taiex_index_stream.py`）與此物件訂閱 `channel: "indices"`；同一個 `WebSocketStockClient` 物件理論上也可訂閱個股頻道，故額外收錄 1 筆「未串接」的個股即時推播能力。`fubon_neo/adapter.py` 的 `WebSocketStockClientWrapper.subscribe()` 對 Speed 模式限制 channel 不得為 `aggregates`／`candles`，已驗證這兩個頻道名稱確實存在；其餘頻道（如逐筆成交／五檔／報價）確切名稱未在本專案程式碼中驗證。
+- `sdk.futopt`／`sdk.futopt_accounting`（期貨選擇權）**整體排除**，不進入本頁範圍——本系統的資產模型不含期貨/選擇權。
+
+### DTO 與 Controller
+
+```java
+public record FubonApiInfoDto(
+        boolean connected,
+        String category,
+        String name,
+        String sdkReference,
+        String httpEndpoint,
+        String description,
+        String consumer,
+        String requestSummary,
+        String responseSummary
+) {
+}
+```
+
+`FubonApiInfoBffController` 僅有單一 `GET` 端點（類層級 `@RequestMapping("/api/bff/fubon-api")` ＋ 無路徑 `@GetMapping`，比照既有 `SchedulePublicBffController`），回傳內建 `List<FubonApiInfoDto>` 常數，不注入任何 Repository、Service、WebClient，也不在 runtime import 或呼叫富邦 SDK——清單內容是建置當下人工盤點的**靜態快照**，不是即時探測結果。`sdkReference` 對已串接與未串接的項目都必填（是唯一保證「這筆資料確實對應到一個真實存在的 SDK 方法」的欄位）；`httpEndpoint` 只有 `connected=true` 才填值，`connected=false` 一律為空字串，不得虛構本系統尚未實作的 HTTP 路徑。
+
+### 清單分類與筆數（總計 52 筆，已串接 8、未串接 44）
+
+| category | 筆數 | 已串接 | 說明 |
+|---|---|---|---|
+| 連線狀態查詢 | 2 | 2 | `/internal/health`、`/internal/config`（本服務自建 meta 端點，非 SDK 方法） |
+| 帳戶／庫存查詢 | 7 | 2 | `sdk.accounting.*`；已串接 `inventories`、`unrealized_gains_and_loses`（皆經 `POST /internal/portfolio/read`） |
+| 委託與交易資訊查詢 | 18 | 0 | `sdk.stock.*` 中委託回報／條件單／停損停利／分時分量／額度／圈存／匯撥類查詢，全數未串接 |
+| 個股報價查詢 | 2 | 0 | `sdk.stock.query_symbol_quote`／`query_symbol_snapshot`（交易命名空間版本的報價查詢，與已串接的 `intraday.quote` 是不同物件） |
+| 歷史成交查詢 | 1 | 1 | `sdk.stock.filled_history`（經 `POST /internal/trades/read`） |
+| 行情查詢 | 20 | 2 | `sdk.marketdata.rest_client.stock.*`；已串接 `intraday.quote`（經 `POST /internal/market-data/tw-quotes`）與 `intraday.tickers`（`sdk_gateway.verify_taiex_index_symbol()` 於大盤指數串流啟動時內部呼叫，核對設定指數代碼是否有效，非獨立對外 endpoint，經 `GET /internal/market-data/taiex-index/stream`） |
+| 即時推播 | 2 | 1 | `sdk.marketdata.websocket_client.stock`；已串接大盤指數頻道（經 `GET /internal/market-data/taiex-index/stream`），個股頻道未串接 |
+
+完整 52 筆逐筆內容（`sdkReference`／`httpEndpoint`／`requestSummary`／`responseSummary` 全文）已依此分類與筆數，完整收錄於自足任務檔 `spec/tasks/t386_fubon_api_documentation_view.md`（386.2 節的 Java 常數區塊），不在此重複——task 檔是實作時的唯一權威來源，本節只描述架構與分類統計。
+
+### 前端呈現
+
+`FubonApiView.vue` 沿用既有骨架，新增：
+- 「已串接」欄位（`el-tag`：`connected=true` 顯示成功色「已串接」、`false` 顯示 info 色「未串接」），可依此篩選。
+- `el-table-column type="expand"`（比照既有 `TradingRadarView.vue` 展開列模式），展開內容顯示 `sdkReference`、`httpEndpoint`（若有）、完整 `requestSummary`／`responseSummary`。
+- `el-alert` 唯讀提醒文字追加「未串接」定位說明，避免使用者誤解為「可透過本系統呼叫」。
+- 分類篩選改為對應上表 7 類（選項較多，改用 `el-select` 而非 `el-radio-group`，避免單列 7 顆按鈕換行擁擠）。
+
+頁面仍不提供任何可觸發實際請求的互動元件（無「試打 API」、無 curl 產生器），未串接項目的存在本身即是本次擴充的核心訴求（讓使用者看到 SDK 還有什麼查詢能力），但呈現上必須與「可下單」徹底切割。
+
+維護提醒：`fubon-broker-service/src/fubon_broker_service/app.py` 新增、刪除或修改對外 endpoint，或 `FUBON_SDK_URL`／wheel 版本升級改變 `sdk.accounting`／`sdk.stock`／`sdk.marketdata` 命名空間方法時，必須重新以本節「盤點方法」的內省步驟核對並更新 `FubonApiInfoBffController` 的靜態清單；controller 內以 Javadoc 明確標註此提醒。

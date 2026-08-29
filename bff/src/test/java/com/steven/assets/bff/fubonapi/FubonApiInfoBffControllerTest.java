@@ -1,0 +1,158 @@
+package com.steven.assets.bff.fubonapi;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 富邦證 API 頁的資料模型守門（Requirement 121 / Task 386，第二版：SDK 全量唯讀查詢盤點）。
+ *
+ * <p><b>{@code fubon-broker-service} 新增／修改 endpoint，或富邦 SDK 版本升級改變
+ * {@code accounting}／{@code stock}／{@code marketdata} 命名空間方法時，本測試與
+ * {@link FubonApiInfoBffController#APIS} 需同步依 {@code spec/tasks/t386_fubon_api_documentation_view.md}
+ * 「盤點方法」段落的步驟重新核對更新。</b>
+ */
+class FubonApiInfoBffControllerTest {
+
+    /** 富邦「盤點方法」段落列出的 22 個下單／改單／刪單／批次／條件單／預約圈存／匯撥申請類方法，一律禁止出現。 */
+    private static final Set<String> FORBIDDEN = Set.of(
+            "sdk.stock.place_order",
+            "sdk.stock.cancel_order",
+            "sdk.stock.modify_price",
+            "sdk.stock.modify_quantity",
+            "sdk.stock.batch_place_order",
+            "sdk.stock.batch_cancel_order",
+            "sdk.stock.batch_modify_price",
+            "sdk.stock.batch_modify_quantity",
+            "sdk.stock.cancel_condition_orders",
+            "sdk.stock.single_condition",
+            "sdk.stock.single_condition_day_trade",
+            "sdk.stock.single_condition_stop",
+            "sdk.stock.multi_condition",
+            "sdk.stock.multi_condition_day_trade",
+            "sdk.stock.multi_condition_stop",
+            "sdk.stock.make_modify_price_obj",
+            "sdk.stock.make_modify_quantity_obj",
+            "sdk.stock.reserve_cash",
+            "sdk.stock.reserve_stock",
+            "sdk.stock.transfer_stock",
+            "sdk.stock.time_slice_order",
+            "sdk.stock.trail_profit"
+    );
+
+    /** 已串接 8 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    private static final Set<String> CONNECTED_PAIRS = Set.of(
+            "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
+            "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
+            "sdk.accounting.inventories|POST /internal/portfolio/read",
+            "sdk.accounting.unrealized_gains_and_loses|POST /internal/portfolio/read",
+            "sdk.stock.filled_history|POST /internal/trades/read",
+            "marketdata.rest_client.stock.intraday.quote|POST /internal/market-data/tw-quotes",
+            "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
+            "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream"
+    );
+
+    /** 透過公開查詢方法取清單（APIS 是 private static，刻意不用反射）。 */
+    private static List<FubonApiInfoDto> apis() {
+        return new FubonApiInfoBffController().list();
+    }
+
+    @Test
+    @DisplayName("清單恰好列出 52 筆富邦 SDK 唯讀查詢能力")
+    void 筆數恰為52() {
+        assertThat(apis()).hasSize(52);
+    }
+
+    @Test
+    @DisplayName("connected=true 恰為 8 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    void 已串接筆數與組合正確() {
+        List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
+        assertThat(connected).hasSize(8);
+
+        Set<String> actual = connected.stream()
+                .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
+                .collect(Collectors.toSet());
+        assertThat(actual).isEqualTo(CONNECTED_PAIRS);
+    }
+
+    @Test
+    @DisplayName("connected=false 恰為 44 筆，且每筆 httpEndpoint 為空字串")
+    void 未串接筆數與httpEndpoint為空() {
+        List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
+        assertThat(notConnected).hasSize(44);
+        assertThat(notConnected).allSatisfy(a -> assertThat(a.httpEndpoint()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("每筆 category 屬於七類之一，且依類別統計筆數正確")
+    void 分類與統計正確() {
+        Set<String> validCategories = Set.of(
+                "連線狀態查詢", "帳戶／庫存查詢", "委託與交易資訊查詢",
+                "個股報價查詢", "歷史成交查詢", "行情查詢", "即時推播"
+        );
+        assertThat(apis()).allSatisfy(a -> assertThat(validCategories).contains(a.category()));
+
+        Map<String, Long> countByCategory = apis().stream()
+                .collect(Collectors.groupingBy(FubonApiInfoDto::category, Collectors.counting()));
+
+        assertThat(countByCategory).isEqualTo(Map.of(
+                "連線狀態查詢", 2L,
+                "帳戶／庫存查詢", 7L,
+                "委託與交易資訊查詢", 18L,
+                "個股報價查詢", 2L,
+                "歷史成交查詢", 1L,
+                "行情查詢", 20L,
+                "即時推播", 2L
+        ));
+    }
+
+    @Test
+    @DisplayName("每筆 sdkReference／name／description／consumer／requestSummary／responseSummary 皆非空白字串")
+    void 欄位皆非空白() {
+        assertThat(apis()).allSatisfy(a -> {
+            assertThat(a.sdkReference()).isNotBlank();
+            assertThat(a.name()).isNotBlank();
+            assertThat(a.description()).isNotBlank();
+            assertThat(a.consumer()).isNotBlank();
+            assertThat(a.requestSummary()).isNotBlank();
+            assertThat(a.responseSummary()).isNotBlank();
+        });
+    }
+
+    @Test
+    @DisplayName("每筆 description 皆明確含唯讀措辭「純查詢」或「不影響券商端」")
+    void description含唯讀措辭() {
+        assertThat(apis()).allSatisfy(a ->
+                assertThat(a.description())
+                        .as("description of %s", a.sdkReference())
+                        .satisfiesAnyOf(
+                                d -> assertThat(d).contains("純查詢"),
+                                d -> assertThat(d).contains("不影響券商端")
+                        ));
+    }
+
+    @Test
+    @DisplayName("52 筆 sdkReference 沒有任何一筆與禁止的 22 個下單／改單／刪單類方法完整相等")
+    void 不含禁止的下單類方法() {
+        // 注意：必須用完整字串精確相等比對，不得用子字串 contains／doesNotContain——
+        // 合法收錄的查詢方法 sdk.stock.get_time_slice_order 字面上就包含子字串
+        // "time_slice_order"，用子字串比對會把這筆合法資料誤判為違規、測試必定紅燈。
+        for (FubonApiInfoDto a : apis()) {
+            assertThat(FORBIDDEN)
+                    .as("sdkReference %s 不得完全等於任一禁止方法", a.sdkReference())
+                    .doesNotContain(a.sdkReference());
+        }
+    }
+
+    @Test
+    @DisplayName("52 筆 sdkReference 皆不包含 futopt 字串（期貨選擇權整體排除）")
+    void 不含期貨選擇權命名空間() {
+        assertThat(apis()).allSatisfy(a -> assertThat(a.sdkReference()).doesNotContain("futopt"));
+    }
+}

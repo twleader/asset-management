@@ -403,6 +403,11 @@ export const bffApi = {
     contract: () => api.get('/bff/open-api/contract', { responseType: 'text', skipErrorToast: true })
   },
 
+  // FubonApi（系統資訊 → 富邦證 API，Requirement 121）
+  fubonApi: {
+    get: () => api.get('/bff/fubon-api')
+  },
+
   // SnapshotList
   snapshotList: {
     getAll:      () => api.get('/bff/snapshot-list'),
