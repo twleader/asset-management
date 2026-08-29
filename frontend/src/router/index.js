@@ -93,6 +93,12 @@ const router = createRouter({
       meta: { title: '開放 API', icon: 'Connection' }
     },
     {
+      path: '/fubon-api',
+      name: 'FubonApi',
+      component: () => import('@/views/FubonApiView.vue'),
+      meta: { title: '富邦證 API', icon: 'Coin' }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),
