@@ -4687,3 +4687,17 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **固定 enum outcome 與 process-local counters，同步排程列表頁。** 新增獨立 `FubonTradeOutcome` enum（不得覆寫或擴充既有 `FubonOutcome`，避免混淆既有 inventory 語意），至少涵蓋 `DISABLED、TRADE_SYNC_DISABLED、TRADE_SYNC_CAPACITY_CONFLICT、MISCONFIGURED、CALENDAR_UNKNOWN、TRADE_FAILED、NO_OWNER、BROKER_MISSING、DRY_RUN、SUCCESS、NO_NEW_TRADES、ROLLED_BACK`，以獨立 `EnumMap<FubonTradeOutcome,LongAdder>` process-local 累計，經既有手動 endpoint 回傳 sanitized summary；不新增 Actuator/Micrometer 依賴、不新增 host/public metrics endpoint。`SchedulePublicBffController.JOBS` 新增一筆 `(BUSINESS, "券商庫存", "富邦台股成交紀錄同步", <白話說明含「唯讀查詢」「以富邦成交序號防止重複新增」>, "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE)`，其測試斷言的總數同步由現行值加一（business 分類同步加一）。
 
 - [ ] **不在本次範圍。** 不做下單、改單、刪單、預約單或任何具金融副作用的富邦 API 呼叫；不修改或刪除既有交易紀錄（含先前已同步或使用者手動輸入者），只新增系統尚未記錄的成交；不同步融資融券、借券、當沖、期貨／選擇權或非台股現股成交；不回填 `fee`／`transactionTax`（SDK 未提供，不得估算）；不在任何 API／前端呈現 `source`／`brokerFilledNo` 欄位；不新增使用者可調整的排程時間或觸發按鈕；不影響既有富邦庫存同步（`FubonInventorySyncScheduler`／`FubonInventorySyncService`）的行為、schema 或 outcome 語意。
+
+---
+
+### Requirement 122／Task 387：Google 登入固定顯示帳號選擇器
+
+**User Story:** 作為在瀏覽器同時登入多個 Gmail 帳號的使用者，我希望每次點擊「使用 Google 登入」都會看到 Google 的帳號選擇畫面，而不是被瀏覽器悄悄帶入某個目前活躍的 Google session，讓我能明確選對帳號登入本系統，避免選錯帳號、或用到未被本系統核准／未在 OAuth consent screen 測試名單內的帳號時被 Google 擋下、卻誤以為是系統登入功能故障。
+
+**背景：** 本系統的 Google OAuth2 登入（Requirement 28）目前呼叫 Spring Security 預設的 authorization request 產生方式，未附加 `prompt` 參數。Google 在此情況下的預設行為是：若瀏覽器目前只有一個或有「最近使用」的 Google 帳號 session，會略過帳號選擇畫面直接沿用該帳號；使用者若同時登入多個 Gmail 帳號，實際登入哪一個帳號由瀏覽器/Google 端狀態決定、非使用者當下顯式選擇，可能與使用者原意不符。
+
+**Acceptance Criteria:**
+
+- [ ] **每次觸發登入都帶 `prompt=select_account`。** BFF 觸發 Google OAuth2 登入的 Authorization Request（`GET /oauth2/authorization/google` 導向 Google `/o/oauth2/v2/auth` 的那個 URL）一律附加 additional parameter `prompt=select_account`，使 Google 略過既有 session 自動選帳號的預設行為，每次都顯示帳號選擇器讓使用者明確挑選要用哪一個 Google 帳號登入。
+- [ ] **不因 scheme、既有 session 或帳號數量而不同。** 不論使用者是透過 `http://localhost` 或 `https://localhost` 觸發登入、瀏覽器當下是否已有 Google session、瀏覽器同時登入的 Gmail 帳號數量多寡，皆一律顯示帳號選擇器；此行為與 Requirement 28 既有的 `redirect_uri`（依 `X-Forwarded-Proto`/`X-Forwarded-Host` 動態產生）、`scope`、`client_id` 等既有授權參數彼此獨立，只新增 `prompt` 這一個 additional parameter。
+- [ ] **不改變登入後續行為。** 使用者在帳號選擇器選定帳號、完成 Google 端授權後，後續行為（`login-upsert`、PENDING/ACTIVE 判斷、ADMIN 判定、302 導回前端 `/`、session cookie 建立、代看 cookie 清除）與現行 Requirement 28 完全相同，不因新增 `prompt` 參數而改變。

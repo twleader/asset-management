@@ -14,7 +14,11 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcReactiveOAuth2UserService;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
+import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
 import org.springframework.security.oauth2.client.userinfo.ReactiveOAuth2UserService;
+import org.springframework.security.oauth2.client.web.server.DefaultServerOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.server.ServerOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.web.server.SecurityWebFilterChain;
@@ -69,7 +73,9 @@ public class SecurityConfig {
     };
 
     @Bean
-    public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
+    public SecurityWebFilterChain springSecurityFilterChain(
+            ServerHttpSecurity http,
+            ServerOAuth2AuthorizationRequestResolver authorizationRequestResolver) {
         http
                 .authorizeExchange(ex -> ex
                         .pathMatchers("/oauth2/**", "/login/**",
@@ -140,11 +146,33 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.PATCH, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.DELETE, GLOBAL_SETTINGS_PATHS).hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .anyExchange().authenticated())
-                .oauth2Login(o -> o.authenticationSuccessHandler(spaSuccessHandler()))
+                .oauth2Login(o -> o.authenticationSuccessHandler(spaSuccessHandler())
+                        .authorizationRequestResolver(authorizationRequestResolver))
                 .logout(l -> l.logoutUrl("/logout").logoutSuccessHandler(status200LogoutHandler()))
                 .exceptionHandling(e -> e.authenticationEntryPoint(json401EntryPoint()))
                 .csrf(ServerHttpSecurity.CsrfSpec::disable);
         return http.build();
+    }
+
+    /**
+     * Google 登入固定顯示帳號選擇器（Requirement 122）：在 Spring Security 預設的
+     * {@link DefaultServerOAuth2AuthorizationRequestResolver} 上疊加一個
+     * {@code prompt=select_account} additional parameter，強制每次觸發
+     * {@code /oauth2/authorization/google} 都導向 Google 的帳號選擇畫面，不因瀏覽器既有
+     * Google session 而被跳過。只新增這一個參數，{@code redirect_uri}／{@code scope}／
+     * {@code client_id} 等既有由 {@code ClientRegistration} 與 {@code X-Forwarded-*}
+     * （Requirement 28 的 {@code forward-headers-strategy: framework}）動態算出的欄位
+     * 完全沿用預設 resolver 的既有行為，不覆寫。
+     */
+    @Bean
+    public ServerOAuth2AuthorizationRequestResolver authorizationRequestResolver(
+            ReactiveClientRegistrationRepository clientRegistrationRepository) {
+        DefaultServerOAuth2AuthorizationRequestResolver resolver =
+                new DefaultServerOAuth2AuthorizationRequestResolver(clientRegistrationRepository);
+        resolver.setAuthorizationRequestCustomizer(
+                (java.util.function.Consumer<OAuth2AuthorizationRequest.Builder>) builder ->
+                        builder.additionalParameters(params -> params.put("prompt", "select_account")));
+        return resolver;
     }
 
     /**
