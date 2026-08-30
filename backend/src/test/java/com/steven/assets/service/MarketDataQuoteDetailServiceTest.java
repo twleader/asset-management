@@ -49,7 +49,7 @@ class MarketDataQuoteDetailServiceTest {
         });
         server.start();
         stalledRequestObserved = new CountDownLatch(1);
-        service = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null);
+        service = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null, null);
     }
 
     @AfterEach void stop() { server.stop(0); }

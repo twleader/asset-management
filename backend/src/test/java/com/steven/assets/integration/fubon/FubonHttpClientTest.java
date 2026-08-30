@@ -2,6 +2,7 @@ package com.steven.assets.integration.fubon;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.stream.IntStream;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -86,6 +89,81 @@ class FubonHttpClientTest {
         FubonConfigState config = mock(FubonConfigState.class);
         when(config.snapshot()).thenReturn(new FubonConfigState.Snapshot(state, token, state.name()));
         return new FubonHttpClient(WebClient.builder().baseUrl(baseUrl).build(), config, Duration.ofSeconds(2));
+    }
+
+    @Test
+    void etfEndpointUsesExactTokenAndPreservesNormalizedStringEnvelope() {
+        server.createContext("/internal/market-data/etf-holdings", exchange -> respond(exchange, 200, """
+                {"batchId":"batch","holdings":[{"stockCode":"0050","status":"SUCCESS","reason":null,
+                "rawResponseJson":"{\\"schemaVersion\\":1,\\"stockCode\\":\\"0050\\",\\"sourceDate\\":null,\\"holdings\\":[]}"}],"counters":{}}
+                """));
+        var result = client(FubonConfigState.State.READY, "shared-token").readEtfHoldings(java.util.List.of("0050"));
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().holdings().getFirst().rawResponseJson()).contains("\"schemaVersion\":1");
+        assertThat(seenToken.get()).isEqualTo("shared-token");
+        assertThat(seenBody.get()).isEqualTo("{\"codes\":[\"0050\"]}");
+    }
+
+    @Test
+    void etfDisabledMisconfiguredMalformedAnd503AreTypedFailures() {
+        server.createContext("/internal/market-data/etf-holdings", exchange -> respond(exchange, 200, "not-json"));
+        assertThat(client(FubonConfigState.State.DISABLED, null).readEtfHoldings(java.util.List.of("0050")).reason()).isEqualTo("DISABLED");
+        assertThat(client(FubonConfigState.State.MISCONFIGURED, null).readEtfHoldings(java.util.List.of("0050")).reason()).isEqualTo("MISCONFIGURED");
+        assertThat(requestCount).hasValue(0);
+        assertThat(client(FubonConfigState.State.READY, "token").readEtfHoldings(java.util.List.of("0050")).reason()).isEqualTo("TRANSPORT_OR_SCHEMA_FAILURE");
+        server.removeContext("/internal/market-data/etf-holdings");
+        server.createContext("/internal/market-data/etf-holdings", exchange -> respond(exchange, 503, "secret-provider-body"));
+        var result = client(FubonConfigState.State.READY, "token").readEtfHoldings(java.util.List.of("0050"));
+        assertThat(result.reason()).isEqualTo("ADAPTER_5XX");
+        assertThat(result.body()).isNull();
+    }
+
+    @Test
+    void etfTimeoutIsBoundedAndDoesNotExposeException() {
+        var config = mock(FubonConfigState.class);
+        when(config.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "token", null));
+        var neverResponds = WebClient.builder().exchangeFunction(request -> reactor.core.publisher.Mono.never()).build();
+        var result = new FubonHttpClient(neverResponds, config, Duration.ofMillis(10)).readEtfHoldings(java.util.List.of("0050"));
+        assertThat(result.reason()).isEqualTo("TRANSPORT_OR_SCHEMA_FAILURE");
+        assertThat(result.body()).isNull();
+    }
+
+    @Test
+    void fullFiftyEtfBatchLargerThanDefaultCodecLimitRemainsReadable() throws Exception {
+        List<String> codes = IntStream.rangeClosed(1, 50).mapToObj(i -> String.format("00%03d", i)).toList();
+        String constituents = IntStream.rangeClosed(1, 100).mapToObj(i ->
+                "{\"stockCode\":\"" + (2000 + i) + "\",\"stockName\":\"成分公司股份有限公司\",\"weight\":\"1\",\"shares\":\"530358242\"}")
+                .collect(java.util.stream.Collectors.joining(","));
+        var rows = codes.stream().map(code -> new FubonDtos.EtfHoldingsItem(code, "SUCCESS", null,
+                "{\"schemaVersion\":1,\"stockCode\":\"" + code + "\",\"sourceDate\":\"2026-08-27\",\"holdings\":[" + constituents + "]}"))
+                .toList();
+        String body = new ObjectMapper().writeValueAsString(new FubonDtos.EtfHoldingsBatchResponse("batch", rows));
+        assertThat(body.getBytes(StandardCharsets.UTF_8).length).isGreaterThan(256 * 1024).isLessThan(FubonHttpClient.ETF_MAX_RESPONSE_BYTES);
+        server.createContext("/internal/market-data/etf-holdings", exchange -> respond(exchange, 200, body));
+        var result = client(FubonConfigState.State.READY, "token").readEtfHoldings(codes);
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().holdings()).hasSize(50);
+        assertThat(FubonEtfHoldingsParser.parse(codes.getFirst(), result.body().holdings().getFirst().rawResponseJson())
+                .orElseThrow().holdings()).hasSize(100);
+    }
+
+    @Test
+    void etfResponseOverItsFiniteLimitFailsClosedWithoutReturningPartialRows() {
+        String body = "{\"batchId\":\"" + "x".repeat(FubonHttpClient.ETF_MAX_RESPONSE_BYTES) + "\",\"holdings\":[]}";
+        server.createContext("/internal/market-data/etf-holdings", exchange -> respond(exchange, 200, body));
+        var result = client(FubonConfigState.State.READY, "token").readEtfHoldings(List.of("0050"));
+        assertThat(result.success()).isFalse();
+        assertThat(result.reason()).isEqualTo("TRANSPORT_OR_SCHEMA_FAILURE");
+        assertThat(result.body()).isNull();
+    }
+
+    @Test
+    void etfCodecLimitDoesNotBroadenPortfolioResponseLimit() {
+        String body = "{\"batchId\":\"" + "x".repeat(300 * 1024) + "\",\"positions\":[]}";
+        server.createContext("/internal/portfolio/read", exchange -> respond(exchange, 200, body));
+        var result = client(FubonConfigState.State.READY, "token").readPortfolio();
+        assertThat(result.success()).isFalse();
+        assertThat(result.body()).isNull();
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {

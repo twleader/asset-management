@@ -46,7 +46,7 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.trail_profit"
     );
 
-    /** 已串接 8 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    /** 已串接 9 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
     private static final Set<String> CONNECTED_PAIRS = Set.of(
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
@@ -55,7 +55,8 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.filled_history|POST /internal/trades/read",
             "marketdata.rest_client.stock.intraday.quote|POST /internal/market-data/tw-quotes",
             "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
-            "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream"
+            "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream",
+            "marketdata.rest_client.stock.ownership.etf_holdings|POST /internal/market-data/etf-holdings"
     );
 
     /** 透過公開查詢方法取清單（APIS 是 private static，刻意不用反射）。 */
@@ -70,10 +71,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=true 恰為 8 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    @DisplayName("connected=true 恰為 9 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
     void 已串接筆數與組合正確() {
         List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
-        assertThat(connected).hasSize(8);
+        assertThat(connected).hasSize(9);
 
         Set<String> actual = connected.stream()
                 .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
@@ -82,10 +83,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=false 恰為 44 筆，且每筆 httpEndpoint 為空字串")
+    @DisplayName("connected=false 恰為 43 筆，且每筆 httpEndpoint 為空字串")
     void 未串接筆數與httpEndpoint為空() {
         List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
-        assertThat(notConnected).hasSize(44);
+        assertThat(notConnected).hasSize(43);
         assertThat(notConnected).allSatisfy(a -> assertThat(a.httpEndpoint()).isEmpty());
     }
 
@@ -154,5 +155,16 @@ class FubonApiInfoBffControllerTest {
     @DisplayName("52 筆 sdkReference 皆不包含 futopt 字串（期貨選擇權整體排除）")
     void 不含期貨選擇權命名空間() {
         assertThat(apis()).allSatisfy(a -> assertThat(a.sdkReference()).doesNotContain("futopt"));
+    }
+
+    @Test
+    void etfDocumentsNormalizedDateAndReadOnlyScheduledScope() {
+        var etf = apis().stream().filter(api -> api.sdkReference().endsWith("ownership.etf_holdings"))
+                .findFirst().orElseThrow();
+        assertThat(etf.connected()).isTrue();
+        assertThat(etf.consumer()).contains("08:50", "15:30", "交易雷達", "需另啟用設定");
+        assertThat(etf.responseSummary()).contains("正規化 JSON", "sourceDate", "decimal 字串")
+                .doesNotContain("逐字保存", "尚未核實", "佔位");
+        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(3);
     }
 }

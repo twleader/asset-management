@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>回傳富邦官方 SDK（{@code fubon_neo} 2.2.9）{@code accounting}／{@code stock}／
  * {@code marketdata} 命名空間中已驗證存在、且確認為唯讀查詢的全部方法的**人工維護靜態清單**
- * （52 筆：8 已串接、44 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
+ * （52 筆：9 已串接、43 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
  * {@code fubon-broker-service} 容器內以 Python 內省 SDK 物件取得的真實方法與 docstring，
  * 詳細盤點步驟見 {@code spec/tasks/t386_fubon_api_documentation_view.md} 的「盤點方法」段落。
  *
@@ -39,7 +39,7 @@ public class FubonApiInfoBffController {
     private static final String NO_SDK_DOC =
             "SDK 未提供可查證的參數／回傳說明（docstring 為空），僅能確認此方法存在於 sdk.stock 命名空間。";
 
-    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：8 已串接、44 未串接）。 */
+    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：9 已串接、43 未串接）。 */
     private static final List<FubonApiInfoDto> APIS = List.of(
 
             // ===== 連線狀態查詢（2，全數已串接）=====
@@ -212,7 +212,7 @@ public class FubonApiInfoBffController {
                     "FilledData 陣列，含 date／filled_no／filled_avg_price／filled_qty／filled_price／"
                             + "order_type／filled_time 等成交欄位"),
 
-            // ===== 行情查詢（20：marketdata.rest_client.stock.*，1 已串接）=====
+            // ===== 行情查詢（20：marketdata.rest_client.stock.*，3 已串接）=====
             new FubonApiInfoDto(true, "行情查詢", "個股即時報價與最佳五檔",
                     "marketdata.rest_client.stock.intraday.quote", "POST /internal/market-data/tw-quotes",
                     "逐檔查詢台股即時成交價、漲跌、成交量與委買委賣最佳五檔，供交易雷達即時報價與庫存估值使用" + RO,
@@ -317,11 +317,18 @@ public class FubonApiInfoBffController {
                     "查詢新股上市櫃申請中名單" + RO, NOT_CONNECTED,
                     "選填 query 參數",
                     "申請中名單陣列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "ETF 成分股持股明細查詢",
-                    "marketdata.rest_client.stock.ownership.etf_holdings", NO_HTTP,
-                    "查詢 ETF 成分股持股明細" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "成分股持股明細陣列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
+            new FubonApiInfoDto(true, "行情查詢", "ETF 成分股持股明細查詢",
+                    "marketdata.rest_client.stock.ownership.etf_holdings",
+                    "POST /internal/market-data/etf-holdings",
+                    "逐檔查詢台股 ETF 成分股持股明細，正規化市場資料落地保存，股票分析直接讀取相同資料" + RO,
+                    "business-services（富邦 ETF 成分股持股同步排程，交易日 08:50／15:30，"
+                            + "範圍為今日交易雷達台股 ETF，需另啟用設定才會執行）",
+                    "codes（1–50 個不重複的台股 ETF 代碼，僅查今日交易雷達範圍）",
+                    "batchId＋holdings 陣列，每筆含 stockCode／status（SUCCESS｜FAILURE）／reason／"
+                            + "rawResponseJson（歷史欄名；版本 1 正規化 JSON 字串，含 schemaVersion／stockCode／"
+                            + "sourceDate 來源日／holdings。成分欄位 stockCode／stockName／weight／shares；"
+                            + "數值為 decimal 字串、shares 可 null，合法無股票成分可有 null sourceDate；"
+                            + "不包含任意 SDK raw 或帳戶資料）"),
 
             // ===== 即時推播（2：marketdata.websocket_client.stock，1 已串接）=====
             new FubonApiInfoDto(true, "即時推播", "大盤指數即時串流",

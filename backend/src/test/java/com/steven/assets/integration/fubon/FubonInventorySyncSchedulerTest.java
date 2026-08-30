@@ -114,7 +114,7 @@ class FubonInventorySyncSchedulerTest {
         server.start();
         try {
             MarketDataService realCalendar = new MarketDataService(
-                    "http://127.0.0.1:" + server.getAddress().getPort(), null);
+                    "http://127.0.0.1:" + server.getAddress().getPort(), null, null);
             FubonConfigState config = config(FubonConfigState.State.READY);
             FubonInventorySyncService sync = mock(FubonInventorySyncService.class);
 

@@ -15,8 +15,12 @@ import java.util.List;
 @Component
 public class FubonHttpClient implements FubonBrokerClient {
     static final String TOKEN_HEADER = "X-Internal-Service-Token";
+    // A 50-ETF batch includes full constituent lists and can exceed WebClient's 256 KiB default.
+    // Keep a finite ETF-only bound; portfolio/quotes/trades retain their existing codec limits.
+    static final int ETF_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
     private final WebClient client;
+    private final WebClient etfClient;
     private final FubonConfigState configState;
     private final Duration timeout;
 
@@ -30,6 +34,9 @@ public class FubonHttpClient implements FubonBrokerClient {
 
     FubonHttpClient(WebClient client, FubonConfigState configState, Duration timeout) {
         this.client = client;
+        this.etfClient = client.mutate()
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(ETF_MAX_RESPONSE_BYTES))
+                .build();
         this.configState = configState;
         this.timeout = timeout;
     }
@@ -101,6 +108,31 @@ public class FubonHttpClient implements FubonBrokerClient {
                     : FubonDtos.CallResult.failure("EMPTY_RESPONSE");
         } catch (WebClientResponseException exception) {
             return FubonDtos.CallResult.failure(httpReason(exception.getStatusCode()));
+        } catch (Exception exception) {
+            return FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
+        }
+    }
+
+    @Override
+    public FubonDtos.CallResult<FubonDtos.EtfHoldingsBatchResponse> readEtfHoldings(List<String> codes) {
+        FubonConfigState.Snapshot config = configState.snapshot();
+        FubonDtos.CallResult<FubonDtos.EtfHoldingsBatchResponse> gate = gate(config);
+        if (gate != null) return gate;
+        try {
+            FubonDtos.EtfHoldingsBatchResponse response = etfClient.post()
+                    .uri("/internal/market-data/etf-holdings")
+                    .header(TOKEN_HEADER, config.token())
+                    .bodyValue(new FubonDtos.EtfHoldingsReadRequest(List.copyOf(codes)))
+                    .retrieve()
+                    .bodyToMono(FubonDtos.EtfHoldingsBatchResponse.class)
+                    .timeout(timeout)
+                    .block();
+            return response != null
+                    ? FubonDtos.CallResult.success(response)
+                    : FubonDtos.CallResult.failure("EMPTY_RESPONSE");
+        } catch (WebClientResponseException exception) {
+            return FubonDtos.CallResult.failure(exception.getStatusCode().is2xxSuccessful()
+                    ? "TRANSPORT_OR_SCHEMA_FAILURE" : httpReason(exception.getStatusCode()));
         } catch (Exception exception) {
             return FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
         }

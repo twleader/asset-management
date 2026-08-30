@@ -246,6 +246,56 @@ class SdkGateway:
                 raise SdkCallError("QUOTE_TRANSPORT_FAILED") from None
         raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
 
+    def read_etf_holdings(self, symbol: str) -> object:
+        """Read-only ETF constituent-holdings lookup (Requirement 123 / Task 389).
+
+        Mirrors quote()'s session/timeout/retry structure exactly -- this call also
+        lives under sdk.marketdata.rest_client.stock and never touches the
+        accounting namespace (_accounting_lock / _wait_for_accounting_budget()),
+        which is reserved for the trading-account query line. EtfHoldingsService
+        validates the official provider schema and creates the normalized DTO;
+        this internal gateway return value must never be exposed directly.
+        """
+        for attempt in range(2):
+            config = self._require_config()
+            self._ensure_session(config)
+            with self._session_lock:
+                client = self._stock_client
+            if client is None:
+                raise SdkCallError("REALTIME_NOT_INITIALIZED", misconfigured=True)
+            try:
+                ownership = raw_field(client, "ownership")
+                etf_holdings_method = raw_field(ownership, "etf_holdings") if ownership is not None else None
+                if not callable(etf_holdings_method):
+                    self._mark_misconfigured()
+                    raise SdkCallError("ETF_HOLDINGS_CLIENT_UNAVAILABLE", misconfigured=True)
+                response = self._run_bounded(
+                    lambda: etf_holdings_method(symbol=symbol),
+                    self.QUOTE_CALL_TIMEOUT_SECONDS, "ETF_HOLDINGS_TIMEOUT",
+                )
+                if self._response_auth_invalid(response):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                return response
+            except SdkCallError as exc:
+                if exc.auth_invalid and attempt == 0:
+                    with self._session_lock:
+                        self._invalidate_locked()
+                    continue
+                raise
+            except Exception as exc:
+                if self._exception_is_rate_limited(exc):
+                    raise SdkCallError(
+                        "RATE_LIMITED", retry_after_seconds=self._exception_retry_after(exc)
+                    ) from None
+                if self._exception_is_auth_invalid(exc) and attempt == 0:
+                    with self._session_lock:
+                        self._invalidate_locked()
+                    continue
+                if self._exception_is_auth_invalid(exc):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True) from None
+                raise SdkCallError("ETF_HOLDINGS_TRANSPORT_FAILED") from None
+        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+
     def realtime_stock_websocket(self) -> object:
         """Returns the read-only market-data websocket client from the existing SDK session."""
         config = self._require_config()

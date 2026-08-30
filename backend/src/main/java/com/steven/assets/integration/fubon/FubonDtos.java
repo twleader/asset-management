@@ -84,6 +84,17 @@ public final class FubonDtos {
             String reason,
             Map<FubonOutcome, Long> counters) {}
 
+    public record EtfHoldingsReadRequest(List<String> codes) {}
+
+    public record EtfHoldingsBatchResponse(
+            String batchId, List<EtfHoldingsItem> holdings, Map<String, Long> counters) {
+        public EtfHoldingsBatchResponse(String batchId, List<EtfHoldingsItem> holdings) {
+            this(batchId, holdings, Map.of());
+        }
+    }
+
+    public record EtfHoldingsItem(String stockCode, String status, String reason, String rawResponseJson) {}
+
     public record TradeReadRequest(String startDate, String endDate) {}
 
     public record TradeBatchResponse(

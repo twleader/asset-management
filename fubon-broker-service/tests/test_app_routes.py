@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 import fubon_broker_service.app as app_module
 from fubon_broker_service.app import create_app
 from fubon_broker_service.config import ConfigLoader
+from fubon_broker_service.etf_holdings import EtfHoldingsService
 from fubon_broker_service.redaction import redact, redact_mapping
 from fubon_broker_service.sdk_gateway import SdkCallError
 from fubon_broker_service.trades import TradeReadError
 
-from helpers import TOKEN, ready_config
+from helpers import TOKEN, fixed_now, ready_config
 
 
 class Gateway:
@@ -71,6 +74,21 @@ class Trades:
         }
 
 
+class EtfHoldings:
+    def __init__(self):
+        self.calls = 0
+
+    async def read(self, codes):
+        self.calls += 1
+        return {
+            "batchId": "etf-holdings-batch",
+            "holdings": [
+                {"stockCode": code, "status": "SUCCESS", "reason": None, "rawResponseJson": "{}"}
+                for code in codes
+            ],
+        }
+
+
 class ExplodingPortfolio:
     def read(self):
         raise RuntimeError("TEST_PERSONAL_ID_SENTINEL TEST_API_KEY_SENTINEL")
@@ -81,12 +99,17 @@ def client_for(loader):
     portfolio = Portfolio()
     quotes = Quotes()
     trades = Trades()
-    application = create_app(loader, gateway, portfolio, quotes, trades)
-    return TestClient(application), gateway, portfolio, quotes, trades
+    etf_holdings = EtfHoldings()
+    application = create_app(
+        loader, gateway, portfolio, quotes, trades, etf_holdings_service=etf_holdings
+    )
+    return TestClient(application), gateway, portfolio, quotes, trades, etf_holdings
 
 
 def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
-    client, gateway, portfolio, quotes, trades = client_for(ConfigLoader(tmp_path, lambda: "false"))
+    client, gateway, portfolio, quotes, trades, etf_holdings = client_for(
+        ConfigLoader(tmp_path, lambda: "false")
+    )
     with client:
         response = client.get("/internal/health")
         assert response.status_code == 200
@@ -94,18 +117,19 @@ def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
         assert response.json()["status"] == "UP"
         assert response.json()["configState"] == "NOT_CONFIGURED"
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
     assert gateway.shutdown_calls == 1
 
 
-def test_exact_six_routes_auth_and_methods(tmp_path):
-    client, _gateway, portfolio, quotes, trades = client_for(ready_config(tmp_path))
+def test_exact_seven_routes_auth_and_methods(tmp_path):
+    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     assert {(route.path, frozenset(route.methods or ())) for route in client.app.routes} == {
         ("/internal/health", frozenset({"GET"})),
         ("/internal/config", frozenset({"GET"})),
         ("/internal/portfolio/read", frozenset({"POST"})),
         ("/internal/market-data/tw-quotes", frozenset({"POST"})),
+        ("/internal/market-data/etf-holdings", frozenset({"POST"})),
         ("/internal/trades/read", frozenset({"POST"})),
         ("/internal/market-data/taiex-index/stream", frozenset({"GET"})),
     }
@@ -121,9 +145,13 @@ def test_exact_six_routes_auth_and_methods(tmp_path):
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True}).status_code == 200
         assert client.post("/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}).status_code == 200
         assert client.post(
+            "/internal/market-data/etf-holdings", headers=headers, json={"codes": ["0050"]}
+        ).status_code == 200
+        assert client.post(
             "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
         ).status_code == 200
         assert client.post("/internal/trades/read", json={"startDate": "2026-08-21", "endDate": "2026-08-21"}).status_code == 401
+        assert client.post("/internal/market-data/etf-holdings", json={"codes": ["0050"]}).status_code == 401
         assert client.get("/docs").status_code == 404
         assert client.get("/redoc").status_code == 404
         assert client.get("/openapi.json").status_code == 404
@@ -131,13 +159,15 @@ def test_exact_six_routes_auth_and_methods(tmp_path):
         assert client.post("/internal/health").status_code == 405
         assert client.get("/internal/portfolio/read", headers=headers).status_code == 405
         assert client.get("/internal/trades/read", headers=headers).status_code == 405
+        assert client.get("/internal/market-data/etf-holdings", headers=headers).status_code == 405
         assert client.get("/internal/market-data/taiex-index/stream", headers=headers).status_code == 503
     assert portfolio.calls == quotes.calls == 1
     assert trades.calls == 1
+    assert etf_holdings.calls == 1
 
 
 def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
-    client, _gateway, portfolio, _quotes, _trades = client_for(ready_config(tmp_path))
+    client, _gateway, portfolio, _quotes, _trades, _etf_holdings = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": False}).status_code == 400
@@ -149,8 +179,137 @@ def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
     assert portfolio.calls == 0
 
 
+def test_etf_holdings_request_body_validation_matrix(tmp_path):
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with client:
+        assert client.post(
+            "/internal/market-data/etf-holdings", headers=headers, json={"codes": []}
+        ).status_code == 400
+        assert client.post(
+            "/internal/market-data/etf-holdings",
+            headers=headers,
+            json={"codes": [f"00{i:03d}" for i in range(100, 151)]},
+        ).status_code == 400
+        assert client.post(
+            "/internal/market-data/etf-holdings",
+            headers=headers,
+            json={"codes": ["0050"], "purpose": "LIVE"},
+        ).status_code == 400
+        assert client.post(
+            "/internal/market-data/etf-holdings", headers=headers, json={}
+        ).status_code == 400
+        response = client.post(
+            "/internal/market-data/etf-holdings",
+            headers=headers,
+            json={"codes": [f"00{i:03d}" for i in range(100, 150)]},
+        )
+        assert response.status_code == 200
+        assert len(response.json()["holdings"]) == 50
+    assert etf_holdings.calls == 1
+
+
+@pytest.mark.parametrize("body", [
+    {"codes": ["0000"]}, {"codes": ["2330"]}, {"codes": ["AAPL"]},
+    {"codes": ["0050", "0050"]}, {"codes": ["0050 "]}, {"codes": [" 0050"]},
+    {"codes": ["00981a"]}, {"codes": ["00Ａ１"]}, {"codes": ["0050\n"]},
+    {"codes": ["005"]}, {"codes": ["0012345"]}, {"codes": ["0050/secret"]},
+    {"codes": [True]}, {"codes": [50]}, {"codes": [None]}, {"codes": "0050"},
+    {"codes": ["0050"], "account": "ACCOUNT_SENTINEL"},
+])
+def test_etf_holdings_rejects_noncanonical_or_duplicate_codes_without_calling_service(tmp_path, body):
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    with client:
+        response = client.post(
+            "/internal/market-data/etf-holdings", headers={"X-Internal-Service-Token": TOKEN}, json=body,
+        )
+    assert response.status_code == 400
+    assert response.json() == {"reason": "INVALID_REQUEST"}
+    assert etf_holdings.calls == 0
+
+
+def test_etf_holdings_accepts_numeric_and_active_etf_symbols_and_checks_each_auth_form(tmp_path):
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    body = {"codes": ["0050", "006208", "00981A", "00631L"]}
+    with client:
+        assert client.post("/internal/market-data/etf-holdings", json=body).status_code == 401
+        assert client.post(
+            "/internal/market-data/etf-holdings", json=body,
+            headers={"X-Internal-Service-Token": "wrong"},
+        ).status_code == 403
+        assert client.post(
+            "/internal/market-data/etf-holdings", json=body,
+            headers=[("X-Internal-Service-Token", TOKEN), ("X-Internal-Service-Token", TOKEN)],
+        ).status_code == 401
+        response = client.post(
+            "/internal/market-data/etf-holdings", json=body, headers={"X-Internal-Service-Token": TOKEN},
+        )
+    assert response.status_code == 200
+    assert [row["stockCode"] for row in response.json()["holdings"]] == body["codes"]
+    assert response.json()["counters"]["SUCCESS"] == 1
+    assert response.json()["counters"]["QUOTE_FAILED"] == 0
+    assert etf_holdings.calls == 1
+
+
+def test_etf_holdings_returns_503_when_disabled_or_misconfigured(tmp_path):
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(
+        ConfigLoader(tmp_path, lambda: "false")
+    )
+    with client:
+        assert client.post(
+            "/internal/market-data/etf-holdings", json={"codes": ["0050"]}
+        ).status_code == 503
+
+    loader = ready_config(tmp_path)
+    (tmp_path / "shared" / "internal-service-token").unlink()
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(loader)
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with client:
+        assert client.post(
+            "/internal/market-data/etf-holdings", headers=headers, json={"codes": ["0050"]}
+        ).status_code == 503
+    assert etf_holdings.calls == 0
+
+
+def test_etf_route_returns_only_normalized_fields_and_counts_mixed_batch_failure(tmp_path):
+    class ProviderGateway(Gateway):
+        def read_etf_holdings(self, code):
+            if code == "0056":
+                raise RuntimeError("SECRET_SENTINEL")
+            return {
+                "symbol": code, "account": "ACCOUNT_SENTINEL", "api-key": "SECRET_SENTINEL",
+                "data": [{"date": "2026-08-20", "components": [
+                    {"symbol": "2330", "name": "台積電", "weight": 58.82, "quantity": 530358242},
+                ]}],
+            }
+
+    gateway = ProviderGateway()
+    application = create_app(
+        ready_config(tmp_path), gateway,
+        etf_holdings_service=EtfHoldingsService(gateway, now=fixed_now),
+    )
+    with TestClient(application) as client:
+        response = client.post(
+            "/internal/market-data/etf-holdings", json={"codes": ["0050", "0056"]},
+            headers={"X-Internal-Service-Token": TOKEN},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert "SENTINEL" not in response.text
+    assert set(body) == {"batchId", "holdings", "counters"}
+    assert json.loads(body["holdings"][0]["rawResponseJson"]) == {
+        "schemaVersion": 1, "stockCode": "0050", "sourceDate": "2026-08-20",
+        "holdings": [{"stockCode": "2330", "stockName": "台積電", "weight": "58.82", "shares": "530358242"}],
+    }
+    assert body["holdings"][1] == {
+        "stockCode": "0056", "status": "FAILURE", "reason": "ETF_HOLDINGS_FAILED", "rawResponseJson": None,
+    }
+    assert body["counters"]["QUOTE_FAILED"] == 1
+    assert body["counters"]["SUCCESS"] == 0
+
+
 def test_trades_read_rejects_malformed_dates_and_oversized_ranges(tmp_path):
-    client, _gateway, _portfolio, _quotes, trades = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, trades, _etf_holdings = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post(
@@ -214,29 +373,31 @@ def test_trades_read_maps_sdk_call_error_to_sanitized_503(tmp_path):
 def test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured(tmp_path):
     loader = ready_config(tmp_path)
     (tmp_path / "shared" / "internal-service-token").unlink()
-    client, _gateway, portfolio, quotes, trades = client_for(loader)
+    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(loader)
     with client:
         health = client.get("/internal/health")
         assert health.status_code == 200
         assert health.json()["configState"] == "MISCONFIGURED"
         assert client.get("/internal/config").status_code == 503
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
 
 
 def test_invalid_enabled_flag_is_misconfigured_not_disabled(tmp_path):
-    client, _gateway, portfolio, quotes, trades = client_for(ConfigLoader(tmp_path, lambda: "not-a-boolean"))
+    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(
+        ConfigLoader(tmp_path, lambda: "not-a-boolean")
+    )
     with client:
         health = client.get("/internal/health")
         functional = client.get("/internal/config")
     assert health.json()["configState"] == "MISCONFIGURED"
     assert functional.status_code == 503
     assert functional.json() == {"detail": {"reason": "INVALID_ENABLED_FLAG"}}
-    assert portfolio.calls == quotes.calls == trades.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
 
 
 def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp_path):
-    client, gateway, portfolio, quotes, trades = client_for(ready_config(tmp_path))
+    client, gateway, portfolio, quotes, trades, etf_holdings = client_for(ready_config(tmp_path))
     gateway.runtime_misconfigured = True
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
@@ -247,9 +408,12 @@ def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp
             "/internal/market-data/tw-quotes", headers=headers, json={"codes": ["2330"], "purpose": "LIVE"}
         ).status_code == 503
         assert client.post(
+            "/internal/market-data/etf-holdings", headers=headers, json={"codes": ["0050"]}
+        ).status_code == 503
+        assert client.post(
             "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
         ).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
 
 
 def test_unexpected_exception_is_sanitized_before_response_and_log(tmp_path, caplog):
@@ -340,3 +504,37 @@ def test_selector_must_be_absent_or_a_complete_pair(tmp_path):
     assert snapshot.state == "MISCONFIGURED"
     assert snapshot.reason == "INCOMPLETE_ACCOUNT_SELECTOR"
     assert "TEST_PERSONAL_ID_SENTINEL" not in repr(snapshot)
+
+
+def test_etf_failure_does_not_change_the_exact_thirteen_counter_keys_seen_by_other_routes(tmp_path):
+    expected_keys = {
+        "DISABLED", "MISCONFIGURED", "CALENDAR_UNKNOWN", "ACCOUNTING_FAILED", "RECONCILE_FAILED",
+        "QUOTE_FAILED", "NO_OWNER", "NO_TODAY_SNAPSHOT", "BROKER_MISSING", "DRY_RUN", "SUCCESS",
+        "EMPTY_CLEARED", "ROLLED_BACK",
+    }
+    client, _gateway, _portfolio, _quotes, _trades, etf = client_for(ready_config(tmp_path))
+
+    async def mixed_result(codes):
+        return {"batchId": "etf-batch", "holdings": [
+            {"stockCode": codes[0], "status": "SUCCESS", "reason": None, "rawResponseJson": "{}"},
+            {"stockCode": codes[1], "status": "FAILURE", "reason": "ETF_HOLDINGS_FAILED", "rawResponseJson": None},
+        ]}
+
+    etf.read = mixed_result
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with client:
+        before = client.post("/internal/market-data/tw-quotes", headers=headers,
+                             json={"codes": ["2330"], "purpose": "LIVE"})
+        holdings = client.post("/internal/market-data/etf-holdings", headers=headers,
+                               json={"codes": ["0050", "0056"]})
+        after = client.post("/internal/market-data/tw-quotes", headers=headers,
+                            json={"codes": ["2330"], "purpose": "LIVE"})
+        portfolio = client.post("/internal/portfolio/read", headers=headers, json={"dryRun": True})
+    for response in (before, holdings, after, portfolio):
+        assert response.status_code == 200
+        assert set(response.json()["counters"]) == expected_keys
+        assert "ETF_HOLDINGS_FAILED" not in response.json()["counters"]
+    assert before.json()["counters"]["QUOTE_FAILED"] == 0
+    for response in (holdings, after, portfolio):
+        assert response.json()["counters"]["QUOTE_FAILED"] == 1
+    assert holdings.json()["holdings"][1]["reason"] == "ETF_HOLDINGS_FAILED"
