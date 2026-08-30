@@ -8,13 +8,13 @@ package com.steven.assets.bff.fubonapi;
  * {@code marketdata} 命名空間中已驗證存在、且確認為唯讀查詢的方法，一律排除任何下單／
  * 改單／撤單等寫入方法。
  *
- * @param connected       本系統是否已實際呼叫此 SDK 能力
+ * @param connected       本頁所述能力是否有已驗證的正常整合路徑；唯讀預檢不等於財務同步完成
  * @param category        分類（連線狀態查詢／帳戶／庫存查詢／委託與交易資訊查詢／個股報價查詢／歷史成交查詢／行情查詢／即時推播）
  * @param name             中文名稱
  * @param sdkReference     SDK 方法或頻道的完整可查證路徑（如 {@code sdk.accounting.bank_remain}），已串接與未串接皆必填
- * @param httpEndpoint     本系統已串接時對應的 {@code method + path}；未串接為空字串，不得虛構
+ * @param httpEndpoint     本系統實際 adapter 的 {@code method + path}；僅預檢仍可列入口，無入口才為空，不得虛構
  * @param description      白話唯讀用途說明
- * @param consumer         已串接時為實際呼叫端服務；未串接為「－（尚未串接）」
+ * @param consumer         實際 consumer 與能力限制；尚無呼叫端時為「－（尚未串接）」
  * @param requestSummary   請求參數摘要
  * @param responseSummary  回應內容摘要
  */

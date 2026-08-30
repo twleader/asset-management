@@ -115,6 +115,15 @@ public class PriceCacheWriter {
         return outcome;
     }
 
+    /** Narrow stock-push entry; it preserves complete packet metadata and the existing quote fence. */
+    public CacheWriteOutcome writeFubonStockPush(FubonMarketData.StockEvent event, Instant receivedAt) {
+        if (!FubonStockPushContract.valid(event, receivedAt)) return CacheWriteOutcome.FAILED;
+        PriceResult result = new PriceResult(event.symbol(), FubonMarketData.MARKET, event.price(), null, null,
+                FubonMarketData.STOCK_SOURCE, event.name(), null, null, event.openPrice(), event.previousClose(),
+                event.highPrice(), event.lowPrice(), null, event.sourceDate(), event.tradeTime());
+        return writeTaiwanLive(result, true);
+    }
+
     /** Taiwan priority pipeline uses the common strict-newer Lua primitive for every provider. */
     public CacheWriteOutcome writeTaiwanLive(PriceResult result, boolean fubonSourceOhlc) {
         if (!positive(result) || !timed(result)) return CacheWriteOutcome.FAILED;

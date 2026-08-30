@@ -25,6 +25,9 @@ finmind:
   token: ${FINMIND_TOKEN:}
 
 fubon:
+  dividend-sync-enabled: ${FUBON_DIVIDEND_SYNC_ENABLED:false}
+  stock-push-enabled: ${FUBON_STOCK_PUSH_ENABLED:false}
+  technical-indicator-sync-enabled: ${FUBON_TECHNICAL_INDICATOR_SYNC_ENABLED:false}
   enabled: ${FUBON_ENABLED:false}
   base-url: ${FUBON_BASE_URL:http://fubon-broker-service:8080}
   shared-token-path: ${FUBON_SHARED_TOKEN_PATH:/run/secrets/fubon/shared/internal-service-token}

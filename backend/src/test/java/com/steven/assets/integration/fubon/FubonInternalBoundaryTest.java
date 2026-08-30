@@ -156,6 +156,66 @@ class FubonInternalBoundaryTest {
         verify(config, never()).snapshot();
     }
 
+    /**
+     * Regression guard for Requirement 128 / Task 393: the existing (inventory-sync) filter's
+     * {@code shouldNotFilter} still does not protect the new bank-balance-sync endpoint either.
+     */
+    @Test
+    void oldFilterStillDoesNotProtectTheNewBankBalanceSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonInternalTokenFilter filter = new FubonInternalTokenFilter(
+                config, new FubonOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/bank-balance-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
+    /**
+     * Regression guard for Requirement 129 / Task 394: the existing (inventory-sync) filter's
+     * {@code shouldNotFilter} still does not protect the new settlement-sync endpoint either.
+     */
+    @Test
+    void oldFilterStillDoesNotProtectTheNewSettlementSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonInternalTokenFilter filter = new FubonInternalTokenFilter(
+                config, new FubonOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/settlement-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
+    /**
+     * Regression guard for Requirement 130 / Task 395: the existing (inventory-sync) filter's
+     * {@code shouldNotFilter} still does not protect the new realized-gain-sync endpoint either.
+     */
+    @Test
+    void oldFilterStillDoesNotProtectTheNewRealizedGainSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonInternalTokenFilter filter = new FubonInternalTokenFilter(
+                config, new FubonOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/realized-gain-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
     @Test
     void matrixVariantCannotReachMvcWithoutTheExactPathBoundary() throws Exception {
         FubonConfigState config = mock(FubonConfigState.class);

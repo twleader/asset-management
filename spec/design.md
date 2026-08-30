@@ -8911,10 +8911,22 @@ Python 掛 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro`；
 | `GET /internal/config` | 無 | presence boolean、configState、可用功能；不回值/路徑 | 401/403 或 503 |
 | `POST /internal/portfolio/read` | `{dryRun:true}` | `batchId/queryDate/accountFingerprint/emptyConfirmed/positions[]` | 400/401/403/503；永遠不寫資料 |
 | `POST /internal/market-data/tw-quotes` | `{codes:[...]}` | provider timestamp 完整的逐檔 success/failure | 400/401/403/503 |
+| `GET /internal/market-data/taiex-index/stream` | SSE | typed index events（Requirement116） | 401/403/503 |
+| `POST /internal/trades/read` | startDate/endDate | typed TradeBatch（Requirement120） | 400/401/403/503 |
+| `POST /internal/market-data/etf-holdings` | ETF snapshot request（Requirement123） | typed ETF holdings（ETF session既有契約） | 400/401/403/503 |
+| `POST /internal/bank-balance/read` | 無 selector | queryDate/observedAt/HMAC fingerprint/TWD/nonnegative balance | 401/403/503 |
+| `POST /internal/settlement/read` | 無 selector，固定3d | identity-validated dates/signed amounts/coverage status | 401/403/503 |
+| `POST /internal/realized-gains/read` | 無 selector | identity-validated Stock/Sell rows/sourceDate | 401/403/503 |
+| `POST /internal/market-data/dividends/read` | radar symbols/from/to | 單一日期批次的 radar 交集，typed dividends | 400/401/403/503 |
+| `POST /internal/market-data/stock-push/subscriptions` | symbols desired set | bounded aggregates subscription status | 400/401/403/503 |
+| `GET /internal/market-data/stock-push/stream` | SSE | typed actual-trade events，非raw packet | 401/403/503 |
+| `POST /internal/market-data/technical-indicators/read` | symbol/from/to | sourceDate/parameters/各組狀態與payload | 400/401/403/503 |
 
-若使用FastAPI，production app必須設定`docs_url=None, redoc_url=None, openapi_url=None`；route allowlist精確只有上述health/config/portfolio/tw-quotes，其他path/method一律404/405，不得因framework預設多曝露`/docs`、`/redoc`或`/openapi.json`。
+若使用FastAPI，production app必須設定`docs_url=None, redoc_url=None, openapi_url=None`；累積本輪後 Python route allowlist 精確為上述 functional 表與 GET /internal/health（ETF基線7條加本輪7條，共14條；Java手動與readback不是Python路由），其他path/method一律404/405，不得因framework預設多曝露`/docs`、`/redoc`或`/openapi.json`。
 
 normalized wire不傳Python float。SDK每個decimal-like值先用`Decimal(str(value))`驗finite，再輸出不含`e/E`的canonical decimal string；Java typed DTO只從`^(0|[1-9][0-9]*)(\.[0-9]+)?$`建`BigDecimal`，JSON number/float、scientific notation、NaN/Infinity一律拒絕。型別界線在Python與Java兩層相同：(a) portfolio normalized `costPrice`、quote normalized `actualPrice`，以及Fubon raw quote精確key `previousClose/openPrice/highPrice/lowPrice`與非null `bids[].price/asks[].price`皆須>0、`precision<=20`、`0<=scale<=10`（`"9999999999.9999999999"`接受，`"10000000000.0000000000"`與`"0.00000000001"`分別因precision21／scale11拒絕）；raw只出現`open/high/low` alias而缺官方price-suffixed keys時拒絕，不得猜測。(b) raw quantity須是`0..9,999,999,999` exact integer，兩側完成守恆後可持久化shares才是`1..9,999,999,999`，對應`stock_holding NUMERIC(15,5)`的10位整數容量；(c) volume是`0..9,223,372,036,854,775,807` exact integer，對應Java `Long`。所有range在做任何乘法／mapping前驗證；public quote writer仍保留既有BigDecimal欄位與numeric JSON，不把adapter值轉double或預先round。這可避免SDK float `0.1`變成binary artifact，並讓precision/scale/overflow拒絕可測。
+
+上述decimal限制是既有portfolio/quote價格profile；本輪account金額欄位限定重用nonnegative或signed parser（precision20/scale10），technical獨立signed profile（precision38/scale18），不放寬原價格規則。所有normalized wire仍為canonical字串，DB money在算完/捨入後另驗各column precision。
 
 SDK client 採單一 instance、login-on-demand 與 single reconnect mutex。登入呼叫 `apikey_login(personal_id,key,cert_path,cert_pass)`；從回傳 accounts 只選 `account_type=stock`。兩個 selector 檔皆有值時必須精確匹配 branch/account；未配置 selector 時只允許恰好一個 stock account；selector 只設一半、零個或多個候選都拒絕。raw account 只在 Python process 記憶體使用；normalized fingerprint 可用 `HMAC-SHA256(internal-token, branch_no + ":" + account)` 的截短 hex，嚴禁可逆遮罩或裸末碼。
 
@@ -10276,11 +10288,11 @@ Focused tests cover parser extraction with a minimal fixture, fail-closed malfor
 
 ### 定位與既有元件重用
 
-本需求是 Requirement 90／Task 352（`FubonInventorySyncScheduler`）的姊妹排程：相同交易日節拍（`0 5,35 9-13 * * MON-FRI`，Asia/Taipei）、相同 `MarketDataService.isTwTradingDayKnown` 三態日曆 gate、相同 `UserAdminService.configuredAdmin()` owner 解析、相同 `FubonConfigState` READY gate、與既有 `FubonInternalTokenFilter` **結構相同但獨立**的手動端點保護模式（見下方「手動驗證端點」小節——既有 filter 的 `shouldNotFilter` 硬編碼 exact-path 只認 inventory-sync 那一條 path，不能原樣套用到新 path，必須新增一支 sibling filter，不是直接沿用同一實例）。不重造這些機制，只新增「查什麼」與「寫什麼」：查 `sdk.stock.filled_history`（成交紀錄），寫 `asset_transaction`（交易紀錄，Requirement 49）而非 `asset_snapshot`/`stock_holding`。
+本需求是 Requirement 90／Task 352（`FubonInventorySyncScheduler`）的姊妹排程：成交專屬節拍（`0 0,30 9-13 * * MON-FRI` 加 `0 0 14 * * MON-FRI`，Asia/Taipei；09:00–14:00共11輪，不含14:30，不改inventory原09:05/09:35）、相同 `MarketDataService.isTwTradingDayKnown` 三態日曆 gate、相同 `UserAdminService.configuredAdmin()` owner 解析、相同 `FubonConfigState` READY gate、與既有 `FubonInternalTokenFilter` **結構相同但獨立**的手動端點保護模式（見下方「手動驗證端點」小節——既有 filter 的 `shouldNotFilter` 硬編碼 exact-path 只認 inventory-sync 那一條 path，不能原樣套用到新 path，必須新增一支 sibling filter，不是直接沿用同一實例）。不重造這些機制，只新增「查什麼」與「寫什麼」：查 `sdk.stock.filled_history`（成交紀錄），寫 `asset_transaction`（交易紀錄，Requirement 49）而非 `asset_snapshot`/`stock_holding`。
 
 ```text
 business-services                              fubon-broker-service
-  FubonTradeSyncScheduler (cron 同 inventory)     SdkGateway.read_filled_trades()
+  FubonTradeSyncScheduler (09:00–14:00 半小時)     SdkGateway.read_filled_trades()
        │ tradeSyncFeatureGate → configState        │ 共用既有 _accounting_lock
        │ → isTwTradingDayKnown                      │ （與 inventories／unrealized 同一
        ▼                                            │  帳務 lane，序列化執行、共守 5/sec）
@@ -10305,35 +10317,7 @@ business-services                              fubon-broker-service
 
 `SdkGateway.read_filled_trades(start_date, end_date)` 共用既有 `read_accounting_pair()` 的鎖與 retry 語意，但**不經過** `_accounting_call`——該既有 helper（`sdk_gateway.py` 現有簽章 `_accounting_call(self, method_name: str, account: object) -> object`）內部固定 `raw_field(raw_field(sdk, "accounting"), method_name)` 解析路徑並以 `lambda: method(account)` 單一參數呼叫，只服務 `sdk.accounting.*`；`filled_history` 屬於 `sdk.stock` 命名空間且需要額外的 `start_date`／`end_date` 參數，兩者介面不相容，**不得**擴充或誤用 `_accounting_call` 去呼叫它（那會把該 helper 的命名空間解析從 `accounting` 混用到 `stock`，牴觸本任務窄範圍唯讀的訴求）。新增獨立的呼叫路徑，直接解析並呼叫 `stock.filled_history`：
 
-```python
-def read_filled_trades(self, start_date: str, end_date: str) -> object:
-    with self._accounting_lock:                      # 與 inventories/unrealized 同一把鎖，序列化執行
-        for attempt in range(2):
-            config = self._require_config()
-            account = self._ensure_session(config)
-            self._wait_for_accounting_budget()     # 共守既有帳務 5 calls/sec 上限（與 _accounting_call 同一預算池）
-            with self._session_lock:
-                sdk = self._sdk
-            stock = raw_field(sdk, "stock") if sdk is not None else None
-            filled_history = raw_field(stock, "filled_history") if stock is not None else None
-            if not callable(filled_history):
-                self._mark_misconfigured()
-                raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
-            try:
-                response = self._run_bounded(
-                    lambda: filled_history(account.raw, start_date, end_date),
-                    self.ACCOUNT_CALL_TIMEOUT_SECONDS, "FILLED_HISTORY_TIMEOUT")
-                if self._response_auth_invalid(response):
-                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-                return response
-            except SdkCallError as exc:
-                if exc.auth_invalid and attempt == 0:
-                    with self._session_lock:
-                        self._invalidate_locked()
-                    continue
-                raise
-        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-```
+日期／來源流程固定如下：HTTP先驗嚴格ISO有效日與既有<=7天界限 → gateway轉 `YYYYMMDD` → accounting lock中選定account與token → 只存取stock.filled_history並在共用budget/5秒timeout下呼叫 → auth-invalid最多一次完整重登入重試 → 把response、同次selected account及token保存為Python內部不可變結果。raw身份核對與HMAC只能使用此結果，不能呼叫結束後重新讀可變session狀態。原帳號和token不離開adapter；timeout/retry沿既有生命週期限制，不新增全域counter鍵。
 
 實作必須只對 `sdk` 的 `stock` 屬性存取 `filled_history` 這一個方法（`raw_field(raw_field(sdk, "stock"), "filled_history")`），不得把整個 `stock` client 物件回傳或暴露給呼叫端；新增測試以 fake SDK 的 `stock` 物件包一層 spy，斷言整個呼叫過程只讀過 `filled_history` 這一個屬性，未存取 `place_order`／`cancel_order`／`batch_place_order` 等任何其他屬性。
 
@@ -10348,19 +10332,21 @@ class TradeReadRequest(BaseModel):
     @field_validator("startDate", "endDate")
     @classmethod
     def valid_iso_date(cls, value: str) -> str:
-        date.fromisoformat(value)   # raises ValueError → 400 via RequestValidationError
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            raise ValueError("INVALID_DATE")
+        date.fromisoformat(value)   # rejects invalid calendar dates → sanitized 400
         return value
 ```
 
 Route handler 驗 `startDate <= endDate` 且 `(endDate - startDate).days <= 7`（超界回 `400`，reason `INVALID_DATE_RANGE`），其餘 config/token/misconfigured 語意與既有兩支 functional route 相同（複用 `authorize` dependency）。
 
-**已知與待核實欄位。** 官方 `filled_history` docstring 範例明確列出 `date`、`filled_no`、`filled_avg_price`、`filled_qty`、`filled_price`、`order_type`、`filled_time`（`order_type` 範例值為 `Stock`，與既有 `unrealized_gains_and_loses` 的 `order_type` 同一列舉）；`FilledData` 的完整欄位數與其餘欄位（標的代號、買賣別、帳號、分公司代號）在本文件撰寫當下未能以真實 SDK 呼叫核實確切屬性名稱（環境無可用憑證）。implementer 必須在 `fubon-broker-service` image（已含 hash 驗證安裝的 `fubon_neo` 2.2.9）內，比照既有 `portfolio.py` 對 `unrealized_gains_and_loses` 核實 `account`／`branch_no`／`order_type`／`buy_sell` 命名的方式（`dir()`／實際 session 呼叫／官方文件），核實 `filled_history` 回傳列上標的代號、買賣別、帳號、分公司代號的確切屬性名稱，並將核實結果寫入程式與測試 fixture 的固定字面值（禁止用猜測字串或防禦性 `getattr` 迴避）。核實不到任一必要欄位時，equivalent 到「該欄位不存在」，對應列即整批 no-write（見下段）。
+**已核實官方契約。** [Python FilledHistory](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/trade/FilledHistory/) 明列身份、stock_no/buy_sell、成交價格數量與filled_no；SDK請求為YYYYMMDD、raw date範例為YYYY/MM/DD，後者須嚴格解析再輸出ISO。官方v2.1.1起單次最大30日，不改本系統既有差值<=7天限制。文件範例有請求／回應日期不一致的示意，不能因此放寬實際range validation。官方shape fixture可測完整正常路徑，不能冒稱已驗真人SDK。
 
 Raw row 驗證順序（比照 Requirement 90 的「fingerprint 之前先驗 raw identity」原則）：
 
 1. `order_type` 精確等於 `Stock`（非 Stock 一律整批 no-write）。
 2. `account`／`branch_no` 精確等於 `_ensure_session` 選出的 `SelectedAccount.raw` 對應欄位。
-3. `date` 落在 `[start_date, end_date]`（inclusive）。
+3. raw `date` 嚴格有效 `YYYY/MM/DD`、round-trip相等，解析後落在 `[start_date, end_date]`（inclusive），normalized `filledDate` 為ISO。
 4. 買賣別對應官方 `BSAction` 的 Buy／Sell 兩值之一。
 
 任一列未通過即整批（本次呼叫全部列）視為 `RECONCILE_FAILED` 等價的無效批次，不得只丟棄該列後繼續處理其餘列——避免「部分列驗證失敗代表 adapter 對 raw schema 的假設已經錯誤」時仍信任其餘列。通過後，`filled_price`／`filled_avg_price` 走既有 `Decimal(str(value))` → canonical decimal string 規則；`filled_qty` 走既有 exact-integer 規則（`0..9,999,999,999`，回應層只接受 `1..9,999,999,999`，0 股成交無意義）；`filled_no` 要求非空字串、長度 ≤ 50。
@@ -10487,19 +10473,22 @@ CREATE UNIQUE INDEX ux_asset_transaction_owner_broker_filled_no
 ```java
 new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
         "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 當日成交紀錄，新增系統尚未記錄的交易到交易紀錄，以富邦成交序號防止重複新增，不覆寫既有紀錄",
-        "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
+        "交易日 09:00–14:00 每 30 分鐘（不含14:30）", "0 0,30 9-13 * * MON-FRI / 0 0 14 * * MON-FRI", TPE),
 ```
 
 `項目數正確()` 測試斷言的總數與 `BUSINESS` 分類計數同步各加一（依實作當下該測試現行值為基準，不假設本文件寫作當下的舊數字）。
 
 ---
 
+
+**2026-08-30 節拍補正驗收：** `FubonTradeSyncScheduler` 兩個註冊與 JOBS 必同時更新；CronExpression 測有效交易日09:00/09:30/10:00/10:30/11:00/11:30/12:00/12:30/13:00/13:30/14:00共11次，排除08:30及14:30。沿用原feature/config/known-calendar/capacity gates，不再建立原Task385已落地的schema；另以fake SDK驗YYYYMMDD request、YYYY/MM/DD response→ISO DTO、錯格式/leap day/範圍邊界與同次selected account/token一致。既有手動ledger CRUD不改，不能當不可變供應商證據。
+
 ## Requirement 121／Task 386：系統資訊「富邦證 API」頁——SDK 全量唯讀查詢盤點（含已串接與未串接）
 
 「系統資訊」分組第三個頁面自最初版本擴大範圍：不只列出本系統已串接的富邦 API，還盤點富邦官方 SDK（`fubon_neo` 2.2.9，Docker 內以 hash-verified wheel 安裝於 `fubon-broker-service` 容器）目前已驗證存在、且**確認為唯讀查詢**的所有方法，並標示每一筆是否已被本系統串接。資料模式仍是 BFF 內建**人工維護的靜態清單**（比照「排程列表」，而非「開放 API」頁的動態解析——`fubon-broker-service` 本身停用 Swagger/OpenAPI 且無 host port，沒有可解析的契約檔）。
 
 ```text
-FubonApiInfoBffController（程式碼常數清單，52 筆：9 已串接 + 43 未串接）
+FubonApiInfoBffController（程式碼常數清單，52 筆：目前ETF基線9已串接/43未串接；本階段完成後15/37；含394/395的原完整目標17/35）
                  │ GET /api/bff/fubon-api（既有 authenticated 保護）
                  ▼
 frontend bffApi.fubonApi.get() → FubonApiView（表格 + type="expand" 展開明細）
@@ -10534,19 +10523,21 @@ public record FubonApiInfoDto(
 
 `FubonApiInfoBffController` 僅有單一 `GET` 端點（類層級 `@RequestMapping("/api/bff/fubon-api")` ＋ 無路徑 `@GetMapping`，比照既有 `SchedulePublicBffController`），回傳內建 `List<FubonApiInfoDto>` 常數，不注入任何 Repository、Service、WebClient，也不在 runtime import 或呼叫富邦 SDK——清單內容是建置當下人工盤點的**靜態快照**，不是即時探測結果。`sdkReference` 對已串接與未串接的項目都必填（是唯一保證「這筆資料確實對應到一個真實存在的 SDK 方法」的欄位）；`httpEndpoint` 只有 `connected=true` 才填值，`connected=false` 一律為空字串，不得虛構本系統尚未實作的 HTTP 路徑。
 
-### 清單分類與筆數（總計 52 筆，已串接 9、未串接 43）
+### 清單分類與筆數（總計52；目前ETF基線9/43，本階段完成後15/37，原完整目標17/35）
 
-| category | 筆數 | 已串接 | 說明 |
+下表「完整目標已串接」是原完整目標的分類規劃，不是目前實作宣告。目前controller維持ETF基線9/43；本階段其他五項完成後為15/37，帳戶類已串接3項；394/395維持未串接，待來源證據與writer驗收完成後才達下表帳戶5項及總17/35。
+
+| category | 筆數 | 完整目標已串接 | 說明 |
 |---|---|---|---|
 | 連線狀態查詢 | 2 | 2 | `/internal/health`、`/internal/config`（本服務自建 meta 端點，非 SDK 方法） |
-| 帳戶／庫存查詢 | 7 | 2 | `sdk.accounting.*`；已串接 `inventories`、`unrealized_gains_and_loses`（皆經 `POST /internal/portfolio/read`） |
+| 帳戶／庫存查詢 | 7 | 5 | inventories/unrealized共用portfolio；新增bank_remain、query_settlement、realized_gains_and_loses各自adapter read |
 | 委託與交易資訊查詢 | 18 | 0 | `sdk.stock.*` 中委託回報／條件單／停損停利／分時分量／額度／圈存／匯撥類查詢，全數未串接 |
 | 個股報價查詢 | 2 | 0 | `sdk.stock.query_symbol_quote`／`query_symbol_snapshot`（交易命名空間版本的報價查詢，與已串接的 `intraday.quote` 是不同物件） |
 | 歷史成交查詢 | 1 | 1 | `sdk.stock.filled_history`（經 `POST /internal/trades/read`） |
-| 行情查詢 | 20 | 3 | `sdk.marketdata.rest_client.stock.*`；已串接 `intraday.quote`（經 `POST /internal/market-data/tw-quotes`）、`intraday.tickers`（`sdk_gateway.verify_taiex_index_symbol()` 於大盤指數串流啟動時內部呼叫，核對設定指數代碼是否有效，非獨立對外 endpoint，經 `GET /internal/market-data/taiex-index/stream`）與 `ownership.etf_holdings`（Requirement 123／Task 389–390，經 `POST /internal/market-data/etf-holdings`） |
-| 即時推播 | 2 | 1 | `sdk.marketdata.websocket_client.stock`；已串接大盤指數頻道（經 `GET /internal/market-data/taiex-index/stream`），個股頻道未串接 |
+| 行情查詢 | 20 | 7 | `sdk.marketdata.rest_client.stock.*`；已串接 `intraday.quote`（經 `POST /internal/market-data/tw-quotes`）與 `intraday.tickers`（`sdk_gateway.verify_taiex_index_symbol()` 於大盤指數串流啟動時內部呼叫，核對設定指數代碼是否有效，非獨立對外 endpoint，經 `GET /internal/market-data/taiex-index/stream`）；另加ETF holdings、dividends與KDJ/MACD/BB三項，各按對應adapter route |
+| 即時推播 | 2 | 2 | 大盤indices與個股aggregates各自SSE；個股另有subscriptions輔助控制入口 |
 
-完整 52 筆逐筆內容（`sdkReference`／`httpEndpoint`／`requestSummary`／`responseSummary` 全文）已依此分類與筆數，完整收錄於自足任務檔 `spec/tasks/t386_fubon_api_documentation_view.md`（386.2 節的 Java 常數區塊），不在此重複——task 檔是實作時的唯一權威來源，本節只描述架構與分類統計。**該區塊不是凍結的歷史快照，日後任一筆 `connected` 狀態變動（如 Requirement 123／Task 390 把 `ownership.etf_holdings` 改為已串接）都必須回頭同步改寫 386.2 節本身，讓它持續與 controller 現況一致**，而不是留著過期內容、另在他處加註「現況已不同」。
+完整 52 筆逐筆內容（`sdkReference`／`httpEndpoint`／`requestSummary`／`responseSummary` 全文）已依此分類與筆數，完整收錄於自足任務檔 `spec/tasks/t386_fubon_api_documentation_view.md`（386.2 節的 Java 常數區塊），不在此重複——task 檔是實作時的唯一權威來源，本節只描述架構與分類統計。**該區塊不是凍結的歷史快照，日後任一筆 `connected` 狀態變動（如 Requirement 123／Task 390 把 `ownership.etf_holdings` 改為已串接）都必須回頭同步改寫 386.2 節本身，讓它持續與 controller 現況一致**，而不是留著過期內容、另在他處加註「現況已不同」。 本輪新增 source/schema 依 Requirements128–133 與各 task 的官方契約，能力通過驗收才同步 controller、測試與 t386.2；不得提前把未完成的財務 writer 標為已串接。
 
 ### 前端呈現
 
@@ -10583,3 +10574,127 @@ feature flag（預設false）→READY→known-open calendar→Repository雷達ET
 台股 `MarketDataService.getEtfHoldings()` pure-read Repository + parser，回既有 `EtfHoldingsResult/EtfHolding`，asOfDate=sourceDate。未同步、同步失敗、格式不符、無股票成分各有明確訊息。美股仍走原external API。移除MoneyDJ helpers但保留external `HistoricalBackfillService.addTwEtfConstituents()`既有in-process台股Yahoo/FinMind查詢；不新增反向HTTP或改動前端契約。
 
 官方契約依據：[富邦ETF Holdings](https://www.fbs.com.tw/TradeAPI/en/docs/market-data/http-api/ownership/etf-holdings/)（v2.2.9，2026-08-30查證）。官方schema與本部署實機樣本為兩種證據，驗收分別記錄；runtime MISCONFIGURED只依具體reason描述，禁止推論簽署/帳號問題。
+
+
+---
+
+## Requirement 128–130／Task 393–395：帳戶唯讀同步、来源核實與既有資料寫入
+
+本輪沒有 SQL schema 變更；三支新增 scheduler/client 只查富邦官方帳務，寫入既有快照 deposit 或 realized_gain。預設新 flags=false 是部署控制，不替代資料驗證或成功路徑。秘密檔 presence/權限檢查與 SDK 實機登入權限是不同證據，本規格不宣稱缺 secret。所有真人帳戶與金融操作都不作開發測試資料。
+
+### 來源契約與時間
+
+| 任務 | SDK／adapter | Asia/Taipei cron | 合法 target |
+|---|---|---|---|
+|393|bank_remain；POST /internal/bank-balance/read|0 0 8 * * * / 0 30 9 * * * / 0 0 14 * * * / 0 0 22 * * *|最新快照台北富邦銀行證券戶，TWD|
+|394|query_settlement(account,3d)；POST /internal/settlement/read|0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *|核實未來交割後，TRANSIT_TWD負應付／正應收|
+|395|realized_gains_and_loses；POST /internal/realized-gains/read|0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *|證據充足的configured owner/台股/富邦證券 realized_gain|
+
+三者不受交易日曆限制，先 feature/global/config READY、configured active admin，再唯讀 SDK；沿用既有 accounting lock、5 calls/sec budget、5秒deadline與auth-invalid最多重登一次。獨立 inFlight 只避免單程序重入，不是 DB concurrency 保證。
+
+[官方銀行](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/accountManagement/Balance/)、[交割款](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/accountManagement/QuerySettlement.txt)、[已實現損益](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/accountManagement/RealizedPnLDetail/) 皆為 Result success/data 信封。Python 同一accounting臨界區捕捉 selected account、response、token；必要raw branch/account非空且精確相同後，才用當次token HMAC-SHA256(branch:account)前24hex做fingerprint。缺欄不能以None==None或selected fallback通過。raw identity/token/原始message不可跨adapter或進log/DB。queryDate/observedAt是本地觀測，不得冒充來源date/revision；跨台北午夜拒绝。Java immutable records複驗日期/時間/fingerprint，使用各欄位適用的decimal parser。
+
+### 銀行／交割的 transaction 邊界
+
+```text
+scheduler/manual → feature/config/owner preflight（NOT_SUPPORTED）
+                 → adapter HTTP → 來源/精度/日期/完整性驗證
+                 → dryRun: sanitized result，零writer/DB write
+                 → 獨立 writer bean（REQUIRES_NEW）
+                    第一DB operation = AssetSnapshotMutationLock.lockLatestForOwner(ownerId)
+                    → recheck owner/broker/bank/type + query freshness
+                    → validate all targets → mutate managed deposits collection
+                    → SnapshotAggregateCalculator.recalculate
+                    → verify column precision → saveAndFlush → commit
+                 → commit成功才計SUCCESS
+```
+
+不得在同service self-invoke 假裝切開 transaction、不得先查app_user/broker/bank/children、不得改成第一個snapshot-related DB action。無snapshot不新增、不改snapshotDate。commit時queryDate仍當日、observedAt不未來且不超過60秒；所有失敗保留舊child和aggregate。同銀行＋depositType有0列才insert、1列才update、>1列整批AMBIGUOUS_TARGET；新增必加入snapshot.getDeposits並設snapshot，同一managed集合供calculator讀，不能只save子列。其他銀行/存款/資產不動。
+
+bank balance/availableBalance是非負官方整數（或官方整數字串），0有效；只balance→amount。新證券戶currency=TWD/originalAmount=null；既有非TWD目標拒絕。amount最後HALF_UP scale2並驗numeric(20,2)的18位整數容量，aggregate亦同；availableBalance不落地，既有notes/rate保留。
+
+### 本階段可實作範圍與未放行財務writer
+
+Task393、Task385日期/节拍修復、Task396–398可在各自spec獨立審查後實作正常功能。Task394/395僅放行現有不安全半成品的adapter/token/嚴格解析/preflight/no-write修復；既有財務writer不得被scheduler/manual/dry-run觸及，不因某flag、常數或fake fixture放行。下面394/395 writer設計是未來待核實要求，**不是已獲准實作契約**；原功能目標保留且兩任務未完成。
+
+394缺可由程式判定的3d未交割完整範圍、產品範圍/產製與空值語意；目前`coverageStatus=UNVERIFIED`及`MISSING_SETTLEMENT_RANGE_CONTRACT`，service回SETTLEMENT_SCOPE_UNVERIFIED。395已核實來源netGain含費稅，但仍缺realized.date與filledDate/filled_no聯結、逐筆net proceeds/取得成本；缺身分即IDENTITY_UNVERIFIED，不以可變ledger補證。兩項均零writer呼叫、零寫鎖，connected=false；來源補齐並經新一輪独立spec審查才准writer測試/實作。證據清單詳兩任務檔，fake只可驗實作而非來源事實。
+
+### 交割來源日期、完整性與符號
+
+官方details.date是多日「查詢日」，保留sourceQueryDate，不能要求每列都等於本地queryDate或改叫tradeDate；可早於但不得晚於queryDate。settlementDate必来自來源且>=sourceQueryDate。全optional欄位None為官方NO_DATA_OBSERVED佔位，不是0元；部分None錯誤。一般列所有金額為signed exact integer、currency=TWD，buySettlement<=0、sellSettlement>=0，兩者相加必與totalSettlementAmount一致，不另外加費稅。重複(date,settlementDate)或無可信識別的同交割日多列整批AMBIGUOUS_SETTLEMENT。
+
+只把settlementDate>queryDate列視為來源明示的未來候選；過去不算，同日非零因銀行入帳狀態未知整批拒絕，不臆測幾點已扣款。覆寫兩列還須有官方契約/可重現去識別證據核实完整未來交割區間；3d字面本身不足，缺此證據回SETTLEMENT_SCOPE_UNVERIFIED/no-write。完整性不是來源新增字段；目前沒有VERIFIED生成算法，只有UNVERIFIED與具體缺少契約的reason。不能以「未來有人核實」泛稱已實作的判定，也不可硬編true。裸空陣列或單一佔位不可清零；有明确完整零值的有效來源才可寫零。
+
+可寫時payableAmount=Σ未來buySettlement（非正）、receivableAmount=Σ未來sellSettlement（非負）。存入最新快照台北富邦銀行的買股待付款／賣股待收款，兩者currency都TRANSIT_TWD；既有一般TWD同名目標不能偷偷改造成在途。sum後才scale2/precision20，兩列與aggregate同transaction；有符號amount符合既有AssetService/Calculator語意。
+
+### 已實現損益的來源缺口與待核實寫入要求
+
+官方order_type為必填、只收Stock/Sell；date保留sourceDate且不未來。price正、qty exact integer、profit/loss非負可皆零。[Go官方RealizedPnLDetail](https://www.fbs.com.tw/TradeAPI/docs/trading/library/go/accountManagement/RealizedPnLDetail/)說明每成交一筆、profit/loss不共存、P&L含手續費及交易稅；故兩者同時非零拒絕。這仍未提供Python來源的fill id、逐筆淨收款/成本或資料日到實際成交日的聯結。
+
+原FUBON_SYNC ledger非不可變證據：AssetTransactionService.updateAssetTransaction可以修改tradeDate/code/shares/price/amount/fee/tax，同時保留source/brokerFilledNo。它只能依owner/台股/富邦證券/股票/賣搜尋候選，唯一候選不構成身分核實；不能改ledger使配對成立。需來源契約/完整可信同次資料建立一對一date/filledNo/量價證據，無資料或歧義全批IDENTITY_UNVERIFIED/AMBIGUOUS_IDENTITY。
+
+已知netGain含費稅，不表示price×qty或ledger.amount毛額可以當net proceeds。待取得逐筆淨收款與取得成本口徑後才能制定公式；目前ACCOUNTING_SEMANTICS_UNVERIFIED/no-write，禁止毛額−netGain當真成本。擬議單日唯一賣出+完整settlement限定子集也須先核实range、date、產品與每筆gross/fee/tax/net，不猜分攤，不在本輪放行。將來獲來源支持時才採未捨入Decimal算完後money HALF_UP scale2驗numeric(20,2)，來源和fixture分別記錄。
+
+realized_gain沒有經濟事件unique，候選作用域必包含owner/market=台股/broker=富邦證券/currency=TWD；shares先scale5 precision15、salePrice先scale4 precision15再查重。不同raw價在DB精度碰撞亦全批AMBIGUOUS_IDENTITY，不去重。名稱只用local-only resolver；缺名稱須明示，不外查非雷達股票。
+
+`FubonRealizedGainWriter`經repository先`LOCK TABLE realized_gain IN SHARE ROW EXCLUSIVE MODE`，短REQUIRES_NEW transaction有界timeout；序列化跨JVM同步，並與普通CRUD的ROW EXCLUSIVE寫鎖互斥。HTTP完成後才拿鎖；鎖後重新讀取同scope全候選/佐證、全批先判定後才insert：0 existing且全部證據完整可新增；1 existing所有canonical財務值一致只記ALREADY_REPRESENTED，不宣稱tuple已成真實ID；多existing或矛盾全批no-write。saveAll/flush失敗rollback，不catch不存在unique當冪等，不覆寫gain/ledger，不改快照。此方案不能解出來源未提供的真實多筆同值身分，應明確不可用。
+
+### 手動入口與 API inventory
+
+business-only POST `/internal/brokers/fubon/bank-balance-sync`、`/settlement-sync`、`/realized-gain-sync` 各自獨立exact-path constant-time token filter，dryRun預設true，controller只委派。只回outcome/reason/計數與適用的成功金額，不回raw account/fingerprint/明細；noBFF/nofrontend/no9090。API inventory的httpEndpoint一律是本節adapter read路徑，Java手動入口放consumer，不混用兩個層級。394/395未具正常財務同步路徑時connected=false，不以parser已完成升級。no-write/partial原因與正常成功分開，不把HTTP200、disabled或舊測試pass冒充資料已更新。
+
+## Requirement 131／Task 396：股利日期批次、雷達交集與既有證據
+
+external-materials-service的FUBON_DIVIDEND_SYNC_ENABLED/config/known trading-day gate，Asia/Taipei `0 0 9 * * MON-FRI`及`0 30 13 * * MON-FRI`。沿用StockSourceQuery.collectTwRadarCodes：各owner最新台股holding∪台股stock_alert去0000；不改原17:00 DividendPersister全市場範圍/warmup。每輪radar empty則零外呼。
+
+[官方dividends](https://www.fbs.com.tw/TradeAPI/docs/market-data/http-api/corporate-actions/dividends.txt) 只能收start_date/end_date，不能传symbol。external一次POST `/internal/market-data/dividends/read`傳本輪symbols/from/to，window固定queryDate−320天至+45天（<=366天），adapter只對官方送日期，一次市場batch後先嚴格取radar交集再輸出/存入。這個provider限制已明示，不假稱上游逐檔查詢，不逐檔重複全市場請求。
+
+mapping驗symbol/exchange/date/dividendType；cashDividend才是現金，dividend參考價調整量不用。stockDividendShares為每千股配股數，只有核實既有stockDividend單位相容才轉，不假設全股票面額10。未核實股票部分null/具名STOCK_DIVIDEND_UNIT_UNVERIFIED，混合event可保留可信cash作PARTIAL，純無可映射金額不造event。含息/含權分別映射exDividendDate/exRightsDate，不互fallback；年取來源事件anchorDate年，發放日未知null，未來價格null不妨礙正股利。money按snapshot_event numeric(18,6)捨入後驗證，無法識別的同檔矛盾event整檔FAILED。
+
+external只呼叫DividendSnapshotStore.record append既有snapshot/event/observation；provider=FUBON_SDK、sourceAvailableAt未知null、observedAt另記、scope實查window。固定PARTIAL/complete=false，空匹配也不是EMPTY_COMPLETE，source failure是FAILED。scopeTo+45只表達請求範圍，沒有future完整性保證；content_hash/event_key共用，不加新writer/投影。backend既有讀取觸發DividendCurrentStateProjectionService，既有CASE中FUBON_SDK屬ELSE50，官方權威/取消規則不改。不做capital_changes/減資。
+
+external exact token POST `/internal/dividend/fubon-sync?dryRun=true|false`預設true、dryRun連attempt都不寫，controller委派service，回計數/outcome；API inventory httpEndpoint為adapter `/internal/market-data/dividends/read`，consumer補Java入口。以真DB驗重跑snapshot/event不重複、observation可追加及PARTIAL不能取消已知future event。
+
+## Requirement 132／Task 397：可信實際成交與完整 quote 原子更新
+
+此路徑只更新既有latest quote，不是book canonical的新來源。`price:{market}:{code}`已有完整JSON metadata，consumer不得僅局部改price/time。選官方Normal-mode **aggregates** 專屬stock WebSocket reference；依官方多連線流程在session lock內init_realtime後保留個股client，不覆寫TaiexIndexStream持有的reference。最多300symbols、額外1條連線，有界queue/backoff/stop；indices flag關閉仍能啟動股票，雙方reconnect/退訂互不干擾，auth generation變更重新完整subscribe。
+
+external FUBON_STOCK_PUSH_ENABLED/config/MarketClock.isTwMarketOpenKnown明確true後，每30秒collectTwRadarCodes及renew desired symbols；Python POST `/internal/market-data/stock-push/subscriptions`只增量差集SDKsubscribe/unsubscribe aggregates/intradayOddLot=false，120秒lease逾期釋放；GET `/internal/market-data/stock-push/stream`為token-protected SSE。盤外/unknown取消，13:30後收盤由原官方close路徑負責。
+
+來源核實依[官方aggregates](https://www.fbs.com.tw/TradeAPI/docs/market-data/websocket-api/market-data-channels/aggregates.txt)與[多連線](https://www.fbs.com.tw/TradeAPI/docs/market-data/making-connection.txt)。event=data/channel=aggregates，正確radar symbol、TWSE/TPEx與核實type；isTrial=true丟棄，缺該optional boolean不能單獨判壞，但lastTrade必需正price、正size、exact epoch microseconds。官方微秒例子與來源date對照測試固定unit，不能位數猜單位。sourceDate=來源日=當日，timestamp不未來且位於授權盤中，不能拿lastUpdated/receivedAt/lastTrial作成交時間。lastPrice包含試撮不可用；closePrice/time若有須與lastTrade一致。
+
+SSE輸出FUBON_WS_AGGREGATES、sourceDate、tradeTimeMicros與同packet可信optional previousClose/OHLC/name；缺值null、不拼舊Redis/REST，volume單位未核實null，buy/sell quote留null，不傳完整五檔。external再驗radar及完整日期/價格，用同包昨收和成交算change（無昨收即null），建立PriceResult=LIVE/closed=false，不冒稱FUBON_INTRADAY或VERIFIED_CLOSE。
+
+PriceCacheWriter窄入口委派既有writeTaiwanLive(result,true)/executeLatestWrite與原price-cache-monotonic-write.lua；整份JSON/date/time/status一次更新，不合併localHighLow假裝來源OHLC。same/older event拒絕、verified close不降級，只有WRITTEN可發布及沿用可信tick。不得直接HSET/JSON.SET、另複製Lua、写quoteDetail/bidLevels/askLevels、fubon_tw_live_quote_response或呼叫book PostgreSQL comparator。真Redis必驗metadata一致与時序保護，不只斷言price。
+
+## Requirement 133／Task 398：既有 Redis 的來源技術快取與純讀介面
+
+原「使用者另准新stock_technical_indicator表」明確作廢，本輪無SQL migration/column/index。已盤點TechnicalIndicatorService為history-based現算、無generic SQL/cache sink；既有alert KD歷史、行情quote及owner radar snapshot皆非合法承接字段。選擇在**既有Redis資料庫**新增獨立市場cache key，不挪用他者欄位。此為TTL可重建資料，不是SQL永續保存，也不改本地算法/雷達評分/API。
+
+external唯一scheduler/service/writer/reader，FUBON_TECHNICAL_INDICATOR_SYNC_ENABLED/config/known trading-day gate，預設Asia/Taipei `0 40 13 * * MON-FRI`；scheduler/manual/dry-run都重驗台北時間>=13:40，較早回BEFORE_CLOSE且零SDK/Redis寫入。每檔外呼與提交前重驗同台北日，跨午夜停止，避免盤中值先占當日no-revision fence。只collectTwRadarCodes；controller不寫業務邏輯，無backend entity/JPA或external→business callback。每stock固定查queryDate−120天到queryDate，D日線KDJ(9,3,3)/MACD(12,26,9)/BB20，SDK三方法完整參數、有界timeout，共用保守60/min市場資料budget、429停止密集外呼，單輪<=30分鐘，未處理明示PARTIAL。
+
+adapter POST `/internal/market-data/technical-indicators/read`傳symbol/from/to，官方三response都要echo正確identity/from/to/timeframe/params；BB period只接受exact integer或canonical integer字串。data每列嚴格date在window且不未來，最大來源日才候選，重複/矛盾日期整組SCHEMA_INVALID。KDJ k/d/j、MACD macdLine/signalLine、BB upper/middle/lower不能混名或造histogram；每組required值全有限才AVAILABLE。technical signed Decimal profile precision38/scale18允許negative/zero，BB upper>=middle>=lower，J/MACD不clamp，SDK finite float只保留其可提供precision。各組有sourceDate，沒sourceTimestamp就null；observedAt只作本地觀測，絕不把today/fetchedAt改名來源日。
+
+### Redis schema 與原子更新
+
+`fubon:technical:tw:{code}:D:v1`保存schemaVersion/symbol/台股/FUBON_SDK/固定parameters manifest和kdj/macd/bb records。每組包含status、sourceDate、nullable sourceTimestamp、parameters、完整payload、contentHash、首次observedAt、expiresAt；lastAttemptStatus/reason/observedAt独立保存，不能冒充新來源值。code與manifest嚴格校验，參數改版需獨立cache格式/身分，不在同key混算法。
+
+external writer用專用小Lua/等價Redis原子transaction逐組compare-and-write，不改price/book Lua：无舊值合法可新增；sourceDate較新整組替换、較舊拒絕；同日同hash冪等、同日不同hash沒有來源revision則CONFLICT_NO_SOURCE_REVISION且保留舊組，不能用較晚fetchedAt決定新舊。單組失敗只更新attempt，不抹其他組、不將舊組標今日，不拼新K舊D。
+
+有效組expiresAt固定sourceDate台北00:00+7天，已過期限不可新增；key TTL為尚有效組最晚期限（<=7天），由Redis server time計剩餘時間，純failure診斷<=15分鐘。等值重跑/失敗不延長既有組期限；reader各組分別判expiresAt，因此其他組延長key存活也不延長舊值。Redis eviction/restart是MISS、不可當0/補SQL；corrupt cache明示拒絕，不混不可信值。
+
+### 讀回與驗證
+
+external `FubonTechnicalIndicatorCacheRepository`只讀Redis、不呼SDK、不刷新TTL；token-protected GET `/internal/technical-indicators/fubon-cache?symbol=...`確定仍為radar代碼，回provider/params、各組date/value/status/lastAttempt/expiresAt。較最近應有交易日舊的sourceDate明示HISTORICAL，calendar unknown明示，不以系統today覆寫sourceDate。沒有任何既有UI/雷達consumer自動切換成富邦算法。
+
+POST `/internal/technical-indicators/fubon-sync?dryRun=true|false`在external、exact token/預設true，dry-run零Redis/attempt寫入；回计數与SUCCESS/PARTIAL/FAILED/BEFORE_CLOSE；manual無收盤gate例外，全部不可用不得SUCCESS。API inventory三技術項目httpEndpoint统一adapter read，consumer記sync/readback。真Redis與fakeSDK必驗三組正常讀回、sourceDate獨立、失敗保留/標記、同日異值拒絕、新日替換、併發原子性、TTL與MISS、radar/Token邊界，不能只測disabled。
+
+## 本輪排程註冊、API盤點與交付門檻
+
+Task385成交改09:00–14:00半小時共11輪、最後14:00，不含14:30；原inventory09:05/09:35不改。六個新job：bank/settlement/realized屬BUSINESS/券商庫存，dividends屬EXTERNAL/股利，stock-push/technical屬EXTERNAL既有行情分類；cron/文字/測試同時更新，stock-push描述持續串流及30秒reconciliation而非假cron。
+
+先合入ETF session的集成基線為58jobs=24business+34external，本輪加3+3後64=27+37；API inventory在目前五項完成、兩財務只做安全預檢時由52/9/43加6項成52/15/37；394/395仍connected=false。原完整目標仍是加8項至52/17/35，兩者不得混稱。以真正合入的清單確認，不用缺ETF的舊計數遮掩漏項。Python adapter14條routes的總allowlist與本文件「Adapter API」表一致；Java手動/技術readback在各自服務，不混進Python盤點。
+
+所有改动須spec-check/独立review、官方schema offline正常路徑/拒絕路徑、真正Spring交易边界與DB/Redis讀回，之後依run-stack驗image/container與auth/gate。舊報告的錯誤授權、鎖弱化、不重算aggregate與「全數通過」不作本輪證據；無法核實的來源範圍／身分／單位明示不可用，不以flag=false或HTTP200當功能完成。本輪不查真人帳號、不做券商金融寫入、不新增公開路由。
+
+兩financial來源缺口未解決前，僅可分段驗收上述五項與安全no-write修復；不得把整體spec標為已無阻礙，不合併第二個session、不刪原Claude branches。待契約/去識別對帳足以產生可程式判定的normal mapping，更新spec並獨立審查後續做writer。成功fixture不能代表真人來源核實。

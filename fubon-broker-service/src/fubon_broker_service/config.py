@@ -46,6 +46,8 @@ class ConfigSnapshot:
     taiex_index_stream_enabled: bool = False
     taiex_index_symbol: str | None = None
     taiex_index_stream_reason: str | None = None
+    stock_push_enabled: bool = False
+    stock_push_reason: str | None = None
 
     def __repr__(self) -> str:
         return f"ConfigSnapshot(enabled={self.enabled!r}, state={self.state!r}, reason={self.reason!r})"
@@ -60,6 +62,7 @@ class ConfigLoader:
         enabled_reader: Callable[[], str | None],
         taiex_index_stream_enabled_reader: Callable[[], str | None] | None = None,
         taiex_index_symbol_reader: Callable[[], str | None] | None = None,
+        stock_push_enabled_reader: Callable[[], str | None] | None = None,
     ) -> None:
         self._root = root
         self._enabled_reader = enabled_reader
@@ -67,6 +70,7 @@ class ConfigLoader:
             taiex_index_stream_enabled_reader or (lambda: "false")
         )
         self._taiex_index_symbol_reader = taiex_index_symbol_reader or (lambda: "")
+        self._stock_push_enabled_reader = stock_push_enabled_reader or (lambda: "false")
 
     @classmethod
     def from_environment(cls) -> "ConfigLoader":
@@ -75,6 +79,7 @@ class ConfigLoader:
             lambda: os.getenv("FUBON_ENABLED", "false"),
             lambda: os.getenv("FUBON_TAIEX_INDEX_STREAM_ENABLED", "false"),
             lambda: os.getenv("FUBON_TAIEX_INDEX_SYMBOL", ""),
+            lambda: os.getenv("FUBON_STOCK_PUSH_ENABLED", "false"),
         )
 
     def load(self) -> ConfigSnapshot:
@@ -84,6 +89,9 @@ class ConfigLoader:
         stream_enabled_raw = (self._taiex_index_stream_enabled_reader() or "false").strip().lower()
         stream_enabled_valid = stream_enabled_raw in {"true", "false"}
         stream_enabled = stream_enabled_raw == "true"
+        stock_push_raw = (self._stock_push_enabled_reader() or "false").strip().lower()
+        stock_push_enabled = stock_push_raw == "true"
+        stock_push_reason = None if stock_push_raw in {"true", "false"} else "INVALID_STOCK_PUSH_FLAG"
         raw_symbol = (self._taiex_index_symbol_reader() or "").strip()
         stream_symbol = raw_symbol if _INDEX_SYMBOL.fullmatch(raw_symbol) else None
         if not stream_enabled_valid:
@@ -139,6 +147,8 @@ class ConfigLoader:
             taiex_index_stream_enabled=stream_enabled,
             taiex_index_symbol=stream_symbol,
             taiex_index_stream_reason=stream_reason,
+            stock_push_enabled=stock_push_enabled,
+            stock_push_reason=stock_push_reason,
         )
 
     def _read_text(self, relative: str) -> str | None:

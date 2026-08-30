@@ -259,6 +259,7 @@ class TaiexIndexStream:
             client: object | None = None
             try:
                 client = self._gateway.realtime_stock_websocket()
+                generation = getattr(self._gateway, "session_generation", None)
                 with self._lock:
                     self._websocket = client
                     symbol = self._symbol
@@ -273,7 +274,9 @@ class TaiexIndexStream:
                 connect()
                 subscribe({"channel": "indices", "symbol": symbol})
                 backoff_index = 0
-                self._reconnect.wait()
+                while not self._reconnect.wait(timeout=0.1):
+                    if generation != getattr(self._gateway, "session_generation", None):
+                        break
             except SdkCallError:
                 logger.warning("Fubon indices stream unavailable reason=SESSION_UNAVAILABLE")
             except Exception:
@@ -284,6 +287,13 @@ class TaiexIndexStream:
                 with self._lock:
                     if self._websocket is client:
                         self._websocket = None
+                    self._latest = None
+                    for subscriber in self._subscribers:
+                        while True:
+                            try:
+                                subscriber.get_nowait()
+                            except queue.Empty:
+                                break
             if self._stop.is_set():
                 return
             delay = self._BACKOFF_SECONDS[min(backoff_index, len(self._BACKOFF_SECONDS) - 1)]

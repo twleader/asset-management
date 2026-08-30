@@ -24,11 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 24 個業務與 34 個外部行情工作")
+    @DisplayName("排程清單完整列出 27 個業務與 37 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(58);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(24);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(34);
+        assertThat(jobs()).hasSize(64);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(27);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(37);
     }
 
     @Test
@@ -56,6 +56,52 @@ class SchedulePublicBffControllerTest {
                     assertThat(job.cron()).isEqualTo("0 5,35 9-13 * * MON-FRI");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
                     assertThat(job.description()).contains("唯讀", "局部替換", "configured admin");
+                });
+    }
+
+    @Test
+    @DisplayName("富邦交割銀行餘額同步精確登錄四個固定時段、時區與唯讀語意（Requirement 128／Task 393）")
+    void 富邦交割銀行餘額同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦交割銀行餘額同步".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.category()).isEqualTo("券商庫存");
+                    assertThat(job.cron()).isEqualTo(
+                            "0 0 8 * * * / 0 30 9 * * * / 0 0 14 * * * / 0 0 22 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("唯讀", "configured admin", "台北富邦銀行證券戶");
+                });
+    }
+
+    @Test
+    @DisplayName("富邦應收付交割金額同步精確登錄四個固定時段、時區與唯讀語意（Requirement 129／Task 394）")
+    void 富邦應收付交割金額同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦應收付交割金額同步".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.category()).isEqualTo("券商庫存");
+                    assertThat(job.cron()).isEqualTo(
+                            "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("唯讀", "3 天區間", "買股待付款／賣股待收款", "來源範圍待核實", "目前不寫");
+                });
+    }
+
+    @Test
+    @DisplayName("富邦已實現損益同步精確登錄四個固定時段、時區與唯讀語意（Requirement 130／Task 395）")
+    void 富邦已實現損益同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦已實現損益同步".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.category()).isEqualTo("券商庫存");
+                    assertThat(job.cron()).isEqualTo(
+                            "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("唯讀", "財務來源待核實", "目前不新增", "不覆寫既有紀錄")
+                            .doesNotContain("自然鍵冪等");
                 });
     }
 
@@ -176,4 +222,33 @@ class SchedulePublicBffControllerTest {
                         .contains("今年與明年", "同時產出 JSON 與 Excel 兩份", "共四檔")
                         .doesNotContain("當前年度交易日曆"));
     }
+    @Test
+    void 成交維持十一輪而庫存節拍不變() {
+        assertThat(jobs()).filteredOn(j -> "富邦台股成交紀錄同步".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.cron()).isEqualTo("0 0,30 9-13 * * MON-FRI；0 0 14 * * MON-FRI");
+            assertThat(job.schedule()).isEqualTo("交易日 09:00–14:00 每 30 分鐘，共 11 輪");
+            assertThat(job.zone()).isEqualTo("Asia/Taipei");
+        });
+    }
+
+    @Test
+    void 新市場資料工作依服務歸屬及真實節拍登錄() {
+        assertThat(jobs()).filteredOn(j -> "富邦除權息現金股利證據同步".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("外部行情服務"); assertThat(job.category()).isEqualTo("股利");
+            assertThat(job.cron()).isEqualTo("0 0 9 * * MON-FRI；0 30 13 * * MON-FRI");
+            assertThat(job.description()).contains("雷達交集", "PARTIAL", "未包含減資", "未核實配股金額");
+        });
+        assertThat(jobs()).filteredOn(j -> "富邦個股即時推播訂閱更新".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("外部行情服務");
+            assertThat(job.cron()).isEqualTo("fixedDelay=30000ms（訂閱清單）");
+            assertThat(job.schedule()).isEqualTo("交易日盤中即時；訂閱清單每 30 秒更新");
+            assertThat(job.description()).contains("實際成交", "300 檔", "120 秒", "試撮");
+        });
+        assertThat(jobs()).filteredOn(j -> "富邦日技術指標快取同步".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("外部行情服務");
+            assertThat(job.cron()).isEqualTo("0 40 13 * * MON-FRI");
+            assertThat(job.description()).contains("Redis cache", "最長 7 天", "不改本地技術計算");
+        });
+    }
+
 }

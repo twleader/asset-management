@@ -92,6 +92,13 @@ public class MarketCalendar {
         }
     }
 
+    /** Same authority as the producer, without request-time loading or retry state mutation. */
+    public Optional<Boolean> peekTwTradingDayKnown(LocalDate date) {
+        if (isWeekend(date)) return Optional.of(false);
+        try { return marketData.peekTwHolidaysKnown(date.getYear()).map(h -> !h.containsKey(date.toString())); }
+        catch (RuntimeException unavailable) { return Optional.empty(); }
+    }
+
     public boolean isUsTradingDay(LocalDate date) {
         return !isWeekend(date) && !isUsHoliday(date);
     }

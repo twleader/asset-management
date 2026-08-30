@@ -10,11 +10,11 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（24 個）與 {@code external-materials-service}（34 個）。
+ * {@code business-services}（27 個）與 {@code external-materials-service}（37 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 34 筆對應 36 個標註
- * （{@code TwClosurePoller} 與台股官方收盤對帳各為一法兩標、各併為一筆；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 37 筆對應 40 個標註
+ * （{@code TwClosurePoller} 與台股官方收盤對帳各為一法兩標、各併為一筆；富邦股利同步也是一法兩標；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
  * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移；Task 337 新增 {@code CommodityPricePoller} 的
  * 每分鐘即時報價與收盤後校正兩筆，各一法一筆，不套用一法兩標的合併規則）。
  *
@@ -34,7 +34,10 @@ import java.util.List;
  * <ul>
  *   <li>business-services：IndexDailyRefreshScheduler、TreasuryYieldRefreshScheduler、HistoricalDataService、ExportScheduleService、
  *       TradingCalendarExportScheduleService、RealizedGainExportScheduleService、SnapshotDateRollScheduler、
- *       StockAlertService、MarketAnalysisScheduler、BackupService</li>
+ *       StockAlertService、MarketAnalysisScheduler、BackupService、FubonInventorySyncScheduler、
+ *       FubonTradeSyncScheduler、FubonBankBalanceSyncScheduler（Requirement 128／Task 393）、
+ *       FubonSettlementSyncScheduler（Requirement 129／Task 394）、
+ *       FubonRealizedGainSyncScheduler（Requirement 130／Task 395）</li>
 
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TaiexIndexPoller、TwClosurePoller、
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
@@ -56,9 +59,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（58 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（64 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（24）=====
+            // ===== business-services（27）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -127,13 +130,34 @@ public class SchedulePublicBffController {
                     "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
                     "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 當日成交紀錄，新增系統尚未記錄的交易到交易紀錄，以富邦成交序號防止重複新增，不覆寫既有紀錄",
-                    "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
+                    "交易日 09:00–14:00 每 30 分鐘，共 11 輪", "0 0,30 9-13 * * MON-FRI；0 0 14 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦 ETF 成分股持股同步",
                     "以隔離的富邦官方 Linux SDK 唯讀查詢今日交易雷達範圍內的台股 ETF 成分股持股明細，"
                             + "正規化成分與來源日期落地保存供股票分析讀取，需啟用 ETF 同步設定，不影響券商端任何狀態",
                     "交易日 08:50、15:30", "0 50 8 * * MON-FRI；0 30 15 * * MON-FRI", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦交割銀行餘額同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 交割銀行帳戶餘額，覆寫最新快照裡台北富邦銀行證券戶存款金額與快照總額；零值照寫，同一交易提交",
+                    "每日 08:00／09:30／14:00／22:00", "0 0 8 * * * / 0 30 9 * * * / 0 0 14 * * * / 0 0 22 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦應收付交割金額同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀解析 3d（3 天區間）交割款觀察；完整來源範圍待核實，SETTLEMENT_SCOPE_UNVERIFIED，目前不寫買股待付款／賣股待收款，核實前不啟用財務同步",
+                    "每日 08:00／13:45／19:30／22:00", "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦已實現損益同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀解析已實現損益明細；逐筆身分與財務來源待核實，IDENTITY_UNVERIFIED，目前不新增、不覆寫既有紀錄，可變 ledger 不作可信來源",
+                    "每日 08:00／13:45／19:30／22:00", "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *", TPE),
 
-            // ===== external-materials-service（34）=====
+            // ===== external-materials-service（37）=====
+            new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股即時推播訂閱更新",
+                    "Normal mode aggregates 僅採實際成交與微秒時間，盤中只訂閱今日交易雷達台股，最多 300 檔；"
+                            + "清單每 30 秒更新、lease 最長 120 秒，停用／離開盤中／日曆未知即撤銷，不使用試撮或覆寫官方收盤",
+                    "交易日盤中即時；訂閱清單每 30 秒更新", "fixedDelay=30000ms（訂閱清單）", TPE),
+            new ScheduledJobDto(EXTERNAL, "股利", "富邦除權息現金股利證據同步",
+                    "日期批次取得、只處理雷達交集，經既有股利證據 store 保存 PARTIAL 現金股利證據；"
+                            + "未包含減資／未核實配股金額，不因不完整回應取消既有事件",
+                    "交易日 09:00／13:30", "0 0 9 * * MON-FRI；0 30 13 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "富邦日技術指標快取同步",
+                    "只處理今日交易雷達台股，以 KDJ(9,3,3)／MACD(12,26,9)／BB(20) 寫獨立 Redis cache；"
+                            + "各組依來源日期驗證、最長 7 天，不改本地技術計算或雷達評分",
+                    "交易日 13:40", "0 40 13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
                     "盤中每 10 秒只查今日交易雷達內台股（最新持股 ∪ 觀察清單，排除 0000），依序查富邦證券 API、TWSE MIS、Yahoo，寫入 Redis 與最新盤中 snapshot；大盤 0000 由「台股大盤即時點位（盤中）」負責",
                     "交易日 09:00–13:30 每 10 秒", "*/10 * 9-13 * * MON-FRI", TPE),
@@ -242,7 +266,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（58 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（64 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

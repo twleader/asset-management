@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 import uuid
+from datetime import date
 from typing import Callable
 
+from .accounting_normalization import checked_result, verify_identity
+from .normalization import stock_code, strict_iso_date, strict_vendor_date
 from .numeric import MAX_SHARES, NumericError, canonical_decimal, exact_integer
 from .sdk_gateway import SdkGateway, SelectedAccount, enum_text, raw_field
 
 
-_STOCK_CODE = re.compile(r"^[0-9A-Z]{2,10}$")
 _VALID_SIDES = {"Buy", "Sell"}
 _MAX_FILLED_NO_LENGTH = 50
 
@@ -43,21 +44,29 @@ class TradeReadService:
         self._fingerprint = fingerprint or self._hmac_fingerprint
         self._batch_id = batch_id or (lambda: str(uuid.uuid4()))
 
-    def read(self, start_date: str, end_date: str, internal_token: str) -> dict[str, object]:
-        response = self._gateway.read_filled_trades(start_date, end_date)
-        account = self._gateway.selected_account()
-
-        if raw_field(response, "is_success") is not True:
+    def read(self, start_date: str, end_date: str) -> dict[str, object]:
+        try:
+            start, end = strict_iso_date(start_date), strict_iso_date(end_date)
+            if start > end or (end - start).days > 7:
+                raise ValueError("INVALID_DATE_RANGE")
+        except ValueError:
+            raise TradeReadError("INVALID_DATE_RANGE") from None
+        read = self._gateway.read_filled_trades(start_date, end_date)
+        if raw_field(read.response, "is_success") is not True:
             raise TradeReadError("FILLED_HISTORY_FAILED")
-        rows = raw_field(response, "data")
+        rows = raw_field(read.response, "data")
         if not isinstance(rows, list):
             raise TradeReadError("FILLED_HISTORY_DATA_NOT_LIST")
+        try:
+            checked_result(read)
+        except ValueError:
+            raise TradeReadError("RECONCILE_FAILED") from None
 
         # Raw identity (and every other field) is validated for every row
         # before the fingerprint or any normalized trade is built.
-        trades = [self._validate_and_normalize(row, account, start_date, end_date) for row in rows]
+        trades = [self._validate_and_normalize(row, read.account, start, end) for row in rows]
 
-        fingerprint = self._fingerprint(internal_token, account.branch_no, account.account_number)
+        fingerprint = self._fingerprint(read.internal_token, read.account.branch_no, read.account.account_number)
         return {
             "batchId": self._batch_id(),
             "startDate": start_date,
@@ -69,7 +78,7 @@ class TradeReadService:
 
     @staticmethod
     def _validate_and_normalize(
-        row: object, account: SelectedAccount, start_date: str, end_date: str
+        row: object, account: SelectedAccount, start_date: date, end_date: date
     ) -> dict[str, object]:
         # (a) order_type must be exactly "Stock".
         order_type = enum_text(raw_field(row, "order_type"))
@@ -90,20 +99,26 @@ class TradeReadService:
             raise TradeReadError("RECONCILE_FAILED")
 
         # (c) account / branch_no must match the exact selected account.
+        try:
+            verify_identity(row, account)
+            filled_date = strict_vendor_date(raw_date)
+        except ValueError:
+            raise TradeReadError("RECONCILE_FAILED") from None
         if raw_account != account.account_number or raw_branch != account.branch_no:
             raise TradeReadError("RECONCILE_FAILED")
 
         # (d) date must fall within [start_date, end_date] inclusive.
-        if not (start_date <= raw_date <= end_date):
+        if not (start_date <= filled_date <= end_date):
             raise TradeReadError("RECONCILE_FAILED")
 
         # (e) side must be one of the official BSAction Buy/Sell values.
         if raw_side not in _VALID_SIDES:
             raise TradeReadError("RECONCILE_FAILED")
 
-        normalized_code = raw_code.strip().upper()
-        if normalized_code != raw_code or not _STOCK_CODE.fullmatch(normalized_code):
-            raise TradeReadError("RECONCILE_FAILED")
+        try:
+            normalized_code = stock_code(raw_code)
+        except ValueError:
+            raise TradeReadError("RECONCILE_FAILED") from None
 
         try:
             filled_price = canonical_decimal(raw_field(row, "filled_price"), positive=True)
@@ -128,7 +143,7 @@ class TradeReadService:
             "filledQty": filled_qty,
             "filledPrice": filled_price,
             "filledAvgPrice": filled_avg_price,
-            "filledDate": raw_date,
+            "filledDate": filled_date.isoformat(),
             "filledTime": raw_time,
             "filledNo": raw_no,
         }

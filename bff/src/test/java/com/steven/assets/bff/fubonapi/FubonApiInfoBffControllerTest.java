@@ -46,7 +46,7 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.trail_profit"
     );
 
-    /** 已串接 9 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    /** 已串接 15 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
     private static final Set<String> CONNECTED_PAIRS = Set.of(
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
@@ -56,7 +56,13 @@ class FubonApiInfoBffControllerTest {
             "marketdata.rest_client.stock.intraday.quote|POST /internal/market-data/tw-quotes",
             "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
             "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream",
-            "marketdata.rest_client.stock.ownership.etf_holdings|POST /internal/market-data/etf-holdings"
+            "marketdata.rest_client.stock.ownership.etf_holdings|POST /internal/market-data/etf-holdings",
+            "sdk.accounting.bank_remain|POST /internal/bank-balance/read",
+            "marketdata.rest_client.stock.corporate_actions.dividends|POST /internal/market-data/dividends/read",
+            "marketdata.rest_client.stock.technical.kdj|POST /internal/market-data/technical-indicators/read",
+            "marketdata.rest_client.stock.technical.macd|POST /internal/market-data/technical-indicators/read",
+            "marketdata.rest_client.stock.technical.bb|POST /internal/market-data/technical-indicators/read",
+            "marketdata.websocket_client.stock（channel=\"aggregates\"）|GET /internal/market-data/stock-push/stream"
     );
 
     /** 透過公開查詢方法取清單（APIS 是 private static，刻意不用反射）。 */
@@ -71,10 +77,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=true 恰為 9 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    @DisplayName("connected=true 恰為 15 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
     void 已串接筆數與組合正確() {
         List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
-        assertThat(connected).hasSize(9);
+        assertThat(connected).hasSize(15);
 
         Set<String> actual = connected.stream()
                 .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
@@ -83,11 +89,20 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=false 恰為 43 筆，且每筆 httpEndpoint 為空字串")
-    void 未串接筆數與httpEndpoint為空() {
+    @DisplayName("connected=false 恰為 37 筆，兩項未核實財務僅標實際預檢入口")
+    void 未串接筆數與預檢入口明確() {
         List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
-        assertThat(notConnected).hasSize(43);
-        assertThat(notConnected).allSatisfy(a -> assertThat(a.httpEndpoint()).isEmpty());
+        assertThat(notConnected).hasSize(37);
+        Map<String, String> preflights = Map.of(
+                "sdk.accounting.query_settlement", "POST /internal/settlement/read",
+                "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read");
+        assertThat(notConnected).allSatisfy(a -> {
+            assertThat(a.httpEndpoint()).isEqualTo(preflights.getOrDefault(a.sdkReference(), ""));
+            if (preflights.containsKey(a.sdkReference())) {
+                assertThat(a.description()).contains("來源", "待核實", "財務同步尚未完成");
+                assertThat(a.consumer()).contains("UNVERIFIED", "dryRun 預設 true");
+            }
+        });
     }
 
     @Test
@@ -165,6 +180,27 @@ class FubonApiInfoBffControllerTest {
         assertThat(etf.consumer()).contains("08:50", "15:30", "交易雷達", "需另啟用設定");
         assertThat(etf.responseSummary()).contains("正規化 JSON", "sourceDate", "decimal 字串")
                 .doesNotContain("逐字保存", "尚未核實", "佔位");
-        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(3);
+        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(7);
     }
+    @Test
+    void cashDividendScopeDoesNotClaimCapitalChangesOrUnverifiedStockDividendAmounts() {
+        var dividends = apis().stream().filter(api -> api.sdkReference().endsWith("corporate_actions.dividends")).findFirst().orElseThrow();
+        assertThat(dividends.connected()).isTrue();
+        assertThat(dividends.description()).contains("PARTIAL", "現金股利", "未包含減資", "未核實配股金額");
+        assertThat(dividends.consumer()).contains("POST /internal/dividend/fubon-sync");
+        var capital = apis().stream().filter(api -> api.sdkReference().endsWith("corporate_actions.capital_changes")).findFirst().orElseThrow();
+        assertThat(capital.connected()).isFalse(); assertThat(capital.httpEndpoint()).isEmpty();
+    }
+
+    @Test
+    void newMarketRowsDescribeActualWireAndOnlyDedicatedReadbackPaths() {
+        var macd = apis().stream().filter(api -> api.sdkReference().endsWith("technical.macd")).findFirst().orElseThrow();
+        assertThat(macd.consumer()).contains("13:40", "/internal/technical-indicators/fubon-cache");
+        assertThat(macd.responseSummary()).contains("queryFrom", "macdLine", "signalLine", "不捏造 histogram");
+        var push = apis().stream().filter(api -> api.sdkReference().contains("aggregates")).findFirst().orElseThrow();
+        assertThat(push.connected()).isTrue();
+        assertThat(push.responseSummary()).contains("tradeSize", "price", "sourceDate", "volume 為 null");
+        assertThat(push.consumer()).contains("subscriptions", "120 秒");
+    }
+
 }

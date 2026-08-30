@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Fixed Taipei filled-trade sync schedule (Requirement 120 / Task 385).
  *
- * <p>Sibling of {@link FubonInventorySyncScheduler}: same cron cadence, same local single-flight
+ * <p>Sibling of {@link FubonInventorySyncScheduler}: independent cron cadence, the same local single-flight
  * guard and tri-state calendar gate structure. Holds its own {@link #inFlight} guard, independent
  * of the inventory scheduler's — the two schedules never share it and never block each other.
  *
@@ -48,7 +48,8 @@ public class FubonTradeSyncScheduler {
         this.clock = clock;
     }
 
-    @Scheduled(cron = "0 5,35 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 0,30 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTradeSync() {
         if (!inFlight.compareAndSet(false, true)) return;
         try {

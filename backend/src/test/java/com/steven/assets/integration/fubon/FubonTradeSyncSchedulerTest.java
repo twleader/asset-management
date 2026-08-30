@@ -32,9 +32,23 @@ class FubonTradeSyncSchedulerTest {
     @Test
     void cronAndZoneAreExact() throws Exception {
         Method method = FubonTradeSyncScheduler.class.getMethod("scheduledTradeSync");
-        Scheduled scheduled = method.getAnnotation(Scheduled.class);
-        assertThat(scheduled.cron()).isEqualTo("0 5,35 9-13 * * MON-FRI");
-        assertThat(scheduled.zone()).isEqualTo("Asia/Taipei");
+        Scheduled[] schedules = method.getAnnotationsByType(Scheduled.class);
+        assertThat(schedules).extracting(Scheduled::cron)
+                .containsExactly("0 0,30 9-13 * * MON-FRI", "0 0 14 * * MON-FRI");
+        assertThat(schedules).allMatch(s -> s.zone().equals("Asia/Taipei"));
+        java.util.TreeSet<java.time.LocalTime> times = new java.util.TreeSet<>();
+        for (Scheduled schedule : schedules) {
+            var cron = org.springframework.scheduling.support.CronExpression.parse(schedule.cron());
+            var next = cron.next(TODAY.atStartOfDay());
+            while (next != null && next.toLocalDate().equals(TODAY)) {
+                times.add(next.toLocalTime());
+                next = cron.next(next);
+            }
+        }
+        assertThat(times).containsExactly(java.time.LocalTime.of(9, 0), java.time.LocalTime.of(9, 30),
+                java.time.LocalTime.of(10, 0), java.time.LocalTime.of(10, 30), java.time.LocalTime.of(11, 0),
+                java.time.LocalTime.of(11, 30), java.time.LocalTime.of(12, 0), java.time.LocalTime.of(12, 30),
+                java.time.LocalTime.of(13, 0), java.time.LocalTime.of(13, 30), java.time.LocalTime.of(14, 0));
     }
 
     @Test

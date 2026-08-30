@@ -3,13 +3,16 @@ package com.steven.assets.integration.fubon;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.codec.json.Jackson2JsonDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Consumer;
 
 /** Typed adapter client. Error bodies and exception text are intentionally never logged. */
 @Component
@@ -21,6 +24,8 @@ public class FubonHttpClient implements FubonBrokerClient {
 
     private final WebClient client;
     private final WebClient etfClient;
+    private final WebClient accountingClient;
+    private final Clock clock;
     private final FubonConfigState configState;
     private final Duration timeout;
 
@@ -33,7 +38,16 @@ public class FubonHttpClient implements FubonBrokerClient {
     }
 
     FubonHttpClient(WebClient client, FubonConfigState configState, Duration timeout) {
+        this(client, configState, timeout, Clock.systemUTC());
+    }
+
+    FubonHttpClient(WebClient client, FubonConfigState configState, Duration timeout, Clock clock) {
         this.client = client;
+        this.clock = clock;
+        this.accountingClient = client.mutate()
+                .codecs(codecs -> codecs.defaultCodecs().jackson2JsonDecoder(
+                        new Jackson2JsonDecoder(FubonAccountingJson.mapper())))
+                .build();
         this.etfClient = client.mutate()
                 .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(ETF_MAX_RESPONSE_BYTES))
                 .build();
@@ -130,6 +144,45 @@ public class FubonHttpClient implements FubonBrokerClient {
             return response != null
                     ? FubonDtos.CallResult.success(response)
                     : FubonDtos.CallResult.failure("EMPTY_RESPONSE");
+        } catch (WebClientResponseException exception) {
+            return FubonDtos.CallResult.failure(exception.getStatusCode().is2xxSuccessful()
+                    ? "TRANSPORT_OR_SCHEMA_FAILURE" : httpReason(exception.getStatusCode()));
+        } catch (Exception exception) {
+            return FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
+        }
+    }
+
+    @Override
+    public FubonDtos.CallResult<FubonDtos.BankBalance> readBankBalance() {
+        return accountingRead("/internal/bank-balance/read", FubonDtos.BankBalance.class,
+                body -> FubonAccountingContract.validateBank(body, clock));
+    }
+
+    @Override
+    public FubonDtos.CallResult<FubonDtos.SettlementBatch> readSettlement() {
+        return accountingRead("/internal/settlement/read", FubonDtos.SettlementBatch.class,
+                body -> FubonAccountingContract.validateSettlement(body, clock));
+    }
+
+    @Override
+    public FubonDtos.CallResult<FubonDtos.RealizedGainBatch> readRealizedGains() {
+        return accountingRead("/internal/realized-gains/read", FubonDtos.RealizedGainBatch.class,
+                body -> FubonAccountingContract.validateRealized(body, clock));
+    }
+
+    private <T> FubonDtos.CallResult<T> accountingRead(String path, Class<T> responseType, Consumer<T> validate) {
+        FubonConfigState.Snapshot config = configState.snapshot();
+        FubonDtos.CallResult<T> gate = gate(config);
+        if (gate != null) return gate;
+        try {
+            // These exact adapter routes have no request body, including no empty object.
+            T response = accountingClient.post().uri(path).header(TOKEN_HEADER, config.token())
+                    .retrieve().bodyToMono(responseType).timeout(timeout).block();
+            if (response == null) return FubonDtos.CallResult.failure("EMPTY_RESPONSE");
+            validate.accept(response);
+            return FubonDtos.CallResult.success(response);
+        } catch (FubonAccountingContract.Rejected exception) {
+            return FubonDtos.CallResult.failure(exception.getMessage());
         } catch (WebClientResponseException exception) {
             return FubonDtos.CallResult.failure(exception.getStatusCode().is2xxSuccessful()
                     ? "TRANSPORT_OR_SCHEMA_FAILURE" : httpReason(exception.getStatusCode()));
