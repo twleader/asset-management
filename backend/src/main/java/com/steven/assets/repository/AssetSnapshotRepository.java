@@ -53,6 +53,23 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
      */
     Optional<AssetSnapshot> findFirstByOwnerUserIdOrderBySnapshotDateDesc(Long ownerUserId);
 
+    /**
+     * Fubon configured-admin preflight only. Native SQL keeps the explicit server-selected
+     * owner authoritative when an internal request has no ordinary tenant identity. Generic
+     * user reads above deliberately retain their Hibernate tenant filter.
+     */
+    @Query(value = "SELECT * FROM asset_snapshot WHERE owner_user_id = :ownerUserId " +
+            "ORDER BY snapshot_date DESC LIMIT 1", nativeQuery = true)
+    Optional<AssetSnapshot> findLatestForFubonConfiguredOwner(@Param("ownerUserId") Long ownerUserId);
+
+    /**
+     * Same physical row locked by generic snapshot mutations, restricted to Fubon writers.
+     * The caller must recheck ACTIVE configured-admin ownership after this first DB operation.
+     */
+    @Query(value = "SELECT * FROM asset_snapshot WHERE owner_user_id = :ownerUserId " +
+            "ORDER BY snapshot_date DESC LIMIT 1 FOR UPDATE", nativeQuery = true)
+    Optional<AssetSnapshot> lockLatestForFubonConfiguredOwner(@Param("ownerUserId") Long ownerUserId);
+
     /** 背景 mutation 專用 owner-latest row lock；owner/date unique 保證最多一列。 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT s FROM AssetSnapshot s WHERE s.ownerUserId = :ownerUserId " +

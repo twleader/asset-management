@@ -1,7 +1,6 @@
 package com.steven.assets.integration.fubon;
 
 import com.steven.assets.model.AppUser;
-import com.steven.assets.model.AssetTransaction;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
@@ -10,11 +9,11 @@ import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -38,6 +37,7 @@ import java.util.regex.Pattern;
  */
 @Service
 @Slf4j
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class FubonTradeSyncService {
     static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final Pattern BATCH_ID = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
@@ -49,6 +49,7 @@ public class FubonTradeSyncService {
     private final BrokerRepository brokerRepository;
     private final AssetTransactionRepository assetTransactionRepository;
     private final StockMasterService stockMasterService;
+    private final FubonTradeWriter writer;
     private final FubonTradeOutcomeCounters counters;
     private final Clock clock;
     private final boolean tradeSyncEnabled;
@@ -63,11 +64,12 @@ public class FubonTradeSyncService {
             BrokerRepository brokerRepository,
             AssetTransactionRepository assetTransactionRepository,
             StockMasterService stockMasterService,
+            FubonTradeWriter writer,
             FubonTradeOutcomeCounters counters,
             @org.springframework.beans.factory.annotation.Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled,
             @org.springframework.beans.factory.annotation.Value("${fubon.tw-live-quotes-enabled:false}") boolean liveQuotesEnabled) {
         this(configState, brokerClient, marketDataService, userAdminService, brokerRepository,
-                assetTransactionRepository, stockMasterService, counters, Clock.system(TW_ZONE),
+                assetTransactionRepository, stockMasterService, writer, counters, Clock.system(TW_ZONE),
                 tradeSyncEnabled, liveQuotesEnabled);
     }
 
@@ -79,6 +81,7 @@ public class FubonTradeSyncService {
             BrokerRepository brokerRepository,
             AssetTransactionRepository assetTransactionRepository,
             StockMasterService stockMasterService,
+            FubonTradeWriter writer,
             FubonTradeOutcomeCounters counters,
             Clock clock,
             boolean tradeSyncEnabled,
@@ -90,6 +93,7 @@ public class FubonTradeSyncService {
         this.brokerRepository = brokerRepository;
         this.assetTransactionRepository = assetTransactionRepository;
         this.stockMasterService = stockMasterService;
+        this.writer = writer;
         this.counters = counters;
         this.clock = clock;
         this.tradeSyncEnabled = tradeSyncEnabled;
@@ -162,7 +166,8 @@ public class FubonTradeSyncService {
         Long ownerId = configured.get().getId();
 
         Optional<BrokerEntity> broker = brokerRepository.findByCode("fubon");
-        if (broker.isEmpty() || !Boolean.TRUE.equals(broker.get().getActive())) {
+        if (broker.isEmpty() || broker.get().getId() == null || !"fubon".equals(broker.get().getCode())
+                || !Boolean.TRUE.equals(broker.get().getActive())) {
             return toResult(recordOutcome(FubonTradeOutcome.BROKER_MISSING), dryRun);
         }
 
@@ -172,7 +177,7 @@ public class FubonTradeSyncService {
         } catch (RuntimeException exception) {
             call = FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
         }
-        if (call == null || !call.success() || call.body() == null || call.body().trades() == null) {
+        if (call == null || !call.success() || !FubonTradeContract.validBatch(call.body(), today, today)) {
             return toResult(recordOutcome(FubonTradeOutcome.TRADE_FAILED), dryRun);
         }
         FubonDtos.TradeBatchResponse body = call.body();
@@ -182,34 +187,24 @@ public class FubonTradeSyncService {
         }
 
         try {
-            return processTrades(ownerId, body, dryRun);
+            return processTrades(ownerId, broker.get().getId(), body, dryRun);
+        } catch (FubonTradeWriter.WriteRejected rejected) {
+            FubonTradeOutcome outcome = recordOutcome(rejected.outcome());
+            return buildResult(outcome, dryRun, body.batchId(), body.trades().size(), 0, 0, 0);
         } catch (RuntimeException unexpected) {
-            counters.increment(FubonTradeOutcome.ROLLED_BACK);
-            log.info("Fubon trade sync outcome={} reason=UNEXPECTED_EXCEPTION",
-                    FubonTradeOutcome.ROLLED_BACK, unexpected);
-            throw unexpected;
+            recordOutcome(FubonTradeOutcome.ROLLED_BACK);
+            // Neither the API error handler nor scheduler may receive raw SQL/row values.
+            // The independently proxied writer has already rolled back before we get here.
+            throw new IllegalStateException("TRANSACTION_ROLLED_BACK");
         }
     }
 
     /**
-     * Validates and (when not dry-run) writes every not-yet-recorded trade in {@code body}.
-     *
-     * <p><b>Deliberately not one big {@code @Transactional} span.</b> The spec sketch describes a
-     * single transactional method for the whole batch, but sharing one PostgreSQL transaction
-     * across every row is unsafe here: once any statement inside a PostgreSQL transaction raises
-     * a constraint violation, the server aborts that whole transaction and rejects every further
-     * statement issued on it ("current transaction is aborted") until it is rolled back — so
-     * catching the unique-index race on row N and continuing to row N+1 in the same transaction
-     * would silently fail every remaining insert, not just skip the duplicate. Each
-     * {@code assetTransactionRepository.save(...)} call below is therefore its own independent
-     * transaction (Spring Data's {@code CrudRepository} methods are transactional per call), so a
-     * concurrent-race duplicate on one row cannot poison the others. Application-level self-
-     * invocation of {@code @Transactional} on a method in this same class would also silently not
-     * apply (Spring's proxy-based AOP does not intercept {@code this.}-calls), which is a second,
-     * independent reason not to add one here.
+     * Prepare outside the write transaction, then wait for the separate writer's commit before
+     * recording SUCCESS. The explicit ON CONFLICT target handles only actual duplicate fills.
      */
-    private TradeSyncResult processTrades(Long ownerId, FubonDtos.TradeBatchResponse body, boolean dryRun) {
-        List<AssetTransaction> toInsert = new ArrayList<>();
+    private TradeSyncResult processTrades(Long ownerId, Long brokerId, FubonDtos.TradeBatchResponse body, boolean dryRun) {
+        List<FubonTradeWriter.PreparedTrade> toInsert = new ArrayList<>();
         int skippedExisting = 0;
         int skippedNameUnresolved = 0;
         for (FubonDtos.FilledTrade trade : body.trades()) {
@@ -217,7 +212,7 @@ public class FubonTradeSyncService {
             // resolveNameLocalOnly falls back to returning the code itself when the local stock
             // master has no name for it yet (see its javadoc); that fallback is this method's
             // only signal that the name is not locally resolvable, so treat it the same as null.
-            if (stockName == null || stockName.equals(trade.stockCode())) {
+            if (stockName == null || stockName.isBlank() || stockName.equals(trade.stockCode())) {
                 skippedNameUnresolved++;
                 continue;
             }
@@ -232,37 +227,14 @@ public class FubonTradeSyncService {
             } else if ("Sell".equals(trade.side())) {
                 transactionType = "賣";
             } else {
-                throw new IllegalStateException("UNEXPECTED_TRADE_SIDE:" + trade.side());
+                throw new IllegalStateException("UNEXPECTED_TRADE_SIDE");
             }
 
             BigDecimal shares = BigDecimal.valueOf(trade.filledQty());
             BigDecimal price = trade.filledAvgPrice().value();
-            BigDecimal amount = price.multiply(shares).setScale(2, RoundingMode.HALF_UP);
-            if (amount.precision() > 20) {
-                FubonTradeOutcome outcome = recordOutcome(FubonTradeOutcome.TRADE_FAILED);
-                return buildResult(outcome, dryRun, body.batchId(), body.trades().size(), 0, 0, 0);
-            }
-
-            toInsert.add(AssetTransaction.builder()
-                    .ownerUserId(ownerId)
-                    .transactionType(transactionType)
-                    .assetType("股票")
-                    .assetName(stockName)
-                    .assetCode(trade.stockCode())
-                    .market("台股")
-                    .currency("TWD")
-                    .channel("富邦證券")
-                    .tradeDate(trade.filledDate())
-                    .shares(shares)
-                    .price(price)
-                    .amount(amount)
-                    .fee(null)
-                    .transactionTax(null)
-                    .exchangeRate(null)
-                    .notes(null)
-                    .source("FUBON_SYNC")
-                    .brokerFilledNo(trade.filledNo())
-                    .build());
+            BigDecimal amount = FubonTradeContract.amount(price, shares);
+            toInsert.add(new FubonTradeWriter.PreparedTrade(trade.filledNo(), transactionType, stockName,
+                    trade.stockCode(), trade.filledDate(), shares, price, amount));
         }
 
         if (dryRun) {
@@ -272,15 +244,10 @@ public class FubonTradeSyncService {
         }
 
         int insertedCount = 0;
-        for (AssetTransaction candidate : toInsert) {
-            try {
-                assetTransactionRepository.save(candidate);
-                insertedCount++;
-            } catch (DataIntegrityViolationException race) {
-                // Unique-index race with a concurrent invocation (manual endpoint vs. scheduler):
-                // treat exactly like the already-exists check above, do not fail the batch.
-                skippedExisting++;
-            }
+        if (!toInsert.isEmpty()) {
+            FubonTradeWriter.CommitResult committed = writer.insert(ownerId, brokerId, List.copyOf(toInsert));
+            insertedCount = committed.insertedCount();
+            skippedExisting += committed.skippedExistingCount();
         }
         FubonTradeOutcome outcome = recordOutcome(FubonTradeOutcome.SUCCESS);
         return buildResult(outcome, false, body.batchId(), body.trades().size(),

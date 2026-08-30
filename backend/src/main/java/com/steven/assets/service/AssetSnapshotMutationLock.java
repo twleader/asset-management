@@ -32,6 +32,12 @@ public class AssetSnapshotMutationLock {
         return snapshotRepository.findLatestByOwnerUserIdForUpdate(ownerUserId);
     }
 
+    /** Fubon internal sync only; ordinary user mutations keep the tenant-filtered methods. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<AssetSnapshot> lockLatestForFubonConfiguredOwner(Long ownerUserId) {
+        return snapshotRepository.lockLatestForFubonConfiguredOwner(ownerUserId);
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public List<AssetSnapshot> lockAllInIdOrder() {
         return snapshotRepository.findAllForUpdateOrderById();

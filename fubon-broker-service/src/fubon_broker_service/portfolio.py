@@ -4,10 +4,11 @@ import hashlib
 import hmac
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from .normalization import strict_vendor_date
 from .numeric import MAX_SHARES, NumericError, canonical_decimal, checked_share_add, exact_integer
 from .sdk_gateway import AccountingPair, SdkCallError, SdkGateway, enum_text, raw_field
 
@@ -24,7 +25,7 @@ class PortfolioError(ValueError):
 
 @dataclass(frozen=True)
 class RawIdentity:
-    source_date: str
+    source_date: date
     account: str
     branch_no: str
     stock_code: str
@@ -58,10 +59,10 @@ class PortfolioService:
 
         # Raw source identity is validated for every row before HMAC or any normalized identity is built.
         inventory_identities = [
-            self._validate_raw_identity(row, pair, query_date.isoformat()) for row in inventories
+            self._validate_raw_identity(row, pair, query_date) for row in inventories
         ]
         unrealized_identities = [
-            self._validate_raw_identity(row, pair, query_date.isoformat()) for row in unrealized
+            self._validate_raw_identity(row, pair, query_date) for row in unrealized
         ]
 
         fingerprint = self._fingerprint(
@@ -135,7 +136,7 @@ class PortfolioService:
         return data
 
     @staticmethod
-    def _validate_raw_identity(row: object, pair: AccountingPair, query_date: str) -> RawIdentity:
+    def _validate_raw_identity(row: object, pair: AccountingPair, query_date: date) -> RawIdentity:
         raw_date = raw_field(row, "date")
         raw_account = raw_field(row, "account")
         raw_branch = raw_field(row, "branch_no")
@@ -143,7 +144,11 @@ class PortfolioService:
         raw_order_type = enum_text(raw_field(row, "order_type"))
         if not all(isinstance(value, str) and value for value in (raw_date, raw_account, raw_branch, raw_code)):
             raise PortfolioError("MISSING_RAW_IDENTITY")
-        if raw_date != query_date:
+        try:
+            source_date = strict_vendor_date(raw_date)
+        except ValueError:
+            raise PortfolioError("INVALID_SOURCE_DATE") from None
+        if source_date != query_date:
             raise PortfolioError("STALE_SOURCE_DATE")
         if raw_account != pair.account.account_number:
             raise PortfolioError("WRONG_SOURCE_ACCOUNT")
@@ -154,7 +159,7 @@ class PortfolioService:
             raise PortfolioError("INVALID_STOCK_CODE")
         if raw_order_type is None:
             raise PortfolioError("MISSING_ORDER_TYPE")
-        return RawIdentity(raw_date, raw_account, raw_branch, normalized_code, raw_order_type)
+        return RawIdentity(source_date, raw_account, raw_branch, normalized_code, raw_order_type)
 
     @staticmethod
     def _unique_map(
@@ -162,8 +167,8 @@ class PortfolioService:
         identities: list[RawIdentity],
         fingerprint: str,
         duplicate_reason: str,
-    ) -> dict[tuple[str, str, str, str, str], object]:
-        result: dict[tuple[str, str, str, str, str], object] = {}
+    ) -> dict[tuple[date, str, str, str, str], object]:
+        result: dict[tuple[date, str, str, str, str], object] = {}
         for row, identity in zip(rows, identities, strict=True):
             key = (
                 identity.source_date,

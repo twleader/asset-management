@@ -11,6 +11,8 @@ import com.steven.assets.service.UserAdminService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -104,6 +106,7 @@ public class FubonInventorySyncService {
     }
 
     /** Manual endpoint flow: accounting may run before the tri-state calendar gate. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public FubonDtos.SyncResponse syncManual(boolean dryRun) {
         FubonDtos.SyncResponse localGate = localConfigGate(dryRun);
         if (localGate != null) return localGate;
@@ -125,6 +128,7 @@ public class FubonInventorySyncService {
     }
 
     /** Scheduler flow after its own tri-state calendar gate authorized this exact Taipei date. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     FubonDtos.SyncResponse syncScheduledAfterCalendar(LocalDate authorizedDate) {
         FubonDtos.SyncResponse localGate = localConfigGate(false);
         if (localGate != null) return localGate;
@@ -258,6 +262,7 @@ public class FubonInventorySyncService {
                     committed.replaceCount(), committed.snapshotId(), reasonFor(outcome), portfolio.fingerprint());
         } catch (FubonInventoryWriter.CommitRejected rejected) {
             FubonOutcome outcome = switch (rejected.reason()) {
+                case "NO_OWNER" -> FubonOutcome.NO_OWNER;
                 case "BROKER_MISSING" -> FubonOutcome.BROKER_MISSING;
                 case "NO_TODAY_SNAPSHOT" -> FubonOutcome.NO_TODAY_SNAPSHOT;
                 default -> FubonOutcome.ROLLED_BACK;
@@ -359,7 +364,7 @@ public class FubonInventorySyncService {
             }
             AppUser owner = configured.get();
             Optional<AssetSnapshot> latest = snapshotRepository
-                    .findFirstByOwnerUserIdOrderBySnapshotDateDesc(owner.getId());
+                    .findLatestForFubonConfiguredOwner(owner.getId());
             if (latest.isEmpty() || latest.get().getId() == null
                     || !expectedDate.equals(latest.get().getSnapshotDate())) {
                 return CommitPreflight.failed(FubonOutcome.NO_TODAY_SNAPSHOT, "NO_TODAY_SNAPSHOT");

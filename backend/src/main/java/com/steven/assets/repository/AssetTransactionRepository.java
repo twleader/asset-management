@@ -2,9 +2,13 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.AssetTransaction;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -46,4 +50,34 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
         )
         """, nativeQuery = true)
     boolean existsByOwnerUserIdAndBrokerFilledNo(Long ownerUserId, String brokerFilledNo);
+
+    /**
+     * The Fubon batch writer alone calls this inside its transaction. Only the existing
+     * owner/filled-no partial unique index is an expected conflict; every other database error
+     * must abort that transaction. Never update a ledger row the user may already have edited.
+     */
+    @Modifying
+    @Query(value = """
+        INSERT INTO asset_transaction (
+            owner_user_id, broker_filled_no, transaction_type, asset_type, asset_name,
+            asset_code, market, currency, channel, trade_date, shares, price, amount,
+            fee, transaction_tax, exchange_rate, notes, source
+        ) VALUES (
+            :ownerUserId, :brokerFilledNo, :transactionType, '股票', :assetName,
+            :assetCode, '台股', 'TWD', '富邦證券', :tradeDate, :shares, :price, :amount,
+            NULL, NULL, NULL, NULL, 'FUBON_SYNC'
+        )
+        ON CONFLICT (owner_user_id, broker_filled_no)
+            WHERE broker_filled_no IS NOT NULL DO NOTHING
+        """, nativeQuery = true)
+    int insertFubonTradeIfAbsent(
+            @Param("ownerUserId") Long ownerUserId,
+            @Param("brokerFilledNo") String brokerFilledNo,
+            @Param("transactionType") String transactionType,
+            @Param("assetName") String assetName,
+            @Param("assetCode") String assetCode,
+            @Param("tradeDate") LocalDate tradeDate,
+            @Param("shares") BigDecimal shares,
+            @Param("price") BigDecimal price,
+            @Param("amount") BigDecimal amount);
 }

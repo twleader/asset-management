@@ -1,5 +1,6 @@
 package com.steven.assets.integration.fubon;
 
+import com.steven.assets.model.AppUser;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.StockHolding;
@@ -8,12 +9,16 @@ import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockMasterService;
-import lombok.RequiredArgsConstructor;
+import com.steven.assets.service.UserAdminService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,9 +26,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** The only DB-writing Fubon boundary; adapter I/O is completed before entry. */
+/** Atomic replacement of the Fubon Taiwan stock scope; adapter I/O is completed before entry. */
 @Service
-@RequiredArgsConstructor
 public class FubonInventoryWriter {
     private static final String MARKET_TW = "台股";
     private static final String BROKER_CODE = "fubon";
@@ -33,6 +37,30 @@ public class FubonInventoryWriter {
     private final BrokerRepository brokerRepository;
     private final StockMasterService stockMasterService;
     private final SnapshotAggregateCalculator aggregateCalculator;
+    private final UserAdminService userAdminService;
+    private final FubonSyncFreshness freshness;
+    private final Clock clock;
+
+    @Autowired
+    public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
+            BrokerRepository brokerRepository, StockMasterService stockMasterService,
+            SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness) {
+        this(mutationLock, snapshotRepository, brokerRepository, stockMasterService, aggregateCalculator,
+                userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE));
+    }
+
+    FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
+            BrokerRepository brokerRepository, StockMasterService stockMasterService,
+            SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness, Clock clock) {
+        this.mutationLock = mutationLock;
+        this.snapshotRepository = snapshotRepository;
+        this.brokerRepository = brokerRepository;
+        this.stockMasterService = stockMasterService;
+        this.aggregateCalculator = aggregateCalculator;
+        this.userAdminService = userAdminService;
+        this.freshness = freshness;
+        this.clock = clock;
+    }
 
     @Transactional
     public CommitResult replace(
@@ -42,8 +70,16 @@ public class FubonInventoryWriter {
             List<PreparedPosition> positions,
             boolean emptyConfirmed) {
         // First DB operation in this transaction: owner-latest PESSIMISTIC_WRITE row lock.
-        AssetSnapshot snapshot = mutationLock.lockLatestForOwner(ownerUserId)
+        AssetSnapshot snapshot = mutationLock.lockLatestForFubonConfiguredOwner(ownerUserId)
                 .orElseThrow(() -> new CommitRejected("NO_TODAY_SNAPSHOT"));
+        freshness.refreshLockedSnapshot(snapshot);
+        AppUser owner = userAdminService.configuredAdmin().orElse(null);
+        if (owner != null) freshness.refreshOwner(owner);
+        if (owner == null || ownerUserId == null || !ownerUserId.equals(owner.getId())
+                || !owner.isActive() || !owner.isAdmin() || !ownerUserId.equals(snapshot.getOwnerUserId())) {
+            throw new CommitRejected("NO_OWNER");
+        }
+        requireCurrentDate(queryDate);
         if (!snapshot.getId().equals(expectedSnapshotId) || !queryDate.equals(snapshot.getSnapshotDate())) {
             throw new CommitRejected("LATEST_SNAPSHOT_CHANGED");
         }
@@ -51,8 +87,11 @@ public class FubonInventoryWriter {
             throw new CommitRejected("EMPTY_SEMANTICS_MISMATCH");
         }
         BrokerEntity broker = brokerRepository.findByCode(BROKER_CODE)
-                .filter(candidate -> Boolean.TRUE.equals(candidate.getActive()))
                 .orElseThrow(() -> new CommitRejected("BROKER_MISSING"));
+        freshness.refreshBroker(broker);
+        if (!BROKER_CODE.equals(broker.getCode()) || !Boolean.TRUE.equals(broker.getActive())) {
+            throw new CommitRejected("BROKER_MISSING");
+        }
 
         Map<String, List<StockHolding>> oldScope = new HashMap<>();
         for (StockHolding stock : snapshot.getStocks()) {
@@ -126,7 +165,18 @@ public class FubonInventoryWriter {
 
         aggregateCalculator.recalculate(snapshot);
         snapshotRepository.saveAndFlush(snapshot);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void beforeCommit(boolean readOnly) { requireCurrentDate(queryDate); }
+            });
+        }
         return new CommitResult(snapshot.getId(), sorted.size(), emptyConfirmed);
+    }
+
+    private void requireCurrentDate(LocalDate queryDate) {
+        if (!LocalDate.now(clock.withZone(FubonInventorySyncService.TW_ZONE)).equals(queryDate)) {
+            throw new CommitRejected("DATE_ROLLOVER");
+        }
     }
 
     static BigDecimal checkedMoney(BigDecimal unrounded) {

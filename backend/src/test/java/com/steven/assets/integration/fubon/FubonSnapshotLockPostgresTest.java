@@ -6,7 +6,9 @@ import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.AppUserRepository;
 import com.steven.assets.repository.BrokerRepository;
+import com.steven.assets.repository.JpaFubonSyncFreshness;
 import com.steven.assets.service.AssetClassifier;
 import com.steven.assets.service.AssetService;
 import com.steven.assets.service.AssetSnapshotMutationLock;
@@ -24,6 +26,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -65,11 +69,19 @@ import static org.mockito.Mockito.when;
         "spring.liquibase.enabled=false"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class,
-        FubonInventoryWriter.class, AssetService.class})
+@Import({JpaFubonSyncFreshness.class, AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class,
+        FubonSnapshotLockPostgresTest.Config.class, AssetService.class})
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class FubonSnapshotLockPostgresTest {
+    @TestConfiguration
+    static class Config {
+        @Bean FubonInventoryWriter inventoryWriter(AssetSnapshotMutationLock lock, AssetSnapshotRepository snapshots,
+                BrokerRepository brokers, StockMasterService stocks, SnapshotAggregateCalculator calculator, UserAdminService users, FubonSyncFreshness freshness) {
+            return new FubonInventoryWriter(lock, snapshots, brokers, stocks, calculator, users, freshness, CLOCK);
+        }
+    }
+
     private static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final LocalDate TODAY = LocalDate.of(2026, 8, 21);
     private static final Clock CLOCK = Clock.fixed(
@@ -99,6 +111,7 @@ class FubonSnapshotLockPostgresTest {
     @MockBean UserAdminService userAdminService;
 
     @Autowired AssetSnapshotRepository snapshotRepository;
+    @Autowired AppUserRepository appUserRepository;
     @Autowired BrokerRepository brokerRepository;
     @Autowired AssetSnapshotMutationLock mutationLock;
     @Autowired FubonInventoryWriter writer;
@@ -248,6 +261,13 @@ class FubonSnapshotLockPostgresTest {
         snapshotRepository.flush();
         brokerRepository.deleteAll();
         brokerRepository.flush();
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            appUserRepository.deleteAll(); appUserRepository.flush();
+            entityManager.createNativeQuery("INSERT INTO app_user (id, email, role, status, created_at, updated_at) VALUES "
+                    + "(9, 'lock-admin@example.invalid', 'ADMIN', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), "
+                    + "(10, 'lock-other@example.invalid', 'ADMIN', 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+                    .executeUpdate();
+        });
         fubon = brokerRepository.saveAndFlush(BrokerEntity.builder()
                 .code("fubon").displayName("富邦證券").active(true).build());
         other = brokerRepository.saveAndFlush(BrokerEntity.builder()
@@ -277,11 +297,7 @@ class FubonSnapshotLockPostgresTest {
         if (configuredAdminId == null) {
             when(userAdminService.configuredAdmin()).thenReturn(Optional.empty());
         } else {
-            when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
-                    .id(configuredAdminId)
-                    .role(AppUser.ROLE_ADMIN)
-                    .status(AppUser.STATUS_ACTIVE)
-                    .build()));
+            when(userAdminService.configuredAdmin()).thenAnswer(call -> appUserRepository.findById(configuredAdminId));
         }
         FubonSnapshotStockScopeOwnershipAdapter adapter = new FubonSnapshotStockScopeOwnershipAdapter(
                 configState, userAdminService, snapshotRepository, CLOCK, inventoryEnabled, liveEnabled);

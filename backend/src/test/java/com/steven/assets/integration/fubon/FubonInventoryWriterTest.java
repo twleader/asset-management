@@ -1,5 +1,6 @@
 package com.steven.assets.integration.fubon;
 
+import com.steven.assets.model.AppUser;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.StockHolding;
@@ -8,6 +9,7 @@ import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockMasterService;
+import com.steven.assets.service.UserAdminService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +18,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +38,8 @@ class FubonInventoryWriterTest {
     @Mock AssetSnapshotRepository snapshotRepository;
     @Mock BrokerRepository brokerRepository;
     @Mock StockMasterService stockMasterService;
+    @Mock UserAdminService userAdminService;
+    @Mock FubonSyncFreshness freshness;
 
     private final SnapshotAggregateCalculator calculator = new SnapshotAggregateCalculator();
     private FubonInventoryWriter writer;
@@ -43,14 +50,17 @@ class FubonInventoryWriterTest {
     @BeforeEach
     void setUp() {
         writer = new FubonInventoryWriter(
-                mutationLock, snapshotRepository, brokerRepository, stockMasterService, calculator);
+                mutationLock, snapshotRepository, brokerRepository, stockMasterService, calculator, userAdminService, freshness,
+                Clock.fixed(Instant.parse("2026-08-21T02:00:00Z"), ZoneOffset.UTC));
         fubon = BrokerEntity.builder().id(1L).code("fubon").displayName("富邦證券").active(true).build();
         other = BrokerEntity.builder().id(2L).code("cathay").displayName("國泰證券").active(true).build();
         snapshot = AssetSnapshot.builder()
                 .id(7L).ownerUserId(9L).snapshotDate(LocalDate.of(2026, 8, 21))
                 .deposits(new ArrayList<>()).funds(new ArrayList<>()).stocks(new ArrayList<>())
                 .build();
-        when(mutationLock.lockLatestForOwner(9L)).thenReturn(Optional.of(snapshot));
+        when(mutationLock.lockLatestForFubonConfiguredOwner(9L)).thenReturn(Optional.of(snapshot));
+        lenient().when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
+                .id(9L).role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build()));
         lenient().when(brokerRepository.findByCode("fubon")).thenReturn(Optional.of(fubon));
     }
 

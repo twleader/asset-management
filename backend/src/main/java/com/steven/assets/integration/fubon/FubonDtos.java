@@ -103,7 +103,13 @@ public final class FubonDtos {
             LocalDate endDate,
             String accountFingerprint,
             boolean emptyConfirmed,
-            List<FilledTrade> trades) {}
+            List<FilledTrade> trades) {
+        public TradeBatchResponse {
+            // Preserve malformed nulls for the fail-closed validator while owning an immutable
+            // copy: a caller cannot replace a checked row before the batch reaches the writer.
+            if (trades != null) trades = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(trades));
+        }
+    }
 
     public record FilledTrade(
             String stockCode,
