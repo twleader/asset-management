@@ -34,6 +34,18 @@
             </el-menu-item>
           </template>
 
+          <!-- Requirement 28：權限管理僅管理者可見 -->
+          <el-sub-menu v-if="auth.isAdmin" index="permissions">
+            <template #title>
+              <el-icon><Lock /></el-icon>
+              <span>權限管理</span>
+            </template>
+            <el-menu-item index="/settings/users">
+              <el-icon><User /></el-icon>
+              <template #title>使用者管理</template>
+            </el-menu-item>
+          </el-sub-menu>
+
           <el-sub-menu index="settings">
             <template #title>
               <el-icon><Setting /></el-icon>
@@ -71,14 +83,10 @@
               <el-icon><Bell /></el-icon>
               <template #title>警示通知設定</template>
             </el-menu-item>
-            <!-- Requirement 28：備份/還原與使用者管理僅管理者可見 -->
+            <!-- Requirement 28：備份/還原僅管理者可見 -->
             <el-menu-item v-if="auth.isAdmin" index="/settings/backup-restore">
               <el-icon><FolderOpened /></el-icon>
               <template #title>備份/還原 資料</template>
-            </el-menu-item>
-            <el-menu-item v-if="auth.isAdmin" index="/settings/users">
-              <el-icon><User /></el-icon>
-              <template #title>使用者管理</template>
             </el-menu-item>
           </el-sub-menu>
         </el-menu>
