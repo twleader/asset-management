@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import logging
 import platform
 import secrets
@@ -8,19 +9,26 @@ from contextlib import asynccontextmanager
 from datetime import date
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 
+from .bank_balance import BankBalanceError, BankBalanceService
 from .config import ConfigLoader, ConfigSnapshot
 from .counters import Outcome, OutcomeCounters
+from .dividends import DividendError, DividendService
 from .etf_holdings import EtfHoldingsService
+from .normalization import stock_code, stock_codes, strict_iso_date
 from .portfolio import PortfolioError, PortfolioService
 from .quotes import QuoteError, QuoteService
+from .realized_gain import RealizedGainError, RealizedGainService
 from .redaction import install_log_redaction, redact_mapping
 from .sdk_gateway import SdkCallError, SdkGateway
+from .settlement import SettlementError, SettlementService
+from .stock_push_stream import StockPushError, StockPushStream
 from .taiex_index_stream import TaiexIndexStream, TaiexIndexStreamError
+from .technical_indicators import TechnicalIndicatorError, TechnicalIndicatorService
 from .trades import TradeReadError, TradeReadService
 
 
@@ -36,6 +44,7 @@ install_log_redaction(
     logger,
     logging.getLogger("fubon_broker_service.sdk_gateway"),
     logging.getLogger("fubon_broker_service.taiex_index_stream"),
+    logging.getLogger("fubon_broker_service.stock_push_stream"),
 )
 
 
@@ -82,8 +91,58 @@ class TradeReadRequest(BaseModel):
     @field_validator("startDate", "endDate")
     @classmethod
     def valid_iso_date(cls, value: str) -> str:
-        date.fromisoformat(value)  # raises ValueError -> 400 via RequestValidationError
+        strict_iso_date(value)
         return value
+
+
+class DividendReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    symbols: list[StrictStr] = Field(min_length=1, max_length=2000)
+    from_date: StrictStr = Field(alias="from")
+    to_date: StrictStr = Field(alias="to")
+
+    @field_validator("symbols")
+    @classmethod
+    def validate_symbols(cls, value: list[str]) -> list[str]:
+        return stock_codes(value, maximum=2000)
+
+    @field_validator("from_date", "to_date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        strict_iso_date(value)
+        return value
+
+
+class TechnicalReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    symbol: StrictStr
+    from_date: StrictStr = Field(alias="from")
+    to_date: StrictStr = Field(alias="to")
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        return stock_code(value)
+
+    @field_validator("from_date", "to_date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        strict_iso_date(value)
+        return value
+
+
+class StockSubscriptionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    symbols: list[StrictStr]
+
+
+def _unique_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    output: dict[str, object] = {}
+    for key, value in pairs:
+        if key in output:
+            raise ValueError("DUPLICATE_JSON_KEY")
+        output[key] = value
+    return output
 
 
 def _sdk_version() -> str:
@@ -104,6 +163,12 @@ def create_app(
     counters: OutcomeCounters | None = None,
     taiex_index_stream: TaiexIndexStream | None = None,
     etf_holdings_service: EtfHoldingsService | None = None,
+    bank_balance_service: BankBalanceService | None = None,
+    settlement_service: SettlementService | None = None,
+    realized_gain_service: RealizedGainService | None = None,
+    dividend_service: DividendService | None = None,
+    technical_indicator_service: TechnicalIndicatorService | None = None,
+    stock_push_stream: StockPushStream | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
     sdk_gateway = gateway or SdkGateway(loader)
@@ -113,10 +178,17 @@ def create_app(
     outcome_counters = counters or OutcomeCounters()
     index_stream = taiex_index_stream or TaiexIndexStream(sdk_gateway)
     etf_holdings = etf_holdings_service or EtfHoldingsService(sdk_gateway)
+    bank_balance = bank_balance_service or BankBalanceService(sdk_gateway)
+    settlement = settlement_service or SettlementService(sdk_gateway)
+    realized_gain = realized_gain_service or RealizedGainService(sdk_gateway)
+    dividends = dividend_service or DividendService(sdk_gateway)
+    technical = technical_indicator_service or TechnicalIndicatorService(sdk_gateway)
+    stock_stream = stock_push_stream or StockPushStream(sdk_gateway, counters=outcome_counters)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        stock_stream.shutdown()
         index_stream.shutdown()
         sdk_gateway.shutdown()
 
@@ -125,15 +197,40 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
         lifespan=lifespan,
+        redirect_slashes=False,
     )
     application.state.config_loader = loader
     application.state.sdk_gateway = sdk_gateway
     application.state.outcome_counters = outcome_counters
     application.state.taiex_index_stream = index_stream
+    application.state.stock_push_stream = stock_stream
+
+    no_body_paths = {"/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read",
+                     "/internal/market-data/stock-push/stream"}
+    strict_json_paths = {"/internal/trades/read", "/internal/market-data/dividends/read",
+                         "/internal/market-data/technical-indicators/read",
+                         "/internal/market-data/stock-push/subscriptions"}
 
     @application.middleware("http")
-    async def sanitized_exception_boundary(request, call_next):
+    async def sanitized_exception_boundary(request: Request, call_next):
         try:
+            if request.url.path in no_body_paths | strict_json_paths:
+                if request.query_params:
+                    return JSONResponse(status_code=400, content={"reason": "INVALID_REQUEST"})
+                chunks, body_size = [], 0
+                async for chunk in request.stream():
+                    body_size += len(chunk)
+                    if body_size > 65536 or request.url.path in no_body_paths and chunk:
+                        return JSONResponse(status_code=400, content={"reason": "INVALID_REQUEST"})
+                    chunks.append(chunk)
+                body = b"".join(chunks)
+                # Starlette's cached middleware request replays this bounded body to FastAPI.
+                request._body = body
+                if body and request.url.path in strict_json_paths:
+                    try:
+                        json.loads(body, object_pairs_hook=_unique_json_keys)
+                    except (ValueError, UnicodeError):
+                        return JSONResponse(status_code=400, content={"reason": "INVALID_REQUEST"})
             return await call_next(request)
         except Exception:
             # Never let an SDK/raw provider exception reach the ASGI server logger or response.
@@ -280,7 +377,7 @@ def create_app(
         if start > end or (end - start).days > 7:
             raise HTTPException(status_code=400, detail=redact_mapping({"reason": "INVALID_DATE_RANGE"}))
         try:
-            result = trades.read(request.startDate, request.endDate, _config.internal_service_token or "")
+            result = trades.read(request.startDate, request.endDate)
         except SdkCallError as exc:
             outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
             outcome_counters.increment(outcome)
@@ -289,6 +386,54 @@ def create_app(
         except TradeReadError as exc:
             outcome_counters.increment(Outcome.RECONCILE_FAILED)
             logger.warning("Fubon filled-trades reconciliation rejected reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/bank-balance/read")
+    def bank_balance_read(_config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = bank_balance.read()
+        except SdkCallError as exc:
+            outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
+            outcome_counters.increment(outcome)
+            logger.warning("Fubon bank balance read failed reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except BankBalanceError as exc:
+            outcome_counters.increment(Outcome.RECONCILE_FAILED)
+            logger.warning("Fubon bank balance reconciliation rejected reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/settlement/read")
+    def settlement_read(_config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = settlement.read()
+        except SdkCallError as exc:
+            outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
+            outcome_counters.increment(outcome)
+            logger.warning("Fubon settlement read failed reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except SettlementError as exc:
+            outcome_counters.increment(Outcome.RECONCILE_FAILED)
+            logger.warning("Fubon settlement reconciliation rejected reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/realized-gains/read")
+    def realized_gains_read(_config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = realized_gain.read()
+        except SdkCallError as exc:
+            outcome = Outcome.MISCONFIGURED if exc.misconfigured else Outcome.ACCOUNTING_FAILED
+            outcome_counters.increment(outcome)
+            logger.warning("Fubon realized gain read failed reason=%s", exc.reason)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except RealizedGainError as exc:
+            outcome_counters.increment(Outcome.RECONCILE_FAILED)
+            logger.warning("Fubon realized gain reconciliation rejected reason=%s", exc.reason)
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         outcome_counters.increment(Outcome.SUCCESS)
         return result
@@ -305,6 +450,54 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
+
+    @application.post("/internal/market-data/dividends/read")
+    def dividends_read(request: DividendReadRequest, _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = dividends.read(request.symbols, request.from_date, request.to_date)
+        except SdkCallError as exc:
+            outcome_counters.increment(Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except DividendError as exc:
+            outcome_counters.increment(Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=400 if exc.request_error else 503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.QUOTE_FAILED if any(row["status"] == "FAILED" for row in result["rows"]) else Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/market-data/technical-indicators/read")
+    def technical_read(request: TechnicalReadRequest, _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = technical.read(request.symbol, request.from_date, request.to_date)
+        except SdkCallError as exc:
+            outcome_counters.increment(Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        except TechnicalIndicatorError as exc:
+            outcome_counters.increment(Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=400 if exc.request_error else 503, detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.SUCCESS if all(result[kind]["status"] == "AVAILABLE" for kind in ("kdj", "macd", "bb")) else Outcome.QUOTE_FAILED)
+        return result
+
+    @application.post("/internal/market-data/stock-push/subscriptions")
+    def stock_subscriptions(request: StockSubscriptionsRequest,
+                            _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        try:
+            result = stock_stream.replace_desired(request.symbols, _config)
+        except StockPushError as exc:
+            outcome_counters.increment(Outcome.DISABLED if exc.reason == "STOCK_PUSH_DISABLED" else Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=400 if exc.request_error else 503,
+                                detail=redact_mapping({"reason": exc.reason})) from None
+        outcome_counters.increment(Outcome.EMPTY_CLEARED if result["outcome"] == "CLEARED" else Outcome.SUCCESS)
+        return result
+
+    @application.get("/internal/market-data/stock-push/stream")
+    def stock_price_sse(_config: ConfigSnapshot = Depends(authorize)) -> StreamingResponse:
+        try:
+            stock_stream.ensure_started(_config)
+        except StockPushError as exc:
+            outcome_counters.increment(Outcome.DISABLED if exc.reason == "STOCK_PUSH_DISABLED" else Outcome.QUOTE_FAILED)
+            raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
+        return StreamingResponse(stock_stream.events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
     return application
 

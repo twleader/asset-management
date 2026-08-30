@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import queue
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .config import ConfigLoader, ConfigSnapshot
+from .normalization import strict_iso_date
 
 
 logger = logging.getLogger(__name__)
@@ -40,11 +42,24 @@ class SelectedAccount:
 
 
 @dataclass(frozen=True)
+class AccountingRead:
+    response: object = field(repr=False)
+    account: SelectedAccount = field(repr=False)
+    internal_token: str = field(repr=False)
+
+
+@dataclass(frozen=True)
 class AccountingPair:
     inventories: object
     unrealized: object
     account: SelectedAccount
     internal_token: str
+
+
+@dataclass(frozen=True)
+class StockPushConnection:
+    client: object = field(repr=False)
+    generation: int
 
 
 def raw_field(value: object, name: str) -> object | None:
@@ -78,19 +93,27 @@ class SdkGateway:
         sdk_factory: Callable[[], object] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
+        normal_mode_factory: Callable[[], object] | None = None,
     ) -> None:
         self._config_loader = config_loader
         self._sdk_factory = sdk_factory or self._default_sdk_factory
         self._monotonic = monotonic
         self._sleeper = sleeper
+        self._normal_mode_factory = normal_mode_factory or self._default_normal_mode
         self._session_lock = threading.RLock()
         self._accounting_lock = threading.Lock()
         self._blocking_slots = threading.BoundedSemaphore(self.MAX_BLOCKING_CALLS)
         self._account_starts: deque[float] = deque()
+        self._history_lock = threading.Lock()
+        self._history_starts: deque[float] = deque()
+        self._history_paused_until = 0.0
+        self._shutdown_event = threading.Event()
         self._sdk: object | None = None
         self._account: SelectedAccount | None = None
         self._stock_client: object | None = None
         self._websocket_stock_client: object | None = None
+        self._stock_push_websocket_client: object | None = None
+        self._session_generation = 0
         self._config_digest: bytes | None = None
         self._session_cleaned = True
         self._runtime_misconfigured = False
@@ -113,22 +136,37 @@ class SdkGateway:
 
         return FubonSDK()
 
+    @staticmethod
+    def _default_normal_mode() -> object:
+        # Mode is only a market-data connection selector; no order model is imported.
+        from fubon_neo.sdk import Mode
+
+        return Mode.Normal
+
+    @property
+    def session_generation(self) -> int:
+        # An immutable integer published while holding the session lock. Readers do not take
+        # that lock from SDK callbacks, which may run while bounded cleanup owns it.
+        return self._session_generation
+
+    def current_config(self) -> ConfigSnapshot:
+        """Local file/flag inspection only; it cannot create an SDK session."""
+        return self._config_loader.load()
+
     def read_accounting_pair(self) -> AccountingPair:
         with self._accounting_lock:
             for attempt in range(2):
-                config = self._require_config()
-                account = self._ensure_session(config)
                 try:
-                    inventories = self._accounting_call("inventories", account.raw)
-                    unrealized = self._accounting_call("unrealized_gains_and_loses", account.raw)
-                    if self._response_auth_invalid(inventories) or self._response_auth_invalid(unrealized):
-                        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-                    return AccountingPair(
-                        inventories=inventories,
-                        unrealized=unrealized,
-                        account=account,
-                        internal_token=config.internal_service_token or "",
-                    )
+                    # Keep method, account and token attached to one session even if a concurrent
+                    # market-data request needs to replace that session.
+                    with self._session_lock:
+                        config = self._require_config()
+                        account = self._ensure_session(config)
+                        inventories = self._accounting_call("inventories", account.raw)
+                        unrealized = self._accounting_call("unrealized_gains_and_loses", account.raw)
+                        if self._response_auth_invalid(inventories) or self._response_auth_invalid(unrealized):
+                            raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                        return AccountingPair(inventories, unrealized, account, config.internal_service_token or "")
                 except SdkCallError as exc:
                     if exc.auth_invalid and attempt == 0:
                         with self._session_lock:
@@ -144,56 +182,177 @@ class SdkGateway:
             raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
 
     def selected_account(self) -> SelectedAccount:
-        """Read-only accessor for the currently selected account identity.
-
-        Reuses the same cached session as read_accounting_pair/read_filled_trades
-        (a cache hit does no SDK I/O); never invokes an accounting or stock
-        method itself. Exists so downstream raw-row validation (matching a
-        filled-trade row's account/branch_no against the selected account)
-        does not have to duplicate _ensure_session's account-selection logic.
-        """
+        """Legacy session accessor; reconciling readers use the atomic AccountingRead instead."""
         config = self._require_config()
         return self._ensure_session(config)
 
-    def read_filled_trades(self, start_date: str, end_date: str) -> object:
-        """Narrow, read-only access to sdk.stock.filled_history only.
+    def read_filled_trades(self, start_date: str, end_date: str) -> AccountingRead:
+        """Only sdk.stock.filled_history is reachable on the broker trading namespace."""
+        start, end = strict_iso_date(start_date), strict_iso_date(end_date)
+        if start > end or (end - start).days > 7:
+            raise SdkCallError("INVALID_DATE_RANGE")
+        return self._read_accounting("filled_history", start.strftime("%Y%m%d"), end.strftime("%Y%m%d"))
 
-        Deliberately does NOT go through _accounting_call: that helper only
-        resolves sdk.accounting.<method_name> and calls it with a single
-        `account` argument, while filled_history lives under the sdk.stock
-        namespace and needs extra start_date/end_date arguments -- the two
-        call shapes are incompatible, and forcing this through _accounting_call
-        would mix the "accounting" namespace resolution with "stock".
+    def read_bank_balance(self) -> AccountingRead:
+        return self._read_accounting("bank_remain")
 
-        sdk.stock is also the SAME namespace that holds place_order,
-        cancel_order, modify_price, modify_quantity, batch_place_order and
-        batch_cancel_order (the SDK's order/trading API). To keep this
-        integration's reachable surface strictly read-only, this method
-        resolves and invokes exactly one attribute on that namespace
-        ("filled_history") and never returns, caches, or otherwise exposes
-        the `stock` object itself to any caller.
-        """
+    def read_settlement(self, range_param: str = "3d") -> AccountingRead:
+        if range_param != "3d":
+            raise SdkCallError("INVALID_SETTLEMENT_RANGE")
+        return self._read_accounting("query_settlement", "3d")
+
+    def read_realized_gains(self) -> AccountingRead:
+        return self._read_accounting("realized_gains_and_loses")
+
+    def read_dividends(self, start_date: str, end_date: str) -> object:
+        return self._marketdata_read("corporate_actions", "dividends", {
+            "start_date": start_date, "end_date": end_date,
+        })
+
+    def read_technical_indicator(self, kind: str, symbol: str, start_date: str, end_date: str,
+                                 *, deadline: float | None = None) -> object:
+        parameters = {
+            "kdj": {"rPeriod": 9, "kPeriod": 3, "dPeriod": 3},
+            "macd": {"fast": 12, "slow": 26, "signal": 9},
+            "bb": {"period": 20},
+        }
+        if kind not in parameters:
+            raise SdkCallError("TECHNICAL_METHOD_UNAVAILABLE", misconfigured=True)
+        return self._marketdata_read("technical", kind, {
+            "symbol": symbol, "from": start_date, "to": end_date,
+            "timeframe": "D", **parameters[kind],
+        }, deadline=deadline)
+
+    def _marketdata_read(self, namespace: str, method_name: str, params: dict[str, object],
+                         *, deadline: float | None = None) -> object:
+        if (namespace, method_name) not in {
+            ("corporate_actions", "dividends"), ("technical", "kdj"),
+            ("technical", "macd"), ("technical", "bb"),
+        }:
+            raise SdkCallError("MARKETDATA_METHOD_UNAVAILABLE", misconfigured=True)
+        for attempt in range(2):
+            self._take_history_budget(deadline=deadline)
+            config = self._require_config()
+            self._ensure_session(config)
+            with self._session_lock:
+                client = self._stock_client
+            method = raw_field(raw_field(client, namespace), method_name)
+            if not callable(method):
+                raise SdkCallError("MARKETDATA_METHOD_UNAVAILABLE", misconfigured=True)
+            try:
+                remaining = self.QUOTE_CALL_TIMEOUT_SECONDS if deadline is None else deadline - self._monotonic()
+                if remaining <= 0:
+                    raise SdkCallError("MARKETDATA_TIMEOUT")
+                def invoke_marketdata() -> object:
+                    # Another worker may receive 429 while this request is waiting for a login
+                    # or blocking-call slot. Recheck immediately before starting the SDK call.
+                    with self._history_lock:
+                        now = self._monotonic()
+                        if self._shutdown_event.is_set():
+                            raise SdkCallError("SERVICE_SHUTDOWN")
+                        if deadline is not None and now >= deadline:
+                            raise SdkCallError("MARKETDATA_TIMEOUT")
+                        if now < self._history_paused_until:
+                            raise SdkCallError("RATE_LIMITED", retry_after_seconds=self._history_paused_until - now)
+                    return method(**params)
+                response = self._run_bounded(
+                    invoke_marketdata, min(self.QUOTE_CALL_TIMEOUT_SECONDS, remaining), "MARKETDATA_TIMEOUT",
+                )
+                if self._response_auth_invalid(response):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                self._check_marketdata_size(response)
+                return response
+            except SdkCallError as exc:
+                if exc.auth_invalid and attempt == 0:
+                    with self._session_lock:
+                        self._invalidate_locked()
+                    continue
+                raise
+            except Exception as exc:
+                if self._exception_is_rate_limited(exc):
+                    retry_after = self._exception_retry_after(exc)
+                    with self._history_lock:
+                        self._history_paused_until = max(
+                            self._history_paused_until, self._monotonic() + max(60.0, retry_after or 0.0),
+                        )
+                    raise SdkCallError("RATE_LIMITED", retry_after_seconds=retry_after) from None
+                if self._exception_is_auth_invalid(exc):
+                    if attempt == 0:
+                        with self._session_lock:
+                            self._invalidate_locked()
+                        continue
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True) from None
+                raise SdkCallError("MARKETDATA_TRANSPORT_FAILED") from None
+        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+
+    def _take_history_budget(self, *, deadline: float | None = None) -> None:
+        wait_budget = 5.0
+        while not self._shutdown_event.is_set():
+            with self._history_lock:
+                now = self._monotonic()
+                if deadline is not None and now >= deadline:
+                    raise SdkCallError("MARKETDATA_TIMEOUT")
+                while self._history_starts and now - self._history_starts[0] >= 60.0:
+                    self._history_starts.popleft()
+                if now < self._history_paused_until:
+                    raise SdkCallError("RATE_LIMITED", retry_after_seconds=self._history_paused_until - now)
+                if len(self._history_starts) < 60:
+                    self._history_starts.append(now)
+                    return
+                until_slot = 60.0 - (now - self._history_starts[0])
+                if wait_budget <= 0:
+                    raise SdkCallError("HISTORY_BUDGET_EXHAUSTED", retry_after_seconds=until_slot)
+                delay = min(0.1, until_slot, wait_budget)
+                if deadline is not None:
+                    delay = min(delay, deadline - now)
+            # Never hold the shared budget lock while waiting; Java paces symbols so this is
+            # normally only a small overlap with another historical reader, not a minute sleep.
+            if self._sleeper is time.sleep:
+                self._shutdown_event.wait(delay)
+            else:
+                self._sleeper(delay)
+            wait_budget -= delay
+        raise SdkCallError("SERVICE_SHUTDOWN")
+
+    @staticmethod
+    def _check_marketdata_size(response: object) -> None:
+        # SDK responses are already decoded; bound the adapter payload without logging it or
+        # allocating another unbounded serialized copy. The blocking-call semaphore also bounds
+        # timed-out SDK requests that cannot be interrupted by Python.
+        try:
+            size = 0
+            for chunk in json.JSONEncoder(ensure_ascii=False, default=str).iterencode(response):
+                size += len(chunk.encode("utf-8"))
+                if size > 8 * 1024 * 1024:
+                    raise SdkCallError("MARKETDATA_RESPONSE_TOO_LARGE")
+        except (TypeError, ValueError):
+            raise SdkCallError("MARKETDATA_SCHEMA_INVALID") from None
+
+    def _read_accounting(self, method_name: str, *args: object) -> AccountingRead:
+        if method_name not in {"filled_history", "bank_remain", "query_settlement", "realized_gains_and_loses"}:
+            raise SdkCallError("READ_METHOD_UNAVAILABLE", misconfigured=True)
         with self._accounting_lock:
             for attempt in range(2):
-                config = self._require_config()
-                account = self._ensure_session(config)
-                self._wait_for_accounting_budget()
-                with self._session_lock:
-                    sdk = self._sdk
-                stock = raw_field(sdk, "stock") if sdk is not None else None
-                filled_history = raw_field(stock, "filled_history") if stock is not None else None
-                if not callable(filled_history):
-                    self._mark_misconfigured()
-                    raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
                 try:
-                    response = self._run_bounded(
-                        lambda: filled_history(account.raw, start_date, end_date),
-                        self.ACCOUNT_CALL_TIMEOUT_SECONDS,
-                        "FILLED_HISTORY_TIMEOUT",
-                    )
-                    if self._response_auth_invalid(response):
-                        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-                    return response
+                    with self._session_lock:
+                        config = self._require_config()
+                        account = self._ensure_session(config)
+                        if method_name == "filled_history":
+                            self._wait_for_accounting_budget()
+                            stock = raw_field(self._sdk, "stock")
+                            method = raw_field(stock, "filled_history")
+                            if not callable(method):
+                                self._mark_misconfigured()
+                                raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
+                            response = self._run_bounded(
+                                lambda: method(account.raw, *args),
+                                self.ACCOUNT_CALL_TIMEOUT_SECONDS, "FILLED_HISTORY_TIMEOUT",
+                            )
+                        else:
+                            response = self._accounting_call(method_name, account.raw, *args)
+                        if self._response_auth_invalid(response):
+                            raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                        return AccountingRead(response, account, config.internal_service_token or "")
                 except SdkCallError as exc:
                     if exc.auth_invalid and attempt == 0:
                         with self._session_lock:
@@ -201,11 +360,16 @@ class SdkGateway:
                         continue
                     raise
                 except Exception as exc:
-                    if self._exception_is_auth_invalid(exc) and attempt == 0:
-                        with self._session_lock:
-                            self._invalidate_locked()
-                        continue
-                    raise SdkCallError("FILLED_HISTORY_TRANSPORT_FAILED") from None
+                    if self._exception_is_auth_invalid(exc):
+                        if attempt == 0:
+                            with self._session_lock:
+                                self._invalidate_locked()
+                            continue
+                        raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True) from None
+                    if self._exception_is_rate_limited(exc):
+                        raise SdkCallError("RATE_LIMITED") from None
+                    reason = "FILLED_HISTORY_TRANSPORT_FAILED" if method_name == "filled_history" else "ACCOUNTING_TRANSPORT_FAILED"
+                    raise SdkCallError(reason) from None
             raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
 
     def quote(self, code: str) -> object:
@@ -307,6 +471,66 @@ class SdkGateway:
             raise SdkCallError("INDICES_CLIENT_UNAVAILABLE", misconfigured=True)
         return client
 
+    def stock_push_websocket(self) -> StockPushConnection:
+        """A dedicated Normal-mode reference; saved REST and index references remain untouched."""
+        config = self._require_config()
+        if config.stock_push_reason:
+            raise SdkCallError(config.stock_push_reason, misconfigured=True)
+        if not config.stock_push_enabled:
+            raise SdkCallError("STOCK_PUSH_DISABLED")
+        self._ensure_session(config)
+        with self._session_lock:
+            if self._shutdown_event.is_set():
+                raise SdkCallError("SERVICE_SHUTDOWN")
+            if self._stock_push_websocket_client is not None:
+                return StockPushConnection(self._stock_push_websocket_client, self._session_generation)
+            sdk = self._sdk
+            if sdk is None:
+                raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+            try:
+                result = self._run_bounded(
+                    lambda: sdk.init_realtime(self._normal_mode_factory()),
+                    self.ACCOUNT_CALL_TIMEOUT_SECONDS, "STOCK_REALTIME_INIT_TIMEOUT",
+                )
+                if raw_field(result, "is_success") is False:
+                    raise SdkCallError("STOCK_REALTIME_INIT_FAILED")
+                marketdata = raw_field(sdk, "marketdata")
+                websocket = raw_field(raw_field(marketdata, "websocket_client"), "stock")
+                if websocket is None or websocket is self._websocket_stock_client:
+                    raise SdkCallError("STOCK_PUSH_CLIENT_UNAVAILABLE")
+                self._stock_push_websocket_client = websocket
+                return StockPushConnection(websocket, self._session_generation)
+            except SdkCallError:
+                raise
+            except Exception:
+                raise SdkCallError("STOCK_REALTIME_INIT_FAILED") from None
+
+    def stock_push_call(self, client: object, method_name: str, payload: dict[str, object] | None = None) -> None:
+        if method_name not in {"connect", "subscribe", "unsubscribe"}:
+            raise SdkCallError("STOCK_PUSH_METHOD_UNAVAILABLE")
+        method = raw_field(client, method_name)
+        if not callable(method):
+            raise SdkCallError("STOCK_PUSH_CLIENT_UNAVAILABLE")
+        self._run_bounded(
+            method if payload is None else lambda: method(payload),
+            self.QUOTE_CALL_TIMEOUT_SECONDS, "STOCK_PUSH_CALL_TIMEOUT",
+        )
+
+    def release_stock_push_websocket(self, client: object | None) -> None:
+        with self._session_lock:
+            if client is None or self._stock_push_websocket_client is not client:
+                return
+            self._stock_push_websocket_client = None
+        self._disconnect_stock_push(client)
+
+    def _disconnect_stock_push(self, client: object | None) -> None:
+        method = raw_field(client, "disconnect")
+        if callable(method):
+            try:
+                self._run_bounded(method, self.CLEANUP_CALL_TIMEOUT_SECONDS, "STOCK_PUSH_CLEANUP_TIMEOUT")
+            except BaseException:
+                logger.warning("Fubon stock stream cleanup failed reason=CLEANUP_FAILED")
+
     def verify_taiex_index_symbol(self, symbol: str) -> None:
         """Verifies the deployment-selected Taiwan index against the official tickers catalog."""
         if not isinstance(symbol, str) or not symbol:
@@ -345,6 +569,7 @@ class SdkGateway:
             raise SdkCallError("INDEX_TICKERS_TRANSPORT_FAILED") from None
 
     def shutdown(self) -> None:
+        self._shutdown_event.set()
         with self._session_lock:
             self._cleanup_locked()
 
@@ -413,6 +638,7 @@ class SdkGateway:
                 self._account = selected
                 self._stock_client = stock_client
                 self._websocket_stock_client = websocket_stock_client
+                self._session_generation += 1
                 self._config_digest = digest
                 self._session_cleaned = False
                 self._runtime_misconfigured = False
@@ -456,7 +682,9 @@ class SdkGateway:
             raise SdkCallError("STOCK_ACCOUNT_NOT_UNIQUE", misconfigured=True)
         return stock_accounts[0]
 
-    def _accounting_call(self, method_name: str, account: object) -> object:
+    def _accounting_call(self, method_name: str, account: object, *args: object) -> object:
+        if method_name not in {"inventories", "unrealized_gains_and_loses", "bank_remain", "query_settlement", "realized_gains_and_loses"}:
+            raise SdkCallError("ACCOUNTING_API_UNAVAILABLE", misconfigured=True)
         self._wait_for_accounting_budget()
         with self._session_lock:
             sdk = self._sdk
@@ -467,7 +695,7 @@ class SdkGateway:
             raise SdkCallError("ACCOUNTING_API_UNAVAILABLE", misconfigured=True)
         try:
             return self._run_bounded(
-                lambda: method(account), self.ACCOUNT_CALL_TIMEOUT_SECONDS, "ACCOUNTING_TIMEOUT"
+                lambda: method(account, *args), self.ACCOUNT_CALL_TIMEOUT_SECONDS, "ACCOUNTING_TIMEOUT"
             )
         except SdkCallError:
             raise
@@ -517,6 +745,11 @@ class SdkGateway:
 
     def _cleanup_locked(self) -> None:
         sdk = self._sdk
+        stock_push = self._stock_push_websocket_client
+        self._stock_push_websocket_client = None
+        if sdk is not None or stock_push is not None:
+            self._session_generation += 1
+        self._disconnect_stock_push(stock_push)
         if sdk is None or self._session_cleaned:
             self._sdk = None
             self._account = None

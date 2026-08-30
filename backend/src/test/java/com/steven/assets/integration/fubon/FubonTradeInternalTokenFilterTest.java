@@ -114,6 +114,66 @@ class FubonTradeInternalTokenFilterTest {
         verify(config, never()).snapshot();
     }
 
+    /**
+     * Regression guard for Requirement 128 / Task 393: the trade-sync filter still does not
+     * protect the new bank-balance-sync endpoint either.
+     */
+    @Test
+    void filterDoesNotProtectTheNewBankBalanceSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonTradeInternalTokenFilter filter = new FubonTradeInternalTokenFilter(
+                config, new FubonTradeOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/bank-balance-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
+    /**
+     * Regression guard for Requirement 129 / Task 394: the trade-sync filter still does not
+     * protect the new settlement-sync endpoint either.
+     */
+    @Test
+    void filterDoesNotProtectTheNewSettlementSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonTradeInternalTokenFilter filter = new FubonTradeInternalTokenFilter(
+                config, new FubonTradeOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/settlement-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
+    /**
+     * Regression guard for Requirement 130 / Task 395: the trade-sync filter still does not
+     * protect the new realized-gain-sync endpoint either.
+     */
+    @Test
+    void filterDoesNotProtectTheNewRealizedGainSyncPath() throws Exception {
+        FubonConfigState config = mock(FubonConfigState.class);
+        FubonTradeInternalTokenFilter filter = new FubonTradeInternalTokenFilter(
+                config, new FubonTradeOutcomeCounters(), mapper);
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/internal/brokers/fubon/realized-gain-sync");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = mock(FilterChain.class);
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
+        verify(config, never()).snapshot();
+    }
+
     @Test
     void matrixVariantCannotReachMvcWithoutTheExactPathBoundary() throws Exception {
         FubonConfigState config = mock(FubonConfigState.class);

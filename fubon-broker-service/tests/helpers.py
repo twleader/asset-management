@@ -17,6 +17,7 @@ def ready_config(
     account: str | None = None,
     taiex_index_stream_enabled: str = "false",
     taiex_index_symbol: str = "",
+    stock_push_enabled: str = "false",
 ) -> ConfigLoader:
     sdk = tmp_path / "sdk"
     shared = tmp_path / "shared"
@@ -36,6 +37,7 @@ def ready_config(
         lambda: "true",
         lambda: taiex_index_stream_enabled,
         lambda: taiex_index_symbol,
+        lambda: stock_push_enabled,
     )
 
 
@@ -92,7 +94,7 @@ def unrealized_row(
 
 def filled_trade_row(
     *,
-    date: str = "2026-08-21",
+    date: str = "2026/08/21",
     account_number: str = "00001234567",
     branch: str = "001",
     code: str = "2330",

@@ -950,6 +950,16 @@ public class MarketDataFetchService {
         return Optional.of(mergeTwHolidays(base.get(), typhoonClosure.closuresForYear(year)));
     }
 
+    /** Pure view of the existing authority; never loads, retries, extends expiry or performs I/O. */
+    public Optional<Map<String, String>> peekTwHolidaysKnown(int year) {
+        if (!typhoonClosure.isClosureCalendarKnown()) return Optional.empty();
+        TwHolidayCacheEntry observed = twHolidayCache.get(year);
+        if (observed == null || observed.holidays().isEmpty()
+                || (observed.source() != TwHolidaySource.TWSE && !clock.instant().isBefore(observed.expiresAt())))
+            return Optional.empty();
+        return Optional.of(mergeTwHolidays(observed.holidays(), typhoonClosure.closuresForYear(year)));
+    }
+
     /** 供健康檢查／測試判定 operator 臨時休市表是否已成功載入。 */
     public boolean isTwClosureCalendarKnown() {
         return typhoonClosure.isClosureCalendarKnown();

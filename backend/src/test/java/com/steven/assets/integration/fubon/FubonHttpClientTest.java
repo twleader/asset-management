@@ -75,6 +75,68 @@ class FubonHttpClientTest {
     }
 
     @Test
+    void readBankBalanceSendsNoBodyAndAcceptsZeroAvailableBalance() {
+        server.createContext("/internal/bank-balance/read", exchange -> respond(exchange, 200,
+                FubonAccountingFixtures.bankJson("123456")));
+        var result = client(FubonConfigState.State.READY, "shared-token").readBankBalance();
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().queryDate()).isEqualTo(FubonAccountingFixtures.DATE);
+        assertThat(result.body().accountFingerprint()).hasSize(24);
+        assertThat(result.body().balance().value()).isEqualByComparingTo("123456");
+        assertThat(result.body().availableBalance().value()).isZero();
+        assertThat(seenToken.get()).isEqualTo("shared-token");
+        assertThat(seenBody.get()).isEmpty();
+    }
+
+    @Test
+    void readSettlementSendsNoBodyAndParsesNegativePayableAndZeroReceivable() {
+        server.createContext("/internal/settlement/read", exchange -> respond(exchange, 200,
+                FubonAccountingFixtures.settlementJson(FubonAccountingFixtures.SETTLEMENT_ROW)));
+        var result = client(FubonConfigState.State.READY, "shared-token").readSettlement();
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().coverageStatus()).isEqualTo("UNVERIFIED");
+        assertThat(result.body().details()).hasSize(1);
+        assertThat(result.body().details().getFirst().buySettlement().value()).isEqualByComparingTo("-1002");
+        assertThat(result.body().details().getFirst().sellSettlement().value()).isZero();
+        assertThat(seenToken.get()).isEqualTo("shared-token");
+        assertThat(seenBody.get()).isEmpty();
+    }
+
+    @Test
+    void readSettlementParsesLegalEmptyDetailsArray() {
+        server.createContext("/internal/settlement/read", exchange -> respond(exchange, 200,
+                FubonAccountingFixtures.settlementJson("")));
+        var result = client(FubonConfigState.State.READY, "shared-token").readSettlement();
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().details()).isEmpty();
+    }
+
+    @Test
+    void readRealizedGainsSendsNoBodyAndParsesZeroProfitAndTypedSourceDate() {
+        server.createContext("/internal/realized-gains/read", exchange -> respond(exchange, 200,
+                FubonAccountingFixtures.realizedJson(FubonAccountingFixtures.REALIZED_ROW)));
+        var result = client(FubonConfigState.State.READY, "shared-token").readRealizedGains();
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().rows()).hasSize(1);
+        var row = result.body().rows().getFirst();
+        assertThat(row.filledPrice().value()).isEqualByComparingTo("123.5");
+        assertThat(row.realizedProfit().value()).isZero();
+        assertThat(row.realizedLoss().value()).isEqualByComparingTo("20");
+        assertThat(row.sourceDate()).isEqualTo(FubonAccountingFixtures.DATE.minusDays(1));
+        assertThat(seenToken.get()).isEqualTo("shared-token");
+        assertThat(seenBody.get()).isEmpty();
+    }
+
+    @Test
+    void readRealizedGainsParsesLegalEmptyRowsArray() {
+        server.createContext("/internal/realized-gains/read", exchange -> respond(exchange, 200,
+                FubonAccountingFixtures.realizedJson("")));
+        var result = client(FubonConfigState.State.READY, "shared-token").readRealizedGains();
+        assertThat(result.success()).isTrue();
+        assertThat(result.body().rows()).isEmpty();
+    }
+
+    @Test
     void disabledAndMissingTokenAreLocalAndSendZeroHttp() {
         server.createContext("/internal/portfolio/read", exchange -> respond(exchange, 500, "must-not-call"));
 
@@ -88,7 +150,7 @@ class FubonHttpClientTest {
     private FubonHttpClient client(FubonConfigState.State state, String token) {
         FubonConfigState config = mock(FubonConfigState.class);
         when(config.snapshot()).thenReturn(new FubonConfigState.Snapshot(state, token, state.name()));
-        return new FubonHttpClient(WebClient.builder().baseUrl(baseUrl).build(), config, Duration.ofSeconds(2));
+        return new FubonHttpClient(WebClient.builder().baseUrl(baseUrl).build(), config, Duration.ofSeconds(2), FubonAccountingFixtures.CLOCK);
     }
 
     @Test

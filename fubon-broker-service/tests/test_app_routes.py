@@ -9,10 +9,13 @@ from fastapi.testclient import TestClient
 
 import fubon_broker_service.app as app_module
 from fubon_broker_service.app import create_app
+from fubon_broker_service.bank_balance import BankBalanceError
 from fubon_broker_service.config import ConfigLoader
 from fubon_broker_service.etf_holdings import EtfHoldingsService
+from fubon_broker_service.realized_gain import RealizedGainError
 from fubon_broker_service.redaction import redact, redact_mapping
 from fubon_broker_service.sdk_gateway import SdkCallError
+from fubon_broker_service.settlement import SettlementError
 from fubon_broker_service.trades import TradeReadError
 
 from helpers import TOKEN, fixed_now, ready_config
@@ -61,9 +64,8 @@ class Trades:
     def __init__(self):
         self.calls = 0
 
-    def read(self, start_date, end_date, internal_token):
+    def read(self, start_date, end_date):
         self.calls += 1
-        assert internal_token
         return {
             "batchId": "trade-batch",
             "startDate": start_date,
@@ -94,22 +96,84 @@ class ExplodingPortfolio:
         raise RuntimeError("TEST_PERSONAL_ID_SENTINEL TEST_API_KEY_SENTINEL")
 
 
+class BankBalance:
+    def __init__(self):
+        self.calls = 0
+
+    def read(self):
+        self.calls += 1
+        return {
+            "queryDate": "2026-08-28",
+            "observedAt": "2026-08-28T00:00:01Z",
+            "accountFingerprint": "0123456789abcdef01234567",
+            "currency": "TWD",
+            "balance": "10000",
+            "availableBalance": "9500",
+        }
+
+
+class Settlement:
+    def __init__(self):
+        self.calls = 0
+
+    def read(self):
+        self.calls += 1
+        return {
+            "details": [
+                {
+                    "date": "2026-08-27",
+                    "settlementDate": "2026-08-29",
+                    "buySettlement": "10020",
+                    "sellSettlement": "1",
+                    "currency": "TWD",
+                }
+            ]
+        }
+
+
+class RealizedGain:
+    def __init__(self):
+        self.calls = 0
+
+    def read(self):
+        self.calls += 1
+        return {
+            "rows": [
+                {
+                    "stockNo": "2330",
+                    "buySell": "Sell",
+                    "filledQty": 1000,
+                    "filledPrice": "105.50",
+                    "realizedProfit": "550.00",
+                    "realizedLoss": "0",
+                    "date": "2026-08-10",
+                }
+            ]
+        }
+
+
 def client_for(loader):
     gateway = Gateway()
     portfolio = Portfolio()
     quotes = Quotes()
     trades = Trades()
     etf_holdings = EtfHoldings()
+    bank_balance = BankBalance()
+    settlement = Settlement()
+    realized_gain = RealizedGain()
     application = create_app(
-        loader, gateway, portfolio, quotes, trades, etf_holdings_service=etf_holdings
+        loader, gateway, portfolio, quotes, trades,
+        etf_holdings_service=etf_holdings,
+        bank_balance_service=bank_balance, settlement_service=settlement,
+        realized_gain_service=realized_gain,
     )
-    return TestClient(application), gateway, portfolio, quotes, trades, etf_holdings
+    return (TestClient(application), gateway, portfolio, quotes, trades, etf_holdings,
+            bank_balance, settlement, realized_gain)
 
 
 def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
-    client, gateway, portfolio, quotes, trades, etf_holdings = client_for(
-        ConfigLoader(tmp_path, lambda: "false")
-    )
+    client, gateway, portfolio, quotes, trades, etf_holdings, bank_balance, settlement, realized_gain = client_for(
+        ConfigLoader(tmp_path, lambda: "false"))
     with client:
         response = client.get("/internal/health")
         assert response.status_code == 200
@@ -117,12 +181,16 @@ def test_disabled_health_is_up_without_reading_sdk_or_secrets(tmp_path):
         assert response.json()["status"] == "UP"
         assert response.json()["configState"] == "NOT_CONFIGURED"
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
+        assert client.post("/internal/bank-balance/read").status_code == 503
+        assert client.post("/internal/settlement/read").status_code == 503
+        assert client.post("/internal/realized-gains/read").status_code == 503
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == bank_balance.calls == settlement.calls == 0
+    assert realized_gain.calls == 0
     assert gateway.shutdown_calls == 1
 
 
-def test_exact_seven_routes_auth_and_methods(tmp_path):
-    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(ready_config(tmp_path))
+def test_exact_adapter_routes_auth_and_methods(tmp_path):
+    client, _gateway, portfolio, quotes, trades, etf_holdings, bank_balance, settlement, realized_gain = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     assert {(route.path, frozenset(route.methods or ())) for route in client.app.routes} == {
         ("/internal/health", frozenset({"GET"})),
@@ -132,6 +200,13 @@ def test_exact_seven_routes_auth_and_methods(tmp_path):
         ("/internal/market-data/etf-holdings", frozenset({"POST"})),
         ("/internal/trades/read", frozenset({"POST"})),
         ("/internal/market-data/taiex-index/stream", frozenset({"GET"})),
+        ("/internal/bank-balance/read", frozenset({"POST"})),
+        ("/internal/settlement/read", frozenset({"POST"})),
+        ("/internal/realized-gains/read", frozenset({"POST"})),
+        ("/internal/market-data/dividends/read", frozenset({"POST"})),
+        ("/internal/market-data/technical-indicators/read", frozenset({"POST"})),
+        ("/internal/market-data/stock-push/subscriptions", frozenset({"POST"})),
+        ("/internal/market-data/stock-push/stream", frozenset({"GET"})),
     }
     with client:
         assert client.get("/internal/health").status_code == 200
@@ -152,6 +227,12 @@ def test_exact_seven_routes_auth_and_methods(tmp_path):
         ).status_code == 200
         assert client.post("/internal/trades/read", json={"startDate": "2026-08-21", "endDate": "2026-08-21"}).status_code == 401
         assert client.post("/internal/market-data/etf-holdings", json={"codes": ["0050"]}).status_code == 401
+        assert client.post("/internal/bank-balance/read", headers=headers).status_code == 200
+        assert client.post("/internal/bank-balance/read").status_code == 401
+        assert client.post("/internal/settlement/read", headers=headers).status_code == 200
+        assert client.post("/internal/settlement/read").status_code == 401
+        assert client.post("/internal/realized-gains/read", headers=headers).status_code == 200
+        assert client.post("/internal/realized-gains/read").status_code == 401
         assert client.get("/docs").status_code == 404
         assert client.get("/redoc").status_code == 404
         assert client.get("/openapi.json").status_code == 404
@@ -160,14 +241,191 @@ def test_exact_seven_routes_auth_and_methods(tmp_path):
         assert client.get("/internal/portfolio/read", headers=headers).status_code == 405
         assert client.get("/internal/trades/read", headers=headers).status_code == 405
         assert client.get("/internal/market-data/etf-holdings", headers=headers).status_code == 405
+        assert client.get("/internal/bank-balance/read", headers=headers).status_code == 405
+        assert client.get("/internal/settlement/read", headers=headers).status_code == 405
+        assert client.get("/internal/realized-gains/read", headers=headers).status_code == 405
         assert client.get("/internal/market-data/taiex-index/stream", headers=headers).status_code == 503
     assert portfolio.calls == quotes.calls == 1
     assert trades.calls == 1
     assert etf_holdings.calls == 1
+    assert bank_balance.calls == 1
+    assert settlement.calls == 1
+    assert realized_gain.calls == 1
+
+
+def test_bank_balance_read_response_shape_and_reconcile_failure(tmp_path):
+    headers = {"X-Internal-Service-Token": TOKEN}
+
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
+    with client:
+        response = client.post("/internal/bank-balance/read", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "queryDate": "2026-08-28",
+        "observedAt": "2026-08-28T00:00:01Z",
+        "accountFingerprint": "0123456789abcdef01234567",
+        "currency": "TWD",
+        "balance": "10000",
+        "availableBalance": "9500",
+    }
+    assert bank_balance.calls == 1
+
+    class RejectingBankBalance:
+        def read(self):
+            raise BankBalanceError("RECONCILE_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              bank_balance_service=RejectingBankBalance())
+    with TestClient(application) as rejecting_client:
+        rejected = rejecting_client.post("/internal/bank-balance/read", headers=headers)
+    assert rejected.status_code == 503
+    assert rejected.json() == {"detail": {"reason": "RECONCILE_FAILED"}}
+
+    class FailingBankBalance:
+        def read(self):
+            raise SdkCallError("ACCOUNTING_TRANSPORT_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              bank_balance_service=FailingBankBalance())
+    with TestClient(application) as failing_client:
+        failed = failing_client.post("/internal/bank-balance/read", headers=headers)
+    assert failed.status_code == 503
+    assert failed.json() == {"detail": {"reason": "ACCOUNTING_TRANSPORT_FAILED"}}
+
+
+def test_settlement_read_response_shape_and_reconcile_failure(tmp_path):
+    headers = {"X-Internal-Service-Token": TOKEN}
+
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, settlement, _realized_gain = client_for(ready_config(tmp_path))
+    with client:
+        response = client.post("/internal/settlement/read", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "details": [
+            {
+                "date": "2026-08-27",
+                "settlementDate": "2026-08-29",
+                "buySettlement": "10020",
+                "sellSettlement": "1",
+                "currency": "TWD",
+            }
+        ]
+    }
+    assert settlement.calls == 1
+
+    class RejectingSettlement:
+        def read(self):
+            raise SettlementError("RECONCILE_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              settlement_service=RejectingSettlement())
+    with TestClient(application) as rejecting_client:
+        rejected = rejecting_client.post("/internal/settlement/read", headers=headers)
+    assert rejected.status_code == 503
+    assert rejected.json() == {"detail": {"reason": "RECONCILE_FAILED"}}
+
+    class FailingSettlement:
+        def read(self):
+            raise SdkCallError("ACCOUNTING_TRANSPORT_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              settlement_service=FailingSettlement())
+    with TestClient(application) as failing_client:
+        failed = failing_client.post("/internal/settlement/read", headers=headers)
+    assert failed.status_code == 503
+    assert failed.json() == {"detail": {"reason": "ACCOUNTING_TRANSPORT_FAILED"}}
+
+
+def test_realized_gains_read_response_shape_and_reconcile_failure(tmp_path):
+    headers = {"X-Internal-Service-Token": TOKEN}
+
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, realized_gain = client_for(
+        ready_config(tmp_path))
+    with client:
+        response = client.post("/internal/realized-gains/read", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {
+        "rows": [
+            {
+                "stockNo": "2330",
+                "buySell": "Sell",
+                "filledQty": 1000,
+                "filledPrice": "105.50",
+                "realizedProfit": "550.00",
+                "realizedLoss": "0",
+                "date": "2026-08-10",
+            }
+        ]
+    }
+    assert realized_gain.calls == 1
+
+    class RejectingRealizedGain:
+        def read(self):
+            raise RealizedGainError("RECONCILE_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              realized_gain_service=RejectingRealizedGain())
+    with TestClient(application) as rejecting_client:
+        rejected = rejecting_client.post("/internal/realized-gains/read", headers=headers)
+    assert rejected.status_code == 503
+    assert rejected.json() == {"detail": {"reason": "RECONCILE_FAILED"}}
+
+    class FailingRealizedGain:
+        def read(self):
+            raise SdkCallError("ACCOUNTING_TRANSPORT_FAILED")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              realized_gain_service=FailingRealizedGain())
+    with TestClient(application) as failing_client:
+        failed = failing_client.post("/internal/realized-gains/read", headers=headers)
+    assert failed.status_code == 503
+    assert failed.json() == {"detail": {"reason": "ACCOUNTING_TRANSPORT_FAILED"}}
+
+
+def test_realized_gains_read_empty_rows_array_is_a_legal_200(tmp_path):
+    headers = {"X-Internal-Service-Token": TOKEN}
+
+    class EmptyRealizedGain:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self):
+            self.calls += 1
+            return {"rows": []}
+
+    empty = EmptyRealizedGain()
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              realized_gain_service=empty)
+    with TestClient(application) as client:
+        response = client.post("/internal/realized-gains/read", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"rows": []}
+    assert empty.calls == 1
+
+
+def test_settlement_read_empty_details_array_is_a_legal_200(tmp_path):
+    headers = {"X-Internal-Service-Token": TOKEN}
+
+    class EmptySettlement:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self):
+            self.calls += 1
+            return {"details": []}
+
+    empty = EmptySettlement()
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                              settlement_service=empty)
+    with TestClient(application) as client:
+        response = client.post("/internal/settlement/read", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"details": []}
+    assert empty.calls == 1
 
 
 def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
-    client, _gateway, portfolio, _quotes, _trades, _etf_holdings = client_for(ready_config(tmp_path))
+    client, _gateway, portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post("/internal/portfolio/read", headers=headers, json={"dryRun": False}).status_code == 400
@@ -180,7 +438,7 @@ def test_portfolio_has_no_commit_mode_and_invalid_requests_are_400(tmp_path):
 
 
 def test_etf_holdings_request_body_validation_matrix(tmp_path):
-    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post(
@@ -218,7 +476,7 @@ def test_etf_holdings_request_body_validation_matrix(tmp_path):
     {"codes": ["0050"], "account": "ACCOUNT_SENTINEL"},
 ])
 def test_etf_holdings_rejects_noncanonical_or_duplicate_codes_without_calling_service(tmp_path, body):
-    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
     with client:
         response = client.post(
             "/internal/market-data/etf-holdings", headers={"X-Internal-Service-Token": TOKEN}, json=body,
@@ -229,7 +487,7 @@ def test_etf_holdings_rejects_noncanonical_or_duplicate_codes_without_calling_se
 
 
 def test_etf_holdings_accepts_numeric_and_active_etf_symbols_and_checks_each_auth_form(tmp_path):
-    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
     body = {"codes": ["0050", "006208", "00981A", "00631L"]}
     with client:
         assert client.post("/internal/market-data/etf-holdings", json=body).status_code == 401
@@ -252,7 +510,7 @@ def test_etf_holdings_accepts_numeric_and_active_etf_symbols_and_checks_each_aut
 
 
 def test_etf_holdings_returns_503_when_disabled_or_misconfigured(tmp_path):
-    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(
         ConfigLoader(tmp_path, lambda: "false")
     )
     with client:
@@ -262,7 +520,7 @@ def test_etf_holdings_returns_503_when_disabled_or_misconfigured(tmp_path):
 
     loader = ready_config(tmp_path)
     (tmp_path / "shared" / "internal-service-token").unlink()
-    client, _gateway, _portfolio, _quotes, _trades, etf_holdings = client_for(loader)
+    client, _gateway, _portfolio, _quotes, _trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(loader)
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post(
@@ -309,7 +567,7 @@ def test_etf_route_returns_only_normalized_fields_and_counts_mixed_batch_failure
 
 
 def test_trades_read_rejects_malformed_dates_and_oversized_ranges(tmp_path):
-    client, _gateway, _portfolio, _quotes, trades, _etf_holdings = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, trades, etf_holdings, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
         assert client.post(
@@ -342,7 +600,7 @@ def test_trades_read_rejects_malformed_dates_and_oversized_ranges(tmp_path):
 
 def test_trades_read_maps_reconciliation_failure_to_sanitized_503(tmp_path):
     class RejectingTrades:
-        def read(self, start_date, end_date, internal_token):
+        def read(self, start_date, end_date):
             raise TradeReadError("RECONCILE_FAILED")
 
     application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), RejectingTrades())
@@ -357,7 +615,7 @@ def test_trades_read_maps_reconciliation_failure_to_sanitized_503(tmp_path):
 
 def test_trades_read_maps_sdk_call_error_to_sanitized_503(tmp_path):
     class FailingTrades:
-        def read(self, start_date, end_date, internal_token):
+        def read(self, start_date, end_date):
             raise SdkCallError("FILLED_HISTORY_UNAVAILABLE", misconfigured=True)
 
     application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), FailingTrades())
@@ -373,31 +631,35 @@ def test_trades_read_maps_sdk_call_error_to_sanitized_503(tmp_path):
 def test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured(tmp_path):
     loader = ready_config(tmp_path)
     (tmp_path / "shared" / "internal-service-token").unlink()
-    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(loader)
+    client, _gateway, portfolio, quotes, trades, etf_holdings, bank_balance, settlement, realized_gain = client_for(loader)
     with client:
         health = client.get("/internal/health")
         assert health.status_code == 200
         assert health.json()["configState"] == "MISCONFIGURED"
         assert client.get("/internal/config").status_code == 503
         assert client.post("/internal/portfolio/read", json={"dryRun": True}).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
+        assert client.post("/internal/bank-balance/read").status_code == 503
+        assert client.post("/internal/settlement/read").status_code == 503
+        assert client.post("/internal/realized-gains/read").status_code == 503
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == bank_balance.calls == settlement.calls == 0
+    assert realized_gain.calls == 0
 
 
 def test_invalid_enabled_flag_is_misconfigured_not_disabled(tmp_path):
-    client, _gateway, portfolio, quotes, trades, etf_holdings = client_for(
-        ConfigLoader(tmp_path, lambda: "not-a-boolean")
-    )
+    client, _gateway, portfolio, quotes, trades, etf_holdings, bank_balance, settlement, realized_gain = client_for(
+        ConfigLoader(tmp_path, lambda: "not-a-boolean"))
     with client:
         health = client.get("/internal/health")
         functional = client.get("/internal/config")
     assert health.json()["configState"] == "MISCONFIGURED"
     assert functional.status_code == 503
     assert functional.json() == {"detail": {"reason": "INVALID_ENABLED_FLAG"}}
-    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == bank_balance.calls == settlement.calls == 0
+    assert realized_gain.calls == 0
 
 
 def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp_path):
-    client, gateway, portfolio, quotes, trades, etf_holdings = client_for(ready_config(tmp_path))
+    client, gateway, portfolio, quotes, trades, etf_holdings, bank_balance, settlement, realized_gain = client_for(ready_config(tmp_path))
     gateway.runtime_misconfigured = True
     headers = {"X-Internal-Service-Token": TOKEN}
     with client:
@@ -413,7 +675,11 @@ def test_runtime_misconfiguration_returns_503_without_retrying_functionality(tmp
         assert client.post(
             "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
         ).status_code == 503
-    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == 0
+        assert client.post("/internal/bank-balance/read", headers=headers).status_code == 503
+        assert client.post("/internal/settlement/read", headers=headers).status_code == 503
+        assert client.post("/internal/realized-gains/read", headers=headers).status_code == 503
+    assert portfolio.calls == quotes.calls == trades.calls == etf_holdings.calls == bank_balance.calls == settlement.calls == 0
+    assert realized_gain.calls == 0
 
 
 def test_unexpected_exception_is_sanitized_before_response_and_log(tmp_path, caplog):
@@ -512,7 +778,7 @@ def test_etf_failure_does_not_change_the_exact_thirteen_counter_keys_seen_by_oth
         "QUOTE_FAILED", "NO_OWNER", "NO_TODAY_SNAPSHOT", "BROKER_MISSING", "DRY_RUN", "SUCCESS",
         "EMPTY_CLEARED", "ROLLED_BACK",
     }
-    client, _gateway, _portfolio, _quotes, _trades, etf = client_for(ready_config(tmp_path))
+    client, _gateway, _portfolio, _quotes, _trades, etf, _bank_balance, _settlement, _realized_gain = client_for(ready_config(tmp_path))
 
     async def mixed_result(codes):
         return {"batchId": "etf-batch", "holdings": [

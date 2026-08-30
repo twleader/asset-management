@@ -114,4 +114,63 @@ public final class FubonDtos {
             LocalDate filledDate,
             String filledTime,
             String filledNo) {}
+
+    /** Adapter observations contain only an HMAC fingerprint, never raw account identity. */
+    public record BankBalance(
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate queryDate,
+            @JsonDeserialize(using = FubonAccountingJson.InstantDeserializer.class) Instant observedAt,
+            String accountFingerprint,
+            String currency,
+            @JsonDeserialize(using = CanonicalFubonDecimal.NonNegativeDeserializer.class)
+                    CanonicalFubonDecimal balance,
+            @JsonDeserialize(using = CanonicalFubonDecimal.NonNegativeDeserializer.class)
+                    CanonicalFubonDecimal availableBalance) {}
+
+    public record SettlementDay(
+            String status,
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate sourceQueryDate,
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate settlementDate,
+            String currency,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyValue,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyFee,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buySettlement,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyTax,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellValue,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellFee,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellSettlement,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellTax,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalBsValue,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalFee,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalTax,
+            @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalSettlementAmount) {}
+
+    public record SettlementBatch(
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate queryDate,
+            @JsonDeserialize(using = FubonAccountingJson.InstantDeserializer.class) Instant observedAt,
+            String accountFingerprint,
+            String coverageStatus,
+            String reason,
+            List<SettlementDay> details) {
+        public SettlementBatch { details = details == null ? null : List.copyOf(details); }
+    }
+
+    public record RealizedGainRow(
+            String stockNo,
+            String buySell,
+            String orderType,
+            @JsonDeserialize(using = ExactSharesDeserializer.class) long filledQty,
+            CanonicalFubonDecimal filledPrice,
+            @JsonDeserialize(using = CanonicalFubonDecimal.NonNegativeDeserializer.class)
+                    CanonicalFubonDecimal realizedProfit,
+            @JsonDeserialize(using = CanonicalFubonDecimal.NonNegativeDeserializer.class)
+                    CanonicalFubonDecimal realizedLoss,
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate sourceDate) {}
+
+    public record RealizedGainBatch(
+            @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate queryDate,
+            @JsonDeserialize(using = FubonAccountingJson.InstantDeserializer.class) Instant observedAt,
+            String accountFingerprint,
+            List<RealizedGainRow> rows) {
+        public RealizedGainBatch { rows = rows == null ? null : List.copyOf(rows); }
+    }
 }

@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>回傳富邦官方 SDK（{@code fubon_neo} 2.2.9）{@code accounting}／{@code stock}／
  * {@code marketdata} 命名空間中已驗證存在、且確認為唯讀查詢的全部方法的**人工維護靜態清單**
- * （52 筆：9 已串接、43 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
+ * （52 筆：15 已串接、37 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
  * {@code fubon-broker-service} 容器內以 Python 內省 SDK 物件取得的真實方法與 docstring，
  * 詳細盤點步驟見 {@code spec/tasks/t386_fubon_api_documentation_view.md} 的「盤點方法」段落。
  *
@@ -39,7 +39,7 @@ public class FubonApiInfoBffController {
     private static final String NO_SDK_DOC =
             "SDK 未提供可查證的參數／回傳說明（docstring 為空），僅能確認此方法存在於 sdk.stock 命名空間。";
 
-    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：9 已串接、43 未串接）。 */
+    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：15 已串接、37 未串接）。 */
     private static final List<FubonApiInfoDto> APIS = List.of(
 
             // ===== 連線狀態查詢（2，全數已串接）=====
@@ -58,7 +58,7 @@ public class FubonApiInfoBffController {
                     "無請求參數（GET 無 body，需 X-Internal-Service-Token header）",
                     "{configState, presence:{...}(bool 各項), capabilities:{...}(bool 各項)}"),
 
-            // ===== 帳戶／庫存查詢（7：sdk.accounting.*，2 已串接）=====
+            // ===== 帳戶／庫存查詢（7：sdk.accounting.*，3 已串接）=====
             new FubonApiInfoDto(true, "帳戶／庫存查詢", "現股庫存查詢",
                     "sdk.accounting.inventories", "POST /internal/portfolio/read",
                     "查詢富邦證券帳戶目前的現股庫存張數、可賣張數與零股明細" + RO,
@@ -73,11 +73,16 @@ public class FubonApiInfoBffController {
                     "account（同上，由服務端自動帶入）",
                     "UnrealizedData 陣列，每筆含 date／account／branch_no／stock_no／buy_sell／order_type／"
                             + "cost_price／tradable_qty／today_qty／unrealized_profit／unrealized_loss"),
-            new FubonApiInfoDto(false, "帳戶／庫存查詢", "交割銀行餘額查詢",
-                    "sdk.accounting.bank_remain", NO_HTTP,
-                    "查詢交割銀行帳戶目前餘額與可用餘額" + RO, NOT_CONNECTED,
-                    "account（Ordering account）",
-                    "BankRemain{branch_no, account, currency, balance, available_balance}"),
+            new FubonApiInfoDto(true, "帳戶／庫存查詢", "交割銀行餘額查詢",
+                    "sdk.accounting.bank_remain", "POST /internal/bank-balance/read",
+                    "唯讀查詢交割銀行餘額，將通過身分、日期與金額驗證的台幣餘額更新到最新快照的台北富邦銀行證券戶，"
+                            + "與快照總額同一交易提交；零餘額照寫" + RO,
+                    "business-services（每日 08:00／09:30／14:00／22:00，需另啟用設定；"
+                            + "手動 POST /internal/brokers/fubon/bank-balance-sync，dryRun 預設 true）",
+                    "無 body／帳戶 selector；selected account 由 adapter 決定，需 internal token",
+                    "queryDate／observedAt／accountFingerprint（HMAC 前 24 hex）／currency=TWD／balance／availableBalance；"
+                            + "金額為非負 decimal 字串，不回傳原帳號或分行"),
+
             new FubonApiInfoDto(false, "帳戶／庫存查詢", "信用維持率查詢",
                     "sdk.accounting.maintenance", NO_HTTP,
                     "查詢帳戶整戶維持率與各筆融資融券部位的維持率明細" + RO, NOT_CONNECTED,
@@ -87,18 +92,26 @@ public class FubonApiInfoBffController {
                             + "maintenance_detail:[{stock_no,order_no,order_type,quantity,price,cost_price,"
                             + "market_value,shortsell_margin,collateral,margin_loan_amt,maintenance_ratio,...}]}"),
             new FubonApiInfoDto(false, "帳戶／庫存查詢", "應收付交割金額查詢",
-                    "sdk.accounting.query_settlement", NO_HTTP,
-                    "查詢近日（0 天或 3 天區間）應收付交割金額明細" + RO, NOT_CONNECTED,
-                    "account、range（\"0d\" 或 \"3d\"）",
-                    "SettlementData{account:{branch_no,account}, details:[Settlement{date,settlement_date,"
-                            + "buy_value,buy_fee,buy_settlement,buy_tax,sell_value,sell_fee,sell_settlement,"
-                            + "sell_tax,total_bs_value,total_fee,total_tax,total_settlement_amount,currency}]}"),
+                    "sdk.accounting.query_settlement", "POST /internal/settlement/read",
+                    "唯讀解析 3d 交割款觀察；來源完整範圍待核實，目前只預檢、不寫買股待付款／賣股待收款，財務同步尚未完成" + RO,
+                    "business-services（每日 08:00／13:45／19:30／22:00；"
+                            + "POST /internal/brokers/fubon/settlement-sync，dryRun 預設 true；"
+                            + "SETTLEMENT_SCOPE_UNVERIFIED，無 writer／寫鎖）",
+                    "無 body／帳戶 selector；adapter 固定 query_settlement(selected, 3d)，需 internal token",
+                    "queryDate／observedAt／accountFingerprint／coverageStatus=UNVERIFIED／"
+                            + "reason=MISSING_SETTLEMENT_RANGE_CONTRACT／details；含 sourceQueryDate、settlementDate、TWD、"
+                            + "12 項 signed 整數字串與 AVAILABLE／NO_DATA_OBSERVED，無原帳號"),
+
             new FubonApiInfoDto(false, "帳戶／庫存查詢", "已實現損益明細查詢",
-                    "sdk.accounting.realized_gains_and_loses", NO_HTTP,
-                    "查詢已實現損益逐筆明細" + RO, NOT_CONNECTED,
-                    "account",
-                    "Realized 陣列，每筆含 date／branch_no／account／stock_no／buy_sell／filled_qty／"
-                            + "filled_price／order_type／realized_profit／realized_loss"),
+                    "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read",
+                    "唯讀解析已實現損益，逐筆身分、淨收款及取得成本來源待核實；目前不新增或覆寫損益，財務同步尚未完成" + RO,
+                    "business-services（每日 08:00／13:45／19:30／22:00；"
+                            + "POST /internal/brokers/fubon/realized-gain-sync，dryRun 預設 true；"
+                            + "IDENTITY_UNVERIFIED，可變 FUBON_SYNC ledger 不能解除限制）",
+                    "無 body／帳戶 selector；selected account 由 adapter 決定，需 internal token",
+                    "queryDate／observedAt／accountFingerprint／rows；每列 stockNo、buySell=Sell、orderType=Stock、"
+                            + "filledQty、filledPrice、realizedProfit、realizedLoss、sourceDate；零損益合法，無原帳號"),
+
             new FubonApiInfoDto(false, "帳戶／庫存查詢", "已實現損益彙總查詢",
                     "sdk.accounting.realized_gains_and_loses_summary", NO_HTTP,
                     "查詢已實現損益依標的彙總結果" + RO, NOT_CONNECTED,
@@ -212,7 +225,7 @@ public class FubonApiInfoBffController {
                     "FilledData 陣列，含 date／filled_no／filled_avg_price／filled_qty／filled_price／"
                             + "order_type／filled_time 等成交欄位"),
 
-            // ===== 行情查詢（20：marketdata.rest_client.stock.*，3 已串接）=====
+            // ===== 行情查詢（20：marketdata.rest_client.stock.*，7 已串接）=====
             new FubonApiInfoDto(true, "行情查詢", "個股即時報價與最佳五檔",
                     "marketdata.rest_client.stock.intraday.quote", "POST /internal/market-data/tw-quotes",
                     "逐檔查詢台股即時成交價、漲跌、成交量與委買委賣最佳五檔，供交易雷達即時報價與庫存估值使用" + RO,
@@ -287,31 +300,48 @@ public class FubonApiInfoBffController {
                     "查詢個股相對強弱指標（RSI）" + RO, NOT_CONNECTED,
                     "symbol（路徑參數）＋選填 query 參數",
                     "RSI 指標數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股 KD 隨機指標查詢",
-                    "marketdata.rest_client.stock.technical.kdj", NO_HTTP,
-                    "查詢個股 KD 隨機指標" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "KDJ 指標數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股 MACD 指標查詢",
-                    "marketdata.rest_client.stock.technical.macd", NO_HTTP,
-                    "查詢個股 MACD 指標" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "MACD 指標數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股布林通道查詢",
-                    "marketdata.rest_client.stock.technical.bb", NO_HTTP,
-                    "查詢個股布林通道（Bollinger Bands）指標" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "布林通道數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
+            new FubonApiInfoDto(true, "行情查詢", "個股 KD 隨機指標查詢",
+                    "marketdata.rest_client.stock.technical.kdj", "POST /internal/market-data/technical-indicators/read",
+                    "查詢今日交易雷達台股的 KDJ(9,3,3) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "external-materials-service（交易日 13:40，需另啟用設定；"
+                            + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
+                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，KDJ(9,3,3)",
+                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
+                            + "kdj payload 為 k／d／j，有界 decimal 字串；sourceTimestamp 未核實為 null"),
+
+            new FubonApiInfoDto(true, "行情查詢", "個股 MACD 指標查詢",
+                    "marketdata.rest_client.stock.technical.macd", "POST /internal/market-data/technical-indicators/read",
+                    "查詢今日交易雷達台股的 MACD(12,26,9) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "external-materials-service（交易日 13:40，需另啟用設定；"
+                            + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
+                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，MACD(12,26,9)",
+                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
+                            + "macd payload 為 macdLine／signalLine，有界 decimal 字串；不捏造 histogram，sourceTimestamp 未核實為 null"),
+
+            new FubonApiInfoDto(true, "行情查詢", "個股布林通道查詢",
+                    "marketdata.rest_client.stock.technical.bb", "POST /internal/market-data/technical-indicators/read",
+                    "查詢今日交易雷達台股的 BB(period=20) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "external-materials-service（交易日 13:40，需另啟用設定；"
+                            + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
+                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，BB(period=20)",
+                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
+                            + "bb payload 為 upper／middle／lower，有界 decimal 字串；sourceTimestamp 未核實為 null"),
+
             new FubonApiInfoDto(false, "行情查詢", "減資／除權息等資本變動查詢",
                     "marketdata.rest_client.stock.corporate_actions.capital_changes", NO_HTTP,
                     "查詢個股減資、除權息等資本變動事件" + RO, NOT_CONNECTED,
                     "選填 query 參數（wrapper 未在程式碼中限定欄位名稱）",
                     "資本變動事件陣列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "股利政策查詢",
-                    "marketdata.rest_client.stock.corporate_actions.dividends", NO_HTTP,
-                    "查詢個股股利政策" + RO, NOT_CONNECTED,
-                    "選填 query 參數",
-                    "股利政策資料，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
+            new FubonApiInfoDto(true, "行情查詢", "股利政策查詢",
+                    "marketdata.rest_client.stock.corporate_actions.dividends", "POST /internal/market-data/dividends/read",
+                    "日期批次取得並只處理雷達交集的除權息現金股利證據；PARTIAL，未包含減資／未核實配股金額，"
+                            + "併入既有股利證據，不以不完整結果取消既有事件" + RO,
+                    "external-materials-service（交易日 09:00／13:30，需另啟用設定；"
+                            + "POST /internal/dividend/fubon-sync，dryRun 預設 true；capital_changes 仍未串接）",
+                    "symbols（今日交易雷達台股）、from／to；SDK 只傳 start_date／end_date 做一次日期批次查詢",
+                    "queryDate／observedAt／scopeFrom／scopeTo／provider=FUBON_SDK／rows；逐檔 PARTIAL／FAILED、usable 與現金股利 events，"
+                            + "sourceAvailableAt 未知為 null，不把未知配股當零"),
+
             new FubonApiInfoDto(false, "行情查詢", "新股上市櫃申請中名單查詢",
                     "marketdata.rest_client.stock.corporate_actions.listing_applicants", NO_HTTP,
                     "查詢新股上市櫃申請中名單" + RO, NOT_CONNECTED,
@@ -330,7 +360,7 @@ public class FubonApiInfoBffController {
                             + "數值為 decimal 字串、shares 可 null，合法無股票成分可有 null sourceDate；"
                             + "不包含任意 SDK raw 或帳戶資料）"),
 
-            // ===== 即時推播（2：marketdata.websocket_client.stock，1 已串接）=====
+            // ===== 即時推播（2：marketdata.websocket_client.stock，全數已串接）=====
             new FubonApiInfoDto(true, "即時推播", "大盤指數即時串流",
                     "marketdata.websocket_client.stock（channel=\"indices\"）",
                     "GET /internal/market-data/taiex-index/stream",
@@ -339,16 +369,17 @@ public class FubonApiInfoBffController {
                     "external-materials-service",
                     "無請求參數（SSE GET，內部已固定訂閱 channel=\"indices\"）",
                     "SSE event，含 symbol／exchange／type／index／time"),
-            new FubonApiInfoDto(false, "即時推播", "個股即時推播",
-                    "marketdata.websocket_client.stock（個股頻道，本專案程式碼已驗證存在 aggregates／candles 兩個頻道名稱）",
-                    NO_HTTP,
-                    "訂閱富邦官方 WebSocket 取得個股即時推播" + RO, NOT_CONNECTED,
-                    "channel＋symbol；本系統目前僅訂閱 indices 頻道，其餘頻道未實際串接，但 "
-                            + "fubon_neo/adapter.py 的 WebSocketStockClientWrapper.subscribe() 對 Speed 模式限制 "
-                            + "channel 不得為 aggregates／candles，證實這兩個頻道名稱確實存在，"
-                            + "其餘頻道（如逐筆成交／五檔／報價）確切名稱未在本專案程式碼中驗證",
-                    "SDK 未提供可查證的回傳欄位說明（本系統目前僅解析 indices 頻道訊息，"
-                            + "其餘頻道訊息格式未經本專案驗證）")
+            new FubonApiInfoDto(true, "即時推播", "個股即時推播",
+                    "marketdata.websocket_client.stock（channel=\"aggregates\"）",
+                    "GET /internal/market-data/stock-push/stream",
+                    "Normal mode aggregates 僅取 lastTrade 實際成交價與微秒時間，驗證當日盤中、範圍與嚴格較新後更新即時報價；"
+                            + "不使用試撮、不產生官方收盤價" + RO,
+                    "external-materials-service（POST /internal/market-data/stock-push/subscriptions 每 30 秒更新雷達清單，"
+                            + "最長 120 秒 lease；內網 SSE consumer，需另啟用設定）",
+                    "subscriptions 傳 symbols（最多 300，空陣列撤銷）；SSE GET 無 body，台北 09:00 ≤ time < 13:30 且交易日已知",
+                    "SSE event=stock-price，id=symbol:tradeTimeMicros；symbol／market／exchange／type／sourceDate／tradeTimeMicros／tradeSize／"
+                            + "price／previousClose／openPrice／highPrice／lowPrice／name／source=FUBON_WS_AGGREGATES；buyPrice、sellPrice、volume 為 null，無原 SDK 包或帳戶資料")
+
     );
 
     /** GET /api/bff/fubon-api —— 回傳富邦 SDK 唯讀查詢能力全量盤點（52 筆靜態資料）。 */
