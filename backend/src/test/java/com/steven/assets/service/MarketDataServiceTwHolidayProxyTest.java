@@ -30,7 +30,7 @@ class MarketDataServiceTwHolidayProxyTest {
         server.start();
         try {
             MarketDataService service = new MarketDataService(
-                    "http://127.0.0.1:" + server.getAddress().getPort(), null);
+                    "http://127.0.0.1:" + server.getAddress().getPort(), null, null);
 
             assertThat(service.getTwHolidays(2099))
                     .containsExactlyEntriesOf(Map.of("2099-01-01", "DGPA provisional"));

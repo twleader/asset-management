@@ -11,10 +11,11 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 
 from .config import ConfigLoader, ConfigSnapshot
 from .counters import Outcome, OutcomeCounters
+from .etf_holdings import EtfHoldingsService
 from .portfolio import PortfolioError, PortfolioService
 from .quotes import QuoteError, QuoteService
 from .redaction import install_log_redaction, redact_mapping
@@ -63,6 +64,16 @@ class QuoteReadRequest(BaseModel):
         return value
 
 
+class EtfHoldingsReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    codes: list[StrictStr] = Field(min_length=1, max_length=50)
+
+    @field_validator("codes")
+    @classmethod
+    def valid_etf_codes(cls, value: list[str]) -> list[str]:
+        return EtfHoldingsService.validate_codes(value)
+
+
 class TradeReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     startDate: StrictStr
@@ -92,6 +103,7 @@ def create_app(
     trade_service: TradeReadService | None = None,
     counters: OutcomeCounters | None = None,
     taiex_index_stream: TaiexIndexStream | None = None,
+    etf_holdings_service: EtfHoldingsService | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
     sdk_gateway = gateway or SdkGateway(loader)
@@ -100,6 +112,7 @@ def create_app(
     trades = trade_service or TradeReadService(sdk_gateway)
     outcome_counters = counters or OutcomeCounters()
     index_stream = taiex_index_stream or TaiexIndexStream(sdk_gateway)
+    etf_holdings = etf_holdings_service or EtfHoldingsService(sdk_gateway)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -235,6 +248,22 @@ def create_app(
             raise HTTPException(status_code=400, detail=redact_mapping({"reason": exc.reason})) from None
         successes = sum(1 for row in result["quotes"] if row.get("status") == "SUCCESS")
         if successes != len(result["quotes"]):
+            outcome_counters.increment(Outcome.QUOTE_FAILED)
+        else:
+            outcome_counters.increment(Outcome.SUCCESS)
+        result["counters"] = outcome_counters.snapshot()
+        return result
+
+    @application.post("/internal/market-data/etf-holdings")
+    async def etf_holdings_read(
+        request: EtfHoldingsReadRequest,
+        _config: ConfigSnapshot = Depends(authorize),
+    ) -> dict[str, object]:
+        result = await etf_holdings.read(request.codes)
+        successes = sum(1 for row in result["holdings"] if row.get("status") == "SUCCESS")
+        if successes != len(result["holdings"]):
+            # ETF is another read-only market-data query. Preserve the existing exact 13-key
+            # process counter contract consumed by the quote client; per-row ETF reasons stay specific.
             outcome_counters.increment(Outcome.QUOTE_FAILED)
         else:
             outcome_counters.increment(Outcome.SUCCESS)

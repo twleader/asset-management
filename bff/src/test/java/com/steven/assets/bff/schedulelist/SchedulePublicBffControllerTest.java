@@ -24,11 +24,26 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 23 個業務與 34 個外部行情工作")
+    @DisplayName("排程清單完整列出 24 個業務與 34 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(57);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(23);
+        assertThat(jobs()).hasSize(58);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(24);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(34);
+    }
+
+    @Test
+    @DisplayName("富邦 ETF 成分股持股同步精確登錄雙 cron、時區與唯讀語意（Task 389）")
+    void 富邦ETF成分股持股同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦 ETF 成分股持股同步".equals(j.name()))
+                .singleElement()
+                .satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.category()).isEqualTo("券商庫存");
+                    assertThat(job.cron()).isEqualTo("0 50 8 * * MON-FRI；0 30 15 * * MON-FRI");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.schedule()).isEqualTo("交易日 08:50、15:30");
+                    assertThat(job.description()).contains("唯讀", "今日交易雷達", "不影響券商端任何狀態");
+                });
     }
 
     @Test

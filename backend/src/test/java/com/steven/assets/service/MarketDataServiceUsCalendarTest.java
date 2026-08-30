@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Regression coverage for the NYSE calendar used by historical session alignment. */
 class MarketDataServiceUsCalendarTest {
 
-    private final MarketDataService service = new MarketDataService("http://unused", null);
+    private final MarketDataService service = new MarketDataService("http://unused", null, null);
 
     @Test
     void juneteenthOnlyClosesNyseFrom2022() {

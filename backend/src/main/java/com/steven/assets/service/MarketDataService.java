@@ -1,5 +1,9 @@
 package com.steven.assets.service;
 
+import com.steven.assets.integration.fubon.FubonEtfHoldingsParser;
+import com.steven.assets.integration.fubon.FubonEtfHoldingsReasons;
+import com.steven.assets.model.FubonEtfHoldingsSnapshot;
+import com.steven.assets.repository.FubonEtfHoldingsSnapshotRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.dto.QuoteDetailDto;
 import com.steven.assets.util.MarketZones;
@@ -43,14 +47,20 @@ public class MarketDataService {
     /** 美東收盤時刻，供判斷「已完成的最近一個美股交易日」（Task 294.2 起，Task 332 隨方法一併移入本類）。 */
     private static final LocalTime US_MARKET_CLOSE = LocalTime.of(16, 0);
 
+    /** 台股市場代碼字面值，供 {@link #getEtfHoldings(String, String)} 分流判斷（Task 390）。 */
+    private static final String TW_MARKET = "台股";
+
     private final WebClient priceServiceClient;
     private final StockRepository stockMasterRepo;
+    private final FubonEtfHoldingsSnapshotRepository fubonEtfHoldingsSnapshotRepository;
 
     public MarketDataService(@Value("${external-materials.base-url:http://external-materials-service:8080}")
                              String externalUrl,
-                             StockRepository stockMasterRepo) {
+                             StockRepository stockMasterRepo,
+                             FubonEtfHoldingsSnapshotRepository fubonEtfHoldingsSnapshotRepository) {
         this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
         this.stockMasterRepo = stockMasterRepo;
+        this.fubonEtfHoldingsSnapshotRepository = fubonEtfHoldingsSnapshotRepository;
     }
 
     public record DividendRateResult(
@@ -216,7 +226,16 @@ public class MarketDataService {
 
     // ─── ETF 持股（proxy）─────────────────────────────────────────────────────
 
+    /**
+     * ETF 成分股持股明細。台股（{@link #TW_MARKET}）改讀本地
+     * {@code fubon_etf_holdings_snapshot}（Task 389／390），不再呼叫
+     * {@code external-materials-service} 的 {@code /internal/etf-holdings}；美股維持原本呼叫該
+     * endpoint（Fubon 無美股覆蓋，繼續用既有 Yahoo／FinMind 路徑）。
+     */
     public EtfHoldingsResult getEtfHoldings(String stockCode, String market) {
+        if (TW_MARKET.equals(market)) {
+            return getTwEtfHoldingsFromFubonSnapshot(stockCode, market);
+        }
         try {
             EtfHoldingsResult r = priceServiceClient.get()
                     .uri(uriBuilder -> uriBuilder.path("/internal/etf-holdings")
@@ -230,6 +249,35 @@ public class MarketDataService {
         }
         return new EtfHoldingsResult(stockCode, market, false, null, null,
                 "external-materials-service 不可用", List.of());
+    }
+
+    /**
+     * 台股 ETF 成分股：讀 {@code fubon_etf_holdings_snapshot}（Task 389 排程寫入）並用
+     * {@link FubonEtfHoldingsParser} 解析（Task 390）。請求路徑不做供應商 I/O；external 的
+     * 台股 Yahoo／FinMind 路徑仍保留給既有 in-process 歷史回補。
+     */
+    private EtfHoldingsResult getTwEtfHoldingsFromFubonSnapshot(String stockCode, String market) {
+        FubonEtfHoldingsSnapshot snapshot;
+        try {
+            snapshot = fubonEtfHoldingsSnapshotRepository.findById(stockCode).orElse(null);
+        } catch (RuntimeException exception) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null, "同步資料暫時無法讀取", List.of());
+        }
+        if (snapshot == null) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null, "尚無同步資料", List.of());
+        }
+        if (!Boolean.TRUE.equals(snapshot.getSuccess())) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null,
+                    "本次同步查詢失敗：" + FubonEtfHoldingsReasons.sanitize(snapshot.getReason()), List.of());
+        }
+        Optional<FubonEtfHoldingsParser.Parsed> parsed = FubonEtfHoldingsParser.parse(stockCode, snapshot.getRawResponseJson());
+        if (parsed.isEmpty() || !TW_MARKET.equals(snapshot.getMarket()) || !stockCode.equals(snapshot.getEtfStockCode())) {
+            return new EtfHoldingsResult(stockCode, market, false, null, null, "同步資料格式不可用", List.of());
+        }
+        FubonEtfHoldingsParser.Parsed result = parsed.get();
+        String asOfDate = result.sourceDate() == null ? null : result.sourceDate().toString();
+        return new EtfHoldingsResult(stockCode, market, true, "Fubon", asOfDate,
+                result.holdings().isEmpty() ? "無股票成分資料" : null, result.holdings());
     }
 
     public DividendHistoryResult getDividendHistory(String stockCode, String market, int years) {

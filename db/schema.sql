@@ -46,7 +46,7 @@
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
 -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump＋隔離 v1.118 套用，2026-08-27
--- 產生當下表數：91 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：92 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -989,6 +989,22 @@ CREATE TABLE public.foreign_stock_daily_history (
     stock_code character varying(16) NOT NULL,
     trading_date date NOT NULL,
     close_point numeric(18,4) NOT NULL
+);
+
+
+--
+-- Name: fubon_etf_holdings_snapshot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_etf_holdings_snapshot (
+    etf_stock_code character varying(20) NOT NULL,
+    market character varying(10) DEFAULT '台股'::character varying NOT NULL,
+    fetched_at timestamp without time zone NOT NULL,
+    success boolean NOT NULL,
+    reason character varying(50),
+    raw_response_json jsonb,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_fubon_etf_holdings_snapshot_market CHECK (((market)::text = '台股'::text))
 );
 
 
@@ -3568,6 +3584,14 @@ ALTER TABLE ONLY public.payment_category
 
 ALTER TABLE ONLY public.payment_category
     ADD CONSTRAINT payment_category_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: fubon_etf_holdings_snapshot pk_fubon_etf_holdings_snapshot; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_etf_holdings_snapshot
+    ADD CONSTRAINT pk_fubon_etf_holdings_snapshot PRIMARY KEY (etf_stock_code);
 
 
 --

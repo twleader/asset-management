@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（22 個）與 {@code external-materials-service}（34 個）。
+ * {@code business-services}（24 個）與 {@code external-materials-service}（34 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 34 筆對應 36 個標註
@@ -56,9 +56,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（56 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（58 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（22）=====
+            // ===== business-services（24）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
@@ -128,6 +128,10 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
                     "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 當日成交紀錄，新增系統尚未記錄的交易到交易紀錄，以富邦成交序號防止重複新增，不覆寫既有紀錄",
                     "交易日 09:05–13:35 每 30 分鐘", "0 5,35 9-13 * * MON-FRI", TPE),
+            new ScheduledJobDto(BUSINESS, "券商庫存", "富邦 ETF 成分股持股同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀查詢今日交易雷達範圍內的台股 ETF 成分股持股明細，"
+                            + "正規化成分與來源日期落地保存供股票分析讀取，需啟用 ETF 同步設定，不影響券商端任何狀態",
+                    "交易日 08:50、15:30", "0 50 8 * * MON-FRI；0 30 15 * * MON-FRI", TPE),
 
             // ===== external-materials-service（34）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
@@ -238,7 +242,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（56 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（58 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

@@ -13,6 +13,17 @@ import java.util.List;
 @Repository
 public interface StockHoldingRepository extends JpaRepository<StockHolding, Long> {
 
+    /** Same per-owner latest-snapshot union as the external-materials radar collector (R123). */
+    @Query(value = """
+            SELECT stock_code FROM stock_holding WHERE market = '台股'
+              AND snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot
+                ORDER BY owner_user_id, snapshot_date DESC, id DESC)
+            UNION
+            SELECT stock_code FROM stock_alert WHERE market = '台股'
+            ORDER BY stock_code
+            """, nativeQuery = true)
+    List<String> findTwRadarCandidateCodes();
+
     List<StockHolding> findBySnapshotId(Long snapshotId);
 
     List<StockHolding> findBySnapshotIdAndMarket(Long snapshotId, String market);

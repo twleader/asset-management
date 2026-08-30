@@ -31,8 +31,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * 殖利率 / ETF 持股 / 股利歷史 / 台股年度休市 / 股票名稱對外抓取（從 backend MarketDataService 搬遷至此）。
@@ -456,17 +454,19 @@ public class MarketDataFetchService {
         return result;
     }
 
+    /**
+     * 台股已改由 backend 本地 {@code fubon_etf_holdings_snapshot} 回答（Requirement 123 / Task
+     * 390），{@code /internal/etf-holdings} 這支 HTTP endpoint 不應再被台股請求呼叫到。此方法對
+     * 台股仍保留 Yahoo → FinMind 的解析路徑，唯一理由是 {@code HistoricalBackfillService
+     * .addTwEtfConstituents()} 在 external-materials-service 服務內部（非經此 HTTP endpoint、
+     * in-process 直接呼叫 {@link #getEtfHoldings(String, String)}）計算「資產配置圓餅圖」透視
+     * 成份股歷史回補清單，與本任務切換的 backend↔external-materials-service HTTP 邊界無關；
+     * MoneyDJ（已死的舊爬蟲來源，見本方法先前版本）已移除，這是本任務唯一移除的資料來源。
+     */
     private EtfHoldingsResult fetchEtfHoldingsUncached(String stockCode, String market) {
         if (!isEtf(stockCode, market)) {
             return new EtfHoldingsResult(stockCode, market, false, null, null,
                     "此股票非 ETF 或未在支援清單", List.of());
-        }
-        // 台股優先 MoneyDJ（完整成分股、單一來源、不像 Yahoo 會限流；FinMind dataset 已移除）
-        if ("台股".equals(market)) {
-            try {
-                EtfHoldingsResult m = getMoneyDjEtfHoldings(stockCode, market);
-                if (m != null && !m.holdings().isEmpty()) return m;
-            } catch (Exception ignore) {}
         }
         try {
             EtfHoldingsResult y = getYahooEtfHoldings(stockCode, market);
@@ -513,32 +513,6 @@ public class MarketDataFetchService {
             return new EtfHoldingsResult(stockCode, market, true, "FinMind", null,
                     "查詢失敗：" + e.getMessage(), List.of());
         }
-    }
-
-    private static final Pattern MDJ_DATE = Pattern.compile("資料日期：([0-9/]+)");
-    private static final Pattern MDJ_TR = Pattern.compile("<tr[^>]*>(.*?)</tr>", Pattern.DOTALL);
-    private static final Pattern MDJ_TD = Pattern.compile("<td[^>]*>(.*?)</td>", Pattern.DOTALL);
-
-    /**
-     * MoneyDJ ETF 持股明細（台股主來源）：完整成分股（非僅前 10），單一來源、不需 crumb、不易限流。
-     * 頁面 https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid={code}.TW
-     * 持股明細表欄位：股票名稱 / 持股(千股) / 比例(%) / 增減。MoneyDJ 只揭露名稱（無代號），
-     * 故 EtfHolding.stockCode 留空，由下游（BFF lookthrough）以 stockName 為聚合鍵。
-     * 以 curl 子程序抓取（與 Yahoo 同理，避開部分站點對 Java HttpClient 的封鎖）。
-     */
-    private EtfHoldingsResult getMoneyDjEtfHoldings(String stockCode, String market) {
-        for (String suffix : new String[]{".TW", ".TWO"}) {
-            try {
-                String url = "https://www.moneydj.com/ETF/X/Basic/Basic0007a.xdjhtm?etfid="
-                        + stockCode + suffix;
-                String html = runCurl("-s", "-m", "20", "-A", UA, url);
-                EtfHoldingsResult r = parseMoneyDjHoldings(stockCode, market, html);
-                if (r != null && !r.holdings().isEmpty()) return r;
-            } catch (Exception e) {
-                log.warn("MoneyDJ ETF 持股查詢失敗 {}{}: {}", stockCode, suffix, e.getMessage());
-            }
-        }
-        return null;
     }
 
     /** 啟動後背景預熱「股名→代號」字典，避免重啟後第一筆 ETF 請求同步載入而逾時。 */
@@ -594,47 +568,6 @@ public class MarketDataFetchService {
     /** 台股全市場「股名→代號」字典（24h cache），暴露供公開資訊個股過濾（Task 178）。 */
     public Map<String, String> twMarketNameToCode() {
         return twNameToCodeMap();
-    }
-
-    private EtfHoldingsResult parseMoneyDjHoldings(String stockCode, String market, String html) {
-        if (html == null || html.isEmpty()) return null;
-        int idx = html.indexOf("股票名稱");
-        if (idx < 0) return null;
-        Map<String, String> nameToCode = twNameToCodeMap();
-        String asOf = null;
-        Matcher dm = MDJ_DATE.matcher(html);
-        if (dm.find()) asOf = dm.group(1);
-        // 持股明細表：從「股票名稱」表頭到該表結束
-        String seg = html.substring(idx);
-        int end = seg.indexOf("</table>");
-        if (end > 0) seg = seg.substring(0, end);
-        List<EtfHolding> holdings = new ArrayList<>();
-        Matcher rm = MDJ_TR.matcher(seg);
-        while (rm.find()) {
-            List<String> cells = new ArrayList<>();
-            Matcher cm = MDJ_TD.matcher(rm.group(1));
-            while (cm.find()) {
-                cells.add(cm.group(1).replaceAll("<[^>]+>", "").replace("&nbsp;", "").trim());
-            }
-            if (cells.size() < 3) continue;
-            String name = cells.get(0);
-            if (name.isEmpty() || name.equals("股票名稱")) continue;
-            try {
-                BigDecimal weight = new BigDecimal(cells.get(2).replace(",", ""))
-                        .setScale(4, RoundingMode.HALF_UP);
-                if (weight.compareTo(BigDecimal.ZERO) <= 0) continue;
-                BigDecimal shares = null;
-                try {
-                    shares = new BigDecimal(cells.get(1).replace(",", ""))
-                            .multiply(BigDecimal.valueOf(1000));
-                } catch (NumberFormatException ignore) {}
-                String code = nameToCode.getOrDefault(name, "");
-                holdings.add(new EtfHolding(code, name, weight, shares));
-            } catch (NumberFormatException ignore) {}
-        }
-        if (holdings.isEmpty()) return null;
-        holdings.sort((a, b) -> b.weight().compareTo(a.weight()));
-        return new EtfHoldingsResult(stockCode, market, true, "MoneyDJ", asOf, null, holdings);
     }
 
     private EtfHoldingsResult getYahooEtfHoldings(String stockCode, String market) {
