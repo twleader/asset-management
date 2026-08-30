@@ -69,7 +69,8 @@ public class SecurityConfig {
             "/api/bff/market-type-settings/**",
             "/api/bff/asset-class-settings/**",
             "/api/bff/transit-fund-type-settings/**",
-            "/api/bff/payment-account-settings/categories/**"
+            "/api/bff/payment-account-settings/categories/**",
+            "/api/bff/app-feature-settings/**"
     };
 
     @Bean

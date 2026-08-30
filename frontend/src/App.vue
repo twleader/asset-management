@@ -18,7 +18,7 @@
           active-text-color="#60a5fa"
         >
           <template v-for="item in mainMenuItems" :key="item.path || item.index">
-            <el-sub-menu v-if="item.children" :index="item.index">
+            <el-sub-menu v-if="item.children && item.children.length" :index="item.index">
               <template #title>
                 <el-icon><component :is="item.icon" /></el-icon>
                 <span>{{ item.title }}</span>
@@ -28,7 +28,7 @@
                 <template #title>{{ child.title }}</template>
               </el-menu-item>
             </el-sub-menu>
-            <el-menu-item v-else :index="item.path">
+            <el-menu-item v-else-if="!item.children" :index="item.path">
               <el-icon><component :is="item.icon" /></el-icon>
               <template #title>{{ item.title }}</template>
             </el-menu-item>
@@ -44,6 +44,11 @@
               <el-icon><User /></el-icon>
               <template #title>使用者管理</template>
             </el-menu-item>
+            <!-- Requirement 134 / Task 407：角色功能管理，沿用父層 v-if="auth.isAdmin" 的既有寫死管理者限制 -->
+            <el-menu-item index="/settings/role-features">
+              <el-icon><Grid /></el-icon>
+              <template #title>角色功能管理</template>
+            </el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="settings">
@@ -51,39 +56,39 @@
               <el-icon><Setting /></el-icon>
               <span>系統設定</span>
             </template>
-            <el-menu-item index="/settings/banks">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/banks')" index="/settings/banks">
               <el-icon><OfficeBuilding /></el-icon>
               <template #title>銀行設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/brokers">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/brokers')" index="/settings/brokers">
               <el-icon><TrendCharts /></el-icon>
               <template #title>券商設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/deposit-types">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/deposit-types')" index="/settings/deposit-types">
               <el-icon><Coin /></el-icon>
               <template #title>存款類型設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/market-types">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/market-types')" index="/settings/market-types">
               <el-icon><Connection /></el-icon>
               <template #title>市場類型設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/asset-classes">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/asset-classes')" index="/settings/asset-classes">
               <el-icon><PieChart /></el-icon>
               <template #title>資產類別歸類</template>
             </el-menu-item>
-            <el-menu-item index="/settings/transit-fund-types">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/transit-fund-types')" index="/settings/transit-fund-types">
               <el-icon><Timer /></el-icon>
               <template #title>在途款項類型設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/funds">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/funds')" index="/settings/funds">
               <el-icon><Money /></el-icon>
               <template #title>信託基金設定</template>
             </el-menu-item>
-            <el-menu-item index="/settings/notifications">
+            <el-menu-item v-if="auth.isFeatureEnabled('/settings/notifications')" index="/settings/notifications">
               <el-icon><Bell /></el-icon>
               <template #title>警示通知設定</template>
             </el-menu-item>
-            <!-- Requirement 28：備份/還原僅管理者可見 -->
+            <!-- Requirement 28：備份/還原僅管理者可見（既有寫死限制，不受角色功能管理影響） -->
             <el-menu-item v-if="auth.isAdmin" index="/settings/backup-restore">
               <el-icon><FolderOpened /></el-icon>
               <template #title>備份/還原 資料</template>
@@ -236,7 +241,9 @@ onUnmounted(() => {
   if (clockTimer) clearInterval(clockTimer)
 })
 
-const mainMenuItems = computed(() => [
+// Requirement 134 / Task 407：各項目（單層項目與群組 children）依 auth.isFeatureEnabled(path) 過濾；
+// 群組過濾後若無可見子項則整組不出現（見上方 template 的 item.children.length 判斷）。
+const rawMenuItems = [
   { path: '/dashboard', title: '總覽儀表板', icon: 'DataLine' },
   {
     index: 'asset-management', title: '資產管理', icon: 'Wallet',
@@ -275,7 +282,14 @@ const mainMenuItems = computed(() => [
       { path: '/fubon-api', title: '富邦證 API', icon: 'Coin' }
     ]
   }
-])
+]
+
+const mainMenuItems = computed(() => rawMenuItems
+  .map(item => item.children
+    ? { ...item, children: item.children.filter(child => auth.isFeatureEnabled(child.path)) }
+    : item)
+  .filter(item => item.children ? item.children.length > 0 : auth.isFeatureEnabled(item.path))
+)
 </script>
 
 <style>

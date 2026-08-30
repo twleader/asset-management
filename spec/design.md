@@ -10974,3 +10974,58 @@ R121仍只用靜態FubonApiInfoService，不能注入報表repository/client；�
 BFF測actual principal/effective相同與不同、缺身分、另一ADMIN及兩種代看都無漏資料；owner在global/兩flags關閉或ADMIN_EMAIL改人後仍可讀自己舊份。正常有資料UI只用隔離fixture stack/DB，不把假資料寫進正式owner DB。部署僅精確加入FUBON_SYNC_OWNER_EMAIL，其他.env內容/憑證/掛載/flags保持；`FUBON_ENABLED=false`、不真人SDK、不manual-sync/subscriptions/rescan POST、不live alias/方法矩陣/security探測。
 
 schema migration先隔離驗、`db/schema.sql`依既有標頭流程重產並通過drift-test，之後協調者依commit-merge-push/run-stack完成main無ff合併、push、重建實際image與GET/UI驗證。原 Task394/395 未完成的財務目標必在完成報告明示；來源報表保存成功不准刪除原Claude refs。
+
+## Requirement 134：角色功能管理（一般使用者功能由管理者設定）
+
+### 問題
+
+現有「僅管理者可用」的限制（使用者管理、備份/還原等）全部寫死在三處程式碼：前端 `router/index.js` 的 `meta.requiresAdmin`／`App.vue` 的 `v-if="auth.isAdmin"`、BFF `SecurityConfig` 的 `pathMatchers`、backend `AdminGateInterceptor` 的路徑清單，沒有中央對照表。使用者要求新增一個「角色功能管理」頁面，讓管理者可以自行決定**一般使用者角色**能看到哪些既有功能頁面（目前這些頁面對一般使用者是全開的），不必改程式碼重新部署。
+
+### 範圍界線（刻意，非遺漏）
+
+- **只做選單可見性／路由導覽層級的控管**，不新增或變更任何業務 API endpoint 本身的權限檢查層。一般使用者若直接呼叫被關閉功能對應的業務 API，目前仍可取得資料——這與功能關閉前的既有行為（本就無角色限制）一致，只是前端不再顯示入口。
+- **不動既有寫死的管理者專屬限制**（`SecurityConfig`、`AdminGateInterceptor`、`meta.requiresAdmin` 涵蓋的使用者管理／備份還原等），這些維持完全獨立、不受本功能影響。
+- **管理者角色不受限**：`role=ADMIN` 恆定可見/可用全部功能，本功能只調整「一般使用者角色」的開關，避免管理者自我鎖死。
+- **功能清單本身是系統 seed 的固定 25 項**（見下表），管理者只能切換開關，不能新增/刪除清單項目——清單項目與實際前端路由一一對應，若開放自由新增，功能代碼會與真實路由脫鉤變成純裝飾。
+
+### 資料模型
+
+新增 `app_feature` 表（單一表，未拆出「角色」欄位——目前系統角色本身仍是寫死的 Java 常數 `ROLE_ADMIN`／`ROLE_USER`，非資料庫可擴充的角色主檔，管理者恆定全開也不需要為 ADMIN 存一列；為此多加一個恆為 `'USER'` 的 `role` 欄位屬於不必要的超前設計，故用單一 `enabled_for_user` 布林欄位直接表達）：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `id` | bigint, PK | |
+| `code` | varchar(100), UNIQUE, NOT NULL | 對應前端路由 path，如 `/history` |
+| `display_name` | varchar(50), NOT NULL | 選單顯示名稱 |
+| `menu_group` | varchar(50), NULLABLE | 對應側邊選單分組標題，頂層項目為 null |
+| `sort_order` | int, NOT NULL, default 0 | |
+| `enabled_for_user` | boolean, NOT NULL, default true | 是否開放給一般使用者角色；`ADMIN` 一律忽略此欄位 |
+
+由 `DataInitializer` seed 固定 25 筆（`/dashboard` 與既有寫死僅管理者可見的頁面不列入，見 Requirement 134 Acceptance Criteria 的完整清單表格），以 `findByCode` 判斷冪等；**已存在的列不覆寫 `enabled_for_user`**，避免重啟服務打回管理者先前的關閉設定。
+
+Liquibase：`v1.121.0-app-feature-role-access.sql`。
+
+### API 端點
+
+| Method | Path | 權限 | 說明 |
+|---|---|---|---|
+| GET | `/api/settings/app-features` | 已登入者（沿用 `GLOBAL_SETTINGS_PATHS` 規則） | 回傳全部 25 筆＋目前 `enabledForUser`；供管理頁與一般使用者前端過濾選單共用同一支 |
+| PATCH | `/api/settings/app-features/{id}/enabled-for-user` | ADMIN | body `{"enabled": boolean}`，僅更新 `enabled_for_user` |
+
+BFF：新增 `AppFeatureSettingsBffRoutes`，`/api/bff/app-feature-settings/**` rewrite 到 `/api/settings/app-features${seg}`；`SecurityConfig.GLOBAL_SETTINGS_PATHS` 陣列加入該 path pattern（沿用陣列既有「寫入限 ADMIN、GET 開放已登入者」規則，不另寫 `.pathMatchers`）。backend `AdminGateInterceptor`／`WebConfig` 不需改動（`/api/settings/**` 已是既有通用規則涵蓋）。
+
+### 前端邏輯
+
+- `authStore` 新增 `disabledFeatureCodes`（string[]），`fetchMe()` 成功後若 `!isAdmin` 才呼叫 `GET /api/bff/app-feature-settings`，把 `enabledForUser === false` 的 `code` 存入；`isAdmin` 時固定空陣列。
+- `authStore.isFeatureEnabled(path)`：`isAdmin === true` 或 `!disabledFeatureCodes.includes(path)` 回傳 `true`。
+- `App.vue`：`mainMenuItems` 各項目與硬編碼的「系統設定」子選單，渲染前以 `auth.isFeatureEnabled(item.path)` 過濾；分組過濾後若無可見子項，整個分組隱藏。
+- `router/index.js` 既有 `beforeEach`：非管理者且 `to.path` 屬於 `disabledFeatureCodes` 時導回 `/dashboard`（與現有 `requiresAdmin` 判斷同一個 guard 內依序檢查）。
+- 設定變更於一般使用者**下次整頁載入／重新登入**後生效，不做即時推播（與其他 settings 類頁面的更新時機一致）。
+
+### 新頁面
+
+`frontend/src/views/RoleFeatureSettingsView.vue`：`GET /api/bff/app-feature-settings` 取得 25 筆，依 `menuGroup`／`sortOrder` 分組列表呈現，每列一個開關對應 `enabledForUser`，切換即呼叫 `PATCH .../{id}/enabled-for-user`。路由 `/settings/role-features`（`meta.requiresAdmin: true`），選單掛在 `App.vue` 既有 `index="permissions"`（權限管理）子選單下、「使用者管理」之後。
+
+### 不處理
+
+同「範圍界線」段：不做 API 層權限檢查、不動既有管理者專屬硬編碼限制、不做角色主檔資料庫化、不開放功能清單自訂新增。

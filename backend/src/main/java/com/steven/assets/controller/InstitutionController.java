@@ -270,4 +270,18 @@ public class InstitutionController {
         boolean active = Boolean.TRUE.equals(body.get("active"));
         return ResponseEntity.ok(institutionService.setTransitFundTypeActive(id, active));
     }
+
+    // ===================== AppFeature（Requirement 134／Task 407：角色功能管理）=====================
+
+    @GetMapping("/app-features")
+    public List<InstitutionDto.AppFeatureResponse> getAllAppFeatures() {
+        return institutionService.getAllAppFeatures();
+    }
+
+    @PatchMapping("/app-features/{id}/enabled-for-user")
+    public ResponseEntity<InstitutionDto.AppFeatureResponse> setAppFeatureEnabledForUser(
+            @PathVariable Long id,
+            @Valid @RequestBody InstitutionDto.UpdateAppFeatureEnabledRequest req) {
+        return ResponseEntity.ok(institutionService.setAppFeatureEnabledForUser(id, req.enabled()));
+    }
 }

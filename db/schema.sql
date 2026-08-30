@@ -45,8 +45,8 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump＋隔離 v1.118 套用，2026-08-27
--- 產生當下表數：92 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump＋隔離 v1.121 套用，2026-08-30
+-- 產生當下表數：93 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -71,6 +71,39 @@ SET row_security = off;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: app_feature; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.app_feature (
+    id bigint NOT NULL,
+    code character varying(100) NOT NULL,
+    display_name character varying(50) NOT NULL,
+    menu_group character varying(50),
+    sort_order integer DEFAULT 0 NOT NULL,
+    enabled_for_user boolean DEFAULT true NOT NULL
+);
+
+
+--
+-- Name: app_feature_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.app_feature_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: app_feature_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.app_feature_id_seq OWNED BY public.app_feature.id;
+
 
 --
 -- Name: app_user; Type: TABLE; Schema: public; Owner: -
@@ -2917,6 +2950,13 @@ CREATE TABLE public.us_index_daily_history (
 
 
 --
+-- Name: app_feature id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_feature ALTER COLUMN id SET DEFAULT nextval('public.app_feature_id_seq'::regclass);
+
+
+--
 -- Name: asset_transaction id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3152,6 +3192,22 @@ ALTER TABLE ONLY public.trading_radar_export_setting ALTER COLUMN id SET DEFAULT
 --
 
 ALTER TABLE ONLY public.trading_radar_export_time ALTER COLUMN id SET DEFAULT nextval('public.trading_radar_export_time_id_seq'::regclass);
+
+
+--
+-- Name: app_feature app_feature_code_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_feature
+    ADD CONSTRAINT app_feature_code_key UNIQUE (code);
+
+
+--
+-- Name: app_feature app_feature_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.app_feature
+    ADD CONSTRAINT app_feature_pkey PRIMARY KEY (id);
 
 
 --

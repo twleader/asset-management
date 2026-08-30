@@ -1,6 +1,7 @@
 package com.steven.assets.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 
@@ -218,5 +219,20 @@ public class InstitutionDto {
             @NotBlank String displayName,
             Boolean payable,
             Integer sortOrder
+    ) {}
+
+    // ===== AppFeature（Requirement 134／Task 407：角色功能管理）=====
+
+    public record AppFeatureResponse(
+            Long id,
+            String code,
+            String displayName,
+            String menuGroup,
+            Integer sortOrder,
+            Boolean enabledForUser
+    ) {}
+
+    public record UpdateAppFeatureEnabledRequest(
+            @NotNull Boolean enabled
     ) {}
 }

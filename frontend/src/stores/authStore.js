@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { authApi } from '@/api'
+import { authApi, appFeatureSettingsApi } from '@/api'
 
 /**
  * 登入態與多租戶（Requirement 28）。
@@ -10,7 +10,11 @@ import { authApi } from '@/api'
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     me: null,
-    loaded: false
+    loaded: false,
+    // Requirement 134 / Task 407：一般使用者角色被關閉的功能 code（= 路由 path）清單，供選單過濾與路由 guard 使用。
+    // 管理者固定為 []（不受限制）；取得失敗時 fail-closed 為 []（本設定只影響 UI 可見性，非安全邊界，
+    // 失敗時不應讓一般使用者整個選單消失）。
+    disabledFeatureCodes: []
   }),
   getters: {
     isLoggedIn: (s) => !!(s.me && s.me.email),
@@ -25,7 +29,9 @@ export const useAuthStore = defineStore('auth', {
     isImpersonating: (s) => !!s.me?.isImpersonating,
     switchableUsers: (s) => s.me?.switchableUsers || [],
     effectiveUserId: (s) => s.me?.effectiveUserId ?? null,
-    effectiveUserName: (s) => s.me?.effectiveUserName || ''
+    effectiveUserName: (s) => s.me?.effectiveUserName || '',
+    // Requirement 134 / Task 407：管理者永遠不受限制；一般使用者依 disabledFeatureCodes 判斷。
+    isFeatureEnabled: (s) => (path) => s.isAdmin || !s.disabledFeatureCodes.includes(path)
   },
   actions: {
     /** 載入目前登入者；未登入（401）時 me=null，不拋錯。 */
@@ -37,7 +43,26 @@ export const useAuthStore = defineStore('auth', {
       } finally {
         this.loaded = true
       }
+      await this.loadDisabledFeatures()
       return this.me
+    },
+    /**
+     * Requirement 134 / Task 407：管理者不受限（固定 []，不呼叫 API）；一般使用者取得停用功能清單。
+     * fail-closed：呼叫失敗時維持 []（=全部顯示），本設定只影響 UI 可見性、非安全邊界。
+     */
+    async loadDisabledFeatures() {
+      if (!this.isLoggedIn || this.isAdmin) {
+        this.disabledFeatureCodes = []
+        return
+      }
+      try {
+        const features = await appFeatureSettingsApi.getAll()
+        this.disabledFeatureCodes = (features || [])
+          .filter(f => f.enabledForUser === false)
+          .map(f => f.code)
+      } catch (e) {
+        this.disabledFeatureCodes = []
+      }
     },
     /** 整頁跳轉 Google 登入。 */
     login() {
