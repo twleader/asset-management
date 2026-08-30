@@ -4,6 +4,8 @@ import com.steven.assets.model.AppUser;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.Bank;
 import com.steven.assets.model.BankDeposit;
+import com.steven.assets.model.BrokerEntity;
+import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
@@ -35,19 +37,20 @@ public class FubonBankBalanceWriter {
     private final DepositTypeRepository depositTypeRepository;
     private final SnapshotAggregateCalculator aggregates;
     private final AssetSnapshotRepository snapshotRepository;
+    private final FubonSyncFreshness freshness;
     private final Clock clock;
 
     @Autowired
     public FubonBankBalanceWriter(AssetSnapshotMutationLock mutationLock, UserAdminService userAdminService,
             BrokerRepository brokerRepository, BankRepository bankRepository, DepositTypeRepository depositTypeRepository,
-            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshotRepository) {
+            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshotRepository, FubonSyncFreshness freshness) {
         this(mutationLock, userAdminService, brokerRepository, bankRepository, depositTypeRepository,
-                aggregates, snapshotRepository, Clock.systemUTC());
+                aggregates, snapshotRepository, freshness, Clock.systemUTC());
     }
 
     FubonBankBalanceWriter(AssetSnapshotMutationLock mutationLock, UserAdminService userAdminService,
             BrokerRepository brokerRepository, BankRepository bankRepository, DepositTypeRepository depositTypeRepository,
-            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshotRepository, Clock clock) {
+            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshotRepository, FubonSyncFreshness freshness, Clock clock) {
         this.mutationLock = mutationLock;
         this.userAdminService = userAdminService;
         this.brokerRepository = brokerRepository;
@@ -55,25 +58,34 @@ public class FubonBankBalanceWriter {
         this.depositTypeRepository = depositTypeRepository;
         this.aggregates = aggregates;
         this.snapshotRepository = snapshotRepository;
+        this.freshness = freshness;
         this.clock = clock;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public BigDecimal write(Long ownerId, FubonDtos.BankBalance observation) {
         // This must precede EVERY database read, including owner and lookup-table checks.
-        AssetSnapshot snapshot = mutationLock.lockLatestForOwner(ownerId)
+        AssetSnapshot snapshot = mutationLock.lockLatestForFubonConfiguredOwner(ownerId)
                 .orElseThrow(() -> new WriteRejected(FubonBankBalanceOutcome.NO_SNAPSHOT));
+        freshness.refreshLockedSnapshot(snapshot);
         AppUser owner = userAdminService.configuredAdmin().orElse(null);
+        if (owner != null) freshness.refreshOwner(owner);
         if (owner == null || ownerId == null || !ownerId.equals(owner.getId()) || !owner.isActive()
                 || !owner.isAdmin() || !ownerId.equals(snapshot.getOwnerUserId())) {
             throw new WriteRejected(FubonBankBalanceOutcome.NO_OWNER);
         }
-        if (brokerRepository.findByCode(FUBON).filter(b -> Boolean.TRUE.equals(b.getActive())).isEmpty()) {
+        BrokerEntity broker = brokerRepository.findByCode(FUBON).orElse(null);
+        if (broker != null) freshness.refreshBroker(broker);
+        if (broker == null || !FUBON.equals(broker.getCode()) || !Boolean.TRUE.equals(broker.getActive())) {
             throw new WriteRejected(FubonBankBalanceOutcome.BROKER_MISSING);
         }
-        Bank bank = bankRepository.findByCode(FUBON).filter(b -> Boolean.TRUE.equals(b.getActive()))
+        Bank bank = bankRepository.findByCode(FUBON)
                 .orElseThrow(() -> new WriteRejected(FubonBankBalanceOutcome.BANK_MISSING));
-        if (depositTypeRepository.findByCode(DEPOSIT_TYPE).filter(t -> Boolean.TRUE.equals(t.getActive())).isEmpty()) {
+        freshness.refreshBank(bank);
+        DepositTypeEntity depositType = depositTypeRepository.findByCode(DEPOSIT_TYPE).orElse(null);
+        if (depositType != null) freshness.refreshDepositType(depositType);
+        if (!FUBON.equals(bank.getCode()) || !Boolean.TRUE.equals(bank.getActive()) || depositType == null
+                || !DEPOSIT_TYPE.equals(depositType.getCode()) || !Boolean.TRUE.equals(depositType.getActive())) {
             throw new WriteRejected(FubonBankBalanceOutcome.BANK_MISSING);
         }
         FubonAccountingContract.validateBank(observation, clock);

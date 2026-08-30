@@ -25,6 +25,7 @@ public class FubonHttpClient implements FubonBrokerClient {
     private final WebClient client;
     private final WebClient etfClient;
     private final WebClient accountingClient;
+    private final WebClient tradeClient;
     private final Clock clock;
     private final FubonConfigState configState;
     private final Duration timeout;
@@ -47,6 +48,10 @@ public class FubonHttpClient implements FubonBrokerClient {
         this.accountingClient = client.mutate()
                 .codecs(codecs -> codecs.defaultCodecs().jackson2JsonDecoder(
                         new Jackson2JsonDecoder(FubonAccountingJson.mapper())))
+                .build();
+        this.tradeClient = client.mutate()
+                .codecs(codecs -> codecs.defaultCodecs().jackson2JsonDecoder(
+                        new Jackson2JsonDecoder(FubonTradeJson.mapper())))
                 .build();
         this.etfClient = client.mutate()
                 .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(ETF_MAX_RESPONSE_BYTES))
@@ -109,7 +114,7 @@ public class FubonHttpClient implements FubonBrokerClient {
         FubonDtos.CallResult<FubonDtos.TradeBatchResponse> gate = gate(config);
         if (gate != null) return gate;
         try {
-            FubonDtos.TradeBatchResponse response = client.post()
+            FubonDtos.TradeBatchResponse response = tradeClient.post()
                     .uri("/internal/trades/read")
                     .header(TOKEN_HEADER, config.token())
                     .bodyValue(new FubonDtos.TradeReadRequest(start.toString(), end.toString()))
@@ -121,7 +126,8 @@ public class FubonHttpClient implements FubonBrokerClient {
                     ? FubonDtos.CallResult.success(response)
                     : FubonDtos.CallResult.failure("EMPTY_RESPONSE");
         } catch (WebClientResponseException exception) {
-            return FubonDtos.CallResult.failure(httpReason(exception.getStatusCode()));
+            return FubonDtos.CallResult.failure(exception.getStatusCode().is2xxSuccessful()
+                    ? "TRANSPORT_OR_SCHEMA_FAILURE" : httpReason(exception.getStatusCode()));
         } catch (Exception exception) {
             return FubonDtos.CallResult.failure("TRANSPORT_OR_SCHEMA_FAILURE");
         }

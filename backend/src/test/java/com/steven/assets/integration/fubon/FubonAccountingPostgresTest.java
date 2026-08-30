@@ -58,7 +58,7 @@ import static org.mockito.Mockito.*;
 @DataJpaTest(showSql = false, properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "spring.liquibase.enabled=false",
         "app.admin-email=bank-test@example.invalid"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, AssetService.class,
+@Import({JpaFubonSyncFreshness.class, AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, AssetService.class,
         UserAdminService.class, FubonAccountingPostgresTest.Config.class})
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -154,7 +154,7 @@ class FubonAccountingPostgresTest {
         });
         var statements = sqlTrace.stop();
         assertThat(statements).isNotEmpty();
-        assertThat(statements.getFirst()).contains("from asset_snapshot").contains("for no key update");
+        assertThat(statements.getFirst()).contains("from asset_snapshot").contains("for update");
         assertThat(statements.getFirst()).doesNotContain("app_user", "bank_deposit");
         readSnapshot(s -> {
             assertThat(s.getDeposits()).hasSize(2); assertThat(target(s).getSnapshot().getId()).isEqualTo(snapshotId);
@@ -317,7 +317,7 @@ class FubonAccountingPostgresTest {
         CountDownLatch locked = new CountDownLatch(1); CountDownLatch release = new CountDownLatch(1);
         AssetSnapshotMutationLock lockTarget = AopTestUtils.getUltimateTargetObject(mutationLock);
         if (bankFirst) doAnswer(call -> { Object result = call.callRealMethod(); locked.countDown(); await(release); return result; })
-                .when(lockTarget).lockLatestForOwner(anyLong());
+                .when(lockTarget).lockLatestForFubonConfiguredOwner(anyLong());
         else doAnswer(call -> { Object result = call.callRealMethod(); locked.countDown(); await(release); return result; })
                 .when(lockTarget).lockById(snapshotId);
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -417,8 +417,8 @@ class FubonAccountingPostgresTest {
         @Bean HibernatePropertiesCustomizer tracing(SqlTrace trace) { return properties -> properties.put("hibernate.session_factory.statement_inspector", trace); }
         @Bean FubonBankBalanceOutcomeCounters bankCounters() { return new FubonBankBalanceOutcomeCounters(); }
         @Bean FubonBankBalanceWriter bankWriter(AssetSnapshotMutationLock lock, UserAdminService users, BrokerRepository brokers,
-                BankRepository banks, DepositTypeRepository types, SnapshotAggregateCalculator calculator, AssetSnapshotRepository snapshots, MutableClock clock) {
-            return new FubonBankBalanceWriter(lock, users, brokers, banks, types, calculator, snapshots, clock);
+                BankRepository banks, DepositTypeRepository types, SnapshotAggregateCalculator calculator, AssetSnapshotRepository snapshots, FubonSyncFreshness freshness, MutableClock clock) {
+            return new FubonBankBalanceWriter(lock, users, brokers, banks, types, calculator, snapshots, freshness, clock);
         }
         @Bean FubonBankBalanceSyncService bankService(FubonConfigState config, FubonBrokerClient client, UserAdminService users,
                 FubonBankBalanceWriter writer, FubonBankBalanceOutcomeCounters counters, MutableClock clock) {

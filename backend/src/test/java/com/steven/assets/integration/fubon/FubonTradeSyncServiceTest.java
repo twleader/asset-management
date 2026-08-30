@@ -1,7 +1,6 @@
 package com.steven.assets.integration.fubon;
 
 import com.steven.assets.model.AppUser;
-import com.steven.assets.model.AssetTransaction;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
@@ -11,10 +10,12 @@ import com.steven.assets.service.UserAdminService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -22,10 +23,14 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -49,6 +54,7 @@ class FubonTradeSyncServiceTest {
     @Mock BrokerRepository brokerRepository;
     @Mock AssetTransactionRepository assetTransactionRepository;
     @Mock StockMasterService stockMasterService;
+    @Mock FubonTradeWriter writer;
 
     private FubonTradeOutcomeCounters counters;
     private FubonTradeSyncService service;
@@ -57,11 +63,13 @@ class FubonTradeSyncServiceTest {
     void setUp() {
         counters = new FubonTradeOutcomeCounters();
         service = build(true, false);
+        lenient().when(writer.insert(any(), any(), any())).thenAnswer(call ->
+                new FubonTradeWriter.CommitResult(((List<?>) call.getArgument(2)).size(), 0));
     }
 
     private FubonTradeSyncService build(boolean tradeSyncEnabled, boolean liveQuotesEnabled) {
         return new FubonTradeSyncService(configState, brokerClient, marketDataService, userAdminService,
-                brokerRepository, assetTransactionRepository, stockMasterService, counters, CLOCK,
+                brokerRepository, assetTransactionRepository, stockMasterService, writer, counters, CLOCK,
                 tradeSyncEnabled, liveQuotesEnabled);
     }
 
@@ -259,7 +267,7 @@ class FubonTradeSyncServiceTest {
         admin();
         activeBroker();
         when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
-                new FubonDtos.TradeBatchResponse("batch-1", TODAY, TODAY, "fp", true, List.of())));
+                new FubonDtos.TradeBatchResponse("batch-1", TODAY, TODAY, "0123456789abcdef01234567", true, List.of())));
 
         FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
@@ -307,7 +315,7 @@ class FubonTradeSyncServiceTest {
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.SUCCESS);
         assertThat(result.skippedNameUnresolvedCount()).isEqualTo(1);
         assertThat(result.insertedCount()).isEqualTo(1);
-        verify(assetTransactionRepository, times(1)).save(any());
+        verify(writer).insert(eq(9L), eq(3L), any());
         verify(assetTransactionRepository, never())
                 .existsByOwnerUserIdAndBrokerFilledNo(9L, "F-UNRESOLVED");
     }
@@ -343,34 +351,23 @@ class FubonTradeSyncServiceTest {
                 batch(trade("2330", "Sell", 3, "12.345", "12.345", "F004"))));
         when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
         when(assetTransactionRepository.existsByOwnerUserIdAndBrokerFilledNo(9L, "F004")).thenReturn(false);
-        when(assetTransactionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.SUCCESS);
         assertThat(result.insertedCount()).isEqualTo(1);
-        ArgumentCaptor<AssetTransaction> captor = ArgumentCaptor.forClass(AssetTransaction.class);
-        verify(assetTransactionRepository).save(captor.capture());
-        AssetTransaction saved = captor.getValue();
-        assertThat(saved.getOwnerUserId()).isEqualTo(9L);
-        assertThat(saved.getTransactionType()).isEqualTo("賣");
-        assertThat(saved.getAssetType()).isEqualTo("股票");
-        assertThat(saved.getAssetName()).isEqualTo("台積電");
-        assertThat(saved.getAssetCode()).isEqualTo("2330");
-        assertThat(saved.getMarket()).isEqualTo("台股");
-        assertThat(saved.getCurrency()).isEqualTo("TWD");
-        assertThat(saved.getChannel()).isEqualTo("富邦證券");
-        assertThat(saved.getTradeDate()).isEqualTo(TODAY);
-        assertThat(saved.getShares()).isEqualByComparingTo("3");
-        assertThat(saved.getPrice()).isEqualByComparingTo("12.345");
+        ArgumentCaptor<List<FubonTradeWriter.PreparedTrade>> captor = ArgumentCaptor.forClass(List.class);
+        verify(writer).insert(eq(9L), eq(3L), captor.capture());
+        FubonTradeWriter.PreparedTrade saved = captor.getValue().getFirst();
+        assertThat(saved.transactionType()).isEqualTo("賣");
+        assertThat(saved.stockName()).isEqualTo("台積電");
+        assertThat(saved.stockCode()).isEqualTo("2330");
+        assertThat(saved.tradeDate()).isEqualTo(TODAY);
+        assertThat(saved.shares()).isEqualByComparingTo("3");
+        assertThat(saved.price()).isEqualByComparingTo("12.345");
         // 12.345 * 3 = 37.035 -> HALF_UP scale 2 -> 37.04
-        assertThat(saved.getAmount()).isEqualByComparingTo("37.04");
-        assertThat(saved.getFee()).isNull();
-        assertThat(saved.getTransactionTax()).isNull();
-        assertThat(saved.getExchangeRate()).isNull();
-        assertThat(saved.getNotes()).isNull();
-        assertThat(saved.getSource()).isEqualTo("FUBON_SYNC");
-        assertThat(saved.getBrokerFilledNo()).isEqualTo("F004");
+        assertThat(saved.amount()).isEqualByComparingTo("37.04");
+        assertThat(saved.filledNo()).isEqualTo("F004");
     }
 
     @Test
@@ -382,34 +379,29 @@ class FubonTradeSyncServiceTest {
                 batch(trade("2330", "Buy", 1, "10", "10", "F005"))));
         when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
         when(assetTransactionRepository.existsByOwnerUserIdAndBrokerFilledNo(9L, "F005")).thenReturn(false);
-        when(assetTransactionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service.syncScheduledAfterCalendar(TODAY, false);
 
-        ArgumentCaptor<AssetTransaction> captor = ArgumentCaptor.forClass(AssetTransaction.class);
-        verify(assetTransactionRepository).save(captor.capture());
-        assertThat(captor.getValue().getTransactionType()).isEqualTo("買");
+        ArgumentCaptor<List<FubonTradeWriter.PreparedTrade>> captor = ArgumentCaptor.forClass(List.class);
+        verify(writer).insert(eq(9L), eq(3L), captor.capture());
+        assertThat(captor.getValue().getFirst().transactionType()).isEqualTo("買");
     }
 
     @Test
-    void unexpectedTradeSideThrowsInsteadOfSilentlyTreatingAsSell() {
+    void unexpectedTradeSideRejectsTheWholeBatchBeforeNameResolution() {
         readyConfigOnly();
         admin();
         activeBroker();
         when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
                 batch(trade("2330", "Short", 1, "10", "10", "F006"))));
-        when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
-        when(assetTransactionRepository.existsByOwnerUserIdAndBrokerFilledNo(9L, "F006")).thenReturn(false);
-
-        assertThatThrownBy(() -> service.syncScheduledAfterCalendar(TODAY, false))
-                .isInstanceOf(IllegalStateException.class);
-        verify(assetTransactionRepository, never()).save(any());
+        assertThat(service.syncScheduledAfterCalendar(TODAY, false).outcome()).isEqualTo(FubonTradeOutcome.TRADE_FAILED);
+        verifyNoInteractions(writer, assetTransactionRepository, stockMasterService);
     }
 
-    // ---- Unique-index race: caught, treated as already-exists, not thrown ---------------------
+    // ---- A committed writer result alone supplies the insert/duplicate counts ----------------
 
     @Test
-    void concurrentUniqueIndexRaceOnSaveIsTreatedAsAlreadyExisting() {
+    void committedDuplicateCountFromWriterIsAddedToTheResponse() {
         readyConfigOnly();
         admin();
         activeBroker();
@@ -417,14 +409,105 @@ class FubonTradeSyncServiceTest {
                 batch(trade("2330", "Buy", 1, "10", "10", "F007"))));
         when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
         when(assetTransactionRepository.existsByOwnerUserIdAndBrokerFilledNo(9L, "F007")).thenReturn(false);
-        when(assetTransactionRepository.save(any()))
-                .thenThrow(new DataIntegrityViolationException("unique violation"));
+        org.mockito.Mockito.doReturn(new FubonTradeWriter.CommitResult(0, 1)).when(writer).insert(eq(9L), eq(3L), any());
 
         FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.SUCCESS);
         assertThat(result.insertedCount()).isZero();
         assertThat(result.skippedExistingCount()).isEqualTo(1);
+    }
+
+    @ParameterizedTest @MethodSource("invalidBatches")
+    void invalidBatchNeverReachesNamesDuplicateReadsOrWriter(FubonDtos.TradeBatchResponse body) {
+        readyConfigOnly(); admin(); activeBroker();
+        when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(body));
+        var result = service.syncScheduledAfterCalendar(TODAY, false);
+        assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.TRADE_FAILED);
+        assertThat(result.insertedCount()).isZero();
+        verifyNoInteractions(stockMasterService, assetTransactionRepository, writer);
+    }
+
+    static Stream<FubonDtos.TradeBatchResponse> invalidBatches() {
+        String fp = "0123456789abcdef01234567";
+        var price = CanonicalFubonDecimal.parsePositive("12.345");
+        var first = new FubonDtos.FilledTrade("2330", "Buy", 3, price, price, TODAY, "09:00", "first");
+        List<FubonDtos.TradeBatchResponse> batches = new ArrayList<>(List.of(
+                new FubonDtos.TradeBatchResponse("batch", TODAY.minusDays(1), TODAY, fp, false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY.plusDays(1), fp, false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", null, TODAY, fp, false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, "wrong-fingerprint", false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, fp.toUpperCase(), false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch?", TODAY, TODAY, fp, false, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, fp, true, List.of(first)),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, fp, false, List.of()),
+                new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, fp, true, null)));
+        List<FubonDtos.FilledTrade> badRows = java.util.Arrays.asList(null,
+                new FubonDtos.FilledTrade("0000", "Buy", 3, price, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("bad code", "Buy", 3, price, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Short", 3, price, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 0, price, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 10_000_000_000L, price, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, null, price, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, null, TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, CanonicalFubonDecimal.parseNonNegative("0"), TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, price, TODAY.minusDays(1), "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, price, TODAY.plusDays(1), "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, price, TODAY, "09:00", ""),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, price, TODAY, "09:00", "x".repeat(51)),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, price, TODAY, "", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, CanonicalFubonDecimal.parsePositive("12.3450001"), TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 3, price, CanonicalFubonDecimal.parsePositive("100000000000"), TODAY, "09:00", "second"),
+                new FubonDtos.FilledTrade("0050", "Buy", 9_999_999_999L, price, CanonicalFubonDecimal.parsePositive("1000000000"), TODAY, "09:00", "second"));
+        badRows.forEach(row -> batches.add(new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, fp,
+                false, java.util.Arrays.asList(first, row))));
+        return batches.stream();
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"12.3450000000", "99999999999.999999"})
+    void exactlyRepresentablePriceRetainsItsNumericValue(String price) {
+        readyConfigOnly(); admin(); activeBroker();
+        when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
+                batch(trade("2330", "Buy", 1, price, price, "exact-price"))));
+        when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
+        assertThat(service.syncScheduledAfterCalendar(TODAY, false).outcome()).isEqualTo(FubonTradeOutcome.SUCCESS);
+        ArgumentCaptor<List<FubonTradeWriter.PreparedTrade>> captor = ArgumentCaptor.forClass(List.class);
+        verify(writer).insert(eq(9L), eq(3L), captor.capture());
+        assertThat(captor.getValue().getFirst().price()).isEqualByComparingTo(price);
+    }
+
+    @Test void unexpectedWriteFailureIsSanitizedAndNeverCountedAsDuplicateOrSuccess() {
+        readyConfigOnly(); admin(); activeBroker();
+        when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
+                batch(trade("2330", "Buy", 1, "10", "10", "failed"))));
+        when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("private-row-value"))
+                .when(writer).insert(any(), any(), any());
+        assertThatThrownBy(() -> service.syncScheduledAfterCalendar(TODAY, false))
+                .isInstanceOf(IllegalStateException.class).hasMessage("TRANSACTION_ROLLED_BACK").hasNoCause();
+        assertThat(counters.snapshot().get(FubonTradeOutcome.SUCCESS)).isZero();
+        assertThat(counters.snapshot().get(FubonTradeOutcome.ROLLED_BACK)).isEqualTo(1);
+    }
+
+    @Test void checkedBatchOwnsItsRowsInsteadOfSharingTheAdapterList() {
+        var rows = new ArrayList<>(List.of(trade("2330", "Buy", 1, "10", "10", "first")));
+        var batch = new FubonDtos.TradeBatchResponse("batch", TODAY, TODAY, "0123456789abcdef01234567", false, rows);
+        rows.clear();
+        assertThat(batch.trades()).hasSize(1);
+        assertThatThrownBy(() -> batch.trades().clear()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"", " ", "2330"})
+    void unusableLocalNameIsSkippedWithoutInventingANameOrOpeningAWriter(String name) {
+        readyConfigOnly(); admin(); activeBroker();
+        when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
+                batch(trade("2330", "Buy", 1, "10", "10", "unnamed"))));
+        when(stockMasterService.resolveNameLocalOnly("2330", "台股")).thenReturn(name);
+        var result = service.syncScheduledAfterCalendar(TODAY, false);
+        assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.SUCCESS);
+        assertThat(result.skippedNameUnresolvedCount()).isEqualTo(1);
+        assertThat(result.insertedCount()).isZero();
+        verifyNoInteractions(writer, assetTransactionRepository);
     }
 
     // ---- helpers --------------------------------------------------------------------------
@@ -441,7 +524,7 @@ class FubonTradeSyncServiceTest {
 
     private void activeBroker() {
         when(brokerRepository.findByCode("fubon")).thenReturn(Optional.of(
-                BrokerEntity.builder().code("fubon").active(true).build()));
+                BrokerEntity.builder().id(3L).code("fubon").active(true).build()));
     }
 
     private FubonConfigState.Snapshot config(FubonConfigState.State state) {
@@ -450,7 +533,7 @@ class FubonTradeSyncServiceTest {
     }
 
     private FubonDtos.TradeBatchResponse batch(FubonDtos.FilledTrade... trades) {
-        return new FubonDtos.TradeBatchResponse("batch-1", TODAY, TODAY, "fp", false, List.of(trades));
+        return new FubonDtos.TradeBatchResponse("batch-1", TODAY, TODAY, "0123456789abcdef01234567", false, List.of(trades));
     }
 
     private FubonDtos.FilledTrade trade(

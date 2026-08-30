@@ -197,7 +197,7 @@ class FubonInventorySyncServiceTest {
                 .role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build();
         AssetSnapshot snapshot = AssetSnapshot.builder().id(7L).ownerUserId(9L).snapshotDate(TODAY).build();
         when(userAdminService.configuredAdmin()).thenReturn(Optional.of(admin));
-        when(snapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L))
+        when(snapshotRepository.findLatestForFubonConfiguredOwner(9L))
                 .thenReturn(Optional.of(snapshot));
         when(brokerRepository.findByCode("fubon")).thenReturn(Optional.of(
                 BrokerEntity.builder().code("fubon").active(true).build()));
@@ -230,7 +230,7 @@ class FubonInventorySyncServiceTest {
         when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(true));
         AppUser admin = AppUser.builder().id(9L).role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build();
         when(userAdminService.configuredAdmin()).thenReturn(Optional.of(admin));
-        when(snapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L)).thenReturn(Optional.of(
+        when(snapshotRepository.findLatestForFubonConfiguredOwner(9L)).thenReturn(Optional.of(
                 AssetSnapshot.builder().id(7L).ownerUserId(9L).snapshotDate(TODAY).build()));
         when(brokerRepository.findByCode("fubon")).thenReturn(Optional.of(
                 BrokerEntity.builder().code("fubon").active(true).build()));
