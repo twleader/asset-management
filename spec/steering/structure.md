@@ -70,9 +70,16 @@ backend/
     │   │   └── WebConfig.java
     │   ├── controller/                        # REST endpoints（/api/{resource}）
     │   ├── service/                           # 領域邏輯
+    │   │   ├── marketdata/                    # InternalMarketDataPort；只宣告既有六種 internal 能力
+    │   │   ├── fubon/                         # secretless readiness／calendar／name／write／lock ports；owner policy
+    │   │   │   └── reports/                   # Task406規劃：來源報表讀寫編排／typed DTO與窄read/write ports
     │   │   └── export/                        # 匯出中介模型 ExportDoc ＋ 兩個 renderer ＋ 雙檔落地（Req 55）
+    │   ├── integration/marketdata/            # 外層 internal WebClient adapter（不連 vendor）
+    │   ├── integration/fubon/                 # 原broker HTTP／config；owner-directory與report持久化adapter
     │   ├── repository/                        # Spring Data JPA repo
-    │   ├── model/                             # JPA Entity + Embedded ID
+    │   ├── model/                             # JPA Entity + Embedded ID；中立值與 entity 分離
+    │   │   ├── marketdata/                    # MarketDataResults／ETF 純分類；不依 HTTP／concrete service
+    │   │   └── fubon/                         # Task406規劃：report header＋兩種typed row Entity，非原財務帳
     │   └── dto/                               # Java records（request/response）
     └── resources/
         ├── application.yml
@@ -88,6 +95,22 @@ backend/
 | **Repository** | Spring Data JPA 查詢 | 不寫業務邏輯 |
 | **Model（Entity）** | 資料表映射、JPA 註解、`@Enumerated(EnumType.STRING)` | 不寫業務邏輯（可放 helper getter） |
 | **DTO** | Java `record`（不可變），request/response transport | 不放 JPA 註解、不持有 entity 參照 |
+
+### Tasks404：富邦與 internal market-data 的 IO 邊界
+
+MarketDataService 的規則、cache、ETF 台股純 DB 讀取保留在 service；六個既有 internal HTTP operation 由 InternalMarketDataPort 隔離，ExternalMaterialsMarketDataClient 負責 WebClient/base URL/codec/deadline。這不是通用代理：quote-detail 2秒、其餘讀取20秒、既有 closure-detect POST20秒，禁止請求端供任意URL。五個市場結果 record 移到中立 MarketDataResults，HTTP shape不變；不可讓port回傳concrete service/client內的nested DTO。
+
+Fubon core只依secretless readiness、單一known-calendar與真正使用的local-name/upsert ports；FubonConfigState仍在外層lazy讀檔，含token Snapshot只給HTTPclient/filter，不進core。calendar委派既有MarketDataService維持同義值權威；StockMaster原proxy維持transaction/afterCommit歷史回補。純ETF分類與snapshot aggregate不為形式新增interface。固定帳務owner與fresh directory由獨立owner工作單元統一，不複製第二套選人規則。
+
+ETF snapshot的單方法write port由原REQUIRES_NEW writer實作，回傳前已commit；庫存／銀行的單方法snapshot-lock port由原MANDATORY row-lock adapter實作，第一個DB operation與其他CRUD鎖序不變。所有新port回中立值或原真正domain entity，不回HTTPclient/private nested DTO；不替純業務流程或counter增空介面。
+
+### Tasks405／406：私人來源報表的邊界（規劃新增）
+
+FubonSyncOwnerPolicy只依小型config/directory ports，固定專用設定的既存ACTIVE ADMIN且與configured admin相同才可寫；禁止hardcode私人email、fallback選人或建立user。writer依target snapshot→fresh owner或owner→report/header的明定鎖序，使用fresh不可變projection，不能從OSIV舊AppUser取得授權。只有部署FUBON_SYNC_OWNER_EMAIL可以精確新增，原flags/秘密不改。行情／ETF／股利不套此個人policy。
+
+business是唯一來源報表writer與reader。Task406規劃三表 fubon_accounting_report／fubon_settlement_report_row／fubon_realized_report_row，每owner/kind只保存最新成功的typed observation，沒有raw JSON／token／account／email／fingerprint、沒有財務ledger副本。日期LocalDate、觀測Instant（同accounting capture臨界區固定的無損微秒，鎖外normalization不得重取時間）、金額價格BigDecimal；JSON decimal才是canonical plain string。獨立REQUIRES_NEW writer整批替換，readOnly REQUIRES_NEW REPEATABLE_READ reader在同一MVCC snapshot組DTO；所有SQL顯式owner、名稱僅bulk local-only、不vendor查字。
+
+新business GET /api/brokers/fubon/accounting-reports只讓dedicated ACTIVE owner本人讀，不要求Fubon啟用或ADMIN_EMAIL仍同人，其他ADMIN不可讀。不寫原snapshot/deposit/holding/transaction/realized_gain，不提供一般報表CRUD或自動入帳。這三表目前是待實作規劃，migration完成後才由92變95，不把原394/395入帳目標標完成。
 
 ### 2.3 命名慣例
 
@@ -153,6 +176,8 @@ bff/src/main/java/com/steven/assets/bff/
 ├── gdptwse/                      # → GdpTwseView
 ├── fund/                         # → FundSettingsView
 ├── marketdata/                   # /api/bff/market-data/* passthrough + SSE
+├── fubonapi/                     # FubonApiInfoService 常數目錄/純篩選，controller 只委派
+├── fubonaccountingreports/       # Task406規劃：本人報表頁service／guard／internal client／DTO
 ├── settings/                     # 共用 settings utility
 ├── banksettings/                 # → BankSettingsView（純 passthrough）
 ├── brokersettings/               # → BrokerSettingsView
@@ -162,6 +187,10 @@ bff/src/main/java/com/steven/assets/bff/
 ├── backuprestore/                # → BackupRestoreView
 └── backup/                       # 備份相關共用
 ```
+
+富邦API目錄沿既有authenticated GET /api/bff/fubon-api，service接受connected/category/keyword可選篩選、回相同DTO array與順序，無參數52列；Vue只render並取消過期請求，不自行filter。httpEndpoint有值即可顯示，安全預檢與完整串接不同；沒有broker試打按鈕。BFF完整book必與raw quote同stockCode/market；唯一FubonBridgeQuote typed tradingDate為LocalDate，raw19欄仍維持原ISO String/JSON。
+
+Task406的 /fubon-accounting-reports 是獨立私人頁，導覽放既有資產／交易群組尾端，保留所有舊route/icon；GET /api/bff/fubon-accounting-reports只委派本頁service，再透過有界10秒/16MiB internal adapter讀business。service先比對可信OIDC principal actual id與Reactor effective tenant id，不相等或缺失即403／零business report request；不修改global TenantIdentity或其他頁代看，不讓另一ADMIN藉代看讀取。DTO只有來源報表，沒有owner/email/account，frontend只render且取消舊請求，無同步／編輯／匯出操作。fubonapi目錄不能依賴這個client或讀任何私人報表；兩份報表完整驗收後才把靜態盤點從52/15/37改為52/17/35並標明不自動入帳。
 
 ### 3.2 BFF 設計鐵則
 
@@ -315,10 +344,11 @@ bff/src/main/java/com/steven/assets/bff/
 ```
 external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 ├── config/             # WebClient、Redis 連線
-├── model/              # DividendDates（錨定日 `min(除息日, 除權日)` 純算術，client 與 service 共用；見 §3.2 鐵則 4 具名例外之五）
+├── model/              # DividendDates 純算術；marketdata/ 放中立 quote/book/dividend/index/canonical DTO
 ├── client/             # PriceFetchClient、TwseInfoFetchClient、DividendFetchClient、ExchangeRateFetchClient、MacroDataFetchClient、NewsFetchClient、BotFxFetchClient、YahooFxFetchClient、FundNavFetchClient、FundDividendFetchClient
 ├── service/
-│   ├── PricePoller            # 2 分鐘 cron：抓 live 寫 Redis
+│   ├── port/                  # 既有行情、radar、canonical store/cache、calendar/evidence 的窄介面
+│   ├── PricePoller            # 原市場排程／台股十秒 dispatcher；只透過窄 ports
 │   ├── ClosePersister         # 收盤 cron：寫 stock_price_history
 │   ├── MarketClock            # isTwMarketOpen / isUsMarketOpen
 │   ├── PriceCacheWriter       # 寫 Redis（封裝 key schema）
@@ -370,6 +400,14 @@ external-materials-service/src/main/java/com/steven/assets/externalmaterials/
 
 ---
 
+### Task402：external IO adapter 與生命週期
+
+核心response/book reader、index ingestion/poller、dispatcher/poller、book writers、dividend sync與radar/calendar只依所需窄ports；現有PriceFetchClient、StockSourceQuery、PriceCacheWriter、canonical stores/caches直接實作，不新增第二套SQL/Redis writer。quote/batch/book/canonical/dividend/dayquote值及pure validity helpers向內搬，不以interface包裝後仍回傳concrete adapter nested records。相同值只保留一份，各named price writer不合成泛用寫入器；legacy deprecated provider不重新接回production。
+
+technical沿既有FubonMarketDataPort／FubonTechnicalCachePort，Attempt/Group/Document/Read/Write與manifest屬中立值；outer Redis codec承擔JSON/persisted-format/canonical-hash，core不import client.FubonMarketJson，不為純codec另造IO介面。v1 bytes/hash/CAS/期限維持相容。
+
+Java index與stock SSE各持自己的run/cancel/open/body/worker；只共用純16KiB UTF-8 line/frame reader與有限transport helper。headers10秒/connect5秒，成功SSE無整段壽命timeout；舊run只能清自己的資源。normalized HTTP在讀取中封頂2MiB與30秒總deadline。index repair只保留最高committed canonical/generation/needsRepair單一state，舊completion不得清新state；canonical返回前必已commit，Redis一律使用DB回傳值。GET仍僅cache candidate→DB驗證，不repair、不外呼。
+
 ### 4.4 Docker 外部 API Gateway `api-gateway/`
 
 `api-gateway` 是獨立、非 root、deny-by-default 的 Nginx image，host 唯一 mapping 為
@@ -384,26 +422,36 @@ OpenAPI 3 契約機械對齊；Swagger 文件須由該 YAML 重產並在每次 9
 
 ### 4.5 Fubon Broker Service `fubon-broker-service/`
 
-```
+```text
 fubon-broker-service/
-├── Dockerfile                 # Python 3.13 multi-stage；runtime platform linux/amd64
-├── .dockerignore              # 排除 SDK 安裝媒介與 secrets
-├── requirements.txt           # exact-pinned runtime dependencies
+├── Dockerfile                 # Python3.13；runtime linux/amd64
+├── requirements.txt           # exact-pinned dependencies
 ├── src/fubon_broker_service/
-│   ├── app.py                 # exact internal routes；關閉 docs/redoc/openapi
-│   ├── config.py              # mounted-file config state（lazy、fail closed）
-│   ├── security.py            # internal token constant-time verify＋redaction
-│   ├── sdk_gateway.py         # login/accounting/init_realtime/session lifecycle
-│   ├── taiex_index_stream.py  # official indices WS → in-memory normalized internal SSE fan-out
-│   └── models.py              # normalized decimal-string wire DTO
-└── tests/                     # fake SDK/adapter；永不需要真實憑證
+│   ├── app.py                 # FastAPI HTTP/組裝層；十四條既有internal routes，docs/openapi關閉
+│   ├── config.py              # lazy mounted-file config；不把secret傳core
+│   ├── redaction.py           # secret／raw identity消毒
+│   ├── ports.py               # Task401：每個consumer所需的窄唯讀Protocol
+│   ├── captures.py            # Task401：中立capture；raw/token/account不進repr
+│   ├── request_context.py     # Task401：monotonic deadline＋不可復活cancel
+│   ├── request_contract.py    # Task401：64KiB與各路由strict parser，無ASGI/SDK依賴
+│   ├── sdk_gateway.py         # 最外層SDK/session/native slots/quota；實作Protocol
+│   ├── normalization.py       # 純日期／身分／欄位轉換
+│   ├── numeric.py             # canonical decimal與exact integer
+│   ├── accounting_normalization.py # 同次來源身分與日期先驗
+│   ├── portfolio.py / trades.py / bank_balance.py / settlement.py / realized_gain.py
+│   ├── quotes.py / etf_holdings.py / dividends.py / technical_indicators.py
+│   └── taiex_index_stream.py / stock_push_stream.py / stock_push_events.py
+└── tests/                     # fake SDK；不需要真人憑證
 ```
 
-- proprietary SDK 只存在這個 Python service；Spring modules 經 `X-Internal-Service-Token` 主動 pull normalized internal API，不直接 import SDK。允許的 internal surface 是 health/config、portfolio dry-read、台股 intraday quote，以及 Requirement 116 唯一的 `GET /internal/market-data/taiex-index/stream`：後者是 external-materials 主動建立的 token-protected SSE GET，adapter 只在已建立 response 裡 fan-out normalized index data，絕不是 reverse call。
-- **券商 API 下單絕對禁令：**服務唯讀，只允許 health/config、portfolio dry-read、台股 intraday quote 和上述 normalized index SSE；不得透過 SDK、HTTP、internal route、排程或腳本建立、送出、買入、賣出、改單、撤單或重送委託，也不得 import、包裝、暴露或間接觸發 order APIs。此禁令不因 internal token、角色、feature flag 或 `dryRun` 值而有例外；憑證必須可驗證為唯讀，否則服務維持 disabled/fail closed。服務不連 PostgreSQL／Redis、不反向呼叫任何 Spring service。
-- Compose 固定 `platform: linux/amd64`、無 host port、只接 `asset-net`、non-root/read-only/tmpfs/drop capabilities。官方 zip/wheel 安裝媒介不入 Git/build context/final image；hash 驗證後安裝的 runtime package可存在final image。
-- `secrets/fubon/sdk/` 只掛Python；Java services只可掛`secrets/fubon/shared/`。disabled或misconfigured時process/service仍healthy，functional feature回typed failure、零外呼/零寫入。
-- business-services 是庫存 persistence與tenant/transaction owner；external-materials-service是Redis live quote唯一writer。Python不得跨越這兩個責任邊界。
+Task401的新增中立檔名可採等價內層命名，但依賴方向與責任不可合併回concrete SDK。Service只依窄Protocol；只有app與outer adapter知道SdkGateway。capture／exception／pure raw helper中立化，raw帳戶、token、payload不repr、不跨adapter。Python不連PostgreSQL/Redis、不反向呼叫Spring，也不取得資產writer。
+
+- 十四條既有internal surface：GET health/config、POST portfolio/trades/bank-balance/settlement/realized-gains read、POST tw-quotes/etf-holdings/dividends/technical-indicators、GET indices SSE、POST stock subscriptions、GET stock SSE。除了health外維持既有internal-token/config gate；不增加host/public path或通用proxy。
+- 所有SDK用途僅帳務／成交紀錄／行情唯讀與市場訂閱，不import或封裝order／改撤單／轉帳／圈存；憑證無可驗證唯讀能力則disabled/fail closed。市場client與session只在官方初始化成功後使用。
+- 每個query有同一deadline/cancel，最多4個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。技術90秒batch、2worker、3.1秒間距、25秒symbol與30分鐘整輪維持。
+- indices與stock各run有不可復活cancel及自己的connection/worker/subscription。晚connect不得subscribe，舊callback/finally不影響新run；ASGI不等同步symbol驗證，connect5秒/cleanup2秒有界，native未結束持續計容量。
+- Compose維持linux/amd64、無host port、asset-net、non-root/read-only/tmpfs/drop capabilities。SDK安裝媒介／secret不入Git/build context；hash驗證後runtime package可在image。只有Python可掛SDKsecret，Java只掛shared token目錄。
+- business-services擁有帳務owner/transaction；external-materials擁有market DB/Redis唯一writer。Task405使五種accounting normalized batch都有strict boolean accountBindingExplicit，同批selector/selected/raw一致才true；缺欄或false只能純讀、不得寫個人資料，raw仍不跨Python。Task406將合法交割/損益保存成本人來源報表，Python不持久化；原394/395在途款／realized_gain入帳仍未完成，不因報表保存解除其no-write。
 
 ### 4.6 Yuanta Broker Service `yuanta-broker-service/`（scaffold，尚待官方帳號啟用）
 

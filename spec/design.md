@@ -10488,10 +10488,12 @@ new ScheduledJobDto(BUSINESS, "券商庫存", "富邦台股成交紀錄同步",
 「系統資訊」分組第三個頁面自最初版本擴大範圍：不只列出本系統已串接的富邦 API，還盤點富邦官方 SDK（`fubon_neo` 2.2.9，Docker 內以 hash-verified wheel 安裝於 `fubon-broker-service` 容器）目前已驗證存在、且**確認為唯讀查詢**的所有方法，並標示每一筆是否已被本系統串接。資料模式仍是 BFF 內建**人工維護的靜態清單**（比照「排程列表」，而非「開放 API」頁的動態解析——`fubon-broker-service` 本身停用 Swagger/OpenAPI 且無 host port，沒有可解析的契約檔）。
 
 ```text
-FubonApiInfoBffController（程式碼常數清單，52 筆：目前ETF基線9已串接/43未串接；本階段完成後15/37；含394/395的原完整目標17/35）
+FubonApiInfoService（人工維護常數與純篩選；52 筆，基線15已串接／37未串接）
+                 ▲ controller 僅委派 query DTO
+FubonApiInfoBffController
                  │ GET /api/bff/fubon-api（既有 authenticated 保護）
                  ▼
-frontend bffApi.fubonApi.get() → FubonApiView（表格 + type="expand" 展開明細）
+frontend bffApi.fubonApi.get(params, { signal }) → FubonApiView（表格 + type="expand" 展開明細）
 ```
 
 ### 盤點方法與可查證性基準
@@ -10521,11 +10523,11 @@ public record FubonApiInfoDto(
 }
 ```
 
-`FubonApiInfoBffController` 僅有單一 `GET` 端點（類層級 `@RequestMapping("/api/bff/fubon-api")` ＋ 無路徑 `@GetMapping`，比照既有 `SchedulePublicBffController`），回傳內建 `List<FubonApiInfoDto>` 常數，不注入任何 Repository、Service、WebClient，也不在 runtime import 或呼叫富邦 SDK——清單內容是建置當下人工盤點的**靜態快照**，不是即時探測結果。`sdkReference` 對已串接與未串接的項目都必填（是唯一保證「這筆資料確實對應到一個真實存在的 SDK 方法」的欄位）；`httpEndpoint` 只有 `connected=true` 才填值，`connected=false` 一律為空字串，不得虛構本系統尚未實作的 HTTP 路徑。
+`FubonApiInfoBffController` 僅保留單一 authenticated `GET /api/bff/fubon-api`，將輸入轉成不依賴 Web framework 的 query DTO 後委派 `FubonApiInfoService`。service 持有 `List<FubonApiInfoDto>` 常數並作純記憶體篩選，不注入 Repository、WebClient、DB、Redis 或 broker client，也不 runtime import／呼叫 SDK。這是建置時人工盤點的**靜態快照**，不是即時探測結果。Task403 取代原先 controller 直接回常數及前端自行篩選的責任配置。`sdkReference` 對已串接與未串接的項目都必填（是唯一保證「這筆資料確實對應到一個真實存在的 SDK 方法」的欄位）；`httpEndpoint` 表示實際存在的 adapter 入口；沒有入口才是空字串，已存在但只完成安全預檢的入口可在 connected=false 時顯示，並在 consumer／description 明示仍未完成財務寫入。connected 只在完整預定系統流程實作並驗收後才為 true，不以有 endpoint 或 parser 為準。
 
-### 清單分類與筆數（總計52；目前ETF基線9/43，本階段完成後15/37，原完整目標17/35）
+### 清單分類與筆數（總計52；本輪重構基線15/37，原完整目標17/35）
 
-下表「完整目標已串接」是原完整目標的分類規劃，不是目前實作宣告。目前controller維持ETF基線9/43；本階段其他五項完成後為15/37，帳戶類已串接3項；394/395維持未串接，待來源證據與writer驗收完成後才達下表帳戶5項及總17/35。
+下表「完整目標已串接」是分類規劃，不是目前實作宣告。架構基線為15/37，帳戶類已串接3項；Task403單獨不改connected值。Task406 兩份官方來源報表完成保存、本人純讀與UI驗收後，才達下表帳戶5項及總17/35；原394/395在途款／realized_gain入帳仍未完成。目錄只寫「僅限已設定的專用同步帳戶、來源報表同步、不自動入帳」，不包含私人email或任何帳務內容。
 
 | category | 筆數 | 完整目標已串接 | 說明 |
 |---|---|---|---|
@@ -10537,19 +10539,31 @@ public record FubonApiInfoDto(
 | 行情查詢 | 20 | 7 | `sdk.marketdata.rest_client.stock.*`；已串接 `intraday.quote`（經 `POST /internal/market-data/tw-quotes`）與 `intraday.tickers`（`sdk_gateway.verify_taiex_index_symbol()` 於大盤指數串流啟動時內部呼叫，核對設定指數代碼是否有效，非獨立對外 endpoint，經 `GET /internal/market-data/taiex-index/stream`）；另加ETF holdings、dividends與KDJ/MACD/BB三項，各按對應adapter route |
 | 即時推播 | 2 | 2 | 大盤indices與個股aggregates各自SSE；個股另有subscriptions輔助控制入口 |
 
-完整 52 筆逐筆內容（`sdkReference`／`httpEndpoint`／`requestSummary`／`responseSummary` 全文）已依此分類與筆數，完整收錄於自足任務檔 `spec/tasks/t386_fubon_api_documentation_view.md`（386.2 節的 Java 常數區塊），不在此重複——task 檔是實作時的唯一權威來源，本節只描述架構與分類統計。**該區塊不是凍結的歷史快照，日後任一筆 `connected` 狀態變動（如 Requirement 123／Task 390 把 `ownership.etf_holdings` 改為已串接）都必須回頭同步改寫 386.2 節本身，讓它持續與 controller 現況一致**，而不是留著過期內容、另在他處加註「現況已不同」。 本輪新增 source/schema 依 Requirements128–133 與各 task 的官方契約，能力通過驗收才同步 controller、測試與 t386.2；不得提前把未完成的財務 writer 標為已串接。
+完整 52 筆逐筆內容（`sdkReference`／`httpEndpoint`／`requestSummary`／`responseSummary` 全文）已依此分類與筆數，完整收錄於自足任務檔 `spec/tasks/t386_fubon_api_documentation_view.md`（386.2 節的 Java 常數區塊），不在此重複——task 檔是實作時的唯一權威來源，本節只描述架構與分類統計。**該區塊不是凍結的歷史快照，日後任一筆 `connected` 狀態變動（如 Requirement 123／Task 390 把 `ownership.etf_holdings` 改為已串接）都必須回頭同步改寫 386.2 節本身，讓它持續與本頁 service 清單一致**，而不是留著過期內容、另在他處加註「現況已不同」。 本輪新增 source/schema 依 Requirements128–133 與各 task 的官方契約，能力通過驗收才同步本頁 service、測試與 t386.2；不得提前把未完成的財務 writer 標為已串接。
+
+### Task403：查詢參數與頁面請求狀態
+
+| 參數 | 型別與比對 | 無效值 |
+|---|---|---|
+| `connected` | 可省略；精確小寫 `true`／`false` | 空字串、數字、大小寫變體皆 400 |
+| `category` | 可省略；七分類精確字串 | 未知值或空字串回空陣列 |
+| `keyword` | strip 頭尾空白，至多 200 Unicode code points；Locale.ROOT lowercase 後在 name／description／category／sdkReference 作 substring | 超長 400；空白視為省略 |
+
+多條件 AND，保留常數清單相對順序；重複與未知參數 400，controller 只作 query DTO 轉換，不自行解釋商業篩選。未帶參數維持同一 52-row JSON array 及九個原 DTO 欄位，無新 wrapper／分頁／個資，七分類順序不變。本頁 service 可由純 Java 單元測試使用，不啟動 Spring 或任何下游。
+
+Vue 不再用 computed/filter 執行目錄搜尋。每次選項／關鍵字改變發本頁 BFF GET，以 AbortController 取消前次、再用遞增 request generation 防止已完成但晚送達的 response／finally 覆寫新 rows／loading／error；卸載也使 generation 失效。只對本頁 axios 呼叫傳既有 `skipErrorToast:true`，取消不報錯，由 view 呈現最新有效 error；全域 401 登入及 403 待核准行為不改。row key 以 sdkReference／實際 endpoint 組成，不使用篩選後 index。既有 requestSummary／responseSummary 全文、唯讀提示、route／icon／權限維持。
 
 ### 前端呈現
 
 `FubonApiView.vue` 沿用既有骨架，新增：
 - 「已串接」欄位（`el-tag`：`connected=true` 顯示成功色「已串接」、`false` 顯示 info 色「未串接」），可依此篩選。
-- `el-table-column type="expand"`（比照既有 `TradingRadarView.vue` 展開列模式），展開內容顯示 `sdkReference`、`httpEndpoint`（若有）、完整 `requestSummary`／`responseSummary`。
+- `el-table-column type="expand"`（比照既有 `TradingRadarView.vue` 展開列模式），展開內容顯示 `sdkReference`、`httpEndpoint`（有非空值即顯示，與 connected 無關）、完整 `requestSummary`／`responseSummary`。
 - `el-alert` 唯讀提醒文字追加「未串接」定位說明，避免使用者誤解為「可透過本系統呼叫」。
 - 分類篩選改為對應上表 7 類（選項較多，改用 `el-select` 而非 `el-radio-group`，避免單列 7 顆按鈕換行擁擠）。
 
-頁面仍不提供任何可觸發實際請求的互動元件（無「試打 API」、無 curl 產生器），未串接項目的存在本身即是本次擴充的核心訴求（讓使用者看到 SDK 還有什麼查詢能力），但呈現上必須與「可下單」徹底切割。
+頁面仍不提供任何可觸發券商呼叫或業務同步的互動元件（無「試打 API」、無 curl 產生器），未串接項目的存在本身即是本次擴充的核心訴求（讓使用者看到 SDK 還有什麼查詢能力），但呈現上必須與「可下單」徹底切割。
 
-維護提醒：`fubon-broker-service/src/fubon_broker_service/app.py` 新增、刪除或修改對外 endpoint，或 `FUBON_SDK_URL`／wheel 版本升級改變 `sdk.accounting`／`sdk.stock`／`sdk.marketdata` 命名空間方法時，必須重新以本節「盤點方法」的內省步驟核對並更新 `FubonApiInfoBffController` 的靜態清單；controller 內以 Javadoc 明確標註此提醒。
+維護提醒：`fubon-broker-service/src/fubon_broker_service/app.py` 新增、刪除或修改對外 endpoint，或 `FUBON_SDK_URL`／wheel 版本升級改變 `sdk.accounting`／`sdk.stock`／`sdk.marketdata` 命名空間方法時，必須重新以本節「盤點方法」的內省步驟核對並更新 `FubonApiInfoService` 的靜態清單；service 內以 Javadoc 明確標註此提醒。
 
 ---
 
@@ -10613,23 +10627,23 @@ scheduler/manual → feature/config/owner preflight（NOT_SUPPORTED）
 
 bank balance/availableBalance是非負官方整數（或官方整數字串），0有效；只balance→amount。新證券戶currency=TWD/originalAmount=null；既有非TWD目標拒絕。amount最後HALF_UP scale2並驗numeric(20,2)的18位整數容量，aggregate亦同；availableBalance不落地，既有notes/rate保留。
 
-### 本階段可實作範圍與未放行財務writer
+### 原財務入帳待核實，來源報表另有正常保存契約
 
-Task393、Task385日期/节拍修復、Task396–398可在各自spec獨立審查後實作正常功能。Task394/395僅放行現有不安全半成品的adapter/token/嚴格解析/preflight/no-write修復；既有財務writer不得被scheduler/manual/dry-run觸及，不因某flag、常數或fake fixture放行。下面394/395 writer設計是未來待核實要求，**不是已獲准實作契約**；原功能目標保留且兩任務未完成。
+Task393、Task385日期／節拍修復、Task396–398及安全預檢已落地，Task399／400亦不重做。Task405固定個人資料owner；Task406另以三張typed來源報表表保存官方實際提供的交割／損益資料，合法來源可正常保存。以下394/395「更新在途款／新增realized_gain」writer仍是未來待核實要求，**不是本輪獲准的財務入帳契約**；這兩個原目標未完成，source-report writer不能觸及它們。
 
-394缺可由程式判定的3d未交割完整範圍、產品範圍/產製與空值語意；目前`coverageStatus=UNVERIFIED`及`MISSING_SETTLEMENT_RANGE_CONTRACT`，service回SETTLEMENT_SCOPE_UNVERIFIED。395已核實來源netGain含費稅，但仍缺realized.date與filledDate/filled_no聯結、逐筆net proceeds/取得成本；缺身分即IDENTITY_UNVERIFIED，不以可變ledger補證。兩項均零writer呼叫、零寫鎖，connected=false；來源補齐並經新一輪独立spec審查才准writer測試/實作。證據清單詳兩任務檔，fake只可驗實作而非來源事實。
+394缺可由程式判定的3d未交割完整範圍、產品範圍/產製與空值語意；目前`coverageStatus=UNVERIFIED`及`MISSING_SETTLEMENT_RANGE_CONTRACT`，service回SETTLEMENT_SCOPE_UNVERIFIED。395已核實來源netGain含費稅，但仍缺realized.date與filledDate/filled_no聯結、逐筆net proceeds/取得成本；缺身分即IDENTITY_UNVERIFIED，不以可變ledger補證。兩項原財務入帳均零 snapshot/gain writer 呼叫、零相關寫鎖；來源補齊且另經審查才准原財務writer測試／實作。Task406來源報表使用獨立writer，完整驗收後catalog可標該查詢能力已串接，但不能宣稱原入帳完成。證據清單詳兩任務檔，fake只可驗實作而非來源事實。
 
 ### 交割來源日期、完整性與符號
 
-官方details.date是多日「查詢日」，保留sourceQueryDate，不能要求每列都等於本地queryDate或改叫tradeDate；可早於但不得晚於queryDate。settlementDate必来自來源且>=sourceQueryDate。全optional欄位None為官方NO_DATA_OBSERVED佔位，不是0元；部分None錯誤。一般列所有金額為signed exact integer、currency=TWD，buySettlement<=0、sellSettlement>=0，兩者相加必與totalSettlementAmount一致，不另外加費稅。重複(date,settlementDate)或無可信識別的同交割日多列整批AMBIGUOUS_SETTLEMENT。
+官方details.date是多日「查詢日」，保留sourceQueryDate，不能要求每列都等於本地queryDate或改叫tradeDate；可早於但不得晚於queryDate。settlementDate必来自來源且>=sourceQueryDate。全optional欄位None為官方NO_DATA_OBSERVED佔位，不是0元；部分None錯誤。一般列所有金額為signed exact integer、currency=TWD，buySettlement<=0、sellSettlement>=0，兩者相加必與totalSettlementAmount一致，不另外加費稅。原財務投影對重複(date,settlementDate)或無可信識別的同交割日多列為AMBIGUOUS_SETTLEMENT；Task406來源報表則保留所有合法列與重複數量，不把顯示列當事件ID。
 
-只把settlementDate>queryDate列視為來源明示的未來候選；過去不算，同日非零因銀行入帳狀態未知整批拒絕，不臆測幾點已扣款。覆寫兩列還須有官方契約/可重現去識別證據核实完整未來交割區間；3d字面本身不足，缺此證據回SETTLEMENT_SCOPE_UNVERIFIED/no-write。完整性不是來源新增字段；目前沒有VERIFIED生成算法，只有UNVERIFIED與具體缺少契約的reason。不能以「未來有人核實」泛稱已實作的判定，也不可硬編true。裸空陣列或單一佔位不可清零；有明确完整零值的有效來源才可寫零。
+原在途款財務投影只把settlementDate>queryDate列視為來源明示的未來候選；過去不算，同日非零因銀行入帳狀態未知而拒絕該財務投影，不臆測幾點已扣款。覆寫兩列還須有官方契約/可重現去識別證據核实完整未來交割區間；3d字面本身不足，缺此證據回SETTLEMENT_SCOPE_UNVERIFIED/no-write。完整性不是來源新增字段；目前沒有VERIFIED生成算法，只有UNVERIFIED與具體缺少契約的reason。不能以「未來有人核實」泛稱已實作的判定，也不可硬編true。裸空陣列或單一佔位不可清零；有明确完整零值的有效來源才可寫零。
 
 可寫時payableAmount=Σ未來buySettlement（非正）、receivableAmount=Σ未來sellSettlement（非負）。存入最新快照台北富邦銀行的買股待付款／賣股待收款，兩者currency都TRANSIT_TWD；既有一般TWD同名目標不能偷偷改造成在途。sum後才scale2/precision20，兩列與aggregate同transaction；有符號amount符合既有AssetService/Calculator語意。
 
 ### 已實現損益的來源缺口與待核實寫入要求
 
-官方order_type為必填、只收Stock/Sell；date保留sourceDate且不未來。price正、qty exact integer、profit/loss非負可皆零。[Go官方RealizedPnLDetail](https://www.fbs.com.tw/TradeAPI/docs/trading/library/go/accountManagement/RealizedPnLDetail/)說明每成交一筆、profit/loss不共存、P&L含手續費及交易稅；故兩者同時非零拒絕。這仍未提供Python來源的fill id、逐筆淨收款/成本或資料日到實際成交日的聯結。
+官方order_type為必填；原財務入帳目標只收Stock/Sell，而Task406來源報表保留官方Buy/Sell與Stock/Margin/Short/DayTrade/SBL。date保留sourceDate且不未來。price正、qty exact integer、profit/loss非負可皆零。[Go官方RealizedPnLDetail](https://www.fbs.com.tw/TradeAPI/docs/trading/library/go/accountManagement/RealizedPnLDetail/)說明每成交一筆、profit/loss不共存、P&L含手續費及交易稅；故兩者同時非零拒絕。這仍未提供Python來源的fill id、逐筆淨收款/成本或資料日到實際成交日的聯結。
 
 原FUBON_SYNC ledger非不可變證據：AssetTransactionService.updateAssetTransaction可以修改tradeDate/code/shares/price/amount/fee/tax，同時保留source/brokerFilledNo。它只能依owner/台股/富邦證券/股票/賣搜尋候選，唯一候選不構成身分核實；不能改ledger使配對成立。需來源契約/完整可信同次資料建立一對一date/filledNo/量價證據，無資料或歧義全批IDENTITY_UNVERIFIED/AMBIGUOUS_IDENTITY。
 
@@ -10641,7 +10655,7 @@ realized_gain沒有經濟事件unique，候選作用域必包含owner/market=台
 
 ### 手動入口與 API inventory
 
-business-only POST `/internal/brokers/fubon/bank-balance-sync`、`/settlement-sync`、`/realized-gain-sync` 各自獨立exact-path constant-time token filter，dryRun預設true，controller只委派。只回outcome/reason/計數與適用的成功金額，不回raw account/fingerprint/明細；noBFF/nofrontend/no9090。API inventory的httpEndpoint一律是本節adapter read路徑，Java手動入口放consumer，不混用兩個層級。394/395未具正常財務同步路徑時connected=false，不以parser已完成升級。no-write/partial原因與正常成功分開，不把HTTP200、disabled或舊測試pass冒充資料已更新。
+business-only POST `/internal/brokers/fubon/bank-balance-sync`、`/settlement-sync`、`/realized-gain-sync` 各自獨立exact-path constant-time token filter，dryRun預設true，controller只委派。只回outcome/reason/計數與適用的成功金額，不回raw account/fingerprint/明細；noBFF/nofrontend/no9090。API inventory的httpEndpoint一律是本節adapter read路徑，Java手動入口放consumer，不混用兩個層級。Task406來源報表完整保存／本人純讀／UI驗收前connected=false，不以parser已完成升級；驗收後說明來源報表已串接、不自動財務入帳。no-write/partial原因與正常成功分開，不把HTTP200、disabled或舊測試pass冒充資料已更新。
 
 ## Requirement 131／Task 396：股利日期批次、雷達交集與既有證據
 
@@ -10693,8 +10707,270 @@ POST `/internal/technical-indicators/fubon-sync?dryRun=true|false`在external、
 
 Task385成交改09:00–14:00半小時共11輪、最後14:00，不含14:30；原inventory09:05/09:35不改。六個新job：bank/settlement/realized屬BUSINESS/券商庫存，dividends屬EXTERNAL/股利，stock-push/technical屬EXTERNAL既有行情分類；cron/文字/測試同時更新，stock-push描述持續串流及30秒reconciliation而非假cron。
 
-先合入ETF session的集成基線為58jobs=24business+34external，本輪加3+3後64=27+37；API inventory在目前五項完成、兩財務只做安全預檢時由52/9/43加6項成52/15/37；394/395仍connected=false。原完整目標仍是加8項至52/17/35，兩者不得混稱。以真正合入的清單確認，不用缺ETF的舊計數遮掩漏項。Python adapter14條routes的總allowlist與本文件「Adapter API」表一致；Java手動/技術readback在各自服務，不混進Python盤點。
+先合入ETF session的集成基線為58jobs=24business+34external，加3+3後64=27+37；架構基線是52/15/37。Task406兩份來源報表完整驗收後為52/17/35，排程數仍64，兩項說明改為保存來源報表、未自動入帳；原394/395財務writer仍未完成。以真正合入的清單確認，不用缺ETF的舊計數遮掩漏項。Python adapter14條routes的總allowlist與本文件「Adapter API」表一致；Java手動/技術readback在各自服務，不混進Python盤點。
 
 所有改动須spec-check/独立review、官方schema offline正常路徑/拒絕路徑、真正Spring交易边界與DB/Redis讀回，之後依run-stack驗image/container與auth/gate。舊報告的錯誤授權、鎖弱化、不重算aggregate與「全數通過」不作本輪證據；無法核實的來源範圍／身分／單位明示不可用，不以flag=false或HTTP200當功能完成。本輪不查真人帳號、不做券商金融寫入、不新增公開路由。
 
-兩financial來源缺口未解決前，僅可分段驗收上述五項與安全no-write修復；不得把整體spec標為已無阻礙，不合併第二個session、不刪原Claude branches。待契約/去識別對帳足以產生可程式判定的normal mapping，更新spec並獨立審查後續做writer。成功fixture不能代表真人來源核實。
+Task406來源報表採官方已有欄位，可獨立正常保存與驗收，不以缺成本／淨收款為由丟棄合法來源。原394/395財務入帳缺口未解時，不能把第二個原session宣稱全部完成或刪原Claude branches。原財務mapping另待可信契約支持與獨立spec審查；成功fixture只證明實作，不代表真人來源核實。
+
+
+## Tasks 401–404：富邦查詢介面、生命週期與分層重構
+
+本節是既有 Requirements 90／91／106／109／114–116／120／121／123／128–133 的具體重構設計，不新增業務來源、公開 route 或 schema。Task399／400 的成交原子性、owner snapshot lock／fresh refresh、嚴格 ISO wire 與 raw 斜線日期修復已落地，不重寫。富邦官方是來源，帳務目標限 tw.leader@gmail.com；owner 由 Task405 固定，Task406 另存來源報表；本節401–404不解除原394/395財務入帳 no-write。所有共享 market/radar/ETF/dividend 行為保持原 scope，不以私人 email 過濾全球行情。
+
+### Task401：Python 內外層、capture 與輸入
+
+`ports.py`（或等價內層模組）只定義目前用得到的 Protocol：PortfolioReader、TradeReader、BankBalanceReader、SettlementReader、RealizedGainReader、QuoteReader、EtfHoldingsReader、DividendReader、TechnicalIndicatorReader，另設各自的 IndexStreamGateway／StockPushGateway 及僅供 readiness 的 RuntimeState。consumer 只持有自己的能力；不能建立一支涵蓋所有 SDK 方法的巨大介面。現有 `SdkGateway` 實作這些介面；只有 app 組裝 concrete gateway，業務模組不能 import concrete gateway、反射取得其私有 helper 或直接 import proprietary SDK。
+
+`SelectedAccount`、`AccountingRead`、`AccountingPair`、`StockPushConnection` 移至中立 capture 模組；raw payload 僅留 Python 記憶體。account／branch／token／raw response 全部 `repr=False`，消毒例外只帶固定 reason，不在 repr／log／response 暴露 raw SDK 或帳號。raw_field／enum_text、payload size、config digest 等純 helper 移至中立 utility／config。capture 必須仍在同一 accounting lock 內捕捉 selected account、回應及 token；既有各服務 raw identity、日期、HMAC 及 zero/None 語意不變。
+
+HTTP 組裝層依既有十四條 route 選取自己的純 request contract，body 累積前以 65,536 bytes 封頂；UTF-8 解碼、JSON unique keys／trailing data、exact shape／strict types 只在純 parser 或已有 strict DTO 作驗證。無 body 路徑只允許真正空 body；有 body 的路徑拒絕未知欄位、coercion、duplicate key，日期用既有 strict ISO parser。方法、token、既有 outcome 與無 query 的限制不擴張；不做 alias 正規化或新增 proxy。fixture 直接測 parser，不對運行中的服務作 alias／方法矩陣／安全探測。
+
+### Task401：deadline、native slot 與 quote dispatch
+
+每個已受理操作攜帶 `CallContext(absoluteDeadline, cancellation)`，以 monotonic clock 計算；沒有更短既有 aggregate 的 read 入口固定30秒，ETF batch30秒，caller更短則取min；子呼叫只有取較短剩餘時間，不能在 lock、login、重試或 queue 後另起一個完整期限。SDK gateway 的 session/accounting mutex、quota 及 native-capacity 等待都遵守 context，取得之後及真正 SDK call 起點再次檢查。shutdown 先原子關閉 admission，禁止新 login/read/subscribe；cleanup 可執行但最多兩秒等待。四個 native slots 計算實際仍在執行的 SDK call，直到其 worker 的 finally 才釋放；呼叫者 timeout 不取消這筆容量會計，亦不允許晚到結果寫入已取消的業務流程。
+
+QuoteService 持有 cache／single-flight；每個 `(purpose, stockCode)` admitted key 代表排隊或執行中的一份工作，process 合計最多100 keys、logical workers最多20，SDK native最多4。第101個新key回 `BATCH_CAPACITY_REJECTED`；相同key的有效waiter共用工作、不再占key。每個waiter可以取消自身等待，只有最後有效waiter離開才取消尚未dispatch的shared work；5秒flight固定自該work建立起算，30秒endpoint固定自入口起算，後來waiter不能延長它們。caller timeout／最後waiter離開後若native仍活著，該key與slot都保留至真完成；新request只能取得該已失效flight的安全失敗，不另起同key並行native。尚未dispatch者須確認取消排程不會晚開始才可移除key。
+
+quote operational rolling240/min與429 circuit在真正SDK起點、取得容量且完成所有session等待後檢查並計數；auth retry也算一次。若等待期間其他call得到429，尚未dispatch的工作不再外呼；至少60秒、有效Retry-After上限600秒的原退避不變。成功INVENTORY cache30秒；LIVE不共用此cache。presence-aware `isTrial` 只接受缺欄或真正boolean false，不能把null、0、0.0或字串視為false。
+
+技術指標保持Java每90秒最多20symbol attempts、2個symbol worker、共用至少3.1秒dispatch間距，Python每symbol KDJ→MACD→BB依序及25秒aggregate deadline，共用rolling60/min historical budget。當日13:40後／same-day／radar gates、全輪30分鐘與PARTIAL保留；quota按真正呼叫共享，不以method/symbol/thread增加額度。帳務rolling5calls/sec、history rolling60/min及quote rolling240/min都在actual native dispatch才記帳，含每次auth retry的業務方法呼叫；不能等slot前先reserve，也不能因不同method/worker擴配額。既有5秒call限制不變。90秒批次是本系統保守節拍，不宣稱官方同API每分鐘僅一次。
+
+### Tasks401／402：每個 run 擁有自己的資源
+
+Python indices與stock、Java indices與stock各自使用run物件保存generation、不可重設的cancel、worker、pending-open、connection/body、latest及subscription狀態。shared reference只指出current run。start／stop交換與ingestion admission有明確線性化點；stop失效當下的run、關自己的body/connection，不清除別人的run。舊callback／late-open／finally只能清自己的資源，不能再subscribe、開始ingest、清空新latest或把新run標為停止。
+
+Python symbol驗證與connect不在ASGI event loop同步執行，同一run的啟動single-flight；connect5秒與cleanup2秒由共享bounded SDK executor處理。未結束thread仍記入容量且不可clear stop event復活，late connect不得subscribe。stock另保留scope/ACK generation、queue64、ACK5秒、最多300symbols、lease120秒、30秒reconciliation，index與stock不互退訂。Java stock subscription manager的shutdown是terminal；排隊refresh拿鎖後必再驗，shutdown後零subscriptions/start。一般clear空scope不等於shutdown。
+
+Java SSE共用的只有純機械bounded UTF-8 reader：每line／frame各16KiB，含delimiter／comment／未知欄位，累積前限制；超限／非法UTF-8立即關自己的body，不呼ingestion。connect5秒、headers10秒，成功stream不設整段lifetime timeout；已cancel的open若晚完成仍須關閉其body。完整frame以既有event／id／JSON／來源微秒規則驗證才可dispatch。維持250/500/1000/2000/5000ms bounded reconnect及消毒錯誤，不新增broker或public入口。
+
+stop前已admit的有限native或DB交易仍依既有完成／rollback規則處理，不能宣稱interrupt可強殺它；stop與new ingest admission同鎖或等效機制使stop完成後不會開始舊run的ingest。已開始的舊completion不得修改新run狀態。
+
+### Task402：external 窄 ports 與中立值
+
+以下 port 放在 `service/port/`、immutable value 放 `model/marketdata/`（可採等價內層路徑）；現有HTTP/JDBC/Redis adapter直接實作，不另疊無功能wrapper。表中的方法是必要能力上限，不整包複製大型client。
+
+| port | 必要能力 | 現有外層實作 |
+|---|---|---|
+| FubonNormalizedQuotePort | fetch normalized batch | FubonNormalizedQuoteClient |
+| LivePriceFetchPort | 台股batch、Yahoo台股actual fallback、既有single quote | PriceFetchClient |
+| StockUniversePort | collectTwRadarCodes、collectHeldStockCodes、collectAllStockCodes | StockSourceQuery |
+| StockMarketRepository | persistIntradayQuote、findLatestDatedClose、loadRecentTaiexCloses、upsertStockName | StockSourceQuery |
+| PriceProjectionPort | 既有write兩overload、writeTaiwanLive、writeTaiwanIndexLive、writeFubonStockPush、syncClosedFromDb | PriceCacheWriter |
+| TaiexCanonicalRepository | persist、findForTradingDate | FubonTaiexIndexStore |
+| IndexIntradaySourcePort | fetchIndexIntradayDay | MacroDataFetchClient |
+| OrderBookRepository／OrderBookCachePort | persist/findRevision/findCanonical；find/writeStrictNewer | IntradayOrderBookSnapshotStore／QuoteDetailCache |
+| YahooOrderBookSourcePort | probeTw、probeTwo | TwQuoteDetailFetchClient |
+| FubonResponseRepository／FubonResponseCachePort | persist/find；find/writeStrictNewer | FubonLiveResponseStore／FubonLiveResponseCache |
+| DividendEvidencePort | append record | DividendSnapshotStore |
+| TaiwanHolidaySourcePort | getTwHolidays、getTwHolidaysKnown、peekTwHolidaysKnown | MarketDataFetchService |
+
+PriceProjection各named entry維持其源別／副作用差別，不合成通用寫入器。deprecated FubonTwLiveQuoteProvider／ExistingTwLiveQuoteProvider不得重新接入production；必要相容僅限搬型別或獨立legacy fixture port，不污染正式port。
+
+搬出PriceResult／TwQuoteBatchSummary、QuoteDetailResult／OrderBookLevel／YahooProbeOutcome、Fubon batch/envelope、StockSource的close/intraday結果、Taiex candidate/canonical/result、book/response store/cache結果、DividendEvent／DividendFetchResult／FetchStatus／PersistResult、DayQuote與writer outcome，保留原field shape／constructor與nullable。FubonMarketData不能再import DividendFetchClient內的record；port不得回傳concrete adapter nested DTO。supportedIdentity、revision驗證、book-validity等純函式放中立contract，不能讓core回呼concrete adapter static。外層其他market caller僅改型別，不改非富邦演算法或來源。
+
+FubonTechnicalCache 既有 core value／port 目前仍反依賴 client.FubonMarketJson；本輪保留既有 FubonMarketDataPort／FubonTechnicalCachePort，將 Attempt／Group／Document／Read／Write 與 manifest 留中立層。JSON encode/decode、canonical-hash、persisted-format驗證改由 outer Redis codec 或真正中立的純 codec 承擔，不為純 codec 造介面。v1 Redis bytes、hash、逐組 CAS、7日到期及failure TTL完整相容，不更改既有資料。
+
+### Task402：commit、有限 response 與 index repair
+
+normalized quote production HTTP transport在subscription/read累積前限制2MiB，包含chunked/缺Content-Length；超限即cancel，禁止先ofString完成再算bytes。30秒總期限涵蓋headers與body，保留connect5秒、無redirect以及既有HTTP failure分類。strict envelope未成立零Fubon observation/DB/cache；沿現有radar範圍及transport-vs-DB-failure的不同fallback行為，不擴大來源。
+
+可投影的store result須確定來自獨立已commit DB transaction。response store／book store／intraday quote writer採真正獨立transaction或有效NOT_SUPPORTED orchestrator加writer的邊界，不能因port易於組合就把Redis包入ambient transaction。每批原子性、source-aware comparator、canonical revision與Lua保持同一實作；commit失敗零Redis，raw候選不代替canonical。GETreader只讀cache candidate並查DBrevision，不repair、不外呼。
+
+index採單一O(1) `ProjectionState(highestCommittedCanonical, attemptGeneration, needsRepair)`：DB APPLIED後先登記最高committed watermark及attempt，再做previous-close／Redis投影；任何DB failure不登記。completion只可CAS自身watermark/generation，成功後保留watermark而清needsRepair，防止舊失敗復活；較新canonical取代舊pending。previous-close或Redis例外保留needsRepair。exact-equal raw只有store返回同timestamp committed canonical且目前state需repair才可重投影，資料取canonical；older/raw contradiction不作來源。重啟無pending時equal不觸發repair，原兩分鐘poller純DB今日current修復不變。
+
+### Task403：book identity 與 bridge 日期
+
+BFF對每個raw row採納完整book前，驗exact stockCode與market，且原source/完整五層/排序/來源時間等條件全成立；錯配時nested及direct quoteDetail均用該raw row的safe unavailable、source=null、both sides空。不得只把book的code改成raw code或混源補值。
+
+只有 external `FubonLiveResponseReadService.Quote.tradingDate` 與 BFF `FubonBridgeQuote.tradingDate` 改成LocalDate；對raw String使用嚴格ISO LocalDate parse後比較，失敗不覆蓋raw quote。投影回RawLatestQuote仍用ISO字串。raw 19欄、response_row opaque JSON、premiumDiscountPct與單份quote欄位不變，不順便遷移其他歷史DTO的日期或增加public schema。
+
+### Task404：business internal HTTP 與富邦 local IO 邊界
+
+MarketDataService只依InternalMarketDataPort及原repository。外層 `integration/marketdata/ExternalMaterialsMarketDataClient`負責固定internal base URL／URI／WebClient／codec；無URL字串constructor在core偷建adapter。共享五個record移至`model/marketdata/MarketDataResults`：DividendRateResult、EtfHolding、EtfHoldingsResult、DividendRow、DividendHistoryResult，保留field名／順序／nullable／日期String及compat constructor；PriceResult不遷移。所有public service方法名稱與參數維持，同module caller同步import，不承諾舊nested FQCN二進位相容。
+
+| InternalMarketDataPort 方法 | 既有 internal HTTP | 總 deadline |
+|---|---|---|
+| quoteDetail(code,market) | GET /internal/quote-detail | 2秒 |
+| dividendRate(code,market) | GET /internal/dividend-rate | 20秒（原無界） |
+| etfHoldings(code,market) | GET /internal/etf-holdings | 20秒（原無界） |
+| dividendHistory(code,market,years) | GET /internal/dividend-history | 20秒（原無界） |
+| twHolidays(year) | GET /internal/tw-holidays | 20秒（原無界） |
+| detectTwClosureToday() | 既有 POST /internal/tw-closure/detect | 20秒 |
+
+最後一項有既有偵測副作用，不稱此port全為pure-read；不新增入口或重試，runtime驗收不觸發它。service保留同code/market完整book驗證、殖利率1h cache與stock-name fallback、當年holiday10m cache／失敗不毒化／非當年每次proxy、NYSE/LSE純計算。台股ETF所有success/failure/empty都只讀本地snapshot與純parser、零portcall；美股／其他既有來源不變。
+
+另以secretless `FubonReadinessPort.readiness()` 回中立state/reason，既有FubonConfigState做lazy Files IO；只有outer HTTPclient/filter可使用含token的snapshot，core service/scheduler/ownership不持secret。`FubonCalendarPort.isTwTradingDayKnown(LocalDate)`保留Optional true/false/empty，外層delegator使用原MarketDataService；ETF純分類抽中立helper，不用新增IOport。StockMaster只分出真正使用的local-only name lookup與upsert能力，外層原service實作，保持庫存upsert在成功commit後才回補；不得把會vendor-call的resolveName接進成交。owner directory／固定email政策另由財務owner單元完成，不能用neutral DTO掩蓋Task399鎖後fresh-read。
+
+FubonEtfHoldingsSyncService 的單純保存依 `FubonEtfHoldingsWritePort.save(FubonEtfHoldingsSnapshot)`，原 FubonEtfHoldingsWriter 直接實作並保持 REQUIRES_NEW／committed-on-return。庫存／銀行 writer 的實際 row-lock 依 `FubonSnapshotLockPort.lockLatestForFubonConfiguredOwner(Long)`，由原 AssetSnapshotMutationLock 實作，保留 MANDATORY、第一個 DB operation 與 Optional<AssetSnapshot>結果；不改其他 snapshot caller 的 lock 方法。純應用流程、計數器或計算不為形式再抽介面。
+
+### 驗收邊界
+
+以上均須先獨立spec審查、再實作與完整module測試，production完整diff含neutral DTO一起作獨立架構審查。時間／race以fake monotonic clock及latch控制，DB／Redis一致性用真隔離PostgreSQL16／Redis7；不以H2或只mock writer取代commit證據。runtime由協調者逐服務rebuild/recreate，證明image內容與測試來源一致，再於main落地後重驗；保留main忽略版.env／secrets與FUBON_ENABLED=false。只做明確GET白名單和authenticated頁面，不做任何真人broker或sync/subscriptions/rescan POST。現行52/15/37及64jobs是架構基線，不能用health200或disabled冒稱財務更新完成。
+
+## Tasks405／406：固定個人 owner 與官方來源報表
+
+本節補充 Requirements90／120／128–130；依使用者本輪授權，可信官方交割款／淨損益可以保存為私人來源報表。原 Task394／395 的在途款與 realized_gain 入帳仍缺不同的財務欄位／身分契約，不把它們改成完成。401–404 是無新 schema 的架構重構；只有406新增下述三表及一頁兩段 authenticated GET，不新增9090 public API，也不改其他財務表。新表在實作 migration 前只是規劃，當前92表，落地後才95表。
+
+### Task405：寫入授權與最小 ports
+
+`FUBON_SYNC_OWNER_EMAIL` 是唯一新增設定，對應 `fubon.sync-owner-email`。部署值是本輪使用者指定的 email；Java不硬編私人值，文件範例用中性地址，不能將值放進log、錯誤、API目錄或報表DTO。正規化為 trim + lowercase(Locale.ROOT)，空／非法則 `SYNC_OWNER_NOT_CONFIGURED`。本地授權選擇不宣稱是券商官方的Google帳號對照。
+
+中立 `FubonOwnerIdentity(id, normalizedEmail, active, admin)` 只在business內部存在；`FubonOwnerDecision(ownerId, reason)` 不攜帶秘密。`FubonSyncOwnerPolicy` 依窄 configuration/directory ports，前者提供已解析的 dedicated/configured-admin email，後者提供按email的唯讀projection及按expected id的fresh鎖定projection。JPA/native SQL與配置注入留外層；不依賴UserAdminService concrete、不回傳其managed AppUser、不新增使用者。只抽這些真正的IO責任，不替純比較或計數器造介面。
+
+寫入須 dedicated owner 存在、id有效、ACTIVE ADMIN，且與configured-admin的正規化email/id完全相同；否則 `SYNC_OWNER_MISMATCH` 或 `NO_ACTIVE_SYNC_OWNER`，沿各流程既有 NO_OWNER outcome 回報消毒reason。ADMIN_EMAIL改人只停止同步，不轉移目的地；caller/header/SDK response都不能選owner。五個個人同步保留原feature→global/config→capacity/calendar順序，通過後才owner preflight，再進broker HTTP/個人財務查詢。disabled保持零owner-query、零HTTP。
+
+writer必須獨立fresh驗同一expected owner。庫存／銀行第一個DB operation仍是同一snapshot row lock，再 `SELECT ... app_user ... FOR UPDATE` 取得fresh projection，防OSIV舊identity與commit前email/status/role競態；非snapshot成交／報表先鎖expected app_user，再鎖自己的target。target owner row lock只針對該id；本次須明定包括InventoryWriter在內的個人writer交易timeout為30秒，鎖等待不得超過交易剩餘預算；不能假稱目前InventoryWriter已有timeout，不可為設定期限提前插入SQL而破壞snapshot首SQL；不拿全表鎖，不改普通CRUD。所有owner-dependent SQL帶明確owner，source/date/numeric/prepared immutable batch亦在鎖後複驗，commit失敗全批rollback。metadata與原prepared/result純應用關係不用為形式再抽介面。
+
+`FubonSnapshotStockScopeOwnershipAdapter` 使用同一dedicated-owner政策，READY/inventory-enabled/!tw-live/今日owner-latest/effective-date仍不變；不合格即PAYLOAD_OWNED。此判定只描述本地已設定能力，不聲稱知道Python當次selector；不得在完整PUT呼Python或SDK。Task399的firstDBlock、locked fresh children與來源保護原樣保留。
+
+### Task405：同批 explicit-account capability
+
+只在下列五個既有normalized success envelope新增必填欄位 `accountBindingExplicit: boolean`，route與其他既有wire不變：
+
+| adapter route | response DTO |
+|---|---|
+| POST /internal/portfolio/read | PortfolioResponse |
+| POST /internal/trades/read | TradeBatchResponse |
+| POST /internal/bank-balance/read | BankBalance |
+| POST /internal/settlement/read | SettlementBatch |
+| POST /internal/realized-gains/read | RealizedGainBatch |
+
+Python在同次capture中保存selector是否明確、selected account、response、token，只有secret selector pair明確且與selected/raw account一致才為true。raw身分不出Python，含身分／token／raw的capture repr不可印出。既有未設定selector而唯一stock account的legacy純讀可回false，但Java個人同步即 `ACCOUNT_BINDING_NOT_EXPLICIT`、零writer；missing/null/string/number不能coerce成true，strict JSON decoder拒絕非boolean，false也不能写入。成功空帳務仍須selected與明確selector相符，不因沒有row略過綁定。writer的不可變prepared batch也攜帶已驗證能力，再驗true；不能手工組沒有capability的prepared data穿過writer。accountFingerprint僅同批correlation，不落新表、不當永久FK，不重建或搬移owner。不新增另一個env旗標來假裝selector已核實。
+
+同時把inventory/trade既有filter改用 `FubonAccountingSyncRequest.targetsEndpoint/hasValidParameters/dryRun`，只集中既有exact-path及省略／單一小寫true/false規則；各自token/outcome/filter鏈不混用。只寫靜態／隔離純parser測試，不建立live method/alias probe工具。
+
+### Task406：官方來源形狀與來源範圍
+
+[Python交割款](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/accountManagement/QuerySettlement/)的date是查詢日，settlement_date及金額有官方None佔位；[Python損益](https://www.fbs.com.tw/TradeAPI/docs/trading/library/python/accountManagement/RealizedPnLDetail/)列出Buy/Sell及Stock/Margin/Short/DayTrade/SBL，[Go損益](https://www.fbs.com.tw/TradeAPI/docs/trading/library/go/accountManagement/RealizedPnLDetail/)說明逐筆與含費稅。這些來源支持下述報表，不支持補造成本、淨收款、實際成交日或完整未交割範圍。本輪官方查證與fake fixture驗證分開，未做真人SDK查詢。
+
+兩支原adapter/read route及SDK方法不變，query_settlement固定`3d`。normalized reply最多2MiB、每批最多10,000行，在讀取中限制，不能先收完整字串才檢查；新report contract保留原嚴格raw帳號/日期/數值驗證，將「來源觀測有效」與「可投影到既有財務模型」分開。即使settlement coverageStatus仍UNVERIFIED／MISSING_SETTLEMENT_RANGE_CONTRACT，合法來源可存report；不得改成偽造VERIFIED。上述兩欄不進report DB，GET scope明訂SOURCE_REPORT_ONLY。
+
+settlement每列sourceQueryDate為官方date，≤本地queryDate；有資料時settlementDate≥sourceQueryDate、currency=TWD，12個原始金額欄位都是exact integer，buySettlement≤0、sellSettlement≥0，兩者之和等於來源totalSettlementAmount。只存必要來源date/currency/兩方向金額；其他毛額／費稅／合計只驗形狀，不另存或拿來猜別種財務數據。所有optional欄位全None保留為NO_DATA_OBSERVED，sourceQueryDate仍必有；partial None失敗。當日非零、合法過去／未來日、同交割日多列與完全同值行都保留；不依未知銀行入帳時間丟棄，不合併或去重。空list只代表這次回應空，不表示沒有其他未交割。
+
+realized每列sourceDate≤queryDate、股票代碼合法且非0000；Buy/Sell和五種官方orderType完整保留，不建立交易物件。qty為1..9,999,999,999，price正值canonical decimal precision≤20/scale≤10，profit/loss為非負exact integer且不可同時正值；只將互斥盈虧合成一份 `providerNetPnl=profit-loss` 保存，不重存三份同一事實。sourceDate不是tradeDate、rowIndex不是fillId，量價與日期相同仍可有多筆，完整保留multiset。currency來源未知在GET為null，報表不提供proceeds/investmentCost，也無報酬率或總資產公式。
+
+queryDate/observedAt只是本地觀測。Task406的observedAt必須在取得SDK response的同一accounting capture臨界區固定為不可變UTC微秒時點；normalization、HTTP與writer不得重取完成時間替代。入口queryDate、capture與完成時間皆須同台北日，順序有序且不能跨午夜；鎖後today同日、observedAt≤now且age≤60秒。新報表observedAt必須 `Instant.getNano()%1000==0`，與Python微秒及PostgreSQL timestamptz無損相容；不默默round/truncate來改變sameAt比較。Java source日期用LocalDate、觀測用Instant、價格和金額用BigDecimal；傳輸JSON的decimal以stripTrailingZeros後toPlainString或等價serializer輸出字串，0固定`"0"`，不能用ToStringSerializer產生1E+3或將核心DTO降為String。
+
+### Task406：三張最小 typed 表（規劃新增）
+
+預定 changeset `v1.121.0-fubon-accounting-source-reports.sql`；已掃其他worktree到1.120.0，但建檔前仍須重新查版號是否碰撞。表名、欄位、constraint如下；不改原五類財務表、不新增原始capture／輪詢歷史副本。JPA/DAO entity只由business持有，BFF不能讀DB。
+
+| 表 | 欄位與限制 |
+|---|---|
+| fubon_accounting_report | `id bigint GENERATED ... AS IDENTITY PRIMARY KEY`；`owner_user_id bigint NOT NULL REFERENCES app_user(id)`；`report_kind varchar(12) NOT NULL CHECK IN ('SETTLEMENT','REALIZED')`；`observed_at timestamptz NOT NULL`；`UNIQUE(owner_user_id,report_kind)` |
+| fubon_settlement_report_row | `report_id bigint NOT NULL REFERENCES fubon_accounting_report(id) ON DELETE CASCADE`；`row_index int NOT NULL CHECK 1..10000`；`PRIMARY KEY(report_id,row_index)`；`source_query_date date NOT NULL`；`settlement_date date NULL`；`currency varchar(10) NULL`；`buy_settlement numeric(20,0) NULL`；`sell_settlement numeric(20,0) NULL` |
+| fubon_realized_report_row | `report_id bigint NOT NULL`，同header FK/cascade；`row_index int NOT NULL CHECK 1..10000`，同複合PK；`source_date date NOT NULL`；`stock_code varchar(10) NOT NULL`；`buy_sell varchar(4) NOT NULL CHECK IN ('Buy','Sell')`；`order_type varchar(10) NOT NULL CHECK IN ('Stock','Margin','Short','DayTrade','SBL')`；`filled_qty bigint NOT NULL CHECK 1..9999999999`；`filled_price numeric(30,10) NOT NULL CHECK >0`；`provider_net_pnl numeric(20,0) NOT NULL` |
+
+settlement row另有互斥CHECK：settlement_date/currency/buy/sell四欄全NULL，或四欄全非NULL且currency='TWD'、settlement_date≥source_query_date、buy≤0、sell≥0。writer在任何SQL前對整批重驗numeric與欄位相依，不讓PostgreSQL默默round；price即使DB型別有較寬整數容量，也不放寬來源precision≤20/scale≤10。兩種child只能寫入相符kind的header，writer以typed method固定kind，不接受caller自選kind。所有read/delete/lock都從owner/kind限定的header取得id，不讓任意reportId越權。
+
+不存owner email/account/fingerprint、queryDate、rowCount或各類sum。queryDate由observedAt以Asia/Taipei衍生，rowCount由實際child算；settlement status與totalSettlementAmount由已存欄位在read service衍生，None不是零。child不重存owner，不加ledger/deposit/snapshot/fill FK。兩種report各自為最新成功來源觀測，不構成長期歷史交易帳。
+
+### Task406：transaction、排序與晚完成
+
+```text
+既有scheduler/manual -> 原feature/global/config gate -> dedicated-owner preflight
+ -> broker HTTP（NOT_SUPPORTED，同批explicit binding） -> 完整來源驗證
+ -> dryRun=true：DRY_RUN，零writer／寫鎖
+ -> saveSettlement 或 saveRealized 的獨立Spring writer（REQUIRES_NEW timeout30s）
+    -> target app_user FOR UPDATE + fresh owner驗證
+    -> owner/kind report header FOR UPDATE（不存在則在同owner鎖下插入）
+    -> 時間／不可變batch／all numeric重驗
+    -> 比較observedAt與canonical sorted multiset
+    -> 必要時replace該report全部child與header -> flush -> commit
+ -> commit後回報source-report結果；不呼snapshot/gain writer
+```
+
+每次只保存一種報表；兩個job互不造同次來源承諾，各有自己的observedAt。canonical排序用schema順序的來源欄位：日期自然順序、文字按固定順序、qty/decimal按數值、null固定在前，decimal忽略可等值的尾零；不含rowIndex或local名稱，保留重複數量。排序後rowIndex連續1..N，只供本份報表定位。
+
+| incoming vs existing | 唯一允許結果 |
+|---|---|
+| 無header | 寫header與完整rows，SAVED |
+| incoming observedAt較舊 | STALE_OBSERVATION，零變動 |
+| 同時且canonical multiset不同 | OBSERVATION_CONFLICT，零變動 |
+| 同時且完全相同 | NO_CHANGE，零變動 |
+| 較新且canonical multiset相同 | 只更新observedAt，SAVED |
+| 較新且不同 | 同transaction刪該report children、插入完整新rows、更新observedAt，SAVED |
+
+空成功來源可替換為零child，只影響自己這份報表。不同scope／來源失敗／時間或decimal不合法不建立header，原報表完整保留；insert第N列失敗、flush失敗、真正commit失敗都rollback。序列化靠目標app_user/header行鎖與unique，不能靠process single-flight或fake。REQUIRES_NEW需要真正Spring proxy；外層ambient rollback不改已獨立commit的report，回傳SAVED前commit必已完成。
+
+### Task406：既有manual結果的加法擴充
+
+兩個既有manual endpoint/token/dryRun規則保持，並保留所有原欄位及原outcome enum值。另各加enum值 `SOURCE_REPORT_SAVED`、`SOURCE_REPORT_UNCHANGED`、`SOURCE_REPORT_REJECTED`、`ROLLED_BACK`；report writer中立結果映射如下。所有回應追加 `reportStatus`（typed enum）、`reportRowCount`（int）、`reportObservedAt`（nullable Instant），不暴露行明細、fingerprint或owner。
+
+| 場景 | outcome / reportStatus / reportRowCount / reportObservedAt |
+|---|---|
+| 原gate/來源不合法 | 既有安全outcome / NOT_SAVED / 0 / null |
+| 合法dryRun | DRY_RUN / NOT_SAVED / 0 / null |
+| 首次或較新報表真commit | SOURCE_REPORT_SAVED / SAVED / committed N / committed observedAt |
+| 同時同內容 | SOURCE_REPORT_UNCHANGED / UNCHANGED / existing N / existing observedAt |
+| 較舊或等時衝突 | SOURCE_REPORT_REJECTED / REJECTED / 0 / null；reason分別STALE_OBSERVATION或OBSERVATION_CONFLICT |
+| writer/flush/commit失敗 | ROLLED_BACK / NOT_SAVED / 0 / null；只給消毒reason |
+
+settlement payableAmount/receivableAmount始終null；realized insertedCount/alreadyRepresentedCount/skippedNameUnresolvedCount始終0，既有rowCount可描述經驗證的來源行數，不能稱作已入帳。原SUCCESS不由report流程回傳，reportSaved counter只計真commit的SAVED；NO_CHANGE另計UNCHANGED。原process13個全域Python counters不因報表增加任意key，各Java獨立outcome counters隨enum明確更新。
+
+### Task406：本人 GET、代看防護與一致快照
+
+唯一新business路由是 `GET /api/brokers/fubon/accounting-reports`，無query selector；未知query或重複param以純parser拒絕400。controller只委派，既有verified caller context不改；read service在自己獨立 `readOnly=true, REQUIRES_NEW, isolation=REPEATABLE_READ` 交易中核對dedicated owner與caller。專用設定缺失/非法、owner不存在/停用、caller不同，一律403通用`FORBIDDEN`，不查報表。合法read只要求專用owner本人且ACTIVE，不要求其角色仍ADMIN或ADMIN_EMAIL仍同人，global/兩sync flags=false亦可讀既有資料。
+
+BFF新增專頁service與 `GET /api/bff/fubon-accounting-reports`，在任何business report request前，由Spring Security OIDC principal使用既有 `BffUser.fromPrincipal(oidc).id()` 取actual id，再與Reactor context的既有TenantIdentity effective id精確比較。缺失／不相等為403，零business report request；不能拿client X-User-Id、query、cookie字面或configured-admin當actual id。B代看A、A代看B皆拒絕，A本人正常。controller只解析authentication/transport並委派頁面service guard，不修改全域TenantWebFilter／TenantIdentity或別頁代看能力；business的dedicated-owner gate仍是第二層。新增business report路徑的所有可達BFF forwarding必須靜態確認不會繞過此guard，不新增裸passthrough／公開manifest入口，驗證只用隔離授權fixture。
+
+business在同一MVCC snapshot內查owner、兩個headers、兩種children、bulk local names並組immutable DTO，不從OSIV stale entity取得owner或讓lazy children跑到交易外，不取寫鎖或更新任何資料。名稱port只查本地StockMaster，最多10,000個唯一代碼，依每批最多1,000分段、禁止逐列N+1／vendor補字；查無名稱null，UI顯示代碼。GET不呼Python config/health、SDK、broker HTTP、scheduler、writer、cache refresh，syncDisabled只讀本地原有非秘密global及各自flag。
+
+BFF專用internal adapter總deadline10秒、response在讀取中最多16MiB；不調高全域WebClient codec。transport/timeout/schema/超限回502通用`REPORT_UNAVAILABLE`，不回部分rows，不暴露URL/HTML/例外。正確403不被轉成502或ACCOUNT_PENDING；原未登入/OIDC gate沿全域security。本頁可設skipErrorToast，由view顯示通用403/502，不能改其他頁既有interceptor。
+
+### Task406：固定只讀 wire 與畫面
+
+下列兩個property固定存在；各自獨立observedAt/queryDate可null，所有list永不null。Java金額／價格欄位使用BigDecimal及canonical plain-string serializer，不以String作核心數值型別。DTO不含ownerId/email/account/fingerprint/報表DB id，也沒有交易日期、淨收款、成本或報酬率欄位。
+
+```text
+AccountingReportsResponse
+  settlement: SettlementReport
+    scope: SOURCE_REPORT_ONLY
+    financialPosting: NOT_APPLIED
+    syncDisabled: boolean                 # !globalEnabled || !settlementEnabled
+    observedAt: Instant|null
+    queryDate: LocalDate|null             # observedAt的Asia/Taipei日期
+    rowCount: int                        # 含None佔位與重複行
+    rows: SettlementReportRow[]
+      rowIndex: int
+      status: AVAILABLE|NO_DATA_OBSERVED
+      sourceQueryDate: LocalDate
+      settlementDate: LocalDate|null
+      currency: TWD|null
+      buySettlement: BigDecimal|null     # JSON canonical plain string
+      sellSettlement: BigDecimal|null
+      totalSettlementAmount: BigDecimal|null # 同列buy+sell，僅回應時計算
+  realizedGain: RealizedGainReport
+    scope: SOURCE_REPORT_ONLY
+    financialPosting: NOT_APPLIED
+    syncDisabled: boolean                 # !globalEnabled || !realizedEnabled
+    observedAt: Instant|null
+    queryDate: LocalDate|null
+    rowCount: int
+    rows: RealizedReportRow[]
+      rowIndex: int
+      sourceDate: LocalDate
+      stockCode: string
+      stockName: string|null              # 本地bulk projection
+      buySell: Buy|Sell
+      orderType: Stock|Margin|Short|DayTrade|SBL
+      filledQty: long
+      filledPrice: BigDecimal             # JSON canonical plain string
+      providerNetPnl: BigDecimal          # JSON canonical plain string
+      currency: null                     # 來源未提供，不推測
+```
+
+無header回observedAt/queryDate=null、rowCount=0、rows=[]，UI為「尚未同步」；有header且0row為「最近一次來源報表沒有資料」，不能混成零元。全None行要顯示來源query date和「來源未提供資料」，金額空白，不當0。來源報表是各API最新成功回應，可能包含不同sourceDate，不宣稱完整年度或當下即時全部帳務。
+
+新頁 `/fubon-accounting-reports`（route name `FubonAccountingReports`、title `富邦帳務報表`）的導覽放現有資產／交易群組尾端；既有route/icon/relative order不變。僅兩個read-only表格與觀測時間、範圍／未自動入帳警語，所有日期/數值/status由server-ready DTO呈現，不前端重算總額或跨報表拼接。沒有sync/import/edit/delete/trade/export按鈕，reload只GET；loading/empty/error不同，request取消不toast，latest generation才更新狀態。前端依專案指示由Terra/high實作並作真browser驗證。
+
+R121仍只用靜態FubonApiInfoService，不能注入報表repository/client；兩accounting項目在整條功能驗收後才connected=true，httpEndpoint仍是既有Python read route，consumer補本人報表GET/頁面與「來源報表、不自動入帳」。52/15/37是401–405尚無報表時基線；401–406整批交付最終52/17/35。原JOBS共64保持，兩job文字只改保存來源報表及四個原cron，不新增排程。
+
+### Tasks405／406：驗證與部署界線
+
+全部新測試均為規劃新增，不能引用不存在的測試宣稱已通過。真PostgreSQL驗兩owner、fresh-lock/OSIV、rollback、date/precision、multiset/duplicate/empty、microsecond/nanosecond boundary與late completion；兩連線控制write/read交錯，REPEATABLE_READ必保證兩種header與其children在同一snapshot完整一致，不以READ_COMMITTED多次查詢或mock替代。before/after摘要證明report同步不改五類原財務表。
+
+BFF測actual principal/effective相同與不同、缺身分、另一ADMIN及兩種代看都無漏資料；owner在global/兩flags關閉或ADMIN_EMAIL改人後仍可讀自己舊份。正常有資料UI只用隔離fixture stack/DB，不把假資料寫進正式owner DB。部署僅精確加入FUBON_SYNC_OWNER_EMAIL，其他.env內容/憑證/掛載/flags保持；`FUBON_ENABLED=false`、不真人SDK、不manual-sync/subscriptions/rescan POST、不live alias/方法矩陣/security探測。
+
+schema migration先隔離驗、`db/schema.sql`依既有標頭流程重產並通過drift-test，之後協調者依commit-merge-push/run-stack完成main無ff合併、push、重建實際image與GET/UI驗證。原 Task394/395 未完成的財務目標必在完成報告明示；來源報表保存成功不准刪除原Claude refs。
