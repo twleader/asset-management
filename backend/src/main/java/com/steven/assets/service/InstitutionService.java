@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.InstitutionDto;
+import com.steven.assets.model.AppFeature;
 import com.steven.assets.model.AssetClass;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BondTerm;
@@ -13,6 +14,7 @@ import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockStyle;
 import com.steven.assets.model.TransitFundType;
+import com.steven.assets.repository.AppFeatureRepository;
 import com.steven.assets.repository.AssetClassRepository;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BondTermRepository;
@@ -54,6 +56,7 @@ public class InstitutionService {
     private final AssetSnapshotRepository snapshotRepo;
     private final FundHoldingRepository fundHoldingRepo;
     private final FundClassOverrideRepository fundClassOverrideRepo;
+    private final AppFeatureRepository appFeatureRepo;
 
     /** securities 清單中基金列的市場標記（與 holdings-classified 一致） */
     private static final String FUND_MARKET = "基金";
@@ -285,6 +288,23 @@ public class InstitutionService {
                 .orElseThrow(() -> new java.util.NoSuchElementException("找不到市場類型 ID: " + id));
         entity.setActive(active);
         return toMarketTypeResponse(marketTypeRepo.save(entity));
+    }
+
+    // ===================== AppFeature（Requirement 134／Task 407：角色功能管理）=====================
+
+    @Transactional(readOnly = true)
+    public List<InstitutionDto.AppFeatureResponse> getAllAppFeatures() {
+        return appFeatureRepo.findAllByOrderBySortOrderAscDisplayNameAsc().stream()
+                .map(this::toAppFeatureResponse)
+                .toList();
+    }
+
+    @Transactional
+    public InstitutionDto.AppFeatureResponse setAppFeatureEnabledForUser(Long id, boolean enabled) {
+        AppFeature entity = appFeatureRepo.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("找不到功能項目 ID: " + id));
+        entity.setEnabledForUser(enabled);
+        return toAppFeatureResponse(appFeatureRepo.save(entity));
     }
 
     // ===================== TransitFundType =====================
@@ -601,6 +621,11 @@ public class InstitutionService {
 
     private InstitutionDto.MarketTypeResponse toMarketTypeResponse(MarketType m) {
         return new InstitutionDto.MarketTypeResponse(m.getId(), m.getCode(), m.getDisplayName(), m.getSortOrder(), m.getActive());
+    }
+
+    private InstitutionDto.AppFeatureResponse toAppFeatureResponse(AppFeature f) {
+        return new InstitutionDto.AppFeatureResponse(
+                f.getId(), f.getCode(), f.getDisplayName(), f.getMenuGroup(), f.getSortOrder(), f.getEnabledForUser());
     }
 
     private InstitutionDto.TransitFundTypeResponse toTransitFundTypeResponse(TransitFundType t) {

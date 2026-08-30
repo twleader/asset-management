@@ -55,6 +55,14 @@ export const userManagementApi = {
   updateRole: (id, role) => api.patch(`/bff/user-management/${id}/role`, { role })
 }
 
+// 角色功能管理（Requirement 134 / Task 407）：管理者設定一般使用者角色可用功能
+export const appFeatureSettingsApi = {
+  // skipErrorToast：一般使用者每次 fetchMe() 都會背景呼叫，失敗時 fail-closed 為空陣列即可（見 authStore），
+  // 不應跳全域錯誤 toast 打擾使用者
+  getAll: () => api.get('/bff/app-feature-settings', { skipErrorToast: true }),
+  setEnabledForUser: (id, enabled) => api.patch(`/bff/app-feature-settings/${id}/enabled-for-user`, { enabled })
+}
+
 /** 從 axios error 取後端訊息（ProblemDetail.detail 優先），供呼叫端自訂呈現。 */
 export function apiErrorMessage(err, fallback = '操作失敗') {
   return err?.response?.data?.detail || err?.response?.data?.message || err?.message || fallback

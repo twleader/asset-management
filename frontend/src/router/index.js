@@ -212,6 +212,13 @@ const router = createRouter({
       meta: { title: '使用者管理', icon: 'User', requiresAdmin: true }
     },
     {
+      path: '/settings/role-features',
+      name: 'RoleFeatureSettings',
+      component: () => import('@/views/RoleFeatureSettingsView.vue'),
+      // Requirement 134 / Task 407：角色功能管理僅管理者
+      meta: { title: '角色功能管理', icon: 'Grid', requiresAdmin: true }
+    },
+    {
       path: '/settings/notifications',
       name: 'NotificationSettings',
       component: () => import('@/views/NotificationSettingsView.vue'),
@@ -244,6 +251,10 @@ router.beforeEach(async (to) => {
     return '/dashboard'
   }
   if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return '/dashboard'
+  }
+  // Requirement 134 / Task 407：一般使用者角色被管理者關閉的功能，直接輸入網址也導回首頁
+  if (!auth.isAdmin && auth.disabledFeatureCodes.includes(to.path)) {
     return '/dashboard'
   }
   return true

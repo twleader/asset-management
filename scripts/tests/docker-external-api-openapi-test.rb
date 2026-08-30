@@ -4,6 +4,12 @@
 require 'set'
 require 'yaml'
 
+# 讀取 nginx.conf／SecurityConfig.java 等含中文註解的檔案時，不能依賴呼叫端 shell 的
+# locale（LANG/LC_ALL 未設定時 Ruby 預設 external encoding 為 US-ASCII，讀到中文字元
+# 即丟 ArgumentError），一律固定為 UTF-8。
+Encoding.default_external = Encoding::UTF_8
+Encoding.default_internal = Encoding::UTF_8
+
 ROOT = File.expand_path('../..', __dir__)
 NGINX = File.join(ROOT, 'api-gateway/nginx.conf')
 FRONTEND_NGINX = File.join(ROOT, 'frontend/nginx.conf')

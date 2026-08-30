@@ -604,7 +604,7 @@
 
 **Acceptance Criteria:**
 
-- [ ] 新增「自動代繳」主選單（與其他主功能同層，置於「系統設定」之前），路徑 `/payment-accounts`，對應 `PaymentAccountSettingsView`；舊路徑 `/settings/payment-accounts` 自動 redirect 至新路徑以維持書籤相容
+- [ ] 新增「自動代繳」選單項目，路徑 `/payment-accounts`，對應 `PaymentAccountSettingsView`；舊路徑 `/settings/payment-accounts` 自動 redirect 至新路徑以維持書籤相容。**選單位置：** 目前位於「資產管理」選單群組（`App.vue` 的 `mainMenuItems` 內 `index: 'asset-management'`）`children` 陣列最後一項，緊接在「資產配置建議」之後（原始版本為與其他主功能同層的頂層選單項目，後續變更搬入此群組；路徑與對應頁面不受選單分組調整影響，見 Requirement 134 功能清單表格同步反映此位置）
 - [ ] 代繳記錄欄位包含：**分類**（FK 至 `payment_category`）、**項目**（自由輸入字串，如「市話 + MOD」）、**帳戶**（自由輸入字串，可填銀行帳戶或信用卡名稱，**不**與既有 `bank` / `broker` entity 關聯）、**備註**（自由輸入字串，可放用戶號碼、電號、水號等）、顯示排序
 - [ ] 分類儲存於資料庫 `payment_category` 表，不寫死 Enum；提供 `code` / `displayName` / `sortOrder` / `active` 欄位
 - [ ] 同頁面上半段提供分類維護區（新增 / 編輯 / 啟用-停用），下半段為代繳記錄主表格，可依分類過濾並依 `payment_category.sortOrder` → `payment_account.sortOrder` 排序顯示
@@ -4897,3 +4897,66 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 本輪四個架構交付依序補齊 Python、external Java、BFF／本頁 Vue、business internal transport 的窄介面與有限生命週期；不重做已落地 Task399／400、不新增 SQL schema／公開 route／排程，raw 19 欄與 opaque JSON 不變。預設目錄維持 52 筆／15 已串接，排程 64 筆（business27／external37），直到另項財務功能真實驗收才更新對應數字。
 - [ ] 使用者已指定富邦官方為來源，帳務寫入目標固定為 `tw.leader@gmail.com` 所屬既存使用者；caller／一般設定變更不得導向其他 owner。Task405 核實專用 owner 與 explicit-account binding，Task406 保存來源報表；401–404 本身不新增財務 writer，也不把 Task394／395 記為已完成或永久不可能。原財務入帳仍 no-write，來源報表則依 Task406 正常保存，不互相混稱。市場、ETF、股利與雷達仍沿各自既有 global/no-tenant 範圍，不以帳務 owner 改行情集合。
 - [ ] 驗收不修改 `.env`／secrets／feature flags，保留 `FUBON_ENABLED=false` 與六個新功能旗標現況。只使用 fake SDK／隔離 HTTP fixture、真 PostgreSQL／Redis 與明確 GET 白名單的 runtime／authenticated UI 驗證；不做真人 SDK、internal alias／方法矩陣／安全探測、manual sync、subscription 或 crawler-rescan POST。成功 fixture 證明程式契約，不冒稱真人資料已核實；兩個原始 session 全範圍完成前不刪原 Claude branches。
+
+### Requirement 134／Task 407：角色功能管理——一般使用者可用功能由管理者設定
+
+**User Story：**我（管理者）希望能設定「一般使用者」角色可以看到與使用系統中的哪些功能頁面，依需求收斂或開放一般使用者的操作範圍，不必修改程式碼。
+
+#### Acceptance Criteria
+
+- [ ] **新增「權限管理」子選單項目「角色功能管理」。** 路由 `/settings/role-features`（`meta.requiresAdmin: true`，比照既有 `/settings/users`），選單項目掛在 `App.vue` 既有 `index="permissions"` 子選單（權限管理，Requirement 28 延伸新增）底下、「使用者管理」之後。此頁與現有「使用者管理」「備份/還原 資料」一樣僅管理者可見／可訪問，機制沿用既有 `meta.requiresAdmin` route guard ＋ `auth.isAdmin` 控制的 `v-if`，不新增例外邏輯、不繞過既有管理者守門。
+
+- [ ] **管理者固定擁有全部功能，不受本功能限制。** `role=ADMIN` 使用者永遠可見／可用系統全部頁面（含「角色功能管理」頁面本身），本功能不提供、也不允許把任一管理者鎖出任何功能，避免自我鎖死。此頁只呈現並操作「一般使用者角色」的功能開關，不提供角色選擇欄位（因目前僅 `ADMIN`／`USER` 兩種角色，且管理者恆定全開，唯一可調整對象即一般使用者）。
+
+- [ ] **可控管的功能清單固定 25 項，由系統 seed，不開放新增／刪除。** 新增資料表 `app_feature`：`id`（PK）、`code`（varchar unique，對應前端路由 path）、`display_name`（varchar，中文顯示名稱）、`menu_group`（varchar，nullable，對應側邊選單分組標題）、`sort_order`（int）、`enabled_for_user`（boolean，預設 `true`）。由 `DataInitializer` seed 下列 25 筆，seed 邏輯以 `findByCode` 判斷：不存在才新增（`enabled_for_user` 初始 `true`）；**已存在的列不得覆寫 `enabled_for_user`**，避免每次重啟服務把管理者先前的關閉設定打回開啟。
+
+  | menu_group | code | display_name |
+  |---|---|---|
+  | 資產管理 | `/history` | 歷年資產管理 |
+  | 資產管理 | `/realized-gains` | 已實現損益 |
+  | 資產管理 | `/transactions` | 交易紀錄 |
+  | 資產管理 | `/asset-allocation-advice` | 資產配置建議 |
+  | 資產管理 | `/payment-accounts` | 自動代繳 |
+  | 股市綜合分析 | `/gdp-twse` | 股市大盤查詢 |
+  | 股市綜合分析 | `/performance-comparison` | 績效比較 |
+  | 股市綜合分析 | `/today-market-analysis` | 今日股市分析 |
+  | 股市綜合分析 | `/trading-radar` | 今日交易雷達 |
+  | 股市綜合分析 | `/stocks` | 股票觀察 |
+  | 公開資訊 | `/trading-calendar` | 交易日曆 |
+  | 公開資訊 | `/exchange-rate` | 台幣兌美元 |
+  | 公開資訊 | `/commodity-price` | 油價金價 |
+  | 公開資訊 | `/crawler-data` | 爬蟲資訊查詢 |
+  | 系統資訊 | `/schedule-list` | 排程列表 |
+  | 系統資訊 | `/open-api` | 開放 API |
+  | 系統資訊 | `/fubon-api` | 富邦證 API |
+  | 系統設定 | `/settings/banks` | 銀行設定 |
+  | 系統設定 | `/settings/brokers` | 券商設定 |
+  | 系統設定 | `/settings/deposit-types` | 存款類型設定 |
+  | 系統設定 | `/settings/market-types` | 市場類型設定 |
+  | 系統設定 | `/settings/asset-classes` | 資產類別歸類 |
+  | 系統設定 | `/settings/transit-fund-types` | 在途款項類型設定 |
+  | 系統設定 | `/settings/funds` | 信託基金設定 |
+  | 系統設定 | `/settings/notifications` | 警示通知設定 |
+
+  `/dashboard`（總覽儀表板）**不列入清單，固定開放**，作為權限判斷未通過時的安全回退頁（見下方路由守門條款），避免「回退頁本身被關閉」的邊界情況。既有寫死僅管理者可見的頁面（`/settings/users`、`/settings/backup-restore`、本次新增的 `/settings/role-features` 本身）**不列入清單**，維持原有寫死限制，不受本功能影響。
+
+- [ ] **後端 API（沿用 `/api/settings/{resource}` 命名慣例，唯讀取開放、僅提供啟用切換，不提供新增／刪除）。**
+  - `GET /api/settings/app-features`：回傳全部 25 筆（含 `enabledForUser` 目前值）；已登入者皆可讀取（沿用既有 `/api/settings/**` GET 對已登入者開放的規則），供一般使用者前端讀取以過濾選單，非僅供管理者頁面使用。
+  - `PATCH /api/settings/app-features/{id}/enabled-for-user`（body `{"enabled": boolean}`）：僅 `ADMIN` 可寫入，比照既有 `PATCH /api/{resource}/{id}/active` 軟切換慣例；只更新 `enabled_for_user` 欄位。
+  - 不提供 `POST`（新增功能項目）與 `DELETE`；功能清單本身由系統 seed 維護，不開放透過此 API 增減。
+  - Controller／Service／Repository 分層須遵守既有 Clean Architecture 規範：Controller 只轉發與 DTO 轉換，業務邏輯放 Service，資料存取走 Repository；可比照既有 `InstitutionController`／`InstitutionService`（市場類型設定等）的分層寫法新增對應方法或新開一組同構檔案。
+  - BFF 新增 route：`/api/bff/app-feature-settings/**` rewrite 到 `/api/settings/app-features${seg}`；`SecurityConfig.GLOBAL_SETTINGS_PATHS` 陣列加入 `/api/bff/app-feature-settings/**`（沿用該陣列既有的「寫入限 ADMIN、GET 開放已登入者」規則，不另寫 `.pathMatchers(...)`）。backend `AdminGateInterceptor`／`WebConfig` 不需改動（`/api/settings/**` 已是既有涵蓋規則）。
+
+- [ ] **前端：選單與路由依一般使用者角色的開關狀態過濾（設定變更於下次整頁載入／重新登入後生效，非即時推播）。** `authStore` 新增狀態 `disabledFeatureCodes`（string 陣列），於既有 `fetchMe()` 成功、且判定 `!isAdmin` 時，額外呼叫 `GET /api/bff/app-feature-settings`，把回傳中 `enabledForUser === false` 的項目 `code` 存入該陣列；`isAdmin === true` 時固定為空陣列（不呼叫、不套用限制）。新增方法 `isFeatureEnabled(path)`：`isAdmin === true` 或 `!disabledFeatureCodes.includes(path)` 時回傳 `true`，否則 `false`。
+  - `App.vue` 的 `mainMenuItems`（含各群組 `children`）與硬編碼的「系統設定」子選單，渲染每個 `el-menu-item` 前以 `auth.isFeatureEnabled(item.path)` 過濾；若某分組（`el-sub-menu`）過濾後底下已無任何可見項目，該分組本身也不顯示。管理者因 `isFeatureEnabled` 恆真而永遠看到全部項目。
+  - `router/index.js` 的既有全域 `beforeEach` guard 新增判斷：非管理者且 `to.path` 存在於 `auth.disabledFeatureCodes` 時，導回 `/dashboard`；與現有 `requiresAdmin` 判斷同一個 guard 內依序檢查，不需另開新的 guard。
+
+- [ ] **「角色功能管理」頁面（`RoleFeatureSettingsView.vue`）。** 進入頁面時呼叫 `GET /api/bff/app-feature-settings` 列出 25 筆，依 `menuGroup`／`sortOrder` 分組顯示（無 `menuGroup` 的項目獨立列出或歸入其他分類呈現，實作者可自訂呈現方式，但須清楚標示分組），每列一個開關（如 `el-switch`）對應 `enabledForUser`，切換時呼叫 `PATCH /api/bff/app-feature-settings/{id}/enabled-for-user` 並依回應更新畫面狀態（失敗需還原開關狀態並提示錯誤）；頁面不提供新增／刪除／搜尋等其他操作。
+
+- [ ] **Liquibase。** 新增 `backend/src/main/resources/db/changelog/changes/v1.121.0-app-feature-role-access.sql`（changeset id 與檔名一致：`steven:v1.121.0-app-feature-role-access`），建立 `app_feature` 表（欄位如上，含 `NOT NULL`／`UNIQUE`／預設值），並於 `db.changelog-master.yaml` 尾端追加對應 `include`。完成後依 `db/schema.sql` 檔頭「重新產生」段重產該檔，並執行 `bash scripts/tests/schema-sql-drift-test.sh` 確認回傳 0。
+
+- [ ] **明確排除範圍（避免審查誤判為遺漏）：**
+  - 本功能只控制前端選單顯示與路由導覽層級的存取，**不新增／變更任何業務 API endpoint 本身的權限檢查**（例如 `/api/history`、`/api/trading-radar` 等既有唯讀業務端點，一般使用者角色目前即無角色層級限制，本次不新增）。技術上直接呼叫該業務 API 的一般使用者仍可取得資料；此為刻意的範圍界線（僅 UI 層可見性／導覽控管），非安全漏洞遺漏，日後如需 API 層強制執行屬另一個 Requirement 範疇。
+  - 不變更角色本身的資料模型：`AppUser.ROLE_ADMIN`／`ROLE_USER` 常數與 `UserAdminService.VALID_ROLE` 驗證集合維持寫死，不做成資料庫可擴充的角色主檔。
+  - 不變更既有寫死於 BFF `SecurityConfig`、backend `AdminGateInterceptor`、`router/index.js` `meta.requiresAdmin` 的管理者專屬限制（使用者管理、備份/還原等既有端點與頁面）。
+  - 不提供「一般使用者可自行查看／申請開通」介面，切換完全由管理者於本頁操作。

@@ -1,5 +1,6 @@
 package com.steven.assets.config;
 
+import com.steven.assets.model.AppFeature;
 import com.steven.assets.model.AssetClass;
 import com.steven.assets.model.StockStyle;
 import com.steven.assets.model.BondTerm;
@@ -10,6 +11,7 @@ import com.steven.assets.model.FundMaster;
 import com.steven.assets.model.MarketType;
 import com.steven.assets.model.PaymentCategory;
 import com.steven.assets.model.TransitFundType;
+import com.steven.assets.repository.AppFeatureRepository;
 import com.steven.assets.repository.AssetClassRepository;
 import com.steven.assets.repository.StockStyleRepository;
 import com.steven.assets.repository.BondTermRepository;
@@ -48,6 +50,7 @@ public class DataInitializer implements ApplicationRunner {
     private final AssetClassRepository assetClassRepo;
     private final StockStyleRepository stockStyleRepo;
     private final BondTermRepository bondTermRepo;
+    private final AppFeatureRepository appFeatureRepo;
 
     @Override
     @Transactional
@@ -62,6 +65,7 @@ public class DataInitializer implements ApplicationRunner {
         seedAssetClasses();
         seedStockStyles();
         seedBondTerms();
+        seedAppFeatures();
     }
 
     private void seedBondTerms() {
@@ -82,6 +86,55 @@ public class DataInitializer implements ApplicationRunner {
                         .active(true)
                         .build());
                 log.info("初始化債券期別: {}", s.displayName());
+            }
+        }
+    }
+
+    /**
+     * 角色功能管理（Requirement 134／Task 407）：一般使用者角色可用功能項目清單，僅在列不存在時新增，
+     * 已存在的列一律跳過——不得覆寫管理者先前設定的 {@code enabledForUser}，避免每次重啟服務打回開啟。
+     */
+    private void seedAppFeatures() {
+        record FeatureSeed(String menuGroup, String code, String displayName, int sortOrder) {}
+
+        List<FeatureSeed> seeds = List.of(
+            new FeatureSeed("資產管理", "/history", "歷年資產管理", 1),
+            new FeatureSeed("資產管理", "/realized-gains", "已實現損益", 2),
+            new FeatureSeed("資產管理", "/transactions", "交易紀錄", 3),
+            new FeatureSeed("資產管理", "/asset-allocation-advice", "資產配置建議", 4),
+            new FeatureSeed("資產管理", "/payment-accounts", "自動代繳", 5),
+            new FeatureSeed("股市綜合分析", "/gdp-twse", "股市大盤查詢", 6),
+            new FeatureSeed("股市綜合分析", "/performance-comparison", "績效比較", 7),
+            new FeatureSeed("股市綜合分析", "/today-market-analysis", "今日股市分析", 8),
+            new FeatureSeed("股市綜合分析", "/trading-radar", "今日交易雷達", 9),
+            new FeatureSeed("股市綜合分析", "/stocks", "股票觀察", 10),
+            new FeatureSeed("公開資訊", "/trading-calendar", "交易日曆", 11),
+            new FeatureSeed("公開資訊", "/exchange-rate", "台幣兌美元", 12),
+            new FeatureSeed("公開資訊", "/commodity-price", "油價金價", 13),
+            new FeatureSeed("公開資訊", "/crawler-data", "爬蟲資訊查詢", 14),
+            new FeatureSeed("系統資訊", "/schedule-list", "排程列表", 15),
+            new FeatureSeed("系統資訊", "/open-api", "開放 API", 16),
+            new FeatureSeed("系統資訊", "/fubon-api", "富邦證 API", 17),
+            new FeatureSeed("系統設定", "/settings/banks", "銀行設定", 18),
+            new FeatureSeed("系統設定", "/settings/brokers", "券商設定", 19),
+            new FeatureSeed("系統設定", "/settings/deposit-types", "存款類型設定", 20),
+            new FeatureSeed("系統設定", "/settings/market-types", "市場類型設定", 21),
+            new FeatureSeed("系統設定", "/settings/asset-classes", "資產類別歸類", 22),
+            new FeatureSeed("系統設定", "/settings/transit-fund-types", "在途款項類型設定", 23),
+            new FeatureSeed("系統設定", "/settings/funds", "信託基金設定", 24),
+            new FeatureSeed("系統設定", "/settings/notifications", "警示通知設定", 25)
+        );
+
+        for (FeatureSeed s : seeds) {
+            if (appFeatureRepo.findByCode(s.code()).isEmpty()) {
+                appFeatureRepo.save(AppFeature.builder()
+                        .code(s.code())
+                        .displayName(s.displayName())
+                        .menuGroup(s.menuGroup())
+                        .sortOrder(s.sortOrder())
+                        .enabledForUser(true)
+                        .build());
+                log.info("初始化功能項目: {}", s.displayName());
             }
         }
     }
