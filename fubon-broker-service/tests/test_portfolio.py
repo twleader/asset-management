@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from unittest.mock import Mock
 
 import pytest
 
@@ -12,6 +13,7 @@ from helpers import TOKEN, account, inventory_row, response, unrealized_row
 
 
 NOW = datetime(2026, 8, 21, 4, 30, tzinfo=UTC)
+MISSING_DATE = object()
 
 
 class Gateway:
@@ -40,11 +42,106 @@ def test_reconciles_inventory_and_unrealized_with_canonical_cost():
     assert "001" not in str(result)
 
 
+@pytest.mark.parametrize(
+    ("now", "source_date", "query_date", "batch_id"),
+    [
+        (
+            datetime(2026, 8, 20, 16, 30, tzinfo=UTC),
+            "2026/08/21",
+            "2026-08-21",
+            "bce8bc9abfcfceb1c8a0d7ca",
+        ),
+        (
+            datetime(2024, 2, 28, 16, 30, tzinfo=UTC),
+            "2024/02/29",
+            "2024-02-29",
+            "7b20148866804341389f3ca9",
+        ),
+    ],
+    ids=["taipei-day-differs-from-utc", "valid-leap-day"],
+)
+def test_official_source_date_preserves_iso_wire_and_batch_contract(now, source_date, query_date, batch_id):
+    fingerprint = Mock(wraps=PortfolioService._hmac_fingerprint)
+    subject = PortfolioService(
+        Gateway([inventory_row(date=source_date)], [unrealized_row(date=source_date)]),
+        now=lambda: now,
+        fingerprint=fingerprint,
+    )
+
+    assert subject.read() == {
+        "batchId": batch_id,
+        "queryDate": query_date,
+        "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+        "emptyConfirmed": False,
+        "positions": [{"stockCode": "2330", "shares": 3, "costPrice": "12.345"}],
+        "reason": None,
+    }
+    fingerprint.assert_called_once_with(TOKEN, "001", "00001234567")
+
+
+@pytest.mark.parametrize("side", ["inventory", "unrealized"])
+@pytest.mark.parametrize(
+    ("raw_date", "reason"),
+    [
+        pytest.param(MISSING_DATE, "MISSING_RAW_IDENTITY", id="missing"),
+        pytest.param(None, "MISSING_RAW_IDENTITY", id="null"),
+        pytest.param("", "MISSING_RAW_IDENTITY", id="empty"),
+        pytest.param(20260821, "MISSING_RAW_IDENTITY", id="numeric"),
+        pytest.param(date(2026, 8, 21), "MISSING_RAW_IDENTITY", id="date-object"),
+        pytest.param("2026-08-21", "INVALID_SOURCE_DATE", id="raw-iso"),
+        pytest.param("2026/8/21", "INVALID_SOURCE_DATE", id="unpadded-month"),
+        pytest.param("2026/08/1", "INVALID_SOURCE_DATE", id="unpadded-day"),
+        pytest.param(" 2026/08/21", "INVALID_SOURCE_DATE", id="leading-whitespace"),
+        pytest.param("2026/08/21 ", "INVALID_SOURCE_DATE", id="trailing-whitespace"),
+        pytest.param("2026/04/31", "INVALID_SOURCE_DATE", id="impossible-day"),
+        pytest.param("2026/13/21", "INVALID_SOURCE_DATE", id="impossible-month"),
+        pytest.param("2026/02/29", "INVALID_SOURCE_DATE", id="invalid-leap-day"),
+        pytest.param("RAW_DATE_SENSITIVE_SENTINEL", "INVALID_SOURCE_DATE", id="sanitized"),
+        pytest.param("2026/08/22", "STALE_SOURCE_DATE", id="future-day"),
+        pytest.param("2024/02/29", "STALE_SOURCE_DATE", id="past-valid-leap-day"),
+    ],
+)
+def test_source_date_failures_are_sanitized_before_fingerprint(side, raw_date, reason):
+    inv = inventory_row()
+    unr = unrealized_row()
+    row = inv if side == "inventory" else unr
+    if raw_date is MISSING_DATE:
+        row.pop("date")
+    else:
+        row["date"] = raw_date
+    fingerprint = Mock()
+
+    with pytest.raises(PortfolioError) as raised:
+        service([inv], [unr], fingerprint=fingerprint).read()
+
+    assert raised.value.reason == reason
+    assert str(raised.value) == reason
+    assert raised.value.__cause__ is None
+    fingerprint.assert_not_called()
+
+
+@pytest.mark.parametrize("side", ["inventory", "unrealized"])
+@pytest.mark.parametrize(
+    ("raw_date", "reason"),
+    [("2026-08-21", "INVALID_SOURCE_DATE"), ("2026/08/20", "STALE_SOURCE_DATE")],
+)
+def test_bad_source_date_in_later_row_rejects_whole_batch_before_fingerprint(side, raw_date, reason):
+    inventories = [inventory_row(), inventory_row(code="2317")]
+    unrealized = [unrealized_row(), unrealized_row(code="2317")]
+    (inventories if side == "inventory" else unrealized)[1]["date"] = raw_date
+    fingerprint = Mock()
+
+    with pytest.raises(PortfolioError, match=reason):
+        service(inventories, unrealized, fingerprint=fingerprint).read()
+
+    fingerprint.assert_not_called()
+
+
 @pytest.mark.parametrize("side", ["inventory", "unrealized"])
 @pytest.mark.parametrize(
     ("field", "value", "reason"),
     [
-        ("date", "2026-08-20", "STALE_SOURCE_DATE"),
+        ("date", "2026/08/20", "STALE_SOURCE_DATE"),
         ("account", "WRONG", "WRONG_SOURCE_ACCOUNT"),
         ("branch_no", "999", "WRONG_SOURCE_BRANCH"),
     ],
@@ -110,16 +207,20 @@ def test_persistable_share_boundaries_are_accepted(shares):
     assert result["positions"][0]["shares"] == shares
 
 
-def test_date_rollover_rejects_whole_pair():
+@pytest.mark.parametrize("empty", [True, False], ids=["empty-account", "with-positions"])
+def test_date_rollover_rejects_whole_pair(empty):
     values = iter(
         [
             datetime(2026, 8, 21, 15, 59, tzinfo=UTC),
             datetime(2026, 8, 21, 16, 0, tzinfo=UTC),
         ]
     )
-    subject = PortfolioService(Gateway([], []), now=lambda: next(values))
+    fingerprint = Mock()
+    gateway = Gateway([] if empty else [inventory_row()], [] if empty else [unrealized_row()])
+    subject = PortfolioService(gateway, now=lambda: next(values), fingerprint=fingerprint)
     with pytest.raises(PortfolioError, match="QUERY_DATE_ROLLOVER"):
         subject.read()
+    fingerprint.assert_not_called()
 
 
 def test_null_accounting_data_is_not_empty_proof():

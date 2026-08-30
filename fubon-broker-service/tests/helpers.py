@@ -51,7 +51,7 @@ def account(branch: str = "001", number: str = "00001234567"):
 
 def inventory_row(
     *,
-    date: str = "2026-08-21",
+    date: str = "2026/08/21",
     account_number: str = "00001234567",
     branch: str = "001",
     code: str = "2330",
@@ -71,7 +71,7 @@ def inventory_row(
 
 def unrealized_row(
     *,
-    date: str = "2026-08-21",
+    date: str = "2026/08/21",
     account_number: str = "00001234567",
     branch: str = "001",
     code: str = "2330",
