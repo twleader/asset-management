@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -44,6 +45,7 @@ public class IntradaySessionQueryService {
     private final Map<String, Attempt> attempts = new ConcurrentHashMap<>();
     private final Object attemptLock = new Object();
 
+    @Autowired
     public IntradaySessionQueryService(MarketClock clock, IntradayTickStore tickStore,
                                        StockSourceQuery stockSource,
                                        SessionReferencePriceStore referenceStore, PriceFetchClient priceFetch) {
