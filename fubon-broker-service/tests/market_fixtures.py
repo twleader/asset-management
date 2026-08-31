@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 from fubon_broker_service.sdk_gateway import SdkCallError
-from fubon_broker_service.technical_indicators import PARAMETERS
+from fubon_broker_service.technical_indicators import PARAMETERS, PROFILES
 
 
 NOW = datetime(2026, 8, 28, 5, 0, tzinfo=UTC)
@@ -28,6 +28,35 @@ def technical_result(kind, symbol="2330", source_date=TODAY, **changes):
               "bb": {"upper": "3", "middle": "0", "lower": "-3.75"}}
     result = {"symbol": symbol, "from": TECHNICAL_FROM, "to": TODAY,
               **PARAMETERS[kind], "data": [{"date": source_date, **values[kind]}]}
+    result.update(changes)
+    return result
+
+
+def technical_v2_result(kind, symbol="2330", source_date=TODAY, *, start=None, end=None,
+                        timeframe="D", parameters=None, **changes):
+    """Invented strict SDK payload for one fixed Task408 profile.
+
+    This intentionally has the provider shape rather than the normalized
+    HTTP response.  Tests therefore exercise the adapter's exact echo and
+    canonical-number checks for all seventeen profiles.
+    """
+    start = start or (NOW.date() - timedelta(days=420)).isoformat()
+    end = end or TODAY
+    candidates = [profile for profile in PROFILES
+                  if profile.kind == kind and profile.timeframe == timeframe
+                  and (parameters is None or all(profile.parameters.get(key) == value
+                                                   for key, value in parameters.items()))]
+    assert len(candidates) == 1, (kind, timeframe, parameters)
+    profile = candidates[0]
+    values = {
+        "sma": {"sma": "600"},
+        "rsi": {"rsi": "52.5"},
+        "kdj": {"k": "30.125", "d": "45.5", "j": "-0.625"},
+        "macd": {"macdLine": "-2.125", "signalLine": "0"},
+        "bb": {"upper": "700", "middle": "600", "lower": "500"},
+    }
+    result = {"symbol": symbol, "from": start, "to": end, **profile.parameters,
+              "data": [{"date": source_date, **values[kind]}]}
     result.update(changes)
     return result
 

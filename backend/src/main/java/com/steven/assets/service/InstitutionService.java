@@ -3,7 +3,6 @@ package com.steven.assets.service;
 import com.steven.assets.dto.InstitutionDto;
 import com.steven.assets.model.AppFeature;
 import com.steven.assets.model.AssetClass;
-import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.BondTerm;
 import com.steven.assets.model.Bank;
 import com.steven.assets.model.BrokerEntity;
@@ -11,12 +10,10 @@ import com.steven.assets.model.DepositTypeEntity;
 import com.steven.assets.model.FundClassOverride;
 import com.steven.assets.model.MarketType;
 import com.steven.assets.model.Stock;
-import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockStyle;
 import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.AppFeatureRepository;
 import com.steven.assets.repository.AssetClassRepository;
-import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BondTermRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
@@ -31,7 +28,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -53,7 +49,7 @@ public class InstitutionService {
     private final AssetClassifier assetClassifier;
     private final StockStyleRepository stockStyleRepo;
     private final BondTermRepository bondTermRepo;
-    private final AssetSnapshotRepository snapshotRepo;
+    private final SettingsClassificationResolver settingsClassification;
     private final FundHoldingRepository fundHoldingRepo;
     private final FundClassOverrideRepository fundClassOverrideRepo;
     private final AppFeatureRepository appFeatureRepo;
@@ -409,11 +405,15 @@ public class InstitutionService {
     /** 列出 stock 主檔 + 持有過的基金（市場=基金）每檔的生效資產類別、子分類與來源（規則／人工）。 */
     @Transactional(readOnly = true)
     public List<InstitutionDto.SecurityResponse> getAllSecurities() {
-        Map<String, BigDecimal> yieldMap = buildLatestYieldMap();
-        BigDecimal threshold = loadIncomeThreshold();
+        SettingsClassificationResolver.Context classificationContext = settingsClassification.context();
+        // 0000 is the Taiwan market index, not a user-classifiable security.
+        // Keep its Stock/history records intact: market regime, charts and
+        // TAIEX pricing still depend on them.  This filter is only the
+        // settings-list boundary.
         List<InstitutionDto.SecurityResponse> stocks = stockRepo.findAll().stream()
+                .filter(stock -> !isTaiexIndex(stock))
                 .sorted(Comparator.comparing(Stock::getMarket).thenComparing(Stock::getCode))
-                .map(s -> toSecurityResponse(s, yieldMap, threshold))
+                .map(s -> toSecurityResponse(s, classificationContext))
                 .toList();
         // 基金以名稱為識別（fund_holding.fund_code 多為 NULL），override 存於 fund_class_override（三欄）
         Map<String, FundClassOverride> fundOverride = new HashMap<>();
@@ -453,7 +453,7 @@ public class InstitutionService {
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setAssetClass(override);
         Stock saved = stockRepo.save(stock);
-        return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
+        return toSecurityResponse(saved, settingsClassification.context());
     }
 
     /**
@@ -476,7 +476,7 @@ public class InstitutionService {
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setStockStyle(override);
         Stock saved = stockRepo.save(stock);
-        return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
+        return toSecurityResponse(saved, settingsClassification.context());
     }
 
     /**
@@ -499,25 +499,7 @@ public class InstitutionService {
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setBondTerm(override);
         Stock saved = stockRepo.save(stock);
-        return toSecurityResponse(saved, buildLatestYieldMap(), loadIncomeThreshold());
-    }
-
-    /** 最新快照逐持股殖利率 Map&lt;market|code, dividendRate&gt;（供設定頁算生效風格）。 */
-    private Map<String, BigDecimal> buildLatestYieldMap() {
-        Map<String, BigDecimal> map = new HashMap<>();
-        List<AssetSnapshot> snaps = snapshotRepo.findAllOrderByDateDesc();
-        if (snaps.isEmpty()) return map;
-        for (StockHolding st : snaps.get(0).getStocks()) {
-            if (st.getDividendRate() != null) {
-                map.put(st.getMarket() + "|" + st.getStockCode(), st.getDividendRate());
-            }
-        }
-        return map;
-    }
-
-    private BigDecimal loadIncomeThreshold() {
-        return stockStyleRepo.findByCode(AssetClassifier.INCOME)
-                .map(StockStyle::getDividendThreshold).orElse(null);
+        return toSecurityResponse(saved, settingsClassification.context());
     }
 
     // ===================== StockStyle（Requirement 26）=====================
@@ -647,48 +629,26 @@ public class InstitutionService {
     }
 
     private InstitutionDto.SecurityResponse toSecurityResponse(
-            Stock s, Map<String, BigDecimal> yieldMap, BigDecimal threshold) {
-        String classOverride = s.getAssetClass();
-        boolean hasClassOverride = classOverride != null && !classOverride.isBlank();
-        String effectiveClass = assetClassifier.classifyStock(s.getCode(), s.getMarket(), classOverride);
-
-        // 股票風格僅對 effectiveAssetClass=STOCK 者有意義；債券/現金 style 一律 null
-        String styleOverride = s.getStockStyle();
-        boolean hasStyleOverride = styleOverride != null && !styleOverride.isBlank();
-        String effectiveStyle = null;
-        String styleSource = null;
-        if (AssetClassifier.STOCK.equals(effectiveClass)) {
-            BigDecimal yield = yieldMap.get(s.getMarket() + "|" + s.getCode());
-            effectiveStyle = assetClassifier.classifyStockStyle(
-                    s.getCode(), s.getMarket(), styleOverride, yield, threshold);
-            styleSource = hasStyleOverride ? "OVERRIDE" : "RULE";
-        }
-
-        // 債券期別僅對 effectiveAssetClass=BOND 者有意義；股票/現金 term 一律 null
-        String termOverride = s.getBondTerm();
-        boolean hasTermOverride = termOverride != null && !termOverride.isBlank();
-        String effectiveTerm = null;
-        String termSource = null;
-        if (AssetClassifier.BOND.equals(effectiveClass)) {
-            effectiveTerm = assetClassifier.classifyBondTerm(
-                    s.getCode(), s.getMarket(), s.getName(), termOverride);
-            termSource = hasTermOverride ? "OVERRIDE" : "RULE";
-        }
-
+            Stock s, SettingsClassificationResolver.Context classificationContext) {
+        SettingsClassificationResolver.Resolution classification = settingsClassification.resolve(s, classificationContext);
         return new InstitutionDto.SecurityResponse(
                 s.getCode(), s.getMarket(), s.getName(),
-                hasClassOverride ? classOverride : null,
-                effectiveClass,
-                hasClassOverride ? "OVERRIDE" : "RULE",
-                hasStyleOverride ? styleOverride : null,
-                effectiveStyle,
-                styleSource,
-                hasTermOverride ? termOverride : null,
-                effectiveTerm,
-                termSource);
+                classification.assetClassOverride(),
+                classification.effectiveAssetClass(),
+                classification.assetClassSource(),
+                classification.stockStyleOverride(),
+                classification.effectiveStockStyle(),
+                classification.stockStyleSource(),
+                classification.bondTermOverride(),
+                classification.effectiveBondTerm(),
+                classification.bondTermSource());
     }
 
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
+
+    private static boolean isTaiexIndex(Stock stock) {
+        return stock != null && "台股".equals(stock.getMarket()) && "0000".equals(stock.getCode());
+    }
 
     /** 空白/null → null；否則 trim + 轉大寫（override 代碼一律大寫存）。 */
     private static String blankToNull(String s) {

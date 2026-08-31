@@ -1,0 +1,11 @@
+{
+  "fixtureVersion": 2,
+  "technicalRuleCompatibilityVersion": "FUBON_TW_SEMANTIC_PROOF_REQUIRED_V1",
+  "semanticFixtureId": "fubon-tw-semantic-proof-unavailable-v1",
+  "rawPriceBasis": "RAW_COMPLETED_UNADJUSTED",
+  "decimalTolerance": "0.00000001",
+  "roundingInitializationProof": "NO_REPRODUCIBLE_FUBON_CANDLE_SEQUENCE;DIRECT_OVERLAY_DISABLED",
+  "approvalState": "NO_DIRECT_OVERLAY",
+  "reason": "SEMANTIC_COMPATIBILITY_UNPROVEN",
+  "approvals": []
+}

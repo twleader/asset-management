@@ -405,6 +405,79 @@
                 <div v-else class="muted">完成週不足 60 根或舊快照未含週K 欄位，本檔今日不採計週線因子。</div>
               </div>
 
+              <!--
+                Task408：technicalResolution 是後端已完成 context binding、freshness 與
+                field-level overlay 後的稽核資料。這裡只分組與格式化，不重新計算任何技術值，
+                也不得把 null 誤呈現成 0 或當作目前的富邦資料。
+              -->
+              <div class="fundamental-panel technical-resolution-panel">
+                <div class="fundamental-head">
+                  <span class="fundamental-title">技術指標來源與採用</span>
+                  <el-tag size="small" :type="technicalResolutionType(row.technicalResolution)" effect="plain">
+                    {{ technicalResolutionLabel(row.technicalResolution) }}
+                  </el-tag>
+                </div>
+                <template v-if="row.technicalResolution">
+                  <div class="technical-resolution-meta">
+                    <div class="technical-resolution-meta-item">
+                      <span>決策輸入版本</span>
+                      <strong>{{ row.technicalResolution.decisionInputVersion || '—' }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>來源／綁定</span>
+                      <strong>{{ technicalSourceLabel(row.technicalResolution.source) }}／{{ technicalBindingLabel(row.technicalResolution.binding) }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>capture／context</span>
+                      <strong>{{ row.technicalResolution.captureId || '—' }}</strong>
+                      <small>{{ row.technicalResolution.contextFingerprint || '—' }}</small>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>最早觀測／有效至</span>
+                      <strong>{{ formatTime(row.technicalResolution.oldestObservedAt) }}／{{ formatTime(row.technicalResolution.freshUntil) }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>回應時資料年齡</span>
+                      <strong>{{ technicalAgeLabel(row.technicalResolution.ageSeconds) }}</strong>
+                      <small>100 秒為 Redis／DB re-project 的固定新鮮度邊界。</small>
+                    </div>
+                  </div>
+
+                  <div v-if="technicalProfileGroups(row.technicalResolution).length" class="technical-profile-groups">
+                    <div v-for="group in technicalProfileGroups(row.technicalResolution)" :key="`${row.market}-${row.stockCode}-${group.key}`" class="technical-profile-group">
+                      <div class="technical-profile-group-title">{{ group.label }} profiles</div>
+                      <div class="technical-profile-grid">
+                        <div v-for="profile in group.profiles" :key="profile.profileId" class="technical-profile-card">
+                          <div class="technical-profile-card-head">
+                            <strong>{{ profile.profileId || '—' }}</strong>
+                            <el-tag size="small" :type="technicalProfileType(profile.status)" effect="plain">{{ profile.status || '—' }}</el-tag>
+                          </div>
+                          <small>資格：{{ technicalEligibilityLabel(profile.eligibility) }}</small>
+                          <small>來源日：{{ profile.sourceDate || '—' }} · 觀測：{{ formatTime(profile.observedAt) }}</small>
+                          <small>參數：{{ formatTechnicalMap(profile.parameters) }}</small>
+                          <small>payload：{{ formatTechnicalMap(profile.payload) }}</small>
+                          <small v-if="profile.reason">未納入／狀態原因：{{ profile.reason }}</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="muted">本次 technicalResolution 未含 profile 資料；不以任何預設值補齊。</div>
+
+                  <div class="technical-provenance-panel">
+                    <div class="technical-profile-group-title">欄位來源與未納入原因</div>
+                    <ul v-if="row.technicalResolution.fieldProvenance?.length" class="technical-provenance-list">
+                      <li v-for="field in row.technicalResolution.fieldProvenance" :key="`${field.field}-${field.profileId}-${field.reason}`">
+                        <strong>{{ field.field || '—' }}</strong>
+                        <span>{{ technicalOriginLabel(field.origin) }}</span>
+                        <small>profile：{{ field.profileId || '—' }} · {{ field.reason || '—' }}</small>
+                      </li>
+                    </ul>
+                    <div v-else class="muted">欄位級 provenance 不可得；不推測富邦或本地來源。</div>
+                  </div>
+                </template>
+                <div v-else class="muted">舊快照（LEGACY_LOCAL_V0）未含 technicalResolution；請重新整理，畫面不將其視為 0 或最新富邦來源。</div>
+              </div>
+
               <div class="fundamental-panel">
                 <div class="fundamental-head">
                   <span class="fundamental-title">基本面與產業</span>
@@ -510,16 +583,29 @@
                 <div class="fundamental-head">
                   <span class="fundamental-title">判斷證據與資料完整性</span>
                   <el-tag size="small" :type="row.evidence.assetProfile?.profileComplete == null ? 'info' : (row.evidence.assetProfile.profileComplete ? 'success' : 'warning')" effect="plain">
-                    輪廓 {{ row.evidence.assetProfile?.profileComplete == null ? '資料不足' : (row.evidence.assetProfile.profileComplete ? '完整' : '不完整') }}
+                    嚴格輪廓 {{ row.evidence.assetProfile?.profileComplete == null ? '資料不足' : (row.evidence.assetProfile.profileComplete ? '完整' : '不完整') }}
                   </el-tag>
                 </div>
                 <div class="confirm-grid">
-                  <div class="confirm-item">
-                    <span>嚴格資產輪廓</span>
-                    <strong>{{ row.evidence.assetProfile?.instrumentKind || '—' }} · {{ row.evidence.assetProfile?.assetClass || '—' }}</strong>
-                    <small>{{ row.evidence.assetProfile?.assetClassSource || 'UNKNOWN' }} · 資產分類完整 {{ boolLabel(row.evidence.assetProfile?.assetClassComplete) }}</small>
-                    <small>工具來源 {{ row.evidence.assetProfile?.instrumentKindSource || 'UNKNOWN' }} · 工具完整 {{ boolLabel(row.evidence.assetProfile?.instrumentKindComplete) }}</small>
-                    <small>風格 {{ row.evidence.assetProfile?.stockStyle || '—' }}／{{ row.evidence.assetProfile?.stockStyleSource || 'UNKNOWN' }}；債券期別 {{ row.evidence.assetProfile?.bondTerm || '—' }}／{{ row.evidence.assetProfile?.bondTermSource || 'UNKNOWN' }}</small>
+                  <div v-if="isClassifiableRadarSecurity(row)" class="confirm-item">
+                    <span>資產類別設定（生效值）</span>
+                    <template v-if="row.evidence.settingsClassification">
+                      <strong>{{ settingsAssetClassLabel(row.evidence.settingsClassification) }} · {{ settingsSubdivisionLabel(row.evidence.settingsClassification) }}</strong>
+                      <small>資產類別來源：{{ classificationSourceLabel(row.evidence.settingsClassification.assetClassSource) }}</small>
+                      <small>股票風格：{{ row.evidence.settingsClassification.effectiveStockStyle ? `${radarStockStyleLabel(row.evidence.settingsClassification.effectiveStockStyle)}（${classificationSourceLabel(row.evidence.settingsClassification.stockStyleSource)}）` : '不適用' }}</small>
+                      <small>債券期別：{{ row.evidence.settingsClassification.effectiveBondTerm ? `${radarBondTermLabel(row.evidence.settingsClassification.effectiveBondTerm)}（${classificationSourceLabel(row.evidence.settingsClassification.bondTermSource)}）` : '不適用' }}</small>
+                      <small v-if="settingsClassificationOverrideSummary(row.evidence.settingsClassification)">使用者指定覆寫：{{ settingsClassificationOverrideSummary(row.evidence.settingsClassification) }}</small>
+                    </template>
+                    <small v-else>舊快照尚未提供資產類別設定投影；不以嚴格雷達輪廓替代。</small>
+                  </div>
+                  <div v-if="isClassifiableRadarSecurity(row)" class="confirm-item">
+                    <span>嚴格交易雷達資產輪廓</span>
+                    <strong>{{ radarAssetClassLabel(row.evidence.assetProfile) }} · {{ radarAssetSubdivisionLabel(row.evidence.assetProfile) }}</strong>
+                    <small>資產類別來源：{{ classificationSourceLabel(row.evidence.assetProfile?.assetClassSource) }} · 完整 {{ boolLabel(row.evidence.assetProfile?.assetClassComplete) }}</small>
+                    <small>股票風格：{{ radarStockStyleLabel(row.evidence.assetProfile?.stockStyle) }}（{{ classificationSourceLabel(row.evidence.assetProfile?.stockStyleSource) }}）</small>
+                    <small>債券期別：{{ radarBondTermLabel(row.evidence.assetProfile?.bondTerm) }}（{{ classificationSourceLabel(row.evidence.assetProfile?.bondTermSource) }}）</small>
+                    <small v-if="assetProfileOverrideSummary(row.evidence.assetProfile)">使用者指定覆寫：{{ assetProfileOverrideSummary(row.evidence.assetProfile) }}</small>
+                    <small>此輪廓供雷達風險與資料完整性判定，不等同資產類別設定頁分類。</small>
                   </div>
                   <div class="confirm-item">
                     <span>幣別證據</span>
@@ -1564,6 +1650,208 @@ function boolLabel(value) {
   return value == null ? '—' : (value ? '是' : '否')
 }
 
+// Task408：設定頁等價分類與 strict AssetProfile 是兩份不同的後端投影；畫面只翻譯
+// 固定 enum，不得依股票名稱、代碼或技術資料自行補推或互相替代。
+const RADAR_ASSET_CLASS_LABELS = Object.freeze({
+  STOCK: '股票',
+  BOND: '債券',
+  CASH: '現金'
+})
+
+const RADAR_STOCK_STYLE_LABELS = Object.freeze({
+  VALUE: '價值',
+  GROWTH: '成長',
+  INCOME: '收益',
+  DIVIDEND: '股利',
+  BROAD_MARKET: '大盤',
+  SECTOR: '產業',
+  REIT: '不動產投資信託'
+})
+
+const RADAR_BOND_TERM_LABELS = Object.freeze({
+  ULTRA_SHORT: '超短期',
+  SHORT: '短期',
+  MID: '中期',
+  INTERMEDIATE: '中期',
+  LONG: '長期',
+  ULTRA_LONG: '超長期'
+})
+
+const CLASSIFICATION_SOURCE_LABELS = Object.freeze({
+  OVERRIDE: '使用者指定覆寫',
+  RULE: '規則',
+  CODE_RULE: '代號規則',
+  NAME_RULE: '名稱規則',
+  PUBLIC_VALUATION: '公開估值',
+  MARKET_DEFAULT: '市場預設',
+  UNKNOWN: '資料不足'
+})
+
+function radarAssetClassLabel(profile) {
+  if (!profile?.assetClass) return '—'
+  return RADAR_ASSET_CLASS_LABELS[profile.assetClass] || profile.assetClass
+}
+
+function radarStockStyleLabel(value) {
+  if (!value) return '不適用／資料不足'
+  return RADAR_STOCK_STYLE_LABELS[value] || value
+}
+
+function radarBondTermLabel(value) {
+  if (!value) return '不適用／資料不足'
+  return RADAR_BOND_TERM_LABELS[value] || value
+}
+
+function radarAssetSubdivisionLabel(profile) {
+  if (!profile) return '—'
+  if (profile.stockStyle) return `股票風格：${radarStockStyleLabel(profile.stockStyle)}`
+  if (profile.bondTerm) return `債券期別：${radarBondTermLabel(profile.bondTerm)}`
+  return '細分不適用／資料不足'
+}
+
+function isClassifiableRadarSecurity(row) {
+  return !(row?.market === '台股' && row?.stockCode === '0000')
+}
+
+function settingsAssetClassLabel(classification) {
+  if (!classification?.effectiveAssetClass) return '—'
+  return RADAR_ASSET_CLASS_LABELS[classification.effectiveAssetClass] || classification.effectiveAssetClass
+}
+
+function settingsSubdivisionLabel(classification) {
+  if (!classification) return '—'
+  if (classification.effectiveStockStyle) {
+    return `股票風格：${radarStockStyleLabel(classification.effectiveStockStyle)}`
+  }
+  if (classification.effectiveBondTerm) {
+    return `債券期別：${radarBondTermLabel(classification.effectiveBondTerm)}`
+  }
+  return '細分不適用'
+}
+
+function classificationSourceLabel(source) {
+  if (!source) return '資料不足'
+  return CLASSIFICATION_SOURCE_LABELS[source] || source
+}
+
+function assetProfileOverrideSummary(profile) {
+  if (!profile) return null
+  const overridden = []
+  if (profile.assetClassSource === 'OVERRIDE') overridden.push(`資產類別=${radarAssetClassLabel(profile)}`)
+  if (profile.stockStyleSource === 'OVERRIDE') overridden.push(`股票風格=${radarStockStyleLabel(profile.stockStyle)}`)
+  if (profile.bondTermSource === 'OVERRIDE') overridden.push(`債券期別=${radarBondTermLabel(profile.bondTerm)}`)
+  return overridden.length ? overridden.join('；') : null
+}
+
+function settingsClassificationOverrideSummary(classification) {
+  if (!classification) return null
+  const overridden = []
+  if (classification.assetClassSource === 'OVERRIDE') {
+    overridden.push(`資產類別=${settingsAssetClassLabel(classification)}`)
+  }
+  if (classification.stockStyleSource === 'OVERRIDE') {
+    overridden.push(`股票風格=${radarStockStyleLabel(classification.effectiveStockStyle)}`)
+  }
+  if (classification.bondTermSource === 'OVERRIDE') {
+    overridden.push(`債券期別=${radarBondTermLabel(classification.effectiveBondTerm)}`)
+  }
+  return overridden.length ? overridden.join('；') : null
+}
+
+// Task408：D/W 只用 profile ID 的 immutable timeframe segment 分組；不推導或改寫 profile 值。
+function technicalProfileGroups(resolution) {
+  if (!Array.isArray(resolution?.profiles)) return []
+  const groups = { daily: [], weekly: [], other: [] }
+  for (const profile of resolution.profiles) {
+    const id = String(profile?.profileId || '').toLowerCase()
+    if (id.includes('_d_')) groups.daily.push(profile)
+    else if (id.includes('_w_')) groups.weekly.push(profile)
+    else groups.other.push(profile)
+  }
+  return [
+    { key: 'daily', label: '日線（D）', profiles: groups.daily },
+    { key: 'weekly', label: '週線（W）', profiles: groups.weekly },
+    { key: 'other', label: '未識別時間框架', profiles: groups.other }
+  ].filter(group => group.profiles.length)
+}
+
+function technicalResolutionLabel(resolution) {
+  if (!resolution) return 'LEGACY_LOCAL_V0'
+  return technicalSourceLabel(resolution.source)
+}
+
+function technicalResolutionType(resolution) {
+  if (!resolution) return 'info'
+  if (resolution.source === 'FUBON_SDK') return 'success'
+  if (resolution.source === 'LOCAL_CALCULATED') return 'warning'
+  return 'info'
+}
+
+function technicalSourceLabel(source) {
+  return ({
+    FUBON_SDK: '富邦 API',
+    LOCAL_CALCULATED: '本地計算'
+  })[source] || (source || '—')
+}
+
+function technicalBindingLabel(binding) {
+  return ({
+    BOUND_CONTEXT: '綁定本次決策 context',
+    UNBOUND_FUBON_SOURCE: '未綁定 context（不可採用）'
+  })[binding] || (binding || '—')
+}
+
+function technicalProfileType(status) {
+  if (status === 'AVAILABLE') return 'success'
+  if (status === 'NO_DATA' || status === 'UNAVAILABLE') return 'warning'
+  if (status === 'SCHEMA_INVALID') return 'danger'
+  return 'info'
+}
+
+function technicalEligibilityLabel(eligibility) {
+  return ({
+    APPLIED: '已納入 V18',
+    AVAILABLE_NOT_APPLIED: '可用但未納入 V18',
+    DETAIL_ONLY: '僅 detail 呈現',
+    LOCAL: '本地計算'
+  })[eligibility] || (eligibility || '—')
+}
+
+function technicalOriginLabel(origin) {
+  return ({
+    FUBON_SDK: '富邦 API 直接 overlay',
+    LOCAL: '本地計算',
+    DERIVED_FROM_FUBON: '由富邦值衍生',
+    DETAIL_ONLY: '僅 detail 呈現',
+    AVAILABLE_NOT_APPLIED: '可用但未納入 V18'
+  })[origin] || (origin || '—')
+}
+
+function technicalAgeLabel(ageSeconds) {
+  if (ageSeconds == null || Number.isNaN(Number(ageSeconds))) return '—'
+  return `${Number(ageSeconds)} 秒`
+}
+
+function formatTechnicalMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '—'
+  const entries = Object.entries(value)
+  if (!entries.length) return '—'
+  return entries
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${key}=${technicalValueLabel(item)}`)
+    .join(' · ')
+}
+
+function technicalValueLabel(value) {
+  if (value == null) return 'null'
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return '—'
+  }
+}
+
 function roeBasisLabel(fallback) {
   if (fallback === true) return '期初權益缺漏，採最新期末權益作分母；此 fallback 的證據權重已下修。'
   if (fallback === false) return '採同一來源的期初與期末權益平均作分母。'
@@ -2158,6 +2446,24 @@ onUnmounted(() => {
 .dividend-date-cell small { color: #64748b; font-size: 11px; }
 .dividend-date-cell strong { color: #0f172a; font-size: 13px; }
 .fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
+.technical-resolution-panel { border-color: #c7d2fe; background: #f8fafc; }
+.technical-resolution-meta { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 9px; }
+.technical-resolution-meta-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; padding: 9px 10px; }
+.technical-resolution-meta-item > span, .technical-resolution-meta-item small { color: #64748b; font-size: 11px; line-height: 1.45; }
+.technical-resolution-meta-item strong { color: #0f172a; font-size: 12px; overflow-wrap: anywhere; }
+.technical-profile-groups { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.technical-profile-group { border-top: 1px solid #dbeafe; padding-top: 11px; }
+.technical-profile-group-title { color: #334155; font-size: 12px; font-weight: 700; }
+.technical-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 9px; margin-top: 8px; }
+.technical-profile-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; padding: 9px 10px; }
+.technical-profile-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.technical-profile-card-head strong { color: #0f172a; font-size: 12px; overflow-wrap: anywhere; }
+.technical-profile-card small { color: #64748b; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.technical-provenance-panel { margin-top: 14px; border-top: 1px solid #dbeafe; padding-top: 11px; }
+.technical-provenance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
+.technical-provenance-list li { display: flex; flex-direction: column; gap: 3px; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; padding: 8px 9px; }
+.technical-provenance-list strong { color: #0f172a; font-size: 12px; overflow-wrap: anywhere; }
+.technical-provenance-list span, .technical-provenance-list small { color: #64748b; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .evidence-detail-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
 .evidence-groups-panel { margin-top: 16px; border-top: 1px solid #e2e8f0; padding-top: 12px; }
 .evidence-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-top: 9px; }
@@ -2197,11 +2503,11 @@ onUnmounted(() => {
   .market-layout { grid-template-columns: 1fr; }
   .market-metrics { grid-template-columns: repeat(3, 1fr); }
   .confirm-grid { grid-template-columns: repeat(2, 1fr); }
-  .fundamental-grid, .valuation-component-grid { grid-template-columns: repeat(2, 1fr); }
+  .fundamental-grid, .valuation-component-grid, .technical-resolution-meta { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 720px) {
   .header-row, .card-head { align-items: flex-start; flex-direction: column; }
-  .market-metrics, .confirm-grid, .fundamental-grid, .valuation-component-grid { grid-template-columns: 1fr; }
+  .market-metrics, .confirm-grid, .fundamental-grid, .valuation-component-grid, .technical-resolution-meta { grid-template-columns: 1fr; }
   .expand-panel { padding-left: 16px; padding-right: 16px; }
   .state-options { grid-template-columns: 1fr; }
 }

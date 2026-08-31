@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>回傳富邦官方 SDK（{@code fubon_neo} 2.2.9）{@code accounting}／{@code stock}／
  * {@code marketdata} 命名空間中已驗證存在、且確認為唯讀查詢的全部方法的**人工維護靜態清單**
- * （52 筆：15 已串接、37 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
+ * （52 筆：19 已串接、33 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
  * {@code fubon-broker-service} 容器內以 Python 內省 SDK 物件取得的真實方法與 docstring，
  * 詳細盤點步驟見 {@code spec/tasks/t386_fubon_api_documentation_view.md} 的「盤點方法」段落。
  *
@@ -39,7 +39,7 @@ public class FubonApiInfoBffController {
     private static final String NO_SDK_DOC =
             "SDK 未提供可查證的參數／回傳說明（docstring 為空），僅能確認此方法存在於 sdk.stock 命名空間。";
 
-    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：15 已串接、37 未串接）。 */
+    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：19 已串接、33 未串接）。 */
     private static final List<FubonApiInfoDto> APIS = List.of(
 
             // ===== 連線狀態查詢（2，全數已串接）=====
@@ -225,7 +225,7 @@ public class FubonApiInfoBffController {
                     "FilledData 陣列，含 date／filled_no／filled_avg_price／filled_qty／filled_price／"
                             + "order_type／filled_time 等成交欄位"),
 
-            // ===== 行情查詢（20：marketdata.rest_client.stock.*，7 已串接）=====
+            // ===== 行情查詢（20：marketdata.rest_client.stock.*，11 已串接）=====
             new FubonApiInfoDto(true, "行情查詢", "個股即時報價與最佳五檔",
                     "marketdata.rest_client.stock.intraday.quote", "POST /internal/market-data/tw-quotes",
                     "逐檔查詢台股即時成交價、漲跌、成交量與委買委賣最佳五檔，供交易雷達即時報價與庫存估值使用" + RO,
@@ -243,17 +243,21 @@ public class FubonApiInfoBffController {
                             + "wrapper 本身為 thin proxy 未在程式碼中限定欄位名稱）",
                     "商品代碼清單，本系統只用來核對設定的指數代碼是否存在於回傳清單中，"
                             + "不解析其餘欄位；完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "單一商品基本資料查詢",
-                    "marketdata.rest_client.stock.intraday.ticker", NO_HTTP,
-                    "查詢單一商品（股票）基本資料" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "商品基本資料，通常含名稱／產業別／市場別等，實際完整欄位以官方回應為準，"
-                            + "此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股當日分鐘K線查詢",
-                    "marketdata.rest_client.stock.intraday.candles", NO_HTTP,
-                    "查詢個股當日盤中分鐘K線" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "分鐘K線陣列，通常含開高低收與成交量，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
+            new FubonApiInfoDto(true, "行情查詢", "單一商品基本資料查詢",
+                    "marketdata.rest_client.stock.intraday.ticker", "POST /internal/market-data/stock-basic/read",
+                    "以固定 strict wire 查詢台股單一商品基本資料；正規化資料寫入 PostgreSQL 的富邦基本資料表，"
+                            + "僅補既有空白 stock 名稱，不建立標的、不改資產分類" + RO,
+                    "external-materials-service（交易日 13:40 唯一 lifecycle；需另啟用設定）",
+                    "body 僅允許 {symbol}；ordinary-lot 呼叫省略 SDK optional type",
+                    "schemaVersion=1／symbol／market／provider／sourceDate／observedAt 與經嚴格驗證的交易所、名稱、分類、漲跌停、交易資格欄位；"
+                            + "PostgreSQL 同日 hash fence，無 Redis／價格 history／latest quote 寫入"),
+            new FubonApiInfoDto(true, "行情查詢", "個股當日分鐘K線查詢",
+                    "marketdata.rest_client.stock.intraday.candles", "POST /internal/market-data/intraday-candles/read",
+                    "以固定 strict wire 查詢台股 ordinary-lot 當日一分鐘 K；每批通過驗證後寫入 PostgreSQL 分鐘 K 歷史" + RO,
+                    "external-materials-service（交易日 13:40 唯一 lifecycle；需另啟用設定）",
+                    "body 僅允許 {symbol}；固定 timeframe=1，ordinary-lot 呼叫省略 SDK optional type",
+                    "AVAILABLE 或 NO_DATA 的 schemaVersion=1 分鐘 K bundle；每根含 UTC 整分 OHLC／量／均價與 hash。"
+                            + "分鐘資料絕不寫 Redis、daily price history 或 latest quote"),
             new FubonApiInfoDto(false, "行情查詢", "個股當日逐筆成交明細查詢",
                     "marketdata.rest_client.stock.intraday.trades", NO_HTTP,
                     "查詢個股當日逐筆成交明細" + RO, NOT_CONNECTED,
@@ -290,42 +294,53 @@ public class FubonApiInfoBffController {
                     "查詢指定市場的成交量值排行" + RO, NOT_CONNECTED,
                     "market（路徑參數）＋選填 query 參數",
                     "成交量值排行陣列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股簡單移動平均線查詢",
-                    "marketdata.rest_client.stock.technical.sma", NO_HTTP,
-                    "查詢個股簡單移動平均線（SMA）指標" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數（如週期）",
-                    "SMA 指標數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
-            new FubonApiInfoDto(false, "行情查詢", "個股相對強弱指標查詢",
-                    "marketdata.rest_client.stock.technical.rsi", NO_HTTP,
-                    "查詢個股相對強弱指標（RSI）" + RO, NOT_CONNECTED,
-                    "symbol（路徑參數）＋選填 query 參數",
-                    "RSI 指標數列，實際完整欄位以官方回應為準，此 wrapper 未在程式碼中定義 schema"),
+            new FubonApiInfoDto(true, "行情查詢", "個股簡單移動平均線查詢",
+                    "marketdata.rest_client.stock.technical.sma", "POST /internal/market-data/technical-indicators/read",
+                    "以 immutable 17-profile bundle 查詢 SMA：日線 5／10／20／60／240、週線 5／10／20；"
+                            + "全歷史 fact/member 由 PostgreSQL 保存，交易雷達再以 100 秒 BOUND Redis overlay 優先讀取" + RO,
+                    "external-materials-service（交易日 13:40 唯一 lifecycle；需另啟用設定；"
+                            + "POST /internal/technical-indicators/fubon-sync）",
+                    "body 僅允許 {symbol}；from 固定 queryDate−420 天、to=queryDate，無 caller 選擇週期／timeframe",
+                    "schemaVersion=2 exact17 profiles；每筆 strict payload {sma}、candidate hash 與 observedAt。"
+                            + "雷達只在 immutable compatibility proof 成立時套用指定欄位；其餘留 detail"),
+            new FubonApiInfoDto(true, "行情查詢", "個股相對強弱指標查詢",
+                    "marketdata.rest_client.stock.technical.rsi", "POST /internal/market-data/technical-indicators/read",
+                    "以 immutable 17-profile bundle 查詢 RSI：日線與週線各 5／10；全歷史寫 PostgreSQL，"
+                            + "交易雷達以 100 秒 BOUND Redis overlay 優先，local fallback 只覆寫 Redis、不覆寫富邦歷史" + RO,
+                    "external-materials-service（交易日 13:40 唯一 lifecycle；需另啟用設定；"
+                            + "POST /internal/technical-indicators/fubon-sync）",
+                    "body 僅允許 {symbol}；from 固定 queryDate−420 天、to=queryDate，無 caller 選擇週期／timeframe",
+                    "schemaVersion=2 exact17 profiles；每筆 strict payload {rsi}、candidate hash 與 observedAt；"
+                            + "欄位 provenance 明示 FUBON／LOCAL／DETAIL_ONLY／未採用原因"),
             new FubonApiInfoDto(true, "行情查詢", "個股 KD 隨機指標查詢",
                     "marketdata.rest_client.stock.technical.kdj", "POST /internal/market-data/technical-indicators/read",
-                    "查詢今日交易雷達台股的 KDJ(9,3,3) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "以 immutable 17-profile bundle 查詢日／週 KDJ(9,3,3)；富邦全歷史在 PostgreSQL 為權威，"
+                            + "雷達 Redis overlay 僅 100 秒且 K／D 的 direct overlay 必須有同一 response previous-row 證明" + RO,
                     "external-materials-service（交易日 13:40，需另啟用設定；"
                             + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，KDJ(9,3,3)",
-                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
-                            + "kdj payload 為 k／d／j，有界 decimal 字串；sourceTimestamp 未核實為 null"),
+                    "body 僅允許 {symbol}；固定日／週 KDJ(9,3,3) 與 queryDate−420 天至 queryDate",
+                    "schemaVersion=2 exact17 profiles；kdj payload 為 k／d／j、same-response previous pointer 與 candidate hash。"
+                            + "vendor J 僅 detail 對照，絕不取代 local J9"),
 
             new FubonApiInfoDto(true, "行情查詢", "個股 MACD 指標查詢",
                     "marketdata.rest_client.stock.technical.macd", "POST /internal/market-data/technical-indicators/read",
-                    "查詢今日交易雷達台股的 MACD(12,26,9) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "以 immutable 17-profile bundle 查詢日／週 MACD(12,26,9)；全歷史寫 PostgreSQL，"
+                            + "100 秒 Redis overlay 僅供雷達即時優先讀取，MACD 保持 detail-only、不改 V18 score" + RO,
                     "external-materials-service（交易日 13:40，需另啟用設定；"
                             + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，MACD(12,26,9)",
-                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
-                            + "macd payload 為 macdLine／signalLine，有界 decimal 字串；不捏造 histogram，sourceTimestamp 未核實為 null"),
+                    "body 僅允許 {symbol}；固定日／週 MACD(12,26,9) 與 queryDate−420 天至 queryDate",
+                    "schemaVersion=2 exact17 profiles；macd payload 為 macdLine／signalLine、candidate hash 與 observedAt；"
+                            + "不捏造 EMA／DIF／OSC，也不將 vendor MACD 填入 V18 score"),
 
             new FubonApiInfoDto(true, "行情查詢", "個股布林通道查詢",
                     "marketdata.rest_client.stock.technical.bb", "POST /internal/market-data/technical-indicators/read",
-                    "查詢今日交易雷達台股的 BB(period=20) 日指標，保存在獨立 Redis cache，最長 7 天；不改本地技術計算或雷達評分" + RO,
+                    "以 immutable 17-profile bundle 查詢日線 BB(20)；全歷史寫 PostgreSQL，100 秒 Redis overlay"
+                            + "只供雷達即時優先讀取，BB 保持 detail-only、不改 V18 score" + RO,
                     "external-materials-service（交易日 13:40，需另啟用設定；"
                             + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "symbol／from／to；timeframe=D，查詢區間為 queryDate 前 120 天至 queryDate，BB(period=20)",
-                    "symbol／market／provider／queryFrom／queryTo／observedAt；kdj／macd／bb 各含 status／reason／parameters／sourceDate／sourceTimestamp／payload；"
-                            + "bb payload 為 upper／middle／lower，有界 decimal 字串；sourceTimestamp 未核實為 null"),
+                    "body 僅允許 {symbol}；固定日線 BB(20) 與 queryDate−420 天至 queryDate",
+                    "schemaVersion=2 exact17 profiles；bb payload 為 upper／middle／lower、candidate hash 與 observedAt；"
+                            + "不由富邦 BB 改寫本地 BIAS 或任一 V18 rule 欄位"),
 
             new FubonApiInfoDto(false, "行情查詢", "減資／除權息等資本變動查詢",
                     "marketdata.rest_client.stock.corporate_actions.capital_changes", NO_HTTP,

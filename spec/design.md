@@ -8921,9 +8921,11 @@ Python 掛 `${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}:/run/secrets/fubon:ro`；
 | `POST /internal/market-data/dividends/read` | radar symbols/from/to | 單一日期批次的 radar 交集，typed dividends | 400/401/403/503 |
 | `POST /internal/market-data/stock-push/subscriptions` | symbols desired set | bounded aggregates subscription status | 400/401/403/503 |
 | `GET /internal/market-data/stock-push/stream` | SSE | typed actual-trade events，非raw packet | 401/403/503 |
-| `POST /internal/market-data/technical-indicators/read` | symbol/from/to | sourceDate/parameters/各組狀態與payload | 400/401/403/503 |
+| `POST /internal/market-data/technical-indicators/read` | exact `{symbol}` | Task408 v2 exact17 profile histories/captureId | 400/401/403/503 |
+| `POST /internal/market-data/stock-basic/read` | exact `{symbol}` | normalized ordinary-lot ticker basic source snapshot | 400/401/403/503 |
+| `POST /internal/market-data/intraday-candles/read` | exact `{symbol}` | normalized ordinary-lot Taipei one-minute candles | 400/401/403/503 |
 
-若使用FastAPI，production app必須設定`docs_url=None, redoc_url=None, openapi_url=None`；累積本輪後 Python route allowlist 精確為上述 functional 表與 GET /internal/health（ETF基線7條加本輪7條，共14條；Java手動與readback不是Python路由），其他path/method一律404/405，不得因framework預設多曝露`/docs`、`/redoc`或`/openapi.json`。
+若使用FastAPI，production app必須設定`docs_url=None, redoc_url=None, openapi_url=None`；Task408 後 Python route allowlist 精確為上述15條 functional routes 與 GET /internal/health，共16條（Java手動與readback不是Python路由），其他path/method一律404/405，不得因framework預設多曝露`/docs`、`/redoc`或`/openapi.json`。
 
 normalized wire不傳Python float。SDK每個decimal-like值先用`Decimal(str(value))`驗finite，再輸出不含`e/E`的canonical decimal string；Java typed DTO只從`^(0|[1-9][0-9]*)(\.[0-9]+)?$`建`BigDecimal`，JSON number/float、scientific notation、NaN/Infinity一律拒絕。型別界線在Python與Java兩層相同：(a) portfolio normalized `costPrice`、quote normalized `actualPrice`，以及Fubon raw quote精確key `previousClose/openPrice/highPrice/lowPrice`與非null `bids[].price/asks[].price`皆須>0、`precision<=20`、`0<=scale<=10`（`"9999999999.9999999999"`接受，`"10000000000.0000000000"`與`"0.00000000001"`分別因precision21／scale11拒絕）；raw只出現`open/high/low` alias而缺官方price-suffixed keys時拒絕，不得猜測。(b) raw quantity須是`0..9,999,999,999` exact integer，兩側完成守恆後可持久化shares才是`1..9,999,999,999`，對應`stock_holding NUMERIC(15,5)`的10位整數容量；(c) volume是`0..9,223,372,036,854,775,807` exact integer，對應Java `Long`。所有range在做任何乘法／mapping前驗證；public quote writer仍保留既有BigDecimal欄位與numeric JSON，不把adapter值轉double或預先round。這可避免SDK float `0.1`變成binary artifact，並讓precision/scale/overflow拒絕可測。
 
@@ -10708,7 +10710,7 @@ POST `/internal/technical-indicators/fubon-sync?dryRun=true|false`在external、
 
 Task385成交改09:00–14:00半小時共11輪、最後14:00，不含14:30；原inventory09:05/09:35不改。六個新job：bank/settlement/realized屬BUSINESS/券商庫存，dividends屬EXTERNAL/股利，stock-push/technical屬EXTERNAL既有行情分類；cron/文字/測試同時更新，stock-push描述持續串流及30秒reconciliation而非假cron。
 
-先合入ETF session的集成基線為58jobs=24business+34external，加3+3後64=27+37；架構基線是52/15/37。Task406兩份來源報表完整驗收後為52/17/35，排程數仍64，兩項說明改為保存來源報表、未自動入帳；原394/395財務writer仍未完成。以真正合入的清單確認，不用缺ETF的舊計數遮掩漏項。Python adapter14條routes的總allowlist與本文件「Adapter API」表一致；Java手動/技術readback在各自服務，不混進Python盤點。
+先合入ETF session的集成基線為58jobs=24business+34external，加3+3後64=27+37；架構基線是52/15/37。Task406兩份來源報表完整驗收後為52/17/35，排程數仍64，兩項說明改為保存來源報表、未自動入帳；原394/395財務writer仍未完成。Task408 再把 SMA、RSI、ticker、分鐘 K 四項接入，最終 inventory 為52/19/33、JOBS 仍64。以真正合入的清單確認，不用缺ETF的舊計數遮掩漏項。Task408 Python adapter16條 routes 的總allowlist與本文件「Adapter API」表一致；Java手動/技術readback在各自服務，不混進Python盤點。
 
 所有改动須spec-check/独立review、官方schema offline正常路徑/拒絕路徑、真正Spring交易边界與DB/Redis讀回，之後依run-stack驗image/container與auth/gate。舊報告的錯誤授權、鎖弱化、不重算aggregate與「全數通過」不作本輪證據；無法核實的來源範圍／身分／單位明示不可用，不以flag=false或HTTP200當功能完成。本輪不查真人帳號、不做券商金融寫入、不新增公開路由。
 
@@ -10725,7 +10727,7 @@ Task406來源報表採官方已有欄位，可獨立正常保存與驗收，不�
 
 `SelectedAccount`、`AccountingRead`、`AccountingPair`、`StockPushConnection` 移至中立 capture 模組；raw payload 僅留 Python 記憶體。account／branch／token／raw response 全部 `repr=False`，消毒例外只帶固定 reason，不在 repr／log／response 暴露 raw SDK 或帳號。raw_field／enum_text、payload size、config digest 等純 helper 移至中立 utility／config。capture 必須仍在同一 accounting lock 內捕捉 selected account、回應及 token；既有各服務 raw identity、日期、HMAC 及 zero/None 語意不變。
 
-HTTP 組裝層依既有十四條 route 選取自己的純 request contract，body 累積前以 65,536 bytes 封頂；UTF-8 解碼、JSON unique keys／trailing data、exact shape／strict types 只在純 parser 或已有 strict DTO 作驗證。無 body 路徑只允許真正空 body；有 body 的路徑拒絕未知欄位、coercion、duplicate key，日期用既有 strict ISO parser。方法、token、既有 outcome 與無 query 的限制不擴張；不做 alias 正規化或新增 proxy。fixture 直接測 parser，不對運行中的服務作 alias／方法矩陣／安全探測。
+HTTP 組裝層依 Task408 後十六條 route 選取自己的純 request contract，request body 累積前以 65,536 bytes 封頂；technical v2 response 另有4 MiB streaming cap。UTF-8 解碼、JSON unique keys／trailing data、exact shape／strict types 只在純 parser 或已有 strict DTO 作驗證。無 body 路徑只允許真正空 body；有 body 的路徑拒絕未知欄位、coercion、duplicate key，日期用既有 strict ISO parser。方法、token、既有 outcome 與無 query 的限制不擴張；不做 alias 正規化或新增 proxy。fixture 直接測 parser，不對運行中的服務作 alias／方法矩陣／安全探測。
 
 ### Task401：deadline、native slot 與 quote dispatch
 
@@ -10735,7 +10737,7 @@ QuoteService 持有 cache／single-flight；每個 `(purpose, stockCode)` admitt
 
 quote operational rolling240/min與429 circuit在真正SDK起點、取得容量且完成所有session等待後檢查並計數；auth retry也算一次。若等待期間其他call得到429，尚未dispatch的工作不再外呼；至少60秒、有效Retry-After上限600秒的原退避不變。成功INVENTORY cache30秒；LIVE不共用此cache。presence-aware `isTrial` 只接受缺欄或真正boolean false，不能把null、0、0.0或字串視為false。
 
-技術指標保持Java每90秒最多20symbol attempts、2個symbol worker、共用至少3.1秒dispatch間距，Python每symbol KDJ→MACD→BB依序及25秒aggregate deadline，共用rolling60/min historical budget。當日13:40後／same-day／radar gates、全輪30分鐘與PARTIAL保留；quota按真正呼叫共享，不以method/symbol/thread增加額度。帳務rolling5calls/sec、history rolling60/min及quote rolling240/min都在actual native dispatch才記帳，含每次auth retry的業務方法呼叫；不能等slot前先reserve，也不能因不同method/worker擴配額。既有5秒call限制不變。90秒批次是本系統保守節拍，不宣稱官方同API每分鐘僅一次。
+Task408 技術指標使用 two symbol workers、`BATCH_SIZE=3`、symbol dispatch≥3.1秒；90秒僅限制 new-job admission，不取消已 admitted job。每 admitted symbol 可依固定 manifest 啟動17個 technical profile+ticker+candles（19 calls）；Python aggregate deadline=60秒、Java technical transport=70秒、ticker/candles=8秒，SDK start 前必留86秒，否則 `NOT_ADMITTED_DEADLINE`且零 SDK start。所有實際 technical/ticker/candle SDK start（含每次 auth/re-login 重送）共用 process-wide rolling 60秒≤38 gate，既有history rolling60/min為外層hard stop。當日13:40後／same-day／radar gates與PARTIAL保留；quota按真正 SDK start 共享，不以method/symbol/thread增加額度。帳務rolling5calls/sec及quote rolling240/min仍在actual native dispatch才記帳，含每次auth retry的業務方法呼叫；不能等slot前先reserve，也不能因不同method/worker擴配額。90秒是本系統 admission 節拍，不宣稱官方同API每分鐘僅一次。
 
 ### Tasks401／402：每個 run 擁有自己的資源
 
@@ -11030,3 +11032,238 @@ BFF：新增 `AppFeatureSettingsBffRoutes`，`/api/bff/app-feature-settings/**` 
 ### 不處理
 
 同「範圍界線」段：不做 API 層權限檢查、不動既有管理者專屬硬編碼限制、不做角色主檔資料庫化、不開放功能清單自訂新增。
+
+## Requirement 135／Task 408：富邦技術指標與 ticker 的 PostgreSQL + Redis 資料流
+
+> **凍結歷史引用，不是 Task408 規格：**下方「Task398 frozen baseline」只保留當時三組／日線／不改雷達 consumer 的背景紀錄，任何五組、兩表、30 秒 deadline、BATCH8 或不改 consumer 的敘述都**不得**用於實作、測試或審查。唯一規格是本節末尾的「Task408 最終控制設計」。
+
+### Task398 frozen baseline（引用；非 Task408 規格）
+
+Task398 的 Redis v1 為三組、七日可重建 cache；使用者現在明確要求技術指標值同時寫入 PostgreSQL 和 Redis，因此本節取代該任務「不得新建 SQL schema」的限制。PostgreSQL 是 durable source of truth，Redis v2 是可以遺失、可以重建的 projection。舊 key fubon:technical:tw:{symbol}:D:v1 不讀改寫、不改 hash/bytes；新的五組資料寫入 v2。另依新增需求接入完整當日1分K，該 series 只保存 PostgreSQL，不塞入技術 Redis。既有本地 TechnicalIndicatorService 繼續從 price history 自算，任何 radar/UI consumer 不自動改採 FUBON_SDK 值。
+
+官方契約固定為：
+
+| 能力 | SDK 路徑 | 固定參數 | 正規化值 |
+|---|---|---|---|
+| SMA | technical/sma/{symbol} | timeframe=D, period=20, from/to | data[].date, data[].sma |
+| RSI | technical/rsi/{symbol} | timeframe=D, period=10, from/to | data[].date, data[].rsi |
+| ticker | intraday/ticker/{symbol} | 僅 symbol | date, type, exchange, symbol, name 與限定基本欄位 |
+| candles | intraday/candles/{symbol} | 普通整股、timeframe=1、sort=asc | date/type/exchange/market/symbol、data[].date/OHLC/volume/average |
+
+SMA20／RSI10 是固定資料身分，而非 caller input；timeframe 或 period 改變必另立 cache/row identity，不能覆寫本輪資料。所有新增路徑是 marketdata read；Python allowlist 不得寬放成任意 technical/intraday method，絕不 import 或呼叫 trading/accounting 寫入 SDK。
+
+### Adapter wire 與中立模型
+
+FubonMarketData.GROUPS 擴為 kdj、macd、bb、sma、rsi；parameters(sma) 為 timeframe D / period 20，parameters(rsi) 為 timeframe D / period 10，payloadFields 分別只允許 sma、rsi。Python TechnicalIndicatorService 使用相同固定順序與 aggregate deadline 30秒；sdk_gateway 只增加 technical/sma、technical/rsi 兩個 allowlist tuple。根 root 的 exact fields 和每組 response echo 繼續 fail closed，任一 group 不合法只回該組 SCHEMA_INVALID。
+
+新增 Python stock-basic request/service/response contract。ticker response 只接收固定 field allowlist；必有 date/type/exchange/symbol/name，雷達台股僅接受 EQUITY 與 TWSE/TPEx，且 sourceDate 必須等於本輪 queryDate。可選欄位以 exact JSON primitive 承接：空白或超長文字、負／非有限價格、非布林旗標、非正 boardLot、負 matchingInterval、未知欄位、非本輪 source date 皆拒絕，不用 null/0/空字串修補。已正規化的 StockBasicRead 使用 immutable value；sourceName 及其他 text 皆不含 control character。
+
+FubonMarketDataPort 新增 basic(symbol, queryDate) 與 candles(symbol, queryDate)；FubonScheduledMarketClient 只 POST 到 /internal/market-data/stock-basic/read 或 /internal/market-data/intraday-candles/read，保留30秒 transport timeout/response上限/constant-time token。FubonMarketJson 對 technical root 期望五組、對 basic/candles root 做 exact parse；consumer core 不依賴 client JSON parser class。
+
+1分K root date 必等於 queryDate、type=EQUITY、exchange 為 TWSE 或 TPEx，timeframe echo 若存在必精確為1；官方 response table 說 timeframe 必揭示但其官方範例省略該 field，因此 Python 可接受省略但輸出固定 timeframe=1，並以固定 request 身分而非猜測值保存。每個 candle timestamp 為嚴格 ISO offset time、台北日期=sourceDate、秒/小數秒為零、09:00含至13:30不含、嚴格 asc/unique、最多270 rows；OHLC/average 是正有限 decimal、high>=open/close>=low、average 落於 low/high，volume 為非負 finite decimal。停牌／無成交分鐘不得自行補 row 或零值。
+
+### PostgreSQL schema、fence 與投影順序
+
+Liquibase v1.122.0 只新增下列兩張 source-specific 表，external-materials-service 以 JdbcTemplate/repository 寫入，backend 不新增 entity/JPA writer：
+
+| 表 | key | 內容 |
+|---|---|---|
+| stock_technical_indicator | stock_code, market, provider, timeframe, indicator | 每一組的 parameters/payload/source date/hash、首次觀測與最後嘗試診斷 |
+| fubon_stock_basic_info | stock_code, market, provider | 最新一份 normalized ticker facts、來源日、觀測時間與 hash |
+| fubon_intraday_candle | stock_code, market, provider, timeframe, candle_at | 已驗證的當日1分K OHLC/volume/average、來源日、exchange、觀測與 hash |
+
+stock_technical_indicator 的 source_date/source_timestamp/payload/content_hash/first_observed_at 必為全有或全無；parameters/payload 必是 jsonb object，market/provider/timeframe/indicator 使用 CHECK 固定為台股/FUBON_SDK/D/五組。可用資料以 sourceDate + canonical hash 作 fence；無資料或錯誤只更新 last_attempt 狀態。sourceDate 新才替換；同日不同 hash 無 source revision 時更新 attempt=CONFLICT_NO_SOURCE_REVISION、保留 immutable source fields。此 SQL 判斷在單一 statement/transaction 中完成，不作 Java select-then-update。
+
+技術同步順序如下：
+
+    Python five-group read -> strict Java parse -> PostgreSQL technical transaction
+      -> canonical committed group rows -> Redis v2 Lua projection -> cache-only readback
+
+PostgreSQL transaction 未成功以前不能呼叫 Redis writer。Redis 投影失敗不會 undo 已 committed rows，而是回 PARTIAL；下次合格同步以相同 PG canonical data 再投影。Redis read path 只讀 v2，不 SDK fetch、不寫 DB、不刷新 TTL；v2 的 Lua key、source-date fences 和7日/15分鐘 TTL 與 Task398 同型，但 manifest 必須剛好五組。v1 不做 migration 或以不完整三組塞進 v2。
+
+fubon_stock_basic_info 是來源快照而非 stock 主檔替代品。source_name 保留當次官方名稱，允許與 stock.name 不同，以保留 source evidence；SQL comment 明確說明這項唯一的刻意去正規化。其餘欄位是 ticker 才提供的交易資格/狀態、交易單位、幣別與 basic metadata。它以 source_date/hash 走同一 conservative fence。成功 upsert 後，只有 stock 已存在且 name 是空白或代號時，才用 source_name 更新 name；不可 insert stock，不可修改任何分類欄位。
+
+fubon_intraday_candle 與每日 stock_price_history、最新 stock_intraday_quote 的資料粒度不同，不能挪用其中任一張表。每一個已通過 source validation 的 candles response 在一個 transaction 中批次 upsert：不存在的 minute 可 insert、相同 hash unchanged、同 minute 不同 hash 而無 source revision 不覆寫並計 CONFLICT_NO_SOURCE_REVISION；transaction 失敗須 rollback 整批、不可留下部分分鐘。它不是高頻讀取 contract，故不新增 Redis key、read-through 或公共 API。
+
+### 排程、結果與 API 目錄
+
+既有 FubonTechnicalIndicatorSyncService 的13:40 job仍是唯一排程；ticker/candles 是同一 symbol 的 technical 後續 reads。技術/基本資料/分鐘K各自失敗互不取消，run結果分列 technicalDb、technicalRedis、basicDb、candleDb 的 written/unchanged/conflict/failed count。feature/dry-run/gate 仍由同一 lifecycle 控制，dry-run不調任何 writer。GROUPS 從3變5，連同 ticker/candles 每檔最多7 calls，因此 BATCH_SIZE=8；2 workers、3.1秒間隔與90秒視窗使全開最大約37 calls/min。
+
+Fubon API inventory 不增減列數，更新 SMA、RSI、ticker、candles 四列的 connected、endpoint、requestSummary、responseSummary、consumer。52筆中19筆 connected、33筆 not connected；JOBS數量不變，只將既有技術排程描述更新為五組技術資料、ticker及同範圍1分K source sync。無新的 BFF/frontend/9090 route。
+
+### 驗證
+
+離線 Python fixture 驗所有新 exact schemas及拒絕分支。Java 以隔離 PostgreSQL+Liquibase 與真 Redis 驗：
+
+- SMA/RSI value、parameters、source date、hash 在 PostgreSQL 和 Redis v2 完全一致。
+- DB failure 零 Redis、Redis failure 保留 DB 並回 PARTIAL，下一個合格 run可投影。
+- old/same/conflicting dates、partial groups、v1 key untouched、v2 per-group expiry。
+- ticker 成功更新 fubon_stock_basic_info，name 只補 placeholder，user name 不覆寫，bad ticker 零寫。
+- candles 的 session/UTC offset/排序/duplicate/OHLC/volume boundary、整批 transaction、same-minute conflict 與每日表/最新quote不受影響。
+
+結尾依 schema.sql 檔頭重產 schema 並跑 drift test；run-stack 從 feature/main source rebuild fubon-broker-service、external-materials-service 和 bff，FUBON_ENABLED=false/feature flags false，不做真人 SDK 或任何 POST 同步。
+
+### Task408 最終控制設計（authoritative）
+
+#### Profile manifest 與明確對映
+
+富邦官方 technical 目錄的五個 endpoint 是唯一 vendor 範圍。`TechnicalProfile` 是共享 immutable manifest，而非任意 SDK method：
+
+| timeframe | profile_id | endpoint / parameters | 雷達的直接消費語意 |
+|---|---|---|---|
+| D | `sma_d_5`, `sma_d_10`, `sma_d_20`, `sma_d_60`, `sma_d_240` | SMA period 5/10/20/60/240 | local MA5/10/20/60/240 的富邦來源候選 |
+| D | `rsi_d_5`, `rsi_d_10` | RSI period 5/10 | local RSI5/10 的富邦來源候選 |
+| D | `kdj_d_9_3_3` | KDJ r=9,k=3,d=3 | K/D 可取代；vendor j=3K−2D 只對應 local k3d2，不能填 j9 |
+| D | `macd_d_12_26_9` | MACD 12/26/9 | 保存 vendor `macdLine`/`signalLine` 原欄；若算 oscillator，標 `DERIVED_FROM_FUBON` |
+| D | `bb_d_20` | BBANDS period 20 | 補充來源 detail，雷達本地沒有同名欄 |
+| W | `sma_w_5`, `sma_w_10`, `sma_w_20` | SMA period 5/10/20 | completed-week MA 的富邦來源候選 |
+| W | `rsi_w_5`, `rsi_w_10` | RSI period 5/10 | completed-week RSI 的富邦來源候選 |
+| W | `kdj_w_9_3_3` | KDJ r=9,k=3,d=3 | completed-week K/D 候選；J 規則同上 |
+| W | `macd_w_12_26_9` | MACD 12/26/9 | completed-week vendor MACD 原欄／明示派生值 |
+
+所有 profile 固定 `from=queryDate−420 days`、`to=queryDate`，共 17 個 SDK calls。Python 在整次 adapter read 建立一個 immutable `captureId`，但**每一 profile 的 `observedAt` 必須在該 SDK response 返回當下固定**，不得以整輪結束時間回填；bundle 的 `oldestObservedAt` 是 17 個 profile observedAt 的最小值。Java map、PostgreSQL identity、canonical hash、Redis manifest 和 Lua fence 都以 profile id—not endpoint kind—as key。無富邦 exact counterpart 的 BIAS、W%R、RSV、`j9=3D−2K`、EMA12/26、DI 值基的 DIF/MACD/OSC 不被改名為富邦資料。這些 local 欄位可在 provider bundle fresh 時保留，但 DTO 必須逐欄標 local / FUBON / DERIVED_FROM_FUBON provenance。
+
+Python technical adapter 在同一固定 60 秒 aggregate deadline 下依 manifest 順序呼叫；Java adapter endpoint deadline 70 秒。SMA/RSI response `period` 的官方 dual representation 是唯一型別例外：只收 finite exact JSON integer 或無符號、無空白／leading zero 的 canonical integer string，且必精確等於 request period，normalized output 固定為 JSON integer；其他欄位不做 coercion。SDK `history_starts` rolling 60/min 保護仍是最後防線。`FubonScheduledMarketClient` 只可傳 manifest 產生的 POST body；不得把 profile/period/timeframe 改成 HTTP input。ticker、minutes candles 仍使用各自 exact token-protected adapter route，ordinary-lot SDK 呼叫必省略 optional `type`（不可送 `type=EQUITY`；`EQUITY` 是 response identity）。
+
+#### Technical adapter v2 wire grammar
+
+這個 private route 的 request 只能是 `{"symbol":"2330"}`；Python 在收到後以 Taipei current date 固定 `queryFrom=queryDate-420 days`、`queryTo=queryDate`，Java 不得再傳或接受 `from`／`to`／method／period／timeframe。成功 HTTP body 的根必**精確**為下列 v2 fields，所有未列欄位、重複 JSON key、技術 payload decimal 被編成 JSON number（而非指定 string）、非 canonical UUID 或不符合表格型別都 schema-invalid：
+
+```json
+{
+  "schemaVersion": 2,
+  "captureId": "lowercase-canonical-uuid",
+  "symbol": "2330",
+  "market": "台股",
+  "provider": "FUBON_SDK",
+  "queryFrom": "2025-01-01",
+  "queryTo": "2026-02-25",
+  "profiles": [
+    {
+      "profileId": "kdj_d_9_3_3",
+      "status": "AVAILABLE",
+      "reason": null,
+      "parameters": {"timeframe":"D","rPeriod":9,"kPeriod":3,"dPeriod":3},
+      "observedAt": "2026-02-25T05:40:01.123456Z",
+      "history": [
+        {"sourceDate":"2026-02-24","sourceTimestamp":null,"payload":{"k":"42.5","d":"40","j":"47.5"}}
+      ]
+    }
+  ]
+}
+```
+
+`profiles` 必剛好為 17 個 manifest `profileId`、依 manifest 固定順序、不能重複或省略；每個 profile object 的 fields 固定為 `profileId,status,reason,parameters,observedAt,history`。`parameters` 是 profile manifest 的 exact normalized JSON（SMA/RSI `period` 已為 JSON integer）；`observedAt` 是 SDK response 返回瞬間的 UTC ISO-8601 instant、不得未來或跨 queryDate 的台北日期。`AVAILABLE` 時 `reason=null` 且 `history` 為 1–421 筆；`NO_DATA` 時 `reason="NO_DATA"`、history 空；`SCHEMA_INVALID` 時 `reason="TECHNICAL_SCHEMA_INVALID"`、history 空；`UNAVAILABLE` 時 history 空且 reason 限 `RATE_LIMITED`／`HISTORY_BUDGET_EXHAUSTED`／`UPSTREAM_UNAVAILABLE`。每一 AVAILABLE history row 的 fields 固定為 `sourceDate,sourceTimestamp,payload`：date 是 ISO day、落在 inclusive query window、整個 array strict ascending/unique；`sourceTimestamp` 在 Task408 一律 JSON null（SDK 無已核實 row-time）；payload 的 keys 正好是該 profile kind 的固定 field set，值為 precision≤38／scale≤18 的 canonical decimal **string**。Python 在傳送前依 sourceDate 排序，Java 只接受該排序，不自行補洞／去重／轉型；最大 row 是 candidate，KDJ 倒數第二個 row 是唯一可寫入 previous member pointer 的 same-response row。
+
+每個 fact 的 `content_hash` 由 Java 重新計算，不信任 wire supplied hash：`SHA-256(UTF-8("FUBON_TECHNICAL_FACT_V1\\n" + profileId + "\\n" + sourceDate + "\\n" + canonical-sorted-JSON(parameters) + "\\n" + canonical-sorted-JSON(payload)))` 的 lowercase 64-hex。canonical JSON 無 whitespace、keys ASCII lexical order、decimal 保留上述 canonical string；不含 captureId/observedAt/sourceTimestamp。Java transport body cap 是 4 MiB（仍在 streaming cap 下），足以容納最壞 `17 × 421` history rows；較大 body 一律在讀取中中斷並視為 unavailable。以一份完整 v2 fixture（含所有17 profiles、日/週、KDJ 兩 row、NO_DATA/UNAVAILABLE/SCHEMA_INVALID 的獨立 reject fixtures）同時測 Python serializer、`FubonMarketJson` parser、hash、所有 fact rows、candidate/member 與 KDJ previous pointer。
+
+#### Ticker and minute-candle v1 wire grammar
+
+`POST /internal/market-data/stock-basic/read` 與 `.../intraday-candles/read` 都只接受 exact `{"symbol":"2330"}`，無 query。ordinary-lot SDK call 必省略 `type`；`EQUITY` 只在 response identity 接受。兩 route 的 200 success wire 禁 unknown/duplicate key、coercion、SDK raw field 與以 JSON number 編碼的 price/decimal，所有 instant 是 UTC `Z` ISO-8601、`observedAt` 是 SDK response-return time、nonfuture 且 Taipei date=queryDate。兩 route 的 error body 都只為 `{"reason":"..."}`：400 `INVALID_REQUEST`，401 `UNAUTHORIZED`，403 `FORBIDDEN`，503 僅 `MISCONFIGURED`／`UPSTREAM_UNAVAILABLE`／`RATE_LIMITED`／`HISTORY_BUDGET_EXHAUSTED`／`SCHEMA_INVALID`／`STALE_QUERY`；source identity/schema failure 是 503 `SCHEMA_INVALID`，不得偽裝為空 success。
+
+這兩條 v1 route 是**唯一**例外：它們不可掛現有 `authorize()`，因為後者的 `TOKEN_REQUIRED`／`TOKEN_INVALID`／`DISABLED`／`RUNTIME_MISCONFIGURED` reason 與 FastAPI `HTTPException` 的 `{"detail":{"reason":...}}` wire 已屬既有14 route 的 frozen compatibility surface。實作 `MarketDataV1Gate`（重用 loader 與 constant-time token compare，但不重用既有 exception transport）以及只由這兩 route raise 的 `MarketDataV1RouteError` handler；handler 必直接以 `JSONResponse` 寫 root `{"reason":reason}`，不得改動舊 gate、舊 `HTTPException` handler 或舊14 route 行為。精確 precedence/mapping 是：(1) config disabled、not READY、no configured internal token、config reason、runtime misconfigured 或 `SdkCallError.misconfigured` → 503 `MISCONFIGURED`；(2) ready config 時 missing/blank/multiple header tokens → 401 `UNAUTHORIZED`；(3) ready config 時 constant-time mismatch → 403 `FORBIDDEN`；(4) malformed/unknown/duplicate/non-exact JSON、query 或 request validation → 400 `INVALID_REQUEST`；(5) declared SDK quota reason `RATE_LIMITED`／`HISTORY_BUDGET_EXHAUSTED`、local stale-date、validated source schema/identity failure → respective 503 `RATE_LIMITED`／`HISTORY_BUDGET_EXHAUSTED`／`STALE_QUERY`／`SCHEMA_INVALID`；(6) all other SDK transport/login/session/auth/timeout and any otherwise-unhandled provider failure → 503 `UPSTREAM_UNAVAILABLE`。為使 (4) 覆蓋 raw duplicate keys，兩條都加入 existing `strict_json_paths`；為使 (6) 不被 app outer boundary 轉成 `INTERNAL_FAILURE`，v1 route-local boundary 必在該 outer boundary 前捕捉並轉為 `MarketDataV1RouteError`。route/method/token/body/config/runtime/SDK matrix fixture 必逐一 assert status 和 exact one-key root body，並有 old-14 route regression fixture assert 原 reason/envelope 未動。
+
+Ticker 200 的 root key set 精確為 `schemaVersion,symbol,market,provider,sourceDate,observedAt,instrumentType,exchange,sourceMarket,sourceName,industry,securityType,limitUpPrice,limitDownPrice,tradingEligible,tradingStatus,matchingInterval,boardLot,currency`：schemaVersion=1 integer、market=台股、provider=FUBON_SDK、sourceDate=queryDate、instrumentType=EQUITY、exchange=TWSE|TPEx；sourceMarket 是 raw market 或 null (ASCII 1–64)，sourceName 是 raw name 在拒絕 leading/trailing whitespace後原樣輸出 (1–100、nonblank/no control)，不傳 `name`；industry/securityType/currency 是 null 或 trimmed bounded string (100/64/10)，currency 若有是 uppercase three letters；limit prices 是 null 或 positive canonical decimal string precision≤20/scale≤10；tradingStatus 是 null 或 `NORMAL|TERMINATED|SUSPENDED`，tradingEligible 是 status null 時 null、否則 `tradingStatus==NORMAL`；matchingInterval 是 null 或 nonnegative integer、boardLot 是 null 或 positive integer。Java hash 是 `SHA-256(UTF-8("FUBON_BASIC_V1" + LF + canonical-sorted-JSON(root without observedAt)))` lower 64-hex，LF=byte 0x0a。
+
+Candles 200 root key set 精確為 `schemaVersion,symbol,market,provider,sourceDate,observedAt,instrumentType,exchange,sourceMarket,timeframe,status,reason,candles`：identity 同 ticker（但無 sourceName），timeframe=1 integer。AVAILABLE 必 reason=null、1–270 strict-ascending/unique candles；NO_DATA 必 reason=NO_DATA、candles=[]，是唯一空 success。每 candle key set 是 `candleAt,open,high,low,close,volume,average`；candleAt UTC Z，換算 Taipei 後是 queryDate `[09:00,13:30)` integer minute；OHLC/average positive canonical decimal string precision≤20/scale≤10、high≥open/close≥low、average∈[low,high]；volume is canonical nonnegative integer string ≤Long.MAX_VALUE。不得補停牌／missing minute／zero；no minute candle may write Redis, daily price history or latest quote. Java row hash is `SHA-256(UTF-8("FUBON_INTRADAY_CANDLE_V1" + LF + canonical-sorted-JSON({symbol,market,provider,sourceDate,instrumentType,exchange,sourceMarket,timeframe,candle})))` lower 64-hex. Python/Java share ticker-success/reject and candle AVAILABLE/NO_DATA/reject fixtures, proving exact parsing, hashes, transaction semantics and zero Redis mutation.
+
+#### Historical PostgreSQL authority
+
+`stock_technical_indicator` 是富邦技術史實表，不是 current-value cache：
+
+```text
+PK: stock_code, market, provider, timeframe, profile_id, source_date
+columns: indicator_kind, parameters(jsonb), payload(jsonb), source_timestamp nullable,
+         capture_id, observed_at, first_observed_at, content_hash NOT NULL
+UNIQUE: stock_code, market, provider, timeframe, profile_id, source_date, content_hash
+```
+
+每個已驗證 `data[]` row 都 insert 至這張表，因此 PostgreSQL 可作歷史資料權威；AVAILABLE fact 的 parameters/payload/content hash/capture/observation 欄均非 null（source timestamp 唯一可 null），同 profile/date+hash 只有一次 immutable fact，同 date 異 hash 無來源 revision 則保留先到的事實並回 `CONFLICT_NO_SOURCE_REVISION`，不刪除其他日期。相同 hash 重抓絕不改寫 fact 的首次 capture／observation metadata。
+
+一張獨立 immutable observation table `fubon_technical_capture_member` 才表示「這一次可讀的 complete capture」：PK `(capture_id UUID, profile_id)`；capture/profile/stock/market/provider/timeframe/source_date/content_hash/observed_at 均 NOT NULL，profile/timeframe 都受 exact-17 allowlist CHECK。其 composite FK 必包含 content hash：`(stock_code,market,provider,timeframe,profile_id,source_date,content_hash)` 指向 fact 的 UNIQUE key，不能只靠 writer 檢查。為使 KDJ overlay 能證明 previous K/D 與 current K/D 同屬該次 SDK response，member 還有 nullable pair `previous_source_date`／`previous_content_hash`：只有兩個 KDJ profile 可兩者同時非 null，必 `previous_source_date < source_date`，且用第二個、同 profile 的 composite FK 指向 fact；非 KDJ 必均為 null，任一 KDJ response 沒有 immediately previous valid row 亦必均為 null。兩張技術表各有 DB trigger 拒絕 UPDATE/DELETE。每個 profile response 的所有 valid history rows 都會保存為 facts，但 member **只指向該 response 最大 validated source_date 的 candidate**，並在 KDJ 時同步記下由該 response 驗出的 immediately previous row pointer，絕不可從較早 capture 的 fact 反推。同步 transaction 只有在 17 profiles 都可驗證且都指向 canonical facts 時才 insert 全部 17 member rows；任何 partial/no-data/conflict capture 都可保留已知 facts、但不能有 member。故 resolver 只可選同 code/market/provider、exact 17 profile IDs 的 member set，並以 `min(member.observed_at)` 決定 freshness；未變 payload 的 C2 仍可追加新的 17 members，無須修改 C1 fact。
+
+`fubon_stock_basic_info` 與 `fubon_intraday_candle` 的界線沿前段：前者保留最新 normalized ticker source snapshot 並只補既有 placeholder stock name；後者是當天普通整股一分 K 的 PostgreSQL fact batch，不是日線、quote 或 Redis technical value。四張 source/observation table 全由 external-materials Jdbc repository 寫入，business 不建立 entity/JPA writer。local calculation 永遠不進前兩張富邦技術表，故不會污染富邦歷史。
+
+#### Redis 即時 overlay 與 100 秒決策
+
+> **Task408 freshness final override：**本小節以及 Requirement 135／Task408 中任何先前的 technical `30 秒`／`30s`／`+30s`／`age<=30` 表述均以 **100 秒**取代：`freshUntil=oldestObservedAt/localCalculatedAt+100s`、DB/Redis age `<=100`、boundary fixture `99/100/101 秒`。理由是 scheduler 90 秒呼叫一次富邦 API，另留 10 秒排程／傳輸餘裕。邏輯 read 在 `now==freshUntil` 仍有效，Lua 只在 `TIME<freshUntil` 寫入，因此不會延長 freshness；本 override 不影響其他領域的30秒設定。
+
+Redis 是優先的即時資料層，PostgreSQL 是 fallback/history authority。台股使用一個可覆寫但 schema-strict 的雙文件 bundle：
+
+```text
+fubon:technical:tw:{code}:D:v2   # D manifest: 10 profiles
+fubon:technical:tw:{code}:W:v2   # W manifest: 7 profiles
+```
+
+每份 value 都有 `bundleGeneration`（同一次 D/W 相同 UUID）、`schemaVersion`、code/market/provider/timeframe、`captureId`、exact manifest、profile payload/source date/parameters/canonical hash，及**每 profile 的 `observedAt`、bundle `oldestObservedAt`、absolute `freshUntil=oldestObservedAt+100s`**。`origin` 僅能是 `FUBON_SDK` 或 `LOCAL_CALCULATED`，另有不可省略的 `binding`，唯三合法組合如下：
+
+| origin | binding | contextFingerprint | writer / reader rule |
+|---|---|---|---|
+| `FUBON_SDK` | `UNBOUND_FUBON_SOURCE` | null | external committed-source projection；只能作 provenance/cache readback，不能 direct radar hit |
+| `FUBON_SDK` | `BOUND_CONTEXT` | exact current input fingerprint | resolver PG fallback re-projection；可作 direct hit |
+| `LOCAL_CALCULATED` | `BOUND_CONTEXT` | exact current input fingerprint | radar fallback；可作 direct hit |
+
+local bundle 的時間欄位是明示的 local calculation capture，而不是冒充 SDK response。v1 D cache 完全獨立，原 bytes/hash/decoder 不變。
+
+D/W 不是兩次獨立 cache 更新：任何 FUBON projection、PG fallback re-projection 或 local fallback 都必須用**同一個兩-key Redis Lua operation**一次寫入完整 D/W documents。reader 必用同一個 `MGET` 取得兩把 key，再一起驗 `bundleGeneration`／`captureId`／manifest／binding／context，不能以兩個 GET 拼成跨 capture 結果。外部 writer 一律先成功 commit PostgreSQL 的 exact-17 member capture，才可寫 `(FUBON_SDK,UNBOUND_FUBON_SOURCE)`；PG failure 或 incomplete capture 時零 Redis。FUBON-to-FUBON 的 Lua fence 比的是**完整 exact-17 `(profileId, sourceDate, contentHash)` vector**，絕不逐 profile merge：incoming 只有在每一 profile 都是 `sourceDate` 較新，或同日且 hash 完全相同時，才可能取代 resident；任一 profile 較舊、或同日 hash 不同，一律拒絕整個 D/W pair。全 vector 相同時，只有 C2 complete member capture 的 `oldestObservedAt` 較 C1 新才可原子更新 C2 的 captureId、generation、per-profile observedAt 與 freshUntil，不能因 source content 相同而把 C2 判成 UNCHANGED、遺留已 stale 的 C1。LOCAL overlay 不得阻擋較後合法 FUBON projection。
+
+`contextFingerprint` 是雷達 input context（code/market、as-of date、adjusted-price input revision、quote timestamp/value、`distributionAdjusted`、technical algorithm/rule version），並不是 vendor raw payload hash。external scheduler 不得猜測該 context，因此只能寫 UNBOUND。resolver 從 PostgreSQL 選出 fresh complete member bundle後，才以當次已解析的 radar input context 產生 BOUND FUBON document；這使同一代碼的 live quote／調整輸入改變時，舊 context 的 Redis document 必定被拒絕，而不讓 external 偽造 business context。
+
+對一個台股 radar target 的 resolver follows this exact sequence:
+
+```text
+1. Redis D+W valid, complete, same generation/capture, BOUND current context and logical Redis TIME <= freshUntil?
+      yes -> use Redis (FUBON_SDK or LOCAL_CALCULATED), no indicator recalculation.
+2. else PostgreSQL has one exact-17 member FUBON_SDK capture and min(member.observedAt) is <= 100s old?
+      yes -> use DB; bind current context and best-effort pair-CAS write the same bundle to Redis.
+             Lua uses Redis TIME and PEXPIREAT both keys to its existing freshUntil;
+             it never resets or extends freshness and never writes DB.
+3. else -> calculate local technical snapshot; overwrite the same D/W v2 Redis keys
+            with origin=LOCAL_CALCULATED, freshUntil=localCalculatedAt+100s and one pair Lua
+            PEXPIREAT at that absolute deadline; never write PostgreSQL.
+```
+
+Invalid/corrupt Redis, incomplete bundle, mixed generation/capture IDs, unbound binding, future timestamp, a time after `freshUntil`, wrong code/market/manifest or context fingerprint mismatch all fall through; they cannot fail the full radar. The user-visible logical freshness boundary is inclusive: at exactly 100 seconds (`now == freshUntil`) an extant valid Redis document or an exact-17 PostgreSQL capture remains usable. Redis expiry can remove a key at that instant, in which case PostgreSQL remains the historical authority for this one response. A DB re-projection only executes when Lua itself sees `TIME < freshUntil`, then uses `PEXPIREAT` to that absolute time; at `TIME == freshUntil` it returns the usable DB result but writes no Redis key. Arrival/queue delay can therefore never extend freshness.
+
+Every resolver/local writer sends the pair it read by MGET as expected D/W generations (or expected absence) to the Lua script. The script writes only when both still match. On a CAS miss, resolver MGETs once and restarts the normal Redis→PG→local priority decision; a second collision returns the already-calculated local result for that one response but makes no cache write. Thus a DB re-projection never blindly replaces a new LOCAL result, and local calculation never overwrites a valid BOUND FUBON that arrived while it ran. Scheduler projection is the only force path: after a DB-committed complete capture, a valid FUBON source bundle may atomically replace LOCAL according to the full-vector fence, but a source-older or non-dominating FUBON bundle cannot replace FUBON or contribute a partial profile mix. A `LOCAL_CALCULATED` document contains a bounded `providerResolution` snapshot (at most the 17 candidate profiles with capture/source/params/payload/hash/observedAt plus eligibility/status/reason and decisionInputVersion, never history arrays), so its 100-second direct hit can still disclose `AVAILABLE_NOT_APPLIED` or `DETAIL_ONLY` without a DB read. A fresh Redis local document deliberately wins before an older/otherwise fresh DB row because Redis is the user-designated immediate source. Non-TW targets use a market-safe 100-second local Redis technical snapshot with the same context and no Fubon DB attempt.
+
+This context binding prevents a within-100-second cache entry from being reused after a live quote or adjustment input changed. Reads never call SDK or extend TTL; the only read-triggered Redis write is the database fallback re-projection to its existing absolute deadline.
+
+#### Radar integration and detail contract
+
+Refactor `RadarInputAssembler` behind a lazy `RadarTechnicalSource` boundary. It first creates a formula-free `PreparedRadarTechnicalContext` (daily completed as-of, completed-week end, live-added flag, and **separate daily/weekly actual-input-window price-basis revisions** plus current fingerprint); only after resolver selection may it calculate missing local slots. The existing `distributionAdjusted` DTO flag is derived from the 241-day daily contract window and is insufficient for weekly eligibility, because weekly uses the longer input window. A fresh complete `LOCAL_CALCULATED` snapshot is reused as a whole.
+
+A fresh FUBON bundle is not automatically an eligible rule input. For each **SMA/K/D/RSI** profile/field, `FubonRadarCompatibilityManifest` must be immutable and `APPROVED`, with exact provider parameters, consumer slot, daily-or-weekly raw price basis, semantic evidence fixture id+hash, approved technical-rule compatibility version, decimal tolerance and initialization/rounding assertion. Its offline fixture tests supply the vector proof; any algorithm/rule version or evidence mismatch is `AVAILABLE_NOT_APPLIED`, without calling the local formula merely to compare. Runtime eligibility additionally requires the same timeframe's unadjusted prepared series, no live/in-progress daily bar, daily sourceDate equal to the same completed daily as-of, and weekly sourceDate equal to the same completed-week end. FUBON KDJ `j` is only displayed as its explicit `k3d2` relationship; FUBON MACD raw fields and any `DERIVED_FROM_FUBON` oscillator are **detail-only** in Task408. They never enter the V18 rule input: local J9/k3d2 and DI-price-basis DIF/MACD/OSC remain local until an independent future requirement changes rule semantics/version and supplies new proof. An ineligible or detail-only vendor value remains visible in detail with its reason, but the corresponding rule slot is local. Local-only BIAS/W%R/RSV/J9/EMA/DI-MACD fields preserve their original local inputs; they must not be silently recomputed from FUBON MA. The implementation must not secretly calculate local SMA/K/D/RSI and then report FUBON, and it must not equate raw vendor J with local j9. Existing action/score policy changes only because a selected approved source supplies its stated technical input, never because of a second score rule or external request.
+
+`ResolvedTechnicalInputs` is a field-level overlay, never a mutated `FullIndicators` that lets hidden downstream formulas consume a vendor value. Its only approved mappings are:
+
+| rule input / detail field | approved provider mapping | otherwise |
+|---|---|---|
+| `StockInput.weeklyMa` | `sma_d_5` | LOCAL |
+| `StockInput.indicators.ma20/ma60/ma240` | `sma_d_20/60/240` | LOCAL |
+| `extended.rsi5/rsi10` | `rsi_d_5/10` | LOCAL |
+| `indicators.k/d` plus `previousK/previousD` | whole `kdj_d_9_3_3` latest + immutable same-response `previous_source_date/hash` member pointer | all four LOCAL if the current or same-response previous member fact is unavailable |
+| `WeeklyInput.ma5/ma10/ma20` | `sma_w_5/10/20` | LOCAL |
+| `WeeklyInput.k/d` | `kdj_w_9_3_3` | LOCAL |
+| `WeeklyInput.rsi5/rsi10` | `rsi_w_5/10` | LOCAL |
+| `sma_d_10`, BB, vendor J, MACD raw/derived | DETAIL_ONLY | never V18 rule input |
+
+MA confirmations, candles, price/change, volume, 52-week fields, MA bias/percentiles, weekly bias/J9/OSC and all local extended `j9/k3d2/rsv/ema/dif/macd/osc/bias/wr` remain local. In particular J9/k3d2 always use local K/D, and BIAS uses local MA. These explicitly labelled field-level hybrids are the only permitted source mixture; DTO, score evidence and tests must expose their provenance.
+
+Add `TradingRadarDto.StockDecision.technicalResolution` at the end of the record, keeping legacy constructors and old serialized snapshots compatible. It reports origin, capture/age/freshness outcome, D/W profile status and per-field provenance. `TradingRadarView` adds a supplementary 「技術指標來源」 detail panel after the existing technical grid. It displays date/timeframe/profile/parameters/payload plus FUBON/LOCAL/DERIVED labels, never turns missing data into zero, and explicitly distinguishes vendor J from local J9. The normal logged-in detail and the public `GET /api/public/trading-radar/stock` detail share this DTO; no route is added, but the exact OpenAPI schema/reflection test must include every new property and nullability. The database loader is one bounded bulk query for the Taiwan target set, not an N+1 query, and a loader failure degrades only these fields to unavailable/local fallback.
+
+`TradingRadarRuleEngine.RULE_VERSION` remains `TW_RULES_V18`; this task instead creates `technicalSourceVersion=FUBON_OVERLAY_V1` and the explicit `decisionInputVersion=TW_RULES_V18|FUBON_OVERLAY_V1`. It belongs in the BOUND cache fingerprint, decision DTO and persisted snapshot. Old snapshot JSON missing this field decodes as `LEGACY_LOCAL_V0`; first source-aware calculation saves the new version but emits `TECHNICAL_SOURCE_VERSION_MIGRATION` rather than an action-change notification. Only later comparisons within the same decisionInputVersion use normal action-change notification rules.
+
+#### Asset-classification settings projection in Radar detail
+
+`/settings/asset-classes` receives its securities inventory from `InstitutionService#getAllSecurities`. Its only display exclusion is the exact pair `market='台股' && code='0000'`; it is a UI/settings boundary, not a deletion or a market-data filter. The TAIEX `Stock`, prices, history, chart and market-regime paths therefore remain unchanged.
+
+Radar has a separately named `AssetClassificationSettings` detail projection for every current `StockDecision` except that same exact TAIEX pair. It is resolved before a fail-soft calculation branch, so `incompleteStock()` also returns it. The projection uses the same effective classification semantics as the settings page: `InstitutionService`/`AssetClassifier`, the latest snapshot dividend yield and the configured income threshold. It contains effective `assetClass`, applicable effective `stockStyle` or `bondTerm`, and a source for each (`RULE` or `OVERRIDE`); `OVERRIDE` is rendered as the user's explicit override, and non-applicable subclasses are explicit null/not-applicable rather than inferred. A current response may not omit this projection merely because price, technical or other Radar evidence is incomplete. Legacy serialized snapshots that predate this field remain nullable and are labelled legacy.
+
+This settings projection must not be conflated with `TradingRadarAssetProfileResolver.AssetProfile`: the latter is a strict risk/evidence contract with public-valuation and unknown semantics, and remains separately displayed under its own name. The frontend only localizes the returned enum/source values; it must not derive classifications from names, codes, or technical values. Tests cover the exact TAIEX exclusion, a same-code non-TW instrument, RULE/OVERRIDE, STOCK/BOND non-applicable subclasses, and live/public incomplete detail paths.
+
+#### Scheduler, migration, verification
+
+The existing 13:40 technical scheduler remains the only external fetch lifecycle. Each symbol can start 17 profile calls plus ticker/candles (=19); `BATCH_SIZE=3`, two workers and 3.1-second symbol dispatch are retained, but 90 seconds is only the new-job admission window, not a promise to kill an already admitted job. Python owns the real process-wide per-SDK-start rolling gate: any contiguous 60 seconds has at most 38 actual technical/ticker/candles starts, including a reissued request after re-login; `SdkGateway` 60/min remains an outer hard stop. Technical has a 60-second adapter/70-second Java transport deadline, ticker/candles each 8 seconds, so a symbol must reserve 86 seconds before it starts or becomes `NOT_ADMITTED_DEADLINE`; no symbol count or Java HTTP dispatch is a substitute for the SDK-start gate. Technical/basics/candles persist independently after their own validation. Result counters distinguish historical PostgreSQL facts, complete capture members, FUBON Redis projection, ticker/candle DB facts, and radar LOCAL Redis overlay.
+
+Migration v1.122.0 adds four tables and index/constraints; regenerate `db/schema.sql`. The test matrix uses isolated PostgreSQL+Liquibase and real Redis to prove historical multi-date readback, fact/member identity including KDJ same-response previous-row FK, unchanged-C2 capture, source conflict preservation, FUBON DB→Redis projection, LOCAL Redis overwrite with PostgreSQL preserved, D/W capture atomicity/MGET, 99/100/101-second plus Redis-TIME-at-boundary behavior, absolute-deadline re-projection, three write interleavings plus a mixed-vector/non-dominating FUBON rejection and same-fact C2 refresh, input fingerprint/compatibility mismatch, v1 untouched, no SDK during radar read, local write-on-fallback, Detail/OpenAPI old snapshot compatibility, SDK-start rolling-38 and near-deadline admission, plus ticker/candle fences. Docker verification rebuilds/recreates fubon-broker-service, external-materials-service, business-services, BFF and frontend with all Fubon flags off; it does not make real SDK calls or invoke manual synchronization.

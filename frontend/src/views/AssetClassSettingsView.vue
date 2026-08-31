@@ -132,9 +132,14 @@ function styleLabel(code) { return labelOf(stockStyles.value, code) }
 function termLabel(code)  { return labelOf(bondTerms.value, code) }
 
 const filteredSecurities = computed(() => {
+  // Defensive UI fence for a stale BFF during a rolling deployment.  The
+  // authoritative exclusion is InstitutionService#getAllSecurities; this
+  // must never delete or reclassify the TAIEX source record itself.
+  const classifiable = securities.value.filter(s =>
+    !(s?.market === '台股' && String(s?.code) === '0000'))
   const kw = keyword.value.trim().toLowerCase()
-  if (!kw) return securities.value
-  return securities.value.filter(s =>
+  if (!kw) return classifiable
+  return classifiable.filter(s =>
     (s.code || '').toLowerCase().includes(kw) ||
     (s.name || '').toLowerCase().includes(kw))
 })

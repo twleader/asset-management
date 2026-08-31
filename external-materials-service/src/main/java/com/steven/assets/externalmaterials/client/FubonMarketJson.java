@@ -191,6 +191,187 @@ public final class FubonMarketJson {
         return new TechnicalGroup(status, null, parameters(group), date, null, values);
     }
 
+    /** Strict Task408 v2 all-history technical document.  The v1 parser above stays frozen. */
+    public static TechnicalBundle technicalV2(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
+        fields(root, Set.of("schemaVersion", "captureId", "symbol", "market", "provider", "queryFrom", "queryTo", "profiles"));
+        if (integer(root.get("schemaVersion")) != 2) throw invalid();
+        String captureText = text(root.get("captureId"));
+        java.util.UUID capture;
+        try { capture = java.util.UUID.fromString(captureText); }
+        catch (RuntimeException bad) { throw invalid(); }
+        if (!capture.toString().equals(captureText)) throw invalid();
+        equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
+        LocalDate from = date(root.get("queryFrom")), to = date(root.get("queryTo"));
+        if (!from.equals(queryDate.minusDays(420)) || !to.equals(queryDate)) throw invalid();
+        JsonNode profiles = root.get("profiles");
+        if (!profiles.isArray() || profiles.size() != TECHNICAL_PROFILES.size()) throw invalid();
+        List<TechnicalProfileRead> output = new ArrayList<>();
+        for (int index = 0; index < TECHNICAL_PROFILES.size(); index++)
+            output.add(technicalProfile(profiles.get(index), TECHNICAL_PROFILES.get(index), from, to, queryDate, now));
+        return new TechnicalBundle(capture, symbol, from, to, output);
+    }
+
+    private static TechnicalProfileRead technicalProfile(JsonNode node, TechnicalProfile profile,
+                                                         LocalDate from, LocalDate to, LocalDate queryDate, Instant now) {
+        fields(node, Set.of("profileId", "status", "reason", "parameters", "observedAt", "history"));
+        equal(node.get("profileId"), profile.profileId());
+        if (!MAPPER.valueToTree(profile.parameters()).equals(node.get("parameters"))) throw invalid();
+        String status = text(node.get("status")), reason = nullableText(node.get("reason"));
+        Instant observed = zObservation(node.get("observedAt"), queryDate, now);
+        JsonNode history = node.get("history");
+        if (!history.isArray()) throw invalid();
+        if (!"AVAILABLE".equals(status)) {
+            if (history.size() != 0) throw invalid();
+            String expected = switch (status) {
+                case "NO_DATA" -> "NO_DATA";
+                case "SCHEMA_INVALID" -> "TECHNICAL_SCHEMA_INVALID";
+                case "UNAVAILABLE" -> reason;
+                default -> throw invalid();
+            };
+            if (!Objects.equals(reason, expected)
+                    || ("UNAVAILABLE".equals(status) && !Set.of("RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED", "UPSTREAM_UNAVAILABLE").contains(reason)))
+                throw invalid();
+            return new TechnicalProfileRead(profile.profileId(), status, reason, profile.parameters(), observed, List.of());
+        }
+        if (reason != null || history.isEmpty() || history.size() > 421) throw invalid();
+        List<TechnicalHistory> rows = new ArrayList<>();
+        LocalDate previous = null;
+        for (JsonNode row : history) {
+            fields(row, Set.of("sourceDate", "sourceTimestamp", "payload"));
+            LocalDate sourceDate = date(row.get("sourceDate"));
+            window(sourceDate, from, to);
+            if (previous != null && !sourceDate.isAfter(previous)) throw invalid();
+            previous = sourceDate;
+            nil(row.get("sourceTimestamp"));
+            JsonNode payload = row.get("payload"); fields(payload, profile.payloadFields());
+            Map<String, String> values = new TreeMap<>();
+            for (String key : profile.payloadFields()) values.put(key, canonicalDecimalText(payload.get(key), 38, 18, false));
+            if ("BBANDS".equals(profile.kind()) && (new BigDecimal(values.get("upper")).compareTo(new BigDecimal(values.get("middle"))) < 0
+                    || new BigDecimal(values.get("middle")).compareTo(new BigDecimal(values.get("lower"))) < 0)) throw invalid();
+            rows.add(new TechnicalHistory(sourceDate, null, values));
+        }
+        return new TechnicalProfileRead(profile.profileId(), status, null, profile.parameters(), observed, rows);
+    }
+
+    public static StockBasicRead stockBasic(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
+        fields(root, Set.of("schemaVersion", "symbol", "market", "provider", "sourceDate", "observedAt", "instrumentType", "exchange",
+                "sourceMarket", "sourceName", "industry", "securityType", "limitUpPrice", "limitDownPrice", "tradingEligible",
+                "tradingStatus", "matchingInterval", "boardLot", "currency"));
+        baseV1(root, symbol, queryDate, now, true);
+        // sourceMarket/sourceName are the adapter's raw identity fields.  Do
+        // not silently trim either: trim would turn an invalid wire document
+        // into a different, apparently valid identity.
+        String sourceMarket = nullablePreservedAscii(root.get("sourceMarket"), 64);
+        String sourceName = boundedText(root.get("sourceName"), 100, true, false);
+        String industry = nullableBoundedText(root.get("industry"), 100, false, true);
+        String securityType = nullableBoundedText(root.get("securityType"), 64, false, true);
+        BigDecimal limitUp = nullableDecimal(root.get("limitUpPrice"), 20, 10, true);
+        BigDecimal limitDown = nullableDecimal(root.get("limitDownPrice"), 20, 10, true);
+        String status = nullableText(root.get("tradingStatus"));
+        if (status != null && !Set.of("NORMAL", "TERMINATED", "SUSPENDED").contains(status)) throw invalid();
+        JsonNode eligible = root.get("tradingEligible");
+        Boolean tradingEligible;
+        if (status == null) { nil(eligible); tradingEligible = null; }
+        else { tradingEligible = bool(eligible); if (tradingEligible != status.equals("NORMAL")) throw invalid(); }
+        Integer matching = nullableInteger(root.get("matchingInterval"), false);
+        Integer boardLot = nullableInteger(root.get("boardLot"), true);
+        String currency = nullableBoundedText(root.get("currency"), 10, true, true);
+        return new StockBasicRead(symbol, queryDate, zObservation(root.get("observedAt"), queryDate, now), text(root.get("exchange")),
+                sourceMarket, sourceName, industry, securityType, limitUp, limitDown, tradingEligible, status, matching, boardLot, currency);
+    }
+
+    public static IntradayCandlesRead candles(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
+        fields(root, Set.of("schemaVersion", "symbol", "market", "provider", "sourceDate", "observedAt", "instrumentType", "exchange",
+                "sourceMarket", "timeframe", "status", "reason", "candles"));
+        baseV1(root, symbol, queryDate, now, false);
+        if (integer(root.get("timeframe")) != 1) throw invalid();
+        String status = text(root.get("status")), reason = nullableText(root.get("reason"));
+        JsonNode source = root.get("candles");
+        if (!source.isArray() || source.size() > 270) throw invalid();
+        if ("NO_DATA".equals(status)) {
+            if (!"NO_DATA".equals(reason) || !source.isEmpty()) throw invalid();
+            return new IntradayCandlesRead(symbol, queryDate, zObservation(root.get("observedAt"), queryDate, now), text(root.get("exchange")),
+                    nullablePreservedAscii(root.get("sourceMarket"), 64), 1, status, reason, List.of());
+        }
+        if (!"AVAILABLE".equals(status) || reason != null || source.isEmpty()) throw invalid();
+        List<IntradayCandle> candles = new ArrayList<>();
+        Instant previous = null;
+        for (JsonNode candle : source) {
+            fields(candle, Set.of("candleAt", "open", "high", "low", "close", "volume", "average"));
+            Instant candleAt = zInstant(candle.get("candleAt"));
+            if (candleAt.getNano() != 0 || !candleAt.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)
+                    || !inSession(candleAt) || previous != null && !candleAt.isAfter(previous)) throw invalid();
+            previous = candleAt;
+            BigDecimal open = decimal(canonicalDecimalText(candle.get("open"), 20, 10, true), 20, 10, true);
+            BigDecimal high = decimal(canonicalDecimalText(candle.get("high"), 20, 10, true), 20, 10, true);
+            BigDecimal low = decimal(canonicalDecimalText(candle.get("low"), 20, 10, true), 20, 10, true);
+            BigDecimal close = decimal(canonicalDecimalText(candle.get("close"), 20, 10, true), 20, 10, true);
+            BigDecimal average = decimal(canonicalDecimalText(candle.get("average"), 20, 10, true), 20, 10, true);
+            if (high.compareTo(open) < 0 || high.compareTo(close) < 0 || open.compareTo(low) < 0 || close.compareTo(low) < 0
+                    || average.compareTo(low) < 0 || average.compareTo(high) > 0) throw invalid();
+            String volume = text(candle.get("volume"));
+            if (!volume.matches("0|[1-9][0-9]*")) throw invalid();
+            long value;
+            try { value = Long.parseLong(volume); } catch (RuntimeException tooLarge) { throw invalid(); }
+            candles.add(new IntradayCandle(candleAt, open, high, low, close, value, average));
+        }
+        return new IntradayCandlesRead(symbol, queryDate, zObservation(root.get("observedAt"), queryDate, now), text(root.get("exchange")),
+                nullablePreservedAscii(root.get("sourceMarket"), 64), 1, status, null, candles);
+    }
+
+    private static void baseV1(JsonNode root, String symbol, LocalDate queryDate, Instant now, boolean basic) {
+        if (integer(root.get("schemaVersion")) != 1) throw invalid();
+        equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
+        if (!date(root.get("sourceDate")).equals(queryDate)) throw invalid();
+        zObservation(root.get("observedAt"), queryDate, now);
+        equal(root.get("instrumentType"), "EQUITY");
+        if (!Set.of("TWSE", "TPEx").contains(text(root.get("exchange")))) throw invalid();
+    }
+    private static Instant zObservation(JsonNode node, LocalDate queryDate, Instant now) {
+        Instant value = zInstant(node);
+        if (value.isAfter(now) || !value.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)) throw invalid();
+        return value;
+    }
+    private static Instant zInstant(JsonNode node) {
+        String value = text(node);
+        if (!value.endsWith("Z")) throw invalid();
+        try { return Instant.parse(value); } catch (RuntimeException failure) { throw invalid(); }
+    }
+    private static String canonicalDecimalText(JsonNode node, int precision, int scale, boolean positive) {
+        String value = text(node); BigDecimal parsed = decimal(value, precision, scale, positive);
+        if (!canonical(parsed).equals(value)) throw invalid();
+        return value;
+    }
+    private static BigDecimal nullableDecimal(JsonNode node, int precision, int scale, boolean positive) {
+        if (node == null || node.isNull()) return null;
+        return decimal(canonicalDecimalText(node, precision, scale, positive), precision, scale, positive);
+    }
+    private static Integer nullableInteger(JsonNode node, boolean positive) {
+        if (node == null || node.isNull()) return null;
+        int value = integer(node);
+        if (positive ? value <= 0 : value < 0) throw invalid();
+        return value;
+    }
+    private static String boundedText(JsonNode node, int maximum, boolean preserve, boolean currency) {
+        String value = text(node);
+        if (value.isBlank() || value.length() > maximum || value.chars().anyMatch(Character::isISOControl)
+                || preserve && !value.equals(value.strip())) throw invalid();
+        if (currency && (!value.matches("[A-Z]{3}"))) throw invalid();
+        return preserve ? value : value.strip();
+    }
+    private static String nullableBoundedText(JsonNode node, int maximum, boolean ascii, boolean currency) {
+        if (node == null || node.isNull()) return null;
+        String value = boundedText(node, maximum, false, currency);
+        if (ascii && !value.matches("[\\x20-\\x7e]+")) throw invalid();
+        return value;
+    }
+    private static String nullablePreservedAscii(JsonNode node, int maximum) {
+        if (node == null || node.isNull()) return null;
+        String value = boundedText(node, maximum, true, false);
+        if (!value.matches("[\\x20-\\x7e]+")) throw invalid();
+        return value;
+    }
+
     public static SubscriptionAck subscription(JsonNode root, int size) {
         fields(root, Set.of("outcome", "symbolCount", "leaseSeconds"));
         String expected = size == 0 ? "CLEARED" : "ACCEPTED";

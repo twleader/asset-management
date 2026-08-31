@@ -68,6 +68,16 @@ public class TradingRadarNotificationSetting {
     @Column(name = "action_policy_version", length = 40)
     private String actionPolicyVersion;
 
+    /**
+     * Source version used to establish {@code lastAction}.  A null persisted
+     * value is intentionally legacy/unknown: Task408 must rebuild its
+     * baseline once rather than treating Fubon-overlay adoption as an action
+     * transition and notifying the user.
+     */
+    @Column(name = "technical_source_version", length = 40)
+    @Builder.Default
+    private String technicalSourceVersion = com.steven.assets.service.FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION;
+
     @Column(name = "last_action", length = 50)
     private String lastAction;
 

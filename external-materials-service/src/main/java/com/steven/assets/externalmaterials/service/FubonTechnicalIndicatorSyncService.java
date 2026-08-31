@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.*;
@@ -18,27 +19,45 @@ public class FubonTechnicalIndicatorSyncService {
     static final Duration RUN_BUDGET = Duration.ofMinutes(30);
     static final Duration SYMBOL_INTERVAL = Duration.ofMillis(3100);
     static final Duration BATCH_WINDOW = Duration.ofSeconds(90);
-    static final int BATCH_SIZE = 20;
+    static final int BATCH_SIZE = 3;
+    static final Duration SYMBOL_RESERVATION = Duration.ofSeconds(86);
     private final String enabled;
     private final FubonMarketRunGate gate;
     private final FubonRadarScope radar;
     private final FubonMarketDataPort client;
     private final FubonTechnicalCachePort cache;
+    private final FubonMarketDataHistoryStore history;
+    private final FubonTechnicalV2CacheRepository v2Cache;
     private final Timing timing;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private volatile Result lastResult = new Result("DISABLED", false, "NOT_RUN", 0, 0, 0, 0, 0, Map.of());
 
     @Autowired
     public FubonTechnicalIndicatorSyncService(@Value("${fubon.technical-indicator-sync-enabled:false}") String enabled,
-            FubonMarketRunGate gate, FubonRadarScope radar, FubonMarketDataPort client, FubonTechnicalCachePort cache) {
-        this(enabled, gate, radar, client, cache, new Timing() {
+            FubonMarketRunGate gate, FubonRadarScope radar, FubonMarketDataPort client, FubonTechnicalCachePort cache,
+            FubonMarketDataHistoryStore history, FubonTechnicalV2CacheRepository v2Cache) {
+        this(enabled, gate, radar, client, cache, history, v2Cache, new Timing() {
+            public long nanos() { return System.nanoTime(); }
+            public void sleep(Duration duration) throws InterruptedException { Thread.sleep(duration); }
+        });
+    }
+    /** Legacy isolated-test constructor; production must use the injected v2 history/cache path. */
+    FubonTechnicalIndicatorSyncService(String enabled, FubonMarketRunGate gate, FubonRadarScope radar,
+                                      FubonMarketDataPort client, FubonTechnicalCachePort cache) {
+        this(enabled, gate, radar, client, cache, null, null, new Timing() {
             public long nanos() { return System.nanoTime(); }
             public void sleep(Duration duration) throws InterruptedException { Thread.sleep(duration); }
         });
     }
     FubonTechnicalIndicatorSyncService(String enabled, FubonMarketRunGate gate, FubonRadarScope radar,
                                       FubonMarketDataPort client, FubonTechnicalCachePort cache, Timing timing) {
-        this.enabled = enabled; this.gate = gate; this.radar = radar; this.client = client; this.cache = cache; this.timing = timing;
+        this(enabled, gate, radar, client, cache, null, null, timing);
+    }
+    FubonTechnicalIndicatorSyncService(String enabled, FubonMarketRunGate gate, FubonRadarScope radar,
+                                      FubonMarketDataPort client, FubonTechnicalCachePort cache,
+                                      FubonMarketDataHistoryStore history, FubonTechnicalV2CacheRepository v2Cache, Timing timing) {
+        this.enabled = enabled; this.gate = gate; this.radar = radar; this.client = client; this.cache = cache;
+        this.history = history; this.v2Cache = v2Cache; this.timing = timing;
     }
     @Scheduled(cron = "0 40 13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduled() { lastResult = sync(false); }
@@ -107,6 +126,78 @@ public class FubonTechnicalIndicatorSyncService {
                 processed, written, partial, failed, skipped, outcomes);
     }
     private SymbolResult processSymbol(String code, boolean dryRun, Run run) {
+        if (history == null || v2Cache == null) return processLegacySymbol(code, dryRun, run);
+        boolean started = false, written = false, anyUsable = false, anyFailure = false;
+        Map<String, Integer> counts = new TreeMap<>();
+        try {
+            if (!eligible(code, run)) return new SymbolResult(false, false, false, false, counts);
+            if (!run.dispatch(timing.nanos())) return new SymbolResult(false, false, false, false, counts);
+            if (!eligible(code, run)) return new SymbolResult(false, false, false, false, counts);
+            started = true;
+
+            // Each source is intentionally independent: a malformed ticker cannot
+            // erase a valid technical history transaction, and vice versa.
+            try {
+                TechnicalBundle technical = client.technicalV2(code, run.date);
+                anyUsable |= technical.profiles().stream().anyMatch(TechnicalProfileRead::available);
+                if (!dryRun && sameDay(run)) {
+                    var persisted = history.persistTechnical(technical);
+                    counts.merge("technicalDb:" + persisted.facts(), 1, Integer::sum);
+                    written |= persisted.facts() == FubonMarketDataHistoryStore.Status.WRITTEN;
+                    if (persisted.completeCaptureCommitted()) {
+                        var pair = FubonTechnicalV2Cache.fromBundle(technical, "FUBON_SDK", "UNBOUND_FUBON_SOURCE", null,
+                                UUID.randomUUID().toString(), null, null);
+                        var expected = v2Cache.read(code, Instant.now(), null, false);
+                        var projected = v2Cache.write(code, pair, expected, true);
+                        counts.merge("technicalRedis:" + projected.outcome(), 1, Integer::sum);
+                        written |= "WRITTEN".equals(projected.outcome());
+                    }
+                }
+                if (!technical.complete()) anyFailure = true;
+            } catch (Unavailable unavailable) {
+                counts.merge("technicalDb:" + unavailable.reason(), 1, Integer::sum); anyFailure = true;
+                if (unavailable.stopRun()) run.halt(unavailable.reason());
+            }
+            if (run.stop.get() == null && sameDay(run)) {
+                try {
+                    StockBasicRead basic = client.basic(code, run.date);
+                    anyUsable = true;
+                    if (!dryRun) {
+                        var persisted = history.persistBasic(basic);
+                        counts.merge("basicDb:" + persisted.status(), 1, Integer::sum);
+                        written |= persisted.status() == FubonMarketDataHistoryStore.Status.WRITTEN;
+                        anyFailure |= persisted.status() == FubonMarketDataHistoryStore.Status.FAILED;
+                    }
+                } catch (Unavailable unavailable) {
+                    counts.merge("basicDb:" + unavailable.reason(), 1, Integer::sum); anyFailure = true;
+                    if (unavailable.stopRun()) run.halt(unavailable.reason());
+                }
+            }
+            if (run.stop.get() == null && sameDay(run)) {
+                try {
+                    IntradayCandlesRead candles = client.candles(code, run.date);
+                    anyUsable |= "AVAILABLE".equals(candles.status()) || "NO_DATA".equals(candles.status());
+                    if (!dryRun && "AVAILABLE".equals(candles.status())) {
+                        var persisted = history.persistCandles(candles);
+                        counts.merge("candleDb:" + persisted.status(), 1, Integer::sum);
+                        written |= persisted.status() == FubonMarketDataHistoryStore.Status.WRITTEN;
+                        anyFailure |= persisted.status() == FubonMarketDataHistoryStore.Status.FAILED;
+                    }
+                } catch (Unavailable unavailable) {
+                    counts.merge("candleDb:" + unavailable.reason(), 1, Integer::sum); anyFailure = true;
+                    if (unavailable.stopRun()) run.halt(unavailable.reason());
+                }
+            }
+            return new SymbolResult(true, written, anyFailure && anyUsable, !anyUsable, counts);
+        } catch (InterruptedException cancelled) {
+            run.halt("INTERRUPTED"); Thread.currentThread().interrupt();
+            return new SymbolResult(started, written, started && anyUsable, started && !anyUsable, counts);
+        } catch (RuntimeException failure) {
+            return new SymbolResult(started, written, started && anyUsable, started && !anyUsable, counts);
+        }
+    }
+    /** Frozen Task398 seam used only by older isolated tests; production always uses v2 history. */
+    private SymbolResult processLegacySymbol(String code, boolean dryRun, Run run) {
         boolean started = false, written = false, available = false;
         Map<String, Integer> counts = new TreeMap<>();
         try {
@@ -174,17 +265,17 @@ public class FubonTechnicalIndicatorSyncService {
             if (stop.compareAndSet(null, reason))
                 threads.stream().filter(t -> t != Thread.currentThread()).forEach(Thread::interrupt);
         }
-        /** One budget for both workers: <=20 symbol attempts per 90s and >=3.1s between grants. */
+        /** One admission budget for both workers: <=3 new jobs/90s and >=3.1s between grants. */
         private synchronized boolean dispatch(long requestedStart) throws InterruptedException {
             if (stop.get() != null) return false;
             long start = Math.max(requestedStart, nextStart);
             if (windowCount >= BATCH_SIZE) start = Math.max(start, windowStart + BATCH_WINDOW.toNanos());
-            if (start + Duration.ofSeconds(30).toNanos() >= deadline) { halt("RUN_DEADLINE"); return false; }
+            if (start + SYMBOL_RESERVATION.toNanos() >= deadline) { halt("NOT_ADMITTED_DEADLINE"); return false; }
             long wait = start - timing.nanos();
             if (wait > 0) timing.sleep(Duration.ofNanos(wait));
             if (stop.get() != null) return false;
             long now = timing.nanos();
-            if (now + Duration.ofSeconds(30).toNanos() >= deadline) { halt("RUN_DEADLINE"); return false; }
+            if (now + SYMBOL_RESERVATION.toNanos() >= deadline) { halt("NOT_ADMITTED_DEADLINE"); return false; }
             if (now >= windowStart + BATCH_WINDOW.toNanos()) { windowStart = now; windowCount = 0; }
             windowCount++;
             nextStart = now + SYMBOL_INTERVAL.toNanos();

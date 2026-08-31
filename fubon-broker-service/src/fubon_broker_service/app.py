@@ -20,6 +20,7 @@ from .counters import Outcome, OutcomeCounters
 from .dividends import DividendError, DividendService
 from .etf_holdings import EtfHoldingsService
 from .normalization import stock_code, stock_codes, strict_iso_date
+from .market_data_v1 import MarketDataV1Error, MarketDataV1Service
 from .portfolio import PortfolioError, PortfolioService
 from .quotes import QuoteError, QuoteService
 from .realized_gain import RealizedGainError, RealizedGainService
@@ -34,6 +35,14 @@ from .trades import TradeReadError, TradeReadService
 
 logger = logging.getLogger(__name__)
 INTERNAL_TOKEN_HEADER = "X-Internal-Service-Token"
+
+
+class MarketDataV1RouteError(RuntimeError):
+    """Only the two Task408 v1 routes use this exact-root response transport."""
+
+    def __init__(self, status_code: int, reason: str) -> None:
+        super().__init__(reason)
+        self.status_code, self.reason = status_code, reason
 
 # Central last line of defense: even if a future call site logs a raw SDK
 # exception or stringifies a credential field, the record is redacted before
@@ -116,19 +125,21 @@ class DividendReadRequest(BaseModel):
 class TechnicalReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     symbol: StrictStr
-    from_date: StrictStr = Field(alias="from")
-    to_date: StrictStr = Field(alias="to")
 
     @field_validator("symbol")
     @classmethod
     def validate_symbol(cls, value: str) -> str:
         return stock_code(value)
 
-    @field_validator("from_date", "to_date")
+
+class MarketDataV1ReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    symbol: StrictStr
+
+    @field_validator("symbol")
     @classmethod
-    def validate_date(cls, value: str) -> str:
-        strict_iso_date(value)
-        return value
+    def validate_symbol(cls, value: str) -> str:
+        return stock_code(value)
 
 
 class StockSubscriptionsRequest(BaseModel):
@@ -168,6 +179,7 @@ def create_app(
     realized_gain_service: RealizedGainService | None = None,
     dividend_service: DividendService | None = None,
     technical_indicator_service: TechnicalIndicatorService | None = None,
+    market_data_v1_service: MarketDataV1Service | None = None,
     stock_push_stream: StockPushStream | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
@@ -183,6 +195,7 @@ def create_app(
     realized_gain = realized_gain_service or RealizedGainService(sdk_gateway)
     dividends = dividend_service or DividendService(sdk_gateway)
     technical = technical_indicator_service or TechnicalIndicatorService(sdk_gateway)
+    market_v1 = market_data_v1_service or MarketDataV1Service(sdk_gateway)
     stock_stream = stock_push_stream or StockPushStream(sdk_gateway, counters=outcome_counters)
 
     @asynccontextmanager
@@ -207,13 +220,29 @@ def create_app(
 
     no_body_paths = {"/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read",
                      "/internal/market-data/stock-push/stream"}
+    v1_market_data_paths = {"/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read"}
     strict_json_paths = {"/internal/trades/read", "/internal/market-data/dividends/read",
                          "/internal/market-data/technical-indicators/read",
-                         "/internal/market-data/stock-push/subscriptions"}
+                         "/internal/market-data/stock-push/subscriptions", *v1_market_data_paths}
 
     @application.middleware("http")
     async def sanitized_exception_boundary(request: Request, call_next):
         try:
+            # The v1 routes intentionally authenticate before parsing their body,
+            # so disabled/misconfigured state cannot leak an INVALID_REQUEST
+            # precedence and their legacy neighbours stay wire-compatible.
+            if request.url.path in v1_market_data_paths:
+                config = loader.load()
+                if (not config.enabled or config.state != "READY" or not config.internal_service_token
+                        or runtime_misconfigured(config)):
+                    outcome_counters.increment(Outcome.MISCONFIGURED)
+                    return JSONResponse(status_code=503, content={"reason": "MISCONFIGURED"})
+                tokens = request.headers.getlist(INTERNAL_TOKEN_HEADER)
+                if len(tokens) != 1 or not tokens[0]:
+                    return JSONResponse(status_code=401, content={"reason": "UNAUTHORIZED"})
+                if not secrets.compare_digest(config.internal_service_token.encode("utf-8"), tokens[0].encode("utf-8")):
+                    return JSONResponse(status_code=403, content={"reason": "FORBIDDEN"})
+                request.state.market_data_v1_config = config
             if request.url.path in no_body_paths | strict_json_paths:
                 if request.query_params:
                     return JSONResponse(status_code=400, content={"reason": "INVALID_REQUEST"})
@@ -234,12 +263,19 @@ def create_app(
             return await call_next(request)
         except Exception:
             # Never let an SDK/raw provider exception reach the ASGI server logger or response.
+            if request.url.path in v1_market_data_paths:
+                logger.error("Fubon market-data v1 request failed reason=UPSTREAM_UNAVAILABLE")
+                return JSONResponse(status_code=503, content={"reason": "UPSTREAM_UNAVAILABLE"})
             logger.error("Fubon request failed reason=INTERNAL_FAILURE")
             return JSONResponse(status_code=503, content=redact_mapping({"reason": "INTERNAL_FAILURE"}))
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(_request, _exc):
         return JSONResponse(status_code=400, content=redact_mapping({"reason": "INVALID_REQUEST"}))
+
+    @application.exception_handler(MarketDataV1RouteError)
+    async def market_data_v1_error_handler(_request, exc: MarketDataV1RouteError):
+        return JSONResponse(status_code=exc.status_code, content={"reason": exc.reason})
 
     def runtime_misconfigured(config: ConfigSnapshot) -> bool:
         checker = getattr(sdk_gateway, "runtime_misconfigured_for", None)
@@ -467,14 +503,43 @@ def create_app(
     @application.post("/internal/market-data/technical-indicators/read")
     def technical_read(request: TechnicalReadRequest, _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
         try:
-            result = technical.read(request.symbol, request.from_date, request.to_date)
+            result = technical.read(request.symbol)
         except SdkCallError as exc:
             outcome_counters.increment(Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED)
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         except TechnicalIndicatorError as exc:
             outcome_counters.increment(Outcome.QUOTE_FAILED)
             raise HTTPException(status_code=400 if exc.request_error else 503, detail=redact_mapping({"reason": exc.reason})) from None
-        outcome_counters.increment(Outcome.SUCCESS if all(result[kind]["status"] == "AVAILABLE" for kind in ("kdj", "macd", "bb")) else Outcome.QUOTE_FAILED)
+        outcome_counters.increment(Outcome.SUCCESS if all(profile["status"] == "AVAILABLE" for profile in result["profiles"]) else Outcome.QUOTE_FAILED)
+        return result
+
+    def market_data_v1_sdk_error(exc: SdkCallError) -> MarketDataV1RouteError:
+        if exc.misconfigured:
+            return MarketDataV1RouteError(503, "MISCONFIGURED")
+        if exc.reason in {"RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED"}:
+            return MarketDataV1RouteError(503, exc.reason)
+        return MarketDataV1RouteError(503, "UPSTREAM_UNAVAILABLE")
+
+    @application.post("/internal/market-data/stock-basic/read")
+    def stock_basic_read(request: MarketDataV1ReadRequest) -> dict[str, object]:
+        try:
+            result = market_v1.basic(request.symbol)
+        except SdkCallError as exc:
+            raise market_data_v1_sdk_error(exc) from None
+        except MarketDataV1Error as exc:
+            raise MarketDataV1RouteError(400 if exc.request_error else 503, exc.reason) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/market-data/intraday-candles/read")
+    def intraday_candles_read(request: MarketDataV1ReadRequest) -> dict[str, object]:
+        try:
+            result = market_v1.candles(request.symbol)
+        except SdkCallError as exc:
+            raise market_data_v1_sdk_error(exc) from None
+        except MarketDataV1Error as exc:
+            raise MarketDataV1RouteError(400 if exc.request_error else 503, exc.reason) from None
+        outcome_counters.increment(Outcome.SUCCESS)
         return result
 
     @application.post("/internal/market-data/stock-push/subscriptions")

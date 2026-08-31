@@ -130,7 +130,13 @@ public class RadarInputAssembler {
             TradingRadarRuleEngine.CandleInput dailyCandle,
             TradingRadarRuleEngine.WeeklyInput weekly,
             List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
-            TechnicalIndicatorService.FullIndicators weeklyIndicators
+            TechnicalIndicatorService.FullIndicators weeklyIndicators,
+            /**
+             * Weekly uses a longer actual input window than the daily 241-row
+             * contract, so its raw/adjusted price basis is deliberately
+             * independent of {@link #distributionAdjusted()}.
+             */
+            boolean weeklyDistributionAdjusted
     ) {
         /** t274 primitive 的欄位捷徑；正式 normalized action 尚未在此任務啟用。 */
         public BigDecimal returnStdDev60Ratio() {
@@ -145,7 +151,64 @@ public class RadarInputAssembler {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 null, null, null, null, null, null,
                 VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"),
-                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY);
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY, false);
+
+        /** Compatibility shape before Task408 added the weekly price-basis flag. */
+        public Assembled(
+                TechnicalIndicatorService.FullIndicators indicators,
+                List<StockPriceHistory> adjustedRowsDesc,
+                boolean distributionAdjusted,
+                List<BigDecimal> completedCloses,
+                BigDecimal previousAdjustedClose,
+                BigDecimal completedChangePercent,
+                BigDecimal week52High,
+                BigDecimal week52Low,
+                BigDecimal kdBandWidthPercent,
+                TradingRadarRuleEngine.Confirmation ma20Confirmation,
+                TradingRadarRuleEngine.Confirmation ma60Confirmation,
+                TradingRadarRuleEngine.Confirmation ma240Confirmation,
+                BigDecimal ma60BiasPercent,
+                BigDecimal ma60BiasPercentile,
+                BigDecimal ma240BiasPercent,
+                BigDecimal week52Position,
+                BigDecimal ruleChangePercent,
+                BigDecimal volumeRatio,
+                VolatilityObservation volatility60,
+                TradingRadarRuleEngine.CandleInput dailyCandle,
+                TradingRadarRuleEngine.WeeklyInput weekly,
+                List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+                TechnicalIndicatorService.FullIndicators weeklyIndicators) {
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses,
+                    previousAdjustedClose, completedChangePercent, week52High, week52Low,
+                    kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation,
+                    ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position,
+                    ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly,
+                    weeklyBarsDesc, weeklyIndicators, false);
+        }
+    }
+
+    /**
+     * Price-basis preparation intentionally stops before any MA/KD/RSI/MACD
+     * formula.  Task408 can therefore bind a fresh LOCAL snapshot to this
+     * exact basis and reuse it without calling {@code computeFromSeries}.
+     */
+    public record Prepared(
+            List<StockPriceHistory> adjustedRowsDesc,
+            List<StockPriceHistory> dailyContractRowsDesc,
+            boolean distributionAdjusted,
+            boolean weeklyDistributionAdjusted,
+            List<BigDecimal> completedCloses,
+            BigDecimal previousAdjustedClose,
+            int firstCompletedIndex,
+            int indicatorRows,
+            BigDecimal price,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+            List<StockPriceHistory> weeklySeriesDesc
+    ) {
+        public static final Prepared EMPTY = new Prepared(List.of(), List.of(), false, false, List.of(), null,
+                0, 0, null, List.of(), List.of());
+
+        public boolean empty() { return adjustedRowsDesc == null || adjustedRowsDesc.isEmpty(); }
     }
 
     /**
@@ -177,7 +240,19 @@ public class RadarInputAssembler {
             int dailyContractRows,
             BigDecimal price) {
 
-        if (combinedDesc == null || combinedDesc.isEmpty()) return Assembled.EMPTY;
+        return calculate(prepare(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price));
+    }
+
+    /** Builds the immutable raw/adjusted price basis without indicator formulas. */
+    public Prepared prepare(
+            List<StockPriceHistory> combinedDesc,
+            List<StockDividendHistory> events,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price) {
+
+        if (combinedDesc == null || combinedDesc.isEmpty()) return Prepared.EMPTY;
 
         // Task 356.4c：長視窗只查一次、只還原一次，日K 與週K 共用這一份還原結果。
         // 不得改為兩次查詢或兩次還原——兩份長度不同的序列各自跑分割偵測啟發式，結果可能分歧，
@@ -200,70 +275,92 @@ public class RadarInputAssembler {
                         .toList();
 
         int indicatorRows = Math.min(adjustedRows.size(), liveAdded ? FULL_WINDOW + 1 : FULL_WINDOW);
-        TechnicalIndicatorService.FullIndicators indicators =
-                indicatorService.computeFromSeries(adjustedRows.subList(0, indicatorRows));
 
         BigDecimal previousAdjustedClose = adjustedRows.size() >= 2
                 ? adjustedRows.get(1).getClosePrice()
                 : null;
 
-        // 最近一根完成日 K 相對前一根的漲跌幅（還原後價基），供逆勢「停止續跌」判定（Task 217.3）。
+        // firstCompleted is retained in Prepared because live/in-progress bars
+        // are part of the binding but never count as a completed technical bar.
         int firstCompleted = liveAdded ? 1 : 0;
-        BigDecimal completedChangePercent = adjustedRows.size() >= firstCompleted + 2
-                ? changePercent(adjustedRows.get(firstCompleted).getClosePrice(),
-                                adjustedRows.get(firstCompleted + 1).getClosePrice())
-                : null;
-
-        // Task 264：52 週高低與 9 日帶寬一律取自同一份還原序列，與 MA／KD 同一價基，
-        // 不違反「禁止混用原始／還原價」。
-        List<StockPriceHistory> window = adjustedRows.subList(0, indicatorRows);
-        BigDecimal week52High = window.size() >= FULL_WINDOW ? maxHigh(window) : null;
-        BigDecimal week52Low = window.size() >= FULL_WINDOW ? minLow(window) : null;
-        BigDecimal kdBandWidthPercent = bandWidthPercent(
-                adjustedRows.subList(0, Math.min(adjustedRows.size(), KD_BAND_ROWS)));
-
-        // Task 299：現行乖離＝同一組還原序列算出的 live 價基乖離，分位在此之後才求值，
-        // 使兩者恆為同一輸入的兩種摘要，不會各自漂移。
-        BigDecimal ma60Bias = biasPercent(price, indicators.quarterlyMa());
-        BigDecimal ma60BiasPct = ma60BiasPercentile(dailyContractRowsDesc, firstCompleted, ma60Bias);
-        LocalDate volatilityAsOf = adjustedRows.size() > firstCompleted
-                ? adjustedRows.get(firstCompleted).getTradingDate() : null;
-        VolatilityObservation volatility60 = returnStdDev60Ratio(completedCloses, volatilityAsOf);
 
         // ── Task 356.2／356.3：週K 聚合與週K 指標（長視窗才有足夠完成週） ───────────────
         WeeklyBarAggregator.Aggregation weeklyAggregation = WeeklyBarAggregator.aggregate(adjustedRows);
         List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc =
                 weeklyIndicatorBars(weeklyAggregation.completedDesc());
         List<StockPriceHistory> weeklySeriesDesc = weeklySeriesDesc(weeklyBarsDesc);
-        TechnicalIndicatorService.FullIndicators weeklyIndicators =
-                weeklyBarsDesc.size() < MIN_COMPLETED_WEEKS
-                        ? TechnicalIndicatorService.FullIndicators.EMPTY
-                        : nonNull(indicatorService.computeFromSeries(weeklySeriesDesc));
+        return new Prepared(List.copyOf(adjustedRows), List.copyOf(dailyContractRowsDesc),
+                distributionAdjusted(adjustment, dailyContractRowsDesc), weeklyDistributionAdjusted(adjustment, weeklyBarsDesc),
+                List.copyOf(completedCloses), previousAdjustedClose, firstCompleted, indicatorRows, price,
+                List.copyOf(weeklyBarsDesc), List.copyOf(weeklySeriesDesc));
+    }
 
+    /** Runs normal local formulas after {@link #prepare}; callers may inject a fresh LOCAL snapshot. */
+    public Assembled calculate(Prepared prepared) {
+        return calculate(prepared, null, null, null);
+    }
+
+    /**
+     * Rebuilds non-formula radar derivatives while reusing a validated LOCAL
+     * technical snapshot.  Null overrides mean calculate locally; non-null
+     * overrides (including EMPTY) are authoritative cache values.
+     */
+    public Assembled calculate(
+            Prepared prepared,
+            TechnicalIndicatorService.FullIndicators cachedIndicators,
+            TradingRadarRuleEngine.WeeklyInput cachedWeekly,
+            TechnicalIndicatorService.FullIndicators cachedWeeklyIndicators) {
+        if (prepared == null || prepared.empty()) return Assembled.EMPTY;
+        List<StockPriceHistory> adjustedRows = prepared.adjustedRowsDesc();
+        int firstCompleted = prepared.firstCompletedIndex();
+        TechnicalIndicatorService.FullIndicators indicators = cachedIndicators == null
+                ? nonNull(indicatorService.computeFromSeries(adjustedRows.subList(0, prepared.indicatorRows())))
+                : nonNull(cachedIndicators);
+        BigDecimal completedChangePercent = prepared.completedCloses().size() >= 2
+                ? changePercent(prepared.completedCloses().get(0), prepared.completedCloses().get(1)) : null;
+        List<StockPriceHistory> window = adjustedRows.subList(0, prepared.indicatorRows());
+        BigDecimal week52High = window.size() >= FULL_WINDOW ? maxHigh(window) : null;
+        BigDecimal week52Low = window.size() >= FULL_WINDOW ? minLow(window) : null;
+        BigDecimal kdBandWidthPercent = bandWidthPercent(
+                adjustedRows.subList(0, Math.min(adjustedRows.size(), KD_BAND_ROWS)));
+        BigDecimal ma60Bias = biasPercent(prepared.price(), indicators.quarterlyMa());
+        BigDecimal ma60BiasPct = ma60BiasPercentile(prepared.dailyContractRowsDesc(), firstCompleted, ma60Bias);
+        LocalDate volatilityAsOf = adjustedRows.size() > firstCompleted
+                ? adjustedRows.get(firstCompleted).getTradingDate() : null;
+        VolatilityObservation volatility60 = returnStdDev60Ratio(prepared.completedCloses(), volatilityAsOf);
+        TechnicalIndicatorService.FullIndicators weeklyIndicators = cachedWeeklyIndicators == null
+                ? prepared.weeklyBarsDesc().size() < MIN_COMPLETED_WEEKS
+                        ? TechnicalIndicatorService.FullIndicators.EMPTY
+                        : nonNull(indicatorService.computeFromSeries(prepared.weeklySeriesDesc()))
+                : nonNull(cachedWeeklyIndicators);
+        TradingRadarRuleEngine.WeeklyInput weekly = cachedWeekly == null
+                ? weeklyInput(prepared.weeklyBarsDesc(), prepared.weeklySeriesDesc(), weeklyIndicators, prepared.price())
+                : cachedWeekly;
         return new Assembled(
                 indicators,
                 adjustedRows,
-                distributionAdjusted(adjustment, dailyContractRowsDesc),
-                completedCloses,
-                previousAdjustedClose,
+                prepared.distributionAdjusted(),
+                prepared.completedCloses(),
+                prepared.previousAdjustedClose(),
                 completedChangePercent,
                 week52High,
                 week52Low,
                 kdBandWidthPercent,
-                ruleEngine.confirm(completedCloses, 20),
-                ruleEngine.confirm(completedCloses, 60),
-                ruleEngine.confirm(completedCloses, FULL_WINDOW),
+                ruleEngine.confirm(prepared.completedCloses(), 20),
+                ruleEngine.confirm(prepared.completedCloses(), 60),
+                ruleEngine.confirm(prepared.completedCloses(), FULL_WINDOW),
                 ma60Bias,
                 ma60BiasPct,
-                biasPercent(price, indicators.annualMa()),
-                week52Position(price, week52High, week52Low),
-                changePercent(price, previousAdjustedClose),
-                volumeRatio(dailyContractRowsDesc, firstCompleted),
+                biasPercent(prepared.price(), indicators.annualMa()),
+                week52Position(prepared.price(), week52High, week52Low),
+                changePercent(prepared.price(), prepared.previousAdjustedClose()),
+                volumeRatio(prepared.dailyContractRowsDesc(), firstCompleted),
                 volatility60,
                 candleAt(adjustedRows, firstCompleted),
-                weeklyInput(weeklyBarsDesc, weeklySeriesDesc, weeklyIndicators, price),
-                weeklyBarsDesc,
-                weeklyIndicators);
+                weekly,
+                prepared.weeklyBarsDesc(),
+                weeklyIndicators,
+                prepared.weeklyDistributionAdjusted());
     }
 
     /**
@@ -337,6 +434,19 @@ public class RadarInputAssembler {
             List<StockPriceHistory> dailyContractRowsDesc) {
         if (adjustment == null || !adjustment.adjusted() || dailyContractRowsDesc.isEmpty()) return false;
         LocalDate oldest = dailyContractRowsDesc.get(dailyContractRowsDesc.size() - 1).getTradingDate();
+        if (oldest == null) return adjustment.adjusted();
+        return adjustment.appliedEventDates().stream()
+                .anyMatch(date -> date != null && date.isAfter(oldest));
+    }
+
+    /** Same evidence rule, evaluated against the much longer weekly input window. */
+    private static boolean weeklyDistributionAdjusted(
+            DistributionAdjustedPriceService.Adjustment adjustment,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc) {
+        if (adjustment == null || !adjustment.adjusted() || weeklyBarsDesc == null || weeklyBarsDesc.isEmpty()) {
+            return false;
+        }
+        LocalDate oldest = weeklyBarsDesc.get(weeklyBarsDesc.size() - 1).weekEndDate();
         if (oldest == null) return adjustment.adjusted();
         return adjustment.appliedEventDates().stream()
                 .anyMatch(date -> date != null && date.isAfter(oldest));

@@ -35,6 +35,8 @@ public class TradingRadarNotificationService {
     private static final String TW_MARKET = "台股";
     private static final String TAIEX_CODE = "0000";
     private static final String ALL_TW = "*\0台股";
+    /** Audit marker for a baseline-only FUBON overlay adoption; never an email transition. */
+    static final String TECHNICAL_SOURCE_VERSION_MIGRATION = "TECHNICAL_SOURCE_VERSION_MIGRATION";
     /** 洗版抑制窗：判斷性取值、無量測依據（Task 301 / Requirement 44）。只擋 email，不影響 last_action 基準。 */
     static final Duration NOTIFY_COOLDOWN = Duration.ofMinutes(60);
 
@@ -123,14 +125,26 @@ public class TradingRadarNotificationService {
             // Action semantics can change without changing V12 scoring/ruleVersion.  An invalid
             // baseline is rebuilt from the same post-gate StockDecision used by the page/export,
             // then exits before transition/cooldown/dispatcher side effects.
+            boolean sourceVersionMigration = !FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION.equals(
+                    setting.getTechnicalSourceVersion());
             boolean baselineValid = Boolean.TRUE.equals(setting.getInitialized())
                     && TradingRadarRuleEngine.RULE_VERSION.equals(setting.getRuleVersion())
                     && TradingRadarEvidenceGate.ACTION_POLICY_VERSION.equals(
-                    setting.getActionPolicyVersion());
+                    setting.getActionPolicyVersion())
+                    && !sourceVersionMigration;
             if (!baselineValid) {
+                if (sourceVersionMigration) {
+                    // Persisting the source version below is the durable migration record; the
+                    // fixed marker makes its no-notify reason observable in operational logs.
+                    log.info("交易雷達通知重建 baseline reason={} setting={} stock={} {} from={} to={}",
+                            TECHNICAL_SOURCE_VERSION_MIGRATION, setting.getId(), setting.getMarket(),
+                            setting.getStockCode(), setting.getTechnicalSourceVersion(),
+                            FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION);
+                }
                 setting.setInitialized(true);
                 setting.setRuleVersion(TradingRadarRuleEngine.RULE_VERSION);
                 setting.setActionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION);
+                setting.setTechnicalSourceVersion(FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION);
                 setting.setLastAction(decision.action());
                 setting.setLastCounterTrendState(decision.counterTrendState());
                 settingRepo.save(setting);
@@ -153,6 +167,7 @@ public class TradingRadarNotificationService {
             setting.setInitialized(true);
             setting.setRuleVersion(TradingRadarRuleEngine.RULE_VERSION);
             setting.setActionPolicyVersion(TradingRadarEvidenceGate.ACTION_POLICY_VERSION);
+            setting.setTechnicalSourceVersion(FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION);
             setting.setLastAction(result.nextAction());
             setting.setLastCounterTrendState(result.nextCounterTrend());
             settingRepo.save(setting);
