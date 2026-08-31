@@ -6,13 +6,13 @@
 
 ## 背景
 
-現行股價 producer 已每 2 分鐘更新 `price:{market}:{code}`，但台股 ETF 淨值／折溢價 producer 仍使用 `0 2/5 9-13 * * MON-FRI`，每 5 分鐘才從證交所 MIS `all_etf.txt` 取一次資料。Docker 外部 `GET /api/quotes` 與 `GET /api/quotes/one` 目前只讀 price key，共 18 個欄位，沒有折溢價。
+本 Task 349 完成時，股價 producer 每 2 分鐘更新 `price:{market}:{code}`，但台股 ETF 淨值／折溢價 producer 仍使用 `0 2/5 9-13 * * MON-FRI`，每 5 分鐘才從證交所 MIS `all_etf.txt` 取一次資料。**現行覆寫：**Requirement 106／Task 370 已將台股個股改為已知開盤時每 10 秒依富邦→MIS→Yahoo 更新；美股／英股仍為每 2 分鐘。Docker 外部 `GET /api/quotes` 與 `GET /api/quotes/one` 目前只讀 price key，共 18 個欄位，沒有折溢價。
 
 既有 `price:etfnav:{market}:{code}` 已保存台股 `all_etf.txt` 的官方 `g` 欄為 `premiumDiscountPct`，TTL 96 小時；這個 key 與 price key 刻意分開，避免三個 price writer 互相覆蓋 NAV 欄位。本任務只調整台股排程頻率，並在公開 quote reader 做 fail-soft 唯讀 join。不得修改 price writer、不得把 NAV 欄位塞回 price payload，也不得用四捨五入後的 iNAV 自行反推折溢價。
 
 ## 要做什麼
 
-- [ ] **349.1 台股排程改為每 2 分鐘且與股價錯開。**修改 `external-materials-service/src/main/java/com/steven/assets/externalmaterials/service/EtfNavPoller.java`：`scheduledTwUpdate` 精確使用 `@Scheduled(cron = "0 1/2 9-13 * * MON-FRI", zone = "Asia/Taipei")`。奇數分鐘會在 09:01、09:03……13:29 通過交易時段守門，與 `PricePoller` 偶數分鐘的 `0 0/2` 錯開；不得改股價 cron。保留 `MarketClock.isTwMarketOpen()`、一輪只呼叫一次 `fetchTwAll()`、持股／觀察清單過濾、台股 17:30、美股 18:30、warmup 與手動 refresh。同步更新該類別 Javadoc 與 `external-materials-service/src/main/resources/application.yml` 註解，不再保留「每 5 分鐘」現況文字。
+- [ ] **349.1 台股排程改為每 2 分鐘。**修改 `external-materials-service/src/main/java/com/steven/assets/externalmaterials/service/EtfNavPoller.java`：`scheduledTwUpdate` 精確使用 `@Scheduled(cron = "0 1/2 9-13 * * MON-FRI", zone = "Asia/Taipei")`。奇數分鐘會在 09:01、09:03……13:29 通過交易時段守門；台股股價現為每 10 秒，兩者不依賴奇偶分鐘錯開，且不得改股價 cron。保留 `MarketClock.isTwMarketOpen()`、一輪只呼叫一次 `fetchTwAll()`、持股／觀察清單過濾、台股 17:30、美股 18:30、warmup 與手動 refresh。同步更新該類別 Javadoc 與 `external-materials-service/src/main/resources/application.yml` 註解，不再保留「每 5 分鐘」現況文字。
 
 - [ ] **349.2 加排程反射測試。**在 external module 新增或擴充測試，以 reflection 取得 `scheduledTwUpdate` 的 `@Scheduled`，斷言 cron 與 zone 精確等於上一項。`EtfNavPoller` 仍精確維持 3 個 `@Scheduled` 方法：台股盤中 `scheduledTwUpdate`、台股 17:30 `scheduledTwCloseUpdate`、美股 18:30 `scheduledUsUpdate`；僅第一支是台股盤中 scheduler，且不得新增獨立 TPEX 盤中 scheduler。測試分別反射三個既有方法，不得以只搜尋 source 字串取代 annotation reflection。
 

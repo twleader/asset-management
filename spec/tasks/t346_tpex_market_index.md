@@ -1,4 +1,4 @@
-# [t346] 台股集中／櫃買市場指數與上市櫃個股兩分鐘 Redis 報價契約
+# [t346] 台股集中／櫃買市場指數與上市櫃個股 Redis 報價契約（台股節拍已由 Task 370 覆寫）
 
 **對應 Requirements:** Requirement 18（股市大盤查詢）、Requirement 36（排程清單）、Requirement 45（指數匯出）、Requirement 67（公開指數 API）、Requirement 85（本任務）  
 **前置任務:** t216、t324、t332  
@@ -8,7 +8,7 @@
 
 「股市大盤查詢」目前第一個市場顯示為「台股大盤」，需求是改成較精確的「台股集中市場」，並在其後加入「台股櫃買市場」。櫃買市場須與既有指數完全同版型：近 10 年日線、MA5/20/60/240、成交量、當日 5 分 K、手動回補、Excel／JSON 匯出、排程匯出與唯讀 public API。
 
-個股報價的最終需求是**每 2 分鐘**，不是每 2 秒。現行架構已把 producer 放在 `external-materials-service`：台股 cron 每兩分鐘取持股／警示代碼，`PriceFetchClient` 對每個台股代碼先查 `tse`、查無再查 `otc`，成功後交 `PriceCacheWriter` 寫既有 Redis；美股另有相同兩分鐘節拍。本任務不得新增第二支櫃買排程或另一份 OTC Redis cache，只補齊可驗證的上櫃契約與排程清單文字。
+本 Task 346 完成時，個股報價節拍是每 2 分鐘：producer 位於 `external-materials-service`，台股 cron 取持股／警示代碼，`PriceFetchClient` 對每個台股代碼先查 `tse`、查無再查 `otc`，成功後交 `PriceCacheWriter` 寫既有 Redis；美股另有相同兩分鐘節拍。**現行覆寫：**Requirement 106／Task 370 已把已知開盤台股改為每 10 秒依富邦→MIS→Yahoo 更新；美股仍為每 2 分鐘。本任務不得新增第二支櫃買排程或另一份 OTC Redis cache，只補齊可驗證的上櫃契約與排程清單文字。
 
 ## 要做什麼
 
@@ -22,7 +22,7 @@
 
 - [ ] 346.4 `MacroDataFetchClient.java`：禁止把 TPEX 加入 `US_INDEX_YAHOO`，`fetchUsIndexDaily("TPEX")` 以具名分支逐月取 TPEx 官方 `indexInfo/inx?date=YYYY/MM/01&response=json` OHLC，同月取 `st41_result.php?l=zh-tw&d=YYY/MM&o=json` 的成交量。兩支回應皆須驗 root lowercase `stat="ok"`，再從 `tables[]` 中找出恰一張含必要欄位的 target table，只依該 table 的 `fields/data` 欄名找 index，不得沿用 TWSE root parser 或寫死欄位位置；零張／多張 target 與 row width 不符皆依各自 OHLC／volume 失敗規則處理。OHLC 每列日期須合法且落在請求月份，O/H/L/C 皆為正數，`high≥max(open,close)`、`low≤min(open,close)` 且 `high≥low`；任一不符即為 OHLC failure。公元／民國日期對齊；量欄精確接受新 schema「成交張數」與舊 schema「成交股數（仟股）」兩個 alias，兩者均×1,000；nested fixture 必須各有一份。OHLC 過去完整月任一失敗即整次 fetch 失敗；量能月失敗只影響該月 incoming volume，單日缺列／非法／收市不同只使該日 volume null 並 WARN。TPEX `DailyOhlc.value` 維持 null，不擴 schema。
 - [ ] 346.5 同一檔的 `fetchIndexIntraday("TPEX")` 以具名分支調用官方 MIS `getChartOhlcStatis.jsp?ex=otc&ch=o00.tw&fqy=1`，禁止加入 `INDEX_INTRADAY_YAHOO`。驗證 `rtmessage`、`staticObj.key`與 `ohlcArray`；以 `key` 取日期，每點必填 `t` epoch milliseconds／正數 `c`，轉 `Asia/Taipei` 後日期須與 key 一致並以本地時間 floor 到五分格，取格內最後 close。`ts=HHmmss` 僅為可選交叉驗證，存在時才與 `t` 比對；fixture 必須包含最後 13:33 點只有 `t/c` 而仍落入 13:30 格。補齊 `Asia/Taipei 09:00–13:30`。當日圖仍為 transient 資料，不寫 DB、不寫個股 Redis tick store。
-- [ ] 346.6 不新增個股排程。保留 `PricePoller.scheduledTwIntradayUpdate` 的 `0 0/2 9-13 * * MON-FRI`／`Asia/Taipei` 與 `MarketClock.isTwMarketOpen()`；保留 `scheduledUsIntradayUpdate` 的 `0 0/2 9-16 * * MON-FRI`／`America/New_York`。台股上市與上櫃都由現有 `collectHeldStockCodes` 集合進同一輪；該 collector 現況只在 alert SQL 排除 `0000`，快照持股側沒有，故 `scheduledTwIntradayUpdate` 收集後須顯式 `tw.remove("0000")` 再呼叫 `updatePrices`，不得把排除誤當既有事實或改動其他 collector caller。
+- [ ] 346.6 不新增個股排程。本 Task 346 當時保留 `PricePoller.scheduledTwIntradayUpdate` 的 `0 0/2 9-13 * * MON-FRI`／`Asia/Taipei` 與 `MarketClock.isTwMarketOpen()`；Requirement 106／Task 370 現行覆寫為已知開盤台股 `*/10 * 9-13 * * MON-FRI`、富邦→MIS→Yahoo。保留 `scheduledUsIntradayUpdate` 的 `0 0/2 9-16 * * MON-FRI`／`America/New_York`。台股上市與上櫃都由現有 `collectHeldStockCodes` 集合進同一輪；該 collector 現況只在 alert SQL 排除 `0000`，快照持股側沒有，故 `scheduledTwIntradayUpdate` 收集後須顯式 `tw.remove("0000")` 再呼叫 `updatePrices`，不得把排除誤當既有事實或改動其他 collector caller。
 - [ ] 346.7 `PriceFetchClient.getTwseRealTimePrice` 的 `tse→otc` fallback 行為不得回歸：只有 response code 等於 requested code、且 `z` 為可解析真實成交價時回 `market='台股'` 的 `PriceResult`。`z='-'`、空陣列、code 不符、HTTP／解析失敗皆 `Optional.empty()`；不得用 `y/o/a/b` 代替 live。有效結果由 `PricePoller` 呼叫既有 `PriceCacheWriter.write(result,false)`，沿用 `price:台股:{code}`、market index SET、24h TTL、`price-update` 與台股 tick 累積。
 
 ### backend：code-keyed 指數與排程分類
@@ -34,16 +34,16 @@
 
 ### 排程清單
 
-- [ ] 346.12 `SchedulePublicBffController.JOBS` 改三筆既有文案：(a)「台股個股即時價（盤中）」明列「上市／上櫃持股與觀察清單、每 2 分鐘查 TWSE MIS、寫 Redis」，friendly schedule 從不完整的「09:00–13:00」訂正為實際守門「交易日 09:00–13:30 每 2 分鐘」；(b) 每日 07:00 job 改稱「櫃買／海外 code-keyed 指數日線回補」，描述明列「TPEX＋8 檔海外指數＋SP500TR＋TWSE 報酬指數增量」；(c) 09:00／12:00 job 改稱「美股指數日線落後補救檢查」，避免暗示會逐盤檢查 TPEX。所有 cron 不變，美股個股項仍每 2 分鐘。不得新增 `@Scheduled`，清單仍 55 筆＝business 21＋external 34。
+- [ ] 346.12 `SchedulePublicBffController.JOBS` 改三筆既有文案：(a) 本 Task 346 當時的「台股個股即時價（盤中）」文案為「上市／上櫃持股與觀察清單、每 2 分鐘查 TWSE MIS、寫 Redis」；現行依 Requirement 106／Task 370 改為已知開盤每 10 秒依富邦→MIS→Yahoo，friendly schedule 為「交易日 09:00–13:30 每 10 秒」；(b) 每日 07:00 job 改稱「櫃買／海外 code-keyed 指數日線回補」，描述明列「TPEX＋8 檔海外指數＋SP500TR＋TWSE 報酬指數增量」；(c) 09:00／12:00 job 改稱「美股指數日線落後補救檢查」，避免暗示會逐盤檢查 TPEX。美股個股項仍每 2 分鐘。不得新增 `@Scheduled`，清單總數與分類數依現行 catalog 維持。
 
 ### 自動化測試
 
 - [ ] 346.13 external client 測試用可控 `HttpClient`／fixture 或抽出的 package-private parser 驗證：第一次 `tse` 查無後會查 `otc`；合法 OTC 的 code/name/z/y/o/h/l/volume 正確映成 `PriceResult`；`z='-'` 回 empty。禁止新增測試專用 HTTP endpoint。
-- [ ] 346.14 `PricePoller` 測試驗證 OTC fixture 結果會交現有 writer、empty 不寫、source 模擬快照持股帶入 `0000` 時不呼叫 client／writer；reflection 驗證 TW／US 兩支 `@Scheduled` 的 cron 與 zone 精確為每 2 分鐘。
+- [ ] 346.14 `PricePoller` 測試驗證 OTC fixture 結果會交現有 writer、empty 不寫、source 模擬快照持股帶入 `0000` 時不呼叫 client／writer；本 Task 346 當時 reflection 驗證 TW／US 兩支 `@Scheduled` 的 cron 與 zone 精確為每 2 分鐘，現行測試須以 Requirement 106／Task 370 覆寫後的台股每 10 秒與美股每 2 分鐘為準。
 - [ ] 346.15 external module 測試 `MacroDataFetchClient` 的 root `{stat:"ok",tables:[{fields,data}]}` TPEx OHLC 月 fixture、「成交張數」新 schema 與「成交股數（仟股）」舊 schema 量能 fixture、民國年轉換、兩個 alias 均×1,000、日期 join、量能失敗不丟 OHLC、過去完整月 OHLC 失敗整批失敗，以及 MIS `staticObj.key/ohlcArray[].t/c` 一分 K→五分格、最後點缺 `ts` 仍收錄、`Asia/Taipei 09:00–13:30` 補齊。另斷言 `US_INDEX_YAHOO`與 `INDEX_INTRADAY_YAHOO` 都不含 TPEX；這些常數／parser 不在 backend，禁止把測試放錯 module。
 - [ ] 346.16 backend 測試涵蓋 TPEX 可經相容 GET query、refresh／export 白名單、相容 GET 仍可查 SP500TR、SP500TR 仍可 refresh 但不進頁面白名單、TPEX incoming null volume 保留同日既有非 null volume、每日全量管理 TPEX、self-heal 分類含 TPEX 且 09:00／12:00 美股 gap-check 不含 TPEX。
 - [ ] 346.17 BFF 測試把 catalog 擴為 10 個，釘住順序與中文 label；public API 測試覆蓋 10 markets × 8 ranges＝80 組，TPEX daily/intraday 回應的 market/range echo、label、固定等長陣列與昨收規則。既有 TWSE 與 8 海外市場不可回歸。
-- [ ] 346.18 排程清單測試釘住台股個股文案、friendly schedule「交易日 09:00–13:30 每 2 分鐘」與兩分鐘 cron、每日全量 job 與美股 gap-check job 的名稱／描述；總數仍 55、business 21、external 34。
+- [ ] 346.18 排程清單測試釘住現行台股個股文案、friendly schedule「交易日 09:00–13:30 每 10 秒」與十秒 cron、每日全量 job 與美股 gap-check job 的名稱／描述；美股個股仍為每 2 分鐘；總數與分類數依現行 catalog 維持。
 
 ## 驗證
 

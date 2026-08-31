@@ -163,11 +163,9 @@ public class AlertChartRenderer {
      * 警示 / 補發 email 內嵌的「當日分時走勢圖」PNG（與年圖並列，同一封信第二張圖）。
      *
      * 與畫面 StockAnalysisDialog「當日」走勢同資料源、同版面語意：
-     *  - 分時 tick 走 {@link HistoricalDataService#fetchIntradayTicks}（date=null → ext-materials 取最近有資料的
+     *  - 分時 tick 走 {@link HistoricalDataService#fetchIntradaySession}（date=null → ext-materials 取最近有資料的
      *    交易日；讀 Redis tick LIST，與畫面「當日」同一支 business API，非直連外部行情）。
-     *  - 昨收基準線 = 該分時交易日「前一交易日」的日線收盤（stock_price_history，{@code tradingDate} 嚴格早於
-     *    分時交易日的最後一筆），與畫面「當日漲跌」同「vs 前一交易日原始收盤」口徑；<b>不採 Redis previousClose</b>。
-     *  - 漲跌色：最新分時價 ≥ 昨收 → 紅（漲）、否則綠（跌），對齊 quoteColor / markPoint「紅漲綠跌」；無昨收可比中性藍。
+     *  - 比較基準、漲跌與標籤皆由 session 回應提供；renderer 不查第二份日線、不重新計算。
      *  - X 軸固定「開盤 → 收盤」（{@link MarketZones} 單一事實來源），以當日分鐘數為數值 X、min/max 鎖定開收盤，
      *    故軸延伸到收盤時間而非最後一筆 tick（與畫面 Requirement 13「X 軸延伸到收盤」同視覺行為）。
      *
@@ -177,13 +175,10 @@ public class AlertChartRenderer {
      */
     public Optional<byte[]> renderIntradayPng(String code, String market) {
         try {
-            List<HistoricalDataService.IntradayTick> ticks =
-                    historicalDataService.fetchIntradayTicks(code, market, null);
+            HistoricalDataService.IntradaySession session =
+                    historicalDataService.fetchIntradaySession(code, market, null);
+            List<HistoricalDataService.IntradayTick> ticks = session.ticks();
             if (ticks == null || ticks.isEmpty()) return Optional.empty();
-
-            // 分時交易日 = 首筆 tick 的 ISO 時間前 10 碼（與畫面 intradayQuote 判定同口徑）
-            LocalDate intradayDate = parseTickDate(ticks.get(0).time());
-            if (intradayDate == null) return Optional.empty();
 
             // 交易時段 open→close → 當日分鐘數 X 軸範圍（MarketZones 單一事實來源，鏡射畫面 sessionHours）
             LocalTime open = MarketZones.openTime(market);
@@ -208,11 +203,11 @@ public class AlertChartRenderer {
                 ys.add(e.getValue());
             }
 
-            // 昨收：前一交易日日線收盤（與畫面「當日漲跌」同口徑）；查無則不畫基準線、線用中性藍
-            Double prevClose = previousDailyClose(code, market, intradayDate);
+            Double prevClose = session.comparisonPrice() == null ? null : session.comparisonPrice().doubleValue();
             double lastPrice = ys.get(ys.size() - 1);
-            Color lineColor = (prevClose == null) ? C_FLAT
-                    : (lastPrice >= prevClose ? C_HIGH : C_LOW);   // 紅漲綠跌
+            Color lineColor = session.change() == null ? C_FLAT
+                    : session.change().signum() > 0 ? C_HIGH
+                    : session.change().signum() < 0 ? C_LOW : C_FLAT;
 
             XYChart chart = new XYChartBuilder().width(WIDTH).height(INTRADAY_H).build();
             XYStyler styler = chart.getStyler();
@@ -224,13 +219,14 @@ public class AlertChartRenderer {
             chart.setCustomYAxisTickLabelsFormatter(nf::format);
             applyIntradayYRange(styler, ys, prevClose);
 
-            // 昨收基準線（先加 → 畫在股價線底下；顯示於 legend 供對照）
+            // 已驗證的 session 比較基準線（先加 → 畫在股價線底下）
             if (prevClose != null) {
-                addNumericRefLine(chart, "昨收 " + fmt(prevClose), openMin, closeMin, prevClose);
+                addNumericRefLine(chart, session.comparisonKind().displayLabel() + " " + fmt(prevClose),
+                        openMin, closeMin, prevClose);
             }
 
             // 分時股價線（legend 帶最新價 + 今日漲跌；線色即漲跌色）
-            XYSeries s = chart.addSeries("股價 " + fmt(lastPrice) + changeSuffix(lastPrice, prevClose), xs, ys);
+            XYSeries s = chart.addSeries("股價 " + fmt(lastPrice) + changeSuffix(session), xs, ys);
             s.setMarker(SeriesMarkers.NONE);
             s.setLineColor(lineColor);
             s.setLineStyle(new BasicStroke(2.0f));
@@ -242,16 +238,6 @@ public class AlertChartRenderer {
         } catch (Exception e) {
             log.warn("當日分時圖 PNG 生成失敗 {} {}: {}", code, market, e.getMessage());
             return Optional.empty();
-        }
-    }
-
-    /** 分時 tick ISO 時間字串 "yyyy-MM-ddTHH:mm:ss" 前 10 碼 → 交易日；格式不符回 null。 */
-    private static LocalDate parseTickDate(String time) {
-        if (time == null || time.length() < 10) return null;
-        try {
-            return LocalDate.parse(time.substring(0, 10));
-        } catch (Exception e) {
-            return null;
         }
     }
 
@@ -269,30 +255,6 @@ public class AlertChartRenderer {
     private static String minToHHmm(int minuteOfDay) {
         int m = Math.max(0, minuteOfDay);
         return String.format("%02d:%02d", (m / 60) % 24, m % 60);
-    }
-
-    /**
-     * 昨收 = 分時交易日「前一交易日」日線收盤：讀 {@link HistoricalDataService#getStockHistory}（升冪），
-     * 取 {@code tradingDate} 嚴格早於分時交易日的最後一筆收盤。查無（如新標的僅今日一格）回 null。
-     * 併入的今日即時價其 {@code tradingDate} == 分時交易日，因嚴格早於條件自動排除，不會誤取。
-     */
-    private Double previousDailyClose(String code, String market, LocalDate intradayDate) {
-        try {
-            List<StockPriceHistory> hist = historicalDataService.getStockHistory(
-                    code, market, intradayDate.minusMonths(2), intradayDate);
-            if (hist == null) return null;
-            Double prev = null;
-            for (StockPriceHistory h : hist) {
-                if (h.getTradingDate() != null && h.getTradingDate().isBefore(intradayDate)
-                        && h.getClosePrice() != null) {
-                    prev = h.getClosePrice().doubleValue();
-                }
-            }
-            return prev;
-        } catch (Exception e) {
-            log.warn("昨收查詢失敗 {} {}: {}", code, market, e.getMessage());
-            return null;
-        }
     }
 
     /** 分時 Y 軸：涵蓋分時區間與昨收基準線，上下各 +10% padding（比照畫面當日鎖定區間，基準線不落框外）。 */
@@ -321,11 +283,11 @@ public class AlertChartRenderer {
                 1f, new float[]{5f, 4f}, 0f));   // 虛線
     }
 
-    /** 今日漲跌後綴「▲/▼金額 (±%)」，供 legend 股價值附註；無昨收回空字串。漲跌方向由線色（紅漲綠跌）表達。 */
-    private static String changeSuffix(double lastPrice, Double prevClose) {
-        if (prevClose == null || prevClose == 0) return "";
-        double chg = lastPrice - prevClose;
-        double pct = chg / prevClose * 100;
+    /** 今日漲跌後綴僅讀 business session，不在 renderer 重算。 */
+    private static String changeSuffix(HistoricalDataService.IntradaySession session) {
+        if (session.change() == null || session.changePercent() == null) return "";
+        double chg = session.change().doubleValue();
+        double pct = session.changePercent().doubleValue();
         String arrow = chg > 0 ? "▲" : chg < 0 ? "▼" : "";
         return String.format(" %s%,.2f (%+.2f%%)", arrow, Math.abs(chg), pct);
     }

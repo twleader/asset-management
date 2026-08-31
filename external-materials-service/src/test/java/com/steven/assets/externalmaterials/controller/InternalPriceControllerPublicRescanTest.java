@@ -13,15 +13,13 @@ import com.steven.assets.externalmaterials.service.FundDividendPoller;
 import com.steven.assets.externalmaterials.service.FundNavBackfillService;
 import com.steven.assets.externalmaterials.service.FundNavPoller;
 import com.steven.assets.externalmaterials.service.HistoricalBackfillService;
-import com.steven.assets.externalmaterials.service.IntradayTickRefresher;
-import com.steven.assets.externalmaterials.service.IntradayTickStore;
+import com.steven.assets.externalmaterials.service.IntradaySessionQueryService;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.MarketDataFetchService;
 import com.steven.assets.externalmaterials.service.NewsPoller;
 import com.steven.assets.externalmaterials.service.PricePoller;
 import com.steven.assets.externalmaterials.service.QuoteDetailReadService;
 import com.steven.assets.externalmaterials.service.StockFundamentalPoller;
-import com.steven.assets.externalmaterials.service.StockSourceQuery;
 import com.steven.assets.externalmaterials.service.TwRadarRefreshService;
 import com.steven.assets.externalmaterials.service.TwTyphoonClosureService;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,9 +64,7 @@ class InternalPriceControllerPublicRescanTest {
                 mock(PriceFetchClient.class),
                 mock(MarketDataFetchService.class),
                 mock(MacroDataFetchClient.class),
-                mock(IntradayTickStore.class),
-                mock(IntradayTickRefresher.class),
-                mock(StockSourceQuery.class),
+                mock(IntradaySessionQueryService.class),
                 mock(TwTyphoonClosureService.class),
                 mock(EtfNavPoller.class),
                 mock(TwRadarRefreshService.class),

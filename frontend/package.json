@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test src/utils/displayQuote.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js src/utils/tradingCalendarYearWindow.test.js src/utils/stockAnalysisDialog.contract.test.js src/utils/tradingRadarDecisionPresentation.test.js src/utils/openApiContract.test.js",
+    "test": "node --test src/utils/displayQuote.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js src/utils/tradingCalendarYearWindow.test.js src/utils/stockAnalysisDialog.contract.test.js src/utils/intradaySession.test.js src/utils/tradingRadarDecisionPresentation.test.js src/utils/openApiContract.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

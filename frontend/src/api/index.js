@@ -132,7 +132,7 @@ export const bffApi = {
       api.get('/bff/stock-analysis/etf-holdings', { params: { code, market }, skipErrorToast: true }),
     getIntradayTicks: (code, market, date) =>
       api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } }),
-    // Yahoo 台股同時間點五檔展示 snapshot；錯誤由 dialog 的局部狀態處理。
+    // Canonical persisted 台股五檔：完整 FUBON_BOOKS 優先、完整 YAHOO_TW fallback；此 GET 純讀不觸發 vendor。
     getQuoteDetail: (code, market) =>
       api.get('/bff/stock-analysis/quote-detail', { params: { code, market }, skipErrorToast: true }),
     // Task 136：走勢圖無歷史時即時觸發單檔 10 年回補（since 省略→後端預設 now−10y）。只補 stock_price_history，不入主檔。

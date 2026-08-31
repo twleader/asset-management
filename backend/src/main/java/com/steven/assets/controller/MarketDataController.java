@@ -70,7 +70,10 @@ public class MarketDataController {
         return ResponseEntity.ok(marketDataService.getDividendRate(code, market));
     }
 
-    /** 行情五檔展示的富邦十秒 cached snapshot；controller 僅驗參數並代理。 */
+    /**
+     * 行情五檔 canonical persisted snapshot：完整 FUBON_BOOKS 優先、完整 YAHOO_TW fallback。
+     * controller 僅驗參數並代理；這是純讀，絕不在 request-time 呼叫任何 vendor 或寫入。
+     */
     @GetMapping("/quote-detail")
     public ResponseEntity<QuoteDetailDto.Response> getQuoteDetail(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
@@ -225,17 +228,16 @@ public class MarketDataController {
     }
 
     /**
-     * 「當日」走勢圖分時 tick 序列（StockAnalysisDialog 走勢圖「當日」期間用）。
-     * GET /api/market-data/intraday-ticks?code=0050&market=台股&date=2026-06-05
-     * Proxy 至 external-materials-service /internal/intraday-ticks。
-     * Redis LIST `price:ticks:{market}:{code}:{date}`，盤中 polling 累積 + 盤後外部源覆寫。
+     * 「當日」走勢圖分時 session。server 回傳同一個 object 的 ticks、raw provenance 與
+     * comparison/change tuple；tick 只讀 cache，僅 qualified TWSE MIS reference evidence
+     * 可在 non-public path 有界 self-heal，前端不得再以 history 自算。
      */
     @GetMapping("/intraday-ticks")
-    public List<HistoricalDataService.IntradayTick> getIntradayTicks(
+    public HistoricalDataService.IntradaySession getIntradayTicks(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return historicalDataService.fetchIntradayTicks(code, market, date);
+        return historicalDataService.fetchIntradaySession(code, market, date);
     }
 
     /**

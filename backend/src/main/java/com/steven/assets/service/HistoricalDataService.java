@@ -6,6 +6,8 @@ import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
+import com.steven.assets.util.MarketZones;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -69,18 +71,64 @@ public class HistoricalDataService {
 
     private record IntradayTickDto(String time, BigDecimal price) {}
 
+    private record IntradaySourceSessionDto(LocalDate tradingDate, List<IntradayTickDto> ticks,
+                                            BigDecimal sessionReferencePrice, LocalDate sessionReferenceDate,
+                                            String sessionReferenceSource) {}
+
+    public enum ComparisonKind {
+        PREVIOUS_CLOSE("昨收"), EX_RIGHTS_REFERENCE("除權息參考價"),
+        SESSION_REFERENCE("參考價"), UNAVAILABLE("比較基準");
+        private final String displayLabel;
+        ComparisonKind(String displayLabel) { this.displayLabel = displayLabel; }
+        public String displayLabel() { return displayLabel; }
+    }
+
+    /** One object deliberately replaces the legacy bare tick array so every consumer shares one comparison fact. */
+    public record IntradaySession(
+            @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate tradingDate,
+            List<IntradayTick> ticks,
+            BigDecimal sessionReferencePrice,
+            @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate sessionReferenceDate,
+            String sessionReferenceSource,
+            BigDecimal comparisonPrice,
+            ComparisonKind comparisonKind,
+            String comparisonSource,
+            BigDecimal lastPrice,
+            BigDecimal change,
+            BigDecimal changePercent) {
+        public IntradaySession {
+            if (tradingDate == null || comparisonKind == null) throw new IllegalArgumentException("invalid session");
+            ticks = ticks == null ? List.of() : List.copyOf(ticks);
+            if (comparisonPrice != null && comparisonPrice.signum() <= 0) {
+                throw new IllegalArgumentException("non-positive comparison");
+            }
+            boolean hasReference = sessionReferencePrice != null || sessionReferenceDate != null
+                    || sessionReferenceSource != null;
+            if (hasReference && (sessionReferencePrice == null || sessionReferencePrice.signum() <= 0
+                    || !tradingDate.equals(sessionReferenceDate)
+                    || !"TWSE_MIS_Y".equals(sessionReferenceSource))) {
+                throw new IllegalArgumentException("invalid raw session reference");
+            }
+            if (!hasReference) {
+                sessionReferencePrice = null;
+                sessionReferenceDate = null;
+                sessionReferenceSource = null;
+            }
+        }
+    }
+
     /**
      * 警示盤中觸發補抓專用：5 分鐘 K 線。
      * 對外呼叫已搬到 ext-materials-service /internal/intraday-5m（FinMind/Yahoo 集中）。
      */
     /**
-     * 「當日」走勢圖分時 tick 序列。
-     * 對應 ext-materials-service /internal/intraday-ticks（讀 Redis tick LIST）。
-     * date 可空 → ext-materials 自取該市場最近一個交易日。
+     * 「當日」走勢圖 session，含已驗證的比較基準、最新價與漲跌；不由前端/renderer 重算。
+     * 對應 ext-materials-service /internal/intraday-ticks（cache-only tick read；只有 exact
+     * TWSE MIS reference evidence 可 bounded self-heal 的 non-public path）。
      */
-    public List<IntradayTick> fetchIntradayTicks(String stockCode, String market, java.time.LocalDate date) {
+    public IntradaySession fetchIntradaySession(String stockCode, String market, LocalDate date) {
         try {
-            IntradayTickDto[] resp = priceServiceClient.get()
+            IntradaySourceSessionDto resp = priceServiceClient.get()
                     .uri(uriBuilder -> {
                         uriBuilder.path("/internal/intraday-ticks")
                                 .queryParam("code", stockCode)
@@ -89,20 +137,43 @@ public class HistoricalDataService {
                         return uriBuilder.build();
                     })
                     .retrieve()
-                    .bodyToMono(IntradayTickDto[].class)
+                    .bodyToMono(IntradaySourceSessionDto.class)
                     .block();
-            if (resp == null) return List.of();
-            List<IntradayTick> out = new ArrayList<>(resp.length);
-            for (IntradayTickDto d : resp) {
-                if (d.price() == null) continue;
+            if (resp == null || resp.tradingDate() == null) return unavailable(date, market);
+            List<IntradayTick> out = new ArrayList<>();
+            if (resp.ticks() != null) for (IntradayTickDto d : resp.ticks()) {
+                if (d == null || d.price() == null) continue;
                 out.add(new IntradayTick(d.time(), d.price()));
             }
-            return out;
+            BigDecimal rawPrevious = null;
+            String rawSource = "0000".equals(stockCode) && "台股".equals(market)
+                    ? "TWSE_INDEX_DAILY_HISTORY" : "STOCK_PRICE_HISTORY";
+            try {
+                if ("0000".equals(stockCode) && "台股".equals(market)) {
+                    rawPrevious = twseDailyRepo.findPreviousBefore(resp.tradingDate())
+                            .map(TwseIndexDailyHistory::getClosePoint).orElse(null);
+                } else {
+                    rawPrevious = priceHistRepo.findPreviousPriceBefore(stockCode, market, resp.tradingDate())
+                            .map(StockPriceHistory::getClosePrice).orElse(null);
+                }
+            } catch (Exception repositoryFailure) {
+                log.warn("取得分時比較用前收失敗 ({} {} {}): {}；保留 session ticks 並 fail closed",
+                        market, stockCode, resp.tradingDate(), repositoryFailure.getMessage());
+            }
+            return IntradaySessionResolver.resolve(stockCode, market, resp.tradingDate(), out,
+                    resp.sessionReferencePrice(), resp.sessionReferenceDate(), resp.sessionReferenceSource(),
+                    rawPrevious, rawSource);
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/intraday-ticks 失敗 ({} {}): {}",
                     market, stockCode, e.getMessage());
-            return List.of();
+            return unavailable(date, market);
         }
+    }
+
+    private static IntradaySession unavailable(LocalDate requestedDate, String market) {
+        LocalDate date = requestedDate == null ? MarketZones.today(market) : requestedDate;
+        return new IntradaySession(date, List.of(), null, null, null,
+                null, ComparisonKind.UNAVAILABLE, null, null, null, null);
     }
 
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {

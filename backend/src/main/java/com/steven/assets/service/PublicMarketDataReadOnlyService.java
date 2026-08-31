@@ -16,7 +16,7 @@ import java.util.List;
  * Requirement 108／Task 372 的 container-only 市場資料 bridge。
  *
  * <p>此 service 不接觸 owner、快照或持股；分時只代理 external 的 exact pure-read
- * endpoint，絕不重用會 cold-start 的 {@code HistoricalDataService.fetchIntradayTicks}。</p>
+ * endpoint，絕不重用會 cold-start 的 {@code HistoricalDataService.fetchIntradaySession}。</p>
  */
 @Slf4j
 @Service

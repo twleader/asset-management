@@ -46,9 +46,7 @@ public class InternalPriceController {
     private final com.steven.assets.externalmaterials.client.PriceFetchClient priceFetch;
     private final MarketDataFetchService marketData;
     private final com.steven.assets.externalmaterials.client.MacroDataFetchClient macro;
-    private final com.steven.assets.externalmaterials.service.IntradayTickStore tickStore;
-    private final com.steven.assets.externalmaterials.service.IntradayTickRefresher tickRefresher;
-    private final com.steven.assets.externalmaterials.service.StockSourceQuery stockSource;
+    private final com.steven.assets.externalmaterials.service.IntradaySessionQueryService intradaySessionQuery;
     private final com.steven.assets.externalmaterials.service.TwTyphoonClosureService typhoonClosure;
     private final com.steven.assets.externalmaterials.service.EtfNavPoller etfNavPoller;
     private final com.steven.assets.externalmaterials.service.TwRadarRefreshService twRadarRefresh;
@@ -384,60 +382,17 @@ public class InternalPriceController {
     }
 
     /**
-     * 「當日」走勢圖分時 tick 序列（盤中 polling 累積 + 盤後外部源覆寫）。
-     * date 未指定 → 預設當日交易日：盤中 / 盤後 tick 都寫在「今天」bucket
-     * （key {@code price:ticks:{market}:{code}:{今天}}），但今日收盤價要收盤後才進
-     * stock_price_history，故盤中直接用 {@code findMaxTradingDate} 會停在前一交易日、
-     * 落在空 bucket（前端顯示「無當日分時資料」）。→ 今天是該市場交易日且今日 tick 已有資料
-     * 就用今天；否則（週末 / 假日 / 盤前尚無資料）退回最近一個有收盤的交易日。
-     * Redis LIST 空且服務側已有完整資料源 → 同步觸發一次 refreshOne 作為 cold-start，回填後再回傳。
+     * 「當日」走勢圖分時 session。tick bucket 只讀既有 Redis：不得 request-time 呼叫
+     * {@code IntradayTickRefresher}、FinMind、Yahoo、tick/DB write 或 publish。合法台股個股、
+     * target 為今日交易日且 reference-cache miss 時，才可有界取得已驗證的 TWSE MIS 同日
+     * {@code d/y} reference evidence，且不依 tick 完整度；Task372 public route 不進此路徑。
      */
     @GetMapping("/intraday-ticks")
-    public java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint> intradayTicks(
+    public com.steven.assets.externalmaterials.service.IntradaySessionQueryService.IntradaySourceSession intradayTicks(
             @RequestParam String code,
             @RequestParam String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        LocalDate today = LocalDate.now(
-                com.steven.assets.externalmaterials.service.MarketClock.zoneOf(market));
-        if (date != null) {
-            if (date.equals(today) && clock.isTradingDay(market, today)) {
-                return todayTicksWithSelfHeal(code, market, today);
-            }
-            return ticksWithColdStart(code, market, date);
-        }
-        if (clock.isTradingDay(market, today)) {
-            var todayTicks = todayTicksWithSelfHeal(code, market, today);
-            if (!todayTicks.isEmpty()) return todayTicks;
-        }
-        return ticksWithColdStart(code, market,
-                stockSource.findMaxTradingDate(code, market).orElse(today));
-    }
-
-    private java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint>
-            todayTicksWithSelfHeal(String code, String market, LocalDate today) {
-        var ticks = tickStore.getTicks(code, market, today);
-        if (com.steven.assets.externalmaterials.service.IntradayTickStore
-                .isIncompleteForSession(ticks, market, today)) {
-            tickRefresher.refreshOneGuarded(code, market, today, true);
-            ticks = tickStore.getTicks(code, market, today);
-        }
-        return ticks;
-    }
-
-    /**
-     * 讀當日 tick LIST；空且服務側有完整資料源時同步 cold-start refresh 一次後再讀。
-     * target 非交易日（週末 / 國定假日 / 颱風假）時**不** cold-start——該日本無盤，refresh 只會抓到
-     * 昨收平盤幻影再度污染（颱風假一體休市，Task 161）；此時退回空序列（前端顯示「無當日分時資料」）。
-     * 保護 {@code findMaxTradingDate} 空（該檔無任何歷史）→ {@code .orElse(today)} 落在颱風日的邊角。
-     */
-    private java.util.List<com.steven.assets.externalmaterials.service.IntradayTickStore.TickPoint>
-            ticksWithColdStart(String code, String market, LocalDate target) {
-        var ticks = tickStore.getTicks(code, market, target);
-        if (ticks.isEmpty() && clock.isTradingDay(market, target)) {
-            tickRefresher.refreshOne(code, market, target);
-            ticks = tickStore.getTicks(code, market, target);
-        }
-        return ticks;
+        return intradaySessionQuery.query(code, market, date);
     }
 
     /** 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘排程）。 */

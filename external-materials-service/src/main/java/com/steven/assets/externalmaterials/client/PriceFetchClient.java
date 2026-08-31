@@ -45,6 +45,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * 對外行情資料抓取：
@@ -82,6 +83,7 @@ public class PriceFetchClient {
     private static final DateTimeFormatter MIS_TIME =
             DateTimeFormatter.ofPattern("HH:mm:ss").withResolverStyle(ResolverStyle.STRICT);
     private static final ZoneId LONDON = ZoneId.of("Europe/London");
+    private static final Pattern TW_STOCK_CODE = Pattern.compile("^[0-9A-Z]{2,10}$");
 
     @FunctionalInterface
     interface Sleeper {
@@ -185,6 +187,23 @@ public class PriceFetchClient {
         }
     }
 
+    /**
+     * A qualified same-session reference from the TWSE MIS {@code d/y} pair.
+     *
+     * <p>Fubon's generic {@code previousClose} and Yahoo metadata do not carry this exact-date
+     * semantic proof, so they intentionally cannot construct this type.</p>
+     */
+    public record TwSessionReference(String stockCode, LocalDate tradingDate,
+                                     BigDecimal price, String source) {
+        public TwSessionReference {
+            if (stockCode == null || stockCode.isBlank() || tradingDate == null
+                    || price == null || price.signum() <= 0
+                    || !"TWSE_MIS_Y".equals(source)) {
+                throw new IllegalArgumentException("invalid TWSE session reference");
+            }
+        }
+    }
+
     public enum TwQuoteClassification { RESOLVED, NO_TRADE, MISSING, INVALID }
 
     /** Immutable evidence for one complete two-wave Taiwan MIS fetch. */
@@ -231,6 +250,33 @@ public class PriceFetchClient {
             return getYahooLsePrice(stockCode);
         }
         return getNasdaqPrice(stockCode);
+    }
+
+    /**
+     * Reads a TWSE MIS session reference only for the exact requested trading date. This is a
+     * bounded external self-heal used by the non-public intraday-session path, never by a Task372
+     * public quote request; {@code y} is deliberately not a live-price fallback.
+     */
+    public Optional<TwSessionReference> fetchTwSessionReference(String stockCode, LocalDate expectedDate) {
+        if (stockCode == null || !TW_STOCK_CODE.matcher(stockCode).matches()
+                || "0000".equals(stockCode) || expectedDate == null) return Optional.empty();
+        return fetchTwseMisItem(stockCode)
+                .flatMap(item -> parseTwSessionReference(stockCode, item, expectedDate));
+    }
+
+    static Optional<TwSessionReference> parseTwSessionReference(
+            String stockCode, JsonNode item, LocalDate expectedDate) {
+        if (stockCode == null || item == null || expectedDate == null) return Optional.empty();
+        try {
+            if (!stockCode.equals(item.path("c").asText("").trim())) return Optional.empty();
+            LocalDate actual = LocalDate.parse(item.path("d").asText(""), MIS_DATE);
+            if (!expectedDate.equals(actual)) return Optional.empty();
+            BigDecimal value = parsePositive(item.path("y").asText(""));
+            if (value == null) return Optional.empty();
+            return Optional.of(new TwSessionReference(stockCode, actual, value, "TWSE_MIS_Y"));
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -515,6 +561,69 @@ public class PriceFetchClient {
 
     private Optional<PriceResult> getTwseRealTimePrice(String stockCode) {
         return Optional.ofNullable(fetchTwBatch(List.of(stockCode)).resolved().get(stockCode));
+    }
+
+    /**
+     * Single-code MIS probe used solely for the qualified {@code d/y} session-reference fact.
+     * Live polling retains the bounded batch-wave path above; this method must not become a
+     * generic live quote shortcut.
+     */
+    private Optional<JsonNode> fetchTwseMisItem(String stockCode) {
+        for (String exchange : List.of("tse", "otc")) {
+            try {
+                String url = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch="
+                        + exchange + "_" + stockCode + ".tw&json=1&delay=3000";
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(MIS_REQUEST_TIMEOUT)
+                        .header("User-Agent", UA)
+                        .header("Referer", "https://mis.twse.com.tw/stock/index.jsp")
+                        .header("Accept", "application/json, */*")
+                        .header("Accept-Encoding", "identity")
+                        .GET()
+                        .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() != 200) continue;
+                JsonNode item = selectTwseItem(mapper.readTree(response.body()).path("msgArray"), stockCode);
+                if (item != null) return Optional.of(item);
+            } catch (Exception e) {
+                log.warn("TWSE MIS session reference 查詢失敗 {} ({}): {}", stockCode, exchange, e.getMessage());
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Exact-code selection keeps a mismatched TSE response from preventing the OTC probe. */
+    static JsonNode selectTwseItem(JsonNode array, String stockCode) {
+        if (array == null || !array.isArray() || stockCode == null) return null;
+        for (JsonNode item : array) {
+            if (stockCode.equals(item.path("c").asText("").trim())) return item;
+        }
+        return null;
+    }
+
+    /** Package seam proving {@code z} remains a live price and cannot be silently replaced by {@code y}. */
+    static Optional<PriceResult> parseTwseLivePrice(String stockCode, JsonNode item) {
+        try {
+            if (stockCode == null || item == null || !stockCode.equals(item.path("c").asText("").trim())) {
+                return Optional.empty();
+            }
+            BigDecimal price = parsePositive(item.path("z").asText(""));
+            if (price == null) return Optional.empty();
+            BigDecimal previousClose = parsePositive(item.path("y").asText(""));
+            BigDecimal change = previousClose == null ? BigDecimal.ZERO : price.subtract(previousClose);
+            BigDecimal changePct = previousClose == null ? BigDecimal.ZERO
+                    : change.multiply(BigDecimal.valueOf(100)).divide(previousClose, 6, RoundingMode.HALF_UP);
+            String name = item.path("n").asText("").trim();
+            return Optional.of(new PriceResult(stockCode, "台股", price, change, changePct, "TWSE",
+                    name.isEmpty() ? null : name,
+                    parseFirstQuote(item.path("b").asText("")), parseFirstQuote(item.path("a").asText("")),
+                    parseDecimal(item.path("o").asText("")), previousClose,
+                    parseDecimal(item.path("h").asText("")), parseDecimal(item.path("l").asText("")),
+                    parseLong(item.path("v").asText(""))));
+        } catch (Exception ignored) {
+            return Optional.empty();
+        }
     }
 
     /** Third-tier Taiwan LIVE fallback. Receipt time is never substituted for Yahoo's market time. */
@@ -1018,6 +1127,11 @@ public class PriceFetchClient {
         if (t.isEmpty() || "-".equals(t) || "--".equals(t) || "N/A".equalsIgnoreCase(t)) return null;
         try { return new BigDecimal(t.replace(",", "")); }
         catch (NumberFormatException e) { return null; }
+    }
+
+    private static BigDecimal parsePositive(String value) {
+        BigDecimal parsed = parseDecimal(value);
+        return parsed != null && parsed.signum() > 0 ? parsed : null;
     }
 
     private static Long parseLong(String s) {
