@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.service;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -44,6 +45,22 @@ class IntradaySessionQueryServiceTest {
     @AfterEach
     void closeExecutor() {
         if (async != null) async.shutdownNow();
+    }
+
+    @Test
+    void springSelectsTheProductionConstructorInsteadOfThePackagePrivateTestSeam() {
+        try (var context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(MarketClock.class, () -> marketClock);
+            context.registerBean(IntradayTickStore.class, () -> ticks);
+            context.registerBean(StockSourceQuery.class, () -> source);
+            context.registerBean(SessionReferencePriceStore.class, () -> references);
+            context.registerBean(PriceFetchClient.class, () -> priceFetch);
+            context.register(IntradaySessionQueryService.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(IntradaySessionQueryService.class)).isNotNull();
+        }
     }
 
     @Test

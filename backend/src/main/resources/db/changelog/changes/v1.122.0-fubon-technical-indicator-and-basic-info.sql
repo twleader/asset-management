@@ -1,6 +1,9 @@
 --liquibase formatted sql
---changeset steven:v1.122.0-fubon-technical-indicator-and-basic-info
+--changeset steven:v1.122.0-fubon-technical-indicator-and-basic-info splitStatements:false
 -- Requirement 135／Task 408: immutable FUBON_SDK history; Redis is intentionally not represented here.
+-- The immutable-history trigger function contains dollar-quoted PL/pgSQL. This changeset must stay
+-- unsplit: Liquibase's semicolon splitter would otherwise submit the function body separately and
+-- PostgreSQL reports an unterminated dollar quote. PgJDBC executes the complete changeset atomically.
 
 -- Task408.9：last_action 除了 rule/action-policy 外，也必須知道採用哪一版技術來源。
 -- 既有列保留 NULL（未知），第一次 FUBON_OVERLAY_V1 評估只重建 baseline，不把來源切換
