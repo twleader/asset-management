@@ -388,6 +388,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 387 | Google 登入固定顯示帳號選擇器：Authorization Request 加 `prompt=select_account`，避免瀏覽器同時登入多個 Gmail 帳號時悄悄沿用非預期帳號（Requirement 122） | [tasks/t387_google_login_account_chooser.md](tasks/t387_google_login_account_chooser.md) |
 | 388 | 修復 DB 備份 remote 授權熱重載、錯帳號 fail-closed 守門與逐筆 durable rotation（Requirement 15／52） | [tasks/t388_backup_remote_safety_reload.md](tasks/t388_backup_remote_safety_reload.md) |
 | 389 | 富邦 ETF 成分股持股明細——抓取與落地基礎設施：交易日 08:50／15:30 查詢今日交易雷達台股 ETF，正規化市場資料落地保存（Requirement 123） | [tasks/t389_fubon_etf_holdings_sync.md](tasks/t389_fubon_etf_holdings_sync.md) |
+| 409 | 盤中走勢比較基準改由 server 提供經驗證的 TWSE MIS 同日 `d/y` session reference，並以單調 Redis cache 保存（Requirement 13） | [tasks/t409_intraday_session_reference_price.md](tasks/t409_intraday_session_reference_price.md) |
 | 390 | 富邦 ETF 成分股持股明細——欄位解析、讀取端切換、清理舊爬蟲：取代既有 MoneyDJ 台股來源（Requirement 123） | [tasks/t390_fubon_etf_holdings_cutover.md](tasks/t390_fubon_etf_holdings_cutover.md) |
 | 393 | 交割銀行餘額查詢排程：每日 08:00／09:30／14:00／22:00 唯讀查詢，覆寫最新快照裡台北富邦銀行證券戶存款金額（Requirement 128） | [tasks/t393_fubon_bank_balance_sync.md](tasks/t393_fubon_bank_balance_sync.md) |
 | 394 | 應收付交割金額查詢排程：每日 08:00／13:45／19:30／22:00 唯讀查詢交割款，目標為核實完整未來在途後更新TRANSIT_TWD快照；目前來源coverage待核實、僅放行安全預檢，財務同步未完成（Requirement 129） | [tasks/t394_fubon_settlement_sync.md](tasks/t394_fubon_settlement_sync.md) |

@@ -498,6 +498,13 @@ assert!(intraday.dig('properties', 'ticks', 'type') == 'array' &&
         intraday.dig('properties', 'ticks', 'items', '$ref') == '#/components/schemas/IntradayTick',
         'IntradayMarketData.ticks 必須是 typed non-null array')
 
+quote_detail = schemas.fetch('PublicQuoteDetail')
+assert!(quote_detail.dig('properties', 'source', 'enum') == ['FUBON_BOOKS', 'YAHOO_TW', nil],
+        'quoteDetail.source 必須只允許 FUBON_BOOKS／YAHOO_TW／null')
+assert!(quote_detail.fetch('description').include?('FUBON_BOOKS') &&
+        quote_detail.fetch('description').include?('YAHOO_TW'),
+        'quoteDetail OpenAPI 必須明載富邦優先、Yahoo 備援')
+
 etf = schemas.fetch('PublicEtfConstituents')
 assert!(etf.dig('properties', 'holdings', 'items', '$ref') == '#/components/schemas/EtfConstituent',
         'etfConstituents.holdings 只能是公開發行人成分股 typed array')

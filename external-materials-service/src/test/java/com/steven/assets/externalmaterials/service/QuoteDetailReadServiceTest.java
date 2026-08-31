@@ -111,6 +111,7 @@ class QuoteDetailReadServiceTest {
 
         assertThat(service.read("AAPL", "美股").supported()).isFalse();
         assertThat(service.read("0000", "台股").supported()).isFalse();
+        assertThat(service.read("2330;DROP", "台股").supported()).isFalse();
         assertThat(service.read(null, "台股").supported()).isFalse();
         verifyNoInteractions(cache, store);
     }

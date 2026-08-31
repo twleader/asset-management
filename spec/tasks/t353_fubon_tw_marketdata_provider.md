@@ -6,7 +6,7 @@
 
 ## 背景
 
-現行 `external-materials-service` 的台股 `PricePoller` 每 2 分鐘抓持股與觀察清單代號，透過 TWSE MIS 網頁來源取得價格，再由唯一 `PriceCacheWriter` 寫 `price:台股:{code}`、index set、24 小時 TTL與 `price-update`。公開 `/api/quotes`、`/api/quotes/one` 已有精確 19 欄：
+本 Task 353 完成時，`external-materials-service` 的台股 `PricePoller` 每 2 分鐘抓持股與觀察清單代號，透過 TWSE MIS 網頁來源取得價格，再由唯一 `PriceCacheWriter` 寫 `price:台股:{code}`、index set、24 小時 TTL與 `price-update`。**現行覆寫：**Requirement 106／Task 370 已將已知開盤台股更新為每 10 秒依富邦→MIS→Yahoo；Task 372 在此基礎上另處理最佳五檔的獨立 canonical snapshot。公開 `/api/quotes`、`/api/quotes/one` 已有精確 19 欄：
 `stockCode,market,price,previousClose,priceChange,changePercent,buyPrice,sellPrice,openPrice,highPrice,lowPrice,volume,stockName,source,tradingDate,updatedAt,closed,quoteStatus,premiumDiscountPct`。最後一欄由獨立 ETF NAV cache唯讀join，不能由Fubon重算。
 
 富邦官方 `intraday/quote/{symbol}` raw payload 回 `previousClose/openPrice/highPrice/lowPrice/closePrice`、bids/asks、`total.tradeVolume`、`lastTrade.time`、`isTrial`、`lastUpdated`；`open/high/low`不是本API的合法raw aliases。官方範例的時間是16位microsecond epoch。`closePrice`/`lastTrade`代表實際成交，`lastPrice`/lastTrial包含試撮。TSE/OTC snapshot雖可兩call取全市場，卻沒有bid/ask/previousClose且範例未證明trial flag，會讓現有19欄退化；SDK的`query_symbol_snapshot`官方另明示不即時。現況約35 codes、每2分鐘，逐檔仍遠低於官方intraday 300 requests/min。provider dispatcher 對正常四入口每輪先限 100 codes，Fubon adapter 同樣有 100 codes hard cap與240/min operational budget；Task 350 `PriceFetchClient.fetchTwBatch` 的 320 只是 disabled existing provider 直接呼叫時的防禦性 hard cap。

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Pure Redis-candidate plus PostgreSQL-revision reader for a canonical Taiwan best-five snapshot.
@@ -14,6 +15,7 @@ import java.util.Optional;
 public class QuoteDetailReadService {
 
     private static final String UNAVAILABLE = "暫時無法取得行情五檔";
+    private static final Pattern STOCK_CODE = Pattern.compile("^[0-9A-Z]{2,10}$");
 
     private final QuoteDetailCache cache;
     private final IntradayOrderBookSnapshotStore store;
@@ -24,7 +26,8 @@ public class QuoteDetailReadService {
     }
 
     public TwQuoteDetailFetchClient.QuoteDetailResult read(String code, String market) {
-        if (!"台股".equals(market) || code == null || "0000".equals(code)) {
+        if (!"台股".equals(market) || code == null || !STOCK_CODE.matcher(code).matches()
+                || "0000".equals(code)) {
             return unavailable(code, market, false, "此市場不支援行情五檔");
         }
         Optional<QuoteDetailCache.CachedSnapshot> cached = cache.find(code, market);

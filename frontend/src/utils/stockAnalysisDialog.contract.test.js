@@ -27,6 +27,11 @@ test('quote-detail contract reads server totals directly, is once-per-open, and 
   assert.match(dialog, /quoteRequestToken/)
   assert.match(dialog, /props\.stock\?\.stockCode === stockCode/)
   assert.match(dialog, /Number\.isNaN\(date\.getTime\(\)\)/)
+  assert.match(dialog, /\{\{ quoteSourceLabel \}\} · \{\{ quoteSourceTime \}\}/)
+  assert.match(dialog, /quoteDetail\.value\?\.source === 'FUBON_BOOKS' \? '富邦證券'/)
+  assert.match(dialog, /quoteDetail\.value\?\.source === 'YAHOO_TW' \? 'Yahoo 股市'/)
+  assert.match(dialog, /: '行情來源不明'/)
+  assert.doesNotMatch(dialog, /<span>Yahoo 股市 · \{\{ quoteSourceTime \}\}<\/span>/)
   assert.match(dialog, /\.volume>span\{position:relative;z-index:1\}/)
   assert.match(dialog, /<span class="volume"><i[^>]*><\/i><span>\{\{ fmtLots\(row\.bidVolumeLots\) \}\}<\/span><\/span>/)
   assert.match(dialog, /\$\{Math\.abs\(Number\(q\.changePercent\)\)\.toFixed\(2\)\}%/)
@@ -72,10 +77,16 @@ test('K branches use only BFF daily or weekly frames with frame-local close stat
   assert.match(dialog, /if \(value === 0\) chartMode\.value = 'line'/)
 })
 
-test('line and intraday implementations intentionally retain their own last-close and axis behavior', () => {
-  // These are explicit allowances: they must not be mistaken for K-frame violations above.
+test('line retains its own close state while intraday consumes the server session object', () => {
+  // The line mode still owns its historical display close; Task 409 deliberately removes the
+  // old intraday history scan and requires the verified server tuple instead.
   assert.match(dialog, /lastNonNull\(chartPrices\.value\)/)
-  assert.match(dialog, /let previousClose = null/)
+  assert.match(dialog, /normalizeIntradaySession\(data\)/)
+  assert.match(dialog, /comparisonLabel\(session\.comparisonKind\)/)
+  assert.match(dialog, /comparisonPrice: session\.comparisonPrice/)
+  assert.match(dialog, /session\.comparisonPrice == null\s*\|\| session\.comparisonKind === 'UNAVAILABLE'\s*\|\| !session\.comparisonSource\s*\|\| session\.lastPrice == null\s*\|\| session\.change == null\s*\|\| session\.changePercent == null/)
+  assert.doesNotMatch(dialog, /let previousClose = null/)
+  assert.doesNotMatch(dialog, /prices\[i\] != null\) \{\s*previousClose/)
   assert.match(chartSection, /const vals = prices\.filter\(v => v != null\)/)
 })
 

@@ -14,8 +14,9 @@ import java.time.LocalDate;
  * Requirement 108／Task 372 的精確、純讀分時 bridge。
  *
  * <p>此 controller 刻意不併入 {@link InternalPriceController}：既有 controller 的
- * {@code /internal/intraday-ticks} 具有 cold-start／refresh 語意，而本 path 只能讀指定
- * Redis bucket。它只在 asset-net 供 business-services 代理，沒有 host port 或 gateway route。</p>
+ * {@code /internal/intraday-ticks} 是會選 bucket、且僅能對 qualified TWSE MIS reference
+ * evidence 做 bounded self-heal 的 non-public session path；本 path 只能讀指定 Redis bucket。
+ * 它只在 asset-net 供 business-services 代理，沒有 host port 或 gateway route。</p>
  */
 @RestController
 @RequestMapping("/internal/intraday-ticks-readonly")

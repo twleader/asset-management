@@ -32,6 +32,10 @@ public interface StockPriceHistoryRepository extends JpaRepository<StockPriceHis
     @Query("SELECT h FROM StockPriceHistory h WHERE h.stockCode = ?1 AND h.market = ?2 AND h.tradingDate <= ?3 ORDER BY h.tradingDate DESC LIMIT 1")
     Optional<StockPriceHistory> findClosestPrice(String stockCode, String market, LocalDate date);
 
+    /** 指定 session 前嚴格最近一個原始收盤；不得取同日。 */
+    @Query("SELECT h FROM StockPriceHistory h WHERE h.stockCode = ?1 AND h.market = ?2 AND h.tradingDate < ?3 ORDER BY h.tradingDate DESC LIMIT 1")
+    Optional<StockPriceHistory> findPreviousPriceBefore(String stockCode, String market, LocalDate date);
+
     /** 取最近 N 筆收盤價（降序），用於計算 MA / KD */
     @Query("SELECT h FROM StockPriceHistory h WHERE h.stockCode = ?1 AND h.market = ?2 ORDER BY h.tradingDate DESC LIMIT ?3")
     List<StockPriceHistory> findRecentN(String stockCode, String market, int n);

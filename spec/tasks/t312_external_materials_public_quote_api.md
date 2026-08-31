@@ -8,7 +8,7 @@
 
 ## 背景
 
-`external-materials-service` 盤中每 2 分鐘（`PricePoller` 的三段獨立 `@Scheduled` cron，台股 09:00–13:30、美股 09:30–16:00 ET、英股 08:00–16:00 LON）輪詢一次外部行情，寫入 Redis（`PriceCacheWriter`，key schema `price:{market}:{code}` JSON、`price:index:{market}` SET）。這份資料目前只能透過兩條路徑取得：(a) 容器內部 `business-services` 經 docker network 呼叫既有 `/internal/*` 端點或直讀 Redis；(b) 使用者登入前端網頁。**docker-compose.yml 從未替 `external-materials-service` 開過 host port**（現行 `external-materials-service:` 服務區塊完全沒有 `ports:` 欄位），使用者無法在 host（Docker 外）用 `curl` 之類工具直接查詢。
+本 Task 312 完成時，`external-materials-service` 盤中每 2 分鐘（`PricePoller` 的三段獨立 `@Scheduled` cron，台股 09:00–13:30、美股 09:30–16:00 ET、英股 08:00–16:00 LON）輪詢一次外部行情，寫入 Redis（`PriceCacheWriter`，key schema `price:{market}:{code}` JSON、`price:index:{market}` SET）。**現行覆寫：**Requirement 106／Task 370 已將已知開盤台股改為每 10 秒依富邦→MIS→Yahoo；美股與英股仍為每 2 分鐘。這份資料目前只能透過兩條路徑取得：(a) 容器內部 `business-services` 經 docker network 呼叫既有 `/internal/*` 端點或直讀 Redis；(b) 使用者登入前端網頁。**docker-compose.yml 從未替 `external-materials-service` 開過 host port**（現行 `external-materials-service:` 服務區塊完全沒有 `ports:` 欄位），使用者無法在 host（Docker 外）用 `curl` 之類工具直接查詢。
 
 使用者明確要求新增一支 API，讓 Docker 外可以取得這個微服務抓到的最新報價——用途是不進容器、不透過前端登入即可確認抓價是否正常運作或臨時查某檔股票的快取價格（維運/監看用途）。
 

@@ -163,6 +163,25 @@ class PublicQuoteMarketDataServiceTest {
     }
 
     @Test
+    void taiexQuoteDetailIsTypedUnsupportedWithoutCallingQuoteDetailEndpoint() {
+        AtomicInteger quoteDetailCalls = new AtomicInteger();
+        PublicQuoteMarketDataService service = service(
+                request -> ok(rawQuote("0000", "台股", "2026-08-24")),
+                request -> {
+                    if (request.url().getPath().endsWith("/quote-detail")) {
+                        quoteDetailCalls.incrementAndGet();
+                    }
+                    return marketResponse(request);
+                });
+
+        DetailedLatestQuote quote = service.one("0000", "台股", "2026-08-01", "2026-08-24").block();
+
+        assertThat(quote.marketData().quoteDetail().supported()).isFalse();
+        assertThat(quote.marketData().quoteDetail().available()).isFalse();
+        assertThat(quoteDetailCalls).hasValue(0);
+    }
+
+    @Test
     void listPreservesRawOrderAndAnEmptyRawListStaysAnEmptyArray() {
         PublicQuoteMarketDataService ordered = service(
                 request -> ok("[" + rawQuote("0050", "台股", "2026-08-24") + ","

@@ -225,7 +225,8 @@ cd frontend
 
 ### 5.2 Live 行情走 Redis + SSE
 
-- **Cache：** `price:{market}:{code}`（JSON，TTL 24h — 確保「今日撈到過真實 z 後就持續活著直到被覆寫」），由 `external-materials-service` 每 2 分鐘 cron 寫入。
+- **Cache：** generic `price:{market}:{code}`（JSON，TTL 24h — 確保「今日撈到過真實 z 後就持續活著直到被覆寫」）由 `external-materials-service` 寫入：台股 known-open 每 10 秒為 Fubon → TWSE MIS → Yahoo，美／英股維持每 2 分鐘。五檔另用 `price:quote-detail:{market}:{code}`（TTL 24h）且只由 canonical order-book row 寫入，不進 generic index／SSE。
+- **來源優先語意：** 全域順序 `FUBON > TWSE > Yahoo > other` 僅比較同一個完整且可驗證的 fact。generic 台股 LIVE 在富邦 SDK 240/min、每十秒最多 40 code 的 bounded-fair cursor 下，未獲本輪 Fubon admission 的 code 視為 Fubon 本輪暫不可用，才依 `MIS → Yahoo` fallback；已選 candidate 的固定順序仍為 Fubon → MIS → Yahoo。五檔 MIS 沒有完整同時間 snapshot，只允許完整單一來源 `FUBON_BOOKS → YAHOO_TW`、絕不混拼。Task 409 session reference 是 qualified-fact exception：只有 exact TWSE MIS 同日 `d/y`，Fubon `previousClose`／Yahoo 不是此 fact 的候選。
 - **Pub/Sub：** Redis channel `price-update`；business-services 透過 `RedisMessageListenerContainer` 訂閱 → fan-out 到 `Sinks.Many<String>` → SSE endpoint `/api/market-data/prices/stream`。
 - **前端：** `EventSource('/api/market-data/prices/stream')`，初始 GET 一次後改走 SSE，不再 polling。
 - **Fallback：** Redis miss → `stock_price_history` 最近一筆收盤。
@@ -234,8 +235,8 @@ cd frontend
 
 | Cron | 時區 | 內容 | 所在 service |
 |------|------|------|--------------|
-| 每 2 分鐘（TW 09:00–13:30 週一～五） | Asia/Taipei | 台股 live → Redis | external-materials |
-| `0 1/2 9-13 * * MON-FRI`（實際守門 09:01–13:29） | Asia/Taipei | 台股 ETF 官方 iNAV／折溢價 → `price:etfnav:*`（與股價錯開，仍為每 2 分鐘） | external-materials |
+| 每 10 秒（TW 09:00–13:30 週一～五） | Asia/Taipei | 台股 live Fubon → TWSE MIS → Yahoo → generic Redis；五檔同輪 FUBON_BOOKS → YAHOO_TW canonical snapshot | external-materials |
+| `0 1/2 9-13 * * MON-FRI`（實際守門 09:01–13:29） | Asia/Taipei | 台股 ETF 官方 iNAV／折溢價 → `price:etfnav:*`（獨立每 2 分鐘，不再與十秒股價 producer 做奇偶分鐘錯開） | external-materials |
 | 每 2 分鐘（US 09:30–16:00 週一～五） | America/New_York | 美股 live → Redis（含 EST/EDT 切換） | external-materials |
 | 13:35 收盤後 | Asia/Taipei | 台股收盤寫 `stock_price_history` | external-materials |
 | 16:05 收盤後 | America/New_York | 美股收盤寫 `stock_price_history` | external-materials |

@@ -63,13 +63,13 @@
             </div>
           </div>
           <div v-if="isIntraday && intradayQuote" class="intraday-quote">
-            <span class="iq-label">昨收</span>
-            <span class="iq-val">{{ fmtQuote(intradayQuote.previousClose) }}</span>
+            <span class="iq-label">{{ intradayQuote.label }}</span>
+            <span class="iq-val">{{ fmtQuote(intradayQuote.comparisonPrice) }}</span>
             <template v-if="intradayQuote.change != null">
               <span class="iq-label">今日漲跌</span>
               <span class="iq-val" :style="{ color: quoteColor(intradayQuote.change) }">
                 {{ intradayQuote.change > 0 ? '▲' : intradayQuote.change < 0 ? '▼' : '' }}{{ fmtQuote(Math.abs(intradayQuote.change)) }}
-                （{{ intradayQuote.changePct > 0 ? '+' : intradayQuote.changePct < 0 ? '-' : '' }}{{ Math.abs(intradayQuote.changePct).toFixed(2) }}%）
+                （{{ intradayQuote.changePercent > 0 ? '+' : intradayQuote.changePercent < 0 ? '-' : '' }}{{ Math.abs(intradayQuote.changePercent).toFixed(2) }}%）
               </span>
             </template>
           </div>
@@ -90,7 +90,7 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="stock?.market === '台股' && stock?.stockCode !== '0000'" label="行情五檔" name="quote-detail">
-        <div class="quote-detail-head"><span>Yahoo 股市 · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading" @click="refreshQuoteDetail">重新整理</el-button></div>
+        <div class="quote-detail-head"><span>{{ quoteSourceLabel }} · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading" @click="refreshQuoteDetail">重新整理</el-button></div>
         <div v-if="quoteDetailLoading" class="analysis-loading"><el-icon class="is-loading" size="36"><Loading /></el-icon><div>載入行情五檔中…</div></div>
         <div v-else-if="!quoteDetail?.available" class="analysis-empty">{{ quoteDetail?.message || '暫時無法取得行情五檔' }}<br><el-button size="small" style="margin-top:12px" @click="refreshQuoteDetail">重新整理</el-button></div>
         <template v-else>
@@ -220,6 +220,7 @@ import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
 import { bffApi } from '@/api/index.js'
 import { escapeHtml } from '@/utils/escapeHtml'
+import { comparisonLabel, intradayLatestDate, normalizeIntradaySession } from '@/utils/intradaySession.js'
 
 // 注意：tree-shaking 版 echarts 必須顯式註冊元件才生效。MarkPointComponent 漏註冊時，
 // 收盤線的 markPoint（最高/最低標記）會被 ECharts 靜默忽略、完全不畫（markLine 有註冊故 KD 80/20 正常）。
@@ -252,6 +253,7 @@ const activeFrame = computed(() => chartMode.value === 'daily-candle' ? (series.
 // K 線的收盤與漲跌基準由 BFF 的 frame-local 欄位定義；不可自行從 closes 回推。
 const activeClose = computed(() => isCandle.value ? activeFrame.value.currentClose : lastNonNull(chartPrices.value))
 const intradayTicks = ref([])
+const intradaySession = ref(null)
 const intradayLoading = ref(false)
 const dividendHistory = ref({ rows: [] })
 const dividendsLoading = ref(false)
@@ -285,43 +287,19 @@ function onZoom() {
 }
 
 const latestTradingDate = computed(() => {
-  if (isIntraday.value && intradayTicks.value.length) {
-    const t = intradayTicks.value[intradayTicks.value.length - 1]?.time
-    return t ? String(t).substring(0, 10) : null
-  }
+  if (isIntraday.value) return intradayLatestDate(intradaySession.value, chartDates.value)
   const d = isCandle.value ? (activeFrame.value.dates ?? []) : chartDates.value
   return d.length ? d[d.length - 1] : null
 })
 
-// 「當日」報價摘要：昨收、現價、今日漲跌（僅當日模式且已有分時 tick 時回值）。
-// 昨收＝該分時交易日「前一交易日」的日線收盤，取自已載入的 history（＝stock_price_history 收盤，
-// 與 Dashboard／管理資產「當日漲跌」同一 business API、同一「vs 前一交易日原始收盤」口徑；
-// 刻意不採 Redis LivePrice.previousClose，因 TWSE `y` 於除息日為除息參考價、與全站慣例不一致）。
-// 現價＝最後一筆非 null 分時成交（＝ legend「股價」的 lastNonNull）。今日漲跌由畫面現價自算，
-// 確保「股價 − 昨收 = 今日漲跌」三值一致（不另抓 live，免與現價對不上）。
+// 當日摘要完整採 business session；前端不反查日線也不自行相減。
 const intradayQuote = computed(() => {
-  if (!isIntraday.value) return null
-  const ticks = intradayTicks.value
-  if (!ticks.length) return null
-  let price = null
-  for (let i = ticks.length - 1; i >= 0; i--) {
-    if (ticks[i]?.price != null) { price = Number(ticks[i].price); break }
-  }
-  if (price == null) return null
-  const sessionDate = String(ticks[0]?.time || '').substring(0, 10)  // 分時序列所屬交易日（YYYY-MM-DD）
-  // 昨收：日線序列（升冪）中 tradingDate 嚴格早於當日交易日的最後一筆收盤。
-  // 聯集對齊後尾格可能是「有指標、無股價」的 null（0000 大盤盤中必然如此），故須跳過 null。
-  let previousClose = null
-  const dates = chartDates.value
-  const prices = chartPrices.value
-  for (let i = dates.length - 1; i >= 0; i--) {
-    if (dates[i] && dates[i] < sessionDate && prices[i] != null) {
-      previousClose = Number(prices[i]); break
-    }
-  }
-  if (!(previousClose > 0)) return { price, previousClose: null, change: null, changePct: null }
-  const change = price - previousClose
-  return { price, previousClose, change, changePct: (change / previousClose) * 100 }
+  const session = intradaySession.value
+  if (!isIntraday.value || !session?.ticks?.length || session.comparisonPrice == null
+      || session.comparisonKind === 'UNAVAILABLE' || !session.comparisonSource
+      || session.lastPrice == null || session.change == null || session.changePercent == null) return null
+  return { label: comparisonLabel(session.comparisonKind), comparisonPrice: session.comparisonPrice,
+    lastPrice: session.lastPrice, change: session.change, changePercent: session.changePercent }
 })
 // 漲跌配色（台股慣例：漲紅、跌綠、平灰），與 markPoint／Dashboard 同義同色
 const quoteColor = v => (v == null ? '#94a3b8' : v > 0 ? '#dc2626' : v < 0 ? '#16a34a' : '#94a3b8')
@@ -397,9 +375,11 @@ async function fetchIntraday() {
   if (!props.stock) return
   intradayLoading.value = true
   intradayTicks.value = []
+  intradaySession.value = null
   try {
     const data = await bffApi.stockAnalysis.getIntradayTicks(props.stock.stockCode, props.stock.market)
-    intradayTicks.value = Array.isArray(data) ? data : []
+    intradaySession.value = normalizeIntradaySession(data)
+    intradayTicks.value = intradaySession.value.ticks
   } catch (e) {
     console.warn('無法取得當日分時資料:', e)
   } finally {
@@ -420,6 +400,7 @@ function onOpen() {
   months.value = 12
   chartMode.value = 'line'
   intradayTicks.value = []
+  intradaySession.value = null
   zoomPct.value = null
   dividendHistory.value = { rows: [] }
   quoteDetail.value = null
@@ -483,6 +464,7 @@ async function fetchQuoteDetail() {
 }
 const quoteStatusText = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? '盤中' : quoteDetail.value?.marketStatus === 'CLOSED' ? '收盤' : '狀態未知')
 const quoteStatusType = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? 'danger' : quoteDetail.value?.marketStatus === 'CLOSED' ? 'info' : 'warning')
+const quoteSourceLabel = computed(() => quoteDetail.value?.source === 'FUBON_BOOKS' ? '富邦證券' : quoteDetail.value?.source === 'YAHOO_TW' ? 'Yahoo 股市' : '行情來源不明')
 const quoteSourceTime = computed(() => { const v = quoteDetail.value?.sourceTime; const date = v ? new Date(v) : null; return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('zh-TW',{ timeZone:'Asia/Taipei',dateStyle:'short',timeStyle:'medium' }).format(date) : '時間不明' })
 const fmtLots = v => v == null ? '—' : Number(v).toLocaleString('zh-TW')
 const fmtPct = v => v == null ? '—' : `${Number(v).toFixed(2)}%`
