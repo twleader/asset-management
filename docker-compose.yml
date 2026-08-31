@@ -9,7 +9,7 @@ services:
     # 實測資料目錄的 postgresql.conf 已被 initdb 寫死 `timezone = UTC`（pg_settings.source = configuration file），
     # 環境變數贏不過它。影響範圍是 SQL NOW()／now() 與 timestamptz 的顯示表示法；
     # naive timestamp 欄位的值由應用端寫入，不受此設定影響。
-    command: ["postgres", "-c", "timezone=Asia/Taipei", "-c", "log_timezone=Asia/Taipei"]
+    command: ["postgres", "-c", "timezone=Asia/Taipei", "-c", "log_timezone=Asia/Taipei", "-c", "max_connections=50"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
