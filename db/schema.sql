@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源隔離 schema candidate（以 asset-postgres schema-only 基準套用 v1.122），2026-08-31
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-01
 -- 產生當下表數：97 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
@@ -234,7 +234,7 @@ CREATE TABLE public.asset_transaction (
     transaction_tax numeric(15,2),
     source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
     broker_filled_no character varying(50),
-    CONSTRAINT asset_transaction_source_check CHECK (((source)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('FUBON_SYNC'::character varying)::text])))
+    CONSTRAINT asset_transaction_source_check CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 
 
@@ -2444,8 +2444,8 @@ CREATE TABLE public.stock_intraday_order_book (
     CONSTRAINT ck_stock_intraday_order_book_market CHECK (((market)::text = '台股'::text)),
     CONSTRAINT ck_stock_intraday_order_book_optional_price CHECK ((((open_price IS NULL) OR (open_price > (0)::numeric)) AND ((high_price IS NULL) OR (high_price > (0)::numeric)) AND ((low_price IS NULL) OR (low_price > (0)::numeric)) AND ((average_price IS NULL) OR (average_price >= (0)::numeric)) AND ((turnover_yi IS NULL) OR (turnover_yi >= (0)::numeric)))),
     CONSTRAINT ck_stock_intraday_order_book_required_price CHECK (((actual_price > (0)::numeric) AND (previous_close > (0)::numeric))),
-    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = ANY (ARRAY[('FUBON_BOOKS'::character varying)::text, ('YAHOO_TW'::character varying)::text]))),
-    CONSTRAINT ck_stock_intraday_order_book_status CHECK (((market_status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('CLOSED'::character varying)::text, ('UNKNOWN'::character varying)::text])))
+    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = ANY ((ARRAY['FUBON_BOOKS'::character varying, 'YAHOO_TW'::character varying])::text[]))),
+    CONSTRAINT ck_stock_intraday_order_book_status CHECK (((market_status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLOSED'::character varying, 'UNKNOWN'::character varying])::text[])))
 );
 
 
@@ -2694,7 +2694,7 @@ CREATE TABLE public.trading_calendar_export_schedule (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
-    CONSTRAINT ck_tc_export_schedule_format CHECK (((format)::text = ANY (ARRAY[('json'::character varying)::text, ('excel'::character varying)::text]))),
+    CONSTRAINT ck_tc_export_schedule_format CHECK (((format)::text = ANY ((ARRAY['json'::character varying, 'excel'::character varying])::text[]))),
     CONSTRAINT ck_tc_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_tc_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
 );
@@ -2866,7 +2866,8 @@ CREATE TABLE public.trading_radar_notification_setting (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     rule_version character varying(30),
-    action_policy_version character varying(40)
+    action_policy_version character varying(40),
+    technical_source_version character varying(40)
 );
 
 
@@ -2894,7 +2895,7 @@ CREATE TABLE public.trading_radar_notification_state (
     state_type character varying(30) NOT NULL,
     state_code character varying(50) NOT NULL,
     last_notified_at timestamp with time zone,
-    CONSTRAINT ck_trn_state_type CHECK (((state_type)::text = ANY (ARRAY[('ACTION'::character varying)::text, ('COUNTER_TREND'::character varying)::text])))
+    CONSTRAINT ck_trn_state_type CHECK (((state_type)::text = ANY ((ARRAY['ACTION'::character varying, 'COUNTER_TREND'::character varying])::text[])))
 );
 
 
@@ -2955,7 +2956,7 @@ CREATE TABLE public.treasury_yield_batch (
     complete boolean NOT NULL,
     content_hash character varying(64) NOT NULL,
     CONSTRAINT ck_treasury_yield_batch_hash_length CHECK ((char_length((content_hash)::text) = 64)),
-    CONSTRAINT ck_treasury_yield_batch_provider CHECK (((provider)::text = ANY (ARRAY[('US_TREASURY'::character varying)::text, ('YAHOO_PROXY'::character varying)::text])))
+    CONSTRAINT ck_treasury_yield_batch_provider CHECK (((provider)::text = ANY ((ARRAY['US_TREASURY'::character varying, 'YAHOO_PROXY'::character varying])::text[])))
 );
 
 
@@ -2982,7 +2983,7 @@ CREATE TABLE public.treasury_yield_daily (
     tenor character varying(8) NOT NULL,
     yield_percent numeric(10,4) NOT NULL,
     source_url text NOT NULL,
-    CONSTRAINT ck_treasury_yield_daily_tenor CHECK (((tenor)::text = ANY (ARRAY[('M3'::character varying)::text, ('Y5'::character varying)::text, ('Y10'::character varying)::text, ('Y30'::character varying)::text]))),
+    CONSTRAINT ck_treasury_yield_daily_tenor CHECK (((tenor)::text = ANY ((ARRAY['M3'::character varying, 'Y5'::character varying, 'Y10'::character varying, 'Y30'::character varying])::text[]))),
     CONSTRAINT ck_treasury_yield_daily_value CHECK (((yield_percent >= (0)::numeric) AND (yield_percent <= (100)::numeric)))
 );
 
@@ -3045,7 +3046,7 @@ CREATE TABLE public.twse_institutional_daily (
     status character varying(20) NOT NULL,
     error_reason text,
     CONSTRAINT ck_twse_institutional_available_values CHECK ((((status)::text <> 'AVAILABLE'::text) OR ((trading_date IS NOT NULL) AND (foreign_net IS NOT NULL) AND (trust_net IS NOT NULL) AND (dealer_net IS NOT NULL) AND (total_net IS NOT NULL) AND (source_url IS NOT NULL)))),
-    CONSTRAINT ck_twse_institutional_status CHECK (((status)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('UNAVAILABLE'::character varying)::text])))
+    CONSTRAINT ck_twse_institutional_status CHECK (((status)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'UNAVAILABLE'::character varying])::text[])))
 );
 
 
