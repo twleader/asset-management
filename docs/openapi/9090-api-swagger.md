@@ -1573,6 +1573,50 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `swingCandidateAction` | 是 | `string | null` | 是 |  | 波段時間框架建議採用的候選動作。 |
 | `dailyCandle` | 是 | `DailyCandle | null` | 是 |  | 交易雷達採用的最近一日 OHLC K 棒。 |
 | `weeklyIndicators` | 是 | `WeeklyIndicators | null` | 是 |  | 交易雷達採用的週線技術指標。 |
+| `technicalResolution` | 是 | `TechnicalResolution | null` | 是 |  | Task408 技術指標來源決策。null 僅表示舊快照的 LEGACY_LOCAL_V0，不能當成現在的富邦資料或零值。 |
+
+### `TechnicalResolution`
+
+固定 17-profile 技術 bundle 的來源、100 秒 freshness、context binding 與欄位級採用稽核。PostgreSQL 是 FUBON_SDK 歷史權威；Redis 僅為 bounded 即時 overlay。LOCAL_CALCULATED 只會覆寫 Redis，不會覆寫富邦 PostgreSQL facts/members。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V18\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
+| `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
+| `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |
+| `captureId` | 是 | `string | null` | 是 |  | 富邦 complete capture 或 local bundle generation 的 UUID。 |
+| `oldestObservedAt` | 是 | `string | null (date-time)` | 是 |  | bundle 17 profiles 中最早的 immutable observedAt；100 秒 freshness 的唯一起點。 |
+| `freshUntil` | 是 | `string | null (date-time)` | 是 |  | oldestObservedAt 加 100 秒的絕對 deadline；DB re-project 不得延長它。 |
+| `ageSeconds` | 是 | `integer | null (int64)` | 是 |  | 回應生成時相對 oldestObservedAt 的秒數；99/100 為可讀邊界，101 必回 local fallback。 |
+| `profiles` | 是 | `array of TechnicalProfileResolution` | 否 | items: TechnicalProfileResolution<br>items 說明: 一個固定 timeframe/profile 的候選結果。 | manifest-order fixed profiles 的候選與是否可被 V18 採用。完整正常 bundle 為 17 項。 |
+| `fieldProvenance` | 是 | `array of TechnicalFieldProvenance` | 否 | items: TechnicalFieldProvenance<br>items 說明: 一個技術欄位的來源稽核。 | 每個 direct overlay、local derivation 或 detail-only 值的來源與未採用原因。 |
+
+### `TechnicalProfileResolution`
+
+一個 immutable profile 的最大 valid source-date candidate，沒有 history array；完整歷史由 PostgreSQL fubon technical fact/member 保留。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `profileId` | 是 | `string | null` | 是 |  | immutable 17-profile manifest ID，例如 sma_d_20、rsi_w_10、kdj_d_9_3_3。 |
+| `status` | 是 | `string | null` | 是 |  | provider candidate 的 AVAILABLE／NO_DATA／SCHEMA_INVALID／UNAVAILABLE 狀態。 |
+| `reason` | 是 | `string | null` | 是 |  | 非 AVAILABLE 的 strict failure reason，或 V18 未採用的原因。 |
+| `parameters` | 是 | `object | null` | 是 |  | immutable provider parameters。每個 profile 的精確 key/value 在 strict resolver 驗證。 |
+| `payload` | 是 | `object | null` | 是 |  | candidate 的 strict canonical decimal-string payload；非 AVAILABLE 可為 null。 |
+| `sourceDate` | 是 | `string | null (date)` | 是 |  | candidate 的最大 valid source date；weekly profile 為最近完成週末交易日。 |
+| `observedAt` | 是 | `string | null (date-time)` | 是 |  | 該 profile SDK response 返回時固定的 immutable observedAt。 |
+| `eligibility` | 是 | `string | null` | 是 |  | APPLIED、DETAIL_ONLY、AVAILABLE_NOT_APPLIED 或未可用原因；前端只呈現，絕不自行補算。 |
+
+### `TechnicalFieldProvenance`
+
+一個送入或揭露於交易雷達的技術欄位來源。DETAIL_ONLY 永遠不改 V18 score；LOCAL 也可能是 DERIVED_FROM_FUBON 的局部衍生值。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `field` | 是 | `string | null` | 是 |  | DTO／detail 內的確切欄位路徑。 |
+| `origin` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL`, `DERIVED_FROM_FUBON`, `DETAIL_ONLY`, `AVAILABLE_NOT_APPLIED` | 欄位實際來源或可用但未採用的狀態：FUBON_SDK 是已套用的富邦 profile，LOCAL 是本地計算，DERIVED_FROM_FUBON 是從富邦值衍生，DETAIL_ONLY 僅供明細，AVAILABLE_NOT_APPLIED 是可用但被 basis/date gate 擋下。 |
+| `profileId` | 是 | `string | null` | 是 |  | 若有對應富邦 profile，為其 immutable profile ID；純 local 值可為 null。 |
+| `reason` | 是 | `string | null` | 是 |  | direct overlay、detail-only 或 fail-closed 未採用的具體理由。 |
 
 ### `DailyCandle`
 
@@ -1698,6 +1742,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `premiumSource` | 是 | `string | null` | 是 |  | ETF 溢折價的公開來源。 |
 | `premiumStale` | 是 | `boolean` | 否 |  | ETF 溢折價是否超過新鮮度門檻。 |
 | `assetProfile` | 是 | `AssetProfile | null` | 是 |  | 標的分類、商品型態與幣別辨識上下文。 |
+| `settingsClassification` | 是 | `SettingsClassification | null` | 是 |  | 資產類別設定頁等價的有效類別／細分與 RULE／OVERRIDE 來源；不等同 strict AssetProfile。台股 0000 或舊 snapshot 為 null。 |
 | `actionGateReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：三軌動作閘門／風險稽核彙總的一項不利診斷；不是任一軌 support source（支持訊號來源）或允許動作依據。 | 三軌動作閘門／風險稽核彙總（medium→short→swing 的 stable-distinct union）；不是任一軌 support source（支持訊號來源）或允許動作依據。 |
 | `evidenceGroups` | 是 | `object` | 否 |  | 按名稱索引的證據群組。 |
 | `marketFeatures` | 是 | `object` | 否 |  | 按市場代碼索引的大盤特徵證據。 |
@@ -1756,6 +1801,22 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `currencyDataComplete` | 是 | `boolean` | 否 |  | 所有必要幣別辨識是否已完成。 |
 | `profileComplete` | 是 | `boolean` | 否 |  | 標的分類與幣別設定是否已完整辨識。 |
 | `missingReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：多個必要內容無法取得的原因清單。 | 多個必要內容無法取得的原因清單。 |
+
+### `SettingsClassification`
+
+資產類別設定頁的有效分類投影。它刻意保留最新快照殖利率與 MID fallback 語意，不能被 strict AssetProfile 取代。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `effectiveAssetClass` | 是 | `string` | 否 |  | 與資產類別設定頁相同規則算出的有效資產類別。 |
+| `assetClassSource` | 是 | `string` | 否 | enum: `RULE`, `OVERRIDE` | 有效資產類別的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫。 |
+| `effectiveStockStyle` | 是 | `string | null` | 是 |  | effectiveAssetClass=STOCK 時，與設定頁相同的有效股票風格。 |
+| `stockStyleSource` | 是 | `string | null` | 是 | enum: `RULE`, `OVERRIDE`, null | 有效股票風格的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫，不適用時為 null。 |
+| `effectiveBondTerm` | 是 | `string | null` | 是 |  | effectiveAssetClass=BOND 時，與設定頁相同的有效債券期別。 |
+| `bondTermSource` | 是 | `string | null` | 是 | enum: `RULE`, `OVERRIDE`, null | 有效債券期別的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫，不適用時為 null。 |
+| `assetClassOverride` | 是 | `string | null` | 是 |  | 使用者保存的資產類別覆寫；沒有覆寫時為 null。 |
+| `stockStyleOverride` | 是 | `string | null` | 是 |  | 使用者保存的股票風格覆寫；沒有覆寫時為 null。 |
+| `bondTermOverride` | 是 | `string | null` | 是 |  | 使用者保存的債券期別覆寫；沒有覆寫時為 null。 |
 
 ### `EvidenceGroup`
 

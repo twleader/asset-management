@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
   HOLDING_PERIOD_PROMPT,
@@ -7,6 +8,11 @@ import {
   presentAllHorizonDecisions,
   presentHorizonDecision
 } from './tradingRadarDecisionPresentation.js'
+
+const tradingRadarView = readFileSync(
+  new URL('../views/TradingRadarView.vue', import.meta.url),
+  'utf8'
+)
 
 const completeRow = {
   shortCandidateAction: 'SHORT_CANDIDATE',
@@ -72,4 +78,52 @@ test('完成日 K 文案只採 dailyCandle.asOfDate，與盤中 quote 日期無�
     completedCandleDisclosure({ asOfDate: '2026-08-27' }),
     '止跌與避免追價的完成日 K 資料不足；盤中股價／漲跌僅供展示，不重算訊號。'
   )
+})
+
+test('Task408 detail 呈現 D/W profile、field provenance 與 legacy null，不在 UI 重算技術指標', () => {
+  for (const requiredFragment of [
+    'row.technicalResolution',
+    'technicalProfileGroups(row.technicalResolution)',
+    '日線（D）',
+    '週線（W）',
+    'formatTechnicalMap(profile.parameters)',
+    'formatTechnicalMap(profile.payload)',
+    'profile.sourceDate',
+    'profile.observedAt',
+    'row.technicalResolution.ageSeconds',
+    'row.technicalResolution.captureId',
+    'row.technicalResolution.binding',
+    'technicalEligibilityLabel(profile.eligibility)',
+    'row.technicalResolution.fieldProvenance',
+    'technicalOriginLabel(field.origin)',
+    'LEGACY_LOCAL_V0'
+  ]) {
+    assert.ok(tradingRadarView.includes(requiredFragment), `missing Task408 detail fragment: ${requiredFragment}`)
+  }
+  assert.ok(tradingRadarView.includes('不重新計算任何技術值'))
+  assert.ok(tradingRadarView.includes('不將其視為 0 或最新富邦來源'))
+})
+
+test('Trading Radar detail 將設定頁等價分類與 strict radar profile 分開顯示，且只排除台股 0000', () => {
+  for (const requiredFragment of [
+    "row?.market === '台股' && row?.stockCode === '0000'",
+    '資產類別設定（生效值）',
+    'row.evidence.settingsClassification',
+    'settingsAssetClassLabel(row.evidence.settingsClassification)',
+    'settingsSubdivisionLabel(row.evidence.settingsClassification)',
+    'classificationSourceLabel(row.evidence.settingsClassification.assetClassSource)',
+    'classificationSourceLabel(row.evidence.settingsClassification.stockStyleSource)',
+    'classificationSourceLabel(row.evidence.settingsClassification.bondTermSource)',
+    'settingsClassificationOverrideSummary(row.evidence.settingsClassification)',
+    '嚴格交易雷達資產輪廓',
+    'radarAssetClassLabel(row.evidence.assetProfile)',
+    'radarAssetSubdivisionLabel(row.evidence.assetProfile)',
+    'classificationSourceLabel(row.evidence.assetProfile?.assetClassSource)',
+    'assetProfileOverrideSummary(row.evidence.assetProfile)',
+    '使用者指定覆寫',
+    '不等同資產類別設定頁分類'
+  ]) {
+    assert.ok(tradingRadarView.includes(requiredFragment), `missing classification detail fragment: ${requiredFragment}`)
+  }
+  assert.ok(tradingRadarView.includes('不得依股票名稱、代碼或技術資料自行補推或互相替代'))
 })

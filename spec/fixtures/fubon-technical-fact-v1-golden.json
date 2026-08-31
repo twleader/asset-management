@@ -1,0 +1,20 @@
+{
+  "fixtureVersion": 1,
+  "algorithm": "FUBON_TECHNICAL_FACT_V1",
+  "profileId": "kdj_d_9_3_3",
+  "sourceDate": "2026-08-28",
+  "parameters": {
+    "dPeriod": 3,
+    "kPeriod": 3,
+    "rPeriod": 9,
+    "timeframe": "D"
+  },
+  "payload": {
+    "d": "45.5",
+    "j": "-0.625",
+    "k": "30.125"
+  },
+  "canonicalInputUtf8": "FUBON_TECHNICAL_FACT_V1\nkdj_d_9_3_3\n2026-08-28\n{\"dPeriod\":3,\"kPeriod\":3,\"rPeriod\":9,\"timeframe\":\"D\"}\n{\"d\":\"45.5\",\"j\":\"-0.625\",\"k\":\"30.125\"}",
+  "canonicalInputUtf8Hex": "4655424f4e5f544543484e4943414c5f464143545f56310a6b646a5f645f395f335f330a323032362d30382d32380a7b2264506572696f64223a332c226b506572696f64223a332c2272506572696f64223a392c2274696d656672616d65223a2244227d0a7b2264223a2234352e35222c226a223a222d302e363235222c226b223a2233302e313235227d",
+  "sha256": "aa91dd8328c4889c849740450913f3665ad5d34adea278a88e4c5ea26683bad9"
+}

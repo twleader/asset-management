@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
@@ -99,6 +100,7 @@ class TradingRadarStockWeeklyWiringTest {
     @Mock private CurrentUserContext currentUserContext;
     @Mock private DividendEventEvidenceRepository dividendEventEvidenceRepository;
     @Mock private TreasuryYieldService treasuryYieldService;
+    @Mock private TradingRadarSettingsClassificationResolver settingsClassificationResolver;
 
     /** 台股大盤那一組（{@code computeAll("0000","台股")}）：只要不是 DATA_INCOMPLETE 即可。 */
     private static final TechnicalIndicatorService.FullIndicators TW_MARKET_IND =
@@ -138,6 +140,62 @@ class TradingRadarStockWeeklyWiringTest {
         assertThat(input.weekly().ma10()).as("完成週足夠時週MA10 必須算得出來").isNotNull();
         assertThat(input.weekly().k()).isNotNull();
         assertThat(input.weekly().osc()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Task408：個股組裝 fail-soft 時仍保留設定頁等價分類，不以 strict profile 代替")
+    void incompleteCurrentRowRetainsSettingsEquivalentClassification() {
+        stubBaseline();
+        Stock master = Stock.builder().code(CODE).market(TW).name("台積電").build();
+        when(stockRepo.findByCodeAndMarket(CODE, TW)).thenReturn(Optional.of(master));
+        var settings = new TradingRadarSettingsClassificationResolver.Resolution(
+                AssetClassifier.STOCK, "RULE", AssetClassifier.INCOME, "RULE",
+                null, null, null, null, null);
+        when(settingsClassificationResolver.resolve(master, CODE, TW, "台積電")).thenReturn(settings);
+        when(dividendEventEvidenceRepository.resolve(anyString(), anyString(), any(), anyList()))
+                .thenThrow(new IllegalStateException("forced downstream failure"));
+
+        TradingRadarDto.StockDecision row = newServiceWithSettingsResolver().assembleAt(AFTER_CLOSE).stocks().stream()
+                .filter(candidate -> CODE.equals(candidate.stockCode()))
+                .findFirst().orElseThrow();
+
+        assertThat(row.dataComplete()).isFalse();
+        assertThat(row.evidence()).isNotNull();
+        assertThat(row.evidence().settingsClassification()).isNotNull();
+        assertThat(row.evidence().settingsClassification().effectiveAssetClass()).isEqualTo(AssetClassifier.STOCK);
+        assertThat(row.evidence().settingsClassification().assetClassSource()).isEqualTo("RULE");
+        assertThat(row.evidence().settingsClassification().effectiveStockStyle()).isEqualTo(AssetClassifier.INCOME);
+        assertThat(row.evidence().assetProfile())
+                .as("incomplete row must not fabricate strict profile to stand in for settings classification")
+                .isNull();
+        verify(settingsClassificationResolver).resolve(master, CODE, TW, "台積電");
+    }
+
+    @Test
+    @DisplayName("Task408：僅台股 0000 是大盤；非台股同碼標的仍要出現在雷達並保留設定分類")
+    void nonTaiwanSameCodeZeroRemainsRadarTargetWithSettingsClassification() {
+        String us = "美股";
+        String sameCode = "0000";
+        stubBaseline();
+        Stock master = Stock.builder().code(sameCode).market(us).name("US Same Code").build();
+        when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.<Object[]>of(new Object[]{sameCode, us}));
+        when(stockRepo.findByCodeAndMarket(sameCode, us)).thenReturn(Optional.of(master));
+        var settings = new TradingRadarSettingsClassificationResolver.Resolution(
+                AssetClassifier.STOCK, "RULE", AssetClassifier.GROWTH, "RULE",
+                null, null, null, null, null);
+        when(settingsClassificationResolver.resolve(master, sameCode, us, "US Same Code")).thenReturn(settings);
+        when(dividendEventEvidenceRepository.resolve(anyString(), anyString(), any(), anyList()))
+                .thenThrow(new IllegalStateException("forced downstream failure"));
+
+        TradingRadarDto.StockDecision row = newServiceWithSettingsResolver().assembleAt(AFTER_CLOSE).stocks().stream()
+                .filter(candidate -> sameCode.equals(candidate.stockCode()))
+                .findFirst().orElseThrow();
+
+        assertThat(row.dataComplete()).isFalse();
+        assertThat(row.evidence().settingsClassification()).isNotNull();
+        assertThat(row.evidence().settingsClassification().effectiveAssetClass()).isEqualTo(AssetClassifier.STOCK);
+        assertThat(row.evidence().settingsClassification().effectiveStockStyle()).isEqualTo(AssetClassifier.GROWTH);
+        verify(settingsClassificationResolver).resolve(master, sameCode, us, "US Same Code");
     }
 
     // ── (b) 外部可觀察徵狀：DTO 有值卻同時揭露缺值，兩者不可能同時為真 ──────────────
@@ -310,6 +368,42 @@ class TradingRadarStockWeeklyWiringTest {
                 currentUserContext,
                 dividendEventEvidenceRepository,
                 treasuryYieldService);
+    }
+
+    private TradingRadarService newServiceWithSettingsResolver() {
+        ruleEngine = Mockito.spy(new TradingRadarRuleEngine());
+        DistributionAdjustedPriceService adjustedPriceService = new DistributionAdjustedPriceService();
+        TechnicalIndicatorService seriesIndicatorService = new TechnicalIndicatorService(
+                priceHistoryRepo, priceQueryService, twseRepo, usIndexDailyHistoryRepo);
+        return new TradingRadarService(
+                ruleEngine,
+                marketIndicatorService,
+                adjustedPriceService,
+                new RadarInputAssembler(seriesIndicatorService, adjustedPriceService, ruleEngine),
+                assetClassifier,
+                twseRepo,
+                usIndexDailyHistoryRepo,
+                priceHistoryRepo,
+                dividendHistoryRepo,
+                priceQueryService,
+                taiexDisplayPriceService,
+                snapshotRepo,
+                alertRepo,
+                stockRepo,
+                marketDataService,
+                marketContextService,
+                fundamentalAnalysisService,
+                etfNavHistoryRepo,
+                snapshotStore,
+                currentUserContext,
+                dividendEventEvidenceRepository,
+                treasuryYieldService,
+                null,
+                null,
+                null,
+                null,
+                null,
+                settingsClassificationResolver);
     }
 
     private void stubLongSeries() {

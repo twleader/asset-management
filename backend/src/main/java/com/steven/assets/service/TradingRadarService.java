@@ -28,6 +28,8 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -110,6 +112,10 @@ public class TradingRadarService {
     private final TradingRadarMarketFeaturePort marketFeaturePort;
     private final BondYieldBetaEvidencePort bondYieldBetaEvidencePort;
     private final StockStyleThresholdProvider stockStyleThresholdProvider;
+    /** Task408 source resolver; nullable only in legacy test constructors. */
+    private final RadarTechnicalResolver radarTechnicalResolver;
+    /** Settings-page-equivalent classification; nullable only in legacy test constructors. */
+    private final TradingRadarSettingsClassificationResolver settingsClassificationResolver;
     /** Compatibility constructors are used by legacy unit adapters; Spring production wiring is strict. */
     private final boolean strictCalendarMode;
 
@@ -142,7 +148,7 @@ public class TradingRadarService {
                 priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
                 marketDataService, marketContextService, fundamentalAnalysisService,
                 etfNavHistoryRepo, snapshotStore, currentUserContext,
-                dividendEventEvidenceRepository, treasuryYieldService, null, null);
+                dividendEventEvidenceRepository, treasuryYieldService, null, null, null);
     }
 
     public TradingRadarService(
@@ -176,7 +182,7 @@ public class TradingRadarService {
                 marketDataService, marketContextService, fundamentalAnalysisService,
                 etfNavHistoryRepo, snapshotStore, currentUserContext,
                 dividendEventEvidenceRepository, treasuryYieldService, marketFeaturePort,
-                bondYieldBetaEvidencePort, null);
+                bondYieldBetaEvidencePort, null, null);
     }
 
     public TradingRadarService(
@@ -211,7 +217,44 @@ public class TradingRadarService {
                 marketDataService, marketContextService, fundamentalAnalysisService,
                 etfNavHistoryRepo, snapshotStore, currentUserContext,
                 dividendEventEvidenceRepository, treasuryYieldService, marketFeaturePort,
-                bondYieldBetaEvidencePort, stockStyleThresholdProvider, null);
+                bondYieldBetaEvidencePort, stockStyleThresholdProvider, null, null, null);
+    }
+
+    /** Compatibility overload retained for tests/adapters that predate Task408. */
+    public TradingRadarService(
+            TradingRadarRuleEngine ruleEngine,
+            TechnicalIndicatorService indicatorService,
+            DistributionAdjustedPriceService adjustedPriceService,
+            RadarInputAssembler assembler,
+            AssetClassifier assetClassifier,
+            TwseIndexDailyHistoryRepository twseRepo,
+            UsIndexDailyHistoryRepository usIndexDailyHistoryRepo,
+            StockPriceHistoryRepository priceHistoryRepo,
+            StockDividendHistoryRepository dividendHistoryRepo,
+            PriceQueryService priceQueryService,
+            TaiexDisplayPriceService taiexDisplayPriceService,
+            AssetSnapshotRepository snapshotRepo,
+            StockAlertRepository alertRepo,
+            StockRepository stockRepo,
+            MarketDataService marketDataService,
+            TradingRadarMarketContextService marketContextService,
+            FundamentalAnalysisService fundamentalAnalysisService,
+            EtfNavHistoryRepository etfNavHistoryRepo,
+            TradingRadarSnapshotStore snapshotStore,
+            CurrentUserContext currentUserContext,
+            DividendEventEvidenceRepository dividendEventEvidenceRepository,
+            TreasuryYieldService treasuryYieldService,
+            TradingRadarMarketFeaturePort marketFeaturePort,
+            BondYieldBetaEvidencePort bondYieldBetaEvidencePort,
+            StockStyleThresholdProvider stockStyleThresholdProvider,
+            EtfNavObservationRepository etfNavObservationRepository) {
+        this(ruleEngine, indicatorService, adjustedPriceService, assembler, assetClassifier,
+                twseRepo, usIndexDailyHistoryRepo, priceHistoryRepo, dividendHistoryRepo,
+                priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
+                marketDataService, marketContextService, fundamentalAnalysisService, etfNavHistoryRepo,
+                snapshotStore, currentUserContext, dividendEventEvidenceRepository, treasuryYieldService,
+                marketFeaturePort, bondYieldBetaEvidencePort, stockStyleThresholdProvider,
+                etfNavObservationRepository, null, null);
     }
 
     @Autowired
@@ -241,7 +284,9 @@ public class TradingRadarService {
             TradingRadarMarketFeaturePort marketFeaturePort,
             BondYieldBetaEvidencePort bondYieldBetaEvidencePort,
             StockStyleThresholdProvider stockStyleThresholdProvider,
-            EtfNavObservationRepository etfNavObservationRepository) {
+            EtfNavObservationRepository etfNavObservationRepository,
+            RadarTechnicalResolver radarTechnicalResolver,
+            TradingRadarSettingsClassificationResolver settingsClassificationResolver) {
         this.ruleEngine = ruleEngine;
         this.indicatorService = indicatorService;
         this.adjustedPriceService = adjustedPriceService;
@@ -268,6 +313,8 @@ public class TradingRadarService {
         this.bondYieldBetaEvidencePort = bondYieldBetaEvidencePort;
         this.stockStyleThresholdProvider = stockStyleThresholdProvider;
         this.etfNavObservationRepository = etfNavObservationRepository;
+        this.radarTechnicalResolver = radarTechnicalResolver;
+        this.settingsClassificationResolver = settingsClassificationResolver;
         this.strictCalendarMode = etfNavObservationRepository != null
                 || marketFeaturePort != null || bondYieldBetaEvidencePort != null
                 || stockStyleThresholdProvider != null;
@@ -431,17 +478,25 @@ public class TradingRadarService {
         loadLatestHoldings(targets, skippedNonTw, ownerId);
         loadWatchList(targets, skippedNonTw, ownerId);
 
+        // Task408: one request-bounded cache/DB read for the whole Taiwan
+        // target set.  `buildStock` receives the immutable batch so it cannot
+        // degenerate into one capture query per stock.
+        RadarTechnicalResolver.Batch technicalBatch = radarTechnicalResolver == null ? null
+                : radarTechnicalResolver.preload(targets.values().stream()
+                        .filter(target -> TW_MARKET.equals(target.market()))
+                        .map(Target::code).collect(java.util.stream.Collectors.toSet()), decisionInstant);
+
         // Task 303：同一次 assemble() 內同幣別的 FxContext 只解析一次（20 檔美股原本各自重查 5 年
         // 匯率）。stream 目前循序執行，但用 ConcurrentHashMap 防未來並行化踩雷。
         Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
                 .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
-                        && !TAIEX_CODE.equals(t.code()))
+                        && !isTaiwanMarketIndex(t.code(), t.market()))
                 .map(t -> buildStock(t, regimeFor(t.market(), twMarket, usMarket),
                         staleFor(t.market(), twMarket, usMarket),
                         marketSummaryFor(t.market(), twMarket, usMarket), decisionInstant, fxCache,
                         decisionClocks.getOrDefault(t.market(), new DecisionClock(null, false)),
-                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false))))
+                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch))
                 .sorted(Comparator
                         .comparing(TradingRadarService::bestScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -527,10 +582,12 @@ public class TradingRadarService {
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDecision evaluateForNotification(
             String stockCode, String market, boolean held, MarketSnapshot snapshot) {
+        RadarTechnicalResolver.Batch technicalBatch = radarTechnicalResolver == null || !TW_MARKET.equals(market)
+                ? null : radarTechnicalResolver.preload(Set.of(stockCode), snapshot.decisionInstant());
         return buildStock(new Target(stockCode, market, held), snapshot.regime(), snapshot.stale(),
                 snapshot.summary(), snapshot.decisionInstant(), new java.util.HashMap<>(),
                 new DecisionClock(snapshot.decisionSessions(), snapshot.authoritativeCalendar()),
-                new DecisionClock(snapshot.usDecisionSessions(), snapshot.usAuthoritativeCalendar()));
+                new DecisionClock(snapshot.usDecisionSessions(), snapshot.usAuthoritativeCalendar()), technicalBatch);
     }
 
     /**
@@ -853,11 +910,14 @@ public class TradingRadarService {
             Instant decisionInstant,
             Map<String, TradingRadarMarketContextService.FxContext> fxCache,
             DecisionClock decisionClock,
-            DecisionClock usDecisionClock) {
+            DecisionClock usDecisionClock,
+            RadarTechnicalResolver.Batch technicalBatch) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
                 .orElse(target.code());
+        TradingRadarDto.SettingsClassification settingsClassification = resolveSettingsClassification(
+                stock.orElse(null), target.code(), target.market(), name);
         TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
                 stock.orElse(null), target.code(), target.market(), name,
                 null, stockStyleIncomeThreshold());
@@ -896,8 +956,19 @@ public class TradingRadarService {
             // 當成完成收盤 K 餵進 MA／BIAS）；更早的歷史列則<b>不看 closeSource</b>，
             // 白名單只界定 verified 收盤，不得拿來裁掉技術序列。
             BigDecimal price = acceptedPrice.value();
-            RadarInputAssembler.Assembled technical = prepareTechnicalData(
-                    target, acceptedPrice);
+            RadarInputAssembler.Prepared technicalBasis = prepareTechnicalBasis(target, acceptedPrice);
+            String technicalFingerprint = technicalContextFingerprint(target, acceptedPrice, technicalBasis);
+            // A fresh local snapshot is selected before `calculate`, so both
+            // daily and weekly computeFromSeries calls are skipped on a valid
+            // BOUND LOCAL cache hit.  Its non-formula derivatives are still
+            // rebuilt from the current prepared price basis.
+            ResolvedTechnicalInputs freshLocal = radarTechnicalResolver == null ? null
+                    : radarTechnicalResolver.freshLocal(target.code(), target.market(), technicalFingerprint,
+                            decisionInstant, technicalBatch);
+            RadarInputAssembler.Assembled technical = freshLocal == null
+                    ? assembler.calculate(technicalBasis)
+                    : assembler.calculate(technicalBasis, freshLocal.indicators(), freshLocal.weekly(),
+                            freshLocal.weeklyIndicators());
             BigDecimal displayPrice = acceptedPrice.value();
             // ── Task 320：即時折溢價（純揭露欄，不進任何規則） ────────────────────────────
             // 「同一 tick」在這裡的正確意思是「<b>價只取一次</b>」：現價與淨值本來就是兩個 Redis key
@@ -920,7 +991,20 @@ public class TradingRadarService {
             // 避免 accepted price 已可用卻把 DTO 的 changePercent 無謂留白。
             if (displayChangePercent == null) displayChangePercent = ruleChangePercent;
 
-            TechnicalIndicatorService.FullIndicators ind = technical.indicators();
+            ResolvedTechnicalInputs resolvedTechnical = freshLocal != null ? freshLocal : radarTechnicalResolver == null
+                    ? new ResolvedTechnicalInputs(technical.indicators(), technical.weekly(), technical.weeklyIndicators(), null)
+                    : radarTechnicalResolver.resolve(
+                            target.code(), target.market(), technical.indicators(), technical.weekly(), technical.weeklyIndicators(),
+                            technical.distributionAdjusted(), technical.weeklyDistributionAdjusted(),
+                            acceptedPrice.liveAccepted(),
+                            technical.volatility60().asOfDate(),
+                            technical.weekly() == null ? null : technical.weekly().weekEndDate(),
+                            technicalFingerprint, decisionInstant, technicalBatch);
+            // ResolvedTechnicalInputs is the single overlay boundary.  Do not
+            // mutate `technical`: confirmations, candles, BIAS and all other
+            // derived fields intentionally remain local.
+            TechnicalIndicatorService.FullIndicators ind = resolvedTechnical.indicators();
+            TradingRadarRuleEngine.WeeklyInput resolvedWeekly = resolvedTechnical.weekly();
             TradingRadarRuleEngine.Confirmation c20 = technical.ma20Confirmation();
             TradingRadarRuleEngine.Confirmation c60 = technical.ma60Confirmation();
             TradingRadarRuleEngine.Confirmation c240 = technical.ma240Confirmation();
@@ -997,7 +1081,7 @@ public class TradingRadarService {
                             // 兩者與 DTO 揭露欄（toDailyCandleDto／toWeeklyDto）同源，皆取自這一份
                             // Assembled，不得為了接線再算第二次。
                             technical.dailyCandle(),
-                            technical.weekly()));
+                            resolvedWeekly));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
@@ -1156,7 +1240,8 @@ public class TradingRadarService {
                             distribution, rateObservation.context(),
                             TradingRadarDto.NormalizedBiasEvidence.from(result.normalizedBias()),
                             TradingRadarDto.NormalizedBiasEvidence.from(result.shortNormalizedBias()),
-                            actionName(gated.candidateSwingAction())),
+                            actionName(gated.candidateSwingAction()))
+                            .withSettingsClassification(settingsClassification),
                     evidence.shortDownsideRisk(),
                     evidence.mediumDownsideRisk(),
                     evidence.shortConfidence(),
@@ -1179,11 +1264,13 @@ public class TradingRadarService {
                     evidence.swingRisk().riskCoverage(),
                     actionName(gated.candidateSwingAction()),
                     toDailyCandleDto(technical.dailyCandle(), technical.volatility60().asOfDate()),
-                    toWeeklyDto(technical.weekly(), technical.weeklyBarsDesc(),
-                            technical.weeklyIndicators()));
+                    toWeeklyDto(resolvedWeekly, technical.weeklyBarsDesc(),
+                            resolvedTechnical.weeklyIndicators()),
+                    resolvedTechnical.resolution());
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
-            return incompleteStock(target, name, assetClass, "讀取個股資料失敗，該檔今日不交易。");
+            return incompleteStock(target, name, assetClass, settingsClassification,
+                    "讀取個股資料失敗，該檔今日不交易。");
         }
     }
 
@@ -1342,10 +1429,10 @@ public class TradingRadarService {
      * 組裝技術面欄位。**實際邏輯全在 {@link RadarInputAssembler}**，本方法只負責 production 專屬的
      * 「當日 live K 併入」與事件查詢；回測走同一支 assembler，故兩者不可能漂移（Task 273 的 273.2b）。
      */
-    private RadarInputAssembler.Assembled prepareTechnicalData(
+    private RadarInputAssembler.Prepared prepareTechnicalBasis(
             Target target,
             RadarObservationResolver.AcceptedPrice acceptedPrice) {
-        if (acceptedPrice == null) return RadarInputAssembler.Assembled.EMPTY;
+        if (acceptedPrice == null) return RadarInputAssembler.Prepared.EMPTY;
         // 技術序列一律取 indicatorSeriesRows（Task 319.3）：verifiedCompletedRows 帶著台股
         // provenance 白名單，那是 accepted price／quoteStatus 的判準，拿來當 MA／KD 的歷史序列
         // 會讓 close_source 為 null 的歷史列（Task 290 明定不回填）整批消失。
@@ -1363,11 +1450,11 @@ public class TradingRadarService {
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
         }
-        if (combined.isEmpty()) return RadarInputAssembler.Assembled.EMPTY;
+        if (combined.isEmpty()) return RadarInputAssembler.Prepared.EMPTY;
 
         LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
         LocalDate toDate = combined.get(0).getTradingDate();
-        return assembler.assemble(
+        return assembler.prepare(
                 combined,
                 dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate),
                 liveAdded,
@@ -1377,6 +1464,70 @@ public class TradingRadarService {
                 completedRows.size(),
                 RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS,
                 acceptedPrice.value());
+    }
+
+    /**
+     * Context binding for a v2 Redis technical pair.  It deliberately hashes
+     * the actual adjusted daily and completed-week input basis rather than a
+     * stock code/date shortcut: a dividend revision, an accepted live quote,
+     * or a different weekly aggregation must invalidate a prior LOCAL result.
+     */
+    private static String technicalContextFingerprint(
+            Target target,
+            RadarObservationResolver.AcceptedPrice acceptedPrice,
+            RadarInputAssembler.Prepared technical) {
+        StringBuilder input = new StringBuilder("FUBON_RADAR_CONTEXT_V1\n");
+        appendFingerprint(input, FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION);
+        appendFingerprint(input, target == null ? null : target.code());
+        appendFingerprint(input, target == null ? null : target.market());
+        appendFingerprint(input, acceptedPrice == null || acceptedPrice.tradingDate() == null
+                ? null : acceptedPrice.tradingDate().toString());
+        appendFingerprint(input, acceptedPrice == null ? null : acceptedPrice.updatedAt());
+        appendFingerprint(input, acceptedPrice == null ? null : decimalFingerprint(acceptedPrice.value()));
+        appendFingerprint(input, technical == null || technical.adjustedRowsDesc().size() <= technical.firstCompletedIndex()
+                || technical.adjustedRowsDesc().get(technical.firstCompletedIndex()).getTradingDate() == null ? null
+                : technical.adjustedRowsDesc().get(technical.firstCompletedIndex()).getTradingDate().toString());
+        appendFingerprint(input, technical == null || technical.weeklyBarsDesc().isEmpty()
+                || technical.weeklyBarsDesc().get(0).weekEndDate() == null ? null
+                : technical.weeklyBarsDesc().get(0).weekEndDate().toString());
+        appendFingerprint(input, technical != null && technical.distributionAdjusted() ? "1" : "0");
+        appendFingerprint(input, technical != null && technical.weeklyDistributionAdjusted() ? "1" : "0");
+        appendFingerprint(input, acceptedPrice != null && acceptedPrice.liveAccepted() ? "1" : "0");
+        if (technical != null) {
+            for (StockPriceHistory row : technical.adjustedRowsDesc()) {
+                appendFingerprint(input, row == null || row.getTradingDate() == null ? null : row.getTradingDate().toString());
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.getOpenPrice()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.getHighPrice()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.getLowPrice()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.getClosePrice()));
+                appendFingerprint(input, row == null || row.getVolume() == null ? null : row.getVolume().toString());
+            }
+            for (WeeklyBarAggregator.WeeklyBar row : technical.weeklyBarsDesc()) {
+                appendFingerprint(input, row == null || row.weekEndDate() == null ? null : row.weekEndDate().toString());
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.open()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.high()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.low()));
+                appendFingerprint(input, row == null ? null : decimalFingerprint(row.close()));
+                appendFingerprint(input, row == null || row.volume() == null ? null : row.volume().toString());
+            }
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(input.toString().getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(64);
+            for (byte value : digest) result.append(String.format(java.util.Locale.ROOT, "%02x", value));
+            return result.toString();
+        } catch (java.security.NoSuchAlgorithmException unavailable) {
+            throw new IllegalStateException("SHA-256 unavailable", unavailable);
+        }
+    }
+
+    private static void appendFingerprint(StringBuilder target, String value) {
+        String safe = value == null ? "<null>" : value;
+        target.append(safe.length()).append(':').append(safe).append('\n');
+    }
+
+    private static String decimalFingerprint(BigDecimal value) {
+        return value == null ? null : value.stripTrailingZeros().toPlainString();
     }
 
     /**
@@ -1448,9 +1599,16 @@ public class TradingRadarService {
             skippedNonTw.add(key);
             return;
         }
-        if (TAIEX_CODE.equals(code)) return;
+        // Only the Taiwan market index is infrastructure/regime data.  A
+        // same-code instrument in another supported market remains a normal
+        // Radar target and must retain its settings classification detail.
+        if (isTaiwanMarketIndex(code, market)) return;
         Target existing = targets.get(key);
         targets.put(key, new Target(code, market, held || (existing != null && existing.held())));
+    }
+
+    private static boolean isTaiwanMarketIndex(String code, String market) {
+        return TW_MARKET.equals(market) && TAIEX_CODE.equals(code);
     }
 
     /** 委派 {@link RadarInputAssembler}，避免同一段換算在兩處各自漂移（Task 273）。 */
@@ -1795,8 +1953,19 @@ public class TradingRadarService {
         return new MarketState(summary, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, true);
     }
 
+    private TradingRadarDto.SettingsClassification resolveSettingsClassification(
+            Stock stock, String code, String market, String name) {
+        if (settingsClassificationResolver == null) return null;
+        return TradingRadarDto.SettingsClassification.from(
+                settingsClassificationResolver.resolve(stock, code, market, name));
+    }
+
     private TradingRadarDto.StockDecision incompleteStock(
-            Target target, String name, String assetClass, String message) {
+            Target target,
+            String name,
+            String assetClass,
+            TradingRadarDto.SettingsClassification settingsClassification,
+            String message) {
         return new TradingRadarDto.StockDecision(
                 target.code(), name, target.market(), assetClass, false, target.held(),
                 TradingRadarRuleEngine.Action.NO_TRADE.name(),
@@ -1833,7 +2002,7 @@ public class TradingRadarService {
                 null, // fxAsOfDate
                 false, // profitTakingConfirmed
                 null, // fundamental
-                TradingRadarDto.RadarEvidence.EMPTY,
+                TradingRadarDto.RadarEvidence.EMPTY.withSettingsClassification(settingsClassification),
                 null, null, null, null, null, null, null, null, List.of(),
                 null, // etfPremiumLivePct（Task 320）
                 null, // etfPremiumLiveNavAsOf（Task 320）
@@ -1848,7 +2017,8 @@ public class TradingRadarService {
                 null, // swingRiskCoverage
                 null, // swingCandidateAction
                 null, // dailyCandle
-                null); // weeklyIndicators
+                null, // weeklyIndicators
+                null); // technicalResolution
     }
 
     private String regimeLabel(TradingRadarRuleEngine.MarketRegime regime) {

@@ -8,6 +8,7 @@ import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /** Non-secret immutable values shared by the three narrowly scoped market consumers. */
@@ -57,6 +58,85 @@ public final class FubonMarketData {
             case "bb" -> Set.of("upper", "middle", "lower");
             default -> throw new IllegalArgumentException("INVALID_GROUP");
         };
+    }
+
+    /** Task408's immutable profile identity.  Do not reuse the frozen v1 GROUPS list. */
+    public record TechnicalProfile(String profileId, String kind, String timeframe,
+                                   Map<String, Object> parameters, Set<String> payloadFields) {
+        public TechnicalProfile {
+            parameters = Map.copyOf(parameters);
+            payloadFields = Set.copyOf(payloadFields);
+        }
+    }
+    public static final List<TechnicalProfile> TECHNICAL_PROFILES = List.of(
+            profile("sma_d_5", "SMA", "D", Map.of("timeframe", "D", "period", 5), Set.of("sma")),
+            profile("sma_d_10", "SMA", "D", Map.of("timeframe", "D", "period", 10), Set.of("sma")),
+            profile("sma_d_20", "SMA", "D", Map.of("timeframe", "D", "period", 20), Set.of("sma")),
+            profile("sma_d_60", "SMA", "D", Map.of("timeframe", "D", "period", 60), Set.of("sma")),
+            profile("sma_d_240", "SMA", "D", Map.of("timeframe", "D", "period", 240), Set.of("sma")),
+            profile("rsi_d_5", "RSI", "D", Map.of("timeframe", "D", "period", 5), Set.of("rsi")),
+            profile("rsi_d_10", "RSI", "D", Map.of("timeframe", "D", "period", 10), Set.of("rsi")),
+            profile("kdj_d_9_3_3", "KDJ", "D", Map.of("timeframe", "D", "rPeriod", 9, "kPeriod", 3, "dPeriod", 3), Set.of("k", "d", "j")),
+            profile("macd_d_12_26_9", "MACD", "D", Map.of("timeframe", "D", "fast", 12, "slow", 26, "signal", 9), Set.of("macdLine", "signalLine")),
+            profile("bb_d_20", "BBANDS", "D", Map.of("timeframe", "D", "period", 20), Set.of("upper", "middle", "lower")),
+            profile("sma_w_5", "SMA", "W", Map.of("timeframe", "W", "period", 5), Set.of("sma")),
+            profile("sma_w_10", "SMA", "W", Map.of("timeframe", "W", "period", 10), Set.of("sma")),
+            profile("sma_w_20", "SMA", "W", Map.of("timeframe", "W", "period", 20), Set.of("sma")),
+            profile("rsi_w_5", "RSI", "W", Map.of("timeframe", "W", "period", 5), Set.of("rsi")),
+            profile("rsi_w_10", "RSI", "W", Map.of("timeframe", "W", "period", 10), Set.of("rsi")),
+            profile("kdj_w_9_3_3", "KDJ", "W", Map.of("timeframe", "W", "rPeriod", 9, "kPeriod", 3, "dPeriod", 3), Set.of("k", "d", "j")),
+            profile("macd_w_12_26_9", "MACD", "W", Map.of("timeframe", "W", "fast", 12, "slow", 26, "signal", 9), Set.of("macdLine", "signalLine"))
+    );
+    private static TechnicalProfile profile(String id, String kind, String timeframe,
+                                            Map<String, Object> parameters, Set<String> fields) {
+        return new TechnicalProfile(id, kind, timeframe, parameters, fields);
+    }
+    public static TechnicalProfile profile(String id) {
+        return TECHNICAL_PROFILES.stream().filter(p -> p.profileId().equals(id)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("INVALID_PROFILE"));
+    }
+    public static List<String> profileIds() {
+        return TECHNICAL_PROFILES.stream().map(TechnicalProfile::profileId).toList();
+    }
+
+    public record TechnicalHistory(LocalDate sourceDate, Instant sourceTimestamp, Map<String, String> payload) {
+        public TechnicalHistory { payload = Map.copyOf(payload); }
+    }
+    public record TechnicalProfileRead(String profileId, String status, String reason,
+                                       Map<String, Object> parameters, Instant observedAt,
+                                       List<TechnicalHistory> history) {
+        public TechnicalProfileRead {
+            parameters = Map.copyOf(parameters); history = List.copyOf(history);
+        }
+        public boolean available() { return "AVAILABLE".equals(status); }
+        public TechnicalHistory candidate() { return available() && !history.isEmpty() ? history.getLast() : null; }
+        public TechnicalHistory previous() { return available() && history.size() > 1 ? history.get(history.size() - 2) : null; }
+    }
+    public record TechnicalBundle(UUID captureId, String symbol, LocalDate queryFrom, LocalDate queryTo,
+                                  List<TechnicalProfileRead> profiles) {
+        public TechnicalBundle { profiles = List.copyOf(profiles); }
+        public boolean complete() { return profiles.size() == TECHNICAL_PROFILES.size()
+                && profiles.stream().allMatch(TechnicalProfileRead::available); }
+        public Instant oldestObservedAt() {
+            return profiles.stream().map(TechnicalProfileRead::observedAt).filter(java.util.Objects::nonNull)
+                    .min(Instant::compareTo).orElse(null);
+        }
+        public Map<String, TechnicalProfileRead> byProfile() {
+            Map<String, TechnicalProfileRead> output = new java.util.LinkedHashMap<>();
+            profiles.forEach(value -> output.put(value.profileId(), value));
+            return Map.copyOf(output);
+        }
+    }
+    public record StockBasicRead(String symbol, LocalDate sourceDate, Instant observedAt, String exchange,
+                                 String sourceMarket, String sourceName, String industry, String securityType,
+                                 BigDecimal limitUpPrice, BigDecimal limitDownPrice, Boolean tradingEligible,
+                                 String tradingStatus, Integer matchingInterval, Integer boardLot, String currency) {}
+    public record IntradayCandle(Instant candleAt, BigDecimal open, BigDecimal high, BigDecimal low,
+                                 BigDecimal close, long volume, BigDecimal average) {}
+    public record IntradayCandlesRead(String symbol, LocalDate sourceDate, Instant observedAt, String exchange,
+                                      String sourceMarket, int timeframe, String status, String reason,
+                                      List<IntradayCandle> candles) {
+        public IntradayCandlesRead { candles = List.copyOf(candles); }
     }
     public record DividendRow(String symbol, String status, boolean usable, String reason,
                               List<DividendEvent> events) {

@@ -20,7 +20,7 @@ from fubon_broker_service.technical_indicators import TechnicalIndicatorService
 
 from accounting_fixtures import NOW as ACCOUNTING_NOW, bank_row, realized_row, settlement_data, settlement_row
 from helpers import TOKEN, filled_trade_row, fixed_now, quote_raw, ready_config, response
-from market_fixtures import DIVIDEND_FROM, DIVIDEND_TO, NOW, TECHNICAL_FROM, TODAY, dividend_row, technical_result
+from market_fixtures import DIVIDEND_FROM, DIVIDEND_TO, NOW, TECHNICAL_FROM, TODAY, dividend_row, technical_result, technical_v2_result
 from stock_push_fixtures import FakeWebsocket, STOCK_NOW, StreamFixture, packet
 from test_market_gateway import MarketSdk
 
@@ -28,6 +28,8 @@ from test_market_gateway import MarketSdk
 HEADER = {"X-Internal-Service-Token": TOKEN}
 DIVIDENDS = "/internal/market-data/dividends/read"
 TECHNICAL = "/internal/market-data/technical-indicators/read"
+BASIC = "/internal/market-data/stock-basic/read"
+CANDLES = "/internal/market-data/intraday-candles/read"
 SUBSCRIPTIONS = "/internal/market-data/stock-push/subscriptions"
 STOCK_STREAM = "/internal/market-data/stock-push/stream"
 ACCOUNTING = ["/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read"]
@@ -40,7 +42,7 @@ PROTECTED = [
     ("GET", "/internal/market-data/taiex-index/stream", None),
     *[("POST", path, None) for path in ACCOUNTING],
     ("POST", DIVIDENDS, {"symbols": ["2330"], "from": DIVIDEND_FROM, "to": DIVIDEND_TO}),
-    ("POST", TECHNICAL, {"symbol": "2330", "from": TECHNICAL_FROM, "to": TODAY}),
+    ("POST", TECHNICAL, {"symbol": "2330"}),
     ("POST", SUBSCRIPTIONS, {"symbols": ["2330"]}),
     ("GET", STOCK_STREAM, None),
 ]
@@ -64,6 +66,13 @@ class RouteSdk(MarketSdk):
     def handle(self, kind, params):
         if kind == "dividends":
             return self.dividend_source
+        if kind in {"sma", "rsi"}:
+            return technical_v2_result(
+                kind, params["symbol"], start=params["from"], end=params["to"],
+                timeframe=params["timeframe"],
+                parameters={key: value for key, value in params.items()
+                            if key not in {"symbol", "from", "to", "timeframe"}},
+            )
         return self.technical_source if self.technical_source is not None else technical_result(kind, params["symbol"])
 
     def bank_remain(self, selected):
@@ -119,13 +128,14 @@ def test_every_protected_route_enforces_config_three_state_without_sdk(tmp_path,
         assert sdk.events == []
 
 
-def test_exact_fourteen_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
+def test_exact_sixteen_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
     client, sdk = app_fixture(tmp_path)
     actual = {(route.path, tuple(route.methods)) for route in client.app.routes}
-    expected = {(path, (method,)) for method, path, _body in PROTECTED} | {("/internal/health", ("GET",))}
-    assert actual == expected and len(actual) == 14
+    expected = {(path, (method,)) for method, path, _body in PROTECTED} | {
+        (BASIC, ("POST",)), (CANDLES, ("POST",)), ("/internal/health", ("GET",))}
+    assert actual == expected and len(actual) == 16
     with client:
-        for method, path, _body in PROTECTED:
+        for method, path, _body in [*PROTECTED, ("POST", BASIC, {"symbol": "2330"}), ("POST", CANDLES, {"symbol": "2330"})]:
             for wrong in {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"} - {method}:
                 assert client.request(wrong, path, headers=HEADER).status_code == 405, (wrong, path)
             assert client.request(method, path + "/", headers=HEADER, follow_redirects=False).status_code == 404
@@ -155,8 +165,7 @@ def test_new_json_routes_reject_unknown_fields_duplicate_keys_and_bad_iso_dates(
             duplicate = json.dumps(body)[:-1] + "," + json.dumps(key) + ":" + json.dumps(value) + "}"
             assert client.post(path, content=duplicate, headers=HEADER).status_code == 400
             assert client.post(path + "?url=FAKE", json=body, headers=HEADER).status_code == 400
-        for bad_date in ("20260828", "2026-W35-5", "2026-8-28", "2026-02-29", "2026/08/28"):
-            assert client.post(TECHNICAL, json={"symbol": "2330", "from": TECHNICAL_FROM, "to": bad_date}, headers=HEADER).status_code == 400
+        assert client.post(TECHNICAL, json={"symbol": "2330", "from": TECHNICAL_FROM}, headers=HEADER).status_code == 400
         assert sdk.events == []
 
 
@@ -200,16 +209,17 @@ def test_market_http_routes_keep_exact_coverage_group_shapes_and_thirteen_counte
         dividends = client.post(DIVIDENDS, json={"symbols": ["2330", "0050"], "from": DIVIDEND_FROM, "to": DIVIDEND_TO}, headers=HEADER)
         assert dividends.status_code == 200
         assert [row["symbol"] for row in dividends.json()["rows"]] == ["2330", "0050"]
-        technical = client.post(TECHNICAL, json={"symbol": "2330", "from": TECHNICAL_FROM, "to": TODAY}, headers=HEADER)
+        technical = client.post(TECHNICAL, json={"symbol": "2330"}, headers=HEADER)
         assert technical.status_code == 200 and len(technical.content) < 512 * 1024
-        for kind in ("kdj", "macd", "bb"):
-            assert set(technical.json()[kind]) == {"status", "reason", "parameters", "sourceDate", "sourceTimestamp", "payload"}
+        assert list(technical.json()) == ["schemaVersion", "captureId", "symbol", "market", "provider", "queryFrom", "queryTo", "profiles"]
+        assert len(technical.json()["profiles"]) == 17
         sdk.bank_source = bank_row(balance=-1)
         assert client.post(ACCOUNTING[0], headers=HEADER).status_code == 503
         sdk.dividend_source = {"data": None}
         assert client.post(DIVIDENDS, json={"symbols": ["2330"], "from": DIVIDEND_FROM, "to": DIVIDEND_TO}, headers=HEADER).status_code == 503
         sdk.technical_source = {"data": []}
-        assert client.post(TECHNICAL, json={"symbol": "2330", "from": TECHNICAL_FROM, "to": TODAY}, headers=HEADER).json()["kdj"]["status"] == "SCHEMA_INVALID"
+        assert any(profile["status"] == "SCHEMA_INVALID" for profile in
+                   client.post(TECHNICAL, json={"symbol": "2330"}, headers=HEADER).json()["profiles"])
         assert client.post(SUBSCRIPTIONS, json={"symbols": ["2330"]}, headers=HEADER).status_code == 503
         quote = client.post("/internal/market-data/tw-quotes", json={"codes": ["2330"], "purpose": "LIVE"}, headers=HEADER)
     assert quote.status_code == 200 and quote.json()["quotes"][0]["status"] == "SUCCESS"

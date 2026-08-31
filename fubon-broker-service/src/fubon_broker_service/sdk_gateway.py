@@ -86,6 +86,10 @@ class SdkGateway:
     QUOTE_CALL_TIMEOUT_SECONDS = 5.0
     CLEANUP_CALL_TIMEOUT_SECONDS = 2.0
     MAX_BLOCKING_CALLS = 4
+    # Task408 is stricter than the frozen historical 60/min limiter.  It is
+    # acquired immediately before *each actual* technical/ticker/candle SDK
+    # invocation, including an authentication retry.
+    MARKETDATA_START_LIMIT = 38
 
     def __init__(
         self,
@@ -106,6 +110,8 @@ class SdkGateway:
         self._account_starts: deque[float] = deque()
         self._history_lock = threading.Lock()
         self._history_starts: deque[float] = deque()
+        self._marketdata_start_lock = threading.Lock()
+        self._marketdata_starts: deque[float] = deque()
         self._history_paused_until = 0.0
         self._shutdown_event = threading.Event()
         self._sdk: object | None = None
@@ -210,24 +216,43 @@ class SdkGateway:
         })
 
     def read_technical_indicator(self, kind: str, symbol: str, start_date: str, end_date: str,
-                                 *, deadline: float | None = None) -> object:
-        parameters = {
+                                 *, timeframe: str = "D", parameters: dict[str, object] | None = None,
+                                 deadline: float | None = None) -> object:
+        legacy_parameters = {
             "kdj": {"rPeriod": 9, "kPeriod": 3, "dPeriod": 3},
             "macd": {"fast": 12, "slow": 26, "signal": 9},
             "bb": {"period": 20},
         }
-        if kind not in parameters:
+        allowed = {"sma", "rsi", *legacy_parameters}
+        if kind not in allowed or timeframe not in {"D", "W"}:
+            raise SdkCallError("TECHNICAL_METHOD_UNAVAILABLE", misconfigured=True)
+        if parameters is None:
+            if kind not in legacy_parameters:
+                raise SdkCallError("TECHNICAL_METHOD_UNAVAILABLE", misconfigured=True)
+            parameters = legacy_parameters[kind]
+        if not isinstance(parameters, dict) or not parameters:
             raise SdkCallError("TECHNICAL_METHOD_UNAVAILABLE", misconfigured=True)
         return self._marketdata_read("technical", kind, {
             "symbol": symbol, "from": start_date, "to": end_date,
-            "timeframe": "D", **parameters[kind],
+            "timeframe": timeframe, **parameters,
+        }, deadline=deadline)
+
+    def read_ticker(self, symbol: str, *, deadline: float | None = None) -> object:
+        # `type` is deliberately omitted: only an odd-lot request is allowed to set it.
+        return self._marketdata_read("intraday", "ticker", {"symbol": symbol}, deadline=deadline)
+
+    def read_intraday_candles(self, symbol: str, *, deadline: float | None = None) -> object:
+        # This is ordinary-lot, one-minute ascending data; never add `type=EQUITY`.
+        return self._marketdata_read("intraday", "candles", {
+            "symbol": symbol, "timeframe": 1, "sort": "asc",
         }, deadline=deadline)
 
     def _marketdata_read(self, namespace: str, method_name: str, params: dict[str, object],
                          *, deadline: float | None = None) -> object:
         if (namespace, method_name) not in {
             ("corporate_actions", "dividends"), ("technical", "kdj"),
-            ("technical", "macd"), ("technical", "bb"),
+            ("technical", "macd"), ("technical", "bb"), ("technical", "sma"),
+            ("technical", "rsi"), ("intraday", "ticker"), ("intraday", "candles"),
         }:
             raise SdkCallError("MARKETDATA_METHOD_UNAVAILABLE", misconfigured=True)
         for attempt in range(2):
@@ -254,6 +279,8 @@ class SdkGateway:
                             raise SdkCallError("MARKETDATA_TIMEOUT")
                         if now < self._history_paused_until:
                             raise SdkCallError("RATE_LIMITED", retry_after_seconds=self._history_paused_until - now)
+                    if namespace in {"technical", "intraday"}:
+                        self._take_marketdata_start_permit(deadline=deadline)
                     return method(**params)
                 response = self._run_bounded(
                     invoke_marketdata, min(self.QUOTE_CALL_TIMEOUT_SECONDS, remaining), "MARKETDATA_TIMEOUT",
@@ -312,6 +339,33 @@ class SdkGateway:
             else:
                 self._sleeper(delay)
             wait_budget -= delay
+        raise SdkCallError("SERVICE_SHUTDOWN")
+
+    def _take_marketdata_start_permit(self, *, deadline: float | None = None) -> None:
+        """Acquire the Task408 38-start rolling permit immediately before SDK I/O.
+
+        It is intentionally independent from `_take_history_budget`: that older
+        60/min gate remains a second defence and may account non-Task408 history
+        readers.  This permit only counts actual technical/ticker/candle starts.
+        """
+        while not self._shutdown_event.is_set():
+            with self._marketdata_start_lock:
+                now = self._monotonic()
+                if deadline is not None and now >= deadline:
+                    raise SdkCallError("HISTORY_BUDGET_EXHAUSTED")
+                while self._marketdata_starts and now - self._marketdata_starts[0] >= 60.0:
+                    self._marketdata_starts.popleft()
+                if len(self._marketdata_starts) < self.MARKETDATA_START_LIMIT:
+                    self._marketdata_starts.append(now)
+                    return
+                wait = max(0.0, 60.0 - (now - self._marketdata_starts[0]))
+                if deadline is not None and now + wait >= deadline:
+                    raise SdkCallError("HISTORY_BUDGET_EXHAUSTED", retry_after_seconds=wait)
+            # Like the existing history limiter, no shared lock is held while waiting.
+            if self._sleeper is time.sleep:
+                self._shutdown_event.wait(wait)
+            else:
+                self._sleeper(wait)
         raise SdkCallError("SERVICE_SHUTDOWN")
 
     @staticmethod

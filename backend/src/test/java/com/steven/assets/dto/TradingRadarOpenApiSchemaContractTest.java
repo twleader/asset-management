@@ -34,6 +34,9 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.Response.class, "TradingRadarResponse"),
             new Binding(TradingRadarDto.MarketSummary.class, "MarketSummary"),
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
+            new Binding(TradingRadarDto.TechnicalResolution.class, "TechnicalResolution"),
+            new Binding(TradingRadarDto.TechnicalProfileResolution.class, "TechnicalProfileResolution"),
+            new Binding(TradingRadarDto.TechnicalFieldProvenance.class, "TechnicalFieldProvenance"),
             new Binding(TradingRadarDto.ExtendedIndicators.class, "ExtendedIndicators"),
             // Task 356.11f：兩個新 schema 必須登錄在此，否則它們不受本測試保護。
             new Binding(TradingRadarDto.DailyCandle.class, "DailyCandle"),
@@ -42,6 +45,7 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.ValuationComponentEvidence.class, "ValuationComponentEvidence"),
             new Binding(TradingRadarDto.RadarEvidence.class, "RadarEvidence"),
             new Binding(TradingRadarDto.AssetProfile.class, "AssetProfile"),
+            new Binding(TradingRadarDto.SettingsClassification.class, "SettingsClassification"),
             new Binding(TradingRadarDto.EvidenceGroup.class, "EvidenceGroup"),
             new Binding(TradingRadarDto.EvidenceComponent.class, "EvidenceComponent"),
             new Binding(TradingRadarDto.MarketFeatureEvidence.class, "MarketFeatureEvidence"),
@@ -86,7 +90,14 @@ class TradingRadarOpenApiSchemaContractTest {
                     // 與 boolean 欄不列入，其餘一律 nullable。
                     "swingAction", "swingActionLabel", "swingScore", "swingDownsideRisk",
                     "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
-                    "dailyCandle", "weeklyIndicators")),
+                    "dailyCandle", "weeklyIndicators", "technicalResolution")),
+            Map.entry("TechnicalResolution", set(
+                    "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
+                    "oldestObservedAt", "freshUntil", "ageSeconds")),
+            Map.entry("TechnicalProfileResolution", set(
+                    "profileId", "status", "reason", "parameters", "payload", "sourceDate", "observedAt",
+                    "eligibility")),
+            Map.entry("TechnicalFieldProvenance", set("field", "origin", "profileId", "reason")),
             Map.entry("ExtendedIndicators", set(
                     "j9", "k3d2", "rsv", "ema12", "ema26", "dif", "macd", "osc",
                     "rsi5", "rsi10", "bias10", "bias20", "b10b20", "wr9")),
@@ -103,7 +114,7 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("RadarEvidence", set(
                     "acceptedPriceAsOfDate", "acceptedPriceSource", "acceptedPriceQuality",
                     "returnStdDev60Ratio", "returnStdDev60AsOfDate", "returnStdDev60Source",
-                    "premiumAsOfDate", "premiumSource", "assetProfile", "shortEvidenceConfidence",
+                    "premiumAsOfDate", "premiumSource", "assetProfile", "settingsClassification", "shortEvidenceConfidence",
                     "mediumEvidenceConfidence", "shortDownsideRisk", "mediumDownsideRisk",
                     "shortRiskCoverage", "mediumRiskCoverage", "candidateAction", "shortCandidateAction",
                     "nextDistributionDate", "nextDistributionKnownAt", "nextDistributionProvider",
@@ -117,6 +128,9 @@ class TradingRadarOpenApiSchemaContractTest {
                     "assetClass", "assetClassSource", "instrumentKind", "instrumentKindSource",
                     "stockStyle", "stockStyleSource", "bondTerm", "bondTermSource", "quoteCurrency",
                     "quoteCurrencySource", "underlyingCurrency", "underlyingCurrencySource")),
+            Map.entry("SettingsClassification", set(
+                    "effectiveStockStyle", "stockStyleSource", "effectiveBondTerm", "bondTermSource",
+                    "assetClassOverride", "stockStyleOverride", "bondTermOverride")),
             Map.entry("EvidenceGroup", set("group")),
             Map.entry("EvidenceComponent", set(
                     "name", "applicability", "asOfDate", "provider", "missingReason")),
@@ -137,6 +151,10 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("MarketSummary", formats(
                     "asOfDate", "date", "marketVolumeAsOfDate", "date", "usTechAsOfDate", "date")),
             Map.entry("StockDecision", formats("asOfDate", "date", "fxAsOfDate", "date")),
+            Map.entry("TechnicalResolution", formats(
+                    "oldestObservedAt", "date-time", "freshUntil", "date-time")),
+            Map.entry("TechnicalProfileResolution", formats(
+                    "sourceDate", "date", "observedAt", "date-time")),
             Map.entry("DailyCandle", formats("asOfDate", "date")),
             Map.entry("WeeklyIndicators", formats("weekEndDate", "date")),
             Map.entry("FundamentalSnapshot", formats(
@@ -157,7 +175,7 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("PublicInformationItem", formats("knownAt", "date-time")));
 
     @Test
-    void allSixteenRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
+    void allTwentyRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
         Map<String, Object> document = loadOpenApi();
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
 
@@ -207,6 +225,35 @@ class TradingRadarOpenApiSchemaContractTest {
                         "不宣告 OpenAPI date-time", "null 表示無盤中時間");
     }
 
+    @Test
+    void technicalResolutionSchemaExampleShowsBoundDailyAndWeeklyProfiles() throws IOException {
+        Map<String, Object> document = loadOpenApi();
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> technical = map(schemas.get("TechnicalResolution"));
+        Map<String, Object> example = map(technical.get("example"));
+
+        assertThat(example).containsEntry("source", "FUBON_SDK")
+                .containsEntry("binding", "BOUND_CONTEXT")
+                .containsEntry("decisionInputVersion", "TW_RULES_V18|FUBON_OVERLAY_V1");
+        assertThat((List<?>) example.get("profiles"))
+                .extracting(profile -> map(profile).get("profileId"))
+                .contains("sma_d_20", "sma_w_20");
+        assertThat((List<?>) example.get("fieldProvenance"))
+                .extracting(field -> map(field).get("origin"))
+                .contains("FUBON_SDK", "DETAIL_ONLY");
+    }
+
+    @Test
+    void technicalResolutionSourceDescriptionDefinesFubonAndLocalSemantics() throws IOException {
+        Map<String, Object> document = loadOpenApi();
+        Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
+        Map<String, Object> technical = map(schemas.get("TechnicalResolution"));
+        Map<String, Object> source = map(map(technical.get("properties")).get("source"));
+
+        assertThat(String.valueOf(source.get("description")))
+                .contains("FUBON_SDK", "LOCAL_CALCULATED", "PostgreSQL", "Redis");
+    }
+
     private static void assertType(String schemaName, RecordComponent component, Map<String, Object> property) {
         Class<?> raw = component.getType();
         Map<String, Object> branch = nonNullBranch(property);
@@ -251,6 +298,12 @@ class TradingRadarOpenApiSchemaContractTest {
     }
 
     private static void assertSchemaForGeneric(String label, Type type, Map<String, Object> schema) {
+        if (type == Object.class) {
+            // Technical profile parameters are a deliberately generic strict-wire object:
+            // exact per-profile keys are validated by the resolver, not widened in the public DTO.
+            assertThat(schema).as(label).isNotNull();
+            return;
+        }
         if (type == String.class) {
             assertThat(baseType(schema)).as(label).isEqualTo("string");
             return;

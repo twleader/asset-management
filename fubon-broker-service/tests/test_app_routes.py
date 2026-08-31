@@ -205,6 +205,8 @@ def test_exact_adapter_routes_auth_and_methods(tmp_path):
         ("/internal/realized-gains/read", frozenset({"POST"})),
         ("/internal/market-data/dividends/read", frozenset({"POST"})),
         ("/internal/market-data/technical-indicators/read", frozenset({"POST"})),
+        ("/internal/market-data/stock-basic/read", frozenset({"POST"})),
+        ("/internal/market-data/intraday-candles/read", frozenset({"POST"})),
         ("/internal/market-data/stock-push/subscriptions", frozenset({"POST"})),
         ("/internal/market-data/stock-push/stream", frozenset({"GET"})),
     }

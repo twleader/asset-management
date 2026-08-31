@@ -342,7 +342,7 @@ public final class StrictPublicJsonResponse {
                 "shortEvidenceConfidence", "mediumEvidenceConfidence", "shortRiskCoverage", "mediumRiskCoverage", "candidateAction",
                 "shortCandidateAction", "actionGateReasons", "etfPremiumLivePct", "etfPremiumLiveNavAsOf", "swingAction",
                 "swingActionLabel", "swingScore", "swingReasons", "swingRisks", "swingDownsideRisk", "swingEvidenceConfidence",
-                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators");
+                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution");
         nullableTexts(value, "stockCode", "stockName", "market", "assetClass", "action", "actionLabel", "counterTrendState",
                 "counterTrendLabel", "quoteStatus", "priceUpdatedAt", "asOfDate", "monthlyConfirmation", "quarterlyConfirmation",
                 "annualConfirmation", "underlyingCurrency", "kdHeat", "timingState", "timingLabel", "shortAction",
@@ -361,6 +361,29 @@ public final class StrictPublicJsonResponse {
         nullableObject(field(value, "evidence"), StrictPublicJsonResponse::radarEvidence);
         nullableObject(field(value, "dailyCandle"), StrictPublicJsonResponse::dailyCandle);
         nullableObject(field(value, "weeklyIndicators"), StrictPublicJsonResponse::weeklyIndicators);
+        nullableObject(field(value, "technicalResolution"), StrictPublicJsonResponse::technicalResolution);
+    }
+
+    private static void technicalResolution(JsonNode value) {
+        exactObject(value, "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
+                "oldestObservedAt", "freshUntil", "ageSeconds", "profiles", "fieldProvenance");
+        nullableTexts(value, "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
+                "oldestObservedAt", "freshUntil");
+        nullableInteger(field(value, "ageSeconds"));
+        array(field(value, "profiles"), StrictPublicJsonResponse::technicalProfileResolution);
+        array(field(value, "fieldProvenance"), StrictPublicJsonResponse::technicalFieldProvenance);
+    }
+
+    private static void technicalProfileResolution(JsonNode value) {
+        exactObject(value, "profileId", "status", "reason", "parameters", "payload", "sourceDate", "observedAt", "eligibility");
+        nullableTexts(value, "profileId", "status", "reason", "sourceDate", "observedAt", "eligibility");
+        nullableObject(field(value, "parameters"), ignored -> {});
+        nullableObject(field(value, "payload"), ignored -> {});
+    }
+
+    private static void technicalFieldProvenance(JsonNode value) {
+        exactObject(value, "field", "origin", "profileId", "reason");
+        nullableTexts(value, "field", "origin", "profileId", "reason");
     }
 
     private static void fundamentalSnapshot(JsonNode value) {
@@ -403,7 +426,7 @@ public final class StrictPublicJsonResponse {
         exactObject(value,
                 "acceptedPriceAsOfDate", "acceptedPriceSource", "acceptedPriceQuality", "livePriceAccepted",
                 "returnStdDev60Ratio", "returnStdDev60AsOfDate", "returnStdDev60Source", "premiumAsOfDate", "premiumSource",
-                "premiumStale", "assetProfile", "actionGateReasons", "evidenceGroups", "marketFeatures",
+                "premiumStale", "assetProfile", "settingsClassification", "actionGateReasons", "evidenceGroups", "marketFeatures",
                 "shortEvidenceConfidence", "mediumEvidenceConfidence", "shortDownsideRisk", "mediumDownsideRisk",
                 "shortRiskCoverage", "mediumRiskCoverage", "candidateAction", "shortCandidateAction", "nextDistributionDate",
                 "nextDistributionKnownAt", "nextDistributionProvider", "nextDistributionSourceUrls", "nextDistributionStatus",
@@ -422,6 +445,7 @@ public final class StrictPublicJsonResponse {
         booleans(value, "livePriceAccepted", "premiumStale");
         arraysOfTexts(value, "actionGateReasons", "nextDistributionSourceUrls");
         nullableObject(field(value, "assetProfile"), StrictPublicJsonResponse::assetProfile);
+        nullableObject(field(value, "settingsClassification"), StrictPublicJsonResponse::settingsClassification);
         map(field(value, "evidenceGroups"), StrictPublicJsonResponse::evidenceGroup);
         map(field(value, "marketFeatures"), StrictPublicJsonResponse::marketFeatureEvidence);
         nullableObject(field(value, "treasuryRateContext"), StrictPublicJsonResponse::treasuryRateContext);
@@ -441,6 +465,16 @@ public final class StrictPublicJsonResponse {
         booleans(value, "assetClassComplete", "instrumentKindComplete", "stockStyleComplete", "bondTermComplete",
                 "quoteCurrencyComplete", "underlyingCurrencyComplete", "currencyDataComplete", "profileComplete");
         arrayOfTexts(field(value, "missingReasons"));
+    }
+
+    private static void settingsClassification(JsonNode value) {
+        exactObject(value,
+                "effectiveAssetClass", "assetClassSource", "effectiveStockStyle", "stockStyleSource",
+                "effectiveBondTerm", "bondTermSource", "assetClassOverride", "stockStyleOverride",
+                "bondTermOverride");
+        requiredTexts(value, "effectiveAssetClass", "assetClassSource");
+        nullableTexts(value, "effectiveStockStyle", "stockStyleSource", "effectiveBondTerm", "bondTermSource",
+                "assetClassOverride", "stockStyleOverride", "bondTermOverride");
     }
 
     private static void evidenceGroup(JsonNode value) {

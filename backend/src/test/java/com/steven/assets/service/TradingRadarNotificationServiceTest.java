@@ -252,6 +252,28 @@ class TradingRadarNotificationServiceTest {
     }
 
     @Test
+    void legacyTechnicalSourceVersion只記TECHNICAL_SOURCE_VERSION_MIGRATION並重建baseline不寄信() {
+        setting.setTechnicalSourceVersion(null);
+        setting.setLastAction("BUY_CANDIDATE");
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        assertEquals(FubonRadarCompatibilityManifest.TECHNICAL_SOURCE_VERSION,
+                setting.getTechnicalSourceVersion());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        assertEquals("NONE", setting.getLastCounterTrendState());
+        assertTrue(setting.getInitialized());
+        assertEquals("TECHNICAL_SOURCE_VERSION_MIGRATION",
+                TradingRadarNotificationService.TECHNICAL_SOURCE_VERSION_MIGRATION);
+        // Source-version baseline migration returns before state comparison/cooldown/dispatch.
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        verify(stateRepo, never()).save(any());
+        verify(settingRepo).save(setting);
+    }
+
+    @Test
     void 舊ActionPolicy首輪只重建而下一個真實transition才通知() {
         setting.setActionPolicyVersion("EVIDENCE_GATE_OLD");
         setting.setLastAction("BUY_CANDIDATE");

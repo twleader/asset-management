@@ -600,8 +600,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 87,
-        "全量 strict audit 預期 87 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 91,
+        "全量 strict audit 預期 91 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end

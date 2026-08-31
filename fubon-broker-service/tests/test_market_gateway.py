@@ -10,7 +10,7 @@ from fubon_broker_service.sdk_gateway import SdkCallError, SdkGateway
 from fubon_broker_service.technical_indicators import TechnicalIndicatorService
 
 from helpers import ready_config
-from market_fixtures import DIVIDEND_FROM, DIVIDEND_TO, NOW, TECHNICAL_FROM, TODAY, technical_result
+from market_fixtures import DIVIDEND_FROM, DIVIDEND_TO, NOW, TECHNICAL_FROM, TODAY, technical_result, technical_v2_result
 from test_sdk_gateway import FakeSdk
 
 
@@ -37,6 +37,13 @@ class MarketSdk(FakeSdk):
     def handle(kind, params):
         if kind == "dividends":
             return {"data": []}
+        if kind in {"sma", "rsi"}:
+            return technical_v2_result(
+                kind, params["symbol"], start=params["from"], end=params["to"],
+                timeframe=params["timeframe"],
+                parameters={key: value for key, value in params.items()
+                            if key not in {"symbol", "from", "to", "timeframe"}},
+            )
         return technical_result(kind, params["symbol"])
 
     def call(self, kind, params):
@@ -48,7 +55,7 @@ class MarketSdk(FakeSdk):
         stock = self.marketdata.rest_client.stock
         stock.corporate_actions = SimpleNamespace(dividends=lambda **kw: self.call("dividends", kw))
         stock.technical = SimpleNamespace(**{kind: (lambda kind=kind, **kw: self.call(kind, kw))
-                                            for kind in ("kdj", "macd", "bb")})
+                                            for kind in ("sma", "rsi", "kdj", "macd", "bb")})
         return result
 
 
@@ -78,19 +85,19 @@ def test_official_parameter_names_fixed_defaults_and_once_date_dividend_call(tmp
     assert len(gateway._history_starts) == 4
 
 
-def test_sixty_first_call_uses_bounded_wait_and_distinct_local_budget_reason(tmp_path):
+def test_thirty_ninth_task408_marketdata_start_respects_its_request_deadline(tmp_path):
     gateway, sdk, clock = make_gateway(tmp_path)
-    for _ in range(60):
+    for _ in range(38):
         gateway.read_technical_indicator("kdj", "2330", TECHNICAL_FROM, TODAY)
     with pytest.raises(SdkCallError) as captured:
-        gateway.read_technical_indicator("kdj", "0050", TECHNICAL_FROM, TODAY)
+        gateway.read_technical_indicator("kdj", "0050", TECHNICAL_FROM, TODAY, deadline=clock.value + 5)
     assert captured.value.reason == "HISTORY_BUDGET_EXHAUSTED"
-    assert len(sdk.market_calls) == 60
-    assert sum(clock.waits) == pytest.approx(5.0)
+    assert len(sdk.market_calls) == 38
+    assert clock.waits == []
     assert gateway._history_paused_until == 0
     clock.value = 160.0
     gateway.read_technical_indicator("kdj", "0050", TECHNICAL_FROM, TODAY)
-    assert len(sdk.market_calls) == 61
+    assert len(sdk.market_calls) == 39
 
 
 def test_waiting_near_window_edge_obtains_slot_without_rate_limited(tmp_path):
@@ -102,7 +109,7 @@ def test_waiting_near_window_edge_obtains_slot_without_rate_limited(tmp_path):
     assert len(sdk.market_calls) == 61 and sum(clock.waits) == pytest.approx(1.0)
 
 
-def test_twenty_one_symbols_complete_with_shared_pacing_instead_of_permanent_starvation(tmp_path):
+def test_twenty_one_symbols_complete_with_shared_task408_pacing_instead_of_starvation(tmp_path):
     gateway, sdk, clock = make_gateway(tmp_path)
     service = TechnicalIndicatorService(gateway, now=lambda: NOW, monotonic=clock)
     for index in range(21):
@@ -110,7 +117,10 @@ def test_twenty_one_symbols_complete_with_shared_pacing_instead_of_permanent_sta
         result = service.read(f"X{index}", TECHNICAL_FROM, TODAY)
         assert all(result[kind]["status"] == "AVAILABLE" for kind in ("kdj", "macd", "bb"))
         clock.value = max(clock.value, started + 3.1)
-    assert len(sdk.market_calls) == 63 and clock.waits == []
+    assert len(sdk.market_calls) == 63
+    # 63 vendor starts cannot fit in any 60-second window under Task408's
+    # process-wide 38-start permit; the fake clock records the bounded wait.
+    assert clock.waits and all(wait > 0 for wait in clock.waits)
 
 
 def test_real_429_pauses_every_historical_reader_for_at_least_one_minute(tmp_path):

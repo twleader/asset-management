@@ -242,6 +242,36 @@ public final class TradingRadarDto {
         }
     }
 
+    /**
+     * Settings-page-equivalent classification for the radar detail display.
+     *
+     * <p>This is not {@link AssetProfile}: it deliberately retains the Asset
+     * Class Settings page's latest-snapshot dividend and permissive bond-term
+     * fallback semantics.  It is null only for the Taiwan market index or a
+     * legacy snapshot that predates this additive projection.</p>
+     */
+    public record SettingsClassification(
+            String effectiveAssetClass,
+            String assetClassSource,
+            String effectiveStockStyle,
+            String stockStyleSource,
+            String effectiveBondTerm,
+            String bondTermSource,
+            String assetClassOverride,
+            String stockStyleOverride,
+            String bondTermOverride
+    ) {
+        public static SettingsClassification from(
+                com.steven.assets.service.TradingRadarSettingsClassificationResolver.Resolution resolution) {
+            if (resolution == null) return null;
+            return new SettingsClassification(
+                    resolution.effectiveAssetClass(), resolution.assetClassSource(),
+                    resolution.effectiveStockStyle(), resolution.stockStyleSource(),
+                    resolution.effectiveBondTerm(), resolution.bondTermSource(),
+                    resolution.assetClassOverride(), resolution.stockStyleOverride(), resolution.bondTermOverride());
+        }
+    }
+
     /** Immutable API projection of one evidence component/group. */
     public record EvidenceComponent(
             String name,
@@ -375,7 +405,9 @@ public final class TradingRadarDto {
             String nextExDividendDate,
             String nextExRightsDate,
             String nextCashPaymentDate,
-            String nextStockPaymentDate
+            String nextStockPaymentDate,
+            /** Settings-page-equivalent classification; strict radar profile remains {@code assetProfile}. */
+            SettingsClassification settingsClassification
     ) {
         public RadarEvidence {
             actionGateReasons = actionGateReasons == null ? List.of() : List.copyOf(actionGateReasons);
@@ -403,7 +435,7 @@ public final class TradingRadarDto {
                     premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
                     java.util.Map.of(), java.util.Map.of(), null, null, null, null, null, null, null, null,
                     null, null, null, List.of(), null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, null);
         }
 
         public static final RadarEvidence EMPTY = new RadarEvidence(
@@ -411,7 +443,7 @@ public final class TradingRadarDto {
                 null, null, false, null, List.of(), java.util.Map.of(), java.util.Map.of(),
                 null, null, null, null, null, null, null, null,
                 null, null, null, List.of(), null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
 
         public static RadarEvidence withConfidence(
                 String acceptedPriceAsOfDate,
@@ -548,7 +580,30 @@ public final class TradingRadarDto {
                     nextEvent == null || nextEvent.cashPaymentDate() == null
                             ? null : nextEvent.cashPaymentDate().toString(),
                     nextEvent == null || nextEvent.stockPaymentDate() == null
-                            ? null : nextEvent.stockPaymentDate().toString());
+                            ? null : nextEvent.stockPaymentDate().toString(),
+                    null);
+        }
+
+        /**
+         * Adds the settings-equivalent display projection without changing the
+         * strict asset profile or any evidence/rule inputs.  This is used for
+         * both successful and incomplete current radar rows; old persisted
+         * snapshots naturally deserialize with this additive field as null.
+         */
+        public RadarEvidence withSettingsClassification(SettingsClassification classification) {
+            return new RadarEvidence(
+                    acceptedPriceAsOfDate, acceptedPriceSource, acceptedPriceQuality, livePriceAccepted,
+                    returnStdDev60Ratio, returnStdDev60AsOfDate, returnStdDev60Source,
+                    premiumAsOfDate, premiumSource, premiumStale, assetProfile, actionGateReasons,
+                    evidenceGroups, marketFeatures, shortEvidenceConfidence, mediumEvidenceConfidence,
+                    shortDownsideRisk, mediumDownsideRisk, shortRiskCoverage, mediumRiskCoverage,
+                    candidateAction, shortCandidateAction, nextDistributionDate, nextDistributionKnownAt,
+                    nextDistributionProvider, nextDistributionSourceUrls, nextDistributionStatus,
+                    nextDistributionMissingReason, distributionsWithinFiveSessions,
+                    distributionsWithinTwentySessions, treasuryRateContext, normalizedBias,
+                    shortNormalizedBias, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage,
+                    swingCandidateAction, nextExDividendDate, nextExRightsDate, nextCashPaymentDate,
+                    nextStockPaymentDate, classification);
         }
     }
 
@@ -730,6 +785,43 @@ public final class TradingRadarDto {
         }
     }
 
+    /**
+     * Task408 field-level technical source audit.  Values in the ordinary
+     * indicator columns remain nullable business values; this record is the
+     * companion evidence explaining exactly which provider facts, if any,
+     * were allowed to affect a V18 input.
+     */
+    public record TechnicalProfileResolution(
+            String profileId,
+            String status,
+            String reason,
+            java.util.Map<String, Object> parameters,
+            java.util.Map<String, String> payload,
+            String sourceDate,
+            String observedAt,
+            String eligibility
+    ) {}
+
+    public record TechnicalFieldProvenance(
+            String field,
+            String origin,
+            String profileId,
+            String reason
+    ) {}
+
+    public record TechnicalResolution(
+            String decisionInputVersion,
+            String source,
+            String binding,
+            String contextFingerprint,
+            String captureId,
+            String oldestObservedAt,
+            String freshUntil,
+            Long ageSeconds,
+            List<TechnicalProfileResolution> profiles,
+            List<TechnicalFieldProvenance> fieldProvenance
+    ) {}
+
     public record StockDecision(
             String stockCode,
             String stockName,
@@ -846,8 +938,56 @@ public final class TradingRadarDto {
             /** 最新完成日的還原 K 棒與三分量（Task 356.5）。 */
             DailyCandle dailyCandle,
             /** 最新完成週的週K 棒與週K 指標（Task 356.6）；與 {@code weeklyMa} 是兩個不同的量。 */
-            WeeklyIndicators weeklyIndicators
+            WeeklyIndicators weeklyIndicators,
+            /** Task408 immutable source/field provenance; old snapshots are null (=LEGACY_LOCAL_V0). */
+            TechnicalResolution technicalResolution
     ) {
+        /**
+         * Task408 compatibility shape.  Historical snapshots and established
+         * unit fixtures predate the final technicalResolution component; their
+         * missing value is intentionally preserved as null (= LEGACY_LOCAL_V0),
+         * never synthesized as an apparent current Fubon decision.
+         */
+        public StockDecision(
+                String stockCode, String stockName, String market, String assetClass,
+                boolean distributionAdjusted, boolean held, String action, String actionLabel, Integer score,
+                String counterTrendState, String counterTrendLabel, List<String> counterTrendReasons,
+                List<String> counterTrendRisks, boolean dataComplete, BigDecimal price,
+                BigDecimal changePercent, String quoteStatus, String priceUpdatedAt, String asOfDate,
+                BigDecimal monthlyMa, BigDecimal quarterlyMa, BigDecimal annualMa,
+                BigDecimal kValue, BigDecimal dValue, String monthlyConfirmation,
+                String quarterlyConfirmation, String annualConfirmation, BigDecimal fxPercentile,
+                String underlyingCurrency, List<String> reasons, List<String> risks, String kdHeat,
+                String timingState, String timingLabel, BigDecimal ma60BiasPercent,
+                BigDecimal week52Position, BigDecimal weeklyMa, BigDecimal etfPremiumPct,
+                BigDecimal etfPremiumPercentile, ExtendedIndicators extendedIndicators,
+                String shortAction, String shortActionLabel, Integer shortScore,
+                List<String> shortReasons, List<String> shortRisks, boolean horizonConflict,
+                BigDecimal volumeRatio, String fxAsOfDate, boolean profitTakingConfirmed,
+                FundamentalSnapshot fundamental, RadarEvidence evidence, Integer shortDownsideRisk,
+                Integer mediumDownsideRisk, Integer shortEvidenceConfidence, Integer mediumEvidenceConfidence,
+                Double shortRiskCoverage, Double mediumRiskCoverage, String candidateAction,
+                String shortCandidateAction, List<String> actionGateReasons, BigDecimal etfPremiumLivePct,
+                String etfPremiumLiveNavAsOf, String swingAction, String swingActionLabel, Integer swingScore,
+                List<String> swingReasons, List<String> swingRisks, Integer swingDownsideRisk,
+                Integer swingEvidenceConfidence, Double swingRiskCoverage, String swingCandidateAction,
+                DailyCandle dailyCandle, WeeklyIndicators weeklyIndicators) {
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    action, actionLabel, score, counterTrendState, counterTrendLabel,
+                    counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent,
+                    quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa,
+                    kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation,
+                    fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel,
+                    ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile,
+                    extendedIndicators, shortAction, shortActionLabel, shortScore, shortReasons, shortRisks,
+                    horizonConflict, volumeRatio, fxAsOfDate, profitTakingConfirmed, fundamental, evidence,
+                    shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence, mediumEvidenceConfidence,
+                    shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction,
+                    actionGateReasons, etfPremiumLivePct, etfPremiumLiveNavAsOf, swingAction, swingActionLabel,
+                    swingScore, swingReasons, swingRisks, swingDownsideRisk, swingEvidenceConfidence,
+                    swingRiskCoverage, swingCandidateAction, dailyCandle, weeklyIndicators, null);
+        }
+
         /** Task 291 前的欄位形狀，供既有測試建構資料。 */
         public StockDecision(
                 String stockCode, String stockName, String market, String assetClass,
@@ -874,7 +1014,7 @@ public final class TradingRadarDto {
                     null, null, List.of(),
                     null, null, // Task 320：etfPremiumLivePct／etfPremiumLiveNavAsOf
                     // Task 356.11b：既有相容建構式一律補新欄位的預設值，不得刪除該建構式。
-                    null, null, null, List.of(), List.of(), null, null, null, null, null, null);
+                    null, null, null, List.of(), List.of(), null, null, null, null, null, null, null);
         }
     }
 }

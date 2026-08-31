@@ -46,7 +46,7 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.trail_profit"
     );
 
-    /** 已串接 15 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    /** 已串接 19 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
     private static final Set<String> CONNECTED_PAIRS = Set.of(
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
@@ -55,10 +55,14 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.filled_history|POST /internal/trades/read",
             "marketdata.rest_client.stock.intraday.quote|POST /internal/market-data/tw-quotes",
             "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
+            "marketdata.rest_client.stock.intraday.ticker|POST /internal/market-data/stock-basic/read",
+            "marketdata.rest_client.stock.intraday.candles|POST /internal/market-data/intraday-candles/read",
             "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream",
             "marketdata.rest_client.stock.ownership.etf_holdings|POST /internal/market-data/etf-holdings",
             "sdk.accounting.bank_remain|POST /internal/bank-balance/read",
             "marketdata.rest_client.stock.corporate_actions.dividends|POST /internal/market-data/dividends/read",
+            "marketdata.rest_client.stock.technical.sma|POST /internal/market-data/technical-indicators/read",
+            "marketdata.rest_client.stock.technical.rsi|POST /internal/market-data/technical-indicators/read",
             "marketdata.rest_client.stock.technical.kdj|POST /internal/market-data/technical-indicators/read",
             "marketdata.rest_client.stock.technical.macd|POST /internal/market-data/technical-indicators/read",
             "marketdata.rest_client.stock.technical.bb|POST /internal/market-data/technical-indicators/read",
@@ -77,10 +81,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=true 恰為 15 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    @DisplayName("connected=true 恰為 19 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
     void 已串接筆數與組合正確() {
         List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
-        assertThat(connected).hasSize(15);
+        assertThat(connected).hasSize(19);
 
         Set<String> actual = connected.stream()
                 .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
@@ -89,10 +93,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=false 恰為 37 筆，兩項未核實財務僅標實際預檢入口")
+    @DisplayName("connected=false 恰為 33 筆，兩項未核實財務僅標實際預檢入口")
     void 未串接筆數與預檢入口明確() {
         List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
-        assertThat(notConnected).hasSize(37);
+        assertThat(notConnected).hasSize(33);
         Map<String, String> preflights = Map.of(
                 "sdk.accounting.query_settlement", "POST /internal/settlement/read",
                 "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read");
@@ -180,7 +184,7 @@ class FubonApiInfoBffControllerTest {
         assertThat(etf.consumer()).contains("08:50", "15:30", "交易雷達", "需另啟用設定");
         assertThat(etf.responseSummary()).contains("正規化 JSON", "sourceDate", "decimal 字串")
                 .doesNotContain("逐字保存", "尚未核實", "佔位");
-        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(7);
+        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(11);
     }
     @Test
     void cashDividendScopeDoesNotClaimCapitalChangesOrUnverifiedStockDividendAmounts() {
@@ -195,8 +199,20 @@ class FubonApiInfoBffControllerTest {
     @Test
     void newMarketRowsDescribeActualWireAndOnlyDedicatedReadbackPaths() {
         var macd = apis().stream().filter(api -> api.sdkReference().endsWith("technical.macd")).findFirst().orElseThrow();
-        assertThat(macd.consumer()).contains("13:40", "/internal/technical-indicators/fubon-cache");
-        assertThat(macd.responseSummary()).contains("queryFrom", "macdLine", "signalLine", "不捏造 histogram");
+        assertThat(macd.consumer()).contains("13:40", "/internal/technical-indicators/fubon-sync");
+        assertThat(macd.responseSummary()).contains("schemaVersion=2", "macdLine", "signalLine", "不捏造 EMA／DIF／OSC");
+        var sma = apis().stream().filter(api -> api.sdkReference().endsWith("technical.sma")).findFirst().orElseThrow();
+        var rsi = apis().stream().filter(api -> api.sdkReference().endsWith("technical.rsi")).findFirst().orElseThrow();
+        var ticker = apis().stream().filter(api -> api.sdkReference().endsWith("intraday.ticker")).findFirst().orElseThrow();
+        var candles = apis().stream().filter(api -> api.sdkReference().endsWith("intraday.candles")).findFirst().orElseThrow();
+        assertThat(sma.connected()).isTrue();
+        assertThat(rsi.connected()).isTrue();
+        assertThat(ticker.httpEndpoint()).isEqualTo("POST /internal/market-data/stock-basic/read");
+        assertThat(candles.httpEndpoint()).isEqualTo("POST /internal/market-data/intraday-candles/read");
+        assertThat(sma.description()).contains("17-profile", "PostgreSQL", "100 秒 BOUND Redis");
+        assertThat(rsi.description()).contains("local fallback", "不覆寫富邦歷史");
+        assertThat(ticker.responseSummary()).contains("無 Redis／價格 history／latest quote");
+        assertThat(candles.responseSummary()).contains("絕不寫 Redis", "daily price history", "latest quote");
         var push = apis().stream().filter(api -> api.sdkReference().contains("aggregates")).findFirst().orElseThrow();
         assertThat(push.connected()).isTrue();
         assertThat(push.responseSummary()).contains("tradeSize", "price", "sourceDate", "volume 為 null");

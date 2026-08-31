@@ -691,7 +691,7 @@ paths:
               schema: {$ref: '#/components/schemas/TradingRadarStockDetailResponse'}
               examples:
                 synthetic:
-                  value: {ruleVersion: TW_RULES_V18, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null}}
+                  value: {ruleVersion: TW_RULES_V18, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null}}
         '400':
           description: 缺少、重複或格式不合法的 stockCode／market；不會呼叫 configured-admin 或 business。
           content:
@@ -5384,6 +5384,7 @@ components:
       - swingCandidateAction
       - dailyCandle
       - weeklyIndicators
+      - technicalResolution
       properties:
         stockCode:
           type:
@@ -5773,6 +5774,213 @@ components:
           - type: 'null'
             description: 交易雷達採用的週線技術指標 的可用型態。
           description: 交易雷達採用的週線技術指標。
+        technicalResolution:
+          anyOf:
+          - "$ref": "#/components/schemas/TechnicalResolution"
+            description: 富邦或本地技術資料來源、profile 與欄位級採用證據 的可用型態。
+          - type: 'null'
+            description: 富邦或本地技術資料來源、profile 與欄位級採用證據 的可用型態。
+          description: Task408 技術指標來源決策。null 僅表示舊快照的 LEGACY_LOCAL_V0，不能當成現在的富邦資料或零值。
+      additionalProperties: false
+    TechnicalResolution:
+      type: object
+      description: 固定 17-profile 技術 bundle 的來源、100 秒 freshness、context binding 與欄位級採用稽核。PostgreSQL 是 FUBON_SDK 歷史權威；Redis 僅為 bounded 即時 overlay。LOCAL_CALCULATED 只會覆寫 Redis，不會覆寫富邦 PostgreSQL facts/members。
+      required:
+      - decisionInputVersion
+      - source
+      - binding
+      - contextFingerprint
+      - captureId
+      - oldestObservedAt
+      - freshUntil
+      - ageSeconds
+      - profiles
+      - fieldProvenance
+      properties:
+        decisionInputVersion:
+          type:
+          - string
+          - 'null'
+          description: 固定為 TW_RULES_V18|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。
+        source:
+          type:
+          - string
+          - 'null'
+          enum: [FUBON_SDK, LOCAL_CALCULATED]
+          description: 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。
+        binding:
+          type:
+          - string
+          - 'null'
+          enum: [BOUND_CONTEXT, UNBOUND_FUBON_SOURCE]
+          description: Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。
+        contextFingerprint:
+          type:
+          - string
+          - 'null'
+          description: 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。
+        captureId:
+          type:
+          - string
+          - 'null'
+          description: 富邦 complete capture 或 local bundle generation 的 UUID。
+        oldestObservedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: bundle 17 profiles 中最早的 immutable observedAt；100 秒 freshness 的唯一起點。
+        freshUntil:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: oldestObservedAt 加 100 秒的絕對 deadline；DB re-project 不得延長它。
+        ageSeconds:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: 回應生成時相對 oldestObservedAt 的秒數；99/100 為可讀邊界，101 必回 local fallback。
+        profiles:
+          type: array
+          description: manifest-order fixed profiles 的候選與是否可被 V18 採用。完整正常 bundle 為 17 項。
+          items:
+            "$ref": "#/components/schemas/TechnicalProfileResolution"
+            description: 一個固定 timeframe/profile 的候選結果。
+        fieldProvenance:
+          type: array
+          description: 每個 direct overlay、local derivation 或 detail-only 值的來源與未採用原因。
+          items:
+            "$ref": "#/components/schemas/TechnicalFieldProvenance"
+            description: 一個技術欄位的來源稽核。
+      additionalProperties: false
+      example:
+        decisionInputVersion: TW_RULES_V18|FUBON_OVERLAY_V1
+        source: FUBON_SDK
+        binding: BOUND_CONTEXT
+        contextFingerprint: 6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4
+        captureId: 20b7b95a-9d3a-4acb-b431-b8b1a59e30f2
+        oldestObservedAt: '2026-08-31T05:40:01Z'
+        freshUntil: '2026-08-31T05:41:41Z'
+        ageSeconds: 42
+        profiles:
+        - profileId: sma_d_20
+          status: AVAILABLE
+          reason: null
+          parameters: {period: 20}
+          payload: {sma: '1135.5000'}
+          sourceDate: '2026-08-28'
+          observedAt: '2026-08-31T05:40:01Z'
+          eligibility: APPLIED
+        - profileId: sma_w_20
+          status: AVAILABLE
+          reason: null
+          parameters: {period: 20}
+          payload: {sma: '1088.7000'}
+          sourceDate: '2026-08-28'
+          observedAt: '2026-08-31T05:40:02Z'
+          eligibility: APPLIED
+        fieldProvenance:
+        - field: indicators.ma20
+          origin: FUBON_SDK
+          profileId: sma_d_20
+          reason: APPROVED_DIRECT_OVERLAY
+        - field: detail.macd_d_12_26_9
+          origin: DETAIL_ONLY
+          profileId: macd_d_12_26_9
+          reason: VENDOR_MACD_DETAIL_ONLY
+    TechnicalProfileResolution:
+      type: object
+      description: 一個 immutable profile 的最大 valid source-date candidate，沒有 history array；完整歷史由 PostgreSQL fubon technical fact/member 保留。
+      required:
+      - profileId
+      - status
+      - reason
+      - parameters
+      - payload
+      - sourceDate
+      - observedAt
+      - eligibility
+      properties:
+        profileId:
+          type:
+          - string
+          - 'null'
+          description: immutable 17-profile manifest ID，例如 sma_d_20、rsi_w_10、kdj_d_9_3_3。
+        status:
+          type:
+          - string
+          - 'null'
+          description: provider candidate 的 AVAILABLE／NO_DATA／SCHEMA_INVALID／UNAVAILABLE 狀態。
+        reason:
+          type:
+          - string
+          - 'null'
+          description: 非 AVAILABLE 的 strict failure reason，或 V18 未採用的原因。
+        parameters:
+          type:
+          - object
+          - 'null'
+          additionalProperties:
+            description: profile 固定參數的單一 canonical JSON 值；strict resolver 僅接受對應 manifest 的鍵和值。
+          description: immutable provider parameters。每個 profile 的精確 key/value 在 strict resolver 驗證。
+        payload:
+          type:
+          - object
+          - 'null'
+          additionalProperties:
+            type: string
+            description: profile payload 的單一 canonical decimal-string 值。
+          description: candidate 的 strict canonical decimal-string payload；非 AVAILABLE 可為 null。
+        sourceDate:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: candidate 的最大 valid source date；weekly profile 為最近完成週末交易日。
+        observedAt:
+          type:
+          - string
+          - 'null'
+          format: date-time
+          description: 該 profile SDK response 返回時固定的 immutable observedAt。
+        eligibility:
+          type:
+          - string
+          - 'null'
+          description: APPLIED、DETAIL_ONLY、AVAILABLE_NOT_APPLIED 或未可用原因；前端只呈現，絕不自行補算。
+      additionalProperties: false
+    TechnicalFieldProvenance:
+      type: object
+      description: 一個送入或揭露於交易雷達的技術欄位來源。DETAIL_ONLY 永遠不改 V18 score；LOCAL 也可能是 DERIVED_FROM_FUBON 的局部衍生值。
+      required:
+      - field
+      - origin
+      - profileId
+      - reason
+      properties:
+        field:
+          type:
+          - string
+          - 'null'
+          description: DTO／detail 內的確切欄位路徑。
+        origin:
+          type:
+          - string
+          - 'null'
+          enum: [FUBON_SDK, LOCAL, DERIVED_FROM_FUBON, DETAIL_ONLY, AVAILABLE_NOT_APPLIED]
+          description: 欄位實際來源或可用但未採用的狀態：FUBON_SDK 是已套用的富邦 profile，LOCAL 是本地計算，DERIVED_FROM_FUBON 是從富邦值衍生，DETAIL_ONLY 僅供明細，AVAILABLE_NOT_APPLIED 是可用但被 basis/date gate 擋下。
+        profileId:
+          type:
+          - string
+          - 'null'
+          description: 若有對應富邦 profile，為其 immutable profile ID；純 local 值可為 null。
+        reason:
+          type:
+          - string
+          - 'null'
+          description: direct overlay、detail-only 或 fail-closed 未採用的具體理由。
       additionalProperties: false
     DailyCandle:
       type: object
@@ -6309,6 +6517,7 @@ components:
       - premiumSource
       - premiumStale
       - assetProfile
+      - settingsClassification
       - actionGateReasons
       - evidenceGroups
       - marketFeatures
@@ -6396,6 +6605,13 @@ components:
           - type: 'null'
             description: 標的分類、商品型態與幣別辨識上下文 的可用型態。
           description: 標的分類、商品型態與幣別辨識上下文。
+        settingsClassification:
+          anyOf:
+          - "$ref": "#/components/schemas/SettingsClassification"
+            description: 資產類別設定頁等價的有效分類 的可用型態。
+          - type: 'null'
+            description: 資產類別設定頁等價的有效分類 的可用型態。
+          description: 資產類別設定頁等價的有效類別／細分與 RULE／OVERRIDE 來源；不等同 strict AssetProfile。台股 0000 或舊 snapshot 為 null。
         actionGateReasons:
           type: array
           items:
@@ -6692,6 +6908,65 @@ components:
           description: 多個必要內容無法取得的原因清單。
       additionalProperties: false
       description: 標的分類、商品型態與幣別辨識結果，以及其可用性與缺漏原因。
+    SettingsClassification:
+      type: object
+      required:
+      - effectiveAssetClass
+      - assetClassSource
+      - effectiveStockStyle
+      - stockStyleSource
+      - effectiveBondTerm
+      - bondTermSource
+      - assetClassOverride
+      - stockStyleOverride
+      - bondTermOverride
+      properties:
+        effectiveAssetClass:
+          type: string
+          description: 與資產類別設定頁相同規則算出的有效資產類別。
+        assetClassSource:
+          type: string
+          enum: [RULE, OVERRIDE]
+          description: 有效資產類別的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫。
+        effectiveStockStyle:
+          type:
+          - string
+          - 'null'
+          description: effectiveAssetClass=STOCK 時，與設定頁相同的有效股票風格。
+        stockStyleSource:
+          type:
+          - string
+          - 'null'
+          enum: [RULE, OVERRIDE, null]
+          description: 有效股票風格的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫，不適用時為 null。
+        effectiveBondTerm:
+          type:
+          - string
+          - 'null'
+          description: effectiveAssetClass=BOND 時，與設定頁相同的有效債券期別。
+        bondTermSource:
+          type:
+          - string
+          - 'null'
+          enum: [RULE, OVERRIDE, null]
+          description: 有效債券期別的來源；RULE 是設定頁規則計算，OVERRIDE 是使用者指定覆寫，不適用時為 null。
+        assetClassOverride:
+          type:
+          - string
+          - 'null'
+          description: 使用者保存的資產類別覆寫；沒有覆寫時為 null。
+        stockStyleOverride:
+          type:
+          - string
+          - 'null'
+          description: 使用者保存的股票風格覆寫；沒有覆寫時為 null。
+        bondTermOverride:
+          type:
+          - string
+          - 'null'
+          description: 使用者保存的債券期別覆寫；沒有覆寫時為 null。
+      additionalProperties: false
+      description: 資產類別設定頁的有效分類投影。它刻意保留最新快照殖利率與 MID fallback 語意，不能被 strict AssetProfile 取代。
     EvidenceGroup:
       type: object
       required:
