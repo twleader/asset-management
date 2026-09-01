@@ -7,6 +7,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -48,6 +49,50 @@ public class SnapshotFormBffController {
             new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
             new ParameterizedTypeReference<>() {};
+
+    /**
+     * GET /api/bff/snapshot-form/snapshots
+     *
+     * 表單「複製前一版」使用的快照清單。必須經本頁 BFF，不能讓瀏覽器直打 business
+     * {@code /api/snapshots}；既有 businessServicesClient 會從 Reactor context 附上 tenant headers。
+     */
+    @GetMapping("/snapshots")
+    public Mono<List<Map<String, Object>>> listSnapshots() {
+        return businessServicesClient.get()
+                .uri("/api/snapshots")
+                .retrieve()
+                .bodyToMono(LIST_MAP);
+    }
+
+    /**
+     * POST /api/bff/snapshot-form → business POST /api/snapshots。
+     *
+     * 寫入錯誤不可降級：retrieve() 的 WebClientResponseException 交由 BusinessErrorAdvice
+     * 原樣轉送 status 與 ProblemDetail，前端才能顯示日期重複等可行動訊息。
+     */
+    @PostMapping
+    public Mono<Map<String, Object>> createSnapshot(@RequestBody Map<String, Object> payload) {
+        return businessServicesClient.post()
+                .uri("/api/snapshots")
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(MAP);
+    }
+
+    /**
+     * PUT /api/bff/snapshot-form/{id} → business PUT /api/snapshots/{id}。
+     * 錯誤處理與新增完全相同，保留 business 回傳的 ProblemDetail。
+     */
+    @PutMapping("/{id}")
+    public Mono<Map<String, Object>> updateSnapshot(
+            @org.springframework.web.bind.annotation.PathVariable Long id,
+            @RequestBody Map<String, Object> payload) {
+        return businessServicesClient.put()
+                .uri("/api/snapshots/{id}", id)
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(MAP);
+    }
 
     /**
      * POST /api/bff/snapshot-form/prices?date=YYYY-MM-DD

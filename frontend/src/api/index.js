@@ -68,14 +68,6 @@ export function apiErrorMessage(err, fallback = '操作失敗') {
   return err?.response?.data?.detail || err?.response?.data?.message || err?.message || fallback
 }
 
-// ===== Snapshots（共享 CRUD，給 store 使用；單一頁面的資料請走對應 bffApi.<page>） =====
-export const snapshotApi = {
-  getAll: () => api.get('/snapshots'),
-  create: (data) => api.post('/snapshots', data),
-  update: (id, data) => api.put(`/snapshots/${id}`, data),
-  getHistory: () => api.get('/snapshots/history')
-}
-
 // ============================================================
 // BFF：每個前端頁面對應一個獨立的 namespace
 // 前端 view 一律走 bffApi.<page>.<method>，不直接呼叫共享 *Api
@@ -106,6 +98,9 @@ export const bffApi = {
 
   // SnapshotForm
   snapshotForm: {
+    listSnapshots: () => api.get('/bff/snapshot-form/snapshots'),
+    create: (data) => api.post('/bff/snapshot-form', data, { skipErrorToast: true }),
+    update: (id, data) => api.put(`/bff/snapshot-form/${id}`, data, { skipErrorToast: true }),
     get: (id) => api.get(`/bff/snapshot-form/${id}`),
     prices: (date, stocks) =>
       api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
