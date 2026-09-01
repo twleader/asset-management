@@ -34,7 +34,11 @@ public class WebConfig implements WebMvcConfigurer {
                     "http://localhost",
                     "http://localhost:80",
                     "http://localhost:5173",
-                    "http://localhost:3000"
+                    "http://localhost:3000",
+                    // 正式對外網域（ASUS DDNS）：BFF 經 Spring Cloud Gateway 轉發請求時會原樣帶上瀏覽器的
+                    // Origin header，漏列會讓 business 自己的 CORS 過濾器在進 controller 前就把請求擋下回 403
+                    // （BFF 端的白名單即使補齊也無效，因為擋點在這裡，不在 BFF；Task 401）。
+                    "https://asset-management.asuscomm.com"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                 .allowedHeaders("*")
