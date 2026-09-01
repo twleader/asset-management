@@ -5015,5 +5015,6 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 表單取得「前一版」候選清單時，一律呼叫自己的 `GET /api/bff/snapshot-form/snapshots`；該 BFF 只轉送既有 business `GET /api/snapshots`，不可複製或重算列表邏輯。
 - [ ] 上述 BFF 寫入端點必須以既有 `businessServicesClient` 將登入者 tenant headers 與原始 payload 轉送至既有 business `POST`／`PUT /api/snapshots`；成功回應原樣回傳，非 2xx 不得吞成空成功回應，須保留 `BusinessErrorAdvice` 的狀態碼與 ProblemDetail，以便表單沿用既有日期唯一鍵錯誤提示。
 - [ ] 共用 Pinia store 的快照列表與歷史資料讀取改用既有 `/api/bff/snapshot-list` 與 `/api/bff/asset-history`，並移除會直接發出 `/api/snapshots` 請求的前端 wrapper；SnapshotDetailView 維持走自己的 `snapshot-detail` BFF。
-- [ ] 此修復不新增 business endpoint、資料表、Liquibase changeset、9090 公開 API 或任何券商 I/O；不因修復而建立、修改或刪除使用者快照資料。
+- [ ] 此修復不新增 business endpoint、資料表、Liquibase changeset、9090 公開 API 或任何券商 I/O；不因修復而建立、修改或刪除使用者快照資料（Task 411 因另一個 bug 已產生的錯誤快照資料是本條的具名例外，見下方 Task 411 條款）。
 - [ ] 回歸驗證至少覆蓋 BFF 的 POST／PUT 方法、下游 URI、payload 與成功回應轉送，並驗證前端 production build 中快照表單 API 路徑為 `/api/bff/snapshot-form`。
+- [ ] **本條是上方「不因修復而建立、修改或刪除使用者快照資料」的具名例外**：id=30 這筆快照是本條所述 bug 造成的錯誤資料，不是需保留的使用者資料，清除它不違反上方條款。**同一瀏覽器分頁內切換不同快照表單頁面時，畫面必須重新載入對應該頁面的資料，不得沿用前一個頁面殘留的欄位值。**（Task 411）使用者從「編輯 A 快照」或「新增快照」導覽到「編輯 B 快照」時，若 Vue Router 因同一元件路徑重用了既有的 `SnapshotFormView` 實例（不重新掛載），僅一次性的 `onMounted` 資料載入不會重新觸發，畫面會殘留上一個頁面的存款／基金／股票欄位值；使用者若在此狀態下按「存檔」，會依當下 `isEdit` 判斷把殘留資料存成新的一筆（多存一筆）或覆蓋錯誤的既有快照，且不會有任何錯誤訊息。修復須包含：(a) 根路由層面保證同類路由切換一律重新掛載目的元件；(b) `SnapshotFormView` 自身也要能偵測路由參數變化並重新載入資料，作為根路由層防護失效時的第二層防線；(c) 送出存檔前，須比對「表單資料實際載入自哪個路由參數」與「當下路由參數」是否一致，不一致一律阻擋送出並提示使用者重新整理頁面，不得靜默送出。

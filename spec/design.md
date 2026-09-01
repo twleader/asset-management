@@ -816,7 +816,7 @@ The exact internal reader never repairs cache or triggers upstream IO. `market !
 
 ```
 src/
-├── App.vue              # Root layout: sidebar navigation + router-view（含「公開資訊」sub-menu：交易日曆 / 台幣兌美元 / 排程列表，Requirement 36）
+├── App.vue              # Root layout: sidebar navigation + router-view（含「公開資訊」sub-menu：交易日曆 / 台幣兌美元 / 排程列表，Requirement 36）。`<router-view>` 的動態元件必掛 `:key="route.fullPath"`（Requirement 136／Task 411）：同一元件對應多筆不同資料（如 `SnapshotFormView` 同時服務新增與逐筆編輯）時，Vue Router 預設會在同類路由切換間重用元件實例、不重新掛載，`onMounted` 的一次性資料載入不會重跑，畫面殘留上一次的資料。`:key` 隨路由變化即強制整個元件卸載重掛，是防止「元件重用＋殘留舊資料」這類錯誤的根本手段；各別頁面若有能力自行以 `watch(() => route.params.id, ...)` 重新載入資料，屬雙重防護，不能取代 `:key`。
 ├── main.js              # App bootstrap, plugin registration
 ├── router/index.js      # Route definitions (32 routes，含 4 條 redirect)
 ├── stores/assetStore.js # Pinia global state

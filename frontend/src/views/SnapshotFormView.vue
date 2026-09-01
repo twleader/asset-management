@@ -2520,7 +2520,14 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
 })
 
 // ===== Lifecycle =====
-onMounted(async () => {
+// loadedFormKey 記錄「目前表單資料實際對應哪一個路由參數」，供送出前比對，
+// 防止 router-view 元件被重用（同一 SnapshotFormView 實例）但資料尚未（或載入中）換成新頁面對應的快照時，
+// 使用者誤送出上一筆殘留資料（即使 App.vue 的 <router-view :key> 已從根本避免重用，這裡是雙重防護）。
+const loadedFormKey = ref(null)
+let stopUserEditedWatch = null
+
+async function loadFormData() {
+  const targetKey = String(route.params.id ?? 'new')
   // 銀行/券商選項 + fund_master 並行載入（彼此獨立）
   await Promise.allSettled([loadInstitutions(), loadFundMasters()])
   // 編輯模式時：fund_master 載入後自動算入既有 row 的預估年配息（原值若 DB 已凍結，這裡只覆寫顯示用）
@@ -2609,15 +2616,39 @@ onMounted(async () => {
   // 等所有 post-load 的程式化 mutation（loadExchangeRateForDate / onUsTransactionDateChange / fetchPriceForRow）
   // 都 settle 後再註冊 watcher，避免初始化噪音誤觸 userEdited
   await nextTick()
-  watch(
+  if (stopUserEditedWatch) { stopUserEditedWatch() }
+  userEdited.value = false
+  stopUserEditedWatch = watch(
     () => [form.deposits, form.funds, form.stocks, form.usdExchangeRate],
     () => { userEdited.value = true },
     { deep: true }
   )
+
+  // 資料真正載入完成才標記 loadedFormKey，submit() 送出前會比對它與當下路由參數是否一致。
+  loadedFormKey.value = targetKey
+}
+
+onMounted(loadFormData)
+
+// 雙重防護：即使 App.vue 的 <router-view :key="route.fullPath"> 已保證同類路由切換時
+// 整個元件會重新掛載（不會走到這個 watcher），仍以 route.params.id 變化觸發重新載入，
+// 避免日後有人移除 :key 或引入其他會重用元件實例的路由設定時，表單又悄悄殘留上一筆資料。
+watch(() => route.params.id, (newId, oldId) => {
+  if (oldId === undefined) return // onMounted 已處理首次載入
+  if (String(newId ?? 'new') === String(oldId ?? 'new')) return
+  loadFormData()
 })
 
 // ===== Submit =====
 const submit = async () => {
+  // 送出前比對「表單資料實際載入自哪個路由參數」與「目前路由參數」是否一致；
+  // 不一致代表元件被重用但資料尚未（或載入中）換成當下頁面對應的快照，
+  // 送出會把上一筆殘留資料存成錯誤的一筆，一律阻擋並要求重新整理頁面。
+  const currentKey = String(route.params.id ?? 'new')
+  if (loadedFormKey.value !== currentKey) {
+    ElMessage.error('頁面資料尚未完成載入或與目前網址不一致，請重新整理頁面後再儲存，避免存成錯誤的快照。')
+    return
+  }
   saving.value = true
   try {
     await formRef.value.validate()
