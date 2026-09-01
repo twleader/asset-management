@@ -2197,8 +2197,9 @@ const copyingPrev = reactive({ deposits: false, funds: false, stocks: false })
  *  - 編輯模式：日期嚴格小於目前快照日期的最新那筆
  */
 const getPrevSnapshotId = async () => {
-  if (store.snapshots.length === 0) await store.fetchSnapshots()
-  const snaps = store.snapshots   // 依日期 DESC 排列
+  // 表單讀取快照清單也必須走本頁 BFF；同步快取供全域最新快照選擇使用。
+  const snaps = await bffApi.snapshotForm.listSnapshots() // 依日期 DESC 排列
+  store.snapshots = snaps
   if (snaps.length === 0) return null
   if (!isEdit.value) return snaps[0].id
   const prev = snaps.find(s => s.snapshotDate < form.snapshotDate)
@@ -2656,10 +2657,13 @@ const submit = async () => {
       stocks: flattenStocks()
     }
     if (isEdit.value) {
-      await store.updateSnapshot(route.params.id, payload)
+      await bffApi.snapshotForm.update(route.params.id, payload)
+      // 這個頁面只需同步全域快照清單；歷史頁會自行透過 asset-history BFF 載入。
+      await store.fetchSnapshots()
       ElMessage.success('更新成功')
     } else {
-      const created = await store.createSnapshot(payload)
+      const created = await bffApi.snapshotForm.create(payload)
+      await store.fetchSnapshots()
       ElMessage.success('建立成功')
       // 新建完成後跳到該快照的編輯頁
       if (created?.id) {

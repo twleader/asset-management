@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { snapshotApi } from '@/api'
+import { bffApi } from '@/api'
 
 export const useAssetStore = defineStore('asset', {
   state: () => ({
@@ -17,26 +17,14 @@ export const useAssetStore = defineStore('asset', {
     async fetchSnapshots() {
       this.loading = true
       try {
-        this.snapshots = await snapshotApi.getAll()
+        this.snapshots = await bffApi.snapshotList.getAll()
       } finally {
         this.loading = false
       }
     },
 
     async fetchHistory() {
-      this.history = await snapshotApi.getHistory()
-    },
-
-    async createSnapshot(data) {
-      const result = await snapshotApi.create(data)
-      await this.fetchSnapshots()
-      return result
-    },
-
-    async updateSnapshot(id, data) {
-      const result = await snapshotApi.update(id, data)
-      await Promise.all([this.fetchSnapshots(), this.fetchHistory()])
-      return result
+      this.history = await bffApi.assetHistory.getHistory()
     },
 
   }

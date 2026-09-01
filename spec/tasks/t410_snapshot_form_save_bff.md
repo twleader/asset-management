@@ -12,11 +12,11 @@
 
 ## 要做什麼
 
-- [ ] 410.1 在 `SnapshotFormBffController` 新增三條已登入頁面路由：`GET /api/bff/snapshot-form/snapshots` → business `GET /api/snapshots`、`POST /api/bff/snapshot-form` → business `POST /api/snapshots`、`PUT /api/bff/snapshot-form/{id}` → business `PUT /api/snapshots/{id}`。三者必共用既有 `businessServicesClient`，保留 tenant header filter、HTTP method、path、body 與成功 JSON；寫入端不得使用 `onErrorReturn` 或 catch 後改回 200。
-- [ ] 410.2 在 `frontend/src/api/index.js` 的 `bffApi.snapshotForm` 新增 `listSnapshots`、`create`、`update` wrapper，並移除舊 `snapshotApi` 直打 `/api/snapshots` 的 wrapper。快照清單／歷史的共用 store 讀取改分別使用既有 `bffApi.snapshotList.getAll()` 與 `bffApi.assetHistory.getHistory()`；不得讓 SnapshotDetailView 改用 SnapshotForm BFF，它要維持自己的 `snapshot-detail` BFF。
-- [ ] 410.3 `SnapshotFormView` 的「複製前一版」使用 `bffApi.snapshotForm.listSnapshots()`，存檔直接使用 `bffApi.snapshotForm.create(payload)` 或 `update(id, payload)`，成功後只刷新必要的 Pinia state；不得透過 legacy `/api/snapshots` 重新取得資料。既有日期重複時 `400 ProblemDetail.detail` 的中文提示、成功後導向新快照編輯頁的行為都必保持。
-- [ ] 410.4 新增 BFF 單元測試，以可控 `WebClient` exchange function 驗證三條 SnapshotForm BFF 路由的下游 HTTP method、URI、payload 及成功 JSON 轉送；至少明確覆蓋 POST 與 PUT。測試必以既有 `WebClientConfig.tenantHeaderFilter()` 組裝 client，並在帶有 `TenantIdentity` 的 Reactor context 下呼叫 POST／PUT，斷言捕捉到的下游請求具有正確的 `X-User-Id`、`X-User-Role` 與 `X-User-Status`。測試不得啟動真券商或修改實際 PostgreSQL 資料。
-- [ ] 410.4a 在同一 controller 測試中，以 `400 application/problem+json` 的下游 fixture 分別覆蓋 POST 與 PUT，並將 `SnapshotFormBffController` 與既有 `BusinessErrorAdvice` 一起綁定至 `WebTestClient`；斷言回應仍為 HTTP 400、Content-Type 為 `application/problem+json`、保留原始 `ProblemDetail.detail`，絕不可變成 HTTP 200 或空成功回應。
+- [x] 410.1 在 `SnapshotFormBffController` 新增三條已登入頁面路由：`GET /api/bff/snapshot-form/snapshots` → business `GET /api/snapshots`、`POST /api/bff/snapshot-form` → business `POST /api/snapshots`、`PUT /api/bff/snapshot-form/{id}` → business `PUT /api/snapshots/{id}`。三者必共用既有 `businessServicesClient`，保留 tenant header filter、HTTP method、path、body 與成功 JSON；寫入端不得使用 `onErrorReturn` 或 catch 後改回 200。
+- [x] 410.2 在 `frontend/src/api/index.js` 的 `bffApi.snapshotForm` 新增 `listSnapshots`、`create`、`update` wrapper，並移除舊 `snapshotApi` 直打 `/api/snapshots` 的 wrapper。快照清單／歷史的共用 store 讀取改分別使用既有 `bffApi.snapshotList.getAll()` 與 `bffApi.assetHistory.getHistory()`；不得讓 SnapshotDetailView 改用 SnapshotForm BFF，它要維持自己的 `snapshot-detail` BFF。
+- [x] 410.3 `SnapshotFormView` 的「複製前一版」使用 `bffApi.snapshotForm.listSnapshots()`，存檔直接使用 `bffApi.snapshotForm.create(payload)` 或 `update(id, payload)`，成功後只刷新必要的 Pinia state；不得透過 legacy `/api/snapshots` 重新取得資料。既有日期重複時 `400 ProblemDetail.detail` 的中文提示、成功後導向新快照編輯頁的行為都必保持。
+- [x] 410.4 新增 BFF 單元測試，以可控 `WebClient` exchange function 驗證三條 SnapshotForm BFF 路由的下游 HTTP method、URI、payload 及成功 JSON 轉送；至少明確覆蓋 POST 與 PUT。測試必以既有 `WebClientConfig.tenantHeaderFilter()` 組裝 client，並在帶有 `TenantIdentity` 的 Reactor context 下呼叫 POST／PUT，斷言捕捉到的下游請求具有正確的 `X-User-Id`、`X-User-Role` 與 `X-User-Status`。測試不得啟動真券商或修改實際 PostgreSQL 資料。
+- [x] 410.4a 在同一 controller 測試中，以 `400 application/problem+json` 的下游 fixture 分別覆蓋 POST 與 PUT，並將 `SnapshotFormBffController` 與既有 `BusinessErrorAdvice` 一起綁定至 `WebTestClient`；斷言回應仍為 HTTP 400、Content-Type 為 `application/problem+json`、保留原始 `ProblemDetail.detail`，絕不可變成 HTTP 200 或空成功回應。
 - [ ] 410.5 驗收需使用 Java 21 跑 BFF 測試、跑 frontend production build，並依 run-stack 僅 rebuild/recreate `bff` 與 `frontend`。執行中容器必健康；需確認實際 frontend bundle 含 `/bff/snapshot-form` 寫入路徑且不再含 `snapshotApi` 直打 `/snapshots` 的 API wrapper。登入後的實際表單可由使用者按存檔驗證；代理不得為測試建立、更新或刪除使用者快照。
 
 ## 驗證
@@ -34,4 +34,6 @@ curl -sI http://localhost/ | head -1
 
 ## 完成報告
 
-（實作者完成後回填：實際修改檔案、測試與 Docker 驗證結果、未進行任何使用者快照寫入的證據，以及與本任務差異。）
+- 實作：`SnapshotFormBffController` 新增清單、新增與更新 passthrough；前端表單的複製／儲存全走 `snapshot-form` BFF，移除 legacy `snapshotApi`，共用 store 的清單與歷史改走既有 page BFF。
+- 測試：Java 21 focused 與完整 `bff` Maven tests 均通過；frontend production build 通過。新增 controller test 使用 in-memory WebClient exchange function、Reactor tenant context 和 `BusinessErrorAdvice`，沒有啟動 broker 或連線／寫入實際 PostgreSQL 快照。
+- Docker runtime：依本次明確指示，未執行 410.5 的 Docker build/recreate、health check 或登入表單驗證，故 410.5 保持未勾選。
