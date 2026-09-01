@@ -159,7 +159,7 @@
         <el-main class="app-main">
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
-              <component :is="Component" />
+              <component :is="Component" :key="route.fullPath" />
             </transition>
           </router-view>
         </el-main>
@@ -171,10 +171,12 @@
 <script setup>
 import zhTw from 'element-plus/dist/locale/zh-tw.mjs'
 import { ElLoading } from 'element-plus'
+import { useRoute } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
 import { useAuthStore } from '@/stores/authStore'
 
 const collapsed = ref(false)
+const route = useRoute()
 const store = useAssetStore()
 const auth = useAuthStore()
 
