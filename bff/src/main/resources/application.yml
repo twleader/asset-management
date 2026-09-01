@@ -36,6 +36,10 @@ spring:
               - "http://localhost"
               - "https://localhost"
               - "http://localhost:5173"
+              # 正式對外網域（ASUS DDNS）：漏列會讓瀏覽器對非 GET 請求（POST/PUT/DELETE/PATCH）帶的
+              # Origin header 卡在 Spring Cloud Gateway CorsWebFilter，回 403（無自訂 body），且與
+              # Spring Security 的 401 判斷順序不同，難以第一時間聯想到 CORS（Task 401）。
+              - "https://asset-management.asuscomm.com"
             allowedMethods:
               - GET
               - POST
