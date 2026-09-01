@@ -37,4 +37,8 @@ curl -sI http://localhost/ | head -1
 
 ## 完成報告
 
-（實作完成後回填：檔案變更清單、build 結果、瀏覽器驗證截圖/操作紀錄、id=30 清除的 SQL 執行紀錄與結果、run-stack 驗收結果。）
+- **實作**：`frontend/src/App.vue` 的 `<router-view>` 動態元件加 `:key="route.fullPath"`（`useRoute()` 取得 `route`）。`frontend/src/views/SnapshotFormView.vue` 把 `onMounted` 內的載入邏輯抽成具名 `loadFormData()`，新增 `loadedFormKey`／`stopUserEditedWatch` 模組級狀態、`watch(() => route.params.id, ...)` 雙重防護、`submit()` 開頭的 `loadedFormKey` 與當下路由參數一致性檢查。
+- **411.1–411.3**：已完成，程式碼見上述兩檔案 diff（commit `4918583f`，main 上 merge commit `0c6d300a`）。
+- **411.4（資料善後，已完成）**：`docker exec asset-postgres psql` 確認 id=30 確為 `owner_user_id=1`、`snapshot_date=2026-09-02`、`total_assets=20287992.21`；子表 `fund_holding`（1 筆）／`stock_holding`（44 筆）／`bank_deposit`（16 筆）皆僅屬於該筆 snapshot，於同一交易內先刪三張子表再刪 `asset_snapshot` id=30，刪除後複查 `asset_snapshot` 僅剩 id=15（2026-09-01，20292222.14，owner 1）、id=18（owner 2）、id=29（owner 3）三筆 2026-09-01/09-02 附近快照，id=30 已不存在。
+- **build／run-stack（已完成）**：`npm run build` 通過；`docker compose -p asset-management build --no-cache frontend` 成功、`up -d --no-deps --force-recreate frontend` 完成，`curl -sI http://localhost/` 回 200；`docker exec asset-frontend grep -l '頁面資料尚未完成載入' /usr/share/nginx/html/assets/*.js` 命中 `SnapshotFormView-DVmVQAXz.js`，證明部署的 bundle 確實含本次新增的一致性檢查文案。
+- **411.5 瀏覽器實測（未能完成，誠實記錄）**：透過 Claude Browser 工具導覽至 `http://localhost/` 嘗試登入時，Google OAuth 回傳 `400 redirect_uri_mismatch`（`已封鎖存取權：這個應用程式的要求無效`），此為本次沙盒瀏覽器所在網域未被登記於該 OAuth Client 的合法 redirect URI 清單所致的環境限制，與本次程式碼變更無關，也非我方可在此環境修正（需要在 Google Cloud Console 註冊對應網域，屬使用者權限範圍）。因此**無法完成「登入 → 開編輯頁 → 切新增頁 → 切回編輯頁」的實際瀏覽器點擊驗證**，411.5 保持未勾選。已完成的替代查證：(a) production build 通過且 bundle 含新程式碼字串（見上）；(b) `arch-auditor` 唯讀查證本次 diff，確認 `stopUserEditedWatch` 正確 stop-before-rebind、`route.params.id` watch 在 `:key` 生效下屬預期的雙重防護死碼、無 watcher／timer／Sortable 實例洩漏（結論 critical:0 major:0 minor:0）；(c) `spec-auditor` 對 spec 文件的對抗式審查（原 major 2 項已修正）。建議下次有可用登入環境時，依 411.5 描述的步驟補做一次瀏覽器實測。
