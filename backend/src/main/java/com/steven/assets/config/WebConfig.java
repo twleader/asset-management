@@ -38,7 +38,9 @@ public class WebConfig implements WebMvcConfigurer {
                     // 正式對外網域（ASUS DDNS）：BFF 經 Spring Cloud Gateway 轉發請求時會原樣帶上瀏覽器的
                     // Origin header，漏列會讓 business 自己的 CORS 過濾器在進 controller 前就把請求擋下回 403
                     // （BFF 端的白名單即使補齊也無效，因為擋點在這裡，不在 BFF；Task 401）。
-                    "https://asset-management.asuscomm.com"
+                    "https://asset-management.asuscomm.com",
+                    // Tailscale Serve HTTPS：9090 gateway 的 Tailnet 對外網域（見 api-gateway/nginx.conf）
+                    "https://mac-mini-2.tailccc7be.ts.net:9090"
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
                 .allowedHeaders("*")
