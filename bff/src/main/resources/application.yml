@@ -40,8 +40,6 @@ spring:
               # Origin header 卡在 Spring Cloud Gateway CorsWebFilter，回 403（無自訂 body），且與
               # Spring Security 的 401 判斷順序不同，難以第一時間聯想到 CORS（Task 401）。
               - "https://asset-management.asuscomm.com"
-              # Tailscale Serve HTTPS：9090 gateway 的 Tailnet 對外網域（見 api-gateway/nginx.conf）
-              - "https://mac-mini-2.tailccc7be.ts.net:9090"
             allowedMethods:
               - GET
               - POST
