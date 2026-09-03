@@ -63,6 +63,9 @@
             </div>
             <v-chart v-else :option="twStockPieOption" style="height: 400px; cursor: pointer" autoresize
               @click="p => onLookthroughPieClick(p, '台股')" />
+            <div v-if="twLookthroughHasData && twLookthroughDegraded.length > 0" class="lookthrough-degraded-note">
+              {{ twLookthroughDegraded.length }} 檔 ETF 因故未展開成分股，已以整檔金額計入：{{ twLookthroughDegraded.map(d => d.code).join('、') }}
+            </div>
           </div>
           <div v-else-if="allocationTab === 'usStock'">
             <div v-if="usLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
@@ -74,6 +77,9 @@
             </div>
             <v-chart v-else :option="usStockPieOption" style="height: 400px; cursor: pointer" autoresize
               @click="p => onLookthroughPieClick(p, '美股')" />
+            <div v-if="usLookthroughHasData && usLookthroughEtfCount > 0" class="lookthrough-degraded-note">
+              美股 ETF 僅揭露前 10 大成份股，其餘已計入『其它』
+            </div>
           </div>
           <div v-else>
             <v-chart :option="assetClassPieOption" style="height: 400px" autoresize />
