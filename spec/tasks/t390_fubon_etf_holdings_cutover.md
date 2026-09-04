@@ -29,3 +29,5 @@ Temurin Java21執行backend/bff/external-materials-service `mvn test`，禁止`2
 - **測試／部署**：完整 Python 232、backend 1,627、BFF 235、external 657 均通過且 Java 無略過；feature Fubon／business／external／BFF 重建、recreate、healthy、image SHA／Compose provenance 均已核對。schema 92 表重產一致，13 條既有 OpenAPI parity 通過。
 
 本機驗收證據與美股讀回保存在 `/tmp/asset-takeover-20260830/etf/`；完成報告不將一次非預期 rescan 的驗收事故隱藏為「全程只有唯讀」，事故與其已觀察副作用已另行揭露。此處只記合併前驗收；main 合併推送後必須再由 main 重建讀回。兩個 session 全部完成前，原 Claude branches 及未提交檔案仍保留。
+
+**2026-09-04 補充（環境限制已部分解除）**：第 26、27 行「真人 provider 查詢未驗證」已被後續事實部分推翻。當日直接呼叫 `fubon-broker-service` 的 `POST /internal/market-data/etf-holdings`（查 `0050`）回 `status: SUCCESS`，取得完整真實成分股清單，確認台股 ETF 成分股查詢具備可用唯讀權限，非僅缺憑證證據。同一帳號的**即時報價**當日仍 100% 失敗（`TRIAL_QUOTE_REJECTED`／`SDK_CALL_SATURATED`），故本補充僅限於 ETF 成分股這一項查詢，不代表帳號已全面轉正式權限。`.env.example` 的 `FUBON_ETF_HOLDINGS_SYNC_ENABLED` 已改為預設 `true`；`fubon_etf_holdings_snapshot` 表在本次補充撰寫當下仍為 0 筆，是因排程固定時間（台北時間每日 08:50／15:30）尚未在旗標開啟後的容器實例上觸發過，非權限問題。

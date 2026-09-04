@@ -32,3 +32,5 @@
 - DB/API 讀回：正式 `fubon_etf_holdings_snapshot` 為 **0 筆**；0050 台股 API 為 `supported=false`、空 holdings、`asOfDate=null`、訊息「尚無同步資料」，沒有灌入範例或捏造日期。
 
 完整測試及 feature deployment 證據位於本機 `/tmp/asset-takeover-20260830/etf/`。驗收時曾發生一次非預期公開資訊 rescan，已向使用者揭露並留存 `incident-readback.md`，後續改為明確白名單唯讀驗收；未呼叫券商寫入方法。此完成報告記錄的是合併前結果，合併推送後的 main rebuild／readback 另行執行並記錄，不在此預先宣稱已完成。原 Claude 未提交內容保持原樣。
+
+**2026-09-04 補充（環境限制已部分解除）**：第 31、32 行記載的「尚未取得可驗證唯讀權限證據」已被後續事實部分推翻。當日直接呼叫 `fubon-broker-service` 的 `POST /internal/market-data/etf-holdings`（查 `0050`）回 `status: SUCCESS`，拿到完整真實成分股清單（台積電 57.11%…等），確認**成分股查詢**具備可用的唯讀權限。此權限與**即時報價**（`FUBON_TW_LIVE_QUOTES_ENABLED`）屬不同層級——即時報價當日仍 100% 失敗（`TRIAL_QUOTE_REJECTED`／`SDK_CALL_SATURATED`，帳號仍在試用層級），故本補充**不代表**帳號已全面轉為正式權限，僅確認 ETF 成分股這一項查詢已可用。`.env.example` 的 `FUBON_ETF_HOLDINGS_SYNC_ENABLED` 因此已改為預設 `true`；`fubon_etf_holdings_snapshot` 表在本次補充撰寫當下仍為 0 筆，因排程固定時間（台北時間每日 08:50／15:30）尚未在旗標開啟後的容器實例上觸發過，非權限問題。
