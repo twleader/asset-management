@@ -78,9 +78,9 @@
 - [x] 416.R2 僅包住 email lookup publisher：以 `Mono.defer(() -> users.byEmail(trimmed)).timeout(Duration.ofSeconds(5)).onErrorMap(...)` 將 HTTP 4xx/5xx、連線／逾時與解碼錯誤轉成 416.5 的 canonical unavailable exception；其後才處理 empty/inactive。不得把 local email 格式錯誤或資料讀取 downstream error 一併映射，且不得讓 lookup 的 WebClientResponseException 或 upstream body 穿透匿名 9090。
 - [x] 416.R3 BusinessUserClient.byEmail 必須刪除 Reactor CTX_IDENTITY 後才發出 lookup；因此 lookup request 不得帶 X-User-Id、X-User-Role、X-User-Status。解析成功後的資料讀取 request 則仍必須帶入被選帳號三個 header，且不受呼叫端殘留 context 影響。
 - [x] 416.R4 測試一律使用 synthetic fixture（例如 selected@example.invalid），不得讀取、硬編碼或在任務報告揭露真人帳號 email。查無帳號要模擬 business 實際的 200 空 body（非 204），並覆蓋 inactive、lookup 4xx/5xx、transport、實際 5 秒 timeout、malformed body、五端點精確 400 detail、同端點每種 lookup 失敗的 canonical 503 body，以及帶殘留 context 時 lookup 無 tenant header、下游使用選取帳號 header。
-- [ ] 416.R5 文件與驗收命令必須可執行：下方完整矩陣取代舊版簡略範例。BFF health 由 compose container 內 localhost:8080 檢查；實機驗收要覆蓋五支端點的 default 與 email 分支（含 trading-radar stock），以環境變數提供已確認的 synthetic fixture 與個股參數。若環境沒有可用 fixture，不得捏造成功結果，需明確回報並保留單元測試證據。
+- [x] 416.R5 文件與驗收命令必須可執行：下方完整矩陣取代舊版簡略範例。BFF health 由 compose container 內 localhost:8080 檢查；實機驗收要覆蓋五支端點的 default 與 email 分支（含 trading-radar stock），以環境變數提供已確認的 synthetic fixture 與個股參數。若環境沒有可用 fixture，不得捏造成功結果，需明確回報並保留單元測試證據。
 - [x] 416.R6 OpenAPI YAML、產生的專案 Swagger Markdown 與 SRPP 鏡像必須同步新契約：五支 operation 的 400 說明／example 要正確表示 email 格式錯誤的 detail；Radar／Transactions 同時保留其既有 selector/filter 400 情境但明示 email invalid 的優先規則；Portfolio 不得再把 byEmail lookup 失敗描述為 502，所有 email lookup failure 都是該 endpoint canonical 503。
-  - 指令的唯一健康檢查為 `docker compose -p asset-management exec -T bff curl -fsS http://localhost:8080/actuator/health`；不得從 host 假設 8080 有對外 port。
+  - 指令的唯一健康檢查為 `docker compose -p asset-management exec -T bff wget -qO- http://localhost:8080/actuator/health`；不得從 host 假設 8080 有對外 port。
   - 先以 `TASK416_ACTIVE_EMAIL`、`TASK416_STOCK_CODE`、`TASK416_STOCK_MARKET` 做非空 preflight；驗收矩陣必須對 `/api/assets/latest`、`/api/public/portfolio-advice/latest`、`/api/public/trading-radar/today`、`/api/public/trading-radar/stock`（帶 stockCode/market）、`/api/public/transactions` 各做一次 default 與一次 urlencoded email query。
   - 查無帳號與 inactive fixture 的 503 要收集完整 body 做逐位元比對，invalid email 要驗證 400 的精確 detail；若環境沒有可用 inactive／active fixture，記為未可做的實機情境，不能以任意真人帳號代替。
 
@@ -107,7 +107,7 @@ ruby scripts/render-9090-openapi-docs.rb --check
 ```bash
 docker compose -p asset-management build --no-cache bff
 docker compose -p asset-management up -d --no-deps --force-recreate bff api-gateway
-docker compose -p asset-management exec -T bff curl -fsS http://localhost:8080/actuator/health
+docker compose -p asset-management exec -T bff wget -qO- http://localhost:8080/actuator/health
 
 # 完整驗收必須用已確認的 synthetic / 非正式帳號 fixture；未設定就停止，不得以真人帳號代替。
 : "${TASK416_ACTIVE_EMAIL:?set an ACTIVE non-configured-admin fixture}"
@@ -227,4 +227,12 @@ ruby scripts/render-9090-openapi-docs.rb --check
 - 已完成 R6：OpenAPI 的五支 operation、rendered project Markdown 及 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md` 已由同一 renderer 覆寫並 byte-identical；Portfolio 的 by-email lookup failure 已明確文件化為 503，不是 502。
 - 已實際通過：`mvn -q -f bff/pom.xml test -DextraArgLine=-Dnet.bytebuddy.experimental=true`、`git diff --check`、`bash scripts/spec-check.sh`、`ruby scripts/tests/docker-external-api-openapi-test.rb`、`ruby scripts/render-9090-openapi-docs.rb --check`。
 
-**尚待上層收尾（未在此報告宣稱已完成）：** R5 的 Docker image rebuild／container recreate／9090 實機矩陣、獨立 architecture review，以及 commit → no-ff merge → push。這些完成前 Task 416 不得標記為整體完成。
+### R5 Docker／9090 實機驗收
+
+- 以 temporary integration 合併 `ffd8010a` 與 `896215d0`；`-X ours` 成功且只處理文件衝突。temporary worktree 已 abort／移除，HTTP 驗收輸出已移至 Trash。
+- BFF 已 rebuild／recreate 且 runtime health 為 `UP`；實際 image digest 為 `sha256:13c110698cd4d3067cb85cdd015e80b456b14c5bf75e81bd32862715e96b5074`，api-gateway image 未變更。原本文件指定的 container 內 `curl` 不存在，故該 health command 不可執行；修正文檔為 container 內 `wget` 後，runtime agent 已重跑成功（exit 0，`{"status":"UP"}`），故 R5 已完成。
+- 五支端點的 default 與 active email 分支皆為 200；五支 missing 情境皆為 503；五支 invalid email 情境皆為 400，且 detail 精確為規定文案。
+- 執行環境沒有 inactive non-admin fixture，故無法做 missing／inactive runtime body equality 比對；此唯一未可執行的 runtime 情境由已通過的 unit tests 覆蓋，未捏造成功結果。
+- recreate 時限內的 BFF log scan，`Connection refused`、`500`、`error`、`exception` 均為 0；未呼叫任何 write 或 broker action。
+
+**任務整體仍不得宣稱完成：** main merge／push 仍被 main worktree 的未知 `.configure-tailscale-api.sh.swp` 阻擋，必須先由其擁有者處理後才能完成既定的 commit → no-ff merge → push。
