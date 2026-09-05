@@ -20,8 +20,9 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
  * <p><b>本 advice 的覆蓋範圍與第七條（今日股市分析）刻意不同</b>：
  * {@link PublicPortfolioAdviceService} 的 downstream 呼叫走 {@code exchangeToMono} 的 byte-relay，
  * 非 2xx <b>不會</b>擲出 {@code WebClientResponseException}，故 business 的非 2xx 屬 relay 範圍。
- * 這裡的 {@code WebClientResponseException} handler 涵蓋的是 bootstrap lookup
- * （{@code BusinessUserClient.configuredAdmin()}，該支用 {@code .retrieve()}）擲出的例外。
+ * 這裡的 {@code WebClientResponseException} handler 只涵蓋 configured-admin bootstrap lookup
+ * （{@code BusinessUserClient.configuredAdmin()}，該支用 {@code .retrieve()}）擲出的例外；email
+ * lookup 在 service 內先轉成 {@code PublicPortfolioAdviceUnavailableException}，不會落到 502 handler。
  *
  * <p>「主要管理者不可用」是合法的結構化訊號，比照既有 {@code LatestAssetsPublicExceptionAdvice.unavailable()}
  * 回具名的 {@code 503 SERVICE_UNAVAILABLE}（<b>不是 404</b>），不在消毒範圍。
@@ -39,7 +40,15 @@ public class PublicPortfolioAdviceExceptionAdvice {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
 
-    /** bootstrap lookup 的 business 非 2xx：一律消毒成固定文案的 502，不帶出上游 body。 */
+    /** email 參數格式不合法（Requirement 140）：在呼叫 business 前就已拒絕，回 400。 */
+    @ExceptionHandler(PublicPortfolioAdviceRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidRequest(PublicPortfolioAdviceRequestException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        problem.setTitle("Invalid portfolio advice request");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
+
+    /** configured-admin bootstrap lookup 的 business 非 2xx：一律消毒成固定文案的 502，不帶出上游 body。 */
     @ExceptionHandler(WebClientResponseException.class)
     public ResponseEntity<ProblemDetail> handleBusinessError(WebClientResponseException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(

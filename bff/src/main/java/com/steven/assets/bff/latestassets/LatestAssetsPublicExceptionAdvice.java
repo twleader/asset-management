@@ -17,6 +17,14 @@ public class LatestAssetsPublicExceptionAdvice {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(p);
     }
 
+    /** email 參數格式不合法（Requirement 140）：在呼叫 business 前就已拒絕，回 400。 */
+    @ExceptionHandler(LatestAssetsRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidRequest(LatestAssetsRequestException ex) {
+        ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        p.setTitle("Invalid latest assets request");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(p);
+    }
+
     @ExceptionHandler(LatestAssetsPayloadException.class)
     public ResponseEntity<ProblemDetail> malformedPayload(LatestAssetsPayloadException ex) {
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());

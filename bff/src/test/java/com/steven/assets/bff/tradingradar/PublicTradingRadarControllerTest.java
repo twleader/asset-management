@@ -25,17 +25,17 @@ class PublicTradingRadarControllerTest {
         var payload = JsonNodeFactory.instance.objectNode().put("ruleVersion", "TW_RULES_V14");
         PublicTradingRadarRelay relay = new PublicTradingRadarRelay(payload);
         PublicTradingRadarService service = mock(PublicTradingRadarService.class);
-        when(service.today()).thenReturn(Mono.just(relay));
+        when(service.today(null)).thenReturn(Mono.just(relay));
         PublicTradingRadarController controller = new PublicTradingRadarController(service);
 
-        var response = controller.today().block();
+        var response = controller.today(null).block();
 
         assertThat(response).isNotNull();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
         assertThat(response.getHeaders()).doesNotContainKey(HttpHeaders.LOCATION);
         assertThat(response.getBody()).isEqualTo(payload);
-        verify(service).today();
+        verify(service).today(null);
         verifyNoMoreInteractions(service);
         assertThat(Arrays.stream(PublicTradingRadarController.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getType))
@@ -45,7 +45,7 @@ class PublicTradingRadarControllerTest {
     @Test
     void serviceContractIsHttpNeutralAndRelayBodyIsImmutable() throws NoSuchMethodException {
         ParameterizedType returnType = (ParameterizedType) PublicTradingRadarService.class
-                .getDeclaredMethod("today").getGenericReturnType();
+                .getDeclaredMethod("today", String.class).getGenericReturnType();
         assertThat(returnType.getRawType()).isEqualTo(Mono.class);
         assertThat(returnType.getActualTypeArguments()).containsExactly(PublicTradingRadarRelay.class);
 

@@ -19,11 +19,11 @@ class PublicTradingRadarSelectorTest {
         PublicTradingRadarService service = new PublicTradingRadarService(users,
                 WebClient.builder().baseUrl("http://business").build());
 
-        assertThatThrownBy(() -> service.stock(List.of("2330", "2317"), List.of("台股")))
+        assertThatThrownBy(() -> service.stock(List.of("2330", "2317"), List.of("台股"), null))
                 .isInstanceOf(PublicTradingRadarRequestException.class);
-        assertThatThrownBy(() -> service.stock(List.of("bad!"), List.of("台股")))
+        assertThatThrownBy(() -> service.stock(List.of("bad!"), List.of("台股"), null))
                 .isInstanceOf(PublicTradingRadarRequestException.class);
-        assertThatThrownBy(() -> service.stock(List.of("2330"), List.of("台 股")))
+        assertThatThrownBy(() -> service.stock(List.of("2330"), List.of("台 股"), null))
                 .isInstanceOf(PublicTradingRadarRequestException.class);
         verifyNoInteractions(users);
     }

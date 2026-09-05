@@ -27,6 +27,12 @@ public class PublicTradingRadarExceptionAdvice {
                 "Invalid trading radar request", "股票代號或市場別格式不合法");
     }
 
+    @ExceptionHandler(PublicTradingRadarEmailRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidEmail(PublicTradingRadarEmailRequestException ignored) {
+        return problem(HttpStatus.BAD_REQUEST,
+                "Invalid trading radar email", "email 格式不合法");
+    }
+
     @ExceptionHandler(PublicTradingRadarStockNotFoundException.class)
     public ResponseEntity<ProblemDetail> notFound(PublicTradingRadarStockNotFoundException ignored) {
         return problem(HttpStatus.NOT_FOUND,
