@@ -487,10 +487,13 @@ Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十�
 經 business 端 30 秒全域冷卻節流）。BFF 8080 與 external-materials 8082
 不再發布到 host。
 
-`trading-radar/today` 固定讀取 `.env` 主要管理者的持倉／觀察清單，回傳首頁收合列表與頁首資料；
+`trading-radar/today` 預設讀取 `.env` 主要管理者的持倉／觀察清單，回傳首頁收合列表與頁首資料；
 `trading-radar/stock` 才依 `stockCode`、`market` 回傳單一標的完整展開資料與證據；
 任何能到達本機 loopback 或獲准 Tailscale identity 的人都可免登入讀取，請勿將
-9090 暴露到公網。`commodity-prices` 每次只讀既有已持久化 WTI、BRENT、GOLD spot，固定三個 slot；
+9090 暴露到公網。**這五支個人資料 API（`assets/latest`、`portfolio-advice/latest`、
+兩支交易雷達、`transactions`）另外接受 `email` query 參數改查指定帳號的資料**（Requirement 140），
+**不需額外密碼或 token**——這是刻意設計，不是遺漏；意味著任何能到達 9090 的人只要知道
+一個有效帳號的 email，就能讀到該帳號完整的個人資料，請務必只在信任的網路邊界內使用。`commodity-prices` 每次只讀既有已持久化 WTI、BRENT、GOLD spot，固定三個 slot；
 它不接受 query 或 GET body，也不會 refresh 或 request-time 外呼。十三支 API 的完整 OpenAPI 3.1 契約在
 `docs/openapi/docker-external-api.yaml`；由該 YAML 產生、供人閱讀的標準文件同時位於
 `docs/openapi/9090-api-swagger.md` 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`；Swagger UI 與 YAML 本身並沒有掛在 9090。

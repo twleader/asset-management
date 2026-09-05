@@ -29,7 +29,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 
 ---
 
-## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398）
+## 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）
 
 | Task | 標題 | 位置 |
 |---|---|---|
@@ -397,6 +397,7 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 396 | 除權息資料查詢排程：交易日 09:00／13:30 唯讀查詢富邦股利政策，併入既有兩段式除權息證據體系（provider 最低優先層），減資不在本次範圍（Requirement 131） | [tasks/t396_fubon_dividend_evidence_sync.md](tasks/t396_fubon_dividend_evidence_sync.md) |
 | 397 | 個股即時推播：訂閱交易雷達股票池，可信實際成交經既有writer/Lua原子更新完整Redis quote，不觸碰 Requirement 114 canonical revision 機制（Requirement 132） | [tasks/t397_fubon_stock_push_price.md](tasks/t397_fubon_stock_push_price.md) |
 | 398 | 個股技術指標查詢排程（KD／MACD／布林通道）：交易日收盤後查詢交易雷達股票，寫既有Redis獨立來源快取並提供內部讀回；不新增SQL表或欄位（Requirement 133） | [tasks/t398_fubon_technical_indicator_sync.md](tasks/t398_fubon_technical_indicator_sync.md) |
+| 416 | 9090 個人資料公開端點（assets/latest、portfolio-advice/latest、trading-radar/today／stock、transactions）新增 optional `email` 參數依帳號查詢，取代固定 configured-admin；刻意不新增驗證層，使用者知情接受曝險範圍擴大（Requirement 140） | [tasks/t416_public_api_email_account_selector.md](tasks/t416_public_api_email_account_selector.md) |
 
 > **編號說明：本輪已吸收 main `07963d01` 的 Task 388 備份修復與 Task 389–390 ETF 成分股同步（Requirement 123）；與 Task 393–398 是聯集，不覆寫既有任務。391–392 保留原避讓空號，本批次繼續使用 393–398，不再改號。**
 
