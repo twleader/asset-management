@@ -715,38 +715,48 @@ Requirement 109／Task 373 取代原本 Yahoo request-time 五檔決策；其後
 
 ```text
 api-gateway:9090
-  GET /api/public/trading-radar/today
-    -> BFF PublicTradingRadarController.list()
-      -> configured-admin bootstrap + explicit tenant headers + cleared Reactor identity
+  GET /api/public/trading-radar/today?email=
+    -> BFF PublicTradingRadarController.today(email)
+      -> email absent: configured-admin bootstrap (unchanged)
+         email present: byEmail(email), require isActive() only
+         + explicit tenant headers + cleared Reactor identity
         -> business GET /internal/public-trading-radar/current/list
           -> TradingRadarPublicProjectionService.list(TradingRadarService.getCurrent())
 
-  GET /api/public/trading-radar/stock?stockCode=&market=
-    -> BFF PublicTradingRadarController.stock(stockCode, market)
-      -> configured-admin bootstrap + explicit tenant headers + cleared Reactor identity
+  GET /api/public/trading-radar/stock?stockCode=&market=&email=
+    -> BFF PublicTradingRadarController.stock(stockCode, market, email)
+      -> email absent: configured-admin bootstrap (unchanged)
+         email present: byEmail(email), require isActive() only
+         + explicit tenant headers + cleared Reactor identity
         -> business GET /internal/public-trading-radar/current/stock?stockCode=&market=
           -> TradingRadarPublicProjectionService.stock(TradingRadarService.getCurrent(), stockCode, market)
 ```
 
 兩個 business route 都是精確 `/internal/public-trading-radar/current/{list,stock}` mapping，只在 Docker network 經 BFF named client 使用，不是 9090／frontend／Tailscale path，也不得落入 `TradingRadarBffRoutes` 的 `/api/bff/trading-radar/**` rewrite；backend controller 只負責 validation 與委派。`TradingRadarPublicProjectionService` 每一次 HTTP request 都恰好呼叫一次既有 `getCurrent()`，以該 immutable response 投影，**不可**改呼叫會保存 export snapshot 的 `get()`，也不可 refresh、export、通知或自行查詢另一個 stock。list 的 `TradingRadarListResponse` 只含首頁所需 metadata、兩個完整 `MarketSummary`、`publicInformation` 和 `TradingRadarListStock[]`；stock item 固定宣告首畫面使用的 identity／asset、hold／distribution／currency、fundamental 摘要、三軌 action/label/score、timing/counter-trend、即時價與折溢價、四條 MA、KD、週指標、as-of。它不包含展開用 `reasons`／`risks`、完整 sources、evidence、extended indicators、daily candle 或其餘 full decision tree。detail 的 `TradingRadarStockDetailResponse` 則以 `stock` property 容納未裁切的既有 `TradingRadarDto.StockDecision`，並保留**該 detail request**同次計算的 metadata／market context。兩支 public API 是兩個獨立 read：不設快取或 snapshot token，也不得宣稱先 list、後 detail 必來自同一個 `generatedAt`；consumer 可比較各 response 的 `generatedAt` 偵測中間更新，而 BFF 絕不可把兩次結果拼成單一 response。`stockCode` 加 `market` 是唯一識別，避免台／美股同代號混淆；合法但無 match 由 typed not-found 轉為 sanitized 404，非輸入錯誤或 upstream failure。
 
-兩支 path 維持 Requirement 86 configured-admin owner scope：public caller 無法選 owner，BFF 不直查 DB，cookie／caller header／Tailscale identity 都不是 tenant selector。BFF 只帶 bootstrap 過的 `X-User-*` 到 business，並在 outbound Reactor context 刪除 caller identity。bootstrap unavailable 保持 503，downstream non-2xx 保持 sanitized 502，transport 保持 503，timeout 保持 504；detail 的 projection not-found 是唯一安全的 404。Nginx、BFF SecurityConfig、Tailscale serve config 皆只能加入各自明列的 exact GET；全 branch 最終十三條 9090 route 的 allowlist（十二 GET、一 POST）與 OpenAPI path/method 集合必須雙向相同；trailing slash、matrix、descendant 不藉 wildcard 被放行。
+兩支 path 維持 Requirement 86 configured-admin owner scope：BFF 不直查 DB，cookie／caller header／Tailscale identity 都不是 tenant selector。BFF 只帶 bootstrap 過的 `X-User-*` 到 business，並在 outbound Reactor context 刪除 caller identity。
+
+> **Requirement 140 現行狀態規則：** 上一句「public caller 無法選 owner」自 Requirement 140 起改為「public caller 只能透過明列的 `email` query 參數選 owner，其餘 cookie／header／Tailscale identity 仍不是 tenant selector」——兩支 path 各自新增 optional `email` 參數，帶有效 email 時改呼叫 `BusinessUserClient.byEmail(email)`（只驗 `isActive()`，不要求 `configuredAdmin()`），不帶時 `configuredAdmin()` bootstrap 逐字不變。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節。bootstrap unavailable 保持 503，downstream non-2xx 保持 sanitized 502，transport 保持 503，timeout 保持 504；detail 的 projection not-found 是唯一安全的 404。Nginx、BFF SecurityConfig、Tailscale serve config 皆只能加入各自明列的 exact GET；全 branch 最終十三條 9090 route 的 allowlist（十二 GET、一 POST）與 OpenAPI path/method 集合必須雙向相同；trailing slash、matrix、descendant 不藉 wildcard 被放行。
 
 `docs/openapi/docker-external-api.yaml` 是 9090 的機器可讀 OpenAPI 3 source of truth。每個 operation 要明述用途、輸入限制、讀寫副作用、owner／network scope、資料新鮮度與交易限制；每個 parameter、request body、response、header、schema、nested property、array item、enum 都要有具體 `description`，並明確保留 type／format／required／nullable／items／ref。不得使用 untyped `object`、free-form map 或只有名稱重述的 description 逃避 class attribute 字典。公開文件產生器以這個 YAML 為唯一輸入、固定 YAML path order，輸出完整 Markdown 到版本庫 `docs/openapi/9090-api-swagger.md`，再以同一 bytes 覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`。輸出必包括：安全與網路邊界、每支 API 的用途／完整 input／status response、所有可達 schema 的 class attribute 表（JSON 名稱、用途、type/format、required、nullable、enum、array item/ref）。產生器要有 `--check` mode，能失敗於任一 mirror 缺失或 bytes 不同；OpenAPI Ruby contract test 必須驗 operation/schema/property documentation completeness 和產生文件同步，令日後任何 9090 API 變更未重產文件即無法通過。
 
 ##### Requirement 112：configured-admin 交易紀錄 public read
 
 ```text
-GET /api/public/transactions?year=YYYY | start=YYYY-MM-DD&end=YYYY-MM-DD
+GET /api/public/transactions?year=YYYY | start=YYYY-MM-DD&end=YYYY-MM-DD | email=
   -> api-gateway exact GET -> BFF PublicTransactionHistoryController
     -> local mutually-exclusive filter validation (invalid: no bootstrap/outbound)
-    -> BusinessUserClient.configuredAdmin() + explicit tenant headers + cleared caller identity
+    -> email absent: BusinessUserClient.configuredAdmin() (unchanged bootstrap)
+       email present: BusinessUserClient.byEmail(email), require isActive() only
+         + explicit tenant headers + cleared caller identity
       -> business GET /internal/public-transaction-history/current?year=&start=&end=
         -> PublicTransactionHistoryService (@Transactional(readOnly=true))
           -> owner-filtered AssetTransactionRepository reads asset_transaction only
 ```
 
-這條 9090 route 的名字含 `public` 只表示在 loopback／Tailscale private network 的無登入 consumer 契約，**不是**全域市場資料：owner 一律由 configured-admin bootstrap 決定，絕不接受 `ownerId`、cookie、caller header 或 Tailscale identity 作 selector。BFF local parser 只接受零個 filter（`ALL`）、一個四位 `year`（1900..9999）或完整 ISO `start/end`（inclusive），任何空白、多值、混用、缺半、無法解析或倒序都回 sanitized 400 且零 downstream。business route 也重驗同一規則，以免 container client 繞過 BFF；它刻意在 `/internal/public-transaction-history/current`，不能被 `TransactionBffRoutes` `/api/asset-transactions/**` 或 frontend proxy 接住。
+> **Requirement 140 現行狀態規則：** 上圖的 `email` 分支為 Requirement 140 新增；`year`／`start`／`end` 的既有 mutually-exclusive 驗證與本分支互不影響。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節。
+
+這條 9090 route 的名字含 `public` 只表示在 loopback／Tailscale private network 的無登入 consumer 契約，**不是**全域市場資料：不帶 `email` 時，owner 由 configured-admin bootstrap 決定（Requirement 140 起可另帶 `email` 選擇帳號，見上方 blockquote 與本檔末專節）；無論哪個分支，都絕不接受 `ownerId`、cookie、caller header 或 Tailscale identity 作 selector。BFF local parser 只接受零個 filter（`ALL`）、一個四位 `year`（1900..9999）或完整 ISO `start/end`（inclusive），任何空白、多值、混用、缺半、無法解析或倒序都回 sanitized 400 且零 downstream。business route 也重驗同一規則，以免 container client 繞過 BFF；它刻意在 `/internal/public-transaction-history/current`，不能被 `TransactionBffRoutes` `/api/asset-transactions/**` 或 frontend proxy 接住。
 
 `PublicTransactionHistoryResponse` 固定為 `selection`、`allTimeSummary`、`summary`、`yearSummaries`、`records`。`selection` 是 `ALL|YEAR|DATE_RANGE` 與 nullable year/start/end；all-time 是同一 owner 全 ledger 的總覽，summary／year summaries／records 則只涵蓋選取範圍。records 只投影既有 `AssetTransactionResponse` 的 18 個 ledger fields，依 `tradeDate DESC, id DESC`；`amountTwd` 只沿用已保存的 USD exchange-rate 規則，fee／tax 不參與 totals。repository 增加 stable date-range query；service 以同一次 owner-scoped record list 同時計算所有 summary，永不呼叫 broker、結算、庫存、Excel、GDrive、sync 或任何 write path。
 
@@ -7454,7 +7464,9 @@ tailnet client ──► HTTPS :9090（五條 path-scoped Serve mount）──�
 
 ### `GET /api/assets/latest` 聚合
 
-`LatestAssetsPublicController` 只委派 `LatestAssetsPublicService`。`ADMIN_EMAIL` 維持只注入 business-services；BFF 不持有 email。Business 在既有 `/internal/users/**` 引導命名空間新增無參數 `GET /internal/users/configured-admin`，由既有 `UserAdminService` 的設定／`isConfiguredAdmin` 唯一權威回既有 user projection；`BusinessUserClient.configuredAdmin()` 呼叫它。這支 lookup 是取得可信身分前的 bootstrap call，故 `AdminGateInterceptor` 僅以 path equality ＋ `GET` method 放行 exact endpoint；不得沿用 `startsWith`，POST、descendant 與其餘 users 管理 API 都維持 ADMIN gate。Public service 必須再驗 `id != null`、`configuredAdmin == true`、`status == ACTIVE`，否則拋 typed unavailable exception，由 advice 回 503 ProblemDetail。通過後由 service 在這一次 WebClient request 明確設定該 user 的 `X-User-Id`／`X-User-Role`／`X-User-Status`；不得採用匿名 request 所帶 header，也不得接受 owner selector。
+`LatestAssetsPublicController` 只委派 `LatestAssetsPublicService`。`ADMIN_EMAIL` 維持只注入 business-services；BFF 不持有 email。Business 在既有 `/internal/users/**` 引導命名空間新增無參數 `GET /internal/users/configured-admin`，由既有 `UserAdminService` 的設定／`isConfiguredAdmin` 唯一權威回既有 user projection；`BusinessUserClient.configuredAdmin()` 呼叫它。這支 lookup 是取得可信身分前的 bootstrap call，故 `AdminGateInterceptor` 僅以 path equality ＋ `GET` method 放行 exact endpoint；不得沿用 `startsWith`，POST、descendant 與其餘 users 管理 API 都維持 ADMIN gate。Public service 必須再驗 `id != null`、`configuredAdmin == true`、`status == ACTIVE`，否則拋 typed unavailable exception，由 advice 回 503 ProblemDetail。通過後由 service 在這一次 WebClient request 明確設定該 user 的 `X-User-Id`／`X-User-Role`／`X-User-Status`；不得採用匿名 request 所帶 header。
+
+> **Requirement 140 現行狀態規則：** 上一句「也不得接受 owner selector」自 Requirement 140 起不再成立——本端點改為可選擇性接受 `email` query 參數，帶有效 email 時改呼叫 `BusinessUserClient.byEmail(email)` 並只驗 `isActive()`（不要求 `configuredAdmin()==true`）；不帶時上述 `configuredAdmin()` bootstrap 路徑逐字不變。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節，該節同時是本次刻意放寬「不得接受 owner selector」邊界的唯一授權來源。
 
 Business 端 `LatestAssetsController` 同樣只委派 `LatestAssetsService.getLatest()`；service 以單一 `@Transactional(readOnly=true)` 完成：
 
@@ -7904,11 +7916,13 @@ UPDATE market_analysis_setting SET engine = 'local' WHERE engine IS NULL OR engi
 | | 第七條 `/api/public/market-analysis/today` | 第八條 `/api/public/portfolio-advice/latest` |
 |---|---|---|
 | 資料 owner 屬性 | 全域參考（`daily_market_analysis` 無 `owner_user_id`、不受 `TenantFilterAspect` 過濾） | **owner-scoped** |
-| owner 解析 | 不需要 | **必須**走 configured-admin bootstrap |
+| owner 解析 | 不需要 | 預設走 configured-admin bootstrap；帶 `email` 時見下方 Requirement 140 |
 | 上游 business 端點 | 既有 `GET /api/market-analysis/today` | 既有 `GET /api/portfolio-advice/latest` |
 | 新增 business 端點 | 無 | 無 |
 
-第八條**必須逐項沿用** `LatestAssetsPublicService` 的既有模式：`users.configuredAdmin()` → 檢查 `configuredAdmin()` 與 `isActive()` → 顯式帶 `HDR_USER_ID`／`HDR_USER_ROLE`／`HDR_USER_STATUS` → **`.contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY))`**。最後這步遺漏即為安全缺陷：共用 `WebClient` 的 tenant filter 會讀 Reactor context，保留登入者／代看者身分會覆寫上面顯式指定的 header，讓公開資料錯指向呼叫者。須有專屬測試模擬「context 已有另一個登入者」並斷言下游收到的仍是 configured admin。
+第八條**必須逐項沿用** `LatestAssetsPublicService` 的既有模式：`users.configuredAdmin()` → 檢查 `configuredAdmin()` 與 `isActive()` → 顯式帶 `HDR_USER_ID`／`HDR_USER_ROLE`／`HDR_USER_STATUS` → **`.contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY))`**。最後這步遺漏即為安全缺陷：共用 `WebClient` 的 tenant filter 會讀 Reactor context，保留登入者／代看者身分會覆寫上面顯式指定的 header，讓公開資料錯指向呼叫者。須有專屬測試模擬「context 已有另一個登入者」並斷言下游收到的仍是 configured admin（或 Requirement 140 的 `email` 路徑下、仍是該 email 解析出的帳號）。
+
+> **Requirement 140 現行狀態規則：** 本節「owner 解析必須走 configured-admin bootstrap」自 Requirement 140 起改為「不帶 `email` 時必須走 configured-admin bootstrap；帶有效 `email` 時改走 `byEmail(email)`，只驗 `isActive()`」。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節。
 
 **第八條只讀，絕不觸發 `POST /api/portfolio-advice/generate`**——那是有 LLM 成本的寫入操作。尚無任何一筆時回 business 既有的「無資料」形狀，不代為產生。
 
@@ -7923,7 +7937,7 @@ bff/src/main/java/com/steven/assets/bff/todaymarketanalysis/   ← 與該頁面�
   PublicMarketAnalysisExceptionAdvice.java @RestControllerAdvice(assignableTypes=…) + @Order(HIGHEST_PRECEDENCE)
 bff/src/main/java/com/steven/assets/bff/portfolioadvice/
   PublicPortfolioAdviceController.java     @RequestMapping("/api/public/portfolio-advice/latest")
-  PublicPortfolioAdviceService.java        configured-admin bootstrap + 顯式 headers + contextWrite delete
+  PublicPortfolioAdviceService.java        configured-admin／by-email bootstrap（Requirement 140）+ 顯式 headers + contextWrite delete
                                            downstream 維持 exchangeToMono byte-relay（非 2xx 屬 relay 範圍、不經 advice）
   PublicPortfolioAdviceExceptionAdvice.java 同上
   PublicPortfolioAdviceUnavailableException.java  具名例外（比照既有 LatestAssetsUnavailableException）
@@ -11270,3 +11284,130 @@ This settings projection must not be conflated with `TradingRadarAssetProfileRes
 The existing 13:40 technical scheduler remains the only external fetch lifecycle. Each symbol can start 17 profile calls plus ticker/candles (=19); `BATCH_SIZE=3`, two workers and 3.1-second symbol dispatch are retained, but 90 seconds is only the new-job admission window, not a promise to kill an already admitted job. Python owns the real process-wide per-SDK-start rolling gate: any contiguous 60 seconds has at most 38 actual technical/ticker/candles starts, including a reissued request after re-login; `SdkGateway` 60/min remains an outer hard stop. Technical has a 60-second adapter/70-second Java transport deadline, ticker/candles each 8 seconds, so a symbol must reserve 86 seconds before it starts or becomes `NOT_ADMITTED_DEADLINE`; no symbol count or Java HTTP dispatch is a substitute for the SDK-start gate. Technical/basics/candles persist independently after their own validation. Result counters distinguish historical PostgreSQL facts, complete capture members, FUBON Redis projection, ticker/candle DB facts, and radar LOCAL Redis overlay.
 
 Migration v1.122.0 adds four tables and index/constraints; regenerate `db/schema.sql`. The test matrix uses isolated PostgreSQL+Liquibase and real Redis to prove historical multi-date readback, fact/member identity including KDJ same-response previous-row FK, unchanged-C2 capture, source conflict preservation, FUBON DB→Redis projection, LOCAL Redis overwrite with PostgreSQL preserved, D/W capture atomicity/MGET, 99/100/101-second plus Redis-TIME-at-boundary behavior, absolute-deadline re-projection, three write interleavings plus a mixed-vector/non-dominating FUBON rejection and same-fact C2 refresh, input fingerprint/compatibility mismatch, v1 untouched, no SDK during radar read, local write-on-fallback, Detail/OpenAPI old snapshot compatibility, SDK-start rolling-38 and near-deadline admission, plus ticker/candle fences. Docker verification rebuilds/recreates fubon-broker-service, external-materials-service, business-services, BFF and frontend with all Fubon flags off; it does not make real SDK calls or invoke manual synchronization.
+
+---
+
+## Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號
+
+### 動機與安全取捨（權威版本，其他章節的「現行狀態規則」註記均指向本節）
+
+`GET /api/assets/latest`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today`、`GET /api/public/trading-radar/stock`、`GET /api/public/transactions` 五支既有 9090 public GET 在 Requirement 68／79／86／111／112 落地時，owner 一律固定為 `BusinessUserClient.configuredAdmin()` 解析出的唯一 configured admin（`ADMIN_EMAIL`，即 `tw.leader@gmail.com`）；各服務並在 bootstrap 之後對 outbound WebClient 呼叫 `.contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY))`，明確拒絕讓 caller 以任何管道（cookie、header、Tailscale identity）改變 owner。這是刻意的設計，理由記載於本檔「風險等同性聲明」一節：這五支端點對外**完全匿名、無 application 層驗證**，唯一防線是 9090 只綁 `127.0.0.1` 加 Tailscale 私網 identity；固定單一 owner 讓「網路邊界一旦被突破」的曝險範圍鎖死在 1 個帳號，而非系統裡的任意帳號。
+
+Requirement 140 刻意鬆動這個邊界：新增 optional `email` query 參數，帶有效 email 時改讀該帳號的資料。**這不是修正先前設計的缺陷，是有意放大曝險範圍換取「多帳號可各自查詢」的功能，且明確不補回一個新的驗證層。** 取捨的完整推演——為什麼現況本來就沒有 application 層驗證、為什麼固定單一帳號仍然把曝險鎖在「1 人」、為什麼開放 email 會把曝險放大到「全部 active 帳號」、以及使用者在完整理解這個差異後仍選擇不加驗證層——寫在 `spec/requirements.md` Requirement 140 的「安全前提」小節，此處不重複；本節與其驗收標準才是可執行的設計，兩份文件需一起讀。
+
+**任何日後想把這五支端點「修回」固定 configured-admin、或認為現在的無驗證 email 查找是遺漏的人，請先讀 Requirement 140 的安全前提小節——這是明確、書面、使用者知情同意的取捨，不是 bug。**
+
+### 共用設計：`byEmail-or-configuredAdmin` bootstrap 分歧
+
+五支服務目前的 bootstrap 實際分兩種變體，**下方虛擬碼只示意共同骨幹，不是可直接覆寫既有程式碼的範本**——實作時必須在各自既有分支上原樣保留其變體特徵，只插入 email 分歧，不得把某一支服務的既有結構改成另一支的樣子：
+
+- **變體 A**（`LatestAssetsPublicService`、`PublicPortfolioAdviceService`）：直接 `users.configuredAdmin().switchIfEmpty(...).flatMap(admin -> if (admin==null||admin.id()==null||!admin.configuredAdmin()||!admin.isActive()) ...)`。
+- **變體 B**（`PublicTradingRadarService`、`PublicTransactionHistoryService`）：額外包了 `Mono.defer(users::configuredAdmin).onErrorMap(ignored -> new XxxUnavailableException())`，且 `flatMap` 的檢查條件多驗 `admin.role() == null || admin.status() == null`。
+
+```java
+// 示意骨幹，非逐字範本；變體 A／B 的既有差異（onErrorMap 包裝、role/status 額外檢查）維持不動
+Mono<BffUser> bootstrap = users.configuredAdmin()
+        .switchIfEmpty(Mono.error(new XxxUnavailableException(...)));
+return bootstrap.flatMap(admin -> {
+    if (admin == null || admin.id() == null || !admin.configuredAdmin() || !admin.isActive()) {
+        return Mono.error(new XxxUnavailableException(...));
+    }
+    // ... 顯式 header + contextWrite 清除 identity
+});
+```
+
+Requirement 140 落地後，五支服務的 controller 方法（`LatestAssetsPublicController.getLatest()`、`PublicPortfolioAdviceController.latest()`、`PublicTradingRadarController.today()`／`stock()`、`PublicTransactionHistoryController.current()`）各自新增 `@RequestParam(required = false) String email` 並原樣傳給對應 service 方法；service 方法在既有 bootstrap 之前插入一個分歧：
+
+```java
+Mono<BffUser> bootstrap = hasText(email)
+        ? validateEmailFormat(email)                       // 格式不合法 -> 400 例外，見下方
+            .then(users.byEmail(email))
+            .switchIfEmpty(Mono.error(new XxxUnavailableException(GENERIC_ACCOUNT_MESSAGE)))
+            .filter(u -> u.id() != null && u.role() != null && u.status() != null && u.isActive())
+            .switchIfEmpty(Mono.error(new XxxUnavailableException(GENERIC_ACCOUNT_MESSAGE)))
+        : users.configuredAdmin()
+            .switchIfEmpty(Mono.error(new XxxUnavailableException(...)))
+            .filter(admin -> admin.id() != null && admin.configuredAdmin() && admin.isActive())
+            .switchIfEmpty(Mono.error(new XxxUnavailableException(...)));
+```
+
+`email` 分支**明確不檢查 `configuredAdmin()`**——只檢查 `isActive()`，因為分支的目的正是允許非 configured-admin 的帳號。之後兩個分支合流，沿用既有「顯式帶三個 header ＋ `.contextWrite` 清除 identity」寫法，未發生分歧；下游 business 呼叫、payload relay、既有例外處理器（`WebClientResponseException` 等）完全不變。
+
+`hasText(email)` 的判定是 trim 後非空字串；空字串／全空白視同未帶參數，走 configured-admin 分支（此為刻意選擇，避免 `?email=` 這種邊界輸入意外落入格式驗證錯誤分支）。
+
+**`email` 宣告為單值 `String`，刻意不比照既有 `stockCode`／`market`／`year`／`start`／`end` 的 `List<String>` + 顯式拒絕多值慣例。** 那些既有參數用 `List<String>` 是為了讓 `?year=2020&year=2021` 這種重複 query key 能被明確攔成 400；`email` 不需要這層防護——重複 query key 時 Spring 對單值 `String` 只會靜默取其中一個值，取到任一個合法值都只是「查到那個人的資料」，不構成繞過驗證或多查到別人資料的風險。這是刻意的設計差異，不是疏漏。
+
+### Email 格式驗證
+
+新增（或在既有 Request/Invalid 例外類別旁新增同慣例的）400 例外類別，驗證：
+
+- trim 後非空、長度 ≤ 254 字元
+- 匹配 `Pattern.compile("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE)`——與 `backend/src/main/java/com/steven/assets/service/UserAdminService.java` 的既有 `EMAIL_PATTERN` 語意一致（BFF 與 backend 是各自獨立的 Maven module／deployable，不共用程式碼，故 BFF 端另建一份相同語意的 regex 常數，不是新建一套不同標準）。
+
+格式驗證發生在任何 I/O（`byEmail` 呼叫）之前，是純本地判斷，不消耗下游資源，也不構成「查無 vs 存在」的可觀測差異來源。
+
+### 帳號查找失敗的錯誤語意（防列舉）
+
+`byEmail(email)` 回空（查無帳號）與回一個 `isActive()==false` 的帳號，**必須映射到同一個例外類別、同一個 HTTP status、同一段 detail 文字**——沿用該端點既有的 Unavailable 例外（`LatestAssetsUnavailableException`／`PublicPortfolioAdviceUnavailableException`／`PublicTradingRadarUnavailableException`／`PublicTransactionHistoryUnavailableException`，503）。訊息文字可保留既有「主要管理者不可用」字樣（`PublicTradingRadarUnavailableException`／`PublicTransactionHistoryUnavailableException` 目前是 no-arg、訊息寫死在各自 ExceptionAdvice；`LatestAssetsUnavailableException`／`PublicPortfolioAdviceUnavailableException` 目前接受自訂訊息字串）——是否泛化訊息文字留給實作者判斷，**唯一不可退讓的是 status code 與訊息內容不得依查無／停用而分岔**，否則此參數會變成外部可用來批次探測「哪些 email 是系統裡的有效帳號」的 oracle。
+
+### 五支端點逐支變更點
+
+| 端點 | Controller | Service | 現有 bootstrap 呼叫點（`spec/design.md` 行號註記於各自章節） |
+|---|---|---|---|
+| `GET /api/assets/latest` | `LatestAssetsPublicController` | `LatestAssetsPublicService.getLatest()` | 見「`GET /api/assets/latest` 聚合」一節 |
+| `GET /api/public/portfolio-advice/latest` | `PublicPortfolioAdviceController` | `PublicPortfolioAdviceService.latest()` | 見「風險等同性聲明」／「兩條路由的結構差異」一節 |
+| `GET /api/public/trading-radar/today` | `PublicTradingRadarController.today()` | `PublicTradingRadarService.today()` → 共用 `relay()` | 見交易雷達 ASCII 拓撲一節 |
+| `GET /api/public/trading-radar/stock` | `PublicTradingRadarController.stock()` | `PublicTradingRadarService.stock()` → 共用 `relay()` | 同上 |
+| `GET /api/public/transactions` | `PublicTransactionHistoryController.current()` | `PublicTransactionHistoryService.current()` | 見 Requirement 112 ASCII 拓撲一節 |
+
+`PublicTradingRadarService` 的 `today()`／`stock()` 共用私有 `relay()`；`email` 應作為 `relay()` 的額外參數往下傳，不得為了加這個參數而複製一份 `relay()`。`stock()` 既有的 `singleSelector` 格式驗證（`stockCode`／`market`）在 bootstrap 之前執行，與 `email` 格式驗證彼此獨立、互不阻擋。
+
+### Gateway／Tailscale／OpenAPI
+
+- `api-gateway/nginx.conf` 五個既有 exact `location` 保留 `$request_uri`，query string 透傳不需改動；不新增、不修改任何 `location`。
+- Tailscale Serve 的五條 path-scoped mount 同樣不需改動（不解析 query string）。
+- `docs/openapi/docker-external-api.yaml`：五個 operation 各自的 `parameters` 新增：
+
+  ```yaml
+  - name: email
+    in: query
+    required: false
+    schema:
+      type: string
+      format: email
+      maxLength: 254
+    description: >-
+      選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+      帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+      格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+      刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+    example: user@example.com
+  ```
+
+  **`example` 欄位不可省略**：`scripts/tests/docker-external-api-openapi-test.rb:258` 對每一個 operation 的每一個 parameter 無條件要求存在合成 `example`，五個 operation 的 `email` parameter 都要各自帶上，否則會在既有測試（非本次新增的 416.10b 那五處）另外斷裂。
+
+  五個 operation 的既有 `responses` 新增／複用 `400`（格式不合法）與既有 `503`（bootstrap／帳號不可用，語意擴充為「configured-admin 或指定帳號皆可能觸發」）描述；不得新增或修改 `200` response schema。
+  `info.version`：`1.10.0` → `1.11.0`。
+  **五個 operation 現有頂層 `description` 必須同步修訂**：目前分別在 `docker-external-api.yaml:315`（`getLatestAssets`）、`:534`（`getPublicPortfolioAdviceLatest`）、`:605`（`getPublicTradingRadarTodayList`）、`:670`（`getPublicTradingRadarStockDetail`）、`:737`（`getPublicTransactionHistory`）寫死「不接受 `ownerId`／`email`／cookie／`X-User-*` 作為租戶選擇輸入」或「owner 只能由 configured-admin bootstrap 決定」等**無條件**語句；這五句話與本節新增的 `email` parameter 字面矛盾（同一個 operation 物件裡，`description` 說不接受 email，`parameters` 卻定義了 `email`）。必須改寫成雙態敘述，例如「不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定（仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）」。既有的 `docker-external-api-openapi-test.rb` 只驗證「有沒有具體描述文字」（completeness），不驗語意是否自相矛盾，故此項不會被既有自動化測試攔下，需人工同步。
+
+  **`scripts/tests/docker-external-api-openapi-test.rb` 本身也必須同一 commit 更新，否則 `scripts/spec-check.sh` 的 B9 會在實作完成後直接 BLOCK**（此腳本硬編碼了變更前的契約形狀，這不是新規則——`info.version` 從 1.8.0 升到 1.9.0 時就必須同步改過一次，見本檔 10229 行）：
+  - `:169` 硬編 `document.dig('info', 'version') == '1.10.0'` → 改為 `'1.11.0'`（連同斷言訊息文字）。
+  - `:27`／`:31`／`:32` 的 `MANIFEST`（`getLatestAssets`／`getPublicPortfolioAdviceLatest`／`getPublicTradingRadarTodayList` 三個 key）目前 response-status 陣列都不含 `400`，各自補上。
+  - `:304-305` 對 `getPublicTradingRadarStockDetail` 的 `parameters` 做精確陣列相等（`== %w[stockCode market]`），`:310-311` 對 `getPublicTransactionHistory` 同理（`== %w[year start end]`）——兩處都要把 `email` 加進期望陣列，否則新增 `email` parameter 後這兩支測試會直接失敗。
+  - 驗證指令需新增 `ruby scripts/tests/docker-external-api-openapi-test.rb`，不能只跑 `render-9090-openapi-docs.rb --check`（兩支腳本驗的維度不同，前者驗契約形狀，後者驗 Markdown 鏡像是否由 YAML 忠實產生）。
+- 依既有慣例由這份 YAML 重新產生 `docs/openapi/9090-api-swagger.md`，再以同一 bytes 覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`。
+
+### 測試矩陣
+
+BFF 單元測試（比照既有 `LatestAssetsConfiguredAdminContextTest`／`PublicPortfolioAdviceConfiguredAdminContextTest`／`PublicTradingRadarConfiguredAdminContextTest`／`PublicTransactionHistoryConfiguredAdminContextTest` 的既有結構，新增 email 分支案例，不新建平行測試檔）每支端點至少覆蓋：
+
+1. 不帶 `email`：與變更前行為逐位元組相同（既有測試應可原樣通過，作為回歸基準）。
+2. 帶合法 email、對應一個 active 且非 configured-admin 的帳號：成功，回應資料須可觀察地屬於該帳號而非 configured-admin。
+3. 帶合法 email、查無對應帳號：503，訊息與情境 5 相同。
+4. 帶合法 email、對應帳號存在但非 ACTIVE：503，訊息與情境 3 相同（斷言兩者 status／body 完全一致）。
+5. 帶格式不合法 email（如缺 `@`、缺網域）：400。
+6. `.contextWrite` 清除 identity 的既有測試模式（模擬 context 已有另一個登入者）在 email 分支下同樣要驗證：下游收到的 header 是 email 解析出的帳號，不是 context 裡殘留的身分。
+
+測試需要準備至少一個非 configured-admin 的 active 測試帳號（seed 或 test fixture），否則情境 2 無法真正驗證「查到別人的資料」而非湊巧命中同一份資料。
+
+實機驗收：`docker compose -p asset-management build --no-cache bff` → `up -d --no-deps --force-recreate bff api-gateway`（business-services 若未變更程式碼不需重建，但需確認既有 `/internal/users/by-email` 可達）；以 `curl "http://127.0.0.1:9090/api/assets/latest"` 與 `curl "http://127.0.0.1:9090/api/assets/latest?email=<測試帳號>"` 分別驗證兩次回應屬於不同帳號，其餘四支端點比照。
