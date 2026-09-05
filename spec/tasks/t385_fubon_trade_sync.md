@@ -1,5 +1,7 @@
 # [t385] 富邦台股成交紀錄同步排程——盤中每 30 分鐘唯讀查詢並新增交易紀錄
 
+> **現況覆寫（Requirement 138／Task 414）：** `FUBON_TW_LIVE_QUOTES_ENABLED=true` 不再是成交同步的靜態拒絕條件；`TRADE_SYNC_CAPACITY_CONFLICT` 已移除。trade、LIVE、inventory 與 bank reader 可同時啟用，並由 gateway 的 accounting lane、五個 native slots、quota 與共同 deadline 仲裁。下方 385.1／385.5／385.9 中任何要求注入或檢查 `liveQuotesEnabled`、回傳 capacity-conflict、或保留該 enum 值的舊文字均已失效，實作必須只保留 trade flag、config state、calendar、owner 與 broker 的既有防線。
+
 **對應 Requirements:** Requirement 120（在交易日盤中每 30 分鐘唯讀查詢富邦當日成交紀錄，若查到系統尚未記錄的成交，冪等新增到交易紀錄，不覆寫既有資料）
 **前置任務:** 無（重用 Requirement 90／Task 352 已落地的 `fubon-broker-service`、`integration/fubon` package、`MarketDataService.isTwTradingDayKnown`、`UserAdminService.configuredAdmin()`）
 **Liquibase changeset:** `v1.119.0-asset-transaction-fubon-source.sql`（建檔前跑 `bash scripts/spec-check.sh` 核對是否已被其他 worktree 佔用最新版號；若已撞號，依既有編號避讓慣例遞增版號，不得覆寫他人 changeset）
@@ -28,8 +30,8 @@
 
 - [ ] **385.4 backend：DTO 與 client。** `FubonDtos.java` 新增 `TradeBatchResponse(String batchId, LocalDate startDate, LocalDate endDate, String accountFingerprint, boolean emptyConfirmed, List<FilledTrade> trades)` 與 `FilledTrade(String stockCode, String side, long filledQty, CanonicalFubonDecimal filledPrice, CanonicalFubonDecimal filledAvgPrice, LocalDate filledDate, String filledTime, String filledNo)`（皆為 immutable record，不得用 `Map`/`JsonNode` 代替）。`FubonBrokerClient` 介面新增 `FubonDtos.CallResult<FubonDtos.TradeBatchResponse> readFilledTrades(LocalDate start, LocalDate end);`；`FubonHttpClient` 新增對應實作，POST 到 `/internal/trades/read`，body `{"startDate": start.toString(), "endDate": end.toString()}`，比照既有 `readPortfolio()`／`readTwQuotes()` 的 timeout／4xx／5xx／invalid JSON 處理（timeout/4xx/5xx/invalid JSON 一律轉 `CallResult.failure(reason)`，不 log raw body）。
 
-- [ ] **385.5 backend：`FubonTradeSyncService` 業務邏輯。** 新增 `FubonTradeSyncService.java`，建構子注入 `FubonConfigState`、`FubonBrokerClient`、`MarketDataService`、`UserAdminService`、`BrokerRepository`、`AssetTransactionRepository`、`StockMasterService`、新增的 `FubonTradeOutcomeCounters`、`Clock`，以及兩個 `@Value` boolean flag（比照 `FubonInventorySyncService` 既有建構子模式：`@Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled` 為本任務新增設定鍵；`@Value("${fubon.tw-live-quotes-enabled:false}") boolean liveQuotesEnabled` 沿用既有設定鍵，與 `FubonInventorySyncService` 讀同一個值）。**本任務刻意採不同於既有 `FubonInventorySyncService` 的方法回傳型別（裸 `FubonTradeOutcome` enum 而非既有的 `FubonDtos.SyncResponse` 完整回應物件）與呼叫圖（`syncManual` 委派給 `syncScheduledAfterCalendar`；既有 `FubonInventorySyncService.syncManual` 是獨立流程、不呼叫 `syncScheduledAfterCalendar`），下方僅指出精神類比之處，不是逐一比照既有程式碼結構。** 公開方法：
-  - `FubonTradeOutcome tradeSyncFeatureGate(boolean dryRun)`：`!tradeSyncEnabled` → `TRADE_SYNC_DISABLED`；`liveQuotesEnabled` → `TRADE_SYNC_CAPACITY_CONFLICT`；否則 `null`。
+- [ ] **385.5 backend：`FubonTradeSyncService` 業務邏輯。** 新增 `FubonTradeSyncService.java`，建構子注入 `FubonConfigState`、`FubonBrokerClient`、`MarketDataService`、`UserAdminService`、`BrokerRepository`、`AssetTransactionRepository`、`StockMasterService`、新增的 `FubonTradeOutcomeCounters`、`Clock`，以及唯一的 `@Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled`。不得再注入／儲存 `liveQuotesEnabled`。**本任務刻意採不同於既有 `FubonInventorySyncService` 的方法回傳型別（裸 `FubonTradeOutcome` enum 而非既有的 `FubonDtos.SyncResponse` 完整回應物件）與呼叫圖（`syncManual` 委派給 `syncScheduledAfterCalendar`；既有 `FubonInventorySyncService.syncManual` 是獨立流程、不呼叫 `syncScheduledAfterCalendar`），下方僅指出精神類比之處，不是逐一比照既有程式碼結構。** 公開方法：
+  - `FubonTradeOutcome tradeSyncFeatureGate(boolean dryRun)`：只有 `!tradeSyncEnabled` → `TRADE_SYNC_DISABLED`；其餘情況回 `null`，不得查看 LIVE flag 或回 capacity-conflict。
   - `void localConfigOutcome(boolean dryRun, FubonConfigState.State state)`：記錄 `DISABLED`／`MISCONFIGURED` counter（比照既有寫法）。
   - `void calendarUnknown(boolean dryRun)`：記錄 `CALENDAR_UNKNOWN`。
   - `private FubonTradeOutcome localConfigGate(boolean dryRun)`：先呼叫 `tradeSyncFeatureGate(dryRun)`，非 null 直接回傳；否則檢查 `configState.snapshot().state()`，非 `READY` 記 `MISCONFIGURED` 並回傳該值；否則回 `null`（放行）。此方法同時供下面 `syncManual` 與 `syncScheduledAfterCalendar` 共用（精神上類比既有 `FubonInventorySyncService.localConfigGate` 的 gate-短路做法，但本任務回傳裸 enum 而非 `SyncResponse`）。
@@ -74,7 +76,7 @@
 - [ ] **385.9 固定 enum outcome 與 counters。** 新增 `FubonTradeOutcome.java`（獨立 enum，**不得**修改或擴充既有 `FubonOutcome.java`，避免混淆既有 inventory sync 的既有值語意與既有測試對該 enum 精確值集合的斷言）：
   ```java
   public enum FubonTradeOutcome {
-      DISABLED, TRADE_SYNC_DISABLED, TRADE_SYNC_CAPACITY_CONFLICT, MISCONFIGURED,
+      DISABLED, TRADE_SYNC_DISABLED, MISCONFIGURED,
       CALENDAR_UNKNOWN, TRADE_FAILED, NO_OWNER, BROKER_MISSING, DRY_RUN, SUCCESS,
       NO_NEW_TRADES, ROLLED_BACK
   }

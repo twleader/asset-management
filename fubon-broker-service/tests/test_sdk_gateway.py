@@ -398,12 +398,18 @@ def test_read_filled_trades_serializes_through_accounting_lock(tmp_path):
 
 def test_read_filled_trades_shares_accounting_budget_pool_with_accounting_call(tmp_path):
     waits = []
+    clock = [0.0]
+
+    def sleeper(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
     sdk = FakeSdk([])
     gateway = SdkGateway(
         ready_config(tmp_path),
         sdk_factory=lambda: sdk,
-        monotonic=lambda: 0.0,
-        sleeper=lambda seconds: waits.append(seconds),
+        monotonic=lambda: clock[0],
+        sleeper=sleeper,
     )
     # Exhaust the shared 5-calls/sec budget via the existing accounting path.
     for _ in range(5):
@@ -487,12 +493,18 @@ def test_read_bank_balance_serializes_through_accounting_lock(tmp_path):
 
 def test_read_bank_balance_shares_accounting_budget_pool_with_accounting_call(tmp_path):
     waits = []
+    clock = [0.0]
+
+    def sleeper(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
     sdk = FakeSdk([])
     gateway = SdkGateway(
         ready_config(tmp_path),
         sdk_factory=lambda: sdk,
-        monotonic=lambda: 0.0,
-        sleeper=lambda seconds: waits.append(seconds),
+        monotonic=lambda: clock[0],
+        sleeper=sleeper,
     )
     # Exhaust the shared 5-calls/sec budget via the existing accounting path.
     for _ in range(5):
@@ -574,12 +586,18 @@ def test_read_realized_gains_serializes_through_accounting_lock(tmp_path):
 
 def test_read_realized_gains_shares_accounting_budget_pool_with_accounting_call(tmp_path):
     waits = []
+    clock = [0.0]
+
+    def sleeper(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
     sdk = FakeSdk([])
     gateway = SdkGateway(
         ready_config(tmp_path),
         sdk_factory=lambda: sdk,
-        monotonic=lambda: 0.0,
-        sleeper=lambda seconds: waits.append(seconds),
+        monotonic=lambda: clock[0],
+        sleeper=sleeper,
     )
     # Exhaust the shared 5-calls/sec budget via the existing accounting path.
     for _ in range(5):
@@ -670,12 +688,18 @@ def test_read_settlement_serializes_through_accounting_lock(tmp_path):
 
 def test_read_settlement_shares_accounting_budget_pool_with_accounting_call(tmp_path):
     waits = []
+    clock = [0.0]
+
+    def sleeper(seconds):
+        waits.append(seconds)
+        clock[0] += seconds
+
     sdk = FakeSdk([])
     gateway = SdkGateway(
         ready_config(tmp_path),
         sdk_factory=lambda: sdk,
-        monotonic=lambda: 0.0,
-        sleeper=lambda seconds: waits.append(seconds),
+        monotonic=lambda: clock[0],
+        sleeper=sleeper,
     )
     # Exhaust the shared 5-calls/sec budget via the existing accounting path.
     for _ in range(5):
@@ -696,3 +720,176 @@ def test_taiex_symbol_is_verified_against_official_index_tickers_before_stream_u
     assert events[:3] == ["login", "init_realtime", "tickers:INDEX:TWSE"]
     with pytest.raises(SdkCallError, match="TAIEX_INDEX_SYMBOL_UNVERIFIED"):
         gateway.verify_taiex_index_symbol("NOT_TAIEX")
+
+
+def test_task414_uses_five_native_sdk_slots():
+    assert SdkGateway.MAX_BLOCKING_CALLS == 5
+
+
+def test_deadline_waits_for_a_slot_released_before_expiry(tmp_path):
+    class ObservedSemaphore:
+        def __init__(self):
+            self._delegate = threading.BoundedSemaphore(1)
+            self.waiting = threading.Event()
+
+        def acquire(self, timeout=None):
+            self.waiting.set()
+            return self._delegate.acquire(timeout=timeout)
+
+        def release(self):
+            self._delegate.release()
+
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: FakeSdk([]))
+    gateway._blocking_slots = ObservedSemaphore()
+    assert gateway._blocking_slots.acquire()
+    gateway._blocking_slots.waiting.clear()
+    done = threading.Event()
+    outcome = []
+
+    def reader():
+        try:
+            outcome.append(
+                gateway._run_bounded(
+                    lambda: "handoff",
+                    gateway.QUOTE_CALL_TIMEOUT_SECONDS,
+                    "QUOTE_TIMEOUT",
+                    deadline=time.monotonic() + 1,
+                )
+            )
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    assert gateway._blocking_slots.waiting.wait(1)
+    gateway._blocking_slots.release()
+    assert done.wait(1)
+    thread.join(1)
+    assert outcome == ["handoff"]
+
+
+def test_deadline_expires_while_all_native_slots_are_occupied(tmp_path):
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: FakeSdk([]))
+    gateway._blocking_slots = threading.BoundedSemaphore(1)
+    assert gateway._blocking_slots.acquire()
+
+    with pytest.raises(SdkCallError, match="^SDK_CALL_SATURATED$"):
+        gateway._run_bounded(
+            lambda: "must-not-run",
+            gateway.QUOTE_CALL_TIMEOUT_SECONDS,
+            "QUOTE_TIMEOUT",
+            deadline=time.monotonic() + 0.02,
+        )
+
+    gateway._blocking_slots.release()
+
+    with pytest.raises(SdkCallError, match="^SDK_CALL_SATURATED$"):
+        gateway._run_bounded(
+            lambda: "must-not-run",
+            gateway.QUOTE_CALL_TIMEOUT_SECONDS,
+            "QUOTE_TIMEOUT",
+            deadline=time.monotonic() - 1,
+        )
+
+
+def test_native_timeout_retains_its_slot_until_worker_finally(tmp_path):
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: FakeSdk([]))
+    gateway._blocking_slots = threading.BoundedSemaphore(1)
+    native_started = threading.Event()
+    release_native = threading.Event()
+
+    def native_call():
+        native_started.set()
+        release_native.wait()
+        return "late-result"
+
+    with pytest.raises(SdkCallError, match="^QUOTE_TIMEOUT$") as raised:
+        gateway._run_bounded(
+            native_call,
+            0.01,
+            "QUOTE_TIMEOUT",
+            deadline=time.monotonic() + 1,
+        )
+
+    assert native_started.is_set()
+    assert raised.value.completion_event is not None
+    assert not gateway._blocking_slots.acquire(timeout=0)
+    release_native.set()
+    assert raised.value.completion_event.wait(1)
+    assert gateway._blocking_slots.acquire(timeout=0)
+    gateway._blocking_slots.release()
+
+
+@pytest.mark.parametrize("lock_name", ["_accounting_lock", "_session_lock"])
+def test_accounting_reader_lock_waits_are_bounded_by_its_deadline(tmp_path, lock_name):
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: FakeSdk([]))
+    lock = getattr(gateway, lock_name)
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_lock():
+        lock.acquire()
+        acquired.set()
+        release.wait()
+        lock.release()
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert acquired.wait(1)
+    try:
+        with pytest.raises(SdkCallError, match="^ACCOUNTING_TIMEOUT$"):
+            gateway.read_bank_balance(deadline=time.monotonic() + 0.02)
+    finally:
+        release.set()
+        holder.join(1)
+
+
+def test_accounting_budget_spends_the_reader_deadline_without_native_dispatch(tmp_path):
+    clock = [0.0]
+
+    def sleep(seconds):
+        clock[0] += seconds
+
+    events = []
+    gateway = SdkGateway(
+        ready_config(tmp_path),
+        sdk_factory=lambda: FakeSdk(events),
+        monotonic=lambda: clock[0],
+        sleeper=sleep,
+    )
+    for _ in range(5):
+        gateway._wait_for_accounting_budget()
+
+    with pytest.raises(SdkCallError, match="^ACCOUNTING_TIMEOUT$"):
+        gateway.read_bank_balance(deadline=0.25)
+
+    assert "bank_remain" not in events
+
+
+def test_auth_retry_cannot_reset_the_original_accounting_deadline(tmp_path):
+    clock = [0.0]
+    events = []
+
+    class ExpiringAuthSdk(FakeSdk):
+        def bank_remain(self, _account):
+            events.append("bank_remain")
+            clock[0] += 0.6
+            return response(None, success=False, code=401)
+
+        def logout(self):
+            clock[0] += 0.5
+            super().logout()
+
+    sdks = [ExpiringAuthSdk(events), FakeSdk(events)]
+    gateway = SdkGateway(
+        ready_config(tmp_path),
+        sdk_factory=lambda: sdks.pop(0),
+        monotonic=lambda: clock[0],
+        sleeper=lambda _seconds: None,
+    )
+
+    with pytest.raises(SdkCallError, match="^ACCOUNTING_TIMEOUT$"):
+        gateway.read_bank_balance(deadline=1.0)
+
+    assert events.count("bank_remain") == 1
+    assert events.count("login") == 1

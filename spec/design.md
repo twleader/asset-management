@@ -8987,18 +8987,17 @@ raw quantity每欄須為`0..9,999,999,999` exact integer，且加總用checked a
 
 #### Task 371 補充：富邦台股手動完整 PUT 的 capability-aware scope ownership
 
-Task 352 的同步局部 replace 只在同步**實際可寫入且實際會鎖到這個 target**時才必須保護 Fubon source rows；`READY` 或 flags 單獨不足以表示如此。除了 `DISABLED`／`MISCONFIGURED`，tracked default `FUBON_ENABLED=true`／`FUBON_TW_LIVE_QUOTES_ENABLED=true`／`FUBON_INVENTORY_SYNC_ENABLED=false` 沒有 inventory writer，而兩個 consumer flags 同時 true 是 `INVENTORY_SYNC_CAPACITY_CONFLICT`。即使 flags 可用，historical snapshot、非 configured-admin owner、或這次 PUT 將日期改為非台北今日也不是 Fubon writer 的 owner-latest target。完整 PUT 的 ownership matrix 固定如下：
+Task 352 的同步局部 replace 只在同步**實際可寫入且實際會鎖到這個 target**時才必須保護 Fubon source rows；`READY` 或 flags 單獨不足以表示如此。除了 `DISABLED`／`MISCONFIGURED`，tracked default `FUBON_ENABLED=true`／`FUBON_TW_LIVE_QUOTES_ENABLED=true`／`FUBON_INVENTORY_SYNC_ENABLED=false` 沒有 inventory writer；Requirement 138／Task 414 取代歷史上的 LIVE 互斥，因此兩個 consumer flags 同時 true 時仍有 inventory writer。即使 flags 可用，historical snapshot、非 configured-admin owner、或這次 PUT 將日期改離台北今日也不是 Fubon writer 的 owner-latest target。完整 PUT 的 ownership matrix 固定如下：
 
 | Fubon config state | effective inventory sync／TW LIVE | lock 後 immutable update target | 富邦台股 scope／完整 PUT 行為 |
 | --- | --- | --- | --- |
 | `DISABLED`／`MISCONFIGURED` | 任意 | 任意 | `PAYLOAD_OWNED`：以完整 payload replace／persist |
 | `READY` | sync=false／任意 LIVE | 任意 | `PAYLOAD_OWNED`：同步 disabled；包括 tracked default 的 live=true 情況 |
-| `READY` | sync=true／LIVE=true | 任意 | `PAYLOAD_OWNED`：`INVENTORY_SYNC_CAPACITY_CONFLICT`，inventory 無 writer |
-| `READY` | sync=true／LIVE=false | historical、non-configured-admin、final effective date 非今日，或 `snapshotId` 不等於 Fubon preflight／writer 的同一 owner-latest target | `PAYLOAD_OWNED`：以完整 payload replace／persist |
-| `READY` | sync=true／LIVE=false | owner 為 `UserAdminService.configuredAdmin()` 的 ACTIVE configured admin、`snapshotId` 與 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 依**最終 effectiveSnapshotDate**選出的同一 owner-latest target 相同，且 effectiveSnapshotDate=Asia/Taipei 今日 | `SOURCE_OWNED`：唯一實際 target，保留 lock 後 DB rows、略過 stale payload 同 scope rows |
+| `READY` | sync=true／任意 LIVE | historical、non-configured-admin、final effective date 非今日，或 `snapshotId` 不等於 Fubon preflight／writer 的同一 owner-latest target | `PAYLOAD_OWNED`：以完整 payload replace／persist |
+| `READY` | sync=true／任意 LIVE | owner 為 `UserAdminService.configuredAdmin()` 的 ACTIVE configured admin、`snapshotId` 與 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 依**最終 effectiveSnapshotDate**選出的同一 owner-latest target 相同，且 effectiveSnapshotDate=Asia/Taipei 今日 | `SOURCE_OWNED`：唯一實際 target，保留 lock 後 DB rows、略過 stale payload 同 scope rows |
 | 其他 broker／market | 不適用 | 不適用 | `PAYLOAD_OWNED`：維持既有完整 PUT |
 
-ownership contract 位於 service layer（例如 `SnapshotStockScopeOwnershipPort`），並回傳本次 transaction 固定使用的 immutable decision。它先接收 `SnapshotUpdateTarget(snapshotId, ownerUserId, effectiveSnapshotDate)`，再對 `(market, brokerCode)` 回覆 `PAYLOAD_OWNED`／`SOURCE_OWNED`。`AssetService` 在 lock 後完成目標驗證／日期設定後才呼叫 port；Fubon integration adapter 是唯一實作此 port、一次擷取 `FubonConfigState.snapshot().state()` 與兩個 effective feature flags，並以和 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 完全相同的 owner-latest target predicate 檢查 target eligibility、再產生 decision 的位置：
+ownership contract 位於 service layer（例如 `SnapshotStockScopeOwnershipPort`），並回傳本次 transaction 固定使用的 immutable decision。它先接收 `SnapshotUpdateTarget(snapshotId, ownerUserId, effectiveSnapshotDate)`，再對 `(market, brokerCode)` 回覆 `PAYLOAD_OWNED`／`SOURCE_OWNED`。`AssetService` 在 lock 後完成目標驗證／日期設定後才呼叫 port；Fubon integration adapter 是唯一實作此 port、一次擷取 `FubonConfigState.snapshot().state()` 與 inventory effective feature flag（LIVE flag 不參與 ownership），並以和 `FubonInventorySyncService` preflight／`FubonInventoryWriter` 完全相同的 owner-latest target predicate 檢查 target eligibility、再產生 decision 的位置：
 
 ```text
 AssetService
@@ -9012,13 +9011,13 @@ AssetService
 FubonSnapshotStockScopeOwnershipAdapter
   └── capture once after lock:
       FubonConfigState.snapshot().state()
-      inventory-sync-enabled / tw-live-quotes-enabled
+      inventory-sync-enabled
       same preflight/writer owner-latest target eligibility
 ```
 
 `AssetService` 不得依賴 Fubon config、SDK、secret directory 或任何 `integration.fubon` concrete class。它在 transaction 第一個 DB operation `AssetSnapshotMutationLock.lockById(id)` 成功後，必須先做既有 tenant／owner checks、snapshot-date unique gate 與 final effective date 的必要設定，才以 immutable target 取得 ownership decision；此後才讀 children、broker、reference data 並以同一個 decision 重建所有 children，同一 transaction 不得重新讀 state、flag 或 target eligibility，也不得用變更前 snapshotDate 判斷 latest target。PAYLOAD_OWNED 時刪除舊 scope 並 materialize payload rows，完整持久化 shares、investmentCost、currentValue、transactionType、transactionDate、transactionExchangeRate、currency、dividend metadata 與 display order；SOURCE_OWNED 時只有 capability、configured-admin owner、同一 owner-latest `snapshotId`、以及 final effectiveSnapshotDate=台北今日四項均成立才保留 locked Fubon rows，並跳過 payload 的同 scope rows。deposits／funds、stock master upsert、rollback 與 `SnapshotAggregateCalculator` 的單一 total formula 均不變。
 
-`FubonInventoryWriter` 與完整 PUT 一律經相同的 PostgreSQL `AssetSnapshotMutationLock`，不用 JVM mutex。只有完整 SOURCE_OWNED actual target 需要讓「Fubon replace 先取得 lock」與反向順序中的第二 transaction 在第一個釋鎖後讀最新 managed scope，保留 Fubon source row、non-Fubon row 與正確 totals。驗證固定涵蓋：`DISABLED`、`MISCONFIGURED`、tracked default（`READY` + `FUBON_ENABLED=true`／LIVE=true／inventory=false）及 capacity conflict（`READY` + LIVE=true／inventory=true）皆做 `00865B` payload-owned DB readback；flags 可用但 historical target、flags 可用但 non-configured-admin target、以及原同步 target 被 PUT 改為非今日 final effective date 也都必須 DB readback 為 payload-owned。唯一完整實際 target（`READY` + LIVE=false／inventory=true + configured admin + same owner-latest target + final date today）才驗 stale-payload 保護與真 PostgreSQL/Testcontainers 的兩個獨立 transaction／latch 雙向 lock-race。不得以 DTO success、H2 或 mock repository 代替。實作後須通過 Maven backend suite、business-services 無快取 rebuild/recreate、BFF restart 與 healthcheck；本補充不新增 schema、Liquibase、API、BFF/frontend contract、排程或任何 broker write capability。
+`FubonInventoryWriter` 與完整 PUT 一律經相同的 PostgreSQL `AssetSnapshotMutationLock`，不用 JVM mutex。只有完整 SOURCE_OWNED actual target 需要讓「Fubon replace 先取得 lock」與反向順序中的第二 transaction 在第一個釋鎖後讀最新 managed scope，保留 Fubon source row、non-Fubon row 與正確 totals。驗證固定涵蓋：`DISABLED`、`MISCONFIGURED`、tracked default（`READY` + `FUBON_ENABLED=true`／LIVE=true／inventory=false）及 LIVE=true／inventory=true 但 target 不合格皆做 `00865B` payload-owned DB readback；flags 可用但 historical target、flags 可用但 non-configured-admin target、以及原同步 target 被 PUT 改為非今日 final effective date 也都必須 DB readback 為 payload-owned。唯一完整實際 target（`READY` + inventory=true／任意 LIVE + configured admin + same owner-latest target + final date today）才驗 stale-payload 保護與真 PostgreSQL/Testcontainers 的兩個獨立 transaction／latch 雙向 lock-race。不得以 DTO success、H2 或 mock repository 代替。實作後須通過 Maven backend suite、business-services 無快取 rebuild/recreate、BFF restart 與 healthcheck；本補充不新增 schema、Liquibase、API、BFF/frontend contract、排程或任何 broker write capability。
 
 
 
@@ -9829,7 +9828,7 @@ Task 353 的「`FUBON_ENABLED` 二選一 provider，enabled 時不 fallback」�
 
 Requirement 106 只覆寫 `market='台股'`、非 `0000` 的 priority LIVE path：Requirement 85 的台股個股 2 分鐘 cron/catalog 改為 10 秒；Requirement 91 的 enabled-only/no-fallback、30 秒 LIVE success cache、100 檔 silent cap 與 provider-takeover Lua 改為下列三來源協調器；Requirement 89 的同時間 LIVE 可接受、以及 stale actual-trade 仍可寫 `price:dayhl:*` 的例外也改為 strict newer 和零副作用。Requirement 89 的 MIS actual-trade `d+t` freshness／`tlong` 診斷規則、`VERIFIED_CLOSE`、正式收盤流程與非台股 producer 全部保留。富邦已驗證 source OHLC 保持權威，accepted Fubon 只 append tick、不進 day-H/L tracker。
 
-設定與額度不能共用含混的 enabled 語意。`FUBON_ENABLED` 只表示 adapter 可以讀取 mounted secret 並提供唯讀能力；`FUBON_TW_LIVE_QUOTES_ENABLED` 才授權 external 的十秒台股 LIVE producer；`FUBON_INVENTORY_SYNC_ENABLED` 才授權 business 的排程與手動庫存同步。`.env.example` 固定為前兩者 true、inventory false。inventory disabled 時，scheduler 和 manual service 在呼叫 portfolio 或 quote 前便回固定 typed outcome，零 adapter／SDK／DB side effect。兩個 consumer 都設 true 是明確 configuration conflict：inventory 一律 fail closed，不把原本 40×6=240 calls/min 的 LIVE budget 稀釋或以 adapter rate failure 掩飾。要回到庫存同步時，使用者必須明確把 live flag 關閉，再開 inventory flag；master flag false 時兩者都只回既有 disabled/misconfigured typed outcome。adapter quote wire 必須以 required `purpose=LIVE|INVENTORY` 區分：LIVE 永不讀／寫跨輪 success cache，仍可對同 `(purpose, code)` single-flight；inventory-only 才保留既有 30 秒 cache，且不得回給 LIVE。
+設定與額度不能共用含混的 enabled 語意。`FUBON_ENABLED` 只表示 adapter 可以讀取 mounted secret 並提供唯讀能力；`FUBON_TW_LIVE_QUOTES_ENABLED` 才授權 external 的十秒台股 LIVE producer；`FUBON_INVENTORY_SYNC_ENABLED` 才授權 business 的排程與手動庫存同步。`.env.example` 固定為前兩者 true、inventory false。inventory disabled 時，scheduler 和 manual service 在呼叫 portfolio 或 quote 前便回固定 typed outcome，零 adapter／SDK／DB side effect。Requirement 138／Task 414 取代歷史上的 configuration conflict：兩個 consumer 都設 true 時，inventory 仍進入自己的 config/calendar/owner gate；共享五個 native slot、quota、且不在 queue／login／auth retry 重置的 absolute deadline 才是唯一資源仲裁。最壞情況是單輪唯讀同步失敗並於下一輪再試，不能回 invented capacity-conflict outcome，也不能把 LIVE flag 關閉當成庫存同步前提。master flag false 時兩者都只回既有 disabled/misconfigured typed outcome。adapter quote wire 必須以 required `purpose=LIVE|INVENTORY` 區分：LIVE 永不讀／寫跨輪 success cache，仍可對同 `(purpose, code)` single-flight；inventory-only 才保留既有 30 秒 cache，且不得回給 LIVE。
 
 來源鏈如下：
 
@@ -10311,13 +10310,12 @@ business-services                              fubon-broker-service
   AssetTransaction（新增列，source=FUBON_SYNC）
 ```
 
-`FUBON_TRADE_SYNC_ENABLED`、`FUBON_INVENTORY_SYNC_ENABLED`、`FUBON_TW_LIVE_QUOTES_ENABLED` 三個 feature flag 各自獨立宣告（`.env.example` 新增第三個）。`docker-compose.yml` 對 `business-services` 的環境變數是逐條白名單（既有 `FUBON_INVENTORY_SYNC_ENABLED`／`FUBON_TW_LIVE_QUOTES_ENABLED` 各自明確一行 passthrough），故必須同步新增 `FUBON_TRADE_SYNC_ENABLED: ${FUBON_TRADE_SYNC_ENABLED:-false}` 這一行，否則 `.env` 設定不會傳入容器。互斥矩陣沿用 Requirement 90 已建立的原則——任何會與 LIVE quote provider 爭同一 SDK session 的功能都與其互斥，同帳務 lane 的功能彼此不互斥：
+`FUBON_TRADE_SYNC_ENABLED`、`FUBON_INVENTORY_SYNC_ENABLED`、`FUBON_TW_LIVE_QUOTES_ENABLED` 三個 feature flag 各自獨立宣告（`.env.example` 新增第三個）。`docker-compose.yml` 對 `business-services` 的環境變數是逐條白名單（既有 `FUBON_INVENTORY_SYNC_ENABLED`／`FUBON_TW_LIVE_QUOTES_ENABLED` 各自明確一行 passthrough），故必須同步新增 `FUBON_TRADE_SYNC_ENABLED: ${FUBON_TRADE_SYNC_ENABLED:-false}` 這一行，否則 `.env` 設定不會傳入容器。Requirement 138／Task 414 取代歷史的 LIVE 互斥矩陣：三個 flag 可同時 true；trade 與 inventory 仍共用 Python 帳務 lane mutex，所有呼叫再由共享五個 native slot、quota 與不重置 absolute deadline 仲裁：
 
 | `FUBON_TRADE_SYNC_ENABLED` | `FUBON_INVENTORY_SYNC_ENABLED` | `FUBON_TW_LIVE_QUOTES_ENABLED` | 結果 |
 |---|---|---|---|
 | false | 任意 | 任意 | trade sync no-op（`TRADE_SYNC_DISABLED`） |
-| true | 任意 | true | trade sync no-op（`TRADE_SYNC_CAPACITY_CONFLICT`） |
-| true | 任意 | false | trade sync 正常執行（與 inventory sync 是否同時 true 無關，兩者共用帳務 lane mutex 依序跑） |
+| true | 任意 | 任意 | trade sync 正常執行（與 inventory／LIVE 是否同時 true 無關；inventory 共用帳務 lane mutex，所有讀取共用 slot／quota／deadline） |
 
 ### Python adapter：窄範圍唯讀成交查詢
 
@@ -10381,7 +10379,6 @@ record FilledTrade(
 ```text
 tradeSyncFeatureGate(dryRun)
   !tradeSyncEnabled            → TRADE_SYNC_DISABLED
-  liveQuotesEnabled            → TRADE_SYNC_CAPACITY_CONFLICT
   else                         → null（放行）
 
 localConfigGate(dryRun)                         // 供 syncManual／syncScheduledAfterCalendar 共用
@@ -10472,7 +10469,7 @@ CREATE UNIQUE INDEX ux_asset_transaction_owner_broker_filled_no
 {"outcome":"SUCCESS","dryRun":false,"batchId":"...","tradeCount":3,"insertedCount":2,"skippedExistingCount":1,"skippedNameUnresolvedCount":0,"reason":"SUCCESS","counters":{...}}
 ```
 
-`FubonTradeOutcome`（獨立 enum，不擴充既有 `FubonOutcome`）：`DISABLED、TRADE_SYNC_DISABLED、TRADE_SYNC_CAPACITY_CONFLICT、MISCONFIGURED、CALENDAR_UNKNOWN、TRADE_FAILED、NO_OWNER、BROKER_MISSING、DRY_RUN、SUCCESS、NO_NEW_TRADES、ROLLED_BACK`，以獨立 `EnumMap<FubonTradeOutcome,LongAdder>` process-local 累計，不新增 Actuator/Micrometer 依賴、不新增 host/public metrics endpoint。
+`FubonTradeOutcome`（獨立 enum，不擴充既有 `FubonOutcome`）：`DISABLED、TRADE_SYNC_DISABLED、MISCONFIGURED、CALENDAR_UNKNOWN、TRADE_FAILED、NO_OWNER、BROKER_MISSING、DRY_RUN、SUCCESS、NO_NEW_TRADES、ROLLED_BACK`；Requirement 138／Task 414 移除歷史的 `TRADE_SYNC_CAPACITY_CONFLICT`，以獨立 `EnumMap<FubonTradeOutcome,LongAdder>` process-local 累計，不新增 Actuator/Micrometer 依賴、不新增 host/public metrics endpoint。
 
 `SchedulePublicBffController.JOBS` 新增一筆（`BUSINESS`、分類沿用既有「券商庫存」）：
 
@@ -10734,9 +10731,9 @@ HTTP 組裝層依 Task408 後十六條 route 選取自己的純 request contract
 
 ### Task401：deadline、native slot 與 quote dispatch
 
-每個已受理操作攜帶 `CallContext(absoluteDeadline, cancellation)`，以 monotonic clock 計算；沒有更短既有 aggregate 的 read 入口固定30秒，ETF batch30秒，caller更短則取min；子呼叫只有取較短剩餘時間，不能在 lock、login、重試或 queue 後另起一個完整期限。SDK gateway 的 session/accounting mutex、quota 及 native-capacity 等待都遵守 context，取得之後及真正 SDK call 起點再次檢查。shutdown 先原子關閉 admission，禁止新 login/read/subscribe；cleanup 可執行但最多兩秒等待。四個 native slots 計算實際仍在執行的 SDK call，直到其 worker 的 finally 才釋放；呼叫者 timeout 不取消這筆容量會計，亦不允許晚到結果寫入已取消的業務流程。
+每個已受理操作攜帶 `CallContext(absoluteDeadline, cancellation)`，以 monotonic clock 計算；沒有更短既有 aggregate 的 read 入口固定30秒，ETF batch30秒，caller更短則取min；子呼叫只有取較短剩餘時間，不能在 lock、login、重試或 queue 後另起一個完整期限。SDK gateway 的 session/accounting mutex、quota 及 native-capacity 等待都遵守 context，取得之後及真正 SDK call 起點再次檢查。shutdown 先原子關閉 admission，禁止新 login/read/subscribe；cleanup 可執行但最多兩秒等待。五個 native slots 計算實際仍在執行的 SDK call，直到其 worker 的 finally 才釋放；呼叫者 timeout 不取消這筆容量會計，亦不允許晚到結果寫入已取消的業務流程。
 
-QuoteService 持有 cache／single-flight；每個 `(purpose, stockCode)` admitted key 代表排隊或執行中的一份工作，process 合計最多100 keys、logical workers最多20，SDK native最多4。第101個新key回 `BATCH_CAPACITY_REJECTED`；相同key的有效waiter共用工作、不再占key。每個waiter可以取消自身等待，只有最後有效waiter離開才取消尚未dispatch的shared work；5秒flight固定自該work建立起算，30秒endpoint固定自入口起算，後來waiter不能延長它們。caller timeout／最後waiter離開後若native仍活著，該key與slot都保留至真完成；新request只能取得該已失效flight的安全失敗，不另起同key並行native。尚未dispatch者須確認取消排程不會晚開始才可移除key。
+QuoteService 持有 cache／single-flight；每個 `(purpose, stockCode)` admitted key 代表排隊或執行中的一份工作，process 合計最多100 keys、logical workers最多20，SDK native最多5。第101個新key回 `BATCH_CAPACITY_REJECTED`；相同key的有效waiter共用工作、不再占key。每個waiter可以取消自身等待，只有最後有效waiter離開才取消尚未dispatch的shared work；30秒endpoint absolute deadline 固定自入口起算，後來waiter不能延長它。slot queue、session lock、login、realtime init、native quote 和最多一次 auth retry 都只可使用該 deadline 的剩餘時間；每次 native read/login/init 自己仍最多5秒。caller timeout／最後waiter離開後若native仍活著，該key與slot都保留至真完成；新request只能取得該已失效flight的安全失敗，不另起同key並行native。尚未dispatch者須確認取消排程不會晚開始才可移除key。
 
 quote operational rolling240/min與429 circuit在真正SDK起點、取得容量且完成所有session等待後檢查並計數；auth retry也算一次。若等待期間其他call得到429，尚未dispatch的工作不再外呼；至少60秒、有效Retry-After上限600秒的原退避不變。成功INVENTORY cache30秒；LIVE不共用此cache。presence-aware `isTrial` 只接受缺欄或真正boolean false，不能把null、0、0.0或字串視為false。
 
@@ -11270,3 +11267,25 @@ This settings projection must not be conflated with `TradingRadarAssetProfileRes
 The existing 13:40 technical scheduler remains the only external fetch lifecycle. Each symbol can start 17 profile calls plus ticker/candles (=19); `BATCH_SIZE=3`, two workers and 3.1-second symbol dispatch are retained, but 90 seconds is only the new-job admission window, not a promise to kill an already admitted job. Python owns the real process-wide per-SDK-start rolling gate: any contiguous 60 seconds has at most 38 actual technical/ticker/candles starts, including a reissued request after re-login; `SdkGateway` 60/min remains an outer hard stop. Technical has a 60-second adapter/70-second Java transport deadline, ticker/candles each 8 seconds, so a symbol must reserve 86 seconds before it starts or becomes `NOT_ADMITTED_DEADLINE`; no symbol count or Java HTTP dispatch is a substitute for the SDK-start gate. Technical/basics/candles persist independently after their own validation. Result counters distinguish historical PostgreSQL facts, complete capture members, FUBON Redis projection, ticker/candle DB facts, and radar LOCAL Redis overlay.
 
 Migration v1.122.0 adds four tables and index/constraints; regenerate `db/schema.sql`. The test matrix uses isolated PostgreSQL+Liquibase and real Redis to prove historical multi-date readback, fact/member identity including KDJ same-response previous-row FK, unchanged-C2 capture, source conflict preservation, FUBON DB→Redis projection, LOCAL Redis overwrite with PostgreSQL preserved, D/W capture atomicity/MGET, 99/100/101-second plus Redis-TIME-at-boundary behavior, absolute-deadline re-projection, three write interleavings plus a mixed-vector/non-dominating FUBON rejection and same-fact C2 refresh, input fingerprint/compatibility mismatch, v1 untouched, no SDK during radar read, local write-on-fallback, Detail/OpenAPI old snapshot compatibility, SDK-start rolling-38 and near-deadline admission, plus ticker/candle fences. Docker verification rebuilds/recreates fubon-broker-service, external-materials-service, business-services, BFF and frontend with all Fubon flags off; it does not make real SDK calls or invoke manual synchronization.
+
+### Requirement 138／Task 414：移除 LIVE 十秒輪詢與庫存／成交同步的靜態互斥閘門
+
+**現況（Requirement 106／Task 370、Requirement 120／Task 385 建立，本次修正）：** `FubonInventorySyncService.inventoryFeatureGate()` 與 `FubonTradeSyncService.tradeSyncFeatureGate()` 各自有一支與時間、與實際併發用量都無關的靜態判斷——只要建構時注入的 `liveQuotesEnabled`（對映 `FUBON_TW_LIVE_QUOTES_ENABLED`）為 `true`，就無條件回傳 `INVENTORY_SYNC_CAPACITY_CONFLICT`／`TRADE_SYNC_CAPACITY_CONFLICT`，連 `brokerClient` 都不會被呼叫。原始設計意圖（Requirement 106 段）是「不把 LIVE 十秒輪詢 40×6=240 calls/min 的預算稀釋掉」，但實作手段是配置層的一刀切拒絕，而非真正依當下併發資源可用量決策。
+
+**真正的共用資源、以及為什麼可以改用即時仲裁而非靜態拒絕：** LIVE 十秒輪詢、庫存同步的估值查詢、成交同步的帳務查詢，三者最終都經過 Python `fubon-broker-service` 同一個 process 內單例 `SdkGateway` 的：
+1. `_blocking_slots`(`threading.BoundedSemaphore(MAX_BLOCKING_CALLS)`，`sdk_gateway.py:88,109`)——所有 blocking SDK 呼叫共用的併發上限，滿了會丟 `SdkCallError("SDK_CALL_SATURATED")`（`sdk_gateway.py:776-778`），呼叫端會拿到明確失敗、不會卡死或損毀資料；
+2. 帳務查詢額外走 `_accounting_lock` 序列化（`inventories`／`bank_remain`／`trades` 互相排隊，不併發搶）；
+3. quote 查詢共用的 240 calls/min 速率預算（`quotes.py`），本次不變動。
+
+也就是說，這個資源競爭本來就有「滿了就明確失敗」的機制，不需要靠配置層的靜態禁止來預防——庫存／成交同步本來就是 fail-closed 設計（`SdkGateway`／adapter 呼叫失敗只會讓該次同步回報失敗、不寫入 DB，不會造成資料錯誤或半寫入）。因此移除靜態閘門後，最壞情況只是「同步這一輪失敗、下一輪重試」，不是資料正確性風險。
+
+**本次變更：**
+1. **刪除靜態閘門判斷式本身**，不用即時 slot 查詢取代它——`_blocking_slots`／`SDK_CALL_SATURATED` 的仲裁已經存在於 Python 端，Java 端不需要重複實作一個「查詢當下 slot 使用量」的機制；讓呼叫直接發生、交給既有的 semaphore 與既有的失敗處理路徑決定成敗即可。`INVENTORY_SYNC_CAPACITY_CONFLICT`／`TRADE_SYNC_CAPACITY_CONFLICT` 這兩個因應靜態閘門而生的 outcome，連同只為了這支判斷式存在的 `liveQuotesEnabled` 建構子參數／欄位，一併從 `FubonInventorySyncService`／`FubonTradeSyncService` 移除；若後續呼叫因 `SDK_CALL_SATURATED` 失敗，會落入既有的一般失敗分支（`FubonOutcome.ACCOUNTING_FAILED`／`FubonTradeOutcome.TRADE_FAILED`），不需要新增專屬 outcome 去分辨「是不是被搶資源」——這不是本次要解決的可觀測性需求。
+2. **同步修正手動快照 ownership**：`FubonSnapshotStockScopeOwnershipAdapter` 移除只為舊 LIVE 互斥存在的 `twLiveQuotesEnabled` 欄位／建構子參數。`READY && inventory-sync-enabled` 的 configured-admin、owner-latest、final-date-today target 不論 LIVE flag 都是 `SOURCE_OWNED`；完整 PUT 必保留 locked source rows，避免已可實際同步的 inventory row 被 stale payload 覆寫。其他 target 保持 `PAYLOAD_OWNED`，不在完整 PUT 外呼 SDK。
+3. **`MAX_BLOCKING_CALLS` 由 4 提高為 5**（`sdk_gateway.py:88`），降低四項功能全部啟用時真正同時搶 slot 而觸發 `SDK_CALL_SATURATED` 的機率；`_accounting_lock` 與 240 calls/min quote 預算不變。這同時覆寫 Task401 在 requirements／design／steering 中的歷史四-slot 敘述；Task401 的單一 absolute deadline、native thread 未真正結束不能釋 slot 與 native read/login/init 各最多5秒仍完整適用。
+4. **slot queue、session、login、retry 與 dispatch 共用同一個 absolute deadline**：`_run_bounded()` 不再只等固定 0.1 秒，但也不得用「queue 5 秒＋執行 5 秒」或每次 auth retry 重置時鐘。入口建立的 monotonic `absoluteDeadline` 會傳入 session/accounting lock、slot acquisition、login、realtime init、accounting budget、native invoke 與最多一次 auth retry；slot 可等待至剩餘 deadline，取得後 native call 僅可執行 `min(既有5秒上限, 剩餘deadline)`。若 deadline 前無 slot，回既有 `SDK_CALL_SATURATED`；lock 到期則回該 reader 既有的 sanitized timeout。取得 lock/quota 後、native invoke 前都再檢查 deadline；native call 在持有 slot 時逾時，worker 仍在 finally 才釋放 slot。quote 的 `QuoteService.read()` 固定入口 deadline 為既有 `ENDPOINT_TIMEOUT_SECONDS=30.0`；`read_accounting_pair`、`read_filled_trades`、`read_bank_balance`、`read_settlement`、`read_realized_gains` 各自建立相同 30 秒或承接更短 caller deadline，並在所有 session/login/retry/dispatch 路徑共用它。移除或改造獨立 `PER_CALL_TIMEOUT_SECONDS` timer，避免它早於同一 deadline 使 queue／retry 被誤判 `QUOTE_TIMEOUT`。caller timeout/cancel 只取消自己的等待：未 dispatch shared work 必須確認不會晚啟動才能移除 key；已 dispatch 的 native worker 即使先向 waiter 回 sanitized failure，同一 `(purpose, stockCode)` admitted key 與 slot 仍保留至 worker finally，新同 key request 不得另起 native call。240/min quote quota／429 circuit 的唯一 debit gate 位於 session、slot、deadline 都通過、native quote method 即將 invoke 之處；未 dispatch 的等待/取消/已開 circuit 零 debit，auth retry 的真實 invoke 仍記一次。Java 端 30 秒 transport 不變。測試以 fake clock、Event/latch 與 fake SDK 證明 deadline 在 slot/session/accounting lock、auth-invalid 後的 session 重建與 retry 中遞減而非重置，且不用脆弱 sleep。
+5. **排程時間錯開**：`FubonBankBalanceSyncScheduler` 的 `09:30`／`14:00` 與 `FubonTradeSyncScheduler` 的整點／半點 cron 精確重疊，改為 `09:20`／`14:20`，避開 `FubonTradeSyncScheduler`（`:00`／`:30`）與 `FubonInventorySyncScheduler`（`:05`／`:35`）；`08:00`／`22:00` 兩個非交易時段的觸發點維持不變。`SchedulePublicBffController.JOBS` 與 `FubonApiInfoBffController` 的「富邦交割銀行餘額同步」展示文字都同步改字串，避免排程列表頁或富邦證 API 資訊頁與實際 cron 漂移。`FubonEtfHoldingsSyncScheduler`（`08:50`／`15:30` MON-FRI）本來就不落在庫存／成交同步的交易時間窗內，與本次調整的時段互不重疊，不需要一併處理。LIVE 十秒輪詢本身在交易日 09:00–13:59 連續每 10 秒觸發，不存在「錯開」的空間，這部分風險由第 1、2、3、4 點的即時仲裁、放寬併發上限與排隊等待吸收，不靠排程時間解決。
+
+**殘留風險（明確揭露、由使用者知情後接受）：** 拆掉靜態閘門後，LIVE 十秒輪詢與庫存／成交同步會真實共用同一個 Python process 的 `_blocking_slots` 與同一個 240 calls/min quote 速率預算（`quotes.py:41,78-93`）——這個計數器不分 `purpose=LIVE` 或 `purpose=INVENTORY`，是全域共用；兩者各自的 30 秒 per-purpose 快取（`quotes.py:95-109`）也互不相通，LIVE 剛抓過的同一檔報價不會讓庫存同步省下重複請求。這正是 Requirement 106 原始設計（`spec/design.md:9832`：「不把原本 40×6=240 calls/min 的 LIVE budget 稀釋」）想避免的情境。本次的取捨是：接受這個稀釋風險，用「排隊等待＋放寬併發上限」取代「一律拒絕」，最壞情況下 LIVE 輪詢在庫存／成交同步觸發的視窗內，個別代碼可能因排隊等待而報價短暫變舊（下一輪 10 秒後補上），或極端情況下仍觸發 `SDK_CALL_SATURATED`／速率預算不足——這是同步失敗、下一輪重試的既有 fail-closed 行為，不是資料寫入錯誤或半寫入風險。若日後觀察到 LIVE 輪詢因此顯著劣化，需要另立 Requirement 重新分配配額，不在本次範圍內處理。
+
+**明確不變更的範圍：** 不新增／刪除／重新命名任何 feature flag；不動 `FubonConfigState` 三態語意；不動五檔快照（`TwFubonOrderBookRoundWriter`）、`stock_holding`／`bank_deposit`／`asset_transaction` 的寫入邏輯本身；不新增下單／改單／撤單或任何具金融副作用的呼叫；`FUBON_STOCK_PUSH_ENABLED`／`FUBON_TAIEX_INDEX_STREAM_ENABLED` 的獨立閘門不受影響（它們本來就不受 `FUBON_TW_LIVE_QUOTES_ENABLED` 控制，也不在本次互斥矩陣調整範圍內）。

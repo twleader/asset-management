@@ -1,5 +1,7 @@
 # [t370] 台股十秒富邦優先行情與最新快照持久化
 
+> **現況覆寫（Requirement 138／Task 414）：** 本檔關於 static `INVENTORY_SYNC_CAPACITY_CONFLICT` 與「先關閉 LIVE 才能啟用 inventory」的文字已失效。LIVE、inventory、trade 與 bank reader 可同時啟用，實際資源由共享五個 native slots、quota 與不重置 deadline 仲裁；不得依本 task 恢復靜態互斥。
+
 **對應 Requirements:** Requirement 106（台股盤中每 10 秒 Fubon → TWSE MIS → Yahoo，且 Redis/DB 僅新蓋舊）
 **前置任務:** t353
 **Liquibase changeset:** v1.113.0-stock-intraday-quote.sql
@@ -10,7 +12,7 @@
 
 使用者要求台股盤中改為每十秒依序嘗試「富邦證券 API → TWSE MIS → Yahoo」，並要求 Redis 和 DB 都必須按來源行情時間嚴格比較，只有較新的資料可覆寫較舊資料；富邦 API 回傳的所有已驗證行情欄位也要保存。
 
-`FUBON_ENABLED=true` 是 adapter 主開關，不是庫存同步授權；tracked `.env.example` 固定設定 `FUBON_ENABLED=true`、`FUBON_TW_LIVE_QUOTES_ENABLED=true`、`FUBON_INVENTORY_SYNC_ENABLED=false`。只有前兩者皆 true 時 external 才可打富邦台股 LIVE；inventory false 時 backend scheduler 與手動庫存 sync 必須在呼叫 adapter 前 typed `INVENTORY_SYNC_DISABLED`、零 SDK／DB side effect。若兩個 consumer flag 都 true，inventory 必須 typed `INVENTORY_SYNC_CAPACITY_CONFLICT`、零 adapter／資產寫入，保留 40 檔×每十秒、240 calls/min 給 LIVE；要啟用庫存同步必須先明確關閉 live flag。富邦目前公開的市場資料契約僅涵蓋台灣證券市場，沒有可驗證的美股 actual-trade endpoint 與來源 timestamp；因此本任務不得對美股發出富邦 request，也不把美股既有 2 分鐘排程改為 10 秒。將來若官方正式提供美股端點，必須另立 requirement，先完成 market adapter、時間契約、速率／容量及 integration test，才可啟用美股十秒更新。
+`FUBON_ENABLED=true` 是 adapter 主開關，不是庫存同步授權；tracked `.env.example` 固定設定 `FUBON_ENABLED=true`、`FUBON_TW_LIVE_QUOTES_ENABLED=true`、`FUBON_INVENTORY_SYNC_ENABLED=false`。只有前兩者皆 true 時 external 才可打富邦台股 LIVE；inventory false 時 backend scheduler 與手動庫存 sync 必須在呼叫 adapter 前 typed `INVENTORY_SYNC_DISABLED`、零 SDK／DB side effect。Requirement 138／Task 414 取代舊有的 consumer 靜態互斥：兩個 flag 同為 true 時 inventory 可進入既有唯讀 adapter，與 LIVE 共用五個 native slots、quota 與不重置 deadline 仲裁，不得要求關閉 LIVE。富邦目前公開的市場資料契約僅涵蓋台灣證券市場，沒有可驗證的美股 actual-trade endpoint 與來源 timestamp；因此本任務不得對美股發出富邦 request，也不把美股既有 2 分鐘排程改為 10 秒。將來若官方正式提供美股端點，必須另立 requirement，先完成 market adapter、時間契約、速率／容量及 integration test，才可啟用美股十秒更新。
 
 `stock_price_history` 是正式日線／收盤的權威資料：台股今日列只可由盤後 TWSE／TPEx 官方對帳或 FinMind 缺檔 fallback 寫入。它沒有來源行情 timestamp，絕對不可用來保存每十秒盤中 quote，否則盤中成交會覆蓋正式收盤語意。因此本任務新增一張「每檔最新盤中 snapshot」表，與既有 tick LIST 及日收盤歷史分開。
 
@@ -103,7 +105,7 @@
 
   不得因容量而安靜截斷、固定只抓前 40、把 budget exhausted 誤標為成功，或讓 provider cache 使 10 秒排程實質停在 30 秒。41、100、321 檔都必須在一個 round 產生完整 outcome；full cursor cycle 後每個 code 至少取得一次 Fubon 機會。
 
-- [ ] **370.10 排程 catalog 與設定邊界。** 將 `SchedulePublicBffController.JOBS` 的「台股個股即時價（盤中）」同步成「交易日 09:00–13:30 每 10 秒」、cron `*/10 * 9-13 * * MON-FRI`，描述明確寫 Fubon → TWSE MIS → Yahoo、Redis＋最新盤中 snapshot、排除 `0000`。不新增排程條目，僅改既有的一筆；總 job count 不應改變。`FUBON_ENABLED` 仍由未納版的 deployment `.env`／secret mount 控制，不能把憑證、token、帳號或密碼寫進 source、log、schema、fixture 或公開 endpoint。依使用者要求，tracked `.env.example` 必須是 `FUBON_ENABLED=true`、`FUBON_TW_LIVE_QUOTES_ENABLED=true`、`FUBON_INVENTORY_SYNC_ENABLED=false`；compose 必須將 master＋live flag 傳給 external，master＋live＋inventory flag 傳給 backend，master flag 傳給 Python adapter。enabled 但 adapter 未配置／不可用時，台股必須以 typed failure 走 MIS → Yahoo；inventory disabled／capacity conflict 均不得 call adapter、不得讀 portfolio/quote、不得寫資產。美股不得讀取或使用任一富邦 flag，也不得變更既有 2 分鐘 cadence。
+- [ ] **370.10 排程 catalog 與設定邊界。** 將 `SchedulePublicBffController.JOBS` 的「台股個股即時價（盤中）」同步成「交易日 09:00–13:30 每 10 秒」、cron `*/10 * 9-13 * * MON-FRI`，描述明確寫 Fubon → TWSE MIS → Yahoo、Redis＋最新盤中 snapshot、排除 `0000`。不新增排程條目，僅改既有的一筆；總 job count 不應改變。`FUBON_ENABLED` 仍由未納版的 deployment `.env`／secret mount 控制，不能把憑證、token、帳號或密碼寫進 source、log、schema、fixture 或公開 endpoint。依使用者要求，tracked `.env.example` 必須是 `FUBON_ENABLED=true`、`FUBON_TW_LIVE_QUOTES_ENABLED=true`、`FUBON_INVENTORY_SYNC_ENABLED=false`；compose 必須將 master＋live flag 傳給 external，master＋live＋inventory flag 傳給 backend，master flag 傳給 Python adapter。enabled 但 adapter 未配置／不可用時，台股必須以 typed failure 走 MIS → Yahoo；inventory disabled 不得 call adapter、不得讀 portfolio/quote、不得寫資產，而 LIVE=true 與 inventory=true 時仍由共享 resource gate 決定，不得以 capacity-conflict 短路。美股不得讀取或使用任一富邦 flag，也不得變更既有 2 分鐘 cadence。
 
 
 - [ ] **370.11 必要測試。**
@@ -111,7 +113,7 @@
   - Python：兩次串行 LIVE 成功讀取同 code 必須有兩次 SDK quote call；並行相同 `(LIVE, code)` 仍只一個 in-flight call；INVENTORY-only 的兩次讀取才可命中既有 30 秒 cache；LIVE 不得讀到 inventory cache；缺／未知 purpose 是 400、零 SDK call；240/min budget、429 circuit、actual-trade/時間驗證不可回歸。
   - Java client：Fubon fields 全量 mapping、strict purpose wire（LIVE client／inventory client）與 cache 隔離、TWSE strict `d+t` 才是 freshness（壞／缺 `tlong` 只記 anomaly）、Yahoo `.TW`→`.TWO` fallback 與 timestamp reject matrix，以及 per-code rate/circuit reason 的 preservation。
   - Coordinator：Fubon DB APPLIED 時零 MIS/Yahoo；Fubon individual/whole-batch/misconfigured/429/stale/equal 時依 code fallback；MIS DB APPLIED 時零 Yahoo；MIS stale/failure 才 Yahoo；DB failure 零 Redis且停止該 code；disabled 零 Fubon；41/100/321 code 的 capacity round-robin、MIS batching、full cursor cycle、local circuit skip 與 in-flight skip。
-  - Feature flag 隔離：.env.example 的 master/live/inventory 三值精確為 true/true/false；master 或 live 關閉時 external 零 token／Fubon HTTP 並走 MIS → Yahoo；inventory 關閉時 scheduler 與手動 service 都回 INVENTORY_SYNC_DISABLED 且零 portfolio／quote／資產寫入；兩 consumer flag 同為 true 時 inventory 回 INVENTORY_SYNC_CAPACITY_CONFLICT 且零 adapter／資產 side effect，LIVE 的 240/min 預算不變。
+  - Feature flag 隔離：.env.example 的 master/live/inventory 三值精確為 true/true/false；master 或 live 關閉時 external 零 token／Fubon HTTP 並走 MIS → Yahoo；inventory 關閉時 scheduler 與手動 service 都回 INVENTORY_SYNC_DISABLED 且零 portfolio／quote／資產寫入；兩 consumer flag 同為 true 時 inventory 仍可進既有唯讀 adapter，LIVE 的 240/min 預算、共享五個 native slots及 deadline 仲裁不變。
   - Redis 真實 integration：跨 FUBON/TWSE/YAHOO 的 newer 成功一次，older/equal 不 SET/SADD/EXPIRE/PUBLISH/tick/day-HL，VERIFIED_CLOSE 不降級，Fubon source OHLC 不寫 day-H/L tracker，MIS/Yahoo 只在 accepted latest 後 observe；不能只 assert Java outcome。
   - PostgreSQL 真實 integration：migration 後 schema 的型別／CHECK、富邦所有可保存欄、newer wins、equal/older 各欄完全不變、stock name 僅隨 APPLIED 前進，以及 DB APPLIED/Redis failure 後同 timestamp 只以 canonical row 修復、DB equal/raw 不同不回灌、DB failure 零 Redis。不可用 mock SQL 宣稱已證明 `ON CONFLICT ... WHERE` 原子性。
   - 排程與 BFF catalog reflection：精確驗 cron／zone／友善文字，且公開 quote API 既有 19 keys、SSE、收盤流程、`stock_price_history` 不被盤中 pipeline 寫入。

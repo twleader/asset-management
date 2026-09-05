@@ -448,7 +448,7 @@ Task401的新增中立檔名可採等價內層命名，但依賴方向與責任�
 
 - Task408 後十六條 exact internal surface：GET health/config、POST portfolio/trades/bank-balance/settlement/realized-gains read、POST tw-quotes/etf-holdings/dividends/technical-indicators/stock-basic/intraday-candles、GET indices SSE、POST stock subscriptions、GET stock SSE。除了health外維持既有internal-token/config gate；新增的 basic/candles 同樣只在 Docker network token gate 內，不增加host/public path或通用proxy。
 - 所有SDK用途僅帳務／成交紀錄／行情唯讀與市場訂閱，不import或封裝order／改撤單／轉帳／圈存；憑證無可驗證唯讀能力則disabled/fail closed。市場client與session只在官方初始化成功後使用。
-- 每個query有同一deadline/cancel，最多4個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。Task408 技術路徑為 `BATCH_SIZE=3`、two workers、symbol dispatch≥3.1 秒；90 秒僅新 job admission，已 admitted job 不因之取消；每 symbol 在 SDK start 前必保留 technical 70 秒＋ticker/candles 各8秒的86秒 deadline，Python aggregate 60秒／Java technical transport70秒，所有19個 technical/ticker/candle SDK start（含 re-login 重送）共用真正 rolling-60s ≤38 gate，外層 history 60/min仍維持。
+- 每個query有同一deadline/cancel，最多5個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。Task408 技術路徑為 `BATCH_SIZE=3`、two workers、symbol dispatch≥3.1 秒；90 秒僅新 job admission，已 admitted job 不因之取消；每 symbol 在 SDK start 前必保留 technical 70 秒＋ticker/candles 各8秒的86秒 deadline，Python aggregate 60秒／Java technical transport70秒，所有19個 technical/ticker/candle SDK start（含 re-login 重送）共用真正 rolling-60s ≤38 gate，外層 history 60/min仍維持。
 - indices與stock各run有不可復活cancel及自己的connection/worker/subscription。晚connect不得subscribe，舊callback/finally不影響新run；ASGI不等同步symbol驗證，connect5秒/cleanup2秒有界，native未結束持續計容量。
 - Compose維持linux/amd64、無host port、asset-net、non-root/read-only/tmpfs/drop capabilities。SDK安裝媒介／secret不入Git/build context；hash驗證後runtime package可在image。只有Python可掛SDKsecret，Java只掛shared token目錄。
 - business-services擁有帳務owner/transaction；external-materials擁有market DB/Redis唯一writer。Task405使五種accounting normalized batch都有strict boolean accountBindingExplicit，同批selector/selected/raw一致才true；缺欄或false只能純讀、不得寫個人資料，raw仍不跨Python。Task406將合法交割/損益保存成本人來源報表，Python不持久化；原394/395在途款／realized_gain入帳仍未完成，不因報表保存解除其no-write。
@@ -562,7 +562,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 131 個 Requirements（最新編號為 136）
+├── requirements.md       # 132 個 Requirements（最新編號為 138）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398）＋尚未歸檔的 201 起區段
 ├── tasks/                # 任務檔

@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
+import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Callable
@@ -32,10 +33,21 @@ class CachedQuote:
     value: dict[str, object]
 
 
+@dataclass
+class InflightQuote:
+    """One admitted (purpose, stockCode) flight and its native-lifecycle state."""
+
+    future: asyncio.Future[dict[str, object]]
+    task: asyncio.Task[None] | None = None
+    waiters: int = 0
+    dispatch_lock: threading.Lock = field(default_factory=threading.Lock)
+    dispatched: bool = False
+    cancel_requested: bool = False
+
+
 class QuoteService:
     MAX_CODES = 100
     MAX_CONCURRENCY = 20
-    PER_CALL_TIMEOUT_SECONDS = 5.0
     ENDPOINT_TIMEOUT_SECONDS = 30.0
     CACHE_SECONDS = 30.0
     MAX_CALLS_PER_MINUTE = 240
@@ -53,9 +65,12 @@ class QuoteService:
         self._state_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENCY)
         self._cache: dict[tuple[str, str], CachedQuote] = {}
-        self._inflight: dict[tuple[str, str], asyncio.Future[dict[str, object]]] = {}
+        self._inflight: dict[tuple[str, str], InflightQuote] = {}
         self._call_starts: deque[float] = deque()
         self._circuit_until = 0.0
+        # This state is read in SdkGateway's worker thread at the final native
+        # dispatch gate, so it cannot be guarded by the asyncio cache lock.
+        self._budget_lock = threading.Lock()
 
     @staticmethod
     def normalize_codes(raw_codes: list[str]) -> list[str]:
@@ -79,10 +94,11 @@ class QuoteService:
         codes = self.normalize_codes(raw_codes)
         if purpose not in {"LIVE", "INVENTORY"}:
             raise QuoteError("INVALID_PURPOSE")
+        deadline = self._monotonic() + self.ENDPOINT_TIMEOUT_SECONDS
         try:
             values = await asyncio.wait_for(
-                asyncio.gather(*(self._read_one(code, purpose) for code in codes)),
-                timeout=self.ENDPOINT_TIMEOUT_SECONDS,
+                asyncio.gather(*(self._read_one(code, purpose, deadline) for code in codes)),
+                timeout=max(0.0, deadline - self._monotonic()),
             )
         except TimeoutError:
             values = [self._failure(code, "BATCH_TIMEOUT") for code in codes]
@@ -92,8 +108,9 @@ class QuoteService:
             "quotes": values,
         }
 
-    async def _read_one(self, code: str, purpose: str) -> dict[str, object]:
-        owner = False
+    async def _read_one(
+        self, code: str, purpose: str, deadline: float
+    ) -> dict[str, object]:
         now_date = self._now().astimezone(TW_ZONE).date().isoformat()
         key = (purpose, code)
         async with self._state_lock:
@@ -107,85 +124,188 @@ class QuoteService:
                 ):
                     return cached.value
                 self._cache.pop(key, None)
-            future = self._inflight.get(key)
-            if future is None:
+            flight = self._inflight.get(key)
+            if flight is None:
                 future = asyncio.get_running_loop().create_future()
-                self._inflight[key] = future
-                owner = True
-        if not owner:
-            return await asyncio.shield(future)
+                flight = InflightQuote(future)
+                self._inflight[key] = flight
+                flight.task = asyncio.create_task(
+                    self._run_flight(key, code, purpose, deadline, flight),
+                    name=f"fubon-quote-{purpose}-{code}",
+                )
+            flight.waiters += 1
 
         try:
-            value = await self._fetch_one(code)
-            async with self._state_lock:
-                if value.get("status") == "SUCCESS":
-                    if purpose == "INVENTORY":
-                        self._cache[key] = CachedQuote(self._monotonic() + self.CACHE_SECONDS, value)
-            future.set_result(value)
-            return value
+            return await asyncio.shield(flight.future)
         except asyncio.CancelledError:
-            failure = self._failure(code, "BATCH_TIMEOUT")
-            if not future.done():
-                future.set_result(failure)
+            await self._detach_waiter(flight, cancelled=True)
             raise
-        except SdkCallError:
-            failure = self._failure(code, "SESSION_UNAVAILABLE")
-            if not future.done():
-                future.set_result(failure)
-            raise
+        else:
+            await self._detach_waiter(flight, cancelled=False)
+
+    async def _detach_waiter(self, flight: InflightQuote, *, cancelled: bool) -> None:
+        task: asyncio.Task[None] | None = None
+        async with self._state_lock:
+            flight.waiters -= 1
+            if cancelled and flight.waiters == 0 and not flight.future.done():
+                # The exact same lock is acquired by the native worker's last
+                # dispatch gate.  A cancellation therefore either wins before
+                # native I/O, or joins a worker already known to be dispatched.
+                with flight.dispatch_lock:
+                    if not flight.dispatched:
+                        flight.cancel_requested = True
+                        task = flight.task
+        if task is not None:
+            task.cancel()
+
+    async def _run_flight(
+        self,
+        key: tuple[str, str],
+        code: str,
+        purpose: str,
+        deadline: float,
+        flight: InflightQuote,
+    ) -> None:
+        completion_event: threading.Event | None = None
+        deferred_remove = False
+        try:
+            value = await self._fetch_one(code, deadline, flight)
+            if value.get("status") == "SUCCESS" and purpose == "INVENTORY":
+                async with self._state_lock:
+                    self._cache[key] = CachedQuote(self._monotonic() + self.CACHE_SECONDS, value)
+            if not flight.future.done():
+                flight.future.set_result(value)
+        except asyncio.CancelledError:
+            # `_detach_waiter` cancels only a flight which has not claimed native
+            # dispatch, so it is safe to remove after producing a local failure.
+            if not flight.future.done():
+                flight.future.set_result(self._failure(code, "BATCH_TIMEOUT"))
+        except SdkCallError as exc:
+            completion_event = exc.completion_event
+            if exc.reason == "RATE_LIMITED":
+                self._open_rate_limit_circuit(exc.retry_after_seconds)
+            reason = "SESSION_UNAVAILABLE" if exc.misconfigured or exc.auth_invalid else exc.reason
+            if not flight.future.done():
+                flight.future.set_result(self._failure(code, reason))
         except Exception:
-            failure = self._failure(code, "QUOTE_FAILED")
-            if not future.done():
-                future.set_result(failure)
-            return failure
+            if not flight.future.done():
+                flight.future.set_result(self._failure(code, "QUOTE_FAILED"))
         finally:
-            async with self._state_lock:
+            if completion_event is not None and not completion_event.is_set():
+                try:
+                    # The SdkGateway event is set only after the timed-out native
+                    # worker releases its blocking slot in finally.
+                    await asyncio.shield(asyncio.to_thread(completion_event.wait))
+                except asyncio.CancelledError:
+                    asyncio.create_task(
+                        self._remove_after_completion(key, flight, completion_event),
+                        name=f"fubon-quote-finalize-{key[0]}-{key[1]}",
+                    )
+                    deferred_remove = True
+            if not deferred_remove:
+                await self._remove_flight(key, flight)
+
+    async def _remove_after_completion(
+        self,
+        key: tuple[str, str],
+        flight: InflightQuote,
+        completion_event: threading.Event,
+    ) -> None:
+        await asyncio.shield(asyncio.to_thread(completion_event.wait))
+        await self._remove_flight(key, flight)
+
+    async def _remove_flight(self, key: tuple[str, str], flight: InflightQuote) -> None:
+        async with self._state_lock:
+            if self._inflight.get(key) is flight:
                 self._inflight.pop(key, None)
 
-    async def _fetch_one(self, code: str) -> dict[str, object]:
-        budget_reason = await self._reserve_budget()
-        if budget_reason is not None:
-            return self._failure(code, budget_reason)
-        async with self._semaphore:
+    def _remaining(self, deadline: float) -> float:
+        remaining = deadline - self._monotonic()
+        if remaining <= 0:
+            raise SdkCallError("QUOTE_TIMEOUT")
+        return remaining
+
+    async def _fetch_one(
+        self, code: str, deadline: float, flight: InflightQuote
+    ) -> dict[str, object]:
+        acquired = False
+        native_task: asyncio.Task[object] | None = None
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=self._remaining(deadline))
+            acquired = True
+            self._remaining(deadline)
+            native_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self._gateway.quote,
+                    code,
+                    deadline=deadline,
+                    before_dispatch=lambda: self._claim_dispatch(flight, deadline),
+                ),
+                name=f"fubon-native-quote-{code}",
+            )
             try:
                 response = await asyncio.wait_for(
-                    asyncio.to_thread(self._gateway.quote, code),
-                    timeout=self.PER_CALL_TIMEOUT_SECONDS,
+                    asyncio.shield(native_task), timeout=self._remaining(deadline)
                 )
-                quote = self._normalize_quote(code, response)
-                return {"stockCode": code, "status": "SUCCESS", "reason": None, "quote": quote}
-            except TimeoutError:
-                return self._failure(code, "QUOTE_TIMEOUT")
-            except SdkCallError as exc:
-                if exc.reason == "RATE_LIMITED":
-                    await self._open_rate_limit_circuit(exc.retry_after_seconds)
-                if exc.misconfigured or exc.auth_invalid:
-                    raise
-                return self._failure(code, exc.reason)
-            except (QuoteError, NumericError) as exc:
-                if isinstance(exc, QuoteError) and exc.reason == "RATE_LIMITED":
-                    await self._open_rate_limit_circuit(exc.retry_after_seconds)
-                return self._failure(code, str(exc))
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                raise self._native_timeout(native_task) from None
+            quote = self._normalize_quote(code, response)
+            return {"stockCode": code, "status": "SUCCESS", "reason": None, "quote": quote}
+        except asyncio.TimeoutError:
+            raise SdkCallError("QUOTE_TIMEOUT") from None
+        except SdkCallError:
+            raise
+        except (QuoteError, NumericError) as exc:
+            if isinstance(exc, QuoteError) and exc.reason == "RATE_LIMITED":
+                self._open_rate_limit_circuit(exc.retry_after_seconds)
+            return self._failure(code, str(exc))
+        finally:
+            if acquired:
+                self._semaphore.release()
 
-    async def _open_rate_limit_circuit(self, retry_after_seconds: float | None = None) -> None:
+    def _native_timeout(self, native_task: asyncio.Task[object]) -> SdkCallError:
+        completion_event = threading.Event()
+
+        def mark_complete(task: asyncio.Task[object]) -> None:
+            # The caller deliberately stopped awaiting this late native bridge;
+            # consume its terminal exception before allowing flight cleanup.
+            try:
+                task.exception()
+            except BaseException:
+                pass
+            completion_event.set()
+
+        native_task.add_done_callback(mark_complete)
+        return SdkCallError("QUOTE_TIMEOUT", completion_event=completion_event)
+
+    def _claim_dispatch(self, flight: InflightQuote, deadline: float) -> None:
+        # Called from SdkGateway's worker after it owns its native slot and has
+        # checked session state.  This is the only 240/min debit point.
+        self._remaining(deadline)
+        with flight.dispatch_lock:
+            if flight.cancel_requested:
+                raise SdkCallError("QUOTE_CANCELLED")
+            self._reserve_dispatch_budget()
+            flight.dispatched = True
+
+    def _open_rate_limit_circuit(self, retry_after_seconds: float | None = None) -> None:
         retry_after = 0.0 if retry_after_seconds is None else min(600.0, max(0.0, retry_after_seconds))
         circuit_seconds = max(self.RATE_LIMIT_CIRCUIT_SECONDS, retry_after)
-        async with self._state_lock:
+        with self._budget_lock:
             self._circuit_until = max(
                 self._circuit_until, self._monotonic() + circuit_seconds
             )
 
-    async def _reserve_budget(self) -> str | None:
-        async with self._state_lock:
+    def _reserve_dispatch_budget(self) -> None:
+        with self._budget_lock:
             now = self._monotonic()
             if now < self._circuit_until:
-                return "RATE_LIMIT_CIRCUIT_OPEN"
+                raise SdkCallError("RATE_LIMIT_CIRCUIT_OPEN")
             while self._call_starts and now - self._call_starts[0] >= 60.0:
                 self._call_starts.popleft()
             if len(self._call_starts) >= self.MAX_CALLS_PER_MINUTE:
-                return "RATE_LIMIT_BUDGET_EXHAUSTED"
+                raise SdkCallError("RATE_LIMIT_BUDGET_EXHAUSTED")
             self._call_starts.append(now)
-            return None
 
     def _normalize_quote(self, requested_code: str, response: object) -> dict[str, object]:
         success = raw_field(response, "is_success")

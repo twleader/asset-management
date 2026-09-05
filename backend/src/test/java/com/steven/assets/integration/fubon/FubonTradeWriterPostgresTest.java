@@ -299,7 +299,7 @@ class FubonTradeWriterPostgresTest {
         @Bean FubonTradeSyncService tradeService(FubonConfigState config, FubonBrokerClient client, MarketDataService marketData,
                 UserAdminService users, BrokerRepository brokers, AssetTransactionRepository ledger,
                 StockMasterService stocks, FubonTradeWriter writer, FubonTradeOutcomeCounters counters) {
-            return new FubonTradeSyncService(config, client, marketData, users, brokers, ledger, stocks, writer, counters, CLOCK, true, false);
+            return new FubonTradeSyncService(config, client, marketData, users, brokers, ledger, stocks, writer, counters, CLOCK, true);
         }
     }
 }
