@@ -11411,3 +11411,220 @@ BFF 單元測試（比照既有 `LatestAssetsConfiguredAdminContextTest`／`Publ
 測試需要準備至少一個非 configured-admin 的 active 測試帳號（seed 或 test fixture），否則情境 2 無法真正驗證「查到別人的資料」而非湊巧命中同一份資料。
 
 實機驗收：`docker compose -p asset-management build --no-cache bff` → `up -d --no-deps --force-recreate bff api-gateway`（business-services 若未變更程式碼不需重建，但需確認既有 `/internal/users/by-email` 可達）；以 `curl "http://127.0.0.1:9090/api/assets/latest"` 與 `curl "http://127.0.0.1:9090/api/assets/latest?email=<測試帳號>"` 分別驗證兩次回應屬於不同帳號，其餘四支端點比照。
+## Requirement 141／Task 417：API logs 查詢的觀測資料流
+
+### 目標與不變量
+
+這是管理者用的失敗觀測資料，不是 API proxy、重送佇列或使用者可執行的診斷工具。資料流只接受
+已完成失敗的現有執行路徑，永遠不發起新的公開 API、Fubon SDK 或 broker 呼叫。每一筆 row 必有
+固定來源、固定 catalog operation、發生當下的 API 中文名稱、原始錯誤訊息標頭、完整原始 stacktrace
+與 UTC occurred_at。使用者要求 log 詳細清楚；`api_name`、`message_header`、`stack_trace` 因此不得
+redact、mask、hash、truncate、字元替換或內容過濾。這是有意識的紀錄策略，不是遺漏 sanitizer；風險由
+ADMIN-only 讀取與 private-only 寫入隔離，而不是改寫紀錄內容。
+
+本功能不為了補強 log 額外收集 request/response body、query 或 raw HTTP headers，亦不新發起 broker
+呼叫。已有 Throwable 時，producer 必保存其原始 class、message、cause chain 與完整 StackTraceElement。
+若既有流程只有正常化的 boundary failure reason 而無 Throwable，才建立明示 operation、HTTP status/reason
+與產生位置的 synthetic trace；它不得杜撰遠端或 SDK 的原因。
+
+`occurred_at` 是 producer 在判定一次失敗的邊界固定的 UTC `Instant`，而非 retry/queue/DB insert 時重新
+取樣的時間；BFF private ingest 將該值原樣傳到 business recorder，external writer 也傳自己的固定值。它是
+列表 `NEWEST`／`OLDEST` 的唯一業務時間，id 只作同一 timestamp 的穩定 secondary order。
+
+ApiErrorOperationCatalog 是程式內的技術 operation allowlist，不是可由使用者設定的業務分類：
+每項由 (source, operationKey, operationLabel, displayOrder) 組成。error row 額外保存 `api_name`
+snapshot，供直接查詢與清單閱讀；read-time 不得以 catalog label 覆寫它。寫入時 server 與 producers
+只能使用下列 immutable seed，並由 composite FK 驗證 source/key/name 的組合。catalog 在本任務不可更新；
+若未來真需改名，必新增 catalog key 而非 UPDATE 已有 label，保留既有 log 身分。它列出 SecurityConfig
+所列的 13 個 public exact route/method，以及已接入的唯讀 Fubon adapter operation；未接入 SDK 目錄項目
+與所有交易/資金操作不在其中。
+
+| source | order | operationKey | apiName | 唯一 producer／route |
+|---|---:|---|---|---|
+| OPEN_API | 10 | OPEN_QUOTES_LIST | 即時報價清單 | GET /api/quotes |
+| OPEN_API | 20 | OPEN_QUOTES_ONE | 單一即時報價 | GET /api/quotes/one |
+| OPEN_API | 30 | OPEN_MARKET_INDEX | 大盤指數 | GET /api/public/market-index |
+| OPEN_API | 40 | OPEN_LATEST_ASSETS | 最新資產 | GET /api/assets/latest |
+| OPEN_API | 50 | OPEN_USD_TWD | 美元兌台幣 | GET /api/public/exchange-rate/usd-twd |
+| OPEN_API | 60 | OPEN_MARKET_ANALYSIS_TODAY | 今日市場分析 | GET /api/public/market-analysis/today |
+| OPEN_API | 70 | OPEN_PORTFOLIO_ADVICE_LATEST | 最新資產配置建議 | GET /api/public/portfolio-advice/latest |
+| OPEN_API | 80 | OPEN_TRADING_RADAR_TODAY | 今日交易雷達 | GET /api/public/trading-radar/today |
+| OPEN_API | 90 | OPEN_TRADING_RADAR_STOCK | 單一標的交易雷達 | GET /api/public/trading-radar/stock |
+| OPEN_API | 100 | OPEN_TRANSACTIONS | 公開交易紀錄 | GET /api/public/transactions |
+| OPEN_API | 110 | OPEN_TRADING_CALENDAR | 交易日曆 | GET /api/public/trading-calendar |
+| OPEN_API | 120 | OPEN_COMMODITY_PRICES | 油價金價 | GET /api/public/commodity-prices |
+| OPEN_API | 130 | OPEN_CRAWLER_RESCAN | 公開爬蟲重新掃描 | POST /api/public/crawler-data/rescan |
+| FUBON_API | 10 | FUBON_PORTFOLIO_READ | 庫存與未實現損益 | FubonHttpClient: POST /internal/portfolio/read |
+| FUBON_API | 20 | FUBON_TW_QUOTES_INVENTORY | 庫存同步台股報價 | FubonHttpClient: POST /internal/market-data/tw-quotes |
+| FUBON_API | 30 | FUBON_FILLED_TRADES_READ | 已成交交易查詢 | FubonHttpClient: POST /internal/trades/read |
+| FUBON_API | 40 | FUBON_ETF_HOLDINGS_READ | ETF 成分股查詢 | FubonHttpClient: POST /internal/market-data/etf-holdings |
+| FUBON_API | 50 | FUBON_BANK_BALANCE_READ | 交割銀行餘額 | FubonHttpClient: POST /internal/bank-balance/read |
+| FUBON_API | 60 | FUBON_SETTLEMENT_READ | 交割款查詢 | FubonHttpClient: POST /internal/settlement/read |
+| FUBON_API | 70 | FUBON_REALIZED_GAINS_READ | 已實現損益 | FubonHttpClient: POST /internal/realized-gains/read |
+| FUBON_API | 80 | FUBON_TW_QUOTES_LIVE | 盤中台股即時報價 | FubonNormalizedQuoteClient: POST /internal/market-data/tw-quotes |
+| FUBON_API | 90 | FUBON_TAIEX_INDEX_STREAM | 加權指數串流 | FubonTaiexIndexStreamClient: GET /internal/market-data/taiex-index/stream |
+| FUBON_API | 100 | FUBON_DIVIDENDS_READ | 股利資料查詢 | FubonScheduledMarketClient: POST /internal/market-data/dividends/read |
+| FUBON_API | 110 | FUBON_TECHNICAL_INDICATORS_READ | 技術指標查詢 | FubonScheduledMarketClient: POST /internal/market-data/technical-indicators/read |
+| FUBON_API | 120 | FUBON_STOCK_BASIC_READ | 個股基本資料查詢 | FubonScheduledMarketClient: POST /internal/market-data/stock-basic/read |
+| FUBON_API | 130 | FUBON_INTRADAY_CANDLES_READ | 分鐘 K 線查詢 | FubonScheduledMarketClient: POST /internal/market-data/intraday-candles/read |
+| FUBON_API | 140 | FUBON_STOCK_PUSH_SUBSCRIPTIONS | 個股推播訂閱 | FubonScheduledMarketClient: POST /internal/market-data/stock-push/subscriptions |
+| FUBON_API | 150 | FUBON_STOCK_PUSH_STREAM | 個股推播串流 | FubonStockPushStreamClient: GET /internal/market-data/stock-push/stream |
+
+### PostgreSQL 與服務所有權
+
+Liquibase v1.123.0-api-error-log.sql 建立：
+
+~~~text
+api_error_log_operation
+  source            VARCHAR(16)  CHECK OPEN_API | FUBON_API
+  operation_key     VARCHAR(160) not null
+  operation_label   VARCHAR(255) not null
+  display_order     SMALLINT     positive, not null
+  PRIMARY KEY (source, operation_key)
+  UNIQUE (source, operation_key, operation_label)
+
+api_error_log
+  id               BIGINT generated identity, primary key
+  source           VARCHAR(16)  CHECK OPEN_API | FUBON_API
+  operation_key    VARCHAR(160) not null
+  api_name         VARCHAR(255) not null
+  message_header   TEXT not null
+  stack_trace      TEXT not null
+  occurred_at      TIMESTAMPTZ not null
+  FOREIGN KEY (source, operation_key, api_name)
+    REFERENCES api_error_log_operation (source, operation_key, operation_label)
+    ON UPDATE RESTRICT ON DELETE RESTRICT
+
+api_error_log_operation_immutable trigger
+  BEFORE UPDATE OR DELETE ON api_error_log_operation
+  RAISE EXCEPTION for every row
+~~~
+
+catalog 只由 migration seed 上述完整固定清單，不設 settings endpoint、DataInitializer、HTTP write API
+或 catalog delete/update 流程。v1.123 在 seed 完成後建立 immutable trigger，任何 UPDATE/DELETE（即使 catalog
+row 尚無 log 引用）都由 DB 拒絕；未來要改名稱只能新增另一個 key。error log 索引為 `(source, operation_key, occurred_at DESC, id DESC)`、
+`(source, api_name, occurred_at DESC, id DESC)` 及 `(occurred_at DESC, id DESC)`。兩表都是 append-only：
+本 requirement 不建 delete/update API、清理 job 或 retention policy。migration 註冊後重產 `db/schema.sql`，
+其 pg_dump 輸出才是後續 schema assertion 的權威。
+
+business-services 是 table schema、catalog、backend insert 和全部 read model 的 owner。
+`ApiErrorLogRecorder.record(source, key, apiName, message, stackTrace, occurredAt)` 先確認上述 immutable
+catalog，並原樣保存 producer-fixed `occurredAt`，再於 `REQUIRES_NEW` transaction 寫入；composite FK 是
+第二道 source/key/name 防線。任何 recorder/DB
+failure 只寫既有應用程式診斷 log 的最小訊息並吞掉，不得改變被觀測 API 的回應、排程 outcome、retry
+或領域 transaction。
+
+由於 external-materials-service 是另一路已存在的 Fubon HTTP client，`spec/steering/structure.md` 會新增
+一項窄例外：它只能由 `ExternalApiErrorLogWriter` 以 parameterized JDBC INSERT、獨立 transaction 寫入
+固定 `FUBON_API` catalog row 的原始 name/message/trace；composite FK 驗證 name，無 SELECT/UPDATE/DELETE、
+無其他 business table、無 reverse HTTP call。這是唯一的 cross-service DB exception，不擴張既有資料所有權。
+
+### 寫入路徑
+
+~~~text
+BFF public controller/advice failure
+  -> exact public route/method capture
+  -> short, best-effort private ingest (OPEN_API only)
+  -> business catalog + REQUIRES_NEW INSERT
+
+business FubonHttpClient failure
+  -> recorder (FUBON_API)
+  -> business catalog + REQUIRES_NEW INSERT
+
+external Fubon client failure
+  -> external write-only JDBC recorder (FUBON_API)
+  -> composite-FK-validated independent parameterized INSERT
+~~~
+
+BFF 的 `PublicApiErrorCaptureWebFilter` 先做 exact route/method catalog match。每個既有 public
+`*ExceptionAdvice` handler 接受 `ServerWebExchange` 並只把原始 Throwable 放入 exchange attribute；filter
+在最終 response status 已確定後才判定：只有 5xx 才以完整 Throwable renderer 建立一筆 ingest，所以既有
+status/body/envelope 不改。若 advice 把 Throwable 映射為 1xx–4xx，filter 必丟棄 attribute、zero row；這些是
+caller/request error，不能因其內部 exception 形式被誤記為系統 API failure。若 exception 已在 framework 內
+處理或 controller 顯式返回 status 而無可記錄 Throwable，filter 的 status fallback 只在 matched route 回 5xx
+時建立包含 HTTP status、operation 與產生位置的 boundary synthetic trace；它不對 1xx–4xx 或任一 2xx 建立 row。
+特別是 `OPEN_QUOTES_ONE` 的合約化 204 cache miss 是正常成功，必為 zero row。
+未處理 Throwable 則在 filter error path 捕捉、
+best-effort ingest 後原樣 rethrow。`apiErrorLogRecorded` exchange attribute 防止同一次請求在 advice、filter
+error path 和 status fallback 重複寫入；catalog 外的 404/405 絕不進此流程。這個 renderer 不遮罩、不截斷或
+過濾現有 exception text，且不主動蒐集 request/response/header 資料。
+
+ApiErrorLogIngestClient 使用 BFF 專屬、無 tenant header 的 WebClient，向 private
+POST `/internal/api-error-logs` 提送固定 JSON schema：`source`、`operationKey`、`apiName`、`messageHeader`、
+`stackTrace`、`occurredAt`；不接受別名或缺欄。endpoint 只接受 `OPEN_API`、完整 catalog key/name 與上述欄位，並由 `ApiErrorLogInternalTokenFilter` 對唯一一個
+`X-Internal-Service-Token` 值以 SHA-256 digest 做 constant-time comparison。設定值只能是新的
+`API_ERROR_LOG_INGEST_TOKEN`；Docker Compose 只把這個 required credential 注入 BFF 與
+business-services，external-materials-service、fubon-broker-service、frontend、api-gateway 都不得取得，
+不得 fallback 至 `INTERNAL_TREASURY_TOKEN`。缺失、錯誤或重複 token 一律 fail closed。BFF request 有短
+timeout 並 `onErrorResume` 吞掉 ingest failure；endpoint 不由 BFF read controller rewrite、不列入
+api-gateway:9090、不進 frontend API wrapper，也不可遞迴產生日誌。
+
+Fubon producer 在每個既有 failure exit 做 best-effort 記錄：`FubonHttpClient` 的 portfolio、inventory
+quotes、filled trades、ETF holdings、bank balance、settlement 與 realized gains；以及 external 的
+`FubonNormalizedQuoteClient`、`FubonTaiexIndexStreamClient`、`FubonScheduledMarketClient`、
+`FubonStockPushStreamClient`。只在 outbound broker invocation 已開始後，transport/timeout/non-2xx/
+schema rejection/empty response/broker failure outcome 才依 catalog 寫 row；一般 POST/GET invocation 至多一筆，
+即使後續 parser/caller 再處理同一失敗。
+
+`DISABLED`、`MISCONFIGURED`、token/base-url/file 缺失、local input validation、cancel/stop 和其餘尚未開始
+HTTP 的 gate 均為零筆。stream 有明確 interval state：開始為 `NO_FAILURE`；post-open non-200、wrong/missing
+content type、I/O、EOF（無論當次 open 是否曾 accepted event）、malformed target frame 或 invalid target event 都
+是 failure。從 `NO_FAILURE` 遇到其中任一事件，記一筆並轉 `FAILURE_OPEN`；在 `FAILURE_OPEN` 的 reconnect、
+EOF、同類或不同類 failure 都不重複。只有 HTTP 200 且 target event 完成既有 strict normalization、成功交給
+consumer 並正常返回時，才轉回 `NO_FAILURE`；之後下一個 failure 才記新 row。純 SSE heartbeat、空 frame、
+comment、以及格式正確但不是 target event 的 frame 被忽略，不改變 interval。cancel/stop 無論任何狀態均不寫入。
+external producer 保存原始 Throwable 與既有 failure reason；已取得 non-2xx status 時 synthetic trace 明示
+status/path，不新增 payload/header dump。Python broker service 維持不連 DB、沒有 callback、不輸出 SDK raw
+exception/account/token/certificate，也不變更任何 Fubon flags 或做真實 SDK 呼叫。
+
+每個 producer 以「即將呼叫 transport/open」的本地事實判定 outbound 是否已開始，不能拿既有的
+`Unavailable.configurationFailure`、`BatchStatus` 或 reason string 推測，因為它們同時表示 pre-I/O gate 和
+已發出請求後的 429/401/503。`FubonNormalizedQuoteClient.fetch(...)` 的 return-result failure 也必在其已知
+transport/parse branch 記錄；`FubonScheduledMarketClient`、`FubonHttpClient` 和兩個 stream client 若目前會將
+caught Throwable 轉換成無 cause 的 outcome，必在轉換前記錄 raw Throwable，或保留 cause 供 recorder 記錄，
+不得只留下 reason enum。
+
+### 管理者查詢 contract
+
+business services 提供三個 controller thin read endpoints：
+
+| endpoint | input | response |
+|---|---|---|
+| GET /api/api-error-logs | source=ALL\|OPEN_API\|FUBON_API, optional operationKey, sort=NEWEST\|OLDEST | 每筆 id, source, operationKey, apiName, messageHeader, occurredAt |
+| GET /api/api-error-logs/operations | source=ALL\|OPEN_API\|FUBON_API | 依 catalog 排序的可選 operationKey, apiName, source |
+| GET /api/api-error-logs/{id} | path id | 上列識別欄位加完整 raw stackTrace |
+
+未知 source/sort/key、key 與 source 不相符、或不存在 id 一律是明確 400/404；list 不含 stackTrace，
+也不以未說明的 limit/pagination 隱藏資料。NEWEST 使用 occurred_at DESC, id DESC，OLDEST 使用
+occurred_at ASC, id ASC。
+
+BFF 新增 `bff/apierrorlogs/ApiErrorLogsBffController`，只做本頁三個
+`/api/bff/api-error-logs` proxy，採既有 `businessServicesClient` 傳遞登入者身分。BFF `SecurityConfig`
+對 `/api/bff/api-error-logs` 及 `/api/bff/api-error-logs/**` 強制 `ROLE_ADMIN`；backend controller 也檢查
+`CurrentUserContext.hasUser()` 和 `isAdmin()`。private ingest endpoint 走獨立 token filter，不能以普通
+user header 或 ADMIN query endpoint 取代。
+
+### 前端
+
+route 為 /api-error-logs、meta.requiresAdmin=true；App 的「系統資訊」新增「API logs 查詢」子項時也以
+auth.isAdmin 過濾，避免一般使用者從 UI 或 feature flag 看見敏感頁面。api/index.js 的
+apiErrorLogs wrapper 是唯一前端資料入口。
+
+ApiErrorLogsView 初始 state 為 source=ALL、sort=NEWEST、operationKey=null。來源採三個 radio
+選項「全部」「開放 API」「富邦證 API」，時間採下拉「由近而遠」「由遠而近」，另一個下拉依 operations
+catalog 顯示單一 API。來源變動先清 operation、重新抓 catalog/清單；排序或 operation 變動只重抓清單。
+table 僅渲染時間、來源、保存的 apiName、原始錯誤標頭。`el-table-column type=expand` 的 expand handler
+第一次才取 detail 並以 `white-space: pre-wrap` 顯示完整 raw stacktrace，依 id 快取成功內容；收合或未展開
+資料不得預先塞進 list state、hidden template、console 或未展開的網路回應。
+
+### 驗證設計
+
+測試以 fake/in-memory client 或 isolated PostgreSQL 覆蓋完整 catalog seed/key/name/order、composite FK、
+immutable trigger 對未引用 row 的 UPDATE/DELETE、apiName snapshot、原始 message/stacktrace 不遮罩不截斷、
+REQUIRES_NEW/no-impact、兩種排序、source/key filter、list/detail 分離、雙 ADMIN gate、private token
+缺失/錯誤/重複、public matched 5xx raw Throwable failure 的既有 envelope 不變、204/captured-4xx/unknown 404 zero row、每個 Fubon
+client failure 一次、pre-I/O zero row、stream invalid/EOF/valid-event reset state、external SQL 僅 parameterized
+INSERT 與 Vue source/DOM lazy-detail 行為。Docker acceptance 先 recreate business-services 讓 Liquibase migration
+完成、重產 `db/schema.sql` 後才跑 drift test，並 rebuild/recreate external-materials-service、bff、frontend；
+驗 business/BFF health 與 acceptance-only token 的 controlled ingest/readback，不呼叫真實 Fubon SDK，不改 flags、
+.env 或 secrets。
