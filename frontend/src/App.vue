@@ -281,14 +281,15 @@ const rawMenuItems = [
     children: [
       { path: '/schedule-list', title: '排程列表', icon: 'Clock' },
       { path: '/open-api', title: '開放 API', icon: 'Connection' },
-      { path: '/fubon-api', title: '富邦證 API', icon: 'Coin' }
+      { path: '/fubon-api', title: '富邦證 API', icon: 'Coin' },
+      { path: '/api-error-logs', title: 'API logs 查詢', icon: 'Document', requiresAdmin: true }
     ]
   }
 ]
 
 const mainMenuItems = computed(() => rawMenuItems
   .map(item => item.children
-    ? { ...item, children: item.children.filter(child => auth.isFeatureEnabled(child.path)) }
+    ? { ...item, children: item.children.filter(child => child.requiresAdmin ? auth.isAdmin : auth.isFeatureEnabled(child.path)) }
     : item)
   .filter(item => item.children ? item.children.length > 0 : auth.isFeatureEnabled(item.path))
 )

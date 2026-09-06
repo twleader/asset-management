@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.externalmaterials.service.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -70,15 +71,21 @@ public class FubonNormalizedQuoteClient {
     private final Transport transport;
     private final ObjectMapper mapper;
     private final FubonNormalizedQuoteMapper quoteMapper;
+    private final ExternalApiErrorLogWriter errorLogWriter;
+    private final Clock clock;
 
     @Autowired
     public FubonNormalizedQuoteClient(
             @Value("${fubon.base-url:http://fubon-broker-service:8080}") String baseUrl,
-            @Value("${fubon.shared-token-path:/run/secrets/fubon/shared/internal-service-token}") String tokenPath) {
-        this(baseUrl, tokenPath, new JdkTransport(), Clock.systemUTC());
+            @Value("${fubon.shared-token-path:/run/secrets/fubon/shared/internal-service-token}") String tokenPath,
+            ExternalApiErrorLogWriter errorLogWriter) {
+        this(baseUrl, tokenPath, new JdkTransport(), Clock.systemUTC(), errorLogWriter);
     }
 
     FubonNormalizedQuoteClient(String baseUrl, String tokenPath, Transport transport, Clock clock) {
+        this(baseUrl, tokenPath, transport, clock, null);
+    }
+    FubonNormalizedQuoteClient(String baseUrl, String tokenPath, Transport transport, Clock clock, ExternalApiErrorLogWriter errorLogWriter) {
         this.baseUrl = baseUrl;
         this.tokenPath = tokenPath;
         this.transport = transport;
@@ -88,6 +95,8 @@ public class FubonNormalizedQuoteClient {
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build());
         this.quoteMapper = new FubonNormalizedQuoteMapper(clock);
+        this.errorLogWriter = errorLogWriter;
+        this.clock = clock;
     }
 
     public BatchResult fetch(List<String> requestedCodes) {
@@ -119,22 +128,40 @@ public class FubonNormalizedQuoteClient {
         try {
             response = transport.post(endpoint, token, requestBody, REQUEST_TIMEOUT);
         } catch (Exception ex) {
+            record(ex);
             return BatchResult.failed(BatchStatus.SERVICE_UNAVAILABLE, codes.size());
         }
+        if (response == null) {
+            record(new IllegalStateException("Fubon quote boundary returned no response path=" + NORMALIZED_PATH));
+            return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
+        }
         if (response.statusCode() == 503) {
+            record(new IllegalStateException("Fubon quote boundary status=503 path=" + NORMALIZED_PATH));
             return BatchResult.failed(BatchStatus.SERVICE_UNAVAILABLE, codes.size());
         }
         if (response.statusCode() == 429) {
+            record(new IllegalStateException("Fubon quote boundary status=429 path=" + NORMALIZED_PATH));
             Map<String, String> reasons = new LinkedHashMap<>();
             codes.forEach(code -> reasons.put(code, "RATE_LIMITED"));
             return new BatchResult(BatchStatus.RATE_LIMITED, List.of(), codes.size(), codes.size(), Map.copyOf(reasons));
         }
         if (response.statusCode() != 200 || response.body() == null
                 || response.body().getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_BYTES) {
+            record(new IllegalStateException("Fubon quote boundary invalid response status=" + response.statusCode() + " path=" + NORMALIZED_PATH));
             return BatchResult.failed(BatchStatus.INVALID_RESPONSE, codes.size());
         }
-        return parseResponse(codes, response.body());
+        BatchResult parsed = parseResponse(codes, response.body());
+        if (parsed.status() == BatchStatus.INVALID_RESPONSE) {
+            record(new IllegalStateException("Fubon quote boundary schema reject path=" + NORMALIZED_PATH));
+        } else if (parsed.status() == BatchStatus.PARTIAL_FAILURE) {
+            // The adapter's normalized envelope explicitly states that at least one requested
+            // symbol failed. Keep the persisted boundary trace factual and body-free.
+            record(new IllegalStateException("Fubon quote boundary broker failure outcome=FAILURE"));
+        }
+        return parsed;
     }
+
+    private void record(Throwable failure) { if (errorLogWriter != null) errorLogWriter.record("FUBON_TW_QUOTES_LIVE", "盤中台股即時報價", failure, clock.instant()); }
 
     private BatchResult parseResponse(List<String> codes, String body) {
         try {

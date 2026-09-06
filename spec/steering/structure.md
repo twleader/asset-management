@@ -562,9 +562,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 132 個 Requirements（最新編號為 140，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 133 個 Requirements（最新編號為 141，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398）＋尚未歸檔的 201 起區段
+├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417 僅有獨立 t417 任務檔，不追加索引
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結
@@ -632,3 +632,11 @@ api-gateway:9090／Tailscale exact public quotes ──► bff
 - ❌ 任何 service 透過券商 API／SDK 下單、買賣、改單、撤單或重送委託（含 fubon-broker-service）
 - ❌ fubon-broker-service 寫 PostgreSQL／Redis、以 HTTP POST／callback 反向呼叫任一 Spring service，或把 proprietary SDK raw data／secret／account payload 跨出 adapter
 - ❌ 任何 service 跨層直接讀對方資料庫表（除非由 SDD 明確設計）
+
+**Task 417 的唯一明文化例外：** `external-materials-service` 僅可由 `ExternalApiErrorLogWriter` 對
+`api_error_log` 做 parameterized JDBC `INSERT`，獨立 transaction、固定 `FUBON_API`、由 catalog composite FK
+驗證 source/key/api_name，保存 external 自己的 Java diagnostic renderer 產生之完整可用非敏感 message/stacktrace；
+renderer 須對該 service runtime 已知 secret exact value 及 credential、token、certificate、raw account／identity、
+raw payload 的敏感 key-value 做 replacement，不能仰賴 Python adapter 的 redactor；不得 `SELECT`／`UPDATE`／`DELETE`、
+不得碰其他 business table、不得反向 HTTP 呼叫 business-services。此例外不適用於任何其他 service、table、
+資料用途或 broker callback。

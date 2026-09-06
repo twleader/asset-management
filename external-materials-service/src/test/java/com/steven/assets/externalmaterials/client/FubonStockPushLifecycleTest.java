@@ -94,6 +94,44 @@ class FubonStockPushLifecycleTest {
             assertThat(events).hasValue(0);
         } finally { stream.stop(); }
     }
+    @Test void malformedTargetFrameIsRecordedOnceAndNeverReachesTheConsumer() throws Exception {
+        ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+        CountDownLatch reachedBackoff = new CountDownLatch(1);
+        AtomicInteger events = new AtomicInteger();
+        String body = "event: stock-price\nid: 2330:1\n\n";
+        var stream = new FubonStockPushStreamClient("true", config(), clock(),
+                (uri, token) -> new FubonStockPushStreamClient.Response(200,
+                        new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), "text/event-stream"),
+                delay -> { reachedBackoff.countDown(); throw new InterruptedException(); }, writer);
+        try {
+            stream.start(event -> events.incrementAndGet());
+            assertThat(reachedBackoff.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(events).hasValue(0);
+            verify(writer).record(eq("FUBON_STOCK_PUSH_STREAM"), eq("個股推播串流"), any(Throwable.class), any());
+        } finally { stream.stop(); }
+    }
+    @Test void restartOpensANewFailureIntervalAfterStop() throws Exception {
+        ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+        CountDownLatch firstBackoff = new CountDownLatch(1);
+        CountDownLatch secondBackoff = new CountDownLatch(1);
+        AtomicInteger backoffs = new AtomicInteger();
+        String body = "event: stock-price\nid: 2330:1\n\n";
+        var stream = new FubonStockPushStreamClient("true", config(), clock(),
+                (uri, token) -> new FubonStockPushStreamClient.Response(200,
+                        new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)), "text/event-stream"),
+                delay -> {
+                    if (backoffs.incrementAndGet() == 1) firstBackoff.countDown(); else secondBackoff.countDown();
+                    new CountDownLatch(1).await();
+                }, writer);
+        try {
+            stream.start(event -> { });
+            assertThat(firstBackoff.await(2, TimeUnit.SECONDS)).isTrue();
+            stream.stop();
+            stream.start(event -> { });
+            assertThat(secondBackoff.await(2, TimeUnit.SECONDS)).isTrue();
+            verify(writer, times(2)).record(eq("FUBON_STOCK_PUSH_STREAM"), eq("個股推播串流"), any(Throwable.class), any());
+        } finally { stream.stop(); }
+    }
     @Test void managerEmptyOverLimitDisabledAndUnknownCalendarNeverBroadensScope() {
         var clock = clock(); var access = mock(FubonMarketAccess.class);
         var radar = mock(FubonRadarScope.class); var port = mock(FubonMarketDataPort.class);

@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.reactive.function.client.WebClientException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.server.ServerWebExchange;
+import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.capture;
 
 /**
  * 公開「今日股市分析」的封閉錯誤契約（Requirement 79）：不回傳 business 原始 body 或例外訊息。
@@ -30,7 +32,8 @@ public class PublicMarketAnalysisExceptionAdvice {
 
     /** business 非 2xx：一律消毒成固定文案的 502，不帶出上游 body。 */
     @ExceptionHandler(WebClientResponseException.class)
-    public ResponseEntity<ProblemDetail> handleBusinessError(WebClientResponseException ex) {
+    public ResponseEntity<ProblemDetail> handleBusinessError(WebClientResponseException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "今日股市分析暫時無法取得，請稍後再試");
         problem.setTitle("Market analysis downstream failure");
@@ -39,7 +42,8 @@ public class PublicMarketAnalysisExceptionAdvice {
 
     /** 連線失敗、逾時等 transport 失敗：固定文案的 503。 */
     @ExceptionHandler(WebClientException.class)
-    public ResponseEntity<ProblemDetail> handleTransportFailure(WebClientException ex) {
+    public ResponseEntity<ProblemDetail> handleTransportFailure(WebClientException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, "今日股市分析服務暫時無法連線");
         problem.setTitle("Market analysis service unavailable");

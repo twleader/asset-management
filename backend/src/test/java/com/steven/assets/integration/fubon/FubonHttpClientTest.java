@@ -3,6 +3,7 @@ package com.steven.assets.integration.fubon;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.apierrorlog.ApiErrorLogRecorder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.IntStream;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -19,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FubonHttpClientTest {
@@ -145,6 +148,23 @@ class FubonHttpClientTest {
         assertThat(client(FubonConfigState.State.MISCONFIGURED, null).readPortfolio().reason())
                 .isEqualTo("MISCONFIGURED");
         assertThat(requestCount).hasValue(0);
+    }
+
+    @Test
+    void invalidLocalInputDoesNotStartBrokerIoOrCreateAnApiErrorLog() {
+        FubonConfigState config = mock(FubonConfigState.class);
+        when(config.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "shared-token", "READY"));
+        ApiErrorLogRecorder recorder = mock(ApiErrorLogRecorder.class);
+        WebClient noIo = WebClient.builder().exchangeFunction(request -> {
+            throw new AssertionError("invalid local input must not start broker I/O");
+        }).build();
+        FubonHttpClient client = new FubonHttpClient(noIo, config, Duration.ofSeconds(2), FubonAccountingFixtures.CLOCK, recorder);
+
+        assertThat(client.readTwQuotes(null).reason()).isEqualTo("INVALID_REQUEST");
+        assertThat(client.readEtfHoldings(java.util.Arrays.asList("0050", null)).reason()).isEqualTo("INVALID_REQUEST");
+        assertThat(client.readFilledTrades(LocalDate.of(2026, 9, 7), LocalDate.of(2026, 9, 6)).reason()).isEqualTo("INVALID_REQUEST");
+
+        verifyNoInteractions(recorder);
     }
 
     private FubonHttpClient client(FubonConfigState.State state, String token) {

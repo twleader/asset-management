@@ -73,6 +73,12 @@ export function apiErrorMessage(err, fallback = '操作失敗') {
 // 前端 view 一律走 bffApi.<page>.<method>，不直接呼叫共享 *Api
 // ============================================================
 export const bffApi = {
+  // ApiErrorLogs：僅管理者，且 detail 只在展開單列時取回 stacktrace。
+  apiErrorLogs: {
+    list: ({ source = 'ALL', sort = 'NEWEST', operationKey = null } = {}) => api.get('/bff/api-error-logs', { params: { source, sort, ...(operationKey && { operationKey }) } }),
+    operations: (source = 'ALL') => api.get('/bff/api-error-logs/operations', { params: { source } }),
+    detail: (id) => api.get(`/bff/api-error-logs/${id}`)
+  },
   // Dashboard
   dashboard: {
     summary: () => api.get('/bff/dashboard/summary'),

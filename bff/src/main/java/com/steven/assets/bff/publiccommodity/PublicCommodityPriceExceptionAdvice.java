@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.reactive.function.client.WebClientException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.server.ServerWebExchange;
+import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.capture;
 
 import java.net.URI;
 
@@ -19,33 +21,39 @@ import java.net.URI;
 public class PublicCommodityPriceExceptionAdvice {
 
     @ExceptionHandler(PublicCommodityPriceRequestException.class)
-    public ResponseEntity<ProblemDetail> invalid(PublicCommodityPriceRequestException ignored) {
+    public ResponseEntity<ProblemDetail> invalid(PublicCommodityPriceRequestException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.BAD_REQUEST, "Invalid commodity price request", "不支援 query parameter 或 request body");
     }
 
     @ExceptionHandler(PublicCommodityPriceTimeoutException.class)
-    public ResponseEntity<ProblemDetail> timeout(PublicCommodityPriceTimeoutException ignored) {
+    public ResponseEntity<ProblemDetail> timeout(PublicCommodityPriceTimeoutException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.GATEWAY_TIMEOUT, "Commodity prices timeout", "商品報價服務逾時");
     }
 
     @ExceptionHandler(PublicCommodityPricePayloadException.class)
-    public ResponseEntity<ProblemDetail> invalidPayload(PublicCommodityPricePayloadException ignored) {
+    public ResponseEntity<ProblemDetail> invalidPayload(PublicCommodityPricePayloadException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.BAD_GATEWAY, "Commodity prices downstream failure", "商品報價暫時無法取得");
     }
 
     @ExceptionHandler(PublicCommodityPriceTransportException.class)
-    public ResponseEntity<ProblemDetail> transport(PublicCommodityPriceTransportException ignored) {
+    public ResponseEntity<ProblemDetail> transport(PublicCommodityPriceTransportException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.SERVICE_UNAVAILABLE,
                 "Commodity prices service unavailable", "商品報價服務暫時無法連線");
     }
 
     @ExceptionHandler(WebClientResponseException.class)
-    public ResponseEntity<ProblemDetail> leakedResponse(WebClientResponseException ignored) {
+    public ResponseEntity<ProblemDetail> leakedResponse(WebClientResponseException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.BAD_GATEWAY, "Commodity prices downstream failure", "商品報價暫時無法取得");
     }
 
     @ExceptionHandler(WebClientException.class)
-    public ResponseEntity<ProblemDetail> leakedTransport(WebClientException ignored) {
+    public ResponseEntity<ProblemDetail> leakedTransport(WebClientException ignored, ServerWebExchange exchange) {
+        capture(exchange, ignored);
         return problem(HttpStatus.SERVICE_UNAVAILABLE,
                 "Commodity prices service unavailable", "商品報價服務暫時無法連線");
     }

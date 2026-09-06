@@ -6,8 +6,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.server.ServerWebExchange;
+import com.steven.assets.bff.apierrorlogs.ApiErrorLogDiagnosticRenderer;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.nio.charset.StandardCharsets;
+import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.capture;
 
 /**
  * 把 business 回的錯誤<b>原樣</b>傳到前端（Requirement 51 / Task 243.5.5）。
@@ -31,11 +35,18 @@ import java.nio.charset.StandardCharsets;
 @Slf4j
 @RestControllerAdvice
 public class BusinessErrorAdvice {
+    private final ApiErrorLogDiagnosticRenderer diagnosticRenderer;
+    /** Compatibility constructor for existing isolated advice tests. */
+    public BusinessErrorAdvice() { this(new ApiErrorLogDiagnosticRenderer("")); }
+    @Autowired
+    public BusinessErrorAdvice(ApiErrorLogDiagnosticRenderer diagnosticRenderer) { this.diagnosticRenderer = diagnosticRenderer; }
 
     @ExceptionHandler(WebClientResponseException.class)
-    public ResponseEntity<String> handleBusinessError(WebClientResponseException ex) {
+    public ResponseEntity<String> handleBusinessError(WebClientResponseException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         String body = ex.getResponseBodyAsString(StandardCharsets.UTF_8);
-        log.warn("business 回應 {}：{}", ex.getStatusCode(), body);
+        // The caller's existing relay contract remains unchanged, but an upstream raw body may contain secrets.
+        log.warn("business 回應 status={} error={} diagnostic={}", ex.getStatusCode(), ex.getClass().getSimpleName(), diagnosticRenderer.render(ex));
 
         MediaType contentType = ex.getHeaders().getContentType();
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(ex.getStatusCode());
