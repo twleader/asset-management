@@ -27,6 +27,17 @@
             mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true
         -->
         <extraArgLine></extraArgLine>
+        <!--
+          Spring Boot 3.4.4 管理的 testcontainers.version 預設 1.20.6，其內建 docker-java
+          對 Docker Engine 送出的探測請求版本低於本機 Docker Desktop 目前回報的 MinAPIVersion
+          （已實測為 1.40，本機 Engine 29.7.2）。低於下限的請求 Docker Desktop 不會回正常錯誤，
+          而是回一個欄位全空、只帶 com.docker.desktop.address 提示的 200/400 混合假回應，
+          導致 DockerClientProviderStrategy 三種策略全部誤判為「找不到有效 Docker 環境」
+          （症狀：curl 打同一個 socket 正常，Testcontainers 卻找不到 Docker）。
+          升級到 1.21.4（同大版號最新，未跨到有破壞性變更的 2.x）已實測修復，不需改動任何
+          程式碼或 ~/.testcontainers.properties。
+        -->
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>
