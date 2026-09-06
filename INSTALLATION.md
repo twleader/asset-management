@@ -612,30 +612,50 @@ portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactio
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。
 
-### 8.6 前端網站自簽憑證 HTTPS（選用，無網域只有固定 IP 時）
+### 8.6 前端網站雙 SNI HTTPS（public 網域＋localhost）
 
-適用情境：沒有正式網域，只想用一個固定 IP（例如公網 IP 或內網 IP）讓網站以 HTTPS
-存取。前端 `frontend` 容器預設就會監聽 443，且啟動時若沒有提供憑證會自動產生一組
-`localhost`／`127.0.0.1` 專用的預設自簽憑證，只供本機測試。要換成你自己的 IP 或
-網域，執行：
+frontend 的 443 同時服務兩個不同 identity，不能拿同一張自簽 certificate 混用：
 
-```bash
-scripts/generate-self-signed-frontend-cert.sh <你的 IP 或網域>
-docker compose -p asset-management up -d --force-recreate frontend
+| 入口 | certificate 要求 |
+|---|---|
+| `https://你的正式網域` | public-trusted chain，SAN 必含正式網域，讓一般瀏覽器正常驗證 |
+| `https://localhost`、`https://127.0.0.1` | 獨立 local CA-signed chain，SAN 必同時含 localhost 與 loopback IP |
+
+在 `.env` 設定兩個**絕對** host path，並啟用 fail-closed gate：
+
+```dotenv
+FRONTEND_TLS_SECRETS_DIR_HOST=/absolute/path/to/public-trusted-pair
+FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST=/absolute/path/to/local-ca-signed-pair
+FRONTEND_PUBLIC_TLS_REQUIRED=true
 ```
 
-之後可用 `https://<你的 IP 或網域>` 連線。詳見 `secrets/frontend-tls/README.md`。
+每個 pair 都要有 `fullchain.pem`、`privkey.pem`。Compose 會唯讀掛載 source；frontend 只在容器
+tmpfs 內複製檔案，不會回寫 host source。required=true 時，只要任一 pair 缺失、或任一路徑不是
+絕對 path，frontend 就會拒絕啟動，而不是悄悄用 localhost fallback 服務正式網域。
 
-**這是自簽憑證，不是任何憑證機構簽發**，瀏覽器會顯示「不受信任」警告，需手動選擇
-「進階 → 繼續前往」，這是預期行為。若要讓其他裝置或網際網路連得到這個 IP，還需要
-自行完成路由器 port forwarding（443，視需要也含 80）與防火牆規則設定——這是本系統
-之外的網路環境設定，本專案的腳本與容器都不會、也不能代為變更路由器或防火牆，請自行
-評估對外開放的風險。
+套用 TLS source 時只 targeted recreate frontend：
 
-已知限制：若計畫透過這個公網 IP 用 Gmail 帳號登入本系統，Google OAuth 的 redirect URI
-驗證規則不接受裸 IP（`localhost` 除外），該登入流程可能無法通過 Google Cloud Console
-驗證；純瀏覽公開頁面或 9090 唯讀 API 不受影響。詳見 `.env.example` 裡 `Gmail OAuth2 登入`
-段落的說明。
+```bash
+FRONTEND_TLS_SECRETS_DIR_HOST="$PUBLIC_TLS_DIR" \
+FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST="$LOCAL_TLS_DIR" \
+FRONTEND_PUBLIC_TLS_REQUIRED=true \
+docker compose -p asset-management up -d --no-deps --force-recreate frontend
+```
+
+接著以正常 certificate validation（不能使用 `-k` 或瀏覽器「繼續前往」）驗證 public hostname 與
+localhost 的 `/login`。完整原因、驗證指令與故障排查見
+[`docs/operations/frontend-dual-sni-tls.md`](docs/operations/frontend-dual-sni-tls.md)。
+
+純本機開發若尚未提供 local pair，可執行：
+
+```bash
+scripts/generate-self-signed-frontend-cert.sh localhost
+```
+
+這只產生 localhost/loopback self-signed 開發輸入，不能產生或取代 public hostname certificate。
+若要讓其他裝置或網際網路連得到正式網域，仍要自行完成路由器 443 port forwarding 與防火牆設定；
+本專案不會代為變更網路邊界。使用正式網域進行 Google 登入時，也必須依第 5 節登記完全相同的
+HTTPS redirect URI。
 
 ---
 
@@ -845,11 +865,11 @@ docker compose -p asset-management logs --tail=200 bff
 
 預設網址是 `http://localhost`，本機 API 為 `http://127.0.0.1:9090`。請保持作業系統防火牆開啟，不要在路由器或公共網路開放 9090、5432；9090 遠端只使用上述 Tailscale Serve，禁止 Funnel。
 
-若要讓其他電腦或網際網路存取網站本身，前端 `443` 已支援自簽憑證 HTTPS（見 8.6），
-但實際對外開放（路由器 port forwarding、防火牆規則）仍是使用者自行規劃與操作的
-網路環境設定，本專案不會代為變更；請自行評估風險，並留意自簽憑證沒有憑證機構
-背書、無法防止主動式中間人攻擊，只適合信任連線來源的場景。不要直接把資料庫等
-其他連接埠對外公開。
+若要讓其他電腦或網際網路存取網站本身，前端 `443` 必須使用第 8.6 節的 dual-SNI 設定：
+public hostname 使用受公開信任的 certificate，localhost 使用獨立 local chain。不要用自簽
+localhost certificate、瀏覽器略過警告或關閉驗證來處理 public hostname。實際對外開放
+（路由器 port forwarding、防火牆規則）仍是使用者自行規劃與操作的網路環境設定，本專案不會代為
+變更；不要直接把資料庫等其他連接埠對外公開。
 
 ---
 

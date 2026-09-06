@@ -426,14 +426,20 @@ services:
     environment:
       # Task 252：僅為 nginx access log 可讀性；前端時間顯示由瀏覽器本地時區決定，與此無關。
       TZ: ${APP_TZ:-Asia/Taipei}
+      # true 是雙入口 production mode：public/local 來源都必須存在且設定為絕對 host path。
+      FRONTEND_PUBLIC_TLS_REQUIRED: ${FRONTEND_PUBLIC_TLS_REQUIRED:-false}
+      # 將和 volume source 相同的 interpolation 後 host path 傳給 entrypoint，僅供相對路徑 preflight；不含 secret。
+      FRONTEND_PUBLIC_TLS_SOURCE_HOST_PATH: ${FRONTEND_TLS_SECRETS_DIR_HOST:-./secrets/frontend-tls}
+      FRONTEND_LOCAL_TLS_SOURCE_HOST_PATH: ${FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST:-./secrets/frontend-local-tls}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # 自簽 HTTPS 憑證；缺檔時容器啟動會自動產生 localhost-only 預設值（見
-      # frontend/docker-entrypoint-tls.sh）。對外公網 IP／網域請用
-      # scripts/generate-self-signed-frontend-cert.sh 產生後 recreate 本容器。
-      - ${FRONTEND_TLS_SECRETS_DIR_HOST:-./secrets/frontend-tls}:/run/secrets/frontend-tls
+      # TLS source 一律 read-only；entrypoint 只複製到下方 tmpfs，絕不回寫 host certificate source。
+      - ${FRONTEND_TLS_SECRETS_DIR_HOST:-./secrets/frontend-tls}:/run/secrets/frontend-tls-source:ro
+      - ${FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST:-./secrets/frontend-local-tls}:/run/secrets/frontend-local-tls-source:ro
+    tmpfs:
+      - /run/frontend-tls:rw,noexec,nosuid,size=1m
     depends_on:
       bff:
         condition: service_healthy

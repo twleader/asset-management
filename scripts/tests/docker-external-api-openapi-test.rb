@@ -13,6 +13,7 @@ Encoding.default_internal = Encoding::UTF_8
 ROOT = File.expand_path('../..', __dir__)
 NGINX = File.join(ROOT, 'api-gateway/nginx.conf')
 FRONTEND_NGINX = File.join(ROOT, 'frontend/nginx.conf')
+FRONTEND_NGINX_APP = File.join(ROOT, 'frontend/nginx-app.conf')
 BFF_SECURITY = File.join(ROOT, 'bff/src/main/java/com/steven/assets/bff/config/SecurityConfig.java')
 OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
 COMPOSE = File.join(ROOT, 'docker-compose.yml')
@@ -694,8 +695,11 @@ assert!(!nginx.match?(/location = \/api\/quotes \{[^}]*external-materials-servic
         'quote gateway 不可仍直接送 external-materials')
 
 frontend_nginx = File.read(FRONTEND_NGINX)
+frontend_nginx_app = File.read(FRONTEND_NGINX_APP)
+assert!(frontend_nginx.include?('include /etc/nginx/includes/frontend-app.conf;'),
+        'frontend TLS server 必須 include 共用 application route 設定')
 MANIFEST.each_key do |(_method, path)|
-  assert!(frontend_nginx.include?("location = #{path} { return 404; }"),
+  assert!(frontend_nginx_app.include?("location = #{path} { return 404; }"),
           "frontend 必須 exact deny 9090 route #{path}")
 end
 bff_security = File.read(BFF_SECURITY)

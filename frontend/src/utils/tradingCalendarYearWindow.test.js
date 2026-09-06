@@ -17,6 +17,7 @@ import {
 const view = readFileSync(new URL('../views/TradingCalendarView.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../api/index.js', import.meta.url), 'utf8')
 const nginx = readFileSync(new URL('../../nginx.conf', import.meta.url), 'utf8')
+const nginxApp = readFileSync(new URL('../../nginx-app.conf', import.meta.url), 'utf8')
 
 const available = {
   holidays: { tw: { '2026-01-01': '元旦' }, us: {}, uk: {} },
@@ -75,7 +76,8 @@ test('authority 失敗使用後端原因且不誤報成功或磁碟權限', () =
 
 test('雙年度匯出與逾時預算固定在頁面專屬鏈路', () => {
   assert.match(api, /exportToDir:\s+\(subpath\).*timeout: 250000/)
-  assert.match(nginx, /location = \/api\/bff\/trading-calendar\/export[\s\S]*?proxy_read_timeout 240s/)
+  assert.match(nginx, /include \/etc\/nginx\/includes\/frontend-app\.conf;/)
+  assert.match(nginxApp, /location = \/api\/bff\/trading-calendar\/export[\s\S]*?proxy_read_timeout 240s/)
   assert.match(view, /:disabled="atMinMonth"/)
   assert.match(view, /:disabled="atMaxMonth"/)
   assert.match(view, /v-for="year in availableYears"/)

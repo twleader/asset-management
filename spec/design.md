@@ -11655,3 +11655,45 @@ INSERT 與 Vue source/DOM lazy-detail／純文字 HTML sentinel 行為。Docker 
 完成、重產 `db/schema.sql` 後才跑 drift test，並 rebuild/recreate external-materials-service、bff、frontend；
 驗 business/BFF health 與 acceptance-only token 的 controlled ingest/readback，不呼叫真實 Fubon SDK，不改 flags、
 .env 或 secrets。
+
+## Requirement 142／Task 419：前端雙 SNI TLS 與 worktree-safe mount
+
+### 問題與邊界
+
+frontend 曾從 feature worktree 重建，而 compose 預設的 `./secrets/frontend-tls` 會相對於啟動目錄解析。該目錄沒有公共鏈時，既有 entrypoint 將 localhost fallback 寫入後，唯一的 443 server 便把它拿去回覆 `asset-management.asuscomm.com`，造成 HSTS 網域無法略過的 `ERR_CERT_AUTHORITY_INVALID`。這不是 OAuth、BFF、cookie 或登入帳號問題，也不是要求使用者信任一張公網自簽憑證可以解決的問題。
+
+本設計只改 frontend TLS termination 與其部署設定；不改 Google OAuth client/redirect URI、BFF、business-services、9090、Tailscale、資料庫、Fubon flags、SDK 或任何帳戶／交易操作。
+
+### 憑證來源與 SNI 拓撲
+
+Compose 將兩個 host directory 以唯讀方式分別 mount：
+
+| Compose variable | read-only source mount | ephemeral runtime directory read by Nginx | consumer | required public deployment value |
+|---|---|---|---|
+| `FRONTEND_TLS_SECRETS_DIR_HOST` | `/run/secrets/frontend-tls-source` | `/run/frontend-tls/public` | `asset-management.asuscomm.com` TLS server | 含 `DNS:asset-management.asuscomm.com` SAN 的 public-trusted fullchain/key **絕對** host path |
+| `FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST` | `/run/secrets/frontend-local-tls-source` | `/run/frontend-tls/local` | `localhost`／`127.0.0.1`／default TLS server | 含 `DNS:localhost,IP:127.0.0.1` SAN、由 local login keychain 信任的 CA-signed fullchain/key **絕對** host path |
+
+443 的 default server 必是 local TLS server，讓 `https://127.0.0.1` 或無 public SNI 的連線取得 local chain；named public server 只以 `server_name asset-management.asuscomm.com` 選擇 public pair。80 維持既有 app route，不新增轉址。所有三個 server block include 同一份 `frontend/nginx-app.conf`，該檔承載既有 root、resolver、gzip、所有 location、OAuth headers、BFF proxy、9090 deny 與 asset cache，從而確保不能因 TLS server 分拆而少掉一條路由。
+
+`FRONTEND_PUBLIC_TLS_REQUIRED=true` 表示 public/local **兩個** pair 都是雙入口 production deployment 的必要條件。Compose 同時把 `${FRONTEND_TLS_SECRETS_DIR_HOST}`／`${FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST}` interpolation 後、實際用來 mount 的非敏感 host path 字串傳為 `FRONTEND_PUBLIC_TLS_SOURCE_HOST_PATH`／`FRONTEND_LOCAL_TLS_SOURCE_HOST_PATH`；entrypoint 必拒絕空白或不以 `/` 開頭的任一值，接著檢查兩個 source 的 `fullchain.pem` 與 `privkey.pem`，任一不存在即非零結束。錯誤輸出只含變數名、路徑與修復方向，絕不輸出檔案內容。存在的 source pair 只以 restrictive mode 複製到 `/run/frontend-tls/public` 或 `/run/frontend-tls/local`，Nginx 永遠只讀這些 ephemeral runtime directory；host mount 維持 read-only，不能被容器覆寫。當該 flag 為 false 的純本機開發預設，若任一 source 沒有 pair，entrypoint 只在對應 runtime directory 各自產生 localhost/127.0.0.1-only fallback，使兩個 Nginx server 都能載入；這兩張 fallback 不是 public chain，不能作 public hostname 的部署驗收。部署公網時的 true gate 使這個 fallback 永遠不可能靜默服務 public hostname。
+
+### 檔案與設定變更
+
+- `frontend/nginx.conf`：80 default、443 local default、443 public named SNI server；每個 server include shared route file。
+- `frontend/nginx-app.conf`：從原本單一 server 抽出的共用 application route configuration，不新增或刪除 route。
+- `frontend/Dockerfile`：將 shared include 複製為 `/etc/nginx/includes/frontend-app.conf`，不可放進 nginx 自動載入的 `conf.d/*.conf`，避免 location 在 http scope 被重複／錯誤解析。
+- `frontend/docker-entrypoint-tls.sh`：以兩個獨立 certificate source 檢查、複製到 ephemeral runtime directory 或僅在該 runtime directory fallback，落實 public-required fail closed；不覆寫 host source 或已存在 pair。
+- `docker-compose.yml`／`.env.example`：新增 local read-only mount、runtime tmpfs、`FRONTEND_PUBLIC_TLS_REQUIRED` 與兩個只供 absolute-path preflight 使用的 non-secret host-path environment；保留 public variable 的名稱以避免既有受信任鏈設定失效。
+- `scripts/generate-self-signed-frontend-cert.sh`：預設只產生 local mount 的 localhost/loopback self-signed 開發輸入，不接觸 public mount，拒絕任何 external hostname。
+- `secrets/frontend-local-tls/`：只版本化 ignore rule 與 placeholder；pem 一律被忽略。
+
+### 驗證設計
+
+先跑 config/static test，實際執行 entrypoint 驗證 public-required 的 relative path、缺 public source、缺 local source 均會失敗，並驗證 three-server include、兩個 compose mounts 與 self-signed script 對 external hostname 的拒絕。由 Docker runtime rebuild/recreate frontend 時明確傳入兩個絕對 host path 與 `FRONTEND_PUBLIC_TLS_REQUIRED=true`。容器內 `nginx -t` 成功後：
+
+1. public hostname 用系統 trust normal TLS connection，確認 subject/SAN 是 `asset-management.asuscomm.com` 且 issuer 為 public trust chain，`/login` 是成功回應；
+2. localhost 與 loopback 用使用者 local root CA normal TLS connection，確認 SAN `localhost`／`127.0.0.1` 與 `/login` 成功；
+3. inspect frontend mounts，確認兩個來源都是預期絕對 path；
+4. 不以 `-k`、不以 browser certificate bypass、不中斷真實登入、不觸發 Google OAuth callback 或任何 broker call 作為驗收手段。
+
+通過上述 runtime acceptance 後，才更新操作文件，記錄事故根因、dual-SNI source of truth、public-required gate、部署指令與重建後驗證清單。
