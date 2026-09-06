@@ -149,6 +149,8 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       # Shared internal-service credential is supplied by the deployment environment only.
       INTERNAL_TREASURY_TOKEN: ${INTERNAL_TREASURY_TOKEN:?請在本機 secret environment 設定 INTERNAL_TREASURY_TOKEN}
+      # Task 417 private BFF-to-business error-log ingress.  This deliberately has no treasury fallback.
+      API_ERROR_LOG_INGEST_TOKEN: ${API_ERROR_LOG_INGEST_TOKEN:?請在本機 secret environment 設定 API_ERROR_LOG_INGEST_TOKEN}
       # Requirement 28：散佈版的主要管理者由安裝者指定；缺值時 Compose 直接顯示錯誤。
       ADMIN_EMAIL: ${ADMIN_EMAIL:?請在 .env 設定 ADMIN_EMAIL（主要管理者的 Google 帳號）}
       # 讓 rclone 從固定路徑讀取設定，避免依賴 USER/HOME
@@ -363,6 +365,8 @@ services:
       # Requirement 53 / Task 252：與其他 JVM 服務同一個時區基準。
       TZ: ${APP_TZ:-Asia/Taipei}
       BUSINESS_SERVICES_URL: http://business-services:8080
+      # Task 417 private error-log ingress credential; only BFF and business-services receive it.
+      API_ERROR_LOG_INGEST_TOKEN: ${API_ERROR_LOG_INGEST_TOKEN:?請在本機 secret environment 設定 API_ERROR_LOG_INGEST_TOKEN}
       # Gmail OAuth2 登入（Requirement 28）：值由專案 .env 注入；未填時用 placeholder 讓 BFF 仍能啟動
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-placeholder-client-id}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-placeholder-secret}

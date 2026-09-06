@@ -1,6 +1,7 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.steven.assets.externalmaterials.service.FubonMarketDataPort;
+import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -27,101 +28,148 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
     private final FubonMarketConfigState config;
     private final MarketClock clock;
     private final Transport transport;
+    private final ExternalApiErrorLogWriter errorLogWriter;
 
     @Autowired
-    public FubonScheduledMarketClient(FubonMarketConfigState config, MarketClock clock) {
-        this(config, clock, new JdkTransport());
+    public FubonScheduledMarketClient(FubonMarketConfigState config, MarketClock clock,
+                                      ExternalApiErrorLogWriter errorLogWriter) {
+        this(config, clock, new JdkTransport(), errorLogWriter);
     }
     FubonScheduledMarketClient(FubonMarketConfigState config, MarketClock clock, Transport transport) {
-        this.config = config; this.clock = clock; this.transport = transport;
+        this(config, clock, transport, null);
+    }
+    FubonScheduledMarketClient(FubonMarketConfigState config, MarketClock clock, Transport transport,
+                               ExternalApiErrorLogWriter errorLogWriter) {
+        this.config = config; this.clock = clock; this.transport = transport; this.errorLogWriter = errorLogWriter;
     }
     @Override public DividendBatch dividends(List<String> symbols, LocalDate date) {
         validateSymbols(symbols, 2000, false);
-        String body = post("/internal/market-data/dividends/read",
+        String body = post("FUBON_DIVIDENDS_READ", "股利資料查詢", "/internal/market-data/dividends/read",
                 Map.of("symbols", symbols, "from", date.minusDays(320).toString(), "to", date.plusDays(45).toString()),
                 8 * 1024 * 1024);
-        try { return FubonMarketJson.dividends(FubonMarketJson.parse(body), symbols, date, clock.instant()); }
-        catch (RuntimeException invalid) { throw new Unavailable("DIVIDEND_SCHEMA_INVALID"); }
+        try {
+            DividendBatch result = FubonMarketJson.dividends(FubonMarketJson.parse(body), symbols, date, clock.instant());
+            if (result.rows().stream().anyMatch(row -> "FAILED".equals(row.status())))
+                brokerFailure("FUBON_DIVIDENDS_READ", "股利資料查詢", "FAILED_OUTCOME");
+            return result;
+        }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_DIVIDENDS_READ", "股利資料查詢", "DIVIDEND_SCHEMA_INVALID", invalid); }
     }
     @Override public TechnicalRead technical(String symbol, LocalDate date) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = post("/internal/market-data/technical-indicators/read",
+        String body = post("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "/internal/market-data/technical-indicators/read",
                 Map.of("symbol", symbol, "from", date.minusDays(120).toString(), "to", date.toString()), 512 * 1024);
-        try { return FubonMarketJson.technical(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
-        catch (RuntimeException invalid) { throw new Unavailable("TECHNICAL_SCHEMA_INVALID"); }
+        try {
+            TechnicalRead result = FubonMarketJson.technical(FubonMarketJson.parse(body), symbol, date, clock.instant());
+            if (result.groups().values().stream().anyMatch(group -> !group.available() && !"NO_DATA".equals(group.reason())))
+                brokerFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "FAILED_OUTCOME");
+            return result;
+        }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "TECHNICAL_SCHEMA_INVALID", invalid); }
     }
     @Override public TechnicalBundle technicalV2(String symbol, LocalDate date) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = post("/internal/market-data/technical-indicators/read", Map.of("symbol", symbol),
+        String body = post("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "/internal/market-data/technical-indicators/read", Map.of("symbol", symbol),
                 4 * 1024 * 1024, TECHNICAL_V2_TIMEOUT);
-        try { return FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
-        catch (RuntimeException invalid) { throw new Unavailable("TECHNICAL_SCHEMA_INVALID"); }
+        try {
+            TechnicalBundle result = FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, date, clock.instant());
+            if (result.profiles().stream().anyMatch(profile -> !profile.available() && !"NO_DATA".equals(profile.reason())))
+                brokerFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "FAILED_OUTCOME");
+            return result;
+        }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "TECHNICAL_SCHEMA_INVALID", invalid); }
     }
     @Override public StockBasicRead basic(String symbol, LocalDate date) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = postV1("/internal/market-data/stock-basic/read", Map.of("symbol", symbol), 256 * 1024);
+        String body = postV1("FUBON_STOCK_BASIC_READ", "個股基本資料查詢", "/internal/market-data/stock-basic/read", Map.of("symbol", symbol), 256 * 1024);
         try { return FubonMarketJson.stockBasic(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
-        catch (RuntimeException invalid) { throw new Unavailable("STOCK_BASIC_SCHEMA_INVALID"); }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_STOCK_BASIC_READ", "個股基本資料查詢", "STOCK_BASIC_SCHEMA_INVALID", invalid); }
     }
     @Override public IntradayCandlesRead candles(String symbol, LocalDate date) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = postV1("/internal/market-data/intraday-candles/read", Map.of("symbol", symbol), 1024 * 1024);
+        String body = postV1("FUBON_INTRADAY_CANDLES_READ", "分鐘 K 線查詢", "/internal/market-data/intraday-candles/read", Map.of("symbol", symbol), 1024 * 1024);
         try { return FubonMarketJson.candles(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
-        catch (RuntimeException invalid) { throw new Unavailable("INTRADAY_CANDLES_SCHEMA_INVALID"); }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_INTRADAY_CANDLES_READ", "分鐘 K 線查詢", "INTRADAY_CANDLES_SCHEMA_INVALID", invalid); }
     }
     @Override public SubscriptionAck subscriptions(List<String> symbols) {
         validateSymbols(symbols, 300, true);
-        String body = post("/internal/market-data/stock-push/subscriptions", Map.of("symbols", symbols), 8 * 1024);
+        String body = post("FUBON_STOCK_PUSH_SUBSCRIPTIONS", "個股推播訂閱", "/internal/market-data/stock-push/subscriptions", Map.of("symbols", symbols), 8 * 1024);
         try { return FubonMarketJson.subscription(FubonMarketJson.parse(body), symbols.size()); }
-        catch (RuntimeException invalid) { throw new Unavailable("SUBSCRIPTION_SCHEMA_INVALID"); }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_STOCK_PUSH_SUBSCRIPTIONS", "個股推播訂閱", "SUBSCRIPTION_SCHEMA_INVALID", invalid); }
     }
     private void validateSymbols(List<String> symbols, int limit, boolean emptyAllowed) {
         if (symbols == null || (!emptyAllowed && symbols.isEmpty()) || symbols.size() > limit
                 || symbols.stream().anyMatch(s -> !validSymbol(s)) || new HashSet<>(symbols).size() != symbols.size())
             throw new Unavailable("INVALID_REQUEST");
     }
-    private String post(String path, Map<String, ?> request, int limit) {
-        return post(path, request, limit, TIMEOUT);
+    private String post(String operationKey, String apiName, String path, Map<String, ?> request, int limit) {
+        return post(operationKey, apiName, path, request, limit, TIMEOUT);
     }
-    private String post(String path, Map<String, ?> request, int limit, Duration timeout) {
+    private String post(String operationKey, String apiName, String path, Map<String, ?> request, int limit, Duration timeout) {
         FubonMarketConfigState.Snapshot access = config.snapshot();
         if (access.reason() != null) throw new Unavailable(access.reason(), true);
+        boolean outboundStarted = false;
         try {
+            String requestBody = FubonMarketJson.MAPPER.writeValueAsString(request);
+            outboundStarted = true;
             RawResponse response = transport.post(access.endpoint(path), access.token(),
-                    FubonMarketJson.MAPPER.writeValueAsString(request), limit, timeout);
-            if (response.status() == 429) throw new Unavailable("RATE_LIMITED", true);
+                    requestBody, limit, timeout);
+            if (response.status() == 429) throw outboundFailure(operationKey, apiName, "RATE_LIMITED", true, response.status(), path);
             if (response.status() == 401 || response.status() == 403 || response.status() == 503)
-                throw new Unavailable("UPSTREAM_UNAVAILABLE", true);
+                throw outboundFailure(operationKey, apiName, "UPSTREAM_UNAVAILABLE", true, response.status(), path);
             if (response.status() != 200 || response.body() == null || response.body().length > limit)
-                throw new Unavailable("UPSTREAM_UNAVAILABLE");
+                throw outboundFailure(operationKey, apiName, "UPSTREAM_UNAVAILABLE", false, response.status(), path);
             return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
         } catch (Unavailable failure) { throw failure; }
         catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new Unavailable("INTERRUPTED", true);
-        } catch (Exception failure) { throw new Unavailable("UPSTREAM_UNAVAILABLE"); }
+        } catch (Exception failure) {
+            if (outboundStarted) record(operationKey, apiName, failure);
+            throw new Unavailable("UPSTREAM_UNAVAILABLE");
+        }
     }
     /** The two v1 routes have an exact root error body, unlike the frozen older routes. */
-    private String postV1(String path, Map<String, ?> request, int limit) {
+    private String postV1(String operationKey, String apiName, String path, Map<String, ?> request, int limit) {
         FubonMarketConfigState.Snapshot access = config.snapshot();
         if (access.reason() != null) throw new Unavailable(access.reason(), true);
+        boolean outboundStarted = false;
         try {
+            String requestBody = FubonMarketJson.MAPPER.writeValueAsString(request);
+            outboundStarted = true;
             RawResponse response = transport.post(access.endpoint(path), access.token(),
-                    FubonMarketJson.MAPPER.writeValueAsString(request), limit, MARKET_DATA_V1_TIMEOUT);
+                    requestBody, limit, MARKET_DATA_V1_TIMEOUT);
             if (response.status() == 200 && response.body() != null && response.body().length <= limit)
                 return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
+                    .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
             String reason = v1Reason(response);
             if ("RATE_LIMITED".equals(reason) || "HISTORY_BUDGET_EXHAUSTED".equals(reason))
-                throw new Unavailable(reason, true);
-            if ("MISCONFIGURED".equals(reason)) throw new Unavailable("MISCONFIGURED", true);
-            if ("STALE_QUERY".equals(reason) || "SCHEMA_INVALID".equals(reason)) throw new Unavailable(reason);
-            throw new Unavailable("UPSTREAM_UNAVAILABLE", response.status() == 401 || response.status() == 403 || response.status() == 503);
+                throw outboundFailure(operationKey, apiName, reason, true, response.status(), path);
+            if ("MISCONFIGURED".equals(reason)) throw outboundFailure(operationKey, apiName, "MISCONFIGURED", true, response.status(), path);
+            if ("STALE_QUERY".equals(reason) || "SCHEMA_INVALID".equals(reason)) throw outboundFailure(operationKey, apiName, reason, false, response.status(), path);
+            throw outboundFailure(operationKey, apiName, "UPSTREAM_UNAVAILABLE", response.status() == 401 || response.status() == 403 || response.status() == 503, response.status(), path);
         } catch (Unavailable failure) { throw failure; }
         catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt(); throw new Unavailable("INTERRUPTED", true);
-        } catch (Exception failure) { throw new Unavailable("UPSTREAM_UNAVAILABLE"); }
+        } catch (Exception failure) {
+            if (outboundStarted) record(operationKey, apiName, failure);
+            throw new Unavailable("UPSTREAM_UNAVAILABLE");
+        }
+    }
+    private Unavailable schemaFailure(String operationKey, String apiName, String reason, RuntimeException failure) {
+        record(operationKey, apiName, failure);
+        return new Unavailable(reason);
+    }
+    private Unavailable outboundFailure(String operationKey, String apiName, String reason, boolean stopRun, int status, String path) {
+        record(operationKey, apiName, new IllegalStateException("Fubon scheduled market boundary status=" + status + " path=" + path));
+        return new Unavailable(reason, stopRun);
+    }
+    private void brokerFailure(String operationKey, String apiName, String reason) {
+        record(operationKey, apiName, new IllegalStateException("Fubon scheduled market broker failure outcome=" + reason));
+    }
+    private void record(String operationKey, String apiName, Throwable failure) {
+        if (errorLogWriter != null) errorLogWriter.record(operationKey, apiName, failure, clock.instant());
     }
     private static String v1Reason(RawResponse response) {
         if (response.body() == null || response.body().length > 4096) return null;

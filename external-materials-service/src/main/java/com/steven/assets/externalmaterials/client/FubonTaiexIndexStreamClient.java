@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.service.FubonTaiexIndexEvent;
 import com.steven.assets.externalmaterials.service.FubonTaiexIndexIngestionService;
+import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,11 +23,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -55,7 +58,10 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
     private final Sleeper sleeper;
     private final TokenReader tokenReader;
     private final ObjectMapper mapper;
+    private final ExternalApiErrorLogWriter errorLogWriter;
+    private final LifecycleFailureInterval failureInterval = new LifecycleFailureInterval();
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicLong generation = new AtomicLong();
     private final AtomicReference<InputStream> activeBody = new AtomicReference<>();
     private volatile ExecutorService executor;
 
@@ -66,9 +72,9 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
             @Value("${fubon.taiex-index-stream.symbol:}") String configuredSymbol,
             @Value("${fubon.base-url:http://fubon-broker-service:8080}") String baseUrl,
             @Value("${fubon.shared-token-path:/run/secrets/fubon/shared/internal-service-token}") String tokenPath,
-            FubonTaiexIndexIngestionService ingestion) {
+            FubonTaiexIndexIngestionService ingestion, ExternalApiErrorLogWriter errorLogWriter) {
         this(fubonEnabled, streamEnabled, configuredSymbol, baseUrl, tokenPath, ingestion,
-                new JdkTransport(), Thread::sleep, FubonSharedTokenReader::read);
+                new JdkTransport(), Thread::sleep, FubonSharedTokenReader::read, errorLogWriter);
     }
 
     FubonTaiexIndexStreamClient(
@@ -81,7 +87,7 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
             Transport transport,
             Sleeper sleeper) {
         this(fubonEnabled, streamEnabled, configuredSymbol, baseUrl, tokenPath, ingestion,
-                transport, sleeper, FubonSharedTokenReader::read);
+                transport, sleeper, FubonSharedTokenReader::read, null);
     }
 
     FubonTaiexIndexStreamClient(
@@ -94,6 +100,9 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
             Transport transport,
             Sleeper sleeper,
             TokenReader tokenReader) {
+        this(fubonEnabled, streamEnabled, configuredSymbol, baseUrl, tokenPath, ingestion, transport, sleeper, tokenReader, null);
+    }
+    FubonTaiexIndexStreamClient(boolean fubonEnabled, boolean streamEnabled, String configuredSymbol, String baseUrl, String tokenPath, FubonTaiexIndexIngestionService ingestion, Transport transport, Sleeper sleeper, TokenReader tokenReader, ExternalApiErrorLogWriter errorLogWriter) {
         this.fubonEnabled = fubonEnabled;
         this.streamEnabled = streamEnabled;
         this.configuredSymbol = configuredSymbol == null ? "" : configuredSymbol.trim();
@@ -106,6 +115,7 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
         this.mapper = new ObjectMapper(JsonFactory.builder()
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build());
+        this.errorLogWriter = errorLogWriter;
     }
 
     @Override
@@ -123,13 +133,17 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
             log.warn("Fubon TAIEX stream is unavailable reason=INVALID_BASE_URL");
             return;
         }
+        // Each lifecycle owns its own error de-duplication interval.  In particular, an old
+        // cancelled loop must never observe or mutate a newly started loop's state.
+        long version = generation.incrementAndGet();
         running.set(true);
         executor = Executors.newVirtualThreadPerTaskExecutor();
-        executor.submit(() -> consumeLoop(endpoint, initialToken));
+        executor.submit(() -> consumeLoop(endpoint, initialToken, version));
     }
 
     @Override
     public synchronized void stop() {
+        generation.incrementAndGet();
         running.set(false);
         closeQuietly(activeBody.getAndSet(null));
         ExecutorService current = executor;
@@ -151,25 +165,41 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
         return fubonEnabled && streamEnabled && SYMBOL.matcher(configuredSymbol).matches();
     }
 
-    private void consumeLoop(URI endpoint, String token) {
+    private boolean active(long version) {
+        return running.get() && generation.get() == version;
+    }
+
+    private void consumeLoop(URI endpoint, String token, long version) {
         long failures = 0L;
         String currentToken = token;
         try {
-            while (running.get()) {
+            while (active(version)) {
+                InputStream ownedBody = null;
                 try (RawResponse response = transport.open(endpoint, currentToken)) {
+                    if (!active(version)) return;
                     if (response == null || response.statusCode() != 200 || response.body() == null) {
-                        log.warn("Fubon TAIEX stream response rejected reason=NON_200");
+                        recordFailure(version, new IllegalStateException("Fubon TAIEX stream rejected response"));
+                        if (active(version)) log.warn("Fubon TAIEX stream response rejected reason=NON_200");
                     } else {
-                        activeBody.set(response.body());
-                        consumeBody(response.body());
-                        activeBody.compareAndSet(response.body(), null);
+                        ownedBody = response.body();
+                        activeBody.set(ownedBody);
+                        if (!active(version)) {
+                            activeBody.compareAndSet(ownedBody, null);
+                            closeQuietly(ownedBody);
+                            return;
+                        }
+                        consumeBody(ownedBody, version);
+                        if (active(version)) recordFailure(version, new java.io.EOFException("Fubon TAIEX stream EOF"));
                     }
                 } catch (Exception failure) {
-                    log.warn("Fubon TAIEX stream disconnected reason=STREAM_UNAVAILABLE");
+                    if (active(version)) {
+                        recordFailure(version, failure);
+                        if (active(version)) log.warn("Fubon TAIEX stream disconnected reason=STREAM_UNAVAILABLE");
+                    }
                 } finally {
-                    activeBody.set(null);
+                    if (ownedBody != null) activeBody.compareAndSet(ownedBody, null);
                 }
-                if (!running.get()) return;
+                if (!active(version)) return;
                 long delay = BACKOFF_MILLIS[(int) Math.min(failures, BACKOFF_MILLIS.length - 1L)];
                 failures++;
                 try {
@@ -178,7 +208,7 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
                     Thread.currentThread().interrupt();
                     return;
                 }
-                if (!running.get()) return;
+                if (!active(version)) return;
                 // Token rotation is noticed only after the non-secret gate passed.  A missing/empty
                 // token stops instead of issuing an unauthenticated request or a retry storm.
                 currentToken = tokenReader.read(tokenPath);
@@ -188,17 +218,17 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
                 }
             }
         } finally {
-            running.set(false);
+            if (generation.get() == version) running.set(false);
         }
     }
 
-    void consumeBody(InputStream input) throws IOException {
+    private void consumeBody(InputStream input, long version) throws IOException {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             Frame frame = new Frame();
             String line;
-            while (running.get() && (line = reader.readLine()) != null) {
+            while (active(version) && (line = reader.readLine()) != null) {
                 if (line.isEmpty()) {
-                    dispatch(frame);
+                    dispatch(frame, version);
                     frame = new Frame();
                     continue;
                 }
@@ -207,11 +237,21 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
         }
     }
 
-    private void dispatch(Frame frame) {
-        if (!frame.complete()) return;
+    private void dispatch(Frame frame, long version) {
+        // Heartbeats and unrelated SSE topics have no market-data loss semantics.  Once the
+        // adapter identifies a TAIEX event, however, any incomplete or rejected shape is a
+        // producer failure and must be surfaced once through the stream's failure latch.
+        if (!active(version) || !frame.targetEvent()) return;
+        if (!frame.complete()) {
+            recordFailure(version, new IllegalStateException("Fubon TAIEX stream malformed target frame"));
+            return;
+        }
         try {
             JsonNode root = mapper.readTree(frame.data);
-            if (root == null || !root.isObject() || !fieldNames(root).equals(FIELDS)) return;
+            if (root == null || !root.isObject() || !fieldNames(root).equals(FIELDS)) {
+                recordFailure(version, new IllegalStateException("Fubon TAIEX stream target schema reject"));
+                return;
+            }
             JsonNode symbol = root.get("symbol");
             JsonNode exchange = root.get("exchange");
             JsonNode type = root.get("type");
@@ -222,12 +262,25 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
                     || !type.isTextual() || !"INDEX".equals(type.textValue())
                     || !index.isTextual() || !validCanonicalIndex(index.textValue())
                     || !micros.isIntegralNumber() || !micros.canConvertToLong() || micros.longValue() <= 0
-                    || !Long.toString(micros.longValue()).equals(frame.id)) return;
-            ingestion.ingest(new FubonTaiexIndexEvent(symbol.textValue(), exchange.textValue(), type.textValue(),
-                    index.textValue(), micros.longValue()));
+                    || !Long.toString(micros.longValue()).equals(frame.id)) {
+                recordFailure(version, new IllegalStateException("Fubon TAIEX stream target schema reject"));
+                return;
+            }
+            if (active(version)) {
+                ingestion.ingest(new FubonTaiexIndexEvent(symbol.textValue(), exchange.textValue(), type.textValue(),
+                        index.textValue(), micros.longValue()));
+                if (active(version)) failureInterval.reset(version);
+            }
         } catch (Exception invalid) {
+            if (active(version)) recordFailure(version, invalid);
             // A malformed frame is data loss, not a reason to accept a looser schema or leak content.
             return;
+        }
+    }
+
+    private void recordFailure(long version, Throwable failure) {
+        if (errorLogWriter != null && active(version) && failureInterval.claim(version) && active(version)) {
+            errorLogWriter.record("FUBON_TAIEX_INDEX_STREAM", "加權指數串流", failure, Instant.now());
         }
     }
 
@@ -305,8 +358,12 @@ public class FubonTaiexIndexStreamClient implements SmartLifecycle {
         }
 
         boolean complete() {
-            return !invalid && "taiex-index".equals(event) && id != null && !id.isBlank()
+            return !invalid && targetEvent() && id != null && !id.isBlank()
                     && data != null && !data.isBlank();
+        }
+
+        boolean targetEvent() {
+            return "taiex-index".equals(event);
         }
     }
 

@@ -5,20 +5,24 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ServerWebExchange;
+import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.capture;
 
 /** 處理公開與頁面股市大盤 API 的 validation／typed payload 錯誤，不介入既有 business error passthrough。 */
 @RestControllerAdvice(assignableTypes = {PublicMarketIndexController.class, GdpTwseBffController.class})
 public class PublicMarketIndexExceptionAdvice {
 
     @ExceptionHandler(PublicMarketIndexRequestException.class)
-    public ResponseEntity<ProblemDetail> handleInvalidRequest(PublicMarketIndexRequestException ex) {
+    public ResponseEntity<ProblemDetail> handleInvalidRequest(PublicMarketIndexRequestException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         problem.setTitle("Invalid market index request");
         return ResponseEntity.badRequest().body(problem);
     }
 
     @ExceptionHandler(MalformedMarketIndexPayloadException.class)
-    public ResponseEntity<ProblemDetail> handleMalformedPayload(MalformedMarketIndexPayloadException ex) {
+    public ResponseEntity<ProblemDetail> handleMalformedPayload(MalformedMarketIndexPayloadException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
         problem.setTitle("Malformed market index payload");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);

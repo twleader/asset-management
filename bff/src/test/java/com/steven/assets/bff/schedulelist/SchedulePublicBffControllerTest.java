@@ -24,11 +24,25 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 27 個業務與 37 個外部行情工作")
+    @DisplayName("排程清單完整列出 28 個業務與 37 個外部行情工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(64);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(27);
+        assertThat(jobs()).hasSize(65);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(28);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(37);
+    }
+
+    @Test
+    @DisplayName("API 錯誤紀錄每日保留清理的 cron 與不可手動清除語意同步實作")
+    void api錯誤紀錄保留清理契約() {
+        assertThat(jobs()).filteredOn(j -> "API 錯誤紀錄清理".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.category()).isEqualTo("資料清理");
+                    assertThat(job.schedule()).isEqualTo("每日 03:15");
+                    assertThat(job.cron()).isEqualTo("0 15 3 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("30 天", "不提供手動清除");
+                });
     }
 
     @Test

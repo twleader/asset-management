@@ -13,13 +13,16 @@ container log，無法從系統介面依 API、來源或時間集中檢視，也
 才向後端取得該筆完整原始 stacktrace，互動方式採 Element Plus table expand，與既有「今日交易雷達」的
 展開列一致。這不是 API 執行、重試、手動同步或券商操作功能；它只保存既有執行流程中已發生的失敗。
 
-使用者明確要求 log 要詳細清楚：API 名稱、錯誤訊息與 stacktrace 均直接保存，不遮罩、不截斷。
-因此本頁、BFF read route 與 business read endpoint 維持 ADMIN 限制，private ingest 也採專屬服務
-credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理者的頁面。
+使用者明確要求 log 要詳細清楚：API 名稱必原樣保存，非敏感錯誤訊息與 stacktrace 必完整保存、不截斷。
+既有 credential、token、certificate、raw account／identity 與 raw payload 的安全替換仍優先，且不得以
+ADMIN 限制取代這項邊界；Python adapter 的 `redaction.py` 不適用於 Java service，因此 BFF、business-services、
+external-materials-service 都必有可測試的 service-local diagnostic renderer。它以自己持有的 runtime secret exact
+replacement 與敏感 key-value replacement 產生完整非敏感 Throwable trace；任何 stacktrace 均不得進匿名 9090 公開 API
+或非管理者的頁面。
 
 ## 要做什麼
 
-- [ ] 417.1 **正規化 catalog 與保留 API 名稱的 error row。** 新增已註冊於 master changelog 尾端的
+- [x] 417.1 **正規化 catalog 與保留 API 名稱的 error row。** 新增已註冊於 master changelog 尾端的
   v1.123.0-api-error-log.sql，建立下列兩張 technical catalog/log table：
   - api_error_log_operation：source VARCHAR(16) NOT NULL、operation_key VARCHAR(160) NOT NULL、
     operation_label VARCHAR(255) NOT NULL、display_order SMALLINT NOT NULL，PRIMARY KEY (source, operation_key)；
@@ -37,13 +40,14 @@ credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理�
     UNIQUE (source, operation_key, operation_label)，使 DB 也驗證每筆保存名稱確實屬於該 source/key。
   - api_name 是使用者明確要求的具名 denormalization：每一筆 log 必保存發生當下的 API 中文名稱，
     供直接查詢與清單閱讀。它不是由 read-time catalog 覆寫；寫入時由 server/producers 的固定 417.2
-    catalog 值帶入，composite FK 保護 source/key/name 身分；immutable trigger 也保護未引用 catalog row。
+    catalog 值帶入，composite FK 保護 source/key/name 身分；catalog immutable trigger 保護未引用 catalog row。
   - api_error_log 建立 (source, operation_key, occurred_at DESC, id DESC)、
-    (source, api_name, occurred_at DESC, id DESC) 與 (occurred_at DESC, id DESC) 索引。不提供刪除、清除、
-    retention job 或修改歷史紀錄的 endpoint。重產 db/schema.sql，並讓
+    (source, api_name, occurred_at DESC, id DESC) 與 (occurred_at DESC, id DESC) 索引。不提供手動刪除、
+    清除或修改歷史紀錄的 endpoint；但建立 retention guard trigger：UPDATE 一律拒絕，DELETE 僅在
+    `occurred_at < transaction_timestamp() - interval '30 days'` 時允許。重產 db/schema.sql，並讓
     bash scripts/tests/schema-sql-drift-test.sh 回傳 0。
 
-- [ ] 417.2 **固定完整 catalog。** ApiErrorOperationCatalog 只讀取上述 seeded table。BFF public matcher
+- [x] 417.2 **固定完整 catalog。** ApiErrorOperationCatalog 只讀取上述 seeded table。BFF public matcher
   與 external producer 只能使用下列 source/key/name；每個 route/client 對應、名稱、排序固定如下：
 
   | source | order | operationKey | apiName | 唯一 producer／route |
@@ -80,19 +84,23 @@ credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理�
   未列 key、未串接 SDK 目錄項目、未知 path/method 的 404/405 或 client route error 一律不得寫入；
   不得加入下單、改單、撤單、圈存、轉帳或其他金融副作用。
 
-- [ ] 417.3 **完整 raw recorder 與 read model。** 在 business-services 以 immutable request/response record
+- [x] 417.3 **完整非敏感診斷 recorder 與 read model。** 在 business-services 以 immutable request/response record
   DTO、Repository、Service、thin Controller 分層實作 ApiErrorLogRecorder。recorder 接受 source/key/name/
   message/stacktrace/producer-fixed occurredAt，先以 catalog 查證 source/key/name 完全一致、原樣保存 occurredAt、
   再寫入 api_error_log，composite FK 再做第二道防線。
   寫入必使用獨立 REQUIRES_NEW transaction；任一 recorder/DB failure 只能用既有應用程式診斷 log 記下
   最小資訊並吞掉，不得改變原本 API status/body、retry、排程 outcome 或金融資料寫入。
-  - 依使用者要求，不得對 api_name、message_header 或 stack_trace 做 redaction、mask、hash、truncate、
-    charset replacement 或內容過濾。BFF/business 記錄原始 Throwable 的完整 class、message、cause chain
-    與 StackTraceElement；若無 Throwable，synthetic boundary failure 必完整寫出 operation、HTTP status/
-    failure reason 與產生位置，不能杜撰遠端原因。
-  - external-materials 必保留原始 Throwable class/message/cause chain/stacktrace，以及既有 code 已取得的
-    failure reason；若其 producer 已拿到 non-2xx status，synthetic trace 必明示 status 和 path。不得為
-    本功能新增 request body/header dump 或新的 broker 呼叫，但既有 exception text 一律原樣保存。
+  - api_name 一律原樣保存。BFF/business 對非敏感診斷內容記錄完整 Throwable class、message、cause chain
+    與 StackTraceElement，不得 hash、truncate、charset replacement 或內容過濾；持久化前必以 Java renderer
+    對 local runtime secret exact value，以及 credential、token、certificate、raw account／identity 與 raw payload
+    的 key-value 做 replacement，但不得縮減其餘內容。renderer 必自行逐層組裝 Throwable，不能直接
+    `printStackTrace` 或包含 raw request/response body、query/header；business ingest controller 對 BFF 傳入內容
+    再清理一次。若無
+    Throwable，synthetic boundary failure 必完整寫出 operation、HTTP status/failure reason 與產生位置，不能
+    杜撰遠端原因。
+  - external-materials 必以自己的 Java renderer 保留經相同安全替換後的完整可用 Throwable class/message/cause chain/stacktrace，
+    以及既有 code 已取得的 failure reason；若其 producer 已拿到 non-2xx status，synthetic trace 必明示
+    status 和 path。不得為本功能新增 request body/header dump 或新的 broker 呼叫。
   - 新增只讀 business API：GET /api/api-error-logs?source=ALL|OPEN_API|FUBON_API&
     operationKey=<optional>&sort=NEWEST|OLDEST、GET /api/api-error-logs/operations?
     source=ALL|OPEN_API|FUBON_API、GET /api/api-error-logs/{id}。list 只含
@@ -101,31 +109,39 @@ credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理�
   - 上述三個 GET 均須 BFF 與 business 兩層 ADMIN 檢查：BFF SecurityConfig 對
     /api/bff/api-error-logs 與 /api/bff/api-error-logs/** 要求 ROLE_ADMIN；business controller 也必以
     CurrentUserContext.hasUser() 與 isAdmin() 拒絕未帶使用者或非 ADMIN 的 direct call。
+  - 新增不公開的 ApiErrorLogRetentionScheduler：每日 03:15（Asia/Taipei；`api-error-log.retention-cron`
+    預設 `0 15 3 * * *`）以 DB `current_timestamp - interval '30 days'` 刪除到期 row，無 run-now／手動
+    清除 endpoint、不讀 detail、不走 BFF、不呼叫 API／Fubon SDK，失敗只記最小診斷並由下一日重試。
 
-- [ ] 417.4 **開放 API capture，不改既有 public contract。** 在 BFF 建立只比對 417.2 exact
+- [x] 417.4 **開放 API capture，不改既有 public contract。** 在 BFF 建立只比對 417.2 exact
   route/method 的 PublicApiErrorCaptureWebFilter；它以不可變 static matcher 得到 OPEN_API key/name，
-  matcher 的 13 組對照測試必與 417.2 migration seed 一致。既有 public controller/advice 發生 Throwable 時，
-  handler 只將原始 Throwable 放入 ServerWebExchange attribute；filter 必等到最終 response status，**只有 5xx**
+  matcher 的 13 組對照測試必與 417.2 migration seed 一致。所有可能處理 matched public route 的 resolver，
+  包含既有 public controller 的 `*ExceptionAdvice` 與全域 `BusinessErrorAdvice`，都必在捕獲當下固定
+  Throwable + UTC Instant 的不可變 capture envelope 至 ServerWebExchange attribute；filter 必等到最終 response status，**只有 5xx**
   才以該原始 Throwable 建立一次 ingest。任何被 advice 映射為 1xx–4xx 的 Throwable 都必丟棄 attribute、zero row，
   不可因程式內部以 exception 表達 caller/request error 而被誤當系統 API error。若沒有可記錄的 Throwable，
   status fallback 也**只**在 matched route 的 response 為 5xx 時才以明示 boundary status failure synthetic trace
   記錄；1xx–4xx 與任何 2xx 都不得因 status 或 Throwable 寫入。尤其
-  GET /api/quotes/one 的合約化 cache-miss 204 是成功、必為 zero row。未處理 Throwable 則記錄後原樣 rethrow；
+  GET /api/quotes/one 的合約化 cache-miss 204 是成功、必為 zero row。未處理 Throwable 則在捕獲當下固定
+  envelope、記錄後原樣 rethrow；沒有 Throwable 的 status fallback 在 final matched 5xx 時才固定 timestamp。
   exchange attribute 防止 advice/filter/status fallback 重複寫入。
-  - BFF 用專屬 ApiErrorLogIngestClient 將原始 OPEN_API failure best-effort POST 到 private business
+  - BFF 用專屬 ApiErrorLogIngestClient 將 renderer 產生的 OPEN_API failure best-effort POST 到 private business
     endpoint /internal/api-error-logs；request JSON 欄位精確為 `source`、`operationKey`、`apiName`、
     `messageHeader`、`stackTrace`、`occurredAt`，不接受別名或缺欄。endpoint 對唯一一個 X-Internal-Service-Token 以 SHA-256 digest
     做 constant-time comparison；設定值只能是新的 API_ERROR_LOG_INGEST_TOKEN。Docker Compose 只把此
     required、BFF/business 專用 credential 注入這兩個服務，external-materials、fubon-broker-service、
     frontend、api-gateway 均不得取得；不提供 INTERNAL_TREASURY_TOKEN fallback，也不提交 .env 值。
     token 缺失、錯誤或重複時 private endpoint fail closed，BFF ingest failure 仍吞掉且不改 public response。
+    `BusinessErrorAdvice` 維持既有 public caller 的 raw body relay，但 application logger、capture envelope、ingest
+    均只能使用 status、exception class 與 renderer 輸出，`WebClientResponseException` raw response body 不得進
+    console、DB、detail 或 list。
   - private endpoint 只接受 OPEN_API、seeded key/name 與固定 JSON schema；不經 BFF route、frontend 或
     9090 gateway 暴露，也不得遞迴產生日誌。成功、所有 4xx（含 caller invalid request/no data）、未列 route、
     unknown-path 404/405 不記錄；matched 5xx 無 Throwable 時才是 status fallback。
   - 不得修改任一既有公開 endpoint 的成功 payload、失敗 status/body、CORS、匿名授權範圍或 9090 route；
     不可把 stacktrace 回傳給公開 API caller。
 
-- [ ] 417.5 **富邦證 API failure emission contract。** business 的 FubonHttpClient 與 external 的
+- [x] 417.5 **富邦證 API failure emission contract。** business 的 FubonHttpClient 與 external 的
   FubonNormalizedQuoteClient、FubonTaiexIndexStreamClient、FubonScheduledMarketClient、
   FubonStockPushStreamClient 只在已開始 outbound broker invocation 後記錄 417.2 對應的一筆
   FUBON_API row：transport/timeout、non-2xx、response schema reject、empty response、或 broker
@@ -147,13 +163,13 @@ credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理�
     轉成無 cause 的 outcome，必在轉換前記錄 raw Throwable 或保留 cause 給 recorder，不能只存 reason enum。
   - business-services 直接以 417.3 recorder 寫入。external-materials 對 api_error_log 的唯一跨服務
     資料庫例外只准 ExternalApiErrorLogWriter 使用 parameterized JDBC INSERT、獨立 transaction、固定
-    source FUBON_API、417.2 key/name 與完整 raw message/trace；不可 SELECT/UPDATE/DELETE、不可讀任何
+    source FUBON_API、417.2 key/name 與完整可用且已經 external renderer 安全替換的 message/trace；不可 SELECT/UPDATE/DELETE、不可讀任何
     business table、不可 HTTP 反向呼叫 business-services。FK 拒絕未知或名稱不符 key 時 writer 必吞掉，不得影響
     原流程。這個窄例外必已寫入 spec/steering/structure.md 的服務邊界；其他跨服務 DB 存取仍禁止。
   - broker service 本身不接 DB、不接新 callback、不輸出 SDK raw exception、account、token 或 certificate。
     所有富邦 I/O 持續是唯讀；本任務不手動呼叫 broker endpoint、不變更 .env/secret、不啟用 Fubon flags。
 
-- [ ] 417.6 **頁面、路由與篩選交互。** 新增 ApiErrorLogsView.vue、/api-error-logs route
+- [x] 417.6 **頁面、路由與篩選交互。** 新增 ApiErrorLogsView.vue、/api-error-logs route
   （meta.requiresAdmin=true）與「系統資訊」子選單的「API logs 查詢」；此選單只在 auth.isAdmin 時顯示，
   不能因一般使用者功能開關而露出。新增前端 apiErrorLogs wrapper，所有資料均呼叫此頁專屬 BFF，
   前端不得直打 business 或 DB。
@@ -163,15 +179,19 @@ credential；任何 stacktrace 均不得進匿名 9090 公開 API 或非管理�
     該來源可選項與列表；其他篩選變更立即重載列表，保留 loading/empty/error state。
   - table 初始列只顯示發生時間、來源、保存的 API 名稱與原始錯誤訊息標頭。使用 el-table-column
     type=expand；第一次展開某一筆才呼叫 detail endpoint，成功後快取該筆完整 raw stacktrace，以保留換行的
-    唯讀文字呈現。清單回應、DOM hidden content、console 與未展開網路回應都不得含 stacktrace。
+    唯讀文字呈現。錯誤字串一律以 Vue interpolation／textContent 呈現，禁止 v-html 或 HTML 解析。清單回應、
+    DOM hidden content、console 與未展開網路回應都不得含 stacktrace。
 
-- [ ] 417.7 **測試與不得破壞的界線。** 新增 backend、BFF、external-materials 與 frontend 回歸測試，
-  至少證明：兩表的 catalog seed/FK、完整 key/name/order、未引用 catalog row 的 UPDATE/DELETE 也被 immutable
-  trigger 拒絕、api_name snapshot 保存、sort/filter、detail 不在 list、ADMIN 雙層拒絕、raw error
-  message/stacktrace 不遮罩不截斷、recorder failure 不改原流程、private token only-BFF/business、exact public
-  5xx Throwable 原樣記錄、204/captured-4xx/unknown 404 zero row、public payload/status 不變、每個 Fubon client outbound failure 一次、
+- [x] 417.7 **測試與不得破壞的界線。** 新增 backend、BFF、external-materials 與 frontend 回歸測試，
+  至少證明：兩表的 catalog seed/FK、完整 key/name/order、NULL source 拒絕、catalog 的任何 UPDATE/DELETE
+  拒絕、error row UPDATE 與 30 天內 DELETE 拒絕／到期 DELETE 允許、retention scheduler 的 cutoff／失敗不影響
+  其他流程、api_name snapshot 保存、sort/filter 與 ALL deterministic order、detail 不在 list、ADMIN 雙層拒絕、
+  非敏感 error message/stacktrace 不截斷、Java renderer 的 runtime-secret／敏感 key-value／raw response-body sentinel
+  不進 DB/detail/list/console（含 BusinessErrorAdvice logger）、recorder failure 不改原流程、
+  private token only-BFF/business、scoped/global advice 的 exact public 5xx Throwable capture 與 producer-boundary
+  timestamp、204/captured-4xx/unknown 404 zero row、public payload/status 不變、每個 Fubon client outbound failure 一次、
   pre-I/O zero row、stream invalid/EOF/valid-event interval transitions、external parameterized INSERT/raw trace，
-  以及三個來源/排序/API UI 控制項與 lazy detail request。
+  以及三個來源/排序/API UI 控制項、lazy detail request 與 HTML sentinel 的純文字呈現。
   不得新增 9090 route、向公開 caller 回傳 stacktrace、API 呼叫/重試、券商寫入、帳戶副作用或手動同步。
 
 ## 驗證
@@ -191,12 +211,13 @@ schema drift 結果不能作為本任務證據**。確認 business health 後，
 其餘三個受影響服務，並重啟 BFF；這樣 BFF 不會保留已換 IP 的 upstream connection。
 
 以下 acceptance-only 值只供本機容器間 token 契約驗證，不是 production secret，不寫入 `.env`，不呼叫
-真實 Fubon SDK。受控 ingest 會刻意留下一筆 append-only 的 sentinel error log；不得用 DELETE 清掉它：
+真實 Fubon SDK。受控 ingest 會刻意留下一筆尚在 30 天保留窗內的 sentinel error log；不得用 DELETE
+手動清掉它：
 
 ~~~bash
 API_ERROR_LOG_INGEST_TOKEN=local-api-error-log-acceptance-only docker compose -p asset-management build --no-cache business-services
 API_ERROR_LOG_INGEST_TOKEN=local-api-error-log-acceptance-only docker compose -p asset-management up -d --no-deps --force-recreate business-services
-docker compose -p asset-management exec -T business-services curl -fsS http://localhost:8080/actuator/health
+docker compose -p asset-management exec -T business-services curl -fsS http://localhost:8080/api/snapshots
 
 # 依 db/schema.sql 檔頭的「重新產生」三步程序更新本檔及表數宣告後，才驗本次 migration 的 schema。
 bash scripts/tests/schema-sql-drift-test.sh
@@ -209,7 +230,7 @@ for svc in business-services external-materials-service bff frontend; do
   test -n "$cid"
   docker inspect --format '{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}} {{.Image}}' "$cid"
 done
-docker compose -p asset-management exec -T business-services curl -fsS http://localhost:8080/actuator/health
+docker compose -p asset-management exec -T business-services curl -fsS http://localhost:8080/api/snapshots
 docker compose -p asset-management exec -T bff curl -fsS http://localhost:8080/actuator/health
 
 # 驗 private token、完整原始欄位與 DB readback；JSON 的 \n 是寫入後 stacktrace 的真換行。
@@ -234,5 +255,9 @@ git diff --cached --check
 
 ## 完成報告
 
-（實作者做完後回填：實際改了哪些檔、測試與 stack runtime 驗證輸出、是否有受限於既有環境而未能執行的
-受控 failure fixture，以及與原計畫的偏差及原因。）
+- 2026-09-06 已完成 catalog／append-only error row、兩層 ADMIN read API、BFF 的 exact public 5xx capture、富邦唯讀 producer failure recorder、30 天每日清理，以及管理者 sidebar／篩選／lazy stacktrace detail 頁面。API 中文名稱在每筆 row 原樣保存；stacktrace 只在 detail 取得，並以純文字呈現。
+- Focused verification 均通過：backend `*ApiErrorLog*`＋`FubonHttpClientTest`、BFF `*ApiErrorLog*`＋`SchedulePublicBffControllerTest`、external `*ApiErrorLog*`＋兩種 stream／normalized／scheduled client tests，以及 frontend `apiErrorLogsView.contract.test.js`。本機 JDK 25 的既有 Mockito/Byte Buddy 相容參數為 `-DextraArgLine=-Dnet.bytebuddy.experimental=true`。
+- Docker runtime acceptance 通過：Liquibase `v1.123.0-api-error-log` 已套用、`db/schema.sql` 已重產為 99 表且 drift test 通過；private acceptance ingest 回 204，精確 sentinel（含換行 stacktrace、API 名稱與 occurredAt）readback 為 1。catalog immutable、composite FK、append-only trigger、未到期 delete 拒絕與到期 delete 允許皆經受控 SQL 驗證；sentinel 保留且未手動刪除。
+- feature worktree 的 business／external／BFF 映像皆 healthy，frontend HTTP 200，BFF 在上游重建後已 restart 且 fresh logs 無 connection-refused、500 或 startup error；編譯後前端 asset 含「API logs 查詢」與 `/bff/api-error-logs`。
+- 安全界線：驗收時所有實際 exposed FUBON feature/sync flag 均明確為 false，business/external fresh log 的 outbound scan 為零；未呼叫 broker/Fubon endpoint、未改 `.env`，ingest token 僅存在 business 與 BFF。
+- 偏差：原驗證段將 business health 寫成 `/actuator/health`，但實際 Compose health contract 是 `/api/snapshots`（回 `[]`）；已更正驗證指令。BFF 與 external 的既有 health endpoints 分別仍為 `/actuator/health` 與 `/internal/health`。

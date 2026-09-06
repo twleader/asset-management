@@ -99,6 +99,12 @@ const router = createRouter({
       meta: { title: '富邦證 API', icon: 'Coin' }
     },
     {
+      path: '/api-error-logs',
+      name: 'ApiErrorLogs',
+      component: () => import('@/views/ApiErrorLogsView.vue'),
+      meta: { title: 'API logs 查詢', icon: 'Document', requiresAdmin: true }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),

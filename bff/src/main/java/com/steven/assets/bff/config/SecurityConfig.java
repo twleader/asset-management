@@ -110,6 +110,8 @@ public class SecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/api/bff/trading-radar/blog-publish")
                             .hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        .pathMatchers("/api/bff/api-error-logs", "/api/bff/api-error-logs/**")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/user-management/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/impersonate/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 今日股市分析（Requirement 31）：GET 開放已登入者；重新分析 / 改模型限 ADMIN（涉 LLM 成本）

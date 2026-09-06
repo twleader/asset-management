@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.reactive.function.client.WebClientException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
+import org.springframework.web.server.ServerWebExchange;
+import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.capture;
 
 /**
  * 公開觸發重新搜尋的封閉錯誤契約（Requirement 71）：不回傳 business 原始 body 或例外訊息。
@@ -39,7 +41,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 public class PublicCrawlerRescanExceptionAdvice {
 
     @ExceptionHandler(WebClientResponseException.class)
-    public ResponseEntity<ProblemDetail> handleBusinessError(WebClientResponseException ex) {
+    public ResponseEntity<ProblemDetail> handleBusinessError(WebClientResponseException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "重新搜尋觸發暫時失敗，請稍後再試");
         problem.setTitle("Crawler rescan downstream failure");
@@ -47,7 +50,8 @@ public class PublicCrawlerRescanExceptionAdvice {
     }
 
     @ExceptionHandler(WebClientException.class)
-    public ResponseEntity<ProblemDetail> handleTransportFailure(WebClientException ex) {
+    public ResponseEntity<ProblemDetail> handleTransportFailure(WebClientException ex, ServerWebExchange exchange) {
+        capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, "重新搜尋服務暫時無法連線");
         problem.setTitle("Crawler rescan service unavailable");

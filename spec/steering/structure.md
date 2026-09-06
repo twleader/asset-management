@@ -635,6 +635,8 @@ api-gateway:9090／Tailscale exact public quotes ──► bff
 
 **Task 417 的唯一明文化例外：** `external-materials-service` 僅可由 `ExternalApiErrorLogWriter` 對
 `api_error_log` 做 parameterized JDBC `INSERT`，獨立 transaction、固定 `FUBON_API`、由 catalog composite FK
-驗證 source/key/api_name，保存既有 failure 的原始 message/stacktrace；不得 `SELECT`／`UPDATE`／`DELETE`、
+驗證 source/key/api_name，保存 external 自己的 Java diagnostic renderer 產生之完整可用非敏感 message/stacktrace；
+renderer 須對該 service runtime 已知 secret exact value 及 credential、token、certificate、raw account／identity、
+raw payload 的敏感 key-value 做 replacement，不能仰賴 Python adapter 的 redactor；不得 `SELECT`／`UPDATE`／`DELETE`、
 不得碰其他 business table、不得反向 HTTP 呼叫 business-services。此例外不適用於任何其他 service、table、
 資料用途或 broker callback。

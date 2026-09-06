@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（27 個）與 {@code external-materials-service}（37 個）。
+ * {@code business-services}（28 個）與 {@code external-materials-service}（37 個）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 37 筆對應 40 個標註
@@ -37,7 +37,8 @@ import java.util.List;
  *       StockAlertService、MarketAnalysisScheduler、BackupService、FubonInventorySyncScheduler、
  *       FubonTradeSyncScheduler、FubonBankBalanceSyncScheduler（Requirement 128／Task 393）、
  *       FubonSettlementSyncScheduler（Requirement 129／Task 394）、
- *       FubonRealizedGainSyncScheduler（Requirement 130／Task 395）</li>
+ *       FubonRealizedGainSyncScheduler（Requirement 130／Task 395）、
+ *       ApiErrorLogRetentionScheduler（Task 417）</li>
 
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TaiexIndexPoller、TwClosurePoller、
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
@@ -59,15 +60,18 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（64 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（65 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（27）=====
+            // ===== business-services（28）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
                     "每日 00:05", "0 5 0 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料清理", "警示觸發紀錄清理",
                     "清理 30 天前的股票警示觸發紀錄",
                     "每日 04:00", "0 0 4 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "資料清理", "API 錯誤紀錄清理",
+                    "清理超過 30 天的開放 API 與富邦證 API 錯誤紀錄；不提供手動清除入口",
+                    "每日 03:15", "0 15 3 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "今日股市分析", "今日股市分析產生",
                     "每分鐘比對啟用中的寄送時間，命中即由 AI 判斷當日台股走向並產生分析；每個時段各重跑一次並各寄一封（限台股交易日，颱風假／假日不寄）；執行時間可於「今日股市分析」頁增減（Requirement 31）",
                     "動態：依「今日股市分析」頁設定（預設 08:45）", "動態（market_analysis_send_time）", TPE),
@@ -266,7 +270,7 @@ public class SchedulePublicBffController {
                     "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（64 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（65 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;
