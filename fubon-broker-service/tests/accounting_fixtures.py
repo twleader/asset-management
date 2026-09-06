@@ -8,7 +8,7 @@ from helpers import TOKEN, account, response
 
 
 NOW = datetime(2026, 8, 28, 5, 40, tzinfo=UTC)
-SELECTED = SelectedAccount(account(), "001", "00001234567")
+SELECTED = SelectedAccount(account(), "001", "00001234567", True)
 
 
 def bank_row(**changes):

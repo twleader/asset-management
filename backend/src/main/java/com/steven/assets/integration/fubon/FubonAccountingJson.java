@@ -16,7 +16,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 
-/** Strict decoding belongs only to the new accounting observations, not existing broker DTOs. */
 final class FubonAccountingJson {
     private FubonAccountingJson() {}
 
@@ -67,6 +66,15 @@ final class FubonAccountingJson {
             } catch (IllegalArgumentException | DateTimeParseException exception) {
                 return (Instant) context.handleWeirdStringValue(Instant.class, raw, "INVALID_OBSERVED_AT");
             }
+        }
+    }
+
+    static final class StrictBooleanDeserializer extends JsonDeserializer<Boolean> {
+        @Override
+        public Boolean deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            if (parser.currentToken() == JsonToken.VALUE_TRUE) return Boolean.TRUE;
+            if (parser.currentToken() == JsonToken.VALUE_FALSE) return Boolean.FALSE;
+            return (Boolean) context.handleUnexpectedToken(Boolean.class, parser);
         }
     }
 }

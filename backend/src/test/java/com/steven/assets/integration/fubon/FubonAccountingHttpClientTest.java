@@ -128,18 +128,44 @@ class FubonAccountingHttpClientTest {
                 settlementJson(SETTLEMENT_ROW.replace("\"buyFee\":\"2\"", "\"buyFee\":\"2.0\"")),
                 settlementJson(SETTLEMENT_ROW.replace("\"buyFee\":\"2\"", "\"buyFee\":true")),
                 settlementJson(SETTLEMENT_ROW.replace("2026-09-01", "2026-08-27")),
+                settlementJson(SETTLEMENT_ROW.replace("\"sourceQueryDate\":\"2026-08-28\"",
+                        "\"sourceQueryDate\":\"2026-08-27\"")
+                        .replace("\"settlementDate\":\"2026-09-01\"",
+                                "\"settlementDate\":\"2026-08-27\"")),
                 settlementJson(SETTLEMENT_ROW.replace("sourceQueryDate\":\"2026-08-28", "sourceQueryDate\":\"2026-08-29")),
                 settlementJson(SETTLEMENT_ROW.replace("2026-09-01", "2026-08-28")),
                 settlementJson(SETTLEMENT_ROW + "," + SETTLEMENT_ROW),
                 settlementJson(NO_DATA_ROW.replace("\"buyFee\":null", "\"buyFee\":\"0\"")),
                 settlementJson(NO_DATA_ROW.replace("\"currency\":null", "\"currency\":\"TWD\"")),
-                settlementJson(SETTLEMENT_ROW).replace("UNVERIFIED", "VERIFIED"),
+                settlementJson(SETTLEMENT_ROW).replace("SDK_RANGE_3D_RETURNED_ROWS", "VERIFIED"),
                 "{\"details\":[]}");
     }
     @ParameterizedTest @MethodSource("invalidSettlement")
     void settlementCannotGuessSignsCoverageOrDateCompleteness(String json) {
         response = json; var result = client.readSettlement();
         assertThat(result.success()).isFalse(); assertThat(result.body()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"false", "null", "\"true\"", "1"})
+    void settlementBindingMustBeTheLiteralTrueBoolean(String value) {
+        response = settlementJson(SETTLEMENT_ROW).replace("\"accountBindingExplicit\":true",
+                "\"accountBindingExplicit\":" + value);
+
+        var result = client.readSettlement();
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.body()).isNull();
+    }
+
+    @Test
+    void missingSettlementBindingFailsClosed() {
+        response = settlementJson(SETTLEMENT_ROW).replace("\"accountBindingExplicit\":true,", "");
+
+        var result = client.readSettlement();
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.body()).isNull();
     }
     static Stream<String> invalidRealized() {
         return Stream.of(
@@ -163,6 +189,28 @@ class FubonAccountingHttpClientTest {
     void realizedRejectsMissingTypeFractionalQuantityAndInvalidAccounting(String json) {
         response = json; var result = client.readRealizedGains();
         assertThat(result.success()).isFalse(); assertThat(result.body()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"false", "null", "\"true\"", "1"})
+    void realizedBindingMustBeTheLiteralTrueBoolean(String value) {
+        response = realizedJson(REALIZED_ROW).replace("\"accountBindingExplicit\":true",
+                "\"accountBindingExplicit\":" + value);
+
+        var result = client.readRealizedGains();
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.body()).isNull();
+    }
+
+    @Test
+    void missingRealizedBindingFailsClosed() {
+        response = realizedJson(REALIZED_ROW).replace("\"accountBindingExplicit\":true,", "");
+
+        var result = client.readRealizedGains();
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.body()).isNull();
     }
     private String valid(String endpoint) {
         return switch (endpoint) {

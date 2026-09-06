@@ -93,8 +93,6 @@ class FubonAccountingPostgresTest {
     @Autowired AssetService assetService;
     @Autowired FubonBankBalanceWriter writer;
     @Autowired FubonBankBalanceSyncService bankService;
-    @Autowired FubonSettlementSyncService settlementService;
-    @Autowired FubonRealizedGainSyncService realizedService;
     @Autowired FubonBankBalanceOutcomeCounters counters;
     @Autowired PlatformTransactionManager transactions;
     @Autowired EntityManager em;
@@ -340,37 +338,6 @@ class FubonAccountingPostgresTest {
         });
     }
 
-    @ParameterizedTest @ValueSource(strings = {"none", "unique", "multiple", "edited"})
-    void parsedFinancialPreflightsNeverUseLedgerLabelsAsProofOrTakeWriteLocks(String candidate) {
-        tx(() -> {
-            gains.saveAndFlush(RealizedGain.builder().ownerUserId(ownerId).assetName("retained-gain").assetCode("2330")
-                    .market("台股").currency("TWD").broker("富邦證券").tradeDate(DATE.minusDays(1))
-                    .shares(bd("1000")).salePrice(bd("123.5")).proceeds(bd("900")).investmentCost(bd("800")).build());
-            int count = candidate.equals("none") ? 0 : candidate.equals("multiple") ? 2 : 1;
-            for (int i = 0; i < count; i++) ledger.saveAndFlush(AssetTransaction.builder().ownerUserId(ownerId)
-                    .assetName("retained-ledger").assetCode("2330").market("台股").currency("TWD").channel("富邦證券")
-                    .tradeDate(DATE.minusDays(1)).shares(bd("1000")).price(bd("123.5"))
-                    .amount(bd(candidate.equals("edited") ? "7" : "123500")).fee(bd("2")).transactionTax(bd("3"))
-                    .transactionType("賣").assetType("股票").source("FUBON_SYNC").brokerFilledNo("test-only-" + i).build());
-        });
-        var before = totals();
-        when(brokerClient.readSettlement()).thenAnswer(call -> { assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse(); return FubonDtos.CallResult.success(settlement()); });
-        when(brokerClient.readRealizedGains()).thenAnswer(call -> { assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse(); return FubonDtos.CallResult.success(realized()); });
-        sqlTrace.start();
-        tx(() -> { for (boolean dryRun : List.of(true, false)) {
-            assertThat(settlementService.syncManual(dryRun).outcome()).isEqualTo(FubonSettlementOutcome.SETTLEMENT_SCOPE_UNVERIFIED);
-            var result = realizedService.syncManual(dryRun); assertThat(result.outcome()).isEqualTo(FubonRealizedGainOutcome.IDENTITY_UNVERIFIED);
-            assertThat(result.insertedCount()).isZero(); assertThat(result.alreadyRepresentedCount()).isZero();
-        }});
-        assertThat(sqlTrace.stop()).noneMatch(sql -> sql.contains("asset_snapshot") || sql.contains("bank_deposit")
-                || sql.contains("asset_transaction") || sql.contains("realized_gain") || sql.contains("for update")
-                || sql.startsWith("insert") || sql.startsWith("update") || sql.startsWith("delete"));
-        assertThat(totals()).containsExactlyElementsOf(before);
-        tx(() -> { em.clear(); assertThat(gains.findAll()).hasSize(1); assertThat(gains.findAll().getFirst().getProceeds()).isEqualByComparingTo("900");
-            assertThat(gains.findAll().getFirst().getInvestmentCost()).isEqualByComparingTo("800");
-            if (candidate.equals("edited")) assertThat(ledger.findAll().getFirst().getAmount()).isEqualByComparingTo("7"); });
-    }
-
     private void fullPut() {
         assetService.updateSnapshot(snapshotId, new AssetSnapshotDto.CreateSnapshotRequest(DATE.minusDays(1), BigDecimal.ONE, "full-put",
                 List.of(new AssetSnapshotDto.DepositRequest(fubon.getId(), "證券戶", bd("7"), null, "TWD", bd("2"), "manual-note"),
@@ -423,12 +390,6 @@ class FubonAccountingPostgresTest {
         @Bean FubonBankBalanceSyncService bankService(FubonConfigState config, FubonBrokerClient client, UserAdminService users,
                 FubonBankBalanceWriter writer, FubonBankBalanceOutcomeCounters counters, MutableClock clock) {
             return new FubonBankBalanceSyncService(config, client, users, writer, counters, true, clock);
-        }
-        @Bean FubonSettlementSyncService settlementService(FubonConfigState config, FubonBrokerClient client, UserAdminService users, BrokerRepository brokers, MutableClock clock) {
-            return new FubonSettlementSyncService(config, client, users, brokers, new FubonSettlementOutcomeCounters(), true, clock);
-        }
-        @Bean FubonRealizedGainSyncService realizedService(FubonConfigState config, FubonBrokerClient client, UserAdminService users, BrokerRepository brokers, MutableClock clock) {
-            return new FubonRealizedGainSyncService(config, client, users, brokers, new FubonRealizedGainOutcomeCounters(), true, clock);
         }
     }
 }

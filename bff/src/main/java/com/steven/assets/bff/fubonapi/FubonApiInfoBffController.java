@@ -11,7 +11,7 @@ import java.util.List;
  *
  * <p>回傳富邦官方 SDK（{@code fubon_neo} 2.2.9）{@code accounting}／{@code stock}／
  * {@code marketdata} 命名空間中已驗證存在、且確認為唯讀查詢的全部方法的**人工維護靜態清單**
- * （52 筆：19 已串接、33 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
+ * （52 筆：21 已串接、31 未串接），並標示每一筆是否已被本系統實際串接。清單來源是在
  * {@code fubon-broker-service} 容器內以 Python 內省 SDK 物件取得的真實方法與 docstring，
  * 詳細盤點步驟見 {@code spec/tasks/t386_fubon_api_documentation_view.md} 的「盤點方法」段落。
  *
@@ -39,7 +39,7 @@ public class FubonApiInfoBffController {
     private static final String NO_SDK_DOC =
             "SDK 未提供可查證的參數／回傳說明（docstring 為空），僅能確認此方法存在於 sdk.stock 命名空間。";
 
-    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：19 已串接、33 未串接）。 */
+    /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：21 已串接、31 未串接）。 */
     private static final List<FubonApiInfoDto> APIS = List.of(
 
             // ===== 連線狀態查詢（2，全數已串接）=====
@@ -91,26 +91,32 @@ public class FubonApiInfoBffController {
                             + "shortsell_value,shortsell_margin,collateral,margin_loan_amt,maintenance_ratio}, "
                             + "maintenance_detail:[{stock_no,order_no,order_type,quantity,price,cost_price,"
                             + "market_value,shortsell_margin,collateral,margin_loan_amt,maintenance_ratio,...}]}"),
-            new FubonApiInfoDto(false, "帳戶／庫存查詢", "應收付交割金額查詢",
+            new FubonApiInfoDto(true, "帳戶／庫存查詢", "應收付交割金額查詢",
                     "sdk.accounting.query_settlement", "POST /internal/settlement/read",
-                    "唯讀解析 3d 交割款觀察；來源完整範圍待核實，目前只預檢、不寫買股待付款／賣股待收款，財務同步尚未完成" + RO,
+                    "唯讀將 SDK 3d 回傳列中交割日位於 future、金額 nonzero 的 TWD transit 在途款窄投影為買股待付款／賣股待收款；"
+                            + "這不是富邦官方定義的完整結算窗口或完整未交割帳。完全相同的 target 會略過，"
+                            + "僅在 target 缺少或金額不同時建立或更新" + RO,
                     "business-services（每日 08:00／13:45／19:30／22:00；"
                             + "POST /internal/brokers/fubon/settlement-sync，dryRun 預設 true；"
-                            + "SETTLEMENT_SCOPE_UNVERIFIED，無 writer／寫鎖）",
+                            + "僅接受真正 boolean accountBindingExplicit=true；"
+                            + "coverageStatus=SDK_RANGE_3D_RETURNED_ROWS 且 reason=null）",
                     "無 body／帳戶 selector；adapter 固定 query_settlement(selected, 3d)，需 internal token",
-                    "queryDate／observedAt／accountFingerprint／coverageStatus=UNVERIFIED／"
-                            + "reason=MISSING_SETTLEMENT_RANGE_CONTRACT／details；含 sourceQueryDate、settlementDate、TWD、"
-                            + "12 項 signed 整數字串與 AVAILABLE／NO_DATA_OBSERVED，無原帳號"),
+                    "queryDate／observedAt／accountFingerprint／accountBindingExplicit=true（JSON boolean）／"
+                            + "coverageStatus=SDK_RANGE_3D_RETURNED_ROWS／reason=null／details；含 sourceQueryDate、"
+                            + "settlementDate、TWD、12 項 signed 整數字串與 AVAILABLE／NO_DATA_OBSERVED，無原帳號"),
 
-            new FubonApiInfoDto(false, "帳戶／庫存查詢", "已實現損益明細查詢",
+            new FubonApiInfoDto(true, "帳戶／庫存查詢", "已實現損益明細查詢",
                     "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read",
-                    "唯讀解析已實現損益，逐筆身分、淨收款及取得成本來源待核實；目前不新增或覆寫損益，財務同步尚未完成" + RO,
+                    "唯讀將富邦回報的淨損益映射為調節成本基礎；這不是原始取得成本或完整 ledger（完整成交帳）。"
+                            + "已由手動等價（manual-equivalence）資料或 source-idempotency 保護表示的相同資料會略過，"
+                            + "僅在缺少對應 occurrence 時新增，絕不覆寫既有紀錄" + RO,
                     "business-services（每日 08:00／13:45／19:30／22:00；"
                             + "POST /internal/brokers/fubon/realized-gain-sync，dryRun 預設 true；"
-                            + "IDENTITY_UNVERIFIED，可變 FUBON_SYNC ledger 不能解除限制）",
+                            + "僅接受真正 boolean accountBindingExplicit=true；手動等價（manual-equivalence）與 source-idempotency 保護）",
                     "無 body／帳戶 selector；selected account 由 adapter 決定，需 internal token",
-                    "queryDate／observedAt／accountFingerprint／rows；每列 stockNo、buySell=Sell、orderType=Stock、"
-                            + "filledQty、filledPrice、realizedProfit、realizedLoss、sourceDate；零損益合法，無原帳號"),
+                    "queryDate／observedAt／accountFingerprint／accountBindingExplicit=true（JSON boolean）／rows；"
+                            + "每列 stockNo、buySell=Sell、orderType=Stock、filledQty、filledPrice、realizedProfit、"
+                            + "realizedLoss、sourceDate；零損益合法，無原帳號"),
 
             new FubonApiInfoDto(false, "帳戶／庫存查詢", "已實現損益彙總查詢",
                     "sdk.accounting.realized_gains_and_loses_summary", NO_HTTP,

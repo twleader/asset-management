@@ -24,6 +24,9 @@ public interface RealizedGainRepository extends JpaRepository<RealizedGain, Long
 
     List<RealizedGain> findAllByOrderByTradeDateDesc();
 
+    @Query("SELECT r FROM RealizedGain r WHERE r.ownerUserId = :ownerUserId ORDER BY r.id ASC")
+    List<RealizedGain> findAllForFubonSyncOwner(@Param("ownerUserId") Long ownerUserId);
+
     @Query("SELECT DISTINCT YEAR(r.tradeDate) FROM RealizedGain r ORDER BY YEAR(r.tradeDate) DESC")
     List<Integer> findDistinctYears();
 

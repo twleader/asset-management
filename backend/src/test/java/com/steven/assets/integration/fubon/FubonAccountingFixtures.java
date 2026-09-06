@@ -13,6 +13,7 @@ final class FubonAccountingFixtures {
     static final String FINGERPRINT = "0123456789abcdef01234567";
     static final String HEADER = "\"queryDate\":\"2026-08-28\",\"observedAt\":\"2026-08-28T00:00:01Z\","
             + "\"accountFingerprint\":\"" + FINGERPRINT + "\",";
+    static final String ACCOUNT_BOUND_HEADER = HEADER + "\"accountBindingExplicit\":true,";
     static final String SETTLEMENT_ROW = """
             {"status":"AVAILABLE","sourceQueryDate":"2026-08-28","settlementDate":"2026-09-01","currency":"TWD",
              "buyValue":"1000","buyFee":"2","buySettlement":"-1002","buyTax":"0",
@@ -34,9 +35,9 @@ final class FubonAccountingFixtures {
         return "{" + HEADER + "\"currency\":\"TWD\",\"balance\":\"" + amount + "\",\"availableBalance\":\"0\"}";
     }
     static String settlementJson(String rows) {
-        return "{" + HEADER + "\"coverageStatus\":\"UNVERIFIED\",\"reason\":\"MISSING_SETTLEMENT_RANGE_CONTRACT\",\"details\":[" + rows + "]}";
+        return "{" + ACCOUNT_BOUND_HEADER + "\"coverageStatus\":\"SDK_RANGE_3D_RETURNED_ROWS\",\"reason\":null,\"details\":[" + rows + "]}";
     }
-    static String realizedJson(String rows) { return "{" + HEADER + "\"rows\":[" + rows + "]}"; }
+    static String realizedJson(String rows) { return "{" + ACCOUNT_BOUND_HEADER + "\"rows\":[" + rows + "]}"; }
 
     static FubonDtos.BankBalance bank(String amount) {
         return new FubonDtos.BankBalance(DATE, NOW.minusSeconds(29), FINGERPRINT, "TWD",

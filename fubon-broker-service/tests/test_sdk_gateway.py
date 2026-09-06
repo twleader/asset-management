@@ -195,6 +195,13 @@ def test_no_selector_requires_exactly_one_stock_account(tmp_path):
     assert events[-2:] == ["logout", "shutdown"]
 
 
+def test_single_account_fallback_is_not_an_explicit_account_binding(tmp_path):
+    events = []
+    gateway = SdkGateway(ready_config(tmp_path), sdk_factory=lambda: FakeSdk(events), sleeper=lambda _seconds: None)
+    selected = gateway.selected_account()
+    assert selected.selector_explicit is False
+
+
 def test_selector_pair_selects_exact_raw_branch_and_account(tmp_path):
     events = []
     loader = ready_config(tmp_path, branch="002", account="00007654321")
@@ -206,6 +213,7 @@ def test_selector_pair_selects_exact_raw_branch_and_account(tmp_path):
     pair = gateway.read_accounting_pair()
     assert pair.account.branch_no == "002"
     assert pair.account.account_number == "00007654321"
+    assert pair.account.selector_explicit is True
 
 
 def test_realtime_init_failure_invalidates_and_cleans_partial_session(tmp_path):

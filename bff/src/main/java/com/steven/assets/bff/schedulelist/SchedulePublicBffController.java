@@ -143,10 +143,10 @@ public class SchedulePublicBffController {
                     "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 交割銀行帳戶餘額，覆寫最新快照裡台北富邦銀行證券戶存款金額與快照總額；零值照寫，同一交易提交",
                     "每日 08:00／09:30／14:00／22:00", "0 0 8 * * * / 0 30 9 * * * / 0 0 14 * * * / 0 0 22 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦應收付交割金額同步",
-                    "以隔離的富邦官方 Linux SDK 唯讀解析 3d（3 天區間）交割款觀察；完整來源範圍待核實，SETTLEMENT_SCOPE_UNVERIFIED，目前不寫買股待付款／賣股待收款，核實前不啟用財務同步",
+                    "以隔離的富邦官方 Linux SDK 唯讀投影 3d 回傳的 future、nonzero TWD transit 在途款為買股待付款／賣股待收款；非富邦官方完整結算窗口。僅接受真正 boolean accountBindingExplicit=true、SDK_RANGE_3D_RETURNED_ROWS 與 reason=null；相同 target 略過，僅缺少或不同時建立／更新",
                     "每日 08:00／13:45／19:30／22:00", "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦已實現損益同步",
-                    "以隔離的富邦官方 Linux SDK 唯讀解析已實現損益明細；逐筆身分與財務來源待核實，IDENTITY_UNVERIFIED，目前不新增、不覆寫既有紀錄，可變 ledger 不作可信來源",
+                    "以隔離的富邦官方 Linux SDK 唯讀將回報淨損益映射為調節成本基礎，非原始取得成本或完整 ledger（完整成交帳）；僅接受真正 boolean accountBindingExplicit=true。手動等價（manual-equivalence）與 source-idempotency 保護會略過相同資料，僅缺少對應 occurrence 時新增，絕不覆寫既有紀錄",
                     "每日 08:00／13:45／19:30／22:00", "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *", TPE),
 
             // ===== external-materials-service（37）=====

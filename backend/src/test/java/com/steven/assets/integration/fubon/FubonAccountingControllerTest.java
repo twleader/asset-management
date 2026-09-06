@@ -43,9 +43,11 @@ class FubonAccountingControllerTest {
                     dryRun ? FubonBankBalanceOutcome.DRY_RUN : FubonBankBalanceOutcome.SUCCESS, dryRun, "test-only",
                     dryRun ? null : new BigDecimal("0.00")));
             when(settlement.syncManual(dryRun)).thenReturn(new FubonSettlementSyncService.SyncResult(
-                    FubonSettlementOutcome.SETTLEMENT_SCOPE_UNVERIFIED, dryRun, "MISSING_SETTLEMENT_RANGE_CONTRACT", null, null));
+                    dryRun ? FubonSettlementOutcome.DRY_RUN : FubonSettlementOutcome.SUCCESS, dryRun, "test-only",
+                    new BigDecimal("-1002.00"), new BigDecimal("0.00"), 1));
             when(realized.syncManual(dryRun)).thenReturn(new FubonRealizedGainSyncService.RealizedGainSyncResult(
-                    FubonRealizedGainOutcome.IDENTITY_UNVERIFIED, dryRun, 1, 0, 0, 0, "IDENTITY_UNVERIFIED"));
+                    dryRun ? FubonRealizedGainOutcome.DRY_RUN : FubonRealizedGainOutcome.SUCCESS,
+                    dryRun, 1, dryRun ? 0 : 1, 0, 0, "test-only"));
         }
     }
 
@@ -141,13 +143,15 @@ class FubonAccountingControllerTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.updatedAmount").isString())
                 .andExpect(jsonPath("$.updatedAmount").value("0.00"));
     }
-    @Test void financialPreflightNeverPretendsMoneyWasCommitted() throws Exception {
+    @Test void accountingResultsExposeOnlySanitizedCommitStateAndCounts() throws Exception {
         mvc.perform(post(PREFIX + "settlement-sync").queryParam("dryRun", "false").header(FubonHttpClient.TOKEN_HEADER, "test-only-token"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("SETTLEMENT_SCOPE_UNVERIFIED"))
-                .andExpect(jsonPath("$.payableAmount").isEmpty()).andExpect(jsonPath("$.receivableAmount").isEmpty());
+                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("SUCCESS"))
+                .andExpect(jsonPath("$.payableAmount").value("-1002.00"))
+                .andExpect(jsonPath("$.receivableAmount").value("0.00"))
+                .andExpect(jsonPath("$.rowCount").value(1));
         mvc.perform(post(PREFIX + "realized-gain-sync").queryParam("dryRun", "false").header(FubonHttpClient.TOKEN_HEADER, "test-only-token"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("IDENTITY_UNVERIFIED"))
-                .andExpect(jsonPath("$.insertedCount").value(0)).andExpect(jsonPath("$.alreadyRepresentedCount").value(0))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.outcome").value("SUCCESS"))
+                .andExpect(jsonPath("$.insertedCount").value(1)).andExpect(jsonPath("$.alreadyRepresentedCount").value(0))
                 .andExpect(jsonPath("$.skippedExistingCount").doesNotExist());
     }
     private void assertInvalidDryRunValues(String endpoint) throws Exception {

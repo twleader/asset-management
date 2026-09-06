@@ -154,6 +154,7 @@ public final class FubonDtos {
             @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate queryDate,
             @JsonDeserialize(using = FubonAccountingJson.InstantDeserializer.class) Instant observedAt,
             String accountFingerprint,
+            @JsonDeserialize(using = FubonAccountingJson.StrictBooleanDeserializer.class) Boolean accountBindingExplicit,
             String coverageStatus,
             String reason,
             List<SettlementDay> details) {
@@ -176,6 +177,7 @@ public final class FubonDtos {
             @JsonDeserialize(using = FubonAccountingJson.LocalDateDeserializer.class) LocalDate queryDate,
             @JsonDeserialize(using = FubonAccountingJson.InstantDeserializer.class) Instant observedAt,
             String accountFingerprint,
+            @JsonDeserialize(using = FubonAccountingJson.StrictBooleanDeserializer.class) Boolean accountBindingExplicit,
             List<RealizedGainRow> rows) {
         public RealizedGainBatch { rows = rows == null ? null : List.copyOf(rows); }
     }
