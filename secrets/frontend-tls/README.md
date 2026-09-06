@@ -1,24 +1,26 @@
-# 前端 HTTPS 自簽憑證目錄
+# 前端 public TLS certificate source
 
-本目錄只提供部署時的檔名與掛載骨架，憑證與私鑰本身一律不進版本控制。
+這個目錄是 `asset-management.asuscomm.com` 的 **public-trusted** certificate source 骨架；
+`fullchain.pem` 與 `privkey.pem` 一律不進 Git。它不是 localhost self-signed certificate 的輸出位置。
 
-`frontend` 容器啟動時，若本目錄缺少 `fullchain.pem` / `privkey.pem`，會自動產生一組
-`localhost` / `127.0.0.1` 專用的預設自簽憑證寫回本目錄，確保 `docker compose up` 在
-未手動設定憑證的情況下也能正常啟動 HTTPS（僅供本機測試，瀏覽器會顯示不受信任警告）。
+部署時由 `FRONTEND_TLS_SECRETS_DIR_HOST` 指向含有下列檔案的**絕對** host path：
 
-若要讓其他裝置或網際網路能以固定 IP（或網域）連線並看到對應的憑證，請在 host 執行：
+- `fullchain.pem`：含 `DNS:asset-management.asuscomm.com` SAN、可由一般瀏覽器公開 trust 驗證的完整鏈。
+- `privkey.pem`：與上述 certificate 配對的私鑰，權限至少應為 `600`。
 
-```bash
-scripts/generate-self-signed-frontend-cert.sh <公網 IP 或網域>
-docker compose up -d --force-recreate frontend
+正式雙入口部署必須同時設定：
+
+```dotenv
+FRONTEND_TLS_SECRETS_DIR_HOST=/absolute/path/to/public-trusted-pair
+FRONTEND_LOCAL_TLS_SECRETS_DIR_HOST=/absolute/path/to/local-ca-signed-pair
+FRONTEND_PUBLIC_TLS_REQUIRED=true
 ```
 
-該腳本會覆蓋本目錄下的 `fullchain.pem` / `privkey.pem`（需已存在時加 `--force`）。
+Compose 會將兩個 source 以唯讀方式掛載；frontend entrypoint 只複製它們到容器 tmpfs，絕不回寫
+host source。`FRONTEND_PUBLIC_TLS_REQUIRED=true` 時，public/local 任一 pair 遺失或任一路徑不是絕對
+path，frontend 都會 fail closed，不能用 localhost fallback 代替 public certificate。
 
-- `fullchain.pem`：自簽憑證（公開，可讀）
-- `privkey.pem`：私鑰，權限應設為僅擁有者可讀寫（`chmod 600`）
-
-自簽憑證不是任何瀏覽器信任的憑證機構簽發，連線時會出現「不受信任」警告，需手動選擇
-「進階 → 繼續前往」，這是預期行為，不是設定錯誤。是否要把本機／裝置對外開放（路由器
-port forwarding、防火牆規則）屬於本系統之外的網路環境設定，需自行評估風險並操作；
-本專案不會、也不能代為變更路由器或防火牆設定。
+不要把 feature worktree 的 `./secrets/...` 當成 public source，也不要以瀏覽器「繼續前往」或關閉
+驗證來處理 public hostname 的 certificate error。若外網出現憑證錯誤，先依
+[`docs/operations/frontend-dual-sni-tls.md`](../../docs/operations/frontend-dual-sni-tls.md) 檢查 source、
+mount 與 SNI，再 targeted recreate frontend。
