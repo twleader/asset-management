@@ -404,3 +404,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.123.0-api-error-log.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.124.0-realized-gain-fubon-sync.sql
+      relativeToChangelogFile: false

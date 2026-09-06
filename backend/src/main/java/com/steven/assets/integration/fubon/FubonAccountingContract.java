@@ -10,7 +10,6 @@ import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Pure validation of normalized accounting observations. It never infers missing source evidence. */
 final class FubonAccountingContract {
     static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     private FubonAccountingContract() {}
@@ -27,8 +26,9 @@ final class FubonAccountingContract {
     static void validateSettlement(FubonDtos.SettlementBatch body, Clock clock) {
         require(body != null, "INVALID_SETTLEMENT");
         header(body.queryDate(), body.observedAt(), body.accountFingerprint(), clock);
-        require("UNVERIFIED".equals(body.coverageStatus())
-                && "MISSING_SETTLEMENT_RANGE_CONTRACT".equals(body.reason()), "SETTLEMENT_SCOPE_UNVERIFIED");
+        require(Boolean.TRUE.equals(body.accountBindingExplicit()), "ACCOUNT_BINDING_UNVERIFIED");
+        require("SDK_RANGE_3D_RETURNED_ROWS".equals(body.coverageStatus()) && body.reason() == null,
+                "INVALID_SETTLEMENT_COVERAGE");
         require(body.details() != null, "INVALID_SETTLEMENT");
         Set<String> sourcePairs = new HashSet<>();
         Set<LocalDate> settlementDays = new HashSet<>();
@@ -53,16 +53,16 @@ final class FubonAccountingContract {
             BigDecimal sell = row.sellSettlement().value();
             require(buy.signum() <= 0 && sell.signum() >= 0
                     && buy.add(sell).compareTo(row.totalSettlementAmount().value()) == 0, "INVALID_SETTLEMENT_AMOUNT");
-            require(!row.settlementDate().equals(body.queryDate()) || (buy.signum() == 0 && sell.signum() == 0),
-                    "AMBIGUOUS_SETTLEMENT");
+            require(row.settlementDate().isAfter(body.queryDate())
+                    || (buy.signum() == 0 && sell.signum() == 0), "AMBIGUOUS_SETTLEMENT");
         }
     }
 
     static void validateRealized(FubonDtos.RealizedGainBatch body, Clock clock) {
         require(body != null, "INVALID_REALIZED_GAIN");
         header(body.queryDate(), body.observedAt(), body.accountFingerprint(), clock);
+        require(Boolean.TRUE.equals(body.accountBindingExplicit()), "ACCOUNT_BINDING_UNVERIFIED");
         require(body.rows() != null, "INVALID_REALIZED_GAIN");
-        Set<String> candidates = new HashSet<>();
         for (FubonDtos.RealizedGainRow row : body.rows()) {
             require(row != null && row.stockNo() != null && row.stockNo().matches("[0-9A-Z]{2,10}")
                     && !"0000".equals(row.stockNo()) && "Sell".equals(row.buySell())
@@ -76,11 +76,46 @@ final class FubonAccountingContract {
             decimal(row.realizedLoss(), false, true);
             require(row.realizedProfit().value().signum() == 0 || row.realizedLoss().value().signum() == 0,
                     "ACCOUNTING_SEMANTICS_UNVERIFIED");
-            BigDecimal price = row.filledPrice().value().setScale(4, RoundingMode.HALF_UP);
-            require(price.signum() > 0 && price.precision() <= 15, "INVALID_REALIZED_PRICE");
-            String candidate = row.stockNo() + ":" + row.sourceDate() + ":" + row.filledQty() + ":" + price;
-            require(candidates.add(candidate), "AMBIGUOUS_IDENTITY");
+            salePrice(row.filledPrice().value());
         }
+    }
+
+    static BigDecimal salePrice(BigDecimal sourcePrice) {
+        require(sourcePrice != null && sourcePrice.signum() > 0, "INVALID_REALIZED_PRICE");
+        try {
+            BigDecimal value = sourcePrice.setScale(4, RoundingMode.UNNECESSARY);
+            require(value.precision() <= 15, "INVALID_REALIZED_PRICE");
+            return value;
+        } catch (ArithmeticException exception) {
+            throw new Rejected("INVALID_REALIZED_PRICE");
+        }
+    }
+
+    static PreparedRealized prepareRealized(FubonDtos.RealizedGainRow row) {
+        BigDecimal salePrice = salePrice(row.filledPrice().value());
+        BigDecimal proceeds = money(row.filledPrice().value().multiply(BigDecimal.valueOf(row.filledQty())));
+        BigDecimal reportedNetPnl = row.realizedProfit().value().subtract(row.realizedLoss().value());
+        BigDecimal investmentCost = money(proceeds.subtract(reportedNetPnl));
+        require(investmentCost.signum() >= 0, "INVALID_REALIZED_COST");
+        return new PreparedRealized(row, salePrice, proceeds, investmentCost);
+    }
+
+    static SettlementProjection settlementProjection(FubonDtos.SettlementBatch body) {
+        validateSettlementShapeOnly(body);
+        BigDecimal payable = BigDecimal.ZERO;
+        BigDecimal receivable = BigDecimal.ZERO;
+        int futureRows = 0;
+        for (FubonDtos.SettlementDay row : body.details()) {
+            if (!"AVAILABLE".equals(row.status()) || !row.settlementDate().isAfter(body.queryDate())) continue;
+            futureRows++;
+            payable = payable.add(row.buySettlement().value());
+            receivable = receivable.add(row.sellSettlement().value());
+        }
+        return new SettlementProjection(money(payable), money(receivable), futureRows);
+    }
+
+    private static void validateSettlementShapeOnly(FubonDtos.SettlementBatch body) {
+        require(body != null && body.details() != null, "INVALID_SETTLEMENT");
     }
 
     static void fresh(LocalDate queryDate, Instant observedAt, Clock clock) {
@@ -96,6 +131,11 @@ final class FubonAccountingContract {
         require(rounded.precision() <= 20, "MONEY_OVERFLOW");
         return rounded;
     }
+
+    record SettlementProjection(BigDecimal payableAmount, BigDecimal receivableAmount, int futureRowCount) {}
+
+    record PreparedRealized(FubonDtos.RealizedGainRow source, BigDecimal salePrice,
+                            BigDecimal proceeds, BigDecimal investmentCost) {}
 
     private static void header(LocalDate queryDate, Instant observedAt, String fingerprint, Clock clock) {
         require(queryDate != null && observedAt != null && fingerprint != null

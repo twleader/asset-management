@@ -392,8 +392,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 410 | 快照表單新增與更新改走專屬 BFF，修復登入後存檔 403（Requirement 136） | [tasks/t410_snapshot_form_save_bff.md](tasks/t410_snapshot_form_save_bff.md) |
 | 390 | 富邦 ETF 成分股持股明細——欄位解析、讀取端切換、清理舊爬蟲：取代既有 MoneyDJ 台股來源（Requirement 123） | [tasks/t390_fubon_etf_holdings_cutover.md](tasks/t390_fubon_etf_holdings_cutover.md) |
 | 393 | 交割銀行餘額查詢排程：每日 08:00／09:30／14:00／22:00 唯讀查詢，覆寫最新快照裡台北富邦銀行證券戶存款金額（Requirement 128） | [tasks/t393_fubon_bank_balance_sync.md](tasks/t393_fubon_bank_balance_sync.md) |
-| 394 | 應收付交割金額查詢排程：每日 08:00／13:45／19:30／22:00 唯讀查詢交割款，目標為核實完整未來在途後更新TRANSIT_TWD快照；目前來源coverage待核實、僅放行安全預檢，財務同步未完成（Requirement 129） | [tasks/t394_fubon_settlement_sync.md](tasks/t394_fubon_settlement_sync.md) |
-| 395 | 已實現損益明細查詢排程：每日 08:00／13:45／19:30／22:00 唯讀查詢，目標為可信成交身分／淨額成本後以既有DB鎖新增；目前缺來源聯結/逐筆收款成本，僅放行安全預檢、財務同步未完成（Requirement 130） | [tasks/t395_fubon_realized_gain_sync.md](tasks/t395_fubon_realized_gain_sync.md) |
+| 394 | 應收付交割金額查詢排程：每日 08:00／13:45／19:30／22:00 讀取 SDK `3d` 回傳列，僅以 future nonzero rows 冪等更新 `TRANSIT_TWD` 買股待付款／賣股待收款；不宣稱完整交割帳（Requirement 129） | [tasks/t394_fubon_settlement_sync.md](tasks/t394_fubon_settlement_sync.md) |
+| 395 | 已實現損益明細查詢排程：每日 08:00／13:45／19:30／22:00 唯讀查詢，將 Stock/Sell 的富邦淨損益以調節成本基礎冪等新增 `realized_gain`；同資料不寫入（Requirement 130） | [tasks/t395_fubon_realized_gain_sync.md](tasks/t395_fubon_realized_gain_sync.md) |
 | 396 | 除權息資料查詢排程：交易日 09:00／13:30 唯讀查詢富邦股利政策，併入既有兩段式除權息證據體系（provider 最低優先層），減資不在本次範圍（Requirement 131） | [tasks/t396_fubon_dividend_evidence_sync.md](tasks/t396_fubon_dividend_evidence_sync.md) |
 | 397 | 個股即時推播：訂閱交易雷達股票池，可信實際成交經既有writer/Lua原子更新完整Redis quote，不觸碰 Requirement 114 canonical revision 機制（Requirement 132） | [tasks/t397_fubon_stock_push_price.md](tasks/t397_fubon_stock_push_price.md) |
 | 398 | 個股技術指標查詢排程（KD／MACD／布林通道）：交易日收盤後查詢交易雷達股票，寫既有Redis獨立來源快取並提供內部讀回；不新增SQL表或欄位（Requirement 133） | [tasks/t398_fubon_technical_indicator_sync.md](tasks/t398_fubon_technical_indicator_sync.md) |

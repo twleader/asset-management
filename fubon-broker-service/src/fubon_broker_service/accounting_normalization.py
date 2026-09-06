@@ -33,6 +33,26 @@ def verify_identity(source: object, account: SelectedAccount) -> None:
         raise ValueError("RECONCILE_FAILED")
 
 
+def verify_optional_identity(source: object, account: SelectedAccount) -> None:
+    branch, number = raw_field(source, "branch_no"), raw_field(source, "account")
+    if branch is None and number is None:
+        return
+    verify_identity(source, account)
+
+
+def account_binding_explicit(read: AccountingRead) -> bool:
+    account = read.account
+    if not isinstance(account, SelectedAccount) or account.selector_explicit is not True:
+        return False
+    raw_branch, raw_number = raw_field(account.raw, "branch_no"), raw_field(account.raw, "account")
+    return (
+        isinstance(raw_branch, str)
+        and isinstance(raw_number, str)
+        and raw_branch == account.branch_no
+        and raw_number == account.account_number
+    )
+
+
 def fingerprint(read: AccountingRead) -> str:
     return hmac.new(
         read.internal_token.encode("utf-8"),

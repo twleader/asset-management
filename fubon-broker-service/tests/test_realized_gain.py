@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -17,7 +18,9 @@ def test_official_result_exports_only_verified_fields_and_source_date():
     body=service([realized_row()]).read()
     assert body["rows"]==[{"stockNo":"2330","buySell":"Sell","orderType":"Stock","filledQty":1000,"filledPrice":"123.5","realizedProfit":"0","realizedLoss":"20","sourceDate":"2026-08-27"}]
     assert body["queryDate"]=="2026-08-28" and len(body["accountFingerprint"])==24
+    assert body["accountBindingExplicit"] is True
     assert SELECTED.account_number not in json.dumps(body)
+    assert SELECTED.branch_no not in json.dumps(body)
     assert not {"tradeDate","filledNo","proceeds","investmentCost"}.intersection(body["rows"][0])
 
 
@@ -67,6 +70,21 @@ def test_qty_inclusive_edges(qty):
 def test_empty_rows_never_suggest_delete_or_a_financial_mapping():
     body=service([]).read()
     assert body["rows"]==[] and "proceeds" not in body
+
+
+def test_binding_is_a_real_false_boolean_without_a_configured_selector_pair():
+    selected = replace(SELECTED, selector_explicit=False)
+    body = RealizedGainService(AccountingGateway([], selected=selected), now=lambda: NOW).read()
+    assert body["accountBindingExplicit"] is False
+    assert type(body["accountBindingExplicit"]) is bool
+
+
+def test_binding_is_false_when_selected_raw_identity_no_longer_matches_capture():
+    selected = replace(SELECTED, raw={"branch_no": "002", "account": SELECTED.account_number})
+    body = RealizedGainService(
+        AccountingGateway([realized_row()], selected=selected), now=lambda: NOW
+    ).read()
+    assert body["accountBindingExplicit"] is False
 
 
 @pytest.mark.parametrize("rows,envelope,success", [([],False,True),(None,True,True),({},True,True),([],True,False)])

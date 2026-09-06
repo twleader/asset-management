@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date, datetime
 
-from .accounting_normalization import checked_result, observation, verify_identity
+from .accounting_normalization import account_binding_explicit, checked_result, observation, verify_identity
 from .normalization import TAIPEI, instant, signed_integer, stock_code, strict_vendor_date, utc_now
 from .numeric import MAX_SHARES, canonical_decimal, exact_integer
 from .sdk_gateway import SdkGateway, SelectedAccount, enum_text, raw_field
@@ -30,7 +30,11 @@ class RealizedGainService:
                 raise ValueError("RECONCILE_FAILED")
             query_date = instant(started).astimezone(TAIPEI).date()
             normalized = [self._normalize(row, read.account, query_date) for row in rows]
-            return {**observation(read, started, self._now()), "rows": normalized}
+            return {
+                **observation(read, started, self._now()),
+                "accountBindingExplicit": account_binding_explicit(read),
+                "rows": normalized,
+            }
         except ValueError as exc:
             reason = str(exc) if str(exc) in {"STALE_QUERY", "ACCOUNTING_SEMANTICS_UNVERIFIED"} else "RECONCILE_FAILED"
             raise RealizedGainError(reason) from None

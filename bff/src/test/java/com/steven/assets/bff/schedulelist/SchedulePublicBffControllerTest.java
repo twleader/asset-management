@@ -89,7 +89,7 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("富邦應收付交割金額同步精確登錄四個固定時段、時區與唯讀語意（Requirement 129／Task 394）")
+    @DisplayName("富邦應收付交割金額同步精確登錄四個固定時段、時區與嚴格在途投影語意（Requirement 129／Task 394）")
     void 富邦應收付交割金額同步排程契約() {
         assertThat(jobs()).filteredOn(j -> "富邦應收付交割金額同步".equals(j.name()))
                 .singleElement()
@@ -99,12 +99,15 @@ class SchedulePublicBffControllerTest {
                     assertThat(job.cron()).isEqualTo(
                             "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
-                    assertThat(job.description()).contains("唯讀", "3 天區間", "買股待付款／賣股待收款", "來源範圍待核實", "目前不寫");
+                    assertThat(job.description()).contains("唯讀", "3d", "future、nonzero TWD transit", "買股待付款／賣股待收款",
+                                    "非富邦官方完整結算窗口", "accountBindingExplicit=true", "SDK_RANGE_3D_RETURNED_ROWS", "reason=null",
+                                    "相同 target", "缺少或不同時建立／更新")
+                            .doesNotContain("啟用");
                 });
     }
 
     @Test
-    @DisplayName("富邦已實現損益同步精確登錄四個固定時段、時區與唯讀語意（Requirement 130／Task 395）")
+    @DisplayName("富邦已實現損益同步精確登錄四個固定時段、時區與調節成本／冪等語意（Requirement 130／Task 395）")
     void 富邦已實現損益同步排程契約() {
         assertThat(jobs()).filteredOn(j -> "富邦已實現損益同步".equals(j.name()))
                 .singleElement()
@@ -114,8 +117,10 @@ class SchedulePublicBffControllerTest {
                     assertThat(job.cron()).isEqualTo(
                             "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
-                    assertThat(job.description()).contains("唯讀", "財務來源待核實", "目前不新增", "不覆寫既有紀錄")
-                            .doesNotContain("自然鍵冪等");
+                    assertThat(job.description()).contains("唯讀", "調節成本基礎", "非原始取得成本或完整 ledger",
+                                    "accountBindingExplicit=true", "手動等價", "manual-equivalence", "source-idempotency", "略過相同資料",
+                                    "缺少對應 occurrence 時新增", "絕不覆寫既有紀錄")
+                            .doesNotContain("啟用");
                 });
     }
 

@@ -46,7 +46,7 @@ public class BankDeposit {
     private BigDecimal originalAmount;
 
     /** 原始幣別 (TWD / USD) */
-    @Column(length = 3)
+    @Column(length = 20)
     @Builder.Default
     private String currency = "TWD";
 

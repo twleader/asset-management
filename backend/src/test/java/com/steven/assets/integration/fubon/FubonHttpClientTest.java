@@ -97,7 +97,7 @@ class FubonHttpClientTest {
                 FubonAccountingFixtures.settlementJson(FubonAccountingFixtures.SETTLEMENT_ROW)));
         var result = client(FubonConfigState.State.READY, "shared-token").readSettlement();
         assertThat(result.success()).isTrue();
-        assertThat(result.body().coverageStatus()).isEqualTo("UNVERIFIED");
+        assertThat(result.body().coverageStatus()).isEqualTo("SDK_RANGE_3D_RETURNED_ROWS");
         assertThat(result.body().details()).hasSize(1);
         assertThat(result.body().details().getFirst().buySettlement().value()).isEqualByComparingTo("-1002");
         assertThat(result.body().details().getFirst().sellSettlement().value()).isZero();

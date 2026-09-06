@@ -46,12 +46,14 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.trail_profit"
     );
 
-    /** 已串接 19 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    /** 已串接 21 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
     private static final Set<String> CONNECTED_PAIRS = Set.of(
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
             "sdk.accounting.inventories|POST /internal/portfolio/read",
             "sdk.accounting.unrealized_gains_and_loses|POST /internal/portfolio/read",
+            "sdk.accounting.query_settlement|POST /internal/settlement/read",
+            "sdk.accounting.realized_gains_and_loses|POST /internal/realized-gains/read",
             "sdk.stock.filled_history|POST /internal/trades/read",
             "marketdata.rest_client.stock.intraday.quote|POST /internal/market-data/tw-quotes",
             "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
@@ -81,10 +83,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=true 恰為 19 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    @DisplayName("connected=true 恰為 21 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
     void 已串接筆數與組合正確() {
         List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
-        assertThat(connected).hasSize(19);
+        assertThat(connected).hasSize(21);
 
         Set<String> actual = connected.stream()
                 .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
@@ -93,20 +95,34 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=false 恰為 33 筆，兩項未核實財務僅標實際預檢入口")
-    void 未串接筆數與預檢入口明確() {
+    @DisplayName("connected=false 恰為 31 筆，交割與已實現損益均為已串接的嚴格來源投影")
+    void 未串接筆數與已串接財務投影明確() {
         List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
-        assertThat(notConnected).hasSize(33);
-        Map<String, String> preflights = Map.of(
+        assertThat(notConnected).hasSize(31);
+        Map<String, String> connectedAccounting = Map.of(
                 "sdk.accounting.query_settlement", "POST /internal/settlement/read",
                 "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read");
         assertThat(notConnected).allSatisfy(a -> {
-            assertThat(a.httpEndpoint()).isEqualTo(preflights.getOrDefault(a.sdkReference(), ""));
-            if (preflights.containsKey(a.sdkReference())) {
-                assertThat(a.description()).contains("來源", "待核實", "財務同步尚未完成");
-                assertThat(a.consumer()).contains("UNVERIFIED", "dryRun 預設 true");
-            }
+            assertThat(a.httpEndpoint()).isEqualTo("");
         });
+        assertThat(apis()).filteredOn(a -> connectedAccounting.containsKey(a.sdkReference()))
+                .allSatisfy(a -> assertThat(a.connected()).isTrue());
+        assertThat(apis()).filteredOn(a -> "sdk.accounting.query_settlement".equals(a.sdkReference()))
+                .singleElement().satisfies(a -> {
+                    assertThat(a.httpEndpoint()).isEqualTo(connectedAccounting.get(a.sdkReference()));
+                    assertThat(a.description()).contains("future", "nonzero", "TWD transit", "完整結算窗口", "相同", "缺少", "不同");
+                    assertThat(a.consumer()).contains("accountBindingExplicit=true", "SDK_RANGE_3D_RETURNED_ROWS", "reason=null")
+                            .doesNotContain("需另啟用設定");
+                    assertThat(a.responseSummary()).contains("JSON boolean", "SDK_RANGE_3D_RETURNED_ROWS", "reason=null");
+                });
+        assertThat(apis()).filteredOn(a -> "sdk.accounting.realized_gains_and_loses".equals(a.sdkReference()))
+                .singleElement().satisfies(a -> {
+                    assertThat(a.httpEndpoint()).isEqualTo(connectedAccounting.get(a.sdkReference()));
+                    assertThat(a.description()).contains("調節成本基礎", "不是原始取得成本", "完整 ledger", "略過", "缺少");
+                    assertThat(a.consumer()).contains("accountBindingExplicit=true", "手動等價", "manual-equivalence", "source-idempotency")
+                            .doesNotContain("需另啟用設定");
+                    assertThat(a.responseSummary()).contains("JSON boolean");
+                });
     }
 
     @Test

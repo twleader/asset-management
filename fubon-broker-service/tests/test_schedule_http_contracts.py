@@ -94,7 +94,8 @@ class RouteSdk(MarketSdk):
 
 
 def app_fixture(tmp_path, *, state="READY"):
-    loader = ready_config(tmp_path) if state == "READY" else ConfigLoader(tmp_path, lambda: "false" if state == "DISABLED" else "true")
+    loader = (ready_config(tmp_path, branch="001", account="00001234567") if state == "READY"
+              else ConfigLoader(tmp_path, lambda: "false" if state == "DISABLED" else "true"))
     sdk = RouteSdk()
     gateway = SdkGateway(loader, sdk_factory=lambda: sdk, sleeper=lambda _delay: None)
     app = create_app(loader, gateway, quote_service=QuoteService(gateway, now=fixed_now),
@@ -191,9 +192,12 @@ def test_official_accounting_result_to_http_keeps_zero_hmac_nulls_and_true_vendo
     detail = settlement.json()["details"][0]
     assert detail["status"] == "NO_DATA_OBSERVED" and detail["sourceQueryDate"] == "2026-08-28"
     assert detail["settlementDate"] is None and all(detail[field] is None for field in AMOUNT_FIELDS.values())
-    assert settlement.json()["coverageStatus"] == "UNVERIFIED"
+    assert settlement.json()["accountBindingExplicit"] is True
+    assert settlement.json()["coverageStatus"] == "SDK_RANGE_3D_RETURNED_ROWS"
+    assert settlement.json()["reason"] is None
     assert realized.json()["rows"][0]["orderType"] == "Stock"
     assert realized.json()["rows"][0]["sourceDate"] == "2026-08-27"
+    assert realized.json()["accountBindingExplicit"] is True
     assert "cost" not in str(realized.json()) and "filledNo" not in str(realized.json())
     assert trades.json()["trades"][0]["filledDate"] == "2026-08-21"
     assert ("filled_history", "20260821", "20260821") in sdk.events

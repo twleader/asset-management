@@ -1866,6 +1866,10 @@ CREATE TABLE public.realized_gain (
     currency character varying(10),
     exchange_rate numeric(10,4),
     owner_user_id bigint NOT NULL,
+    sync_source character varying(32),
+    sync_fingerprint character(64),
+    sync_occurrence integer,
+    CONSTRAINT ck_realized_gain_sync_provenance CHECK ((((sync_source IS NULL) AND (sync_fingerprint IS NULL) AND (sync_occurrence IS NULL)) OR (((sync_source)::text = 'FUBON_REALIZED_GAIN_SYNC'::text) AND (sync_fingerprint IS NOT NULL) AND (sync_fingerprint ~ '^[0-9a-f]{64}$'::text) AND (sync_occurrence IS NOT NULL) AND (sync_occurrence >= 1)))),
     CONSTRAINT realized_gain_market_check CHECK (((market)::text = ANY (ARRAY[('台股'::character varying)::text, ('美股'::character varying)::text])))
 );
 
@@ -5005,6 +5009,13 @@ CREATE UNIQUE INDEX uk_dividend_event ON public.stock_dividend_history USING btr
 --
 
 CREATE UNIQUE INDEX uk_news_headline_dedupe ON public.news_headline USING btree (dedupe_key);
+
+
+--
+-- Name: uq_realized_gain_fubon_sync_occurrence; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_realized_gain_fubon_sync_occurrence ON public.realized_gain USING btree (owner_user_id, sync_source, sync_fingerprint, sync_occurrence) WHERE (sync_source IS NOT NULL);
 
 
 --

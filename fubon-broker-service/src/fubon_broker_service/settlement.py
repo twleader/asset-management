@@ -3,7 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date, datetime
 
-from .accounting_normalization import checked_result, observation, verify_identity
+from .accounting_normalization import (
+    account_binding_explicit,
+    checked_result,
+    observation,
+    verify_identity,
+    verify_optional_identity,
+)
 from .normalization import TAIPEI, instant, require_fields, signed_integer, strict_vendor_date, utc_now
 from .sdk_gateway import SdkGateway, raw_field
 
@@ -39,7 +45,10 @@ class SettlementService:
             if not isinstance(rows, list):
                 raise ValueError("RECONCILE_FAILED")
             query_date = instant(started).astimezone(TAIPEI).date()
-            normalized = [self._normalize(row, query_date) for row in rows]
+            normalized = []
+            for row in rows:
+                verify_optional_identity(row, read.account)
+                normalized.append(self._normalize(row, query_date))
             seen: set[tuple[str, str | None]] = set()
             settlement_days: set[str] = set()
             for row in normalized:
@@ -50,8 +59,13 @@ class SettlementService:
                 seen.add(key)
                 if day is not None:
                     settlement_days.add(day)
-            return {**observation(read, started, self._now()), "coverageStatus": "UNVERIFIED",
-                    "reason": "MISSING_SETTLEMENT_RANGE_CONTRACT", "details": normalized}
+            return {
+                **observation(read, started, self._now()),
+                "accountBindingExplicit": account_binding_explicit(read),
+                "coverageStatus": "SDK_RANGE_3D_RETURNED_ROWS",
+                "reason": None,
+                "details": normalized,
+            }
         except ValueError as exc:
             reason = str(exc) if str(exc) in {"STALE_QUERY", "AMBIGUOUS_SETTLEMENT"} else "RECONCILE_FAILED"
             raise SettlementError(reason) from None
@@ -76,7 +90,7 @@ class SettlementService:
         buy, sell = int(amounts["buySettlement"]), int(amounts["sellSettlement"])
         if buy > 0 or sell < 0 or buy + sell != int(amounts["totalSettlementAmount"]):
             raise ValueError("RECONCILE_FAILED")
-        if settlement_date == query_date and (buy != 0 or sell != 0):
+        if settlement_date <= query_date and (buy != 0 or sell != 0):
             raise ValueError("AMBIGUOUS_SETTLEMENT")
         return {"status": "AVAILABLE", "sourceQueryDate": source_date.isoformat(),
                 "settlementDate": settlement_date.isoformat(), "currency": "TWD", **amounts}

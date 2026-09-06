@@ -72,14 +72,13 @@ backend/
     │   ├── service/                           # 領域邏輯
     │   │   ├── marketdata/                    # InternalMarketDataPort；只宣告既有六種 internal 能力
     │   │   ├── fubon/                         # secretless readiness／calendar／name／write／lock ports；owner policy
-    │   │   │   └── reports/                   # Task406規劃：來源報表讀寫編排／typed DTO與窄read/write ports
     │   │   └── export/                        # 匯出中介模型 ExportDoc ＋ 兩個 renderer ＋ 雙檔落地（Req 55）
     │   ├── integration/marketdata/            # 外層 internal WebClient adapter（不連 vendor）
     │   ├── integration/fubon/                 # 原broker HTTP／config；owner-directory與report持久化adapter
     │   ├── repository/                        # Spring Data JPA repo
     │   ├── model/                             # JPA Entity + Embedded ID；中立值與 entity 分離
     │   │   ├── marketdata/                    # MarketDataResults／ETF 純分類；不依 HTTP／concrete service
-    │   │   └── fubon/                         # Task406規劃：report header＋兩種typed row Entity，非原財務帳
+    │   │   └── fubon/                         # 保留既有 Fubon 領域 entity；Task406 延後，不建立 report entity
     │   └── dto/                               # Java records（request/response）
     └── resources/
         ├── application.yml
@@ -104,13 +103,11 @@ Fubon core只依secretless readiness、單一known-calendar與真正使用的loc
 
 ETF snapshot的單方法write port由原REQUIRES_NEW writer實作，回傳前已commit；庫存／銀行的單方法snapshot-lock port由原MANDATORY row-lock adapter實作，第一個DB operation與其他CRUD鎖序不變。所有新port回中立值或原真正domain entity，不回HTTPclient/private nested DTO；不替純業務流程或counter增空介面。
 
-### Tasks405／406：私人來源報表的邊界（規劃新增）
+### Task405：Task394／395 私人同步的 owner 與寫入邊界
 
-FubonSyncOwnerPolicy只依小型config/directory ports，固定專用設定的既存ACTIVE ADMIN且與configured admin相同才可寫；禁止hardcode私人email、fallback選人或建立user。writer依target snapshot→fresh owner或owner→report/header的明定鎖序，使用fresh不可變projection，不能從OSIV舊AppUser取得授權。只有部署FUBON_SYNC_OWNER_EMAIL可以精確新增，原flags/秘密不改。行情／ETF／股利不套此個人policy。
+FubonSyncOwnerPolicy 只依小型 config/directory ports，固定專用設定的既存 ACTIVE ADMIN 且與 configured admin 相同才可寫；禁止 hardcode 私人 email、fallback 選人或建立 user。settlement writer 依 target snapshot→fresh owner，realized-gain writer 依 owner→realized table lock；均使用 fresh projection，不能從 OSIV 舊 AppUser 取得授權。只有部署 FUBON_SYNC_OWNER_EMAIL 可以精確新增，原 flags／秘密不改。行情／ETF／股利不套此個人 policy。
 
-business是唯一來源報表writer與reader。Task406規劃三表 fubon_accounting_report／fubon_settlement_report_row／fubon_realized_report_row，每owner/kind只保存最新成功的typed observation，沒有raw JSON／token／account／email／fingerprint、沒有財務ledger副本。日期LocalDate、觀測Instant（同accounting capture臨界區固定的無損微秒，鎖外normalization不得重取時間）、金額價格BigDecimal；JSON decimal才是canonical plain string。獨立REQUIRES_NEW writer整批替換，readOnly REQUIRES_NEW REPEATABLE_READ reader在同一MVCC snapshot組DTO；所有SQL顯式owner、名稱僅bulk local-only、不vendor查字。
-
-新business GET /api/brokers/fubon/accounting-reports只讓dedicated ACTIVE owner本人讀，不要求Fubon啟用或ADMIN_EMAIL仍同人，其他ADMIN不可讀。不寫原snapshot/deposit/holding/transaction/realized_gain，不提供一般報表CRUD或自動入帳。這三表目前是待實作規劃，migration完成後才由92變95，不把原394/395入帳目標標完成。
+Task394 寫既有 latest snapshot 的唯一 transit target，資料相同零 mutation；Task395 寫既有 `realized_gain`，以 sync source/fingerprint/occurrence 與 partial unique index 保留重複數量並防止重跑。兩者都不寫 raw JSON、token、account 或 email，不呼叫 vendor 作名稱補全。Task406 的私人來源報表、其三張表與 GET/UI 都已延後；不能以來源報表取代或撤回 Task394／395 的本機投影。
 
 ### 2.3 命名慣例
 
@@ -176,8 +173,7 @@ bff/src/main/java/com/steven/assets/bff/
 ├── gdptwse/                      # → GdpTwseView
 ├── fund/                         # → FundSettingsView
 ├── marketdata/                   # /api/bff/market-data/* passthrough + SSE
-├── fubonapi/                     # FubonApiInfoService 常數目錄/純篩選，controller 只委派
-├── fubonaccountingreports/       # Task406規劃：本人報表頁service／guard／internal client／DTO
+├── fubonapi/                     # FubonApiInfoBffController 的 APIS 靜態目錄；Task403 service/篩選重構尚未實作
 ├── settings/                     # 共用 settings utility
 ├── banksettings/                 # → BankSettingsView（純 passthrough）
 ├── brokersettings/               # → BrokerSettingsView
@@ -188,9 +184,9 @@ bff/src/main/java/com/steven/assets/bff/
 └── backup/                       # 備份相關共用
 ```
 
-富邦API目錄沿既有authenticated GET /api/bff/fubon-api，service接受connected/category/keyword可選篩選、回相同DTO array與順序，無參數52列；Vue只render並取消過期請求，不自行filter。httpEndpoint有值即可顯示，安全預檢與完整串接不同；沒有broker試打按鈕。BFF完整book必與raw quote同stockCode/market；唯一FubonBridgeQuote typed tradingDate為LocalDate，raw19欄仍維持原ISO String/JSON。
+富邦 API 目錄沿既有 authenticated `GET /api/bff/fubon-api`，現有 `FubonApiInfoBffController` 只回 private static `APIS` 的 52 列原順序；Task403 的 service／後端 `connected/category/keyword` 篩選尚未實作。現有 Vue 暫行以本地 computed filter 篩選並取消過期請求。httpEndpoint 有值即可顯示，安全預檢與完整串接不同；沒有 broker 試打按鈕。BFF 完整 book 必與 raw quote 同 stockCode/market；唯一 FubonBridgeQuote typed tradingDate 為 LocalDate，raw19欄仍維持原 ISO String/JSON。
 
-Task406的 /fubon-accounting-reports 是獨立私人頁，導覽放既有資產／交易群組尾端，保留所有舊route/icon；GET /api/bff/fubon-accounting-reports只委派本頁service，再透過有界10秒/16MiB internal adapter讀business。service先比對可信OIDC principal actual id與Reactor effective tenant id，不相等或缺失即403／零business report request；不修改global TenantIdentity或其他頁代看，不讓另一ADMIN藉代看讀取。DTO只有來源報表，沒有owner/email/account，frontend只render且取消舊請求，無同步／編輯／匯出操作。fubonapi目錄不能依賴這個client或讀任何私人報表；兩份報表完整驗收後才把靜態盤點從52/15/37改為52/17/35並標明不自動入帳。
+Task406 的私人來源報表頁已延後；現有 BFF 不建立該 route、client、DTO 或導航，也不以它影響 Fubon API 靜態目錄。目錄在本次驗收後為52/21/31。
 
 ### 3.2 BFF 設計鐵則
 
@@ -451,7 +447,7 @@ Task401的新增中立檔名可採等價內層命名，但依賴方向與責任�
 - 每個query有同一deadline/cancel，最多4個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。Task408 技術路徑為 `BATCH_SIZE=3`、two workers、symbol dispatch≥3.1 秒；90 秒僅新 job admission，已 admitted job 不因之取消；每 symbol 在 SDK start 前必保留 technical 70 秒＋ticker/candles 各8秒的86秒 deadline，Python aggregate 60秒／Java technical transport70秒，所有19個 technical/ticker/candle SDK start（含 re-login 重送）共用真正 rolling-60s ≤38 gate，外層 history 60/min仍維持。
 - indices與stock各run有不可復活cancel及自己的connection/worker/subscription。晚connect不得subscribe，舊callback/finally不影響新run；ASGI不等同步symbol驗證，connect5秒/cleanup2秒有界，native未結束持續計容量。
 - Compose維持linux/amd64、無host port、asset-net、non-root/read-only/tmpfs/drop capabilities。SDK安裝媒介／secret不入Git/build context；hash驗證後runtime package可在image。只有Python可掛SDKsecret，Java只掛shared token目錄。
-- business-services擁有帳務owner/transaction；external-materials擁有market DB/Redis唯一writer。Task405使五種accounting normalized batch都有strict boolean accountBindingExplicit，同批selector/selected/raw一致才true；缺欄或false只能純讀、不得寫個人資料，raw仍不跨Python。Task406將合法交割/損益保存成本人來源報表，Python不持久化；原394/395在途款／realized_gain入帳仍未完成，不因報表保存解除其no-write。
+- business-services擁有帳務 owner/transaction；external-materials 擁有 market DB/Redis 唯一 writer。Task405 使 settlement 與 realized-gains normalized batch 都有 strict boolean `accountBindingExplicit`，同批 selector/selected/raw 一致才 true；缺欄或 false 只能純讀、不得寫個人資料，raw 仍不跨 Python。Task394／395 的本機投影均已規格化為可驗收目標；Task406 來源報表延後且不影響兩者。
 
 ### 4.6 Yuanta Broker Service `yuanta-broker-service/`（scaffold，尚待官方帳號啟用）
 

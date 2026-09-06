@@ -77,6 +77,15 @@ public class RealizedGain {
     @Column(precision = 10, scale = 4)
     private BigDecimal exchangeRate;
 
+    @Column(name = "sync_source", length = 32)
+    private String syncSource;
+
+    @Column(name = "sync_fingerprint", length = 64)
+    private String syncFingerprint;
+
+    @Column(name = "sync_occurrence")
+    private Integer syncOccurrence;
+
     /** 年度，由 tradeDate 即時衍生 */
     @Transient
     public Integer getYear() {

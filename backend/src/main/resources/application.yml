@@ -92,6 +92,7 @@ fubon:
   base-url: ${FUBON_BASE_URL:http://fubon-broker-service:8080}
   shared-secret-dir: /run/secrets/fubon/shared
   timeout: 30s
+  sync-owner-email: ${FUBON_SYNC_OWNER_EMAIL:}
 
 # 今日股市分析（Requirement 31）：Claude Opus 4.8 + 本地新聞（news_headline）。
 # （Task 179 起已移除 web_search server tool，新聞固定讀本地 news_headline。）

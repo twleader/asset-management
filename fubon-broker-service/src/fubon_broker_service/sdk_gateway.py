@@ -36,9 +36,10 @@ class SdkCallError(RuntimeError):
 
 @dataclass(frozen=True)
 class SelectedAccount:
-    raw: object
-    branch_no: str
-    account_number: str
+    raw: object = field(repr=False)
+    branch_no: str = field(repr=False)
+    account_number: str = field(repr=False)
+    selector_explicit: bool = False
 
 
 @dataclass(frozen=True)
@@ -722,7 +723,12 @@ class SdkGateway:
                 raise SdkCallError("INVALID_STOCK_ACCOUNT", misconfigured=True)
             stock_accounts.append(SelectedAccount(account, branch, number))
 
-        if config.account_branch_no is not None and config.account_number is not None:
+        if config.presence.account_selector_pair:
+            if not all(
+                isinstance(value, str) and value
+                for value in (config.account_branch_no, config.account_number)
+            ):
+                raise SdkCallError("INVALID_ACCOUNT_SELECTOR", misconfigured=True)
             matches = [
                 candidate
                 for candidate in stock_accounts
@@ -731,7 +737,8 @@ class SdkGateway:
             ]
             if len(matches) != 1:
                 raise SdkCallError("ACCOUNT_SELECTOR_NOT_UNIQUE", misconfigured=True)
-            return matches[0]
+            selected = matches[0]
+            return SelectedAccount(selected.raw, selected.branch_no, selected.account_number, True)
         if len(stock_accounts) != 1:
             raise SdkCallError("STOCK_ACCOUNT_NOT_UNIQUE", misconfigured=True)
         return stock_accounts[0]
