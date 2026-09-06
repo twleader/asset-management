@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PublicPortfolioAdviceControllerTest {
 
     private static final String ADMIN_JSON =
-            "{\"id\":1,\"email\":\"owner@example.com\",\"role\":\"ADMIN\",\"status\":\"ACTIVE\",\"protectedAdmin\":true}";
+            "{\"id\":1,\"email\":\"owner@example.invalid\",\"role\":\"ADMIN\",\"status\":\"ACTIVE\",\"protectedAdmin\":true}";
 
     /**
      * controller 本身零 WebClient 互動：手刻替身（子類覆寫 {@code latest()}）只被委派一次，並用反射斷言
@@ -46,14 +46,14 @@ class PublicPortfolioAdviceControllerTest {
         PublicPortfolioAdviceService service =
                 new PublicPortfolioAdviceService(new BusinessUserClient(neverCalled), neverCalled) {
                     @Override
-                    public Mono<ResponseEntity<byte[]>> latest() {
+                    public Mono<ResponseEntity<byte[]>> latest(String email) {
                         calls.incrementAndGet();
                         return Mono.just(ResponseEntity.ok(payload));
                     }
                 };
         PublicPortfolioAdviceController controller = new PublicPortfolioAdviceController(service);
 
-        ResponseEntity<byte[]> response = controller.latest().block();
+        ResponseEntity<byte[]> response = controller.latest(null).block();
 
         assertThat(response).isNotNull();
         assertThat(response.getStatusCode().value()).isEqualTo(200);

@@ -24,12 +24,12 @@ MANIFEST = {
   ['GET', '/api/quotes'] => %w[200 400 502 504],
   ['GET', '/api/quotes/one'] => %w[200 204 400 502 504],
   ['GET', '/api/public/market-index'] => %w[200 400 500 502 504],
-  ['GET', '/api/assets/latest'] => %w[200 404 500 502 503 504],
+  ['GET', '/api/assets/latest'] => %w[200 400 404 500 502 503 504],
   ['GET', '/api/public/exchange-rate/usd-twd'] => %w[200 404 502 504],
   ['POST', '/api/public/crawler-data/rescan'] => %w[200 405 502 503 504],
   ['GET', '/api/public/market-analysis/today'] => %w[200 502 503 504],
-  ['GET', '/api/public/portfolio-advice/latest'] => %w[200 502 503 504],
-  ['GET', '/api/public/trading-radar/today'] => %w[200 502 503 504],
+  ['GET', '/api/public/portfolio-advice/latest'] => %w[200 400 502 503 504],
+  ['GET', '/api/public/trading-radar/today'] => %w[200 400 502 503 504],
   ['GET', '/api/public/trading-radar/stock'] => %w[200 400 404 502 503 504],
   ['GET', '/api/public/transactions'] => %w[200 400 502 503 504],
   ['GET', '/api/public/trading-calendar'] => %w[200 400 502 503 504],
@@ -166,7 +166,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.10.0', 'Task 383 後 OpenAPI info.version 必須為 1.10.0')
+assert!(document.dig('info', 'version') == '1.11.0', 'Task 416 後 OpenAPI info.version 必須為 1.11.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -301,17 +301,77 @@ radar_success_schema = openapi_routes
 assert!(radar_success_schema == {'$ref' => '#/components/schemas/TradingRadarListResponse'},
         '交易雷達 list 200 application/json 必須精確引用 TradingRadarListResponse')
 radar_stock = openapi_routes.fetch(['GET', '/api/public/trading-radar/stock'])
-assert!(radar_stock.fetch('parameters').map { |parameter| parameter.fetch('name') } == %w[stockCode market],
-        '交易雷達 detail 只能含 stockCode/market exact selector')
+assert!(radar_stock.fetch('parameters').map { |parameter| parameter.fetch('name') } == %w[stockCode market email],
+        '交易雷達 detail 只能含 stockCode/market exact selector 與 Requirement 140 的可選 email')
 assert!(radar_stock.dig('responses', '200', 'content', 'application/json', 'schema') ==
           {'$ref' => '#/components/schemas/TradingRadarStockDetailResponse'},
         '交易雷達 detail 200 必須精確引用 TradingRadarStockDetailResponse')
 transactions = openapi_routes.fetch(['GET', '/api/public/transactions'])
-assert!(transactions.fetch('parameters').map { |parameter| parameter.fetch('name') } == %w[year start end],
-        'transactions 只能含 year/start/end strict filter')
+assert!(transactions.fetch('parameters').map { |parameter| parameter.fetch('name') } == %w[year start end email],
+        'transactions 只能含 year/start/end strict filter 與 Requirement 140 的可選 email')
 assert!(transactions.dig('responses', '200', 'content', 'application/json', 'schema') ==
           {'$ref' => '#/components/schemas/PublicTransactionHistoryResponse'},
         'transactions 200 必須精確引用 PublicTransactionHistoryResponse')
+
+# Requirement 140 的五支 owner-scoped public API 都必須用相同的 synthetic email parameter，並把
+# email lookup failure 與下游 current-read failure 的契約清楚分開。這些是安全契約，不能只靠
+# renderer 產出 Markdown 後目視檢查。
+personal_owner_operations = {
+  ['GET', '/api/assets/latest'] => %w[email],
+  ['GET', '/api/public/portfolio-advice/latest'] => %w[email],
+  ['GET', '/api/public/trading-radar/today'] => %w[email],
+  ['GET', '/api/public/trading-radar/stock'] => %w[stockCode market email],
+  ['GET', '/api/public/transactions'] => %w[year start end email]
+}.freeze
+personal_owner_operations.each do |key, expected_parameters|
+  operation = openapi_routes.fetch(key)
+  assert!(operation.fetch('parameters').map { |parameter| parameter.fetch('name') } == expected_parameters,
+          "#{key.join(' ')}: Requirement 140 parameter 順序或集合漂移")
+  email = operation.fetch('parameters').find { |parameter| parameter.fetch('name') == 'email' }
+  assert!(email.dig('schema', 'type') == 'string' && email.dig('schema', 'format') == 'email' &&
+          email.dig('schema', 'maxLength') == 254,
+          "#{key.join(' ')}: email 必須是 maxLength 254 的 email string")
+  assert!(email.fetch('example') == 'selected@example.invalid',
+          "#{key.join(' ')}: email example 必須是 synthetic fixture")
+  assert!(email.fetch('description').include?('格式不合法回 400') &&
+          email.fetch('description').include?('查無帳號或帳號非 ACTIVE 回 503'),
+          "#{key.join(' ')}: email parameter 必須說明 400 與 anti-enumeration 503 契約")
+end
+
+latest_assets = openapi_routes.fetch(['GET', '/api/assets/latest'])
+latest_assets_400 = latest_assets.dig('responses', '400', 'content', 'application/problem+json', 'example')
+assert!(latest_assets_400.fetch('detail') == 'email 格式不合法',
+        'latest assets email invalid 必須回精確 detail')
+assert!(latest_assets.dig('responses', '503', 'content', 'application/problem+json', 'examples',
+                          'emailLookupUnavailable', 'value', 'detail') == '指定帳號不可用',
+        'latest assets email lookup failure 必須有 canonical 503 example')
+
+portfolio_advice = openapi_routes.fetch(['GET', '/api/public/portfolio-advice/latest'])
+portfolio_400 = portfolio_advice.dig('responses', '400', 'content', 'application/problem+json', 'example')
+assert!(portfolio_400.fetch('detail') == 'email 格式不合法',
+        'portfolio advice email invalid 必須回精確 detail')
+assert!(!portfolio_advice.dig('responses', '502', 'description').include?('bootstrap lookup'),
+        'portfolio advice by-email lookup failure 不得文件化為 502')
+assert!(portfolio_advice.dig('responses', '503', 'content', 'application/problem+json', 'examples',
+                             'emailLookupUnavailable', 'value', 'detail') == '指定帳號不可用',
+        'portfolio advice email lookup failure 必須有 canonical 503 example')
+
+radar_today = openapi_routes.fetch(['GET', '/api/public/trading-radar/today'])
+radar_today_400 = radar_today.dig('responses', '400', 'content', 'application/problem+json', 'example')
+assert!(radar_today_400.fetch('detail') == 'email 格式不合法',
+        'trading radar today email invalid 必須回精確 detail')
+radar_stock_400 = radar_stock.dig('responses', '400', 'content', 'application/problem+json', 'examples')
+assert!(radar_stock_400.dig('invalidEmail', 'value', 'detail') == 'email 格式不合法' &&
+        radar_stock_400.dig('invalidSelector', 'value', 'detail') == '股票代號或市場別格式不合法' &&
+        radar_stock.dig('description').include?('email` 格式驗證優先'),
+        'trading radar stock 必須同時保留 email 優先與 selector 400 契約')
+
+transactions_400 = transactions.dig('responses', '400', 'content', 'application/problem+json', 'examples')
+assert!(transactions_400.dig('invalidEmail', 'value', 'detail') == 'email 格式不合法' &&
+        transactions_400.dig('invalidFilter', 'value', 'detail') == '交易紀錄篩選條件不合法' &&
+        transactions.dig('description').include?('email 格式驗證優先於 filter'),
+        'transactions 必須同時保留 email 優先與 filter 400 契約')
+
 calendar = openapi_routes.fetch(['GET', '/api/public/trading-calendar'])
 assert!(calendar.fetch('parameters').map { |parameter| parameter.fetch('name') } == ['year'],
         'trading-calendar 必須只含 year')
