@@ -11438,8 +11438,10 @@ message、cause chain 或 stack frame。不可直接 `printStackTrace`／序列�
 recorder，external writer 也傳自己的固定值。無 Throwable 的 status fallback 則在 final matched 5xx 判定點固定時間。它是
 列表 `NEWEST`／`OLDEST` 的唯一業務時間，id 只作同一 timestamp 的穩定 secondary order。
 
-ApiErrorOperationCatalog 是程式內的技術 operation allowlist，不是可由使用者設定的業務分類：
-每項由 (source, operationKey, operationLabel, displayOrder) 組成。error row 額外保存 `api_name`
+ApiErrorLogOperationCatalog 是程式內的技術 operation allowlist，不是可由使用者設定的業務分類：
+每項由 (source, operationKey, apiName, apiUrl, displayOrder) 組成。`apiUrl` 是 catalog 內的非空、唯讀
+`HTTP method + canonical path` 顯示 metadata，不是可呼叫的 remote host URL、不是 credential、不是 client input，也不
+進入 error row 或資料庫 schema。error row 額外保存 `api_name`
 snapshot，供直接查詢與清單閱讀；read-time 不得以 catalog label 覆寫它。寫入時 server 與 producers
 只能使用下列 immutable seed，並由 composite FK 驗證 source/key/name 的組合。catalog 在本任務不可更新；
 若未來真需改名，必新增 catalog key 而非 UPDATE 已有 label，保留既有 log 身分。它列出 SecurityConfig
@@ -11476,6 +11478,35 @@ snapshot，供直接查詢與清單閱讀；read-time 不得以 catalog label �
 | FUBON_API | 130 | FUBON_INTRADAY_CANDLES_READ | 分鐘 K 線查詢 | FubonScheduledMarketClient: POST /internal/market-data/intraday-candles/read |
 | FUBON_API | 140 | FUBON_STOCK_PUSH_SUBSCRIPTIONS | 個股推播訂閱 | FubonScheduledMarketClient: POST /internal/market-data/stock-push/subscriptions |
 | FUBON_API | 150 | FUBON_STOCK_PUSH_STREAM | 個股推播串流 | FubonStockPushStreamClient: GET /internal/market-data/stock-push/stream |
+
+#### operations response 與唯讀 canonical URL metadata
+
+`apiUrl` 一律是上表「唯一 producer／route」欄中的精確 `HTTP method + canonical path`：OPEN_API row 直接使用該欄全值；
+FUBON_API row 則去掉 producer 名稱與冒號、逐字保留其後的 method/path。例如 `OPEN_QUOTES_LIST` 是 `GET /api/quotes`，`FUBON_TW_QUOTES_INVENTORY` 是
+`POST /internal/market-data/tw-quotes`，`FUBON_TAIEX_INDEX_STREAM` 是
+`GET /internal/market-data/taiex-index/stream`。同一路徑的不同 catalog operation（兩個台股報價 operation）各自保留
+自己的 key/name/order，但可有相同 `apiUrl`。此 metadata 不含 producer 名稱、任何 vendor／container host、query、token、
+certificate、帳號或其他 secret，且不暗示可由前端、BFF 或 browser 直接呼叫該 internal path。
+
+既有 `GET /api/api-error-logs/operations?source=ALL|OPEN_API|FUBON_API` 與其既有
+`GET /api/bff/api-error-logs/operations?source=ALL|OPEN_API|FUBON_API` proxy（BFF 原樣轉送 `source` query）不新增 route、參數、授權或 I/O；兩者在既有 ADMIN 雙重守門後回傳同一個
+JSON array。每個 item 的 schema 固定為：
+
+```json
+{
+  "source": "OPEN_API",
+  "operationKey": "OPEN_QUOTES_LIST",
+  "apiName": "即時報價清單",
+  "apiUrl": "GET /api/quotes",
+  "displayOrder": 10
+}
+```
+
+五個欄位皆為 catalog 產生的 read-only 值；`apiUrl` 不可為 null 或空白。`source=ALL` 仍依
+`OPEN_API`、`FUBON_API`、`displayOrder`、`operationKey` 排序，單一 source 仍依 `displayOrder`、`operationKey` 排序。
+list/detail 的既有 response schema 不增加 `apiUrl`，也不因這個 UI metadata 改變其 stacktrace 分離、資料庫或 retention
+語意。business service 只由 `ApiErrorLogOperationCatalog` 回傳 metadata；BFF 保持 opaque proxy，不重新組裝、猜測或
+過濾 `apiUrl`。
 
 ### PostgreSQL 與服務所有權
 
@@ -11613,7 +11644,7 @@ business services 提供三個 controller thin read endpoints：
 | endpoint | input | response |
 |---|---|---|
 | GET /api/api-error-logs | source=ALL\|OPEN_API\|FUBON_API, optional operationKey, sort=NEWEST\|OLDEST | 每筆 id, source, operationKey, apiName, messageHeader, occurredAt |
-| GET /api/api-error-logs/operations | source=ALL\|OPEN_API\|FUBON_API | 依 catalog 排序的可選 operationKey, apiName, source |
+| GET /api/api-error-logs/operations | source=ALL\|OPEN_API\|FUBON_API | 依 catalog 排序的唯讀 `source`, `operationKey`, `apiName`, `apiUrl`, `displayOrder` |
 | GET /api/api-error-logs/{id} | path id | 上列識別欄位加完整 raw stackTrace |
 
 未知 source/sort/key、key 與 source 不相符、或不存在 id 一律是明確 400/404；list 不含 stackTrace，
@@ -11633,10 +11664,13 @@ route 為 /api-error-logs、meta.requiresAdmin=true；App 的「系統資訊」�
 auth.isAdmin 過濾，避免一般使用者從 UI 或 feature flag 看見敏感頁面。api/index.js 的
 apiErrorLogs wrapper 是唯一前端資料入口。
 
-ApiErrorLogsView 初始 state 為 source=ALL、sort=NEWEST、operationKey=null。來源採三個 radio
-選項「全部」「開放 API」「富邦證 API」，時間採下拉「由近而遠」「由遠而近」，另一個下拉依 operations
-catalog 顯示單一 API。來源變動先清 operation、重新抓 catalog/清單；排序或 operation 變動只重抓清單。
-table 僅渲染時間、來源、保存的 apiName、原始錯誤標頭。`el-table-column type=expand` 的 expand handler
+ApiErrorLogsView 初始 state 為 source=ALL、sort=NEWEST、operationKey=null。篩選列有且只有三個 `el-select`：來源、
+時間排序、單一 API；來源的三個 option value/text 固定為 `ALL`／「全部」、`OPEN_API`／「開放 API」、
+`FUBON_API`／「富邦證 API」，不得保留 `el-radio-group` 或 `el-radio-button`。第一欄來源固定 160px；在扣除它與
+12px 欄間 gap 後，第二欄時間排序與第三欄單一 API 必使用同一個可用寬度的 `1:2` grid/flex ratio（例如
+`minmax(0, 1fr)` 與 `minmax(0, 2fr)`），不得等寬。時間採下拉「由近而遠」「由遠而近」；單一 API 下拉的 option label
+與 selection label 固定為 `apiName + " — " + apiUrl`，value 仍是 `operationKey`，不可只顯示 apiName。來源變動先清
+operation、重新抓 catalog/清單；排序或 operation 變動只重抓清單。table 僅渲染時間、來源、保存的 apiName、原始錯誤標頭。`el-table-column type=expand` 的 expand handler
 第一次才取 detail 並以 `white-space: pre-wrap` 顯示完整 raw stacktrace，依 id 快取成功內容；收合或未展開
 資料不得預先塞進 list state、hidden template、console 或未展開的網路回應。錯誤字串只能以 Vue interpolation／
 textContent 呈現，禁止 `v-html` 或任意 HTML 解析。
