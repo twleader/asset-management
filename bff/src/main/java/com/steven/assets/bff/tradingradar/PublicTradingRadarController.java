@@ -20,16 +20,21 @@ public class PublicTradingRadarController {
 
     private final PublicTradingRadarService service;
 
+    /**
+     * {@code email} 省略時 owner 為 configured-admin；帶入合法且 active 帳號的 email 時，
+     * owner 改由該帳號決定（Requirement 140）。
+     */
     @GetMapping("/today")
-    public Mono<ResponseEntity<JsonNode>> today() {
-        return service.today().map(PublicTradingRadarController::toResponse);
+    public Mono<ResponseEntity<JsonNode>> today(@RequestParam(required = false) String email) {
+        return service.today(email).map(PublicTradingRadarController::toResponse);
     }
 
     @GetMapping("/stock")
     public Mono<ResponseEntity<JsonNode>> stock(
             @RequestParam(required = false) List<String> stockCode,
-            @RequestParam(required = false) List<String> market) {
-        return service.stock(stockCode, market).map(PublicTradingRadarController::toResponse);
+            @RequestParam(required = false) List<String> market,
+            @RequestParam(required = false) String email) {
+        return service.stock(stockCode, market, email).map(PublicTradingRadarController::toResponse);
     }
 
     private static ResponseEntity<JsonNode> toResponse(PublicTradingRadarRelay relay) {

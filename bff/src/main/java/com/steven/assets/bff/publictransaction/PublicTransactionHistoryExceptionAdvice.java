@@ -20,6 +20,11 @@ public class PublicTransactionHistoryExceptionAdvice {
         return problem(HttpStatus.BAD_REQUEST, "Invalid transaction history request", "交易紀錄篩選條件不合法");
     }
 
+    @ExceptionHandler(PublicTransactionHistoryEmailRequestException.class)
+    public ResponseEntity<ProblemDetail> invalidEmail(PublicTransactionHistoryEmailRequestException ignored) {
+        return problem(HttpStatus.BAD_REQUEST, "Invalid transaction history email", "email 格式不合法");
+    }
+
     @ExceptionHandler(PublicTransactionHistoryUnavailableException.class)
     public ResponseEntity<ProblemDetail> unavailable(PublicTransactionHistoryUnavailableException ignored) {
         return problem(HttpStatus.SERVICE_UNAVAILABLE, "Transaction history unavailable", "交易紀錄服務暫時不可用");

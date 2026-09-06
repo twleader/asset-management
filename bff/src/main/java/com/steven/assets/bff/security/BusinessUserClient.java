@@ -47,7 +47,11 @@ public class BusinessUserClient {
                 .uri(uriBuilder -> uriBuilder.path("/internal/users/by-email").queryParam("email", email).build())
                 .retrieve()
                 .bodyToMono(MAP)
-                .map(BusinessUserClient::toUser);
+                .map(BusinessUserClient::toUser)
+                // by-email 和 configured-admin 一樣都是取得可信 owner 前的 bootstrap lookup。
+                // 即使匿名 9090 request 意外攜帶登入／代看 Reactor context，也不得讓 shared
+                // WebClient filter 注入 X-User-*，以免 lookup 受到呼叫者 tenant 影響。
+                .contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY));
     }
 
     /**

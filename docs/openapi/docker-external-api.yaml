@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.10.0
+  version: 1.11.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
     十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
@@ -311,8 +311,25 @@ paths:
     get:
       tags: [最新資產]
       operationId: getLatestAssets
-      summary: 取得主要管理者的最新完整資產
-      description: 唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId；不接受 ownerId、email、cookie 或 X-User-* 作為租戶選擇輸入。
+      summary: 取得指定帳號或預設主要管理者的最新完整資產
+      description: >-
+        唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId；
+        不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定
+        （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
+      parameters:
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+            刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+          example: selected@example.invalid
       responses:
         '200':
           description: 自洽且保留原始 BigDecimal JSON 精度的最新資產。
@@ -323,6 +340,13 @@ paths:
               examples:
                 synthetic:
                   $ref: '#/components/examples/LatestAssetsSynthetic'
+        '400':
+          description: email 參數格式不合法（缺 `@`、缺網域或超過 254 字元）；不會呼叫 by-email 或 business。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Invalid latest assets request, status: 400, detail: email 格式不合法, instance: /api/assets/latest}
         '404':
           description: 主要管理者尚無資產快照；business 的 ProblemDetail 原樣 relay。
           content:
@@ -349,12 +373,18 @@ paths:
                 $ref: '#/components/schemas/NginxErrorHtml'
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
         '503':
-          description: Configured admin 不存在、未啟用或不可用。
+          description: >-
+            Configured admin 不存在、未啟用或不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
+            transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example: {type: 'about:blank', title: Latest assets unavailable, status: 503, detail: 主要管理者不可用, instance: /api/assets/latest}
+              examples:
+                configuredAdmin:
+                  value: {type: 'about:blank', title: Latest assets unavailable, status: 503, detail: 主要管理者不可用, instance: /api/assets/latest}
+                emailLookupUnavailable:
+                  value: {type: 'about:blank', title: Latest assets unavailable, status: 503, detail: 指定帳號不可用, instance: /api/assets/latest}
         '504':
           $ref: '#/components/responses/NginxGatewayTimeout'
   /api/public/exchange-rate/usd-twd:
@@ -526,15 +556,30 @@ paths:
     get:
       tags: [公開分析]
       operationId: getPublicPortfolioAdviceLatest
-      summary: 取得主要管理者的最新資產配置建議
+      summary: 取得指定帳號或預設主要管理者的最新資產配置建議
       description: |
         純唯讀、零副作用（Requirement 79／Task 338），**絕不**觸發 `POST /api/portfolio-advice/generate`
-        那條有 LLM 成本的寫入流程。資料是 owner-scoped，owner 只能是 business 唯一解析出的
-        configured admin：BFF 走 configured-admin bootstrap 並顯式帶 `X-User-*`，同時清除 Reactor
-        context 身分，故不接受 ownerId、email、cookie 或 `X-User-*` 作為租戶選擇輸入。
+        那條有 LLM 成本的寫入流程。資料是 owner-scoped；不帶 `email` 時 owner 由 business 唯一解析出的
+        configured admin bootstrap 決定，帶合法 `email` 時 owner 改由該帳號決定（仍不接受 `ownerId`、
+        cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。BFF 一律顯式帶 `X-User-*`
+        並清除 Reactor context 身分。
         成功與下游非 2xx 都採 byte-relay（金融數值不經 Map/Double round-trip，狀態碼與 body 原樣傳回）；
-        只有 bootstrap 階段的失敗才由 scoped advice 消毒。尚無任何一筆建議時回 HTTP 200 的
+        只有 bootstrap 階段（含 by-email 解析）的失敗才由 scoped advice 消毒。尚無任何一筆建議時回 HTTP 200 的
         `{"status":"NONE"}` 占位物件，`status` 亦可能是 `PROCESSING`／`FAILED`。
+      parameters:
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+            刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+          example: selected@example.invalid
       responses:
         '200':
           description: 最新一筆建議；尚無資料時為 status=NONE 的占位物件。
@@ -575,8 +620,15 @@ paths:
                 none:
                   summary: 尚無任何一筆建議
                   value: {id: null, status: NONE, model: null, createdAt: null, completedAt: null, errorMessage: null, age: null, investmentHorizonYears: null, monthlyInvestment: null, goals: [], riskTolerance: null, expectedAnnualReturn: null, basedOnSnapshotId: null, basedOnSnapshotDate: null, basedOnTotalAssets: null, summary: null, riskAssessment: null, targetAllocation: [], rebalancePlan: [], actions: [], warnings: [], references: []}
+        '400':
+          description: email 參數格式不合法（缺 `@`、缺網域或超過 254 字元）；不會呼叫 by-email 或 business。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Invalid portfolio advice request, status: 400, detail: email 格式不合法, instance: /api/public/portfolio-advice/latest}
         '502':
-          description: bootstrap lookup 的 business 非 2xx 被 scoped advice 消毒成固定文案，或 Nginx 無法連上 upstream。
+          description: 選定 owner 後的 portfolio-advice current read 非 2xx，或 Nginx 無法連上 upstream；by-email lookup 的任何失敗一律是 503，不會是 502。
           content:
             application/problem+json:
               schema:
@@ -587,12 +639,18 @@ paths:
                 $ref: '#/components/schemas/NginxErrorHtml'
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
         '503':
-          description: Configured admin 不存在、未啟用或不可用（具名 503，不是 404），或 BFF 連不上 business。
+          description: >-
+            Configured admin 不存在、未啟用或不可用（具名 503，不是 404）；帶 `email` 時，查無、非 ACTIVE、
+            by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example: {type: 'about:blank', title: Portfolio advice unavailable, status: 503, detail: 主要管理者不可用, instance: /api/public/portfolio-advice/latest}
+              examples:
+                configuredAdmin:
+                  value: {type: 'about:blank', title: Portfolio advice unavailable, status: 503, detail: 主要管理者不可用, instance: /api/public/portfolio-advice/latest}
+                emailLookupUnavailable:
+                  value: {type: 'about:blank', title: Portfolio advice unavailable, status: 503, detail: 指定帳號不可用, instance: /api/public/portfolio-advice/latest}
         '504':
           $ref: '#/components/responses/NginxGatewayTimeout'
   /api/public/trading-radar/today:
@@ -601,10 +659,10 @@ paths:
       operationId: getPublicTradingRadarTodayList
       summary: 取得今日交易雷達第一屏收合列
       description: |
-        純唯讀、零副作用。owner 只能是 business 唯一解析的
-        configured admin；不接受 owner selector、email、cookie、匿名 caller 的 `X-User-*`
-        或 Tailscale header 作為租戶輸入。BFF 顯式傳遞 configured-admin tenant headers，
-        並清除 Reactor 內可能存在的登入者／代看身分。
+        純唯讀、零副作用。不帶 `email` 時 owner 為 business 唯一解析的 configured admin；
+        帶合法 `email` 時 owner 改由該帳號決定（仍不接受 `ownerId`、cookie、匿名 caller 的
+        `X-User-*` 或 Tailscale identity 作為額外的租戶選擇輸入）。BFF 顯式傳遞已解析 owner 的
+        tenant headers，並清除 Reactor 內可能存在的登入者／代看身分。
 
         本路徑每次只呼叫一次 business 的 current read，再投影第一屏的全域欄位與每檔收合列；
         不回傳 reasons、evidence、完整 fundamental 或 K 棒展開樹。它不會 refresh、export、
@@ -615,6 +673,20 @@ paths:
         HTTP 層本身沒有應用層認證；只能經 `127.0.0.1:9090` loopback 或獲准的
         Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI 與本 YAML
         都沒有掛在 9090。
+      parameters:
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+            刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+          example: selected@example.invalid
       responses:
         '200':
           description: 第一屏全域資料與每檔收合列；stocks 可為空。
@@ -636,6 +708,14 @@ paths:
                     stocks: []
                     skippedNonTwStocks: 0
                     publicInformation: []
+        '400':
+          description: >-
+            email 參數格式不合法；不會呼叫 configured-admin、by-email 或 business。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example: {type: 'about:blank', title: Invalid trading radar email, status: 400, detail: email 格式不合法, instance: /api/public/trading-radar/today}
         '502':
           description: Business 的任何非 2xx 被 scoped advice 消毒，或 Nginx 無法連上 upstream。
           content:
@@ -648,7 +728,9 @@ paths:
                 $ref: '#/components/schemas/NginxErrorHtml'
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
         '503':
-          description: Configured admin 不存在、不合法或 bootstrap／downstream transport 失敗。
+          description: >-
+            Configured admin 不存在、不合法或 current-read transport 失敗；帶 `email` 時，查無、非 ACTIVE、
+            by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
           content:
             application/problem+json:
               schema:
@@ -665,11 +747,13 @@ paths:
       tags: [公開交易雷達]
       operationId: getPublicTradingRadarStockDetail
       summary: 取得今日交易雷達指定股票的展開資料
-      description: |
+      description: >-
         只接受一個已 URL-encoded 的 `stockCode` 與一個 `market`，兩者共同構成精確 selector，
-        用以消除跨市場同代號歧義。BFF 先在本地驗證參數，通過後才以 configured-admin 身分
-        呼叫 business 一次 current read；不快取、不重新整理、不寫 snapshot，且只回本日結果
-        已存在的標的。不存在時固定回已消毒的 404，不洩漏其他標的或 owner 資訊。
+        用以消除跨市場同代號歧義。BFF 先在本地驗證參數，通過後才以已解析 owner 身分（不帶 `email`
+        時為 configured-admin；帶合法 `email` 時為該帳號）呼叫 business 一次 current read；
+        `email` 格式驗證優先於 stockCode／market selector；email 合法或省略時，selector 的既有 400 契約不變。
+        不快取、不重新整理、不寫 snapshot，且只回本日結果已存在的標的。不存在時固定回已消毒的
+        404，不洩漏其他標的或 owner 資訊。
       parameters:
         - name: stockCode
           in: query
@@ -683,6 +767,19 @@ paths:
           description: 1 至 10 個 Unicode 字母或數字的市場字串；前後空白會移除。
           schema: {type: string, pattern: '^[\\p{L}0-9]{1,10}$'}
           example: 台股
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+            刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+          example: selected@example.invalid
       responses:
         '200':
           description: 與 list 同一次 current-result 投影語意的指定標的完整展開樹。
@@ -693,11 +790,17 @@ paths:
                 synthetic:
                   value: {ruleVersion: TW_RULES_V18, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null}}
         '400':
-          description: 缺少、重複或格式不合法的 stockCode／market；不會呼叫 configured-admin 或 business。
+          description: >-
+            email 格式不合法時優先回 email detail；否則缺少、重複或格式不合法的 stockCode／market 維持 selector detail。
+            兩者都不會呼叫 configured-admin、by-email 或 business。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}
-              example: {type: 'about:blank', title: Invalid trading radar request, status: 400, detail: 股票代號或市場別格式不合法, instance: /api/public/trading-radar/stock}
+              examples:
+                invalidEmail:
+                  value: {type: 'about:blank', title: Invalid trading radar email, status: 400, detail: email 格式不合法, instance: /api/public/trading-radar/stock}
+                invalidSelector:
+                  value: {type: 'about:blank', title: Invalid trading radar request, status: 400, detail: 股票代號或市場別格式不合法, instance: /api/public/trading-radar/stock}
         '404':
           description: 本日 current result 沒有精確 code/market 標的。
           content:
@@ -714,7 +817,9 @@ paths:
               schema: {$ref: '#/components/schemas/NginxErrorHtml'}
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
         '503':
-          description: configured-admin 不可用，或 BFF transport failure。
+          description: >-
+            configured-admin 或 current-read transport failure；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
+            transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}
@@ -732,12 +837,14 @@ paths:
     get:
       tags: [公開交易紀錄]
       operationId: getPublicTransactionHistory
-      summary: 取得 configured-admin 的唯讀交易紀錄
-      description: |
-        owner 只能由 BFF configured-admin bootstrap 決定，request 不可提供 owner、帳戶、券商或
-        身分 header 作選擇。無 query 時回全部紀錄；可精確擇一提供 `year`，或成對提供 `start`
-        與 `end`。篩選會在 BFF 本地嚴格驗證，錯誤不會觸發 bootstrap。此 API 不同步、匯出、寫入
-        或計算個別成交推論；records 固定按 `tradeDate DESC, id DESC`。
+      summary: 取得指定帳號或預設主要管理者的唯讀交易紀錄
+      description: >-
+        不帶 `email` 時 owner 由 BFF configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號
+        決定（仍不接受 `ownerId`、帳戶、券商或其他身分 header 作為額外的租戶選擇輸入）。無 query 時回全部紀錄；
+        可精確擇一提供 `year`，或成對提供 `start` 與 `end`。篩選與 `email` 各自獨立在 BFF 本地嚴格驗證，
+        email 格式驗證優先於 filter；email 合法或省略時，filter 的既有 400 契約不變。錯誤不會觸發 bootstrap。
+        此 API 不同步、匯出、寫入或計算個別成交推論；records 固定按
+        `tradeDate DESC, id DESC`。
       parameters:
         - name: year
           in: query
@@ -757,6 +864,19 @@ paths:
           description: 與 start 成對提供的 inclusive ISO 迄日，且不得早於 start。
           schema: {type: string, format: date}
           example: '2026-12-31'
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用時相同的錯誤契約，
+            刻意不區分「查無」與「停用」以避免此參數成為帳號列舉工具）。
+          example: selected@example.invalid
       responses:
         '200':
           description: 選定範圍的 immutable 交易帳本、全期與選定範圍摘要。
@@ -767,11 +887,17 @@ paths:
                 synthetic:
                   value: {selection: {mode: ALL, year: null, start: null, end: null}, allTimeSummary: {buyCount: 1, sellCount: 0, totalBuyAmountTwd: 1000.00, totalSellAmountTwd: 0}, summary: {buyCount: 1, sellCount: 0, totalBuyAmountTwd: 1000.00, totalSellAmountTwd: 0}, yearSummaries: [{year: 2026, buyCount: 1, sellCount: 0, totalBuyAmountTwd: 1000.00, totalSellAmountTwd: 0}], records: [{id: 1, transactionType: 買, assetType: 股票, assetName: 合成科技, assetCode: EXM-TW-001, market: 台股, currency: TWD, channel: synthetic, tradeDate: '2026-01-15', shares: 10, price: 100, amount: 1000, fee: 1, transactionTax: 0, exchangeRate: null, notes: 合成範例, amountTwd: 1000, year: 2026}]}
         '400':
-          description: year 重複、year 與 date range 混用、缺少 range 一端、日期格式或順序不合法。
+          description: >-
+            email 格式不合法時優先回 email detail；否則 year 重複、year 與 date range 混用、缺少 range 一端、
+            日期格式或順序不合法維持 filter detail。兩者都不會呼叫 configured-admin、by-email 或 business。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}
-              example: {type: 'about:blank', title: Invalid transaction history request, status: 400, detail: 交易紀錄篩選條件不合法, instance: /api/public/transactions}
+              examples:
+                invalidEmail:
+                  value: {type: 'about:blank', title: Invalid transaction history email, status: 400, detail: email 格式不合法, instance: /api/public/transactions}
+                invalidFilter:
+                  value: {type: 'about:blank', title: Invalid transaction history request, status: 400, detail: 交易紀錄篩選條件不合法, instance: /api/public/transactions}
         '502':
           description: Business 非 2xx 或 Nginx upstream failure；回應已消毒。
           content:
@@ -782,7 +908,9 @@ paths:
               schema: {$ref: '#/components/schemas/NginxErrorHtml'}
               example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
         '503':
-          description: configured-admin 或 BFF transport 不可用。
+          description: >-
+            configured-admin 或 current-read transport 不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
+            transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}

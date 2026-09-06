@@ -20,12 +20,17 @@ public class PublicTransactionHistoryController {
 
     private final PublicTransactionHistoryService service;
 
+    /**
+     * {@code email} 省略時 owner 為 configured-admin；帶入合法且 active 帳號的 email 時，
+     * owner 改由該帳號決定（Requirement 140）。
+     */
     @GetMapping
     public Mono<ResponseEntity<JsonNode>> current(
             @RequestParam(required = false) List<String> year,
             @RequestParam(required = false) List<String> start,
-            @RequestParam(required = false) List<String> end) {
-        return service.current(year, start, end).map(PublicTransactionHistoryController::toResponse);
+            @RequestParam(required = false) List<String> end,
+            @RequestParam(required = false) String email) {
+        return service.current(year, start, end, email).map(PublicTransactionHistoryController::toResponse);
     }
 
     private static ResponseEntity<JsonNode> toResponse(PublicTransactionHistoryRelay relay) {
