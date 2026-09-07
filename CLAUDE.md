@@ -394,6 +394,42 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
   語意與安全邊界都不得省略。Gateway allowlist 與 OpenAPI paths 必須由自動化 contract test 雙向比對，
   禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；每次 9090 API 變更必須由它重產本專案 Swagger Markdown，並覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
 
+### 從任一 worktree 重建 Docker 服務前，先比對該 worktree 的 `.env` 與 main 的 `.env`
+
+**`.env` 是 per-worktree、gitignored，可能是一份缺漏、過期的舊副本——這是跟「程式碼新不新」完全獨立
+的另一個風險軸。** 既有規則「已 merge 就必須從 main worktree build」管的只是程式碼；即使乖乖從 main
+build，如果執行 `docker compose` 當下的目錄是某個 feature worktree，一樣會套用那個 worktree 自己的
+`.env`，程式碼是新的也救不回來。反過來，`.env` 過期也不會因為之後改從 main build 就自動變新——
+**要修好必須是「從 main 的目錄執行 `docker compose`」，讓 compose 讀到 main 的 `.env`**，不是「main
+有正確的 `.env`」這件事本身就會自動生效。
+
+**成因（2026-09-07 同一個 session 連續踩到兩次）：** Task 421 驗收時把 `business-services`／
+`api-gateway`／`bff`／`frontend` 都從某個 feature worktree 重建，該 worktree 的 `.env` 比 main 的
+`.env` 少了 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`、`API_ERROR_LOG_INGEST_TOKEN`、
+`FRONTEND_PUBLIC_TLS_REQUIRED` 與兩個 TLS 憑證路徑。結果：`frontend` 重建後公網網域被套上本機自簽
+fallback 憑證（Chrome 顯示 `NET::ERR_CERT_AUTHORITY_INVALID`）；`bff` 重建後用錯 Google OAuth
+Client（使用者登入時看到 `redirect_uri_mismatch`）；`business-services`／`bff` 兩邊的
+`API_ERROR_LOG_INGEST_TOKEN` 一度不一致（分別讀到不同的臨時假值）——這第三個問題**完全靜默**，
+ingest endpoint 本身就是 fail-soft／`onErrorResume` 設計，不會噴任何錯誤，只會悄悄失效，若不是主動
+比對兩邊 token 值，不會自己被發現。**三個症狀、同一個根因，且「build 成功」「容器 healthy」全程都
+正常——這兩者都不代表 secrets 是對的，這次事故從頭到尾沒有任何一次 build/health check 失敗。**
+
+**預防：** 只要即將執行 `docker compose build/up --force-recreate` 的目錄不是「持續維護、確定跟正式
+環境同步」的那份（通常是 main），先跑：
+```bash
+diff <(sort <該目錄>/.env) <(sort /Users/steven/Project/asset-management-main/.env)
+```
+任何差異（缺少的變數、或存在但值不同）都是紅旗，尤其是 `GOOGLE_CLIENT_*`、`*_TOKEN`、
+`FRONTEND_*_TLS_*` 這類直接影響對外憑證／第三方 OAuth／內部服務間認證的變數——不要假設「反正差不多」，
+先確認哪一份才對（通常是 main），再決定要不要改從 main 重建，不要等使用者回報「憑證警告」「登入失敗」
+才回頭查，那樣一次事故要來回好幾輪才收斂，非常浪費 token。
+
+**確認已修好：** 用 `docker exec <container> printenv <VAR>` 對照容器內的實際值，不能只看 build 有沒有
+報錯或容器是否 `healthy`——如上所述，這兩者在這次事故中全程正常。
+
+> 這個檢查已經寫進 `.claude/skills/run-stack/SKILL.md` 的 Step 1b（找出正確 build 來源那一步），
+> 之後任何 session／subagent 呼叫 `/run-stack` 時都會照著跑，不必再靠這裡的文字提醒。
+
 ### 服務啟動
 ```bash
 # 後端（port 8080）
