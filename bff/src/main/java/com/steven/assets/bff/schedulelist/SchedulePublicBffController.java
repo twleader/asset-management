@@ -9,8 +9,10 @@ import java.util.List;
 /**
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
- * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬兩個服務：
- * {@code business-services}（28 個）與 {@code external-materials-service}（37 個）。
+ * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬三個服務：
+ * {@code business-services}（28 個）、{@code external-materials-service}（37 個）與
+ * {@code bff}（1 個；Requirement 143／Task 421 新增的 {@code NginxGatewayFailureLogTailer}，
+ * 是 bff 服務有史以來第一個 {@code @Scheduled} 元件）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
  * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 37 筆對應 40 個標註
@@ -44,6 +46,7 @@ import java.util.List;
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
  *       IntradayTickRefresher、HistoricalBackfillService、ExchangeRatePoller、ClosePersister、
  *       UsValuationDerivationScheduler、CommodityPricePoller、EtfNavPoller</li>
+ *   <li>bff：NginxGatewayFailureLogTailer（Requirement 143／Task 421）</li>
  * </ul>
  *
  * <p>{@code CommodityPricePoller} 與 {@code EtfNavPoller} 為 Task 337 補入——前者是本次新增的
@@ -56,11 +59,12 @@ public class SchedulePublicBffController {
 
     private static final String BUSINESS = "業務服務";
     private static final String EXTERNAL = "外部行情服務";
+    private static final String GATEWAY = "BFF 閘道觀測服務";
     private static final String TPE = "Asia/Taipei";
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（65 筆）。順序刻意先業務服務、再外部行情服務，前端再依 category 分組。 */
+    /** 全系統排程清單（66 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（28）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -267,10 +271,15 @@ public class SchedulePublicBffController {
                     "每日 16:00", "0 0 16 * * *", TPE),
             new ScheduledJobDto(EXTERNAL, "台股休市偵測", "台股臨時休市偵測",
                     "開盤前每 15 分鐘偵測颱風／臨時休市，於 09:00 開盤前生效",
-                    "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE)
+                    "交易日 05:00–07:00 每 15 分鐘", "0 0/15 5-6 * * MON-FRI；0 0 7 * * MON-FRI", TPE),
+
+            // ===== bff（1）=====
+            new ScheduledJobDto(GATEWAY, "API 錯誤紀錄", "Nginx gateway 錯誤擷取",
+                    "定期讀取 Nginx 錯誤 log，比對既有 13 條白名單路由後寫入 API 錯誤紀錄",
+                    "每 15 秒", "fixedDelay=15000ms", "")
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（65 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（66 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

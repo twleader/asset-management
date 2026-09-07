@@ -130,7 +130,7 @@ com.steven.assets/
   - `FundSettingsBffController`：`GET /api/bff/fund-settings/bank-options` → 過濾 active 後的銷售銀行下拉；與 SnapshotForm 的 lookups **同讀 business `/api/settings/banks`**（同義欄位同一來源），fund-settings 頁不再跨頁呼叫 `/api/bff/snapshot-form/lookups`（Task 175：一頁一 BFF 合規化）
   - `RealizedGainBffRoutes`：`/api/realized-gains/**` → business-services。**目前無前端消費者**：原「RealizedGainView 的 Pinia store `gainApi` 共用 CRUD」說法已不成立——該頁已全面走 `RealizedGainBffController` 的 `/api/bff/realized-gain` 聚合端點，前端 `gainApi` wrapper 與 `assetStore` 的三個已實現損益 action 已於 Task 197 移除。route 本身暫留（移除需重建 BFF 服務），**屬待清理項**
   - `MarketDataBffRoutes`：`/api/market-data/**` → business-services。消費者是 DashboardView 與 TradingRadarView 兩頁的 SSE 行情串流（皆為 `new EventSource('/api/market-data/prices/stream')`，見下方 SSE 段落之已知落差）；`marketDataApi` wrapper（歷史/配息/ETF 成分股）無呼叫端，已於 Task 197 移除，該類查詢皆走 `StockAnalysisBffRoutes` 的 `/api/bff/stock-analysis/**`
-  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後為 55 筆；main Task 351 只調整交易日曆年份描述、不新增 job；**Task 352（business：富邦台股現股庫存同步）再新增一個後，共 56 筆** ＝ `business-services` 22 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。
+  - `SchedulePublicBffController`（ScheduleListView 專屬，「公開資訊」分組，Requirement 36）：`GET /api/bff/schedule-list` → 回傳系統所有自動排程的**人工維護靜態清單**（`ScheduledJobDto` 不可變 record：service / category / name / description / schedule 白話 / cron / zone）。Task 334（external：美股推導估值每日排程）與 Task 332（business：海外指數日線落後補救檢查）各新增一個 `@Scheduled` 後為 53 筆；Task 340（external：油價金價盤中每分鐘即時報價、收盤後 17:05 校正）再新增兩個後為 55 筆；main Task 351 只調整交易日曆年份描述、不新增 job；**Task 352（business：富邦台股現股庫存同步）再新增一個後，共 56 筆** ＝ `business-services` 22 ＋ `external-materials-service` 34（Task 327 新增 USD/TWD 2 秒 live producer 後為 51 ＝ 20 ＋ 31；**以 `@Scheduled` 方法計**；business 另包含 `AlertNotificationDispatcher` 每 60 秒與 `TradingRadarNotificationService` 每 2 秒兩個 fixed-delay job；external 實際 **36** 個標註，`TwClosurePoller` 與台股官方收盤對帳各為一法兩標、各併為一筆。**本段「Task 352…共 56 筆」之後的逐 Task 遞增記載已停止維護**（Task 393／394／395／417 等後續新增排程未回頭補這段敘事）；`SchedulePublicBffController.java` 現有 `JOBS`（business 28、external 37）才是權威。**Task 421（Requirement 143）新增 `bff` 服務史上第一個 `@Scheduled`（`NginxGatewayFailureLogTailer`，讀取 Nginx 錯誤 log），總筆數變為 66 ＝ business 28 ＋ external 37 ＋ 新增的第三個 service「BFF 閘道觀測服務」1**；前端 `ScheduleListView` 的 KPI 卡／篩選／tag 顏色已同步改為依 `distinctServices` 動態產生，不再是本段下一句所述「兩服務」假設下的寫死判斷。
 **逐檔核對務必用 `grep -ran`**：`AlertNotificationDispatcher.java` 會被 `file(1)` 判為 data，普通 `grep -r` 整檔跳過，backend 會少算成 20）。此頁為唯讀資訊展示故不做跨服務反射探索、不入 DB、不設管理端點；**新增／調整任何 `@Scheduled` 須同步更新此清單以免漂移**。**動態排程**（每分鐘 tick 比對 DB 可設定時點：`NewsPoller`→`crawler_schedule`、`MarketAnalysisScheduler`→`market_analysis_send_time`）於清單標「動態：依『X』頁設定（預設 …）」／「動態（表名）」，**不寫死時間**；每分鐘 tick 但時點為 per-user 私人設定者（`ExportScheduleService`／`TradingCalendarExportScheduleService`）則照列 `每分鐘`／`0 * * * * *` 實際 cron。前端 `ScheduleListView` 之服務別／分類計數由 payload 動態算出，故加減筆數無須改前端。無下游呼叫（不需 WebClient），落 BFF `anyExchange().authenticated()`（已登入者皆可讀）。
   - `CrawlerDataBffController`（CrawlerDataView 專屬，「公開資訊」分組，Requirement 38）：爬蟲資訊查詢頁，一頁一 BFF、WebClient 轉呼 business：
     - `GET /api/bff/crawler-data?date=YYYY-MM-DD&dateField=fetched|published&category=` → business `GET /api/news-headlines`：查指定日期爬回的 `news_headline`（與今日股市分析同讀一份表，符合「同義欄位、同一 business API」）。
@@ -11732,3 +11732,64 @@ Compose 將兩個 host directory 以唯讀方式分別 mount：
 4. 不以 `-k`、不以 browser certificate bypass、不中斷真實登入、不觸發 Google OAuth callback 或任何 broker call 作為驗收手段。
 
 通過上述 runtime acceptance 後，才更新操作文件，記錄事故根因、dual-SNI source of truth、public-required gate、部署指令與重建後驗證清單。
+
+## Requirement 143／Task 421：開放 API 錯誤日誌擴大擷取 4xx 與 gateway 無法連線失敗
+
+### 背景與範圍
+
+延伸 Requirement 141／Task 417 的觀測資料流：不新建 catalog、不新建資料表，沿用既有 `api_error_log`、既有 13 條 OPEN_API 白名單 route、既有 `/internal/api-error-logs` ingest contract 與既有 ADMIN 雙層守門。只放寬「什麼情況要記一筆」，新增「由誰來記」的第二個 OPEN_API producer，並讓清單多顯示一個失敗當下就已知、只是原本沒有保存的事實：HTTP 狀態碼。起因是兩類當天實際發生、但落在既有 141 排除範圍內的失敗：呼叫端對 `market-index` 帶不存在的代碼（4xx，caller error 排除）、Nginx 在 BFF/business-services 重啟空窗期間自行回應 502（請求根本沒進到 BFF，既有 filter 架構上看不到）。
+
+**本節取代上方 Requirement 141／Task 417 設計說明裡下列已過期的敘述**（原文保留在上方不動，讀者須以本節為準，不得只讀 141 該節）：
+- 「filter 在最終 response status 已確定後才判定：只有 5xx 才以 BFF renderer 建立一筆 ingest」→ 改為：5xx 一律建立；4xx 只在已捕獲 Throwable 時建立（見下方「PublicApiErrorCaptureWebFilter 放寬」）。
+- 「若 advice 把 Throwable 映射為 1xx–4xx，filter 必丟棄 attribute、zero row」→ 這句只在「沒有捕獲到 Throwable」時仍成立；捕獲到 Throwable 且映射為 4xx 時不再 zero row。
+- 「ApiErrorLogIngestClient...提送固定 JSON schema：`source`、`operationKey`、`apiName`、`messageHeader`、`stackTrace`、`occurredAt`；不接受別名或缺欄」→ schema 擴為 8 欄（新增 `httpStatus`、`dedupeKey`），「不接受別名或缺欄」的精神不變，缺欄位改為缺這 8 個之一即拒絕。
+- 管理者查詢 contract 表格裡 `GET /api/api-error-logs`／`GET /api/api-error-logs/{id}` 的回應欄位列表 → 均新增 `httpStatus`（FUBON_API 為 `null`）。
+- 前端一節「table 僅渲染時間、來源、保存的 apiName、原始錯誤標頭」→ 新增「HTTP 狀態碼」欄，插入來源與 apiName 之間。
+- 「驗證設計」一節「204/captured-4xx/unknown 404 zero row」一句同樣部分取代：`captured-4xx` 不再是 zero row，改依上方「PublicApiErrorCaptureWebFilter 放寬」；`204` 與 `unknown 404` 仍是 zero row，不變。
+
+### PostgreSQL 變更
+
+Liquibase v1.125.0-api-error-log-status-and-dedupe.sql 對既有 `api_error_log` 做純新增：
+
+~~~text
+api_error_log（既有表，新增兩欄）
+  http_status  SMALLINT NULL, CHECK (http_status IS NULL OR http_status BETWEEN 100 AND 599)
+  dedupe_key   VARCHAR(64) NULL
+
+uq_api_error_log_dedupe_key
+  UNIQUE INDEX ON api_error_log (dedupe_key) WHERE dedupe_key IS NOT NULL
+~~~
+
+`http_status` 由 OPEN_API 的兩個 producer（既有 WebFilter、下方新增的 gateway-log 排程）填入；FUBON_API 既有 5 個 producer 不變、留 NULL。`dedupe_key` 只由新 gateway-log 排程填入（該行原始文字的 SHA-256 hex digest），其餘既有 producer 一律留 NULL。既有 `guard_api_error_log_retention` trigger 已對 `api_error_log` 的所有 UPDATE 一律 `RAISE EXCEPTION`；新 producer 對重複內容的處理方式是「INSERT 因唯一索引違反而失敗」，不是「UPDATE 已存在的 row」，與既有 append-only 不變量完全相容，原 trigger 不需修改。migration 註冊後依既有規則重產 `db/schema.sql`。
+
+### PublicApiErrorCaptureWebFilter 放寬
+
+`finalStatus(...)` 目前「只有 5xx 才 `recordOnce`」改為：final status 為 5xx 時無條件 `recordOnce`（含既有 status-fallback 分支，行為不變，因為這個分支現在只可能是 5xx）；final status 為 4xx 時，**只有**當下 exchange attribute 已存在 `CAPTURE_ATTRIBUTE`（代表某個 advice/resolver 真的捕獲了一個 Throwable，不是 controller 主動、非例外地回應 4xx）才 `recordOnce`。`recordOnce` 新增一個 `int httpStatus` 參數，原樣傳給 `ingest.ingest(...)`。`ApiErrorLogIngestClient.ingest(...)` 新增 `httpStatus` 參數，固定帶 `dedupeKey=null`（filter-driven capture 從不去重，每次都是新的一次性事件）。
+
+### 新增：BFF gateway-log 排程 producer
+
+新增共用類別（例如 `bff/apierrorlogs/OpenApiRouteCatalog`），把目前寫死在 `PublicApiErrorCaptureWebFilter` 內的 13 筆 `ROUTES` map 抽出，供 WebFilter 與新排程共用同一份，避免兩處各自維護、日後新增/修改路由卻只改到一處。
+
+新增 `bff/apierrorlogs/NginxGatewayFailureLogTailer`（可命名等價）：`@Scheduled(fixedDelay=...)`（預設值＋可設定覆寫），讀取設定路徑（預設 `/var/log/nginx-shared/error.log`，可設定）的檔案內容，只處理 `[error]` 等級行（`[warn]`/`[notice]`/`[info]` 一律略過）。每個 tick 從檔案開頭完整重讀，不持久化 offset；正確性由 `dedupe_key` 唯一索引保證，不需要跨重啟保留游標——這正是 BFF 自己重啟時最需要捕捉的情境：nginx 在 BFF 離線期間寫入的行，必須在 BFF 回來後的下一個 tick 被讀到，而非被一個「只看新增內容」的 cursor 錯過。
+
+每行解析：
+- 時間戳：nginx 格式 `YYYY/MM/DD HH:mm:ss`，容器系統時區固定 UTC，轉為 `Instant`。
+- `request: "<METHOD> <PATH>[?query] HTTP/1.1"`：取 METHOD 與 PATH（去除 query string 與後方 ` HTTP/1.1`），查表比對 `OpenApiRouteCatalog`；查無比對則整行捨棄、zero row。
+- 錯誤原因：整行文字含 `timed out` 時 `httpStatus=504`，其餘一律 `httpStatus=502`（對應本 gateway 各 `location` 對單一動態 upstream 變數 `proxy_pass`、未使用 `upstream {}` 群組時，nginx 對 connect/read 失敗的預設行為）。
+- `messageHeader`：固定樣式，例如 `"Nginx 無法連線至上游服務 operation=<operationKey> status=<httpStatus>"`。
+- `stackTrace`：該行原始文字（已確認只含 container-internal IP/port/hostname，不含 token/certificate/account；仍照既有 renderer 慣例走一次既有 sanitize 作第二道防線）。
+- `dedupeKey`：該行（trim 後）原始文字的 SHA-256 hex digest。
+
+比對到白名單的每一行都呼叫既有 `ApiErrorLogIngestClient.ingest(...)`（新增 `dedupeKey` 參數，只有這個 producer 帶非 null 值）。掛載檔案不存在（例如本機未接 volume 的開發情境）時，排程整輪略過並只記最小診斷，不得讓 BFF 啟動失敗。
+
+### Docker 基礎設施
+
+新增具名 volume（例如 `nginx_gateway_log`，比照既有 `postgres_data`/`redis_data` 用 `name:` 明確命名）。`api-gateway` 服務新增 `- nginx_gateway_log:/var/log/nginx-shared` 掛載（讀寫）；因該服務是 `read_only: true` + `user: nginx`，Dockerfile 須在 `USER nginx` 之前建立該目錄並 `chown` 給 `nginx` user，具名 volume 首次建立時才會繼承這個屬主與可讀寫權限。`bff` 服務新增同一 volume 的 `:ro` 掛載；`bff` 的 `appuser` 與 `api-gateway` 的 `nginx` user 是不同 uid，須確認 nginx 寫出的檔案對其他 uid 仍可讀（跨容器 uid 邊界，Docker acceptance 需明確驗證，不可假設）。`nginx.conf` 的 `error_log` 新增第二個目的地指到這個掛載路徑，既有 `/dev/stderr` 目的地保留，`docker logs asset-api-gateway` 行為不變。
+
+### 讀模型與前端
+
+business 既有 `ApiErrorLogService.ListItem`/`Detail` record 新增 `httpStatus` 欄位（FUBON_API 為 `null`）；BFF 三個既有 proxy endpoint 因採 `Mono<Object>` opaque relay，程式碼不需變更，但須有測試證明新欄位確實透傳。前端 `ApiErrorLogsView.vue` table 新增「HTTP 狀態碼」欄（`httpStatus`，null 顯示 `—`），置於「來源」與「API 名稱」之間；既有三個篩選 `el-select`、expand/lazy-detail 行為與 grid 版面比例不變。
+
+### 驗證設計
+
+Java 邏輯（WebFilter 的 4xx/5xx 分流、新排程的 log 行解析為純函式、recorder 傳遞新欄位）以既有 mock-based 單元測試風格覆蓋，比照 `ApiErrorLogServiceTest` 既有寫法。`dedupe_key` 唯一索引對真實併發/重複 INSERT 的實際擋下行為，比照 `FubonTradeSyncUniqueIndexPostgresTest` 的既有模式，用 Testcontainers 起真實 PostgreSQL 驗證（不是 mock、不是 H2）。Docker runtime acceptance 除既有 Requirement 141 的重建/recreate/schema drift 流程外，另需：確認新 volume 在 `api-gateway`（讀寫）與 `bff`（唯讀）都掛載成功且讀取無 Permission denied；以受控方式讓 Nginx 對其中一條白名單路由產生一次真實連線失敗，確認 BFF 排程實際寫入一筆帶正確 `httpStatus`、`messageHeader` 含「無法連線」字樣的 row，且同一失敗行重複觸發排程時 readback 筆數仍為 1；以 curl 對既有 market-index 端點送出不合法 `market` 值，確認 list 出現一筆 `httpStatus=400` 的新 row；不呼叫真實 Fubon SDK，不改 flags、`.env` 或 secrets。

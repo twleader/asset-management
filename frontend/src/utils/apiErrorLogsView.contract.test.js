@@ -18,3 +18,14 @@ test('API error-log view keeps the three selects, source contract and lazy text-
   assert.ok(view.includes('Object.hasOwn(details.value, row.id)'))
   assert.equal(view.includes('v-html'), false)
 })
+
+test('API error-log view adds an HTTP status column between source and apiName with a dash fallback for null (Task 421／Requirement 143)', () => {
+  assert.ok(view.includes('prop="httpStatus" label="HTTP 狀態碼" width="120"'))
+  assert.ok(view.includes("{{ row.httpStatus ?? '—' }}"))
+  const sourceIndex = view.indexOf('prop="source"')
+  const httpStatusIndex = view.indexOf('prop="httpStatus"')
+  const apiNameIndex = view.indexOf('prop="apiName"')
+  assert.ok(sourceIndex >= 0)
+  assert.ok(httpStatusIndex > sourceIndex)
+  assert.ok(apiNameIndex > httpStatusIndex)
+})

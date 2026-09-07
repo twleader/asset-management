@@ -9,7 +9,7 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false"/>
     <el-table :data="rows" v-loading="loading" row-key="id" @expand-change="expand">
       <el-table-column type="expand"><template #default="{ row }"><pre v-if="Object.hasOwn(details, row.id)" class="trace">{{ details[row.id] }}</pre><span v-else>載入詳細錯誤中…</span></template></el-table-column>
-      <el-table-column prop="occurredAt" label="發生時間" min-width="190"/><el-table-column prop="source" label="來源" width="130"/><el-table-column prop="apiName" label="API 名稱" min-width="160"/><el-table-column prop="messageHeader" label="錯誤訊息標頭" min-width="360"/>
+      <el-table-column prop="occurredAt" label="發生時間" min-width="190"/><el-table-column prop="source" label="來源" width="130"/><el-table-column prop="httpStatus" label="HTTP 狀態碼" width="120"><template #default="{ row }">{{ row.httpStatus ?? '—' }}</template></el-table-column><el-table-column prop="apiName" label="API 名稱" min-width="160"/><el-table-column prop="messageHeader" label="錯誤訊息標頭" min-width="360"/>
     </el-table>
     <el-empty v-if="!loading && !error && rows.length === 0" description="目前沒有錯誤日誌"/>
   </section>

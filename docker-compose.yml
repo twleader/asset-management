@@ -374,6 +374,10 @@ services:
       # Session／代看 cookie Secure 開關（Requirement 30）：目前 nginx 為純 http，維持 false 以免瀏覽器不回送登入 cookie；
       # 正式環境於 Nginx 終止 TLS（https）後設 SESSION_COOKIE_SECURE=true 才帶 Secure。
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+    volumes:
+      # Task 421／Requirement 143：唯讀掛載 api-gateway 寫入的 Nginx 錯誤 log，供
+      # NginxGatewayFailureLogTailer 讀取；BFF 自身不寫入這個磁碟區。
+      - nginx_gateway_log:/var/log/nginx-shared:ro
     depends_on:
       business-services:
         condition: service_healthy
@@ -395,6 +399,11 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9090:9090"
+    volumes:
+      # Task 421／Requirement 143：具名磁碟區落地 Nginx 錯誤 log，供 bff 的
+      # NginxGatewayFailureLogTailer 唯讀擷取 Nginx 自己回應的 502（BFF/business-services
+      # 重建空窗期間 healthcheck 打中的連線失敗，架構上進不到 BFF 應用程式）。
+      - nginx_gateway_log:/var/log/nginx-shared
     depends_on:
       external-materials-service:
         condition: service_healthy
@@ -457,3 +466,5 @@ volumes:
     name: asset-postgres-data
   redis_data:
     name: asset-redis-data
+  nginx_gateway_log:
+    name: asset-nginx-gateway-log
