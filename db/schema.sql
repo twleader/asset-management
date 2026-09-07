@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-01
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-07
 -- 產生當下表數：99 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
@@ -125,6 +125,9 @@ CREATE TABLE public.api_error_log (
     message_header text NOT NULL,
     stack_trace text NOT NULL,
     occurred_at timestamp with time zone NOT NULL,
+    http_status smallint,
+    dedupe_key character varying(64),
+    CONSTRAINT api_error_log_http_status_check CHECK (((http_status IS NULL) OR ((http_status >= 100) AND (http_status <= 599)))),
     CONSTRAINT api_error_log_source_check CHECK (((source)::text = ANY ((ARRAY['OPEN_API'::character varying, 'FUBON_API'::character varying])::text[])))
 );
 
@@ -5009,6 +5012,13 @@ CREATE UNIQUE INDEX uk_dividend_event ON public.stock_dividend_history USING btr
 --
 
 CREATE UNIQUE INDEX uk_news_headline_dedupe ON public.news_headline USING btree (dedupe_key);
+
+
+--
+-- Name: uq_api_error_log_dedupe_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_api_error_log_dedupe_key ON public.api_error_log USING btree (dedupe_key) WHERE (dedupe_key IS NOT NULL);
 
 
 --

@@ -50,11 +50,28 @@ class ApiErrorLogServiceTest {
         assertThat(operation.path("apiUrl").asText()).isEqualTo("GET /api/quotes");
 
         var list = json.readTree(json.writeValueAsString(new ApiErrorLogService.ListItem(1L, "OPEN_API",
-                "OPEN_QUOTES_LIST", "即時報價清單", "failure", null)));
+                "OPEN_QUOTES_LIST", "即時報價清單", "failure", null, null)));
         var detail = json.readTree(json.writeValueAsString(new ApiErrorLogService.Detail(1L, "OPEN_API",
-                "OPEN_QUOTES_LIST", "即時報價清單", "failure", "trace", null)));
+                "OPEN_QUOTES_LIST", "即時報價清單", "failure", "trace", null, null)));
         assertThat(list.has("apiUrl")).isFalse();
         assertThat(detail.has("apiUrl")).isFalse();
+    }
+
+    @Test void list_and_detail_from_carry_http_status_including_null_for_fubon_api_rows() {
+        ApiErrorLog withStatus = new ApiErrorLog("OPEN_API", "OPEN_MARKET_INDEX", "大盤指數", "header", "trace",
+                java.time.Instant.parse("2026-09-07T01:00:00Z"), 400, null);
+        ApiErrorLog withoutStatus = new ApiErrorLog("FUBON_API", "FUBON_PORTFOLIO_READ", "庫存與未實現損益", "header", "trace",
+                java.time.Instant.parse("2026-09-07T01:00:00Z"), null, null);
+
+        ApiErrorLogService.ListItem listWithStatus = ApiErrorLogService.ListItem.from(withStatus);
+        ApiErrorLogService.ListItem listWithoutStatus = ApiErrorLogService.ListItem.from(withoutStatus);
+        ApiErrorLogService.Detail detailWithStatus = ApiErrorLogService.Detail.from(withStatus);
+        ApiErrorLogService.Detail detailWithoutStatus = ApiErrorLogService.Detail.from(withoutStatus);
+
+        assertThat(listWithStatus.httpStatus()).isEqualTo(400);
+        assertThat(listWithoutStatus.httpStatus()).isNull();
+        assertThat(detailWithStatus.httpStatus()).isEqualTo(400);
+        assertThat(detailWithoutStatus.httpStatus()).isNull();
     }
 
     private static ApiErrorLogService adminService() {
