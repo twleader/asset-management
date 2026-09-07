@@ -80,6 +80,32 @@ git -C "$MW" fetch origin && git -C "$MW" merge --ff-only origin/main
 cp /Users/steven/Project/asset-management/.env "$MW/.env"   # worktree 沒有 .env；env_file 相對 compose 檔解析，--env-file 救不了
 ```
 
+### ⚠ 不論最後決定從哪個目錄 build，先比對該目錄的 `.env` 跟 main 的 `.env`
+
+**這跟上面「從哪個目錄 build」是兩個獨立的風險軸——一個管程式碼新不新，這個管 `.env` 新不新。**
+`.env` 是 per-worktree、gitignored，可能是一份缺漏、過期的舊副本；即使乖乖照上面的表從對的目錄
+build 程式碼，如果那個目錄的 `.env` 本身就是舊的，一樣會讓服務套用錯誤或缺失的 secrets。
+2026-09-07 實測過：某 worktree 的 `.env` 比 main 的少了 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`、
+`API_ERROR_LOG_INGEST_TOKEN`、`FRONTEND_PUBLIC_TLS_REQUIRED` 與兩個 TLS 路徑——從那裡重建
+`frontend`／`bff` 後，公網網域被套上本機自簽 fallback 憑證、Google OAuth 登入 `redirect_uri_mismatch`，
+且 `business-services`／`bff` 兩邊的內部 token 一度不一致（fail-soft 設計，不報錯、只是悄悄失效）。
+**build 成功、容器 healthy 全程都正常——這兩者都不代表 secrets 是對的**，等使用者回報憑證警告或登入
+失敗才回頭查，一次事故要來回好幾輪才收斂，非常浪費 token。
+
+**在 Step 3 執行 build/recreate 之前，先跑（`<TARGET>` 是你決定要 build 的那個目錄，可能是 `$MW`
+也可能是你自己所在的 feature worktree）：**
+
+```bash
+diff <(sort <TARGET>/.env) <(sort /Users/steven/Project/asset-management-main/.env)
+```
+
+（若 `<TARGET>` 就是 main 自己，這個指令會自動零差異，可安全略過不必特判。）任何差異都是紅旗——尤其
+`GOOGLE_CLIENT_*`、`*_TOKEN`、`FRONTEND_*_TLS_*` 這類直接影響對外憑證／第三方 OAuth／內部服務間認證
+的變數。不要假設「反正差不多」；main 的 `.env` 是持續維護、跟正式環境同步的那份，有差異時預設以它
+為準——若要繼續用 `<TARGET>` 建置，先把缺漏／不同的變數值同步過去（不要覆寫 `<TARGET>/.env` 裡
+main 沒有的其餘既有內容），再繼續 Step 3。修完後用 `docker exec <container> printenv <VAR>` 對照
+容器內的實際值確認，不能只看 build 有沒有報錯或容器是否 healthy。
+
 ### 被洗掉時怎麼認出來
 
 症狀是**站沒掛、只是跑舊版**：容器全 healthy、頁面回 200，但功能不見了。**DB 不會跟著回退**，所以典型組合是「資料表還在、seed 還在，但 API 回 `No static resource api/xxx`、前端卡片消失」——看到這組合就是映像被覆蓋，不是 migration 沒跑。
