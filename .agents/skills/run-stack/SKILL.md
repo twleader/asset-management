@@ -135,30 +135,102 @@ $DC up -d --no-deps --force-recreate <service>
 
 `--no-deps` keeps unrelated services untouched. `--force-recreate` is required because the image tag stays `asset-management-<service>:latest`; without it Compose sees "same image tag" and skips.
 
-### ⚠ Recreated `business-services` or `external-materials-service`? Restart `bff` too
+### ⚠ Recreated `business-services` or `external-materials-service`? Keep `bff` running and verify recovery first
 
-Recreating a container gives it a **new IP** on the compose network (observed: `172.19.0.4` → `172.19.0.7`). The BFF's JVM
-resolver keeps the **old** IP and every `/api/**` then fails with `Connection refused: business-services/<old-ip>:8080`
-→ **500 on every page**. It does *not* self-heal in 30s (measured: still broken 3 minutes later — Docker's embedded DNS
-hands out TTL 600).
+Do **not** routinely restart `bff` when either upstream is force-recreated. The BFF's
+`DnsCacheConfig.MAX_TTL` is deliberately **30 seconds** (Task 208); retain that design and
+do not change the TTL as a workaround. Keep BFF available while the new upstream becomes
+healthy, then retry the affected safe GET through `api-gateway`. This lets the resolver
+refresh without introducing a BFF outage of our own.
+
+First wait for the just-recreated upstream to report `(healthy)`. Check its Docker health
+status once per second for at most **120 seconds**; if it never becomes healthy, print the
+last status and fail. Do not begin the 30-second BFF retry window before this succeeds:
+
+```bash
+upstream_service=business-services  # Or: external-materials-service
+upstream_container="asset-$upstream_service"
+upstream_deadline=$(( $(date +%s) + 120 ))
+upstream_status=unknown
+while [ "$(date +%s)" -lt "$upstream_deadline" ]; do
+  upstream_status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
+      "$upstream_container" 2>&1)
+  if [ "$upstream_status" = healthy ]; then
+    break
+  fi
+  sleep 1
+done
+if [ "$upstream_status" != healthy ]; then
+  echo "FAILED: $upstream_container did not become healthy within 120 seconds; last Docker health status: $upstream_status" >&2
+  exit 1
+fi
+```
+
+After `business-services` is healthy, retry its concrete safe endpoint once per second for
+at most **30 seconds**. Keep the error output: a timeout must remain a failing, diagnosable
+result rather than being hidden by the retry loop.
+
+```bash
+deadline=$(( $(date +%s) + 30 ))
+bff_recovered=false
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if bff_response=$(curl -fsS --connect-timeout 1 --max-time 1 \
+      'http://127.0.0.1:9090/api/public/market-index?market=TWSE&range=1m') && \
+      printf '%s' "$bff_response" | \
+      python3 -c 'import json,sys; json.load(sys.stdin); print("market-index JSON received")'; then
+    bff_recovered=true
+    break
+  fi
+  sleep 1
+done
+if [ "$bff_recovered" != true ]; then
+  echo 'FAILED: BFF → business-services did not recover within 30 seconds.' >&2
+  exit 1
+fi
+```
+
+After `external-materials-service` is healthy, use the same 30-second, one-second retry
+window for `/api/quotes`. Its only success condition is a JSON array: an empty array (`[]`)
+is a valid cache state and must **not** be treated as a failure.
+
+```bash
+deadline=$(( $(date +%s) + 30 ))
+bff_recovered=false
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if bff_response=$(curl -fsS --connect-timeout 1 --max-time 1 \
+      http://127.0.0.1:9090/api/quotes) && \
+      printf '%s' "$bff_response" | \
+      python3 -c 'import json,sys; value=json.load(sys.stdin); assert isinstance(value, list), type(value); print("quotes JSON array received")'; then
+    bff_recovered=true
+    break
+  fi
+  sleep 1
+done
+if [ "$bff_recovered" != true ]; then
+  echo 'FAILED: BFF → external-materials-service did not recover within 30 seconds.' >&2
+  exit 1
+fi
+```
+
+Only use the following fallback when the relevant loop has actually expired, the upstream is
+still `(healthy)`, **and** `docker logs asset-bff --since <upstream-recreate-start-time>`
+shows a `Connection refused` that names that exact upstream. A generic `502`, any other HTTP
+failure, malformed payload, or an unrelated BFF log line is not enough evidence to restart
+BFF. The fallback itself creates a short BFF outage while its single replica stops and starts;
+it is not a normal deployment step.
 
 ```bash
 docker compose -p asset-management restart bff
+docker exec asset-bff wget -qO- http://127.0.0.1:8080/actuator/health
 ```
 
-Do this **whenever** you recreated an upstream service, even if the BFF itself was untouched. Then confirm no residual failures:
+After that exceptional restart, repeat the same relevant 30-second endpoint verification
+above; do not report recovery merely because BFF's actuator is `UP`.
 
-```bash
-docker logs asset-bff --since <bff-start-time>Z 2>&1 | grep -cE "Connection refused|500 Server Error"   # → 0
-```
-
-**Diagnosing it later (don't misread it as a broken feature):** `business-services` logs are *clean*, calling the endpoint
-from inside the business container works, and the errors appear **only** in `docker logs asset-bff`. `docker exec asset-bff
-getent hosts business-services` resolves *correctly* — the stale copy lives inside the JVM, not the container's resolver.
-Compare `docker inspect asset-business-services` current IP against the refused IP in the log to confirm.
-
-Note: `asset-bff` has **no curl**, and every BFF route except `/actuator/health|info` needs a login session — you cannot
-prove the upstream hop with an unauthenticated curl. Verify via the log check above, then have the user reload a page.
+Keep api-gateway's existing 10-second `wget` healthcheck and the Nginx log tailer enabled.
+They may emit a transient `502` while a single BFF replica itself is being rebuilt or
+restarted, and that interruption cannot be eliminated by this upstream-recovery change.
+Do not delete or silence either signal to hide that noise: it records a real availability gap.
 
 Stack down (no containers running):
 
