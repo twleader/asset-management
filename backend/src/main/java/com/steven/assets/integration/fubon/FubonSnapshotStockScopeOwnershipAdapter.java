@@ -33,17 +33,15 @@ public class FubonSnapshotStockScopeOwnershipAdapter implements SnapshotStockSco
     private final AssetSnapshotRepository snapshotRepository;
     private final Clock clock;
     private final boolean inventorySyncEnabled;
-    private final boolean twLiveQuotesEnabled;
 
     @Autowired
     public FubonSnapshotStockScopeOwnershipAdapter(
             FubonConfigState configState,
             UserAdminService userAdminService,
             AssetSnapshotRepository snapshotRepository,
-            @Value("${fubon.inventory-sync-enabled:false}") boolean inventorySyncEnabled,
-            @Value("${fubon.tw-live-quotes-enabled:false}") boolean twLiveQuotesEnabled) {
+            @Value("${fubon.inventory-sync-enabled:false}") boolean inventorySyncEnabled) {
         this(configState, userAdminService, snapshotRepository, Clock.system(TW_ZONE),
-                inventorySyncEnabled, twLiveQuotesEnabled);
+                inventorySyncEnabled);
     }
 
     FubonSnapshotStockScopeOwnershipAdapter(
@@ -51,14 +49,12 @@ public class FubonSnapshotStockScopeOwnershipAdapter implements SnapshotStockSco
             UserAdminService userAdminService,
             AssetSnapshotRepository snapshotRepository,
             Clock clock,
-            boolean inventorySyncEnabled,
-            boolean twLiveQuotesEnabled) {
+            boolean inventorySyncEnabled) {
         this.configState = configState;
         this.userAdminService = userAdminService;
         this.snapshotRepository = snapshotRepository;
         this.clock = clock;
         this.inventorySyncEnabled = inventorySyncEnabled;
-        this.twLiveQuotesEnabled = twLiveQuotesEnabled;
     }
 
     @Override
@@ -68,7 +64,6 @@ public class FubonSnapshotStockScopeOwnershipAdapter implements SnapshotStockSco
         if (config == null
                 || config.state() != FubonConfigState.State.READY
                 || !inventorySyncEnabled
-                || twLiveQuotesEnabled
                 || !isCurrentWriterTarget(target)) {
             return SnapshotStockScopeOwnership.payloadOwned();
         }

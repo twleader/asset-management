@@ -33,8 +33,8 @@ public class FubonBankBalanceSyncScheduler {
     }
 
     @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Taipei")
-    @Scheduled(cron = "0 30 9 * * *", zone = "Asia/Taipei")
-    @Scheduled(cron = "0 0 14 * * *", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 20 9 * * *", zone = "Asia/Taipei")
+    @Scheduled(cron = "0 20 14 * * *", zone = "Asia/Taipei")
     @Scheduled(cron = "0 0 22 * * *", zone = "Asia/Taipei")
     public void scheduledBankBalanceSync() {
         if (syncService.localConfigGate() != null) return;

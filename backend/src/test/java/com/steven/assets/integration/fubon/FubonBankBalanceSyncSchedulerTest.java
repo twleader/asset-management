@@ -28,7 +28,7 @@ class FubonBankBalanceSyncSchedulerTest {
         Scheduled[] scheduled = method.getAnnotationsByType(Scheduled.class);
         assertThat(scheduled).hasSize(4);
         assertThat(scheduled).extracting(Scheduled::cron).containsExactlyInAnyOrder(
-                "0 0 8 * * *", "0 30 9 * * *", "0 0 14 * * *", "0 0 22 * * *");
+                "0 0 8 * * *", "0 20 9 * * *", "0 20 14 * * *", "0 0 22 * * *");
         assertThat(scheduled).allSatisfy(annotation -> assertThat(annotation.zone()).isEqualTo("Asia/Taipei"));
     }
 

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 
 from fubon_broker_service.quotes import QuoteError, QuoteService
+from fubon_broker_service.sdk_gateway import SdkCallError
 
 from helpers import fixed_now, quote_raw
 
@@ -20,7 +21,9 @@ class Gateway:
         self.calls = 0
         self.lock = threading.Lock()
 
-    def quote(self, _code):
+    def quote(self, _code, *, deadline=None, before_dispatch=None):
+        if before_dispatch is not None:
+            before_dispatch()
         with self.lock:
             self.calls += 1
         if self.delay:
@@ -36,7 +39,9 @@ class PerCodeGateway:
         self.max_active = 0
         self.lock = threading.Lock()
 
-    def quote(self, code):
+    def quote(self, code, *, deadline=None, before_dispatch=None):
+        if before_dispatch is not None:
+            before_dispatch()
         with self.lock:
             self.calls += 1
             self.active += 1
@@ -398,7 +403,137 @@ def test_batch_wall_timeout_returns_stable_failure_for_every_code(monkeypatch):
     assert [row["reason"] for row in result["quotes"]] == ["BATCH_TIMEOUT", "BATCH_TIMEOUT"]
 
 
-def test_per_call_timeout_is_bounded_and_reported(monkeypatch):
-    monkeypatch.setattr(QuoteService, "PER_CALL_TIMEOUT_SECONDS", 0.01)
-    result = asyncio.run(QuoteService(Gateway(delay=0.05), now=fixed_now).read(["2330"]))
-    assert result["quotes"][0]["reason"] == "QUOTE_TIMEOUT"
+def test_quote_service_has_no_independent_per_call_deadline():
+    assert not hasattr(QuoteService, "PER_CALL_TIMEOUT_SECONDS")
+
+
+def test_late_native_timeout_keeps_same_key_admitted_until_worker_completion():
+    class TimedOutNativeGateway:
+        def __init__(self):
+            self.calls = 0
+            self.started = threading.Event()
+            self.release_worker = threading.Event()
+            self.completed = threading.Event()
+            self.lock = threading.Lock()
+
+        def quote(self, code, *, deadline=None, before_dispatch=None):
+            assert before_dispatch is not None
+            before_dispatch()
+            with self.lock:
+                self.calls += 1
+                call_number = self.calls
+            if call_number == 1:
+                self.started.set()
+
+                def finish_after_native_worker():
+                    self.release_worker.wait()
+                    self.completed.set()
+
+                threading.Thread(target=finish_after_native_worker, daemon=True).start()
+                raise SdkCallError("QUOTE_TIMEOUT", completion_event=self.completed)
+            return quote_raw(code)
+
+    async def wait_until(predicate):
+        for _ in range(100):
+            if predicate():
+                return
+            await asyncio.sleep(0)
+        raise AssertionError("flight finalizer did not run")
+
+    async def scenario():
+        gateway = TimedOutNativeGateway()
+        service = QuoteService(gateway, now=fixed_now)
+
+        first = await service.read(["2330"])
+        assert first["quotes"][0]["reason"] == "QUOTE_TIMEOUT"
+        assert gateway.started.is_set()
+
+        # The first caller has already received a sanitized failure, but a second
+        # same-key caller must join that admitted flight rather than dispatching.
+        second = await service.read(["2330"])
+        assert second["quotes"][0]["reason"] == "QUOTE_TIMEOUT"
+        assert gateway.calls == 1
+
+        gateway.release_worker.set()
+        await asyncio.wait_for(asyncio.to_thread(gateway.completed.wait), timeout=1)
+        await wait_until(lambda: ("LIVE", "2330") not in service._inflight)
+
+        third = await service.read(["2330"])
+        assert third["quotes"][0]["status"] == "SUCCESS"
+        assert gateway.calls == 2
+
+    asyncio.run(scenario())
+
+
+def test_queued_expiration_debits_no_quote_quota_and_never_calls_gateway(monkeypatch):
+    class NeverDispatchGateway:
+        def __init__(self):
+            self.calls = 0
+
+        def quote(self, _code, *, deadline=None, before_dispatch=None):
+            self.calls += 1
+            raise AssertionError("queued quote must not dispatch")
+
+    async def scenario():
+        monkeypatch.setattr(QuoteService, "ENDPOINT_TIMEOUT_SECONDS", 0.01)
+        gateway = NeverDispatchGateway()
+        service = QuoteService(gateway, now=fixed_now)
+        service._semaphore = asyncio.Semaphore(0)
+
+        result = await service.read(["2330"])
+
+        assert result["quotes"][0]["reason"] == "BATCH_TIMEOUT"
+        assert gateway.calls == 0
+        assert not service._call_starts
+
+    asyncio.run(scenario())
+
+
+def test_circuit_opened_while_waiting_prevents_later_native_dispatch(monkeypatch):
+    class ObservedSemaphore(asyncio.Semaphore):
+        def __init__(self):
+            super().__init__(1)
+            self.acquires = 0
+            self.second_waiting = asyncio.Event()
+
+        async def acquire(self):
+            self.acquires += 1
+            if self.acquires == 2:
+                self.second_waiting.set()
+            return await super().acquire()
+
+    class CircuitGateway:
+        def __init__(self):
+            self.native_codes = []
+            self.first_started = threading.Event()
+            self.release_first = threading.Event()
+
+        def quote(self, code, *, deadline=None, before_dispatch=None):
+            assert before_dispatch is not None
+            before_dispatch()
+            self.native_codes.append(code)
+            if code == "2330":
+                self.first_started.set()
+                self.release_first.wait()
+                return {"is_success": False, "code": 429}
+            return quote_raw(code)
+
+    async def scenario():
+        gateway = CircuitGateway()
+        service = QuoteService(gateway, now=fixed_now)
+        service._semaphore = ObservedSemaphore()
+
+        first_task = asyncio.create_task(service.read(["2330"]))
+        await asyncio.wait_for(asyncio.to_thread(gateway.first_started.wait), timeout=1)
+        second_task = asyncio.create_task(service.read(["2317"]))
+        await asyncio.wait_for(service._semaphore.second_waiting.wait(), timeout=1)
+
+        gateway.release_first.set()
+        first, second = await asyncio.gather(first_task, second_task)
+
+        assert first["quotes"][0]["reason"] == "RATE_LIMITED"
+        assert second["quotes"][0]["reason"] == "RATE_LIMIT_CIRCUIT_OPEN"
+        assert gateway.native_codes == ["2330"]
+        assert len(service._call_starts) == 1
+
+    asyncio.run(scenario())

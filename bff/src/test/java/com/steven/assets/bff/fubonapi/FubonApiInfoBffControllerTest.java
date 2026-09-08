@@ -202,6 +202,14 @@ class FubonApiInfoBffControllerTest {
                 .doesNotContain("逐字保存", "尚未核實", "佔位");
         assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(11);
     }
+
+    @Test
+    void bankBalanceDocumentsTheSameFourSlotsAsTheScheduler() {
+        var bankBalance = apis().stream()
+                .filter(api -> "sdk.accounting.bank_remain".equals(api.sdkReference()))
+                .findFirst().orElseThrow();
+        assertThat(bankBalance.consumer()).contains("08:00／09:20／14:20／22:00");
+    }
     @Test
     void cashDividendScopeDoesNotClaimCapitalChangesOrUnverifiedStockDividendAmounts() {
         var dividends = apis().stream().filter(api -> api.sdkReference().endsWith("corporate_actions.dividends")).findFirst().orElseThrow();

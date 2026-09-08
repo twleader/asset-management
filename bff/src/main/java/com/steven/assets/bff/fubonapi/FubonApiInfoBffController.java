@@ -77,7 +77,7 @@ public class FubonApiInfoBffController {
                     "sdk.accounting.bank_remain", "POST /internal/bank-balance/read",
                     "唯讀查詢交割銀行餘額，將通過身分、日期與金額驗證的台幣餘額更新到最新快照的台北富邦銀行證券戶，"
                             + "與快照總額同一交易提交；零餘額照寫" + RO,
-                    "business-services（每日 08:00／09:30／14:00／22:00，需另啟用設定；"
+                    "business-services（每日 08:00／09:20／14:20／22:00，需另啟用設定；"
                             + "手動 POST /internal/brokers/fubon/bank-balance-sync，dryRun 預設 true）",
                     "無 body／帳戶 selector；selected account 由 adapter 決定，需 internal token",
                     "queryDate／observedAt／accountFingerprint（HMAC 前 24 hex）／currency=TWD／balance／availableBalance；"

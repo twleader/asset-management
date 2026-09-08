@@ -53,7 +53,6 @@ public class FubonTradeSyncService {
     private final FubonTradeOutcomeCounters counters;
     private final Clock clock;
     private final boolean tradeSyncEnabled;
-    private final boolean liveQuotesEnabled;
 
     @Autowired
     public FubonTradeSyncService(
@@ -66,11 +65,10 @@ public class FubonTradeSyncService {
             StockMasterService stockMasterService,
             FubonTradeWriter writer,
             FubonTradeOutcomeCounters counters,
-            @org.springframework.beans.factory.annotation.Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled,
-            @org.springframework.beans.factory.annotation.Value("${fubon.tw-live-quotes-enabled:false}") boolean liveQuotesEnabled) {
+            @org.springframework.beans.factory.annotation.Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled) {
         this(configState, brokerClient, marketDataService, userAdminService, brokerRepository,
                 assetTransactionRepository, stockMasterService, writer, counters, Clock.system(TW_ZONE),
-                tradeSyncEnabled, liveQuotesEnabled);
+                tradeSyncEnabled);
     }
 
     FubonTradeSyncService(
@@ -84,8 +82,7 @@ public class FubonTradeSyncService {
             FubonTradeWriter writer,
             FubonTradeOutcomeCounters counters,
             Clock clock,
-            boolean tradeSyncEnabled,
-            boolean liveQuotesEnabled) {
+            boolean tradeSyncEnabled) {
         this.configState = configState;
         this.brokerClient = brokerClient;
         this.marketDataService = marketDataService;
@@ -97,13 +94,11 @@ public class FubonTradeSyncService {
         this.counters = counters;
         this.clock = clock;
         this.tradeSyncEnabled = tradeSyncEnabled;
-        this.liveQuotesEnabled = liveQuotesEnabled;
     }
 
     /** Scheduler calls this before config/calendar reads so consumer flags have precedence. */
     public FubonTradeOutcome tradeSyncFeatureGate(boolean dryRun) {
         if (!tradeSyncEnabled) return recordOutcome(FubonTradeOutcome.TRADE_SYNC_DISABLED);
-        if (liveQuotesEnabled) return recordOutcome(FubonTradeOutcome.TRADE_SYNC_CAPACITY_CONFLICT);
         return null;
     }
 
@@ -280,7 +275,6 @@ public class FubonTradeSyncService {
         return switch (outcome) {
             case DISABLED -> "DISABLED";
             case TRADE_SYNC_DISABLED -> "TRADE_SYNC_DISABLED";
-            case TRADE_SYNC_CAPACITY_CONFLICT -> "TRADE_SYNC_CAPACITY_CONFLICT";
             case MISCONFIGURED -> "MISCONFIGURED";
             case CALENDAR_UNKNOWN -> "CALENDAR_NOT_AUTHORIZED";
             case TRADE_FAILED -> "TRADE_ADAPTER_FAILURE";

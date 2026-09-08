@@ -71,7 +71,7 @@ class FubonInventorySyncServiceTest {
 
     @Test
     void inventoryFlagDisabledStopsBeforeAnyAdapterOrPersistenceAccess() {
-        FubonInventorySyncService disabled = configured(false, false);
+        FubonInventorySyncService disabled = configured(false);
         FubonDtos.SyncResponse result = disabled.syncManual(false);
         assertThat(result.outcome()).isEqualTo(FubonOutcome.INVENTORY_SYNC_DISABLED);
         verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
@@ -79,12 +79,21 @@ class FubonInventorySyncServiceTest {
     }
 
     @Test
-    void simultaneousLiveAndInventoryFlagsStopBeforeAnyAdapterOrPersistenceAccess() {
-        FubonInventorySyncService conflict = configured(true, true);
-        FubonDtos.SyncResponse result = conflict.syncManual(false);
-        assertThat(result.outcome()).isEqualTo(FubonOutcome.INVENTORY_SYNC_CAPACITY_CONFLICT);
-        verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
-                brokerRepository, stockRepository, writer);
+    void simultaneousLiveAndInventoryFlagsStillUseTheReadOnlyAdapter() {
+        // LIVE is deliberately no longer a constructor input or local gate.  With the
+        // deployment flag also enabled, the service must enter its normal read-only flow.
+        FubonInventorySyncService enabled = configured(true);
+        ready();
+        when(brokerClient.readPortfolio()).thenReturn(FubonDtos.CallResult.success(portfolio(TODAY)));
+        when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(true));
+        when(brokerClient.readTwQuotes(List.of("2330")))
+                .thenReturn(FubonDtos.CallResult.success(quoteBatch(quote(TODAY, "2330"))));
+
+        FubonDtos.SyncResponse result = enabled.syncManual(true);
+
+        assertThat(result.outcome()).isEqualTo(FubonOutcome.DRY_RUN);
+        verify(brokerClient).readPortfolio();
+        verify(brokerClient).readTwQuotes(List.of("2330"));
     }
 
     @Test
@@ -134,11 +143,11 @@ class FubonInventorySyncServiceTest {
         verifyNoInteractions(userAdminService, snapshotRepository, brokerRepository, stockRepository, writer);
     }
 
-    private FubonInventorySyncService configured(boolean inventoryEnabled, boolean liveEnabled) {
+    private FubonInventorySyncService configured(boolean inventoryEnabled) {
         Clock clock = Clock.fixed(Instant.parse("2026-08-21T04:00:00Z"), ZoneOffset.UTC);
         return new FubonInventorySyncService(configState, brokerClient, marketDataService, userAdminService,
                 snapshotRepository, brokerRepository, stockRepository, writer, counters, clock,
-                inventoryEnabled, liveEnabled);
+                inventoryEnabled);
     }
 
     @Test

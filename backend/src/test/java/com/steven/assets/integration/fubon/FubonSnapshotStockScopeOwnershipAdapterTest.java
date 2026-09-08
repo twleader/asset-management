@@ -51,7 +51,7 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
         configureEligibleTarget();
         when(configState.snapshot()).thenReturn(config(FubonConfigState.State.READY));
 
-        SnapshotStockScopeOwnership ownership = adapter(true, false)
+        SnapshotStockScopeOwnership ownership = adapter(true)
                 .capture(target(7L, 9L, TODAY));
 
         assertThat(ownership.isSourceOwned("台股", "fubon")).isTrue();
@@ -66,23 +66,20 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
     void fullStateAndFlagMatrixMapsEveryNonWriterCaseToPayloadOwnership() {
         for (FubonConfigState.State state : FubonConfigState.State.values()) {
             for (boolean inventoryEnabled : new boolean[]{false, true}) {
-                for (boolean liveEnabled : new boolean[]{false, true}) {
-                    reset(configState, userAdminService, snapshotRepository);
-                    when(configState.snapshot()).thenReturn(config(state));
-                    boolean expectedSource = state == FubonConfigState.State.READY
-                            && inventoryEnabled && !liveEnabled;
-                    if (expectedSource) {
-                        when(userAdminService.configuredAdmin()).thenReturn(Optional.of(activeAdmin(9L)));
-                        when(snapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L))
-                                .thenReturn(Optional.of(snapshot(7L, 9L, TODAY)));
-                    }
-                    SnapshotStockScopeOwnership ownership = adapter(inventoryEnabled, liveEnabled)
-                            .capture(target(7L, 9L, TODAY));
-                    assertThat(ownership.isSourceOwned("台股", "fubon"))
-                            .as("state=%s inventory=%s live=%s", state, inventoryEnabled, liveEnabled)
-                            .isEqualTo(expectedSource);
-                    verify(configState, times(1)).snapshot();
+                reset(configState, userAdminService, snapshotRepository);
+                when(configState.snapshot()).thenReturn(config(state));
+                boolean expectedSource = state == FubonConfigState.State.READY && inventoryEnabled;
+                if (expectedSource) {
+                    when(userAdminService.configuredAdmin()).thenReturn(Optional.of(activeAdmin(9L)));
+                    when(snapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L))
+                            .thenReturn(Optional.of(snapshot(7L, 9L, TODAY)));
                 }
+                SnapshotStockScopeOwnership ownership = adapter(inventoryEnabled)
+                        .capture(target(7L, 9L, TODAY));
+                assertThat(ownership.isSourceOwned("台股", "fubon"))
+                        .as("state=%s inventory=%s", state, inventoryEnabled)
+                        .isEqualTo(expectedSource);
+                verify(configState, times(1)).snapshot();
             }
         }
     }
@@ -91,14 +88,14 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
     void eligibleCapabilityStillReturnsPayloadOwnershipForEveryNonWriterTarget() {
         when(configState.snapshot()).thenReturn(config(FubonConfigState.State.READY));
 
-        assertThat(adapter(true, false).capture(target(7L, 9L, TODAY.minusDays(1)))
+        assertThat(adapter(true).capture(target(7L, 9L, TODAY.minusDays(1)))
                 .isSourceOwned("台股", "fubon")).isFalse();
         verify(userAdminService, never()).configuredAdmin();
         verify(snapshotRepository, never()).findFirstByOwnerUserIdOrderBySnapshotDateDesc(anyLong());
 
         reset(userAdminService, snapshotRepository);
         when(userAdminService.configuredAdmin()).thenReturn(Optional.of(activeAdmin(9L)));
-        assertThat(adapter(true, false).capture(target(7L, 10L, TODAY))
+        assertThat(adapter(true).capture(target(7L, 10L, TODAY))
                 .isSourceOwned("台股", "fubon")).isFalse();
         verify(snapshotRepository, never()).findFirstByOwnerUserIdOrderBySnapshotDateDesc(anyLong());
 
@@ -106,12 +103,12 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
         when(userAdminService.configuredAdmin()).thenReturn(Optional.of(activeAdmin(9L)));
         when(snapshotRepository.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L))
                 .thenReturn(Optional.of(snapshot(8L, 9L, TODAY)));
-        assertThat(adapter(true, false).capture(target(7L, 9L, TODAY))
+        assertThat(adapter(true).capture(target(7L, 9L, TODAY))
                 .isSourceOwned("台股", "fubon")).isFalse();
 
         reset(userAdminService, snapshotRepository);
         when(userAdminService.configuredAdmin()).thenReturn(Optional.of(inactiveAdmin(9L)));
-        assertThat(adapter(true, false).capture(target(7L, 9L, TODAY))
+        assertThat(adapter(true).capture(target(7L, 9L, TODAY))
                 .isSourceOwned("台股", "fubon")).isFalse();
     }
 
@@ -120,7 +117,7 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
         configureEligibleTarget();
         when(configState.snapshot()).thenReturn(config(FubonConfigState.State.READY));
 
-        SnapshotStockScopeOwnership ownership = adapter(true, false)
+        SnapshotStockScopeOwnership ownership = adapter(true)
                 .capture(target(7L, 9L, TODAY));
 
         assertThat(ownership.isSourceOwned("台股", "fubon")).isTrue();
@@ -137,9 +134,19 @@ class FubonSnapshotStockScopeOwnershipAdapterTest {
                 .noneMatch(type -> type.getPackageName().contains(".integration.fubon"));
     }
 
-    private FubonSnapshotStockScopeOwnershipAdapter adapter(boolean inventoryEnabled, boolean liveEnabled) {
+    @Test
+    void livePollingNoLongerParticipatesInTheOwnershipDecision() {
+        configureEligibleTarget();
+        when(configState.snapshot()).thenReturn(config(FubonConfigState.State.READY));
+
+        SnapshotStockScopeOwnership ownership = adapter(true).capture(target(7L, 9L, TODAY));
+
+        assertThat(ownership.isSourceOwned("台股", "fubon")).isTrue();
+    }
+
+    private FubonSnapshotStockScopeOwnershipAdapter adapter(boolean inventoryEnabled) {
         return new FubonSnapshotStockScopeOwnershipAdapter(configState, userAdminService, snapshotRepository,
-                CLOCK, inventoryEnabled, liveEnabled);
+                CLOCK, inventoryEnabled);
     }
 
     private static SnapshotUpdateTarget target(Long snapshotId, Long ownerUserId, LocalDate date) {

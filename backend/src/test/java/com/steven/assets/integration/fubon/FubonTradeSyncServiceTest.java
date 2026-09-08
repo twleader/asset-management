@@ -62,22 +62,22 @@ class FubonTradeSyncServiceTest {
     @BeforeEach
     void setUp() {
         counters = new FubonTradeOutcomeCounters();
-        service = build(true, false);
+        service = build(true);
         lenient().when(writer.insert(any(), any(), any())).thenAnswer(call ->
                 new FubonTradeWriter.CommitResult(((List<?>) call.getArgument(2)).size(), 0));
     }
 
-    private FubonTradeSyncService build(boolean tradeSyncEnabled, boolean liveQuotesEnabled) {
+    private FubonTradeSyncService build(boolean tradeSyncEnabled) {
         return new FubonTradeSyncService(configState, brokerClient, marketDataService, userAdminService,
                 brokerRepository, assetTransactionRepository, stockMasterService, writer, counters, CLOCK,
-                tradeSyncEnabled, liveQuotesEnabled);
+                tradeSyncEnabled);
     }
 
     // ---- localConfigGate / tradeSyncFeatureGate --------------------------------------------
 
     @Test
     void featureFlagDisabledStopsBeforeAnyAdapterOrPersistenceAccess() {
-        FubonTradeSyncService disabled = build(false, false);
+        FubonTradeSyncService disabled = build(false);
 
         FubonTradeSyncService.TradeSyncResult result = disabled.syncManual(false);
 
@@ -87,14 +87,22 @@ class FubonTradeSyncServiceTest {
     }
 
     @Test
-    void liveQuoteCapacityConflictStopsBeforeAnyAdapterOrPersistenceAccess() {
-        FubonTradeSyncService conflict = build(true, true);
+    void simultaneousLiveAndTradeFlagsStillUseTheReadOnlyAdapter() {
+        // LIVE is deliberately no longer a constructor input or local gate.  The
+        // trade reader must continue through its own READY/calendar/owner gates.
+        FubonTradeSyncService enabled = build(true);
+        readyConfigOnly();
+        when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(true));
+        admin();
+        activeBroker();
+        when(brokerClient.readFilledTrades(TODAY, TODAY)).thenReturn(FubonDtos.CallResult.success(
+                new FubonDtos.TradeBatchResponse("batch-1", TODAY, TODAY,
+                        "0123456789abcdef01234567", true, List.of())));
 
-        FubonTradeSyncService.TradeSyncResult result = conflict.syncManual(false);
+        FubonTradeSyncService.TradeSyncResult result = enabled.syncManual(false);
 
-        assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.TRADE_SYNC_CAPACITY_CONFLICT);
-        verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService,
-                brokerRepository, assetTransactionRepository, stockMasterService);
+        assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.NO_NEW_TRADES);
+        verify(brokerClient).readFilledTrades(TODAY, TODAY);
     }
 
     @Test

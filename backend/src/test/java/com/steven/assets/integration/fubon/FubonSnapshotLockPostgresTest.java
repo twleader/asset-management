@@ -126,12 +126,12 @@ class FubonSnapshotLockPostgresTest {
     @BeforeEach
     void seed() {
         seed(TODAY, 9L);
-        useOwnership(FubonConfigState.State.READY, true, false, 9L);
+        useOwnership(FubonConfigState.State.READY, true, 9L);
     }
 
     @Test
     void disabledManualFullPutPersistsFubonRowsAfterDatabaseReadback() {
-        useOwnership(FubonConfigState.State.DISABLED, true, false, 9L);
+        useOwnership(FubonConfigState.State.DISABLED, true, 9L);
 
         manualFullUpdate(TODAY, "00865B", "2000", "97038", "97600", "買", TODAY.minusDays(52));
 
@@ -140,7 +140,7 @@ class FubonSnapshotLockPostgresTest {
 
     @Test
     void misconfiguredManualFullPutPersistsFubonRowsAfterDatabaseReadback() {
-        useOwnership(FubonConfigState.State.MISCONFIGURED, true, false, 9L);
+        useOwnership(FubonConfigState.State.MISCONFIGURED, true, 9L);
 
         manualFullUpdate(TODAY, "00865B", "1000", "49390", "48800", "賣", TODAY.minusDays(25));
 
@@ -149,7 +149,7 @@ class FubonSnapshotLockPostgresTest {
 
     @Test
     void trackedDefaultWithoutInventoryWriterPersistsFubonRowsAfterDatabaseReadback() {
-        useOwnership(FubonConfigState.State.READY, false, true, 9L);
+        useOwnership(FubonConfigState.State.READY, false, 9L);
 
         manualFullUpdate(TODAY, "00865B", "1500", "72800", "73200", "買", TODAY.minusDays(17));
 
@@ -157,18 +157,20 @@ class FubonSnapshotLockPostgresTest {
     }
 
     @Test
-    void inventorySyncCapacityConflictPersistsFubonRowsAfterDatabaseReadback() {
-        useOwnership(FubonConfigState.State.READY, true, true, 9L);
+    void livePollingNoLongerLetsFullPutOverwriteEligibleFubonSourceRows() {
+        // The runtime LIVE flag is deliberately not consumed by the ownership adapter.
+        // This is the former LIVE=true capacity-conflict target and must now be source-owned.
+        useOwnership(FubonConfigState.State.READY, true, 9L);
 
         manualFullUpdate(TODAY, "00865B", "1800", "87300", "87900", "買", TODAY.minusDays(9));
 
-        assertPayloadPersisted("00865B", "1800", "87300", "87900", "買", TODAY.minusDays(9));
+        assertSourceFubonPreservedAndOtherPayloadUpdated();
     }
 
     @Test
     void historicalTargetPersistsFubonRowsAfterDatabaseReadback() {
         seed(TODAY.minusDays(1), 9L);
-        useOwnership(FubonConfigState.State.READY, true, false, 9L);
+        useOwnership(FubonConfigState.State.READY, true, 9L);
 
         manualFullUpdate(TODAY.minusDays(1), "00865B", "2100", "101900", "102900", "買", TODAY.minusDays(60));
 
@@ -178,7 +180,7 @@ class FubonSnapshotLockPostgresTest {
     @Test
     void nonConfiguredAdminTargetPersistsFubonRowsAfterDatabaseReadback() {
         seed(TODAY, 10L);
-        useOwnership(FubonConfigState.State.READY, true, false, 9L);
+        useOwnership(FubonConfigState.State.READY, true, 9L);
 
         manualFullUpdate(TODAY, "00865B", "2200", "106800", "107800", "買", TODAY.minusDays(32));
 
@@ -187,7 +189,7 @@ class FubonSnapshotLockPostgresTest {
 
     @Test
     void changingSourceTargetToNonTodayDatePersistsFubonRowsAfterDatabaseReadback() {
-        useOwnership(FubonConfigState.State.READY, true, false, 9L);
+        useOwnership(FubonConfigState.State.READY, true, 9L);
         LocalDate finalDate = TODAY.minusDays(2);
 
         manualFullUpdate(finalDate, "00865B", "2300", "111700", "112700", "買", TODAY.minusDays(45));
@@ -201,10 +203,14 @@ class FubonSnapshotLockPostgresTest {
 
     @Test
     void onlyEligibleSourceTargetRejectsStaleFubonPayloadButUpdatesNonFubonRows() {
-        useOwnership(FubonConfigState.State.READY, true, false, 9L);
+        useOwnership(FubonConfigState.State.READY, true, 9L);
 
         manualFullUpdate(TODAY, "2330", "1", "1", "1", "STALE", TODAY.minusDays(1));
 
+        assertSourceFubonPreservedAndOtherPayloadUpdated();
+    }
+
+    private void assertSourceFubonPreservedAndOtherPayloadUpdated() {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             entityManager.clear();
             AssetSnapshot reloaded = snapshotRepository.findById(snapshotId).orElseThrow();
@@ -289,7 +295,6 @@ class FubonSnapshotLockPostgresTest {
     private void useOwnership(
             FubonConfigState.State state,
             boolean inventoryEnabled,
-            boolean liveEnabled,
             Long configuredAdminId) {
         reset(stockScopeOwnershipPort, configState, userAdminService);
         when(configState.snapshot()).thenReturn(new FubonConfigState.Snapshot(
@@ -300,7 +305,7 @@ class FubonSnapshotLockPostgresTest {
             when(userAdminService.configuredAdmin()).thenAnswer(call -> appUserRepository.findById(configuredAdminId));
         }
         FubonSnapshotStockScopeOwnershipAdapter adapter = new FubonSnapshotStockScopeOwnershipAdapter(
-                configState, userAdminService, snapshotRepository, CLOCK, inventoryEnabled, liveEnabled);
+                configState, userAdminService, snapshotRepository, CLOCK, inventoryEnabled);
         when(stockScopeOwnershipPort.capture(any())).thenAnswer(invocation -> adapter.capture(invocation.getArgument(0)));
     }
 

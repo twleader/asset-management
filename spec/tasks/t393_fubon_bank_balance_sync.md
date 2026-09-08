@@ -1,6 +1,6 @@
 # [t393] 交割銀行餘額查詢排程——每日四時段更新存款與快照總額
 
-**對應 Requirements:** Requirement 128（每天 08:00／09:30／14:00／22:00 唯讀查詢富邦交割銀行餘額，更新最新快照的台北富邦銀行證券戶；只使用既有 table／columns）
+**對應 Requirements:** Requirement 128（每天 08:00／09:20／14:20／22:00 唯讀查詢富邦交割銀行餘額，更新最新快照的台北富邦銀行證券戶；只使用既有 table／columns）
 **前置任務:** 無；重用既有 Fubon adapter、configured admin、共用快照鎖與聚合計算器。
 **Liquibase changeset:** 無；不得新增表、欄位、索引或變更 `db/schema.sql`。
 
@@ -14,7 +14,7 @@
 
 ## 要做什麼
 
-- [x] **393.1 排程與 gate。** `FubonBankBalanceSyncScheduler` 同一方法註冊四個 `@Scheduled`：`0 0 8 * * *`、`0 30 9 * * *`、`0 0 14 * * *`、`0 0 22 * * *`，時區全部 `Asia/Taipei`。每天執行，週末與休市日不略過。獨立 `AtomicBoolean inFlight` 只防單程序重入，不可冒充跨程序 DB 互斥。先檢查 `FUBON_BANK_BALANCE_SYNC_ENABLED`，再檢查 `FUBON_ENABLED`／既有 `FubonConfigState.READY`；停用或未設定時零 SDK、HTTP 與資料寫入。沿用 Python `_accounting_lock`、共用 5 calls/sec 帳務 budget、5 秒單次 timeout、僅 auth-invalid 可重登一次；不改既有 LIVE／inventory／trade 的互斥政策。`.env.example` 加新 flag 預設 `false`，Compose 的 business-services 白名單傳入；不修改既有部署的全域啟用值或秘密。
+- [x] **393.1 排程與 gate。** `FubonBankBalanceSyncScheduler` 同一方法註冊四個 `@Scheduled`：`0 0 8 * * *`、`0 20 9 * * *`、`0 20 14 * * *`、`0 0 22 * * *`，時區全部 `Asia/Taipei`。每天執行，週末與休市日不略過。獨立 `AtomicBoolean inFlight` 只防單程序重入，不可冒充跨程序 DB 互斥。先檢查 `FUBON_BANK_BALANCE_SYNC_ENABLED`，再檢查 `FUBON_ENABLED`／既有 `FubonConfigState.READY`；停用或未設定時零 SDK、HTTP 與資料寫入。沿用 Python `_accounting_lock`、共用 5 calls/sec 帳務 budget、5 秒單次 timeout、僅 auth-invalid 可重登一次；Requirement 138 已改為讓 LIVE、庫存、成交與銀行餘額同步以共享資源仲裁、可同時啟用。`.env.example` 加新 flag 預設 `false`，Compose 的 business-services 白名單傳入；不修改既有部署的全域啟用值或秘密。
 
 - [x] **393.2 Python 先驗來源，再產生自有 DTO。** `read_bank_balance()` 使用既有 `_accounting_call("bank_remain", selected.raw)`；在同一 accounting critical section 擷取 selected account、該次回應及 token，避免分兩次取 session 而把重登前後帳戶混用。檢查 `is_success is True`、`data` 非空且形狀正確；缺少信封、`None`、錯型別皆為 `RECONCILE_FAILED`，不得接受裸物件備援。selected stock account 類型及唯一選擇沿用既有登入規則；`data.branch_no`、`data.account` 必須存在、是非空字串且各自與 selected raw identity 精確相等。缺值不可透過 `None == None` 當匹配，也不得用 selected 值填補缺欄。`currency` 必須為 `TWD`；兩金額接受零與官方整數／整數字串，拒絕 bool、負數、非有限、指數表示及超界值；不因 available balance 為零拒絕整批。
 
@@ -32,7 +32,7 @@
 
   `amount=balance.setScale(2, HALF_UP)`，捨入後再次驗 `precision<=20`（整數最多 18 位）；零照寫、不刪列。新增 `currency=TWD, originalAmount=null, annualInterestRate=null, notes=null`；更新保持既有 note/rate，保持台幣 originalAmount 為 null。availableBalance 不落地。其他存款／基金／股票完整保留。呼叫唯一 `SnapshotAggregateCalculator.recalculate(snapshot)`，檢查 monetary aggregates 在 `NUMERIC(20,2)` 內，再 `snapshotRepository.saveAndFlush(snapshot)`；children 與 totals 必須同 transaction commit 或全部 rollback。手動修改的同目標金額仍會在下一次合格同步被覆寫；不授權改別的銀行或非最新快照。
 
-- [x] **393.6 outcome 與註冊。** 獨立 `FubonBankBalanceOutcome`／process-local counters 至少含 `DISABLED, BANK_BALANCE_SYNC_DISABLED, MISCONFIGURED, NO_OWNER, BROKER_MISSING, BANK_MISSING, NO_SNAPSHOT, AMBIGUOUS_TARGET, STALE_QUERY, BANK_BALANCE_FAILED, DRY_RUN, SUCCESS, ROLLED_BACK`。commit 失敗不可記 SUCCESS。`SchedulePublicBffController.JOBS` 的 BUSINESS／券商庫存項目顯示「每日 08:00／09:30／14:00／22:00」，cron、註冊數測試同步。API 盤點 `httpEndpoint` 固定 adapter `POST /internal/bank-balance/read`，Java 手動路徑放 consumer；有正式呼叫路徑且通過成功／失敗測試才標 connected=true，不是因旗標宣告就算接妥。
+- [x] **393.6 outcome 與註冊。** 獨立 `FubonBankBalanceOutcome`／process-local counters 至少含 `DISABLED, BANK_BALANCE_SYNC_DISABLED, MISCONFIGURED, NO_OWNER, BROKER_MISSING, BANK_MISSING, NO_SNAPSHOT, AMBIGUOUS_TARGET, STALE_QUERY, BANK_BALANCE_FAILED, DRY_RUN, SUCCESS, ROLLED_BACK`。commit 失敗不可記 SUCCESS。`SchedulePublicBffController.JOBS` 的 BUSINESS／券商庫存項目顯示「每日 08:00／09:20／14:20／22:00」，cron、註冊數測試同步。API 盤點 `httpEndpoint` 固定 adapter `POST /internal/bank-balance/read`，Java 手動路徑放 consumer；有正式呼叫路徑且通過成功／失敗測試才標 connected=true，不是因旗標宣告就算接妥。
 
 - [x] **393.7 有效驗收。** Python 覆蓋官方 Result、錯／缺 account、缺 branch、錯幣別、零值、auth 重試跨 session 一致性、raw sentinel 不外洩。Java 以真正 Spring proxy 證明 HTTP 時沒有 transaction、writer 第一 SQL 為共用 lock；PostgreSQL/Testcontainers 驗新增及更新後 clear persistence context 讀回 children 與 totalDeposit/totalAssets/estimatedAnnualDividend 一致。涵蓋全零、18 位整數界線、aggregate overflow、duplicate target、owner 不符、bank 缺席、最新快照變更、同時 full PUT、rollback、dryRun 零寫入。不可只以 Mockito 或 jar class 字串存在當成功。
 
