@@ -372,7 +372,8 @@ public class FubonApiInfoBffController {
                     "marketdata.rest_client.stock.ownership.etf_holdings",
                     "POST /internal/market-data/etf-holdings",
                     "逐檔查詢台股 ETF 成分股持股明細，正規化市場資料落地保存，股票分析直接讀取相同資料" + RO,
-                    "business-services（富邦 ETF 成分股持股同步排程，交易日 08:50／15:30，"
+                    "business-services（富邦 ETF 成分股交易日 08:50／15:30 全量同步；"
+                            + "ApplicationReady missing-only 補齊尚無成功資料及 failure retry，"
                             + "範圍為今日交易雷達台股 ETF，需另啟用設定才會執行）",
                     "codes（1–50 個不重複的台股 ETF 代碼，僅查今日交易雷達範圍）",
                     "batchId＋holdings 陣列，每筆含 stockCode／status（SUCCESS｜FAILURE）／reason／"

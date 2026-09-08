@@ -1,6 +1,7 @@
 package com.steven.assets.integration.fubon;
 
 import com.steven.assets.model.FubonEtfHoldingsSnapshot;
+import com.steven.assets.repository.FubonEtfHoldingsSnapshotRepository;
 import com.steven.assets.repository.StockHoldingRepository;
 import com.steven.assets.service.MarketDataService;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -34,6 +37,7 @@ class FubonEtfHoldingsSyncServiceTest {
     @Mock MarketDataService marketDataService;
     @Mock FubonBrokerClient brokerClient;
     @Mock FubonEtfHoldingsWriter writer;
+    @Mock FubonEtfHoldingsSnapshotRepository snapshotRepository;
     @Mock StockHoldingRepository stockHoldingRepository;
     private FubonEtfHoldingsSyncService service;
 
@@ -42,18 +46,23 @@ class FubonEtfHoldingsSyncServiceTest {
 
     private FubonEtfHoldingsSyncService build(boolean enabled) {
         return new FubonEtfHoldingsSyncService(enabled, configState, marketDataService,
-                brokerClient, writer, stockHoldingRepository, CLOCK);
+                brokerClient, writer, snapshotRepository, stockHoldingRepository, CLOCK);
+    }
+
+    private void readyConfig() {
+        when(configState.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "token", null));
     }
 
     private void ready() {
-        when(configState.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "token", null));
+        readyConfig();
         when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(true));
     }
 
     @Test
     void disabledFeatureDoesNotEvenReadConfig() {
         build(false).syncScheduled();
-        verifyNoInteractions(configState, marketDataService, brokerClient, writer, stockHoldingRepository);
+        build(false).syncMissingOnStartup();
+        verifyNoInteractions(configState, marketDataService, brokerClient, writer, snapshotRepository, stockHoldingRepository);
     }
 
     @Test
@@ -61,8 +70,9 @@ class FubonEtfHoldingsSyncServiceTest {
         for (var state : List.of(FubonConfigState.State.DISABLED, FubonConfigState.State.MISCONFIGURED)) {
             when(configState.snapshot()).thenReturn(new FubonConfigState.Snapshot(state, null, state.name()));
             service.syncScheduled();
+            service.syncMissingOnStartup();
         }
-        verifyNoInteractions(marketDataService, brokerClient, writer, stockHoldingRepository);
+        verifyNoInteractions(marketDataService, brokerClient, writer, snapshotRepository, stockHoldingRepository);
     }
 
     @Test
@@ -81,6 +91,170 @@ class FubonEtfHoldingsSyncServiceTest {
                 .thenThrow(new IllegalStateException("db unavailable"));
         service.syncScheduled(); service.syncScheduled();
         verifyNoInteractions(brokerClient, writer);
+    }
+
+    @Test
+    void startupEmptyOrUnreadableRadarSkipsProjectionCalendarAndProvider() {
+        readyConfig();
+        when(stockHoldingRepository.findTwRadarCandidateCodes()).thenReturn(List.of())
+                .thenThrow(new IllegalStateException("db unavailable"));
+        service.syncMissingOnStartup();
+        service.syncMissingOnStartup();
+        verify(snapshotRepository, never()).findSuccessfulEtfStockCodes(anyCollection());
+        verify(marketDataService, never()).isTwTradingDayKnown(any());
+        verifyNoInteractions(brokerClient, writer);
+    }
+
+    @Test
+    void startupAllSuccessfulUsesOneProjectionAndDoesNotRewriteRows() {
+        readyConfig();
+        radarCodes("0050", "00719B");
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection()))
+                .thenReturn(Set.of("0050", "00719B"));
+        service.syncMissingOnStartup();
+        verify(snapshotRepository).findSuccessfulEtfStockCodes(argThat(codes ->
+                codes.size() == 2 && codes.containsAll(List.of("0050", "00719B"))));
+        verify(marketDataService, never()).isTwTradingDayKnown(any());
+        verifyNoInteractions(brokerClient, writer);
+    }
+
+    @Test
+    void startupRetriesFailureRowAndQueriesMissingRowOnly() {
+        readyConfig();
+        radarCodes("0050", "00719B", "0056", "006208");
+        // 0050 represents a successful non-empty payload; 00719B a successful legal empty payload.
+        // A prior failure row (0056) is intentionally absent from the success-only projection, as is
+        // the code with no row (006208).
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection()))
+                .thenReturn(Set.of("0050", "00719B"));
+        when(brokerClient.readEtfHoldings(List.of("0056", "006208"))).thenReturn(
+                FubonDtos.CallResult.success(new FubonDtos.EtfHoldingsBatchResponse("batch",
+                        List.of(success("0056"), success("006208")))));
+
+        service.syncMissingOnStartup();
+
+        verify(snapshotRepository, times(1)).findSuccessfulEtfStockCodes(anyCollection());
+        verify(brokerClient).readEtfHoldings(List.of("0056", "006208"));
+        assertThat(saved(2)).containsOnlyKeys("0056", "006208");
+        verify(marketDataService, never()).isTwTradingDayKnown(any());
+    }
+
+    @Test
+    void startupProjectionFailureFailsClosed() {
+        readyConfig();
+        radarCodes("0050");
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection()))
+                .thenThrow(new IllegalStateException("private database error"));
+        service.syncMissingOnStartup();
+        verifyNoInteractions(brokerClient, writer);
+        verify(marketDataService, never()).isTwTradingDayKnown(any());
+    }
+
+    @Test
+    void startupProviderFailurePersistsTypedFailureWithoutSelfRetry() {
+        readyConfig();
+        radarCodes("0050");
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of());
+        when(brokerClient.readEtfHoldings(List.of("0050")))
+                .thenReturn(FubonDtos.CallResult.failure("ETF_HOLDINGS_TIMEOUT"));
+        service.syncMissingOnStartup();
+        assertFailure(saved(1).get("0050"), "ETF_HOLDINGS_TIMEOUT");
+        verify(brokerClient, times(1)).readEtfHoldings(anyList());
+    }
+
+    @Test
+    void startupPersistsLegalEmptyHoldingsAsSuccess() {
+        readyConfig();
+        radarCodes("00719B");
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of());
+        response(new FubonDtos.EtfHoldingsItem("00719B", "SUCCESS", null, emptyPayload("00719B")));
+        service.syncMissingOnStartup();
+        var row = saved(1).get("00719B");
+        assertThat(row.getSuccess()).isTrue();
+        assertThat(row.getRawResponseJson()).isEqualTo(emptyPayload("00719B"));
+        assertThat(row.getReason()).isNull();
+    }
+
+    @Test
+    void successfulFullThenPendingStartupUsesProjectionAndMakesZeroSecondProviderCall() {
+        ready();
+        radarCodes("0050");
+        response(success("0050"));
+        service.syncScheduled();
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of("0050"));
+
+        service.syncMissingOnStartup();
+
+        verify(brokerClient, times(1)).readEtfHoldings(anyList());
+        verify(writer, times(1)).save(any());
+    }
+
+    @Test
+    void closedFullDoesNotPreventPendingStartupFromFillingGapWithoutCalendar() {
+        readyConfig();
+        when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(false));
+        radarCodes("0050");
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of());
+        response(success("0050"));
+
+        service.syncScheduled();
+        service.syncMissingOnStartup();
+
+        verify(marketDataService, times(1)).isTwTradingDayKnown(TODAY);
+        verify(brokerClient, times(1)).readEtfHoldings(List.of("0050"));
+        assertThat(saved(1).get("0050").getSuccess()).isTrue();
+    }
+
+    @Test
+    void fullProviderFailureCanBeRetriedImmediatelyByPendingStartupIntent() {
+        ready();
+        radarCodes("0050", "0056");
+        when(brokerClient.readEtfHoldings(List.of("0050", "0056")))
+                .thenReturn(FubonDtos.CallResult.success(new FubonDtos.EtfHoldingsBatchResponse("full", List.of(
+                        success("0050"),
+                        new FubonDtos.EtfHoldingsItem("0056", "FAILURE", "ETF_HOLDINGS_TIMEOUT", null)))));
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of("0050"));
+        when(brokerClient.readEtfHoldings(List.of("0056")))
+                .thenReturn(FubonDtos.CallResult.success(new FubonDtos.EtfHoldingsBatchResponse("startup",
+                        List.of(success("0056")))));
+
+        service.syncScheduled();
+        service.syncMissingOnStartup();
+
+        ArgumentCaptor<FubonEtfHoldingsSnapshot> rows = ArgumentCaptor.forClass(FubonEtfHoldingsSnapshot.class);
+        verify(writer, times(3)).save(rows.capture());
+        assertThat(rows.getAllValues()).extracting(FubonEtfHoldingsSnapshot::getEtfStockCode)
+                .containsExactly("0050", "0056", "0056");
+        assertThat(rows.getAllValues()).extracting(FubonEtfHoldingsSnapshot::getSuccess)
+                .containsExactly(true, false, true);
+    }
+
+    @Test
+    void fullWriterFailureCanBeRetriedImmediatelyByPendingStartupIntent() {
+        ready();
+        radarCodes("0050", "0056");
+        when(brokerClient.readEtfHoldings(List.of("0050", "0056")))
+                .thenReturn(FubonDtos.CallResult.success(new FubonDtos.EtfHoldingsBatchResponse("full",
+                        List.of(success("0050"), success("0056")))));
+        when(snapshotRepository.findSuccessfulEtfStockCodes(anyCollection())).thenReturn(Set.of("0050"));
+        when(brokerClient.readEtfHoldings(List.of("0056")))
+                .thenReturn(FubonDtos.CallResult.success(new FubonDtos.EtfHoldingsBatchResponse("startup",
+                        List.of(success("0056")))));
+        AtomicInteger writesFor0056 = new AtomicInteger();
+        doAnswer(invocation -> {
+            FubonEtfHoldingsSnapshot row = invocation.getArgument(0);
+            if ("0056".equals(row.getEtfStockCode()) && writesFor0056.getAndIncrement() == 0) {
+                throw new IllegalStateException("first write fails");
+            }
+            return null;
+        }).when(writer).save(any());
+
+        service.syncScheduled();
+        service.syncMissingOnStartup();
+
+        assertThat(writesFor0056).hasValue(2);
+        verify(brokerClient).readEtfHoldings(List.of("0050", "0056"));
+        verify(brokerClient).readEtfHoldings(List.of("0056"));
     }
 
     @Test
@@ -211,6 +385,11 @@ class FubonEtfHoldingsSyncServiceTest {
     private String payload(String code) {
         return "{\"schemaVersion\":1,\"stockCode\":\"" + code
                 + "\",\"sourceDate\":\"2026-08-20\",\"holdings\":[{\"stockCode\":\"2330\",\"stockName\":\"台積電\",\"weight\":\"58.82\",\"shares\":null}]}";
+    }
+
+    private String emptyPayload(String code) {
+        return "{\"schemaVersion\":1,\"stockCode\":\"" + code
+                + "\",\"sourceDate\":null,\"holdings\":[]}";
     }
 
     private FubonDtos.EtfHoldingsItem success(String code) {

@@ -11812,3 +11812,90 @@ business 既有 `ApiErrorLogService.ListItem`/`Detail` record 新增 `httpStatus
 ### 驗證設計
 
 Java 邏輯（WebFilter 的 4xx/5xx 分流、新排程的 log 行解析為純函式、recorder 傳遞新欄位）以既有 mock-based 單元測試風格覆蓋，比照 `ApiErrorLogServiceTest` 既有寫法。`dedupe_key` 唯一索引對真實併發/重複 INSERT 的實際擋下行為，比照 `FubonTradeSyncUniqueIndexPostgresTest` 的既有模式，用 Testcontainers 起真實 PostgreSQL 驗證（不是 mock、不是 H2）。Docker runtime acceptance 除既有 Requirement 141 的重建/recreate/schema drift 流程外，另需：確認新 volume 在 `api-gateway`（讀寫）與 `bff`（唯讀）都掛載成功且讀取無 Permission denied；以受控方式讓 Nginx 對其中一條白名單路由產生一次真實連線失敗，確認 BFF 排程實際寫入一筆帶正確 `httpStatus`、`messageHeader` 含「無法連線」字樣的 row，且同一失敗行重複觸發排程時 readback 筆數仍為 1；以 curl 對既有 market-index 端點送出不合法 `market` 值，確認 list 出現一筆 `httpStatus=400` 的新 row；不呼叫真實 Fubon SDK，不改 flags、`.env` 或 secrets。
+
+## Requirement 144／Task 422：富邦 ETF 成分股 ApplicationReady 缺口補齊
+
+### 根因、人工復原與正式邊界
+
+既有 `FubonEtfHoldingsSyncScheduler` 只有交易日 08:50／15:30 兩個 cron。2026-09-08 22:49 重建的 business-services 已錯過兩個時點，即使 `FUBON_ETF_HOLDINGS_SYNC_ENABLED=true`，翌日 00:00 的 `fubon_etf_holdings_snapshot` 仍是 0 筆；Dashboard pure-read 因而把台股 ETF 退回成 ETF 自身 slice。2026-09-09 直接呼叫 `POST /internal/market-data/etf-holdings` 查 18 檔雷達 ETF 均成功，股票型有 29–113 筆成分股、債券型為合法空集合，證明根因是 lifecycle 空窗。
+
+當次人工復原是直接呼叫 adapter 取得 normalized payload，再依既有 table schema 用 SQL transaction/upsert 補入 18 筆，**沒有經過 Java `FubonEtfHoldingsSyncService` 或 `FubonEtfHoldingsWriter`**。這些 row 可供畫面恢復與 all-successful runtime readback，但不是 Java 正式 pipeline 的驗收證據，也不作 seed。永久實作必走 `SyncService → FubonBrokerClient → normalized parser → FubonEtfHoldingsWriter(REQUIRES_NEW)`。
+
+### 非阻塞 ApplicationReady 與有界 coalescing
+
+~~~text
+ApplicationReadyEvent
+  └─ lifecycle once CAS
+      └─ Thread.ofVirtual().name("fubon-etf-holdings-startup").start(...)
+          └─ submit STARTUP intent ─────┐
+                                       │
+08:50／15:30 cron ─ submit FULL intent ├─ bounded coalescing runner
+                                       │   pendingStartup: boolean
+                                       │   pendingFull: boolean
+                                       │   running: boolean
+                                       └─ drain loop（FULL 優先，再 STARTUP）
+                                             ├─ FULL: flag → READY → known-open → radar ETF → 全量
+                                             └─ STARTUP: flag → READY → radar ETF
+                                                        → successful IDs batch projection
+                                                        → candidates − successful IDs
+                                                                  │
+                                                                  ▼
+                              既有 4-code batch/client/parser/逐檔 REQUIRES_NEW writer
+~~~
+
+listener 的 once CAS 成功後只建立一條具名 daemon／virtual thread並立即返回；不得在 Spring event thread 等 provider／DB，不得建立 executor pool、無界 queue 或重複 ready thread。背景 thread 只送出一個 STARTUP intent，真正外呼仍受同一 runner 控制。
+
+runner 以一個短臨界區保護 `pendingStartup`、`pendingFull`、`running`；尚未取走的同類 burst trigger 只把同一 boolean 設為 true。第一個看到 `running=false` 的 caller 成為 runner，迴圈每次在鎖內依 FULL 優先取走一個 intent並清除該 bit、鎖外執行，再回鎖 drain。action 執行中若有新的合法 trigger 到來，可重新把已清除的 bit 設為 true，runner 後續必再取走；兩者皆空才原子釋放 running。runner 只有兩個 pending bit，不保存 Runnable/request queue，也不增加 `attemptedBeforeStartup` 或任何 per-code attempted 集合，因此儲存恆為 O(1)，但不限制整個 application lifecycle 的執行次數。
+
+- FULL 先成為 runner：FULL 完成後仍 drain 已 pending 的 STARTUP。FULL 成功時 successful projection 使 STARTUP 零 provider；FULL 對某 code 發生 provider／writer failure 時，pending STARTUP 可因仍無 successful row 立即 retry；FULL 因 closed／unknown calendar no-op 時，STARTUP 仍不看 calendar而補缺。
+- STARTUP 先成為 runner：執行中到達的 FULL 把 `pendingFull=true` 後返回；STARTUP 完成後 runner 必接著執行 FULL，STARTUP failure code 可由該次 FULL 再試。
+- STARTUP source 由 ApplicationReady once guard 限定一次；FULL 仍由每日 08:50／15:30 兩個 cron 產生，可在同一 JVM application lifecycle 多次執行。尚未消費的同類 burst 才 coalesce；若 bit 已取走，新合法 trigger 必可重新設 bit，不得 lost wakeup。failure 不得自我 submit 新 intent，但日後正常 cron 可繼續重試。一次 action failure 由 runner 捕獲並記消毒後診斷，再繼續 drain 已存在的 intent；釋放 running 的 race 必以測試證明不會漏掉臨界點新 trigger。
+
+### Service selection 與 successful projection
+
+`syncScheduled()` 保留 flag → READY → `isTwTradingDayKnown(today)==true` → radar ETF → 全量同步；calendar false／unknown／throw 都 no-op。`syncMissingOnStartup()` 保留 flag → READY，但完全不呼叫 calendar；它收同一雷達 ETF 集合（各 owner 最新快照台股持股 ∪ 台股警示、排除 0000、同一 `isEtf` heuristic），再用 successful projection 求差集。provider 已拒絕 `sourceDate > 台北今日`，所以週末／休市日可安全取得最近來源。
+
+Repository 使用單次 collection projection，只回 `success=true` code：
+
+~~~java
+@Query("select s.etfStockCode from FubonEtfHoldingsSnapshot s "
+     + "where s.success = true and s.etfStockCode in :codes")
+Set<String> findSuccessfulEtfStockCodes(@Param("codes") Collection<String> codes);
+~~~
+
+禁止 loop 內 `existsById`／`findById` N+1，也不載入完整 JSONB。candidates 空時零 projection；query failure fail closed、零 provider。startup 對 row 的判斷如下：
+
+| table 狀態 | startup 行為 | 後續合法 trigger |
+|---|---|---|
+| 無 row | 查 provider | 未成功仍重試 |
+| `success=true`＋非空 holdings | 略過且 timestamps 不變 | 持續略過，固定 FULL 負責刷新 |
+| `success=true`＋合法空集合 | 視為完整、略過 | 持續略過，不把空集合誤判 failure |
+| `success=false` | STARTUP 查詢；若 FULL failure 後已有 STARTUP pending，可立即 retry | 後續 08:50／15:30 FULL 或下次 application startup 仍可重試 |
+
+once guard 保證 STARTUP source 只有 ApplicationReady 一次；pending boolean 只合併尚未消費的 burst，並不阻止日後兩個固定 FULL。provider failure 照既有 typed failure row 保存且不自我排程；成功、合法空集合、單檔／整批 failure、writer failure 隔離、四檔 batch、30 秒 HTTP deadline、parser 與 reason redaction 都不變。
+
+使用者僅在效能證據顯示必要時條件允許 shared SDK slots 由 5 調至 6；本輪實測 Python ETF `MAX_CONCURRENCY=4`，18 檔約 1 秒全數成功，未證明 5 slots 是瓶頸。因此本設計不變更 backend 4-code batch、Python ETF concurrency 4 或 global `SdkGateway.MAX_BLOCKING_CALLS=5`。這是 Task 422 明確的範圍排除，不是遺漏的效能需求。
+
+### Compose cold-boot ordering
+
+`business-services.depends_on` 在 postgres／redis 之外加入 `fubon-broker-service: condition: service_healthy`。現有 Fubon healthcheck 只驗 `/internal/health` 回 `status=UP`；Python `health()` 無論 configState 是 NOT_CONFIGURED／DISABLED、MISCONFIGURED 或 READY 都回 process liveness UP，且既有 `test_disabled_health_is_up_without_reading_sdk_or_secrets`、`test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured` 與三態 route tests 已釘住。因此 dependency 不會把 optional Fubon configuration 變成 business 啟動硬失敗；它只消除 adapter HTTP process 尚未 listen 的 race。Java feature flag／READY 仍是功能 gate，Compose health 不得改成 SDK login／credential／provider success probe。
+
+### Dashboard、排程清單與公開面
+
+Dashboard request path 仍是 `GET /api/bff/dashboard/tw-stock-lookthrough/{snapshotId}` → business local snapshot pure-read，絕不 request-time 呼叫 Fubon。既有 BFF 將股票型 ETF 正規化穿透、以股名合併、取前十筆並把尾段聚成唯一 `others`；合法空集合債券 ETF 保留 degraded fallback。ETF 配息不從成分股重建。
+
+`SchedulePublicBffController.JOBS` 仍只有同一筆 ETF job，cron／schedule／zone／business 28／全系統 66 都不變，只更新 description 同時揭露固定 FULL 與 ApplicationReady missing-only／failure retry。`FubonApiInfoBffController` 的既有 `ownership.etf_holdings` item 也同步更新 consumer 文案；API inventory item count、connected count 與分類統計不變。ApplicationReady 不是新 scheduled job。不新增 endpoint、9090／Tailscale／OpenAPI route、DB schema、flag、secret 或券商寫入能力。
+
+### 驗證設計與兩階段部署
+
+Service tests 覆蓋 disabled、not-ready、empty candidates、all-successful、failure-row retry、missing-only、projection failure、provider failure、合法空集合；mixed fixture 中 success 非空與 success 空集合略過，failure 與無 row 會由當次 intent 查詢。PostgreSQL test 驗 successful-code projection 與 timestamps/payload 不覆寫。
+
+Scheduler deterministic latch tests 必覆蓋 listener 在 provider latch 尚未釋放時已返回、重複 ready event只開一條 thread／一個 STARTUP source、FULL winner 後 STARTUP、STARTUP winner 後 FULL；FULL winner 再分 known-open success、closed、unknown，證明 success 後 STARTUP zero-provider，而 calendar no-op 後 STARTUP 仍補缺。另以 burst 與 release-race latch 證明尚未消費的同類 trigger 只保留一個 bit、bit 取走後新 trigger 可再次設 pending且不 lost wakeup、state 恆 O(1)；partial/provider/writer failure 不自我排程循環，而後續合法 FULL trigger 仍可執行。`SchedulePublicBffControllerTest` 與 `FubonApiInfoBffControllerTest` 分別鎖定新文案與既有 job/API 計數。
+
+Compose 用 static contract test 驗 `business-services.depends_on.fubon-broker-service.condition == service_healthy`；disabled 與 MISCONFIGURED 的 `/internal/health` 仍為 UP，透過已核實存在的 Fubon Dockerfile `test` stage 執行既有 `fubon-broker-service/tests/test_app_routes.py::test_disabled_health_is_up_without_reading_sdk_or_secrets` 與 `::test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured`，不用 host pytest，也不建立固定 `container_name` 會互撞的兩套隔離 Compose runtime。實際 Docker 只以目前 `.env` 的正式 stack 驗當前 config、dependency ordering 與 health。
+
+runtime SQL 的 ETF candidate 必與 `FubonEtfHoldingsParser.validEtfCode` 等價：PostgreSQL regex `^00[0-9]{2,3}([0-9A-Z])?$` 並排除 `0000`，不可只用寬鬆 `LIKE '00%'`。
+
+部署分兩階段且兩次都做 DB／Dashboard readback：第一階段從 feature worktree build/recreate Fubon、business、bff 並驗收；通過測試與 arch review 後 commit，`git merge --no-ff` 進 main；第二階段先確認 main 已同步合併 commit，再從 main 目錄與 main `.env` build/recreate相同服務並重驗。任何階段 `.env` 與選定 build source 不符即停。人工 SQL 18 rows 只能證明 all-successful startup 不覆寫；failure retry 與正式 writer pipeline 必由自動化與可控 fixture 證明。
+
+兩階段最後都讀 `fubon_etf_holdings_snapshot` code、success、sourceDate、holdings count、updated_at，並以登入 Dashboard API 驗 items≤10、唯一 others、總額守恆、股票型 ETF 不殘留、合法空集合只走 degraded。無 migration；schema drift 仍須通過。
