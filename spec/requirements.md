@@ -4797,11 +4797,11 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 ### Requirement 128／Task 393：交割銀行餘額查詢——每日四時段更新存款與快照總額
 
-**User Story：**作為使用富邦證券及台北富邦銀行的使用者，我希望每天 08:00／09:30／14:00／22:00 查詢交割銀行餘額，更新最新資產快照的證券戶存款，且總資產同步正確。
+**User Story：**作為使用富邦證券及台北富邦銀行的使用者，我希望每天 08:00／09:20／14:20／22:00 查詢交割銀行餘額，更新最新資產快照的證券戶存款，且總資產同步正確。
 
 #### Acceptance Criteria
 
-- [ ] **既有 schema、固定時段與唯讀邊界。** 不新增 SQL 表／欄位／索引。business-services 使用獨立 FUBON_BANK_BALANCE_SYNC_ENABLED，先 flag/global/config READY，再查 configured active admin；每天執行、不加交易日曆 gate。Asia/Taipei cron 為 `0 0 8 * * * / 0 30 9 * * * / 0 0 14 * * * / 0 0 22 * * *`。bank 固定本地 code=fubon（台北富邦銀行），不是從 SDK 回應猜銀行名稱。
+- [ ] **既有 schema、固定時段與唯讀邊界。** 不新增 SQL 表／欄位／索引。business-services 使用獨立 FUBON_BANK_BALANCE_SYNC_ENABLED，先 flag/global/config READY，再查 configured active admin；每天執行、不加交易日曆 gate。Asia/Taipei cron 為 `0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *`。bank 固定本地 code=fubon（台北富邦銀行），不是從 SDK 回應猜銀行名稱。
 - [ ] **官方來源與身分邊界。** `bank_remain` 解 `Result.is_success/data`；同次 accounting lock 捕捉 selected account/response/token，raw branch/account 皆必填且精確相等後才 HMAC-SHA256 產生 24 hex fingerprint。raw 身分不跨 adapter、不記錄；缺欄不得當匹配。TWD balance/available_balance 接受官方整數或整數字串、允許零，拒負數／非有限。queryDate/observedAt 只表示本地觀測，不冒充 vendor sourceDate。
 - [ ] **預檢與第一 DB 鎖。** `POST /internal/bank-balance/read` 輸出 normalized typed record，金額重用既有 nonnegative decimal component parser。orchestrator 以 NOT_SUPPORTED 完成 owner/HTTP/preflight；獨立 REQUIRES_NEW writer 的第一個 DB operation 必為 `AssetSnapshotMutationLock.lockLatestForOwner(ownerId)`，其前不得查 owner/broker/bank/children。鎖後 recheck owner/broker/bank，無快照不建；跨台北日或觀测距 commit 超 60 秒 no-write。
 - [ ] **子列與總額同交易。** 只更新最新 snapshot 的 fubon bank＋證券戶；0 列新增、1 列更新、重複或其他幣別整批 AMBIGUOUS_TARGET。新增加入 managed deposits collection，amount=balance HALF_UP scale2 後檢查 numeric(20,2)，零仍保存；TWD、originalAmount=null，其他列不動。`SnapshotAggregateCalculator.recalculate` 與 child/saveAndFlush 同 transaction，aggregate 溢位整批 rollback；不可等待手動編輯才補總额。SUCCESS 只在 commit 後記錄。
