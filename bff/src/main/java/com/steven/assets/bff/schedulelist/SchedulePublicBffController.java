@@ -141,6 +141,7 @@ public class SchedulePublicBffController {
                     "交易日 09:00–14:00 每 30 分鐘，共 11 輪", "0 0,30 9-13 * * MON-FRI；0 0 14 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦 ETF 成分股持股同步",
                     "以隔離的富邦官方 Linux SDK 唯讀查詢今日交易雷達範圍內的台股 ETF 成分股持股明細，"
+                            + "交易日 08:50／15:30 全量同步；ApplicationReady missing-only 補齊尚無成功資料及 failure retry。"
                             + "正規化成分與來源日期落地保存供股票分析讀取，需啟用 ETF 同步設定，不影響券商端任何狀態",
                     "交易日 08:50、15:30", "0 50 8 * * MON-FRI；0 30 15 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦交割銀行餘額同步",

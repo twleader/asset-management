@@ -1,6 +1,7 @@
 package com.steven.assets.integration.fubon;
 
 import com.steven.assets.model.FubonEtfHoldingsSnapshot;
+import com.steven.assets.repository.FubonEtfHoldingsSnapshotRepository;
 import com.steven.assets.repository.StockHoldingRepository;
 import com.steven.assets.service.MarketDataService;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class FubonEtfHoldingsSyncService {
     private final MarketDataService marketDataService;
     private final FubonBrokerClient brokerClient;
     private final FubonEtfHoldingsWriter writer;
+    private final FubonEtfHoldingsSnapshotRepository snapshotRepository;
     private final StockHoldingRepository stockHoldingRepository;
     private final Clock clock;
 
@@ -46,19 +48,22 @@ public class FubonEtfHoldingsSyncService {
             MarketDataService marketDataService,
             FubonBrokerClient brokerClient,
             FubonEtfHoldingsWriter writer,
+            FubonEtfHoldingsSnapshotRepository snapshotRepository,
             StockHoldingRepository stockHoldingRepository) {
         this(etfHoldingsSyncEnabled, configState, marketDataService, brokerClient, writer,
-                stockHoldingRepository, Clock.system(TW_ZONE));
+                snapshotRepository, stockHoldingRepository, Clock.system(TW_ZONE));
     }
 
     FubonEtfHoldingsSyncService(boolean enabled, FubonConfigState configState,
             MarketDataService marketDataService, FubonBrokerClient brokerClient,
-            FubonEtfHoldingsWriter writer, StockHoldingRepository stockHoldingRepository, Clock clock) {
+            FubonEtfHoldingsWriter writer, FubonEtfHoldingsSnapshotRepository snapshotRepository,
+            StockHoldingRepository stockHoldingRepository, Clock clock) {
         this.etfHoldingsSyncEnabled = enabled;
         this.configState = configState;
         this.marketDataService = marketDataService;
         this.brokerClient = brokerClient;
         this.writer = writer;
+        this.snapshotRepository = snapshotRepository;
         this.stockHoldingRepository = stockHoldingRepository;
         this.clock = clock;
     }
@@ -75,15 +80,46 @@ public class FubonEtfHoldingsSyncService {
         }
         if (tradingDay == null || !tradingDay.orElse(false)) return;
 
-        List<String> codes;
+        List<String> codes = collectRadarCodesOrEmpty();
+        if (codes.isEmpty()) return;
+        syncCodes(codes, today);
+    }
+
+    /**
+     * Application-lifecycle gap fill. Deliberately skips the trading-calendar gate and queries only
+     * radar ETFs without an already committed successful row (including a successful empty payload).
+     */
+    public void syncMissingOnStartup() {
+        if (!etfHoldingsSyncEnabled) return;
+        if (configState.snapshot().state() != FubonConfigState.State.READY) return;
+
+        List<String> candidates = collectRadarCodesOrEmpty();
+        if (candidates.isEmpty()) return;
+
+        Set<String> successfulCodes;
         try {
-            codes = new ArrayList<>(collectTwRadarEtfCodes());
+            successfulCodes = snapshotRepository.findSuccessfulEtfStockCodes(candidates);
         } catch (RuntimeException exception) {
-            log.warn("Fubon ETF holdings sync outcome=SKIPPED reason=RADAR_QUERY_FAILED");
+            log.warn("Fubon ETF holdings startup sync outcome=SKIPPED reason=SUCCESSFUL_IDS_QUERY_FAILED");
             return;
         }
-        if (codes.isEmpty()) return;
+        Set<String> covered = successfulCodes == null ? Set.of() : successfulCodes;
+        List<String> missing = candidates.stream().filter(code -> !covered.contains(code)).toList();
+        if (missing.isEmpty()) return;
 
+        syncCodes(missing, LocalDate.now(clock.withZone(TW_ZONE)));
+    }
+
+    private List<String> collectRadarCodesOrEmpty() {
+        try {
+            return new ArrayList<>(collectTwRadarEtfCodes());
+        } catch (RuntimeException exception) {
+            log.warn("Fubon ETF holdings sync outcome=SKIPPED reason=RADAR_QUERY_FAILED");
+            return List.of();
+        }
+    }
+
+    private void syncCodes(List<String> codes, LocalDate today) {
         Instant now = clock.instant();
         int succeeded = 0;
         int failed = 0;

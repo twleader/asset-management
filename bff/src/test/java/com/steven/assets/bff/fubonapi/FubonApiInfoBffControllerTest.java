@@ -197,10 +197,13 @@ class FubonApiInfoBffControllerTest {
         var etf = apis().stream().filter(api -> api.sdkReference().endsWith("ownership.etf_holdings"))
                 .findFirst().orElseThrow();
         assertThat(etf.connected()).isTrue();
-        assertThat(etf.consumer()).contains("08:50", "15:30", "交易雷達", "需另啟用設定");
+        assertThat(etf.consumer()).contains("交易日 08:50／15:30 全量同步", "ApplicationReady",
+                "missing-only", "failure retry", "交易雷達", "需另啟用設定");
         assertThat(etf.responseSummary()).contains("正規化 JSON", "sourceDate", "decimal 字串")
                 .doesNotContain("逐字保存", "尚未核實", "佔位");
         assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(11);
+        assertThat(apis()).hasSize(52);
+        assertThat(apis().stream().filter(FubonApiInfoDto::connected)).hasSize(21);
     }
 
     @Test

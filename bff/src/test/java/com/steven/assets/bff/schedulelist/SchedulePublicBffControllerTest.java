@@ -47,7 +47,7 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("富邦 ETF 成分股持股同步精確登錄雙 cron、時區與唯讀語意（Task 389）")
+    @DisplayName("富邦 ETF 成分股持股同步精確登錄雙 cron、啟動補缺與唯讀語意（Task 422）")
     void 富邦ETF成分股持股同步排程契約() {
         assertThat(jobs()).filteredOn(j -> "富邦 ETF 成分股持股同步".equals(j.name()))
                 .singleElement()
@@ -57,7 +57,8 @@ class SchedulePublicBffControllerTest {
                     assertThat(job.cron()).isEqualTo("0 50 8 * * MON-FRI；0 30 15 * * MON-FRI");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
                     assertThat(job.schedule()).isEqualTo("交易日 08:50、15:30");
-                    assertThat(job.description()).contains("唯讀", "今日交易雷達", "不影響券商端任何狀態");
+                    assertThat(job.description()).contains("唯讀", "今日交易雷達", "交易日 08:50／15:30 全量同步",
+                            "ApplicationReady", "missing-only", "failure retry", "不影響券商端任何狀態");
                 });
     }
 

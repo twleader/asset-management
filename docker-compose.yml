@@ -241,6 +241,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      fubon-broker-service:
+        condition: service_healthy
     networks:
       - asset-net
     healthcheck:

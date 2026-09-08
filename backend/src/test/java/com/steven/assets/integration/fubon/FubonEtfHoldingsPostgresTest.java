@@ -30,6 +30,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -61,6 +62,9 @@ class FubonEtfHoldingsPostgresTest {
             {"schemaVersion":1,"stockCode":"0050","sourceDate":"2026-08-27","holdings":[
               {"stockCode":"2330","stockName":"台積電","weight":"58.82","shares":"530358242"}]}
             """;
+    private static final String EMPTY_PAYLOAD = """
+            {"schemaVersion":1,"stockCode":"00719B","sourceDate":null,"holdings":[]}
+            """;
 
     @BeforeEach
     void useActualEtfSchemaInsteadOfHibernateTypeInference() throws Exception {
@@ -89,6 +93,83 @@ class FubonEtfHoldingsPostgresTest {
     }
 
     @Test
+    void successfulCodeProjectionReturnsNonEmptyAndLegalEmptyRowsButNotFailureOrMissing() {
+        writer.save(row("0050", true, null, PAYLOAD));
+        writer.save(row("00719B", true, null, EMPTY_PAYLOAD));
+        writer.save(row("0056", false, "ETF_HOLDINGS_TIMEOUT", null));
+
+        Set<String> successful = repository.findSuccessfulEtfStockCodes(
+                List.of("0050", "00719B", "0056", "006208"));
+
+        assertThat(successful).containsExactlyInAnyOrder("0050", "00719B");
+    }
+
+    @Test
+    void startupKeepsSuccessfulRowsByteAndTimestampStableWhileRetryingFailureAndMissingRows() {
+        Instant old = Instant.parse("2026-08-20T00:00:00Z");
+        writer.save(FubonEtfHoldingsSnapshot.builder().etfStockCode("0050").market("台股")
+                .success(true).reason(null).rawResponseJson(PAYLOAD).fetchedAt(old).updatedAt(old).build());
+        writer.save(FubonEtfHoldingsSnapshot.builder().etfStockCode("00719B").market("台股")
+                .success(true).reason(null).rawResponseJson(EMPTY_PAYLOAD).fetchedAt(old).updatedAt(old).build());
+        writer.save(FubonEtfHoldingsSnapshot.builder().etfStockCode("0056").market("台股")
+                .success(false).reason("ETF_HOLDINGS_TIMEOUT").rawResponseJson(null)
+                .fetchedAt(old).updatedAt(old).build());
+        String originalNonEmptyPayload = repository.findById("0050").orElseThrow().getRawResponseJson();
+        String originalEmptyPayload = repository.findById("00719B").orElseThrow().getRawResponseJson();
+
+        var config = mock(FubonConfigState.class);
+        when(config.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "test", null));
+        var market = mock(MarketDataService.class);
+        for (String code : List.of("0050", "00719B", "0056", "006208")) {
+            when(market.isEtf(code, "台股")).thenReturn(true);
+        }
+        var radar = mock(StockHoldingRepository.class);
+        when(radar.findTwRadarCandidateCodes()).thenReturn(List.of("0050", "00719B", "0056", "006208"));
+        var broker = mock(FubonBrokerClient.class);
+        String retriedPayload = PAYLOAD.replace("0050", "0056");
+        String missingPayload = PAYLOAD.replace("0050", "006208");
+        when(broker.readEtfHoldings(List.of("0056", "006208"))).thenReturn(FubonDtos.CallResult.success(
+                new FubonDtos.EtfHoldingsBatchResponse("batch", List.of(
+                        new FubonDtos.EtfHoldingsItem("0056", "SUCCESS", null, retriedPayload),
+                        new FubonDtos.EtfHoldingsItem("006208", "SUCCESS", null, missingPayload)))));
+        var service = new FubonEtfHoldingsSyncService(true, config, market, broker, writer,
+                repository, radar, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        service.syncMissingOnStartup();
+
+        verify(broker).readEtfHoldings(List.of("0056", "006208"));
+        var nonEmpty = repository.findById("0050").orElseThrow();
+        assertThat(nonEmpty.getRawResponseJson()).isEqualTo(originalNonEmptyPayload);
+        assertThat(nonEmpty.getReason()).isNull();
+        assertThat(nonEmpty.getFetchedAt()).isEqualTo(old);
+        assertThat(nonEmpty.getUpdatedAt()).isEqualTo(old);
+        var legalEmpty = repository.findById("00719B").orElseThrow();
+        assertThat(legalEmpty.getRawResponseJson()).isEqualTo(originalEmptyPayload);
+        assertThat(legalEmpty.getReason()).isNull();
+        assertThat(legalEmpty.getFetchedAt()).isEqualTo(old);
+        assertThat(legalEmpty.getUpdatedAt()).isEqualTo(old);
+        assertThat(repository.findById("0056").orElseThrow().getSuccess()).isTrue();
+        assertThat(repository.findById("006208").orElseThrow().getSuccess()).isTrue();
+
+        service.syncMissingOnStartup();
+        verifyNoMoreInteractions(broker);
+        verify(market, never()).isTwTradingDayKnown(any());
+    }
+
+    @Test
+    void legalEmptyJsonbRoundTripRemainsAReadableSuccessfulResult() {
+        writer.save(row("00719B", true, null, EMPTY_PAYLOAD));
+        assertThat(jdbc.queryForObject("SELECT jsonb_array_length(raw_response_json->'holdings') "
+                + "FROM fubon_etf_holdings_snapshot WHERE etf_stock_code='00719B'", Integer.class)).isZero();
+        var result = new MarketDataService("http://127.0.0.1:1", null, repository)
+                .getEtfHoldings("00719B", "台股");
+        assertThat(result.supported()).isTrue();
+        assertThat(result.asOfDate()).isNull();
+        assertThat(result.holdings()).isEmpty();
+        assertThat(result.message()).isEqualTo("無股票成分資料");
+    }
+
+    @Test
     void failedBatchClearsPreviouslySuccessfulPayloadInCommittedDatabase() {
         writer.save(row("0050", true, null, PAYLOAD));
         var config = mock(FubonConfigState.class);
@@ -100,7 +181,8 @@ class FubonEtfHoldingsPostgresTest {
         when(radar.findTwRadarCandidateCodes()).thenReturn(List.of("0050"));
         var broker = mock(FubonBrokerClient.class);
         when(broker.readEtfHoldings(List.of("0050"))).thenReturn(FubonDtos.CallResult.failure("ADAPTER_5XX"));
-        new FubonEtfHoldingsSyncService(true, config, market, broker, writer, radar, Clock.fixed(NOW, ZoneOffset.UTC)).syncScheduled();
+        new FubonEtfHoldingsSyncService(true, config, market, broker, writer, repository,
+                radar, Clock.fixed(NOW, ZoneOffset.UTC)).syncScheduled();
         var persisted = repository.findById("0050").orElseThrow();
         assertThat(persisted.getSuccess()).isFalse();
         assertThat(persisted.getReason()).isEqualTo("ADAPTER_5XX");
