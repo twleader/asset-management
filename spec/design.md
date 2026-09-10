@@ -4672,6 +4672,91 @@ run-now 不動當日 guard——全部同 R41，不重述。
 
 ---
 
+## Requirement 145／Task 423：台幣兌美元匯出多個每日執行時間
+
+本節取代上方 Requirement 42 的單一時間排程資料模型與 `GET/PUT schedule` 契約；手動下載、
+匯率資料來源、USD 常數、輸出範圍、目錄安全、雙格式輸出及 Google Drive 規則均維持原樣。
+這是「一份共用匯出設定 + 多個純時間 child」，不是多筆可各自指定資料夾的獨立排程。
+
+### 資料模型與 migration
+
+`exchange_rate_export_schedule` 保留 owner、總開關、輸出子路徑、`range_months`、Drive 欄位和 parent
+最近一次摘要。既有 `run_hour`、`run_minute`、`last_run_date` 不移除，改為 rollback shadow：新程式的
+due 判斷只看 child；parent `last_run_at`／`last_run_status` 則仍是最後完成 child 的整體摘要。
+
+```sql
+CREATE TABLE exchange_rate_export_schedule_time (
+    id              BIGSERIAL PRIMARY KEY,
+    schedule_id     BIGINT       NOT NULL REFERENCES exchange_rate_export_schedule(id) ON DELETE CASCADE,
+    run_hour        INT          NOT NULL,
+    run_minute      INT          NOT NULL,
+    enabled         BOOLEAN      NOT NULL DEFAULT TRUE,
+    last_run_date   DATE,
+    last_run_at     TIMESTAMP,
+    last_run_status VARCHAR(500),
+    updated_at      TIMESTAMP,
+    CONSTRAINT uq_exchange_rate_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute),
+    CONSTRAINT ck_exchange_rate_export_schedule_time_hour CHECK (run_hour BETWEEN 0 AND 23),
+    CONSTRAINT ck_exchange_rate_export_schedule_time_minute CHECK (run_minute BETWEEN 0 AND 59)
+);
+CREATE INDEX idx_exchange_rate_export_schedule_time_schedule
+    ON exchange_rate_export_schedule_time(schedule_id);
+```
+
+`v1.126.0-exchange-rate-export-schedule-multi-time.sql` 必須以 expand/contract 方式建立子表，將每筆
+parent 的時分、`last_run_date`、`last_run_at`、`last_run_status`、`updated_at` 複製為一筆 enabled child，並以
+`IF NOT EXISTS`／`ON CONFLICT DO NOTHING` 保持冪等。不得 drop parent legacy 欄位、不得放寬其
+nullability。版號是以實機已執行至 `v1.125.0` 為基準；開工與部署前均須重新查
+`databasechangelog`，若遭其他 worktree 佔用，檔名、changeset id、此段與任務檔必須一起避讓。
+部署要先停止且確認舊 business-services container 已退出，才啟動會執行 migration 的新 image；不能讓
+舊 image 在 child 資料複製之後仍寫入 parent guard，否則新 due runner 會因 child guard 過期而同日重跑。
+
+`ExchangeRateExportSchedule` 新增 `@OrderBy("runHour ASC, runMinute ASC, id ASC")` 的
+`@OneToMany(mappedBy="schedule", cascade=ALL, orphanRemoval=true) @Builder.Default List<...> times = new ArrayList<>()`；child
+是 owning `@ManyToOne(fetch=LAZY, optional=false) @JoinColumn(name="schedule_id", nullable=false)`，且
+`addTime` 必須先 `time.setSchedule(this)` 再加入 list。child 採 `@Getter/@Setter`，不可使用雙向關聯
+會遞迴的 `@Data`。repository 的 owner lookup 與 scheduler
+`findAll()` 均以 entity graph 載入 `times`。每次設定儲存選最早 enabled child（全停用時最早 child）
+作 representative，立即同步 parent 時分和 representative guard；representative 執行後也同步
+legacy guard。rollback 到舊 image 時只能跑 representative，其他 child 暫停但不會發生 schema failure。
+
+### API 與執行語意
+
+| 層 | 端點 | 新契約 |
+|---|---|---|
+| business | `GET /api/exchange-rate-export/schedule` | 共用 parent 欄位 + 依時分排序的 `times:[{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}]`；不再有 top-level `runHour/runMinute` |
+| business | `PUT /api/exchange-rate-export/schedule` | `{enabled,outputSubpath,rangeMonths,times:[{runHour,runMinute,enabled}],gdriveEnabled,gdriveSubpath}` 整包取代；忽略 child id |
+| BFF | `GET/PUT /api/bff/exchange-rate/export/schedule` | 既有 `Map<String,Object>` 原樣 passthrough；不得裁切 `times[]` |
+| business | `POST /api/exchange-rate-export/run-now` | 既有雙格式 response 不變；不消耗 child guard |
+| BFF | `POST /api/bff/exchange-rate/export/run-now` | 原樣 relay business response；不消耗 child guard |
+
+無 parent 的 GET 回 transient `08:00 enabled=true` child，不寫 DB；parent 暫無 child 時由 legacy 時分
+形成 transient child。PUT 驗 `times` 非空、時分合法、時分不可重複，且 parent enabled 時至少一 child
+enabled。整包替換以 `(runHour,runMinute)` 保留相同 child 的 guard／結果；新增 child guard 為 null，
+未列 child orphan removal；新增、設定修改以及成功／失敗完成 child 均寫 Taipei `updated_at`。初次 run-now
+建立 disabled parent + unguarded `08:00 enabled=true` child。
+
+既有一個 Taipei 每分鐘 `@Scheduled` 及 `ApplicationReadyEvent` 都經同一 CAS 入口。due runner 先驗
+parent enabled，再逐 child 以 enabled、`now >= LocalTime`、child `lastRunDate != today` 判斷；成功或失敗
+只更新該 child guard／結果，並更新 parent 最近一次摘要。多個已到點 child 必須依時分全部執行，第一個
+child 或 parent shadow 不得擋住第二個；單一失敗不阻斷其他 child 或 owner。每輪仍只建立一次 USD
+匯率文件並寫 `.xlsx`／`.json`，同日較晚時間覆寫同名檔；匯率資料是全域公開資料，背景讀取不啟用
+owner filter。
+
+### 前端、排程清單與測試
+
+`ExchangeRateView.vue` 以可新增、停用、移除的時間列取代單一 picker；最後一列不可移除。每列顯示
+時間、enabled 與該列上次執行資訊，載入優先讀 `times[]`，只為未升級後端提供一次 `runHour/runMinute`
+fallback。儲存前擋空列、非法／重複時分和總開啟但全 child 停用；成功後以 response 完整重建。共用的
+range、路徑、Drive、run-now 與 parent 整體上次結果不變，提示要說明每個啟用時間更新同日最新檔。
+
+不新增 `@Scheduled` annotation 或 public 9090 路由；`SchedulePublicBffController.JOBS` 保留同一筆
+台幣兌美元匯出工作，只改為「每分鐘檢查頁面設定的多個每日時間」。新增 child／migration、service、
+controller JSON、BFF passthrough、前端靜態契約與 migration 回退測試；Docker 驗收必須重建/recreate
+business-services、bff、frontend，實測兩個時間與各自 guard，並在完成後還原原設定。
+
+---
+
 ## Requirement 43：今日交易雷達（純本地規則、零 AI API）
 
 ### 架構與請求鏈

@@ -1,8 +1,10 @@
 package com.steven.assets.repository;
 
 import com.steven.assets.model.ExchangeRateExportSchedule;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -14,5 +16,10 @@ import java.util.Optional;
  */
 public interface ExchangeRateExportScheduleRepository extends JpaRepository<ExchangeRateExportSchedule, Long> {
 
+    @EntityGraph(attributePaths = "times")
     Optional<ExchangeRateExportSchedule> findByOwnerUserId(Long ownerUserId);
+
+    @Override
+    @EntityGraph(attributePaths = "times")
+    List<ExchangeRateExportSchedule> findAll();
 }

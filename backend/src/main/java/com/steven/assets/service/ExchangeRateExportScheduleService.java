@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.ExchangeRateExportDto;
 import com.steven.assets.model.ExchangeRateExportSchedule;
+import com.steven.assets.model.ExchangeRateExportScheduleTime;
 import com.steven.assets.repository.ExchangeRateExportScheduleRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.UnauthenticatedException;
@@ -12,6 +13,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,6 +23,11 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -105,16 +112,15 @@ public class ExchangeRateExportScheduleService {
         Long ownerId = requireOwnerId();
         ExchangeRateExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
                 ExchangeRateExportSchedule.builder().ownerUserId(ownerId).build());
+        if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
         return toResponse(s);
     }
 
     /** upsert 當前使用者設定。 */
+    @Transactional
     public ExchangeRateExportDto.SettingResponse updateForCurrentUser(ExchangeRateExportDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
-        int hour = req.runHour() == null ? 8 : req.runHour();
-        int minute = req.runMinute() == null ? 0 : req.runMinute();
-        if (hour < 0 || hour > 23) throw new IllegalArgumentException("執行時(hour)必須介於 0～23");
-        if (minute < 0 || minute > 59) throw new IllegalArgumentException("執行分(minute)必須介於 0～59");
+        validateTimes(req.times(), Boolean.TRUE.equals(req.enabled()));
         Integer rangeMonths = req.rangeMonths();
         if (rangeMonths != null && (rangeMonths < 1 || rangeMonths > MAX_RANGE_MONTHS)) {
             throw new IllegalArgumentException("匯出範圍(月)必須介於 1～" + MAX_RANGE_MONTHS + "，或留空代表全部十年");
@@ -131,8 +137,6 @@ public class ExchangeRateExportScheduleService {
 
         s.setOwnerUserId(ownerId);
         s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setRunHour(hour);
-        s.setRunMinute(minute);
         s.setOutputSubpath(subpath);
         s.setRangeMonths(rangeMonths);
         s.setGdriveEnabled(drive.enabled());
@@ -140,14 +144,40 @@ public class ExchangeRateExportScheduleService {
         // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
         // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
         s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+        Map<String, ExchangeRateExportScheduleTime> existing = new HashMap<>();
+        for (ExchangeRateExportScheduleTime time : s.getTimes()) {
+            existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
+        }
+        HashSet<String> requested = new HashSet<>();
+        for (ExchangeRateExportDto.TimeRequest item : req.times()) {
+            String key = timeKey(item.runHour(), item.runMinute());
+            requested.add(key);
+            ExchangeRateExportScheduleTime time = existing.get(key);
+            if (time == null) {
+                time = ExchangeRateExportScheduleTime.builder()
+                        .runHour(item.runHour()).runMinute(item.runMinute())
+                        .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
+                s.addTime(time);
+            } else {
+                time.setEnabled(Boolean.TRUE.equals(item.enabled()));
+                time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            }
+        }
+        s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
+        syncRollbackRepresentative(s);
         return toResponse(settingRepo.save(s), drive.selfCheckWarning());
     }
 
     /** 立即產檔寫入當前使用者設定的目錄（供驗證路徑正確）。不動當日 guard。 */
     public ExchangeRateExportDto.RunNowResponse runNowForCurrentUser() {
         Long ownerId = requireOwnerId();
-        ExchangeRateExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
-                ExchangeRateExportSchedule.builder().ownerUserId(ownerId).build());
+        ExchangeRateExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() -> {
+            ExchangeRateExportSchedule created = ExchangeRateExportSchedule.builder()
+                    .ownerUserId(ownerId).enabled(Boolean.FALSE).build();
+            created.addTime(defaultTime());
+            syncRollbackRepresentative(created);
+            return created;
+        });
         try {
             var r = export(s, ownerId);
             s.setOwnerUserId(ownerId);
@@ -180,16 +210,10 @@ public class ExchangeRateExportScheduleService {
     /** 每分鐘檢查各使用者設定，命中執行時間且當日未跑者即產檔。 */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
     public void tick() {
-        if (!ticking.compareAndSet(false, true)) {
-            log.debug("上一輪台幣兌美元排程匯出尚未結束，跳過本次 tick");
-            return;
-        }
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("台幣兌美元排程匯出 tick 發生例外：{}", e.getMessage(), e);
-        } finally {
-            ticking.set(false);
         }
     }
 
@@ -197,9 +221,21 @@ public class ExchangeRateExportScheduleService {
     @EventListener(ApplicationReadyEvent.class)
     public void selfHealOnStartup() {
         try {
-            runDueExports();
+            tryRunDueExports();
         } catch (RuntimeException e) {
             log.warn("台幣兌美元排程匯出開機自癒失敗：{}", e.getMessage(), e);
+        }
+    }
+
+    private void tryRunDueExports() {
+        if (!ticking.compareAndSet(false, true)) {
+            log.debug("上一輪台幣兌美元排程匯出尚未結束，跳過本次觸發");
+            return;
+        }
+        try {
+            runDueExports();
+        } finally {
+            ticking.set(false);
         }
     }
 
@@ -210,33 +246,42 @@ public class ExchangeRateExportScheduleService {
      * 延遲／跳過的分鐘（Spring 預設排程池只有 1 條執行緒、與其他 @Scheduled 共用，可能被長工作卡住跨越分鐘），
      * 都會在後續 tick 自動補跑，直到當日成功並把 lastRunDate 設為今日為止，避免整日靜默漏跑。
      */
-    private void runDueExports() {
+    @Transactional
+    void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
         for (ExchangeRateExportSchedule s : settingRepo.findAll()) {
             if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            if (today.equals(s.getLastRunDate())) continue;
-            if (!now.isBefore(LocalTime.of(s.getRunHour(), s.getRunMinute()))) {
-                runScheduled(s, today);
+            if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
+            for (ExchangeRateExportScheduleTime time : s.getTimes()) {
+                if (!Boolean.TRUE.equals(time.getEnabled()) || today.equals(time.getLastRunDate())) continue;
+                if (!now.isBefore(LocalTime.of(time.getRunHour(), time.getRunMinute()))) {
+                    runScheduled(s, time, today);
+                }
             }
         }
     }
 
     /** 背景：對指定設定產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
-    private void runScheduled(ExchangeRateExportSchedule s, LocalDate today) {
+    private void runScheduled(ExchangeRateExportSchedule s, ExchangeRateExportScheduleTime time, LocalDate today) {
         try {
             var r = export(s, s.getOwnerUserId());
-            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            time.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
             applyGdriveStatus(s, r);
-            log.info("台幣兌美元排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
+            log.info("台幣兌美元排程匯出 owner={} {}:{} → {}", s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), r.localStatus());
         } catch (Exception e) {
-            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            log.warn("台幣兌美元排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
+            time.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
+            s.setLastRunStatus(time.getLastRunStatus());
+            log.warn("台幣兌美元排程匯出失敗 owner={} {}:{}：{}", s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), e.getMessage(), e);
             syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
         } finally {
-            // 成功或失敗都設 guard，避免命中分鐘後每 poll 重試整天。
-            s.setLastRunDate(today);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
+            LocalDateTime completedAt = LocalDateTime.now(TW_ZONE);
+            time.setLastRunDate(today);
+            time.setLastRunAt(completedAt);
+            time.setUpdatedAt(completedAt);
+            s.setLastRunAt(completedAt);
+            syncRollbackRepresentative(s);
             settingRepo.save(s);
         }
     }
@@ -310,6 +355,61 @@ public class ExchangeRateExportScheduleService {
         return sub;
     }
 
+    private static ExchangeRateExportScheduleTime defaultTime() {
+        return ExchangeRateExportScheduleTime.builder().runHour(8).runMinute(0).enabled(Boolean.TRUE).build();
+    }
+
+    /** Rolling-upgrade fallback；GET 只建立 transient child，直到儲存或排程寫回才持久化。 */
+    private static ExchangeRateExportScheduleTime legacyTime(ExchangeRateExportSchedule schedule) {
+        return ExchangeRateExportScheduleTime.builder()
+                .runHour(schedule.getRunHour() == null ? 8 : schedule.getRunHour())
+                .runMinute(schedule.getRunMinute() == null ? 0 : schedule.getRunMinute())
+                .enabled(Boolean.TRUE)
+                .lastRunDate(schedule.getLastRunDate())
+                .lastRunAt(schedule.getLastRunAt())
+                .lastRunStatus(schedule.getLastRunStatus())
+                .build();
+    }
+
+    private static String timeKey(Integer hour, Integer minute) {
+        return hour + ":" + minute;
+    }
+
+    private static void validateTimes(List<ExchangeRateExportDto.TimeRequest> times, boolean parentEnabled) {
+        if (times == null || times.isEmpty()) throw new IllegalArgumentException("至少需要一個執行時間");
+        HashSet<String> seen = new HashSet<>();
+        boolean anyEnabled = false;
+        for (ExchangeRateExportDto.TimeRequest time : times) {
+            if (time == null || time.runHour() == null || time.runMinute() == null
+                    || time.runHour() < 0 || time.runHour() > 23 || time.runMinute() < 0 || time.runMinute() > 59) {
+                throw new IllegalArgumentException("執行時間必須介於 00:00～23:59");
+            }
+            if (!seen.add(timeKey(time.runHour(), time.runMinute()))) throw new IllegalArgumentException("執行時間不可重複");
+            anyEnabled |= Boolean.TRUE.equals(time.enabled());
+        }
+        if (parentEnabled && !anyEnabled) throw new IllegalArgumentException("啟用排程時至少需啟用一個時間");
+    }
+
+    /** rollback representative = 最早 enabled child；全部停用時為最早 child。 */
+    private static void syncRollbackRepresentative(ExchangeRateExportSchedule schedule) {
+        ExchangeRateExportScheduleTime representative = schedule.getTimes().stream()
+                .filter(time -> Boolean.TRUE.equals(time.getEnabled()))
+                .min(ExchangeRateExportScheduleService::compareTime)
+                .orElseGet(() -> schedule.getTimes().stream().min(ExchangeRateExportScheduleService::compareTime).orElse(null));
+        if (representative == null) return;
+        schedule.setRunHour(representative.getRunHour());
+        schedule.setRunMinute(representative.getRunMinute());
+        schedule.setLastRunDate(representative.getLastRunDate());
+    }
+
+    private static int compareTime(ExchangeRateExportScheduleTime left, ExchangeRateExportScheduleTime right) {
+        int hour = Integer.compare(left.getRunHour(), right.getRunHour());
+        if (hour != 0) return hour;
+        int minute = Integer.compare(left.getRunMinute(), right.getRunMinute());
+        if (minute != 0) return minute;
+        return Comparator.nullsLast(Long::compareTo).compare(left.getId(), right.getId());
+    }
+
     /** 基底 resolve 子路徑並驗證仍在基底內（拒 `..`／絕對路徑跳脫）。 */
     private Path resolveDir(String subpath) {
         Path base = Path.of(baseDir).toAbsolutePath().normalize();
@@ -333,10 +433,16 @@ public class ExchangeRateExportScheduleService {
                                                              String gdriveSelfCheckWarning) {
         return ExchangeRateExportDto.SettingResponse.builder()
                 .enabled(Boolean.TRUE.equals(s.getEnabled()))
-                .runHour(s.getRunHour())
-                .runMinute(s.getRunMinute())
                 .outputSubpath(s.getOutputSubpath())
                 .rangeMonths(s.getRangeMonths())
+                .times(s.getTimes().stream()
+                        .sorted(Comparator.comparing(ExchangeRateExportScheduleTime::getRunHour)
+                                .thenComparing(ExchangeRateExportScheduleTime::getRunMinute)
+                                .thenComparing(time -> time.getId() == null ? Long.MAX_VALUE : time.getId()))
+                        .map(time -> new ExchangeRateExportDto.TimeResponse(time.getId(), time.getRunHour(), time.getRunMinute(),
+                                time.getEnabled(), time.getLastRunAt() == null ? null : time.getLastRunAt().format(TS_FMT),
+                                time.getLastRunStatus()))
+                        .toList())
                 .lastRunAt(s.getLastRunAt() == null ? null : s.getLastRunAt().format(TS_FMT))
                 .lastRunStatus(s.getLastRunStatus())
                 .baseDir(baseDir)
