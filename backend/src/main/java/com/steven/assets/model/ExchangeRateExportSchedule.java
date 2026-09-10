@@ -9,6 +9,8 @@ import org.hibernate.annotations.Filter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 台幣兌美元匯率每日排程自動匯出設定（Requirement 42 / Task 204）。
@@ -49,12 +51,15 @@ public class ExchangeRateExportSchedule {
     @Builder.Default
     private Boolean enabled = Boolean.FALSE;
 
-    /** 每日執行時（0..23） */
+    /**
+     * rollback shadow（Requirement 145 / Task 423）：新 scheduler 不得以此欄判斷 due，
+     * 只同步最早啟用（全停用時最早）的 {@link #times} child，供舊 image rollback。
+     */
     @Column(name = "run_hour", nullable = false)
     @Builder.Default
     private Integer runHour = 8;
 
-    /** 每日執行分（0..59） */
+    /** rollback shadow，理由同 {@link #runHour}。 */
     @Column(name = "run_minute", nullable = false)
     @Builder.Default
     private Integer runMinute = 0;
@@ -71,7 +76,7 @@ public class ExchangeRateExportSchedule {
     @Column(name = "range_months")
     private Integer rangeMonths;
 
-    /** 當日已執行的日期（成功或失敗都設，避免同分鐘每 poll 重跑） */
+    /** rollback representative 的當日 guard shadow；新 scheduler 僅看 child guard。 */
     @Column(name = "last_run_date")
     private LocalDate lastRunDate;
 
@@ -113,4 +118,18 @@ public class ExchangeRateExportSchedule {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * 正規化每日執行時間（Requirement 145 / Task 423）。輸出範圍、資料夾及 Drive 設定保留 parent-only，
+     * 每個 child 則各自保存 enabled、guard 與執行結果。
+     */
+    @OneToMany(mappedBy = "schedule", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("runHour ASC, runMinute ASC, id ASC")
+    @Builder.Default
+    private List<ExchangeRateExportScheduleTime> times = new ArrayList<>();
+
+    public void addTime(ExchangeRateExportScheduleTime time) {
+        time.setSchedule(this);
+        times.add(time);
+    }
 }

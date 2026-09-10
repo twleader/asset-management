@@ -46,7 +46,7 @@
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
 -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-07
--- 產生當下表數：99 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：100 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -964,6 +964,44 @@ CREATE SEQUENCE public.exchange_rate_export_schedule_id_seq
 --
 
 ALTER SEQUENCE public.exchange_rate_export_schedule_id_seq OWNED BY public.exchange_rate_export_schedule.id;
+
+
+--
+-- Name: exchange_rate_export_schedule_time; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.exchange_rate_export_schedule_time (
+    id bigint NOT NULL,
+    schedule_id bigint NOT NULL,
+    run_hour integer NOT NULL,
+    run_minute integer NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    last_run_date date,
+    last_run_at timestamp without time zone,
+    last_run_status character varying(500),
+    updated_at timestamp without time zone,
+    CONSTRAINT ck_exchange_rate_export_schedule_time_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
+    CONSTRAINT ck_exchange_rate_export_schedule_time_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
+);
+
+
+--
+-- Name: exchange_rate_export_schedule_time_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.exchange_rate_export_schedule_time_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: exchange_rate_export_schedule_time_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.exchange_rate_export_schedule_time_id_seq OWNED BY public.exchange_rate_export_schedule_time.id;
 
 
 --
@@ -3222,6 +3260,13 @@ ALTER TABLE ONLY public.exchange_rate_export_schedule ALTER COLUMN id SET DEFAUL
 
 
 --
+-- Name: exchange_rate_export_schedule_time id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_rate_export_schedule_time ALTER COLUMN id SET DEFAULT nextval('public.exchange_rate_export_schedule_time_id_seq'::regclass);
+
+
+--
 -- Name: export_schedule_setting id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3657,6 +3702,14 @@ ALTER TABLE ONLY public.etf_nav_observation
 
 ALTER TABLE ONLY public.exchange_rate_export_schedule
     ADD CONSTRAINT exchange_rate_export_schedule_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: exchange_rate_export_schedule_time exchange_rate_export_schedule_time_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_rate_export_schedule_time
+    ADD CONSTRAINT exchange_rate_export_schedule_time_pkey PRIMARY KEY (id);
 
 
 --
@@ -4412,6 +4465,14 @@ ALTER TABLE ONLY public.exchange_rate_export_schedule
 
 
 --
+-- Name: exchange_rate_export_schedule_time uq_exchange_rate_export_schedule_time; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_rate_export_schedule_time
+    ADD CONSTRAINT uq_exchange_rate_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute);
+
+
+--
 -- Name: export_schedule_setting uq_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4697,6 +4758,13 @@ CREATE INDEX idx_etf_nav_observation_decision ON public.etf_nav_observation USIN
 --
 
 CREATE INDEX idx_etf_nav_observation_nav_date ON public.etf_nav_observation USING btree (stock_code, market, nav_date, available_at DESC);
+
+
+--
+-- Name: idx_exchange_rate_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_exchange_rate_export_schedule_time_schedule ON public.exchange_rate_export_schedule_time USING btree (schedule_id);
 
 
 --
@@ -5077,6 +5145,14 @@ ALTER TABLE ONLY public.api_error_log
 
 ALTER TABLE ONLY public.commodity_export_schedule_time
     ADD CONSTRAINT commodity_export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.commodity_export_schedule(id) ON DELETE CASCADE;
+
+
+--
+-- Name: exchange_rate_export_schedule_time exchange_rate_export_schedule_time_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.exchange_rate_export_schedule_time
+    ADD CONSTRAINT exchange_rate_export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.exchange_rate_export_schedule(id) ON DELETE CASCADE;
 
 
 --

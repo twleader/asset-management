@@ -2,6 +2,8 @@ package com.steven.assets.dto;
 
 import lombok.Builder;
 
+import java.util.List;
+
 /**
  * 台幣兌美元匯率每日排程自動匯出設定 DTO（Requirement 42 / Task 204）。
  *
@@ -13,10 +15,9 @@ public class ExchangeRateExportDto {
     @Builder
     public record SettingResponse(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
             Integer rangeMonths,   // null ＝ 全部十年
+            List<TimeResponse> times,
             String lastRunAt,      // yyyy-MM-dd HH:mm:ss，無則 null
             String lastRunStatus,  // 「成功：/path」或「失敗：訊息」
             String baseDir,        // 容器內基底目錄（供 UI 顯示完整落點提示）
@@ -33,16 +34,23 @@ public class ExchangeRateExportDto {
             String gdriveSelfCheckWarning
     ) {}
 
+    public record TimeResponse(
+            Long id, Integer runHour, Integer runMinute, Boolean enabled,
+            String lastRunAt, String lastRunStatus
+    ) {}
+
     public record SettingRequest(
             Boolean enabled,
-            Integer runHour,
-            Integer runMinute,
             String outputSubpath,
             Integer rangeMonths,
+            List<TimeRequest> times,
             // null ＝ 該欄整個沒送出＝不變更（不得把已開啟的 Drive 開關靜默關掉，見 Task 243.1.1）
             Boolean gdriveEnabled,
             String gdriveSubpath
     ) {}
+
+    /** Client 傳入的 id 一律忽略，service 以 (runHour, runMinute) 對映既有 child。 */
+    public record TimeRequest(Integer runHour, Integer runMinute, Boolean enabled) {}
 
     @Builder
     public record RunNowResponse(

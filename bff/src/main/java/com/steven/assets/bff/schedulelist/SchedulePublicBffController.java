@@ -110,7 +110,7 @@ public class SchedulePublicBffController {
                     "每分鐘檢查頁面設定的多個每日時間，命中每個啟用時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到指定目錄（Requirement 72）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "台幣兌美元匯出", "每日匯出排程檢查",
-                    "每分鐘檢查各使用者的台幣兌美元匯率自動匯出設定，命中執行時間即同時產出 JSON 與 Excel 兩份（主檔名相同）到指定目錄（Requirement 42）；輸出含 Google Drive 同步（若已啟用）",
+                    "每分鐘檢查各使用者頁面設定的多個每日時間，命中每個啟用時間即同時產出 JSON 與 Excel 兩份（主檔名相同）並更新同日最新檔到指定目錄（Requirement 145）；輸出含 Google Drive 同步（若已啟用）",
                     "每分鐘", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "大盤指數匯出", "每日匯出排程檢查",
                     "每分鐘檢查各使用者的大盤指數日線自動匯出設定，逐一處理每個時間點及其複選指數，命中後同時產出 JSON 與 Excel 兩份（主檔名相同，欄位為開高低收＋四條均線＋成交股數／成交金額，各複選指數各自一組）到指定目錄（Requirement 45）；輸出含 Google Drive 同步（若已啟用）",

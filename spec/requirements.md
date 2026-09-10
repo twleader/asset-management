@@ -1194,6 +1194,23 @@
 - [ ] **檔名**：`油價金價_{使用者ID}_{YYYYMMDD}.xlsx`。檔名含 owner id 的原因：資料雖為全域，但各使用者可設不同「匯出範圍」，同日產出內容不同；若多使用者設定同一 subpath，不帶 id 會互相覆蓋成非預期區間。
 - [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移。
 
+### Requirement 145／Task 423：台幣兌美元匯率每日匯出支援多個執行時間
+
+**User Story:** 作為使用者，我希望「台幣兌美元」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份匯率檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾、匯出範圍或 Google Drive 設定。
+
+> 本 Requirement 只取代 Requirement 42 的單一每日時間模型。每位 owner 的輸出資料夾、`range_months`、Drive 設定與整體最近一次結果仍共用；檔名仍為 `台幣兌美元_{ownerId}_yyyyMMdd`，較晚的同日排程覆寫相同 `.xlsx` 與 `.json` 成為最新內容，不新增時間戳或額外歷史檔。手動 Excel 下載、立即匯出、匯率資料來源與 USD 固定幣別均不變。
+
+**Acceptance Criteria:**
+
+- [ ] **正規化多時間模型與可回退 migration：**`exchange_rate_export_schedule` 繼續保存 owner、總開關、輸出子路徑、`range_months`、Google Drive 欄位與最近一次整體結果；新增 `exchange_rate_export_schedule_time`，每列為 `id`、`schedule_id`、`run_hour`、`run_minute`、`enabled`、`last_run_date`、`last_run_at`、`last_run_status`、`updated_at`。以 `UNIQUE(schedule_id,run_hour,run_minute)` 禁止重複時分，並有 `ON DELETE CASCADE` FK、`schedule_id` index、hour 0..23／minute 0..59 CHECK 與冪等 DDL。時間不可存成逗號字串、JSON 或 array 欄位。migration 把每筆既有 parent 的時分、guard／時間／狀態及 `updated_at` 無損複製為一列 enabled child；parent 既有 `run_hour`、`run_minute`、`last_run_date` 不得刪除或改變 nullability，僅作舊 image rollback shadow。**部署不得讓舊／新 business image 同時排程：**先停止並確認舊容器已退出，再啟動會套 migration 的新 image；否則舊 image 在 child 複製後寫入 parent guard，會讓新 image 同日重跑。
+- [ ] **rollback representative 與 parent 摘要：**每次儲存選最早啟用 child（全部停用時選最早 child）為 representative，立即同步 parent `run_hour`、`run_minute` 與其 `last_run_date`；representative 執行後也同步 legacy guard。每個完成的 child 都更新 parent `last_run_at`／`last_run_status` 為整體最近一次摘要，Drive 最近結果維持 parent-only。新 scheduler 不得把 parent legacy guard 當 due 依據；rollback 至舊 image 時只會執行這個代表時間，額外時間暫停但 schema 不會失效。
+- [ ] **明確 `times[]` API 契約：**`GET /api/exchange-rate-export/schedule` 回傳既有 parent 欄位 `enabled/outputSubpath/rangeMonths/lastRunAt/lastRunStatus/baseDir`、四個 Drive 結果欄位及依時分排序的 `times:[{id,runHour,runMinute,enabled,lastRunAt,lastRunStatus}]`；既有時間字串格式不變，只移除 top-level `runHour`／`runMinute`。`PUT` body 為 `{enabled,outputSubpath,rangeMonths,times:[{runHour,runMinute,enabled}],gdriveEnabled,gdriveSubpath}`，採整包取代且 client 傳入 child id 一律忽略。business run-now 精確為 `POST /api/exchange-rate-export/run-now`，BFF 為 `POST /api/bff/exchange-rate/export/run-now`，既有雙格式 response 均不變；BFF 的 GET／PUT schedule 及 run-now 維持 `Map<String,Object>` passthrough，不能建立可能裁切 `times[]` 的鏡像 DTO。
+- [ ] **儲存、預設與 guard：**child 為 owning `@ManyToOne(fetch=LAZY, optional=false)`、`@JoinColumn(name="schedule_id", nullable=false)`；parent 的 ordered `times` 是 `@OneToMany(mappedBy="schedule", cascade=ALL, orphanRemoval=true)` 加 `@Builder.Default new ArrayList<>()`，`addTime` 必須先設 `child.schedule=this` 再加入，禁止另建 unidirectional join table。PUT 的 `times` 不得 null 或空；時分值域合法、request 內不得重複、parent enabled 時至少一個 child enabled；現有 `rangeMonths`、本機路徑與 Drive 授權／自檢語意不變。整包替換在同一 transaction；以 `(runHour,runMinute)` 對映既有 child，保留相同時分的 `lastRunDate`／`lastRunAt`／`lastRunStatus`，新時分 guard 為 null，未列 child 由 orphan removal 移除。child 新增、設定修改、成功或失敗完成都寫 Taipei `updatedAt`。無 parent 的 GET 只回 transient `08:00 enabled=true`，不寫 DB；parent 存在卻沒有 child 時，暫以其 legacy 時分形成 transient child。初次 run-now 建立 disabled parent 與未 guard 的 `08:00 enabled=true` child。
+- [ ] **多時間 due runner：**保留且只保留既有一個 Taipei 每分鐘 `@Scheduled` 及一個 `ApplicationReadyEvent`；兩入口先經同一 `AtomicBoolean.compareAndSet` 進入 due runner。runner 先檢查 parent enabled，再逐一檢查 child enabled、`now >= LocalTime.of(runHour,runMinute)` 與該 child `lastRunDate != today`。每個 child 成功或失敗均只寫自己的 guard／狀態；一個失敗不得阻止同 owner 的後續時間或其他 owner。開機時若多個時間已過且尚未 guard，須依時分全部補跑。Compose 維持 business-services 單 replica；若未來多 replica，須加 DB atomic claim／row lock，JVM 鎖不視為跨 replica 保護。
+- [ ] **立即匯出與輸出不變：**run-now 忽略 parent／child enabled，產出既有同一份 USD 匯率 `.xlsx` 與 `.json`，只更新 parent 整體／Drive 摘要，絕不建立、刪除或修改既有 child guard、時間或狀態。背景與 run-now 維持每次只建立一份匯出文件後輸出雙格式；同日多時間重算當日滾動範圍並覆寫同名檔，資料仍為全域公開匯率，不啟用 owner filter 讀取資料。
+- [ ] **前端互動：**`ExchangeRateView.vue` 將單一時間 picker 改為可新增／停用／移除的時間列；每列有時間 picker、啟用開關、上次執行資訊，最後一列不可移除，並有「＋ 新增時間」。載入優先使用 `times[]`，只為尚未升級後端的一次讀取提供 `runHour`／`runMinute` fallback；新後端空 `times` 視為異常，不靜默補預設。儲存前阻擋空清單、重複／非法時分及總開關開啟卻全列停用；成功後必須以完整 response 重建列。共用的範圍、輸出／Drive 資料夾、立即匯出與卡片整體上次結果保留，提示改為說明每個啟用時間都會更新同日最新檔。
+- [ ] **文件、測試與實機驗收：**排程清單不新增 job、總數與 annotation 數不變，只更新「台幣兌美元匯出」為每分鐘檢查多個每日時間；Requirement 42 與 design 舊單時間描述須註記被本 Requirement 取代。測試至少覆蓋 migration 無損搬移與 representative dual-write、GET 預設、整包取代／排序／驗證、同時分 guard 保留、兩個 overdue 都執行、前一失敗仍跑下一個、startup/tick CAS、run-now 不改 child、owner／Drive／雙格式不回歸、controller JSON、BFF passthrough 及前端靜態契約。Docker 無快取重建並 recreate `business-services`、`bff`、`frontend` 後，以已登入 owner 儲存至少兩個時間、讀回排序並用受控 guard／到點案例證明同日各執行一次；驗收完還原原始設定與輸出，不保留測試排程或檔案。
+
 ---
 
 ### Requirement 42: 台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄
@@ -1219,6 +1236,10 @@
 - [ ] **寫檔採 tmp ＋ atomic move**：先寫 `.tmp` 再 `ATOMIC_MOVE`（不支援時退 `REPLACE_EXISTING`），避免覆寫既有檔時因中途失敗留下半截殘檔。
 - [ ] **檔名**：`台幣兌美元_{使用者ID}_{YYYYMMDD}.xlsx`。含 owner id 的原因同 Requirement 41：資料雖為全域，但各使用者可設不同匯出範圍，同日產出內容不同，不帶 id 會在共用目錄互相覆蓋。
 - [ ] **排程列表頁需登錄**：新排程須在「公開資訊 → 排程列表」（Requirement 36 / `SchedulePublicBffController` 的 `JOBS`）補上對應項目，避免該頁與實際排程漂移。
+
+> **由 Requirement 145 取代的部分：** 本 Requirement 中「每日單一時間」及 parent 表以
+> `run_hour`／`run_minute`／`last_run_date` 作為唯一排程來源的敘述，均由 Requirement 145 的
+> 多時間點模型取代。手動匯出、匯出內容、範圍、路徑、Drive 與 owner 隔離等其餘語意不變。
 
 ---
 

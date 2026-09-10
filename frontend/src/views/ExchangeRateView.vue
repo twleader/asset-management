@@ -89,9 +89,17 @@
         <el-form-item label="啟用每日排程">
           <el-switch v-model="schedule.enabled" />
         </el-form-item>
-        <el-form-item label="每日執行時間">
-          <el-time-picker v-model="scheduleTime" format="HH:mm" value-format="HH:mm"
-            placeholder="時:分" style="width:130px" />
+        <el-form-item label="每日執行時間" class="schedule-times-item">
+          <div class="schedule-times">
+            <div v-for="(time, index) in scheduleTimes" :key="time.key" class="schedule-time-row">
+              <el-time-picker v-model="time.value" format="HH:mm" value-format="HH:mm"
+                placeholder="時:分" style="width:130px" />
+              <el-switch v-model="time.enabled" active-text="啟用" inactive-text="停用" />
+              <span class="schedule-time-status">{{ time.lastRunAt ? `${time.lastRunAt} ${time.lastRunStatus || ''}` : '尚未執行' }}</span>
+              <el-button text type="danger" :disabled="scheduleTimes.length === 1" @click="removeScheduleTime(index)">移除</el-button>
+            </div>
+            <el-button text type="primary" @click="addScheduleTime">＋ 新增時間</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="匯出範圍">
           <el-select v-model="schedule.rangeMonths" style="width:140px">
@@ -145,7 +153,7 @@
       <div class="schedule-hint">
         以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。每日於指定時間匯出台幣兌美元匯率為
+        主機 <code>/Users/steven/input</code>。於下列每個啟用時間更新同日最新的台幣兌美元匯率檔：
         <code>台幣兌美元_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；內容同上方「匯出 Excel」）。
         匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
       </div>
@@ -272,10 +280,11 @@ const schedule = reactive({
   gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
   gdriveLastRunAt: null, gdriveLastStatus: '',
  
-  enabled: false, runHour: 8, runMinute: 0, outputSubpath: 'input',
+  enabled: false, outputSubpath: 'input',
   rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''
 })
-const scheduleTime = ref('08:00')
+const scheduleTimes = ref([])
+let nextScheduleTimeKey = 1
 const savingSchedule = ref(false)
 const runningNow = ref(false)
 
@@ -498,8 +507,6 @@ function downloadBlob(blob, filename) {
 async function loadSchedule() {
   const s = await bffApi.exchangeRate.getExportSchedule()
   schedule.enabled = !!s.enabled
-  schedule.runHour = s.runHour ?? 8
-  schedule.runMinute = s.runMinute ?? 0
   schedule.outputSubpath = s.outputSubpath ?? 'input'
   // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
   schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
@@ -507,7 +514,33 @@ async function loadSchedule() {
   schedule.lastRunStatus = s.lastRunStatus ?? null
   schedule.baseDir = s.baseDir ?? ''
   applyGdrive(s)
-  scheduleTime.value = `${String(schedule.runHour).padStart(2, '0')}:${String(schedule.runMinute).padStart(2, '0')}`
+  // 只有 legacy response 未提供 times 才可回退；新契約回空列是錯誤，不可靜默補預設。
+  if (Array.isArray(s.times)) {
+    if (s.times.length === 0) throw new Error('排程時間設定異常，請重新儲存設定')
+    rebuildScheduleTimes(s.times)
+  } else {
+    rebuildScheduleTimes([{ runHour: s.runHour ?? 8, runMinute: s.runMinute ?? 0, enabled: true }])
+  }
+}
+
+function rebuildScheduleTimes(times) {
+  scheduleTimes.value = [...times]
+    .sort((a, b) => (a.runHour - b.runHour) || (a.runMinute - b.runMinute) || ((a.id ?? 0) - (b.id ?? 0)))
+    .map(time => ({
+      key: time.id ?? `new-${nextScheduleTimeKey++}`,
+      value: `${String(time.runHour).padStart(2, '0')}:${String(time.runMinute).padStart(2, '0')}`,
+      enabled: !!time.enabled,
+      lastRunAt: time.lastRunAt ?? null,
+      lastRunStatus: time.lastRunStatus ?? null
+    }))
+}
+
+function addScheduleTime() {
+  scheduleTimes.value.push({ key: `new-${nextScheduleTimeKey++}`, value: '08:00', enabled: true, lastRunAt: null, lastRunStatus: null })
+}
+
+function removeScheduleTime(index) {
+  if (scheduleTimes.value.length > 1) scheduleTimes.value.splice(index, 1)
 }
 
 async function saveSchedule() {
@@ -516,24 +549,46 @@ async function saveSchedule() {
     ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
     return
   }
+  if (!scheduleTimes.value.length) {
+    ElMessage.warning('至少需要一個執行時間')
+    return
+  }
+  const times = []
+  const seenTimes = new Set()
+  for (const time of scheduleTimes.value) {
+    const match = /^(\d{2}):(\d{2})$/.exec(time.value || '')
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
+      ElMessage.warning('請填寫有效的執行時間')
+      return
+    }
+    const key = `${match[1]}:${match[2]}`
+    if (seenTimes.has(key)) {
+      ElMessage.warning('執行時間不可重複')
+      return
+    }
+    seenTimes.add(key)
+    times.push({ runHour: Number(match[1]), runMinute: Number(match[2]), enabled: !!time.enabled })
+  }
+  if (schedule.enabled && !times.some(time => time.enabled)) {
+    ElMessage.warning('啟用排程時至少需啟用一個時間')
+    return
+  }
   savingSchedule.value = true
   try {
-    const [h, m] = (scheduleTime.value || '08:00').split(':').map(Number)
     const s = await bffApi.exchangeRate.updateExportSchedule({
       enabled: schedule.enabled,
       gdriveEnabled: schedule.gdriveEnabled,
       gdriveSubpath: (schedule.gdriveSubpath || '').trim(),
-      runHour: h,
-      runMinute: m,
+      times,
       outputSubpath: (schedule.outputSubpath || 'input').trim(),
       rangeMonths: schedule.rangeMonths
     })
-    schedule.runHour = s.runHour ?? h
-    schedule.runMinute = s.runMinute ?? m
     schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
     schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
     schedule.baseDir = s.baseDir ?? schedule.baseDir
     applyGdrive(s)
+    if (!Array.isArray(s.times) || s.times.length === 0) throw new Error('伺服器未回傳有效的排程時間')
+    rebuildScheduleTimes(s.times)
     ElMessage.success('排程設定已儲存')
     // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
     showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
@@ -654,6 +709,10 @@ const spreadChartOption = computed(() => {
 .kpi-sub { font-size: 12px; color: #94a3b8; margin-top: 4px; }
 .dialog-note { font-size: 12px; color: #64748b; line-height: 1.6; }
 .schedule-form { margin-bottom: 4px; }
+.schedule-times-item :deep(.el-form-item__content) { align-items: flex-start; }
+.schedule-times { display: flex; flex-direction: column; gap: 6px; }
+.schedule-time-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.schedule-time-status { color: var(--el-text-color-secondary); font-size: 12px; min-width: 160px; }
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
 .schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
 .schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }
