@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Filter;
 
 import java.math.BigDecimal;
@@ -80,14 +81,17 @@ public class AssetSnapshot {
     private String notes;
 
     @OneToMany(mappedBy = "snapshot", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 64)
     @Builder.Default
     private List<BankDeposit> deposits = new ArrayList<>();
 
     @OneToMany(mappedBy = "snapshot", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 64)
     @Builder.Default
     private List<FundHolding> funds = new ArrayList<>();
 
     @OneToMany(mappedBy = "snapshot", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 64)
     @Builder.Default
     private List<StockHolding> stocks = new ArrayList<>();
 }

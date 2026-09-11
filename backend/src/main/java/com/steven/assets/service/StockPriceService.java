@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.ExchangeRateHistory;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
@@ -61,8 +62,9 @@ public class StockPriceService {
                         .map(row -> new PriceQueryService.PriceKey(row.getStockCode(), row.getMarket()))
                         .collect(Collectors.toCollection(LinkedHashSet::new)))
                 .orElseGet(LinkedHashSet::new);
+        Map<PriceQueryService.PriceKey, String> stockNames = loadStockNames(required);
         return priceQuery.getAllDisplayPrices(required).stream()
-                .map(this::toDto)
+                .map(price -> toDto(price, stockNames))
                 .collect(Collectors.toList());
     }
 
@@ -102,6 +104,10 @@ public class StockPriceService {
         Optional<AssetSnapshot> latestOpt = snapshotRepo.findLatestWithStocks();
         if (latestOpt.isEmpty()) return null;
         AssetSnapshot snapshot = latestOpt.get();
+        Set<PriceQueryService.PriceKey> holdingKeys = snapshot.getStocks().stream()
+                .map(row -> new PriceQueryService.PriceKey(row.getStockCode(), row.getMarket()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<PriceQueryService.PriceKey, String> stockNames = loadStockNames(holdingKeys);
 
         BigDecimal exchangeRate = snapshot.getUsdExchangeRate();
         if (exchangeRate == null || exchangeRate.compareTo(BigDecimal.ZERO) == 0) {
@@ -112,7 +118,7 @@ public class StockPriceService {
 
         List<LiveStockItem> stockItems = new ArrayList<>();
         BigDecimal liveStockValue = BigDecimal.ZERO;
-        LocalDateTime latestUpdate = null;
+        Instant latestUpdate = null;
 
         for (StockHolding sh : snapshot.getStocks()) {
             LocalDate targetTradingDate = priceQuery.displaySession(sh.getMarket()).targetTradingDate();
@@ -121,7 +127,7 @@ public class StockPriceService {
             BigDecimal price = null;
             Boolean closed = null;
             String tradingDate = null;
-            LocalDateTime updatedAt = null;
+            Instant updatedAt = null;
             // 昨收／漲跌／漲跌幅：與即時價同一筆 LivePrice 帶出（同一 tick），供匯出「股票（即時）」用（Task 200）
             BigDecimal previousClose = null;
             BigDecimal priceChange = null;
@@ -139,13 +145,9 @@ public class StockPriceService {
                 changePercent = lp.changePercent();
                 quoteStatus = lp.quoteStatus();
                 source = lp.source();
-                if (lp.updatedAt() != null) {
-                    try {
-                        updatedAt = LocalDateTime.parse(lp.updatedAt());
-                        if (latestUpdate == null || updatedAt.isAfter(latestUpdate)) {
-                            latestUpdate = updatedAt;
-                        }
-                    } catch (Exception ignored) {}
+                updatedAt = parseLiveUpdatedAt(lp.updatedAt(), sh.getMarket());
+                if (updatedAt != null && (latestUpdate == null || updatedAt.isAfter(latestUpdate))) {
+                    latestUpdate = updatedAt;
                 }
             }
 
@@ -171,13 +173,14 @@ public class StockPriceService {
                 valuationSource = "SNAPSHOT_VALUE";
             }
 
-            String shName = stockMasterRepo.findByCodeAndMarket(sh.getStockCode(), sh.getMarket())
-                    .map(s -> s.getName()).orElse(sh.getStockCode());
+            String shName = stockNames.getOrDefault(
+                    new PriceQueryService.PriceKey(sh.getStockCode(), sh.getMarket()), sh.getStockCode());
             stockItems.add(new LiveStockItem(
                 sh.getStockCode(), shName, sh.getMarket(), sh.getShares(),
                 price, liveValue, closed, tradingDate,
                 previousClose, priceChange, changePercent, quoteStatus
-                , sh.getId(), source, targetTradingDate.toString(), valuationSource
+                , sh.getId(), source, targetTradingDate.toString(), valuationSource,
+                updatedAt
             ));
         }
 
@@ -193,6 +196,29 @@ public class StockPriceService {
             isTwMarketOpen(), isUsMarketOpen(), isUkMarketOpen(),
             latestUpdate != null ? latestUpdate.toString() : null
         );
+    }
+
+    /**
+     * 將 Redis/歷史相容的報價時間正規化為 Instant。帶 offset 的值使用其明示時間，舊有
+     * 無 offset 時間則以該市場的牆鐘時區解讀；損壞值只降級為 null，不能中斷 live-assets 讀取。
+     */
+    private static Instant parseLiveUpdatedAt(String raw, String market) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return Instant.parse(raw);
+        } catch (DateTimeException ignored) {
+            // 下一個相容格式。
+        }
+        try {
+            return OffsetDateTime.parse(raw).toInstant();
+        } catch (DateTimeException ignored) {
+            // 下一個相容格式。
+        }
+        try {
+            return LocalDateTime.parse(raw).atZone(MarketZones.resolve(market)).toInstant();
+        } catch (DateTimeException ignored) {
+            return null;
+        }
     }
 
     private static String classifyValuationSource(String tradingDate, LocalDate target) {
@@ -211,11 +237,37 @@ public class StockPriceService {
         String name = stockMasterRepo.findByCodeAndMarket(lp.stockCode(), lp.market())
                 .map(s -> s.getName())
                 .orElse(lp.stockName() != null ? lp.stockName() : lp.stockCode());
+        return toDto(lp, name);
+    }
+
+    private StockPriceDto toDto(PriceQueryService.LivePrice lp, Map<PriceQueryService.PriceKey, String> stockNames) {
+        String name = stockNames.getOrDefault(new PriceQueryService.PriceKey(lp.stockCode(), lp.market()),
+                lp.stockName() != null ? lp.stockName() : lp.stockCode());
+        return toDto(lp, name);
+    }
+
+    private StockPriceDto toDto(PriceQueryService.LivePrice lp, String name) {
         return new StockPriceDto(
                 lp.stockCode(), name, lp.market(),
                 lp.price(), lp.priceChange(), lp.changePercent(),
                 lp.tradingDate(), lp.updatedAt(), lp.closed(), lp.source(), lp.quoteStatus()
         );
+    }
+
+    /** 只以本次輸出的 bounded 代號做一次主檔查詢，市場仍由 map key 精確辨識。 */
+    private Map<PriceQueryService.PriceKey, String> loadStockNames(Collection<PriceQueryService.PriceKey> keys) {
+        Set<String> codes = keys == null ? Set.of() : keys.stream()
+                .map(PriceQueryService.PriceKey::stockCode)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (codes.isEmpty()) return Map.of();
+        List<Stock> masters = stockMasterRepo.findAllByCodeIn(codes);
+        if (masters == null || masters.isEmpty()) return Map.of();
+        return masters.stream().collect(Collectors.toMap(
+                stock -> new PriceQueryService.PriceKey(stock.getCode(), stock.getMarket()),
+                Stock::getName,
+                (first, ignored) -> first,
+                LinkedHashMap::new));
     }
 
     public record StockPriceDto(
@@ -232,7 +284,8 @@ public class StockPriceService {
         BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent,
         String quoteStatus,
         // Requirement 68 provenance：維持舊欄位與金額算法，只在末端向後相容新增。
-        Long holdingId, String source, String targetTradingDate, String valuationSource
+        Long holdingId, String source, String targetTradingDate, String valuationSource,
+        Instant updatedAt
     ) {
         /** 舊 renderer/tests 的相容建構子；新增 provenance 欄位不影響既有資料金額。 */
         public LiveStockItem(String stockCode, String stockName, String market,
@@ -242,7 +295,19 @@ public class StockPriceService {
                              String quoteStatus) {
             this(stockCode, stockName, market, shares, currentPrice, liveValue, closed, tradingDate,
                     previousClose, priceChange, changePercent, quoteStatus, null, null, null,
-                    currentPrice == null ? "SNAPSHOT_VALUE" : "UNVERIFIED_SESSION_PRICE");
+                    currentPrice == null ? "SNAPSHOT_VALUE" : "UNVERIFIED_SESSION_PRICE", null);
+        }
+
+        /** Task 424 前的完整 provenance 建構子，維持既有 renderer 與測試呼叫相容。 */
+        public LiveStockItem(String stockCode, String stockName, String market,
+                             BigDecimal shares, BigDecimal currentPrice, BigDecimal liveValue,
+                             Boolean closed, String tradingDate,
+                             BigDecimal previousClose, BigDecimal priceChange, BigDecimal changePercent,
+                             String quoteStatus, Long holdingId, String source,
+                             String targetTradingDate, String valuationSource) {
+            this(stockCode, stockName, market, shares, currentPrice, liveValue, closed, tradingDate,
+                    previousClose, priceChange, changePercent, quoteStatus, holdingId, source,
+                    targetTradingDate, valuationSource, null);
         }
     }
 

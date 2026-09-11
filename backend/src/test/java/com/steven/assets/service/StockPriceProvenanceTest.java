@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
@@ -11,12 +12,16 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** 目標交易日價格的 provenance 標示不能把舊、壞或未來日期誤標為 target。 */
@@ -60,9 +65,83 @@ class StockPriceProvenanceTest {
                 PriceQueryService.DisplayPhase.OPEN, TARGET, TARGET));
         when(prices.getDisplayPrice("2330", "台股")).thenReturn(hasPrice
                 ? Optional.of(livePrice(tradingDate)) : Optional.empty());
-        when(stocks.findByCodeAndMarket("2330", "台股")).thenReturn(Optional.empty());
+        when(stocks.findAllByCodeIn(Set.of("2330"))).thenReturn(List.of());
 
         return service().getLiveAssets().stocks().getFirst().valuationSource();
+    }
+
+    @Test
+    void liveAssetsUsesOneBoundedMasterReadAndKeepsEachQuoteTimestamp() {
+        StockHolding tw = StockHolding.builder().id(7L).stockCode("2330").market("台股")
+                .shares(BigDecimal.ONE).build();
+        StockHolding us = StockHolding.builder().id(8L).stockCode("AAPL").market("美股")
+                .shares(BigDecimal.ONE).build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().id(9L).snapshotDate(TARGET)
+                .usdExchangeRate(BigDecimal.ONE).stocks(List.of(tw, us)).build();
+        when(snapshots.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        when(prices.displaySession("台股")).thenReturn(session(TARGET));
+        when(prices.displaySession("美股")).thenReturn(session(TARGET));
+        when(prices.getDisplayPrice("2330", "台股")).thenReturn(Optional.of(
+                livePrice("2330", "台股", "2026-08-13", "2026-08-13T10:01:00")));
+        when(prices.getDisplayPrice("AAPL", "美股")).thenReturn(Optional.of(
+                livePrice("AAPL", "美股", "2026-08-13", "2026-08-13T10:05:00-04:00")));
+        when(stocks.findAllByCodeIn(Set.of("2330", "AAPL"))).thenReturn(List.of(
+                Stock.builder().code("2330").market("台股").name("台積電").build(),
+                Stock.builder().code("AAPL").market("美股").name("Apple").build()));
+
+        StockPriceService.LiveAssetsResponse response = service().getLiveAssets();
+
+        assertThat(response.stocks()).extracting(StockPriceService.LiveStockItem::stockName)
+                .containsExactly("台積電", "Apple");
+        assertThat(response.stocks()).extracting(StockPriceService.LiveStockItem::updatedAt)
+                .containsExactly(Instant.parse("2026-08-13T02:01:00Z"), Instant.parse("2026-08-13T14:05:00Z"));
+        assertThat(response.priceUpdatedAt()).isEqualTo("2026-08-13T14:05:00Z");
+        verify(stocks).findAllByCodeIn(Set.of("2330", "AAPL"));
+        verify(stocks, never()).findByCodeAndMarket(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void malformedLiveTimestampFailsSoftInsteadOfBreakingLiveAssetsRead() {
+        StockHolding holding = StockHolding.builder().stockCode("2330").market("台股")
+                .shares(BigDecimal.ONE).build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().id(9L).snapshotDate(TARGET)
+                .usdExchangeRate(BigDecimal.ONE).stocks(List.of(holding)).build();
+        when(snapshots.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        when(prices.displaySession("台股")).thenReturn(session(TARGET));
+        when(prices.getDisplayPrice("2330", "台股")).thenReturn(Optional.of(
+                livePrice("2330", "台股", "2026-08-13", "not-a-time")));
+        when(stocks.findAllByCodeIn(Set.of("2330"))).thenReturn(List.of());
+
+        StockPriceService.LiveAssetsResponse response = service().getLiveAssets();
+
+        assertThat(response.stocks().getFirst().updatedAt()).isNull();
+        assertThat(response.priceUpdatedAt()).isNull();
+    }
+
+    @Test
+    void allPricesUsesOneBoundedMasterReadWithoutPerPriceLookup() {
+        StockHolding tw = StockHolding.builder().stockCode("2330").market("台股").build();
+        StockHolding us = StockHolding.builder().stockCode("AAPL").market("美股").build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(tw, us)).build();
+        when(snapshots.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        when(prices.getAllDisplayPrices(Set.of(
+                new PriceQueryService.PriceKey("2330", "台股"),
+                new PriceQueryService.PriceKey("AAPL", "美股"))))
+                .thenReturn(List.of(
+                        livePrice("2330", "台股", "2026-08-13", "2026-08-13T10:01:00"),
+                        livePrice("AAPL", "美股", "2026-08-13", "2026-08-13T10:05:00")));
+        when(stocks.findAllByCodeIn(Set.of("2330", "AAPL"))).thenReturn(List.of(
+                Stock.builder().code("2330").market("台股").name("台積電").build(),
+                Stock.builder().code("AAPL").market("美股").name("Apple").build()));
+
+        List<StockPriceService.StockPriceDto> result = service().getAllPrices();
+
+        assertThat(result).extracting(StockPriceService.StockPriceDto::stockName)
+                .containsExactly("台積電", "Apple");
+        verify(stocks).findAllByCodeIn(Set.of("2330", "AAPL"));
+        verify(stocks, never()).findByCodeAndMarket(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     private StockPriceService service() {
@@ -74,8 +153,12 @@ class StockPriceProvenanceTest {
     }
 
     private static PriceQueryService.LivePrice livePrice(String tradingDate) {
-        return new PriceQueryService.LivePrice("2330", "台積電", "台股", BigDecimal.valueOf(100),
+        return livePrice("2330", "台股", tradingDate, null);
+    }
+
+    private static PriceQueryService.LivePrice livePrice(String code, String market, String tradingDate, String updatedAt) {
+        return new PriceQueryService.LivePrice(code, "台積電", market, BigDecimal.valueOf(100),
                 null, null, null, null, null, null, null, null, null, tradingDate,
-                null, false, "TEST", "LIVE");
+                updatedAt, false, "TEST", "LIVE");
     }
 }

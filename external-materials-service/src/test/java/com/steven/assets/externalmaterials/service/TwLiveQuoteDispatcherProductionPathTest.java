@@ -71,8 +71,10 @@ class TwLiveQuoteDispatcherProductionPathTest {
         dispatcher.refresh(codes); dispatcher.refresh(codes);
         org.mockito.ArgumentCaptor<List<String>> lists = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(fubon, times(2)).fetch(lists.capture());
-        assertThat(lists.getAllValues().getFirst()).contains("0001").doesNotContain("0041");
-        assertThat(lists.getAllValues().get(1)).contains("0041");
+        assertThat(lists.getAllValues().getFirst()).hasSize(TwLiveQuoteDispatcher.FUBON_CODES_PER_ROUND)
+                .contains("0001").doesNotContain("0041");
+        assertThat(lists.getAllValues().get(1)).hasSize(TwLiveQuoteDispatcher.FUBON_CODES_PER_ROUND)
+                .contains("0041");
     }
 
     @Test

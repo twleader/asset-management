@@ -5,13 +5,23 @@ import com.steven.assets.model.StockId;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, StockId> {
 
     Optional<Stock> findByCodeAndMarket(String code, String market);
+
+    /**
+     * 以目前畫面實際需要的代號一次載入主檔名稱；呼叫端仍以 (code, market) 精確配對，
+     * 避免逐列查詢造成 dashboard 的 N+1。
+     */
+    @Query("SELECT s FROM Stock s WHERE s.code IN :codes")
+    List<Stock> findAllByCodeIn(@Param("codes") Collection<String> codes);
 
     /** 是否已存在該主檔（StockMasterService 用以判定「新標的」→ 是否觸發 10 年歷史回補）。 */
     boolean existsByCodeAndMarket(String code, String market);

@@ -186,17 +186,19 @@ class StockSourceQueryHeldCodesTest {
         assertThat(sqls).anyMatch(s -> s.contains("stock_alert"));
     }
 
-    // ── 回歸錨點：Task 249 的雷達收集器不得被本次改動波及 ────────────
+    // ── Task 424：雷達收集器必須由主檔錨定且維持單一 SQL ────────────
 
     @Test
-    void 雷達收集器仍維持自己的每owner查詢與大盤排除() {
+    void 雷達收集器以單一主檔錨定查詢排除非主檔大盤與不合法代號() {
         List<Call> calls = captureQueries();
 
         Set<String> tw = new LinkedHashSet<>();
         query.collectTwRadarCodes(tw);
 
-        assertThat(calls).extracting(Call::sql)
-                .anyMatch(s -> s.contains("stock_holding")
-                        && s.contains("DISTINCT ON (owner_user_id)"));
+        assertThat(calls).singleElement().extracting(Call::sql).satisfies(sql ->
+                assertThat(sql).contains("stock_holding", "stock_alert", "JOIN radar_codes r ON r.code = s.code",
+                                "s.market = '台股'", "s.code <> '0000'", "s.code ~ '^[0-9]{4,6}[A-Z]?$'",
+                                "DISTINCT ON (owner_user_id)", "ORDER BY owner_user_id, snapshot_date DESC, id DESC",
+                                "ORDER BY s.code"));
     }
 }

@@ -4698,6 +4698,13 @@ CREATE INDEX idx_backup_record_modified ON public.backup_record USING btree (mod
 
 
 --
+-- Name: idx_bank_deposit_snapshot_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_bank_deposit_snapshot_id ON public.bank_deposit USING btree (snapshot_id);
+
+
+--
 -- Name: idx_commodity_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4793,6 +4800,13 @@ CREATE INDEX idx_fubon_technical_capture_member_lookup ON public.fubon_technical
 --
 
 CREATE INDEX idx_fund_div_code_date ON public.fund_dividend_history USING btree (fund_code, base_date DESC);
+
+
+--
+-- Name: idx_fund_holding_snapshot_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fund_holding_snapshot_id ON public.fund_holding USING btree (snapshot_id);
 
 
 --
@@ -5003,6 +5017,13 @@ CREATE INDEX idx_stock_dividend_snapshot_event_date ON public.stock_dividend_sna
 --
 
 CREATE INDEX idx_stock_financial_asof ON public.stock_financial_quarter USING btree (stock_code, market, fiscal_year DESC, fiscal_quarter DESC, observed_at DESC);
+
+
+--
+-- Name: idx_stock_holding_snapshot_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_stock_holding_snapshot_id ON public.stock_holding USING btree (snapshot_id);
 
 
 --

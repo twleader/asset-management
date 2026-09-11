@@ -31,6 +31,30 @@ public class StockSourceQuery {
     public static final Set<String> TRUSTED_TW_CLOSE_SOURCES = Set.of(
             TWSE_MI_INDEX, TPEX_DAILY_CLOSE, FINMIND_TW_CLOSE);
 
+    private static final String TW_RADAR_CODES_SQL = """
+            WITH radar_codes AS (
+                SELECT h.stock_code AS code
+                FROM stock_holding h
+                WHERE h.market = '台股'
+                  AND h.snapshot_id IN (
+                    SELECT DISTINCT ON (owner_user_id) id
+                    FROM asset_snapshot
+                    ORDER BY owner_user_id, snapshot_date DESC, id DESC
+                  )
+                UNION
+                SELECT a.stock_code AS code
+                FROM stock_alert a
+                WHERE a.market = '台股'
+            )
+            SELECT DISTINCT s.code
+            FROM stock s
+            JOIN radar_codes r ON r.code = s.code
+            WHERE s.market = '台股'
+              AND s.code <> '0000'
+              AND s.code ~ '^[0-9]{4,6}[A-Z]?$'
+            ORDER BY s.code
+            """;
+
     private final JdbcTemplate jdbc;
 
     /** stock 主檔全部代號（不分市場）集合，供公開資訊個股過濾（Task 178）。 */
@@ -116,7 +140,8 @@ public class StockSourceQuery {
     }
 
     /**
-     * 今日交易雷達回補專用：**每位 owner 各自最新快照**的台股持股 ∪ 台股觀察清單，排除大盤 `0000`（Task 249）。
+     * 今日交易雷達回補專用：**每位 owner 各自最新快照**的台股持股 ∪ 台股觀察清單，
+     * 以台股 stock 主檔精確錨定、排除大盤 `0000` 與不合法代號（Task 424）。
      *
      * <p><b>為什麼不重用 {@link #collectHeldStockCodes}（以下為 Task 249 當時的狀態）：</b>後者當時取的是
      * {@code SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1}——
@@ -145,13 +170,13 @@ public class StockSourceQuery {
      * 請求量幾無變化；{@link #collectHeldStockCodes} 現已改為同一口徑。上一段保留為當時的決策記錄。</p>
      */
     public void collectTwRadarCodes(Set<String> twCodes) {
-        jdbc.query("SELECT h.stock_code FROM stock_holding h WHERE h.market = '台股' "
-                        + "AND h.snapshot_id IN (SELECT DISTINCT ON (owner_user_id) id FROM asset_snapshot "
-                        + "ORDER BY owner_user_id, snapshot_date DESC, id DESC)",
-                (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("stock_code")); });
-        jdbc.query("SELECT DISTINCT stock_code FROM stock_alert WHERE market = '台股'",
-                (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("stock_code")); });
-        twCodes.remove("0000");   // 大盤走 twse_index_daily_history / Yahoo ^TWII，不打 TWSE mis API
+        jdbc.query(TW_RADAR_CODES_SQL,
+                (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("code")); });
+    }
+
+    /** 與台股雷達 SQL 的正規表達式完全相同，避免下游 Fubon consumer 擴張主檔錨定後的範圍。 */
+    static boolean isTaiwanRadarCode(String code) {
+        return code != null && code.matches("^[0-9]{4,6}[A-Z]?$") && !"0000".equals(code);
     }
 
     private static void classify(String code, String market,
