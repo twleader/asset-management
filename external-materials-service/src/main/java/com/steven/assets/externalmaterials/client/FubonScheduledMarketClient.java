@@ -91,6 +91,23 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
         try { return FubonMarketJson.candles(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
         catch (RuntimeException invalid) { throw schemaFailure("FUBON_INTRADAY_CANDLES_READ", "分鐘 K 線查詢", "INTRADAY_CANDLES_SCHEMA_INVALID", invalid); }
     }
+    @Override public IntradayVolumesRead intradayVolumes(String symbol, LocalDate date) {
+        validateSymbols(List.of(symbol), 1, false);
+        String body = postV1("FUBON_INTRADAY_VOLUMES_READ", "個股當日分價量查詢",
+                "/internal/market-data/intraday-volumes/read", Map.of("symbol", symbol), 2 * 1024 * 1024);
+        try { return FubonMarketJson.intradayVolumes(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_INTRADAY_VOLUMES_READ", "個股當日分價量查詢", "INVALID_RESPONSE", invalid); }
+    }
+    @Override public HistoricalDailyCandlesRead historicalDailyCandles(String symbol, LocalDate from, LocalDate to) {
+        validateSymbols(List.of(symbol), 1, false);
+        if (from == null || to == null || from.isAfter(to) || from.plusDays(365).isBefore(to))
+            throw new Unavailable("INVALID_REQUEST");
+        String body = postV1("FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢",
+                "/internal/market-data/historical-daily-candles/read",
+                Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()), 2 * 1024 * 1024);
+        try { return FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse(body), symbol, from, to, clock.instant()); }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢", "INVALID_RESPONSE", invalid); }
+    }
     @Override public SubscriptionAck subscriptions(List<String> symbols) {
         validateSymbols(symbols, 300, true);
         String body = post("FUBON_STOCK_PUSH_SUBSCRIPTIONS", "個股推播訂閱", "/internal/market-data/stock-push/subscriptions", Map.of("symbols", symbols), 8 * 1024);
@@ -130,7 +147,7 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
             throw new Unavailable("UPSTREAM_UNAVAILABLE");
         }
     }
-    /** The two v1 routes have an exact root error body, unlike the frozen older routes. */
+    /** Task408/425 v1 routes have an exact root error body, unlike frozen older routes. */
     private String postV1(String operationKey, String apiName, String path, Map<String, ?> request, int limit) {
         FubonMarketConfigState.Snapshot access = config.snapshot();
         if (access.reason() != null) throw new Unavailable(access.reason(), true);
@@ -147,7 +164,8 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
             if ("RATE_LIMITED".equals(reason) || "HISTORY_BUDGET_EXHAUSTED".equals(reason))
                 throw outboundFailure(operationKey, apiName, reason, true, response.status(), path);
             if ("MISCONFIGURED".equals(reason)) throw outboundFailure(operationKey, apiName, "MISCONFIGURED", true, response.status(), path);
-            if ("STALE_QUERY".equals(reason) || "SCHEMA_INVALID".equals(reason)) throw outboundFailure(operationKey, apiName, reason, false, response.status(), path);
+            if ("STALE_QUERY".equals(reason) || "SCHEMA_INVALID".equals(reason) || "INVALID_RESPONSE".equals(reason))
+                throw outboundFailure(operationKey, apiName, "INVALID_RESPONSE", false, response.status(), path);
             throw outboundFailure(operationKey, apiName, "UPSTREAM_UNAVAILABLE", response.status() == 401 || response.status() == 403 || response.status() == 503, response.status(), path);
         } catch (Unavailable failure) { throw failure; }
         catch (InterruptedException interrupted) {

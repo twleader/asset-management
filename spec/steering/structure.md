@@ -186,7 +186,7 @@ bff/src/main/java/com/steven/assets/bff/
 
 富邦 API 目錄沿既有 authenticated `GET /api/bff/fubon-api`，現有 `FubonApiInfoBffController` 只回 private static `APIS` 的 52 列原順序；Task403 的 service／後端 `connected/category/keyword` 篩選尚未實作。現有 Vue 暫行以本地 computed filter 篩選並取消過期請求。httpEndpoint 有值即可顯示，安全預檢與完整串接不同；沒有 broker 試打按鈕。BFF 完整 book 必與 raw quote 同 stockCode/market；唯一 FubonBridgeQuote typed tradingDate 為 LocalDate，raw19欄仍維持原 ISO String/JSON。
 
-Task406 的私人來源報表頁已延後；現有 BFF 不建立該 route、client、DTO 或導航，也不以它影響 Fubon API 靜態目錄。目錄在本次驗收後為52/21/31。
+Task406 的私人來源報表頁已延後；現有 BFF 不建立該 route、client、DTO 或導航，也不以它影響 Fubon API 靜態目錄。Task425 接入當日分價量與歷史日 K 後，目錄為52/23/29。
 
 ### 3.2 BFF 設計鐵則
 
@@ -423,7 +423,7 @@ fubon-broker-service/
 ├── Dockerfile                 # Python3.13；runtime linux/amd64
 ├── requirements.txt           # exact-pinned dependencies
 ├── src/fubon_broker_service/
-│   ├── app.py                 # FastAPI HTTP/組裝層；Task408 後十六條 exact internal routes，docs/openapi關閉
+│   ├── app.py                 # FastAPI HTTP/組裝層；Task425 後十八條 exact internal routes，docs/openapi關閉
 │   ├── config.py              # lazy mounted-file config；不把secret傳core
 │   ├── redaction.py           # secret／raw identity消毒
 │   ├── ports.py               # Task401：每個consumer所需的窄唯讀Protocol
@@ -442,9 +442,9 @@ fubon-broker-service/
 
 Task401的新增中立檔名可採等價內層命名，但依賴方向與責任不可合併回concrete SDK。Service只依窄Protocol；只有app與outer adapter知道SdkGateway。capture／exception／pure raw helper中立化，raw帳戶、token、payload不repr、不跨adapter。Python不連PostgreSQL/Redis、不反向呼叫Spring，也不取得資產writer。
 
-- Task408 後十六條 exact internal surface：GET health/config、POST portfolio/trades/bank-balance/settlement/realized-gains read、POST tw-quotes/etf-holdings/dividends/technical-indicators/stock-basic/intraday-candles、GET indices SSE、POST stock subscriptions、GET stock SSE。除了health外維持既有internal-token/config gate；新增的 basic/candles 同樣只在 Docker network token gate 內，不增加host/public path或通用proxy。
+- Task425 後十八條 exact internal surface：GET health/config、POST portfolio/trades/bank-balance/settlement/realized-gains read、POST tw-quotes/etf-holdings/dividends/technical-indicators/stock-basic/intraday-candles/intraday-volumes/historical-daily-candles、GET indices SSE、POST stock subscriptions、GET stock SSE。除了health外維持既有internal-token/config gate；新增的 basic/candles/volumes/daily-candles 同樣只在 Docker network token gate 內，不增加host/public path或通用proxy。
 - 所有SDK用途僅帳務／成交紀錄／行情唯讀與市場訂閱，不import或封裝order／改撤單／轉帳／圈存；憑證無可驗證唯讀能力則disabled/fail closed。市場client與session只在官方初始化成功後使用。
-- 每個query有同一deadline/cancel，最多5個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。Task408 技術路徑為 `BATCH_SIZE=3`、two workers、symbol dispatch≥3.1 秒；90 秒僅新 job admission，已 admitted job 不因之取消；每 symbol 在 SDK start 前必保留 technical 70 秒＋ticker/candles 各8秒的86秒 deadline，Python aggregate 60秒／Java technical transport70秒，所有19個 technical/ticker/candle SDK start（含 re-login 重送）共用真正 rolling-60s ≤38 gate，外層 history 60/min仍維持。
+- 每個query有同一deadline/cancel，最多5個真正在途native call；caller取消不能提前釋slot。quote最多100admitted `(purpose,code)` keys（排隊＋執行），20logical worker；caller timeout而native未結束時連key都保留，不能新開同key。accounting5/s、history60/min、quote240/min與429都在actual native dispatch前共同重驗及記帳，包含auth retry，不在等slot前先reserve。Task408 技術路徑為 `BATCH_SIZE=3`、two workers、symbol dispatch≥3.1 秒；90 秒僅新 job admission，已 admitted job 不因之取消；每 symbol 在 SDK start 前必保留 technical 70 秒＋ticker/candles 各8秒的86秒 deadline，Python aggregate 60秒／Java technical transport70秒。所有 technical、ticker、intraday-candles、intraday-volumes 與 historical-daily-candles 的 actual SDK starts（含 re-login 重送）共同受 rolling-60s ≤38、外層 history 60/min、五個 blocking slot 和 429 stop-run 約束，沒有另一個按 API 類別或 21 項計數的上限。Task425 的兩條排程使用固定 30 檔雷達集合，超限為 RADAR_LIMIT_EXCEEDED、零 SDK call、不得 partial 或 round-robin；429 或 RATE_LIMITED 會停止當輪且 Java 不重試。
 - indices與stock各run有不可復活cancel及自己的connection/worker/subscription。晚connect不得subscribe，舊callback/finally不影響新run；ASGI不等同步symbol驗證，connect5秒/cleanup2秒有界，native未結束持續計容量。
 - Compose維持linux/amd64、無host port、asset-net、non-root/read-only/tmpfs/drop capabilities。SDK安裝媒介／secret不入Git/build context；hash驗證後runtime package可在image。只有Python可掛SDKsecret，Java只掛shared token目錄。
 - business-services擁有帳務 owner/transaction；external-materials 擁有 market DB/Redis 唯一 writer。Task405 使 settlement 與 realized-gains normalized batch 都有 strict boolean `accountBindingExplicit`，同批 selector/selected/raw 一致才 true；缺欄或 false 只能純讀、不得寫個人資料，raw 仍不跨 Python。Task394／395 的本機投影均已規格化為可驗收目標；Task406 來源報表延後且不影響兩者。
@@ -558,7 +558,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 139 個 Requirements（最新編號為 146，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 140 個 Requirements（最新編號為 147，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417 僅有獨立 t417 任務檔，不追加索引
 ├── tasks/                # 任務檔

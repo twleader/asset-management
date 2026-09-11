@@ -319,6 +319,78 @@ public final class FubonMarketJson {
                 nullablePreservedAscii(root.get("sourceMarket"), 64), 1, status, null, candles);
     }
 
+    /** Task425 exact Redis-only current price-volume envelope. */
+    public static IntradayVolumesRead intradayVolumes(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
+        fields(root, Set.of("schemaVersion", "symbol", "market", "provider", "sourceDate", "observedAt", "instrumentType",
+                "exchange", "sourceMarket", "status", "reason", "levels"));
+        task425Base(root, symbol, now);
+        if (!date(root.get("sourceDate")).equals(queryDate)) throw invalid();
+        Instant observed = task425Observation(root.get("observedAt"), queryDate, now);
+        String status = text(root.get("status")), reason = nullableText(root.get("reason"));
+        JsonNode levels = root.get("levels");
+        if (!levels.isArray() || levels.size() > 10000) throw invalid();
+        if ("NO_DATA".equals(status)) {
+            if (!"NO_DATA".equals(reason) || !levels.isEmpty()) throw invalid();
+            return new IntradayVolumesRead(symbol, queryDate, observed, text(root.get("exchange")),
+                    nullablePreservedAscii(root.get("sourceMarket"), 20), status, reason, List.of());
+        }
+        if (!"OK".equals(status) || reason != null || levels.isEmpty()) throw invalid();
+        List<IntradayVolumeLevel> output = new ArrayList<>();
+        BigDecimal previous = null;
+        for (JsonNode level : levels) {
+            fields(level, Set.of("price", "volume", "bidVolume", "askVolume"));
+            BigDecimal price = decimal(canonicalDecimalText(level.get("price"), 20, 10, true), 20, 10, true);
+            if (previous != null && price.compareTo(previous) <= 0) throw invalid();
+            previous = price;
+            output.add(new IntradayVolumeLevel(price, nonNegativeLongText(level.get("volume")),
+                    nullableNonNegativeLongText(level.get("bidVolume")), nullableNonNegativeLongText(level.get("askVolume"))));
+        }
+        return new IntradayVolumesRead(symbol, queryDate, observed, text(root.get("exchange")),
+                nullablePreservedAscii(root.get("sourceMarket"), 20), status, null, output);
+    }
+
+    /** Task425 exact immutable daily-candle envelope. */
+    public static HistoricalDailyCandlesRead historicalDailyCandles(JsonNode root, String symbol,
+                                                                      LocalDate from, LocalDate to, Instant now) {
+        fields(root, Set.of("schemaVersion", "symbol", "market", "provider", "queryFrom", "queryTo", "observedAt",
+                "instrumentType", "exchange", "sourceMarket", "status", "reason", "candles"));
+        task425Base(root, symbol, now);
+        if (!date(root.get("queryFrom")).equals(from) || !date(root.get("queryTo")).equals(to)
+                || from.isAfter(to) || from.plusDays(365).isBefore(to)) throw invalid();
+        // A response receipt is a present-time observation, not a market-day field.
+        // Historical callers may legitimately query a completed window ending before
+        // today, so tying this timestamp to queryTo would reject a valid response.
+        Instant observed = task425Instant(root.get("observedAt"));
+        String status = text(root.get("status")), reason = nullableText(root.get("reason"));
+        JsonNode source = root.get("candles");
+        if (!source.isArray() || source.size() > 366) throw invalid();
+        if ("NO_DATA".equals(status)) {
+            if (!"NO_DATA".equals(reason) || !source.isEmpty()) throw invalid();
+            return new HistoricalDailyCandlesRead(symbol, from, to, observed, text(root.get("exchange")),
+                    nullablePreservedAscii(root.get("sourceMarket"), 20), status, reason, List.of());
+        }
+        if (!"OK".equals(status) || reason != null || source.isEmpty()) throw invalid();
+        List<HistoricalDailyCandle> output = new ArrayList<>();
+        LocalDate previous = null;
+        for (JsonNode candle : source) {
+            fields(candle, Set.of("tradingDate", "open", "high", "low", "close", "volume", "turnover", "change"));
+            LocalDate day = date(candle.get("tradingDate"));
+            if (day.isBefore(from) || day.isAfter(to) || previous != null && !day.isAfter(previous)) throw invalid();
+            previous = day;
+            BigDecimal open = decimal(canonicalDecimalText(candle.get("open"), 20, 10, true), 20, 10, true);
+            BigDecimal high = decimal(canonicalDecimalText(candle.get("high"), 20, 10, true), 20, 10, true);
+            BigDecimal low = decimal(canonicalDecimalText(candle.get("low"), 20, 10, true), 20, 10, true);
+            BigDecimal close = decimal(canonicalDecimalText(candle.get("close"), 20, 10, true), 20, 10, true);
+            BigDecimal turnover = decimal(canonicalDecimalText(candle.get("turnover"), 20, 10, false), 20, 10, false);
+            BigDecimal change = nullableSignedDecimal(candle.get("change"));
+            if (high.compareTo(open) < 0 || high.compareTo(close) < 0 || open.compareTo(low) < 0 || close.compareTo(low) < 0)
+                throw invalid();
+            output.add(new HistoricalDailyCandle(day, open, high, low, close, nonNegativeLongText(candle.get("volume")), turnover, change));
+        }
+        return new HistoricalDailyCandlesRead(symbol, from, to, observed, text(root.get("exchange")),
+                nullablePreservedAscii(root.get("sourceMarket"), 20), status, null, output);
+    }
+
     private static void baseV1(JsonNode root, String symbol, LocalDate queryDate, Instant now, boolean basic) {
         if (integer(root.get("schemaVersion")) != 1) throw invalid();
         equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
@@ -326,6 +398,23 @@ public final class FubonMarketJson {
         zObservation(root.get("observedAt"), queryDate, now);
         equal(root.get("instrumentType"), "EQUITY");
         if (!Set.of("TWSE", "TPEx").contains(text(root.get("exchange")))) throw invalid();
+    }
+    private static void task425Base(JsonNode root, String symbol, Instant now) {
+        if (integer(root.get("schemaVersion")) != 1) throw invalid();
+        equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
+        equal(root.get("instrumentType"), "EQUITY");
+        if (!Set.of("TWSE", "TPEx", "ESB").contains(text(root.get("exchange")))) throw invalid();
+        if (task425Instant(root.get("observedAt")).isAfter(now)) throw invalid();
+    }
+    private static Instant task425Observation(JsonNode node, LocalDate queryDate, Instant now) {
+        Instant value = task425Instant(node);
+        if (value.isAfter(now) || !value.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)) throw invalid();
+        return value;
+    }
+    private static Instant task425Instant(JsonNode node) {
+        String value = text(node);
+        if (!value.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z")) throw invalid();
+        try { return Instant.parse(value); } catch (RuntimeException failure) { throw invalid(); }
     }
     private static Instant zObservation(JsonNode node, LocalDate queryDate, Instant now) {
         Instant value = zInstant(node);
@@ -341,6 +430,18 @@ public final class FubonMarketJson {
         String value = text(node); BigDecimal parsed = decimal(value, precision, scale, positive);
         if (!canonical(parsed).equals(value)) throw invalid();
         return value;
+    }
+    private static BigDecimal nullableSignedDecimal(JsonNode node) {
+        if (node == null || node.isNull()) return null;
+        return decimal(canonicalDecimalText(node, 20, 10, false), 20, 10, false);
+    }
+    private static long nonNegativeLongText(JsonNode node) {
+        String value = text(node);
+        if (!value.matches("0|[1-9][0-9]*")) throw invalid();
+        try { return Long.parseLong(value); } catch (RuntimeException tooLarge) { throw invalid(); }
+    }
+    private static Long nullableNonNegativeLongText(JsonNode node) {
+        return node == null || node.isNull() ? null : nonNegativeLongText(node);
     }
     private static BigDecimal nullableDecimal(JsonNode node, int precision, int scale, boolean positive) {
         if (node == null || node.isNull()) return null;

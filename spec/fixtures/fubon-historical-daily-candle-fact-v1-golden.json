@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "symbol": "2330",
+  "market": "台股",
+  "provider": "FUBON_SDK",
+  "tradingDate": "2026-08-28",
+  "exchange": "TWSE",
+  "sourceMarket": "TSE",
+  "open": "950",
+  "high": "960",
+  "low": "945",
+  "close": "955",
+  "volume": "123",
+  "turnover": "117465",
+  "change": "5",
+  "canonicalInputUtf8": "FUBON_HISTORICAL_DAILY_CANDLE_FACT_V1\n{\"change\":\"5\",\"close\":\"955\",\"exchange\":\"TWSE\",\"high\":\"960\",\"low\":\"945\",\"market\":\"台股\",\"open\":\"950\",\"provider\":\"FUBON_SDK\",\"schemaVersion\":1,\"sourceMarket\":\"TSE\",\"symbol\":\"2330\",\"tradingDate\":\"2026-08-28\",\"turnover\":\"117465\",\"volume\":\"123\"}",
+  "canonicalInputUtf8Hex": "4655424f4e5f484953544f524943414c5f4441494c595f43414e444c455f464143545f56310a7b226368616e6765223a2235222c22636c6f7365223a22393535222c2265786368616e6765223a2254575345222c2268696768223a22393630222c226c6f77223a22393435222c226d61726b6574223a22e58fb0e882a1222c226f70656e223a22393530222c2270726f7669646572223a224655424f4e5f53444b222c22736368656d6156657273696f6e223a312c22736f757263654d61726b6574223a22545345222c2273796d626f6c223a2232333330222c2274726164696e6744617465223a22323032362d30382d3238222c227475726e6f766572223a22313137343635222c22766f6c756d65223a22313233227d",
+  "sha256": "becf74e0b7096c55e2d15eeceb394777cbb17fe858687f85c73c091d586eaf6c"
+}

@@ -28,6 +28,14 @@ public final class FubonCanonicalHash {
     public static String candle(Map<String, Object> sourceAndCandle) {
         return digest("FUBON_INTRADAY_CANDLE_V1\n" + canonical(sourceAndCandle));
     }
+    /** Task425 immutable daily fact hash; observedAt/createdAt are deliberately not source content. */
+    public static String dailyCandle(Map<String, Object> canonicalDailyCandle) {
+        return digest(dailyCandleInputBytes(canonicalDailyCandle));
+    }
+    public static byte[] dailyCandleInputBytes(Map<String, Object> canonicalDailyCandle) {
+        if (canonicalDailyCandle == null) throw new IllegalArgumentException("daily candle hash inputs");
+        return ("FUBON_HISTORICAL_DAILY_CANDLE_FACT_V1\n" + canonical(canonicalDailyCandle)).getBytes(StandardCharsets.UTF_8);
+    }
     public static String canonical(Map<String, ?> value) {
         try { return FubonMarketJson.MAPPER.writeValueAsString(new TreeMap<>(value)); }
         catch (Exception impossible) { throw new IllegalArgumentException("SCHEMA_INVALID", impossible); }

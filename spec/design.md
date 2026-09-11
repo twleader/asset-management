@@ -12014,3 +12014,36 @@ Fubon 呼叫只在 external-materials 已有的 feature/config/交易時段 gate
 唯一有效台股代碼規則為 `^[0-9]{4,6}[A-Z]?$`。`StockSourceQuery` 以此規則在 SQL／唯一後置篩選中排除不合法但存在於主檔的代碼；`TwLiveQuoteDispatcher`、Fubon technical 與 push path 都只接受該 collector 結果，不能另以更寬鬆 regex 擴張 Fubon 範圍。
 
 Dashboard `/summary` 仍是單一 browser request。BFF 並行讀 snapshots、history、market status、live assets，將 `liveAssets.stocks[]` 正規化為原 `stockPrices` consumer shape，再沿用 `LiveAssetsOverlay` 與 `SnapshotEnricher` 做 latest／basedate 處理。`/realtime` 同樣只讀 market status + live assets。這只刪除重複 price fan-out，不變更前端 API、DTO 欄位、error fallback 或 snapshot detail/close-data 的既有行為。
+
+## Requirement 147／Task 425：富邦分價量／歷史日 K 的儲存與讀取分流
+
+```text
+Fubon SDK (read-only)
+  └─ fubon-broker-service exact internal POST routes
+       └─ external-materials-service (only scheduler/client/writer)
+            ├─ 每分鐘、台股 09:00–13:30：intraday volumes
+            │    └─ dedicated Redis snapshot, same-day/newer-only/TTL
+            └─ 交易日 15:35：historical daily candles
+                 └─ fubon_historical_daily_candle (immutable PostgreSQL fact)
+                      └─ guarded stock_price_history FUBON_SDK projection
+
+Trading radar / business / BFF request read
+  └─ Redis volume snapshot or PostgreSQL daily-candle projection only
+       └─ no broker HTTP, SDK, scheduler, refresh, or write
+```
+
+兩條 internal route 都是固定 request shape 與 strict normalized response；Python 不 relay SDK raw object，Java 只接受確切 identity、schemaVersion、交易所、日期與 canonical number。分價量 snapshot 的 Redis key 與既有 generic price／tick／quote key 隔離，payload 保留 Fubon 的 price、volume 與 nullable bid／ask quantities；只接受相同台北來源日且 strictly newer observedAt 的值，並以 TTL 防止跨日誤用。雷達讀取時需同時驗證來源日與 freshness，缺值即 fail-soft，不得補打一個 Fubon request。
+
+日 K 的 source fact 是 PostgreSQL 唯一長期保存位置，包含 Fubon 才有的 turnover 與 price change。寫入單一 transaction，以 content hash fence 防止 silent overwrite；之後才可對來源中立 `stock_price_history` 做受權威來源保護的投影。台灣交易所／櫃買／FinMind verified close 已存在時，只保留 Fubon fact，不修改 canonical row。候選代號永遠由 `FubonRadarScope` 取得，排程對 readiness、台股交易日、有效代號與 single-flight 全部 fail closed。
+
+**Task 425 固定容量與 wire 契約。** 兩個工作只可取得固定 30 個雷達代碼；超額以 RADAR_LIMIT_EXCEEDED fail closed，零 SDK 呼叫、零部分輪替。每個入選代碼每輪恰好一次 scheduler 邏輯 route invocation，可沿用既有一次 auth-invalid retry；retry 仍計入每分鐘歷史額度及 rolling 60 秒最多 38 次 actual SDK starts。兩者共用既有五個 blocking slot，429 停輪且 Java 不做第二層 retry。分價量 JSON 根欄位依序為 schemaVersion、symbol、market、provider、sourceDate、observedAt、instrumentType、exchange、sourceMarket、status、reason、levels；日 K 根欄位依序為 schemaVersion、symbol、market、provider、queryFrom、queryTo、observedAt、instrumentType、exchange、sourceMarket、status、reason、candles。schemaVersion 是整數 1；所有價格、量與金額均為不含指數記法的十進位字串，volume 為非負整數字串，prices 與 amount 最多 30 位有效小數。observedAt 為外部服務收到完整 broker 回應後的 UTC ISO-8601 時刻，sourceDate 僅屬分價量、是 broker payload 的 Asia/Taipei 行情日；日 K 只有 queryFrom/queryTo 與各 candle 的 tradingDate。HTTP 200 snapshot status 只能為 OK 或 NO_DATA；OK 的 levels 必須非空且有序，NO_DATA 的 levels 必須為空、reason 為 NO_DATA。INVALID_RESPONSE、RATE_LIMITED、UPSTREAM_ERROR 是 typed non-2xx error code，不是可快取 snapshot；它們不得覆寫既有 Redis 值。
+
+**Task 425 Redis 與 PostgreSQL 邊界。** 分價量只存入 Redis key fubon:intraday-price-volume:台股:{symbol}，TTL 固定 18 小時；以 Lua 比較 sourceDate 和 observedAt 後才覆寫，同日期只有嚴格較新的 observedAt 能替換既有值。NO_DATA 也可更新 Redis，但 typed non-2xx error 絕不可覆寫既有值。Radar 讀取時必須驗證 sourceDate 為 Taipei 今天、status 為 OK 且 observedAt 介於 now-minus-two-minutes 和 now-plus-30-seconds；不符即視為無資料，絕不可 request-time 呼叫 Fubon。日 K 只存 PostgreSQL：fubon_historical_daily_candle 的 primary key 為 stock_code、market、trading_date，payload_hash 為 NOT NULL 一般欄位；同 natural key/same hash unchanged，不同 hash 由 atomic insert conflict 回 typed conflict 且不插入第二筆。完整 DDL 為 stock_code varchar(20) NOT NULL、market varchar(20) NOT NULL CHECK market=台股、provider varchar(32) NOT NULL CHECK provider=FUBON_SDK、trading_date date NOT NULL、exchange varchar(10) NOT NULL CHECK exchange in TWSE/TPEx/ESB、source_market varchar(20) nullable、open/high/low/close numeric(30,10) NOT NULL、volume bigint NOT NULL、turnover numeric(30,10) NOT NULL、price_change numeric(30,10) nullable、observed_at timestamptz NOT NULL、schema_version integer NOT NULL CHECK schema_version=1、canonical_payload jsonb NOT NULL、payload_hash char(64) NOT NULL CHECK lowercase SHA-256、created_at timestamptz NOT NULL。OHLC 全正且 high 不低於 open/close、low 不高於 open/close；volume/turnover 非負。資料表具阻止 UPDATE 與 DELETE 的不可變更觸發器。payload_hash 的 byte input 是 FUBON_HISTORICAL_DAILY_CANDLE_FACT_V1 換行加上依鍵排序的 canonical JSON，JSON 只含 schemaVersion、symbol、market、provider、tradingDate、exchange、sourceMarket、open、high、low、close、volume、turnover、change，排除 observedAt 與 createdAt；FubonCanonicalHash 必須提供相同的 daily-candle bytes/hash 方法及 golden fixture。
+
+**Task 425 原子權威收盤投影。** 每筆可用日 K 先以獨立交易寫入 immutable fact；接著才以單一 INSERT ON CONFLICT guarded upsert 投影 stock_price_history。migration 必須驗證並復用既有 stock_code、market、trading_date unique constraint，讓兩種 writer 共用同一原子基礎；不得重建 constraint 或進行破壞性的 duplicate rewrite。FUBON conflict update where 條件只能接受目前列不存在，或目前 close_source 不在精確受信任集合 TWSE_MI_INDEX、TPEX_DAILY_CLOSE、FINMIND_TW_CLOSE；不得先 SELECT 再寫入。正式交易所收盤寫入也必須是一個原子 authority upsert，保證與 FUBON 同時到達時正式來源獲勝。投影跳過或拋錯不得影響已提交 fact。測試以並行交易證明正式來源最終獲勝，並以故意使投影失敗驗證 fact 仍存在。
+
+**Task 425 目錄與排程總數。** 兩支新 broker read route 是 stock/intraday/volumes 與 stock/historical/daily-candles。Fubon API catalog 由 52 總數、21 已接、31 未接調整為 52 總數、23 已接、29 未接。Schedule 列表由 28 business、37 external、1 BFF、合計 66 調整為 28 business、39 external、1 BFF、合計 68；分價量為每分鐘，日 K 為交易日 15:35 Asia/Taipei。
+
+**Task 425 端到端界線覆寫。** 前述泛稱的 30 位有效小數一律由此固定界線取代：所有 price、turnover、price_change 與分價量的 decimal 為 precision 至多 20、scale 至多 10；volume 為 0 至 Long.MAX_VALUE；sourceMarket 為 null 或 ASCII 1..20，超界於 PostgreSQL 前以 INVALID_RESPONSE 拒絕。故所有合法日 K 均可寫入 numeric(30,10)、bigint 與 varchar(20) 欄位。日 K 工作固定傳送 queryTo=Taipei 當日、queryFrom=queryTo.minusDays(365)，恆為 inclusive 366 日而不受 2 月 29 日影響。stock_price_history 已有 stock_code、market、trading_date 的 unique constraint，migration 只能驗證並復用它，不能重建或破壞性去重。
+
+**Task 425 strict child JSON。** instrumentType 固定是 JSON string EQUITY。levels 每項的精確 key set 是 price、volume、bidVolume、askVolume：price 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，bidVolume 和 askVolume 各為 null 或非負 signed-64 integer JSON string。candles 每項的精確 key set 是 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD JSON string，OHLC 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，turnover 為非負 canonical decimal JSON string，change 為 null 或 signed canonical decimal JSON string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。每個 root 和 child object 均拒絕 missing、unknown、duplicate fields。

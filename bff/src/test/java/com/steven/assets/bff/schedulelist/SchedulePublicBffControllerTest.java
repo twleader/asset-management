@@ -24,12 +24,29 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 28 個業務、37 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 28 個業務、39 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(66);
+        assertThat(jobs()).hasSize(68);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(28);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(37);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(39);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Task425 的分價量與日K各有唯一 external 排程，且不宣稱 request-time 外呼")
+    void Task425富邦分價量與日K排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦個股當日分價量同步".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("外部行情服務");
+            assertThat(job.cron()).isEqualTo("0 * * * * *");
+            assertThat(job.zone()).isEqualTo("Asia/Taipei");
+            assertThat(job.description()).contains("最多 30 檔", "Redis", "只讀", "絕不現場呼叫富邦");
+        });
+        assertThat(jobs()).filteredOn(j -> "富邦個股歷史日K線同步".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("外部行情服務");
+            assertThat(job.cron()).isEqualTo("0 35 15 * * MON-FRI");
+            assertThat(job.schedule()).isEqualTo("交易日 15:35");
+            assertThat(job.description()).contains("366 日 K", "immutable PostgreSQL fact", "可信官方收盤永不覆寫");
+        });
     }
 
     @Test

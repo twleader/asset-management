@@ -55,6 +55,15 @@ class FixedGateway:
             "data": [{"date": "2026-08-28T01:00:00Z", "open": "950", "high": "960", "low": "945",
                       "close": "955", "volume": "123", "average": "953"}],
         }
+        self.volume_source = {
+            "date": TODAY, "type": "EQUITY", "exchange": "TWSE", "market": "TSE", "symbol": "2330",
+            "data": [{"price": "950", "volume": "123", "bidVolume": "100", "askVolume": None}],
+        }
+        self.daily_candle_source = {
+            "type": "EQUITY", "exchange": "TWSE", "market": "TSE", "symbol": "2330",
+            "data": [{"date": TODAY, "open": "950", "high": "960", "low": "945", "close": "955",
+                      "volume": "123", "turnover": "117465", "change": "5"}],
+        }
 
     def shutdown(self) -> None:
         pass
@@ -76,6 +85,15 @@ class FixedGateway:
     def read_intraday_candles(self, symbol, *, deadline=None):
         self.calls.append(("candles", {"symbol": symbol, "timeframe": 1, "sort": "asc"}))
         return deepcopy(self.candle_source)
+
+    def read_intraday_volumes(self, symbol, *, deadline=None):
+        self.calls.append(("volumes", {"symbol": symbol}))
+        return deepcopy(self.volume_source)
+
+    def read_historical_daily_candles(self, symbol, start, end, *, deadline=None):
+        self.calls.append(("daily-candles", {"symbol": symbol, "from": start, "to": end, "timeframe": "D",
+                                              "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc"}))
+        return deepcopy(self.daily_candle_source)
 
 
 def test_fixed_17_profile_aggregate_has_exact_root_and_420_day_window():
@@ -159,6 +177,22 @@ def test_basic_and_candles_only_rebuild_allowed_normalized_fields():
                                   ("candles", {"symbol": "2330", "timeframe": 1, "sort": "asc"})]
 
 
+def test_task425_volume_and_daily_candle_wire_contracts_are_exact_and_fixed():
+    gateway = FixedGateway()
+    service = MarketDataV1Service(gateway, now=lambda: NOW)
+    volumes = service.volumes("2330")
+    daily = service.daily_candles("2330", (NOW.date() - timedelta(days=365)).isoformat(), TODAY)
+    assert list(volumes) == ["schemaVersion", "symbol", "market", "provider", "sourceDate", "observedAt", "instrumentType",
+                             "exchange", "sourceMarket", "status", "reason", "levels"]
+    assert volumes["status"] == "OK" and volumes["levels"] == [{"price": "950", "volume": "123", "bidVolume": "100", "askVolume": None}]
+    assert volumes["observedAt"].endswith(".000000Z")
+    assert list(daily) == ["schemaVersion", "symbol", "market", "provider", "queryFrom", "queryTo", "observedAt",
+                           "instrumentType", "exchange", "sourceMarket", "status", "reason", "candles"]
+    assert daily["status"] == "OK" and daily["candles"][0]["tradingDate"] == TODAY
+    assert gateway.calls[-1][1] == {"symbol": "2330", "from": (NOW.date() - timedelta(days=365)).isoformat(), "to": TODAY,
+                                    "timeframe": "D", "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc"}
+
+
 def test_source_name_whitespace_is_rejected_before_preserving_raw_value():
     gateway = FixedGateway()
     gateway.ticker["name"] = " 台積電 "
@@ -177,7 +211,8 @@ def app_client(tmp_path, *, disabled: bool = False, gateway: FixedGateway | None
     return TestClient(application), source
 
 
-@pytest.mark.parametrize("path", ["/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read"])
+@pytest.mark.parametrize("path", ["/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read",
+                                  "/internal/market-data/intraday-volumes/read"])
 def test_route_local_v1_gate_uses_root_reason_and_does_not_touch_sdk(tmp_path, path):
     client, gateway = app_client(tmp_path)
     with client:
@@ -195,7 +230,8 @@ def test_route_local_v1_gate_uses_root_reason_and_does_not_touch_sdk(tmp_path, p
     assert len(gateway.calls) == 1
 
 
-@pytest.mark.parametrize("path", ["/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read"])
+@pytest.mark.parametrize("path", ["/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read",
+                                  "/internal/market-data/intraday-volumes/read"])
 def test_route_local_v1_disabled_and_unhandled_provider_failure_are_sanitized(tmp_path, path):
     disabled, disabled_gateway = app_client(tmp_path, disabled=True)
     with disabled:
@@ -206,8 +242,10 @@ def test_route_local_v1_disabled_and_unhandled_provider_failure_are_sanitized(tm
     exploding = FixedGateway()
     if path.endswith("stock-basic/read"):
         exploding.read_ticker = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider"))  # type: ignore[method-assign]
-    else:
+    elif path.endswith("intraday-candles/read"):
         exploding.read_intraday_candles = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider"))  # type: ignore[method-assign]
+    else:
+        exploding.read_intraday_volumes = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider"))  # type: ignore[method-assign]
     client, _ = app_client(tmp_path, gateway=exploding)
     with client:
         result = client.post(path, headers={"X-Internal-Service-Token": TOKEN}, json={"symbol": "2330"})
@@ -221,3 +259,18 @@ def test_route_local_v1_maps_sdk_configuration_and_rate_limit_without_detail_env
     with client:
         response = client.post("/internal/market-data/stock-basic/read", headers={"X-Internal-Service-Token": TOKEN}, json={"symbol": "2330"})
     assert response.status_code == 503 and response.json() == {"reason": "RATE_LIMITED"}
+
+
+def test_task425_daily_route_requires_exact_date_window_and_never_accepts_extra_fields(tmp_path):
+    client, gateway = app_client(tmp_path)
+    body = {"symbol": "2330", "from": (NOW.date() - timedelta(days=365)).isoformat(), "to": TODAY}
+    with client:
+        response = client.post("/internal/market-data/historical-daily-candles/read", headers={"X-Internal-Service-Token": TOKEN}, json=body)
+        invalid = client.post("/internal/market-data/historical-daily-candles/read", headers={"X-Internal-Service-Token": TOKEN},
+                              json={**body, "extra": True})
+        too_long = client.post("/internal/market-data/historical-daily-candles/read", headers={"X-Internal-Service-Token": TOKEN},
+                               json={"symbol": "2330", "from": "2025-01-01", "to": "2026-08-28"})
+    assert response.status_code == 200 and response.json()["status"] == "OK"
+    assert invalid.status_code == 400 and invalid.json() == {"reason": "INVALID_REQUEST"}
+    assert too_long.status_code == 400 and too_long.json() == {"reason": "INVALID_REQUEST"}
+    assert len(gateway.calls) == 1

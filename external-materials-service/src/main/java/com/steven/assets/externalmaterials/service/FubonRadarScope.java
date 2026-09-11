@@ -16,7 +16,7 @@ public class FubonRadarScope {
         catch (RuntimeException failure) { throw new FubonMarketData.Unavailable("RADAR_UNAVAILABLE"); }
         if (codes.stream().anyMatch(code -> !StockSourceQuery.isTaiwanRadarCode(code)))
             throw new FubonMarketData.Unavailable("RADAR_INVALID");
-        if (codes.size() > limit) throw new FubonMarketData.Unavailable("SUBSCRIPTION_LIMIT");
+        if (codes.size() > limit) throw new FubonMarketData.Unavailable(limit == 30 ? "RADAR_LIMIT_EXCEEDED" : "SUBSCRIPTION_LIMIT");
         return codes.stream().sorted().toList();
     }
 }

@@ -110,6 +110,35 @@ class FubonScheduledMarketClientTest {
                     assertThat(e).hasMessageNotContaining("fake-do-not-echo");
                 });
     }
+    @Test void task425ExactVolumeAndDailyContractsRejectWrongStatusAndPreserveCanonicalNumbers() {
+        var volumes = FubonMarketJson.intradayVolumes(FubonMarketJson.parse("""
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","sourceDate":"2026-08-28",
+                 "observedAt":"2026-08-28T05:40:00.000000Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
+                 "status":"OK","reason":null,"levels":[{"price":"950","volume":"123","bidVolume":"100","askVolume":null}]}
+                """), "2330", DAY, NOW);
+        assertThat(volumes.status()).isEqualTo("OK");
+        assertThat(volumes.levels().getFirst().price()).isEqualByComparingTo("950");
+        var daily = FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse("""
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-08-28","queryTo":"2026-08-28",
+                 "observedAt":"2026-08-28T05:40:00.000000Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
+                 "status":"OK","reason":null,"candles":[{"tradingDate":"2026-08-28","open":"950","high":"960","low":"945","close":"955","volume":"123","turnover":"117465","change":"5"}]}
+                """), "2330", DAY.minusDays(365), DAY, NOW);
+        assertThat(daily.candles().getFirst().close()).isEqualByComparingTo("955");
+        assertThatThrownBy(() -> FubonMarketJson.intradayVolumes(FubonMarketJson.parse("""
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","sourceDate":"2026-08-28",
+                 "observedAt":"2026-08-28T05:40:00Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
+                 "status":"OK","reason":null,"levels":[{"price":"950","volume":"123","bidVolume":"100","askVolume":null}]}
+                """), "2330", DAY, NOW)).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void historicalDailyObservationIsReceiptTimeNotTheLastRequestedMarketDate() {
+        LocalDate oldTo = DAY.minusDays(30), oldFrom = oldTo.minusDays(365);
+        var daily = FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse("""
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-07-29","queryTo":"2026-07-29",
+                 "observedAt":"2026-08-28T05:40:00.000000Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
+                 "status":"OK","reason":null,"candles":[{"tradingDate":"2026-07-29","open":"950","high":"960","low":"945","close":"955","volume":"123","turnover":"117465","change":"5"}]}
+                """), "2330", oldFrom, oldTo, NOW);
+        assertThat(daily.observedAt()).isEqualTo(NOW.minusSeconds(5));
+    }
     @Test void responseLimitCancelsSubscriptionBeforeAccumulatingOversizedBody() {
         var subscriber = new FubonScheduledMarketClient.LimitedBody(8);
         Flow.Subscription subscription = mock(Flow.Subscription.class);
