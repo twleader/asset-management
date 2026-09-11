@@ -266,7 +266,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 |---|---|---|
 | `collectAllStockCodes` | `stock` 主檔 ∪ **全庫最新一筆**快照持股 ∪ `stock_alert`（Task 257 刻意未改為 per-owner） | `PricePoller.warmCacheOnStartup`、`DividendPersister` ×2、`HistoricalBackfillService.repairRange`（未指定 `code` 時，Task 258） |
 | `collectHeldStockCodes` | **每位 owner** 最新快照持股 ∪ `stock_alert`（Task 257 起；與 `collectTwRadarCodes` 共用同一個快照選取子查詢） | `PricePoller` ×4（盤中 cron ×3 ＋ `refreshAll`）、`ClosePersister` ×4、`IntradayTickRefresher` ×4、`EtfNavPoller` ×2 |
-| `collectTwRadarCodes` | **每位 owner** 最新快照的台股持股 ∪ 台股 `stock_alert` | `TwRadarRefreshService`（Task 249） |
+| `collectTwRadarCodes` | **每位 owner** 最新快照的台股持股 ∪ 台股 `stock_alert`，再 exact join 台股 `stock` 主檔，僅 `^[0-9]{4,6}[A-Z]?$`、非 `0000` | `TwRadarRefreshService`、`TwLiveQuoteDispatcher`、`FubonRadarScope`（Fubon technical／stock push／dividend sync） |
 
 `collectHeldStockCodes` 原本取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——**全庫只取一筆**。Task 249 已在 `collectTwRadarCodes` 指出這個缺陷，但當時只新增新方法繞過，判斷「改既有方法會放大背景排程的外部請求量」而不動它。**該判斷經量測後不成立**：改為 per-owner 後實測台股 18 → 19 檔（只多 `2885` 一檔）、美股 9 → 9、英股 3 → 3，外部請求量幾乎不變；而不改的代價是落選 owner 的持股完全沒有行情。
 
@@ -274,7 +274,7 @@ NASDAQ info API 自 2026/04 起對 ETF 的 `keyStats` 為 null（無 dayrange �
 
 > **「同一口徑」只限於快照選取子查詢，不是全等。** `collectHeldStockCodes` 與 `collectTwRadarCodes` 共用的是
 > `DISTINCT ON (owner_user_id) … ORDER BY owner_user_id, snapshot_date DESC, id DESC` 這段，其餘兩點仍不同：
-> (1) `collectTwRadarCodes` 在 SQL 層就 `WHERE h.market = '台股'` 並在方法尾端無條件 `remove("0000")`；
+> (1) `collectTwRadarCodes` 在 SQL 層就 `WHERE h.market = '台股'`、exact join 台股 stock master、限定 `^[0-9]{4,6}[A-Z]?$` 並排除 `0000`；
 > (2) `collectHeldStockCodes` 靠 `classify()` 的 else 分支把「非美股、非英股」的一切 `market` 值（含 NULL 與
 > 日後由 `/api/settings/market-types` 新增的市場類型）一律歸入 `twCodes`，且只在 `stock_alert` 那條查詢排除
 > `0000`、持股分支不排除。故兩支**不可互相替換**，也不能只改一支就認為另一支跟著正確。
@@ -5795,7 +5795,7 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 `GET /api/trading-radar` **一個位元組都不改**，SSE 背景重算（`recalculateRadar()` → `load(false, true)`）仍走 GET。這不是風格偏好而是必要條件：POST 若被 SSE 路徑呼叫，抓取寫 Redis → `price-update` 事件 → 2 秒 debounce → 再抓取，會形成自我餵食迴圈並持續打外部 API。
 
-`twCodes` 來自**新增的** `StockSourceQuery.collectTwRadarCodes(Set<String>)`：每位 owner 各自最新快照的台股持股 ∪ 台股 `stock_alert`，排除 `0000`。
+`twCodes` 來自**新增的** `StockSourceQuery.collectTwRadarCodes(Set<String>)`：每位 owner 各自最新快照的台股持股 ∪ 台股 `stock_alert`，再 exact join 台股 `stock` 主檔，只保留 `^[0-9]{4,6}[A-Z]?$` 且排除 `0000`。
 
 **不重用既有的 `collectHeldStockCodes()`**，因為它取 `SELECT id FROM asset_snapshot ORDER BY snapshot_date DESC LIMIT 1`——全庫只取一筆快照，同日期時 tie-break 任意。實測（2026-07-29 部署後）owner 1 的快照 id 15 有 35 筆台股持股、owner 2 的 id 18 只有 2 筆，兩者同日，Postgres 挑中 id 18；結果雷達顯示 19 檔而回補只涵蓋 18 檔，`2885`（只在 owner 1 持股、不在觀察清單）永遠不會被更新——按鈕說「已抓取最新報價」卻有一列沒動。改用 `DISTINCT ON (owner_user_id) ... ORDER BY owner_user_id, snapshot_date DESC, id DESC` 後實測 19/19 全覆蓋。~~**`collectHeldStockCodes` 本身不得修改**：它服務每 2 分鐘的 `scheduledTwIntradayUpdate` 與 `refreshAll()`，放大範圍會改變背景排程的外部請求量。~~ **（此句已由 Task 257 推翻，見下方「持股抓價清單的 owner 涵蓋範圍」；保留原句作為當時的決策記錄。）** `TwRadarRefreshService` 仍保留一次防禦性 `tw.remove("0000")`，不倚賴收集器的排除。**不重用既有的 `POST /internal/refresh`**——後者是 `PricePoller.refreshAll()`，會連美股／英股一併抓，而本頁只評台股，多抓只是把使用者的等待時間拉長。
 
@@ -10046,11 +10046,11 @@ Requirement 115 對 Requirement 106 作出兩個精確收窄：台股即時 prod
 
 #### 雷達邊界與 producer flow
 
-`StockSourceQuery.collectTwRadarCodes` 是唯一集合 authority。它以每個 owner 最新 snapshot 的台股持股聯集台股 `stock_alert`，並於 SQL/collector boundary 排除 `0000`。每一個 dispatcher entry 都把它作為同一個 second boundary，而不是只有 `TwRadarRefreshService` 自己先查一次：
+`StockSourceQuery.collectTwRadarCodes` 是唯一集合 authority。它以每個 owner 最新 snapshot 的台股持股聯集台股 `stock_alert`，再 exact join 台股 `stock` 主檔、限定 `^[0-9]{4,6}[A-Z]?$` 並於 SQL/collector boundary 排除 `0000`。Requirement 146 對 Requirement 115 收窄後，`TwLiveQuoteDispatcher` 與經 `FubonRadarScope` 的 technical／push／dividend consumer 都使用這同一集合；每一個 dispatcher entry 都把它作為同一個 second boundary，而不是只有 `TwRadarRefreshService` 自己先查一次：
 
 ```text
 normalised dispatcher input C
-  └─ R = collectTwRadarCodes()                   # per-owner latest TW holdings ∪ TW alerts − 0000
+  └─ R = collectTwRadarCodes()                   # per-owner latest TW holdings ∪ alerts, stock-master + regex gated, − 0000
      E = stable-sort(C ∩ R)                      # the only live-market-data candidate set
      R empty / collector error / E empty → zero Fubon/MIS/Yahoo HTTP and zero book work
   └─ pending E only
@@ -11984,3 +11984,33 @@ runtime SQL 的 ETF candidate 必與 `FubonEtfHoldingsParser.validEtfCode` 等�
 部署分兩階段且兩次都做 DB／Dashboard readback：第一階段從 feature worktree build/recreate Fubon、business、bff 並驗收；通過測試與 arch review 後 commit，`git merge --no-ff` 進 main；第二階段先確認 main 已同步合併 commit，再從 main 目錄與 main `.env` build/recreate相同服務並重驗。任何階段 `.env` 與選定 build source 不符即停。人工 SQL 18 rows 只能證明 all-successful startup 不覆寫；failure retry 與正式 writer pipeline 必由自動化與可控 fixture 證明。
 
 兩階段最後都讀 `fubon_etf_holdings_snapshot` code、success、sourceDate、holdings count、updated_at，並以登入 Dashboard API 驗 items≤10、唯一 others、總額守恆、股票型 ETF 不殘留、合法空集合只走 degraded。無 migration；schema drift 仍須通過。
+
+## Requirement 146／Task 424：Dashboard 查詢資料流收斂
+
+### 讀取與索引模型
+
+`asset_snapshot` 是 owner-filter 的 root；三張歷史明細 `stock_holding`、`fund_holding`、`bank_deposit` 都以 `snapshot_id BIGINT NOT NULL` FK 指向它。新增三個單欄 B-tree index，名稱固定為 `idx_stock_holding_snapshot_id`、`idx_fund_holding_snapshot_id`、`idx_bank_deposit_snapshot_id`。這是純 lookup index：不改 FK、資料、delete cascade 或 API。因 production table 可持續成長，changeset 必以 `runInTransaction:false` 搭配 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，避免在 migration transaction 中非法執行 concurrent index。
+
+`AssetSnapshot` 仍保留三個 bag collection；每個 collection 明確 `@BatchSize(size = 64)`。讀 history 時 Hibernate 可按同一 association batch 以 `snapshot_id IN (...)` 載入，不得用三個 collection 的 join fetch。這與上述 index 配合，將 lazy N+1 收斂為每個 child type 的有界批次，並避免多 bag join 的重複列／例外。
+
+### 行情與 Dashboard 摘要資料流
+
+```text
+stock_holding + stock_alert + stock master
+  └─ StockSourceQuery.collectTwRadarCodes (台股、主檔存在、`^[0-9]{4,6}[A-Z]?$`、去重、排除 0000)
+       └─ TwLiveQuoteDispatcher (<=40 Fubon codes per 10-second round; round-robin only above 40)
+            └─ canonical intraday DB + Redis price cache
+
+Dashboard BFF /summary, /realtime
+  └─ business /live-assets (latest snapshot holdings only)
+       └─ stocks[] → BFF stockPrices projection
+  └─ no business /market-data/prices call
+```
+
+Fubon 呼叫只在 external-materials 已有的 feature/config/交易時段 gate 後發生；BFF 與 business 的 read request 一律不直呼券商。40 檔是 10 秒週期下 240 calls/min 的既有安全預算，不得擴張成不受限全市場抓價。
+
+`StockPriceService` 讀價格時只取得目前 owner 最新快照需要的 `(market,code)`，並以一次主檔查詢建立名稱 map；`PriceQueryService` 的 display price 只處理這個 key set，不再把 Redis 全域 `price:index:*` 加回來。`LiveStockItem` 向後相容帶入同一 `LivePrice` 的逐筆 `updatedAt`，root `priceUpdatedAt` 仍只是整包最大更新時間，讓 BFF 投影後維持原 `stockPrices.updatedAt` semantics。display gate、歷史 fallback 與其他 DTO field semantics 都維持不變。
+
+唯一有效台股代碼規則為 `^[0-9]{4,6}[A-Z]?$`。`StockSourceQuery` 以此規則在 SQL／唯一後置篩選中排除不合法但存在於主檔的代碼；`TwLiveQuoteDispatcher`、Fubon technical 與 push path 都只接受該 collector 結果，不能另以更寬鬆 regex 擴張 Fubon 範圍。
+
+Dashboard `/summary` 仍是單一 browser request。BFF 並行讀 snapshots、history、market status、live assets，將 `liveAssets.stocks[]` 正規化為原 `stockPrices` consumer shape，再沿用 `LiveAssetsOverlay` 與 `SnapshotEnricher` 做 latest／basedate 處理。`/realtime` 同樣只讀 market status + live assets。這只刪除重複 price fan-out，不變更前端 API、DTO 欄位、error fallback 或 snapshot detail/close-data 的既有行為。

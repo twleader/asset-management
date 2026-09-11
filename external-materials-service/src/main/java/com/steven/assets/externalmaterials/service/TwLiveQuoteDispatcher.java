@@ -309,7 +309,7 @@ public class TwLiveQuoteDispatcher {
         if (fallback != null) fallback.submit(candidates);
     }
     private static boolean isTaiwanCode(String code) {
-        return code != null && code.matches("^[0-9]{4,6}[A-Z]?$") && !"0000".equals(code);
+        return StockSourceQuery.isTaiwanRadarCode(code);
     }
     private static List<String> normalizedCodes(Collection<String> raw) {
         TreeSet<String> sorted = new TreeSet<>();

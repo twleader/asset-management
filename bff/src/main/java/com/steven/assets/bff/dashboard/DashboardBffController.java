@@ -65,12 +65,6 @@ public class DashboardBffController {
                 .bodyToMono(LIST_MAP)
                 .onErrorReturn(Collections.emptyList());
 
-        Mono<List<Map<String, Object>>> pricesMono = businessServicesClient.get()
-                .uri("/api/market-data/prices")
-                .retrieve()
-                .bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList());
-
         Mono<Map<String, Object>> marketStatusMono = businessServicesClient.get()
                 .uri("/api/market-data/market-status")
                 .retrieve()
@@ -83,13 +77,13 @@ public class DashboardBffController {
                 .bodyToMono(MAP)
                 .onErrorReturn(Collections.emptyMap());
 
-        return Mono.zip(snapshotsMono, historyMono, pricesMono, marketStatusMono, liveAssetsMono)
+        return Mono.zip(snapshotsMono, historyMono, marketStatusMono, liveAssetsMono)
                 .flatMap(tuple -> {
                     List<Map<String, Object>> snapshots = tuple.getT1();
                     List<Map<String, Object>> history = tuple.getT2();
-                    List<Map<String, Object>> prices = tuple.getT3();
-                    Map<String, Object> marketStatus = tuple.getT4();
-                    Map<String, Object> liveAssets = tuple.getT5();
+                    Map<String, Object> marketStatus = tuple.getT3();
+                    Map<String, Object> liveAssets = tuple.getT4();
+                    List<Map<String, Object>> prices = stockPricesFromLiveAssets(liveAssets);
 
                     // 最新一筆 history 套 per-market 基準日閘門覆蓋（僅「該市場今日」用 live，過去日期保留
                     // 凍結收盤），與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
@@ -137,26 +131,54 @@ public class DashboardBffController {
 
     /**
      * GET /api/bff/dashboard/realtime
-     * 2 分鐘輪詢用：直接從 business-services 讀 Redis live cache + market status。
-     * 不再從 BFF 觸發 refresh — price-service 自己 2 分鐘 cron 維護 Redis，盤中各市場開盤期間
-     * 自動寫入最新報價；BFF 只負責讀。
+     * 2 分鐘輪詢用：從 live-assets 投影持股報價 + market status；同一輪只讀一次行情資料。
+     * 不再從 BFF 觸發 refresh — producer 自己維護行情，BFF 只負責純讀投影。
      */
     @GetMapping("/realtime")
     public Mono<ResponseEntity<Map<String, Object>>> getRealtime() {
         return Mono.zip(
-                businessServicesClient.get().uri("/api/market-data/prices")
-                        .retrieve().bodyToMono(LIST_MAP).onErrorReturn(Collections.emptyList()),
                 businessServicesClient.get().uri("/api/market-data/market-status")
                         .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap()),
                 businessServicesClient.get().uri("/api/market-data/live-assets")
                         .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
         ).map(t -> {
             Map<String, Object> body = new HashMap<>();
-            body.put("stockPrices", t.getT1());
-            body.put("marketStatus", t.getT2());
-            body.put("liveAssets", t.getT3());
+            body.put("stockPrices", stockPricesFromLiveAssets(t.getT2()));
+            body.put("marketStatus", t.getT1());
+            body.put("liveAssets", t.getT2());
             return ResponseEntity.ok(body);
         });
+    }
+
+    /**
+     * 將同一輪 live-assets 持股報價投影回 dashboard 既有的 stockPrices 契約。
+     * 每筆 updatedAt 必須保留該筆 LivePrice 的時間，不能以 root 的最大時間覆蓋。
+     */
+    private static List<Map<String, Object>> stockPricesFromLiveAssets(Map<String, Object> liveAssets) {
+        if (liveAssets == null || !(liveAssets.get("stocks") instanceof List<?> stocks)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> prices = new ArrayList<>();
+        for (Object item : stocks) {
+            if (!(item instanceof Map<?, ?> stock)) continue;
+            Map<String, Object> projected = new LinkedHashMap<>();
+            projected.put("stockCode", stock.get("stockCode"));
+            projected.put("stockName", stock.get("stockName"));
+            projected.put("market", stock.get("market"));
+            projected.put("price", stock.get("currentPrice"));
+            projected.put("previousClose", stock.get("previousClose"));
+            projected.put("priceChange", stock.get("priceChange"));
+            projected.put("changePercent", stock.get("changePercent"));
+            projected.put("tradingDate", stock.get("tradingDate"));
+            projected.put("updatedAt", stock.get("updatedAt"));
+            projected.put("closed", stock.get("closed"));
+            projected.put("source", stock.get("source"));
+            projected.put("quoteStatus", stock.get("quoteStatus"));
+            prices.add(projected);
+        }
+        prices.sort(Comparator.comparing((Map<String, Object> row) -> String.valueOf(row.get("market")))
+                .thenComparing(row -> String.valueOf(row.get("stockCode"))));
+        return prices;
     }
 
     /**

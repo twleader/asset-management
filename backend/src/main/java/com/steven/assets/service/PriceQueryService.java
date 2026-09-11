@@ -29,7 +29,8 @@ import java.util.Set;
 /**
  * 即時行情唯讀查詢：
  * - live：先讀 Redis (`price:{market}:{code}`)，miss 則 fallback 至 stock_price_history 最近一筆
- * - 列舉：透過 `price:index:{market}` set 列出所有有 cache 的代號
+ * - 全域列舉：透過 `price:index:{market}` set 列出所有有 cache 的代號
+ * - 畫面持股列舉：只由呼叫端給定代號，絕不把全域 cache 聯集進來
  *
  * 寫入由 price-service 負責；business-services 不再直接抓外部 API。
  * 對外 endpoint /api/market-data/prices 等介面不變。
@@ -249,21 +250,15 @@ public class PriceQueryService {
         return all;
     }
 
-    /** 把呼叫端必要代號與 Redis index 聯集後逐檔套用顯示狀態閘門。 */
+    /**
+     * 只對呼叫端明確提供的必要代號逐檔套用顯示狀態閘門。
+     *
+     * <p>Dashboard 的持股視圖不能因為全域 Redis index 累積歷史代號而逐步放大；
+     * 全域列舉仍由 {@link #getAll()} 保留給真正需要它的既有呼叫端。</p>
+     */
     public List<LivePrice> getAllDisplayPrices(Set<PriceKey> required) {
         List<LivePrice> all = new ArrayList<>();
         Set<PriceKey> keys = new LinkedHashSet<>(required == null ? Set.of() : required);
-        for (String market : new String[]{"台股", "美股", "英股"}) {
-            String indexKey = "price:index:" + market;
-            try {
-                Set<String> codes = redis.opsForSet().members(indexKey);
-                if (codes != null) {
-                    for (String code : codes) keys.add(new PriceKey(code, market));
-                }
-            } catch (Exception e) {
-                log.warn("Redis index 讀取失敗 {}: {}", indexKey, e.getMessage());
-            }
-        }
         keys.stream()
                 .filter(key -> !("台股".equals(key.market()) && "0000".equals(key.stockCode())))
                 .forEach(key -> getDisplayPrice(key.stockCode(), key.market()).ifPresent(all::add));

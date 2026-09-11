@@ -13,10 +13,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PriceQueryServiceDisplayTest {
@@ -127,6 +130,21 @@ class PriceQueryServiceDisplayTest {
         assertThat(result.price()).isEqualByComparingTo("182.40");
         assertThat(result.tradingDate()).isEqualTo("2026-08-07");
         assertThat(result.quoteStatus()).isEqualTo("LIVE");
+    }
+
+    @Test
+    void suppliedDisplayKeysNeverReadOrUnionGlobalRedisIndexes() {
+        PriceQueryService service = serviceAt("2026-08-08T02:00:00Z");
+        when(values.get("price:美股:NVDA")).thenReturn("""
+                {"stockCode":"NVDA","market":"美股","price":182.40,
+                 "tradingDate":"2026-08-07","updatedAt":"2026-08-07T16:00:00",
+                 "closed":false,"source":"NASDAQ","quoteStatus":"LIVE"}
+                """);
+
+        var result = service.getAllDisplayPrices(Set.of(new PriceQueryService.PriceKey("NVDA", "美股")));
+
+        assertThat(result).singleElement().extracting(PriceQueryService.LivePrice::stockCode).isEqualTo("NVDA");
+        verify(redis, never()).opsForSet();
     }
 
     private PriceQueryService serviceAt(String instant) {
