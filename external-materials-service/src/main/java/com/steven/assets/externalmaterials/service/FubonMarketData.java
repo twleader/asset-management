@@ -138,6 +138,23 @@ public final class FubonMarketData {
                                       List<IntradayCandle> candles) {
         public IntradayCandlesRead { candles = List.copyOf(candles); }
     }
+    /** Task425 current-session price-volume snapshot; it is Redis-only and never a price authority. */
+    public record IntradayVolumeLevel(BigDecimal price, long volume, Long bidVolume, Long askVolume) {}
+    public record IntradayVolumesRead(String symbol, LocalDate sourceDate, Instant observedAt, String exchange,
+                                      String sourceMarket, String status, String reason,
+                                      List<IntradayVolumeLevel> levels) {
+        public IntradayVolumesRead { levels = List.copyOf(levels); }
+        public boolean usableSnapshot() { return "OK".equals(status) || "NO_DATA".equals(status); }
+    }
+    /** Task425 immutable completed daily source fact. */
+    public record HistoricalDailyCandle(LocalDate tradingDate, BigDecimal open, BigDecimal high, BigDecimal low,
+                                        BigDecimal close, long volume, BigDecimal turnover, BigDecimal priceChange) {}
+    public record HistoricalDailyCandlesRead(String symbol, LocalDate queryFrom, LocalDate queryTo, Instant observedAt,
+                                             String exchange, String sourceMarket, String status, String reason,
+                                             List<HistoricalDailyCandle> candles) {
+        public HistoricalDailyCandlesRead { candles = List.copyOf(candles); }
+        public boolean usableSnapshot() { return "OK".equals(status) || "NO_DATA".equals(status); }
+    }
     public record DividendRow(String symbol, String status, boolean usable, String reason,
                               List<DividendEvent> events) {
         public DividendRow { events = List.copyOf(events); }

@@ -51,6 +51,21 @@ class FubonScheduledMarketClientApiErrorLogTest {
         verifyNoInteractions(writer);
     }
 
+    @Test void task425OutboundFailuresUseTheTwoSeededImmutableErrorLogIdentities() {
+        MarketClock clock = mock(MarketClock.class);
+        when(clock.instant()).thenReturn(NOW);
+        ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+        FubonScheduledMarketClient client = client(clock, writer,
+                (uri, token, body, limit, timeout) -> new FubonScheduledMarketClient.RawResponse(503, "{}".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> client.intradayVolumes("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+        assertThatThrownBy(() -> client.historicalDailyCandles("2330", DAY.minusDays(365), DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+
+        verify(writer).record(eq("FUBON_INTRADAY_VOLUMES_READ"), eq("個股當日分價量查詢"), any(Throwable.class), eq(NOW));
+        verify(writer).record(eq("FUBON_HISTORICAL_DAILY_CANDLES_READ"), eq("個股歷史日K線查詢"), any(Throwable.class), eq(NOW));
+        verifyNoMoreInteractions(writer);
+    }
+
     private static FubonScheduledMarketClient client(MarketClock clock, ExternalApiErrorLogWriter writer,
                                                        FubonScheduledMarketClient.Transport transport) {
         return new FubonScheduledMarketClient(

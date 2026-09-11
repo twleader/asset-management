@@ -46,7 +46,7 @@
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
 -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-07
--- 產生當下表數：100 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：101 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -81,6 +81,19 @@ BEGIN
         RAISE EXCEPTION 'api_error_log is within retention window';
     END IF;
     RETURN OLD;
+END;
+$$;
+
+
+--
+-- Name: guard_fubon_historical_daily_candle_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_fubon_historical_daily_candle_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'fubon_historical_daily_candle is immutable';
 END;
 $$;
 
@@ -1164,6 +1177,44 @@ CREATE TABLE public.fubon_etf_holdings_snapshot (
     raw_response_json jsonb,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_fubon_etf_holdings_snapshot_market CHECK (((market)::text = '台股'::text))
+);
+
+
+--
+-- Name: fubon_historical_daily_candle; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_historical_daily_candle (
+    stock_code character varying(20) NOT NULL,
+    market character varying(20) NOT NULL,
+    provider character varying(32) NOT NULL,
+    trading_date date NOT NULL,
+    exchange character varying(10) NOT NULL,
+    source_market character varying(20),
+    open numeric(30,10) NOT NULL,
+    high numeric(30,10) NOT NULL,
+    low numeric(30,10) NOT NULL,
+    close numeric(30,10) NOT NULL,
+    volume bigint NOT NULL,
+    turnover numeric(30,10) NOT NULL,
+    price_change numeric(30,10),
+    observed_at timestamp with time zone NOT NULL,
+    schema_version integer NOT NULL,
+    canonical_payload jsonb NOT NULL,
+    payload_hash character(64) NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_fubon_historical_daily_candle_ohlc CHECK (((high >= open) AND (high >= close) AND (open >= low) AND (close >= low))),
+    CONSTRAINT fubon_historical_daily_candle_close_check CHECK ((close > (0)::numeric)),
+    CONSTRAINT fubon_historical_daily_candle_exchange_check CHECK (((exchange)::text = ANY ((ARRAY['TWSE'::character varying, 'TPEx'::character varying, 'ESB'::character varying])::text[]))),
+    CONSTRAINT fubon_historical_daily_candle_high_check CHECK ((high > (0)::numeric)),
+    CONSTRAINT fubon_historical_daily_candle_low_check CHECK ((low > (0)::numeric)),
+    CONSTRAINT fubon_historical_daily_candle_market_check CHECK (((market)::text = '台股'::text)),
+    CONSTRAINT fubon_historical_daily_candle_open_check CHECK ((open > (0)::numeric)),
+    CONSTRAINT fubon_historical_daily_candle_payload_hash_check CHECK ((payload_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT fubon_historical_daily_candle_provider_check CHECK (((provider)::text = 'FUBON_SDK'::text)),
+    CONSTRAINT fubon_historical_daily_candle_schema_version_check CHECK ((schema_version = 1)),
+    CONSTRAINT fubon_historical_daily_candle_turnover_check CHECK ((turnover >= (0)::numeric)),
+    CONSTRAINT fubon_historical_daily_candle_volume_check CHECK ((volume >= 0))
 );
 
 
@@ -3745,6 +3796,14 @@ ALTER TABLE ONLY public.foreign_stock_daily_history
 
 
 --
+-- Name: fubon_historical_daily_candle fubon_historical_daily_candle_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_daily_candle
+    ADD CONSTRAINT fubon_historical_daily_candle_pkey PRIMARY KEY (stock_code, market, trading_date);
+
+
+--
 -- Name: fubon_taiex_index_latest fubon_taiex_index_latest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5136,6 +5195,13 @@ CREATE TRIGGER api_error_log_operation_immutable BEFORE DELETE OR UPDATE ON publ
 --
 
 CREATE TRIGGER api_error_log_retention_guard BEFORE DELETE OR UPDATE ON public.api_error_log FOR EACH ROW EXECUTE FUNCTION public.guard_api_error_log_retention();
+
+
+--
+-- Name: fubon_historical_daily_candle trg_fubon_historical_daily_candle_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fubon_historical_daily_candle_immutable BEFORE DELETE OR UPDATE ON public.fubon_historical_daily_candle FOR EACH ROW EXECUTE FUNCTION public.guard_fubon_historical_daily_candle_immutable();
 
 
 --

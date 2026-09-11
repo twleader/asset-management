@@ -27,7 +27,7 @@ class ApiErrorLogServiceTest {
         verifyNoInteractions(repository);
     }
 
-    @Test void catalog_has_all_28_fixed_source_key_name_url_and_order_values() {
+    @Test void catalog_has_all_30_fixed_source_key_name_url_and_order_values() {
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).containsExactlyElementsOf(expectedCatalog());
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).allSatisfy(operation ->
                 assertThat(operation.apiUrl()).isNotBlank());
@@ -39,7 +39,7 @@ class ApiErrorLogServiceTest {
 
         assertThat(service.operations("ALL")).containsExactlyElementsOf(expected);
         assertThat(service.operations(ApiErrorLogOperationCatalog.OPEN_API)).containsExactlyElementsOf(expected.subList(0, 13));
-        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(13, 28));
+        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(13, 30));
     }
 
     @Test void operations_json_has_exactly_five_fields_and_list_detail_do_not_expose_api_url() throws Exception {
@@ -110,7 +110,9 @@ class ApiErrorLogServiceTest {
                 operation("FUBON_API", "FUBON_STOCK_BASIC_READ", "個股基本資料查詢", "POST /internal/market-data/stock-basic/read", 120),
                 operation("FUBON_API", "FUBON_INTRADAY_CANDLES_READ", "分鐘 K 線查詢", "POST /internal/market-data/intraday-candles/read", 130),
                 operation("FUBON_API", "FUBON_STOCK_PUSH_SUBSCRIPTIONS", "個股推播訂閱", "POST /internal/market-data/stock-push/subscriptions", 140),
-                operation("FUBON_API", "FUBON_STOCK_PUSH_STREAM", "個股推播串流", "GET /internal/market-data/stock-push/stream", 150));
+                operation("FUBON_API", "FUBON_STOCK_PUSH_STREAM", "個股推播串流", "GET /internal/market-data/stock-push/stream", 150),
+                operation("FUBON_API", "FUBON_INTRADAY_VOLUMES_READ", "個股當日分價量查詢", "POST /internal/market-data/intraday-volumes/read", 160),
+                operation("FUBON_API", "FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢", "POST /internal/market-data/historical-daily-candles/read", 170));
     }
 
     private static ApiErrorLogOperationCatalog.Operation operation(String source, String key, String name, String apiUrl, int order) {

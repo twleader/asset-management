@@ -300,12 +300,25 @@ class SdkGateway:
             "symbol": symbol, "timeframe": 1, "sort": "asc",
         }, deadline=deadline)
 
+    def read_intraday_volumes(self, symbol: str, *, deadline: float | None = None) -> object:
+        # Ordinary-lot accumulated price-volume only.  This is intentionally a
+        # narrow read adapter, never a generic method dispatcher.
+        return self._marketdata_read("intraday", "volumes", {"symbol": symbol}, deadline=deadline)
+
+    def read_historical_daily_candles(self, symbol: str, start_date: str, end_date: str,
+                                      *, deadline: float | None = None) -> object:
+        return self._marketdata_read("historical", "candles", {
+            "symbol": symbol, "from": start_date, "to": end_date, "timeframe": "D",
+            "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc",
+        }, deadline=deadline)
+
     def _marketdata_read(self, namespace: str, method_name: str, params: dict[str, object],
                          *, deadline: float | None = None) -> object:
         if (namespace, method_name) not in {
             ("corporate_actions", "dividends"), ("technical", "kdj"),
             ("technical", "macd"), ("technical", "bb"), ("technical", "sma"),
             ("technical", "rsi"), ("intraday", "ticker"), ("intraday", "candles"),
+            ("intraday", "volumes"), ("historical", "candles"),
         }:
             raise SdkCallError("MARKETDATA_METHOD_UNAVAILABLE", misconfigured=True)
         for attempt in range(2):
@@ -332,7 +345,7 @@ class SdkGateway:
                             raise SdkCallError("MARKETDATA_TIMEOUT")
                         if now < self._history_paused_until:
                             raise SdkCallError("RATE_LIMITED", retry_after_seconds=self._history_paused_until - now)
-                    if namespace in {"technical", "intraday"}:
+                    if namespace in {"technical", "intraday", "historical"}:
                         self._take_marketdata_start_permit(deadline=deadline)
                     return method(**params)
                 response = self._run_bounded(

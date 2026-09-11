@@ -17,5 +17,11 @@ public interface FubonMarketDataPort {
     default IntradayCandlesRead candles(String symbol, LocalDate queryDate) {
         throw new Unavailable("INTRADAY_CANDLES_UNAVAILABLE");
     }
+    default IntradayVolumesRead intradayVolumes(String symbol, LocalDate queryDate) {
+        throw new Unavailable("INTRADAY_VOLUMES_UNAVAILABLE");
+    }
+    default HistoricalDailyCandlesRead historicalDailyCandles(String symbol, LocalDate from, LocalDate to) {
+        throw new Unavailable("HISTORICAL_DAILY_CANDLES_UNAVAILABLE");
+    }
     SubscriptionAck subscriptions(List<String> symbols);
 }

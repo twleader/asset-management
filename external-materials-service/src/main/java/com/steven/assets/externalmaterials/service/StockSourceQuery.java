@@ -678,22 +678,32 @@ public class StockSourceQuery {
             log.warn("拒絕寫入缺少來源的驗證收盤：{} {} {}", market, stockCode, tradingDate);
             return false;
         }
-        Long existing = jdbc.query(
-                "SELECT id FROM stock_price_history WHERE stock_code=? AND market=? AND trading_date=?",
-                ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
-                rs -> rs.next() ? rs.getLong(1) : null);
-        if (existing != null) {
-            jdbc.update(
-                    "UPDATE stock_price_history SET open_price=?, high_price=?, low_price=?, close_price=?, volume=?, close_source=? WHERE id=?",
-                    open, high, low, close, volume == null ? 0L : volume, closeSource, existing);
-        } else {
-            jdbc.update(
-                    "INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume, close_source) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    stockCode, market, tradingDate,
-                    open, high, low, close, volume == null ? 0L : volume, closeSource);
-        }
+        // Official close writers are authority writers: no SELECT-then-write race can let an older Fubon projection win.
+        jdbc.update("""
+                INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume, close_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (stock_code, market, trading_date) DO UPDATE SET
+                  open_price=EXCLUDED.open_price, high_price=EXCLUDED.high_price, low_price=EXCLUDED.low_price,
+                  close_price=EXCLUDED.close_price, volume=EXCLUDED.volume, close_source=EXCLUDED.close_source
+                """, stockCode, market, tradingDate, open, high, low, close, volume == null ? 0L : volume, closeSource);
         return true;
+    }
+
+    /** Task425 guarded Fubon projection.  It cannot overwrite a trusted exchange/FinMind completed close. */
+    public boolean upsertFubonHistoricalDailyCandle(String stockCode, LocalDate tradingDate,
+                                                     BigDecimal open, BigDecimal high, BigDecimal low,
+                                                     BigDecimal close, Long volume) {
+        if (close == null || close.signum() <= 0) return false;
+        int changed = jdbc.update("""
+                INSERT INTO stock_price_history (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume, close_source)
+                VALUES (?, '台股', ?, ?, ?, ?, ?, ?, 'FUBON_SDK')
+                ON CONFLICT (stock_code, market, trading_date) DO UPDATE SET
+                  open_price=EXCLUDED.open_price, high_price=EXCLUDED.high_price, low_price=EXCLUDED.low_price,
+                  close_price=EXCLUDED.close_price, volume=EXCLUDED.volume, close_source='FUBON_SDK'
+                WHERE stock_price_history.close_source IS NULL OR stock_price_history.close_source NOT IN
+                  ('TWSE_MI_INDEX', 'TPEX_DAILY_CLOSE', 'FINMIND_TW_CLOSE')
+                """, stockCode, tradingDate, open, high, low, close, volume == null ? 0L : volume);
+        return changed == 1;
     }
 
     /** 台股指定日是否已有可信來源的完成收盤。 */

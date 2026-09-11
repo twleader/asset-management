@@ -23,7 +23,8 @@ public final class ApiErrorLogOperationCatalog {
             new Operation(FUBON_API,"FUBON_TAIEX_INDEX_STREAM","加權指數串流","GET /internal/market-data/taiex-index/stream",90), new Operation(FUBON_API,"FUBON_DIVIDENDS_READ","股利資料查詢","POST /internal/market-data/dividends/read",100),
             new Operation(FUBON_API,"FUBON_TECHNICAL_INDICATORS_READ","技術指標查詢","POST /internal/market-data/technical-indicators/read",110), new Operation(FUBON_API,"FUBON_STOCK_BASIC_READ","個股基本資料查詢","POST /internal/market-data/stock-basic/read",120),
             new Operation(FUBON_API,"FUBON_INTRADAY_CANDLES_READ","分鐘 K 線查詢","POST /internal/market-data/intraday-candles/read",130), new Operation(FUBON_API,"FUBON_STOCK_PUSH_SUBSCRIPTIONS","個股推播訂閱","POST /internal/market-data/stock-push/subscriptions",140),
-            new Operation(FUBON_API,"FUBON_STOCK_PUSH_STREAM","個股推播串流","GET /internal/market-data/stock-push/stream",150));
+            new Operation(FUBON_API,"FUBON_STOCK_PUSH_STREAM","個股推播串流","GET /internal/market-data/stock-push/stream",150), new Operation(FUBON_API,"FUBON_INTRADAY_VOLUMES_READ","個股當日分價量查詢","POST /internal/market-data/intraday-volumes/read",160),
+            new Operation(FUBON_API,"FUBON_HISTORICAL_DAILY_CANDLES_READ","個股歷史日K線查詢","POST /internal/market-data/historical-daily-candles/read",170));
     public static Operation require(String source, String key, String apiName) {
         return OPERATIONS.stream().filter(o -> o.source.equals(source) && o.operationKey.equals(key) && o.apiName.equals(apiName))
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown API error log operation"));

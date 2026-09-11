@@ -46,7 +46,7 @@ class FubonApiInfoBffControllerTest {
             "sdk.stock.trail_profit"
     );
 
-    /** 已串接 21 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
+    /** 已串接 23 筆的 (sdkReference, httpEndpoint) 組合，須與清單完全一致。 */
     private static final Set<String> CONNECTED_PAIRS = Set.of(
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/health",
             "（本服務自建 meta 端點，非 SDK 方法）|GET /internal/config",
@@ -59,6 +59,8 @@ class FubonApiInfoBffControllerTest {
             "marketdata.rest_client.stock.intraday.tickers|GET /internal/market-data/taiex-index/stream",
             "marketdata.rest_client.stock.intraday.ticker|POST /internal/market-data/stock-basic/read",
             "marketdata.rest_client.stock.intraday.candles|POST /internal/market-data/intraday-candles/read",
+            "marketdata.rest_client.stock.intraday.volumes|POST /internal/market-data/intraday-volumes/read",
+            "marketdata.rest_client.stock.historical.candles|POST /internal/market-data/historical-daily-candles/read",
             "marketdata.websocket_client.stock（channel=\"indices\"）|GET /internal/market-data/taiex-index/stream",
             "marketdata.rest_client.stock.ownership.etf_holdings|POST /internal/market-data/etf-holdings",
             "sdk.accounting.bank_remain|POST /internal/bank-balance/read",
@@ -83,10 +85,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=true 恰為 21 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
+    @DisplayName("connected=true 恰為 23 筆，且 (sdkReference, httpEndpoint) 組合與清單完全一致")
     void 已串接筆數與組合正確() {
         List<FubonApiInfoDto> connected = apis().stream().filter(FubonApiInfoDto::connected).toList();
-        assertThat(connected).hasSize(21);
+        assertThat(connected).hasSize(23);
 
         Set<String> actual = connected.stream()
                 .map(a -> a.sdkReference() + "|" + a.httpEndpoint())
@@ -95,10 +97,10 @@ class FubonApiInfoBffControllerTest {
     }
 
     @Test
-    @DisplayName("connected=false 恰為 31 筆，交割與已實現損益均為已串接的嚴格來源投影")
+    @DisplayName("connected=false 恰為 29 筆，交割與已實現損益均為已串接的嚴格來源投影")
     void 未串接筆數與已串接財務投影明確() {
         List<FubonApiInfoDto> notConnected = apis().stream().filter(a -> !a.connected()).toList();
-        assertThat(notConnected).hasSize(31);
+        assertThat(notConnected).hasSize(29);
         Map<String, String> connectedAccounting = Map.of(
                 "sdk.accounting.query_settlement", "POST /internal/settlement/read",
                 "sdk.accounting.realized_gains_and_loses", "POST /internal/realized-gains/read");
@@ -201,9 +203,9 @@ class FubonApiInfoBffControllerTest {
                 "missing-only", "failure retry", "交易雷達", "需另啟用設定");
         assertThat(etf.responseSummary()).contains("正規化 JSON", "sourceDate", "decimal 字串")
                 .doesNotContain("逐字保存", "尚未核實", "佔位");
-        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(11);
+        assertThat(apis().stream().filter(api -> "行情查詢".equals(api.category()) && api.connected()).count()).isEqualTo(13);
         assertThat(apis()).hasSize(52);
-        assertThat(apis().stream().filter(FubonApiInfoDto::connected)).hasSize(21);
+        assertThat(apis().stream().filter(FubonApiInfoDto::connected)).hasSize(23);
     }
 
     @Test
