@@ -1486,7 +1486,8 @@ function onRowExpand(row, expandedRows) {
 }
 
 async function loadStockDetail(row, key, generation) {
-  const state = detailStates[key] = { loading: true, loaded: false, error: '', generation }
+  detailStates[key] = { loading: true, loaded: false, error: '', generation }
+  const state = detailStates[key]
   try {
     const response = await bffApi.tradingRadar.stock(row.market, row.stockCode)
     const stillCurrent = !disposed && generation === listGeneration && expandedDetailKeys.has(key)

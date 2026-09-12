@@ -5226,7 +5226,7 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 - [ ] **Task 425：strict child JSON。** instrumentType 必為 JSON string EQUITY。levels 每項必且僅可為 price、volume、bidVolume、askVolume：price 是正 canonical decimal string；volume 是非負 signed-64 整數 string；bidVolume、askVolume 各為 null 或非負 signed-64 整數 string。candles 每項必且僅可為 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD string，OHLC 為正 canonical decimal string，volume 為非負 signed-64 整數 string，turnover 為非負 canonical decimal string，change 為 null 或 signed canonical decimal string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。root 與每個 child object 均拒絕 missing、unknown 或 duplicate field。
 
-### Requirement 148／Task 426：交易雷達 BFF 列表／明細分流與 API 錯誤去重安靜寫入
+### Requirement 148／Task 426、Task 427：交易雷達 BFF 列表／明細分流與 API 錯誤去重安靜寫入
 
 **User Story：**作為交易雷達使用者，我希望先快速看見足以比較全部標的的列表，只有展開某一檔時才載入其稽核明細；作為維運者，我也希望 Nginx 故障日誌的預期重掃仍只保存一筆，而不每 15 秒製造一次 duplicate-key 警告與額外失敗交易。
 
@@ -5234,6 +5234,7 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 #### Acceptance Criteria
 
+- [ ] **已成功的單檔明細回應必完成 reactive state transition。** `TradingRadarView.vue` 的每一個 detail request state 必以 `detailStates[key]` 內實際儲存的 reactive proxy 作為 identity guard 的唯一比較對象；不得把「指派給 reactive map 時的 raw object」保存在 local variable 後，再與由 map 讀出的 proxy 使用 `===` 比較。當 response 含有 `stock`，且 generation、exact `(market, stockCode)`、row 與 expanded state 仍有效時，前端必 merge 該一檔 detail、設 `loaded=true`，並在 `finally` 清除同一 state 的 `loading`。因此 HTTP 200 明細不得被錯當成 stale response 而永久停留在 loading；真正 stale response 仍不得覆寫新 list generation。回歸測試必以 Vue reactive state 證明 stored proxy identity 可通過 guard，並釘住成功 response 會離開 loading、渲染 detail。
 - [ ] **手動刷新同樣維持 list-only browser 契約。** 既有 `POST /api/bff/trading-radar/refresh` 可繼續執行已授權的行情回補，但不得再把 `TradingRadarDto.Response`／任何 `StockDecision` full tree 回傳或直接塞回頁面。它只回 `priceRefresh` outcome（或等價的不含雷達 detail envelope）；前端依該 outcome 顯示既有提示後，再以 list API 取得目前畫面。full response 只可留給既有匯出／snapshot 等非 browser-list consumer，並有 regression test 證明 manual refresh 的 network response／state 不含 detail tree。
 - [ ] **列表／明細組裝邊界可觀測且不可繞過。** list path 除不得呼叫 `get()`／`getCurrent()` 外，也不得呼叫現有 full-detail `buildStock()`、建立 `TradingRadarDto.StockDecision`、`RadarEvidence` 或任何 detail-only DTO 後再投影；必須以明確的 shared compact decision core 及分離 detail assembler 組裝。測試必須可觀測地證明 list 不進 full detail assembler，而 stock path 對已驗證的 single target 恰進一次。list 排序固定與既有 full response 相同：best score 由高到低、同分／null 時 stockCode 升冪。精簡 DTO 的表格欄位名稱固定包含 `priceUpdatedAt` 與 scalar `dailyCandleAsOfDate`；前端不得再依賴完整 `dailyCandle` object。
 - [ ] **detail 與 list replacement 的 generation 競態必丟棄舊回應。** 展開請求發出時要捕捉目前 list generation、exact pair 與展開狀態；只有 response 完成時 generation 仍相同、pair 仍相同且 row 仍展開，才可寫入快取或 render。手動 refresh 後的 list replacement 先完成、才抵達的舊 detail response必丟棄，不得覆蓋新 generation；SSE 本身不得建立新 generation。前端測試以 deferred detail promise 與先完成的 manual-refresh list replacement 重現此順序。
