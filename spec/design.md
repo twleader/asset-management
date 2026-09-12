@@ -12048,7 +12048,7 @@ Trading radar / business / BFF request read
 
 **Task 425 strict child JSON。** instrumentType 固定是 JSON string EQUITY。levels 每項的精確 key set 是 price、volume、bidVolume、askVolume：price 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，bidVolume 和 askVolume 各為 null 或非負 signed-64 integer JSON string。candles 每項的精確 key set 是 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD JSON string，OHLC 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，turnover 為非負 canonical decimal JSON string，change 為 null 或 signed canonical decimal JSON string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。每個 root 和 child object 均拒絕 missing、unknown、duplicate fields。
 
-## Requirement 148／Task 426：交易雷達 browser BFF 列表／明細分流與錯誤日誌 no-op dedupe
+## Requirement 148／Task 426、Task 427：交易雷達 browser BFF 列表／明細分流與錯誤日誌 no-op dedupe
 
 ### 路由與信任邊界
 
@@ -12083,6 +12083,14 @@ The list implementation may reuse pure input resolvers and rule engine component
 ### Vue state and lazy expansion
 
 Mounted load and an explicit manual refresh outcome call `bffApi.tradingRadar.list()`. A list replacement owns the current generation number and clears/invalidate its per-row detail cache. The expand handler loads `bffApi.tradingRadar.stock(market, stockCode)` only for the newly expanded row; loading, failure and no-detail states are explicit. A cached detail is usable only when its generation matches the current list. By contrast, a valid SSE `price-update` never calls list, stock or refresh: it patches only the matching row's payload-provided `price`, `changePercent`, `quoteStatus` and `priceUpdatedAt`. It never recomputes action/score/technical/fundamental/market fields, touches another row, replaces the root response, invalidates detail, or handles `0000` as a reason to reload. This eliminates full-page recomputation after every price event.
+
+#### Task 427：明細 reactive identity 與成功 completion
+
+`detailStates` 是 Vue `reactive({})` map。將 raw object 指派給它之後，從 map 讀回的是 Vue proxy；因此 `const state = detailStates[key] = { ... }` 後，`detailStates[key] === state` 必為 false。這會錯誤觸發 stale-response guard，讓 HTTP 200 的 `stock` 被捨棄，也讓 finally 無法把 map 中 state 的 `loading` 設回 false。
+
+dispatch 必分兩步進行：先把新 raw state 寫入 `detailStates[key]`，再以 `const state = detailStates[key]` 取得該 map 儲存的 reactive proxy。所有同一 request 的 identity checks 均與此 `state` 比較。response 到達時，只有 current generation、exact expanded pair、原 row 與此 stored state 都仍相同才可 `Object.assign(row, response.stock)` 並設 `state.loaded = true`；不符合時仍安靜丟棄。無論 success、error 或 stale return，只有 map 仍指向這一個 stored state 時才在 finally 設 `state.loading = false`。這個修正不改 BFF route、detail payload、SSE mapping、list generation 或任何 server-side read。
+
+前端回歸測試必同時釘住：(1) stored proxy 而非 raw assignment result 通過 identity guard；(2) current successful `stock` response 離開 loading 並標記 loaded；(3) generation replacement／不同 map state 仍不接受舊 response。
 
 #### SSE `price-update` patch mapping (authoritative)
 

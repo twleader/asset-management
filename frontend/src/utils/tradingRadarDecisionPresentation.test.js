@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { reactive } from 'vue'
 import {
   HOLDING_PERIOD_PROMPT,
   HOLDING_PERIOD_STATES,
@@ -149,4 +150,40 @@ test('Task426 首屏只讀 list，展開才讀單檔 detail，SSE 只按 mapping
   ]) {
     assert.equal(tradingRadarView.includes(forbidden), false, `Task426 SSE must not retain ${forbidden}`)
   }
+})
+
+test('Task427 reactive 明細 state 讀回 proxy，current success 可完成且 stale replacement 不被舊 state 寫入', () => {
+  const detailStates = reactive({})
+  const key = '台股\u00002330'
+  const row = { market: '台股', stockCode: '2330' }
+
+  const rawState = { loading: true, loaded: false, error: '', generation: 1 }
+  detailStates[key] = rawState
+  const state = detailStates[key]
+
+  assert.notEqual(state, rawState)
+  assert.equal(detailStates[key], state)
+  Object.assign(row, { price: 1000 })
+  state.loaded = true
+  if (detailStates[key] === state) state.loading = false
+  assert.deepEqual(row, { market: '台股', stockCode: '2330', price: 1000 })
+  assert.deepEqual(detailStates[key], { loading: false, loaded: true, error: '', generation: 1 })
+
+  detailStates[key] = { loading: true, loaded: false, error: '', generation: 2 }
+  const replacement = detailStates[key]
+  if (detailStates[key] === state) {
+    Object.assign(row, { price: 1100 })
+    state.loaded = true
+    state.loading = false
+  }
+  assert.equal(row.price, 1000)
+  assert.deepEqual(replacement, { loading: true, loaded: false, error: '', generation: 2 })
+})
+
+test('Task427 明細 request state 必從 reactive map 寫回後讀取，禁止 raw assignment-expression identity', () => {
+  assert.match(
+    tradingRadarView,
+    /detailStates\[key\] = \{ loading: true, loaded: false, error: '', generation \}\s+const state = detailStates\[key\]/
+  )
+  assert.doesNotMatch(tradingRadarView, /const state = detailStates\[key\] =/)
 })
