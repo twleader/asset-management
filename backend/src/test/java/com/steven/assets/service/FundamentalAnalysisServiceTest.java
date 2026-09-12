@@ -1,15 +1,15 @@
 package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.repository.FundamentalAnalysisBatchRepository;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,10 +17,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /** Task 292 基本面公式守門：這些錯誤都會靜默產生「很合理」的假分數。Task 293 新增美股市場閘門守門。 */
@@ -391,9 +391,8 @@ class FundamentalAnalysisServiceTest {
      * 不得為了湊滿 coverage=4 虛構假的營收因子。
      */
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
     void usMarketCoverageCapsAtThreeAndNeverFabricatesRevenueOrIndustry() {
-        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
         // 14:00Z is after the US market-local date has advanced to 2026-08-08;
         // a 02:00Z decision is still 2026-08-07 in New York and must not see the
         // 2026-08-08 valuation row.
@@ -402,14 +401,8 @@ class FundamentalAnalysisServiceTest {
         List<FundamentalAnalysisService.FinancialRow> financials = financialRows("SEC_EDGAR", 2026, 2);
         List<FundamentalAnalysisService.ValuationRow> valuations = valuationRows("YAHOO", LocalDate.of(2026, 8, 8));
 
-        when(jdbc.query(argThat((String sql) -> sql != null && sql.contains("stock_financial_quarter")),
-                any(RowMapper.class), any(Object[].class))).thenReturn(financials);
-        when(jdbc.query(argThat((String sql) -> sql != null && sql.contains("stock_valuation_daily")),
-                any(RowMapper.class), any(Object[].class))).thenReturn(valuations);
-        // 月營收／產業彙總刻意不 stub：Mockito 對 List 回傳型別的預設值即為空 list，
-        // 藉此同時斷言「美股輪次未曾產生任何營收列」不需要額外程式碼特例。
-
-        var service = new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+        when(repository.findSnapshot(any(), eq(decisionInstant))).thenReturn(snapshot(financials, valuations));
+        var service = new FundamentalAnalysisService(repository, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
 
         var resolved = service.resolve("AAPL", "Apple", "美股", decisionInstant);
 
@@ -422,12 +415,32 @@ class FundamentalAnalysisServiceTest {
         assertEquals("SEC_EDGAR", resolved.snapshot().epsProvider());
     }
 
+    @Test
+    void listBatchReadsFourObservationFamiliesOnceForAllExactPairs() {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        Instant decision = Instant.parse("2026-09-12T06:00:00Z");
+        when(publicInfo.loadForEarliestDecision(decision)).thenReturn(List.of());
+        when(repository.findSnapshots(any(), eq(decision))).thenReturn(Map.of());
+        FundamentalAnalysisService service = new FundamentalAnalysisService(repository, new ObjectMapper(), publicInfo);
+        TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
+                null, "2330", "台股", "台積電", null, AssetClassifier.defaultDividendThreshold());
+
+        var results = service.resolveBatch(List.of(
+                new FundamentalAnalysisService.BatchQuery("2330", "台積電", "台股", profile),
+                new FundamentalAnalysisService.BatchQuery("2330", "同碼美股", "美股", profile)), decision);
+
+        assertEquals(2, results.size());
+        verify(publicInfo, times(1)).loadForEarliestDecision(decision);
+        verify(repository, times(1)).findSnapshots(any(), eq(decision));
+    }
+
     /** 測試 (k)：resolveInputsForBacktest() 對 market="美股" 也能組出非 unavailable 的結果（不再卡在獨立閘門）。 */
     @Test
     void resolveInputsForBacktestAllowsUsMarketThroughIndependentGate() {
-        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
         FundamentalAnalysisService service =
-                new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+                new FundamentalAnalysisService(repository, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
         Instant decision = Instant.parse("2026-08-08T02:00:00Z");
 
         var result = service.resolveInputsForBacktest("AAPL", "美股", List.of(decision));
@@ -441,12 +454,11 @@ class FundamentalAnalysisServiceTest {
      * 沒有連帶丟掉 {@code stockCode != null} 與 {@code !isEtf(...)} 兩個既有子句。
      */
     @Test
-    @SuppressWarnings({"unchecked", "rawtypes"})
     void resolveInputsForBacktestKeepsNullCodeAndEtfGuardsForBothMarkets() {
-        JdbcTemplate jdbc = mock(JdbcTemplate.class);
-        when(jdbc.queryForObject(anyString(), eq(Boolean.class), any(Object[].class))).thenReturn(true);
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        when(repository.hasEtfNav("VOO", "美股")).thenReturn(true);
         FundamentalAnalysisService service =
-                new FundamentalAnalysisService(jdbc, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
+                new FundamentalAnalysisService(repository, new ObjectMapper(), mock(PublicInfoEvidenceResolver.class));
         Instant decision = Instant.parse("2026-08-08T02:00:00Z");
 
         // "0050" 靠既有 00 開頭字首捷徑直接判定為 ETF，不必依賴上面的 DB stub。
@@ -490,6 +502,20 @@ class FundamentalAnalysisServiceTest {
             List<String> urls,
             Instant availableAt,
             Instant observedAt) implements FundamentalAnalysisService.SourcedRow {}
+
+    private static FundamentalAnalysisBatchRepository.Snapshot snapshot(
+            List<FundamentalAnalysisService.FinancialRow> financials,
+            List<FundamentalAnalysisService.ValuationRow> valuations) {
+        return new FundamentalAnalysisBatchRepository.Snapshot(
+                financials.stream().map(row -> new FundamentalAnalysisBatchRepository.FinancialObservation(
+                        row.year(), row.quarter(), row.eps(), row.income(), row.equity(), row.provider(), "[]",
+                        row.availableAt(), row.observedAt())).toList(),
+                List.of(),
+                valuations.stream().map(row -> new FundamentalAnalysisBatchRepository.ValuationObservation(
+                        row.date(), row.pe(), row.pb(), row.dividendYieldPct(), row.loss(), row.provider(), "[]",
+                        row.availableAt(), row.observedAt())).toList(),
+                List.of());
+    }
 
     private static List<FundamentalAnalysisService.FinancialRow> financialRows(
             String provider, int latestYear, int latestQuarter) {

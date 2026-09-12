@@ -35,6 +35,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -150,6 +152,20 @@ class TradingRadarMarketFreshnessTest {
                 "台股", Instant.parse("2026-08-09T06:00:00Z"));
 
         assertTrue(sessions.isEmpty());
+    }
+
+    @Test
+    void listFutureSessionsUsesOnlyCachedCalendarAndNeverCallsLegacyTaiwanCalendar() {
+        when(marketDataService.futureTradingSessionsCachedOnly(anyString(), any(LocalDate.class), anyInt(), anyInt()))
+                .thenReturn(Optional.empty());
+
+        List<LocalDate> sessions = newService().futureSessionsCachedOnly(
+                "台股", Instant.parse("2026-08-09T06:00:00Z"));
+
+        assertTrue(sessions.isEmpty());
+        verify(marketDataService).futureTradingSessionsCachedOnly("台股", LocalDate.of(2026, 8, 9), 20, 90);
+        verify(marketDataService, never()).isTwTradingDayKnown(any(LocalDate.class));
+        verify(marketDataService, never()).isTradingDay("台股", LocalDate.of(2026, 8, 10));
     }
 
     @Test

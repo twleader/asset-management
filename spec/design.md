@@ -12048,7 +12048,7 @@ Trading radar / business / BFF request read
 
 **Task 425 strict child JSON。** instrumentType 固定是 JSON string EQUITY。levels 每項的精確 key set 是 price、volume、bidVolume、askVolume：price 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，bidVolume 和 askVolume 各為 null 或非負 signed-64 integer JSON string。candles 每項的精確 key set 是 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD JSON string，OHLC 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，turnover 為非負 canonical decimal JSON string，change 為 null 或 signed canonical decimal JSON string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。每個 root 和 child object 均拒絕 missing、unknown、duplicate fields。
 
-## Requirement 148／Task 426、Task 427：交易雷達 browser BFF 列表／明細分流與錯誤日誌 no-op dedupe
+## Requirement 148／Task 426、Task 427、Task 428：交易雷達 browser BFF 列表／明細分流、首頁批次決策與錯誤日誌 no-op dedupe
 
 ### 路由與信任邊界
 
@@ -12079,6 +12079,34 @@ external system only: :9090 /api/public/trading-radar/today|stock
 List DTOs are not aliases of the public 9090 DTOs. They contain only the version/instant, market summaries/public information required by the existing tab/cards, plus first-screen stock scalars: identity/name/market/held state, three action-label-score tuples, timing/counter-trend, table fundamental summary, price/change/quality timestamp, ETF premium, MA, daily KD, weekly KD, daily-candle date and existing visible flags. `reasons`, `risks`, full fundamental/evidence/factor objects, detail observations and all expand-panel collections are excluded structurally, not merely left empty.
 
 The list implementation may reuse pure input resolvers and rule engine components, but must not invoke `get()` or `getCurrent()` then map its full result. At a common owner and decision instant, every visible decision/table value remains semantically identical to the full response. Neither new path saves a snapshot, refreshes cached data or performs Fubon/broker/external I/O; all quote/technical/fundamental reads stay on their established DB/Redis read boundary.
+
+### Task 428：request-scoped list-input batch 與純逐列 evaluator
+
+Task 426 的 DTO 分流只縮小了 HTTP body；若 `getList()` 仍在 `targets.stream()` 內呼叫舊的完整 core，則每一列仍會各自讀主檔、500 筆價格、Redis quote/NAV、股利證據、基本面公開資訊／四張 observation 表、ETF premium history、market feature 與 rate context。這是 N 檔串行 I/O，不是可接受的 compact decision core，也正是首頁比單檔展開慢的根因。
+
+`getList()` 因此先建立一個僅存活於本次 request 的 immutable `ListDecisionInputs`（名稱可不同，但責任與邊界固定），再開始逐列評估：
+
+```
+eligible owner targets
+  └─ one ListDecisionInputs preload
+       ├─ exact-pair stock/profile map
+       ├─ one bounded price-history batch (≤500 rows per exact pair)
+       ├─ one Redis MGET for quotes + one Redis MGET for ETF NAVs
+       ├─ dividend-evidence + adjustment-event batches; one future-session calendar per market
+       ├─ one public-info read + four fundamental observation batches
+       ├─ read-only Taiwan/US technical fact/cache snapshots
+       └─ market/currency/typed-instrument shared evidence maps
+  └─ per-target list evaluator (map lookup + pure assembler/rules/gate only)
+  └─ ListStock projection and existing deterministic sort
+```
+
+The preloader may use dedicated repository/adapter batch methods, but all SQL is read-only and parameterized. Per-target methods receive typed exact pairs and return a map keyed by that pair; shared methods use their complete natural key (`market`, `currency`, or a typed rate/bond query carrying every input dimension). No batch key may be a naked code, and no method constructs an `IN` predicate from concatenated user input or performs vendor I/O. The price batch preserves the prior newest-first order and 500-row cap **per pair**. A Redis miss preserves the same history fallback/unavailable result as the single-reader path; an absent NAV remains absent. A fundamental batch loads public-info rows once at the request's decision instant, loads each of financial-quarter, monthly-revenue, valuation-daily and industry-monthly observations in bounded batch reads, groups them by exact pair, and calls the existing pure as-of factor resolver for each target. Dividend evidence and the separate price-series adjustment events are both batch inputs; each market's future-session calendar is resolved once before that work and calendar unknown remains fail-closed without a request-time calendar fetch. A rate/bond-beta batch must collapse its underlying price, dividend, FX and Treasury history reads across all requested instruments; the existing adapter implementation that loops per instrument is not sufficient.
+
+After this point the list loop is an I/O-free evaluator: it may call `RadarInputAssembler`, a **preloaded read-only** technical overlay, `TradingRadarRuleEngine`, `TradingRadarEvidenceConfidenceResolver`, `TradingRadarEvidenceGate` and DTO projection, but may not call a repository, `StringRedisTemplate`, `PriceQueryService` single-reader, fundamental single resolver, dividend/adjustment single resolver, market-feature resolver, rate resolver or the existing `RadarTechnicalResolver.resolve(...)`. The latter can read and write Redis on a cache miss and its existing preload covers only Taiwan, so it is not a list-evaluator primitive. The list technical overlay consumes the context's Taiwan and US facts/cache snapshots and has zero cache write behavior. Shared market, currency and instrument evidence is looked up from the context. Context entries have explicit unavailable values; no failed target may borrow another target's data, trigger a refresh/external call, manufacture zero, or prevent other rows from being returned.
+
+The list context is not a response cache: it is neither persisted nor reused across requests, does not write a radar snapshot, and cannot make a later SSE value appear to be a recalculated decision. The existing full response and single-stock detail retain their own established assembly paths and response contracts. This task changes no browser/BFF/public route, no 9090 contract, no SSE mapping and no detail payload.
+
+Tests expose the boundary with fakes/spies at the input ports: a multi-target list request observes one public-info batch, one future-session resolution per market and the expected bounded batch calls; once evaluation begins it observes zero per-target repository/Redis/fundamental/dividend/adjustment/technical-cache/rate calls and zero technical cache writes. Tests prove no `(code, market)` mismatch and that natural-keyed shared values do not leak between markets, currencies or typed rate queries. A frozen same-instant fixture compares every `ListStock` scalar, failure projection and sort order against the legacy/full decision projection. The runtime benchmark remains the authenticated BFF protocol: 38 warm valid targets, seven serial calls with the first discarded, all six list TTFBs at most 800ms, body below 70 KiB, and full median at least twice list median. Public 9090 timing is diagnostic only and cannot satisfy this acceptance.
 
 ### Vue state and lazy expansion
 

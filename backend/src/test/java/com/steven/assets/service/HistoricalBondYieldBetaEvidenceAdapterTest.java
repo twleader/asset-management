@@ -1,10 +1,9 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TreasuryYieldDto;
+import com.steven.assets.model.StockDividendHistory;
 import com.steven.assets.model.StockPriceHistory;
-import com.steven.assets.repository.ExchangeRateHistoryRepository;
-import com.steven.assets.repository.StockDividendHistoryRepository;
-import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.TradingRadarListBatchRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,6 +16,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,6 +24,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -36,10 +37,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
     private static final Instant DECISION = LocalDate.of(2026, 1, 12)
             .atTime(20, 0).atZone(ZoneId.of("America/New_York")).toInstant();
 
-    @Mock private StockPriceHistoryRepository priceRepository;
-    @Mock private StockDividendHistoryRepository dividendRepository;
-    @Mock private ExchangeRateHistoryRepository exchangeRateRepository;
-    @Mock private TreasuryYieldBatchRepository treasuryRepository;
+    @Mock private TradingRadarListBatchRepository batchRepository;
     @Mock private MarketDataService marketDataService;
 
     private HistoricalBondYieldBetaEvidenceAdapter adapter;
@@ -47,9 +45,10 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
     @BeforeEach
     void setUp() {
         adapter = new HistoricalBondYieldBetaEvidenceAdapter(
-                priceRepository, dividendRepository, exchangeRateRepository,
-                new DistributionAdjustedPriceService(), treasuryRepository, marketDataService);
-        when(dividendRepository.findAdjustmentEvents(any(), any(), any(), any()))
+                batchRepository, new DistributionAdjustedPriceService(), marketDataService);
+        org.mockito.Mockito.lenient().when(batchRepository.findAdjustmentEvents(any(), any()))
+                .thenAnswer(invocation -> emptyEvents(invocation.getArgument(0)));
+        org.mockito.Mockito.lenient().when(batchRepository.findExchangeRatesByCurrency(any()))
                 .thenReturn(List.of());
         org.mockito.Mockito.lenient().when(marketDataService.isUsTradingDay(any()))
                 .thenReturn(true);
@@ -58,9 +57,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
     @Test
     void actualAdjustedPriceAndAppendOnlyTreasurySeriesProduceAvailablePerInstrumentBeta() {
         Fixture fixture = fixture(true);
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(fixture.prices());
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(fixture.curves());
+        stubHistory(fixture.prices(), fixture.curves());
         BondYieldBetaResolver.Query query = query();
 
         BondYieldBetaResolver.Result result = adapter.resolve(query);
@@ -79,9 +76,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
     @Test
     void legacyRowsWithoutCloseSourceUseExplicitUnknownProvenanceAndRemainAsOfSafe() {
         Fixture fixture = fixture(false);
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(fixture.prices());
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(fixture.curves());
+        stubHistory(fixture.prices(), fixture.curves());
 
         BondYieldBetaResolver.Result result = adapter.resolve(query());
 
@@ -97,9 +92,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         StockPriceHistory previous = fixture.prices().getFirst();
         List<StockPriceHistory> mixed = new ArrayList<>(fixture.prices());
         mixed.set(0, price(previous.getTradingDate(), previous.getClosePrice(), null));
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(mixed);
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(fixture.curves());
+        stubHistory(mixed, fixture.curves());
 
         List<BondYieldBetaResolver.Sample> samples = adapter.load(query());
 
@@ -117,9 +110,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         List<StockPriceHistory> untrusted = fixture.prices().stream()
                 .map(row -> price(row.getTradingDate(), row.getClosePrice(), "MANUAL_GUESS"))
                 .toList();
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(untrusted);
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(fixture.curves());
+        stubHistory(untrusted, fixture.curves());
 
         BondYieldBetaResolver.Result result = adapter.resolve(query());
 
@@ -134,9 +125,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         List<TreasuryYieldDto.StoredBatch> withGap = new ArrayList<>(fixture.curves());
         LocalDate missingDate = FIRST.plusDays(5);
         withGap.removeIf(batch -> missingDate.equals(batch.curveDate()));
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(fixture.prices());
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(withGap);
+        stubHistory(fixture.prices(), withGap);
 
         List<BondYieldBetaResolver.Sample> samples = adapter.load(query());
 
@@ -157,10 +146,8 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
                     && date.getDayOfWeek() != java.time.DayOfWeek.SATURDAY
                     && date.getDayOfWeek() != java.time.DayOfWeek.SUNDAY;
         });
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(List.of(price(tuesday, new BigDecimal("100"), true),
-                        price(wednesday, new BigDecimal("99.8"), true)));
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(List.of(
+        stubHistory(List.of(price(tuesday, new BigDecimal("100"), true),
+                price(wednesday, new BigDecimal("99.8"), true)), List.of(
                 curve(1, friday, new BigDecimal("4.00")),
                 curve(2, tuesday, new BigDecimal("4.10"))));
 
@@ -186,10 +173,8 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         Map<String, BigDecimal> future = Map.of(
                 "M3", new BigDecimal("3.50"), "Y5", new BigDecimal("9.00"),
                 "Y10", new BigDecimal("5.50"), "Y30", new BigDecimal("6.50"));
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(List.of(price(currentDate, new BigDecimal("100"), true),
-                        price(currentDate.plusDays(1), new BigDecimal("99.8"), true)));
-        when(treasuryRepository.findCompleteSeriesThrough(DECISION)).thenReturn(List.of(
+        stubHistory(List.of(price(currentDate, new BigDecimal("100"), true),
+                price(currentDate.plusDays(1), new BigDecimal("99.8"), true)), List.of(
                 curve(1, previousDate, previous, DECISION.minusSeconds(120)),
                 curve(2, currentDate, current, DECISION.minusSeconds(60)),
                 curve(3, currentDate.plusDays(1), future, DECISION.plusSeconds(1))));
@@ -214,10 +199,7 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
     @Test
     void resolveBatchLoadsEachHistoricalSourceOnceForSharedCodeAndMarket() {
         Fixture fixture = fixture(true);
-        when(priceRepository.findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET))
-                .thenReturn(fixture.prices());
-        when(treasuryRepository.findCompleteSeriesThrough(any()))
-                .thenReturn(fixture.curves());
+        stubHistory(fixture.prices(), fixture.curves());
         BondYieldBetaResolver.Query first = query();
         BondYieldBetaResolver.Query second = new BondYieldBetaResolver.Query(
                 CODE, MARKET, "Y30", DECISION.minusSeconds(3600),
@@ -226,17 +208,49 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         var results = adapter.resolveBatch(List.of(first, second));
 
         assertThat(results).containsKeys(first, second);
-        verify(priceRepository, times(1))
-                .findAllByStockCodeAndMarketOrderByTradingDateAsc(CODE, MARKET);
-        verify(dividendRepository, times(1)).findAdjustmentEvents(
-                any(), any(), any(), any());
-        verify(treasuryRepository, times(1)).findCompleteSeriesThrough(any());
+        verify(batchRepository, times(1)).findAllPrices(any());
+        verify(batchRepository, times(1)).findAdjustmentEvents(any(), any());
+        verify(batchRepository, times(1)).findCompleteTreasurySeriesThrough(any());
+    }
+
+    @Test
+    void requestBatchRepositoryProvidesOneExactPairHistoryWithoutScalarFallback() {
+        Fixture fixture = fixture(true);
+        TradingRadarListBatchRepository.Key key = new TradingRadarListBatchRepository.Key(CODE, MARKET);
+        when(batchRepository.findAllPrices(any())).thenReturn(Map.of(key, fixture.prices()));
+        when(batchRepository.findAdjustmentEvents(any(), any())).thenReturn(Map.of(key, List.of()));
+        when(batchRepository.findCompleteTreasurySeriesThrough(any())).thenReturn(fixture.curves());
+
+        var result = adapter.resolveBatch(List.of(query()));
+
+        assertThat(result.get(query()).status()).isEqualTo(BondYieldBetaResolver.Status.AVAILABLE);
+        verify(batchRepository).findAllPrices(any());
+        verify(batchRepository).findAdjustmentEvents(any(), any());
     }
 
     private static BondYieldBetaResolver.Query query() {
         return new BondYieldBetaResolver.Query(
                 CODE, MARKET, "Y30", DECISION, BondYieldBetaResolver.FxControl.NONE,
                 1, 3, 3, 3);
+    }
+
+    private void stubHistory(
+            List<StockPriceHistory> prices, List<TreasuryYieldDto.StoredBatch> curves) {
+        when(batchRepository.findAllPrices(any())).thenAnswer(invocation -> {
+            Collection<TradingRadarListBatchRepository.Key> keys = invocation.getArgument(0);
+            Map<TradingRadarListBatchRepository.Key, List<StockPriceHistory>> out = new LinkedHashMap<>();
+            keys.forEach(key -> out.put(key, List.copyOf(prices)));
+            return Map.copyOf(out);
+        });
+        when(batchRepository.findCompleteTreasurySeriesThrough(any())).thenReturn(curves);
+    }
+
+    private static Map<TradingRadarListBatchRepository.Key, List<StockDividendHistory>> emptyEvents(
+            Collection<TradingRadarListBatchRepository.Key> keys) {
+        if (keys == null) return Map.of();
+        Map<TradingRadarListBatchRepository.Key, List<StockDividendHistory>> out = new LinkedHashMap<>();
+        keys.forEach(key -> out.put(key, List.of()));
+        return Map.copyOf(out);
     }
 
     private static Fixture fixture(boolean withPriceProvider) {

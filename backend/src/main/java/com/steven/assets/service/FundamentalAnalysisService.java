@@ -4,23 +4,22 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.News;
+import com.steven.assets.repository.FundamentalAnalysisBatchRepository;
 import com.steven.assets.util.MarketZones;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -57,7 +56,7 @@ public class FundamentalAnalysisService {
     private static final List<String> PROVIDERS =
             List.of("EXCHANGE", "SEC_EDGAR", "YAHOO", "WANTGOO", "FINMIND", DERIVED_PROVIDER);
 
-    private final JdbcTemplate jdbc;
+    private final FundamentalAnalysisBatchRepository fundamentalBatchRepository;
     private final ObjectMapper mapper;
     private final PublicInfoEvidenceResolver publicInfo;
 
@@ -92,6 +91,15 @@ public class FundamentalAnalysisService {
             return new Resolved(input, snapshot);
         }
     }
+
+    /** Exact natural-key request for the Radar list's one immutable fundamental snapshot. */
+    public record BatchQuery(
+            String stockCode,
+            String stockName,
+            String market,
+            TradingRadarAssetProfileResolver.AssetProfile profile) {}
+
+    private record BatchKey(String stockCode, String market) {}
 
     public Resolved resolve(String stockCode, String stockName, String market, Instant decisionInstant) {
         TradingRadarAssetProfileResolver.AssetProfile strictProfile =
@@ -141,6 +149,59 @@ public class FundamentalAnalysisService {
             log.warn("基本面 as-of 解析失敗（{}）：{}", stockCode, e.getMessage());
             return Resolved.unavailable(true, initialEvidence);
         }
+    }
+
+    /**
+     * List-path batch entry.  Public information is loaded once and each result is keyed by the
+     * full (code, market) pair; callers must never key this map by code alone.
+     */
+    public Map<BatchQuery, Resolved> resolveBatch(List<BatchQuery> rawQueries, Instant decisionInstant) {
+        if (rawQueries == null || rawQueries.isEmpty() || decisionInstant == null) return Map.of();
+        Map<BatchKey, BatchQuery> canonical = new LinkedHashMap<>();
+        rawQueries.stream().filter(Objects::nonNull)
+                .filter(query -> query.stockCode() != null && query.market() != null)
+                .sorted(Comparator.comparing(BatchQuery::market).thenComparing(BatchQuery::stockCode))
+                .forEach(query -> canonical.putIfAbsent(new BatchKey(query.stockCode(), query.market()), query));
+        List<BatchQuery> queries = List.copyOf(canonical.values());
+        if (queries.isEmpty()) return Map.of();
+        List<News> evidenceRows;
+        try {
+            evidenceRows = publicInfo.loadForEarliestDecision(decisionInstant);
+        } catch (Exception unavailable) {
+            log.warn("public_info 清單批次讀取失敗：{}", unavailable.getMessage());
+            evidenceRows = List.of();
+        }
+        Map<BatchKey, PreparedData> preparedByKey;
+        try {
+            preparedByKey = loadPreparedDataBatch(canonical.keySet(), decisionInstant);
+        } catch (Exception unavailable) {
+            log.warn("基本面清單批次 observation 讀取失敗：{}", unavailable.getMessage());
+            preparedByKey = Map.of();
+        }
+        Map<BatchQuery, Resolved> out = new LinkedHashMap<>();
+        for (BatchQuery query : queries) {
+            TradingRadarAssetProfileResolver.AssetProfile profile = query.profile();
+            boolean applicable = profile != null && profile.equity()
+                    && profile.instrumentKind() == TradingRadarAssetProfileResolver.InstrumentKind.STOCK;
+            if (!applicable) {
+                out.put(query, Resolved.unavailable(false));
+                continue;
+            }
+            try {
+                PreparedData prepared = preparedByKey.getOrDefault(
+                        new BatchKey(query.stockCode(), query.market()), PreparedData.EMPTY);
+                out.put(query, resolvePrepared(query.stockCode(), query.stockName(), query.market(), decisionInstant,
+                        prepared, evidenceRows, MarketZones.resolve(query.market())));
+            } catch (Exception unavailable) {
+                PublicInfoEvidenceResolver.Evidence evidence = PublicInfoEvidenceResolver.Evidence.EMPTY;
+                try {
+                    evidence = publicInfo.resolveFromRows(query.stockCode(), query.stockName(), null,
+                            query.market(), decisionInstant, evidenceRows);
+                } catch (RuntimeException ignored) { }
+                out.put(query, Resolved.unavailable(true, evidence));
+            }
+        }
+        return Map.copyOf(out);
     }
 
     /**
@@ -295,56 +356,55 @@ public class FundamentalAnalysisService {
     private boolean isEtf(String stockCode, String market) {
         if (stockCode.startsWith("00")) return true;
         try {
-            Boolean exists = jdbc.queryForObject(
-                    "SELECT EXISTS(SELECT 1 FROM etf_nav_history WHERE stock_code=? AND market=?)",
-                    Boolean.class, stockCode, market);
-            return Boolean.TRUE.equals(exists);
+            return fundamentalBatchRepository != null
+                    && fundamentalBatchRepository.hasEtfNav(stockCode, market);
         } catch (Exception e) {
             return false;
         }
     }
 
     private PreparedData loadPreparedData(String code, String market, Instant latestInstant) {
-        List<FinancialRow> financials = jdbc.query("""
-                SELECT fiscal_year, fiscal_quarter, eps, net_income_parent, equity_parent,
-                       provider, source_urls::text, source_available_at, observed_at
-                FROM stock_financial_quarter
-                WHERE stock_code=? AND market=?
-                  AND source_available_at<=? AND observed_at<=?
-                """, (rs, ignored) -> financialRow(rs), code, market,
-                timestamp(latestInstant), timestamp(latestInstant));
-        List<RevenueRow> revenues = jdbc.query("""
-                SELECT revenue_year, revenue_month, industry_name, revenue_yoy_pct,
-                       provider, source_urls::text, source_available_at, observed_at
-                FROM stock_monthly_revenue
-                WHERE stock_code=? AND market=?
-                  AND source_available_at<=? AND observed_at<=?
-                """, (rs, ignored) -> revenueRow(rs), code, market,
-                timestamp(latestInstant), timestamp(latestInstant));
-        List<ValuationRow> valuations = jdbc.query("""
-                SELECT trading_date, pe_ratio, pb_ratio, dividend_yield_pct, pe_loss_flag, provider,
-                       source_urls::text, source_available_at, observed_at
-                FROM stock_valuation_daily
-                WHERE stock_code=? AND market=?
-                  AND source_available_at<=? AND observed_at<=?
-                """, (rs, ignored) -> valuationRow(rs), code, market,
-                timestamp(latestInstant), timestamp(latestInstant));
-        List<IndustryRow> industries = jdbc.query("""
-                SELECT i.industry_name, i.revenue_year, i.revenue_month, i.revenue_yoy_pct,
-                       i.company_count, i.provider, i.source_urls::text,
-                       i.source_available_at, i.observed_at
-                FROM industry_monthly_revenue i
-                WHERE i.source_available_at<=? AND i.observed_at<=?
-                  AND EXISTS (
-                      SELECT 1 FROM stock_monthly_revenue s
-                      WHERE s.stock_code=? AND s.market=?
-                        AND s.industry_name=i.industry_name
-                        AND s.source_available_at<=? AND s.observed_at<=?
-                  )
-                """, (rs, ignored) -> industryRow(rs),
-                timestamp(latestInstant), timestamp(latestInstant), code, market,
-                timestamp(latestInstant), timestamp(latestInstant));
-        return new PreparedData(financials, revenues, valuations, industries);
+        if (fundamentalBatchRepository == null) return PreparedData.EMPTY;
+        return toPreparedData(fundamentalBatchRepository.findSnapshot(
+                new FundamentalAnalysisBatchRepository.Key(code, market), latestInstant));
+    }
+
+    /**
+     * One immutable exact-pair snapshot for the list path.  The four source tables are still
+     * intentionally separate evidence families, but each family is read once for every requested
+     * natural key rather than once per row.  All as-of/revision/provider choices remain in
+     * {@link #resolvePrepared}; this method only transports rows.
+     */
+    private Map<BatchKey, PreparedData> loadPreparedDataBatch(
+            Collection<BatchKey> rawKeys, Instant latestInstant) {
+        if (rawKeys == null || rawKeys.isEmpty() || latestInstant == null
+                || fundamentalBatchRepository == null) return Map.of();
+        List<FundamentalAnalysisBatchRepository.Key> keys = rawKeys.stream().filter(Objects::nonNull)
+                .filter(key -> key.stockCode() != null && key.market() != null)
+                .map(key -> new FundamentalAnalysisBatchRepository.Key(key.stockCode(), key.market()))
+                .distinct().sorted(Comparator.comparing(FundamentalAnalysisBatchRepository.Key::market)
+                        .thenComparing(FundamentalAnalysisBatchRepository.Key::stockCode)).toList();
+        Map<BatchKey, PreparedData> out = new LinkedHashMap<>();
+        fundamentalBatchRepository.findSnapshots(keys, latestInstant).forEach((key, snapshot) ->
+                out.put(new BatchKey(key.stockCode(), key.market()), toPreparedData(snapshot)));
+        return Map.copyOf(out);
+    }
+
+    private PreparedData toPreparedData(FundamentalAnalysisBatchRepository.Snapshot snapshot) {
+        if (snapshot == null) return PreparedData.EMPTY;
+        return new PreparedData(
+                snapshot.financials().stream().map(row -> new FinancialRow(
+                        row.year(), row.quarter(), row.eps(), row.income(), row.equity(), row.provider(),
+                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                snapshot.revenues().stream().map(row -> new RevenueRow(
+                        row.year(), row.month(), row.industryName(), row.yoy(), row.provider(),
+                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                snapshot.valuations().stream().map(row -> new ValuationRow(
+                        row.date(), row.pe(), row.pb(), normalizeDividendYieldPct(row.dividendYieldPct(), false),
+                        row.loss(), row.provider(), urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                snapshot.industries().stream().map(row -> new IndustryRow(
+                        row.industryName(), row.year(), row.month(), row.yoy(), row.companyCount(), row.provider(),
+                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList());
     }
 
     static <T extends SourcedRow> List<T> latestAsOf(
@@ -382,7 +442,9 @@ public class FundamentalAnalysisService {
             List<FinancialRow> financials,
             List<RevenueRow> revenues,
             List<ValuationRow> valuations,
-            List<IndustryRow> industries) {}
+            List<IndustryRow> industries) {
+        private static final PreparedData EMPTY = new PreparedData(List.of(), List.of(), List.of(), List.of());
+    }
 
     /*
      * 下面的 factor 計算只接收已依決策日 collapse 過的 observation；不得在此再查 DB，
@@ -723,42 +785,6 @@ public class FundamentalAnalysisService {
         return Math.max(-1.0, Math.min(1.0, value));
     }
 
-    private static Timestamp timestamp(Instant instant) {
-        return Timestamp.from(instant);
-    }
-
-    private FinancialRow financialRow(ResultSet rs) throws SQLException {
-        return new FinancialRow(rs.getInt("fiscal_year"), rs.getInt("fiscal_quarter"),
-                rs.getBigDecimal("eps"), rs.getBigDecimal("net_income_parent"),
-                rs.getBigDecimal("equity_parent"), rs.getString("provider"),
-                urls(rs.getString("source_urls")), instant(rs, "source_available_at"),
-                instant(rs, "observed_at"));
-    }
-
-    private RevenueRow revenueRow(ResultSet rs) throws SQLException {
-        return new RevenueRow(rs.getInt("revenue_year"), rs.getInt("revenue_month"),
-                rs.getString("industry_name"), rs.getBigDecimal("revenue_yoy_pct"),
-                rs.getString("provider"), urls(rs.getString("source_urls")),
-                instant(rs, "source_available_at"), instant(rs, "observed_at"));
-    }
-
-    private ValuationRow valuationRow(ResultSet rs) throws SQLException {
-        return new ValuationRow(rs.getDate("trading_date").toLocalDate(), rs.getBigDecimal("pe_ratio"),
-                rs.getBigDecimal("pb_ratio"),
-                normalizeDividendYieldPct(rs.getBigDecimal("dividend_yield_pct"), false),
-                (Boolean) rs.getObject("pe_loss_flag"), rs.getString("provider"),
-                urls(rs.getString("source_urls")), instant(rs, "source_available_at"),
-                instant(rs, "observed_at"));
-    }
-
-    private IndustryRow industryRow(ResultSet rs) throws SQLException {
-        return new IndustryRow(rs.getString("industry_name"), rs.getInt("revenue_year"),
-                rs.getInt("revenue_month"), rs.getBigDecimal("revenue_yoy_pct"),
-                rs.getInt("company_count"), rs.getString("provider"),
-                urls(rs.getString("source_urls")), instant(rs, "source_available_at"),
-                instant(rs, "observed_at"));
-    }
-
     private List<String> urls(String json) {
         if (json == null || json.isBlank()) return List.of();
         try {
@@ -767,11 +793,6 @@ public class FundamentalAnalysisService {
             log.warn("基本面 source_urls 解析失敗：{}", e.getMessage());
             return List.of();
         }
-    }
-
-    private static Instant instant(ResultSet rs, String column) throws SQLException {
-        Timestamp value = rs.getTimestamp(column);
-        return value == null ? null : value.toInstant();
     }
 
     private static int count(Factor... factors) {

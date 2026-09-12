@@ -163,6 +163,14 @@ public class TradingRadarMarketContextService {
                 market, decisionInstant, date -> marketDataService.isTradingDayKnown(market, date)));
     }
 
+    /** Strict list-request decision clock backed only by local/cached calendar evidence. */
+    public Optional<RadarObservationResolver.DecisionSessions> resolveDecisionSessionsCachedOnly(
+            String market, Instant decisionInstant) {
+        if (market == null || decisionInstant == null || marketDataService == null) return Optional.empty();
+        return Optional.ofNullable(RadarObservationResolver.decisionSessionsStrict(
+                market, decisionInstant, date -> marketDataService.isTradingDayCachedOnly(market, date)));
+    }
+
     public record Resolved(
             MarketContext market,
             List<TradingRadarDto.PublicInformationItem> publicInformation
@@ -337,6 +345,78 @@ public class TradingRadarMarketContextService {
     }
 
     /**
+     * Resolves all foreign-currency contexts from one exact currency-set read.  The projection
+     * remains the same pure {@link #resolveFxFromRows} used by the single-instrument path, so
+     * duplicate stock codes in different markets cannot alter the FX result.
+     */
+    public Map<String, FxContext> resolveFxBatch(Set<String> rawCurrencies, Instant decisionInstant) {
+        if (rawCurrencies == null || rawCurrencies.isEmpty() || decisionInstant == null) return Map.of();
+        Set<String> currencies = rawCurrencies.stream().filter(java.util.Objects::nonNull)
+                .map(value -> value.trim().toUpperCase()).filter(value -> !value.isBlank())
+                .filter(value -> !"TWD".equals(value)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (currencies.isEmpty()) return Map.of();
+        LocalDate target = fxTargetDate(decisionInstant);
+        if (target == null) return currencies.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                value -> value, ignored -> FxContext.EMPTY));
+        try {
+            List<ExchangeRateHistory> rows = exchangeRateRepo
+                    .findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(
+                            currencies, target.minusYears(FX_LOOKBACK_YEARS), target);
+            Map<String, List<ExchangeRateHistory>> byCurrency = new HashMap<>();
+            if (rows != null) for (ExchangeRateHistory row : rows) {
+                if (row == null || row.getCurrency() == null) continue;
+                byCurrency.computeIfAbsent(row.getCurrency().trim().toUpperCase(), ignored -> new ArrayList<>())
+                        .add(row);
+            }
+            Map<String, FxContext> out = new HashMap<>();
+            for (String currency : currencies) {
+                out.put(currency, resolveFxFromRows(currency, decisionInstant,
+                        byCurrency.getOrDefault(currency, List.of())));
+            }
+            return Map.copyOf(out);
+        } catch (Exception e) {
+            log.warn("交易雷達匯率批次脈絡讀取失敗：{}", e.toString());
+            return currencies.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                    value -> value, ignored -> FxContext.EMPTY));
+        }
+    }
+
+    /**
+     * List-only FX batch: the target completed Taiwan session is derived from
+     * an existing local calendar snapshot.  Cache miss is evidence-unavailable,
+     * never authorization to fetch the proxy during a browser request.
+     */
+    public Map<String, FxContext> resolveFxBatchCachedOnly(Set<String> rawCurrencies, Instant decisionInstant) {
+        if (rawCurrencies == null || rawCurrencies.isEmpty() || decisionInstant == null) return Map.of();
+        Set<String> currencies = rawCurrencies.stream().filter(java.util.Objects::nonNull)
+                .map(value -> value.trim().toUpperCase()).filter(value -> !value.isBlank())
+                .filter(value -> !"TWD".equals(value)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (currencies.isEmpty()) return Map.of();
+        LocalDate target = fxTargetDateCachedOnly(decisionInstant);
+        if (target == null) return unavailableFxContexts(currencies);
+        try {
+            List<ExchangeRateHistory> rows = exchangeRateRepo
+                    .findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(
+                            currencies, target.minusYears(FX_LOOKBACK_YEARS), target);
+            Map<String, List<ExchangeRateHistory>> byCurrency = new HashMap<>();
+            if (rows != null) for (ExchangeRateHistory row : rows) {
+                if (row == null || row.getCurrency() == null) continue;
+                byCurrency.computeIfAbsent(row.getCurrency().trim().toUpperCase(), ignored -> new ArrayList<>())
+                        .add(row);
+            }
+            Map<String, FxContext> out = new HashMap<>();
+            for (String currency : currencies) {
+                out.put(currency, resolveFxFromRowsAtTarget(currency, target,
+                        byCurrency.getOrDefault(currency, List.of())));
+            }
+            return Map.copyOf(out);
+        } catch (Exception e) {
+            log.warn("交易雷達唯讀匯率批次脈絡讀取失敗：{}", e.toString());
+            return unavailableFxContexts(currencies);
+        }
+    }
+
+    /**
      * 匯率純計算入口。只接受 target date 精確列，且排除缺值、非正與 buy=sell 的 fallback 中間價。
      */
     public FxContext resolveFxFromRows(
@@ -344,6 +424,12 @@ public class TradingRadarMarketContextService {
         if (currency == null || currency.isBlank() || decisionInstant == null) return FxContext.EMPTY;
         LocalDate target = fxTargetDate(decisionInstant);
         if (target == null) return FxContext.EMPTY;
+        return resolveFxFromRowsAtTarget(currency, target, suppliedRows);
+    }
+
+    private FxContext resolveFxFromRowsAtTarget(
+            String currency, LocalDate target, List<ExchangeRateHistory> suppliedRows) {
+        if (currency == null || currency.isBlank() || target == null) return FxContext.EMPTY;
         LocalDate lower = target.minusYears(FX_LOOKBACK_YEARS);
         String normalizedCurrency = currency.trim().toUpperCase();
         List<ExchangeRateHistory> valid = suppliedRows == null ? List.of() : suppliedRows.stream()
@@ -384,6 +470,25 @@ public class TradingRadarMarketContextService {
             candidate = candidate.minusDays(1);
         }
         return null;
+    }
+
+    private LocalDate fxTargetDateCachedOnly(Instant decisionInstant) {
+        if (decisionInstant == null || marketDataService == null) return null;
+        ZonedDateTime local = decisionInstant.atZone(TAIPEI);
+        LocalDate candidate = local.toLocalTime().isBefore(FX_COMPLETE)
+                ? local.toLocalDate().minusDays(1) : local.toLocalDate();
+        for (int i = 0; i < MAX_CALENDAR_LOOKBACK; i++) {
+            Optional<Boolean> tradingDay = marketDataService.isTwTradingDayCachedOnly(candidate);
+            if (tradingDay == null || tradingDay.isEmpty()) return null;
+            if (tradingDay.get()) return candidate;
+            candidate = candidate.minusDays(1);
+        }
+        return null;
+    }
+
+    private static Map<String, FxContext> unavailableFxContexts(Set<String> currencies) {
+        return currencies.stream().collect(java.util.stream.Collectors.toUnmodifiableMap(
+                value -> value, ignored -> FxContext.EMPTY));
     }
 
     private List<TradingRadarDto.PublicInformationItem> publicInformation(Instant decisionInstant) {

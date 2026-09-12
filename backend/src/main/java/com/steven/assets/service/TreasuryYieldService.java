@@ -10,7 +10,9 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Business-side Treasury proxy、atomic upsert orchestration 與 decision query。 */
 @Service
@@ -100,9 +102,27 @@ public class TreasuryYieldService {
             throw new IllegalArgumentException("Treasury tenor 必須是 M3/Y5/Y10/Y30：" + tenor);
         }
         Instant at = decisionInstant == null ? clock.instant() : decisionInstant;
+        return selectedRateBatch(at).map(selected -> rateContext(selected, tenor));
+    }
+
+    /** One selected complete curve and one calendar check for every requested tenor in a list. */
+    public Map<String, TreasuryYieldDto.RateContext> resolveRateContexts(
+            Instant decisionInstant, Set<String> rawTenors) {
+        if (rawTenors == null || rawTenors.isEmpty()) return Map.of();
+        List<String> tenors = rawTenors.stream().filter(TreasuryYieldBatchRepository.TENOR_ORDER::contains)
+                .sorted().toList();
+        if (tenors.isEmpty()) return Map.of();
+        Instant at = decisionInstant == null ? clock.instant() : decisionInstant;
+        Optional<SelectedRateBatch> selected = selectedRateBatch(at);
+        if (selected.isEmpty()) return Map.of();
+        Map<String, TreasuryYieldDto.RateContext> out = new java.util.LinkedHashMap<>();
+        for (String tenor : tenors) out.put(tenor, rateContext(selected.get(), tenor));
+        return Map.copyOf(out);
+    }
+
+    private Optional<SelectedRateBatch> selectedRateBatch(Instant at) {
         return repository.findSelected(at).map(batch -> {
-            if (!batch.complete() || batch.values().size() != 4 || !batch.values().containsKey(tenor)) {
-                // Store resolver 已防禦；這裡保留第二層，禁止 incomplete header 靜默進規則。
+            if (!batch.complete() || batch.values().size() != 4) {
                 throw new IllegalStateException("Treasury selected batch 不完整：" + batch.batchId());
             }
             LocalDate decisionDateEt = at.atZone(NEW_YORK).toLocalDate();
@@ -117,18 +137,29 @@ public class TreasuryYieldService {
                         + batch.curveDate() + " 晚於 decision-time expected completed US session " + expected;
             } else {
                 SessionLagResolution lag = sessionLag(batch.curveDate(), expected);
-                staleReason = lag.unknown() != null
-                        ? unknownCalendarReason(lag.unknown())
+                staleReason = lag.unknown() != null ? unknownCalendarReason(lag.unknown())
                         : lag.sessions() > MAX_CURVE_LAG_SESSIONS
                         ? "Treasury curve 落後要求 completed US session " + lag.sessions()
                         + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
             }
             long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
-            return new TreasuryYieldDto.RateContext(batch.batchId(), true, tenor,
-                    batch.values().get(tenor), batch.curveDate(), batch.provider(), batch.sourceManifest(),
-                    batch.availableAt(), batch.availabilityBasis(), batch.fetchedAt(), lagDays, staleReason);
+            return new SelectedRateBatch(batch, lagDays, staleReason);
         });
     }
+
+    private TreasuryYieldDto.RateContext rateContext(SelectedRateBatch selected, String tenor) {
+        TreasuryYieldDto.StoredBatch batch = selected.batch();
+        if (!batch.values().containsKey(tenor)) {
+            throw new IllegalStateException("Treasury selected batch tenor 缺漏：" + tenor);
+        }
+        return new TreasuryYieldDto.RateContext(batch.batchId(), true, tenor,
+                batch.values().get(tenor), batch.curveDate(), batch.provider(), batch.sourceManifest(),
+                batch.availableAt(), batch.availabilityBasis(), batch.fetchedAt(), selected.lagDays(),
+                selected.staleReason());
+    }
+
+    private record SelectedRateBatch(
+            TreasuryYieldDto.StoredBatch batch, long lagDays, String staleReason) {}
 
     private record CompletedSessionResolution(
             LocalDate date, TradingRadarSessionCalendarPort.DayResolution unknown) {}

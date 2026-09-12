@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -12,6 +13,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -82,6 +85,38 @@ class RadarTechnicalResolverNonTwLocalTest {
         assertThat(recomputed.resolution().freshUntil()).isEqualTo(NOW.plusSeconds(100).toString());
         assertThat(replacement.expectedDocument()).isEqualTo(stale);
         assertThat(replacement.freshUntil()).isEqualTo(NOW.plusSeconds(100));
+        verify(cache, never()).readPairs(any());
+        verifyNoInteractions(facts);
+    }
+
+    @Test
+    void listReadOnlyUsesOneMarketSafeMgetAndNeverFallsBackToIndividualGetOrWrite() {
+        RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
+        RadarTechnicalCachePort cache = mock(RadarTechnicalCachePort.class);
+        when(cache.writeMarketLocal(any())).thenReturn("WRITTEN");
+        RadarTechnicalResolver resolver = new RadarTechnicalResolver(facts, cache, new ObjectMapper());
+
+        // Build the same valid document that the full path stores, then make
+        // it available only through the request-bounded batch read.
+        resolver.resolve(CODE, MARKET, indicators("5"), null, indicators("5"), false, false, false,
+                LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 28), FINGERPRINT, NOW);
+        ArgumentCaptor<RadarTechnicalCachePort.MarketLocalWrite> writes =
+                ArgumentCaptor.forClass(RadarTechnicalCachePort.MarketLocalWrite.class);
+        verify(cache).writeMarketLocal(writes.capture());
+        RadarTechnicalCachePort.MarketLocalKey key = new RadarTechnicalCachePort.MarketLocalKey(MARKET, CODE);
+        clearInvocations(cache, facts);
+        when(cache.readMarketLocals(List.of(key))).thenReturn(Map.of(key, writes.getValue().document()));
+
+        RadarTechnicalResolver.Batch batch = resolver.preload(java.util.Set.of(), List.of(key), NOW.plusSeconds(20));
+        ResolvedTechnicalInputs resolved = resolver.resolveReadOnly(
+                CODE, MARKET, indicators("9"), null, indicators("9"), false, false, false,
+                LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 28), FINGERPRINT, NOW.plusSeconds(20), batch);
+
+        assertThat(resolved.indicators().monthlyMa()).isEqualByComparingTo("5");
+        assertThat(resolved.resolution().source()).isEqualTo("LOCAL_CALCULATED");
+        verify(cache).readMarketLocals(List.of(key));
+        verify(cache, never()).readMarketLocal(any(), any());
+        verify(cache, never()).writeMarketLocal(any());
         verify(cache, never()).readPairs(any());
         verifyNoInteractions(facts);
     }

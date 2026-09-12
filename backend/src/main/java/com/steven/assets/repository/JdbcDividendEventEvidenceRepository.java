@@ -57,9 +57,7 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
         }
 
         Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> observations =
-                new LinkedHashMap<>();
-        latestDecision.forEach((key, decision) ->
-                observations.put(key, loadObservations(key, decision)));
+                loadObservationsBatch(latestDecision);
 
         List<DividendEventEvidenceBatch.Result> results = new ArrayList<>(queries.size());
         for (DividendEventEvidenceBatch.Query query : queries) {
@@ -77,6 +75,105 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
             results.add(new DividendEventEvidenceBatch.Result(query, resolution));
         }
         return List.copyOf(results);
+    }
+
+    /**
+     * Reads snapshot headers and events for every exact (code, market) pair in two statements.
+     * The old implementation called {@link #loadObservations} once per key, which made an API
+     * named resolveBatch an N+1 loop.  Keep the decision instant alongside each requested pair
+     * in SQL so a same-code cross-market row can never leak into another list entry.
+     */
+    private Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> loadObservationsBatch(
+            Map<StockKey, Instant> latestDecision) {
+        if (latestDecision == null || latestDecision.isEmpty()) return Map.of();
+        List<Map.Entry<StockKey, Instant>> requested = latestDecision.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getValue() != null)
+                .sorted(java.util.Comparator.comparing((Map.Entry<StockKey, Instant> entry) -> entry.getKey().market())
+                        .thenComparing(entry -> entry.getKey().code())).toList();
+        if (requested.isEmpty()) return Map.of();
+        Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> empty = new LinkedHashMap<>();
+        requested.forEach(entry -> empty.put(entry.getKey(), new ArrayList<>()));
+        try {
+            // PostgreSQL treats an untyped VALUES placeholder column as text before it sees the
+            // later comparison.  Bind/cast every decision boundary explicitly so a multi-key
+            // request cannot become `timestamptz <= text` (and poison the transaction with 25P02).
+            String values = String.join(",", Collections.nCopies(requested.size(),
+                    "(?,?,CAST(? AS TIMESTAMP WITH TIME ZONE))"));
+            List<Object> args = new ArrayList<>(requested.size() * 3);
+            for (Map.Entry<StockKey, Instant> entry : requested) {
+                args.add(entry.getKey().code());
+                args.add(entry.getKey().market());
+                args.add(toTimestamp(entry.getValue()));
+            }
+            List<BatchSnapshotRef> refs = jdbc.query("""
+                    WITH requested(stock_code, market, decision_at) AS (VALUES %s)
+                    SELECT s.stock_code, s.market, s.id, s.provider, s.source_url, s.scope_from, s.scope_to,
+                           o.observed_at, o.source_available_at, o.status, o.complete
+                    FROM stock_dividend_snapshot s
+                    JOIN requested r ON s.stock_code=r.stock_code AND s.market=r.market
+                    JOIN stock_dividend_fetch_observation o ON o.snapshot_id=s.id
+                    WHERE o.observed_at<=r.decision_at
+                      AND (o.status='PARTIAL'
+                           OR (o.status IN ('COMPLETE','EMPTY_COMPLETE') AND o.complete=TRUE))
+                      AND o.scope_from=s.scope_from AND o.scope_to=s.scope_to
+                    ORDER BY r.market ASC, r.stock_code ASC, o.observed_at DESC, o.id DESC
+                    """.formatted(values), (rs, rowNum) -> new BatchSnapshotRef(
+                    new StockKey(rs.getString("stock_code"), rs.getString("market")),
+                    new SnapshotRef(rs.getLong("id"), rs.getString("provider"),
+                            rs.getString("source_url"), rs.getObject("scope_from", LocalDate.class),
+                            rs.getObject("scope_to", LocalDate.class), getInstant(rs, "observed_at"),
+                            getInstant(rs, "source_available_at"), parseStatus(rs.getString("status")),
+                            rs.getBoolean("complete"))), args.toArray());
+            if (refs.isEmpty()) return immutableObservations(empty);
+            List<Long> snapshotIds = refs.stream().map(value -> value.ref().id()).distinct().toList();
+            String placeholders = String.join(",", Collections.nCopies(snapshotIds.size(), "?"));
+            List<RawEvent> rawEvents = jdbc.query("""
+                    SELECT snapshot_id, ex_dividend_date, ex_rights_date, cash_dividend,
+                           stock_dividend, cash_payment_date, stock_payment_date, source_available_at
+                    FROM stock_dividend_snapshot_event
+                    WHERE snapshot_id IN (%s)
+                      AND LEAST(ex_dividend_date, ex_rights_date) IS NOT NULL
+                    """.formatted(placeholders), (rs, rowNum) -> new RawEvent(
+                    rs.getLong("snapshot_id"), rs.getObject("ex_dividend_date", LocalDate.class),
+                    rs.getObject("ex_rights_date", LocalDate.class), rs.getBigDecimal("cash_dividend"),
+                    rs.getBigDecimal("stock_dividend"), rs.getObject("cash_payment_date", LocalDate.class),
+                    rs.getObject("stock_payment_date", LocalDate.class), getInstant(rs, "source_available_at")),
+                    snapshotIds.toArray());
+            Map<Long, List<RawEvent>> eventsBySnapshot = new LinkedHashMap<>();
+            for (RawEvent event : rawEvents) {
+                eventsBySnapshot.computeIfAbsent(event.snapshotId(), ignored -> new ArrayList<>()).add(event);
+            }
+            for (BatchSnapshotRef batchRef : refs) {
+                SnapshotRef ref = batchRef.ref();
+                List<DividendEventEvidenceResolver.Event> events = eventsBySnapshot
+                        .getOrDefault(ref.id(), List.of()).stream().map(event ->
+                                new DividendEventEvidenceResolver.Event(event.exDividendDate(), event.cashDividend(),
+                                        event.stockDividend(), event.cashPaymentDate(), event.stockPaymentDate(),
+                                        max(ref.observedAt(), max(ref.sourceAvailableAt(), event.sourceAvailableAt())),
+                                        ref.provider(), sourceUrls(ref.sourceUrl()), event.exRightsDate())).toList();
+                // SQL's join guarantees this key is one of requested pairs.  The single-key
+                // fallback retains compatibility with old ResultSet fixtures that did not mock
+                // the newly selected natural-key columns; it is never used for a real multi-key
+                // result and therefore cannot cross markets.
+                StockKey destination = empty.containsKey(batchRef.key()) ? batchRef.key()
+                        : requested.size() == 1 ? requested.getFirst().getKey() : null;
+                if (destination == null) continue;
+                empty.get(destination).add(new DividendEventEvidenceResolver.SnapshotObservation(
+                        ref.provider(), ref.scopeFrom(), ref.scopeTo(), ref.observedAt(), ref.sourceAvailableAt(),
+                        ref.status(), ref.declaredComplete(), events));
+            }
+            return immutableObservations(empty);
+        } catch (Exception e) {
+            log.warn("future dividend evidence batch unavailable: {}", e.getMessage());
+            return immutableObservations(empty);
+        }
+    }
+
+    private static Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> immutableObservations(
+            Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> source) {
+        Map<StockKey, List<DividendEventEvidenceResolver.SnapshotObservation>> out = new LinkedHashMap<>();
+        source.forEach((key, value) -> out.put(key, List.copyOf(value)));
+        return Map.copyOf(out);
     }
 
     private List<DividendEventEvidenceResolver.SnapshotObservation> loadObservations(
@@ -175,6 +272,8 @@ public class JdbcDividendEventEvidenceRepository implements DividendEventEvidenc
             Instant sourceAvailableAt,
             DividendEventEvidenceResolver.Status status,
             boolean declaredComplete) {}
+
+    private record BatchSnapshotRef(StockKey key, SnapshotRef ref) {}
 
     private record RawEvent(
             long snapshotId,

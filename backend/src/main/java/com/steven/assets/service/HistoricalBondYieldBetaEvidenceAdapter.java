@@ -4,9 +4,7 @@ import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockDividendHistory;
 import com.steven.assets.model.StockPriceHistory;
-import com.steven.assets.repository.ExchangeRateHistoryRepository;
-import com.steven.assets.repository.StockDividendHistoryRepository;
-import com.steven.assets.repository.StockPriceHistoryRepository;
+import com.steven.assets.repository.TradingRadarListBatchRepository;
 import com.steven.assets.util.MarketZones;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -71,25 +69,16 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
         }
     }
 
-    private final StockPriceHistoryRepository priceRepository;
-    private final StockDividendHistoryRepository dividendRepository;
-    private final ExchangeRateHistoryRepository exchangeRateRepository;
+    private final TradingRadarListBatchRepository batchRepository;
     private final DistributionAdjustedPriceService adjustedPriceService;
-    private final TreasuryYieldBatchRepository treasuryRepository;
     private final MarketDataService marketDataService;
 
     public HistoricalBondYieldBetaEvidenceAdapter(
-            StockPriceHistoryRepository priceRepository,
-            StockDividendHistoryRepository dividendRepository,
-            ExchangeRateHistoryRepository exchangeRateRepository,
+            TradingRadarListBatchRepository batchRepository,
             DistributionAdjustedPriceService adjustedPriceService,
-            TreasuryYieldBatchRepository treasuryRepository,
             MarketDataService marketDataService) {
-        this.priceRepository = priceRepository;
-        this.dividendRepository = dividendRepository;
-        this.exchangeRateRepository = exchangeRateRepository;
+        this.batchRepository = batchRepository;
         this.adjustedPriceService = adjustedPriceService;
-        this.treasuryRepository = treasuryRepository;
         this.marketDataService = marketDataService;
     }
 
@@ -115,21 +104,59 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
             grouped.computeIfAbsent(new BatchKey(query.code(), query.market()), ignored -> new ArrayList<>())
                     .add(query);
         }
-        Map<BatchKey, BatchHistory> histories = new LinkedHashMap<>();
+        Map<BatchKey, BatchHistory> histories = loadBatchHistories(grouped);
         Map<BondYieldBetaResolver.Query, BondYieldBetaResolver.Result> out = new LinkedHashMap<>();
         for (Map.Entry<BatchKey, List<BondYieldBetaResolver.Query>> entry : grouped.entrySet()) {
             BatchKey key = entry.getKey();
             List<BondYieldBetaResolver.Query> group = entry.getValue();
-            Instant latestDecision = group.stream().map(BondYieldBetaResolver.Query::decisionInstant)
-                    .filter(java.util.Objects::nonNull).max(Instant::compareTo).orElse(null);
-            boolean fxRequired = group.stream()
-                    .anyMatch(query -> query.fxControl() == BondYieldBetaResolver.FxControl.REQUIRED);
-            BatchHistory history = histories.computeIfAbsent(key,
-                    ignored -> loadBatchHistory(key.code(), key.market(), latestDecision, fxRequired));
+            BatchHistory history = histories.get(key);
+            if (history == null) {
+                // Legacy direct construction exists only in isolated unit/backtest adapters that
+                // predate the request reader.  The Spring list bean is always injected above and
+                // therefore never takes this branch; its context must not disguise this fallback
+                // as a batch implementation.
+                Instant latestDecision = group.stream().map(BondYieldBetaResolver.Query::decisionInstant)
+                        .filter(java.util.Objects::nonNull).max(Instant::compareTo).orElse(null);
+                boolean fxRequired = group.stream().anyMatch(query ->
+                        query.fxControl() == BondYieldBetaResolver.FxControl.REQUIRED);
+                history = loadBatchHistory(key.code(), key.market(), latestDecision, fxRequired);
+            }
             for (BondYieldBetaResolver.Query query : group) {
                 Evidence evidence = loadEvidence(query, history);
                 out.put(query, BondYieldBetaResolver.resolve(query, evidence.samples(), evidence.rateSignal()));
             }
+        }
+        return Map.copyOf(out);
+    }
+
+    /**
+     * Production list batches must not disguise the old per-instrument history reader as a
+     * batch.  The exact-pair reader loads price/dividend rows once, while Treasury and USD FX
+     * streams are shared immutable evidence for the entire request.
+     */
+    private Map<BatchKey, BatchHistory> loadBatchHistories(
+            Map<BatchKey, List<BondYieldBetaResolver.Query>> grouped) {
+        if (grouped == null || grouped.isEmpty() || batchRepository == null) return Map.of();
+        List<TradingRadarListBatchRepository.Key> keys = grouped.keySet().stream()
+                .map(key -> new TradingRadarListBatchRepository.Key(key.code(), key.market())).toList();
+        Map<TradingRadarListBatchRepository.Key, List<StockPriceHistory>> prices = batchRepository.findAllPrices(keys);
+        Map<TradingRadarListBatchRepository.Key, List<StockDividendHistory>> events =
+                batchRepository.findAdjustmentEvents(keys, prices);
+        Instant latestDecision = grouped.values().stream().flatMap(List::stream)
+                .map(BondYieldBetaResolver.Query::decisionInstant).filter(java.util.Objects::nonNull)
+                .max(Instant::compareTo).orElse(null);
+        List<TreasuryYieldDto.StoredBatch> treasury = latestDecision == null ? List.of()
+                : batchRepository.findCompleteTreasurySeriesThrough(latestDecision);
+        boolean fxRequired = grouped.values().stream().flatMap(List::stream)
+                .anyMatch(query -> query.fxControl() == BondYieldBetaResolver.FxControl.REQUIRED);
+        Map<LocalDate, FxChange> fx = fxRequired
+                ? fxChanges(batchRepository.findExchangeRatesByCurrency("USD")) : Map.of();
+        Map<BatchKey, BatchHistory> out = new LinkedHashMap<>();
+        for (BatchKey key : grouped.keySet()) {
+            TradingRadarListBatchRepository.Key readerKey =
+                    new TradingRadarListBatchRepository.Key(key.code(), key.market());
+            out.put(key, new BatchHistory(prices.getOrDefault(readerKey, List.of()),
+                    events.getOrDefault(readerKey, List.of()), fx, treasury));
         }
         return Map.copyOf(out);
     }
@@ -254,28 +281,22 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
             String code, String market, Instant latestDecision, boolean fxRequired) {
         if (code == null || market == null || latestDecision == null) return new BatchHistory(
                 List.of(), List.of(), Map.of(), List.of());
-        List<StockPriceHistory> raw = priceRepository
-                .findAllByStockCodeAndMarketOrderByTradingDateAsc(code, market);
+        if (batchRepository == null) return new BatchHistory(List.of(), List.of(), Map.of(), List.of());
+        TradingRadarListBatchRepository.Key key = new TradingRadarListBatchRepository.Key(code, market);
+        Map<TradingRadarListBatchRepository.Key, List<StockPriceHistory>> pricesByKey =
+                batchRepository.findAllPrices(List.of(key));
+        List<StockPriceHistory> raw = pricesByKey.getOrDefault(key, List.of());
         List<StockPriceHistory> prices = raw == null ? List.of() : raw.stream()
                 .filter(row -> row != null && row.getTradingDate() != null
                         && positive(row.getClosePrice()))
                 .sorted(Comparator.comparing(StockPriceHistory::getTradingDate))
                 .toList();
-        List<StockDividendHistory> events = List.of();
-        if (!prices.isEmpty()) {
-            LocalDate from = prices.getFirst().getTradingDate();
-            LocalDate to = prices.getLast().getTradingDate();
-            List<StockDividendHistory> loaded = dividendRepository.findAdjustmentEvents(
-                    code, market, from, to);
-            // Task 357：改用 anchorDate，理由同上。
-            events = loaded == null ? List.of() : loaded.stream()
-                    .filter(event -> event != null && event.anchorDate() != null)
-                    .toList();
-        }
-        List<TreasuryYieldDto.StoredBatch> batches = treasuryRepository
-                .findCompleteSeriesThrough(latestDecision);
+        List<StockDividendHistory> events = batchRepository.findAdjustmentEvents(
+                List.of(key), Map.of(key, prices)).getOrDefault(key, List.of()).stream()
+                .filter(event -> event != null && event.anchorDate() != null).toList();
+        List<TreasuryYieldDto.StoredBatch> batches = batchRepository.findCompleteTreasurySeriesThrough(latestDecision);
         Map<LocalDate, FxChange> fx = fxRequired
-                ? fxChanges(exchangeRateRepository.findByCurrencyOrderByRateDateAsc("USD"))
+                ? fxChanges(batchRepository.findExchangeRatesByCurrency("USD"))
                 : Map.of();
         return new BatchHistory(prices, events, fx, batches);
     }

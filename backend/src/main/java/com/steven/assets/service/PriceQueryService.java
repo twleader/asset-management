@@ -21,8 +21,11 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -114,6 +117,50 @@ public class PriceQueryService {
         Optional<LivePrice> cached = readRedis(stockCode, market);
         if (cached.isPresent()) return cached;
         return fallbackToHistory(stockCode, market);
+    }
+
+    /**
+     * Read the explicitly requested quote keys with one Redis MGET.  Callers that already own
+     * the bounded price series (the Trading Radar list path) pass it here so a Redis miss never
+     * falls back to a per-symbol repository query.  Missing/malformed cache values deliberately
+     * remain per-key misses; they must not borrow a quote from a same-code row in another market.
+     */
+    public Map<PriceKey, Optional<LivePrice>> getLiveBatch(
+            Set<PriceKey> required,
+            Map<PriceKey, List<StockPriceHistory>> historyByKey) {
+        if (required == null || required.isEmpty()) return Map.of();
+        List<PriceKey> keys = required.stream()
+                .filter(key -> key != null && key.stockCode() != null && key.market() != null)
+                .distinct().sorted(Comparator.comparing(PriceKey::market).thenComparing(PriceKey::stockCode)).toList();
+        if (keys.isEmpty()) return Map.of();
+        List<String> redisKeys = keys.stream()
+                .map(key -> "price:" + key.market() + ":" + key.stockCode()).toList();
+        List<String> values;
+        try {
+            values = redis.opsForValue().multiGet(redisKeys);
+        } catch (RuntimeException unavailable) {
+            values = Collections.nCopies(keys.size(), null);
+        }
+        if (values == null || values.size() != keys.size()) values = Collections.nCopies(keys.size(), null);
+        Map<PriceKey, Optional<LivePrice>> result = new LinkedHashMap<>();
+        for (int index = 0; index < keys.size(); index++) {
+            PriceKey key = keys.get(index);
+            Optional<LivePrice> value = Optional.empty();
+            String json = values.get(index);
+            if (json != null) {
+                try {
+                    value = Optional.of(parse(json));
+                } catch (Exception malformed) {
+                    log.warn("Redis 行情批次解析失敗 {}", redisKeys.get(index));
+                }
+            }
+            if (value.isEmpty()) {
+                value = fallbackToBoundedHistory(key, historyByKey == null ? List.of()
+                        : historyByKey.getOrDefault(key, List.of()));
+            }
+            result.put(key, value);
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     /**
@@ -215,18 +262,50 @@ public class PriceQueryService {
         try {
             String json = redis.opsForValue().get(key);
             if (json == null) return Optional.empty();
-            JsonNode n = mapper.readTree(json);
-            return Optional.of(new EtfNav(
-                    n.path("stockCode").asText(stockCode),
-                    n.path("market").asText(market),
-                    decimalOrNull(n, "nav"),
-                    decimalOrNull(n, "premiumDiscountPct"),
-                    n.path("navAsOf").isMissingNode() ? null : n.path("navAsOf").asText(null),
-                    n.path("source").isMissingNode() ? null : n.path("source").asText(null)));
+            return Optional.of(parseEtfNav(json, stockCode, market));
         } catch (Exception e) {
             log.warn("ETF 淨值讀取失敗 {}: {}", key, e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /** Exact-key ETF NAV MGET counterpart of {@link #getLiveBatch(Set, Map)}. */
+    public Map<PriceKey, Optional<EtfNav>> getEtfNavBatch(Set<PriceKey> required) {
+        if (required == null || required.isEmpty()) return Map.of();
+        List<PriceKey> keys = required.stream()
+                .filter(key -> key != null && key.stockCode() != null && key.market() != null)
+                .distinct().sorted(Comparator.comparing(PriceKey::market).thenComparing(PriceKey::stockCode)).toList();
+        if (keys.isEmpty()) return Map.of();
+        List<String> redisKeys = keys.stream()
+                .map(key -> "price:etfnav:" + key.market() + ":" + key.stockCode()).toList();
+        List<String> values;
+        try {
+            values = redis.opsForValue().multiGet(redisKeys);
+        } catch (RuntimeException unavailable) {
+            values = Collections.nCopies(keys.size(), null);
+        }
+        if (values == null || values.size() != keys.size()) values = Collections.nCopies(keys.size(), null);
+        Map<PriceKey, Optional<EtfNav>> result = new LinkedHashMap<>();
+        for (int index = 0; index < keys.size(); index++) {
+            PriceKey key = keys.get(index);
+            try {
+                result.put(key, values.get(index) == null ? Optional.empty()
+                        : Optional.of(parseEtfNav(values.get(index), key.stockCode(), key.market())));
+            } catch (Exception malformed) {
+                log.warn("ETF 淨值批次解析失敗 {}", redisKeys.get(index));
+                result.put(key, Optional.empty());
+            }
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+    private EtfNav parseEtfNav(String json, String stockCode, String market) throws Exception {
+        JsonNode n = mapper.readTree(json);
+        return new EtfNav(
+                n.path("stockCode").asText(stockCode), n.path("market").asText(market),
+                decimalOrNull(n, "nav"), decimalOrNull(n, "premiumDiscountPct"),
+                n.path("navAsOf").isMissingNode() ? null : n.path("navAsOf").asText(null),
+                n.path("source").isMissingNode() ? null : n.path("source").asText(null));
     }
 
     private static BigDecimal decimalOrNull(JsonNode node, String field) {
@@ -346,6 +425,26 @@ public class PriceQueryService {
         return historyRepo.findRecentN(stockCode, market, 1).stream()
                 .findFirst()
                 .map(h -> historyToLive(h, market, stockCode, "PREVIOUS_CLOSE"));
+    }
+
+    private Optional<LivePrice> fallbackToBoundedHistory(PriceKey key, List<StockPriceHistory> supplied) {
+        if (supplied == null || supplied.isEmpty()) return Optional.empty();
+        List<StockPriceHistory> rows = supplied.stream().filter(row -> row != null && row.getTradingDate() != null)
+                .sorted(Comparator.comparing(StockPriceHistory::getTradingDate).reversed()).toList();
+        if (rows.isEmpty()) return Optional.empty();
+        StockPriceHistory latest = rows.getFirst();
+        StockPriceHistory previous = rows.stream()
+                .filter(row -> row.getTradingDate().isBefore(latest.getTradingDate())).findFirst().orElse(null);
+        BigDecimal close = latest.getClosePrice();
+        BigDecimal previousClose = previous == null ? null : previous.getClosePrice();
+        BigDecimal change = close != null && previousClose != null ? close.subtract(previousClose) : null;
+        BigDecimal changePercent = close != null && previousClose != null && previousClose.signum() > 0
+                ? change.multiply(BigDecimal.valueOf(100)).divide(previousClose, 6, java.math.RoundingMode.HALF_UP)
+                : null;
+        return Optional.of(new LivePrice(key.stockCode(), null, key.market(), close, previousClose, change,
+                changePercent, null, null, latest.getOpenPrice(), latest.getHighPrice(), latest.getLowPrice(),
+                latest.getVolume(), latest.getTradingDate().toString(),
+                LocalDateTime.now(MarketZones.TW_ZONE).toString(), true, latest.getCloseSource(), "PREVIOUS_CLOSE"));
     }
 
     private LivePrice historyToLive(
