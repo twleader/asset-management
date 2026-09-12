@@ -101,6 +101,24 @@ class RadarTechnicalResolverFubonOverlayTest {
     }
 
     @Test
+    void listReadOnlyFallbackConsumesPreloadedBatchAndNeverWritesTechnicalCache() {
+        RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
+        RadarTechnicalCachePort cache = mock(RadarTechnicalCachePort.class);
+        when(cache.readPairs(List.of(CODE))).thenReturn(Map.of(CODE, new RadarTechnicalCachePort.Pair(null, null)));
+        when(facts.findFreshCompleteCaptures(List.of(CODE), NOW)).thenReturn(Map.of());
+        RadarTechnicalResolver resolver = new RadarTechnicalResolver(facts, cache, new ObjectMapper());
+
+        RadarTechnicalResolver.Batch batch = resolver.preload(java.util.Set.of(CODE), NOW);
+        ResolvedTechnicalInputs resolved = resolver.resolveReadOnly(
+                CODE, "台股", localIndicators(), localWeekly(), localIndicators(), false, false, false,
+                DAILY_AS_OF, WEEKLY_AS_OF, FINGERPRINT, NOW, batch);
+
+        assertThat(resolved.resolution().source()).isEqualTo("LOCAL_CALCULATED");
+        verify(cache, never()).writePair(org.mockito.ArgumentMatchers.any());
+        verify(cache, never()).writeMarketLocal(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void freshExact17DatabaseCaptureReprojectsBoundFubonWithoutExtendingDeadlineOrWritingLocalSnapshot() throws Exception {
         RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
         RadarTechnicalCachePort cache = mock(RadarTechnicalCachePort.class);

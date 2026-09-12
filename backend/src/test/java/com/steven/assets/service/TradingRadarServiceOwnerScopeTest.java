@@ -1,6 +1,10 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.Stock;
+import com.steven.assets.model.StockHolding;
+import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.EtfNavHistoryRepository;
 import com.steven.assets.repository.ExchangeRateHistoryRepository;
@@ -17,10 +21,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -67,9 +74,10 @@ class TradingRadarServiceOwnerScopeTest {
     @Mock private CurrentUserContext currentUserContext;
     @Mock private DividendEventEvidenceRepository dividendEventEvidenceRepository;
     @Mock private TreasuryYieldService treasuryYieldService;
+    @Mock private TradingRadarListBatchPreloader listBatchPreloader;
 
     private TradingRadarService newService() {
-        return new TradingRadarService(
+        TradingRadarService service = new TradingRadarService(
                 new TradingRadarRuleEngine(),
                 indicatorService,
                 adjustedPriceService,
@@ -94,10 +102,14 @@ class TradingRadarServiceOwnerScopeTest {
                 currentUserContext,
                 dividendEventEvidenceRepository,
                 treasuryYieldService);
+        service.setListBatchPreloader(listBatchPreloader);
+        return service;
     }
 
     /** holdings／watchlist 一律回空（owner／無 owner 兩種查詢都要 stub），只隔離出 owner 分支本身。 */
     private void stubCommon() {
+        lenient().when(adjustedPriceService.adjust(anyList(), anyList())).thenAnswer(call ->
+                new DistributionAdjustedPriceService.Adjustment(call.getArgument(0), false));
         lenient().when(taiexDisplayPriceService.resolve()).thenReturn(
                 new TaiexDisplayPriceService.DisplayQuote(
                         null, null, null, null, null, null,
@@ -106,6 +118,9 @@ class TradingRadarServiceOwnerScopeTest {
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
+        lenient().when(marketContextService.resolveDecisionSessionsCachedOnly(anyString(), any()))
+                .thenAnswer(call -> Optional.ofNullable(RadarObservationResolver.decisionSessionsStrict(
+                        call.getArgument(0), call.getArgument(1), date -> Optional.of(true))));
         lenient().when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(List.of());
         // Task 294：buildUsMarket() 每輪都會計算（不論本輪有沒有美股標的），需同步 stub 避免 NPE。
         lenient().when(usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(anyString(), anyInt()))
@@ -193,5 +208,163 @@ class TradingRadarServiceOwnerScopeTest {
         verify(snapshotStore, never()).save(anyLong(), any());
         verify(snapshotStore, never()).saveRecomputed(anyLong(), any());
         verify(currentUserContext, never()).getEffectiveUserId();
+    }
+
+    @Test
+    void browserListContext禁止逐檔價格調整快取與基本面IO() {
+        stubCommon();
+        AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(StockHolding.builder()
+                .stockCode("2330").market("台股").build())).build();
+        when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        Stock stock = Stock.builder().code("2330").market("台股").name("台積電").build();
+        StockPriceHistory price = StockPriceHistory.builder().stockCode("2330").market("台股")
+                .tradingDate(LocalDate.of(2026, 9, 11)).closePrice(new BigDecimal("100")).build();
+        TradingRadarListBatchPreloader.Entry entry = new TradingRadarListBatchPreloader.Entry(
+                Optional.of(stock), List.of(price), Optional.empty(), Optional.empty(), List.of(),
+                DividendEventEvidenceResolver.Resolution.MISSING,
+                FundamentalAnalysisService.Resolved.unavailable(false),
+                BondYieldBetaResolver.Result.notApplicable(null), null,
+                TradingRadarMarketContextService.FxContext.EMPTY,
+                TradingRadarMarketFeatureResolver.Evidence.empty("台股", java.time.Instant.EPOCH, "test"),
+                LocalDate.of(2026, 9, 11), List.of());
+        when(listBatchPreloader.preload(any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(new TradingRadarListBatchPreloader.Context(Map.of(
+                        new TradingRadarListBatchPreloader.Key("2330", "台股"), entry)));
+
+        TradingRadarDto.ListResponse response = newService().getList();
+
+        assertNotNull(response);
+        verify(priceHistoryRepo, never()).findRecentN(anyString(), anyString(), anyInt());
+        verify(priceQueryService, never()).getLive("2330", "台股");
+        verify(stockRepo, never()).findByCodeAndMarket(anyString(), anyString());
+        verify(dividendEventEvidenceRepository, never()).resolve(anyString(), anyString(), any(), any());
+        verify(fundamentalAnalysisService, never()).resolve(anyString(), anyString(), anyString(), any());
+        verify(etfNavHistoryRepo, never()).findRecentPremiumPctAsOf(anyString(), anyString(), any(), any());
+        verify(marketDataService, never()).isTwTradingDayKnown(any(LocalDate.class));
+        verify(marketDataService, never()).isTradingDay(anyString(), any(LocalDate.class));
+    }
+
+    @Test
+    void list與full在兩市場三個target的全部可見scalar一致且不混用同碼市場資料() {
+        stubCommon();
+        Stock tw = Stock.builder().code("SAME").market("台股").name("台灣同碼").build();
+        Stock usSame = Stock.builder().code("SAME").market("美股").name("美股同碼").build();
+        Stock usOther = Stock.builder().code("OTHER").market("美股").name("美股另一檔").build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(
+                StockHolding.builder().stockCode("SAME").market("台股").shares(BigDecimal.ONE).build(),
+                StockHolding.builder().stockCode("SAME").market("美股").shares(BigDecimal.ONE).build(),
+                StockHolding.builder().stockCode("OTHER").market("美股").shares(BigDecimal.ONE).build())).build();
+        when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+
+        Map<String, Stock> stocks = Map.of(
+                key("SAME", "台股"), tw,
+                key("SAME", "美股"), usSame,
+                key("OTHER", "美股"), usOther);
+        Map<String, List<StockPriceHistory>> prices = Map.of(
+                key("SAME", "台股"), List.of(price("SAME", "台股", "101")),
+                key("SAME", "美股"), List.of(price("SAME", "美股", "202")),
+                key("OTHER", "美股"), List.of(price("OTHER", "美股", "303")));
+        when(stockRepo.findByCodeAndMarket(anyString(), anyString())).thenAnswer(call ->
+                Optional.ofNullable(stocks.get(key(call.getArgument(0), call.getArgument(1)))));
+        when(priceHistoryRepo.findRecentN(anyString(), anyString(), anyInt())).thenAnswer(call ->
+                prices.getOrDefault(key(call.getArgument(0), call.getArgument(1)), List.of()));
+        when(dividendEventEvidenceRepository.resolve(anyString(), anyString(), any(), any()))
+                .thenReturn(DividendEventEvidenceResolver.Resolution.MISSING);
+        when(fundamentalAnalysisService.resolve(anyString(), anyString(), anyString(), any(), any()))
+                .thenReturn(FundamentalAnalysisService.Resolved.unavailable(false));
+        when(marketContextService.resolveFx(anyString(), any()))
+                .thenReturn(TradingRadarMarketContextService.FxContext.EMPTY);
+
+        Map<TradingRadarListBatchPreloader.Key, TradingRadarListBatchPreloader.Entry> entries = Map.of(
+                new TradingRadarListBatchPreloader.Key("SAME", "台股"), entry(tw, prices.get(key("SAME", "台股"))),
+                new TradingRadarListBatchPreloader.Key("SAME", "美股"), entry(usSame, prices.get(key("SAME", "美股"))),
+                new TradingRadarListBatchPreloader.Key("OTHER", "美股"), entry(usOther, prices.get(key("OTHER", "美股"))));
+        when(listBatchPreloader.preload(any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(new TradingRadarListBatchPreloader.Context(entries));
+
+        TradingRadarService service = newService();
+        TradingRadarDto.ListResponse list = service.getList();
+        TradingRadarDto.Response full = service.getCurrent();
+
+        assertThat(list.stocks()).hasSize(3);
+        assertThat(full.stocks()).hasSize(3);
+        Map<String, TradingRadarDto.StockDecision> fullByPair = full.stocks().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        stock -> key(stock.stockCode(), stock.market()), java.util.function.Function.identity()));
+        list.stocks().forEach(listStock -> assertVisibleListScalarsMatchFull(listStock,
+                fullByPair.get(key(listStock.stockCode(), listStock.market()))));
+        assertThat(list.stocks().stream().filter(stock -> "SAME".equals(stock.stockCode()))
+                .collect(java.util.stream.Collectors.toMap(TradingRadarDto.ListStock::market,
+                        TradingRadarDto.ListStock::stockName)))
+                .containsExactlyInAnyOrderEntriesOf(Map.of("台股", "台灣同碼", "美股", "美股同碼"));
+    }
+
+    private static String key(String code, String market) {
+        return code + '\0' + market;
+    }
+
+    private static StockPriceHistory price(String code, String market, String close) {
+        BigDecimal value = new BigDecimal(close);
+        return StockPriceHistory.builder().stockCode(code).market(market)
+                .tradingDate(LocalDate.of(2026, 9, 11)).openPrice(value).highPrice(value)
+                .lowPrice(value).closePrice(value).volume(1_000L).build();
+    }
+
+    private static TradingRadarListBatchPreloader.Entry entry(Stock stock, List<StockPriceHistory> prices) {
+        return new TradingRadarListBatchPreloader.Entry(
+                Optional.of(stock), prices, Optional.empty(), Optional.empty(), List.of(),
+                DividendEventEvidenceResolver.Resolution.MISSING,
+                FundamentalAnalysisService.Resolved.unavailable(false),
+                BondYieldBetaResolver.Result.notApplicable(null), null,
+                TradingRadarMarketContextService.FxContext.EMPTY,
+                TradingRadarMarketFeatureResolver.Evidence.empty(stock.getMarket(), java.time.Instant.EPOCH, "test"),
+                LocalDate.of(2026, 9, 11), List.of());
+    }
+
+    private static void assertVisibleListScalarsMatchFull(
+            TradingRadarDto.ListStock list, TradingRadarDto.StockDecision full) {
+        assertThat(full).isNotNull();
+        assertThat(list.stockCode()).isEqualTo(full.stockCode());
+        assertThat(list.stockName()).isEqualTo(full.stockName());
+        assertThat(list.market()).isEqualTo(full.market());
+        assertThat(list.assetClass()).isEqualTo(full.assetClass());
+        assertThat(list.distributionAdjusted()).isEqualTo(full.distributionAdjusted());
+        assertThat(list.held()).isEqualTo(full.held());
+        assertThat(list.fxPercentile()).isEqualTo(full.fxPercentile());
+        assertThat(list.underlyingCurrency()).isEqualTo(full.underlyingCurrency());
+        assertThat(list.fundamental()).isEqualTo(full.fundamental() == null ? null
+                : new TradingRadarDto.ListFundamental(full.fundamental().applicable(), full.fundamental().coverage(),
+                full.fundamental().industryName(), full.fundamental().industryRevenueYoyPct()));
+        assertThat(list.shortAction()).isEqualTo(full.shortAction());
+        assertThat(list.shortActionLabel()).isEqualTo(full.shortActionLabel());
+        assertThat(list.shortScore()).isEqualTo(full.shortScore());
+        assertThat(list.swingAction()).isEqualTo(full.swingAction());
+        assertThat(list.swingActionLabel()).isEqualTo(full.swingActionLabel());
+        assertThat(list.swingScore()).isEqualTo(full.swingScore());
+        assertThat(list.action()).isEqualTo(full.action());
+        assertThat(list.actionLabel()).isEqualTo(full.actionLabel());
+        assertThat(list.score()).isEqualTo(full.score());
+        assertThat(list.horizonConflict()).isEqualTo(full.horizonConflict());
+        assertThat(list.timingState()).isEqualTo(full.timingState());
+        assertThat(list.timingLabel()).isEqualTo(full.timingLabel());
+        assertThat(list.counterTrendState()).isEqualTo(full.counterTrendState());
+        assertThat(list.counterTrendLabel()).isEqualTo(full.counterTrendLabel());
+        assertThat(list.price()).isEqualTo(full.price());
+        assertThat(list.changePercent()).isEqualTo(full.changePercent());
+        assertThat(list.quoteStatus()).isEqualTo(full.quoteStatus());
+        assertThat(list.priceUpdatedAt()).isEqualTo(full.priceUpdatedAt());
+        assertThat(list.etfPremiumLivePct()).isEqualTo(full.etfPremiumLivePct());
+        assertThat(list.etfPremiumLiveNavAsOf()).isEqualTo(full.etfPremiumLiveNavAsOf());
+        assertThat(list.weeklyMa()).isEqualTo(full.weeklyMa());
+        assertThat(list.monthlyMa()).isEqualTo(full.monthlyMa());
+        assertThat(list.quarterlyMa()).isEqualTo(full.quarterlyMa());
+        assertThat(list.annualMa()).isEqualTo(full.annualMa());
+        assertThat(list.kValue()).isEqualTo(full.kValue());
+        assertThat(list.dValue()).isEqualTo(full.dValue());
+        assertThat(list.kdHeat()).isEqualTo(full.kdHeat());
+        assertThat(list.weeklyIndicators()).isEqualTo(full.weeklyIndicators() == null ? null
+                : new TradingRadarDto.ListWeeklyIndicators(full.weeklyIndicators().k(), full.weeklyIndicators().d(),
+                full.weeklyIndicators().changePercent()));
+        assertThat(list.dailyCandleAsOfDate()).isEqualTo(full.dailyCandle() == null ? null : full.dailyCandle().asOfDate());
     }
 }

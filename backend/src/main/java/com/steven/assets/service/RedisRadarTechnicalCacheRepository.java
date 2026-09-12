@@ -81,6 +81,33 @@ public class RedisRadarTechnicalCacheRepository implements RadarTechnicalCachePo
     }
 
     @Override
+    public Map<MarketLocalKey, String> readMarketLocals(List<MarketLocalKey> rawKeys) {
+        if (rawKeys == null || rawKeys.isEmpty()) return Map.of();
+        List<MarketLocalKey> keys = rawKeys.stream()
+                .filter(key -> key != null && key.market() != null && !key.market().isBlank()
+                        && key.code() != null && !key.code().isBlank())
+                .distinct()
+                .sorted(java.util.Comparator.comparing(MarketLocalKey::market)
+                        .thenComparing(MarketLocalKey::code))
+                .toList();
+        if (keys.isEmpty()) return Map.of();
+        try {
+            List<String> redisKeys = keys.stream()
+                    .map(key -> marketLocalKey(key.market(), key.code())).toList();
+            List<String> values = redis.opsForValue().multiGet(redisKeys);
+            if (values == null || values.size() != keys.size()) return Map.of();
+            Map<MarketLocalKey, String> result = new LinkedHashMap<>();
+            for (int index = 0; index < keys.size(); index++) {
+                String value = values.get(index);
+                if (value != null) result.put(keys.get(index), value);
+            }
+            return Map.copyOf(result);
+        } catch (RuntimeException unavailable) {
+            return Map.of();
+        }
+    }
+
+    @Override
     public String writeMarketLocal(MarketLocalWrite request) {
         if (request == null || request.market() == null || request.market().isBlank()
                 || request.code() == null || request.code().isBlank()

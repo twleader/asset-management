@@ -105,7 +105,7 @@ public class RadarTechnicalResolver {
                     Map.of(), "NOT_TW_TARGET");
         }
         if (!MARKET.equals(market)) {
-            return resolveMarketLocal(code, market, local, localWeekly, localWeeklyIndicators, contextFingerprint, now);
+            return resolveMarketLocal(code, market, local, localWeekly, localWeeklyIndicators, contextFingerprint, now, batch);
         }
         if ("0000".equals(code)) {
             return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", null, contextFingerprint, null, null, null,
@@ -132,6 +132,47 @@ public class RadarTechnicalResolver {
             writeBoundFubon(code, contextFingerprint, source, cache, now);
         }
         return resolved;
+    }
+
+    /**
+     * List-path counterpart of {@link #resolve}: it may consume only the supplied immutable
+     * batch snapshot and never reprojects a DB capture or writes a LOCAL fallback to Redis.
+     */
+    public ResolvedTechnicalInputs resolveReadOnly(
+            String code, String market, TechnicalIndicatorService.FullIndicators local,
+            TradingRadarRuleEngine.WeeklyInput localWeekly,
+            TechnicalIndicatorService.FullIndicators localWeeklyIndicators,
+            boolean dailyDistributionAdjusted, boolean weeklyDistributionAdjusted, boolean liveAdded,
+            LocalDate dailyAsOf, LocalDate completedWeekEnd, String contextFingerprint, Instant now, Batch batch) {
+        if (!validMarket(market) || !validCode(code) || now == null) {
+            return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
+                    contextFingerprint, null, now, now == null ? null : now.plusSeconds(FRESH_SECONDS), Map.of(),
+                    "NO_READONLY_TECHNICAL_SNAPSHOT");
+        }
+        if (!MARKET.equals(market)) {
+            return resolveMarketLocalReadOnly(code, market, local, localWeekly, localWeeklyIndicators,
+                    contextFingerprint, now, batch);
+        }
+        if ("0000".equals(code)) {
+            return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
+                    contextFingerprint, null, now, now.plusSeconds(FRESH_SECONDS), Map.of(),
+                    "NO_READONLY_TECHNICAL_SNAPSHOT");
+        }
+        CacheRead cache = cacheRead(code, contextFingerprint, now, batch);
+        Source source = cache.source();
+        if (source != null && "LOCAL_CALCULATED".equals(source.origin())) {
+            ResolvedTechnicalInputs cached = localFromSnapshot(source, contextFingerprint, now);
+            if (cached != null) return cached;
+            source = null;
+        }
+        if (source == null) source = databaseCapture(code, now, batch);
+        if (source == null) {
+            return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
+                    contextFingerprint, null, now, now.plusSeconds(FRESH_SECONDS), Map.of(),
+                    "NO_FRESH_FUBON_CAPTURE");
+        }
+        return overlay(local, localWeekly, localWeeklyIndicators, source, dailyDistributionAdjusted,
+                weeklyDistributionAdjusted, liveAdded, dailyAsOf, completedWeekEnd, contextFingerprint, now);
     }
 
     private ResolvedTechnicalInputs overlay(
@@ -272,13 +313,37 @@ public class RadarTechnicalResolver {
      * resolver calls only parse their already captured bytes.
      */
     public Batch preload(Set<String> rawCodes, Instant now) {
-        if (rawCodes == null || rawCodes.isEmpty() || now == null) return Batch.EMPTY;
-        List<String> codes = rawCodes.stream().filter(RadarTechnicalResolver::validCode)
+        return preload(rawCodes, List.of(), now);
+    }
+
+    /**
+     * Preloads Taiwan Fubon pairs/captures and non-Taiwan market-local documents
+     * into one immutable request value.  Neither read is permitted again while a
+     * loaded batch is supplied to a list evaluator.
+     */
+    public Batch preload(Set<String> rawCodes, Collection<RadarTechnicalCachePort.MarketLocalKey> rawMarketLocalKeys,
+                         Instant now) {
+        if (now == null) return Batch.EMPTY;
+        List<String> codes = (rawCodes == null ? java.util.stream.Stream.<String>empty() : rawCodes.stream())
+                .filter(RadarTechnicalResolver::validCode)
                 .distinct().sorted().toList();
-        if (codes.isEmpty()) return Batch.EMPTY;
-        Map<String, RadarTechnicalCachePort.Pair> cachePairs = cachePort.readPairs(codes);
-        Map<String, RadarTechnicalFactPort.Capture> captures = facts.findFreshCompleteCaptures(codes, now);
-        return new Batch(cachePairs, captures, true);
+        List<RadarTechnicalCachePort.MarketLocalKey> marketLocalKeys =
+                (rawMarketLocalKeys == null ? java.util.stream.Stream.<RadarTechnicalCachePort.MarketLocalKey>empty()
+                        : rawMarketLocalKeys.stream())
+                        .filter(key -> key != null && validMarket(key.market()) && validCode(key.code())
+                                && !MARKET.equals(key.market()))
+                        .distinct()
+                        .sorted(Comparator.comparing(RadarTechnicalCachePort.MarketLocalKey::market)
+                                .thenComparing(RadarTechnicalCachePort.MarketLocalKey::code))
+                        .toList();
+        if (codes.isEmpty() && marketLocalKeys.isEmpty()) return Batch.EMPTY;
+        Map<String, RadarTechnicalCachePort.Pair> cachePairs = codes.isEmpty()
+                ? Map.of() : cachePort.readPairs(codes);
+        Map<String, RadarTechnicalFactPort.Capture> captures = codes.isEmpty()
+                ? Map.of() : facts.findFreshCompleteCaptures(codes, now);
+        Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments = marketLocalKeys.isEmpty()
+                ? Map.of() : cachePort.readMarketLocals(marketLocalKeys);
+        return new Batch(cachePairs, captures, marketLocalDocuments, !codes.isEmpty(), !marketLocalKeys.isEmpty());
     }
 
     /**
@@ -290,7 +355,7 @@ public class RadarTechnicalResolver {
             String code, String market, String contextFingerprint, Instant now, Batch batch) {
         if (!validMarket(market) || !validCode(code) || now == null) return null;
         if (!MARKET.equals(market)) {
-            MarketLocalRead marketLocal = marketLocalRead(code, market, contextFingerprint, now);
+            MarketLocalRead marketLocal = marketLocalRead(code, market, contextFingerprint, now, batch);
             return marketLocal.source() == null ? null : marketLocalFromSnapshot(marketLocal.source(), contextFingerprint, now);
         }
         if ("0000".equals(code)) return null;
@@ -312,12 +377,13 @@ public class RadarTechnicalResolver {
             TradingRadarRuleEngine.WeeklyInput localWeekly,
             TechnicalIndicatorService.FullIndicators localWeeklyIndicators,
             String fingerprint,
-            Instant now) {
+            Instant now,
+            Batch batch) {
         if (fingerprint == null || fingerprint.isBlank()) {
             return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", null, fingerprint,
                     null, null, null, Map.of(), "NO_CONTEXT_FINGERPRINT");
         }
-        MarketLocalRead cached = marketLocalRead(code, market, fingerprint, now);
+        MarketLocalRead cached = marketLocalRead(code, market, fingerprint, now, batch);
         if (cached.source() != null) return marketLocalFromSnapshot(cached.source(), fingerprint, now);
         ResolvedTechnicalInputs fallback = local(local, localWeekly, localWeeklyIndicators,
                 "LOCAL_CALCULATED", "BOUND_CONTEXT", fingerprint, null, now,
@@ -326,10 +392,31 @@ public class RadarTechnicalResolver {
         return fallback;
     }
 
-    private MarketLocalRead marketLocalRead(String code, String market, String fingerprint, Instant now) {
+    /** List counterpart of the non-TW local cache path.  It never writes a fallback. */
+    private ResolvedTechnicalInputs resolveMarketLocalReadOnly(
+            String code, String market, TechnicalIndicatorService.FullIndicators local,
+            TradingRadarRuleEngine.WeeklyInput localWeekly,
+            TechnicalIndicatorService.FullIndicators localWeeklyIndicators,
+            String fingerprint, Instant now, Batch batch) {
+        if (fingerprint == null || fingerprint.isBlank()) {
+            return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", null, fingerprint,
+                    null, null, null, Map.of(), "NO_CONTEXT_FINGERPRINT");
+        }
+        MarketLocalRead cached = marketLocalRead(code, market, fingerprint, now, batch);
+        if (cached.source() != null) return marketLocalFromSnapshot(cached.source(), fingerprint, now);
+        return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT", fingerprint,
+                null, now, now.plusSeconds(FRESH_SECONDS), Map.of(), "NO_FRESH_MARKET_LOCAL_SNAPSHOT");
+    }
+
+    private MarketLocalRead marketLocalRead(String code, String market, String fingerprint, Instant now, Batch batch) {
         String raw = null;
         try {
-            raw = cachePort.readMarketLocal(market, code);
+            RadarTechnicalCachePort.MarketLocalKey key = new RadarTechnicalCachePort.MarketLocalKey(market, code);
+            if (batch != null && batch.marketLocalLoaded) {
+                raw = batch.marketLocalDocuments.get(key);
+            } else {
+                raw = cachePort.readMarketLocal(market, code);
+            }
             if (raw == null) return new MarketLocalRead(null, null);
             Map<String, Object> root = json.readValue(raw, new TypeReference<>() {});
             if (!Set.of("schemaVersion", "code", "market", "origin", "binding", "contextFingerprint",
@@ -1066,18 +1153,24 @@ public class RadarTechnicalResolver {
 
     /** Per-radar-request preloaded values; no mutable singleton cache is used. */
     public static final class Batch {
-        private static final Batch EMPTY = new Batch(Map.of(), Map.of(), false);
+        private static final Batch EMPTY = new Batch(Map.of(), Map.of(), Map.of(), false, false);
         private final Map<String, RadarTechnicalCachePort.Pair> cachePairs;
         private final Map<String, RadarTechnicalFactPort.Capture> captures;
+        private final Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments;
         private final boolean cacheLoaded;
         private final boolean captureLoaded;
+        private final boolean marketLocalLoaded;
 
         private Batch(Map<String, RadarTechnicalCachePort.Pair> cachePairs,
-                      Map<String, RadarTechnicalFactPort.Capture> captures, boolean loaded) {
+                      Map<String, RadarTechnicalFactPort.Capture> captures,
+                      Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments,
+                      boolean twLoaded, boolean marketLocalLoaded) {
             this.cachePairs = cachePairs == null ? Map.of() : Map.copyOf(cachePairs);
             this.captures = captures == null ? Map.of() : Map.copyOf(captures);
-            this.cacheLoaded = loaded;
-            this.captureLoaded = loaded;
+            this.marketLocalDocuments = marketLocalDocuments == null ? Map.of() : Map.copyOf(marketLocalDocuments);
+            this.cacheLoaded = twLoaded;
+            this.captureLoaded = twLoaded;
+            this.marketLocalLoaded = marketLocalLoaded;
         }
     }
 }

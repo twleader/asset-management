@@ -472,6 +472,24 @@ public class MarketDataService {
     }
 
     /**
+     * Read-only calendar lookup for a bounded request context.  Unlike
+     * {@link #isTwTradingDayKnown(LocalDate)}, this method must never refresh
+     * the holiday proxy: a missing or expired local snapshot is an unknown
+     * calendar and callers must fail closed.
+     */
+    public Optional<Boolean> isTwTradingDayCachedOnly(LocalDate date) {
+        if (date == null) return Optional.empty();
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) return Optional.of(false);
+        TimedHolidays cached = twHolidayCurrentYearCache.get(date.getYear());
+        if (cached == null || cached.value() == null || cached.value().isEmpty()
+                || System.currentTimeMillis() >= cached.expiresAt()) {
+            return Optional.empty();
+        }
+        return Optional.of(!cached.value().containsKey(date.toString()));
+    }
+
+    /**
      * 可區分「交易日／休市日／日曆不可得」的跨市場交易日判定。
      * 台股沿用 ext-materials 的權威日曆；美股與英股使用本地完整假日表。
      * 回測與配息 session 計數不得把日曆讀取失敗當成平日，因此台股未知時回空值。
@@ -485,6 +503,41 @@ public class MarketDataService {
             return Optional.of(isUkTradingDay(date));
         }
         return isTwTradingDayKnown(date);
+    }
+
+    /**
+     * Local/cache-only counterpart of {@link #isTradingDayKnown(String, LocalDate)}.
+     * US/UK calendars are deterministic local tables; Taiwan requires a still-valid
+     * local authority snapshot and never falls through to the external proxy.
+     */
+    public Optional<Boolean> isTradingDayCachedOnly(String market, LocalDate date) {
+        if (date == null) return Optional.empty();
+        if ("美股".equals(market) || "US".equalsIgnoreCase(String.valueOf(market))) {
+            return Optional.of(isUsTradingDay(date));
+        }
+        if ("英股".equals(market) || "UK".equalsIgnoreCase(String.valueOf(market))) {
+            return Optional.of(isUkTradingDay(date));
+        }
+        return isTwTradingDayCachedOnly(date);
+    }
+
+    /**
+     * Produces a request-bounded future-session list without external I/O.
+     * Any unknown date invalidates the whole result so a caller cannot silently
+     * treat a weekday as an open Taiwan session.
+     */
+    public Optional<List<LocalDate>> futureTradingSessionsCachedOnly(
+            String market, LocalDate startExclusive, int requiredSessions, int maxCalendarDays) {
+        if (startExclusive == null || requiredSessions < 0 || maxCalendarDays < 0) return Optional.empty();
+        if (requiredSessions == 0) return Optional.of(List.of());
+        List<LocalDate> sessions = new java.util.ArrayList<>();
+        for (int i = 1; i <= maxCalendarDays && sessions.size() < requiredSessions; i++) {
+            LocalDate date = startExclusive.plusDays(i);
+            Optional<Boolean> known = isTradingDayCachedOnly(market, date);
+            if (known == null || known.isEmpty()) return Optional.empty();
+            if (known.get()) sessions.add(date);
+        }
+        return Optional.of(List.copyOf(sessions));
     }
 
     public boolean isUsTradingDay(LocalDate date) {

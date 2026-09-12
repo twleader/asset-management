@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class TreasuryYieldServiceTest {
@@ -42,6 +43,23 @@ class TreasuryYieldServiceTest {
         assertThat(context.sourceManifest().values()).doesNotHaveDuplicates();
         assertThat(context.complete()).isTrue();
         assertThat(context.staleReason()).isNull();
+    }
+
+    @Test
+    void listTenorBatch只選一次完整curve並保留各tenor值() {
+        TreasuryYieldBatchRepository repository = mock(TreasuryYieldBatchRepository.class);
+        MarketDataService marketDataService = knownUsCalendar();
+        Instant decision = Instant.parse("2026-08-10T14:00:00Z");
+        when(repository.findSelected(decision)).thenReturn(Optional.of(storedBatch(LocalDate.of(2026, 8, 7))));
+        TreasuryYieldService service = serviceFor(repository, decision, marketDataService);
+
+        Map<String, TreasuryYieldDto.RateContext> contexts = service.resolveRateContexts(
+                decision, Set.of("Y5", "Y10", "Y30"));
+
+        assertThat(contexts).containsOnlyKeys("Y5", "Y10", "Y30");
+        assertThat(contexts.get("Y5").value()).isEqualByComparingTo("4.2000");
+        assertThat(contexts.get("Y10").value()).isEqualByComparingTo("4.3000");
+        verify(repository, times(1)).findSelected(decision);
     }
 
     @Test

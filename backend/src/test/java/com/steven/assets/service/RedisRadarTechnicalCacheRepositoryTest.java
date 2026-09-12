@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
@@ -32,6 +33,27 @@ class RedisRadarTechnicalCacheRepositoryTest {
         assertThat(pairs.get("2330")).isEqualTo(new RadarTechnicalCachePort.Pair("d2330", "w2330"));
         assertThat(pairs.get("0050")).isEqualTo(new RadarTechnicalCachePort.Pair("d0050", "w0050"));
         verify(values).multiGet(anyList());
+    }
+
+    @Test
+    void marketLocalBulkReadUsesOneMgetWithExactMarketCodeKeysAndPreservesMisses() {
+        StringRedisTemplate redis = org.mockito.Mockito.mock(StringRedisTemplate.class);
+        @SuppressWarnings("unchecked")
+        ValueOperations<String, String> values = org.mockito.Mockito.mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        RadarTechnicalCachePort.MarketLocalKey tw = new RadarTechnicalCachePort.MarketLocalKey("台股", "2330");
+        RadarTechnicalCachePort.MarketLocalKey us = new RadarTechnicalCachePort.MarketLocalKey("美股", "2330");
+        when(values.multiGet(List.of(
+                RedisRadarTechnicalCacheRepository.marketLocalKey("台股", "2330"),
+                RedisRadarTechnicalCacheRepository.marketLocalKey("美股", "2330"))))
+                .thenReturn(java.util.Arrays.asList("tw-document", null));
+
+        var documents = new RedisRadarTechnicalCacheRepository(redis).readMarketLocals(List.of(us, tw));
+
+        assertThat(documents).containsExactly(Map.entry(tw, "tw-document"));
+        verify(values).multiGet(List.of(
+                RedisRadarTechnicalCacheRepository.marketLocalKey("台股", "2330"),
+                RedisRadarTechnicalCacheRepository.marketLocalKey("美股", "2330")));
     }
 
     @Test
