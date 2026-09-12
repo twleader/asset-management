@@ -28,7 +28,9 @@ export function isAcceptedTodayQuote(quote, today) {
  * 舊 poller 的盤中 payload 不得再把它覆蓋回最後成交價。
  */
 export function mergeSseQuote(current, incoming, today = marketToday(incoming?.market)) {
-  if (!incoming) return current
+  // The stream contract must carry an explicit status.  Do not turn an incomplete
+  // event into LIVE: callers use this same gate before changing any displayed quote.
+  if (!incoming || incoming.quoteStatus == null) return current
   if (current?.quoteStatus === 'CLOSE_PENDING' || current?.quoteStatus === 'VERIFIED_CLOSE') {
     return incoming.quoteStatus === 'VERIFIED_CLOSE' && incoming.tradingDate === today
       ? incoming

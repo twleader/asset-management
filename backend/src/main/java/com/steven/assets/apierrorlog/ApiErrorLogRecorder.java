@@ -16,7 +16,20 @@ public class ApiErrorLogRecorder {
     public void record(String source, String operationKey, String apiName, String messageHeader, String stackTrace, Instant occurredAt, Integer httpStatus, String dedupeKey) {
         try {
             ApiErrorLogOperationCatalog.require(source, operationKey, apiName);
-            writes.executeWithoutResult(status -> repository.save(new ApiErrorLog(source, operationKey, apiName, renderer.sanitize(messageHeader), renderer.sanitize(stackTrace), occurredAt, httpStatus, dedupeKey)));
+            // Validate and sanitize once before choosing the write path.  A non-null dedupe key
+            // originates from the stable gateway-line digest; a repeated line is a successful,
+            // silent no-op, while every other storage error still reaches this catch block.
+            String safeHeader = renderer.sanitize(messageHeader);
+            String safeTrace = renderer.sanitize(stackTrace);
+            writes.executeWithoutResult(status -> {
+                if (dedupeKey != null) {
+                    repository.insertIgnoringDuplicateDedupeKey(source, operationKey, apiName,
+                            safeHeader, safeTrace, occurredAt, httpStatus, dedupeKey);
+                } else {
+                    repository.save(new ApiErrorLog(source, operationKey, apiName,
+                            safeHeader, safeTrace, occurredAt, httpStatus, null));
+                }
+            });
         } catch (RuntimeException failure) {
             log.warn("API error log recorder failed source={} operation={} error={}", source, operationKey, failure.getClass().getSimpleName());
         }

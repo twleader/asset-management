@@ -54,11 +54,25 @@ public class TradingRadarController {
         return service.getCurrent();
     }
 
+    /** Requirement 148: browser first-screen data only; detail is loaded per expanded stock. */
+    @GetMapping("/list")
+    public TradingRadarDto.ListResponse list() {
+        return service.getList();
+    }
+
+    /** Requirement 148: authenticated, owner-scoped lazy detail for one exact market/code pair. */
+    @GetMapping("/stock")
+    public TradingRadarDto.StockDetailResponse stock(
+            @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String stockCode,
+            @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
+        return service.getStockDetail(stockCode, market);
+    }
+
     /**
      * 手動「重新整理」：先同步回補台股行情再重算（Task 249）。
      *
-     * <p>只有使用者按下按鈕會走這裡；SSE 盤中自動更新仍走上方的 {@link #get()}，
-     * 否則每個 tick 都會觸發一次外部抓取而形成自我餵食迴圈。
+     * <p>只有使用者按下按鈕會走這裡；SSE 盤中更新只 patch 已載入列的允許行情欄位，不發出 HTTP，
+     * 因而不會讓每個 tick 都觸發一次外部抓取。
      * 回補逾時／失敗一律降級成 {@code priceRefresh.outcome}，不回 5xx。</p>
      */
     @PostMapping("/refresh")

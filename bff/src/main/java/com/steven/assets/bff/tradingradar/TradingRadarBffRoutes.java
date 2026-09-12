@@ -17,7 +17,10 @@ public class TradingRadarBffRoutes {
     public RouteLocator tradingRadarRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
                 .route("trading-radar-route", r -> r
-                        .path("/api/bff/trading-radar", "/api/bff/trading-radar/**")
+                        // List/stock are explicit browser contracts.  The same page-owned wildcard
+                        // retains existing notification/export routes and forwards owner headers.
+                        .path("/api/bff/trading-radar", "/api/bff/trading-radar/list",
+                                "/api/bff/trading-radar/stock", "/api/bff/trading-radar/**")
                         .filters(f -> f.rewritePath(
                                 "/api/bff/trading-radar(?<seg>/?.*)",
                                 "/api/trading-radar${seg}"))

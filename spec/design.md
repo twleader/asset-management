@@ -11864,7 +11864,7 @@ uq_api_error_log_dedupe_key
   UNIQUE INDEX ON api_error_log (dedupe_key) WHERE dedupe_key IS NOT NULL
 ~~~
 
-`http_status` 由 OPEN_API 的兩個 producer（既有 WebFilter、下方新增的 gateway-log 排程）填入；FUBON_API 既有 5 個 producer 不變、留 NULL。`dedupe_key` 只由新 gateway-log 排程填入（該行原始文字的 SHA-256 hex digest），其餘既有 producer 一律留 NULL。既有 `guard_api_error_log_retention` trigger 已對 `api_error_log` 的所有 UPDATE 一律 `RAISE EXCEPTION`；新 producer 對重複內容的處理方式是「INSERT 因唯一索引違反而失敗」，不是「UPDATE 已存在的 row」，與既有 append-only 不變量完全相容，原 trigger 不需修改。migration 註冊後依既有規則重產 `db/schema.sql`。
+`http_status` 由 OPEN_API 的兩個 producer（既有 WebFilter、下方新增的 gateway-log 排程）填入；FUBON_API 既有 5 個 producer 不變、留 NULL。`dedupe_key` 只由新 gateway-log 排程填入（該行原始文字的 SHA-256 hex digest），其餘既有 producer 一律留 NULL。既有 `guard_api_error_log_retention` trigger 已對 `api_error_log` 的所有 UPDATE 一律 `RAISE EXCEPTION`；新 producer 對重複內容必以 `INSERT ... ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING` 成為安靜 no-op，不 UPDATE 已存在的 row。這保留 append-only 不變量且不再把正常的 whole-file re-read 記成應用程式例外；原 trigger 與 migration 均不需修改。
 
 ### PublicApiErrorCaptureWebFilter 放寬
 
@@ -12047,3 +12047,87 @@ Trading radar / business / BFF request read
 **Task 425 端到端界線覆寫。** 前述泛稱的 30 位有效小數一律由此固定界線取代：所有 price、turnover、price_change 與分價量的 decimal 為 precision 至多 20、scale 至多 10；volume 為 0 至 Long.MAX_VALUE；sourceMarket 為 null 或 ASCII 1..20，超界於 PostgreSQL 前以 INVALID_RESPONSE 拒絕。故所有合法日 K 均可寫入 numeric(30,10)、bigint 與 varchar(20) 欄位。日 K 工作固定傳送 queryTo=Taipei 當日、queryFrom=queryTo.minusDays(365)，恆為 inclusive 366 日而不受 2 月 29 日影響。stock_price_history 已有 stock_code、market、trading_date 的 unique constraint，migration 只能驗證並復用它，不能重建或破壞性去重。
 
 **Task 425 strict child JSON。** instrumentType 固定是 JSON string EQUITY。levels 每項的精確 key set 是 price、volume、bidVolume、askVolume：price 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，bidVolume 和 askVolume 各為 null 或非負 signed-64 integer JSON string。candles 每項的精確 key set 是 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD JSON string，OHLC 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，turnover 為非負 canonical decimal JSON string，change 為 null 或 signed canonical decimal JSON string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。每個 root 和 child object 均拒絕 missing、unknown、duplicate fields。
+
+## Requirement 148／Task 426：交易雷達 browser BFF 列表／明細分流與錯誤日誌 no-op dedupe
+
+### 路由與信任邊界
+
+```text
+TradingRadarView (browser, authenticated)
+  ├─ GET /api/bff/trading-radar/list
+  │    └─ TradingRadarBffRoutes → GET business /api/trading-radar/list
+  └─ expand one `(market, stockCode)` only
+       └─ GET /api/bff/trading-radar/stock?market=&stockCode=
+            └─ TradingRadarBffRoutes → GET business /api/trading-radar/stock?market=&stockCode=
+
+external system only: :9090 /api/public/trading-radar/today|stock
+  └─ unchanged PublicTradingRadarController / PublicTradingRadarProjectionService
+```
+
+`TradingRadarBffRoutes` retains this page's existing BFF owner-header forwarding and maps only the two new browser paths to their corresponding authenticated business paths. BFF never calls 9090/public routes, public controller/projection, database, Redis, Fubon, or an external data source. The business controller resolves the user through the established `CurrentUserContext`; list and detail never accept a client-selected owner. The detail lookup first verifies the exact `market + stockCode` is an eligible target in this owner scope, otherwise it returns the normal invalid parameter/not-found boundary without revealing stock existence outside that scope. Existing full radar routes remain unchanged for snapshot/export compatibility.
+
+### Two response projections without an eager full tree
+
+`TradingRadarService` owns three intentionally separate read paths:
+
+| path | output | allowed work |
+|---|---|---|
+| existing full | legacy `TradingRadarDto.Response` | current all-target full assembly/snapshot behavior, unchanged |
+| `list` | `TradingRadarListResponse` and scalar `TradingRadarListStock` | market contexts and each target's shared decision inputs only to the degree required for visible table fields; no expand-only DTO tree, snapshot write or external refresh |
+| `stock` | metadata plus one full `StockDecision` | resolve one in-scope target then run its full detail assembly only; never make all-target full decisions then filter |
+
+List DTOs are not aliases of the public 9090 DTOs. They contain only the version/instant, market summaries/public information required by the existing tab/cards, plus first-screen stock scalars: identity/name/market/held state, three action-label-score tuples, timing/counter-trend, table fundamental summary, price/change/quality timestamp, ETF premium, MA, daily KD, weekly KD, daily-candle date and existing visible flags. `reasons`, `risks`, full fundamental/evidence/factor objects, detail observations and all expand-panel collections are excluded structurally, not merely left empty.
+
+The list implementation may reuse pure input resolvers and rule engine components, but must not invoke `get()` or `getCurrent()` then map its full result. At a common owner and decision instant, every visible decision/table value remains semantically identical to the full response. Neither new path saves a snapshot, refreshes cached data or performs Fubon/broker/external I/O; all quote/technical/fundamental reads stay on their established DB/Redis read boundary.
+
+### Vue state and lazy expansion
+
+Mounted load and an explicit manual refresh outcome call `bffApi.tradingRadar.list()`. A list replacement owns the current generation number and clears/invalidate its per-row detail cache. The expand handler loads `bffApi.tradingRadar.stock(market, stockCode)` only for the newly expanded row; loading, failure and no-detail states are explicit. A cached detail is usable only when its generation matches the current list. By contrast, a valid SSE `price-update` never calls list, stock or refresh: it patches only the matching row's payload-provided `price`, `changePercent`, `quoteStatus` and `priceUpdatedAt`. It never recomputes action/score/technical/fundamental/market fields, touches another row, replaces the root response, invalidates detail, or handles `0000` as a reason to reload. This eliminates full-page recomputation after every price event.
+
+#### SSE `price-update` patch mapping (authoritative)
+
+This table is the exhaustive allow-list for `TradingRadarView.applyPriceUpdate`; the implementation must select a row by identity, validate the gate, and assign only named fields. It must not spread the event object or substitute omitted fields with invented defaults.
+
+| payload field(s) | validation / interpretation | row field mutation |
+|---|---|---|
+| `market`, `stockCode` | Both required; exact match against an existing non-`0000` `market + stockCode`. Identity is not mutable. | none |
+| `tradingDate`, `quoteStatus` | `mergeSseQuote` gate only. `LIVE` is accepted only for the market-local current date. An existing `CLOSE_PENDING` or `VERIFIED_CLOSE` row accepts only same-date `VERIFIED_CLOSE`. Missing `quoteStatus` is not defaulted to `LIVE`. | accepted `quoteStatus` only |
+| `price`, `changePercent` | Atomic price tuple: price is positive and changePercent finite. For backward compatibility `changePct` is read only when canonical `changePercent` is absent; canonical wins if both exist. If either tuple element is absent/invalid, neither is assigned. | `price`, `changePercent` together |
+| `updatedAt` | Applied only with an accepted price tuple, never as its own freshness update. | `priceUpdatedAt` |
+| `previousClose`, `priceChange`, `buyPrice`, `sellPrice`, `openPrice`, `highPrice`, `lowPrice`, `volume`, `stockName`, `source`, `closed`, and every unknown field | Explicitly ignored by Trading Radar SSE. | none |
+
+An identity miss, an index/`0000` event, a failed gate or an invalid tuple causes no row or root mutation and no HTTP request. An SSE event does not advance list generation, invalidate a loaded detail, or alter detail content; only an explicit list replacement after initial/manual flow can do that.
+
+### Gateway log duplicate root cause and exact write boundary
+
+`NginxGatewayFailureLogTailer` deliberately rereads the complete shared error file on every configured tick and starts at the beginning after BFF restart. That is required recovery behavior, not the bug. A repeated matching raw line retains the same SHA-256 `dedupeKey`; the former recorder's JPA `save` attempted a second ordinary insert, letting `uq_api_error_log_dedupe_key` raise `DataIntegrityViolationException` and converting an expected no-op into a warning every tick.
+
+The recorder gains a narrow repository write method for non-null keys only:
+
+```sql
+INSERT INTO api_error_log (..., dedupe_key)
+VALUES (..., :dedupeKey)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+```
+
+Its affected-row result distinguishes first insert from expected duplicate no-op. The no-op is silent and does not update any row, satisfying `guard_api_error_log_retention`; all null-key producers keep the ordinary append insert path. Constraint errors outside this named conflict target and all other storage failures still produce the existing diagnostic. The existing partial unique index, migration, tailer scan schedule and cursor-free recovery behavior remain unchanged.
+
+### Verification design
+
+Tests must prove controller/BFF owner guards and exact rewrites; list cannot spy/delegate to full `get`/`getCurrent`; list JSON lacks detail collections; detail evaluates only its one eligible target; and the Vue test observes one initial list request, no eager stock requests, one stock request per expansion, plus a matching SSE event that patches only price/change/status/time with zero HTTP request or root replacement. PostgreSQL integration verifies duplicate non-null record calls leave exactly one row without an exception, while null-key calls append twice. The tailer unit test keeps two attempts for one same line, demonstrating recovery behavior did not turn into a cursor.
+
+Runtime acceptance rebuilds only business-services, bff and frontend from this feature worktree, then checks health and an authenticated browser session's initial list/one-expand network trace. It separately probes the unchanged 9090 public read contract. Repeated tailer scans must not show the old duplicate-key warning, and no acceptance action may invoke Fubon SDK or any financial mutation.
+
+### Manual refresh, compact-core and race completion rules
+
+`POST /api/trading-radar/refresh` keeps its explicit user-initiated price-refresh behavior but its browser response no longer carries a full radar `Response`. It returns only the existing `priceRefresh` outcome envelope. After the frontend renders that outcome, it calls `list`; therefore no browser path has a full-tree shortcut through manual refresh. Snapshot/export callers remain on their existing non-browser full path.
+
+The list implementation is structurally prohibited from calling `buildStock()` or constructing `StockDecision`, `RadarEvidence` or a detail DTO. Extract a compact decision core that produces exactly the scalar fields required by `TradingRadarListStock`, then keep a separate full detail assembler that enriches a core only for one already-authorized target. The existing full response still uses the full detail assembler. The list's sort is exact compatibility behavior: best score descending followed by stock code ascending; its scalar wire fields are named `priceUpdatedAt` and `dailyCandleAsOfDate`, so the table does not retain a hidden dependency on a full `dailyCandle` object.
+
+Each list replacement increments a generation and invalidates details. An expand request captures `(generation, market, stockCode, expanded)` at dispatch; its completion can update the cache/panel only when all four still match. This rejects a stale detail that arrives after a manual-refresh-driven list replacement, rather than merely clearing a cache before the stale promise resolves. SSE is not a list replacement and must not affect generation or the detail cache.
+
+Before the native/non-null dedupe branch, recorder code validates the catalog then sanitizes both diagnostic strings exactly once. The native repository method has no raw-input overload and accepts only those sanitized values. Null-key writes preserve the normal JPA append path; other database exceptions retain warning diagnostics.
+
+### Performance acceptance protocol
+
+Use one authenticated owner with 38 fixed eligible targets, a warm Docker stack and warm Redis/data. Make seven serial requests to authenticated BFF list and full endpoints, discard each endpoint's first request, then record all six TTFB values, bodies and medians. Every list TTFB must be at most 800ms, list body must be below 70 KiB, and the legacy full median must be at least twice the list median. The report records endpoint, timestamp, bytes and each sample; 9090/public measurements cannot substitute for this browser proof. If an existing authorized session is unavailable, this browser measurement is explicitly pending rather than claimed as completed.

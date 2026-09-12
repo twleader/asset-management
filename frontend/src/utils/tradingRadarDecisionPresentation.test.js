@@ -127,3 +127,26 @@ test('Trading Radar detail 將設定頁等價分類與 strict radar profile 分�
   }
   assert.ok(tradingRadarView.includes('不得依股票名稱、代碼或技術資料自行補推或互相替代'))
 })
+
+test('Task426 首屏只讀 list，展開才讀單檔 detail，SSE 只按 mapping patch 同列行情欄位', () => {
+  for (const fragment of [
+    "bffApi.tradingRadar.list()",
+    "bffApi.tradingRadar.stock(row.market, row.stockCode)",
+    '@expand-change="onRowExpand"',
+    'PRICE_UPDATE_FIELD_MAPPING',
+    "payload: 'price + changePercent|changePct'",
+    'applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)',
+    'Object.assign(row, response.stock)',
+    'generation === listGeneration',
+    'expandedDetailKeys.has(key)'
+  ]) {
+    assert.ok(tradingRadarView.includes(fragment), `missing Task426 list/detail/SSE fragment: ${fragment}`)
+  }
+  for (const forbidden of [
+    'scheduleRecalculation()',
+    'recalculateRadar()',
+    'radar.value = { ...radar.value, stocks: nextStocks }'
+  ]) {
+    assert.equal(tradingRadarView.includes(forbidden), false, `Task426 SSE must not retain ${forbidden}`)
+  }
+})

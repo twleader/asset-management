@@ -180,4 +180,18 @@ class TradingRadarServiceOwnerScopeTest {
         verify(snapshotStore, never()).saveRecomputed(anyLong(), any());
         verify(currentUserContext, never()).getEffectiveUserId();
     }
+
+    @Test
+    void browserList走同一owner範圍但不建立完整response快照() {
+        stubCommon();
+
+        TradingRadarDto.ListResponse response = newService().getList();
+
+        assertNotNull(response);
+        verify(snapshotRepo).findLatestWithStocks();
+        verify(alertRepo).findDistinctStockCodeMarket();
+        verify(snapshotStore, never()).save(anyLong(), any());
+        verify(snapshotStore, never()).saveRecomputed(anyLong(), any());
+        verify(currentUserContext, never()).getEffectiveUserId();
+    }
 }

@@ -56,6 +56,93 @@ public final class TradingRadarDto {
     }
 
     /**
+     * Authenticated browser first-screen projection (Requirement 148 / Task 426).
+     *
+     * <p>This is deliberately a different type from the external :9090 projection.  In
+     * particular, it has no evidence, reasons, risks, daily-candle object, or full weekly
+     * object, so serialising a list response cannot accidentally turn into an eager detail
+     * response.</p>
+     */
+    public record ListResponse(
+            String ruleVersion,
+            String actionPolicyVersion,
+            String generatedAt,
+            MarketSummary market,
+            MarketSummary usMarket,
+            List<ListStock> stocks,
+            int skippedNonTwStocks,
+            List<PublicInformationItem> publicInformation) {
+        public ListResponse {
+            stocks = stocks == null ? List.of() : List.copyOf(stocks);
+            publicInformation = publicInformation == null ? List.of() : List.copyOf(publicInformation);
+        }
+    }
+
+    /** Browser lazy-expand response.  Only the requested owner-scoped stock is included. */
+    public record StockDetailResponse(
+            String ruleVersion,
+            String actionPolicyVersion,
+            String generatedAt,
+            StockDecision stock) {}
+
+    /** Compact fundamental summary used by {@link ListStock}; source/evidence trees stay detail-only. */
+    public record ListFundamental(
+            boolean applicable,
+            int coverage,
+            String industryName,
+            BigDecimal industryRevenueYoyPct) {}
+
+    /** Compact weekly values visible in the collapsed table; full OHLC/indicator series are detail-only. */
+    public record ListWeeklyIndicators(
+            BigDecimal k,
+            BigDecimal d,
+            BigDecimal changePercent) {}
+
+    /**
+     * First-screen row.  The scalar daily-candle date and quote timestamp intentionally replace
+     * the corresponding nested full-detail objects.
+     */
+    public record ListStock(
+            String stockCode,
+            String stockName,
+            String market,
+            String assetClass,
+            boolean distributionAdjusted,
+            boolean held,
+            BigDecimal fxPercentile,
+            String underlyingCurrency,
+            ListFundamental fundamental,
+            String shortAction,
+            String shortActionLabel,
+            Integer shortScore,
+            String swingAction,
+            String swingActionLabel,
+            Integer swingScore,
+            String action,
+            String actionLabel,
+            Integer score,
+            boolean horizonConflict,
+            String timingState,
+            String timingLabel,
+            String counterTrendState,
+            String counterTrendLabel,
+            BigDecimal price,
+            BigDecimal changePercent,
+            String quoteStatus,
+            String priceUpdatedAt,
+            BigDecimal etfPremiumLivePct,
+            String etfPremiumLiveNavAsOf,
+            BigDecimal weeklyMa,
+            BigDecimal monthlyMa,
+            BigDecimal quarterlyMa,
+            BigDecimal annualMa,
+            BigDecimal kValue,
+            BigDecimal dValue,
+            String kdHeat,
+            ListWeeklyIndicators weeklyIndicators,
+            String dailyCandleAsOfDate) {}
+
+    /**
      * 公開財經資訊原文；主頁市場清單使用台灣／美國近 72 小時，個股基本面證據使用台灣近 120 日。
      * 兩者都只揭露來源，不做關鍵字情緒評分。
      */
@@ -717,12 +804,11 @@ public final class TradingRadarDto {
     ) {}
 
     /**
-     * {@code POST /api/trading-radar/refresh} 的回應（Task 249）。
-     *
-     * <p>{@code radar} 與 {@code GET} 完全同形——{@link Response} 不得為此新增欄位，
-     * 它會被 {@code TradingRadarSnapshotStore} 序列化進 Redis 快照供 Requirement 48 的區間匯出讀回。</p>
+     * {@code POST /api/trading-radar/refresh} only reports its price-refresh outcome.
+     * The browser then reads the compact list explicitly; returning a full radar tree here would
+     * bypass the lazy list/detail boundary.
      */
-    public record RefreshResponse(Response radar, PriceRefresh priceRefresh) {}
+    public record RefreshResponse(PriceRefresh priceRefresh) {}
 
     public record MarketSummary(
             String regime,
