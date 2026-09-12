@@ -301,8 +301,11 @@ export const bffApi = {
 
   // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
   tradingRadar: {
-    // 純讀重算；SSE 盤中自動更新走這支（不得改成下方的 refresh，否則會自我餵食迴圈）
+    // Legacy full-tree endpoint remains for non-page compatibility consumers only.
     get: () => api.get('/bff/trading-radar'),
+    // Requirement 148: page initial/manual list and lazy single-stock detail stay on this page BFF.
+    list: () => api.get('/bff/trading-radar/list'),
+    stock: (market, stockCode) => api.get('/bff/trading-radar/stock', { params: { market, stockCode } }),
     // Task 249：手動「重新整理」＝先同步回補台股行情再重算。
     // 外部抓取需時，全域 timeout 30s 不夠用，必須 per-call 覆寫（鏈路上界為 nginx /api/ 的 60s）
     refresh: () => api.post('/bff/trading-radar/refresh', null, { timeout: 45000 }),

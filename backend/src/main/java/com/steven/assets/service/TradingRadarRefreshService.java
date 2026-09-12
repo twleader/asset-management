@@ -11,11 +11,11 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 
 /**
- * 今日交易雷達手動「重新整理」：先同步回補台股行情，再走既有純讀重算（Task 249，Requirement 43 修訂）。
+ * 今日交易雷達手動「重新整理」：先同步回補台股行情，再回傳 outcome（Task 426）。
  *
  * <p>本服務推翻了 Requirement 43 原本的「不得因重新整理而觸發外部行情抓取」，
- * <b>但只限使用者明確按下按鈕的這一條路徑</b>：{@code GET /api/trading-radar} 行為完全不變，
- * SSE 盤中自動更新仍走 GET——否則抓取寫 Redis 會觸發 {@code price-update} 事件、再觸發下一輪抓取，
+ * <b>但只限使用者明確按下按鈕的這一條路徑</b>：既有 full GET 行為完全不變；SSE
+ * {@code price-update} 只會 patch 已載入列的允許行情欄位，絕不發出 HTTP 或觸發刷新，因而不會
  * 形成自我餵食迴圈。仍不呼叫任何 AI／LLM API，也不觸發新聞爬蟲。</p>
  */
 @Slf4j
@@ -28,7 +28,6 @@ public class TradingRadarRefreshService {
     private static final String COOLDOWN_KEY_PREFIX = "radar:refresh:cooldown:";
     private static final String COOLDOWN_GLOBAL_KEY = COOLDOWN_KEY_PREFIX + "global";
 
-    private final TradingRadarService tradingRadarService;
     private final PriceQueryService priceQueryService;
     private final MarketDataService marketDataService;
     private final CurrentUserContext currentUserContext;
@@ -44,10 +43,8 @@ public class TradingRadarRefreshService {
                 ? refreshPrices(twOpen)
                 : "COOLDOWN";
 
-        TradingRadarDto.Response radar = tradingRadarService.get();
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
-        return new TradingRadarDto.RefreshResponse(
-                radar, new TradingRadarDto.PriceRefresh(outcome, twOpen, elapsedMs));
+        return new TradingRadarDto.RefreshResponse(new TradingRadarDto.PriceRefresh(outcome, twOpen, elapsedMs));
     }
 
     /**

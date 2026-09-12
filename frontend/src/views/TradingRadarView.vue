@@ -218,10 +218,26 @@
         stripe
         style="width:100%"
         @row-dblclick="onStockDblClick"
+        @expand-change="onRowExpand"
       >
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-panel">
+              <el-alert
+                v-if="isDetailLoading(row)"
+                type="info"
+                :closable="false"
+                show-icon
+                title="正在載入此股票的明細…"
+              />
+              <el-alert
+                v-else-if="detailError(row)"
+                type="error"
+                :closable="false"
+                show-icon
+                :title="detailError(row)"
+              />
+              <template v-else-if="hasDetail(row)">
               <div class="evidence-summary">
                 <div class="confirm-grid">
                   <div class="confirm-item">
@@ -763,6 +779,8 @@
                 行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.dailyCandle?.asOfDate || '資料不足' }}
                 <span v-if="row.distributionAdjusted">　·　技術價基：還原權息／分割</span>
               </div>
+              </template>
+              <div v-else class="muted">展開後才會載入此股票的明細。</div>
             </div>
           </template>
         </el-table-column>
@@ -867,7 +885,7 @@
         <!--
           Task 320：ETF 即時折溢價（純揭露，不進任何規則）。值與該列現價同一 tick，
           個股與查無淨值者顯示「—」，不補 0。SSE 的 price-update 只帶報價、不帶淨值，
-          故報價跳動後約 2 秒內本欄仍是上一輪 API 的值，由背景 load() 自癒；
+          因此本欄維持 list 回應的資料，不為 SSE 自行重算或重新載入整頁；
           前端一律不自行以 (price−nav)/nav 重算——台股必須直取證交所權威值。
         -->
         <el-table-column label="折溢價(即時)" min-width="120" align="right">
@@ -913,7 +931,7 @@
           </template>
         </el-table-column>
         <el-table-column label="完成日 K" width="115">
-          <template #default="{ row }">{{ row.dailyCandle?.asOfDate || '資料不足' }}</template>
+          <template #default="{ row }">{{ row.dailyCandleAsOfDate || row.dailyCandle?.asOfDate || '資料不足' }}</template>
         </el-table-column>
         <el-table-column label="通知" width="105" align="center" fixed="right">
           <template #default="{ row }">
@@ -1266,7 +1284,8 @@ import { useRoute, useRouter } from 'vue-router'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
-import { isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
+import { isClosePending } from '@/utils/displayQuote'
+import { applyTradingRadarSsePriceUpdate } from '@/utils/tradingRadarSsePriceUpdate'
 import { projectValuationEvidence } from '@/utils/valuationEvidence'
 import {
   HOLDING_PERIOD_OPTIONS,
@@ -1347,15 +1366,23 @@ const notificationForm = reactive({
 const notificationOptions = reactive({ actions: [], counterTrends: [], recipients: [] })
 const analysisVisible = ref(false)
 const analysisStock = ref(null)
-const RECALCULATE_DELAY_MS = 2000
 const RECONNECT_DELAY_MS = 5000
 
 let priceStream = null
-let recalculationTimer = null
 let reconnectTimer = null
-let recalculating = false
-let recalculationPending = false
 let disposed = false
+let listGeneration = 0
+const expandedDetailKeys = new Set()
+const detailStates = reactive({})
+
+// Requirement 148 SSE mapping table: this is the complete allow-list for a price-update.
+// Identity is selection-only; no payload field is spread or implicitly merged into a row.
+const PRICE_UPDATE_FIELD_MAPPING = Object.freeze([
+  Object.freeze({ payload: 'market + stockCode', rowFields: Object.freeze([]), rule: 'exact identity only' }),
+  Object.freeze({ payload: 'tradingDate + quoteStatus', rowFields: Object.freeze(['quoteStatus']), rule: 'mergeSseQuote gate' }),
+  Object.freeze({ payload: 'price + changePercent|changePct', rowFields: Object.freeze(['price', 'changePercent']), rule: 'accepted atomic tuple' }),
+  Object.freeze({ payload: 'updatedAt', rowFields: Object.freeze(['priceUpdatedAt']), rule: 'only with accepted tuple' })
+])
 
 const market = computed(() => radar.value.market || {})
 // 大盤卡片的台股／美股分頁（Requirement 76 / Task 335）。與下方個股表格的 marketTab 是
@@ -1381,17 +1408,22 @@ const informationGroups = computed(() => [
 ])
 const marketClass = computed(() => `regime-${String(currentMarket.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
 
-// 純讀重算。初次載入與 SSE 背景重算都走這裡；不觸發任何外部行情抓取。
-async function load(manual = false, silent = false) {
-  if (manual) refreshing.value = true
-  else if (!silent) loading.value = true
+// First screen and explicit manual refresh read only this page's compact list contract.
+async function load(silent = false) {
+  if (!silent) loading.value = true
   try {
-    const next = await bffApi.tradingRadar.get()
-    if (!disposed) radar.value = next
+    const next = await bffApi.tradingRadar.list()
+    if (!disposed) replaceList(next)
   } finally {
     if (!silent) loading.value = false
-    if (manual) refreshing.value = false
   }
+}
+
+function replaceList(next) {
+  listGeneration += 1
+  expandedDetailKeys.clear()
+  for (const key of Object.keys(detailStates)) delete detailStates[key]
+  radar.value = next
 }
 
 // Task 249：outcome → 提示文案。不得宣稱做了沒做的事。
@@ -1406,78 +1438,70 @@ const REFRESH_MESSAGES = {
 }
 
 /**
- * 手動「重新整理」：先同步回補台股行情再重算（Task 249）。
- * 只有按鈕走這支；scheduleRecalculation / recalculateRadar 一律用上面的 load()，
- * 否則抓取 → 寫 Redis → price-update → 再抓取，會變成自我餵食迴圈。
+ * 手動「重新整理」只取得行情回補 outcome，再明確替換 compact list。SSE 絕不走此路。
  */
 async function manualRefresh() {
   refreshing.value = true
   try {
     const resp = await bffApi.tradingRadar.refresh()
     if (disposed) return
-    if (resp?.radar) radar.value = resp.radar
     const hint = REFRESH_MESSAGES[resp?.priceRefresh?.outcome] || REFRESH_MESSAGES.TIMEOUT
     ElMessage({ type: hint.type, message: hint.text })
+    await load(true)
   } finally {
     refreshing.value = false
   }
 }
 
-function scheduleRecalculation() {
-  if (disposed) return
-  if (recalculationTimer) clearTimeout(recalculationTimer)
-  recalculationTimer = setTimeout(() => {
-    recalculationTimer = null
-    void recalculateRadar()
-  }, RECALCULATE_DELAY_MS)
+function applyPriceUpdate(payload) {
+  applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)
 }
 
-async function recalculateRadar() {
-  if (disposed) return
-  if (recalculating) {
-    recalculationPending = true
+function detailKey(row) {
+  return `${row.market}\u0000${row.stockCode}`
+}
+
+function isDetailLoading(row) {
+  return detailStates[detailKey(row)]?.loading === true
+}
+
+function detailError(row) {
+  return detailStates[detailKey(row)]?.error || ''
+}
+
+function hasDetail(row) {
+  return detailStates[detailKey(row)]?.loaded === true
+}
+
+function onRowExpand(row, expandedRows) {
+  const key = detailKey(row)
+  const expanded = Array.isArray(expandedRows) && expandedRows.some(candidate => detailKey(candidate) === key)
+  if (!expanded) {
+    expandedDetailKeys.delete(key)
     return
   }
-
-  recalculating = true
-  try {
-    await load(false, true)
-  } catch (e) {
-    console.warn('交易雷達背景重算失敗:', e)
-  } finally {
-    recalculating = false
-    if (recalculationPending && !disposed) {
-      recalculationPending = false
-      scheduleRecalculation()
-    }
-  }
+  expandedDetailKeys.add(key)
+  if (hasDetail(row) || isDetailLoading(row)) return
+  void loadStockDetail(row, key, listGeneration)
 }
 
-function applyPriceUpdate(payload) {
-  if (!['台股', '美股'].includes(payload?.market) || !payload.stockCode) return
-
-  let matched = false
-  const nextStocks = (radar.value.stocks || []).map(row => {
-    if (row.market !== payload.market || String(row.stockCode).toUpperCase() !== String(payload.stockCode).toUpperCase()) return row
-    matched = true
-    const incoming = {
-      ...row,
-      ...payload,
-      quoteStatus: payload.quoteStatus ?? 'LIVE',
-      changePercent: payload.changePercent ?? payload.changePct ?? row.changePercent,
-      priceUpdatedAt: payload.updatedAt ?? row.priceUpdatedAt
+async function loadStockDetail(row, key, generation) {
+  const state = detailStates[key] = { loading: true, loaded: false, error: '', generation }
+  try {
+    const response = await bffApi.tradingRadar.stock(row.market, row.stockCode)
+    const stillCurrent = !disposed && generation === listGeneration && expandedDetailKeys.has(key)
+      && detailStates[key] === state && (radar.value.stocks || []).includes(row)
+    if (!stillCurrent) return
+    if (!response?.stock) throw new Error('未取得股票明細')
+    Object.assign(row, response.stock)
+    state.loaded = true
+  } catch (error) {
+    if (!disposed && generation === listGeneration && expandedDetailKeys.has(key) && detailStates[key] === state) {
+      state.error = error?.message || '載入股票明細失敗，請稍後再試。'
     }
-    const merged = mergeSseQuote(row, incoming)
-    if (merged === row) return row
-    return {
-      ...row,
-      ...merged
-    }
-  })
-
-  if (matched) radar.value = { ...radar.value, stocks: nextStocks }
-  if (!matched && String(payload.stockCode) !== '0000') return
-  scheduleRecalculation()
+  } finally {
+    if (detailStates[key] === state) state.loading = false
+  }
 }
 
 function openPriceStream() {
@@ -2311,7 +2335,7 @@ function handleBlogOauthRedirect() {
 }
 
 onMounted(() => {
-  load(false).catch(() => {}).finally(openPriceStream)
+  load().catch(() => {}).finally(openPriceStream)
   loadExportSchedule().catch(() => {})
   loadBlogStatus().catch(() => {})
   handleBlogOauthRedirect()
@@ -2322,10 +2346,6 @@ onUnmounted(() => {
   if (priceStream) {
     priceStream.close()
     priceStream = null
-  }
-  if (recalculationTimer) {
-    clearTimeout(recalculationTimer)
-    recalculationTimer = null
   }
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)

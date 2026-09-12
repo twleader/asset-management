@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 /**
  * Task 249：手動「重新整理」先回補行情再重算。
  *
- * <p>核心不變式：<b>任何降級路徑都必須仍然回傳完整 radar</b>——按鈕不該因為抓取失敗就給不出結果。</p>
+ * <p>核心不變式：任何降級路徑仍回傳 outcome，但不得偷渡完整 radar tree。</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -38,7 +38,6 @@ class TradingRadarRefreshServiceTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    @Mock private TradingRadarService tradingRadarService;
     @Mock private PriceQueryService priceQueryService;
     @Mock private MarketDataService marketDataService;
     @Mock private CurrentUserContext currentUserContext;
@@ -47,15 +46,11 @@ class TradingRadarRefreshServiceTest {
 
     private TradingRadarRefreshService service;
 
-    private static final TradingRadarDto.Response RADAR = new TradingRadarDto.Response(
-            "TW_RULES_V7", "2026-07-29T10:00:00+08:00", null, List.of(), 0);
-
     @BeforeEach
     void setUp() {
         service = new TradingRadarRefreshService(
-                tradingRadarService, priceQueryService, marketDataService, currentUserContext, redis);
+                priceQueryService, marketDataService, currentUserContext, redis);
         when(redis.opsForValue()).thenReturn(valueOps);
-        when(tradingRadarService.get()).thenReturn(RADAR);
         when(currentUserContext.hasUser()).thenReturn(true);
         when(currentUserContext.getEffectiveUserId()).thenReturn(1L);
         cooldownAvailable();
@@ -75,7 +70,7 @@ class TradingRadarRefreshServiceTest {
     }
 
     @Test
-    void 開盤中觸發回補後重算() {
+    void 開盤中觸發回補後只回傳outcome() {
         when(marketDataService.isMarketOpenNow("台股")).thenReturn(true);
         when(priceQueryService.refreshTradingRadarPrices())
                 .thenReturn(summary("{\"performed\":true,\"busy\":false,\"skippedPendingClose\":false}"));
@@ -85,7 +80,6 @@ class TradingRadarRefreshServiceTest {
         verify(priceQueryService).refreshTradingRadarPrices();
         assertEquals("FETCHED", resp.priceRefresh().outcome());
         assertTrue(resp.priceRefresh().twMarketOpen());
-        assertNotNull(resp.radar());
     }
 
     @Test
@@ -97,7 +91,6 @@ class TradingRadarRefreshServiceTest {
         TradingRadarDto.RefreshResponse resp = service.refreshAndGet();
 
         assertEquals("CLOSED_SYNCED", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     @Test
@@ -109,11 +102,10 @@ class TradingRadarRefreshServiceTest {
         TradingRadarDto.RefreshResponse resp = service.refreshAndGet();
 
         assertEquals("SKIPPED_PENDING_CLOSE", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     @Test
-    void owner冷卻中不呼叫外部但仍重算() {
+    void owner冷卻中不呼叫外部也不組完整雷達() {
         when(marketDataService.isMarketOpenNow("台股")).thenReturn(true);
         when(valueOps.setIfAbsent(eq("radar:refresh:cooldown:1"), eq("1"), any(Duration.class)))
                 .thenReturn(false);
@@ -122,7 +114,6 @@ class TradingRadarRefreshServiceTest {
 
         verify(priceQueryService, never()).refreshTradingRadarPrices();
         assertEquals("COOLDOWN", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     /** 全域鍵專屬案例：只測 owner 鍵不算覆蓋——多使用者輪流按正是靠全域鍵擋下的。 */
@@ -140,7 +131,6 @@ class TradingRadarRefreshServiceTest {
         // 沒真的抓，就不該燒掉使用者自己的 30 秒冷卻
         verify(redis).delete("radar:refresh:cooldown:1");
         assertEquals("COOLDOWN", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     @Test
@@ -153,7 +143,7 @@ class TradingRadarRefreshServiceTest {
     }
 
     @Test
-    void 外部逾時不上拋且仍回完整結果() {
+    void 外部逾時不上拋且只回outcome() {
         when(marketDataService.isMarketOpenNow("台股")).thenReturn(true);
         when(priceQueryService.refreshTradingRadarPrices())
                 .thenThrow(new IllegalStateException("Timeout on blocking read for 30000 MILLISECONDS"));
@@ -161,11 +151,10 @@ class TradingRadarRefreshServiceTest {
         TradingRadarDto.RefreshResponse resp = service.refreshAndGet();
 
         assertEquals("TIMEOUT", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     @Test
-    void 外部失敗不上拋且仍回完整結果() {
+    void 外部失敗不上拋且只回outcome() {
         when(marketDataService.isMarketOpenNow("台股")).thenReturn(true);
         when(priceQueryService.refreshTradingRadarPrices())
                 .thenThrow(new RuntimeException("connection refused"));
@@ -173,7 +162,6 @@ class TradingRadarRefreshServiceTest {
         TradingRadarDto.RefreshResponse resp = service.refreshAndGet();
 
         assertEquals("FAILED", resp.priceRefresh().outcome());
-        assertNotNull(resp.radar());
     }
 
     /** outcome 與 twMarketOpen 必須同源，否則會出現「抓了即時報價卻標成休市」的矛盾 payload。 */

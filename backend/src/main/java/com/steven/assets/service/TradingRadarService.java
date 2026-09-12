@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * 今日交易雷達（Requirement 43）資料組裝。
@@ -58,6 +59,8 @@ public class TradingRadarService {
     private static final String IXIC_CODE = "IXIC";
 
     private static final String TWD = "TWD";
+    private static final Pattern STOCK_CODE_SELECTOR = Pattern.compile("^[A-Za-z0-9.\\-]{1,12}$");
+    private static final Pattern MARKET_SELECTOR = Pattern.compile("^[\\p{L}0-9]{1,10}$");
 
     /**
      * ETF 折溢價分位的回看筆數與最小樣本數（Task 264）。
@@ -388,6 +391,63 @@ public class TradingRadarService {
     private record Target(String code, String market, boolean held) {}
 
     /**
+     * Shared rule-evaluation result.  It is deliberately an internal calculation object, not an
+     * HTTP detail DTO: list callers project only table scalars while full/detail callers create a
+     * {@link TradingRadarDto.StockDecision} at the final boundary.
+     */
+    private record DecisionCore(
+            Target target,
+            String name,
+            String assetClass,
+            TradingRadarDto.SettingsClassification settingsClassification,
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            RadarInputAssembler.Assembled technical,
+            ResolvedTechnicalInputs resolvedTechnical,
+            RadarObservationResolver.AcceptedPrice acceptedPrice,
+            TradingRadarRuleEngine.StockResult result,
+            TradingRadarEvidenceGate.GatedActions gated,
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence,
+            FundamentalAnalysisService.Resolved fundamental,
+            DividendEventEvidenceResolver.Resolution distribution,
+            TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation,
+            PremiumObservation premium,
+            BigDecimal displayPrice,
+            BigDecimal displayChangePercent,
+            String quoteStatus,
+            String updatedAt,
+            String asOf,
+            TechnicalIndicatorService.FullIndicators indicators,
+            TradingRadarRuleEngine.Confirmation c20,
+            TradingRadarRuleEngine.Confirmation c60,
+            TradingRadarRuleEngine.Confirmation c240,
+            BigDecimal fxPercentile,
+            String currency,
+            String fxAsOfDate,
+            BigDecimal ma60Bias,
+            BigDecimal week52Position,
+            BigDecimal etfPremiumPct,
+            BigDecimal etfPremiumPercentile,
+            BigDecimal etfPremiumLivePct,
+            String etfPremiumLiveNavAsOf,
+            List<String> reasons,
+            List<String> risks,
+            List<String> shortReasons,
+            List<String> shortRisks,
+            List<String> swingReasons,
+            List<String> swingRisks,
+            String failureMessage) {
+        static DecisionCore failed(Target target, String name, String assetClass,
+                                   TradingRadarDto.SettingsClassification settingsClassification,
+                                   String message) {
+            return new DecisionCore(target, name, assetClass, settingsClassification,
+                    null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, "CLOSE_PENDING", null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null,
+                    List.of(), List.of(message), List.of(), List.of(message), List.of(), List.of(message), message);
+        }
+    }
+
+    /**
      * 當前台股交易日：今天是交易日就取今天，否則往回找最近一個交易日。
      * 用於判斷大盤資料是否停在更早的交易日；沿用既有交易日曆，不自建假日表。
      */
@@ -437,6 +497,96 @@ public class TradingRadarService {
     @Transactional(readOnly = true)
     public TradingRadarDto.Response getCurrent() {
         return assemble(null);
+    }
+
+    /**
+     * Authenticated browser first-screen read.  This path deliberately owns its compact
+     * projection and never delegates to get(), getCurrent(), or the full response assembler.
+     */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.ListResponse getList() {
+        Instant decisionInstant = Instant.now();
+        TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
+        MarketState twMarket = buildMarket(context.market(), decisionInstant);
+        MarketState usMarket = buildUsMarket(decisionInstant);
+        Map<String, DecisionClock> decisionClocks = resolveDecisionClocks(decisionInstant);
+        Map<String, Target> targets = new LinkedHashMap<>();
+        Set<String> skippedNonTw = new HashSet<>();
+        loadLatestHoldings(targets, skippedNonTw, null);
+        loadWatchList(targets, skippedNonTw, null);
+        RadarTechnicalResolver.Batch technicalBatch = preloadTaiwanTechnical(targets.values(), decisionInstant);
+        Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
+        List<TradingRadarDto.ListStock> stocks = targets.values().stream()
+                .filter(this::isSupportedTarget)
+                .map(target -> toListStock(buildDecisionCore(target,
+                        regimeFor(target.market(), twMarket, usMarket),
+                        staleFor(target.market(), twMarket, usMarket),
+                        marketSummaryFor(target.market(), twMarket, usMarket), decisionInstant, fxCache,
+                        decisionClocks.getOrDefault(target.market(), new DecisionClock(null, false)),
+                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch,
+                        false)))
+                .sorted(Comparator.comparing(TradingRadarService::bestListScore,
+                                Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(TradingRadarDto.ListStock::stockCode))
+                .toList();
+        return new TradingRadarDto.ListResponse(TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(), twMarket.summary(),
+                usMarket.summary(), stocks, skippedNonTw.size(), context.publicInformation());
+    }
+
+    /** Lazy detail read for exactly one current-user target; it never assembles every target first. */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.StockDetailResponse getStockDetail(String rawStockCode, String rawMarket) {
+        String stockCode = normalizeSelector(rawStockCode, STOCK_CODE_SELECTOR, "股票代號格式不合法");
+        String market = normalizeSelector(rawMarket, MARKET_SELECTOR, "市場別格式不合法");
+        Instant decisionInstant = Instant.now();
+        Map<String, Target> targets = new LinkedHashMap<>();
+        Set<String> skipped = new HashSet<>();
+        loadLatestHoldings(targets, skipped, null);
+        loadWatchList(targets, skipped, null);
+        Target target = targets.get(stockCode + '\0' + market);
+        if (target == null || !isSupportedTarget(target)) {
+            throw new IllegalArgumentException("找不到可分析標的");
+        }
+
+        TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
+        MarketState twMarket = TW_MARKET.equals(target.market())
+                ? buildMarket(context.market(), decisionInstant) : incompleteMarket("台股大盤未讀取");
+        MarketState usMarket = US_MARKET.equals(target.market())
+                ? buildUsMarket(decisionInstant) : incompleteMarket("美股大盤未讀取");
+        Map<String, DecisionClock> clocks = resolveDecisionClocks(decisionInstant);
+        RadarTechnicalResolver.Batch technicalBatch = preloadTaiwanTechnical(List.of(target), decisionInstant);
+        DecisionCore core = buildDecisionCore(target, regimeFor(target.market(), twMarket, usMarket),
+                staleFor(target.market(), twMarket, usMarket), marketSummaryFor(target.market(), twMarket, usMarket),
+                decisionInstant, new java.util.HashMap<>(),
+                clocks.getOrDefault(target.market(), new DecisionClock(null, false)),
+                clocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch, true);
+        return new TradingRadarDto.StockDetailResponse(TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(), toFullDecision(core));
+    }
+
+    private RadarTechnicalResolver.Batch preloadTaiwanTechnical(
+            java.util.Collection<Target> targets, Instant decisionInstant) {
+        if (radarTechnicalResolver == null) return null;
+        return radarTechnicalResolver.preload(targets.stream()
+                .filter(target -> TW_MARKET.equals(target.market()))
+                .map(Target::code).collect(java.util.stream.Collectors.toSet()), decisionInstant);
+    }
+
+    private boolean isSupportedTarget(Target target) {
+        return target != null && (TW_MARKET.equals(target.market()) || US_MARKET.equals(target.market()))
+                && !isTaiwanMarketIndex(target.code(), target.market());
+    }
+
+    private static String normalizeSelector(String raw, Pattern pattern, String message) {
+        if (raw == null) throw new IllegalArgumentException(message);
+        String normalized = raw.trim();
+        if (normalized.isEmpty() || !pattern.matcher(normalized).matches()) {
+            throw new IllegalArgumentException(message);
+        }
+        return normalized;
     }
 
     /**
@@ -492,11 +642,12 @@ public class TradingRadarService {
         List<TradingRadarDto.StockDecision> decisions = targets.values().stream()
                 .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
                         && !isTaiwanMarketIndex(t.code(), t.market()))
-                .map(t -> buildStock(t, regimeFor(t.market(), twMarket, usMarket),
+                .map(t -> toFullDecision(buildDecisionCore(t, regimeFor(t.market(), twMarket, usMarket),
                         staleFor(t.market(), twMarket, usMarket),
                         marketSummaryFor(t.market(), twMarket, usMarket), decisionInstant, fxCache,
                         decisionClocks.getOrDefault(t.market(), new DecisionClock(null, false)),
-                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch))
+                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch,
+                        true)))
                 .sorted(Comparator
                         .comparing(TradingRadarService::bestScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
@@ -584,10 +735,11 @@ public class TradingRadarService {
             String stockCode, String market, boolean held, MarketSnapshot snapshot) {
         RadarTechnicalResolver.Batch technicalBatch = radarTechnicalResolver == null || !TW_MARKET.equals(market)
                 ? null : radarTechnicalResolver.preload(Set.of(stockCode), snapshot.decisionInstant());
-        return buildStock(new Target(stockCode, market, held), snapshot.regime(), snapshot.stale(),
+        return toFullDecision(buildDecisionCore(new Target(stockCode, market, held), snapshot.regime(), snapshot.stale(),
                 snapshot.summary(), snapshot.decisionInstant(), new java.util.HashMap<>(),
                 new DecisionClock(snapshot.decisionSessions(), snapshot.authoritativeCalendar()),
-                new DecisionClock(snapshot.usDecisionSessions(), snapshot.usAuthoritativeCalendar()), technicalBatch);
+                new DecisionClock(snapshot.usDecisionSessions(), snapshot.usAuthoritativeCalendar()), technicalBatch,
+                true));
     }
 
     /**
@@ -902,7 +1054,7 @@ public class TradingRadarService {
         }
     }
 
-    private TradingRadarDto.StockDecision buildStock(
+    private DecisionCore buildDecisionCore(
             Target target,
             TradingRadarRuleEngine.MarketRegime marketRegime,
             boolean marketStale,
@@ -911,13 +1063,15 @@ public class TradingRadarService {
             Map<String, TradingRadarMarketContextService.FxContext> fxCache,
             DecisionClock decisionClock,
             DecisionClock usDecisionClock,
-            RadarTechnicalResolver.Batch technicalBatch) {
+            RadarTechnicalResolver.Batch technicalBatch,
+            boolean includeFullDetail) {
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(target.code(), target.market());
         String name = stock.map(Stock::getName)
                 .filter(n -> n != null && !n.isBlank())
                 .orElse(target.code());
-        TradingRadarDto.SettingsClassification settingsClassification = resolveSettingsClassification(
-                stock.orElse(null), target.code(), target.market(), name);
+        TradingRadarDto.SettingsClassification settingsClassification = includeFullDetail
+                ? resolveSettingsClassification(stock.orElse(null), target.code(), target.market(), name)
+                : null;
         TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
                 stock.orElse(null), target.code(), target.market(), name,
                 null, stockStyleIncomeThreshold());
@@ -1132,146 +1286,161 @@ public class TradingRadarService {
                     result.action(), result.shortAction(), result.swingAction(),
                     target.held(), profile, evidence);
 
-            List<String> reasons = new ArrayList<>();
-            if (technical.distributionAdjusted()) {
-                reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
-            }
-            reasons.addAll(result.reasons());
-            List<String> risks = new ArrayList<>(result.risks());
-            risks.addAll(gated.mediumDiagnostics());
-            List<String> shortReasons = new ArrayList<>();
-            if (technical.distributionAdjusted()) {
-                shortReasons.add("MA／KD、擴充指標與相對量已使用同一份還原權息／分割序列。 ");
-            }
-            shortReasons.addAll(result.shortReasons());
-            List<String> shortRisks = new ArrayList<>(result.shortRisks());
-            shortRisks.addAll(gated.shortDiagnostics());
+            List<String> reasons = List.of();
+            List<String> risks = List.of();
+            List<String> shortReasons = List.of();
+            List<String> shortRisks = List.of();
             // Task 356.1b-2：swing 軌必須比照既有兩軌加入還原權息揭露句，否則同一頁三軌
             // 中兩軌有揭露、一軌沒有。
             // 出處就是這裡——**引擎不產生任何還原字串**：evaluateStock 的三軌 reasons 只寫
             // 均線位置／指標方向，「已使用還原權息序列」這件事只有本方法知道（判準是
             // technical.distributionAdjusted()，由 RadarInputAssembler 依事件日與日K 契約視窗
             // 決定）。三軌的揭露句因此一律在此加上，不得指望 result.swingReasons() 自帶。
-            List<String> swingReasons = new ArrayList<>();
-            if (technical.distributionAdjusted()) {
-                swingReasons.add("MA／KD、週K 聚合與相對量已使用同一份還原權息／分割序列，"
-                        + "1周~1月 的波段位置不受配息缺口或分割跳空影響。 ");
-            }
-            swingReasons.addAll(nullSafe(result.swingReasons()));
-            List<String> swingRisks = new ArrayList<>(nullSafe(result.swingRisks()));
-            swingRisks.addAll(gated.swingDiagnostics());
-            if (!TWD.equals(currency) && fx.asOfDate() == null) {
-                String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
-                risks.add(missingFx);
-                shortRisks.add(missingFx);
-                swingRisks.add(missingFx);
+            List<String> swingReasons = List.of();
+            List<String> swingRisks = List.of();
+            if (includeFullDetail) {
+                reasons = new ArrayList<>();
+                if (technical.distributionAdjusted()) {
+                    reasons.add("MA／KD、兩日確認與規則漲跌已使用還原權息／分割價，避免把配息缺口或分割跳空誤判為趨勢跌破。 ");
+                }
+                reasons.addAll(result.reasons());
+                risks = new ArrayList<>(result.risks());
+                risks.addAll(gated.mediumDiagnostics());
+                shortReasons = new ArrayList<>();
+                if (technical.distributionAdjusted()) {
+                    shortReasons.add("MA／KD、擴充指標與相對量已使用同一份還原權息／分割序列。 ");
+                }
+                shortReasons.addAll(result.shortReasons());
+                shortRisks = new ArrayList<>(result.shortRisks());
+                shortRisks.addAll(gated.shortDiagnostics());
+                swingReasons = new ArrayList<>();
+                if (technical.distributionAdjusted()) {
+                    swingReasons.add("MA／KD、週K 聚合與相對量已使用同一份還原權息／分割序列，"
+                            + "1周~1月 的波段位置不受配息缺口或分割跳空影響。 ");
+                }
+                swingReasons.addAll(nullSafe(result.swingReasons()));
+                swingRisks = new ArrayList<>(nullSafe(result.swingRisks()));
+                swingRisks.addAll(gated.swingDiagnostics());
+                if (!TWD.equals(currency) && fx.asOfDate() == null) {
+                    String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
+                    risks.add(missingFx);
+                    shortRisks.add(missingFx);
+                    swingRisks.add(missingFx);
+                }
             }
 
             String updatedAt = acceptedPrice.updatedAt();
             String asOf = acceptedPrice.tradingDate() == null
                     ? null : acceptedPrice.tradingDate().toString();
             String quoteStatus = acceptedPrice.quoteStatus();
-            return new TradingRadarDto.StockDecision(
-                    target.code(),
-                    name,
-                    target.market(),
-                    assetClass,
-                    technical.distributionAdjusted(),
-                    target.held(),
-                    gated.mediumAction().name(),
-                    actionLabel(gated.mediumAction()),
-                    result.score(),
-                    result.counterTrend().state().name(),
-                    counterTrendLabel(result.counterTrend().state()),
-                    result.counterTrend().reasons(),
-                    result.counterTrend().risks(),
-                    result.action() != TradingRadarRuleEngine.Action.NO_TRADE,
-                    displayPrice,
-                    displayChangePercent,
-                    quoteStatus,
-                    updatedAt,
-                    asOf,
-                    ind.monthlyMa(),
-                    ind.quarterlyMa(),
-                    ind.annualMa(),
-                    ind.k(),
-                    ind.d(),
-                    c20.name(),
-                    c60.name(),
-                    c240.name(),
-                    fxPct,
-                    currency,
-                    List.copyOf(reasons),
-                    List.copyOf(risks),
-                    result.kdHeat().name(),
-                    result.timingState().name(),
-                    timingLabel(result.timingState()),
-                    ma60Bias,
-                    week52Pos,
-                    ind.weeklyMa(),
-                    etfPremiumPct,
-                    etfPremiumPercentile,
-                    toDto(ind.extended()),
-                    gated.shortAction().name(),
-                    actionLabel(gated.shortAction()),
-                    result.shortScore(),
-                    List.copyOf(shortReasons),
-                    List.copyOf(shortRisks),
-                    result.horizonConflict(),
-                    technical.volumeRatio(),
-                    fx.asOfDate() == null ? null : fx.asOfDate().toString(),
-                    result.profitTakingConfirmed(),
-                    fundamental.snapshot(),
-                    TradingRadarDto.RadarEvidence.withConfidence(
-                            asOf,
-                            acceptedPrice.source(),
-                            acceptedPrice.quality().name(),
-                            acceptedPrice.liveAccepted(),
-                            technical.returnStdDev60Ratio(),
-                            technical.volatility60().asOfDate() == null
-                                    ? null : technical.volatility60().asOfDate().toString(),
-                            technical.volatility60().source(),
-                            premium.asOfDate() == null ? null : premium.asOfDate().toString(),
-                            premium.source(),
-                            premium.stale(),
-                            TradingRadarDto.AssetProfile.from(profile),
-                            gated.reasons(), evidence,
-                            gated.candidateMediumAction().name(), gated.candidateShortAction().name(),
-                            distribution, rateObservation.context(),
-                            TradingRadarDto.NormalizedBiasEvidence.from(result.normalizedBias()),
-                            TradingRadarDto.NormalizedBiasEvidence.from(result.shortNormalizedBias()),
-                            actionName(gated.candidateSwingAction()))
-                            .withSettingsClassification(settingsClassification),
-                    evidence.shortDownsideRisk(),
-                    evidence.mediumDownsideRisk(),
-                    evidence.shortConfidence(),
-                    evidence.mediumConfidence(),
-                    evidence.shortRisk().riskCoverage(),
-                    evidence.mediumRisk().riskCoverage(),
-                    gated.candidateMediumAction().name(),
-                    gated.candidateShortAction().name(),
-                    gated.reasons(),
-                    etfPremiumLivePct,
-                    etfPremiumLiveNavAsOf,
-                    // ─── Task 356.11b：1周~1月 軌與兩組新指標（追加在既有 62 個之後）───
-                    actionName(gated.swingAction()),
-                    gated.swingAction() == null ? null : actionLabel(gated.swingAction()),
-                    result.swingScore(),
-                    List.copyOf(swingReasons),
-                    List.copyOf(swingRisks),
-                    evidence.swingDownsideRisk(),
-                    evidence.swingConfidence(),
-                    evidence.swingRisk().riskCoverage(),
-                    actionName(gated.candidateSwingAction()),
-                    toDailyCandleDto(technical.dailyCandle(), technical.volatility60().asOfDate()),
-                    toWeeklyDto(resolvedWeekly, technical.weeklyBarsDesc(),
-                            resolvedTechnical.weeklyIndicators()),
-                    resolvedTechnical.resolution());
+            return new DecisionCore(
+                    target, name, assetClass, settingsClassification, profile, technical, resolvedTechnical,
+                    acceptedPrice, result, gated, evidence, fundamental, distribution, rateObservation, premium,
+                    displayPrice, displayChangePercent, quoteStatus, updatedAt, asOf, ind, c20, c60, c240,
+                    fxPct, currency, fx.asOfDate() == null ? null : fx.asOfDate().toString(),
+                    ma60Bias, week52Pos, etfPremiumPct, etfPremiumPercentile,
+                    etfPremiumLivePct, etfPremiumLiveNavAsOf, List.copyOf(reasons), List.copyOf(risks),
+                    List.copyOf(shortReasons), List.copyOf(shortRisks), List.copyOf(swingReasons),
+                    List.copyOf(swingRisks), null);
         } catch (Exception e) {
             log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
-            return incompleteStock(target, name, assetClass, settingsClassification,
+            return DecisionCore.failed(target, name, assetClass, settingsClassification,
                     "讀取個股資料失敗，該檔今日不交易。");
         }
+    }
+
+    /** Full/snapshot/export projection is intentionally kept behind this late boundary. */
+    private TradingRadarDto.StockDecision toFullDecision(DecisionCore core) {
+        if (core.failureMessage() != null) {
+            return incompleteStock(core.target(), core.name(), core.assetClass(),
+                    core.settingsClassification(), core.failureMessage());
+        }
+        return new TradingRadarDto.StockDecision(
+                core.target().code(), core.name(), core.target().market(), core.assetClass(),
+                core.technical().distributionAdjusted(), core.target().held(),
+                core.gated().mediumAction().name(), actionLabel(core.gated().mediumAction()), core.result().score(),
+                core.result().counterTrend().state().name(), counterTrendLabel(core.result().counterTrend().state()),
+                core.result().counterTrend().reasons(), core.result().counterTrend().risks(),
+                core.result().action() != TradingRadarRuleEngine.Action.NO_TRADE,
+                core.displayPrice(), core.displayChangePercent(), core.quoteStatus(), core.updatedAt(), core.asOf(),
+                core.indicators().monthlyMa(), core.indicators().quarterlyMa(), core.indicators().annualMa(),
+                core.indicators().k(), core.indicators().d(), core.c20().name(), core.c60().name(), core.c240().name(),
+                core.fxPercentile(), core.currency(), core.reasons(), core.risks(), core.result().kdHeat().name(),
+                core.result().timingState().name(), timingLabel(core.result().timingState()), core.ma60Bias(),
+                core.week52Position(), core.indicators().weeklyMa(), core.etfPremiumPct(),
+                core.etfPremiumPercentile(), toDto(core.indicators().extended()), core.gated().shortAction().name(),
+                actionLabel(core.gated().shortAction()), core.result().shortScore(), core.shortReasons(),
+                core.shortRisks(), core.result().horizonConflict(), core.technical().volumeRatio(), core.fxAsOfDate(),
+                core.result().profitTakingConfirmed(), core.fundamental().snapshot(),
+                TradingRadarDto.RadarEvidence.withConfidence(
+                        core.asOf(), core.acceptedPrice().source(), core.acceptedPrice().quality().name(),
+                        core.acceptedPrice().liveAccepted(), core.technical().returnStdDev60Ratio(),
+                        core.technical().volatility60().asOfDate() == null ? null
+                                : core.technical().volatility60().asOfDate().toString(),
+                        core.technical().volatility60().source(),
+                        core.premium().asOfDate() == null ? null : core.premium().asOfDate().toString(),
+                        core.premium().source(), core.premium().stale(),
+                        TradingRadarDto.AssetProfile.from(core.profile()), core.gated().reasons(), core.evidence(),
+                        core.gated().candidateMediumAction().name(), core.gated().candidateShortAction().name(),
+                        core.distribution(), core.rateObservation().context(),
+                        TradingRadarDto.NormalizedBiasEvidence.from(core.result().normalizedBias()),
+                        TradingRadarDto.NormalizedBiasEvidence.from(core.result().shortNormalizedBias()),
+                        actionName(core.gated().candidateSwingAction()))
+                        .withSettingsClassification(core.settingsClassification()),
+                core.evidence().shortDownsideRisk(), core.evidence().mediumDownsideRisk(),
+                core.evidence().shortConfidence(), core.evidence().mediumConfidence(),
+                core.evidence().shortRisk().riskCoverage(), core.evidence().mediumRisk().riskCoverage(),
+                core.gated().candidateMediumAction().name(), core.gated().candidateShortAction().name(),
+                core.gated().reasons(), core.etfPremiumLivePct(), core.etfPremiumLiveNavAsOf(),
+                actionName(core.gated().swingAction()),
+                core.gated().swingAction() == null ? null : actionLabel(core.gated().swingAction()),
+                core.result().swingScore(), core.swingReasons(), core.swingRisks(),
+                core.evidence().swingDownsideRisk(), core.evidence().swingConfidence(),
+                core.evidence().swingRisk().riskCoverage(), actionName(core.gated().candidateSwingAction()),
+                toDailyCandleDto(core.technical().dailyCandle(), core.technical().volatility60().asOfDate()),
+                toWeeklyDto(core.resolvedTechnical().weekly(), core.technical().weeklyBarsDesc(),
+                        core.resolvedTechnical().weeklyIndicators()), core.resolvedTechnical().resolution());
+    }
+
+    /** List projection never creates a StockDecision, RadarEvidence, or nested full-detail DTO. */
+    private TradingRadarDto.ListStock toListStock(DecisionCore core) {
+        if (core.failureMessage() != null) {
+            return new TradingRadarDto.ListStock(
+                    core.target().code(), core.name(), core.target().market(), core.assetClass(), false,
+                    core.target().held(), null, null, null, null, null, null, null, null, null,
+                    TradingRadarRuleEngine.Action.NO_TRADE.name(),
+                    actionLabel(TradingRadarRuleEngine.Action.NO_TRADE), null, false,
+                    TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
+                    timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
+                    TradingRadarRuleEngine.CounterTrendState.NONE.name(),
+                    counterTrendLabel(TradingRadarRuleEngine.CounterTrendState.NONE), null, null,
+                    core.quoteStatus(), null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+        TradingRadarDto.FundamentalSnapshot fundamental = core.fundamental().snapshot();
+        TradingRadarDto.ListFundamental listFundamental = fundamental == null ? null
+                : new TradingRadarDto.ListFundamental(fundamental.applicable(), fundamental.coverage(),
+                        fundamental.industryName(), fundamental.industryRevenueYoyPct());
+        TradingRadarRuleEngine.WeeklyInput weekly = core.resolvedTechnical().weekly();
+        TradingRadarDto.ListWeeklyIndicators listWeekly = weekly == null ? null
+                : new TradingRadarDto.ListWeeklyIndicators(weekly.k(), weekly.d(), weekly.changePercent());
+        String dailyCandleAsOfDate = core.technical().dailyCandle() == null
+                || core.technical().volatility60().asOfDate() == null ? null
+                : core.technical().volatility60().asOfDate().toString();
+        return new TradingRadarDto.ListStock(
+                core.target().code(), core.name(), core.target().market(), core.assetClass(),
+                core.technical().distributionAdjusted(), core.target().held(), core.fxPercentile(), core.currency(),
+                listFundamental, core.gated().shortAction().name(), actionLabel(core.gated().shortAction()),
+                core.result().shortScore(), actionName(core.gated().swingAction()),
+                core.gated().swingAction() == null ? null : actionLabel(core.gated().swingAction()),
+                core.result().swingScore(), core.gated().mediumAction().name(),
+                actionLabel(core.gated().mediumAction()), core.result().score(), core.result().horizonConflict(),
+                core.result().timingState().name(), timingLabel(core.result().timingState()),
+                core.result().counterTrend().state().name(), counterTrendLabel(core.result().counterTrend().state()),
+                core.displayPrice(), core.displayChangePercent(), core.quoteStatus(), core.updatedAt(),
+                core.etfPremiumLivePct(), core.etfPremiumLiveNavAsOf(), core.indicators().weeklyMa(),
+                core.indicators().monthlyMa(), core.indicators().quarterlyMa(), core.indicators().annualMa(),
+                core.indicators().k(), core.indicators().d(), core.result().kdHeat().name(), listWeekly,
+                dailyCandleAsOfDate);
     }
 
     /**
@@ -1888,6 +2057,11 @@ public class TradingRadarService {
      */
     /* package */ static Integer bestScore(TradingRadarDto.StockDecision decision) {
         // 不得寫成 List.of(...)：三軌分數皆可為 null，List.of 對 null 元素直接擲 NPE。
+        Integer best = maxScore(decision.shortScore(), decision.swingScore());
+        return maxScore(best, decision.score());
+    }
+
+    private static Integer bestListScore(TradingRadarDto.ListStock decision) {
         Integer best = maxScore(decision.shortScore(), decision.swingScore());
         return maxScore(best, decision.score());
     }
