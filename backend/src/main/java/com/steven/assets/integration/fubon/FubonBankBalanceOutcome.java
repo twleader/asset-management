@@ -16,6 +16,7 @@ public enum FubonBankBalanceOutcome {
     BROKER_MISSING,
     BANK_MISSING,
     NO_SNAPSHOT,
+    TARGET_MISSING,
     AMBIGUOUS_TARGET,
     STALE_QUERY,
     BANK_BALANCE_FAILED,

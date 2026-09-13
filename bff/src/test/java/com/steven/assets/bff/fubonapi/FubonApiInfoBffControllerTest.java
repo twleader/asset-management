@@ -214,6 +214,8 @@ class FubonApiInfoBffControllerTest {
                 .filter(api -> "sdk.accounting.bank_remain".equals(api.sdkReference()))
                 .findFirst().orElseThrow();
         assertThat(bankBalance.consumer()).contains("08:00／09:20／14:20／22:00");
+        assertThat(bankBalance.description()).contains("既有台北富邦銀行台幣活存")
+                .doesNotContain("台北富邦銀行證券戶");
     }
     @Test
     void cashDividendScopeDoesNotClaimCapitalChangesOrUnverifiedStockDividendAmounts() {

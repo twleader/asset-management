@@ -75,7 +75,7 @@ public class FubonApiInfoBffController {
                             + "cost_price／tradable_qty／today_qty／unrealized_profit／unrealized_loss"),
             new FubonApiInfoDto(true, "帳戶／庫存查詢", "交割銀行餘額查詢",
                     "sdk.accounting.bank_remain", "POST /internal/bank-balance/read",
-                    "唯讀查詢交割銀行餘額，將通過身分、日期與金額驗證的台幣餘額更新到最新快照的台北富邦銀行證券戶，"
+                    "唯讀查詢交割銀行餘額，將通過身分、日期與金額驗證的台幣餘額更新到最新快照的既有台北富邦銀行台幣活存，"
                             + "與快照總額同一交易提交；零餘額照寫" + RO,
                     "business-services（每日 08:00／09:20／14:20／22:00，需另啟用設定；"
                             + "手動 POST /internal/brokers/fubon/bank-balance-sync，dryRun 預設 true）",

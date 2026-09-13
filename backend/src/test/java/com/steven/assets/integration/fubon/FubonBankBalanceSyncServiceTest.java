@@ -111,7 +111,7 @@ class FubonBankBalanceSyncServiceTest {
         assertThat(counters.snapshot().get(FubonBankBalanceOutcome.SUCCESS)).isZero();
     }
     @ParameterizedTest @EnumSource(value = FubonBankBalanceOutcome.class,
-            names = {"NO_SNAPSHOT", "BROKER_MISSING", "BANK_MISSING", "NO_OWNER", "AMBIGUOUS_TARGET"})
+            names = {"NO_SNAPSHOT", "BROKER_MISSING", "BANK_MISSING", "NO_OWNER", "TARGET_MISSING", "AMBIGUOUS_TARGET"})
     void writerRejectionsRemainTyped(FubonBankBalanceOutcome outcome) {
         ready(); when(client.readBankBalance()).thenReturn(FubonDtos.CallResult.success(bank("1")));
         when(writer.write(eq(9L), any())).thenThrow(new FubonBankBalanceWriter.WriteRejected(outcome));

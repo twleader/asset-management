@@ -122,9 +122,9 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
             otherBank = banks.saveAndFlush(Bank.builder().code("other").displayName("其他銀行").active(true).build());
             fubonBroker = brokers.saveAndFlush(BrokerEntity.builder().code("fubon").displayName("富邦證券").active(true).build());
             otherBroker = brokers.saveAndFlush(BrokerEntity.builder().code("other").displayName("其他券商").active(true).build());
-            depositTypes.saveAndFlush(DepositTypeEntity.builder().code("證券戶").displayName("證券戶").active(true).build());
+            depositTypes.saveAndFlush(DepositTypeEntity.builder().code("活存").displayName("活存").active(true).build());
             AssetSnapshot snapshot = AssetSnapshot.builder().ownerUserId(ownerId).snapshotDate(DATE).usdExchangeRate(BigDecimal.ONE).build();
-            snapshot.getDeposits().add(deposit(snapshot, fubonBank, "20", "證券戶"));
+            snapshot.getDeposits().add(deposit(snapshot, fubonBank, "20", "活存"));
             snapshot.getDeposits().add(deposit(snapshot, otherBank, "100", "活存"));
             snapshot.getStocks().add(holding(snapshot, fubonBroker, "2330", "20"));
             snapshot.getStocks().add(holding(snapshot, otherBroker, "0050", "50"));
@@ -220,12 +220,12 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
             tx(() -> { switch (kind) {
                 case "broker" -> assertThat(brokers.findByCode("fubon").orElseThrow().getActive()).isTrue();
                 case "bank" -> assertThat(banks.findByCode("fubon").orElseThrow().getActive()).isTrue();
-                default -> assertThat(depositTypes.findByCode("證券戶").orElseThrow().getActive()).isTrue();
+                default -> assertThat(depositTypes.findByCode("活存").orElseThrow().getActive()).isTrue();
             }});
             mutateElsewhere(() -> { switch (kind) {
                 case "broker" -> { var b = brokers.findByCode("fubon").orElseThrow(); b.setActive(false); brokers.saveAndFlush(b); }
                 case "bank" -> { var b = banks.findByCode("fubon").orElseThrow(); b.setActive(false); banks.saveAndFlush(b); }
-                default -> { var t = depositTypes.findByCode("證券戶").orElseThrow(); t.setActive(false); depositTypes.saveAndFlush(t); }
+                default -> { var t = depositTypes.findByCode("活存").orElseThrow(); t.setActive(false); depositTypes.saveAndFlush(t); }
             }});
             assertThat(bankService.syncManual(false).outcome()).isEqualTo(kind.equals("broker")
                     ? FubonBankBalanceOutcome.BROKER_MISSING : FubonBankBalanceOutcome.BANK_MISSING);
@@ -329,7 +329,10 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
         return StockHolding.builder().snapshot(snapshot).broker(broker).stockCode(code).market("台股").shares(BigDecimal.ONE)
                 .investmentCost(new BigDecimal(value)).currentValue(new BigDecimal(value)).currency("TWD").build();
     }
-    private BankDeposit target(AssetSnapshot snapshot) { return snapshot.getDeposits().stream().filter(d -> d.getBank().getCode().equals("fubon")).findFirst().orElseThrow(); }
+    private BankDeposit target(AssetSnapshot snapshot) {
+        return snapshot.getDeposits().stream().filter(d -> d.getBank().getCode().equals("fubon") && d.getDepositType().equals("活存"))
+                .findFirst().orElseThrow();
+    }
     static class SqlTrace implements org.hibernate.resource.jdbc.spi.StatementInspector {
         private final ThreadLocal<List<String>> statements = new ThreadLocal<>();
         void start() { statements.set(new ArrayList<>()); }

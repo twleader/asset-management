@@ -121,8 +121,11 @@ class FubonAccountingPostgresTest {
             fubon = banks.saveAndFlush(Bank.builder().code("fubon").displayName("台北富邦銀行").active(true).build());
             otherBank = banks.saveAndFlush(Bank.builder().code("other").displayName("其他銀行").active(true).build());
             broker = brokers.saveAndFlush(BrokerEntity.builder().code("fubon").displayName("富邦證券").active(true).build());
+            depositTypes.saveAndFlush(DepositTypeEntity.builder().code("活存").displayName("活存").active(true).build());
             depositTypes.saveAndFlush(DepositTypeEntity.builder().code("證券戶").displayName("證券戶").active(true).build());
             var snapshot = AssetSnapshot.builder().ownerUserId(ownerId).snapshotDate(DATE.minusDays(1)).usdExchangeRate(BigDecimal.ONE).build();
+            snapshot.getDeposits().add(deposit(snapshot, fubon, "活存", "20", "TWD", "2", "target-note", "20.1234"));
+            snapshot.getDeposits().add(deposit(snapshot, fubon, "證券戶", "30", "TWD", "3", "security-note", "30.5678"));
             snapshot.getDeposits().add(deposit(snapshot, otherBank, "活存", "100", "TWD", "1", "other-note"));
             snapshot.getFunds().add(FundHolding.builder().snapshot(snapshot).bank(otherBank).fundName("test-fund")
                     .investmentAmount(bd("35")).currentValue(bd("50")).estimatedDividend(bd("3")).build());
@@ -155,40 +158,43 @@ class FubonAccountingPostgresTest {
         assertThat(statements.getFirst()).contains("from asset_snapshot").contains("for update");
         assertThat(statements.getFirst()).doesNotContain("app_user", "bank_deposit");
         readSnapshot(s -> {
-            assertThat(s.getDeposits()).hasSize(2); assertThat(target(s).getSnapshot().getId()).isEqualTo(snapshotId);
+            assertThat(s.getDeposits()).hasSize(3); assertThat(target(s).getSnapshot().getId()).isEqualTo(snapshotId);
             assertThat(target(s).getAmount()).isEqualByComparingTo("1000.00");
-            assertThat(target(s).getNotes()).isNull(); assertThat(target(s).getAnnualInterestRate()).isNull();
-            assertThat(target(s).getOriginalAmount()).isNull(); assertThat(s.getFunds()).hasSize(1); assertThat(s.getStocks()).hasSize(1);
-            assertThat(s.getTotalDeposit()).isEqualByComparingTo("1100");
-            assertThat(s.getTotalAssets()).isEqualByComparingTo("1350");
-            assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo("8");
+            assertThat(target(s).getNotes()).isEqualTo("target-note"); assertThat(target(s).getAnnualInterestRate()).isEqualByComparingTo("2");
+            assertThat(target(s).getOriginalAmount()).isEqualByComparingTo("20.1234"); assertThat(s.getFunds()).hasSize(1); assertThat(s.getStocks()).hasSize(1);
+            assertThat(s.getTotalDeposit()).isEqualByComparingTo("1130");
+            assertThat(s.getTotalAssets()).isEqualByComparingTo("1380");
+            assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo("29");
             assertThat(s.getSnapshotDate()).isEqualTo(DATE.minusDays(1));
         });
     }
 
-    @Test void updateUsesSameManagedRowAndPreservesNotesRateAndUnrelatedChildren() {
-        addTarget("20", "TWD", "2", "keep-note"); Long originalId = readTargetId();
+    @Test void updateUsesSameManagedDemandDepositAndPreservesItsMetadataAndUnrelatedChildren() {
+        Long originalId = readTargetId(); Long securityId = readSecurityAccountId();
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.SUCCESS);
         readSnapshot(s -> {
-            assertThat(target(s).getId()).isEqualTo(originalId); assertThat(target(s).getNotes()).isEqualTo("keep-note");
+            assertThat(target(s).getId()).isEqualTo(originalId); assertThat(target(s).getNotes()).isEqualTo("target-note");
             assertThat(target(s).getAnnualInterestRate()).isEqualByComparingTo("2");
-            assertThat(s.getTotalDeposit()).isEqualByComparingTo("1100");
-            assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo("28");
-            assertThat(s.getFunds().getFirst().getCurrentValue()).isEqualByComparingTo("50");
+            assertThat(target(s).getOriginalAmount()).isEqualByComparingTo("20.1234");
+            assertThat(securityAccount(s).getId()).isEqualTo(securityId); assertThat(securityAccount(s).getAmount()).isEqualByComparingTo("30");
+            assertThat(securityAccount(s).getNotes()).isEqualTo("security-note"); assertThat(securityAccount(s).getAnnualInterestRate()).isEqualByComparingTo("3");
+            assertThat(securityAccount(s).getOriginalAmount()).isEqualByComparingTo("30.5678");
+            assertThat(s.getDeposits()).hasSize(3); assertThat(s.getTotalDeposit()).isEqualByComparingTo("1130");
+            assertThat(s.getTotalAssets()).isEqualByComparingTo("1380"); assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo("29");
+            assertThat(s.getFunds().getFirst().getCurrentValue()).isEqualByComparingTo("50"); assertThat(s.getStocks()).hasSize(1);
         });
     }
 
-    @ParameterizedTest @ValueSource(booleans = {true, false})
-    void zeroBalancePersistsRatherThanDeleting(boolean existing) {
-        if (existing) addTarget("20", "TWD", null, null);
+    @Test void zeroBalancePersistsExistingDemandDepositRatherThanDeleting() {
         when(brokerClient.readBankBalance()).thenReturn(FubonDtos.CallResult.success(bank("0")));
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.SUCCESS);
-        readSnapshot(s -> { assertThat(s.getDeposits()).hasSize(2); assertThat(target(s).getAmount()).isZero();
-            assertThat(s.getTotalDeposit()).isEqualByComparingTo("100"); assertThat(s.getTotalAssets()).isEqualByComparingTo("350"); });
+        readSnapshot(s -> { assertThat(s.getDeposits()).hasSize(3); assertThat(target(s).getAmount()).isZero();
+            assertThat(s.getTotalDeposit()).isEqualByComparingTo("130"); assertThat(s.getTotalAssets()).isEqualByComparingTo("380"); });
     }
 
     @Test void fullEighteenIntegerDigitsFitWhenAllOtherAssetsAreZero() {
-        tx(() -> { var s = snapshots.findById(snapshotId).orElseThrow(); s.getDeposits().clear(); s.getFunds().clear();
+        tx(() -> { var s = snapshots.findById(snapshotId).orElseThrow(); BankDeposit demandDeposit = target(s);
+            s.getDeposits().removeIf(deposit -> deposit != demandDeposit); s.getFunds().clear();
             s.getStocks().clear(); aggregateCalculator.recalculate(s); snapshots.saveAndFlush(s); });
         when(brokerClient.readBankBalance()).thenReturn(FubonDtos.CallResult.success(bank("999999999999999999.99")));
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.SUCCESS);
@@ -197,9 +203,9 @@ class FubonAccountingPostgresTest {
 
     @ParameterizedTest @ValueSource(strings = {"totalDeposit", "totalAssets", "annualDividend"})
     void aggregateOverflowRollsBackChildrenAndTotals(String field) {
-        addTarget("0", "TWD", "100", "retained");
+        setTarget("0", "TWD", "100", "retained", "20.1234");
         tx(() -> { var s = snapshots.findById(snapshotId).orElseThrow();
-            if (!field.equals("totalDeposit")) s.getDeposits().stream().filter(d -> !d.getBank().getCode().equals("fubon"))
+            if (!field.equals("totalDeposit")) s.getDeposits().stream().filter(d -> d != target(s))
                     .forEach(d -> { d.setAmount(BigDecimal.ZERO); d.setAnnualInterestRate(null); });
             if (field.equals("annualDividend")) { s.getFunds().getFirst().setCurrentValue(BigDecimal.ZERO);
                 s.getStocks().getFirst().setCurrentValue(BigDecimal.ZERO); }
@@ -208,34 +214,51 @@ class FubonAccountingPostgresTest {
         when(brokerClient.readBankBalance()).thenReturn(FubonDtos.CallResult.success(bank("999999999999999999.99")));
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.ROLLED_BACK);
         assertThat(totals()).containsExactlyElementsOf(before);
-        readSnapshot(s -> { assertThat(target(s).getAmount()).isZero(); assertThat(target(s).getNotes()).isEqualTo("retained"); });
+        readSnapshot(s -> { assertThat(target(s).getAmount()).isZero(); assertThat(target(s).getNotes()).isEqualTo("retained");
+            assertThat(target(s).getOriginalAmount()).isEqualByComparingTo("20.1234"); });
         assertNoSuccess();
     }
 
     @Test void duplicateTargetsRefuseToPickOne() {
-        addTarget("10", "TWD", null, null); addTarget("20", "TWD", null, null);
+        addDemandTarget("10", "TWD", null, null, null);
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.AMBIGUOUS_TARGET);
-        readSnapshot(s -> assertThat(s.getDeposits().stream().filter(d -> d.getDepositType().equals("證券戶")))
-                .extracting(BankDeposit::getAmount).containsExactlyInAnyOrder(bd("10.00"), bd("20.00")));
+        readSnapshot(s -> assertThat(demandDeposits(s)).extracting(BankDeposit::getAmount)
+                .containsExactlyInAnyOrder(bd("10.00"), bd("20.00")));
         assertNoSuccess();
     }
-    @Test void foreignCurrencyTargetIsNotConvertedToTaiwanDollar() {
-        addTarget("10", "USD", null, null);
+    @Test void singletonForeignCurrencyDemandDepositIsNotConvertedToTaiwanDollar() {
+        setTarget("10", "USD", null, "usd-demand", "10.0000");
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.AMBIGUOUS_TARGET);
         readSnapshot(s -> { assertThat(target(s).getCurrency()).isEqualTo("USD"); assertThat(target(s).getAmount()).isEqualByComparingTo("10"); });
     }
+
+    @Test void missingDemandDepositRejectsWithoutInsertingOrTouchingSecurityAccountOrAggregates() {
+        Long securityId = readSecurityAccountId();
+        tx(() -> { var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().removeIf(this::isDemandDeposit); aggregateCalculator.recalculate(snapshot); snapshots.saveAndFlush(snapshot); });
+        var before = totals();
+        assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.TARGET_MISSING);
+        readSnapshot(s -> {
+            assertThat(s.getDeposits()).hasSize(2); assertThat(securityAccount(s).getId()).isEqualTo(securityId);
+            assertThat(securityAccount(s).getAmount()).isEqualByComparingTo("30"); assertThat(securityAccount(s).getNotes()).isEqualTo("security-note");
+        });
+        assertThat(totals()).containsExactlyElementsOf(before); assertNoSuccess();
+    }
+
     @ParameterizedTest @ValueSource(strings = {"bank", "type", "broker"})
     void inactiveLookupAfterLockIsTypedAndWritesNothing(String kind) {
         tx(() -> { switch (kind) {
             case "bank" -> { var b = banks.findById(fubon.getId()).orElseThrow(); b.setActive(false); banks.saveAndFlush(b); }
-            case "type" -> { var d = depositTypes.findByCode("證券戶").orElseThrow(); d.setActive(false); depositTypes.saveAndFlush(d); }
+            case "type" -> { var d = depositTypes.findByCode("活存").orElseThrow(); d.setActive(false); depositTypes.saveAndFlush(d); }
             case "broker" -> { var b = brokers.findById(broker.getId()).orElseThrow(); b.setActive(false); brokers.saveAndFlush(b); }
         }});
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(kind.equals("broker") ? FubonBankBalanceOutcome.BROKER_MISSING : FubonBankBalanceOutcome.BANK_MISSING);
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1)); assertNoSuccess();
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3)); assertNoSuccess();
     }
     @Test void missingBankIsReportedAndDoesNotCreateLookupOrDeposit() {
-        banks.deleteById(fubon.getId());
+        tx(() -> { var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().removeIf(deposit -> deposit.getBank() != null && "fubon".equals(deposit.getBank().getCode()));
+            snapshots.saveAndFlush(snapshot); banks.deleteById(fubon.getId()); banks.flush(); });
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.BANK_MISSING);
         assertThat(banks.findByCode("fubon")).isEmpty(); readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1));
     }
@@ -249,36 +272,38 @@ class FubonAccountingPostgresTest {
             var owner = users.findById(ownerId).orElseThrow(); owner.setStatus(AppUser.STATUS_DISABLED); users.saveAndFlush(owner);
         }); return FubonDtos.CallResult.success(bank("1000")); });
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.NO_OWNER);
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1)); assertNoSuccess();
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3)); assertNoSuccess();
     }
     @Test void writerRejectsSnapshotForDifferentOwnerEvenIfItExists() {
         tx(() -> snapshots.saveAndFlush(AssetSnapshot.builder().ownerUserId(otherOwnerId).snapshotDate(DATE).build()));
         assertThatThrownBy(() -> writer.write(otherOwnerId, bank("1000")))
                 .isInstanceOf(FubonBankBalanceWriter.WriteRejected.class).hasMessage("NO_OWNER");
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1));
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3));
     }
     @Test void latestSnapshotCreatedDuringHttpIsTheOnlyTarget() {
         var newestId = new AtomicReference<Long>();
-        when(brokerClient.readBankBalance()).thenAnswer(call -> { tx(() -> newestId.set(snapshots.saveAndFlush(
-                AssetSnapshot.builder().ownerUserId(ownerId).snapshotDate(DATE).build()).getId()));
+        when(brokerClient.readBankBalance()).thenAnswer(call -> { tx(() -> {
+            var newest = AssetSnapshot.builder().ownerUserId(ownerId).snapshotDate(DATE).usdExchangeRate(BigDecimal.ONE).build();
+            newest.getDeposits().add(deposit(newest, banks.findById(fubon.getId()).orElseThrow(), "活存", "20", "TWD", "2", "newest-target", "20.1234"));
+            aggregateCalculator.recalculate(newest); newestId.set(snapshots.saveAndFlush(newest).getId());
+        });
             return FubonDtos.CallResult.success(bank("1000")); });
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.SUCCESS);
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1));
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3));
         tx(() -> { em.clear(); var newest = snapshots.findById(newestId.get()).orElseThrow();
             assertThat(target(newest).getAmount()).isEqualByComparingTo("1000"); assertThat(newest.getTotalAssets()).isEqualByComparingTo("1000"); });
     }
     @Test void dryRunFromRealProxyHasNoSnapshotSqlOrMutations() {
         sqlTrace.start(); assertThat(bankService.syncManual(true).outcome()).isEqualTo(FubonBankBalanceOutcome.DRY_RUN);
         assertThat(sqlTrace.stop()).noneMatch(sql -> sql.contains("asset_snapshot") || sql.contains("bank_deposit") || sql.contains("for update"));
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1)); assertNoSuccess();
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3)); assertNoSuccess();
     }
     @Test void freshnessIsRecheckedAfterFlushBeforeCommit() {
-        addTarget("20", "TWD", null, null);
         doAnswer(call -> { call.callRealMethod(); clock.set(NOW.plusSeconds(32)); return null; })
                 .when(aggregateCalculator).recalculate(any());
         var result = bankService.syncManual(false);
         assertThat(result.outcome()).isEqualTo(FubonBankBalanceOutcome.STALE_QUERY); assertThat(result.updatedAmount()).isNull();
-        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("370"); });
+        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("400"); });
         assertNoSuccess();
     }
     @Test void crossingTaipeiMidnightDuringWriterRollsBack() {
@@ -288,30 +313,28 @@ class FubonAccountingPostgresTest {
         doAnswer(call -> { call.callRealMethod(); clock.set(beforeMidnight.plusSeconds(2)); return null; })
                 .when(aggregateCalculator).recalculate(any());
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.STALE_QUERY);
-        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(1)); assertNoSuccess();
+        readSnapshot(s -> assertThat(s.getDeposits()).hasSize(3)); assertNoSuccess();
     }
     @Test void databaseFlushFailureRollsBackBothChildAndAggregate() {
-        addTarget("20", "TWD", null, null);
         doAnswer(call -> { call.callRealMethod(); ((AssetSnapshot) call.getArgument(0)).setNotes("x".repeat(501)); return null; })
                 .when(aggregateCalculator).recalculate(any());
         assertThat(bankService.syncManual(false).outcome()).isEqualTo(FubonBankBalanceOutcome.ROLLED_BACK);
-        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("370"); assertThat(s.getNotes()).isNull(); });
+        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("400"); assertThat(s.getNotes()).isNull(); });
         assertNoSuccess();
     }
     @Test void actualDeferredCommitFailureCannotBecomeSuccess() {
-        addTarget("20", "TWD", null, null);
         tx(() -> { em.createNativeQuery("CREATE FUNCTION reject_bank_commit() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''test-only deferred rejection''; RETURN NEW; END'").executeUpdate();
             em.createNativeQuery("CREATE CONSTRAINT TRIGGER reject_bank_commit AFTER UPDATE ON bank_deposit DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.amount = 9999) EXECUTE FUNCTION reject_bank_commit()").executeUpdate(); });
         when(brokerClient.readBankBalance()).thenReturn(FubonDtos.CallResult.success(bank("9999")));
         var result = bankService.syncManual(false);
         assertThat(result.outcome()).isEqualTo(FubonBankBalanceOutcome.ROLLED_BACK); assertThat(result.updatedAmount()).isNull();
-        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("370"); });
+        readSnapshot(s -> { assertThat(target(s).getAmount()).isEqualByComparingTo("20"); assertThat(s.getTotalAssets()).isEqualByComparingTo("400"); });
         assertNoSuccess();
     }
 
     @ParameterizedTest @ValueSource(booleans = {true, false})
     void bankAndFullPutSerializeOnTheSameRealPostgresRow(boolean bankFirst) throws Exception {
-        addTarget("20", "TWD", "2", "old-note");
+        setTarget("20", "TWD", "2", "old-note", "20.1234");
         CountDownLatch locked = new CountDownLatch(1); CountDownLatch release = new CountDownLatch(1);
         AssetSnapshotMutationLock lockTarget = AopTestUtils.getUltimateTargetObject(mutationLock);
         if (bankFirst) doAnswer(call -> { Object result = call.callRealMethod(); locked.countDown(); await(release); return result; })
@@ -328,11 +351,11 @@ class FubonAccountingPostgresTest {
             first.get(10, TimeUnit.SECONDS); second.get(10, TimeUnit.SECONDS);
         } finally { release.countDown(); }
         readSnapshot(s -> {
-            assertThat(s.getDeposits()).hasSize(2); assertThat(target(s).getAmount()).isEqualByComparingTo(bankFirst ? "7" : "1000");
-            assertThat(target(s).getNotes()).isEqualTo("manual-note");
-            assertThat(s.getTotalDeposit()).isEqualByComparingTo(bankFirst ? "207" : "1200");
-            assertThat(s.getTotalAssets()).isEqualByComparingTo(bankFirst ? "337" : "1330");
-            assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo(bankFirst ? "18" : "38");
+            assertThat(s.getDeposits()).hasSize(3); assertThat(target(s).getAmount()).isEqualByComparingTo(bankFirst ? "7" : "1000");
+            assertThat(target(s).getNotes()).isEqualTo("manual-demand-note"); assertThat(target(s).getOriginalAmount()).isEqualByComparingTo("7.1234");
+            assertThat(s.getTotalDeposit()).isEqualByComparingTo(bankFirst ? "237" : "1230");
+            assertThat(s.getTotalAssets()).isEqualByComparingTo(bankFirst ? "367" : "1360");
+            assertThat(s.getEstimatedAnnualDividend()).isEqualByComparingTo(bankFirst ? "19" : "39");
             assertThat(s.getFunds().getFirst().getCurrentValue()).isEqualByComparingTo("40");
             assertThat(s.getStocks().getFirst().getCurrentValue()).isEqualByComparingTo("90");
         });
@@ -340,24 +363,43 @@ class FubonAccountingPostgresTest {
 
     private void fullPut() {
         assetService.updateSnapshot(snapshotId, new AssetSnapshotDto.CreateSnapshotRequest(DATE.minusDays(1), BigDecimal.ONE, "full-put",
-                List.of(new AssetSnapshotDto.DepositRequest(fubon.getId(), "證券戶", bd("7"), null, "TWD", bd("2"), "manual-note"),
+                List.of(new AssetSnapshotDto.DepositRequest(fubon.getId(), "活存", bd("7"), bd("7.1234"), "TWD", bd("2"), "manual-demand-note"),
+                        new AssetSnapshotDto.DepositRequest(fubon.getId(), "證券戶", bd("30"), bd("30.5678"), "TWD", bd("3"), "manual-security-note"),
                         new AssetSnapshotDto.DepositRequest(otherBank.getId(), "活存", bd("200"), null, "TWD", bd("1"), "other-manual")),
                 List.of(new AssetSnapshotDto.FundRequest("test-fund", null, otherBank.getId(), bd("35"), bd("40"), null, bd("7"))),
                 List.of(new AssetSnapshotDto.StockRequest("0050", "0050", "台股", broker.getId(), bd("1"), bd("80"), bd("90"),
                         bd("9"), bd("0.1"), "TWD", null, null, null, null))));
     }
-    private void addTarget(String amount, String currency, String rate, String notes) {
-        tx(() -> { var s = snapshots.findById(snapshotId).orElseThrow(); s.getDeposits().add(deposit(s, fubon, "證券戶", amount, currency, rate, notes));
+    private void addDemandTarget(String amount, String currency, String rate, String notes, String originalAmount) {
+        tx(() -> { var s = snapshots.findById(snapshotId).orElseThrow(); s.getDeposits().add(deposit(s, fubon, "活存", amount, currency, rate, notes, originalAmount));
             aggregateCalculator.recalculate(s); snapshots.saveAndFlush(s); });
     }
+    private void setTarget(String amount, String currency, String rate, String notes, String originalAmount) {
+        tx(() -> { var target = target(snapshots.findById(snapshotId).orElseThrow()); target.setAmount(bd(amount)); target.setCurrency(currency);
+            target.setAnnualInterestRate(rate == null ? null : bd(rate)); target.setNotes(notes); target.setOriginalAmount(originalAmount == null ? null : bd(originalAmount));
+            aggregateCalculator.recalculate(target.getSnapshot()); snapshots.saveAndFlush(target.getSnapshot()); });
+    }
     private BankDeposit deposit(AssetSnapshot s, Bank bank, String type, String amount, String currency, String rate, String notes) {
+        return deposit(s, bank, type, amount, currency, rate, notes, null);
+    }
+    private BankDeposit deposit(AssetSnapshot s, Bank bank, String type, String amount, String currency, String rate, String notes, String originalAmount) {
         return BankDeposit.builder().snapshot(s).bank(bank).depositType(type).amount(bd(amount)).currency(currency)
-                .annualInterestRate(rate == null ? null : bd(rate)).notes(notes).build();
+                .annualInterestRate(rate == null ? null : bd(rate)).notes(notes)
+                .originalAmount(originalAmount == null ? null : bd(originalAmount)).build();
     }
     private BankDeposit target(AssetSnapshot s) {
-        return s.getDeposits().stream().filter(d -> d.getBank().getCode().equals("fubon") && d.getDepositType().equals("證券戶")).findFirst().orElseThrow();
+        return demandDeposits(s).stream().findFirst().orElseThrow();
+    }
+    private List<BankDeposit> demandDeposits(AssetSnapshot s) { return s.getDeposits().stream().filter(this::isDemandDeposit).toList(); }
+    private boolean isDemandDeposit(BankDeposit deposit) {
+        return deposit.getBank() != null && "fubon".equals(deposit.getBank().getCode()) && "活存".equals(deposit.getDepositType());
+    }
+    private BankDeposit securityAccount(AssetSnapshot s) {
+        return s.getDeposits().stream().filter(d -> d.getBank() != null && "fubon".equals(d.getBank().getCode())
+                && "證券戶".equals(d.getDepositType())).findFirst().orElseThrow();
     }
     private Long readTargetId() { AtomicReference<Long> id = new AtomicReference<>(); readSnapshot(s -> id.set(target(s).getId())); return id.get(); }
+    private Long readSecurityAccountId() { AtomicReference<Long> id = new AtomicReference<>(); readSnapshot(s -> id.set(securityAccount(s).getId())); return id.get(); }
     private List<BigDecimal> totals() { List<BigDecimal> values = new ArrayList<>(); readSnapshot(s -> { values.add(s.getTotalDeposit()); values.add(s.getTotalAssets()); values.add(s.getEstimatedAnnualDividend()); }); return values; }
     private void readSnapshot(Consumer<AssetSnapshot> assertion) { tx(() -> { em.clear(); assertion.accept(snapshots.findById(snapshotId).orElseThrow()); }); }
     private void tx(Runnable action) { new TransactionTemplate(transactions).executeWithoutResult(status -> action.run()); }
