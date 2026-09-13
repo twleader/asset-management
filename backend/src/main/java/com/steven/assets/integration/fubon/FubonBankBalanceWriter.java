@@ -29,7 +29,7 @@ import java.util.Objects;
 @Service
 public class FubonBankBalanceWriter {
     private static final String FUBON = "fubon";
-    private static final String DEPOSIT_TYPE = "證券戶";
+    private static final String DEPOSIT_TYPE = "活存";
     private final AssetSnapshotMutationLock mutationLock;
     private final UserAdminService userAdminService;
     private final BrokerRepository brokerRepository;
@@ -94,20 +94,15 @@ public class FubonBankBalanceWriter {
         List<BankDeposit> targets = snapshot.getDeposits().stream()
                 .filter(d -> d.getBank() != null && Objects.equals(d.getBank().getId(), bank.getId())
                         && DEPOSIT_TYPE.equals(d.getDepositType())).toList();
-        if (targets.size() > 1 || (!targets.isEmpty() && !"TWD".equals(targets.get(0).getCurrency()))) {
+        if (targets.isEmpty()) {
+            throw new WriteRejected(FubonBankBalanceOutcome.TARGET_MISSING);
+        }
+        if (targets.size() > 1 || !"TWD".equals(targets.getFirst().getCurrency())) {
             throw new WriteRejected(FubonBankBalanceOutcome.AMBIGUOUS_TARGET);
         }
         BigDecimal amount = FubonAccountingContract.money(observation.balance().value());
-        BankDeposit target;
-        if (targets.isEmpty()) {
-            target = BankDeposit.builder().bank(bank).depositType(DEPOSIT_TYPE).currency("TWD").build();
-            target.setSnapshot(snapshot);
-            snapshot.getDeposits().add(target);
-        } else {
-            target = targets.get(0);
-        }
+        BankDeposit target = targets.getFirst();
         target.setAmount(amount);
-        target.setOriginalAmount(null);
         aggregates.recalculate(snapshot);
         validateTotals(snapshot);
         snapshotRepository.saveAndFlush(snapshot);

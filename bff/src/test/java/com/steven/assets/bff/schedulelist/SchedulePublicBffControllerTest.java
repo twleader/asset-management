@@ -104,7 +104,8 @@ class SchedulePublicBffControllerTest {
                             "0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *");
                     assertThat(job.schedule()).isEqualTo("每日 08:00／09:20／14:20／22:00");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
-                    assertThat(job.description()).contains("唯讀", "configured admin", "台北富邦銀行證券戶");
+                    assertThat(job.description()).contains("唯讀", "configured admin", "既有台北富邦銀行台幣活存")
+                            .doesNotContain("台北富邦銀行證券戶");
                 });
     }
 
