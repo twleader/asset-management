@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
  * local full indicators are copied, never mutated.</p>
  */
 @Component
+@Slf4j
 public class RadarTechnicalResolver {
     static final String MARKET = "台股";
     static final String PROVIDER = "FUBON_SDK";
@@ -337,13 +339,82 @@ public class RadarTechnicalResolver {
                                 .thenComparing(RadarTechnicalCachePort.MarketLocalKey::code))
                         .toList();
         if (codes.isEmpty() && marketLocalKeys.isEmpty()) return Batch.EMPTY;
-        Map<String, RadarTechnicalCachePort.Pair> cachePairs = codes.isEmpty()
-                ? Map.of() : cachePort.readPairs(codes);
-        Map<String, RadarTechnicalFactPort.Capture> captures = codes.isEmpty()
-                ? Map.of() : facts.findFreshCompleteCaptures(codes, now);
-        Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments = marketLocalKeys.isEmpty()
-                ? Map.of() : cachePort.readMarketLocals(marketLocalKeys);
+        Map<String, RadarTechnicalCachePort.Pair> cachePairs = preloadCachePairs(codes);
+        Map<String, RadarTechnicalFactPort.Capture> captures = preloadCaptures(codes, now);
+        Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments =
+                preloadMarketLocalDocuments(marketLocalKeys);
         return new Batch(cachePairs, captures, marketLocalDocuments, !codes.isEmpty(), !marketLocalKeys.isEmpty());
+    }
+
+    /**
+     * A list batch is an all-or-unavailable snapshot, never permission to reopen a per-target
+     * cache path.  Retain only requested exact keys so a malformed adapter result cannot leak a
+     * same-code value across markets or targets.
+     */
+    private Map<String, RadarTechnicalCachePort.Pair> preloadCachePairs(List<String> codes) {
+        if (codes.isEmpty()) return Map.of();
+        try {
+            Set<String> requested = Set.copyOf(codes);
+            Map<String, RadarTechnicalCachePort.Pair> raw = cachePort.readPairs(codes);
+            if (raw == null) {
+                log.warn("交易雷達技術批次不可得：phase=taiwan-cache-pairs, result=null");
+                return Map.of();
+            }
+            Map<String, RadarTechnicalCachePort.Pair> safe = new LinkedHashMap<>();
+            raw.forEach((code, pair) -> {
+                if (code != null && pair != null && requested.contains(code)) safe.put(code, pair);
+            });
+            return Map.copyOf(safe);
+        } catch (RuntimeException unavailable) {
+            logTechnicalBatchUnavailable("taiwan-cache-pairs", unavailable);
+            return Map.of();
+        }
+    }
+
+    private Map<String, RadarTechnicalFactPort.Capture> preloadCaptures(List<String> codes, Instant now) {
+        if (codes.isEmpty()) return Map.of();
+        try {
+            Set<String> requested = Set.copyOf(codes);
+            Map<String, RadarTechnicalFactPort.Capture> raw = facts.findFreshCompleteCaptures(codes, now);
+            if (raw == null) {
+                log.warn("交易雷達技術批次不可得：phase=taiwan-captures, result=null");
+                return Map.of();
+            }
+            Map<String, RadarTechnicalFactPort.Capture> safe = new LinkedHashMap<>();
+            raw.forEach((code, capture) -> {
+                if (code != null && capture != null && requested.contains(code)) safe.put(code, capture);
+            });
+            return Map.copyOf(safe);
+        } catch (RuntimeException unavailable) {
+            logTechnicalBatchUnavailable("taiwan-captures", unavailable);
+            return Map.of();
+        }
+    }
+
+    private Map<RadarTechnicalCachePort.MarketLocalKey, String> preloadMarketLocalDocuments(
+            List<RadarTechnicalCachePort.MarketLocalKey> marketLocalKeys) {
+        if (marketLocalKeys.isEmpty()) return Map.of();
+        try {
+            Set<RadarTechnicalCachePort.MarketLocalKey> requested = Set.copyOf(marketLocalKeys);
+            Map<RadarTechnicalCachePort.MarketLocalKey, String> raw = cachePort.readMarketLocals(marketLocalKeys);
+            if (raw == null) {
+                log.warn("交易雷達技術批次不可得：phase=market-local-cache, result=null");
+                return Map.of();
+            }
+            Map<RadarTechnicalCachePort.MarketLocalKey, String> safe = new LinkedHashMap<>();
+            raw.forEach((key, document) -> {
+                if (key != null && document != null && requested.contains(key)) safe.put(key, document);
+            });
+            return Map.copyOf(safe);
+        } catch (RuntimeException unavailable) {
+            logTechnicalBatchUnavailable("market-local-cache", unavailable);
+            return Map.of();
+        }
+    }
+
+    private static void logTechnicalBatchUnavailable(String phase, RuntimeException unavailable) {
+        log.warn("交易雷達技術批次不可得：phase={}, error={}", phase,
+                unavailable.getClass().getSimpleName());
     }
 
     /**
@@ -1160,6 +1231,15 @@ public class RadarTechnicalResolver {
         private final boolean cacheLoaded;
         private final boolean captureLoaded;
         private final boolean marketLocalLoaded;
+
+        /**
+         * Marks a failed list preload as already attempted.  List evaluators must consume only
+         * this unavailable snapshot, rather than silently reopening an individual Redis or DB
+         * read for each target.
+         */
+        static Batch unavailable(boolean taiwanRequested, boolean marketLocalRequested) {
+            return new Batch(Map.of(), Map.of(), Map.of(), taiwanRequested, marketLocalRequested);
+        }
 
         private Batch(Map<String, RadarTechnicalCachePort.Pair> cachePairs,
                       Map<String, RadarTechnicalFactPort.Capture> captures,

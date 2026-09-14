@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -404,7 +405,7 @@ public class TradingRadarService {
      * HTTP detail DTO: list callers project only table scalars while full/detail callers create a
      * {@link TradingRadarDto.StockDecision} at the final boundary.
      */
-    private record DecisionCore(
+    record DecisionCore(
             Target target,
             String name,
             String assetClass,
@@ -538,31 +539,28 @@ public class TradingRadarService {
         Set<String> skippedNonTw = new HashSet<>();
         loadLatestHoldings(targets, skippedNonTw, null);
         loadWatchList(targets, skippedNonTw, null);
-        RadarTechnicalResolver.Batch technicalBatch = preloadListTechnical(targets.values(), decisionInstant);
+        List<Target> eligibleTargets = targets.values().stream().filter(this::isSupportedTarget).toList();
+        RadarTechnicalResolver.Batch technicalBatch = preloadListTechnical(eligibleTargets, decisionInstant);
         Map<String, List<LocalDate>> futureSessionsByMarket = new LinkedHashMap<>();
-        for (String market : targets.values().stream().map(Target::market).filter(this::isSupportedMarket)
+        for (String market : eligibleTargets.stream().map(Target::market)
                 .distinct().toList()) {
             futureSessionsByMarket.put(market, futureSessionsCachedOnly(market, decisionInstant));
         }
         Map<String, TradingRadarMarketFeatureResolver.ExpectedSessions> expectedMarketSessions =
                 listExpectedMarketSessions(decisionClocks);
-        Map<String, LocalDate> premiumTargetDates = listPremiumTargetDatesCachedOnly(targets.values(), decisionInstant,
+        Map<String, LocalDate> premiumTargetDates = listPremiumTargetDatesCachedOnly(eligibleTargets, decisionInstant,
                 decisionClocks);
-        TradingRadarListBatchPreloader.Context listInputs = listBatchPreloader == null ? null
-                : listBatchPreloader.preload(targets.values().stream().filter(this::isSupportedTarget)
-                        .map(target -> new TradingRadarListBatchPreloader.Target(
-                                target.code(), target.market(), target.held())).toList(),
-                decisionInstant, futureSessionsByMarket, expectedMarketSessions, premiumTargetDates, SERIES_FETCH_ROWS);
+        TradingRadarListBatchPreloader.Context listInputs = preloadListInputs(eligibleTargets, decisionInstant,
+                futureSessionsByMarket, expectedMarketSessions, premiumTargetDates);
         Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
-        List<TradingRadarDto.ListStock> stocks = targets.values().stream()
-                .filter(this::isSupportedTarget)
-                .map(target -> toListStock(buildDecisionCore(target,
+        List<TradingRadarDto.ListStock> stocks = eligibleTargets.stream()
+                .map(target -> safeListStock(target, () -> buildDecisionCore(target,
                         regimeFor(target.market(), twMarket, usMarket),
                         staleFor(target.market(), twMarket, usMarket),
                         marketSummaryFor(target.market(), twMarket, usMarket), decisionInstant, fxCache,
                         decisionClocks.getOrDefault(target.market(), new DecisionClock(null, false)),
                         decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch,
-                        false, listInputs == null ? null : listInputs.entry(target.code(), target.market()))))
+                        false, listInputs.entry(target.code(), target.market()))))
                 .sorted(Comparator.comparing(TradingRadarService::bestListScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(TradingRadarDto.ListStock::stockCode))
@@ -618,7 +616,45 @@ public class TradingRadarService {
                         && !TW_MARKET.equals(target.market()))
                 .map(target -> new RadarTechnicalCachePort.MarketLocalKey(target.market(), target.code()))
                 .toList();
-        return radarTechnicalResolver.preload(taiwanCodes, marketLocalKeys, decisionInstant);
+        try {
+            RadarTechnicalResolver.Batch batch = radarTechnicalResolver.preload(taiwanCodes, marketLocalKeys, decisionInstant);
+            if (batch != null) return batch;
+            log.warn("交易雷達清單批次不可得：phase=technical-preload, result=null");
+        } catch (RuntimeException unavailable) {
+            logListBatchUnavailable("technical-preload", unavailable);
+        }
+        return RadarTechnicalResolver.Batch.unavailable(!taiwanCodes.isEmpty(), !marketLocalKeys.isEmpty());
+    }
+
+    /**
+     * The compact route may not translate a failed batch into a null context: doing so would
+     * reopen per-target readers or let a single missing map entry collapse the owner list.
+     */
+    private TradingRadarListBatchPreloader.Context preloadListInputs(
+            Collection<Target> targets, Instant decisionInstant,
+            Map<String, List<LocalDate>> futureSessionsByMarket,
+            Map<String, TradingRadarMarketFeatureResolver.ExpectedSessions> expectedMarketSessions,
+            Map<String, LocalDate> premiumTargetDates) {
+        List<TradingRadarListBatchPreloader.Target> batchTargets = (targets == null ? List.<Target>of() : targets).stream()
+                .filter(this::isSupportedTarget)
+                .map(target -> new TradingRadarListBatchPreloader.Target(
+                        target.code(), target.market(), target.held())).toList();
+        if (batchTargets.isEmpty()) return new TradingRadarListBatchPreloader.Context(Map.of());
+        TradingRadarListBatchPreloader.Context source = null;
+        if (listBatchPreloader == null) {
+            log.warn("交易雷達清單批次不可得：phase=list-input-preload, result=not-injected");
+        } else {
+            try {
+                source = listBatchPreloader.preload(batchTargets, decisionInstant, futureSessionsByMarket,
+                        expectedMarketSessions, premiumTargetDates, SERIES_FETCH_ROWS);
+                if (source == null) {
+                    log.warn("交易雷達清單批次不可得：phase=list-input-preload, result=null");
+                }
+            } catch (RuntimeException unavailable) {
+                logListBatchUnavailable("list-input-preload", unavailable);
+            }
+        }
+        return TradingRadarListBatchPreloader.Context.complete(batchTargets, source, decisionInstant);
     }
 
     /** Detail remains a one-target path; only its pre-existing Taiwan pair preload applies. */
@@ -1499,7 +1535,11 @@ public class TradingRadarService {
                     List.copyOf(shortReasons), List.copyOf(shortRisks), List.copyOf(swingReasons),
                     List.copyOf(swingRisks), null);
         } catch (Exception e) {
-            log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
+            if (includeFullDetail) {
+                log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
+            } else {
+                logListBatchUnavailable("compact-decision-core", e);
+            }
             return DecisionCore.failed(target, name, assetClass, settingsClassification,
                     "讀取個股資料失敗，該檔今日不交易。");
         }
@@ -1558,19 +1598,30 @@ public class TradingRadarService {
                         core.resolvedTechnical().weeklyIndicators()), core.resolvedTechnical().resolution());
     }
 
+    /**
+     * Terminal compact-row boundary: a bad evaluator or projection is one unavailable row, never
+     * a failed stream that clears the owner's whole list.
+     */
+    private TradingRadarDto.ListStock safeListStock(Target target, Supplier<DecisionCore> coreBuilder) {
+        DecisionCore core;
+        try {
+            core = coreBuilder.get();
+        } catch (RuntimeException unavailable) {
+            logListBatchUnavailable("compact-decision-core", unavailable);
+            return unavailableListStock(target, target.code(), "UNKNOWN");
+        }
+        try {
+            return toListStock(core);
+        } catch (RuntimeException unavailable) {
+            logListBatchUnavailable("compact-projection", unavailable);
+            return unavailableListStock(target, target.code(), "UNKNOWN");
+        }
+    }
+
     /** List projection never creates a StockDecision, RadarEvidence, or nested full-detail DTO. */
-    private TradingRadarDto.ListStock toListStock(DecisionCore core) {
+    /* package */ TradingRadarDto.ListStock toListStock(DecisionCore core) {
         if (core.failureMessage() != null) {
-            return new TradingRadarDto.ListStock(
-                    core.target().code(), core.name(), core.target().market(), core.assetClass(), false,
-                    core.target().held(), null, null, null, null, null, null, null, null, null,
-                    TradingRadarRuleEngine.Action.NO_TRADE.name(),
-                    actionLabel(TradingRadarRuleEngine.Action.NO_TRADE), null, false,
-                    TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
-                    timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
-                    TradingRadarRuleEngine.CounterTrendState.NONE.name(),
-                    counterTrendLabel(TradingRadarRuleEngine.CounterTrendState.NONE), null, null,
-                    core.quoteStatus(), null, null, null, null, null, null, null, null, null, null, null, null);
+            return unavailableListStock(core.target(), core.name(), core.assetClass());
         }
         TradingRadarDto.FundamentalSnapshot fundamental = core.fundamental().snapshot();
         TradingRadarDto.ListFundamental listFundamental = fundamental == null ? null
@@ -1597,6 +1648,26 @@ public class TradingRadarService {
                 core.indicators().monthlyMa(), core.indicators().quarterlyMa(), core.indicators().annualMa(),
                 core.indicators().k(), core.indicators().d(), core.result().kdHeat().name(), listWeekly,
                 dailyCandleAsOfDate);
+    }
+
+    private static TradingRadarDto.ListStock unavailableListStock(Target target, String name, String assetClass) {
+        String safeName = name == null || name.isBlank() ? target.code() : name;
+        String safeAssetClass = assetClass == null || assetClass.isBlank() ? "UNKNOWN" : assetClass;
+        return new TradingRadarDto.ListStock(
+                target.code(), safeName, target.market(), safeAssetClass, false,
+                target.held(), null, null, null, null, null, null, null, null, null,
+                TradingRadarRuleEngine.Action.NO_TRADE.name(),
+                actionLabel(TradingRadarRuleEngine.Action.NO_TRADE), null, false,
+                TradingRadarRuleEngine.TimingState.NEUTRAL.name(),
+                timingLabel(TradingRadarRuleEngine.TimingState.NEUTRAL),
+                TradingRadarRuleEngine.CounterTrendState.NONE.name(),
+                counterTrendLabel(TradingRadarRuleEngine.CounterTrendState.NONE), null, null,
+                "CLOSE_PENDING", null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    private static void logListBatchUnavailable(String phase, Exception unavailable) {
+        log.warn("交易雷達清單批次不可得：phase={}, error={}", phase,
+                unavailable.getClass().getSimpleName());
     }
 
     /**

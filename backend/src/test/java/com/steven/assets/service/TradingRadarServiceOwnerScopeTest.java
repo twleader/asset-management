@@ -214,7 +214,7 @@ class TradingRadarServiceOwnerScopeTest {
     void browserListContext禁止逐檔價格調整快取與基本面IO() {
         stubCommon();
         AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(StockHolding.builder()
-                .stockCode("2330").market("台股").build())).build();
+                .stockCode("2330").market("台股").shares(BigDecimal.ONE).build())).build();
         when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
         Stock stock = Stock.builder().code("2330").market("台股").name("台積電").build();
         StockPriceHistory price = StockPriceHistory.builder().stockCode("2330").market("台股")
@@ -242,6 +242,54 @@ class TradingRadarServiceOwnerScopeTest {
         verify(etfNavHistoryRepo, never()).findRecentPremiumPctAsOf(anyString(), anyString(), any(), any());
         verify(marketDataService, never()).isTwTradingDayKnown(any(LocalDate.class));
         verify(marketDataService, never()).isTradingDay(anyString(), any(LocalDate.class));
+    }
+
+    @Test
+    void browserListBatchThrow仍完整保留持股與觀察清單的eligible聯集且不重開逐檔讀取() {
+        stubCommon();
+        stubEligibleUnion();
+        when(listBatchPreloader.preload(any(), any(), any(), any(), any(), anyInt()))
+                .thenThrow(new IllegalStateException("batch unavailable"));
+
+        TradingRadarDto.ListResponse response = newService().getList();
+
+        assertThat(response.stocks()).extracting(stock -> key(stock.stockCode(), stock.market()))
+                .containsExactlyInAnyOrder(key("2330", "台股"), key("DUP", "台股"), key("AAPL", "美股"));
+        assertThat(response.stocks()).allSatisfy(stock -> {
+            assertThat(stock.action()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE.name());
+            assertThat(stock.price()).isNull();
+            assertThat(stock.score()).isNull();
+        });
+        assertThat(response.stocks()).filteredOn(stock -> "DUP".equals(stock.stockCode()))
+                .singleElement().satisfies(stock -> assertThat(stock.held()).isTrue());
+        verify(priceHistoryRepo, never()).findRecentN(anyString(), anyString(), anyInt());
+        verify(priceQueryService, never()).getLive("2330", "台股");
+        verify(priceQueryService, never()).getLive("DUP", "台股");
+        verify(priceQueryService, never()).getLive("AAPL", "美股");
+        verify(stockRepo, never()).findByCodeAndMarket(anyString(), anyString());
+        verify(dividendEventEvidenceRepository, never()).resolve(anyString(), anyString(), any(), any());
+        verify(fundamentalAnalysisService, never()).resolve(anyString(), anyString(), anyString(), any());
+        verify(etfNavHistoryRepo, never()).findRecentPremiumPctAsOf(anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    void browserListCompactProjectionThrow仍以同identity輸出unavailableNoTradeRows() {
+        stubCommon();
+        stubEligibleUnion();
+        when(listBatchPreloader.preload(any(), any(), any(), any(), any(), anyInt()))
+                .thenAnswer(call -> TradingRadarListBatchPreloader.Context.complete(
+                        call.getArgument(0), null, call.getArgument(1)));
+
+        TradingRadarDto.ListResponse response = new ProjectionFailingTradingRadarService().getList();
+
+        assertThat(response.stocks()).extracting(stock -> key(stock.stockCode(), stock.market()))
+                .containsExactlyInAnyOrder(key("2330", "台股"), key("DUP", "台股"), key("AAPL", "美股"));
+        assertThat(response.stocks()).allSatisfy(stock -> {
+            assertThat(stock.action()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE.name());
+            assertThat(stock.quoteStatus()).isEqualTo("CLOSE_PENDING");
+            assertThat(stock.price()).isNull();
+            assertThat(stock.score()).isNull();
+        });
     }
 
     @Test
@@ -297,6 +345,53 @@ class TradingRadarServiceOwnerScopeTest {
                 .collect(java.util.stream.Collectors.toMap(TradingRadarDto.ListStock::market,
                         TradingRadarDto.ListStock::stockName)))
                 .containsExactlyInAnyOrderEntriesOf(Map.of("台股", "台灣同碼", "美股", "美股同碼"));
+    }
+
+    private void stubEligibleUnion() {
+        AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(
+                StockHolding.builder().stockCode("2330").market("台股").shares(BigDecimal.ONE).build(),
+                StockHolding.builder().stockCode("DUP").market("台股").shares(BigDecimal.ONE).build(),
+                StockHolding.builder().stockCode("0000").market("台股").shares(BigDecimal.ONE).build(),
+                StockHolding.builder().stockCode("ZERO").market("美股").shares(BigDecimal.ZERO).build())).build();
+        when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.of(
+                new Object[]{"DUP", "台股"},
+                new Object[]{"AAPL", "美股"},
+                new Object[]{"0000", "台股"}));
+    }
+
+    private final class ProjectionFailingTradingRadarService extends TradingRadarService {
+        private ProjectionFailingTradingRadarService() {
+            super(
+                    new TradingRadarRuleEngine(),
+                    indicatorService,
+                    adjustedPriceService,
+                    new RadarInputAssembler(indicatorService, adjustedPriceService, new TradingRadarRuleEngine()),
+                    assetClassifier,
+                    twseRepo,
+                    usIndexDailyHistoryRepo,
+                    priceHistoryRepo,
+                    dividendHistoryRepo,
+                    priceQueryService,
+                    taiexDisplayPriceService,
+                    snapshotRepo,
+                    alertRepo,
+                    stockRepo,
+                    marketDataService,
+                    marketContextService,
+                    fundamentalAnalysisService,
+                    etfNavHistoryRepo,
+                    snapshotStore,
+                    currentUserContext,
+                    dividendEventEvidenceRepository,
+                    treasuryYieldService);
+            setListBatchPreloader(listBatchPreloader);
+        }
+
+        @Override
+        TradingRadarDto.ListStock toListStock(DecisionCore core) {
+            throw new IllegalStateException("projection unavailable");
+        }
     }
 
     private static String key(String code, String market) {
