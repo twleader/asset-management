@@ -121,6 +121,37 @@ class RadarTechnicalResolverNonTwLocalTest {
         verifyNoInteractions(facts);
     }
 
+    @Test
+    void failedOrNullBatchReadsStayMarkedLoadedAndNeverReopenSingleTargetReadsOrWrites() {
+        String taiwanCode = "2330";
+        RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
+        RadarTechnicalCachePort cache = mock(RadarTechnicalCachePort.class);
+        RadarTechnicalResolver resolver = new RadarTechnicalResolver(facts, cache, new ObjectMapper());
+        RadarTechnicalCachePort.MarketLocalKey marketLocalKey =
+                new RadarTechnicalCachePort.MarketLocalKey(MARKET, CODE);
+        when(cache.readPairs(List.of(taiwanCode))).thenThrow(new IllegalStateException("cache unavailable"));
+        when(facts.findFreshCompleteCaptures(List.of(taiwanCode), NOW)).thenReturn(null);
+        when(cache.readMarketLocals(List.of(marketLocalKey))).thenThrow(new IllegalStateException("local unavailable"));
+
+        RadarTechnicalResolver.Batch batch = resolver.preload(
+                java.util.Set.of(taiwanCode), List.of(marketLocalKey), NOW);
+        ResolvedTechnicalInputs taiwan = resolver.resolveReadOnly(
+                taiwanCode, "台股", indicators("1"), null, indicators("1"), false, false, false,
+                LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 28), FINGERPRINT, NOW, batch);
+        ResolvedTechnicalInputs us = resolver.resolveReadOnly(
+                CODE, MARKET, indicators("1"), null, indicators("1"), false, false, false,
+                LocalDate.of(2026, 8, 28), LocalDate.of(2026, 8, 28), FINGERPRINT, NOW, batch);
+
+        assertThat(taiwan.resolution().source()).isEqualTo("LOCAL_CALCULATED");
+        assertThat(us.resolution().source()).isEqualTo("LOCAL_CALCULATED");
+        verify(cache, org.mockito.Mockito.times(1)).readPairs(List.of(taiwanCode));
+        verify(facts, org.mockito.Mockito.times(1)).findFreshCompleteCaptures(List.of(taiwanCode), NOW);
+        verify(cache, org.mockito.Mockito.times(1)).readMarketLocals(List.of(marketLocalKey));
+        verify(cache, never()).readMarketLocal(any(), any());
+        verify(cache, never()).writePair(any());
+        verify(cache, never()).writeMarketLocal(any());
+    }
+
     private static TechnicalIndicatorService.FullIndicators indicators(String value) {
         BigDecimal number = new BigDecimal(value);
         return new TechnicalIndicatorService.FullIndicators(

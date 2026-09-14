@@ -12048,7 +12048,7 @@ Trading radar / business / BFF request read
 
 **Task 425 strict child JSON。** instrumentType 固定是 JSON string EQUITY。levels 每項的精確 key set 是 price、volume、bidVolume、askVolume：price 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，bidVolume 和 askVolume 各為 null 或非負 signed-64 integer JSON string。candles 每項的精確 key set 是 tradingDate、open、high、low、close、volume、turnover、change：tradingDate 為 YYYY-MM-DD JSON string，OHLC 為正 canonical decimal JSON string，volume 為非負 signed-64 integer JSON string，turnover 為非負 canonical decimal JSON string，change 為 null 或 signed canonical decimal JSON string。日 K 的 OK 必為非空 candles 且 reason=null；NO_DATA 必為空 candles 且 reason=NO_DATA。每個 root 和 child object 均拒絕 missing、unknown、duplicate fields。
 
-## Requirement 148／Task 426、Task 427、Task 428：交易雷達 browser BFF 列表／明細分流、首頁批次決策與錯誤日誌 no-op dedupe
+## Requirement 148／Task 426、Task 427、Task 428、Task 430：交易雷達 browser BFF 列表／明細分流、首頁批次決策與錯誤日誌 no-op dedupe
 
 ### 路由與信任邊界
 
@@ -12107,6 +12107,16 @@ After this point the list loop is an I/O-free evaluator: it may call `RadarInput
 The list context is not a response cache: it is neither persisted nor reused across requests, does not write a radar snapshot, and cannot make a later SSE value appear to be a recalculated decision. The existing full response and single-stock detail retain their own established assembly paths and response contracts. This task changes no browser/BFF/public route, no 9090 contract, no SSE mapping and no detail payload.
 
 Tests expose the boundary with fakes/spies at the input ports: a multi-target list request observes one public-info batch, one future-session resolution per market and the expected bounded batch calls; once evaluation begins it observes zero per-target repository/Redis/fundamental/dividend/adjustment/technical-cache/rate calls and zero technical cache writes. Tests prove no `(code, market)` mismatch and that natural-keyed shared values do not leak between markets, currencies or typed rate queries. A frozen same-instant fixture compares every `ListStock` scalar, failure projection and sort order against the legacy/full decision projection. The runtime benchmark remains the authenticated BFF protocol: 38 warm valid targets, seven serial calls with the first discarded, all six list TTFBs at most 800ms, body below 70 KiB, and full median at least twice list median. Public 9090 timing is diagnostic only and cannot satisfy this acceptance.
+
+### Task 430：批次失敗不清空 owner 清單
+
+`getList()` 先以既有 owner-scoped holding snapshot（只取 shares > 0）及 watch-list，依既有 code/market normalize、台／美 supported-market 與台股 `0000` 指數排除規則產生 immutable exact `(market, stockCode)` eligible 聯集；同一 pair 若任一來源為持有，輸出 target 的 `held=true`。這個目標集合是 response cardinality 的權威，不能由任一資料讀取結果縮小。若 eligible 聯集非空，list 一定逐 pair 回傳一個 `ListStock`；真正沒有 eligible target 才是唯一合法空清單。
+
+Technical preload 與 list-input preloader 的每個唯讀 phase 必各自將 runtime failure、null reader result 或 malformed/missing input 正規化為已載入的 unavailable snapshot。Technical fallback 必保留「batch 已嘗試」標記，使逐列 evaluator 不會在失敗後偷偷退回 single Redis/DB read 或 cache write；list-input fallback 必 materialize 每個 target 的 exact-key entry，所有可選讀值以既有 unavailable value 表示。不得 catch 後將 context 設成 null 而讓全數 target 消失，也不得把 failure 轉交給 generic exception handler 形成 HTTP 500。
+
+compact `DecisionCore` 仍是每列的 fail-soft 邊界；`toListStock` 也必有最後一層列級轉換，避免 nullable/不合法 projection 逸出 stream 而終止整個 response。它只能產生相同 target identity 的 unavailable `NO_TRADE` row，不能虛構價格、分數或資料，且不會影響其他列。每個 batch/projection fallback 使用 sanitized warning（phase、exception class、已清理訊息）；禁止日誌輸出 owner/account、authorization header、cookie、token、raw cache/document 或 quote payload。
+
+測試用 multi-market owner fixture 固定 union/held/identity，並逐一注入 technical preload、list batch reader 及 projection 失敗或 null，驗證 response 仍含全部 targets、沒有 500、沒有 N+1／寫入／外部 I/O，且未受影響列照常可決策。runtime 驗收以 authenticated owner list 的 HTTP 200 與 response pairs 對 owner union，搭配 legacy full 與 9090 public contract regression；public timing 或 response 不構成 browser 驗收。
 
 ### Vue state and lazy expansion
 
