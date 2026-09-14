@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-07
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-14
 -- 產生當下表數：101 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
@@ -467,7 +467,9 @@ CREATE TABLE public.bank_deposit (
     original_amount numeric(20,4),
     snapshot_id bigint NOT NULL,
     bank_id bigint,
-    annual_interest_rate numeric(7,4)
+    annual_interest_rate numeric(7,4),
+    source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
+    CONSTRAINT ck_bank_deposit_source CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 
 

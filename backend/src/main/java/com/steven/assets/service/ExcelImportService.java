@@ -197,13 +197,16 @@ public class ExcelImportService {
             date, usdRate, null, deposits, funds, stocks
         );
 
-        // 若已存在同日期快照，先刪除再重建（覆蓋匯入）
+        // 同日期覆蓋必經 AssetService 的 row-lock / source-owned preservation 路徑；不可
+        // delete-and-recreate，否則會把富邦唯讀同步的在途款及其成交備註一起刪掉。
         final LocalDate finalDate = date;
-        snapshotRepo.findBySnapshotDate(finalDate).ifPresent(existing -> {
-            log.info("快照 {} 已存在，刪除後重新匯入", finalDate);
-            assetService.deleteSnapshot(existing.getId());
-        });
-        assetService.createSnapshot(req);
+        var existing = snapshotRepo.findBySnapshotDate(finalDate);
+        if (existing.isPresent()) {
+            log.info("快照 {} 已存在，鎖定後覆蓋匯入", finalDate);
+            assetService.updateSnapshot(existing.get().getId(), req);
+        } else {
+            assetService.createSnapshot(req);
+        }
     }
 
     /**

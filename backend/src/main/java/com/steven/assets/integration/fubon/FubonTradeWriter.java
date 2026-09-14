@@ -1,10 +1,9 @@
 package com.steven.assets.integration.fubon;
 
-import com.steven.assets.model.AppUser;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
-import com.steven.assets.service.UserAdminService;
+import com.steven.assets.service.fubon.FubonSyncOwnerPort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -19,16 +18,21 @@ import java.util.List;
 @RequiredArgsConstructor
 public class FubonTradeWriter {
     private final AssetTransactionRepository transactions;
-    private final UserAdminService users;
+    private final FubonSyncOwnerPort ownerPolicy;
     private final BrokerRepository brokers;
     private final FubonSyncFreshness freshness;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public CommitResult insert(Long ownerId, Long expectedBrokerId, List<PreparedTrade> prepared) {
-        AppUser owner = users.configuredAdmin().orElse(null);
-        if (owner != null) freshness.refreshOwner(owner);
-        if (owner == null || ownerId == null || !ownerId.equals(owner.getId())
-                || !owner.isActive() || !owner.isAdmin()) {
+        // This is deliberately the first DB action in the writer. The locked dedicated owner
+        // closes the race between service preflight and the insert-only ledger transaction.
+        FubonSyncOwnerPort.LockedOwner lockedOwner;
+        try {
+            lockedOwner = ownerPolicy.lockAndRevalidate(ownerId);
+        } catch (FubonSyncOwnerPort.Rejected rejected) {
+            throw new WriteRejected(outcomeFor(rejected.denial()));
+        }
+        if (lockedOwner == null || ownerId == null || !ownerId.equals(lockedOwner.ownerId())) {
             throw new WriteRejected(FubonTradeOutcome.NO_OWNER);
         }
         BrokerEntity broker = brokers.findByCode("fubon").orElse(null);
@@ -77,5 +81,10 @@ public class FubonTradeWriter {
         private final FubonTradeOutcome outcome;
         WriteRejected(FubonTradeOutcome outcome) { super(outcome.name()); this.outcome = outcome; }
         FubonTradeOutcome outcome() { return outcome; }
+    }
+
+    private static FubonTradeOutcome outcomeFor(FubonSyncOwnerPort.Denial denial) {
+        return denial == FubonSyncOwnerPort.Denial.SYNC_OWNER_NOT_CONFIGURED
+                ? FubonTradeOutcome.SYNC_OWNER_NOT_CONFIGURED : FubonTradeOutcome.NO_OWNER;
     }
 }

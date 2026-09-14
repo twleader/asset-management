@@ -10,6 +10,8 @@ import com.steven.assets.repository.JpaFubonSyncFreshness;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
+import com.steven.assets.service.fubon.FubonSyncOwnerPolicy;
+import com.steven.assets.service.fubon.FubonSyncOwnerPort;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.TenantFilterAspect;
 import jakarta.persistence.EntityManager;
@@ -68,7 +70,7 @@ import static org.mockito.Mockito.when;
 
 /** Dedicated PostgreSQL: actual transactional writer, conflict target, and deferred commit. */
 @DataJpaTest(showSql = false, properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "spring.liquibase.enabled=false",
-        "app.admin-email=trade-test@example.invalid"})
+        "app.admin-email=trade-test@example.invalid", "fubon.sync-owner-email=trade-test@example.invalid"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({JpaFubonSyncFreshness.class, FubonTradeWriter.class, UserAdminService.class, CurrentUserContext.class,
         TenantFilterAspect.class, FubonTradeWriterPostgresTest.Config.class})
@@ -296,10 +298,17 @@ class FubonTradeWriterPostgresTest {
             return factory -> factory.registerScope("request", new org.springframework.web.context.request.RequestScope());
         }
         @Bean FubonTradeOutcomeCounters tradeCounters() { return new FubonTradeOutcomeCounters(); }
+        @Bean FubonSyncOwnerDirectoryAdapter fubonSyncOwnerDirectoryAdapter(AppUserRepository users,
+                UserAdminService configuredAdmin) {
+            return new FubonSyncOwnerDirectoryAdapter(users, configuredAdmin, "trade-test@example.invalid");
+        }
+        @Bean FubonSyncOwnerPolicy fubonSyncOwnerPolicy(FubonSyncOwnerDirectoryAdapter directory) {
+            return new FubonSyncOwnerPolicy(directory, directory);
+        }
         @Bean FubonTradeSyncService tradeService(FubonConfigState config, FubonBrokerClient client, MarketDataService marketData,
-                UserAdminService users, BrokerRepository brokers, AssetTransactionRepository ledger,
+                FubonSyncOwnerPort ownerPolicy, BrokerRepository brokers, AssetTransactionRepository ledger,
                 StockMasterService stocks, FubonTradeWriter writer, FubonTradeOutcomeCounters counters) {
-            return new FubonTradeSyncService(config, client, marketData, users, brokers, ledger, stocks, writer, counters, CLOCK, true);
+            return new FubonTradeSyncService(config, client, marketData, ownerPolicy, brokers, ledger, stocks, writer, counters, CLOCK, true);
         }
     }
 }

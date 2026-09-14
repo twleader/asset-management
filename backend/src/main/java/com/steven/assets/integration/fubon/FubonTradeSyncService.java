@@ -1,12 +1,11 @@
 package com.steven.assets.integration.fubon;
 
-import com.steven.assets.model.AppUser;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.StockMasterService;
-import com.steven.assets.service.UserAdminService;
+import com.steven.assets.service.fubon.FubonSyncOwnerPort;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -27,7 +26,8 @@ import java.util.regex.Pattern;
  * Read-only Fubon filled-trade sync into {@code asset_transaction} (Requirement 120 / Task 385).
  *
  * <p>Sibling of {@link FubonInventorySyncService}: same cron cadence, same tri-state calendar
- * gate, same {@link FubonConfigState} READY gate, same configured-admin owner resolution. The
+ * gate, same {@link FubonConfigState} READY gate, and the dedicated Fubon sync-owner policy
+ * shared with the accounting projections. The
  * output target and internal call graph are deliberately different — this service returns a bare
  * {@link FubonTradeOutcome} enum wrapped in {@link TradeSyncResult} rather than the existing
  * {@link FubonDtos.SyncResponse}, and {@link #syncManual} delegates to
@@ -45,7 +45,7 @@ public class FubonTradeSyncService {
     private final FubonConfigState configState;
     private final FubonBrokerClient brokerClient;
     private final MarketDataService marketDataService;
-    private final UserAdminService userAdminService;
+    private final FubonSyncOwnerPort ownerPolicy;
     private final BrokerRepository brokerRepository;
     private final AssetTransactionRepository assetTransactionRepository;
     private final StockMasterService stockMasterService;
@@ -59,14 +59,14 @@ public class FubonTradeSyncService {
             FubonConfigState configState,
             FubonBrokerClient brokerClient,
             MarketDataService marketDataService,
-            UserAdminService userAdminService,
+            FubonSyncOwnerPort ownerPolicy,
             BrokerRepository brokerRepository,
             AssetTransactionRepository assetTransactionRepository,
             StockMasterService stockMasterService,
             FubonTradeWriter writer,
             FubonTradeOutcomeCounters counters,
             @org.springframework.beans.factory.annotation.Value("${fubon.trade-sync-enabled:false}") boolean tradeSyncEnabled) {
-        this(configState, brokerClient, marketDataService, userAdminService, brokerRepository,
+        this(configState, brokerClient, marketDataService, ownerPolicy, brokerRepository,
                 assetTransactionRepository, stockMasterService, writer, counters, Clock.system(TW_ZONE),
                 tradeSyncEnabled);
     }
@@ -75,7 +75,7 @@ public class FubonTradeSyncService {
             FubonConfigState configState,
             FubonBrokerClient brokerClient,
             MarketDataService marketDataService,
-            UserAdminService userAdminService,
+            FubonSyncOwnerPort ownerPolicy,
             BrokerRepository brokerRepository,
             AssetTransactionRepository assetTransactionRepository,
             StockMasterService stockMasterService,
@@ -86,7 +86,7 @@ public class FubonTradeSyncService {
         this.configState = configState;
         this.brokerClient = brokerClient;
         this.marketDataService = marketDataService;
-        this.userAdminService = userAdminService;
+        this.ownerPolicy = ownerPolicy;
         this.brokerRepository = brokerRepository;
         this.assetTransactionRepository = assetTransactionRepository;
         this.stockMasterService = stockMasterService;
@@ -153,12 +153,14 @@ public class FubonTradeSyncService {
         FubonTradeOutcome gate = localConfigGate(dryRun);
         if (gate != null) return toResult(gate, dryRun);
 
-        Optional<AppUser> configured = userAdminService.configuredAdmin();
-        if (configured.isEmpty() || configured.get().getId() == null
-                || !configured.get().isActive() || !configured.get().isAdmin()) {
-            return toResult(recordOutcome(FubonTradeOutcome.NO_OWNER), dryRun);
+        // Dedicated owner selection is the common accounting boundary. It must happen before
+        // broker, ledger and stock-master access so a blank/invalid configured owner is a true
+        // zero-I/O local stop rather than a partial sync.
+        FubonSyncOwnerPort.Decision owner = ownerPolicy.preflight();
+        if (owner == null || !owner.allowed()) {
+            return toResult(recordOutcome(owner == null ? FubonTradeOutcome.NO_OWNER : outcomeFor(owner.denial())), dryRun);
         }
-        Long ownerId = configured.get().getId();
+        Long ownerId = owner.ownerId();
 
         Optional<BrokerEntity> broker = brokerRepository.findByCode("fubon");
         if (broker.isEmpty() || broker.get().getId() == null || !"fubon".equals(broker.get().getCode())
@@ -278,6 +280,7 @@ public class FubonTradeSyncService {
             case MISCONFIGURED -> "MISCONFIGURED";
             case CALENDAR_UNKNOWN -> "CALENDAR_NOT_AUTHORIZED";
             case TRADE_FAILED -> "TRADE_ADAPTER_FAILURE";
+            case SYNC_OWNER_NOT_CONFIGURED -> "SYNC_OWNER_NOT_CONFIGURED";
             case NO_OWNER -> "NO_ACTIVE_CONFIGURED_ADMIN";
             case BROKER_MISSING -> "BROKER_MISSING";
             case DRY_RUN -> "DRY_RUN_COMPLETE";
@@ -285,6 +288,11 @@ public class FubonTradeSyncService {
             case NO_NEW_TRADES -> "NO_NEW_TRADES";
             case ROLLED_BACK -> "TRANSACTION_ROLLED_BACK";
         };
+    }
+
+    private static FubonTradeOutcome outcomeFor(FubonSyncOwnerPort.Denial denial) {
+        return denial == FubonSyncOwnerPort.Denial.SYNC_OWNER_NOT_CONFIGURED
+                ? FubonTradeOutcome.SYNC_OWNER_NOT_CONFIGURED : FubonTradeOutcome.NO_OWNER;
     }
 
     private static boolean validBatchId(String value) {

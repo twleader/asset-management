@@ -9,6 +9,7 @@ import com.steven.assets.model.RealizedGain;
 import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.AppUserRepository;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.RealizedGainRepository;
@@ -102,6 +103,7 @@ class FubonAccountingProjectionPostgresTest {
     @SpyBean SnapshotAggregateCalculator aggregates;
 
     @Autowired AssetSnapshotRepository snapshots;
+    @Autowired AssetTransactionRepository assetTransactions;
     @Autowired AppUserRepository users;
     @Autowired BankRepository banks;
     @Autowired BrokerRepository brokers;
@@ -220,6 +222,8 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(target.getCurrency()).isEqualTo("TRANSIT_TWD");
             assertThat(target.getOriginalAmount()).isNull();
             assertThat(target.getAnnualInterestRate()).isNull();
+            assertThat(target.getSource()).isEqualTo("FUBON_SYNC");
+            assertThat(target.getNotes()).isEqualTo("富邦證券交割款；當日無已同步成交明細");
             assertThat(snapshot.getDeposits()).hasSize(2);
             assertThat(transit(snapshot, RECEIVABLE)).isEmpty();
             assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-902.00");
@@ -227,7 +231,7 @@ class FubonAccountingProjectionPostgresTest {
     }
 
     @Test
-    void settlementUpdatePreservesNotesAndClearsOnlyDerivedRateFields() {
+    void settlementUpdateRefreshesSyncNoteAndClearsOnlyDerivedRateFields() {
         addTransit(PAYABLE, "-5.00", "TRANSIT_TWD", "10.00", "keep-note", "5.0000");
 
         assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
@@ -236,15 +240,42 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(transit(snapshot, PAYABLE)).hasSize(1);
             BankDeposit target = transit(snapshot, PAYABLE).getFirst();
             assertThat(target.getAmount()).isEqualByComparingTo("-1002.00");
-            assertThat(target.getNotes()).isEqualTo("keep-note");
+            assertThat(target.getNotes()).isEqualTo("富邦證券交割款；當日無已同步成交明細");
             assertThat(target.getAnnualInterestRate()).isNull();
             assertThat(target.getOriginalAmount()).isNull();
         });
     }
 
     @Test
+    void settlementNeverMutatesAUniqueManualTarget() {
+        addTransit(PAYABLE, "-5.00", "TRANSIT_TWD", null, "manual-note", null, "MANUAL");
+
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.UNMANAGED_TARGET);
+
+        readSnapshot(snapshot -> {
+            BankDeposit target = transit(snapshot, PAYABLE).getFirst();
+            assertThat(target.getAmount()).isEqualByComparingTo("-5.00");
+            assertThat(target.getNotes()).isEqualTo("manual-note");
+            assertThat(target.getSource()).isEqualTo("MANUAL");
+        });
+    }
+
+    @Test
+    void settlementNoteUsesOnlySameOwnerSameDateFubonBuyLedgerRows() {
+        tx(() -> assetTransactions.saveAllAndFlush(List.of(
+                ledger(ownerId, "買", "00719B", "元大美債1-3", "1000", "FUBON_SYNC"),
+                ledger(ownerId, "賣", "2885", "元大金", "1000", "FUBON_SYNC"),
+                ledger(ownerId, "買", "2330", "台積電", "1000", "MANUAL"))));
+
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getNotes())
+                .isEqualTo("富邦證券當日已同步成交：買入 元大美債1-3（00719B）1 張"));
+    }
+
+    @Test
     void settlementCanonicalSameDataDoesNotRecalculateOrEmitDml() {
-        addTransit(PAYABLE, "-1002.000", "TRANSIT_TWD", null, "local-note", null);
+        addTransit(PAYABLE, "-1002.000", "TRANSIT_TWD", null, "富邦證券交割款；當日無已同步成交明細", null);
         clearInvocations(aggregates);
         when(brokerClient.readSettlement()).thenAnswer(call -> {
             sqlTrace.start();
@@ -256,7 +287,8 @@ class FubonAccountingProjectionPostgresTest {
         assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
         verify(aggregates, never()).recalculate(any());
         assertThat(sqlTrace.stop()).noneMatch(sql -> sql.startsWith("insert") || sql.startsWith("update"));
-        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getNotes()).isEqualTo("local-note"));
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getNotes())
+                .isEqualTo("富邦證券交割款；當日無已同步成交明細"));
     }
 
     @Test
@@ -496,13 +528,18 @@ class FubonAccountingProjectionPostgresTest {
     }
 
     private Long addTransit(String type, String amount, String currency, String rate, String notes, String original) {
+        return addTransit(type, amount, currency, rate, notes, original, "FUBON_SYNC");
+    }
+
+    private Long addTransit(String type, String amount, String currency, String rate, String notes, String original,
+            String source) {
         AtomicReference<Long> id = new AtomicReference<>();
         tx(() -> {
             AssetSnapshot snapshot = snapshots.findById(snapshotId).orElseThrow();
             BankDeposit deposit = BankDeposit.builder().snapshot(snapshot).bank(fubonBank).depositType(type)
                     .currency(currency).amount(new BigDecimal(amount)).notes(notes)
                     .annualInterestRate(rate == null ? null : new BigDecimal(rate))
-                    .originalAmount(original == null ? null : new BigDecimal(original)).build();
+                    .originalAmount(original == null ? null : new BigDecimal(original)).source(source).build();
             snapshot.getDeposits().add(deposit);
             aggregates.recalculate(snapshot);
             snapshots.saveAndFlush(snapshot);
@@ -510,6 +547,14 @@ class FubonAccountingProjectionPostgresTest {
         });
         clearInvocations(aggregates);
         return id.get();
+    }
+
+    private static com.steven.assets.model.AssetTransaction ledger(Long ownerId, String direction, String code,
+            String name, String shares, String source) {
+        return com.steven.assets.model.AssetTransaction.builder().ownerUserId(ownerId).transactionType(direction)
+                .assetType("股票").assetName(name).assetCode(code).market("台股").currency("TWD")
+                .channel("富邦證券").tradeDate(DATE).shares(new BigDecimal(shares)).price(BigDecimal.ONE)
+                .amount(new BigDecimal(shares)).source(source).build();
     }
 
     private void addManualEquivalent(String shares, String price, String name) {
@@ -581,9 +626,9 @@ class FubonAccountingProjectionPostgresTest {
         @Bean FubonSettlementWriter fubonSettlementWriter(AssetSnapshotMutationLock locks,
                 FubonSyncOwnerPort ownerPolicy, BrokerRepository brokers, BankRepository banks,
                 TransitFundTypeRepository transitTypes, SnapshotAggregateCalculator aggregates,
-                AssetSnapshotRepository snapshots, MutableClock clock) {
+                AssetSnapshotRepository snapshots, AssetTransactionRepository assetTransactions, MutableClock clock) {
             return new FubonSettlementWriter(locks, ownerPolicy, brokers, banks, transitTypes, aggregates,
-                    snapshots, clock);
+                    snapshots, assetTransactions, clock);
         }
         @Bean FubonRealizedGainWriter fubonRealizedGainWriter(FubonSyncOwnerPort ownerPolicy,
                 RealizedGainRepository gains, EntityManager entityManager) {

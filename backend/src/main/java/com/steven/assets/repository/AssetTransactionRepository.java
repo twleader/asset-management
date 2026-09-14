@@ -52,6 +52,25 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
     boolean existsByOwnerUserIdAndBrokerFilledNo(Long ownerUserId, String brokerFilledNo);
 
     /**
+     * Fubon settlement notes are an informative view of the same owner's already-persisted
+     * filled-trade ledger. This internal writer has no HTTP tenant identity, so a native query
+     * with every ownership/source/date/direction predicate is required to bypass ownerFilter
+     * without admitting manual rows or another owner's transactions.
+     */
+    @Query(value = """
+        SELECT * FROM asset_transaction
+        WHERE owner_user_id = :ownerUserId
+          AND source = 'FUBON_SYNC'
+          AND trade_date = :tradeDate
+          AND transaction_type = :transactionType
+        ORDER BY asset_code ASC NULLS LAST, asset_name ASC NULLS LAST, id ASC
+        """, nativeQuery = true)
+    List<AssetTransaction> findFubonSyncedDetailsForTransitNote(
+            @Param("ownerUserId") Long ownerUserId,
+            @Param("tradeDate") LocalDate tradeDate,
+            @Param("transactionType") String transactionType);
+
+    /**
      * The Fubon batch writer alone calls this inside its transaction. Only the existing
      * owner/filled-no partial unique index is an expected conflict; every other database error
      * must abort that transaction. Never update a ledger row the user may already have edited.

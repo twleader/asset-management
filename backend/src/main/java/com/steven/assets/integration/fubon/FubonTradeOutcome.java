@@ -14,6 +14,7 @@ public enum FubonTradeOutcome {
     MISCONFIGURED,
     CALENDAR_UNKNOWN,
     TRADE_FAILED,
+    SYNC_OWNER_NOT_CONFIGURED,
     NO_OWNER,
     BROKER_MISSING,
     DRY_RUN,
