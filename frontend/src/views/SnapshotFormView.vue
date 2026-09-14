@@ -285,21 +285,29 @@
               <el-tab-pane label="台幣" name="TWD">
                 <el-table ref="transitTwdDepositTableRef" :data="transitTwdDeposits" size="small" row-key="_rowId">
                   <el-table-column width="36" align="center">
-                    <template #default>
-                      <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
+                    <template #default="{ row }">
+                      <el-icon v-if="!isAutoTransit(row)" class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                     </template>
                   </el-table-column>
                   <el-table-column label="銀行" width="160">
                     <template #default="{ row }">
-                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable :disabled="isAutoTransit(row)">
                         <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
                       </el-select>
                     </template>
                   </el-table-column>
                   <el-table-column label="類型" width="170">
                     <template #default="{ row }">
-                      <el-select v-model="row.depositType" size="small" style="width:100%">
+                      <el-select v-model="row.depositType" size="small" style="width:100%" :disabled="isAutoTransit(row)">
                         <el-option v-for="t in transitTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="更新方式" width="105">
+                    <template #default="{ row }">
+                      <el-select :model-value="row.updateMode" size="small" style="width:100%" disabled>
+                        <el-option label="手動" value="MANUAL" />
+                        <el-option label="自動" value="AUTO" />
                       </el-select>
                     </template>
                   </el-table-column>
@@ -307,17 +315,18 @@
                     <template #default="{ row }">
                       <el-input v-model="row.amountStr" size="small" style="width:100%"
                         :input-style="{ textAlign:'right', color: isTransitPayable(row) ? '#dc2626' : '#16a34a' }"
+                        :disabled="isAutoTransit(row)"
                         @blur="row.amount = numParse(row.amountStr, 0); row.amountStr = numFmt(row.amount)" />
                     </template>
                   </el-table-column>
                   <el-table-column label="備註">
                     <template #default="{ row }">
-                      <el-input v-model="row.notes" size="small" />
+                      <el-input v-model="row.notes" size="small" :disabled="isAutoTransit(row)" />
                     </template>
                   </el-table-column>
                   <el-table-column width="50">
                     <template #default="{ row }">
-                      <el-popconfirm title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                      <el-popconfirm v-if="!isAutoTransit(row)" title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
                         @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
                         <template #reference>
                           <el-button type="danger" size="small" :icon="Delete" circle />
@@ -346,21 +355,29 @@
               <el-tab-pane label="外幣" name="USD">
                 <el-table ref="transitUsdDepositTableRef" :data="transitUsdDeposits" size="small" row-key="_rowId">
                   <el-table-column width="36" align="center">
-                    <template #default>
-                      <el-icon class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
+                    <template #default="{ row }">
+                      <el-icon v-if="!isAutoTransit(row)" class="row-drag-handle" style="cursor:grab;color:#94a3b8"><Operation /></el-icon>
                     </template>
                   </el-table-column>
                   <el-table-column label="銀行" width="160">
                     <template #default="{ row }">
-                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable>
+                      <el-select v-model="row.bankId" size="small" style="width:100%" clearable :disabled="isAutoTransit(row)">
                         <el-option v-for="b in bankOptions" :key="b.value" :label="b.label" :value="b.value" />
                       </el-select>
                     </template>
                   </el-table-column>
                   <el-table-column label="類型" width="170">
                     <template #default="{ row }">
-                      <el-select v-model="row.depositType" size="small" style="width:100%">
+                      <el-select v-model="row.depositType" size="small" style="width:100%" :disabled="isAutoTransit(row)">
                         <el-option v-for="t in transitTypeOptions" :key="t.value" :label="t.label" :value="t.value" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="更新方式" width="105">
+                    <template #default="{ row }">
+                      <el-select :model-value="row.updateMode" size="small" style="width:100%" disabled>
+                        <el-option label="手動" value="MANUAL" />
+                        <el-option label="自動" value="AUTO" />
                       </el-select>
                     </template>
                   </el-table-column>
@@ -368,6 +385,7 @@
                     <template #default="{ row }">
                       <el-input v-model="row.amountStr" size="small" style="width:100%"
                         :input-style="{ textAlign:'right', color: isTransitPayable(row) ? '#dc2626' : '#16a34a' }"
+                        :disabled="isAutoTransit(row)"
                         @blur="row.amount = numParse(row.amountStr, 2); row.amountStr = numFmt(row.amount)" />
                     </template>
                   </el-table-column>
@@ -380,12 +398,12 @@
                   </el-table-column>
                   <el-table-column label="備註">
                     <template #default="{ row }">
-                      <el-input v-model="row.notes" size="small" />
+                      <el-input v-model="row.notes" size="small" :disabled="isAutoTransit(row)" />
                     </template>
                   </el-table-column>
                   <el-table-column width="50">
                     <template #default="{ row }">
-                      <el-popconfirm title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
+                      <el-popconfirm v-if="!isAutoTransit(row)" title="確定刪除此筆在途款項？" width="240" confirm-button-text="刪除" cancel-button-text="取消" confirm-button-type="danger"
                         @confirm="form.deposits.splice(form.deposits.indexOf(row),1)">
                         <template #reference>
                           <el-button type="danger" size="small" :icon="Delete" circle />
@@ -2011,9 +2029,13 @@ const mapDepositFromApi = (d, rate = 1) => {
     amountStr: numFmt(displayAmt),
     annualInterestRate: interestRate,
     annualInterestRateStr: interestRate != null ? numFmt(interestRate) : '',
-    notes: d.notes
+    notes: d.notes,
+    // API only projects this read-only field. It is intentionally omitted from submit payloads.
+    updateMode: d.updateMode === 'AUTO' ? 'AUTO' : 'MANUAL'
   }
 }
+
+const isAutoTransit = (row) => row?.updateMode === 'AUTO'
 
 // ===== Deposit Tabs =====
 const depositTab  = ref('TWD')
@@ -2041,11 +2063,11 @@ const addDeposit = (outerTab = 'TWD') => {
   if (outerTab === 'TRANSIT') {
     const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
     const defaultType = transitTypeOptions.value[0]?.value ?? '信用卡待付款'
-    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '' })
+    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', updateMode: 'MANUAL' })
     return
   }
   const typeMap = { USD: '美元活存', TWD: '活存' }
-  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '' })
+  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', updateMode: 'MANUAL' })
 }
 
 const addFund = () =>

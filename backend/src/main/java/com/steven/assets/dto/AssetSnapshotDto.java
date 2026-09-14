@@ -102,7 +102,8 @@ public class AssetSnapshotDto {
             String currency,
             BigDecimal annualInterestRate,    // 年利率（百分比；nullable）
             BigDecimal estimatedAnnualInterest, // 預估年利息（TWD，amount × rate / 100；rate null 時為 null）
-            String notes
+            String notes,
+            String updateMode                 // 唯讀 MANUAL / AUTO；不接受任何寫入 payload
     ) {}
 
     public record FundResponse(

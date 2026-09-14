@@ -6,6 +6,7 @@ import com.steven.assets.model.BankDeposit;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.model.TransitFundType;
 import com.steven.assets.repository.AssetSnapshotRepository;
+import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BankRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.TransitFundTypeRepository;
@@ -38,18 +39,23 @@ public class FubonSettlementWriter {
     private final TransitFundTypeRepository transitTypes;
     private final SnapshotAggregateCalculator aggregates;
     private final AssetSnapshotRepository snapshots;
+    private final AssetTransactionRepository transactions;
+    private final FubonTransitNoteFormatter noteFormatter;
     private final Clock clock;
 
     @Autowired
     public FubonSettlementWriter(AssetSnapshotMutationLock mutationLock, FubonSyncOwnerPort ownerPolicy,
             BrokerRepository brokers, BankRepository banks, TransitFundTypeRepository transitTypes,
-            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshots) {
-        this(mutationLock, ownerPolicy, brokers, banks, transitTypes, aggregates, snapshots, Clock.systemUTC());
+            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshots,
+            AssetTransactionRepository transactions) {
+        this(mutationLock, ownerPolicy, brokers, banks, transitTypes, aggregates, snapshots, transactions,
+                Clock.systemUTC());
     }
 
     FubonSettlementWriter(AssetSnapshotMutationLock mutationLock, FubonSyncOwnerPort ownerPolicy,
             BrokerRepository brokers, BankRepository banks, TransitFundTypeRepository transitTypes,
-            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshots, Clock clock) {
+            SnapshotAggregateCalculator aggregates, AssetSnapshotRepository snapshots,
+            AssetTransactionRepository transactions, Clock clock) {
         this.mutationLock = mutationLock;
         this.ownerPolicy = ownerPolicy;
         this.brokers = brokers;
@@ -57,6 +63,8 @@ public class FubonSettlementWriter {
         this.transitTypes = transitTypes;
         this.aggregates = aggregates;
         this.snapshots = snapshots;
+        this.transactions = transactions;
+        this.noteFormatter = new FubonTransitNoteFormatter();
         this.clock = clock;
     }
 
@@ -91,11 +99,13 @@ public class FubonSettlementWriter {
         boolean changed = false;
         if (projection.payableAmount().signum() != 0) {
             requireTransitType(PAYABLE, true);
-            changed |= projectDirection(snapshot, bank, PAYABLE, projection.payableAmount(), true);
+            changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(), PAYABLE,
+                    projection.payableAmount(), true);
         }
         if (projection.receivableAmount().signum() != 0) {
             requireTransitType(RECEIVABLE, false);
-            changed |= projectDirection(snapshot, bank, RECEIVABLE, projection.receivableAmount(), false);
+            changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(), RECEIVABLE,
+                    projection.receivableAmount(), false);
         }
         if (!changed) {
             return new CommitResult(false, projection.payableAmount(), projection.receivableAmount());
@@ -121,8 +131,8 @@ public class FubonSettlementWriter {
         }
     }
 
-    private boolean projectDirection(AssetSnapshot snapshot, Bank bank, String type, BigDecimal sourceAmount,
-            boolean payable) {
+    private boolean projectDirection(AssetSnapshot snapshot, Bank bank, Long expectedOwnerId,
+            java.time.LocalDate queryDate, String type, BigDecimal sourceAmount, boolean payable) {
         BigDecimal amount = FubonAccountingContract.money(sourceAmount);
         if ((payable && amount.signum() >= 0) || (!payable && amount.signum() <= 0)) {
             throw new WriteRejected(FubonSettlementOutcome.SETTLEMENT_FAILED);
@@ -139,17 +149,32 @@ public class FubonSettlementWriter {
         if (candidates.isEmpty()) {
             BankDeposit created = BankDeposit.builder()
                     .snapshot(snapshot).bank(bank).depositType(type).currency(TRANSIT_TWD)
-                    .amount(amount).originalAmount(null).annualInterestRate(null).build();
+                    .amount(amount).originalAmount(null).annualInterestRate(null)
+                    .notes(transitNote(expectedOwnerId, queryDate, type)).source("FUBON_SYNC").build();
             snapshot.getDeposits().add(created);
             return true;
         }
         BankDeposit target = candidates.getFirst();
+        if (!"FUBON_SYNC".equals(target.getSource())) {
+            throw new WriteRejected(FubonSettlementOutcome.UNMANAGED_TARGET);
+        }
         BigDecimal existing = target.getAmount() == null ? null : FubonAccountingContract.money(target.getAmount());
-        if (existing != null && existing.compareTo(amount) == 0) return false;
+        String note = transitNote(expectedOwnerId, queryDate, type);
+        boolean changed = existing == null || existing.compareTo(amount) != 0
+                || !Objects.equals(target.getNotes(), note)
+                || target.getOriginalAmount() != null || target.getAnnualInterestRate() != null;
+        if (!changed) return false;
         target.setAmount(amount);
         target.setOriginalAmount(null);
         target.setAnnualInterestRate(null);
+        target.setNotes(note);
         return true;
+    }
+
+    private String transitNote(Long expectedOwnerId, java.time.LocalDate queryDate, String type) {
+        String transactionType = PAYABLE.equals(type) ? "買" : "賣";
+        return noteFormatter.format(type, transactions.findFubonSyncedDetailsForTransitNote(
+                expectedOwnerId, queryDate, transactionType));
     }
 
     private static FubonSettlementOutcome outcomeFor(FubonSyncOwnerPort.Denial denial) {

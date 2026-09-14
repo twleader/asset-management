@@ -136,6 +136,7 @@ public class AssetService {
                         .currency(d.currency() != null ? d.currency() : "TWD")
                         .annualInterestRate(sanitizeInterestRate(d))
                         .notes(d.notes())
+                        .source("MANUAL")
                         .build();
                 snapshot.getDeposits().add(deposit);
             });
@@ -283,7 +284,14 @@ public class AssetService {
         snapshot.setUsdExchangeRate(req.usdExchangeRate());
         snapshot.setNotes(req.notes());
 
-        snapshot.getDeposits().clear();
+        // 富邦唯讀在途款是 source-owned projection；完整 PUT 不能藉由未含 source 的
+        // 管理資產 payload 覆寫、刪除或重建它。identity 固定是 bank id + transit type，
+        // 不看 request 自帶的 currency，避免 UI round-trip 產生第二筆同一 target。
+        java.util.Set<DepositIdentity> protectedDepositIdentities = snapshot.getDeposits().stream()
+                .filter(AssetService::isFubonManagedTransit)
+                .map(AssetService::depositIdentity)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        snapshot.getDeposits().removeIf(deposit -> !isFubonManagedTransit(deposit));
         snapshot.getFunds().clear();
         // Preserve only scopes the one captured decision says are source-owned.
         snapshot.getStocks().removeIf(stock -> !scopeOwnership.isSourceOwned(
@@ -291,6 +299,9 @@ public class AssetService {
 
         if (req.deposits() != null) {
             req.deposits().forEach(d -> {
+                if (protectedDepositIdentities.contains(new DepositIdentity(d.bankId(), d.depositType()))) {
+                    return;
+                }
                 Bank bank = d.bankId() != null ? bankRepo.findById(d.bankId()).orElse(null) : null;
                 snapshot.getDeposits().add(BankDeposit.builder()
                     .snapshot(snapshot).bank(bank).depositType(d.depositType())
@@ -298,7 +309,7 @@ public class AssetService {
                     .originalAmount(d.originalAmount())
                     .currency(d.currency() != null ? d.currency() : "TWD")
                     .annualInterestRate(sanitizeInterestRate(d))
-                    .notes(d.notes()).build());
+                    .notes(d.notes()).source("MANUAL").build());
             });
         }
         if (req.funds() != null) {
@@ -919,7 +930,7 @@ public class AssetService {
                         d.getDepositType(), d.getDepositType(),
                         d.getAmount(), d.getOriginalAmount(), d.getCurrency(),
                         d.getAnnualInterestRate(), interestOut,
-                        d.getNotes()
+                        d.getNotes(), depositUpdateMode(d)
                     );
                 }).toList();
 
@@ -978,6 +989,28 @@ public class AssetService {
             deposits, funds, stocks
         );
     }
+
+    private static final String FUBON = "fubon";
+    private static final String FUBON_SYNC = "FUBON_SYNC";
+    private static final String TRANSIT_TWD = "TRANSIT_TWD";
+    private static final java.util.Set<String> FUBON_TRANSIT_TYPES = java.util.Set.of("買股待付款", "賣股待收款");
+
+    private static boolean isFubonManagedTransit(BankDeposit deposit) {
+        return deposit != null && FUBON_SYNC.equals(deposit.getSource())
+                && TRANSIT_TWD.equals(deposit.getCurrency())
+                && deposit.getBank() != null && FUBON.equals(deposit.getBank().getCode())
+                && FUBON_TRANSIT_TYPES.contains(deposit.getDepositType());
+    }
+
+    private static DepositIdentity depositIdentity(BankDeposit deposit) {
+        return new DepositIdentity(deposit.getBank().getId(), deposit.getDepositType());
+    }
+
+    private static String depositUpdateMode(BankDeposit deposit) {
+        return FUBON_SYNC.equals(deposit.getSource()) ? "AUTO" : "MANUAL";
+    }
+
+    private record DepositIdentity(Long bankId, String depositType) {}
 
     /**
      * 查詢交易日的 USD 匯率 (midRate)

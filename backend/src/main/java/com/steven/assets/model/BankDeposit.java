@@ -57,4 +57,12 @@ public class BankDeposit {
     /** 備註 (例如定存到期日、利率等) */
     @Column(length = 200)
     private String notes;
+
+    /**
+     * 建立來源。手動管理資產與 Excel 匯入固定為 {@code MANUAL}；富邦唯讀對帳
+     * 只能建立／更新自己的 {@code FUBON_SYNC} 在途款項，不能接管手動列。
+     */
+    @Builder.Default
+    @Column(nullable = false, length = 20)
+    private String source = "MANUAL";
 }

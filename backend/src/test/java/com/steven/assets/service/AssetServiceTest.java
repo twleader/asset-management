@@ -111,6 +111,70 @@ class AssetServiceTest {
         assertThat(target.getValue()).isEqualTo(new SnapshotUpdateTarget(1L, 9L, finalDate));
     }
 
+    @Test
+    void updateSnapshot_preservesOnlyFubonOwnedTransitAndDropsEveryPayloadCollision() {
+        Bank fubon = Bank.builder().id(7L).code("fubon").displayName("台北富邦銀行").build();
+        Bank manualBank = Bank.builder().id(8L).code("manual").displayName("手動銀行").build();
+        BankDeposit managed = BankDeposit.builder().snapshot(snapshot).bank(fubon).depositType("買股待付款")
+                .currency("TRANSIT_TWD").amount(new BigDecimal("-1002")).notes("auto note")
+                .source("FUBON_SYNC").build();
+        snapshot.getDeposits().add(managed);
+        when(snapshotMutationLock.lockById(1L)).thenReturn(snapshot);
+        when(stockScopeOwnershipPort.capture(any())).thenReturn(SnapshotStockScopeOwnership.payloadOwned());
+        when(bankRepo.findById(8L)).thenReturn(Optional.of(manualBank));
+        when(snapshotRepo.save(snapshot)).thenReturn(snapshot);
+
+        service.updateSnapshot(1L, new com.steven.assets.dto.AssetSnapshotDto.CreateSnapshotRequest(
+                snapshot.getSnapshotDate(), BigDecimal.ONE, "updated", List.of(
+                // Currency deliberately differs: collision identity is bank id + type only.
+                new com.steven.assets.dto.AssetSnapshotDto.DepositRequest(7L, "買股待付款", BigDecimal.ONE,
+                        null, "USD", null, "malicious overwrite"),
+                new com.steven.assets.dto.AssetSnapshotDto.DepositRequest(8L, "活存", new BigDecimal("20"),
+                        null, "TWD", null, "manual")), List.of(), List.of()));
+
+        assertThat(snapshot.getDeposits()).hasSize(2);
+        assertThat(snapshot.getDeposits().getFirst()).isSameAs(managed);
+        assertThat(managed.getAmount()).isEqualByComparingTo("-1002");
+        assertThat(managed.getNotes()).isEqualTo("auto note");
+        assertThat(managed.getSource()).isEqualTo("FUBON_SYNC");
+        assertThat(snapshot.getDeposits().get(1).getSource()).isEqualTo("MANUAL");
+        verify(bankRepo, never()).findById(7L);
+    }
+
+    @Test
+    void depositResponse_projectsOnlyManualOrAutoUpdateMode() {
+        Bank bank = Bank.builder().id(7L).code("fubon").displayName("台北富邦銀行").build();
+        snapshot.getDeposits().add(BankDeposit.builder().snapshot(snapshot).bank(bank).depositType("買股待付款")
+                .currency("TRANSIT_TWD").amount(new BigDecimal("-1")).source("FUBON_SYNC").build());
+        snapshot.getDeposits().add(BankDeposit.builder().snapshot(snapshot).bank(bank).depositType("活存")
+                .currency("TWD").amount(new BigDecimal("1")).source("MANUAL").build());
+        when(snapshotRepo.findById(1L)).thenReturn(Optional.of(snapshot));
+
+        var detail = service.getSnapshotDetail(1L);
+
+        assertThat(detail.deposits()).extracting(com.steven.assets.dto.AssetSnapshotDto.DepositResponse::updateMode)
+                .containsExactly("AUTO", "MANUAL");
+    }
+
+    @Test
+    void createSnapshot_explicitlyMarksEveryUserDepositManual() {
+        LocalDate date = LocalDate.of(2026, 8, 21);
+        Bank bank = Bank.builder().id(8L).code("manual").displayName("手動銀行").build();
+        when(snapshotRepo.existsBySnapshotDate(date)).thenReturn(false);
+        when(tenantGuard.requireCurrentUserId()).thenReturn(9L);
+        when(bankRepo.findById(8L)).thenReturn(Optional.of(bank));
+        when(snapshotRepo.save(any(AssetSnapshot.class))).thenAnswer(call -> call.getArgument(0));
+
+        service.createSnapshot(new com.steven.assets.dto.AssetSnapshotDto.CreateSnapshotRequest(
+                date, BigDecimal.ONE, null, List.of(new com.steven.assets.dto.AssetSnapshotDto.DepositRequest(
+                8L, "活存", new BigDecimal("20"), null, "TWD", null, "manual")), List.of(), List.of()));
+
+        ArgumentCaptor<AssetSnapshot> captured = ArgumentCaptor.forClass(AssetSnapshot.class);
+        verify(snapshotRepo).save(captured.capture());
+        assertThat(captured.getValue().getDeposits()).singleElement()
+                .extracting(BankDeposit::getSource).isEqualTo("MANUAL");
+    }
+
     // ---- recalcAllDividends ----
 
     @Test

@@ -1,12 +1,22 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.AssetSnapshot;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.web.MockMultipartFile;
+
+import java.io.ByteArrayOutputStream;
+import java.time.LocalDate;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * ExcelImportService 單元測試
@@ -80,6 +90,26 @@ class ExcelImportServiceTest {
     @Test
     void isUsStock_null為false() {
         assertThat(invokeIsUsStock(null)).isFalse();
+    }
+
+    @Test
+    void sameDateImportUsesLockedAssetUpdateInsteadOfDeleteAndRecreate() throws Exception {
+        AssetSnapshot existing = AssetSnapshot.builder().id(42L).snapshotDate(LocalDate.of(2026, 8, 21)).build();
+        when(snapshotRepo.findBySnapshotDate(LocalDate.of(2026, 8, 21))).thenReturn(Optional.of(existing));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            workbook.createSheet("20260821").createRow(0);
+            workbook.write(bytes);
+            var result = service.importExcel(new MockMultipartFile("file", "snapshot.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes.toByteArray()));
+
+            assertThat(result.errors()).isEmpty();
+            assertThat(result.snapshotsImported()).isEqualTo(1);
+        }
+
+        verify(assetService).updateSnapshot(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any());
+        verify(assetService, never()).deleteSnapshot(42L);
+        verify(assetService, never()).createSnapshot(org.mockito.ArgumentMatchers.any());
     }
 
     // ---- Helpers (reflective invocation) ----

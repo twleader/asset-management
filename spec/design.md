@@ -12164,6 +12164,33 @@ Tests must prove controller/BFF owner guards and exact rewrites; list cannot spy
 
 Runtime acceptance rebuilds only business-services, bff and frontend from this feature worktree, then checks health and an authenticated browser session's initial list/one-expand network trace. It separately probes the unchanged 9090 public read contract. Repeated tailer scans must not show the old duplicate-key warning, and no acceptance action may invoke Fubon SDK or any financial mutation.
 
+## Requirement 150／Task 432：富邦帳務共同 owner 與在途成交備註
+
+```text
+FUBON_SYNC_OWNER_EMAIL
+          │ strict ACTIVE configured-admin identity + fresh owner lock
+          ├───────────────┬─────────────────────┐
+          ▼               ▼                     ▼
+filled_history       query_settlement(3d)  realized_gains_and_loses
+          │               │                     │
+asset_transaction    台北富邦銀行 fubon       realized_gain
+source=FUBON_SYNC    TRANSIT_TWD aggregate      existing strict mapping
+          │               │
+          └──same-day local FUBON_SYNC rows──► notes
+```
+
+All three financial projections use `FubonSyncOwnerPort`; a missing, malformed, inactive, non-admin, non-configured or changed owner stops before adapter and persistence work. Transaction writer's first database action is owner locking/revalidation. Requirement 150 explicitly adds `FubonTradeOutcome.SYNC_OWNER_NOT_CONFIGURED`: the matching port denial is reflected in the manual response `outcome`, `reason`, and counter map, while every other owner denial remains `NO_OWNER`. The settlement writer keeps its existing snapshot lock before owner locking. It continues to take principal amounts only from validated, fresh future `query_settlement('3d')` data and never derives amount from a fill; realized gain keeps its separate source-to-cost/profit mapping and never derives it from the ledger.
+
+`v1.129.0-bank-deposit-source.sql` adds `bank_deposit.source` with only `MANUAL` and `FUBON_SYNC`, defaulting every legacy row to `MANUAL`. This prevents a source projection from silently taking over a user-created in-transit row: absent targets are created as `FUBON_SYNC`; only that source can be updated later; a unique `MANUAL`/unknown target returns `UNMANAGED_TARGET` without an amount or note write; duplicate or currency-mismatched targets remain `AMBIGUOUS_TARGET`.
+
+The JPA field itself is non-null and has a `MANUAL` builder/field default, so a JPA INSERT from manual create, complete PUT or Excel import never binds null and accidentally bypasses the database default. No user DTO or import field exposes this provenance. `AssetService.updateSnapshot()` captures then restores the exact existing `FUBON_SYNC` Fubon `TRANSIT_TWD` payable/receivable rows before rebuilding ordinary deposits. Its collision key is bank id plus type—not currency—so `TRANSIT_TWD`, `TWD`, `USD`, or null payload currency cannot create a second candidate that would later make the writer ambiguous. `ExcelImportService` must take this locked preservation update for an existing same-date snapshot containing a protected row; it may retain delete-and-recreate only when no such row exists. Thus an ordinary management-page or Excel round trip cannot delete or edit a source-owned amount/note; the aggregate is recalculated over the restored source rows plus the valid manual payload.
+
+The existing snapshot-detail response adds one readonly presentation field, `updateMode`: it maps stored `FUBON_SYNC` to `AUTO`, otherwise `MANUAL`, and does not return the raw provenance. Both Taiwan-dollar and US-dollar transit tables render a disabled select with labels `手動` and `自動`; new rows default to `手動`. `AUTO` means an actually source-owned Fubon row, not a user choice: it disables bank/type/amount/note/drag/delete controls and is never accepted by a create, PUT, import or other write payload. Backend source checks and preservation remain the authoritative guard, so a stale/malicious client cannot turn a manual transit row into auto.
+
+For a nonzero Fubon `買股待付款` target, the settlement writer uses one native, explicit-owner query for persisted same-owner, same-Taipei-query-date `asset_transaction` rows with `source='FUBON_SYNC'` and `transaction_type='買'`; `賣股待收款` is the symmetrical native query with `transaction_type='賣'`. It cannot use Hibernate's HTTP tenant filter, derived query or JPQL because the internal manual route intentionally has no tenant header. SQL orders `asset_code, asset_name, id`; a deterministic pure formatter then groups rows by instrument and turns 1,000 shares into one lot, while odd lots retain exact shares and decimal lots. Its wording identifies the list as same-day synchronized trades, rather than a per-row settlement reconciliation. Empty local detail produces a generic source note and content exceeding `BankDeposit.notes`' 200-character limit produces an explicit count summary, not truncation. The note change participates in the same snapshot aggregate transaction, while the aggregate amount remains untouched.
+
+The sole active broker-to-bank mapping in this task is Fubon Securities to the existing `bank.code='fubon'` (Taipei Fubon Bank). Yuanta Securities to `yuanta` and Cathay Securities to `cathay` are future mapping decisions only: this design creates no adapter, SDK access, feature flag, route, schedule or write path for either broker.
+
 ### Task 431：富邦 Python 原生列舉的有限正規化
 
 `sdk.accounting.inventories` 與 `sdk.accounting.unrealized_gains_and_loses` 的正式欄位仍是 `order_type` 與 `buy_sell`；現場 SDK 2.2.9 回傳的物件字串分別是 `OrderType.Stock` 和 `BSAction.Buy`，但這兩個原生物件沒有可用 `.value` 或 `.name`。既有 `enum_text` 因而回 `None`，在任何 HMAC／normalized DTO 建立之前錯誤回 `MISSING_ORDER_TYPE`。

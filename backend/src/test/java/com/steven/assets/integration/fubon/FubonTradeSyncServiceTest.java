@@ -1,12 +1,11 @@
 package com.steven.assets.integration.fubon;
 
-import com.steven.assets.model.AppUser;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.StockMasterService;
-import com.steven.assets.service.UserAdminService;
+import com.steven.assets.service.fubon.FubonSyncOwnerPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,7 +49,7 @@ class FubonTradeSyncServiceTest {
     @Mock FubonConfigState configState;
     @Mock FubonBrokerClient brokerClient;
     @Mock MarketDataService marketDataService;
-    @Mock UserAdminService userAdminService;
+    @Mock FubonSyncOwnerPort ownerPolicy;
     @Mock BrokerRepository brokerRepository;
     @Mock AssetTransactionRepository assetTransactionRepository;
     @Mock StockMasterService stockMasterService;
@@ -68,7 +67,7 @@ class FubonTradeSyncServiceTest {
     }
 
     private FubonTradeSyncService build(boolean tradeSyncEnabled) {
-        return new FubonTradeSyncService(configState, brokerClient, marketDataService, userAdminService,
+        return new FubonTradeSyncService(configState, brokerClient, marketDataService, ownerPolicy,
                 brokerRepository, assetTransactionRepository, stockMasterService, writer, counters, CLOCK,
                 tradeSyncEnabled);
     }
@@ -82,7 +81,7 @@ class FubonTradeSyncServiceTest {
         FubonTradeSyncService.TradeSyncResult result = disabled.syncManual(false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.TRADE_SYNC_DISABLED);
-        verifyNoInteractions(configState, brokerClient, marketDataService, userAdminService,
+        verifyNoInteractions(configState, brokerClient, marketDataService, ownerPolicy,
                 brokerRepository, assetTransactionRepository, stockMasterService);
     }
 
@@ -112,7 +111,7 @@ class FubonTradeSyncServiceTest {
         FubonTradeSyncService.TradeSyncResult result = service.syncManual(false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.DISABLED);
-        verifyNoInteractions(brokerClient, marketDataService, userAdminService,
+        verifyNoInteractions(brokerClient, marketDataService, ownerPolicy,
                 brokerRepository, assetTransactionRepository, stockMasterService);
     }
 
@@ -123,7 +122,7 @@ class FubonTradeSyncServiceTest {
         FubonTradeSyncService.TradeSyncResult result = service.syncManual(false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.MISCONFIGURED);
-        verifyNoInteractions(brokerClient, marketDataService, userAdminService,
+        verifyNoInteractions(brokerClient, marketDataService, ownerPolicy,
                 brokerRepository, assetTransactionRepository, stockMasterService);
     }
 
@@ -137,7 +136,7 @@ class FubonTradeSyncServiceTest {
         FubonTradeSyncService.TradeSyncResult result = service.syncManual(false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.CALENDAR_UNKNOWN);
-        verifyNoInteractions(brokerClient, userAdminService, brokerRepository,
+        verifyNoInteractions(brokerClient, ownerPolicy, brokerRepository,
                 assetTransactionRepository, stockMasterService);
     }
 
@@ -147,7 +146,7 @@ class FubonTradeSyncServiceTest {
         when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(false));
 
         assertThat(service.syncManual(false).outcome()).isEqualTo(FubonTradeOutcome.CALENDAR_UNKNOWN);
-        verifyNoInteractions(brokerClient, userAdminService, brokerRepository,
+        verifyNoInteractions(brokerClient, ownerPolicy, brokerRepository,
                 assetTransactionRepository, stockMasterService);
     }
 
@@ -157,19 +156,19 @@ class FubonTradeSyncServiceTest {
         when(marketDataService.isTwTradingDayKnown(TODAY)).thenThrow(new IllegalStateException("unavailable"));
 
         assertThat(service.syncManual(false).outcome()).isEqualTo(FubonTradeOutcome.CALENDAR_UNKNOWN);
-        verifyNoInteractions(brokerClient, userAdminService, brokerRepository, assetTransactionRepository);
+        verifyNoInteractions(brokerClient, ownerPolicy, brokerRepository, assetTransactionRepository);
     }
 
     @Test
     void syncManualDelegatesToScheduledAfterCalendarOnKnownTradingDay() {
         readyConfigOnly();
         when(marketDataService.isTwTradingDayKnown(TODAY)).thenReturn(Optional.of(true));
-        when(userAdminService.configuredAdmin()).thenReturn(Optional.empty());
+        when(ownerPolicy.preflight()).thenReturn(new FubonSyncOwnerPort.Decision(null, FubonSyncOwnerPort.Denial.NO_OWNER));
 
         FubonTradeSyncService.TradeSyncResult result = service.syncManual(false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.NO_OWNER);
-        verify(userAdminService).configuredAdmin();
+        verify(ownerPolicy).preflight();
     }
 
     // ---- syncScheduledAfterCalendar: defense-in-depth re-gate -------------------------------
@@ -181,15 +180,15 @@ class FubonTradeSyncServiceTest {
         FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
         assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.DISABLED);
-        verifyNoInteractions(brokerClient, userAdminService, brokerRepository, assetTransactionRepository);
+        verifyNoInteractions(brokerClient, ownerPolicy, brokerRepository, assetTransactionRepository);
     }
 
-    // ---- NO_OWNER: absent / inactive / non-admin --------------------------------------------
+    // ---- Dedicated owner denial ---------------------------------------------------------------
 
     @Test
-    void configuredAdminAbsentReturnsNoOwner() {
+    void dedicatedOwnerAbsenceReturnsNoOwnerBeforeBrokerOrAdapter() {
         readyConfigOnly();
-        when(userAdminService.configuredAdmin()).thenReturn(Optional.empty());
+        when(ownerPolicy.preflight()).thenReturn(new FubonSyncOwnerPort.Decision(null, FubonSyncOwnerPort.Denial.NO_OWNER));
 
         FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
@@ -198,24 +197,16 @@ class FubonTradeSyncServiceTest {
     }
 
     @Test
-    void configuredAdminPresentButInactiveReturnsNoOwner() {
+    void dedicatedOwnerConfigMissingHasDistinctOutcomeReasonAndCounter() {
         readyConfigOnly();
-        when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
-                .id(9L).role(AppUser.ROLE_ADMIN).status("SUSPENDED").build()));
+        when(ownerPolicy.preflight()).thenReturn(new FubonSyncOwnerPort.Decision(null,
+                FubonSyncOwnerPort.Denial.SYNC_OWNER_NOT_CONFIGURED));
 
-        assertThat(service.syncScheduledAfterCalendar(TODAY, false).outcome())
-                .isEqualTo(FubonTradeOutcome.NO_OWNER);
-        verifyNoInteractions(brokerClient, brokerRepository, assetTransactionRepository);
-    }
+        FubonTradeSyncService.TradeSyncResult result = service.syncScheduledAfterCalendar(TODAY, false);
 
-    @Test
-    void configuredAdminPresentButNotAdminRoleReturnsNoOwner() {
-        readyConfigOnly();
-        when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
-                .id(9L).role("USER").status(AppUser.STATUS_ACTIVE).build()));
-
-        assertThat(service.syncScheduledAfterCalendar(TODAY, false).outcome())
-                .isEqualTo(FubonTradeOutcome.NO_OWNER);
+        assertThat(result.outcome()).isEqualTo(FubonTradeOutcome.SYNC_OWNER_NOT_CONFIGURED);
+        assertThat(result.reason()).isEqualTo("SYNC_OWNER_NOT_CONFIGURED");
+        assertThat(result.counters().get(FubonTradeOutcome.SYNC_OWNER_NOT_CONFIGURED)).isEqualTo(1L);
         verifyNoInteractions(brokerClient, brokerRepository, assetTransactionRepository);
     }
 
@@ -526,8 +517,7 @@ class FubonTradeSyncServiceTest {
     }
 
     private void admin() {
-        when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
-                .id(9L).role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build()));
+        when(ownerPolicy.preflight()).thenReturn(new FubonSyncOwnerPort.Decision(9L, null));
     }
 
     private void activeBroker() {
