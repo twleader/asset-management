@@ -16,6 +16,14 @@ NOW = datetime(2026, 8, 21, 4, 30, tzinfo=UTC)
 MISSING_DATE = object()
 
 
+class NativeSdkEnum:
+    def __init__(self, text):
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+
 class Gateway:
     def __init__(self, inventories, unrealized):
         self.pair = AccountingPair(
@@ -38,6 +46,22 @@ def test_reconciles_inventory_and_unrealized_with_canonical_cost():
     assert result["queryDate"] == "2026-08-21"
     assert result["emptyConfirmed"] is False
     assert result["positions"] == [{"stockCode": "2330", "shares": 3, "costPrice": "0.1"}]
+    assert "00001234567" not in str(result)
+    assert "001" not in str(result)
+
+
+def test_reconciles_native_sdk_enum_inventory_and_unrealized_without_raw_identity_leakage():
+    result = service(
+        [inventory_row(order_type=NativeSdkEnum("OrderType.Stock"))],
+        [
+            unrealized_row(
+                order_type=NativeSdkEnum("OrderType.Stock"),
+                buy_sell=NativeSdkEnum("BSAction.Buy"),
+            )
+        ],
+    ).read()
+
+    assert result["positions"] == [{"stockCode": "2330", "shares": 3, "costPrice": "12.345"}]
     assert "00001234567" not in str(result)
     assert "001" not in str(result)
 
@@ -196,6 +220,47 @@ def test_one_sided_empty_is_not_an_empty_account_proof():
 def test_reconciliation_fail_closed_matrix(inventory, unrealized, reason):
     with pytest.raises(PortfolioError, match=reason):
         service([inventory], [unrealized]).read()
+
+
+@pytest.mark.parametrize(
+    ("inventory", "unrealized"),
+    [
+        (
+            inventory_row(order_type=NativeSdkEnum("OrderType.Margin")),
+            unrealized_row(order_type=NativeSdkEnum("OrderType.Margin")),
+        ),
+        (
+            inventory_row(order_type=NativeSdkEnum("OrderType.Stock")),
+            unrealized_row(
+                order_type=NativeSdkEnum("OrderType.Stock"),
+                buy_sell=NativeSdkEnum("BSAction.Sell"),
+            ),
+        ),
+    ],
+    ids=["margin", "sell"],
+)
+def test_native_sdk_enum_unsupported_position_types_fail_closed(inventory, unrealized):
+    with pytest.raises(PortfolioError, match="UNSUPPORTED_POSITION_TYPE"):
+        service([inventory], [unrealized]).read()
+
+
+def test_missing_order_type_still_rejects_before_fingerprint():
+    inventory = inventory_row()
+    inventory.pop("order_type")
+    fingerprint = Mock()
+
+    with pytest.raises(PortfolioError, match="MISSING_ORDER_TYPE"):
+        service([inventory], [unrealized_row()], fingerprint=fingerprint).read()
+
+    fingerprint.assert_not_called()
+
+
+def test_native_sdk_enum_pairing_mismatch_still_rejects_whole_batch():
+    with pytest.raises(PortfolioError, match="IDENTITY_SET_MISMATCH"):
+        service(
+            [inventory_row(order_type=NativeSdkEnum("OrderType.Stock"))],
+            [unrealized_row(order_type=NativeSdkEnum("OrderType.Margin"))],
+        ).read()
 
 
 @pytest.mark.parametrize("shares", [1, 9_999_999_999])

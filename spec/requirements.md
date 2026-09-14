@@ -5263,3 +5263,16 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
   | `price` + `changePercent` | 為一個原子價格 tuple：`price` 必為正數、`changePercent` 必為有限數；舊事件僅可在 canonical `changePercent` 缺席時讀 `changePct` 作相同語意 fallback，兩者同時出現時 canonical 優先。tuple 任一欄缺失／不合法則兩欄都不更新 | `price`、`changePercent` |
   | `updatedAt` | 僅在上述價格 tuple 已接受時更新；不得單獨推進列的新鮮度 | `priceUpdatedAt` |
   | 其他 payload 欄位（如 `previousClose`、`priceChange`、`buyPrice`、`sellPrice`、`openPrice`、`highPrice`、`lowPrice`、`volume`、`stockName`、`source`、`closed`） | 本頁 SSE 一律忽略 | 無 |
+
+### Requirement 149／Task 431：富邦 Python 原生列舉正規化不得阻斷現股庫存同步
+
+**User Story：**作為持有富邦現股的管理者，我希望富邦 SDK 實際回傳的現股庫存與未實現損益可以在保持逐列身分、現股類別與數量對帳的前提下同步到最新快照，而不是因 Python 原生列舉物件沒有 `.value`／`.name` 被誤判為缺少 `order_type` 或 `buy_sell`，使整批永遠不寫入。
+
+本 Requirement 補正 Requirement 90／Task 352 的「只在已通過 source identity 後建立對帳 key」規則，並取代其中暗示所有 SDK enum 可由 `.value` 或 `.name` 取得文字的實作假設；來源欄位本身、每列驗證、集合相等、現股限定與 fail-closed 行為均不放寬。2026-09-14 的受控唯讀檢查已確認富邦 Python 2.2.9 的 `inventories` 與 `unrealized_gains_and_loses` 都回傳 `OrderType.Stock`、`BSAction.Buy` 原生物件；欄位存在，但現有 helper 對 18 筆都正規化為 `null`，故 adapter 回 `MISSING_ORDER_TYPE`。富邦官方文件亦將 `order_type` 與 `buy_sell` 列為兩個回應的正式欄位。
+
+#### Acceptance Criteria
+
+- [ ] **只修正已宣告的原生 enum 文字投影。** `fubon_broker_service.sdk_gateway.enum_text` 保留 `None`、`str`、`int`、可用 `.value`／`.name` 的既有預設行為；native textual fallback 必為 portfolio 的明確 opt-in，未 opt-in 的成交、已實現損益、帳戶選擇與認證失效 consumer 不得改變結果。opt-in 時才只接受 `OrderType.<member>` 與 `BSAction.<member>`：prefix 與 member 都必為 ASCII identifier、恰有一個 `.`，回傳 member；其他任意 object repr、空 member、多點、空白、未知 prefix 或例外一律回 `None`。不得以 `str(value)` 的任意輸出作 fallback、不得把缺欄位／`None` 預設成 `Stock` 或 `Buy`、不得寫入或記錄 raw SDK payload／帳號／token。
+- [ ] **庫存批次的身份與資產類別防線不變。** 每一 inventory 與 unrealized row 仍須有來源 `date/account/branch_no/stock_no` 且與 selected account／Asia-Taipei query date 精確一致，才可在 HMAC 前建立 `(sourceDate, fingerprint, branchNo, stockCode, orderType)` key；兩側 keys 仍須各自唯一且集合完全相等。正規化後只接受 `OrderType.Stock`／`BSAction.Buy` 的現股長倉；`Margin`、`Short`、`DayTrade`、`SBL`、`Sell`、未知／缺少／不合法 enum、數量不一致、空集合證明不足及任何來源身分錯誤都必整批 fail closed、零 DB write。不得把融資、融券、借券、當沖或空方資料寫成現股。
+- [ ] **對外契約與權限邊界不變。** `POST /internal/portfolio/read`、其 token 驗證、sanitized 503 reason、Java DTO、business inventory scheduler、feature flags、DB schema、BFF／frontend／9090／Tailscale route 均不新增或改形。此修正只允許既有唯讀 `sdk.accounting.inventories`／`sdk.accounting.unrealized_gains_and_loses` 正規化成功後走既有 local writer；不得 import、呼叫或暴露任何下單、改單、撤單、匯款、圈存或其他券商寫入功能。
+- [ ] **回歸證據與實機驗收。** Python tests 必直接覆蓋既有 `str`／`int`／`.value`／`.name`、opt-in native-like `OrderType.Stock`／`BSAction.Buy`、未 opt-in native text、malformed／unknown prefix、空白、空 member、多點與 `__str__` 例外；portfolio fixture 並須證明 `Margin`／`Sell`、缺欄位與 mismatched keys 全數仍 fail closed。Docker 重建並 recreate `fubon-broker-service` 後，既有 token-protected portfolio dry-read 必回 normalized positions 而非 `MISSING_ORDER_TYPE`，不輸出 raw response。使用者已授權本次帳務同步時，才可在 business service healthy 後透過既有 internal manual inventory sync `dryRun=false` 做一次既有的唯讀序列：validated portfolio pair、交易日 gate、inventory-purpose TW quote read／新鮮度驗證，才進入本機 writer；任一 gate 失敗都維持零寫入並回既有 typed reason。成功時需讀回 configured admin 當日快照的富邦台股 rows 與 aggregate，並明示這只證明本機資料落地、未觸發任何券商交易。若 `filled_history` 仍回 API-key 拒絕，成交紀錄維持 fail closed，絕不以其他 endpoint 猜測或補造。

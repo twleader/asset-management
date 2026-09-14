@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import queue
+import re
 import threading
 import time
 from collections import deque
@@ -16,6 +17,9 @@ from .normalization import strict_iso_date
 
 
 logger = logging.getLogger(__name__)
+
+
+_PORTFOLIO_NATIVE_ENUM_TEXT = re.compile(r"\A(?:OrderType|BSAction)\.([A-Za-z_][A-Za-z0-9_]*)\Z")
 
 
 class SdkCallError(RuntimeError):
@@ -75,15 +79,22 @@ def raw_field(value: object, name: str) -> object | None:
     return getattr(value, name, None)
 
 
-def enum_text(value: object) -> str | None:
+def enum_text(value: object, *, allow_native_portfolio_text: bool = False) -> str | None:
     if value is None:
         return None
     candidate = getattr(value, "value", value)
     if not isinstance(candidate, (str, int)):
         candidate = getattr(value, "name", None)
-    if candidate is None:
+    if candidate is not None:
+        return str(candidate)
+    if not allow_native_portfolio_text:
         return None
-    return str(candidate)
+    try:
+        native_text = str(value)
+    except Exception:
+        return None
+    match = _PORTFOLIO_NATIVE_ENUM_TEXT.fullmatch(native_text)
+    return match.group(1) if match else None
 
 
 class SdkGateway:

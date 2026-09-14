@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from fubon_broker_service.config import ConfigLoader
-from fubon_broker_service.sdk_gateway import SdkCallError, SdkGateway
+from fubon_broker_service.sdk_gateway import SdkCallError, SdkGateway, enum_text
 
 from helpers import account, ready_config, response
 from accounting_fixtures import bank_row, realized_row, settlement_row
@@ -45,6 +45,68 @@ class Intraday:
 
 class AuthenticationError(RuntimeError):
     """Recognized by SdkGateway._exception_is_auth_invalid via its class name."""
+
+
+class NativeSdkEnum:
+    def __init__(self, text):
+        self._text = text
+
+    def __str__(self):
+        return self._text
+
+
+class BrokenNativeSdkEnum:
+    def __str__(self):
+        raise RuntimeError("must not escape")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ("Stock", "Stock"),
+        (7, "7"),
+        (SimpleNamespace(value="Stock"), "Stock"),
+        (SimpleNamespace(name="Buy"), "Buy"),
+    ],
+)
+def test_enum_text_preserves_existing_default_projections(value, expected):
+    assert enum_text(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("OrderType.Stock", "Stock"),
+        ("BSAction.Buy", "Buy"),
+    ],
+)
+def test_enum_text_native_portfolio_projection_requires_explicit_opt_in(text, expected):
+    value = NativeSdkEnum(text)
+    assert enum_text(value) is None
+    assert enum_text(value, allow_native_portfolio_text=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "OrderType.",
+        "BSAction.",
+        "OrderType.Stock.More",
+        "OtherType.Stock",
+        "OrderType. Stock",
+        "OrderType.Stock ",
+        " OrderType.Stock",
+        "OrderType.台股",
+        "not-an-enum",
+    ],
+)
+def test_enum_text_native_portfolio_projection_rejects_malformed_text(text):
+    assert enum_text(NativeSdkEnum(text), allow_native_portfolio_text=True) is None
+
+
+def test_enum_text_native_portfolio_projection_contains_stringification_failure():
+    assert enum_text(BrokenNativeSdkEnum(), allow_native_portfolio_text=True) is None
 
 
 class FakeSdk:

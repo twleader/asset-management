@@ -81,7 +81,9 @@ class PortfolioService:
             inv_identity = identity[-2:]
             if inv_identity[1] != "Stock":
                 raise PortfolioError("UNSUPPORTED_POSITION_TYPE")
-            buy_sell = enum_text(raw_field(unrealized_row, "buy_sell"))
+            buy_sell = enum_text(
+                raw_field(unrealized_row, "buy_sell"), allow_native_portfolio_text=True
+            )
             if buy_sell != "Buy":
                 raise PortfolioError("UNSUPPORTED_POSITION_TYPE")
 
@@ -141,7 +143,9 @@ class PortfolioService:
         raw_account = raw_field(row, "account")
         raw_branch = raw_field(row, "branch_no")
         raw_code = raw_field(row, "stock_no")
-        raw_order_type = enum_text(raw_field(row, "order_type"))
+        raw_order_type = enum_text(
+            raw_field(row, "order_type"), allow_native_portfolio_text=True
+        )
         if not all(isinstance(value, str) and value for value in (raw_date, raw_account, raw_branch, raw_code)):
             raise PortfolioError("MISSING_RAW_IDENTITY")
         try:

@@ -12164,6 +12164,16 @@ Tests must prove controller/BFF owner guards and exact rewrites; list cannot spy
 
 Runtime acceptance rebuilds only business-services, bff and frontend from this feature worktree, then checks health and an authenticated browser session's initial list/one-expand network trace. It separately probes the unchanged 9090 public read contract. Repeated tailer scans must not show the old duplicate-key warning, and no acceptance action may invoke Fubon SDK or any financial mutation.
 
+### Task 431：富邦 Python 原生列舉的有限正規化
+
+`sdk.accounting.inventories` 與 `sdk.accounting.unrealized_gains_and_loses` 的正式欄位仍是 `order_type` 與 `buy_sell`；現場 SDK 2.2.9 回傳的物件字串分別是 `OrderType.Stock` 和 `BSAction.Buy`，但這兩個原生物件沒有可用 `.value` 或 `.name`。既有 `enum_text` 因而回 `None`，在任何 HMAC／normalized DTO 建立之前錯誤回 `MISSING_ORDER_TYPE`。
+
+helper 只加一個有限且無資料副作用的分支：既有 `.value`／`.name` 路徑無法取得 `str` 或 `int` 時，只有 portfolio 的明確 opt-in 才會取得字串表示法；其餘 consumer（成交、已實現損益、帳戶選擇、認證失效）維持原結果。opt-in 時**只有**完整匹配 `OrderType.<ASCII identifier>` 或 `BSAction.<ASCII identifier>` 才投影最後的 member。所有其他 prefix、空白、多個 dot、空 member、任意 object repr 或 `__str__` 例外均回 `None`。這不是把不存在的欄位補成預設值；每個 row 仍先讀原始欄位，`None` 仍是 `MISSING_ORDER_TYPE`／後續不合法類別，未通過的值也仍不會建立 key。
+
+`PortfolioService` 不因 helper 放寬集合或資產類別：兩邊 row 的 `(source date, selected-account fingerprint, branch, stock code, normalized order type)` 一對一集合仍須相等；僅在 key 相等後才接受 `order_type == "Stock"` 和 `buy_sell == "Buy"`。因此 `OrderType.Margin`、`OrderType.Short`、`OrderType.DayTrade`、`OrderType.SBL`、`BSAction.Sell` 和任何未知值都保留 `UNSUPPORTED_POSITION_TYPE` 或既有對帳失敗，絕不落為台股現股。Python tests 使用 native-like object fixture，同時證明成功投影和所有拒絕分支；不存取真人帳號、不記 raw response。
+
+部署只重建 `fubon-broker-service`；Java business service、BFF、資料庫與公開路徑不變。runtime 先對 token-protected adapter 做唯讀 normalized portfolio read；只有使用者授權的既有 manual inventory sync 才會依不變的序列（validated portfolio pair、交易日 gate、inventory-purpose TW quote read／新鮮度驗證）將已驗證 positions 寫入 configured-admin 今日快照。任一 gate 的 typed failure 都是零寫入，且不是 enum 修正失敗。完成後以本機 DB 唯讀讀回富邦台股 rows 與 aggregate。這條同步絕不下單；`filled_history` 的 Key 權限失敗保持獨立、不可用 inventory 資料補造交易紀錄。
+
 ### Manual refresh, compact-core and race completion rules
 
 `POST /api/trading-radar/refresh` keeps its explicit user-initiated price-refresh behavior but its browser response no longer carries a full radar `Response`. It returns only the existing `priceRefresh` outcome envelope. After the frontend renders that outcome, it calls `list`; therefore no browser path has a full-tree shortcut through manual refresh. Snapshot/export callers remain on their existing non-browser full path.
