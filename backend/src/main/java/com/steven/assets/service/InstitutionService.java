@@ -46,6 +46,7 @@ public class InstitutionService {
     private final TransitFundTypeRepository transitFundTypeRepo;
     private final AssetClassRepository assetClassRepo;
     private final StockRepository stockRepo;
+    private final StockMasterService stockMasterService;
     private final AssetClassifier assetClassifier;
     private final StockStyleRepository stockStyleRepo;
     private final BondTermRepository bondTermRepo;
@@ -452,7 +453,7 @@ public class InstitutionService {
                 .orElseThrow(() -> new java.util.NoSuchElementException(
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setAssetClass(override);
-        Stock saved = stockRepo.save(stock);
+        Stock saved = stockMasterService.saveClassification(stock);
         return toSecurityResponse(saved, settingsClassification.context());
     }
 
@@ -475,7 +476,7 @@ public class InstitutionService {
                 .orElseThrow(() -> new java.util.NoSuchElementException(
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setStockStyle(override);
-        Stock saved = stockRepo.save(stock);
+        Stock saved = stockMasterService.saveClassification(stock);
         return toSecurityResponse(saved, settingsClassification.context());
     }
 
@@ -498,7 +499,7 @@ public class InstitutionService {
                 .orElseThrow(() -> new java.util.NoSuchElementException(
                         "找不到標的: " + req.code() + " / " + req.market()));
         stock.setBondTerm(override);
-        Stock saved = stockRepo.save(stock);
+        Stock saved = stockMasterService.saveClassification(stock);
         return toSecurityResponse(saved, settingsClassification.context());
     }
 

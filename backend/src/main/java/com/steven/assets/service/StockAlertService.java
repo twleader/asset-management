@@ -135,7 +135,7 @@ public class StockAlertService {
                 .build();
         // 0000 = 台股大盤：不寫入 stock 主檔（避免被排程當真股票抓價，價格走 twse_index_daily_history）
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
-        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+        if (!isTaiex && !"台股".equals(req.market()) && req.stockName() != null && !req.stockName().isBlank()) {
             stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
         StockAlert saved = alertRepo.save(alert);
@@ -222,7 +222,7 @@ public class StockAlertService {
         alert.setStockCode(code);
         alert.setMarket(req.market());
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
-        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+        if (!isTaiex && !"台股".equals(req.market()) && req.stockName() != null && !req.stockName().isBlank()) {
             stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
         alert.setAlertType(req.alertType());
@@ -264,6 +264,12 @@ public class StockAlertService {
             throw new IllegalArgumentException("英股無 0000 代號");
         }
         if (userName == null || userName.isBlank()) return;
+        // Taiwan manual writes use only existing local evidence; never make external I/O here.
+        if ("台股".equals(market)) {
+            String masterName = stockMasterRepo.findByCodeAndMarket(code, market).map(s -> s.getName()).orElse(null);
+            if (masterName == null || userName.trim().equalsIgnoreCase(masterName.trim())) return;
+            throw new IllegalArgumentException("代號 %s 與既有主檔名稱「%s」不符".formatted(code, masterName));
+        }
         String canonical;
         if ("台股".equals(market)) canonical = historicalDataService.fetchTwStockName(code);
         else if ("英股".equals(market)) canonical = historicalDataService.fetchUkStockName(code);
@@ -463,7 +469,7 @@ public class StockAlertService {
         assertNoDuplicateGroup(code, req.market(), req.conditions(), null);
         // 0000 = 台股大盤：不寫入 stock 主檔（避免被排程當真股票抓價，比照既有 create）
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
-        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+        if (!isTaiex && !"台股".equals(req.market()) && req.stockName() != null && !req.stockName().isBlank()) {
             stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
         StockAlertGroup saved = groupRepo.save(StockAlertGroup.builder()
@@ -502,7 +508,7 @@ public class StockAlertService {
         assertNameMatchesCode(code, req.market(), req.stockName());
         assertNoDuplicateGroup(code, req.market(), req.conditions(), id);
         boolean isTaiex = "0000".equals(code) && "台股".equals(req.market());
-        if (!isTaiex && req.stockName() != null && !req.stockName().isBlank()) {
+        if (!isTaiex && !"台股".equals(req.market()) && req.stockName() != null && !req.stockName().isBlank()) {
             stockMasterService.upsert(code, req.market(), req.stockName().trim());
         }
         group.setStockCode(code);

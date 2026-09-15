@@ -175,6 +175,21 @@ class AssetServiceTest {
                 .extracting(BankDeposit::getSource).isEqualTo("MANUAL");
     }
 
+    @Test
+    void createSnapshotTaiwanPayloadNeverWritesTheStockMaster() {
+        LocalDate date = LocalDate.of(2026, 8, 21);
+        when(snapshotRepo.existsBySnapshotDate(date)).thenReturn(false);
+        when(tenantGuard.requireCurrentUserId()).thenReturn(9L);
+        when(snapshotRepo.save(any(AssetSnapshot.class))).thenAnswer(call -> call.getArgument(0));
+
+        service.createSnapshot(new com.steven.assets.dto.AssetSnapshotDto.CreateSnapshotRequest(
+                date, BigDecimal.ONE, null, List.of(), List.of(), List.of(
+                new com.steven.assets.dto.AssetSnapshotDto.StockRequest("00850", "USER SUPPLIED WRONG NAME", "台股", null,
+                        BigDecimal.ONE, BigDecimal.TEN, BigDecimal.TEN, null, null, "TWD", null, null, null, null))));
+
+        verify(stockMasterService, never()).upsert(anyString(), anyString(), anyString());
+    }
+
     // ---- recalcAllDividends ----
 
     @Test

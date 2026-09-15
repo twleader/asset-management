@@ -4,6 +4,8 @@ import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.fubon.FubonSyncOwnerPort;
+import com.steven.assets.service.BrokerFilledTradeCostProjector;
+import com.steven.assets.model.BrokerFilledTradeCostProjection;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -21,6 +23,7 @@ public class FubonTradeWriter {
     private final FubonSyncOwnerPort ownerPolicy;
     private final BrokerRepository brokers;
     private final FubonSyncFreshness freshness;
+    private final BrokerFilledTradeCostProjector costProjector;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public CommitResult insert(Long ownerId, Long expectedBrokerId, List<PreparedTrade> prepared) {
@@ -63,7 +66,18 @@ public class FubonTradeWriter {
         for (PreparedTrade trade : batch) {
             int count = transactions.insertFubonTradeIfAbsent(ownerId, trade.filledNo(), trade.transactionType(),
                     trade.stockName(), trade.stockCode(), trade.tradeDate(), trade.shares(), trade.price(), trade.amount());
-            if (count == 1) inserted++;
+            if (count == 1) {
+                inserted++;
+                Long transactionId = transactions.findFubonTransactionId(ownerId, trade.filledNo());
+                if (transactionId == null) throw new IllegalStateException("MISSING_INSERTED_FUBON_LEDGER");
+                costProjector.projectNew(BrokerFilledTradeCostProjection.builder()
+                        .ownerUserId(ownerId).broker(broker).brokerFilledNo(trade.filledNo())
+                        .assetTransactionId(transactionId).stockCode(trade.stockCode()).market("台股").currency("TWD")
+                        .transactionType(trade.transactionType()).tradeDate(trade.tradeDate()).shares(trade.shares())
+                        .buyCost(BrokerFilledTradeCostProjector.buyCost(trade.amount(), trade.shares(), trade.price(), null, null))
+                        .status("買".equals(trade.transactionType()) ? BrokerFilledTradeCostProjector.PENDING
+                                : BrokerFilledTradeCostProjector.SKIPPED_NO_PRETRADE_BASIS).build());
+            }
             else if (count == 0) existing++;
             else throw new IllegalStateException("UNEXPECTED_INSERT_COUNT");
         }

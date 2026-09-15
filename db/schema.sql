@@ -46,7 +46,7 @@
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
 -- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres schema-only dump，2026-09-14
--- 產生當下表數：101 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：102 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -558,6 +558,47 @@ CREATE TABLE public.broker (
     display_name character varying(50) NOT NULL,
     keywords character varying(200)
 );
+
+
+--
+-- Name: broker_filled_trade_cost_projection; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.broker_filled_trade_cost_projection (
+    id bigint NOT NULL,
+    owner_user_id bigint NOT NULL,
+    broker_id bigint NOT NULL,
+    broker_filled_no character varying(50) NOT NULL,
+    asset_transaction_id bigint NOT NULL,
+    stock_code character varying(20) NOT NULL,
+    market character varying(20) NOT NULL,
+    currency character varying(10) NOT NULL,
+    transaction_type character varying(10) NOT NULL,
+    trade_date date NOT NULL,
+    shares numeric(15,5) NOT NULL,
+    buy_cost numeric(20,2) NOT NULL,
+    status character varying(40) NOT NULL,
+    CONSTRAINT broker_filled_trade_cost_projection_status_check CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'APPLIED'::character varying, 'SKIPPED_NO_PRETRADE_BASIS'::character varying])::text[])))
+);
+
+
+--
+-- Name: broker_filled_trade_cost_projection_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.broker_filled_trade_cost_projection_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: broker_filled_trade_cost_projection_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.broker_filled_trade_cost_projection_id_seq OWNED BY public.broker_filled_trade_cost_projection.id;
 
 
 --
@@ -3278,6 +3319,13 @@ ALTER TABLE ONLY public.backup_record ALTER COLUMN id SET DEFAULT nextval('publi
 
 
 --
+-- Name: broker_filled_trade_cost_projection id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection ALTER COLUMN id SET DEFAULT nextval('public.broker_filled_trade_cost_projection_id_seq'::regclass);
+
+
+--
 -- Name: commodity_export_schedule id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3659,6 +3707,14 @@ ALTER TABLE ONLY public.bond_term
 
 ALTER TABLE ONLY public.bond_term
     ADD CONSTRAINT bond_term_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: broker_filled_trade_cost_projection broker_filled_trade_cost_projection_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT broker_filled_trade_cost_projection_pkey PRIMARY KEY (id);
 
 
 --
@@ -4462,6 +4518,22 @@ ALTER TABLE ONLY public.bank
 
 
 --
+-- Name: broker_filled_trade_cost_projection uq_broker_fill_cost_projection; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT uq_broker_fill_cost_projection UNIQUE (owner_user_id, broker_id, broker_filled_no);
+
+
+--
+-- Name: broker_filled_trade_cost_projection uq_broker_fill_cost_projection_transaction; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT uq_broker_fill_cost_projection_transaction UNIQUE (asset_transaction_id);
+
+
+--
 -- Name: commodity_export_schedule uq_commodity_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4763,6 +4835,13 @@ CREATE INDEX idx_backup_record_modified ON public.backup_record USING btree (mod
 --
 
 CREATE INDEX idx_bank_deposit_snapshot_id ON public.bank_deposit USING btree (snapshot_id);
+
+
+--
+-- Name: idx_broker_fill_cost_projection_pending; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_broker_fill_cost_projection_pending ON public.broker_filled_trade_cost_projection USING btree (owner_user_id, broker_id, stock_code, trade_date, broker_filled_no) WHERE ((status)::text = 'PENDING'::text);
 
 
 --
@@ -5226,6 +5305,30 @@ CREATE TRIGGER trg_stock_technical_indicator_immutable BEFORE DELETE OR UPDATE O
 
 ALTER TABLE ONLY public.api_error_log
     ADD CONSTRAINT api_error_log_source_operation_key_api_name_fkey FOREIGN KEY (source, operation_key, api_name) REFERENCES public.api_error_log_operation(source, operation_key, operation_label) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: broker_filled_trade_cost_projection broker_filled_trade_cost_projection_asset_transaction_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT broker_filled_trade_cost_projection_asset_transaction_id_fkey FOREIGN KEY (asset_transaction_id) REFERENCES public.asset_transaction(id);
+
+
+--
+-- Name: broker_filled_trade_cost_projection broker_filled_trade_cost_projection_broker_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT broker_filled_trade_cost_projection_broker_id_fkey FOREIGN KEY (broker_id) REFERENCES public.broker(id);
+
+
+--
+-- Name: broker_filled_trade_cost_projection broker_filled_trade_cost_projection_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.broker_filled_trade_cost_projection
+    ADD CONSTRAINT broker_filled_trade_cost_projection_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
 
 
 --

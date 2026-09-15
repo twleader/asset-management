@@ -164,7 +164,41 @@ class FubonSnapshotLockPostgresTest {
 
         manualFullUpdate(TODAY, "00865B", "1800", "87300", "87900", "買", TODAY.minusDays(9));
 
-        assertSourceFubonPreservedAndOtherPayloadUpdated();
+        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("10");
+    }
+
+    @Test
+    void sourceOwnedFullPutMayUpdateOnlyTheMatchingManualCostBaseline() {
+        useOwnership(FubonConfigState.State.READY, true, 9L);
+
+        manualFullUpdate(TODAY, "2330", "999", "77", "999", "STALE", TODAY.minusDays(1));
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            entityManager.clear();
+            AssetSnapshot reloaded = snapshotRepository.findById(snapshotId).orElseThrow();
+            StockHolding sourceFubon = holdingForBroker(reloaded, "fubon");
+            assertThat(sourceFubon.getShares()).isEqualByComparingTo("1");
+            assertThat(sourceFubon.getCurrentValue()).isEqualByComparingTo("10");
+            assertThat(sourceFubon.getTransactionType()).isEqualTo("SYNC");
+            assertThat(sourceFubon.getInvestmentCost()).isEqualByComparingTo("77");
+            assertTotalsMatchChildren(reloaded);
+        });
+    }
+
+    @Test
+    void sourceOwnedDuplicateOrInvalidCostCandidatesLeaveTheBaselineUntouched() {
+        useOwnership(FubonConfigState.State.READY, true, 9L);
+        AssetSnapshotDto.StockRequest first = stockRequest("2330", "台積電", fubon.getId(), "1", "77", "999", "STALE", TODAY);
+        AssetSnapshotDto.StockRequest duplicate = stockRequest("2330", "台積電", fubon.getId(), "1", "88", "999", "STALE", TODAY);
+        updateWithRequests(List.of(first, duplicate, stockRequest("0056", "元大高股息", other.getId(), "2", "30", "80", "買", TODAY)));
+        assertSourceCost("10");
+
+        for (BigDecimal invalid : java.util.Arrays.asList(null, new BigDecimal("-1"), new BigDecimal("1.001"),
+                new BigDecimal("1000000000000000000.00"))) {
+            updateWithRequests(List.of(stockRequest("2330", "台積電", fubon.getId(), "1", invalid, "999", "STALE", TODAY),
+                    stockRequest("0056", "元大高股息", other.getId(), "2", "30", "80", "買", TODAY)));
+            assertSourceCost("10");
+        }
     }
 
     @Test
@@ -207,10 +241,10 @@ class FubonSnapshotLockPostgresTest {
 
         manualFullUpdate(TODAY, "2330", "1", "1", "1", "STALE", TODAY.minusDays(1));
 
-        assertSourceFubonPreservedAndOtherPayloadUpdated();
+        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("1");
     }
 
-    private void assertSourceFubonPreservedAndOtherPayloadUpdated() {
+    private void assertSourceFubonVendorFieldsAndOtherPayloadUpdated(String expectedCost) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             entityManager.clear();
             AssetSnapshot reloaded = snapshotRepository.findById(snapshotId).orElseThrow();
@@ -218,7 +252,7 @@ class FubonSnapshotLockPostgresTest {
             StockHolding updatedOther = holdingForBroker(reloaded, "other");
             assertThat(sourceFubon.getStockCode()).isEqualTo("2330");
             assertThat(sourceFubon.getShares()).isEqualByComparingTo("1");
-            assertThat(sourceFubon.getInvestmentCost()).isEqualByComparingTo("10");
+            assertThat(sourceFubon.getInvestmentCost()).isEqualByComparingTo(expectedCost);
             assertThat(sourceFubon.getCurrentValue()).isEqualByComparingTo("10");
             assertThat(sourceFubon.getTransactionType()).isEqualTo("SYNC");
             assertThat(sourceFubon.getTransactionDate()).isEqualTo(TODAY.minusDays(90));
@@ -247,7 +281,7 @@ class FubonSnapshotLockPostgresTest {
                         "1111", 1, new BigDecimal("12.345"), new BigDecimal("20"), "第一筆"),
                 new FubonInventoryWriter.PreparedPosition(
                         "9999", 9_999_999_999L, new BigDecimal("1000000000"),
-                        BigDecimal.ONE, "溢位筆")), false))
+                        new BigDecimal("1000000000"), "溢位筆")), false))
                 .isInstanceOf(FubonInventoryWriter.CommitRejected.class)
                 .hasMessage("MONEY_PRECISION_EXCEEDED");
 
@@ -317,12 +351,28 @@ class FubonSnapshotLockPostgresTest {
             String current,
             String transactionType,
             LocalDate transactionDate) {
-        assetService.updateSnapshot(snapshotId, new AssetSnapshotDto.CreateSnapshotRequest(
-                snapshotDate, BigDecimal.ONE, "full-update", List.of(), List.of(), List.of(
+        updateWithRequests(snapshotDate, List.of(
                 stockRequest(fubonCode, "富邦測試標的", fubon.getId(), shares, cost, current,
                         transactionType, transactionDate),
                 stockRequest("0056", "元大高股息", other.getId(), "2", "30", "80",
-                        "買", TODAY.minusDays(3)))));
+                        "買", TODAY.minusDays(3))));
+    }
+
+    private void updateWithRequests(List<AssetSnapshotDto.StockRequest> requests) {
+        updateWithRequests(TODAY, requests);
+    }
+
+    private void updateWithRequests(LocalDate snapshotDate, List<AssetSnapshotDto.StockRequest> requests) {
+        assetService.updateSnapshot(snapshotId, new AssetSnapshotDto.CreateSnapshotRequest(
+                snapshotDate, BigDecimal.ONE, "full-update", List.of(), List.of(), requests));
+    }
+
+    private void assertSourceCost(String expected) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            entityManager.clear();
+            assertThat(holdingForBroker(snapshotRepository.findById(snapshotId).orElseThrow(), "fubon").getInvestmentCost())
+                    .isEqualByComparingTo(expected);
+        });
     }
 
     private void assertPayloadPersisted(
@@ -401,7 +451,7 @@ class FubonSnapshotLockPostgresTest {
             StockHolding finalOther = holdingForBroker(finalSnapshot, "other");
             assertThat(finalFubon.getStockCode()).isEqualTo("2330");
             assertThat(finalFubon.getShares()).isEqualByComparingTo("3");
-            assertThat(finalFubon.getInvestmentCost()).isEqualByComparingTo("37.04");
+            assertThat(finalFubon.getInvestmentCost()).isEqualByComparingTo("1.00");
             assertThat(finalFubon.getCurrentValue()).isEqualByComparingTo("60.00");
             assertThat(finalOther.getStockCode()).isEqualTo("0056");
             assertThat(finalOther.getCurrentValue()).isEqualByComparingTo("80");
@@ -435,6 +485,14 @@ class FubonSnapshotLockPostgresTest {
                 new BigDecimal(shares), new BigDecimal(cost), new BigDecimal(current),
                 new BigDecimal("123"), new BigDecimal("0.05"), "TWD", null,
                 transactionType, transactionDate, new BigDecimal("31.2345"));
+    }
+
+    private AssetSnapshotDto.StockRequest stockRequest(
+            String code, String name, Long brokerId, String shares, BigDecimal cost, String current,
+            String transactionType, LocalDate transactionDate) {
+        return new AssetSnapshotDto.StockRequest(code, name, "台股", brokerId,
+                new BigDecimal(shares), cost, new BigDecimal(current), new BigDecimal("123"),
+                new BigDecimal("0.05"), "TWD", null, transactionType, transactionDate, new BigDecimal("31.2345"));
     }
 
     private static StockHolding holdingForBroker(AssetSnapshot snapshot, String brokerCode) {

@@ -5,9 +5,13 @@ import com.steven.assets.model.AssetTransaction;
 import com.steven.assets.model.BrokerEntity;
 import com.steven.assets.repository.AppUserRepository;
 import com.steven.assets.repository.AssetTransactionRepository;
+import com.steven.assets.repository.BrokerFilledTradeCostProjectionRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.JpaFubonSyncFreshness;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.AssetSnapshotMutationLock;
+import com.steven.assets.service.BrokerFilledTradeCostProjector;
+import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
 import com.steven.assets.service.fubon.FubonSyncOwnerPolicy;
@@ -72,7 +76,8 @@ import static org.mockito.Mockito.when;
 @DataJpaTest(showSql = false, properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "spring.liquibase.enabled=false",
         "app.admin-email=trade-test@example.invalid", "fubon.sync-owner-email=trade-test@example.invalid"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaFubonSyncFreshness.class, FubonTradeWriter.class, UserAdminService.class, CurrentUserContext.class,
+@Import({JpaFubonSyncFreshness.class, FubonTradeWriter.class, BrokerFilledTradeCostProjector.class,
+        AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class, CurrentUserContext.class,
         TenantFilterAspect.class, FubonTradeWriterPostgresTest.Config.class})
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -95,6 +100,7 @@ class FubonTradeWriterPostgresTest {
     @Autowired FubonTradeSyncService service;
     @Autowired FubonTradeOutcomeCounters counters;
     @Autowired AssetTransactionRepository ledger;
+    @Autowired BrokerFilledTradeCostProjectionRepository costProjections;
     @Autowired AppUserRepository users;
     @Autowired BrokerRepository brokers;
     @Autowired EntityManager em;
@@ -114,6 +120,7 @@ class FubonTradeWriterPostgresTest {
             em.createNativeQuery("ALTER TABLE asset_transaction DROP CONSTRAINT IF EXISTS reject_trade_row").executeUpdate();
             em.createNativeQuery("CREATE UNIQUE INDEX IF NOT EXISTS ux_asset_transaction_owner_broker_filled_no "
                     + "ON asset_transaction (owner_user_id, broker_filled_no) WHERE broker_filled_no IS NOT NULL").executeUpdate();
+            em.createNativeQuery("DELETE FROM broker_filled_trade_cost_projection").executeUpdate();
             ledger.deleteAll(); users.deleteAll(); brokers.deleteAll(); em.flush();
             ownerId = users.saveAndFlush(AppUser.builder().email("trade-test@example.invalid")
                     .role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build()).getId();
@@ -154,6 +161,20 @@ class FubonTradeWriterPostgresTest {
             assertThat(row.getTransactionTax()).isNull(); assertThat(row.getExchangeRate()).isNull();
             assertThat(row.getNotes()).isNull(); assertThat(row.getSource()).isEqualTo("FUBON_SYNC");
         }
+        assertThat(costProjections.findAll()).hasSize(2)
+                .allSatisfy(projection -> assertThat(projection.getStatus())
+                        .isEqualTo(BrokerFilledTradeCostProjector.SKIPPED_NO_PRETRADE_BASIS));
+    }
+
+    @Test void newFubonBuyCreatesExactlyOnePendingCostProjectionWhenNoHoldingExists() {
+        writer.insert(ownerId, brokerId, List.of(prepared("F-BUY")));
+
+        assertThat(costProjections.findAll()).singleElement().satisfies(projection -> {
+            assertThat(projection.getBrokerFilledNo()).isEqualTo("F-BUY");
+            assertThat(projection.getAssetTransactionId()).isEqualTo(ledger.findAll().getFirst().getId());
+            assertThat(projection.getBuyCost()).isEqualByComparingTo("37.04");
+            assertThat(projection.getStatus()).isEqualTo(BrokerFilledTradeCostProjector.PENDING);
+        });
     }
 
     @Test void laterNonDuplicateConstraintFailureRollsBackTheEarlierInsert() {
