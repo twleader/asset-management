@@ -727,20 +727,6 @@ public class StockSourceQuery {
                 ps -> ps.setObject(1, tradingDate));
     }
 
-    /** 更新 stock 主檔的 name（若有差異）。upsert：若不存在則插入。 */
-    public void upsertStockName(String code, String market, String name) {
-        if (name == null || name.isBlank() || name.equalsIgnoreCase(code)) return;
-        int updated = jdbc.update("UPDATE stock SET name=? WHERE code=? AND market=? AND (name IS NULL OR name='' OR name=?)",
-                name, code, market, code);
-        if (updated == 0) {
-            // 嘗試插入（若已存在會被 PK 拒絕，忽略）
-            try {
-                jdbc.update("INSERT INTO stock (code, market, name) VALUES (?, ?, ?) ON CONFLICT (code, market) DO NOTHING",
-                        code, market, name);
-            } catch (Exception ignored) {}
-        }
-    }
-
     /**
      * Stores the latest intraday observation independently from the authoritative daily close.
      * PostgreSQL performs the freshness decision so concurrent poller rounds cannot regress a quote.
@@ -772,13 +758,6 @@ public class StockSourceQuery {
                     quote.stockCode(), quote.market(), quote.tradingDate(), java.sql.Timestamp.from(quote.freshnessInstant()), quote.source(),
                     quote.price(), quote.previousClose(), quote.openPrice(), quote.highPrice(), quote.lowPrice(),
                     quote.buyPrice(), quote.sellPrice(), quote.volume());
-            if (!applied.isEmpty()) {
-                if (quote.stockName() != null && !quote.stockName().isBlank()
-                        && !quote.stockName().equalsIgnoreCase(quote.stockCode())) {
-                    jdbc.update("UPDATE stock SET name=? WHERE code=? AND market=?",
-                            quote.stockName(), quote.stockCode(), quote.market());
-                }
-            }
             List<IntradayQuote> canonical = jdbc.query("""
                     SELECT q.stock_code, q.market, q.trading_date, q.provider_updated_at, q.source, q.actual_price,
                       q.previous_close, q.open_price, q.high_price, q.low_price, q.buy_price, q.sell_price, q.volume,

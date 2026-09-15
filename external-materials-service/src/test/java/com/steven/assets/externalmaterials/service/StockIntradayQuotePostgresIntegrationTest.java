@@ -70,7 +70,7 @@ class StockIntradayQuotePostgresIntegrationTest {
                     .isEqualByComparingTo("101.2");
             assertThat(jdbc.queryForObject("SELECT volume FROM stock_intraday_quote WHERE stock_code='2330'", Long.class))
                     .isEqualTo(123L);
-            assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330'", String.class)).isEqualTo("新名");
+            assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330'", String.class)).isEqualTo("舊名");
 
             assertThatThrownBy(() -> jdbc.update("INSERT INTO stock_intraday_quote "
                             + "(stock_code, market, trading_date, provider_updated_at, source, actual_price) "

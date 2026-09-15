@@ -63,14 +63,6 @@ public class FubonTwLiveQuoteProvider implements TwLiveQuoteProvider {
             }
             if (result.mainPriceWritten()) {
                 written++;
-                try {
-                    source.upsertStockName(
-                            observation.result().stockCode(),
-                            observation.result().market(),
-                            observation.result().stockName());
-                } catch (Exception ex) {
-                    log.warn("tw-live stock-name update failed provider=FUBON reason=LOCAL_WRITE_FAILED");
-                }
             } else {
                 failed++;
                 countWriteOutcome(result.outcome());

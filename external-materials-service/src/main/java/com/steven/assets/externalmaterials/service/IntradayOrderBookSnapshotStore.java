@@ -128,7 +128,7 @@ public class IntradayOrderBookSnapshotStore {
 
     /**
      * Applies a candidate atomically and returns the committed canonical row plus its revision.
-     * Header, all five levels, and stock name live in the same transaction.
+     * A valid existing stock master is required; header and all five levels then commit together.
      */
     public PersistResult persist(TwQuoteDetailFetchClient.QuoteDetailResult snapshot) {
         if (!isPersistable(snapshot)) return PersistResult.failed();
@@ -178,6 +178,11 @@ public class IntradayOrderBookSnapshotStore {
     }
 
     private PersistResult persistWithinTransaction(TwQuoteDetailFetchClient.QuoteDetailResult snapshot) {
+        List<String> masterNames = jdbc.query("SELECT name FROM stock WHERE code=? AND market=?",
+                (rs, rowNum) -> rs.getString("name"), snapshot.stockCode(), snapshot.market());
+        if (masterNames.size() != 1 || invalidMasterName(masterNames.getFirst(), snapshot.stockCode())) {
+            return PersistResult.failed();
+        }
         LocalDate tradingDate = snapshot.sourceTime().atZone(MarketClock.TW_ZONE).toLocalDate();
         List<Long> revisions = jdbc.query("""
                 INSERT INTO stock_intraday_order_book
@@ -223,11 +228,6 @@ public class IntradayOrderBookSnapshotStore {
                     """, snapshot.stockCode(), snapshot.market(), level.level(), level.bidPrice(),
                     level.bidVolumeLots(), level.askPrice(), level.askVolumeLots());
         }
-        jdbc.update("""
-                INSERT INTO stock (code, market, name) VALUES (?, ?, ?)
-                ON CONFLICT (code, market) DO UPDATE SET name=EXCLUDED.name
-                WHERE stock.name IS DISTINCT FROM EXCLUDED.name
-                """, snapshot.stockCode(), snapshot.market(), snapshot.stockName().trim());
         return readCanonical(snapshot.stockCode(), snapshot.market())
                 .map(PersistResult::applied)
                 .orElseThrow(() -> new IllegalStateException("canonical order book unreadable after applied write"));
@@ -286,6 +286,10 @@ public class IntradayOrderBookSnapshotStore {
 
     private static boolean isSupportedIdentity(String code, String market) {
         return TAIWAN.equals(market) && code != null && CODE.matcher(code).matches() && !"0000".equals(code);
+    }
+
+    private static boolean invalidMasterName(String name, String code) {
+        return name == null || name.isBlank() || name.trim().equalsIgnoreCase(code);
     }
 
     private static boolean allowedSource(String source) {

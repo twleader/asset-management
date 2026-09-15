@@ -8,7 +8,6 @@ import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
-import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,8 +26,8 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,7 +36,6 @@ class FubonInventoryWriterTest {
     @Mock AssetSnapshotMutationLock mutationLock;
     @Mock AssetSnapshotRepository snapshotRepository;
     @Mock BrokerRepository brokerRepository;
-    @Mock StockMasterService stockMasterService;
     @Mock UserAdminService userAdminService;
     @Mock FubonSyncFreshness freshness;
 
@@ -50,7 +48,7 @@ class FubonInventoryWriterTest {
     @BeforeEach
     void setUp() {
         writer = new FubonInventoryWriter(
-                mutationLock, snapshotRepository, brokerRepository, stockMasterService, calculator, userAdminService, freshness,
+                mutationLock, snapshotRepository, brokerRepository, calculator, userAdminService, freshness,
                 Clock.fixed(Instant.parse("2026-08-21T02:00:00Z"), ZoneOffset.UTC));
         fubon = BrokerEntity.builder().id(1L).code("fubon").displayName("富邦證券").active(true).build();
         other = BrokerEntity.builder().id(2L).code("cathay").displayName("國泰證券").active(true).build();
@@ -93,7 +91,6 @@ class FubonInventoryWriterTest {
         assertThat(snapshot.getTotalStockValue()).isEqualByComparingTo("160.00");
         assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("160.00");
         assertThat(snapshot.getEstimatedAnnualDividend()).isEqualByComparingTo("3");
-        verify(stockMasterService).upsert("2330", "台股", "台積電");
         verify(snapshotRepository).saveAndFlush(snapshot);
     }
 

@@ -171,9 +171,6 @@ public class PricePoller {
                         PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, markClosed);
                         if (outcome == PriceCacheWriter.CacheWriteOutcome.WRITTEN) {
                             written.incrementAndGet();
-                            if (result.stockName() != null && !result.stockName().isBlank()) {
-                                source.upsertStockName(code, market, result.stockName());
-                            }
                         } else if (outcome == PriceCacheWriter.CacheWriteOutcome.FAILED
                                 || outcome == PriceCacheWriter.CacheWriteOutcome.SKIPPED_INVALID_PRICE) {
                             failed.incrementAndGet();

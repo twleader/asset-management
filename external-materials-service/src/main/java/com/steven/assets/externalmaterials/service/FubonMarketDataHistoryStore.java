@@ -196,10 +196,6 @@ public class FubonMarketDataHistoryStore {
                 """, basic.symbol(), MARKET, PROVIDER, basic.sourceDate(), basic.exchange(), basic.sourceName(), basic.industry(),
                 basic.securityType(), basic.sourceMarket(), basic.limitUpPrice(), basic.limitDownPrice(), basic.tradingEligible(),
                 basic.tradingStatus(), basic.matchingInterval(), basic.boardLot(), basic.currency(), Timestamp.from(basic.observedAt()), hash);
-        // Deliberately no stock insert or classification mutation.
-        jdbc.update("""
-                UPDATE stock SET name=? WHERE code=? AND market=? AND (btrim(name)='' OR name=code)
-                """, basic.sourceName(), basic.symbol(), MARKET);
         return new BasicResult(Status.WRITTEN);
     }
 
