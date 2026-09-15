@@ -4,6 +4,8 @@
 **前置任務:** 無；沿用既有唯讀 adapter、configured active admin、最新快照鎖與聚合計算器。
 **Liquibase changeset:** 無；不得新增或修改 table、column、index、migration 或 `db/schema.sql`。
 
+> **現行契約覆蓋聲明（2026-09-15）：** 此任務的活存 target 規則已由 Requirement 152／Task 434 覆寫。現行實作只可覆寫既有台北富邦銀行／證券戶／TWD；不存在、重複或非 TWD 時必須 fail closed，不得新增、轉移、轉幣或改寫活存／任何其他存款列。下方 429.1–429.4 與完成報告僅保留當時規格與交付證據，不可作為後續實作指示。
+
 ## 背景
 
 目前同步把富邦 `bank_remain.balance` 寫入 `證券戶`，但使用者明確確認該 SDK 回傳要對應的是畫面中既有的「台北富邦銀行／台幣活存」。舊映射會留下過期活存金額，並嘗試建立不代表使用者帳戶的 `證券戶` 列；這是錯誤資料，不是前端顯示問題。

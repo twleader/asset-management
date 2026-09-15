@@ -391,8 +391,8 @@ Task 201 起仍在本檔下方，是最後一批以單體檔記錄的任務；�
 | 409 | 盤中走勢比較基準改由 server 提供經驗證的 TWSE MIS 同日 `d/y` session reference，並以單調 Redis cache 保存（Requirement 13） | [tasks/t409_intraday_session_reference_price.md](tasks/t409_intraday_session_reference_price.md) |
 | 410 | 快照表單新增與更新改走專屬 BFF，修復登入後存檔 403（Requirement 136） | [tasks/t410_snapshot_form_save_bff.md](tasks/t410_snapshot_form_save_bff.md) |
 | 390 | 富邦 ETF 成分股持股明細——欄位解析、讀取端切換、清理舊爬蟲：取代既有 MoneyDJ 台股來源（Requirement 123） | [tasks/t390_fubon_etf_holdings_cutover.md](tasks/t390_fubon_etf_holdings_cutover.md) |
-| 393 | （歷史）交割銀行餘額查詢排程：原投影為台北富邦銀行證券戶；現行 target 見 Task 429（Requirement 128） | [tasks/t393_fubon_bank_balance_sync.md](tasks/t393_fubon_bank_balance_sync.md) |
-| 429 | 富邦交割銀行餘額僅覆寫最新快照既有台北富邦銀行台幣活存；缺列 fail closed，不建立或改寫證券戶（Requirement 128） | [tasks/t429_fubon_bank_balance_demand_deposit_target.md](tasks/t429_fubon_bank_balance_demand_deposit_target.md) |
+| 393 | （歷史）交割銀行餘額查詢排程：原投影為台北富邦銀行證券戶；現行 target 見 Task 434（Requirement 152） | [tasks/t393_fubon_bank_balance_sync.md](tasks/t393_fubon_bank_balance_sync.md) |
+| 429 | （歷史）富邦交割銀行餘額曾覆寫台北富邦銀行台幣活存；現行規則見 Task 434，僅覆寫既有證券戶／TWD（Requirement 152） | [tasks/t429_fubon_bank_balance_demand_deposit_target.md](tasks/t429_fubon_bank_balance_demand_deposit_target.md) |
 | 394 | 應收付交割金額查詢排程：每日 08:00／13:45／19:30／22:00 讀取 SDK `3d` 回傳列，僅以 future nonzero rows 冪等更新 `TRANSIT_TWD` 買股待付款／賣股待收款；不宣稱完整交割帳（Requirement 129） | [tasks/t394_fubon_settlement_sync.md](tasks/t394_fubon_settlement_sync.md) |
 | 395 | 已實現損益明細查詢排程：每日 08:00／13:45／19:30／22:00 唯讀查詢，將 Stock/Sell 的富邦淨損益以調節成本基礎冪等新增 `realized_gain`；同資料不寫入（Requirement 130） | [tasks/t395_fubon_realized_gain_sync.md](tasks/t395_fubon_realized_gain_sync.md) |
 | 396 | 除權息資料查詢排程：交易日 09:00／13:30 唯讀查詢富邦股利政策，併入既有兩段式除權息證據體系（provider 最低優先層），減資不在本次範圍（Requirement 131） | [tasks/t396_fubon_dividend_evidence_sync.md](tasks/t396_fubon_dividend_evidence_sync.md) |

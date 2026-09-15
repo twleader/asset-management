@@ -4825,17 +4825,17 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 ---
 
-### Requirement 128／Tasks 393、429：交割銀行餘額查詢——每日四時段更新台北富邦台幣活存與快照總額
+### Requirement 128／Tasks 393、429（歷史 target 規則已由 Requirement 152／Task 434 覆寫）：交割銀行餘額查詢——每日四時段更新既有目標與快照總額
 
-**User Story：**作為使用富邦證券及台北富邦銀行的使用者，我希望每天 08:00／09:20／14:20／22:00 查詢交割銀行餘額，覆寫最新資產快照中台北富邦銀行的既有台幣活存，且總資產同步正確。
+**User Story：**作為使用富邦證券及台北富邦銀行的使用者，我希望每天 08:00／09:20／14:20／22:00 查詢交割銀行餘額，覆寫最新資產快照中的指定既有 target，且總資產同步正確。現行精確 target 僅以 Requirement 152／Task 434 為準。
 
 #### Acceptance Criteria
 
 - [ ] **既有 schema、固定時段與唯讀邊界。** 不新增 SQL 表／欄位／索引。business-services 使用獨立 FUBON_BANK_BALANCE_SYNC_ENABLED，先 flag/global/config READY，再查 configured active admin；每天執行、不加交易日曆 gate。Asia/Taipei cron 為 `0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *`。bank 固定本地 code=fubon（台北富邦銀行），不是從 SDK 回應猜銀行名稱。
 - [ ] **官方來源與身分邊界。** `bank_remain` 解 `Result.is_success/data`；同次 accounting lock 捕捉 selected account/response/token，raw branch/account 皆必填且精確相等後才 HMAC-SHA256 產生 24 hex fingerprint。raw 身分不跨 adapter、不記錄；缺欄不得當匹配。TWD balance/available_balance 接受官方整數或整數字串、允許零，拒負數／非有限。queryDate/observedAt 只表示本地觀測，不冒充 vendor sourceDate。
 - [ ] **預檢與第一 DB 鎖。** `POST /internal/bank-balance/read` 輸出 normalized typed record，金額重用既有 nonnegative decimal component parser。orchestrator 以 NOT_SUPPORTED 完成 owner/HTTP/preflight；獨立 REQUIRES_NEW writer 的第一個 DB operation 必為 `AssetSnapshotMutationLock.lockLatestForFubonConfiguredOwner(ownerId)`，其前不得查 owner/broker/bank/children。鎖後 recheck owner/broker/bank，無快照不建；跨台北日或觀测距 commit 超 60 秒 no-write。
-- [ ] **子列與總額同交易。** 同一 locked managed `deposits` collection 中 `bank.code=fubon`＋`depositType=活存` 的全部列是候選集；零候選回 `TARGET_MISSING` 且不新增任何存款列；兩列以上回 `AMBIGUOUS_TARGET`；恰一列但其 currency 非 `TWD` 也回 `AMBIGUOUS_TARGET`；只有恰一個 TWD 候選才可更新同一 managed instance。這是使用者指定的台北富邦銀行台幣活存，不得另建或改寫 `證券戶`。bank／`活存` type 必須仍為 active，否則維持 `BANK_MISSING`。`amount=balance` HALF_UP scale2 後檢查 numeric(20,2)，零仍保存；既有 target 的 `originalAmount`、notes/rate 全數保留，其他存款／基金／股票不動。`availableBalance` 絕不可作為 fallback 或寫入。`SnapshotAggregateCalculator.recalculate` 與 child/saveAndFlush 同 transaction，aggregate 溢位整批 rollback；不可等待手動編輯才補總额。SUCCESS 只在 commit 後記錄。
-- [ ] **可驗收入口。** token-protected business `POST /internal/brokers/fubon/bank-balance-sync?dryRun=true|false` 預設 true，controller 只委派；dry-run 不持 writer 鎖、不寫 DB。公開結果僅 outcome/dryRun/reason/成功 updatedAmount。API 盤點 httpEndpoint 是 adapter `/internal/bank-balance/read`，Java 手動入口放 consumer；不新增 BFF/frontend/9090 路由，但既有 `FubonApiInfoBffController` 與 `SchedulePublicBffController.JOBS` 的靜態說明及各自測試必須同步指向既有台北富邦銀行台幣活存。驗證實際 Spring transaction 邊界、零值、precision、候選集的缺列／重複／非 TWD、既有欄位保留、併發 full PUT、PostgreSQL commit 後 children 與 aggregate 一致。
+- [ ] **子列與總額同交易。** Requirement 152／Task 434 取代本段過去活存 mapping：同一 locked managed `deposits` collection 中 `bank.code=fubon`＋`depositType=證券戶` 的全部列是候選集；零候選回 `TARGET_MISSING` 且不新增任何存款列；兩列以上回 `AMBIGUOUS_TARGET`；恰一列但其 currency 非 `TWD` 也回 `AMBIGUOUS_TARGET`；只有恰一個 TWD 候選才可更新同一 managed instance。不得更新 `活存`、另建、轉移或改寫其他列。bank／`證券戶` type 必須仍為 active，否則維持 `BANK_MISSING`。`amount=balance` HALF_UP scale2 後檢查 numeric(20,2)，零仍保存；既有 target 的 `originalAmount`、notes/rate 全數保留，其他存款／基金／股票不動。`availableBalance` 絕不可作為 fallback 或寫入。`SnapshotAggregateCalculator.recalculate` 與 child/saveAndFlush 同 transaction，aggregate 溢位整批 rollback；不可等待手動編輯才補總额。SUCCESS 只在 commit 後記錄。
+- [ ] **可驗收入口。** token-protected business `POST /internal/brokers/fubon/bank-balance-sync?dryRun=true|false` 預設 true，controller 只委派；dry-run 不持 writer 鎖、不寫 DB。公開結果僅 outcome/dryRun/reason/成功 updatedAmount。API 盤點 httpEndpoint 是 adapter `/internal/bank-balance/read`，Java 手動入口放 consumer；不新增 BFF/frontend/9090 路由，但既有 `FubonApiInfoBffController` 與 `SchedulePublicBffController.JOBS` 的靜態說明及各自測試必須同步指向既有台北富邦銀行證券戶／TWD，並明示缺列、重複或非 TWD fail closed。驗證實際 Spring transaction 邊界、零值、precision、候選集的缺列／重複／非 TWD、既有欄位保留、併發 full PUT、PostgreSQL commit 後 children 與 aggregate 一致。
 
 ### Requirement 129／Task 394：應收付交割款查詢——投影 SDK `3d` 回傳列至在途款
 
@@ -5303,3 +5303,15 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **catalog response shape 僅接受明確白名單。** `SdkGateway.verify_taiex_index_symbol` 既有 `is_success is False` 仍回 `INDEX_TICKERS_REJECTED`。它必以 presence-aware selector 區分 absent 與 present 值：成功 rows 只可來自 (a) legacy top-level list，(b) mapping 且 present `is_success is True` 的 `data` list，或 (c) mapping 且 absent `is_success` 的 `data` list；mapping 的 envelope 必另有精確 `exchange == "TWSE"` 與 `type == "INDEX"`。present `None`、`0`、`1`、字串或其他值、缺／錯 envelope metadata、data 缺失／非 list、任意 attribute object（即使有 `data` list）、nested／混合／未知結構一律為 `INDEX_TICKERS_INVALID`。不得猜測、遞迴擷取或掃描任意 response。
 - [ ] **身份與副作用防線不變。** 對已接受 mapping envelope，程式只對每個 data row 精確比對 deployment-selected `symbol`（可有 `name`），不得要求、讀取或由 row 補猜 `exchange`／`type`；外層 metadata 是唯一的 exchange/type authority。legacy top-level list 若保留，則每列仍須精確三元 `(symbol, exchange, type) == (configuredSymbol, "TWSE", "INDEX")`。空 list、近似／缺 symbol、legacy row 缺 exchange/type 或錯 metadata 都 fail closed，不得開 WebSocket。富邦官方文件以 `IR0001` 示範 deployment configuration，但 source 不得硬編該值或改變其他合法 deployment-selected symbol 的 exact-match 語意。不改 token guard、stream message normalizer、WebSocket reconnect、public/BFF/9090 route、DB/Redis schema 或既有 writer 程式、金融帳務或交易功能。catalog 與已驗證的 index stream 僅可讀市場資料，絕不下單、改單、撤單、轉帳、圈存或寫入券商；既有 stream 接收合格事件時的 DB-first／Redis projection 保持不變。
 - [ ] **受控測試與本機驗收。** Python tests 直接覆蓋含只有 `symbol`／`name` data row 的官方 mapping envelope 正向案例、legacy list、explicit-success envelope、`false` rejection、absent versus present-invalid `is_success`、缺／錯 envelope metadata、attribute object（含 `data` list）拒絕、malformed envelope、symbol mismatch 與 no-websocket-before-verification。本任務只允許無實帳戶的本機 adapter health 與 feature-disabled safety validation；不得呼叫 SDK、internal POST、SSE、manual sync 或任何券商 API，不得啟用 TAIEX stream、修改 active main flags 或重建 external-materials service。不得輸出 token、帳號、raw catalog、價格或 stream payload；不啟用 dividend、technical、stock-push、realized-gain 或 settlement flags。
+
+### Requirement 152／Task 434：富邦交割銀行餘額僅更新既有台北富邦銀行證券戶
+
+**User Story：**作為使用者，我希望富邦唯讀 `bank_remain.balance` 更新畫面中既有的「台北富邦銀行／證券戶／TWD」餘額，而不因程式錯誤改寫未對應的活存列或在目標不存在時建立／轉移資料。
+
+本 Requirement 取代 Requirement 128／Task 429 對銀行餘額 target 為「活存」及「不得更新證券戶」的文字；其餘唯讀 adapter、帳號身分、TWD、非負整數、日期、新鮮度、transaction 與排程契約均不變。已驗證的 `bank_remain` 回應只證明可供本機投影的餘額，不代表或授權任何券商交易、匯款或轉帳。
+
+#### Acceptance Criteria
+
+- [ ] **精確既有 target 與 fail-closed 選擇。** `FubonBankBalanceWriter` 仍以 configured active admin 最新快照鎖作為第一個 DB operation；在同一 locked managed deposits collection，僅以 `bank.code=fubon`、`depositType=證券戶` 作候選集，且不先按 currency 過濾。零列必回既有 `TARGET_MISSING`；多列或唯一列 currency 非 `TWD` 必回既有 `AMBIGUOUS_TARGET`。只有一筆既有 TWD target 才可更新。不得新增、刪除、改類型、轉幣、挑選其他列，亦不得更新同銀行的 `活存` 或任何其他銀行／存款類型。
+- [ ] **資料與交易邊界不放寬。** 僅把既有已完整驗證的 `balance` 依 HALF_UP scale 2 寫入 target `amount`；`availableBalance` 不落地、不作 fallback，零值仍更新而不刪列。保留同一列的 `originalAmount`、`notes`、`annualInterestRate`，以既有 `SnapshotAggregateCalculator` 在同一 `REQUIRES_NEW` transaction 重算 aggregate 並 `saveAndFlush`。不改 adapter reader、response identity／currency／integer validation、feature flag、排程時間、內部 route、BFF route、schema、Liquibase migration，亦不新增手動同步入口。
+- [ ] **資訊頁與回歸證據。** `FubonApiInfoBffController` 的既有 `sdk.accounting.bank_remain` 說明必明確為「既有台北富邦銀行證券戶／TWD」，並明示缺列、多列或非 TWD fail closed；不新增 BFF API。單元與真實 PostgreSQL 測試必覆蓋唯一 target、零餘額、保留 metadata／不動活存、無 target、重複 target、唯一非 TWD target、aggregate 同 transaction、commit rollback 與既有排程 cron／Taipei zone 不變。不得呼叫真實 SDK、下單、改單、撤單、匯款、圈存、轉帳或任何券商寫入功能。

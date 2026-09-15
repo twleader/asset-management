@@ -29,7 +29,7 @@ import java.util.Objects;
 @Service
 public class FubonBankBalanceWriter {
     private static final String FUBON = "fubon";
-    private static final String DEPOSIT_TYPE = "活存";
+    private static final String DEPOSIT_TYPE = "證券戶";
     private final AssetSnapshotMutationLock mutationLock;
     private final UserAdminService userAdminService;
     private final BrokerRepository brokerRepository;

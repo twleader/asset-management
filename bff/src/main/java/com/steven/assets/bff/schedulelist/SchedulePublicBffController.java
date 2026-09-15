@@ -146,7 +146,7 @@ public class SchedulePublicBffController {
                             + "正規化成分與來源日期落地保存供股票分析讀取，需啟用 ETF 同步設定，不影響券商端任何狀態",
                     "交易日 08:50、15:30", "0 50 8 * * MON-FRI；0 30 15 * * MON-FRI", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦交割銀行餘額同步",
-                    "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 交割銀行帳戶餘額，覆寫最新快照裡既有台北富邦銀行台幣活存金額與快照總額；零值照寫，同一交易提交",
+                    "以隔離的富邦官方 Linux SDK 唯讀查詢 configured admin 交割銀行帳戶餘額，僅覆寫最新快照裡既有台北富邦銀行證券戶／TWD金額與快照總額；零值照寫，缺列、重複或非TWD均fail closed，同一交易提交",
                     "每日 08:00／09:20／14:20／22:00", "0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦應收付交割金額同步",
                     "以隔離的富邦官方 Linux SDK 唯讀投影 3d 回傳的 future、nonzero TWD transit 在途款為買股待付款／賣股待收款；非富邦官方完整結算窗口。僅接受真正 boolean accountBindingExplicit=true、SDK_RANGE_3D_RETURNED_ROWS 與 reason=null；相同 target 略過，僅缺少或不同時建立／更新",

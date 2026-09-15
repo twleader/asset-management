@@ -4,7 +4,7 @@
 **前置任務:** t352、t385、t393 已交付的功能切片
 **Liquibase changeset:** 無
 
-> **現行契約覆蓋聲明（2026-09-13）：** 本任務 399.5 關於銀行餘額寫入 TWD `證券戶` 的敘述是當時 t393 的歷史交付，已由 Task 429 覆蓋。現行實作只可覆寫既有台北富邦銀行／台幣活存；不存在時 fail closed，不得建立或改寫 `證券戶`。其餘已完成的 owner／lock／transaction 證據不受影響。
+> **現行契約覆蓋聲明（2026-09-15）：** 本任務 399.5 關於銀行餘額寫入 TWD `證券戶` 的鎖、recheck、aggregate 與 fail-closed 證據保留，但 target 選擇以 Requirement 152／Task 434 為準：只可覆寫既有台北富邦銀行／證券戶／TWD；不存在、重複或非 TWD 時 fail closed，不得新增、轉移或改寫 `活存`。其餘已完成的 owner／lock／transaction 證據不受影響。
 
 ## 背景
 
