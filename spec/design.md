@@ -10692,7 +10692,7 @@ feature flag（預設false）→READY→known-open calendar→Repository雷達ET
 
 ---
 
-## Requirement 128–130／Task 393、429、394–395：帳戶唯讀同步、来源核實與既有資料寫入
+## Requirement 128、130、152／Task 393、429、434、394–395：帳戶唯讀同步、來源核實與既有資料寫入
 
 Task394 寫既有 snapshot deposit；Task395 新增最小 `realized_gain` 同步去重欄位與 partial unique index，其他帳務表不變。三支 scheduler/client 只查富邦官方帳務，券商端從不寫入。預設 flags=false 是部署控制，不替代資料驗證或成功路徑。秘密檔 presence/權限檢查與 SDK 實機登入權限是不同證據，本規格不宣稱缺 secret。所有真人帳戶與金融操作都不作開發測試資料。
 
@@ -10700,7 +10700,7 @@ Task394 寫既有 snapshot deposit；Task395 新增最小 `realized_gain` 同步
 
 | 任務 | SDK／adapter | Asia/Taipei cron | 合法 target |
 |---|---|---|---|
-|393／429|bank_remain；POST /internal/bank-balance/read|0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *|最新快照既有台北富邦銀行台幣活存，TWD|
+|393／429／434|bank_remain；POST /internal/bank-balance/read|0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *|最新快照既有台北富邦銀行證券戶，TWD|
 |394|query_settlement(account,3d)；POST /internal/settlement/read|0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *|核實未來交割後，TRANSIT_TWD負應付／正應收|
 |395|realized_gains_and_loses；POST /internal/realized-gains/read|0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *|configured owner/台股/富邦證券的富邦淨損益調節成本 realized_gain|
 
@@ -10723,9 +10723,9 @@ scheduler/manual → feature/config/owner preflight（NOT_SUPPORTED）
                  → commit成功才計SUCCESS
 ```
 
-不得在同service self-invoke 假裝切開 transaction、不得先查app_user/broker/bank/children、不得改成第一個snapshot-related DB action。無snapshot不新增、不改snapshotDate。commit時queryDate仍當日、observedAt不未來且不超過60秒；所有失敗保留舊child和aggregate。銀行餘額先以同一 locked managed collection 中既有 `bank.code=fubon`、`depositType=活存` 的所有列作候選集：0 列回 `TARGET_MISSING`、不 insert；>1 列回 `AMBIGUOUS_TARGET`；唯一列非 TWD 亦回 `AMBIGUOUS_TARGET`；只有唯一 TWD 列才 update，不得任選、轉幣或另建 `證券戶`。這個限制只適用銀行餘額；交割款在途列的建立規則維持其各自契約。其他銀行/存款/資產不動。
+不得在同service self-invoke 假裝切開 transaction、不得先查app_user/broker/bank/children、不得改成第一個snapshot-related DB action。無snapshot不新增、不改snapshotDate。commit時queryDate仍當日、observedAt不未來且不超過60秒；所有失敗保留舊child和aggregate。Requirement 152／Task434 覆寫 Task429 的舊活存 target：銀行餘額先以同一 locked managed collection 中既有 `bank.code=fubon`、`depositType=證券戶` 的所有列作候選集：0 列回 `TARGET_MISSING`、不 insert；>1 列回 `AMBIGUOUS_TARGET`；唯一列非 TWD 亦回 `AMBIGUOUS_TARGET`；只有唯一 TWD 列才 update，不得任選、轉幣、新增、轉移或更新 `活存`／其他列。這個限制只適用銀行餘額；交割款在途列的建立規則維持其各自契約。其他銀行/存款/資產不動。
 
-bank balance/availableBalance是非負官方整數（或官方整數字串），0有效；只 `balance`→既有台幣活存的 amount，`availableBalance` 不落地且不得作 fallback。amount 最後 HALF_UP scale2 並驗 numeric(20,2) 的18位整數容量，aggregate 亦同；既有 target 的 notes/rate/originalAmount 全數保留。`FubonApiInfoBffController` 與 `SchedulePublicBffController.JOBS` 是人工維護的現行資訊清單，銀行餘額 target 變更時須同步更新這兩筆既有說明與測試；不新增 BFF route。
+bank balance/availableBalance是非負官方整數（或官方整數字串），0有效；只 `balance`→既有台幣證券戶的 amount，`availableBalance` 不落地且不得作 fallback。amount 最後 HALF_UP scale2 並驗 numeric(20,2) 的18位整數容量，aggregate 亦同；既有 target 的 notes/rate/originalAmount 全數保留。`FubonApiInfoBffController` 與 `SchedulePublicBffController.JOBS` 都是人工維護的現行資訊清單；銀行餘額 target 變更時兩者既有說明與測試都必同步為證券戶／TWD與缺列、重複、非 TWD fail-closed 規則，不新增或修改 BFF route。`SchedulePublicBffController.JOBS` 的排程時段與 cron 不因本 target 修正變更。
 
 ### Task394／395 的 SDK 回傳列投影與冪等入帳
 

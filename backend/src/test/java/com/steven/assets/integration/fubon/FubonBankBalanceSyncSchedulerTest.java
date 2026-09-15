@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Four fixed cron slots and single-flight guard for the bank balance sync scheduler
- * (Requirement 128 / Task 393). Unlike {@link FubonTradeSyncSchedulerTest} / the inventory
+ * (Requirement 152 / Task 434). Unlike {@link FubonTradeSyncSchedulerTest} / the inventory
  * scheduler's test, there is no calendar gate to verify here at all -- the feature-gate /
  * configState short-circuit is entirely delegated to {@link FubonBankBalanceSyncService
  * #syncScheduled()}, which is asserted separately in {@link FubonBankBalanceSyncServiceTest}.

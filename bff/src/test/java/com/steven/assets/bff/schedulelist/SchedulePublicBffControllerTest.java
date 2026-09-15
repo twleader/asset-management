@@ -93,7 +93,7 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("富邦交割銀行餘額同步精確登錄四個固定時段、時區與唯讀語意（Requirement 128／Task 393）")
+    @DisplayName("富邦交割銀行餘額同步精確登錄四個固定時段、時區與唯讀語意（Requirement 152／Task 434）")
     void 富邦交割銀行餘額同步排程契約() {
         assertThat(jobs()).filteredOn(j -> "富邦交割銀行餘額同步".equals(j.name()))
                 .singleElement()
@@ -104,8 +104,9 @@ class SchedulePublicBffControllerTest {
                             "0 0 8 * * * / 0 20 9 * * * / 0 20 14 * * * / 0 0 22 * * *");
                     assertThat(job.schedule()).isEqualTo("每日 08:00／09:20／14:20／22:00");
                     assertThat(job.zone()).isEqualTo("Asia/Taipei");
-                    assertThat(job.description()).contains("唯讀", "configured admin", "既有台北富邦銀行台幣活存")
-                            .doesNotContain("台北富邦銀行證券戶");
+                    assertThat(job.description()).contains("唯讀", "configured admin", "既有台北富邦銀行證券戶／TWD",
+                            "零值照寫", "缺列、重複或非TWD均fail closed")
+                            .doesNotContain("台幣活存");
                 });
     }
 
