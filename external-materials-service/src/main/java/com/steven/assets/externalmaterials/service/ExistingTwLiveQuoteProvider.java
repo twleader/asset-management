@@ -54,13 +54,6 @@ public class ExistingTwLiveQuoteProvider implements TwLiveQuoteProvider {
             switch (outcome) {
                 case WRITTEN -> {
                     written++;
-                    if (result.stockName() != null && !result.stockName().isBlank()) {
-                        try {
-                            source.upsertStockName(entry.getKey(), "台股", result.stockName());
-                        } catch (Exception ex) {
-                            log.warn("tw-live stock-name update failed provider=TWSE reason=LOCAL_WRITE_FAILED");
-                        }
-                    }
                 }
                 case REJECTED_STALE -> {
                     staleRejected++;

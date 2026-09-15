@@ -9975,7 +9975,7 @@ stock_intraday_quote
 | `stockCode, market` | composite primary key |
 | `tradingDate, updatedAt, source` | `trading_date, provider_updated_at, source` |
 | `actualPrice, previousClose, openPrice, highPrice, lowPrice, buyPrice, sellPrice, volume` | 對應 `*_price`／`volume` 欄 |
-| `stockName` | 僅在此 snapshot 原子 upsert 成功後，更新 `stock.name` |
+| `stockName` | 僅作 ingress 格式驗證；不寫入 `stock`，讀回名稱只取既有主檔 |
 | `priceChange, changePercent, closed, quoteStatus` | 不入 DB；前兩者由 Redis payload 即時計算，後兩者是 cache state |
 
 原子 upsert 是唯一 mutation primitive：
@@ -9999,7 +9999,7 @@ WHERE EXCLUDED.provider_updated_at > stock_intraday_quote.provider_updated_at
 RETURNING stock_code;
 ```
 
-回傳列數為零就代表 equal/older，呼叫端不得更新 `stock.name`。寫 snapshot 與名稱更新放進同一 transaction；因此名稱也只會隨被接受的較新 observation 前進。
+回傳列數為零就代表 equal/older。來源名稱不得寫入主檔；canonical read 只讀既有 `stock.name`，故 transaction 寫 header/levels 前必先確認同一 `(code, 台股)` 主檔有非空、非代號名稱，否則整筆 fail closed、零寫入。
 
 #### 十秒 producer 與時間單調
 
@@ -11181,7 +11181,7 @@ stock_technical_indicator 的 source_date/source_timestamp/payload/content_hash/
 
 PostgreSQL transaction 未成功以前不能呼叫 Redis writer。Redis 投影失敗不會 undo 已 committed rows，而是回 PARTIAL；下次合格同步以相同 PG canonical data 再投影。Redis read path 只讀 v2，不 SDK fetch、不寫 DB、不刷新 TTL；v2 的 Lua key、source-date fences 和7日/15分鐘 TTL 與 Task398 同型，但 manifest 必須剛好五組。v1 不做 migration 或以不完整三組塞進 v2。
 
-fubon_stock_basic_info 是來源快照而非 stock 主檔替代品。source_name 保留當次官方名稱，允許與 stock.name 不同，以保留 source evidence；SQL comment 明確說明這項唯一的刻意去正規化。其餘欄位是 ticker 才提供的交易資格/狀態、交易單位、幣別與 basic metadata。它以 source_date/hash 走同一 conservative fence。成功 upsert 後，只有 stock 已存在且 name 是空白或代號時，才用 source_name 更新 name；不可 insert stock，不可修改任何分類欄位。
+fubon_stock_basic_info 是來源快照而非 stock 主檔替代品。source_name 保留當次官方名稱，允許與 stock.name 不同，以保留 source evidence；SQL comment 明確說明這項唯一的刻意去正規化。其餘欄位是 ticker 才提供的交易資格/狀態、交易單位、幣別與 basic metadata。它以 source_date/hash 走同一 conservative fence。成功 upsert 後不得以 source_name 更新或插入 stock；不可修改任何分類欄位。
 
 fubon_intraday_candle 與每日 stock_price_history、最新 stock_intraday_quote 的資料粒度不同，不能挪用其中任一張表。每一個已通過 source validation 的 candles response 在一個 transaction 中批次 upsert：不存在的 minute 可 insert、相同 hash unchanged、同 minute 不同 hash 而無 source revision 不覆寫並計 CONFLICT_NO_SOURCE_REVISION；transaction 失敗須 rollback 整批、不可留下部分分鐘。它不是高頻讀取 contract，故不新增 Redis key、read-through 或公共 API。
 
@@ -11282,7 +11282,7 @@ UNIQUE: stock_code, market, provider, timeframe, profile_id, source_date, conten
 
 一張獨立 immutable observation table `fubon_technical_capture_member` 才表示「這一次可讀的 complete capture」：PK `(capture_id UUID, profile_id)`；capture/profile/stock/market/provider/timeframe/source_date/content_hash/observed_at 均 NOT NULL，profile/timeframe 都受 exact-17 allowlist CHECK。其 composite FK 必包含 content hash：`(stock_code,market,provider,timeframe,profile_id,source_date,content_hash)` 指向 fact 的 UNIQUE key，不能只靠 writer 檢查。為使 KDJ overlay 能證明 previous K/D 與 current K/D 同屬該次 SDK response，member 還有 nullable pair `previous_source_date`／`previous_content_hash`：只有兩個 KDJ profile 可兩者同時非 null，必 `previous_source_date < source_date`，且用第二個、同 profile 的 composite FK 指向 fact；非 KDJ 必均為 null，任一 KDJ response 沒有 immediately previous valid row 亦必均為 null。兩張技術表各有 DB trigger 拒絕 UPDATE/DELETE。每個 profile response 的所有 valid history rows 都會保存為 facts，但 member **只指向該 response 最大 validated source_date 的 candidate**，並在 KDJ 時同步記下由該 response 驗出的 immediately previous row pointer，絕不可從較早 capture 的 fact 反推。同步 transaction 只有在 17 profiles 都可驗證且都指向 canonical facts 時才 insert 全部 17 member rows；任何 partial/no-data/conflict capture 都可保留已知 facts、但不能有 member。故 resolver 只可選同 code/market/provider、exact 17 profile IDs 的 member set，並以 `min(member.observed_at)` 決定 freshness；未變 payload 的 C2 仍可追加新的 17 members，無須修改 C1 fact。
 
-`fubon_stock_basic_info` 與 `fubon_intraday_candle` 的界線沿前段：前者保留最新 normalized ticker source snapshot 並只補既有 placeholder stock name；後者是當天普通整股一分 K 的 PostgreSQL fact batch，不是日線、quote 或 Redis technical value。四張 source/observation table 全由 external-materials Jdbc repository 寫入，business 不建立 entity/JPA writer。local calculation 永遠不進前兩張富邦技術表，故不會污染富邦歷史。
+`fubon_stock_basic_info` 與 `fubon_intraday_candle` 的界線沿前段：前者保留最新 normalized ticker source snapshot、絕不補寫 stock 主檔；後者是當天普通整股一分 K 的 PostgreSQL fact batch，不是日線、quote 或 Redis technical value。四張 source/observation table 全由 external-materials Jdbc repository 寫入，business 不建立 entity/JPA writer。local calculation 永遠不進前兩張富邦技術表，故不會污染富邦歷史。
 
 #### Redis 即時 overlay 與 100 秒決策
 

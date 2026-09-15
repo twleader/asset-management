@@ -5315,3 +5315,13 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **精確既有 target 與 fail-closed 選擇。** `FubonBankBalanceWriter` 仍以 configured active admin 最新快照鎖作為第一個 DB operation；在同一 locked managed deposits collection，僅以 `bank.code=fubon`、`depositType=證券戶` 作候選集，且不先按 currency 過濾。零列必回既有 `TARGET_MISSING`；多列或唯一列 currency 非 `TWD` 必回既有 `AMBIGUOUS_TARGET`。只有一筆既有 TWD target 才可更新。不得新增、刪除、改類型、轉幣、挑選其他列，亦不得更新同銀行的 `活存` 或任何其他銀行／存款類型。
 - [ ] **資料與交易邊界不放寬。** 僅把既有已完整驗證的 `balance` 依 HALF_UP scale 2 寫入 target `amount`；`availableBalance` 不落地、不作 fallback，零值仍更新而不刪列。保留同一列的 `originalAmount`、`notes`、`annualInterestRate`，以既有 `SnapshotAggregateCalculator` 在同一 `REQUIRES_NEW` transaction 重算 aggregate 並 `saveAndFlush`。不改 adapter reader、response identity／currency／integer validation、feature flag、排程時間、內部 route、BFF route、schema、Liquibase migration，亦不新增手動同步入口。
 - [ ] **資訊頁與回歸證據。** `FubonApiInfoBffController` 的既有 `sdk.accounting.bank_remain` 說明必明確為「既有台北富邦銀行證券戶／TWD」，並明示缺列、多列或非 TWD fail closed；不新增 BFF API。單元與真實 PostgreSQL 測試必覆蓋唯一 target、零餘額、保留 metadata／不動活存、無 target、重複 target、唯一非 TWD target、aggregate 同 transaction、commit rollback 與既有排程 cron／Taipei zone 不變。不得呼叫真實 SDK、下單、改單、撤單、匯款、圈存、轉帳或任何券商寫入功能。
+
+### Requirement 153／Task 435：台股主檔名稱必須與行情來源隔離
+
+**User Story：**作為持有台股 ETF 的使用者，我希望股票名稱是正確的商品名稱，而非行情來源誤放的發行公司或其他描述欄位，且後續行情與富邦庫存同步不會再覆寫已驗證的名稱。
+
+#### Acceptance Criteria
+
+- [ ] **權威名稱與行情資料分工。** 本 Requirement 僅處理**非使用者輸入**的台股名稱：既有 `MarketDataFetchService.fetchTwStockName` 的 FinMind `TaiwanStockInfo.stock_name` 是 `StockMasterService.resolveName` 與 `StockAlertService` 守門採用的權威來源；`AssetService` 既有使用者快照輸入與其既有寫入語意不在本任務變更範圍。富邦／Yahoo 即時行情、五檔、Fubon basic-info 與富邦庫存的 ingress `stockName`／`sourceName` 只供各自的格式驗證或既有專屬 observation/cache，不得寫入、覆寫或插入 `stock.name`（包含原本僅填補空白／代號主檔的情境）。
+- [ ] **五檔主檔前提、既有錯誤資料修復與防回歸。** 五檔 canonical read 的名稱一律讀既有 `stock.name`；來源名稱不另持久化。`IntradayOrderBookSnapshotStore` 僅在同一 transaction 已確認該 `(code, 台股)` 主檔有非空、非代號名稱時，才可更新 header/levels；主檔不存在或名稱無效時整筆 fail closed、零 header/levels 寫入。以 idempotent Liquibase data correction 將既有 `(code, market)=(006208, 台股)` 的主檔名稱修為「富邦台50」；不得新增股票、變更其他欄位或其他標的。較舊快照拒絕、富邦庫存成功替換的既有價量／持股／aggregate 行為均維持，但任何來源名稱皆不得改變既有主檔名稱。資料庫整合測試須 seed 主檔，並證明已存在的名稱不被 Fubon 或 Yahoo 五檔名稱覆寫、缺主檔時零五檔寫入，且 migration 僅更正該筆既有資料。
+- [ ] **範圍。** 不新增公開 API、BFF route、排程、券商 SDK 呼叫或任何下單／帳務寫入能力；不改行情價格、五檔、庫存估值或快照持股資料。schema 結構不變；`db/schema.sql` 必須由 Liquibase 後的 schema 重新產生並通過 drift test。

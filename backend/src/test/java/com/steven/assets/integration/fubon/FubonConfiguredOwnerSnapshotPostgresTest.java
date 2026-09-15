@@ -361,8 +361,8 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
             return new FubonBankBalanceSyncService(config, client, users, writer, new FubonBankBalanceOutcomeCounters(), true, clock);
         }
         @Bean FubonInventoryWriter inventoryWriter(AssetSnapshotMutationLock lock, AssetSnapshotRepository snapshots, BrokerRepository brokers,
-                StockMasterService stocks, SnapshotAggregateCalculator calculator, UserAdminService users, FubonSyncFreshness freshness, MutableClock clock) {
-            return new FubonInventoryWriter(lock, snapshots, brokers, stocks, calculator, users, freshness, clock);
+                SnapshotAggregateCalculator calculator, UserAdminService users, FubonSyncFreshness freshness, MutableClock clock) {
+            return new FubonInventoryWriter(lock, snapshots, brokers, calculator, users, freshness, clock);
         }
         @Bean FubonInventorySyncService inventoryService(FubonConfigState config, FubonBrokerClient client, MarketDataService marketData,
                 UserAdminService users, AssetSnapshotRepository snapshots, BrokerRepository brokers, StockRepository stocks, FubonInventoryWriter writer, MutableClock clock) {

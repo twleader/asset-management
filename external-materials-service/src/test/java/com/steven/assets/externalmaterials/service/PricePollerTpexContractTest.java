@@ -50,6 +50,10 @@ class PricePollerTpexContractTest {
         verify(client, never()).getStockPrice("0000", "台股");
         verify(client).fetchTwBatch(Set.of("6488"));
         verify(writer).write(otc, false);
+        // The legacy provider is still reachable by this scheduler fixture, but it may only
+        // consume the code set.  It must not ask StockSourceQuery to mutate a stock master.
+        verify(source).collectHeldStockCodes(any(), any(), any());
+        verifyNoMoreInteractions(source);
     }
 
     @Test

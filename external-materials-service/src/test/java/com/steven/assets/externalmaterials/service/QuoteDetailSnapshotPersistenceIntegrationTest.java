@@ -76,6 +76,7 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         jdbc.execute("DROP TABLE IF EXISTS stock_intraday_order_book");
         jdbc.execute("DROP TABLE IF EXISTS stock");
         jdbc.execute("CREATE TABLE stock (code varchar(20), market varchar(20), name varchar(100) NOT NULL, PRIMARY KEY(code, market))");
+        jdbc.update("INSERT INTO stock (code, market, name) VALUES ('2330', '台股', '台積電')");
         applyMigration();
         try (RedisConnection connection = redisFactory.getConnection()) {
             connection.serverCommands().flushAll();
@@ -94,7 +95,7 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         assertThat(persisted.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book_level", Integer.class)).isEqualTo(5);
-        assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("新名");
+        assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("台積電");
         assertThat(cache.writeStrictNewer(persisted.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
         assertThat(redis.opsForValue().get(QuoteDetailCache.key("台股", "2330"))).contains("FUBON_BOOKS");
         assertThat(redis.getExpire(QuoteDetailCache.key("台股", "2330"))).isBetween(86_390L, 86_400L);
@@ -137,6 +138,17 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book_level", Integer.class)).isEqualTo(5);
         assertThat(redis.opsForValue().get(QuoteDetailCache.key("台股", "2330"))).isEqualTo(beforePayload);
         assertThat(redis.getExpire(QuoteDetailCache.key("台股", "2330"))).isLessThan(beforeTtl);
+    }
+
+    @Test
+    void missingStockMasterRejectsWholeSnapshotWithoutWritingHeaderOrLevels() {
+        jdbc.update("DELETE FROM stock WHERE code='2330' AND market='台股'");
+
+        var persisted = store.persist(snapshot("來源名稱", "2026-08-21T05:00:00Z", "100", levels()));
+
+        assertThat(persisted.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.FAILED);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book_level", Integer.class)).isZero();
     }
 
     @Test

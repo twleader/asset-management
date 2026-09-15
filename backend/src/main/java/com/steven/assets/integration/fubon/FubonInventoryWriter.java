@@ -8,7 +8,6 @@ import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
-import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -35,7 +34,6 @@ public class FubonInventoryWriter {
     private final AssetSnapshotMutationLock mutationLock;
     private final AssetSnapshotRepository snapshotRepository;
     private final BrokerRepository brokerRepository;
-    private final StockMasterService stockMasterService;
     private final SnapshotAggregateCalculator aggregateCalculator;
     private final UserAdminService userAdminService;
     private final FubonSyncFreshness freshness;
@@ -43,19 +41,18 @@ public class FubonInventoryWriter {
 
     @Autowired
     public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
-            BrokerRepository brokerRepository, StockMasterService stockMasterService,
+            BrokerRepository brokerRepository,
             SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness) {
-        this(mutationLock, snapshotRepository, brokerRepository, stockMasterService, aggregateCalculator,
+        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator,
                 userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE));
     }
 
     FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
-            BrokerRepository brokerRepository, StockMasterService stockMasterService,
+            BrokerRepository brokerRepository,
             SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness, Clock clock) {
         this.mutationLock = mutationLock;
         this.snapshotRepository = snapshotRepository;
         this.brokerRepository = brokerRepository;
-        this.stockMasterService = stockMasterService;
         this.aggregateCalculator = aggregateCalculator;
         this.userAdminService = userAdminService;
         this.freshness = freshness;
@@ -143,7 +140,6 @@ public class FubonInventoryWriter {
                 displayOrder = matchingOrder != null ? matchingOrder : nextDisplayOrder++;
             }
 
-            stockMasterService.upsert(position.stockCode(), MARKET_TW, position.stockName());
             snapshot.getStocks().add(StockHolding.builder()
                     .snapshot(snapshot)
                     .stockCode(position.stockCode())

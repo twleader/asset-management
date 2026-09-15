@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FubonTwLiveQuoteProviderTest {
@@ -51,7 +52,7 @@ class FubonTwLiveQuoteProviderTest {
                 .isEqualTo(TwLiveQuoteBatchResult.MarketState.MARKET_CLOSED);
         verify(client, never()).fetch(anyList());
         verify(writer, never()).writeProviderTimed(any(), eq(true), eq(true));
-        verify(source, never()).upsertStockName(any(), any(), any());
+        verifyNoInteractions(source);
     }
 
     @Test
@@ -66,7 +67,7 @@ class FubonTwLiveQuoteProviderTest {
         assertThat(result.failed()).isZero();
         assertThat(counters.snapshot().get(TwLiveQuoteOutcomeCounters.Outcome.TICK_APPEND_FAILED))
                 .isEqualTo(1);
-        verify(source).upsertStockName("2330", "台股", "台積電");
+        verifyNoInteractions(source);
     }
 
     @Test
@@ -79,7 +80,7 @@ class FubonTwLiveQuoteProviderTest {
         assertThat(stale.failed()).isEqualTo(1);
         assertThat(counters.snapshot().get(TwLiveQuoteOutcomeCounters.Outcome.STALE_OR_EQUAL))
                 .isEqualTo(1);
-        verify(source, never()).upsertStockName(any(), any(), any());
+        verifyNoInteractions(source);
 
         client = mock(FubonNormalizedQuoteClient.class);
         when(client.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(

@@ -77,8 +77,8 @@ class FubonSnapshotLockPostgresTest {
     @TestConfiguration
     static class Config {
         @Bean FubonInventoryWriter inventoryWriter(AssetSnapshotMutationLock lock, AssetSnapshotRepository snapshots,
-                BrokerRepository brokers, StockMasterService stocks, SnapshotAggregateCalculator calculator, UserAdminService users, FubonSyncFreshness freshness) {
-            return new FubonInventoryWriter(lock, snapshots, brokers, stocks, calculator, users, freshness, CLOCK);
+                BrokerRepository brokers, SnapshotAggregateCalculator calculator, UserAdminService users, FubonSyncFreshness freshness) {
+            return new FubonInventoryWriter(lock, snapshots, brokers, calculator, users, freshness, CLOCK);
         }
     }
 
