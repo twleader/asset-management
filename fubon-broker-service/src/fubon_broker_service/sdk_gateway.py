@@ -733,15 +733,32 @@ class SdkGateway:
                 self.QUOTE_CALL_TIMEOUT_SECONDS,
                 "INDEX_TICKERS_TIMEOUT",
             )
-            if self._response_auth_invalid(response):
-                raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-            if raw_field(response, "is_success") is False:
-                raise SdkCallError("INDEX_TICKERS_REJECTED", misconfigured=True)
-            rows = raw_field(response, "data") if raw_field(response, "is_success") is True else response
+            if isinstance(response, list):
+                rows = response
+                mapping_envelope = False
+            elif isinstance(response, dict):
+                if self._response_auth_invalid(response):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                is_success_present = "is_success" in response
+                is_success = response.get("is_success")
+                data_present = "data" in response
+                data = response.get("data")
+                if is_success is False:
+                    raise SdkCallError("INDEX_TICKERS_REJECTED", misconfigured=True)
+                if (is_success_present and is_success is not True) or not data_present:
+                    raise SdkCallError("INDEX_TICKERS_INVALID", misconfigured=True)
+                if response.get("exchange") != "TWSE" or response.get("type") != "INDEX":
+                    raise SdkCallError("INDEX_TICKERS_INVALID", misconfigured=True)
+                rows = data
+                mapping_envelope = True
+            else:
+                raise SdkCallError("INDEX_TICKERS_INVALID", misconfigured=True)
             if not isinstance(rows, list):
                 raise SdkCallError("INDEX_TICKERS_INVALID", misconfigured=True)
             for row in rows:
-                if (raw_field(row, "symbol") == symbol
+                if mapping_envelope and raw_field(row, "symbol") == symbol:
+                    return
+                if (not mapping_envelope and raw_field(row, "symbol") == symbol
                         and raw_field(row, "exchange") == "TWSE"
                         and raw_field(row, "type") == "INDEX"):
                     return

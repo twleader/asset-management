@@ -12201,6 +12201,12 @@ helper 只加一個有限且無資料副作用的分支：既有 `.value`／`.na
 
 部署只重建 `fubon-broker-service`；Java business service、BFF、資料庫與公開路徑不變。runtime 先對 token-protected adapter 做唯讀 normalized portfolio read；只有使用者授權的既有 manual inventory sync 才會依不變的序列（validated portfolio pair、交易日 gate、inventory-purpose TW quote read／新鮮度驗證）將已驗證 positions 寫入 configured-admin 今日快照。任一 gate 的 typed failure 都是零寫入，且不是 enum 修正失敗。完成後以本機 DB 唯讀讀回富邦台股 rows 與 aggregate。這條同步絕不下單；`filled_history` 的 Key 權限失敗保持獨立、不可用 inventory 資料補造交易紀錄。
 
+### Requirement 151／Task 433：TAIEX tickers success envelope compatibility
+
+`verify_taiex_index_symbol` 在 session／authorization 的既有 read-only market-data boundary 內處理 `intraday.tickers(type="INDEX", exchange="TWSE")` 的回應。SDK 2.2.9 曾回傳沒有 `is_success` 的 mapping envelope；其 `exchange` 與 `type` 是 envelope metadata，`data` 才是 list，官方每列可只有 `symbol`／`name`。resolver 以 presence-aware、有序白名單選 rows：top-level list，或 mapping 的 present `is_success is True` data list，或 mapping 的 absent `is_success` data list。每個 accepted mapping 都必須先精確驗證 outer `exchange == "TWSE"` 與 `type == "INDEX"`，再只對 data row 精確比對 configured symbol；metadata 不得從 row 取得或補猜。明確 `is_success is False` 一律 rejected；present-but-not-bool-true/false、缺／錯 outer metadata、缺／非-list data、任何 attribute object（即使有 data list）與其他形狀一律 invalid；不把 mapping 迭代成 rows，也不作 recursive extraction。
+
+對 accepted mapping，exact identity 為 outer `(exchange, type) == ("TWSE", "INDEX")` 加 row `symbol == configuredSymbol`；對 legacy top-level list，才維持每列 exact `(symbol, exchange, type) == (configuredSymbol, "TWSE", "INDEX")`。不硬編任何 symbol；官方文件的 `IR0001` 是 deployment configuration 範例，不是 source 常數。unknown／partial identities 永遠不會開 WebSocket。程式不改預設 config、active main flags 或路由；本任務不啟用 stream，也不重建 external-materials service。驗收限於無實帳戶的本機 adapter health 與 feature-disabled safety validation，禁止 SDK、internal POST、SSE、manual sync 或任何券商 API。既有合格 event 的 DB-first／Redis projection 不改，catalog／typed failure 仍是零 writer side effect；不改 schema、writer 程式、accounting/financial writers 或其他 Fubon flags。
+
 ### Manual refresh, compact-core and race completion rules
 
 `POST /api/trading-radar/refresh` keeps its explicit user-initiated price-refresh behavior but its browser response no longer carries a full radar `Response`. It returns only the existing `priceRefresh` outcome envelope. After the frontend renders that outcome, it calls `list`; therefore no browser path has a full-tree shortcut through manual refresh. Snapshot/export callers remain on their existing non-browser full path.

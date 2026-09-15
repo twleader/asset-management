@@ -40,7 +40,12 @@ class Intraday:
 
     def tickers(self, *, type, exchange):
         self.events.append(f"tickers:{type}:{exchange}")
-        return response([{"symbol": "IR0001", "exchange": "TWSE", "type": "INDEX"}])
+        return {
+            "is_success": True,
+            "exchange": "TWSE",
+            "type": "INDEX",
+            "data": [{"symbol": "IR0001", "name": "synthetic index"}],
+        }
 
 
 class AuthenticationError(RuntimeError):
@@ -790,6 +795,139 @@ def test_taiex_symbol_is_verified_against_official_index_tickers_before_stream_u
     assert events[:3] == ["login", "init_realtime", "tickers:INDEX:TWSE"]
     with pytest.raises(SdkCallError, match="TAIEX_INDEX_SYMBOL_UNVERIFIED"):
         gateway.verify_taiex_index_symbol("NOT_TAIEX")
+
+
+def _catalog_gateway(tmp_path, catalog_response):
+    events = []
+
+    class CatalogSdk(FakeSdk):
+        def init_realtime(self):
+            super().init_realtime()
+
+            def tickers(*, type, exchange):
+                events.append(f"tickers:{type}:{exchange}")
+                return catalog_response
+
+            self.marketdata.rest_client.stock.intraday.tickers = tickers
+
+    return SdkGateway(
+        ready_config(tmp_path), sdk_factory=lambda: CatalogSdk(events), sleeper=lambda _seconds: None
+    ), events
+
+
+class AttributeCatalogResponse:
+    def __init__(self, is_success=True, code=None):
+        self.is_success = is_success
+        self.code = code
+        self.exchange = "TWSE"
+        self.type = "INDEX"
+        self.data = [{"symbol": "IR0001", "name": "synthetic index"}]
+
+
+@pytest.mark.parametrize(
+    "catalog_response",
+    [
+        [{"symbol": "IR0001", "exchange": "TWSE", "type": "INDEX"}],
+        {
+            "is_success": True,
+            "exchange": "TWSE",
+            "type": "INDEX",
+            "data": [{"symbol": "IR0001", "name": "synthetic index"}],
+        },
+        {
+            "exchange": "TWSE",
+            "type": "INDEX",
+            "data": [{"symbol": "IR0001", "name": "synthetic index"}],
+        },
+    ],
+)
+def test_taiex_symbol_verifier_accepts_only_the_three_whitelisted_catalog_shapes(tmp_path, catalog_response):
+    gateway, events = _catalog_gateway(tmp_path, catalog_response)
+
+    gateway.verify_taiex_index_symbol("IR0001")
+
+    assert events == ["login", "init_realtime", "tickers:INDEX:TWSE"]
+
+
+def test_taiex_symbol_verifier_rejects_explicit_false_catalog_response(tmp_path):
+    gateway, _events = _catalog_gateway(
+        tmp_path,
+        {
+            "is_success": False,
+            "exchange": "TWSE",
+            "type": "INDEX",
+            "data": [{"symbol": "IR0001", "name": "synthetic index"}],
+        },
+    )
+
+    with pytest.raises(SdkCallError, match="INDEX_TICKERS_REJECTED"):
+        gateway.verify_taiex_index_symbol("IR0001")
+
+
+@pytest.mark.parametrize(
+    "catalog_response",
+    [
+        {"is_success": None, "data": []},
+        {"is_success": 0, "data": []},
+        {"is_success": 1, "data": []},
+        {"is_success": "true", "data": []},
+        {"is_success": {}, "data": []},
+        {"is_success": True},
+        {"is_success": True, "data": {}},
+        {"data": "not-a-list"},
+        {"nested": {"data": []}},
+        {},
+        AttributeCatalogResponse(),
+        AttributeCatalogResponse(is_success=False, code=401),
+    ],
+)
+def test_taiex_symbol_verifier_rejects_present_invalid_or_malformed_catalog_envelopes(
+    tmp_path, catalog_response
+):
+    gateway, _events = _catalog_gateway(tmp_path, catalog_response)
+
+    with pytest.raises(SdkCallError, match="INDEX_TICKERS_INVALID"):
+        gateway.verify_taiex_index_symbol("IR0001")
+
+
+@pytest.mark.parametrize(
+    "catalog_response",
+    [
+        {"type": "INDEX", "data": [{"symbol": "IR0001"}]},
+        {"exchange": "TWSE", "data": [{"symbol": "IR0001"}]},
+        {"exchange": "TPEX", "type": "INDEX", "data": [{"symbol": "IR0001"}]},
+        {"exchange": "TWSE", "type": "STOCK", "data": [{"symbol": "IR0001"}]},
+    ],
+)
+def test_taiex_symbol_verifier_rejects_missing_or_wrong_mapping_envelope_metadata(
+    tmp_path, catalog_response
+):
+    gateway, _events = _catalog_gateway(tmp_path, catalog_response)
+
+    with pytest.raises(SdkCallError, match="INDEX_TICKERS_INVALID"):
+        gateway.verify_taiex_index_symbol("IR0001")
+
+
+@pytest.mark.parametrize(
+    "catalog_response",
+    [
+        [],
+        [{"symbol": "IR0002", "exchange": "TWSE", "type": "INDEX"}],
+        [{"symbol": "IR0001", "exchange": "TPEX", "type": "INDEX"}],
+        [{"symbol": "IR0001", "exchange": "TWSE", "type": "STOCK"}],
+        [{"symbol": "IR0001", "exchange": "TWSE"}],
+        {"exchange": "TWSE", "type": "INDEX", "data": []},
+        {"exchange": "TWSE", "type": "INDEX", "data": [{"symbol": "IR0002"}]},
+        {"exchange": "TWSE", "type": "INDEX", "data": [{"name": "synthetic index"}]},
+    ],
+)
+def test_taiex_symbol_verifier_keeps_exact_configured_symbol_identity_for_each_shape(
+    tmp_path, catalog_response
+):
+    gateway, _events = _catalog_gateway(tmp_path, catalog_response)
+
+    with pytest.raises(SdkCallError, match="TAIEX_INDEX_SYMBOL_UNVERIFIED"):
+        gateway.verify_taiex_index_symbol("IR0001")
 
 
 def test_task414_uses_five_native_sdk_slots():
