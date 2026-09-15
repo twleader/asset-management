@@ -9,6 +9,7 @@ import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.UserAdminService;
+import com.steven.assets.service.BrokerFilledTradeCostProjector;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,18 +39,32 @@ public class FubonInventoryWriter {
     private final UserAdminService userAdminService;
     private final FubonSyncFreshness freshness;
     private final Clock clock;
+    private final BrokerFilledTradeCostProjector costProjector;
 
-    @Autowired
     public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
             BrokerRepository brokerRepository,
             SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness) {
         this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator,
-                userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE));
+                userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE), null);
+    }
+
+    @Autowired
+    public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
+            BrokerRepository brokerRepository, SnapshotAggregateCalculator aggregateCalculator,
+            UserAdminService userAdminService, FubonSyncFreshness freshness, BrokerFilledTradeCostProjector costProjector) {
+        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator, userAdminService, freshness,
+                Clock.system(FubonInventorySyncService.TW_ZONE), costProjector);
     }
 
     FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
             BrokerRepository brokerRepository,
             SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness, Clock clock) {
+        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator, userAdminService, freshness, clock, null);
+    }
+
+    FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
+            BrokerRepository brokerRepository, SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService,
+            FubonSyncFreshness freshness, Clock clock, BrokerFilledTradeCostProjector costProjector) {
         this.mutationLock = mutationLock;
         this.snapshotRepository = snapshotRepository;
         this.brokerRepository = brokerRepository;
@@ -57,6 +72,7 @@ public class FubonInventoryWriter {
         this.userAdminService = userAdminService;
         this.freshness = freshness;
         this.clock = clock;
+        this.costProjector = costProjector;
     }
 
     @Transactional
@@ -110,7 +126,9 @@ public class FubonInventoryWriter {
         for (PreparedPosition position : sorted) {
             validatePrepared(position);
             BigDecimal shares = BigDecimal.valueOf(position.shares());
-            BigDecimal investmentCost = checkedMoney(position.costPrice().multiply(shares));
+            // Inventory valuation is not a ledger basis. Preserve an existing manual cost; a
+            // first broker row starts at zero and may consume only verified pending buys.
+            BigDecimal investmentCost = BigDecimal.ZERO.setScale(2);
             BigDecimal currentValue = checkedMoney(position.actualPrice().multiply(shares));
             List<StockHolding> old = oldScope.getOrDefault(position.stockCode(), List.of());
 
@@ -119,6 +137,7 @@ public class FubonInventoryWriter {
             Integer displayOrder = null;
             if (old.size() == 1) {
                 StockHolding previous = old.getFirst();
+                investmentCost = previous.getInvestmentCost();
                 displayOrder = previous.getDisplayOrder();
                 if (isPositiveRate(previous.getDividendRate())) {
                     dividendRate = previous.getDividendRate();
@@ -140,7 +159,7 @@ public class FubonInventoryWriter {
                 displayOrder = matchingOrder != null ? matchingOrder : nextDisplayOrder++;
             }
 
-            snapshot.getStocks().add(StockHolding.builder()
+            StockHolding replacement = StockHolding.builder()
                     .snapshot(snapshot)
                     .stockCode(position.stockCode())
                     .market(MARKET_TW)
@@ -156,7 +175,9 @@ public class FubonInventoryWriter {
                     .transactionDate(null)
                     .transactionExchangeRate(null)
                     .displayOrder(displayOrder)
-                    .build());
+                    .build();
+            snapshot.getStocks().add(replacement);
+            if (costProjector != null) costProjector.consumePendingBuys(snapshot, broker, replacement);
         }
 
         aggregateCalculator.recalculate(snapshot);

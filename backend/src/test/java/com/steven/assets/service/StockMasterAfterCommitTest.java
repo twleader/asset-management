@@ -35,7 +35,7 @@ class StockMasterAfterCommitTest {
     void setUp() {
         executor = new RecordingExecutor();
         service = new StockMasterService(repository, historicalDataService, executor);
-        when(repository.existsByCodeAndMarket("2330", "台股")).thenReturn(false);
+        when(repository.existsByCodeAndMarket("AAPL", "美股")).thenReturn(false);
         lenient().when(historicalDataService.backfillSingleStock(any(), any(), any()))
                 .thenReturn(Map.of("records", 1));
     }
@@ -51,7 +51,7 @@ class StockMasterAfterCommitTest {
     @Test
     void rollbackSubmitsNoBackfill() {
         beginTransaction();
-        service.upsert("2330", "台股", "台積電");
+        service.upsert("AAPL", "美股", "Apple");
         assertThat(executor.executions).isZero();
 
         TransactionSynchronizationManager.getSynchronizations()
@@ -64,7 +64,7 @@ class StockMasterAfterCommitTest {
     @Test
     void commitSubmitsExactlyOnceAndOnlyAfterCommitCallback() {
         beginTransaction();
-        service.upsert("2330", "台股", "台積電");
+        service.upsert("AAPL", "美股", "Apple");
         assertThat(executor.executions).isZero();
         assertThat(TransactionSynchronizationManager.getSynchronizations()).hasSize(1);
 
@@ -76,7 +76,7 @@ class StockMasterAfterCommitTest {
 
     @Test
     void noTransactionSubmitsImmediately() {
-        service.upsert("2330", "台股", "台積電");
+        service.upsert("AAPL", "美股", "Apple");
 
         assertThat(executor.executions).isEqualTo(1);
         verify(historicalDataService).backfillSingleStock(any(), any(), any());

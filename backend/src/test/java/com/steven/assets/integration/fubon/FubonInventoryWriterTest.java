@@ -78,7 +78,7 @@ class FubonInventoryWriterTest {
         StockHolding mapped = snapshot.getStocks().stream()
                 .filter(row -> "2330".equals(row.getStockCode())).findFirst().orElseThrow();
         assertThat(mapped.getShares()).isEqualByComparingTo("3");
-        assertThat(mapped.getInvestmentCost()).isEqualByComparingTo("37.04");
+        assertThat(mapped.getInvestmentCost()).isEqualByComparingTo("20.00");
         assertThat(mapped.getCurrentValue()).isEqualByComparingTo("60.00");
         assertThat(mapped.getDividendRate()).isEqualByComparingTo("0.05");
         assertThat(mapped.getEstimatedDividend()).isEqualByComparingTo("3");
@@ -127,17 +127,17 @@ class FubonInventoryWriterTest {
     }
 
     @Test
-    void precisionTwentyMoneyIsWritableButPrecisionTwentyOneRollsBackBeforeSave() {
+    void firstInventoryRowStartsAtZeroAndCurrentValueOverflowRollsBackBeforeSave() {
         writer.replace(9L, 7L, snapshot.getSnapshotDate(),
                 List.of(new FubonInventoryWriter.PreparedPosition(
                         "2330", 1, new BigDecimal("999999999999999999.99"), BigDecimal.ONE, "台積電")), false);
         assertThat(snapshot.getStocks().getFirst().getInvestmentCost())
-                .isEqualByComparingTo("999999999999999999.99");
+                .isEqualByComparingTo("0.00");
 
         snapshot.getStocks().clear();
         assertThatThrownBy(() -> writer.replace(9L, 7L, snapshot.getSnapshotDate(),
                 List.of(new FubonInventoryWriter.PreparedPosition(
-                        "2330", 9_999_999_999L, new BigDecimal("1000000000"), BigDecimal.ONE, "台積電")), false))
+                        "2330", 9_999_999_999L, BigDecimal.ONE, new BigDecimal("1000000000"), "台積電")), false))
                 .isInstanceOf(FubonInventoryWriter.CommitRejected.class)
                 .hasMessage("MONEY_PRECISION_EXCEEDED");
         verify(snapshotRepository).saveAndFlush(snapshot);

@@ -186,7 +186,7 @@ public class AssetService {
                         .build();
                 snapshot.getStocks().add(stock);
                 // 同步到 stock 主檔（名稱不得與代號相同，否則視為無效資料）
-                if (st.stockCode() != null && st.stockName() != null
+                if (!"台股".equals(st.market()) && st.stockCode() != null && st.stockName() != null
                         && !st.stockName().isBlank()
                         && !st.stockName().equalsIgnoreCase(st.stockCode())) {
                     stockMasterService.upsert(st.stockCode(), st.market(), st.stockName());
@@ -324,6 +324,18 @@ public class AssetService {
             });
         }
         if (req.stocks() != null) {
+            java.util.Map<SourceOwnedStockIdentity, java.util.List<AssetSnapshotDto.StockRequest>> sourceCostCandidates =
+                    new java.util.HashMap<>();
+            req.stocks().forEach(st -> {
+                BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
+                if (scopeOwnership.isSourceOwned(st.market(), broker == null ? null : broker.getCode())
+                        && "TWD".equals(st.currency() == null ? "TWD" : st.currency())) {
+                    sourceCostCandidates.computeIfAbsent(
+                            new SourceOwnedStockIdentity(broker == null ? null : broker.getId(), st.stockCode(), st.market()),
+                            ignored -> new java.util.ArrayList<>()).add(st);
+                }
+            });
+            applySourceOwnedManualCosts(snapshot, scopeOwnership, sourceCostCandidates);
             java.util.Map<String, Integer> displayOrderMap = assignDisplayOrder(req.stocks());
             req.stocks().forEach(st -> {
                 BrokerEntity broker = st.brokerId() != null ? brokerRepo.findById(st.brokerId()).orElse(null) : null;
@@ -342,7 +354,7 @@ public class AssetService {
                     .transactionExchangeRate(st.transactionExchangeRate())
                     .displayOrder(displayOrderMap.get(st.market() + "_" + st.stockCode()))
                     .build());
-                if (st.stockCode() != null && st.stockName() != null
+                if (!"台股".equals(st.market()) && st.stockCode() != null && st.stockName() != null
                         && !st.stockName().isBlank()
                         && !st.stockName().equalsIgnoreCase(st.stockCode())) {
                     stockMasterService.upsert(st.stockCode(), st.market(), st.stockName());
@@ -353,6 +365,27 @@ public class AssetService {
         recalcTotals(snapshot);
         return toSummaryResponse(snapshotRepo.save(snapshot));
     }
+
+    /** Source-owned Fubon rows retain vendor fields; only one exact, valid cost candidate may update a baseline. */
+    private static void applySourceOwnedManualCosts(
+            AssetSnapshot snapshot,
+            SnapshotStockScopeOwnership ownership,
+            java.util.Map<SourceOwnedStockIdentity, java.util.List<AssetSnapshotDto.StockRequest>> candidates) {
+        for (StockHolding existing : snapshot.getStocks()) {
+            if (!ownership.isSourceOwned(existing.getMarket(),
+                    existing.getBroker() == null ? null : existing.getBroker().getCode())) continue;
+            SourceOwnedStockIdentity identity = new SourceOwnedStockIdentity(
+                    existing.getBroker() == null ? null : existing.getBroker().getId(),
+                    existing.getStockCode(), existing.getMarket());
+            java.util.List<AssetSnapshotDto.StockRequest> exact = candidates.getOrDefault(identity, java.util.List.of());
+            if (exact.size() != 1) continue;
+            BigDecimal cost = exact.getFirst().investmentCost();
+            if (cost == null || cost.signum() < 0 || cost.scale() > 2 || cost.precision() > 20) continue;
+            existing.setInvestmentCost(cost);
+        }
+    }
+
+    private record SourceOwnedStockIdentity(Long brokerId, String stockCode, String market) {}
 
     @Transactional
     public void deleteSnapshot(Long id) {

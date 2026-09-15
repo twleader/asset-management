@@ -4,6 +4,8 @@ import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.EtfNavFetchClient;
+import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
+import org.springframework.beans.factory.ObjectProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,6 +67,7 @@ public class MarketDataFetchService {
     private final TwTyphoonClosureService typhoonClosure;
     private final DgpaCalendarAuthority dgpaCalendarAuthority;
     private final Clock clock;
+    private final ObjectProvider<FubonNormalizedQuoteClient> fubonQuotes;
 
     private volatile String yahooCrumb = null;
     private volatile long yahooCrumbBlockedUntil = 0L;
@@ -105,15 +108,22 @@ public class MarketDataFetchService {
     public MarketDataFetchService(StockSourceQuery store,
                                   TwTyphoonClosureService typhoonClosure,
                                   @Value("${finmind.token:${FINMIND_TOKEN:}}") String finmindToken,
-                                  DgpaCalendarAuthority dgpaCalendarAuthority) {
-        this(store, typhoonClosure, finmindToken, dgpaCalendarAuthority, Clock.systemUTC());
+                                  DgpaCalendarAuthority dgpaCalendarAuthority,
+                                  ObjectProvider<FubonNormalizedQuoteClient> fubonQuotes) {
+        this(store, typhoonClosure, finmindToken, dgpaCalendarAuthority, Clock.systemUTC(), fubonQuotes);
     }
 
     /** 舊有純單元測試相容入口；正式 Spring wiring 一律使用可注入的 DGPA port。 */
     public MarketDataFetchService(StockSourceQuery store,
                                   TwTyphoonClosureService typhoonClosure,
                                   String finmindToken) {
-        this(store, typhoonClosure, finmindToken, year -> Optional.empty(), Clock.systemUTC());
+        this(store, typhoonClosure, finmindToken, year -> Optional.empty(), Clock.systemUTC(), null);
+    }
+
+    /** Existing tests and non-Spring callers retain this four-argument constructor. */
+    public MarketDataFetchService(StockSourceQuery store, TwTyphoonClosureService typhoonClosure,
+                                  String finmindToken, DgpaCalendarAuthority dgpaCalendarAuthority) {
+        this(store, typhoonClosure, finmindToken, dgpaCalendarAuthority, Clock.systemUTC(), null);
     }
 
     MarketDataFetchService(StockSourceQuery store,
@@ -121,11 +131,18 @@ public class MarketDataFetchService {
                            String finmindToken,
                            DgpaCalendarAuthority dgpaCalendarAuthority,
                            Clock clock) {
+        this(store, typhoonClosure, finmindToken, dgpaCalendarAuthority, clock, null);
+    }
+
+    MarketDataFetchService(StockSourceQuery store, TwTyphoonClosureService typhoonClosure,
+                           String finmindToken, DgpaCalendarAuthority dgpaCalendarAuthority,
+                           Clock clock, ObjectProvider<FubonNormalizedQuoteClient> fubonQuotes) {
         this.store = store;
         this.typhoonClosure = typhoonClosure;
         this.dgpaCalendarAuthority = dgpaCalendarAuthority;
         this.clock = clock;
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
+        this.fubonQuotes = fubonQuotes;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -1117,22 +1134,82 @@ public class MarketDataFetchService {
 
     // ─── 股票名稱 ──────────────────────────────────────────────────────────────
 
-    /** 台股名稱：FinMind TaiwanStockInfo。 */
+    /** Taiwan master-name authority: Fubon exact quote → TWSE → TPEx → Yahoo exact ticker. */
     public String fetchTwStockName(String code) {
+        String normalized = code == null ? "" : code.trim().toUpperCase();
+        if (normalized.isBlank()) return "";
+        String fubon = fetchFubonTwName(normalized);
+        if (validSourceName(fubon, normalized)) return fubon.trim();
+        String twse = fetchExchangeTwName("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", normalized);
+        if (validSourceName(twse, normalized)) return twse.trim();
+        String tpex = fetchExchangeTwName("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", normalized);
+        if (validSourceName(tpex, normalized)) return tpex.trim();
+        String yahoo = fetchYahooTwName(normalized + ".TW");
+        if (validSourceName(yahoo, normalized)) return yahoo.trim();
+        String yahooTwo = fetchYahooTwName(normalized + ".TWO");
+        return validSourceName(yahooTwo, normalized) ? yahooTwo.trim() : "";
+    }
+
+    String fetchFubonTwName(String code) {
+        if (fubonQuotes == null) return "";
         try {
-            String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id="
-                    + code.trim().toUpperCase();
-            HttpResponse<String> resp = httpClient.send(
-                    finmindRequest(url, 15), HttpResponse.BodyHandlers.ofString());
+            FubonNormalizedQuoteClient client = fubonQuotes.getIfAvailable();
+            if (client == null) return "";
+            return client.fetch(List.of(code)).observations().stream()
+                    .map(observation -> observation.result()).filter(r -> code.equals(r.stockCode()) && "台股".equals(r.market()))
+                    .map(r -> r.stockName() == null ? "" : r.stockName().trim())
+                    .filter(name -> !name.isBlank() && !name.equalsIgnoreCase(code)).findFirst().orElse("");
+        } catch (Exception ignored) { return ""; }
+    }
+
+    String fetchExchangeTwName(String url, String code) {
+        try {
+            HttpResponse<String> resp = httpClient.send(HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", UA).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return "";
-            JsonNode data = mapper.readTree(resp.body()).path("data");
-            if (data.isArray() && data.size() > 0) {
-                String name = data.get(0).path("stock_name").asText("").trim();
-                if (!name.isEmpty() && !name.equalsIgnoreCase(code)) return name;
-            }
-        } catch (Exception e) {
-            log.warn("FinMind 查詢台股名稱失敗 {}: {}", code, e.getMessage());
+            return parseExchangeTwName(mapper.readTree(resp.body()), code);
+        } catch (Exception ignored) { }
+        return "";
+    }
+
+    /** TPEx real responses use SecuritiesCompanyCode / CompanyName, unlike TWSE's Code / Name. */
+    static String parseExchangeTwName(JsonNode data, String code) {
+        if (data == null || !data.isArray() || code == null) return "";
+        for (JsonNode row : data) {
+            String rowCode = firstText(row, "Code", "code", "證券代號", "SecuritiesCompanyCode");
+            String name = firstText(row, "Name", "name", "證券名稱", "CompanyName");
+            if (code.equals(rowCode) && validSourceName(name, code)) return name.trim();
         }
+        return "";
+    }
+
+    String fetchYahooTwName(String ticker) {
+        try {
+            String url = "https://query2.finance.yahoo.com/v8/finance/chart/" + ticker + "?interval=1d&range=1d";
+            Process proc = new ProcessBuilder("curl", "-s", "-H", "User-Agent: Mozilla/5.0", url).start();
+            String body = new String(proc.getInputStream().readAllBytes()); proc.waitFor();
+            JsonNode meta = mapper.readTree(body).path("chart").path("result").path(0).path("meta");
+            return parseYahooTwName(meta, ticker);
+        } catch (Exception ignored) { return ""; }
+    }
+
+    static String parseYahooTwName(JsonNode meta, String ticker) {
+        if (meta == null || ticker == null || !ticker.contains(".")) return "";
+        if (!ticker.equals(meta.path("symbol").asText(""))) return "";
+        String exchange = meta.path("exchangeName").asText("").trim();
+        if (!("TAI".equals(exchange) || "TWO".equals(exchange))) return "";
+        String name = meta.path("shortName").asText("").trim();
+        if (name.isBlank()) name = meta.path("longName").asText("").trim();
+        String code = ticker.substring(0, ticker.lastIndexOf('.'));
+        return validSourceName(name, code) && !name.equalsIgnoreCase(ticker) ? name : "";
+    }
+
+    private static boolean validSourceName(String name, String code) {
+        return name != null && !name.trim().isBlank() && !name.trim().equalsIgnoreCase(code);
+    }
+
+    private static String firstText(JsonNode node, String... keys) {
+        for (String key : keys) { String value = node.path(key).asText("").trim(); if (!value.isBlank()) return value; }
         return "";
     }
 

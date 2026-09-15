@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.model.Stock;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -30,6 +31,7 @@ import java.util.concurrent.Executors;
 public class StockMasterService {
 
     private final StockRepository stockMasterRepo;
+    private final StockMasterPersistence persistence;
     private final HistoricalDataService historicalDataService;
 
     /**
@@ -41,16 +43,23 @@ public class StockMasterService {
     private final ExecutorService backfillExecutor;
 
     @Autowired
-    public StockMasterService(StockRepository stockMasterRepo, HistoricalDataService historicalDataService) {
-        this(stockMasterRepo, historicalDataService, newBackfillExecutor());
+    public StockMasterService(StockRepository stockMasterRepo, StockMasterPersistence persistence,
+                              HistoricalDataService historicalDataService) {
+        this(stockMasterRepo, persistence, historicalDataService, newBackfillExecutor());
     }
 
-    StockMasterService(StockRepository stockMasterRepo,
+    StockMasterService(StockRepository stockMasterRepo, StockMasterPersistence persistence,
                        HistoricalDataService historicalDataService,
                        ExecutorService backfillExecutor) {
         this.stockMasterRepo = stockMasterRepo;
+        this.persistence = persistence;
         this.historicalDataService = historicalDataService;
         this.backfillExecutor = backfillExecutor;
+    }
+
+    StockMasterService(StockRepository stockMasterRepo, HistoricalDataService historicalDataService,
+                       ExecutorService backfillExecutor) {
+        this(stockMasterRepo, null, historicalDataService, backfillExecutor);
     }
 
     /**
@@ -59,11 +68,23 @@ public class StockMasterService {
      */
     @Transactional
     public void upsert(String code, String market, String name) {
+        if ("台股".equals(market)) throw new IllegalArgumentException("台股主檔只能由 trusted resolver 寫入");
+        upsertTrusted(code, market, name);
+    }
+
+    @Transactional
+    void upsertTrusted(String code, String market, String name) {
         boolean isNew = !stockMasterRepo.existsByCodeAndMarket(code, market);
-        stockMasterRepo.upsert(code, market, name);
+        if (persistence != null) persistence.upsertTrusted(code, market, name);
         if (isNew && !isTaiex(code, market)) {
             scheduleBackfillAfterCommit(code, market);
         }
+    }
+
+    /** Classification settings use the same restricted master persistence boundary. */
+    @Transactional
+    public Stock saveClassification(Stock stock) {
+        return persistence == null ? stock : persistence.saveClassification(stock);
     }
 
     /**
@@ -79,17 +100,19 @@ public class StockMasterService {
         if ("0000".equals(upperCode) && "台股".equals(market)) return "台股大盤";
         if ("0000".equals(upperCode) && ("美股".equals(market) || "英股".equals(market))) return "";
 
-        String name = stockMasterRepo.findByCodeAndMarket(upperCode, market)
-                .map(s -> s.getName())
-                .orElse("");
-        if (name.isEmpty()) {
-            name = fetchExternalName(upperCode, market);
-            // 查到後存入主檔，下次直接用本地（新標的順帶背景觸發 10 年歷史回補）
-            if (!name.isEmpty()) {
-                upsert(upperCode, market, name);
-            }
+        if (!"台股".equals(market)) {
+            String local = stockMasterRepo.findByCodeAndMarket(upperCode, market)
+                    .map(s -> s.getName()).orElse("");
+            if (!local.isEmpty()) return local;
         }
-        return name;
+        // Taiwan must never trust an existing local name over the current authority chain.
+        String name = fetchExternalName(upperCode, market);
+        if (name != null && !name.isBlank() && !name.trim().equalsIgnoreCase(upperCode)) {
+            String trustedName = name.trim();
+            upsertTrusted(upperCode, market, trustedName);
+            return trustedName;
+        }
+        return "";
     }
 
     /**

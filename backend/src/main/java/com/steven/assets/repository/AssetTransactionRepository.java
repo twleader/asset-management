@@ -99,4 +99,8 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
             @Param("shares") BigDecimal shares,
             @Param("price") BigDecimal price,
             @Param("amount") BigDecimal amount);
+
+    @Query(value = "SELECT id FROM asset_transaction WHERE owner_user_id = :ownerUserId " +
+            "AND broker_filled_no = :brokerFilledNo AND source = 'FUBON_SYNC'", nativeQuery = true)
+    Long findFubonTransactionId(Long ownerUserId, String brokerFilledNo);
 }
