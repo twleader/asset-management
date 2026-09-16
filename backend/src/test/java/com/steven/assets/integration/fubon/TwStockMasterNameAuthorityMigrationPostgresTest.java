@@ -34,7 +34,7 @@ class TwStockMasterNameAuthorityMigrationPostgresTest {
                 statement.execute("INSERT INTO stock VALUES ('006208','美股','must retain','OTHER','VALUE','LONG','USD')");
                 statement.execute("INSERT INTO stock VALUES ('0050','台股','元大台灣50','ETF','INDEX',NULL,'TWD')");
 
-                apply(connection);
+                apply(postgres);
                 assertThat(reapplySql(connection)).isZero();
 
                 assertThat(single(connection, "SELECT name FROM stock WHERE code='006208' AND market='台股'"))
@@ -66,7 +66,7 @@ class TwStockMasterNameAuthorityMigrationPostgresTest {
                 statement.execute("CREATE TABLE stock (code varchar(20), market varchar(20), name varchar(100) NOT NULL, asset_class varchar(20), stock_style varchar(20), bond_term varchar(20), underlying_currency varchar(20), PRIMARY KEY(code, market))");
                 statement.execute("INSERT INTO stock VALUES ('0050','台股','元大台灣50','ETF','INDEX',NULL,'TWD')");
 
-                apply(connection);
+                apply(postgres);
 
                 assertThat(single(connection, "SELECT count(*) FROM stock WHERE code='006208' AND market='台股'"))
                         .isEqualTo("0");
@@ -87,10 +87,12 @@ class TwStockMasterNameAuthorityMigrationPostgresTest {
         }
     }
 
-    private static void apply(Connection connection) throws Exception {
-        try (ClassLoaderResourceAccessor resources = new ClassLoaderResourceAccessor()) {
+    /** Liquibase closes its own connection; fixture replay and readback retain a separate live connection. */
+    private static void apply(PostgreSQLContainer<?> postgres) throws Exception {
+        try (Connection migrationConnection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+             ClassLoaderResourceAccessor resources = new ClassLoaderResourceAccessor()) {
             var changeLog = new FormattedSqlChangeLogParser().parse(MIGRATION, new ChangeLogParameters(), resources);
-            var database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(connection));
+            var database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(migrationConnection));
             try (Liquibase liquibase = new Liquibase(changeLog, resources, database)) {
                 liquibase.update(new Contexts(), new LabelExpression());
             }
