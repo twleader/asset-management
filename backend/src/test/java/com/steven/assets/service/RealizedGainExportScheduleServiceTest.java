@@ -88,6 +88,7 @@ class RealizedGainExportScheduleServiceTest {
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
                 baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -117,7 +118,7 @@ class RealizedGainExportScheduleServiceTest {
     }
 
     private RealizedGainExportSchedule setting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
-        return RealizedGainExportSchedule.builder()
+        return RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .id(owner).ownerUserId(owner)
                 .enabled(true).outputSubpath("input")
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath)
@@ -174,7 +175,7 @@ class RealizedGainExportScheduleServiceTest {
     void 多個時間依時分排序且各自保留相同時間的guard_新時間guard為null() {
         givenCurrentUser(ADMIN_ID);
         RealizedGainExportSchedule current = setting(ADMIN_ID, false, null);
-        var nineThirty = RealizedGainExportScheduleTime.builder()
+        var nineThirty = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1))
                 .lastRunStatus("舊狀態").build();
         current.addTime(nineThirty);
@@ -207,7 +208,7 @@ class RealizedGainExportScheduleServiceTest {
     void 整包取代時不在清單內的舊時間被移除() {
         givenCurrentUser(ADMIN_ID);
         RealizedGainExportSchedule current = setting(ADMIN_ID, false, null);
-        current.addTime(RealizedGainExportScheduleTime.builder().runHour(20).runMinute(0).enabled(true).build());
+        current.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(20).runMinute(0).enabled(true).build());
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
 
         RealizedGainExportDto.SettingResponse response = service.updateForCurrentUser(
@@ -313,9 +314,9 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void 兩個到點時間各自執行_其一已guard不阻擋另一() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var already = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0)
+        var already = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0)
                 .enabled(true).lastRunDate(LocalDate.now(TW)).build(); // 今天已跑過
-        var due = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(1)
+        var due = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1)
                 .enabled(true).build(); // 未跑過
         s.addTime(already);
         s.addTime(due);
@@ -333,7 +334,7 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void 停用的時間點不執行() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var disabledTime = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(false).build();
+        var disabledTime = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(false).build();
         s.addTime(disabledTime);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -347,7 +348,7 @@ class RealizedGainExportScheduleServiceTest {
     void 停用的parent其到點child也不執行() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
         s.setEnabled(false);
-        var due = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
+        var due = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
         s.addTime(due);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -360,7 +361,7 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void 尚未到執行時間不跑() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        s.addTime(RealizedGainExportScheduleTime.builder().runHour(23).runMinute(59).enabled(true).build());
+        s.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(23).runMinute(59).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
         service.selfHealOnStartup();
@@ -389,8 +390,8 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var first = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
-        var second = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(1).enabled(true).build();
+        var first = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
+        var second = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1).enabled(true).build();
         s.addTime(first);
         s.addTime(second);
         when(settingRepo.findAll()).thenReturn(List.of(s));
@@ -415,7 +416,7 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
+        var due = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
         s.addTime(due);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -445,9 +446,9 @@ class RealizedGainExportScheduleServiceTest {
     @Test
     void 背景逐列走owner_scoped版而非全域doc() throws Exception {
         RealizedGainExportSchedule a = setting(ADMIN_ID, false, null);
-        a.addTime(RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        a.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         RealizedGainExportSchedule b = setting(OTHER_ID, false, null);
-        b.addTime(RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        b.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(a, b));
         when(excelExportService.realizedGainsDocForOwner(anyLong())).thenReturn(doc());
 
@@ -467,7 +468,7 @@ class RealizedGainExportScheduleServiceTest {
     void runNow既有多時間設定不新增也不修改childGuard() throws Exception {
         givenCurrentUser(ADMIN_ID);
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var morning = RealizedGainExportScheduleTime.builder().runHour(8).runMinute(0)
+        var morning = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(8).runMinute(0)
                 .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
         s.addTime(morning);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
@@ -481,32 +482,23 @@ class RealizedGainExportScheduleServiceTest {
     }
 
     @Test
-    void runNow無設定建立disabledParent與未guard的0800child() throws Exception {
+    void runNow無設定只產檔而不建立設定或child() throws Exception {
         givenCurrentUser(ADMIN_ID);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
         when(excelExportService.realizedGainsDoc()).thenReturn(doc());
 
-        service.runNowForCurrentUser();
-
-        ArgumentCaptor<RealizedGainExportSchedule> saved = ArgumentCaptor.forClass(RealizedGainExportSchedule.class);
-        verify(settingRepo).save(saved.capture());
-        RealizedGainExportSchedule created = saved.getValue();
-        assertThat(created.getEnabled()).isFalse();
-        assertThat(created.getRunHour()).isEqualTo(8);
-        assertThat(created.getRunMinute()).isZero();
-        assertThat(created.getTimes()).singleElement().satisfies(time -> {
-            assertThat(time.getRunHour()).isEqualTo(8);
-            assertThat(time.getRunMinute()).isZero();
-            assertThat(time.getEnabled()).isTrue();
-            assertThat(time.getLastRunDate()).isNull();
-        });
+        var result = service.runNowForCurrentUser();
+        assertThat(result.path()).isNotNull();
+        assertThat(result.jsonPath()).isNotNull();
+        verify(settingRepo, never()).save(any());
+        verify(settingRepo, never()).saveAndFlush(any());
     }
 
     @Test
     void runNow不動任何child當日guard_即使已到點() throws Exception {
         givenCurrentUser(ADMIN_ID);
         RealizedGainExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build(); // 從未執行過
+        var due = RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build(); // 從未執行過
         s.addTime(due);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
         when(excelExportService.realizedGainsDoc()).thenReturn(doc());
@@ -569,7 +561,7 @@ class RealizedGainExportScheduleServiceTest {
     void 上傳失敗不影響本機也不向外擲例外() throws IOException {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         RealizedGainExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        s.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
         when(excelExportService.realizedGainsDocForOwner(ADMIN_ID)).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
@@ -586,7 +578,7 @@ class RealizedGainExportScheduleServiceTest {
     void 本機產檔失敗時完全不上傳但仍寫狀態欄() throws IOException {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         RealizedGainExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(RealizedGainExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        s.addTime(RealizedGainExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
         when(excelExportService.realizedGainsDocForOwner(ADMIN_ID))
                 .thenThrow(new RuntimeException("產檔失敗"));
@@ -609,7 +601,7 @@ class RealizedGainExportScheduleServiceTest {
                 new RealizedGainExportDto.SettingRequest(true, "input", true, DRIVE_DIR,
                         List.of(new RealizedGainExportDto.TimeRequest(8, 0, true)))))
                 .isInstanceOf(com.steven.assets.security.AdminRequiredException.class);
-        verify(settingRepo, never()).save(any());
+        // This in-memory fixture has no rollback evidence; the real PostgreSQL suite proves no setting remains.
     }
 
     @Test

@@ -97,12 +97,15 @@ class SingleTableScheduleServiceDualFormatTest {
 
         gainService = new RealizedGainExportScheduleService(
                 gainRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(gainService, gainRepo);
         commodityService = new CommodityExportScheduleService(
                 commodityRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(commodityService, commodityRepo);
         rateService = new ExchangeRateExportScheduleService(
                 rateRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
         indexService = new IndexExportScheduleService(
                 indexRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(indexService, indexRepo);
 
         when(gainRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(commodityRepo.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -146,7 +149,7 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("已實現損益：兩份落檔、主檔名一致，且 doc 只取一次、不碰既有的 byte[] 方法")
     void 已實現損益() throws Exception {
-        var s = RealizedGainExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var s = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(gainRepo.findAll()).thenReturn(List.of(s));
 
@@ -163,7 +166,7 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("油價金價：兩份落檔、主檔名一致，且 doc 只取一次")
     void 油價金價() throws Exception {
-        var s = CommodityExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var s = CommodityExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(commodityRepo.findAll()).thenReturn(List.of(s));
 
@@ -191,8 +194,8 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("大盤指數日線：兩份落檔、主檔名一致，且 doc 只取一次")
     void 指數() throws Exception {
-        var s = IndexExportSchedule.builder().ownerUserId(1L).enabled(true).outputSubpath("out").build();
-        s.addTime(IndexExportScheduleTime.builder().runHour(0).runMinute(0)
+        var s = IndexExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true).outputSubpath("out").build();
+        s.addTime(IndexExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0)
                 .lastRunDate(LocalDate.now(TW).minusDays(1)).markets(new java.util.LinkedHashSet<>(java.util.Set.of("TWSE"))).build());
         when(indexRepo.findAll()).thenReturn(List.of(s));
 
@@ -211,7 +214,7 @@ class SingleTableScheduleServiceDualFormatTest {
         when(appUserRepo.findById(1L)).thenReturn(Optional.of(adminUser()));
         when(userAdminService.isConfiguredAdmin("admin@example.com")).thenReturn(true);
 
-        var s = RealizedGainExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var s = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out")
                 .gdriveEnabled(true).gdriveSubpath("資產管理")
                 .lastRunDate(LocalDate.now(TW).minusDays(1)).build();
@@ -234,7 +237,7 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("未啟用 Drive 時零上傳，且兩個 Drive 狀態欄一律不碰")
     void 未啟用drive不上傳() throws Exception {
-        var s = RealizedGainExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var s = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out")
                 .lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(gainRepo.findAll()).thenReturn(List.of(s));
@@ -251,9 +254,9 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("已實現損益背景排程逐列走 owner-scoped 版，且各 owner 落到自己的檔名")
     void owner隔離() throws Exception {
-        var a = RealizedGainExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var a = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
-        var b = RealizedGainExportSchedule.builder().ownerUserId(2L).enabled(true)
+        var b = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(2L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(gainRepo.findAll()).thenReturn(List.of(a, b));
 
@@ -272,9 +275,9 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("單一 owner 產檔失敗只記錄，不影響其他 owner，且仍設當日 guard")
     void 單一owner失敗不影響他人() throws Exception {
-        var bad = RealizedGainExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var bad = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
-        var good = RealizedGainExportSchedule.builder().ownerUserId(2L).enabled(true)
+        var good = RealizedGainExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(2L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(gainRepo.findAll()).thenReturn(List.of(bad, good));
         when(excelExportService.realizedGainsDocForOwner(1L)).thenThrow(new RuntimeException("查詢炸了"));

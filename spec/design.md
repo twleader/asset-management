@@ -12249,3 +12249,12 @@ RULE_VERSION V19與decisionInputVersion現行source組合共同隔離cache/notif
 
 布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
 
+## Requirement 157／Task 439：匯出capture／短交易結果寫回
+
+四匯出服務先以短讀取準備不可變run input（scheduleId/ownerId/childId或明確legacy身份、當日guard、目錄/Drive等執行設定）；退出交易後完成現有一次doc→雙格式及I/O，finally產immutable outcome。獨立結果writer Spring proxy開短交易，以schedule id+owner讀current並鎖parent，child exact id只局部last-run欄更新；current不存在skip，removed child skip，不save captured aggregate。UIupdate同parent鎖、在鎖內fresh read/config mutate，child lock order parent→child，避免writer與UI在各短交易之間繼續stale merge。不得在長I/O持鎖。legacy只在執行前短交易鎖parent、新讀確認仍空且legacy時間一致時建立並flush既有fallback child取得id，結果不建child。child id與captured hour/minute皆相同才記結果（disabled可記，改時間skip）；parent摘要只在completedAt不早於current summary時依current現行代表算法更新，防late completion倒退。
+
+Drive outcome與captured destination config完整比對後才更新metadata；不同時保留最新Drive metadata。本機status仍可記入現存對象。manual同writer而不寫child日guard；執行前無persisted setting的default run不在結果階段插入設定，避免競態吞新UI。status截斷遵守現有各欄上限，成功/失敗均保留原guard語意，background個別失敗不連坐。transaction proxy、tenant explicit owner、不變API由focused測試證明；所有I/O為fake，禁止為驗收真的runNow/export/Drive。
+
+
+執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
+

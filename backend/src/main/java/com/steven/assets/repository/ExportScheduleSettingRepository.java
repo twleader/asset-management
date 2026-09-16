@@ -15,6 +15,11 @@ import java.util.Optional;
  */
 public interface ExportScheduleSettingRepository extends JpaRepository<ExportScheduleSetting, Long> {
 
+    /** Parent-only lock: collection joins would make PostgreSQL FOR UPDATE invalid. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select s from ExportScheduleSetting s where s.ownerUserId = :owner")
+    Optional<ExportScheduleSetting> findLockedByOwnerUserId(@org.springframework.data.repository.query.Param("owner") Long owner);
+
     @EntityGraph(attributePaths = "times")
     Optional<ExportScheduleSetting> findByOwnerUserId(Long ownerUserId);
 

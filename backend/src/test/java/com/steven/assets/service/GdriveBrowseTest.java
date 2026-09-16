@@ -63,6 +63,7 @@ class GdriveBrowseTest {
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
                 "/home/steven");
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
     }
 
     @Test

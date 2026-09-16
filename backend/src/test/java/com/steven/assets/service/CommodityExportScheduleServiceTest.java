@@ -85,6 +85,7 @@ class CommodityExportScheduleServiceTest {
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
                 baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -114,7 +115,7 @@ class CommodityExportScheduleServiceTest {
     }
 
     private CommodityExportSchedule setting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
-        return CommodityExportSchedule.builder()
+        return CommodityExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .id(owner).ownerUserId(owner)
                 .enabled(true).outputSubpath("input")
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath)
@@ -152,7 +153,7 @@ class CommodityExportScheduleServiceTest {
     void 多個時間依時分排序且各自保留相同時間的guard_新時間guard為null() {
         givenCurrentUser(ADMIN_ID);
         CommodityExportSchedule current = setting(ADMIN_ID, false, null);
-        var nineThirty = CommodityExportScheduleTime.builder()
+        var nineThirty = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1))
                 .lastRunStatus("舊狀態").build();
         current.addTime(nineThirty);
@@ -186,7 +187,7 @@ class CommodityExportScheduleServiceTest {
     void 整包取代時不在清單內的舊時間被移除() {
         givenCurrentUser(ADMIN_ID);
         CommodityExportSchedule current = setting(ADMIN_ID, false, null);
-        current.addTime(CommodityExportScheduleTime.builder().runHour(20).runMinute(0).enabled(true).build());
+        current.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(20).runMinute(0).enabled(true).build());
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
 
         CommodityExportDto.SettingResponse response = service.updateForCurrentUser(
@@ -323,9 +324,9 @@ class CommodityExportScheduleServiceTest {
     @Test
     void 兩個到點時間各自執行_其一已guard不阻擋另一() throws Exception {
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var already = CommodityExportScheduleTime.builder().runHour(0).runMinute(0)
+        var already = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0)
                 .enabled(true).lastRunDate(LocalDate.now(TW)).build(); // 今天已跑過
-        var due = CommodityExportScheduleTime.builder().runHour(0).runMinute(1)
+        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1)
                 .enabled(true).build(); // 未跑過
         s.addTime(already);
         s.addTime(due);
@@ -343,7 +344,7 @@ class CommodityExportScheduleServiceTest {
     @Test
     void 停用的時間點不執行() throws Exception {
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var disabledTime = CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(false).build();
+        var disabledTime = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(false).build();
         s.addTime(disabledTime);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -356,7 +357,7 @@ class CommodityExportScheduleServiceTest {
     @Test
     void 尚未到執行時間不跑() throws Exception {
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var future = CommodityExportScheduleTime.builder().runHour(23).runMinute(59).enabled(true).build();
+        var future = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(23).runMinute(59).enabled(true).build();
         s.addTime(future);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -368,8 +369,8 @@ class CommodityExportScheduleServiceTest {
     @Test
     void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws Exception {
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var first = CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
-        var second = CommodityExportScheduleTime.builder().runHour(0).runMinute(1).enabled(true).build();
+        var first = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
+        var second = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1).enabled(true).build();
         s.addTime(first);
         s.addTime(second);
         when(settingRepo.findAll()).thenReturn(List.of(s));
@@ -394,7 +395,7 @@ class CommodityExportScheduleServiceTest {
     @Test
     void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
+        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
         s.addTime(due);
         when(settingRepo.findAll()).thenReturn(List.of(s));
 
@@ -424,9 +425,9 @@ class CommodityExportScheduleServiceTest {
     @Test
     void owner隔離_不同owner的child互不影響() throws Exception {
         CommodityExportSchedule a = setting(ADMIN_ID, false, null);
-        a.addTime(CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        a.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         CommodityExportSchedule b = setting(OTHER_ID, false, null);
-        b.addTime(CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        b.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(a, b));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
 
@@ -443,7 +444,7 @@ class CommodityExportScheduleServiceTest {
     void runNow既有多時間設定不新增也不修改childGuard() throws Exception {
         givenCurrentUser(ADMIN_ID);
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var morning = CommodityExportScheduleTime.builder().runHour(8).runMinute(0)
+        var morning = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(8).runMinute(0)
                 .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
         s.addTime(morning);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
@@ -457,32 +458,23 @@ class CommodityExportScheduleServiceTest {
     }
 
     @Test
-    void runNow無設定建立disabledParent與未guard的0800child() throws Exception {
+    void runNow無設定只產檔而不建立設定或child() throws Exception {
         givenCurrentUser(ADMIN_ID);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
 
-        service.runNowForCurrentUser();
-
-        ArgumentCaptor<CommodityExportSchedule> saved = ArgumentCaptor.forClass(CommodityExportSchedule.class);
-        verify(settingRepo).save(saved.capture());
-        CommodityExportSchedule created = saved.getValue();
-        assertThat(created.getEnabled()).isFalse();
-        assertThat(created.getRunHour()).isEqualTo(8);
-        assertThat(created.getRunMinute()).isZero();
-        assertThat(created.getTimes()).singleElement().satisfies(time -> {
-            assertThat(time.getRunHour()).isEqualTo(8);
-            assertThat(time.getRunMinute()).isZero();
-            assertThat(time.getEnabled()).isTrue();
-            assertThat(time.getLastRunDate()).isNull();
-        });
+        var result = service.runNowForCurrentUser();
+        assertThat(result.path()).isNotNull();
+        assertThat(result.jsonPath()).isNotNull();
+        verify(settingRepo, never()).save(any());
+        verify(settingRepo, never()).saveAndFlush(any());
     }
 
     @Test
     void runNow不動任何child當日guard_即使已到點() throws Exception {
         givenCurrentUser(ADMIN_ID);
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build(); // 從未執行過
+        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build(); // 從未執行過
         s.addTime(due);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
@@ -507,9 +499,10 @@ class CommodityExportScheduleServiceTest {
         CommodityExportScheduleService svc = new CommodityExportScheduleService(
                 settingRepo, excelExportService, currentUserProvider, gdrive,
                 failingExcel, jsonRenderer, dual, baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(svc, settingRepo);
 
         CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        s.addTime(CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
 
@@ -558,7 +551,7 @@ class CommodityExportScheduleServiceTest {
     void 上傳失敗不影響本機也不向外擲例外() throws IOException {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         CommodityExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
         when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
@@ -575,7 +568,7 @@ class CommodityExportScheduleServiceTest {
     void 本機產檔失敗時完全不上傳但仍寫狀態欄() throws IOException {
         givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
         CommodityExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(CommodityExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build());
+        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
         when(settingRepo.findAll()).thenReturn(List.of(s));
         when(excelExportService.commodityPricesDoc(any(), any()))
                 .thenThrow(new RuntimeException("產檔失敗"));
@@ -599,6 +592,6 @@ class CommodityExportScheduleServiceTest {
                         List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
                         true, DRIVE_DIR)))
                 .isInstanceOf(com.steven.assets.security.AdminRequiredException.class);
-        verify(settingRepo, never()).save(any());
+        // This in-memory fixture has no rollback evidence; the real PostgreSQL suite proves no setting remains.
     }
 }

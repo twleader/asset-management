@@ -5374,3 +5374,17 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
 
+### Requirement 157／Task 439：匯出完成結果不得覆蓋並行設定
+
+**User Story:** 身為匯出設定使用者，我希望匯出進行期間更新或移除時間點，完成結果只寫回仍存在的執行對象，保留最新設定。
+
+**Acceptance Criteria:**
+- 僅四服務ExportScheduleService、CommodityExportScheduleService、RealizedGainExportScheduleService、IndexExportScheduleService接手此修復。長產檔／本機寫檔／Drive I/O在交易外，用不可變captured執行參數；獨立Spring proxy bean短交易新讀目前parent及child，只寫lastRunDate/lastRunAt/lastRunStatus/必要updatedAt與現行代表摘要。不得merge captured entity、重建times、復活removed child或deleted parent。
+- persisted identity包含schedule id+owner id+child id+captured hour/minute。guard使用captured執行日，只能落已存在且同parent並時間相同的child；disabled但身份時間相同可記實際結果，時間改變則skip。legacy空children只允許執行前短交易鎖parent、新讀確認仍空且legacy時間相同後建立並flush既有fallback child取得id，再capture/I/O；結果階段永不建立child，移除重建同時間但不同id亦skip。
+- UI更新與短結果交易採同一parent pessimistic write lock，或等效無stale entity merge的原子欄位更新，不能只鎖background而UI仍load/save舊aggregate。parent/child lock order一致，建立設定用existing唯一owner約束且競態失敗重讀，不額外新增schema。parent代表摘要依current children現行演算法新算，不用captured時間表。
+- Drive結果只在current gdriveEnabled/gdriveSubpath及所有被capture且影響Drive目的地的設定仍完全一致才更新gdriveLastRunAt/gdriveLastStatus；本機結果不因此被丟棄。runNow同樣不可save stale aggregate；不存在且執行前未保存的default設定不因產檔完成而插入，結果仍依現有response回傳；manual不更新child lastRunDate。成功/失敗保留既有guard及status截斷長度語意。
+- HTTP/BFF/DTO與排程cron、時間語意、tenant隔離、雙格式一次doc、檔名/路徑/Drive功能不變；不觸發實機匯出或Drive驗收，以fake I/O和真交易競態證明。
+
+
+執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
+

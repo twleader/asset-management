@@ -1,5 +1,7 @@
 package com.steven.assets.service;
 
+import com.steven.assets.repository.ExportSettingCreationRetry;
+
 import com.steven.assets.dto.RealizedGainExportDto;
 import com.steven.assets.model.RealizedGainExportSchedule;
 import com.steven.assets.model.RealizedGainExportScheduleTime;
@@ -61,6 +63,8 @@ public class RealizedGainExportScheduleService {
     private static final int GDRIVE_STATUS_MAX = 512;
 
     private final RealizedGainExportScheduleRepository settingRepo;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ExportExecutionPort<RealizedGainExportSchedule> executionStore;
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
@@ -105,72 +109,62 @@ public class RealizedGainExportScheduleService {
     }
 
     /** upsert 當前使用者設定；times 為整包取代（相同時分沿用既有 child 的 guard）。 */
-    @Transactional
     public RealizedGainExportDto.SettingResponse updateForCurrentUser(RealizedGainExportDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
         validateTimes(req.times(), Boolean.TRUE.equals(req.enabled()));
         String subpath = normalizeSubpath(req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
-        RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
-                RealizedGainExportSchedule.builder().ownerUserId(ownerId).build());
-        // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
-        // 本機路徑與排程時間刻意維持所有使用者皆可設定——只有 Drive 這一項會把資料送出本機。
-        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
-                ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
+        return ExportSettingCreationRetry.retry(() -> executionStore.update(ownerId, s -> {
+            // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
+            // 本機路徑與排程時間刻意維持所有使用者皆可設定——只有 Drive 這一項會把資料送出本機。
+            GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
+                    ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
 
-        s.setOwnerUserId(ownerId);
-        s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setOutputSubpath(subpath);
-        s.setGdriveEnabled(drive.enabled());
-        s.setGdriveSubpath(drive.subpath());
-        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
-        // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
-        s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            s.setOwnerUserId(ownerId);
+            s.setEnabled(Boolean.TRUE.equals(req.enabled()));
+            s.setOutputSubpath(subpath);
+            s.setGdriveEnabled(drive.enabled());
+            s.setGdriveSubpath(drive.subpath());
+            // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
+            // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
+            s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
 
-        // 以 (時,分) 對映舊 child：相同時分保留該 child 的 guard／狀態，新時分 guard 為 null，
-        // 不在 body 內的 child 由 orphanRemoval 刪除。child 的 status 一律不接受使用者輸入。
-        Map<String, RealizedGainExportScheduleTime> existing = new HashMap<>();
-        for (RealizedGainExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
-        HashSet<String> requested = new HashSet<>();
-        for (RealizedGainExportDto.TimeRequest item : req.times()) {
-            String key = timeKey(item.runHour(), item.runMinute());
-            requested.add(key);
-            RealizedGainExportScheduleTime time = existing.get(key);
-            if (time == null) {
-                time = RealizedGainExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
-                        .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
-                s.addTime(time);
-            } else {
-                time.setEnabled(Boolean.TRUE.equals(item.enabled()));
-                time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            // 以 (時,分) 對映舊 child：相同時分保留該 child 的 guard／狀態，新時分 guard 為 null，
+            // 不在 body 內的 child 由 orphanRemoval 刪除。child 的 status 一律不接受使用者輸入。
+            Map<String, RealizedGainExportScheduleTime> existing = new HashMap<>();
+            for (RealizedGainExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
+            HashSet<String> requested = new HashSet<>();
+            for (RealizedGainExportDto.TimeRequest item : req.times()) {
+                String key = timeKey(item.runHour(), item.runMinute());
+                requested.add(key);
+                RealizedGainExportScheduleTime time = existing.get(key);
+                if (time == null) {
+                    time = RealizedGainExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
+                            .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
+                    s.addTime(time);
+                } else {
+                    time.setEnabled(Boolean.TRUE.equals(item.enabled()));
+                    time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+                }
             }
-        }
-        s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
-        syncRollbackRepresentative(s);
-        return toResponse(settingRepo.save(s), drive.selfCheckWarning());
+            s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
+            syncRollbackRepresentative(s);
+            return toResponse(s, drive.selfCheckWarning());
+        }));
     }
 
     /** 立即以當前使用者身分產檔寫入其設定目錄（供驗證）。不動任何時間點的當日 guard。 */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public RealizedGainExportDto.RunNowResponse runNowForCurrentUser() {
         Long ownerId = requireOwnerId();
-        RealizedGainExportSchedule s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() -> {
-            RealizedGainExportSchedule created = RealizedGainExportSchedule.builder()
-                    .ownerUserId(ownerId).enabled(Boolean.FALSE).build();
-            created.addTime(defaultTime());   // 本次 run-now 不消耗它：guard 保持 null
-            syncRollbackRepresentative(created);
-            return created;
-        });
+        CapturedExport s = executionStore.manual(ownerId);
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
             // HTTP 情境：realizedGainsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
             // 一次查詢取得 doc，再 render 兩種格式——兩份檔內容一致的唯一保證。
             var r = writeDual(s, ownerId, excelExportService.realizedGainsDoc(), subpath);
-            s.setOwnerUserId(ownerId);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
-            applyGdriveStatus(s, r);
-            settingRepo.save(s);
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), r.localStatus(), r.gdriveStatus());
             return RealizedGainExportDto.RunNowResponse.builder()
                     // 既有欄位語意不變：填 xlsx 那一份
                     .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
@@ -182,11 +176,8 @@ public class RealizedGainExportScheduleService {
                     .jsonGdrivePath(r.jsonGdrivePath())
                     .build();
         } catch (IOException | RuntimeException e) {
-            s.setOwnerUserId(ownerId);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            syncGdrive(s, null); // 本機失敗＝完全不上傳，但已啟用時仍須寫狀態欄說明原因
-            settingRepo.save(s);
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), "失敗：" + e.getMessage(),
+                    failedDriveStatus(s));
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
         }
     }
@@ -195,6 +186,7 @@ public class RealizedGainExportScheduleService {
 
     /** 每分鐘檢查各使用者設定，命中執行時間且當日未跑者即產檔。 */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void tick() {
         try {
             tryRunDueExports();
@@ -205,6 +197,7 @@ public class RealizedGainExportScheduleService {
 
     /** 服務重啟自癒：補跑「今日排程時間已到但尚未執行」者（與 tick 同一判斷，冪等）。 */
     @EventListener(ApplicationReadyEvent.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void selfHealOnStartup() {
         try {
             tryRunDueExports();
@@ -241,20 +234,17 @@ public class RealizedGainExportScheduleService {
      * 避免整日靜默漏跑。判斷主體先 parent 總開關、再逐 child——第一個時間點執行完只會擋住該 child，
      * 不會用 parent guard 擋住同日後續 child。
      */
-    @Transactional
     void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
-        for (RealizedGainExportSchedule s : settingRepo.findAll()) {
-            if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            // v1.104 套用前不可能有 real runtime；仍保留一輪 legacy fallback，避免部署中途
-            // 或手動 fixture 因空 children 把既有單時間排程靜默停掉。
-            if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
-            for (RealizedGainExportScheduleTime time : s.getTimes()) {
-                if (!Boolean.TRUE.equals(time.getEnabled()) || today.equals(time.getLastRunDate())) continue;
-                if (!now.isBefore(LocalTime.of(time.getRunHour(), time.getRunMinute()))) {
-                    runScheduled(s, time, today);
+        for (RealizedGainExportSchedule candidate : settingRepo.findAll()) {
+            try {
+                for (CapturedExport capture : executionStore.due(candidate.getId(), candidate.getOwnerUserId(), today, now)) {
+                    try { runScheduled(capture); }
+                    catch (RuntimeException e) { log.warn("匯出結果寫回失敗 owner={} child={}", capture.ownerId(), capture.childId(), e); }
                 }
+            } catch (RuntimeException e) {
+                log.warn("匯出設定捕捉失敗 owner={}", candidate.getOwnerUserId(), e);
             }
         }
     }
@@ -263,36 +253,27 @@ public class RealizedGainExportScheduleService {
      * 背景：對指定時間點產檔並更新該 child 的 guard／狀態，同步 parent 最近一次整體摘要。
      * 單一時間點失敗只記錄、不影響同 owner 的其他時間點或其他 owner。
      */
-    private void runScheduled(RealizedGainExportSchedule s, RealizedGainExportScheduleTime time, LocalDate today) {
+    private void runScheduled(CapturedExport s) {
+        String localStatus;
+        String driveStatus;
         try {
-            // 背景無 request context：必須走 owner-scoped 版，否則會把所有人的損益寫進每個人的檔案。
-            var r = writeDual(s, s.getOwnerUserId(),
-                    excelExportService.realizedGainsDocForOwner(s.getOwnerUserId()),
-                    normalizeSubpath(s.getOutputSubpath()));
-            time.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
-            s.setLastRunStatus(time.getLastRunStatus());
-            applyGdriveStatus(s, r);
-            log.info("已實現損益排程匯出 owner={} {}:{} → {}",
-                    s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), r.localStatus());
+            var result = writeDual(s, s.getOwnerUserId(), excelExportService.realizedGainsDocForOwner(s.getOwnerUserId()), normalizeSubpath(s.getOutputSubpath()));
+            localStatus = result.localStatus(); driveStatus = result.gdriveStatus();
+            log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), localStatus);
         } catch (Exception e) {
-            time.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            s.setLastRunStatus(time.getLastRunStatus());
-            log.warn("已實現損益排程匯出失敗 owner={} {}:{}：{}",
-                    s.getOwnerUserId(), time.getRunHour(), time.getRunMinute(), e.getMessage(), e);
-            syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
-        } finally {
-            // 成功或失敗都設該時間點的當日 guard，避免命中分鐘後每 poll 重試整天。
-            LocalDateTime completedAt = LocalDateTime.now(TW_ZONE);
-            time.setLastRunDate(today);
-            time.setLastRunAt(completedAt);
-            time.setUpdatedAt(completedAt);
-            s.setLastRunAt(completedAt);
-            syncRollbackRepresentative(s);
-            settingRepo.save(s);
+            localStatus = "失敗：" + e.getMessage();
+            driveStatus = failedDriveStatus(s);
+            log.warn("排程匯出 owner={} 失敗", s.getOwnerUserId(), e);
         }
+        executionStore.complete(s, LocalDateTime.now(TW_ZONE), localStatus, driveStatus);
     }
 
     // ===== 輔助 =====
+
+    /** Null local file is handled without any remote I/O, preserving the existing skipped status. */
+    private String failedDriveStatus(CapturedExport s) {
+        return s.isGdriveEnabled() ? gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), null).status() : null;
+    }
 
     private Long requireOwnerId() {
         CurrentUserContext ctx = currentUserProvider.getObject();
@@ -390,7 +371,7 @@ public class RealizedGainExportScheduleService {
      * 「主檔名不得含路徑分隔字元」是兩道不同的防線。
      */
     private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDual(
-            RealizedGainExportSchedule s, Long ownerId,
+            CapturedExport s, Long ownerId,
             com.steven.assets.service.export.ExportDoc doc, String subpath) throws IOException {
         byte[] xlsx = null;
         byte[] json = null;
@@ -409,15 +390,7 @@ public class RealizedGainExportScheduleService {
                 s.isGdriveEnabled(), s.getGdriveSubpath());
     }
 
-    /** 寫回 Drive 狀態欄。未啟用時 {@code gdriveStatus} 為 null，此時兩欄一律不碰（沿用既有語意）。 */
-    private void applyGdriveStatus(RealizedGainExportSchedule s,
-                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
-        if (r.gdriveStatus() == null) return;
-        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(truncate(r.gdriveStatus(), GDRIVE_STATUS_MAX));
-    }
-
-    private RealizedGainExportDto.SettingResponse toResponse(RealizedGainExportSchedule s) {
+private RealizedGainExportDto.SettingResponse toResponse(RealizedGainExportSchedule s) {
         return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義
     }
 
@@ -453,26 +426,7 @@ public class RealizedGainExportScheduleService {
                 .build();
     }
 
-    /**
-     * 本機檔寫成功後的 Drive 同步（best-effort）。<b>順序不可顛倒</b>：本機那一份是既有的留存機制，
-     * 必須先確定它寫成功才上傳；本機失敗時傳 {@code null} ——完全不上傳，絕不上傳前一次的舊檔。
-     *
-     * <p>不擲例外、不 rollback 本機檔、不改既有 {@code lastRunStatus}——「本機成功、Drive 失敗」是正常
-     * 且必須可分辨的狀態。owner 權限在 {@code syncQuietly} 內<b>每一輪重驗</b>（背景排程沒有 request
-     * context，{@code PUT} 當下的檢查在此不適用）。
-     *
-     * @return 未啟用時回 {@code null}（不碰狀態欄）；否則為本輪結果，供 run-now 回報落點
-     */
-    private GdriveOutputSupport.SyncResult syncGdrive(RealizedGainExportSchedule s, Path localFile) {
-        if (!s.isGdriveEnabled()) return null;
-        GdriveOutputSupport.SyncResult r =
-                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
-        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(truncate(r.status(), GDRIVE_STATUS_MAX));
-        return r;
-    }
-
-    /**
+/**
      * 狀態字串寫入前的截斷（對應 {@code varchar(500)} 與 {@code varchar(512)}）。
      *
      * <p>成功時狀態內含絕對路徑、失敗時內含 rclone 或 IO 的原始錯誤訊息，長度無上限。
