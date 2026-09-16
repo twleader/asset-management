@@ -175,7 +175,7 @@ for t in $(added_lines 'spec/**' | grep -oE '(^|[^@A-Za-z])[A-Z][A-Za-z0-9]*Test
            | grep -oE '[A-Z][A-Za-z0-9]*Test' | sort -u); do
   printf '%s' "$t" | grep -qE "$FRAMEWORK_TESTS" && continue
   if ! find . -path ./.git -prune -o -name "${t}.java" -print -o -name "${t}.js" -print 2>/dev/null | grep -q .; then
-    block "spec 提到測試類 $t，但全樹找不到 ${t}.java/.js —— 宣稱的驗證不存在（Task 160 前例）"
+    block "spec 提到測試類 ${t}，但全樹找不到 ${t}.java/.js —— 宣稱的驗證不存在（Task 160 前例）"
   fi
 done
 
