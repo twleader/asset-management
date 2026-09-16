@@ -34,6 +34,9 @@ public class DividendHistoryService {
     private final DividendCurrentStateProjectionService projectionService;
     private final WebClient externalClient;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private DividendCashEnrichmentService enrichmentService;
+
     public DividendHistoryService(StockDividendHistoryRepository repo,
                                   DividendCurrentStateProjectionService projectionService,
                                   @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
@@ -105,6 +108,11 @@ public class DividendHistoryService {
             projectionService.projectOne(code, market, Instant.now());
         } catch (RuntimeException e) {
             log.warn("股利 current-state 投影失敗：{} {}: {}", market, code, e.getMessage());
+        }
+        try {
+            if (enrichmentService != null) enrichmentService.enrich(code, market, Instant.now());
+        } catch (RuntimeException e) {
+            log.warn("股利現金資訊回填失敗：{} {}: {}", market, code, e.getMessage());
         }
     }
 

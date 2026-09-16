@@ -56,6 +56,24 @@ class DividendHistoryServiceTest {
     }
 
     @Test
+    void pureReadNeverEnrichesOrProjectsAndFailuresStayIndependent() {
+        DividendCashEnrichmentService enrichment = mock(DividendCashEnrichmentService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "enrichmentService", enrichment);
+        when(repo.findByStockSinceYear(eq("0056"), eq("台股"), anyInt()))
+                .thenReturn(List.of(history("0056", "台股", "TWSE")));
+        service.findFromDbReadOnly("0056", "台股", 10);
+        org.mockito.Mockito.verifyNoInteractions(enrichment, projection);
+        assertThat(syncCalls).hasValue(0);
+        when(projection.projectOne(eq("0056"), eq("台股"), any(Instant.class)))
+                .thenThrow(new IllegalStateException("projection fixture"));
+        org.mockito.Mockito.doThrow(new IllegalStateException("enrichment fixture"))
+                .when(enrichment).enrich(eq("0056"), eq("台股"), any(Instant.class));
+        assertThat(service.findFromDb("0056", "台股", 10).rows()).hasSize(1);
+        verify(enrichment).enrich(eq("0056"), eq("台股"), any(Instant.class));
+        assertThat(syncCalls).hasValue(0);
+    }
+
+    @Test
     void firstProjectionFailureFallsBackToExistingHistoryRows() {
         StockDividendHistory existing = history("0056", "台股", "TWSE");
         when(projection.projectOne(eq("0056"), eq("台股"), any(Instant.class)))

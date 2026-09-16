@@ -12258,3 +12258,7 @@ Drive outcome與captured destination config完整比對後才更新metadata；�
 
 執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
 
+## Requirement 158／Task 440：現金股利可證enrichment
+
+獨立enrichment bean REQUIRES_NEW，從既有side-effect findFromDb在projection之後呼叫，兩段try/catch獨立；pure-read flow不呼叫。candidate僅ACTIVE現金>0/exDividendDate且previousClose或yieldPct或fillDays缺值，保留完整兩除權息日/金額身份。重用MarketDataService.isTradingDayCachedOnly(market,date)，UNKNOWN fail closed，以市場本地cache-only交易曆和完成Kauthority產asOf，bounded native價格讀至asOf。previousClose需除息日完成bar及權威前session正raw收盤，不跨gap；yield4位，fillDays0起權威session數且hit前coverage完整。純配股不填现金enrichment；另一公司行動改basis且無證明不算fillDays。缺曆/完K/null/非正/未來皆保留未知。writer以identity+ACTIVE及每欄IS NULL／COALESCE守門，防cancellation/amendment競態；不改event/date/payment/provider facts，不復活。existing非null值不覆蓋，無candidate不查價格，不新增schema或外部查詢。
+

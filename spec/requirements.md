@@ -5388,3 +5388,13 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
 
+### Requirement 158／Task 440：可證實價格基礎才回填股利顯示資訊
+
+**User Story:** 身為股利歷史使用者，我希望已完成且完整價格資料可補齊昨收、現金殖利率及填息天數，證據不足維持未知。
+
+**Acceptance Criteria:**
+- 保留main四日期（exDividendDate/exRightsDate/cashPaymentDate/stockPaymentDate）與min非null兩除權息日anchor的事件身份／cancel語意；只對ACTIVE、正現金股利且有exDividendDate之事件回填現金enrichment，不把純配股anchor誤作現金除息日。partial yield-only null亦候選；僅填原欄null，不改既有非null/provider facts。
+- 獨立proxy bean的REQUIRES_NEW回填與既有projection各自fail-soft。只接既有有投影副作用findFromDb流程；findFromDbReadOnly、public/9090、radar、batch pure-read不得接回填或外呼。價格讀取有顯式asOf上界，asOf由市場時區／本地cache-only交易日與完成收盤證據判定，不能把當日盤中／future列當完成K。
+- 現金昨收是exDividendDate前一個權威交易session的原始正收盤，除息日已完成且bar存在；本地交易日曆可證該session且價格完整才填。從exDate到第一個已完成close>=previousClose的區間不得缺任何權威交易session，fillDays為0起算完成交易session位移；無hit或曆／資料缺口為null。資料日期嚴格升序/唯一、null/非正拒絕；不得跳過無效價格或以週末推斷future。跨另一除權息／分割等公司行動且無同basis證據時fillDays仍null，不以raw跨基礎比大小。
+- yieldPct=cashDividend/previousClose*100，scale4 HALF_UP；previousClose遵守DB numeric(15,4)範圍、yield與fill範圍先驗證。只有本次可證值且current仍ACTIVE、owner-independent exact stock/market/event id/兩除權息日及金額身份相同時原子COALESCE缺值更新；若併發projection變更／取消／刪除則零寫，不復活、不覆寫剛填值。無價格／證據直接無寫入，零新增券商功能、零schema變更。
+

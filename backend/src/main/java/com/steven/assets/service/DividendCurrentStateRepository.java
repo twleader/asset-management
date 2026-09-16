@@ -168,6 +168,12 @@ public interface DividendCurrentStateRepository {
      */
     List<ActiveEventDetail> findActiveEventDetails(String code, String market);
 
+    /** Atomic missing-field update, conditional on the captured exact ACTIVE identity. */
+    default int fillMissingCashEnrichment(String code, String market, ActiveEventDetail expected,
+            BigDecimal previousClose, BigDecimal yieldPct, Integer fillDays) {
+        return 0;
+    }
+
     /** 把合併後的 metadata/enrichment 寫回 keeper 列（不改金額、除息日、狀態）。 */
     void applyMergedEnrichment(long id, String eventKey, LocalDate cashPaymentDate,
             LocalDate stockPaymentDate, BigDecimal yieldPct, BigDecimal previousClose,

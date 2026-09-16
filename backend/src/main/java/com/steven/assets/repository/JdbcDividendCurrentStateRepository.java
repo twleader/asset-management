@@ -144,6 +144,28 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
     }
 
     @Override
+    public int fillMissingCashEnrichment(String code, String market, ActiveEventDetail expected,
+            BigDecimal previousClose, BigDecimal yieldPct, Integer fillDays) {
+        return jdbc.update("""
+                UPDATE stock_dividend_history
+                   SET previous_close=COALESCE(previous_close, ?),
+                       yield_pct=COALESCE(yield_pct, ?), fill_days=COALESCE(fill_days, ?),
+                       updated_at=NOW()
+                 WHERE id=? AND stock_code=? AND market=? AND event_status='ACTIVE'
+                   AND ex_dividend_date IS NOT DISTINCT FROM ?
+                   AND ex_rights_date IS NOT DISTINCT FROM ?
+                   AND cash_dividend IS NOT DISTINCT FROM ?
+                   AND stock_dividend IS NOT DISTINCT FROM ?
+                   AND (previous_close IS NULL OR previous_close IS NOT DISTINCT FROM ?)
+                   AND ((previous_close IS NULL AND CAST(? AS NUMERIC) IS NOT NULL)
+                     OR (yield_pct IS NULL AND CAST(? AS NUMERIC) IS NOT NULL)
+                     OR (fill_days IS NULL AND CAST(? AS INTEGER) IS NOT NULL))
+                """, previousClose, yieldPct, fillDays, expected.id(), code, market,
+                expected.exDividendDate(), expected.exRightsDate(), expected.cashDividend(),
+                expected.stockDividend(), previousClose, previousClose, yieldPct, fillDays);
+    }
+
+    @Override
     public void applyMergedEnrichment(long id, String eventKey, LocalDate cashPaymentDate,
             LocalDate stockPaymentDate, BigDecimal yieldPct, BigDecimal previousClose,
             Integer fillDays) {
