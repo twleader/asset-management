@@ -167,7 +167,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.11.0', 'Task 416 後 OpenAPI info.version 必須為 1.11.0')
+assert!(document.dig('info', 'version') == '1.12.0', 'Task 438 後 OpenAPI info.version 必須為 1.12.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -661,8 +661,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 91,
-        "全量 strict audit 預期 91 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 92,
+        "全量 strict audit 預期 92 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end

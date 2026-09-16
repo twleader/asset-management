@@ -211,6 +211,12 @@ class TradingRadarStockWeeklyWiringTest {
         // 先證明「資料確實完整」，否則下面的 not-contains 會是一條恆真的空斷言。
         assertThat(decision.dailyCandle()).as("DTO 必須有完整日K 棒").isNotNull();
         assertThat(decision.dailyCandle().close()).isNotNull();
+        assertThat(decision.bollinger()).isNotNull();
+        TradingRadarRuleEngine.BollingerInput wiredBollinger = captureStockInput().bollinger();
+        assertThat(wiredBollinger).isNotNull();
+        assertThat(decision.bollinger().asOfDate()).isEqualTo(decision.dailyCandle().asOfDate());
+        assertThat(decision.bollinger().percentB()).isEqualByComparingTo(wiredBollinger.percentB());
+        assertThat(decision.bollinger().bandWidthPercent()).isEqualByComparingTo(wiredBollinger.bandWidthPercent());
         assertThat(decision.weeklyIndicators()).isNotNull();
         assertThat(decision.weeklyIndicators().completedWeeks())
                 .isGreaterThanOrEqualTo(RadarInputAssembler.MIN_COMPLETED_WEEKS);

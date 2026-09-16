@@ -5359,3 +5359,18 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **寫入層強制，不能只靠 caller 約定。** `StockRepository` 改為只宣告 read methods、不得再繼承或暴露 `JpaRepository.save`／raw `upsert`；唯一 mutable `StockMasterPersistence` 為 package-private adapter，只可由 `StockMasterService` 的 trusted Taiwan write 或既有非台股 manual policy 呼叫。架構/source-scan test 必證明其他 service 無法注入 mutable master adapter、沒有 `StockRepository.save`／`upsert` 或直接 `stock` SQL。對已存在台股名稱，任意 user payload、非本次 trusted resolver 的 Fubon/Yahoo quote、五檔、庫存或交易 ingress 名稱均零 mutation；trusted resolver 成功時才可更新。這條名稱 resolver 僅使用既有唯讀 market-data adapter，絕不使用帳務、成交、庫存、下單、改單、撤單、轉帳或其他券商寫入能力；不得為名稱新增公開 API、BFF route、排程或 feature flag。
 - [ ] **既有錯誤資料只做可證實修正。** idempotent `v1.133.0-tw-stock-master-user-input-authority.sql` 將既有 `(00850, 台股)` 從錯誤英文名稱更正為「元大臺灣ESG永續」；只有該 exact row 且名稱不同才更新，不能新增主檔或改任何其他欄位／標的。Requirement 153 的 `006208 → 富邦台50` correction 保持不變。Liquibase 後重產 `db/schema.sql` 並通過 drift test。
 - [ ] **回歸與 runtime 證據。** unit/integration tests 必覆蓋：富邦成功時不觸 TWSE/TPEx/Yahoo；富邦拒絕或 identity 不符時精確 fallback 至 TWSE；TWSE 無 exact row／失敗才查 TPEx；TWSE/TPEx 都失敗才精確 fallback 至 Yahoo；FinMind 絕不作主檔名稱 fallback；三者全失敗零主檔 mutation；已存在台股主檔不受 Asset snapshot、Alert（含 group）任一手動名稱覆寫；缺主檔的台股手動 payload 不創建主檔且不外呼；trusted resolver 對新建與更名皆可寫入；非台股既有手動行為不變；五檔、庫存與交易 ingress 仍零主檔寫入；migration 精確且 idempotent。rebuild/recreate 受影響的 `business-services` 與 `external-materials-service`，health/BFF recovery 後唯讀 PostgreSQL 必讀回 `00850 | 台股 | 元大臺灣ESG永續`，並確認股票觀察畫面仍讀同一 `stock.name`。runtime 不得主動觸發名稱 resolver、富邦 SDK、manual sync、internal broker POST、下單、改單、撤單、轉帳，亦不得改 `.env` 或 secrets。
+
+
+### Requirement 156／Task 438：完成日 K 布林延伸風險納入既有乖離因子
+
+**User Story:** 身為交易雷達使用者，我希望本機完成日 K 的布林相對位置與寬度實際參與既有計算，並能理解其保守扣分用途。
+
+**Acceptance Criteria:**
+- 用同一權息還原完成日序列連續20根有效正收盤、SMA20與population標準差2倍計算布林，不含盤中K、不跨null補根、不取未來資料；日期嚴格遞減。中軌M、upper=M+2σ、lower=M−2σ，width=(upper−lower)/M*100，percentB=(最新完成close−lower)/(upper−lower)，BigDecimal DECIMAL128中間運算及sqrt、結果scale8 HALF_UP。不足／無效回null；σ=0保留三軌價格與width0、percentB null。
+- 既有日BIAS原值b=meanAvailable(clamp(−BIAS10/10),clamp(−BIAS20/20))；有效布林時扣分p=.25*clamp(2*(percentB−.5),0,1)*min(1,width/2)*min(1,20/width)，新值clamp(b−p,−1,1)。b缺值仍缺值，布林缺值／width0沿用b。僅上方延伸扣分，不給下軌正分或直接覆寫買賣；三軌日BIAS各.06、其餘23因子與所有權重不變。所有數字為判斷性產品值，沒有獲利改善依據。
+- 純本機計算、不改富邦原值或未證實overlay，不新增外呼／DB表／公共路由。共用assembler投影nullable bollinger（date asOfDate、int period20/int standardDeviationMultiplier2、decimal三軌價格/percentB/bandWidthPercent）至detail/snapshot/export；舊snapshot缺欄null、compact list不增加detail物件。快取fingerprint含公式版本與所有有效輸入。OpenAPI只相容追加且同步兩份Swagger。
+- production升TW_RULES_V19，decisionInputVersion使用現行technicalSourceVersion組合且不得保留V18前綴；V13 candidate計算與發布gate不變，離線production baseline共用公式與asOf截斷。通知版本不同只重建baseline首輪不寄信；三期軌道與最後同軌EVIDENCE_GATE_V1不變。實際扣分與資料缺口只在同軌risks透明揭露，不作support evidence、不宣稱預測報酬。
+
+
+布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
+

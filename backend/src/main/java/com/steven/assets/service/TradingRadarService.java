@@ -1111,7 +1111,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V18（Task 382，gate 診斷風險分類修正）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V19（完成日布林延伸扣分）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1426,7 +1426,7 @@ public class TradingRadarService {
                             // 兩者與 DTO 揭露欄（toDailyCandleDto／toWeeklyDto）同源，皆取自這一份
                             // Assembled，不得為了接線再算第二次。
                             technical.dailyCandle(),
-                            resolvedWeekly));
+                            resolvedWeekly, technical.bollinger()));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
@@ -1595,7 +1595,15 @@ public class TradingRadarService {
                 core.evidence().swingRisk().riskCoverage(), actionName(core.gated().candidateSwingAction()),
                 toDailyCandleDto(core.technical().dailyCandle(), core.technical().volatility60().asOfDate()),
                 toWeeklyDto(core.resolvedTechnical().weekly(), core.technical().weeklyBarsDesc(),
-                        core.resolvedTechnical().weeklyIndicators()), core.resolvedTechnical().resolution());
+                        core.resolvedTechnical().weeklyIndicators()), core.resolvedTechnical().resolution(),
+                toBollingerDto(core.technical().bollinger()));
+    }
+
+    private static TradingRadarDto.Bollinger toBollingerDto(TradingRadarRuleEngine.BollingerInput value) {
+        if (value == null) return null;
+        return new TradingRadarDto.Bollinger(value.asOfDate() == null ? null : value.asOfDate().toString(),
+                value.period(), value.standardDeviationMultiplier(), value.middleBand(), value.upperBand(),
+                value.lowerBand(), value.percentB(), value.bandWidthPercent());
     }
 
     /**
@@ -1906,8 +1914,9 @@ public class TradingRadarService {
             Target target,
             RadarObservationResolver.AcceptedPrice acceptedPrice,
             RadarInputAssembler.Prepared technical) {
-        StringBuilder input = new StringBuilder("FUBON_RADAR_CONTEXT_V1\n");
+        StringBuilder input = new StringBuilder("FUBON_RADAR_CONTEXT_V2\n");
         appendFingerprint(input, FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION);
+        appendFingerprint(input, "LOCAL_COMPLETED_BB20_POPULATION_2SIGMA_V1");
         appendFingerprint(input, target == null ? null : target.code());
         appendFingerprint(input, target == null ? null : target.market());
         appendFingerprint(input, acceptedPrice == null || acceptedPrice.tradingDate() == null

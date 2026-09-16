@@ -58,7 +58,7 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V18";
+    public static final String RULE_VERSION = "TW_RULES_V19";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -625,6 +625,12 @@ public class TradingRadarRuleEngine {
      * @param etfPremiumPct          ETF 折溢價（%，{@code 1.2} = 溢價 1.2%）；非 ETF 為 null。
      * @param etfPremiumPercentile   該 ETF 自身歷史折溢價分位（0–100）；樣本不足或非 ETF 為 null。
      */
+    /** Local completed, distribution-adjusted 20-session Bollinger observation; never a provider overlay. */
+    public record BollingerInput(
+            LocalDate asOfDate, int period, int standardDeviationMultiplier,
+            BigDecimal middleBand, BigDecimal upperBand, BigDecimal lowerBand,
+            BigDecimal percentB, BigDecimal bandWidthPercent) {}
+
     public record StockInput(
             boolean held,
             BigDecimal price,
@@ -660,8 +666,42 @@ public class TradingRadarRuleEngine {
              * 週K 因子輸入（Task 356.6）。{@code null} 或 {@code completedWeeks < 60} 時
              * 四組週K 因子<b>全部</b>缺值、權重重分配，並於 risks 揭露。
              */
-            WeeklyInput weekly
+            WeeklyInput weekly,
+            BollingerInput bollinger
     ) {
+        /** Pre-V19 full input: missing completed Bollinger data intentionally preserves original BIAS. */
+        public StockInput(boolean held,
+            BigDecimal price,
+            BigDecimal changePercent,
+            BigDecimal completedChangePercent,
+            Indicators indicators,
+            BigDecimal previousK,
+            BigDecimal previousD,
+            Confirmation ma20Confirmation,
+            Confirmation ma60Confirmation,
+            Confirmation ma240Confirmation,
+            InstrumentType instrumentType,
+            MarketRegime marketRegime,
+            boolean marketStale,
+            BigDecimal fxPercentile,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal kdBandWidthPercent,
+            BigDecimal etfPremiumPct,
+            BigDecimal etfPremiumPercentile,
+            BigDecimal weeklyMa,
+            ExtendedIndicators extendedIndicators,
+            BigDecimal volumeRatio,
+            FundamentalInput fundamental,
+
+            CandleInput dailyCandle,
+
+            WeeklyInput weekly) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, null);
+        }
+
         /**
          * Task 356 之前的完整形狀；日K 棒與週K 缺值時五個新因子一律不採計。
          *
@@ -670,8 +710,8 @@ public class TradingRadarRuleEngine {
          * 於是五個新因子（日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能）恆為缺值、
          * 權重被重分配掉——這正是本任務實作期間真的發生過的缺陷（{@code TradingRadarService
          * .buildStock} 只傳 25 個引數，線上五因子全空、回測卻有值，兩邊靜默分岔）。
-         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 27 參數的正式建構式並傳入
-         * {@code assembled.dailyCandle()} 與 {@code assembled.weekly()}；由
+         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 28 參數的正式建構式並傳入
+         * {@code assembled.dailyCandle()}、{@code assembled.weekly()} 與 {@code assembled.bollinger()}；由
          * {@code TradingRadarStockWeeklyWiringTest} 釘住。</p>
          */
         public StockInput(
@@ -1542,7 +1582,7 @@ public class TradingRadarRuleEngine {
 
         // 因子貢獻與其文案只算一次，三軌各自加權累加（Task 305／356.7a）：避免逐檔重算三遍，
         // 更避免日後只改其中一軌路徑上的貢獻函數呼叫，導致三軌靜默分岔。
-        FactorContributions factors = computeFactors(input, narrowBand, kdHeat);
+        FactorContributions factors = computeFactors(input, narrowBand, kdHeat, candidate == null);
         HorizonScore medium = evaluateHorizon(input, Horizon.MEDIUM, factors, kdHeat, timing,
                 profitTaking, candidate,
                 context == null ? null : context.mediumTreasuryContribution(), context,
@@ -1633,7 +1673,7 @@ public class TradingRadarRuleEngine {
      * <p>{@code kdHeat} 目前不影響任何共用貢獻值或文案，接收它只是與 {@code evaluateStock}
      * 既有的一次性求值（{@code kdHeatOf(input)} 只呼叫一次）對齊，避免呼叫端另外分開傳遞。</p>
      */
-    private FactorContributions computeFactors(StockInput input, boolean narrowBand, KdHeat kdHeat) {
+    private FactorContributions computeFactors(StockInput input, boolean narrowBand, KdHeat kdHeat, boolean production) {
         List<String> reasons = new ArrayList<>();
         List<String> risks = new ArrayList<>();
 
@@ -1656,6 +1696,8 @@ public class TradingRadarRuleEngine {
         Double macd = macdContribution(input.extendedIndicators(), input.price(), reasons, risks);
         Double rsi = rsiContribution(input.extendedIndicators(), reasons, risks);
         Double bias = biasContribution(input.extendedIndicators(), reasons, risks);
+        // Candidate factors and their narratives remain frozen; production alone uses this safety preference.
+        if (production) bias = bollingerAdjustedBias(bias, input.bollinger(), risks);
         Double volume = volumeContribution(input.completedChangePercent(), input.volumeRatio(), reasons, risks);
 
         Double market = null;
@@ -2501,6 +2543,34 @@ public class TradingRadarRuleEngine {
         if (value != null && value > 0.4) reasons.add("乖離率偏低，具均值回歸與逢低承接空間。 ");
         if (value != null && value < -0.4) risks.add("乖離率偏高，追價成本升高。 ");
         return value;
+    }
+
+    /** Judgmental extension penalty inside the existing BIAS weight, not a stand-alone buy/sell signal. */
+    static Double bollingerAdjustedBias(Double bias, BollingerInput observation, List<String> risks) {
+        if (bias == null) return null;
+        if (observation == null || observation.bandWidthPercent() == null) {
+            risks.add("布林完成日資料不足，本次沿用原乖離因子。 ");
+            return bias;
+        }
+        if (observation.bandWidthPercent().signum() == 0) {
+            risks.add("布林區間無寬度，本次不採計延伸扣分。 ");
+            return bias;
+        }
+        double penalty = bollingerExtensionPenalty(observation);
+        if (penalty > 0) {
+            risks.add("布林完成日價格位於中軌上方，已在乖離因子採計上方延伸扣分；觸及上軌不構成單獨賣訊。 ");
+        }
+        return clampUnit(bias - penalty);
+    }
+
+    static double bollingerExtensionPenalty(BollingerInput observation) {
+        if (observation == null || observation.percentB() == null || observation.bandWidthPercent() == null) return 0;
+        double width = observation.bandWidthPercent().doubleValue();
+        double position = observation.percentB().doubleValue();
+        if (!Double.isFinite(width) || width <= 0 || !Double.isFinite(position)) return 0;
+        double extension = Math.max(0, Math.min(1, 2 * (position - 0.5)));
+        double reliability = Math.min(1, width / 2) * Math.min(1, 20 / width);
+        return 0.25 * extension * reliability;
     }
 
     /** 個股完成日量價確認；相對量使用調整後成交股數計算。 */

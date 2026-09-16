@@ -47,7 +47,7 @@ class RadarTechnicalResolverFubonOverlayTest {
                 false, false, false, DAILY_AS_OF, WEEKLY_AS_OF, FINGERPRINT, NOW);
 
         assertThat(resolved.resolution().source()).isEqualTo("FUBON_SDK");
-        // No evidence-backed provider field is currently approved for V18,
+        // No evidence-backed provider field is currently approved for this production version,
         // therefore each exact counterpart remains the prepared local value.
         assertThat(resolved.indicators().weeklyMa()).isEqualByComparingTo("1");
         assertThat(resolved.indicators().monthlyMa()).isEqualByComparingTo("1");
@@ -78,6 +78,26 @@ class RadarTechnicalResolverFubonOverlayTest {
         verify(cache).readPairs(List.of(CODE));
         verifyNoInteractions(facts);
         verify(cache, never()).writePair(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void priorProductionInputVersionCannotHitAnOtherwiseFreshBoundBundle() throws Exception {
+        RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
+        RadarTechnicalCachePort cache = mock(RadarTechnicalCachePort.class);
+        ObjectMapper json = new ObjectMapper();
+        var daily = document("D", DAILY_AS_OF);
+        var weekly = document("W", WEEKLY_AS_OF);
+        daily.put("decisionInputVersion", "TW_RULES_V18|FUBON_OVERLAY_V1");
+        weekly.put("decisionInputVersion", "TW_RULES_V18|FUBON_OVERLAY_V1");
+        when(cache.readPairs(List.of(CODE))).thenReturn(Map.of(CODE, new RadarTechnicalCachePort.Pair(
+                json.writeValueAsString(daily), json.writeValueAsString(weekly))));
+        when(facts.findFreshCompleteCaptures(List.of(CODE), NOW)).thenReturn(Map.of());
+        var result = new RadarTechnicalResolver(facts, cache, json).resolve(
+                CODE, "台股", localIndicators(), localWeekly(), localIndicators(),
+                false, false, false, DAILY_AS_OF, WEEKLY_AS_OF, FINGERPRINT, NOW);
+        assertThat(result.resolution().source()).isEqualTo("LOCAL_CALCULATED");
+        assertThat(result.resolution().decisionInputVersion()).isEqualTo("TW_RULES_V19|FUBON_OVERLAY_V1");
+        verify(facts).findFreshCompleteCaptures(List.of(CODE), NOW);
     }
 
     @Test

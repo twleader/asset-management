@@ -12238,3 +12238,14 @@ Before the native/non-null dedupe branch, recorder code validates the catalog th
 ### Performance acceptance protocol
 
 Use one authenticated owner with 38 fixed eligible targets, a warm Docker stack and warm Redis/data. Make seven serial requests to authenticated BFF list and full endpoints, discard each endpoint's first request, then record all six TTFB values, bodies and medians. Every list TTFB must be at most 800ms, list body must be below 70 KiB, and the legacy full median must be at least twice the list median. The report records endpoint, timestamp, bytes and each sample; 9090/public measurements cannot substitute for this browser proof. If an existing authorized session is unavailable, this browser measurement is explicitly pending rather than claimed as completed.
+
+
+## Requirement 156／Task 438：完成日布林延伸扣分
+
+RadarInputAssembler從已權息還原且排除進行中K的firstCompletedIndex切連續20收盤，產一次immutable BollingerInput，傳入StockInput與唯一nullable detail/snapshot/export projection。公式20日SMA及population σ、上下軌2σ、width百分點/%B；BigDecimal DECIMAL128、輸出8位。constant width0不算%B，任何無效窗不跨缺口補根。production BIAS既有值減最多.25的上方延伸扣分：p=.25*clamp(2*(%B−.5),0,1)*min(1,width/2)*min(1,20/width)；原BIAS null仍null，布林null沿用原值。23因子/三軌各.06 BIAS/V13 candidate不變；不新增直接action覆寫。這是判斷性保守成本偏好，不是獲利或回檔機率模型。
+
+RULE_VERSION V19與decisionInputVersion現行source組合共同隔離cache/notification，first-version transition只建baseline。BOUND fingerprint包含有效20日期/close及公式／來源版本（同份Prepared有效窗唯一決定完整布林結果），避免舊cache命中。list compact core使用同一計算但不建detail；full/detail投影布林date/int/decimal DTO，舊快照缺欄null。nullable bollinger只追加至既有可達typed契約、不新增路由，OpenAPI相容minor及Swagger兩鏡像同步。risks按三軌局部揭露且EvidenceGate最後仍保持同軌安全裁切。offline production共用assembler、history截斷，不alter candidate V13。
+
+
+布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
+

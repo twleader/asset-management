@@ -342,7 +342,7 @@ public final class StrictPublicJsonResponse {
                 "shortEvidenceConfidence", "mediumEvidenceConfidence", "shortRiskCoverage", "mediumRiskCoverage", "candidateAction",
                 "shortCandidateAction", "actionGateReasons", "etfPremiumLivePct", "etfPremiumLiveNavAsOf", "swingAction",
                 "swingActionLabel", "swingScore", "swingReasons", "swingRisks", "swingDownsideRisk", "swingEvidenceConfidence",
-                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution");
+                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger");
         nullableTexts(value, "stockCode", "stockName", "market", "assetClass", "action", "actionLabel", "counterTrendState",
                 "counterTrendLabel", "quoteStatus", "priceUpdatedAt", "asOfDate", "monthlyConfirmation", "quarterlyConfirmation",
                 "annualConfirmation", "underlyingCurrency", "kdHeat", "timingState", "timingLabel", "shortAction",
@@ -362,6 +362,22 @@ public final class StrictPublicJsonResponse {
         nullableObject(field(value, "dailyCandle"), StrictPublicJsonResponse::dailyCandle);
         nullableObject(field(value, "weeklyIndicators"), StrictPublicJsonResponse::weeklyIndicators);
         nullableObject(field(value, "technicalResolution"), StrictPublicJsonResponse::technicalResolution);
+        nullableObject(field(value, "bollinger"), StrictPublicJsonResponse::bollinger);
+    }
+
+    private static void bollinger(JsonNode value) {
+        exactObject(value, "asOfDate", "period", "standardDeviationMultiplier", "middleBand", "upperBand",
+                "lowerBand", "percentB", "bandWidthPercent");
+        nullableText(field(value, "asOfDate"));
+        if (!field(value, "asOfDate").isNull()) LocalDate.parse(field(value, "asOfDate").textValue());
+        integer(field(value, "period"));
+        integer(field(value, "standardDeviationMultiplier"));
+        if (!field(value, "period").canConvertToInt() || field(value, "period").intValue() != 20
+                || !field(value, "standardDeviationMultiplier").canConvertToInt()
+                || field(value, "standardDeviationMultiplier").intValue() != 2) invalid();
+        for (String name : new String[]{"middleBand", "upperBand", "lowerBand", "percentB", "bandWidthPercent"}) {
+            nullableNumber(field(value, name));
+        }
     }
 
     private static void technicalResolution(JsonNode value) {

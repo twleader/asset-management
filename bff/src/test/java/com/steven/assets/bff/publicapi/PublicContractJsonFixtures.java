@@ -22,6 +22,15 @@ public final class PublicContractJsonFixtures {
     public static final String TRADING_RADAR_LIST_WITH_NULLABLE_STOCK = TRADING_RADAR_LIST.replace(
             "\"stocks\":[]", "\"stocks\":[" + nullableNestedListStock() + "]");
 
+    public static final String TRADING_RADAR_STOCK_DETAIL = TRADING_RADAR_LIST
+            .replace("\"stocks\":[],\"skippedNonTwStocks\":0,\"publicInformation\":[]", "\"stock\":" + nullableNestedDetailStock());
+
+    private static String nullableNestedDetailStock() {
+        return """
+                {"stockCode":"2330","stockName":"測試標的","market":"台股","assetClass":null,"distributionAdjusted":false,"held":false,"action":null,"actionLabel":null,"score":null,"counterTrendState":null,"counterTrendLabel":null,"counterTrendReasons":[],"counterTrendRisks":[],"dataComplete":false,"price":null,"changePercent":null,"quoteStatus":null,"priceUpdatedAt":null,"asOfDate":null,"monthlyMa":null,"quarterlyMa":null,"annualMa":null,"kValue":null,"dValue":null,"monthlyConfirmation":null,"quarterlyConfirmation":null,"annualConfirmation":null,"fxPercentile":null,"underlyingCurrency":null,"reasons":[],"risks":[],"kdHeat":null,"timingState":null,"timingLabel":null,"ma60BiasPercent":null,"week52Position":null,"weeklyMa":null,"etfPremiumPct":null,"etfPremiumPercentile":null,"extendedIndicators":null,"shortAction":null,"shortActionLabel":null,"shortScore":null,"shortReasons":[],"shortRisks":[],"horizonConflict":false,"volumeRatio":null,"fxAsOfDate":null,"profitTakingConfirmed":false,"fundamental":null,"evidence":null,"shortDownsideRisk":null,"mediumDownsideRisk":null,"shortEvidenceConfidence":null,"mediumEvidenceConfidence":null,"shortRiskCoverage":null,"mediumRiskCoverage":null,"candidateAction":null,"shortCandidateAction":null,"actionGateReasons":[],"etfPremiumLivePct":null,"etfPremiumLiveNavAsOf":null,"swingAction":null,"swingActionLabel":null,"swingScore":null,"swingReasons":[],"swingRisks":[],"swingDownsideRisk":null,"swingEvidenceConfidence":null,"swingRiskCoverage":null,"swingCandidateAction":null,"dailyCandle":null,"weeklyIndicators":null,"technicalResolution":null,"bollinger":null}
+                """.strip();
+    }
+
     public static String tradingCalendar(int year) {
         StringBuilder days = new StringBuilder();
         LocalDate current = LocalDate.of(year, 1, 1);

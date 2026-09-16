@@ -57,20 +57,19 @@ class TradingRadarLivePremiumRuleIsolationTest {
         List<String> components =
                 componentNames(com.steven.assets.dto.TradingRadarDto.StockDecision.class);
 
-        // Task 356.11b/408：62 → 74（1周~1月 軌九欄 ＋ dailyCandle ＋ weeklyIndicators
-        // ＋ immutable technicalResolution）。
-        assertThat(components).hasSize(74);
+        // Task 356.11b/408/438：62 → 75（既有十二欄後再附加 completed-local bollinger）。
+        assertThat(components).hasSize(75);
         // Task 320 的兩欄仍緊接 actionGateReasons，且相對順序未變——
         // 中間插入會讓既有 positional 呼叫端一起位移。
         assertThat(components.subList(59, 62))
                 .as("Task 320 的兩欄仍在既有 62 欄的最末")
                 .containsExactly("actionGateReasons", "etfPremiumLivePct", "etfPremiumLiveNavAsOf");
         // Task 356 的 11 欄與 Task408 technicalResolution 都一律追加在既有 62 個之後；
-        // technicalResolution 必須是最後一欄，舊有 positional constructor 不得被中途位移。
+        // Task 438 bollinger 再接在 technicalResolution 之後，舊有 positional constructor 不得被中途位移。
         assertThat(components.subList(62, components.size()))
                 .containsExactly("swingAction", "swingActionLabel", "swingScore",
                         "swingReasons", "swingRisks", "swingDownsideRisk",
                         "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
-                        "dailyCandle", "weeklyIndicators", "technicalResolution");
+                        "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger");
     }
 }

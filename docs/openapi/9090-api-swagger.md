@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.11.0` |
+| 契約版本 | `1.12.0` |
 | 對外路徑 | 13 條：12 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -1592,6 +1592,22 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `dailyCandle` | 是 | `DailyCandle | null` | 是 |  | 交易雷達採用的最近一日 OHLC K 棒。 |
 | `weeklyIndicators` | 是 | `WeeklyIndicators | null` | 是 |  | 交易雷達採用的週線技術指標。 |
 | `technicalResolution` | 是 | `TechnicalResolution | null` | 是 |  | Task408 技術指標來源決策。null 僅表示舊快照的 LEGACY_LOCAL_V0，不能當成現在的富邦資料或零值。 |
+| `bollinger` | 是 | `Bollinger | null` | 是 |  | 本機完成日布林，用於既有乖離因子中的上方延伸扣分，不是單獨買賣訊號，也不使用未證實富邦布林 overlay。 |
+
+### `Bollinger`
+
+同一完成日 K 權息還原價格窗的本機 BB20/2。population 標準差與 SMA 同窗；窄幅及極寬幅衰減上方延伸扣分，沒有報酬或回檔機率宣稱。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `asOfDate` | 是 | `string | null (date)` | 是 |  | 最新完成日 K 的交易日期，不採盤中報價日期。 |
+| `period` | 是 | `integer (int32)` | 否 | enum: `20` | 同窗平均與 population 標準差的連續有效完成日 K 根數，固定 20。 |
+| `standardDeviationMultiplier` | 是 | `integer (int32)` | 否 | enum: `2` | 上下軌相對中軌的標準差倍數，固定 2。 |
+| `middleBand` | 是 | `number | null` | 是 |  | 20 根完成日正收盤的簡單平均，權息還原價格基礎。 最終數值採小數 8 位 HALF_UP。 |
+| `upperBand` | 是 | `number | null` | 是 |  | 同窗 SMA20 加兩倍 population 標準差，觸及上軌不是單獨賣訊。 最終數值採小數 8 位 HALF_UP。 |
+| `lowerBand` | 是 | `number | null` | 是 |  | 同窗 SMA20 減兩倍 population 標準差，可能非正且觸及下軌不給買入加分。 最終數值採小數 8 位 HALF_UP。 |
+| `percentB` | 是 | `number | null` | 是 |  | 最新完成收盤相對上下軌位置的比例，可低於 0 或高於 1；零寬度為 null。 最終數值採小數 8 位 HALF_UP。 |
+| `bandWidthPercent` | 是 | `number | null` | 是 |  | 上下軌差除中軌再乘 100 的百分點，常數窗為 0，不能當成 9 日 KD 高低帶寬度。 最終數值採小數 8 位 HALF_UP。 |
 
 ### `TechnicalResolution`
 
@@ -1599,7 +1615,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V18\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V19\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |
