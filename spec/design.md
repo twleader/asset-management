@@ -12266,3 +12266,6 @@ Drive outcome與captured destination config完整比對後才更新metadata；�
 
 八頁保持各自現行BFF/DTO和多times結構。canonical setting只由load或成功save回應更新，card render canonical摘要。dialog open做deep copy至draft（不同市場/子time完全隔離），所有輸入與browse結果只動draft。cancel/close丟棄draft無寫入；save一次busy gate，沿用現行normalize與endpoint，成功canonical replace+close，失敗保留draft+error。busy阻擋save/close/runNow等衝突動作；runNow保留既有已保存設定語意、不得暗中保存draft。不動頁面其他CRUD、圖表、SSE；frontend render與狀態處理不添加business規則。
 
+## Requirement 32／Task 442：投組建議三模式與現有逾時註解校正
+
+僅同步現存實作的注釋/說明：LOCAL同步終態、不建client/不查key/無外呼；HYBRID非同步PROCESSING、數字本機、僅兩段文字LLM且停web search；LLM完整非同步PROCESSING與現有捕捉adviceId的背景結果寫回。MarketAnalysis client現已有90秒transport timeout，batch poll/catch/stale守門維持原行為。controller文案不得一律宣稱同步或每模式都PROCESSING；不重做已存在timeout、不新增模型/參數/API/SQL/排程。

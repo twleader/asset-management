@@ -72,12 +72,12 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>使用者先在頁面填理財條件（生日／退休前年薪與年支出／退休日期／理財目標／風險承受度／獲利預期／退休後現金流與試算假設，存於
  * {@code investment_profile}），再按「產生建議」：本服務讀該使用者最新 {@code asset_snapshot} 的現況配置與持有明細，
- * 結合條件組提示詞，**同步**呼叫 Claude（adaptive thinking + 可選 {@code web_search} 納入當前市場）產出結構化建議
- * （整體評析／風險評估／建議目標配置／調整動作／風險提醒／參考來源），解析後存 {@code portfolio_advice}（歷次保存）。
+ * 結合理財條件產出結構化建議並保存歷次結果。LOCAL 在 request 內同步落終態；HYBRID 與 LLM
+ * 先保存 {@code PROCESSING}，再將工作交給背景執行緒池，前端輪詢結果。
  *
- * <p>與「今日股市分析」的差異：分析是每日排程、走 Batch API（省 50%、可等）；本功能是互動式即時需求，故走
- * 同步 Messages API（點按鈕即等結果）。同步在 request 執行緒內 owner context 已綁定，{@code @Filter}／
- * {@link TenantGuard} 正常運作。金鑰未設定或呼叫／解析失敗 → 落 {@code NOT_CONFIGURED}／{@code FAILED}，不拋出。
+ * <p>request 執行緒先依 owner context 讀取資料並組好 prompt；背景只執行 Claude 呼叫並以
+ * 捕捉的 {@code adviceId} 更新結果，不查 owner-scoped 資料，也不自動繼承 request tenant context。HYBRID 與 LLM 的 Messages API 呼叫
+ * 在背景執行，金鑰未設定或呼叫／解析失敗落 {@code NOT_CONFIGURED}／{@code FAILED}。
  *
  * <p><b>Requirement 80 / Task 339 起有三條路徑</b>，由 {@code portfolio_advice_setting.engine} 決定：
  * <ul>
@@ -85,8 +85,8 @@ import java.util.concurrent.TimeUnit;
  *       <b>不建 {@code AnthropicClient}、不發任何外部請求、不檢查金鑰</b>，同步落終態（不經 {@code PROCESSING}）。</li>
  *   <li>{@link #ENGINE_HYBRID}：所有數字仍由本機決定，LLM 只把結果改寫成 {@code summary} 與
  *       {@code riskAssessment} 兩段文字；<b>強制停用 {@code web_search}</b>、{@code references} 固定空陣列，
- *       維持既有非同步形狀。</li>
- *   <li>{@link #ENGINE_LLM}：既有完整路徑（adaptive thinking ＋ effort ＋ {@code web_search} ＋ references 淨化）。</li>
+ *       立即回 {@code PROCESSING}，由背景工作完成。</li>
+ *   <li>{@link #ENGINE_LLM}：立即回 {@code PROCESSING}，背景執行完整路徑（adaptive thinking ＋ effort ＋可選 {@code web_search} ＋ references 淨化）。</li>
  * </ul>
  * 三檔位共用同一組狀態常數與同一個 {@link #latest()} 自癒邏輯，也共用同一支
  * {@link #enrich(PortfolioAdviceResult, BigDecimal)} 做金額算術——不得為本機檔位另寫一份。
@@ -628,7 +628,7 @@ public class PortfolioAdviceService {
     // ===== 產生建議 =====
 
     /**
-     * upsert 條件後，落一筆 {@code PROCESSING} 建議並立即回傳；實際 Claude 呼叫（數十秒）由背景執行緒
+     * upsert 條件後，LOCAL 同步落終態；HYBRID／LLM 落 {@code PROCESSING} 並立即回傳。Claude 呼叫由背景執行緒
      * {@link #runGeneration} 進行，完成後把該列更新為 {@code OK}/{@code FAILED}。前端輪詢至非 PROCESSING。
      *
      * <p>非同步（非同步呼叫）是為避免同步長連線撞 nginx/proxy 60s 逾時；且送出即有 PROCESSING 回饋。

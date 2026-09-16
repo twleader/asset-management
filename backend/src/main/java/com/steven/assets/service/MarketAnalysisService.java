@@ -853,6 +853,7 @@ public class MarketAnalysisService {
                     // 以此為上限拋出（而非 SDK 預設 10 分鐘），避免單次收尾呼叫長時間阻塞排程執行緒。
                     c = AnthropicOkHttpClient.builder()
                             .apiKey(apiKey)
+                            // 單次 Batch client HTTP 呼叫最多等待 90 秒；批次輪詢與自癒期限沿用既有規則。
                             .timeout(Duration.ofSeconds(90))
                             .build();
                     anthropicClient = c;
