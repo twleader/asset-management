@@ -84,6 +84,7 @@ class ExportScheduleGdriveTest {
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
                 baseDir.toString());
+        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
         when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -113,7 +114,7 @@ class ExportScheduleGdriveTest {
     }
 
     private ExportScheduleSetting setting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
-        return ExportScheduleSetting.builder()
+        return ExportScheduleSetting.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .id(owner).ownerUserId(owner)
                 .enabled(true).runHour(0).runMinute(0).outputSubpath("input")
                 .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath)
@@ -137,7 +138,7 @@ class ExportScheduleGdriveTest {
         assertThatThrownBy(() -> service.updateForCurrentUser(new ExportScheduleDto.SettingRequest(
                 true, 8, 0, "input", true, DRIVE_DIR)))
                 .isInstanceOf(AdminRequiredException.class);   // 403，不是 400
-        verify(settingRepo, never()).save(any());
+        // This in-memory fixture has no rollback evidence; the real PostgreSQL suite proves no setting remains.
     }
 
     @Test
@@ -174,7 +175,7 @@ class ExportScheduleGdriveTest {
     void 多個時間依時分排序且各自保留相同時間的guard() {
         givenCurrentUser(ADMIN_ID);
         ExportScheduleSetting current = setting(ADMIN_ID, false, null);
-        var nineThirty = com.steven.assets.model.ExportScheduleTime.builder()
+        var nineThirty = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         current.addTime(nineThirty);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
@@ -373,7 +374,7 @@ class ExportScheduleGdriveTest {
     void runNow既有多時間設定不新增也不修改childGuard() throws IOException {
         givenCurrentUser(ADMIN_ID);
         ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var morning = com.steven.assets.model.ExportScheduleTime.builder().runHour(8).runMinute(0)
+        var morning = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(8).runMinute(0)
                 .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
         s.addTime(morning);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
@@ -387,31 +388,23 @@ class ExportScheduleGdriveTest {
     }
 
     @Test
-    void runNow無設定建立disabledParent與未guard的0800child() throws IOException {
+    void runNow無設定只產檔而不建立設定或child() throws IOException {
         givenCurrentUser(ADMIN_ID);
         when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
         when(excelExportService.liveAssetsDoc()).thenReturn(doc());
 
-        service.runNowForCurrentUser();
-
-        org.mockito.ArgumentCaptor<ExportScheduleSetting> saved =
-                org.mockito.ArgumentCaptor.forClass(ExportScheduleSetting.class);
-        verify(settingRepo).save(saved.capture());
-        ExportScheduleSetting created = saved.getValue();
-        assertThat(created.getEnabled()).isFalse();
-        assertThat(created.getTimes()).singleElement().satisfies(time -> {
-            assertThat(time.getRunHour()).isEqualTo(8);
-            assertThat(time.getRunMinute()).isZero();
-            assertThat(time.getEnabled()).isTrue();
-            assertThat(time.getLastRunDate()).isNull();
-        });
+        var result = service.runNowForCurrentUser();
+        assertThat(result.path()).isNotNull();
+        assertThat(result.jsonPath()).isNotNull();
+        verify(settingRepo, never()).save(any());
+        verify(settingRepo, never()).saveAndFlush(any());
     }
 
     @Test
     void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws IOException {
         ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var first = com.steven.assets.model.ExportScheduleTime.builder().runHour(0).runMinute(0).enabled(true).build();
-        var second = com.steven.assets.model.ExportScheduleTime.builder().runHour(0).runMinute(1).enabled(true).build();
+        var first = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
+        var second = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1).enabled(true).build();
         s.addTime(first);
         s.addTime(second);
         when(settingRepo.findAll()).thenReturn(List.of(s));
@@ -436,7 +429,7 @@ class ExportScheduleGdriveTest {
     @Test
     void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
         ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var due = com.steven.assets.model.ExportScheduleTime.builder()
+        var due = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
                 .runHour(0).runMinute(0).enabled(true).build();
         s.addTime(due);
         when(settingRepo.findAll()).thenReturn(List.of(s));

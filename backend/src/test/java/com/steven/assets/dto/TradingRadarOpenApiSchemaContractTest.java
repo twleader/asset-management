@@ -34,6 +34,7 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.Response.class, "TradingRadarResponse"),
             new Binding(TradingRadarDto.MarketSummary.class, "MarketSummary"),
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
+            new Binding(TradingRadarDto.Bollinger.class, "Bollinger"),
             new Binding(TradingRadarDto.TechnicalResolution.class, "TechnicalResolution"),
             new Binding(TradingRadarDto.TechnicalProfileResolution.class, "TechnicalProfileResolution"),
             new Binding(TradingRadarDto.TechnicalFieldProvenance.class, "TechnicalFieldProvenance"),
@@ -59,6 +60,7 @@ class TradingRadarOpenApiSchemaContractTest {
     /** 明示可為 null 的 wire fields；未列者必須是非 nullable schema。 */
     private static final Map<String, Set<String>> NULLABLE = Map.ofEntries(
             Map.entry("TradingRadarResponse", set()),
+            Map.entry("Bollinger", set("asOfDate", "middleBand", "upperBand", "lowerBand", "percentB", "bandWidthPercent")),
             Map.entry("DailyCandle", set(
                     "open", "high", "low", "close", "closePosition", "bodyDirection",
                     "lowerShadowRatio", "asOfDate")),
@@ -90,7 +92,7 @@ class TradingRadarOpenApiSchemaContractTest {
                     // 與 boolean 欄不列入，其餘一律 nullable。
                     "swingAction", "swingActionLabel", "swingScore", "swingDownsideRisk",
                     "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
-                    "dailyCandle", "weeklyIndicators", "technicalResolution")),
+                    "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger")),
             Map.entry("TechnicalResolution", set(
                     "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
                     "oldestObservedAt", "freshUntil", "ageSeconds")),
@@ -148,6 +150,7 @@ class TradingRadarOpenApiSchemaContractTest {
     /** Java String 承載但具有穩定 ISO 語意的欄位；其餘 String 不得猜 format。 */
     private static final Map<String, Map<String, String>> STRING_FORMATS = Map.ofEntries(
             Map.entry("TradingRadarResponse", formats("generatedAt", "date-time")),
+            Map.entry("Bollinger", formats("asOfDate", "date")),
             Map.entry("MarketSummary", formats(
                     "asOfDate", "date", "marketVolumeAsOfDate", "date", "usTechAsOfDate", "date")),
             Map.entry("StockDecision", formats("asOfDate", "date", "fxAsOfDate", "date")),
@@ -234,7 +237,7 @@ class TradingRadarOpenApiSchemaContractTest {
 
         assertThat(example).containsEntry("source", "FUBON_SDK")
                 .containsEntry("binding", "BOUND_CONTEXT")
-                .containsEntry("decisionInputVersion", "TW_RULES_V18|FUBON_OVERLAY_V1");
+                .containsEntry("decisionInputVersion", "TW_RULES_V19|FUBON_OVERLAY_V1");
         assertThat((List<?>) example.get("profiles"))
                 .extracting(profile -> map(profile).get("profileId"))
                 .contains("sma_d_20", "sma_w_20");

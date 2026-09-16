@@ -14,5 +14,10 @@ import java.util.Optional;
  */
 public interface IndexExportScheduleRepository extends JpaRepository<IndexExportSchedule, Long> {
 
+    /** Parent-only lock: collection joins would make PostgreSQL FOR UPDATE invalid. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select s from IndexExportSchedule s where s.ownerUserId = :owner")
+    Optional<IndexExportSchedule> findLockedByOwnerUserId(@org.springframework.data.repository.query.Param("owner") Long owner);
+
     Optional<IndexExportSchedule> findByOwnerUserId(Long ownerUserId);
 }

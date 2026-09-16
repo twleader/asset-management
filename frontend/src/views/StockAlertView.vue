@@ -122,14 +122,19 @@
       <template #header>
         <span class="section-title">📤 觸發即時匯出（JSON）</span>
       </template>
+      <div>已儲存：{{ exportSetting.outputSubpath || '家目錄根' }}；Drive {{ exportSetting.gdriveEnabled ? '啟用' : '停用' }}</div>
+      <el-button type="primary" :disabled="savingExport" @click="openExportDialog">編輯設定</el-button>
+      <el-button :loading="runningExport" :disabled="savingExport" @click="runNowExport">立即匯出到目錄</el-button>
+      <el-dialog v-model="outputSettingDialog.visible" title="編輯匯出設定" width="680px" :close-on-click-modal="!savingExport" :close-on-press-escape="!savingExport" :show-close="!savingExport" :before-close="closeExportDialog">
+      <div v-if="outputSettingDialog.draft">
       <el-form :inline="true" label-width="110px" class="export-form">
         <el-form-item label="啟用即時匯出">
-          <el-switch v-model="exportSetting.enabled" />
+          <el-switch :disabled="savingExport" v-model="outputSettingDialog.draft.enabled" />
         </el-form-item>
         <el-form-item label="輸出資料夾">
-          <el-input v-model="exportSetting.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+          <el-input :disabled="savingExport" v-model="outputSettingDialog.draft.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
             <template #append>
-              <el-button :icon="FolderOpened" @click="openDirPicker()">選擇</el-button>
+              <el-button :disabled="savingExport" :icon="FolderOpened" @click="openDirPicker()">選擇</el-button>
             </template>
           </el-input>
         </el-form-item>
@@ -141,40 +146,40 @@
         <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
           <div style="display:flex; flex-direction:column; gap:6px">
             <div style="display:flex; align-items:center; gap:12px">
-              <el-switch v-model="exportSetting.gdriveEnabled" />
+              <el-switch :disabled="savingExport" v-model="outputSettingDialog.draft.gdriveEnabled" />
               <el-input
-                v-model="exportSetting.gdriveSubpath"
+                v-model="outputSettingDialog.draft.gdriveSubpath"
                 readonly
                 placeholder="（尚未選擇 Drive 資料夾）"
-                :disabled="!exportSetting.gdriveEnabled"
+                :disabled="savingExport || (!outputSettingDialog.draft.gdriveEnabled)"
                 style="width:260px"
               >
                 <template #append>
-                  <el-button :disabled="!exportSetting.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button>
+                  <el-button :disabled="savingExport || (!outputSettingDialog.draft.gdriveEnabled)" @click="openDirPicker('gdrive')">選擇</el-button>
                 </template>
               </el-input>
             </div>
             <div class="export-hint">
               開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
               <strong>本機那一份永遠即時照寫、不受影響</strong>。
-              <template v-if="exportSetting.gdriveEnabled && exportSetting.gdriveSubpath">
-                <br />Drive 落點：<code>{{ exportSetting.gdriveRemote || 'GDriveOutput' }}:{{ exportSetting.gdriveSubpath }}</code>
+              <template v-if="outputSettingDialog.draft.gdriveEnabled && outputSettingDialog.draft.gdriveSubpath">
+                <br />Drive 落點：<code>{{ outputSettingDialog.draft.gdriveRemote || 'GDriveOutput' }}:{{ outputSettingDialog.draft.gdriveSubpath }}</code>
               </template>
               <br /><strong>本機即時、Drive 最多延遲約一分鐘</strong>：短時間內連續觸發時，
               Drive 那一份會合併成一次上傳（檔案每次都是當日全量重寫，合併不會少任何一筆）。
               <br />上次上傳：
-              <template v-if="exportSetting.gdriveLastRunAt">
-                {{ exportSetting.gdriveLastRunAt }} — <code>{{ exportSetting.gdriveLastStatus || '—' }}</code>
+              <template v-if="outputSettingDialog.draft.gdriveLastRunAt">
+                {{ outputSettingDialog.draft.gdriveLastRunAt }} — <code>{{ outputSettingDialog.draft.gdriveLastStatus || '—' }}</code>
               </template>
               <template v-else>—（尚未上傳過）</template>
             </div>
           </div>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="savingExport" @click="saveExportSetting">儲存設定</el-button>
-          <el-button :loading="runningExport" @click="runNowExport">立即匯出</el-button>
-        </el-form-item>
-      </el-form>
+
+      </el-form>      </div>
+      <template #footer><el-button :disabled="savingExport" @click="outputSettingDialog.visible = false">取消</el-button><el-button type="primary" :loading="savingExport" :disabled="savingExport" @click="saveExportSetting">儲存設定</el-button></template>
+      </el-dialog>
+
       <div class="export-hint">
         警示條件（含複合條件群組）一旦觸發，立刻把<strong>最近 3 天的全部觸發</strong>寫到指定資料夾，
         檔名 <code>alert_triggers_{{ '{使用者ID}' }}.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>（主檔名相同、只差副檔名，固定不含日期）；每次觸發覆寫同一組檔案。
@@ -475,6 +480,7 @@
 </template>
 
 <script setup>
+import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingDraft'
 import { Plus, Edit, Delete, Loading, Operation, Refresh, FolderOpened } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import Sortable from 'sortablejs'
@@ -629,6 +635,7 @@ const exportSetting = reactive({
   lastRunAt: null, lastRunStatus: ''
 })
 const savingExport = ref(false)
+const outputSettingDialog = reactive({ visible: false, draft: null })
 const runningExport = ref(false)
 
 async function loadExportSetting() {
@@ -656,21 +663,31 @@ function applyExportSetting(s) {
   exportSetting.gdriveLastStatus = s.gdriveLastStatus || ''
 }
 
+function openExportDialog() {
+  if (savingExport.value) return
+  outputSettingDialog.draft = cloneExportSetting(exportSetting)
+  outputSettingDialog.visible = true
+}
+function closeExportDialog(done) { if (!savingExport.value) done() }
+
 async function saveExportSetting() {
+  if (savingExport.value || !outputSettingDialog.draft) return
+  const draft = outputSettingDialog.draft
   // 前端先擋一次空值，後端仍會驗（真正的閘門在後端）
-  if (exportSetting.gdriveEnabled && !(exportSetting.gdriveSubpath || '').trim()) {
+  if (draft.gdriveEnabled && !(draft.gdriveSubpath || '').trim()) {
     ElMessage.warning('已啟用 Google Drive 同步，請先選擇 Drive 目標資料夾')
     return
   }
   savingExport.value = true
   try {
     const s = await bffApi.stockAlert.saveExportSetting({
-      enabled: exportSetting.enabled,
-      outputSubpath: (exportSetting.outputSubpath || '').trim(),
-      gdriveEnabled: exportSetting.gdriveEnabled,
-      gdriveSubpath: (exportSetting.gdriveSubpath || '').trim()
+      enabled: draft.enabled,
+      outputSubpath: (draft.outputSubpath || '').trim(),
+      gdriveEnabled: draft.gdriveEnabled,
+      gdriveSubpath: (draft.gdriveSubpath || '').trim()
     })
     applyExportSetting(s)
+    outputSettingDialog.visible = false
     ElMessage.success('觸發匯出設定已儲存')
     // 啟用當下的可用性自檢警告（Requirement 52）：不入庫，只在這一次回應裡
     showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
@@ -683,6 +700,7 @@ async function saveExportSetting() {
 }
 
 async function runNowExport() {
+  if (savingExport.value || runningExport.value) return
   runningExport.value = true
   try {
     const r = await bffApi.stockAlert.runNowExport()
@@ -725,8 +743,9 @@ const dirPickerPreview = computed(() => {
 })
 
 function openDirPicker(mode = 'local') {
+  if (savingExport.value || !outputSettingDialog.draft) return
   dirPicker.mode = mode
-  dirPicker.picked = (mode === 'gdrive' ? exportSetting.gdriveSubpath : exportSetting.outputSubpath) || ''
+  dirPicker.picked = (mode === 'gdrive' ? outputSettingDialog.draft.gdriveSubpath : outputSettingDialog.draft.outputSubpath) || ''
   dirPicker.newSub = ''
   dirPicker.baseDir = ''         // 兩種 mode 的基底不同，重開時一律重新取
   dirPicker.error = ''
@@ -761,11 +780,12 @@ async function loadDirNode(node, resolve) {
 const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
 
 function confirmDirPick() {
+  if (savingExport.value || !outputSettingDialog.draft) return
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
-  if (dirPicker.mode === 'gdrive') exportSetting.gdriveSubpath = p
-  else exportSetting.outputSubpath = p
+  if (dirPicker.mode === 'gdrive') outputSettingDialog.draft.gdriveSubpath = p
+  else outputSettingDialog.draft.outputSubpath = p
   dirPicker.visible = false
 }
 

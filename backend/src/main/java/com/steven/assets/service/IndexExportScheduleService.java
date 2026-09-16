@@ -1,5 +1,7 @@
 package com.steven.assets.service;
 
+import com.steven.assets.repository.ExportSettingCreationRetry;
+
 import com.steven.assets.dto.IndexExportDto;
 import com.steven.assets.model.IndexExportSchedule;
 import com.steven.assets.model.IndexExportScheduleTime;
@@ -39,6 +41,8 @@ public class IndexExportScheduleService {
     private static final int GDRIVE_STATUS_MAX = 512;
 
     private final IndexExportScheduleRepository settingRepo;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ExportExecutionPort<IndexExportSchedule> executionStore;
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
     private final GdriveOutputSupport gdrive;
@@ -68,7 +72,6 @@ public class IndexExportScheduleService {
         return toResponse(settingRepo.findByOwnerUserId(owner).orElseGet(() -> defaultSchedule(owner)));
     }
 
-    @Transactional
     public IndexExportDto.SettingResponse updateForCurrentUser(IndexExportDto.SettingRequest req) {
         Long owner = requireOwnerId();
         Integer range = req.rangeMonths();
@@ -86,51 +89,50 @@ public class IndexExportScheduleService {
             if (normalized.putIfAbsent(key, new IndexExportDto.TimeRequest(h, m, t.enabled(), normalizeMarkets(t.markets()))) != null)
                 throw new IllegalArgumentException("時間點不可重複：" + String.format("%02d:%02d", h, m));
         }
-        IndexExportSchedule s = settingRepo.findByOwnerUserId(owner).orElseGet(() -> IndexExportSchedule.builder().ownerUserId(owner).build());
-        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(owner, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
-        Map<String, IndexExportScheduleTime> old = s.getTimes().stream().collect(Collectors.toMap(this::timeKey, Function.identity(), (a,b) -> a));
-        List<IndexExportScheduleTime> next = new ArrayList<>();
-        for (IndexExportDto.TimeRequest t : normalized.values()) {
-            String key = t.runHour() + ":" + t.runMinute();
-            IndexExportScheduleTime child = old.get(key);
-            if (child == null) child = IndexExportScheduleTime.builder().runHour(t.runHour()).runMinute(t.runMinute()).build();
-            child.setEnabled(!Boolean.FALSE.equals(t.enabled()));
-            child.setMarkets(new LinkedHashSet<>(t.markets()));
-            child.setSchedule(s); child.setUpdatedAt(LocalDateTime.now(TW_ZONE));
-            next.add(child);
-        }
-        s.getTimes().clear();
-        next.forEach(s::addTime);
-        s.setOwnerUserId(owner); s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setOutputSubpath(subpath); s.setRangeMonths(range);
-        s.setGdriveEnabled(drive.enabled()); s.setGdriveSubpath(drive.subpath()); s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
-        return toResponse(settingRepo.save(s), drive.selfCheckWarning());
+        return ExportSettingCreationRetry.retry(() -> executionStore.update(owner, s -> {
+            GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(owner, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
+            Map<String, IndexExportScheduleTime> old = s.getTimes().stream().collect(Collectors.toMap(this::timeKey, Function.identity(), (a,b) -> a));
+            List<IndexExportScheduleTime> next = new ArrayList<>();
+            for (IndexExportDto.TimeRequest t : normalized.values()) {
+                String key = t.runHour() + ":" + t.runMinute();
+                IndexExportScheduleTime child = old.get(key);
+                if (child == null) child = IndexExportScheduleTime.builder().runHour(t.runHour()).runMinute(t.runMinute()).build();
+                child.setEnabled(!Boolean.FALSE.equals(t.enabled()));
+                child.setMarkets(new LinkedHashSet<>(t.markets()));
+                child.setSchedule(s); child.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+                next.add(child);
+            }
+            s.getTimes().clear();
+            next.forEach(s::addTime);
+            s.setOwnerUserId(owner); s.setEnabled(Boolean.TRUE.equals(req.enabled()));
+            s.setOutputSubpath(subpath); s.setRangeMonths(range);
+            s.setGdriveEnabled(drive.enabled()); s.setGdriveSubpath(drive.subpath()); s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            return toResponse(s, drive.selfCheckWarning());
+        }));
     }
 
     /** 未儲存設定沿用 transient 預設，但不可因立即匯出把它寫回 DB。 */
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public IndexExportDto.RunNowResponse runNowForCurrentUser() {
         Long owner = requireOwnerId();
-        Optional<IndexExportSchedule> found = settingRepo.findByOwnerUserId(owner);
-        boolean transientDefault = found.isEmpty();
-        IndexExportSchedule s = found.orElseGet(() -> defaultSchedule(owner));
-        List<String> markets = s.getTimes().stream().flatMap(t -> t.getMarkets().stream())
-                .map(this::normalizeMarket).distinct().toList();
+        CapturedExport s = executionStore.manual(owner);
+        List<String> markets = s.markets().stream().map(this::normalizeMarket).distinct().toList();
         if (markets.isEmpty()) throw new IllegalArgumentException("至少選擇一個匯出指數");
-        List<IndexExportDto.FileResult> files = new ArrayList<>();
-        for (String market : markets) files.add(exportOne(s, owner, market));
-        IndexExportDto.FileResult first = files.get(0);
-        if (!transientDefault) {
-            // 上游 DualFormatExportWriter 已把合併字串壓在 512 內，但那是跨類別的約定；寫入點自己再截一次，
-            // 上游若改動固定開銷或分半算式也不會演變成 varchar 溢位→整筆回滾。
-            s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE)); s.setGdriveLastStatus(truncate(first.gdriveStatus(), GDRIVE_STATUS_MAX));
-            s.setUpdatedAt(LocalDateTime.now(TW_ZONE)); settingRepo.save(s);
+        try {
+            List<IndexExportDto.FileResult> files = new ArrayList<>();
+            for (String market : markets) files.add(exportOne(s, owner, market));
+            IndexExportDto.FileResult first = files.get(0);
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), null, first.gdriveStatus());
+            return new IndexExportDto.RunNowResponse(first.path(), first.sizeBytes(), first.gdrivePath(), first.gdriveStatus(),
+                    first.jsonPath(), first.jsonSizeBytes(), first.jsonGdrivePath(), files);
+        } catch (RuntimeException e) {
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), null, failedDriveStatus(s));
+            throw e;
         }
-        return new IndexExportDto.RunNowResponse(first.path(), first.sizeBytes(), first.gdrivePath(), first.gdriveStatus(),
-                first.jsonPath(), first.jsonSizeBytes(), first.jsonGdrivePath(), files);
     }
 
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void tick() {
         if (!ticking.compareAndSet(false, true)) return;
         try { runDueExports(); } catch (RuntimeException e) { log.warn("大盤指數排程 tick 失敗：{}", e.getMessage(), e); }
@@ -138,38 +140,44 @@ public class IndexExportScheduleService {
     }
 
     @EventListener(ApplicationReadyEvent.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void selfHealOnStartup() { try { runDueExports(); } catch (RuntimeException e) { log.warn("大盤指數開機自癒失敗：{}", e.getMessage(), e); } }
 
     private void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE); LocalTime now = LocalTime.now(TW_ZONE);
-        for (IndexExportSchedule s : settingRepo.findAll()) {
-            if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            for (IndexExportScheduleTime t : new ArrayList<>(s.getTimes())) {
-                if (!Boolean.TRUE.equals(t.getEnabled()) || today.equals(t.getLastRunDate())) continue;
-                if (!now.isBefore(LocalTime.of(t.getRunHour(), t.getRunMinute()))) runScheduled(s, t, today);
+        for (IndexExportSchedule candidate : settingRepo.findAll()) {
+            try {
+                for (CapturedExport capture : executionStore.due(candidate.getId(), candidate.getOwnerUserId(), today, now)) {
+                    try { runScheduled(capture); }
+                    catch (RuntimeException e) { log.warn("匯出結果寫回失敗 owner={} child={}", capture.ownerId(), capture.childId(), e); }
+                }
+            } catch (RuntimeException e) {
+                log.warn("匯出設定捕捉失敗 owner={}", candidate.getOwnerUserId(), e);
             }
         }
     }
 
-    private void runScheduled(IndexExportSchedule s, IndexExportScheduleTime t, LocalDate today) {
-        List<String> markets = t.getMarkets().stream().map(this::normalizeMarket).distinct().toList();
+    private void runScheduled(CapturedExport s) {
         List<String> statuses = new ArrayList<>();
-        for (String market : markets) {
+        String driveStatus = null;
+        for (String market : s.markets().stream().map(this::normalizeMarket).distinct().toList()) {
             try {
                 IndexExportDto.FileResult file = exportOne(s, s.getOwnerUserId(), market);
                 statuses.add(file.path() != null && file.jsonPath() != null
                         ? "成功：" + file.path() + "／" + file.jsonPath()
                         : "部分失敗(" + market + ")：xlsx=" + file.path() + ", json=" + file.jsonPath());
+                driveStatus = file.gdriveStatus();
+            } catch (Exception e) {
+                statuses.add("失敗(" + market + ")：" + e.getMessage());
+                driveStatus = failedDriveStatus(s);
+                log.warn("大盤指數排程 owner={} market={} 失敗", s.getOwnerUserId(), market, e);
             }
-            catch (Exception e) { statuses.add("失敗(" + market + ")：" + e.getMessage()); log.warn("大盤指數排程 owner={} market={} 失敗", s.getOwnerUserId(), market, e); }
         }
-        t.setLastRunDate(today); t.setLastRunAt(LocalDateTime.now(TW_ZONE));
-        t.setLastRunStatus(truncate(statuses.isEmpty() ? "略過：未選指數"
-                : statuses.stream().filter(Objects::nonNull).collect(Collectors.joining("；")), STATUS_MAX));
-        t.setUpdatedAt(LocalDateTime.now(TW_ZONE)); s.setUpdatedAt(LocalDateTime.now(TW_ZONE)); settingRepo.save(s);
+        executionStore.complete(s, LocalDateTime.now(TW_ZONE), statuses.isEmpty() ? "略過：未選指數"
+                : String.join("；", statuses), driveStatus);
     }
 
-    private IndexExportDto.FileResult exportOne(IndexExportSchedule s, Long owner, String market) {
+    private IndexExportDto.FileResult exportOne(CapturedExport s, Long owner, String market) {
         try {
             LocalDate end = LocalDate.now(TW_ZONE);
             LocalDate start = s.getRangeMonths() == null ? end.minusYears(10) : end.minusMonths(s.getRangeMonths());
@@ -228,6 +236,11 @@ public class IndexExportScheduleService {
         Path base = Path.of(baseDir).toAbsolutePath().normalize(); Path target = base.resolve(subpath).normalize();
         if (!target.startsWith(base)) throw new IllegalArgumentException("輸出子路徑不可跳脫基底目錄：" + subpath); return target;
     }
+    /** Null local file is handled without any remote I/O, preserving the existing skipped status. */
+    private String failedDriveStatus(CapturedExport s) {
+        return s.isGdriveEnabled() ? gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), null).status() : null;
+    }
+
     private Long requireOwnerId() { CurrentUserContext ctx = currentUserProvider.getObject(); if (!ctx.hasUser()) throw new UnauthenticatedException("未識別使用者，無法存取排程設定"); return ctx.getEffectiveUserId(); }
 
     private IndexExportDto.SettingResponse toResponse(IndexExportSchedule s) { return toResponse(s, null); }

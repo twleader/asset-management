@@ -167,42 +167,40 @@
         title="設定後即時生效（免重啟），下一輪抓取起寫入新資料夾。目錄不存在時會自動建立。"
       />
 
+      <div>已儲存：{{ exportPath.outputSubpath || '家目錄根' }}；Drive {{ exportPath.gdriveEnabled ? '啟用' : '停用' }}</div>
+      <el-button type="primary" :disabled="savingExportPath || !exportPathLoaded || !auth.isAdmin" @click="openExportDialog">編輯設定</el-button>
+      <el-dialog v-model="outputSettingDialog.visible" title="編輯匯出設定" width="680px" :close-on-click-modal="!savingExportPath" :close-on-press-escape="!savingExportPath" :show-close="!savingExportPath" :before-close="closeExportDialog">
+      <div v-if="outputSettingDialog.draft">
       <div v-loading="exportPathLoading">
         <div class="path-row">
           <span class="field-label">輸出資料夾</span>
-          <el-input
-            v-model="exportPath.outputSubpath"
+          <el-input :disabled="savingExportPath"
+            v-model="outputSettingDialog.draft.outputSubpath"
             readonly
             placeholder="（家目錄根）"
             style="width:340px"
           >
             <template #append>
-              <el-button :disabled="!auth.isAdmin" @click="openDirPicker('local')">選擇</el-button>
+              <el-button :disabled="savingExportPath || (!auth.isAdmin)" @click="openDirPicker('local')">選擇</el-button>
             </template>
           </el-input>
-          <el-button
-            v-if="auth.isAdmin"
-            type="primary"
-            :loading="savingExportPath"
-            :disabled="!exportPathLoaded"
-            @click="saveExportPath"
-          >儲存設定</el-button>
+
         </div>
 
         <!-- Google Drive 同步（Task 241）：本機照寫不變，這裡只是額外多上傳一份副本 -->
         <div class="path-row gdrive-row">
           <span class="field-label">同步 Google Drive</span>
-          <el-switch v-model="exportPath.gdriveEnabled" :disabled="!auth.isAdmin" />
+          <el-switch v-model="outputSettingDialog.draft.gdriveEnabled" :disabled="savingExportPath || (!auth.isAdmin)" />
           <el-input
-            v-model="exportPath.gdriveSubpath"
+            v-model="outputSettingDialog.draft.gdriveSubpath"
             readonly
             placeholder="（尚未選擇 Drive 資料夾）"
-            :disabled="!exportPath.gdriveEnabled"
+            :disabled="savingExportPath || (!outputSettingDialog.draft.gdriveEnabled)"
             style="width:340px"
           >
             <template #append>
               <el-button
-                :disabled="!auth.isAdmin || !exportPath.gdriveEnabled"
+                :disabled="savingExportPath || (!auth.isAdmin || !outputSettingDialog.draft.gdriveEnabled)"
                 @click="openDirPicker('gdrive')"
               >選擇</el-button>
             </template>
@@ -212,38 +210,43 @@
         <div class="path-hint">
           開啟後，每輪除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到
           Google Drive 的所選資料夾。<strong>本機那一份永遠照寫、不受影響</strong>（SRPP 退休規劃專案讀的是本機檔）。
-          <template v-if="exportPath.gdriveEnabled && exportPath.gdriveSubpath">
+          <template v-if="outputSettingDialog.draft.gdriveEnabled && outputSettingDialog.draft.gdriveSubpath">
             <br />Drive 落點：
-            <code>{{ exportPath.gdriveRemote }}:{{ exportPath.gdriveSubpath }}/public_info_{{ today }}.json</code>
+            <code>{{ outputSettingDialog.draft.gdriveRemote }}:{{ outputSettingDialog.draft.gdriveSubpath }}/public_info_{{ today }}.json</code>
           </template>
           <span v-if="gdriveDirty" class="path-dirty">
             ← 尚未儲存的變更，按「儲存設定」後生效
           </span>
           <br />
           上次上傳：
-          <template v-if="exportPath.gdriveLastRunAt">
-            {{ exportPath.gdriveLastRunAt }} —
-            <code>{{ exportPath.gdriveLastStatus || '—' }}</code>
+          <template v-if="outputSettingDialog.draft.gdriveLastRunAt">
+            {{ outputSettingDialog.draft.gdriveLastRunAt }} —
+            <code>{{ outputSettingDialog.draft.gdriveLastStatus || '—' }}</code>
           </template>
           <template v-else>—（尚未執行過）</template>
         </div>
 
         <div class="path-hint">
-          以主機家目錄 <code>{{ exportPath.baseDir || '/home/steven' }}</code>（對映主機
+          以主機家目錄 <code>{{ outputSettingDialog.draft.baseDir || '/home/steven' }}</code>（對映主機
           <code>/Users/steven</code>）為根，只能選其下的子資料夾。目前落點：
-          <code>{{ exportPath.absolutePath || '—' }}/public_info_{{ today }}.json</code>
+          <code>{{ outputSettingDialog.draft.absolutePath || '—' }}/public_info_{{ today }}.json</code>
           <span v-if="exportPathDirty" class="path-dirty">
-            ← 尚未儲存的變更：<code>{{ exportPath.outputSubpath || '（家目錄根，儲存後將套用預設子資料夾）' }}</code>，
+            ← 尚未儲存的變更：<code>{{ outputSettingDialog.draft.outputSubpath || '（家目錄根，儲存後將套用預設子資料夾）' }}</code>，
             按「儲存設定」後生效
           </span>
           <br />
           檔名固定為 <code>public_info_&lt;日期&gt;.json</code> 與 <code>.xlsx</code> <strong>兩份</strong>（主檔名相同；SRPP 退休規劃專案依 .json 這一份取用，故不開放修改）；
           同日多輪覆寫、跨日產生新檔。
-          <template v-if="exportPath.updatedAt">
-            <br />上次修改：{{ exportPath.updatedAt }}
+          <template v-if="outputSettingDialog.draft.updatedAt">
+            <br />上次修改：{{ outputSettingDialog.draft.updatedAt }}
           </template>
         </div>
 
+
+      </div>
+      </div>
+      <template #footer><el-button :disabled="savingExportPath" @click="outputSettingDialog.visible = false">取消</el-button><el-button type="primary" :loading="savingExportPath" :disabled="savingExportPath" @click="saveExportPath">儲存設定</el-button></template>
+      </el-dialog>
         <!-- 手動匯出兩顆（Requirement 63 / Task 280）：不必等排程時間點，也不必重啟容器靠 warmup。
              一顆在跑時另一顆停用——同時按必然有一顆拿到 BUSY -->
         <template v-if="auth.isAdmin">
@@ -253,7 +256,7 @@
               type="primary"
               plain
               :loading="running === 'export'"
-              :disabled="running !== ''"
+              :disabled="savingExportPath || (running !== '')"
               @click="runManual('export')"
             >
               <el-icon style="margin-right:4px"><Download /></el-icon>立即匯出
@@ -262,7 +265,7 @@
               type="success"
               plain
               :loading="running === 'fetch'"
-              :disabled="running !== ''"
+              :disabled="savingExportPath || (running !== '')"
               @click="runManual('fetch')"
             >
               <el-icon style="margin-right:4px"><Refresh /></el-icon>立即抓取並匯出
@@ -277,7 +280,6 @@
             上一輪還在跑時會提示「尚未結束」並略過，不會同時跑兩輪。
           </div>
         </template>
-      </div>
     </el-card>
 
     <!-- 輸出資料夾選擇器（本機／Google Drive 共用，由 dirPicker.mode 決定資料來源） -->
@@ -319,6 +321,7 @@
 </template>
 
 <script setup>
+import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingDraft'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { bffApi, apiErrorMessage } from '@/api'
@@ -421,6 +424,7 @@ const exportPath = reactive({
 const exportPathLoading = ref(false)
 const exportPathLoaded = ref(false)   // 未成功載入前停用儲存，避免以空值覆寫既有設定
 const savingExportPath = ref(false)
+const outputSettingDialog = reactive({ visible: false, draft: null })
 const today = dayjs().format('YYYY-MM-DD')
 
 // 已儲存的值；用來標示「改了但尚未儲存」。落點字串一律沿用後端回傳的 absolutePath，
@@ -474,29 +478,34 @@ async function fetchExportPath() {
   }
 }
 
+function openExportDialog() {
+  if (savingExportPath.value || !exportPathLoaded.value || !auth.isAdmin) return
+  outputSettingDialog.draft = cloneExportSetting(exportPath)
+  outputSettingDialog.visible = true
+}
+function closeExportDialog(done) { if (!savingExportPath.value) done() }
+
 async function saveExportPath() {
+  if (savingExportPath.value || !outputSettingDialog.draft) return
+  const draft = outputSettingDialog.draft
   // 前端先擋一次（後端也會回 400）：開了同步卻沒指定資料夾，等於要把檔案倒在 Drive 根目錄
-  if (exportPath.gdriveEnabled && !(exportPath.gdriveSubpath || '').trim()) {
+  if (draft.gdriveEnabled && !(draft.gdriveSubpath || '').trim()) {
     ElMessage.warning('已啟用 Google Drive 同步，請先選擇 Drive 目標資料夾')
     return
   }
   savingExportPath.value = true
   try {
     const s = (await bffApi.crawlerData.saveExportPath({
-      outputSubpath: exportPath.outputSubpath || '',
-      gdriveEnabled: exportPath.gdriveEnabled,
-      gdriveSubpath: exportPath.gdriveSubpath || ''
+      outputSubpath: draft.outputSubpath || '',
+      gdriveEnabled: draft.gdriveEnabled,
+      gdriveSubpath: draft.gdriveSubpath || ''
     })) || {}
-    // 以後端正規化後的值回填（空字串會被正規化為預設子路徑），避免畫面與實際落點不一致
-    exportPath.outputSubpath = s.outputSubpath || ''
-    exportPath.baseDir = s.baseDir || exportPath.baseDir
-    exportPath.absolutePath = s.absolutePath || ''
-    exportPath.updatedAt = s.updatedAt || null
-    exportPath.gdriveEnabled = !!s.gdriveEnabled
-    exportPath.gdriveSubpath = s.gdriveSubpath || ''
+    const { gdriveSelfCheckWarning, ...saved } = s
+    replaceExportSetting(exportPath, saved)
     savedSubpath.value = exportPath.outputSubpath
     savedGdrive.enabled = exportPath.gdriveEnabled
     savedGdrive.subpath = exportPath.gdriveSubpath
+    outputSettingDialog.visible = false
     ElMessage.success('已儲存爬蟲輸出設定，下一輪抓取起生效')
     // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
     showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
@@ -513,6 +522,7 @@ async function saveExportPath() {
 const running = ref('')
 
 async function runManual(kind) {
+  if (savingExportPath.value) return
   running.value = kind
   try {
     const r = (await (kind === 'fetch'
@@ -562,8 +572,9 @@ function showManualResult(r) {
 }
 
 function openDirPicker(mode = 'local') {
+  if (savingExportPath.value || !outputSettingDialog.draft) return
   dirPicker.mode = mode
-  dirPicker.picked = (mode === 'gdrive' ? exportPath.gdriveSubpath : exportPath.outputSubpath) || ''
+  dirPicker.picked = (mode === 'gdrive' ? outputSettingDialog.draft.gdriveSubpath : outputSettingDialog.draft.outputSubpath) || ''
   dirPicker.newSub = ''
   dirPicker.baseDir = ''
   dirPicker.error = ''
@@ -598,11 +609,12 @@ async function loadDirNode(node, resolve) {
 const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
 
 function confirmDirPick() {
+  if (savingExportPath.value || !outputSettingDialog.draft) return
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
-  if (dirPicker.mode === 'gdrive') exportPath.gdriveSubpath = p
-  else exportPath.outputSubpath = p
+  if (dirPicker.mode === 'gdrive') outputSettingDialog.draft.gdriveSubpath = p
+  else outputSettingDialog.draft.outputSubpath = p
   dirPicker.visible = false
 }
 

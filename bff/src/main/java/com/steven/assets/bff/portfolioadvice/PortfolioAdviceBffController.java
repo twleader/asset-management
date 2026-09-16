@@ -23,7 +23,7 @@ import java.util.Map;
  * AssetAllocationAdviceView（資產配置建議頁）專屬 BFF（Requirement 32）。
  *
  * <p>一次聚合 business 的「最新建議 + 歷史 + 理財條件 profile + 成本控管設定 + 目前資產配置」，前端只 render；
- * 產生建議走 {@code POST /generate}（同步、可能耗數十秒，timeout 180s）；儲存條件走 {@code PUT /profile}；
+ * 產生建議走 {@code POST /generate}（LOCAL 同步終態；HYBRID／LLM 回 PROCESSING 並由背景完成，轉發 timeout 180s）；儲存條件走 {@code PUT /profile}；
  * 調整成本設定走 {@code PUT /settings}（限 ADMIN，見 SecurityConfig）。下游呼叫由 WebClient 帶上 {@code X-User-*}
  * 租戶身分，business 端 owner-scoped。
  */
@@ -92,7 +92,7 @@ public class PortfolioAdviceBffController {
         });
     }
 
-    /** POST /api/bff/portfolio-advice/generate → 轉發 business（非同步：business 立即回 PROCESSING 列；180s timeout 為保險上限）。 */
+    /** POST /api/bff/portfolio-advice/generate → 轉發 business（LOCAL 同步終態；HYBRID／LLM 立即回 PROCESSING；180s timeout 為轉發上限）。 */
     @PostMapping("/generate")
     public Mono<ResponseEntity<Map<String, Object>>> generate(@RequestBody(required = false) Map<String, Object> body) {
         return businessServicesClient.post()

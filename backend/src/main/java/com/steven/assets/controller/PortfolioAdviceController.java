@@ -81,7 +81,7 @@ public class PortfolioAdviceController {
         return adviceService.getProjection();
     }
 
-    /** 產生建議（非同步：送背景執行緒池後立即回 PROCESSING 列，由前端輪詢收尾）。body 帶入理財條件，會一併儲存為 profile。 */
+    /** 產生建議（LOCAL 同步回終態；HYBRID／LLM 立即回 PROCESSING，由背景完成並供前端輪詢）。body 帶入理財條件，會一併儲存為 profile。 */
     @PostMapping("/generate")
     public PortfolioAdviceDto generate(@RequestBody(required = false) Map<String, Object> body) {
         PortfolioAdvice row = adviceService.generate(toInput(body == null ? Map.of() : body));

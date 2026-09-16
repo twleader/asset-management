@@ -255,7 +255,9 @@ class TradingRadarDualFormatTest {
             "週結束日", "週MA10", "週K", "週D", "週OSC", "週量比", "週漲跌%",
             "日K收盤位置", "日K實體", "日K下影線比",
             // Task 357／Requirement 94：「下一配息」四個日期再附加於其後（新的真正最末）。
-            "下一除息日", "下一除權日", "下一發放股息日", "下一發放股權日");
+            "下一除息日", "下一除權日", "下一發放股息日", "下一發放股權日",
+            "布林完成日K", "布林根數", "布林標準差倍數", "布林中軌", "布林上軌", "布林下軌",
+            "布林%B", "布林寬度%", "布林來源與用途");
 
     /** Task 320 尾端附加的欄數；下方由 size() 往回推的錨點算式必須扣掉它，否則三條 subList 會一起錯位。 */
     private static final int LIVE_PREMIUM_COLS = 2;
@@ -263,8 +265,9 @@ class TradingRadarDualFormatTest {
     private static final int WEEKLY_CANDLE_COLS = 10;
     /** Task 357 再附加於其後的「下一配息」四個日期；同樣要從 size() 錨點扣掉。 */
     private static final int DIVIDEND_DATES_COLS = 4;
-    /** 由 size() 往回推的錨點一律扣掉這三塊尾端欄，否則子 subList 會一起錯位。 */
-    private static final int TAIL_COLS = LIVE_PREMIUM_COLS + WEEKLY_CANDLE_COLS + DIVIDEND_DATES_COLS;
+    private static final int BOLLINGER_COLS = 9;
+    /** 由 size() 往回推的錨點扣掉四塊尾端欄，維持所有既有位置。 */
+    private static final int TAIL_COLS = LIVE_PREMIUM_COLS + WEEKLY_CANDLE_COLS + DIVIDEND_DATES_COLS + BOLLINGER_COLS;
 
     private static List<String> headerRow(Sheet sheet) {
         List<String> out = new ArrayList<>();
@@ -331,7 +334,7 @@ class TradingRadarDualFormatTest {
         assertThat(headerRow(wb.getSheet("大盤總覽")))
                 .as("大盤總覽 51 欄").containsExactlyElementsOf(MARKET_HEADERS_V11);
         assertThat(headerRow(wb.getSheet("個股決策")))
-                .as("個股決策 194 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
+                .as("個股決策 203 欄").containsExactlyElementsOf(STOCK_HEADERS_V11);
         // 三條錨點都由 size() 往回推，故必須先扣掉 Task 320 在尾端附加的欄數；
         // 不扣的話三條 subList 會一起紅，而失敗訊息讀起來像是「既有欄整體位移」（實際上沒有）。
         int valuationStart = STOCK_HEADERS_V11.size() - TAIL_COLS
@@ -353,17 +356,17 @@ class TradingRadarDualFormatTest {
         // Task 320：兩欄仍在週K／日K 棒之前（釘住「尾端附加」而非中段插入）
         assertThat(STOCK_HEADERS_V11.subList(
                         STOCK_HEADERS_V11.size() - TAIL_COLS,
-                        STOCK_HEADERS_V11.size() - WEEKLY_CANDLE_COLS - DIVIDEND_DATES_COLS))
+                        STOCK_HEADERS_V11.size() - WEEKLY_CANDLE_COLS - DIVIDEND_DATES_COLS - BOLLINGER_COLS))
                 .containsExactly("即時折溢價%", "即時淨值時間");
         // Task 356.12a：週K 7 欄 ＋ 日K 棒 3 欄仍在「下一配息」四欄之前（同樣釘住「尾端附加」）。
         assertThat(STOCK_HEADERS_V11.subList(
-                        STOCK_HEADERS_V11.size() - WEEKLY_CANDLE_COLS - DIVIDEND_DATES_COLS,
-                        STOCK_HEADERS_V11.size() - DIVIDEND_DATES_COLS))
+                        STOCK_HEADERS_V11.size() - WEEKLY_CANDLE_COLS - DIVIDEND_DATES_COLS - BOLLINGER_COLS,
+                        STOCK_HEADERS_V11.size() - DIVIDEND_DATES_COLS - BOLLINGER_COLS))
                 .containsExactly("週結束日", "週MA10", "週K", "週D", "週OSC", "週量比", "週漲跌%",
                         "日K收盤位置", "日K實體", "日K下影線比");
-        // Task 357：「下一配息」四個日期在整張表的真正最末。
+        // Task 357 四日期保留原索引；Task 438 九布林欄只追加在其後。
         assertThat(STOCK_HEADERS_V11.subList(
-                        STOCK_HEADERS_V11.size() - DIVIDEND_DATES_COLS, STOCK_HEADERS_V11.size()))
+                        STOCK_HEADERS_V11.size() - DIVIDEND_DATES_COLS - BOLLINGER_COLS, STOCK_HEADERS_V11.size() - BOLLINGER_COLS))
                 .containsExactly("下一除息日", "下一除權日", "下一發放股息日", "下一發放股權日");
         assertThat(new HashSet<>(STOCK_HEADERS_V11)).hasSameSizeAs(STOCK_HEADERS_V11);
         assertThat(wb.getSheet("快照索引").getRow(1).getLastCellNum())
@@ -401,7 +404,7 @@ class TradingRadarDualFormatTest {
                 .as("Task 320 前的末欄位於索引 177").isEqualTo("殖利率缺漏原因");
 
         // (ii) 即時折溢價兩欄之後是 Task 356.12a 的 10 欄 ＋ Task 357 的 4 欄，總欄數 174 → 194
-        assertThat(actualHeaders).hasSize(194);
+        assertThat(actualHeaders).hasSize(203);
         assertThat(actualHeaders.subList(178, 180)).containsExactly("即時折溢價%", "即時淨值時間");
         assertThat(actualHeaders.subList(180, 190))
                 .containsExactly("週結束日", "週MA10", "週K", "週D", "週OSC", "週量比", "週漲跌%",
@@ -409,13 +412,17 @@ class TradingRadarDualFormatTest {
         assertThat(actualHeaders.subList(190, 194))
                 .containsExactly("下一除息日", "下一除權日", "下一發放股息日", "下一發放股權日");
 
+        assertThat(actualHeaders.subList(194, 203)).containsExactly(
+                "布林完成日K", "布林根數", "布林標準差倍數", "布林中軌", "布林上軌", "布林下軌",
+                "布林%B", "布林寬度%", "布林來源與用途");
+
         // (iv) headers／formats／rows 三者長度一致（fail-fast 的補強，不是替代）
         ExportDoc.Table stockTable = (ExportDoc.Table) service.radarDoc(1L, 0L, 1L)
                 .sheets().stream().filter(s -> "個股決策".equals(s.name())).findFirst().orElseThrow()
                 .blocks().get(0);
-        assertThat(stockTable.headers()).hasSize(194);
-        assertThat(stockTable.columnFormats()).hasSize(194);
-        assertThat(stockTable.rows()).isNotEmpty().allSatisfy(r -> assertThat(r).hasSize(194));
+        assertThat(stockTable.headers()).hasSize(203);
+        assertThat(stockTable.columnFormats()).hasSize(203);
+        assertThat(stockTable.rows()).isNotEmpty().allSatisfy(r -> assertThat(r).hasSize(203));
     }
 
     /**
@@ -479,7 +486,7 @@ class TradingRadarDualFormatTest {
         ExportDoc.Table table = stockDoc.blocks().stream()
                 .filter(ExportDoc.Table.class::isInstance).map(ExportDoc.Table.class::cast)
                 .findFirst().orElseThrow();
-        assertThat(table.headers()).hasSize(194); // Task 356.12a 174→190，Task 357 再 +4 → 194
+        assertThat(table.headers()).hasSize(203); // Task 356.12a 174→190，Task 357 再 +4 → 194
         assertThat(table.columnFormats()).hasSameSizeAs(table.headers());
         assertThat(table.rows()).allSatisfy(row -> assertThat(row).hasSameSizeAs(table.headers()));
         // 這兩條也是「由 size() 往回推」的錨點，同樣要扣掉 Task 320 新增的欄數才會指到估值分量區
@@ -512,8 +519,8 @@ class TradingRadarDualFormatTest {
 
         Workbook workbook = GoldenWorkbooks.read(new ExcelDocRenderer().render(doc));
         Sheet sheet = workbook.getSheet("個股決策");
-        assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short) 194); // 174+16(356.12a)+4(357)
-        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 194);
+        assertThat(sheet.getRow(0).getLastCellNum()).isEqualTo((short) 203); // 174+16(356.12a)+4(357)
+        assertThat(sheet.getRow(1).getLastCellNum()).isEqualTo((short) 203);
         assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PE來源網址"))
                 .getStringCellValue()).isEqualTo("https://example.test/pe-1\nhttps://example.test/pe-2");
         assertThat(sheet.getRow(1).getCell(STOCK_HEADERS_V11.indexOf("PB資料日期"))
@@ -953,7 +960,7 @@ class TradingRadarDualFormatTest {
         JsonNode stockRows = json.at("/sheets/2/tables/0/rows");
         assertThat(stockRows).isNotEmpty();
         assertThat(stockRows).allSatisfy(row -> assertThat(row.size())
-                .as("個股決策：JSON 每列的 key 數必須等於 194 欄").isEqualTo(194));
+                .as("個股決策：JSON 每列的 key 數必須等於 203 欄").isEqualTo(203));
         assertThat(json.at("/sheets/1/tables/0/rows")).isNotEmpty()
                 .allSatisfy(row -> assertThat(row.size())
                         .as("大盤總覽：JSON 每列的 key 數必須等於 51 欄").isEqualTo(51));
@@ -962,7 +969,7 @@ class TradingRadarDualFormatTest {
         Sheet stockSheet = GoldenWorkbooks.read(service.exportForOwner(1L, 0L, 1L))
                 .getSheet("個股決策");
         short headerCells = stockSheet.getRow(0).getLastCellNum();
-        assertThat(headerCells).isEqualTo((short) 194);
+        assertThat(headerCells).isEqualTo((short) 203);
         for (int r = 1; r <= stockSheet.getLastRowNum(); r++) {
             assertThat(stockSheet.getRow(r).getLastCellNum())
                     .as("Excel 第 %d 列的 cell 數", r).isEqualTo(headerCells);

@@ -5359,3 +5359,50 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **寫入層強制，不能只靠 caller 約定。** `StockRepository` 改為只宣告 read methods、不得再繼承或暴露 `JpaRepository.save`／raw `upsert`；唯一 mutable `StockMasterPersistence` 為 package-private adapter，只可由 `StockMasterService` 的 trusted Taiwan write 或既有非台股 manual policy 呼叫。架構/source-scan test 必證明其他 service 無法注入 mutable master adapter、沒有 `StockRepository.save`／`upsert` 或直接 `stock` SQL。對已存在台股名稱，任意 user payload、非本次 trusted resolver 的 Fubon/Yahoo quote、五檔、庫存或交易 ingress 名稱均零 mutation；trusted resolver 成功時才可更新。這條名稱 resolver 僅使用既有唯讀 market-data adapter，絕不使用帳務、成交、庫存、下單、改單、撤單、轉帳或其他券商寫入能力；不得為名稱新增公開 API、BFF route、排程或 feature flag。
 - [ ] **既有錯誤資料只做可證實修正。** idempotent `v1.133.0-tw-stock-master-user-input-authority.sql` 將既有 `(00850, 台股)` 從錯誤英文名稱更正為「元大臺灣ESG永續」；只有該 exact row 且名稱不同才更新，不能新增主檔或改任何其他欄位／標的。Requirement 153 的 `006208 → 富邦台50` correction 保持不變。Liquibase 後重產 `db/schema.sql` 並通過 drift test。
 - [ ] **回歸與 runtime 證據。** unit/integration tests 必覆蓋：富邦成功時不觸 TWSE/TPEx/Yahoo；富邦拒絕或 identity 不符時精確 fallback 至 TWSE；TWSE 無 exact row／失敗才查 TPEx；TWSE/TPEx 都失敗才精確 fallback 至 Yahoo；FinMind 絕不作主檔名稱 fallback；三者全失敗零主檔 mutation；已存在台股主檔不受 Asset snapshot、Alert（含 group）任一手動名稱覆寫；缺主檔的台股手動 payload 不創建主檔且不外呼；trusted resolver 對新建與更名皆可寫入；非台股既有手動行為不變；五檔、庫存與交易 ingress 仍零主檔寫入；migration 精確且 idempotent。rebuild/recreate 受影響的 `business-services` 與 `external-materials-service`，health/BFF recovery 後唯讀 PostgreSQL 必讀回 `00850 | 台股 | 元大臺灣ESG永續`，並確認股票觀察畫面仍讀同一 `stock.name`。runtime 不得主動觸發名稱 resolver、富邦 SDK、manual sync、internal broker POST、下單、改單、撤單、轉帳，亦不得改 `.env` 或 secrets。
+
+
+### Requirement 156／Task 438：完成日 K 布林延伸風險納入既有乖離因子
+
+**User Story:** 身為交易雷達使用者，我希望本機完成日 K 的布林相對位置與寬度實際參與既有計算，並能理解其保守扣分用途。
+
+**Acceptance Criteria:**
+- 用同一權息還原完成日序列連續20根有效正收盤、SMA20與population標準差2倍計算布林，不含盤中K、不跨null補根、不取未來資料；日期嚴格遞減。中軌M、upper=M+2σ、lower=M−2σ，width=(upper−lower)/M*100，percentB=(最新完成close−lower)/(upper−lower)，BigDecimal DECIMAL128中間運算及sqrt、結果scale8 HALF_UP。不足／無效回null；σ=0保留三軌價格與width0、percentB null。
+- 既有日BIAS原值b=meanAvailable(clamp(−BIAS10/10),clamp(−BIAS20/20))；有效布林時扣分p=.25*clamp(2*(percentB−.5),0,1)*min(1,width/2)*min(1,20/width)，新值clamp(b−p,−1,1)。b缺值仍缺值，布林缺值／width0沿用b。僅上方延伸扣分，不給下軌正分或直接覆寫買賣；三軌日BIAS各.06、其餘23因子與所有權重不變。所有數字為判斷性產品值，沒有獲利改善依據。
+- 純本機計算、不改富邦原值或未證實overlay，不新增外呼／DB表／公共路由。共用assembler投影nullable bollinger（date asOfDate、int period20/int standardDeviationMultiplier2、decimal三軌價格/percentB/bandWidthPercent）至detail/snapshot/export；舊snapshot缺欄null、compact list不增加detail物件。快取fingerprint含公式版本與所有有效輸入。OpenAPI只相容追加且同步兩份Swagger。
+- production升TW_RULES_V19，decisionInputVersion使用現行technicalSourceVersion組合且不得保留V18前綴；V13 candidate計算與發布gate不變，離線production baseline共用公式與asOf截斷。通知版本不同只重建baseline首輪不寄信；三期軌道與最後同軌EVIDENCE_GATE_V1不變。實際扣分與資料缺口只在同軌risks透明揭露，不作support evidence、不宣稱預測報酬。
+
+
+布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
+
+### Requirement 157／Task 439：匯出完成結果不得覆蓋並行設定
+
+**User Story:** 身為匯出設定使用者，我希望匯出進行期間更新或移除時間點，完成結果只寫回仍存在的執行對象，保留最新設定。
+
+**Acceptance Criteria:**
+- 僅四服務ExportScheduleService、CommodityExportScheduleService、RealizedGainExportScheduleService、IndexExportScheduleService接手此修復。長產檔／本機寫檔／Drive I/O在交易外，用不可變captured執行參數；獨立Spring proxy bean短交易新讀目前parent及child，只寫lastRunDate/lastRunAt/lastRunStatus/必要updatedAt與現行代表摘要。不得merge captured entity、重建times、復活removed child或deleted parent。
+- persisted identity包含schedule id+owner id+child id+captured hour/minute。guard使用captured執行日，只能落已存在且同parent並時間相同的child；disabled但身份時間相同可記實際結果，時間改變則skip。legacy空children只允許執行前短交易鎖parent、新讀確認仍空且legacy時間相同後建立並flush既有fallback child取得id，再capture/I/O；結果階段永不建立child，移除重建同時間但不同id亦skip。
+- UI更新與短結果交易採同一parent pessimistic write lock，或等效無stale entity merge的原子欄位更新，不能只鎖background而UI仍load/save舊aggregate。parent/child lock order一致，建立設定用existing唯一owner約束且競態失敗重讀，不額外新增schema。parent代表摘要依current children現行演算法新算，不用captured時間表。
+- Drive結果只在current gdriveEnabled/gdriveSubpath及所有被capture且影響Drive目的地的設定仍完全一致才更新gdriveLastRunAt/gdriveLastStatus；本機結果不因此被丟棄。runNow同樣不可save stale aggregate；不存在且執行前未保存的default設定不因產檔完成而插入，結果仍依現有response回傳；manual不更新child lastRunDate。成功/失敗保留既有guard及status截斷長度語意。
+- HTTP/BFF/DTO與排程cron、時間語意、tenant隔離、雙格式一次doc、檔名/路徑/Drive功能不變；不觸發實機匯出或Drive驗收，以fake I/O和真交易競態證明。
+
+
+執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
+
+### Requirement 158／Task 440：可證實價格基礎才回填股利顯示資訊
+
+**User Story:** 身為股利歷史使用者，我希望已完成且完整價格資料可補齊昨收、現金殖利率及填息天數，證據不足維持未知。
+
+**Acceptance Criteria:**
+- 保留main四日期（exDividendDate/exRightsDate/cashPaymentDate/stockPaymentDate）與min非null兩除權息日anchor的事件身份／cancel語意；只對ACTIVE、正現金股利且有exDividendDate之事件回填現金enrichment，不把純配股anchor誤作現金除息日。partial yield-only null亦候選；僅填原欄null，不改既有非null/provider facts。
+- 獨立proxy bean的REQUIRES_NEW回填與既有projection各自fail-soft。只接既有有投影副作用findFromDb流程；findFromDbReadOnly、public/9090、radar、batch pure-read不得接回填或外呼。價格讀取有顯式asOf上界，asOf由市場時區／本地cache-only交易日與完成收盤證據判定，不能把當日盤中／future列當完成K。
+- 現金昨收是exDividendDate前一個權威交易session的原始正收盤，除息日已完成且bar存在；本地交易日曆可證該session且價格完整才填。從exDate到第一個已完成close>=previousClose的區間不得缺任何權威交易session，fillDays為0起算完成交易session位移；無hit或曆／資料缺口為null。資料日期嚴格升序/唯一、null/非正拒絕；不得跳過無效價格或以週末推斷future。跨另一除權息／分割等公司行動且無同basis證據時fillDays仍null，不以raw跨基礎比大小。
+- yieldPct=cashDividend/previousClose*100，scale4 HALF_UP；previousClose遵守DB numeric(15,4)範圍、yield與fill範圍先驗證。只有本次可證值且current仍ACTIVE、owner-independent exact stock/market/event id/兩除權息日及金額身份相同時原子COALESCE缺值更新；若併發projection變更／取消／刪除則零寫，不復活、不覆寫剛填值。無價格／證據直接無寫入，零新增券商功能、零schema變更。
+
+### Requirement 159／Task 441：八頁匯出設定以摘要與可取消草稿編輯
+
+**User Story:** 身為匯出設定使用者，我希望卡片摘要顯示已保存狀態，開啟對話框編輯且取消不改設定。
+
+**Acceptance Criteria:**
+- TransactionView、StockAlertView、AssetHistoryView、TradingRadarView、ExchangeRateView、CommodityPriceView、RealizedGainView、CrawlerDataView八頁現有匯出卡只呈現已保存摘要與編輯入口；所有原先可寫設定移至dialog，保留目前各頁多times／台美市場／enabled／輸出路徑／Drive及所有其餘功能，不套舊單時間版實作。
+- 每次open從最新canonical已載入setting深複製draft（times子陣列不共享）；draft增刪時點／toggle／browse路徑不寫canonical、不自動呼叫update。Cancel、X、ESC、遮罩關閉都丟棄draft、零write；browse若只讀沿用原contract。save既有endpoint/body/normalize/validate，只busy=false時允許一次請求；busy期間禁重複save、close、runNow與移除時點，避免不一致。
+- save成功以server canonical response替換摘要並關閉；失敗dialog保持draft與錯誤、不關閉／不重讀覆蓋草稿，不假裝保存成功；再次開啟用新canonical。runNow與現有狀態刷新沿用原行為且不隱式保存draft，頁面其他交易／CRUD／圖表／SSE／查詢不變；不新增API、DB、排程或券商動作。

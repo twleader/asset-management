@@ -1,5 +1,7 @@
 package com.steven.assets.service;
 
+import com.steven.assets.repository.ExportSettingCreationRetry;
+
 import com.steven.assets.dto.ExportScheduleDto;
 import com.steven.assets.model.ExportScheduleSetting;
 import com.steven.assets.model.ExportScheduleTime;
@@ -57,6 +59,8 @@ public class ExportScheduleService {
     private static final int GDRIVE_STATUS_MAX = 512;
 
     private final ExportScheduleSettingRepository settingRepo;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ExportExecutionPort<ExportScheduleSetting> executionStore;
     private final ExcelExportService excelExportService;
     private final ObjectProvider<CurrentUserContext> currentUserProvider;
 
@@ -102,68 +106,59 @@ public class ExportScheduleService {
     }
 
     /** upsert 當前使用者設定。 */
-    @Transactional
     public ExportScheduleDto.SettingResponse updateForCurrentUser(ExportScheduleDto.SettingRequest req) {
         Long ownerId = requireOwnerId();
         validateTimes(req.times(), Boolean.TRUE.equals(req.enabled()));
         String subpath = normalizeSubpath(req.outputSubpath());
         resolveDir(subpath); // 驗證不跳脫基底（丟出即擋下）
 
-        ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() ->
-                ExportScheduleSetting.builder().ownerUserId(ownerId).build());
-        // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
-        // 本機路徑與排程時間刻意維持所有使用者皆可設定——只有 Drive 這一項會把資料送出本機。
-        GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
-                ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
+        return ExportSettingCreationRetry.retry(() -> executionStore.update(ownerId, s -> {
+            // Drive 兩欄一律走共用元件：null 解析（未送出＝不變更）、驗證、啟用時必填、只有主要管理者能啟用（403）。
+            // 本機路徑與排程時間刻意維持所有使用者皆可設定——只有 Drive 這一項會把資料送出本機。
+            GdriveOutputSupport.DriveSettings drive = gdrive.resolveUpdate(
+                    ownerId, req.gdriveEnabled(), req.gdriveSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath());
 
-        s.setOwnerUserId(ownerId);
-        s.setEnabled(Boolean.TRUE.equals(req.enabled()));
-        s.setOutputSubpath(subpath);
-        s.setGdriveEnabled(drive.enabled());
-        s.setGdriveSubpath(drive.subpath());
-        // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
-        // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
-        s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
-        Map<String, ExportScheduleTime> existing = new HashMap<>();
-        for (ExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
-        HashSet<String> requested = new HashSet<>();
-        for (ExportScheduleDto.TimeRequest item : req.times()) {
-            String key = timeKey(item.runHour(), item.runMinute());
-            requested.add(key);
-            ExportScheduleTime time = existing.get(key);
-            if (time == null) {
-                time = ExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
-                        .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
-                s.addTime(time);
-            } else {
-                time.setEnabled(Boolean.TRUE.equals(item.enabled()));
-                time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            s.setOwnerUserId(ownerId);
+            s.setEnabled(Boolean.TRUE.equals(req.enabled()));
+            s.setOutputSubpath(subpath);
+            s.setGdriveEnabled(drive.enabled());
+            s.setGdriveSubpath(drive.subpath());
+            // 刻意不碰 gdriveLastRunAt／gdriveLastStatus：那是執行結果，不是使用者設定。
+            // 啟用當下的自檢結果同樣不寫那兩欄（Task 247.3.4），只走當次回應。
+            s.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+            Map<String, ExportScheduleTime> existing = new HashMap<>();
+            for (ExportScheduleTime time : s.getTimes()) existing.put(timeKey(time.getRunHour(), time.getRunMinute()), time);
+            HashSet<String> requested = new HashSet<>();
+            for (ExportScheduleDto.TimeRequest item : req.times()) {
+                String key = timeKey(item.runHour(), item.runMinute());
+                requested.add(key);
+                ExportScheduleTime time = existing.get(key);
+                if (time == null) {
+                    time = ExportScheduleTime.builder().runHour(item.runHour()).runMinute(item.runMinute())
+                            .enabled(Boolean.TRUE.equals(item.enabled())).updatedAt(LocalDateTime.now(TW_ZONE)).build();
+                    s.addTime(time);
+                } else {
+                    time.setEnabled(Boolean.TRUE.equals(item.enabled()));
+                    time.setUpdatedAt(LocalDateTime.now(TW_ZONE));
+                }
             }
-        }
-        s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
-        syncRollbackRepresentative(s);
-        return toResponse(settingRepo.save(s), drive.selfCheckWarning());
+            s.getTimes().removeIf(time -> !requested.contains(timeKey(time.getRunHour(), time.getRunMinute())));
+            syncRollbackRepresentative(s);
+            return toResponse(s, drive.selfCheckWarning());
+        }));
     }
 
     /** 立即以當前使用者身分產檔寫入其設定目錄（供驗證）。不動當日 guard。 */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public ExportScheduleDto.RunNowResponse runNowForCurrentUser() {
         Long ownerId = requireOwnerId();
-        ExportScheduleSetting s = settingRepo.findByOwnerUserId(ownerId).orElseGet(() -> {
-            ExportScheduleSetting created = ExportScheduleSetting.builder().ownerUserId(ownerId).enabled(Boolean.FALSE).build();
-            created.addTime(defaultTime());
-            syncRollbackRepresentative(created);
-            return created;
-        });
+        CapturedExport s = executionStore.manual(ownerId);
         String subpath = normalizeSubpath(s.getOutputSubpath());
         try {
             // HTTP 情境：liveAssetsDoc() 由 TenantFilterAspect 自動 owner-scoped 到當前使用者。
             // 一次查詢取得 doc，再 render 兩種格式——本匯出點吃 Redis 即時價，查兩次會對不起來。
             var r = writeDual(s, ownerId, excelExportService.liveAssetsDoc(), subpath);
-            s.setOwnerUserId(ownerId);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
-            applyGdriveStatus(s, r);
-            settingRepo.save(s);
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), r.localStatus(), r.gdriveStatus());
             return ExportScheduleDto.RunNowResponse.builder()
                     // 既有三欄語意不變：一律指 xlsx 那一份
                     .path(r.xlsxFile() == null ? null : r.xlsxFile().toString())
@@ -175,11 +170,8 @@ public class ExportScheduleService {
                     .jsonGdrivePath(r.jsonGdrivePath())
                     .build();
         } catch (IOException | RuntimeException e) {
-            s.setOwnerUserId(ownerId);
-            s.setLastRunAt(LocalDateTime.now(TW_ZONE));
-            s.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            syncGdrive(s, null); // 本機失敗＝完全不上傳，但已啟用時仍須寫狀態欄說明原因
-            settingRepo.save(s);
+            executionStore.complete(s, LocalDateTime.now(TW_ZONE), "失敗：" + e.getMessage(),
+                    failedDriveStatus(s));
             throw new RuntimeException("立即匯出失敗：" + e.getMessage(), e);
         }
     }
@@ -267,6 +259,7 @@ public class ExportScheduleService {
 
     /** 每分鐘檢查各使用者設定，命中執行時間且當日未跑者即產檔。 */
     @Scheduled(cron = "0 * * * * *", zone = "Asia/Taipei")
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void tick() {
         try {
             tryRunDueExports();
@@ -277,6 +270,7 @@ public class ExportScheduleService {
 
     /** 服務重啟自癒：補跑「今日排程時間已到但尚未執行」者（與 tick 同一判斷，冪等）。 */
     @EventListener(ApplicationReadyEvent.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void selfHealOnStartup() {
         try {
             tryRunDueExports();
@@ -304,52 +298,43 @@ public class ExportScheduleService {
         }
     }
 
-    @Transactional
     void runDueExports() {
         LocalDate today = LocalDate.now(TW_ZONE);
         LocalTime now = LocalTime.now(TW_ZONE);
-        for (ExportScheduleSetting s : settingRepo.findAll()) {
-            if (!Boolean.TRUE.equals(s.getEnabled())) continue;
-            // v1.102 套用前不可能有 real runtime；仍保留一輪 legacy fallback，避免部署中途
-            // 或手動 fixture 因空 children 把既有單時間排程靜默停掉。
-            if (s.getTimes().isEmpty()) s.addTime(legacyTime(s));
-            for (ExportScheduleTime time : s.getTimes()) {
-                if (!Boolean.TRUE.equals(time.getEnabled()) || today.equals(time.getLastRunDate())) continue;
-                if (!now.isBefore(LocalTime.of(time.getRunHour(), time.getRunMinute()))) {
-                    runScheduled(s, time, today);
+        for (ExportScheduleSetting candidate : settingRepo.findAll()) {
+            try {
+                for (CapturedExport capture : executionStore.due(candidate.getId(), candidate.getOwnerUserId(), today, now)) {
+                    try { runScheduled(capture); }
+                    catch (RuntimeException e) { log.warn("匯出結果寫回失敗 owner={} child={}", capture.ownerId(), capture.childId(), e); }
                 }
+            } catch (RuntimeException e) {
+                log.warn("匯出設定捕捉失敗 owner={}", candidate.getOwnerUserId(), e);
             }
         }
     }
 
     /** 背景：對指定 owner 產檔並更新 guard／狀態。單一使用者失敗只記錄、不影響其他人。 */
-    private void runScheduled(ExportScheduleSetting s, ExportScheduleTime time, LocalDate today) {
+    private void runScheduled(CapturedExport s) {
+        String localStatus;
+        String driveStatus;
         try {
-            var r = writeDual(s, s.getOwnerUserId(),
-                    excelExportService.liveAssetsDocForOwner(s.getOwnerUserId()),
-                    normalizeSubpath(s.getOutputSubpath()));
-            time.setLastRunStatus(truncate(r.localStatus(), STATUS_MAX));
-            s.setLastRunStatus(time.getLastRunStatus());
-            applyGdriveStatus(s, r);
-            log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), r.localStatus());
+            var result = writeDual(s, s.getOwnerUserId(), excelExportService.liveAssetsDocForOwner(s.getOwnerUserId()), normalizeSubpath(s.getOutputSubpath()));
+            localStatus = result.localStatus(); driveStatus = result.gdriveStatus();
+            log.info("排程匯出 owner={} → {}", s.getOwnerUserId(), localStatus);
         } catch (Exception e) {
-            time.setLastRunStatus(truncate("失敗：" + e.getMessage(), STATUS_MAX));
-            s.setLastRunStatus(time.getLastRunStatus());
-            log.warn("排程匯出失敗 owner={}：{}", s.getOwnerUserId(), e.getMessage(), e);
-            syncGdrive(s, null); // 本機失敗＝不上傳；已啟用時仍寫狀態欄，否則會停在上一次的成功
-        } finally {
-            // 成功或失敗都設 guard，避免命中分鐘後每 poll 重試整天。
-            LocalDateTime completedAt = LocalDateTime.now(TW_ZONE);
-            time.setLastRunDate(today);
-            time.setLastRunAt(completedAt);
-            time.setUpdatedAt(completedAt);
-            s.setLastRunAt(completedAt);
-            syncRollbackRepresentative(s);
-            settingRepo.save(s);
+            localStatus = "失敗：" + e.getMessage();
+            driveStatus = failedDriveStatus(s);
+            log.warn("排程匯出 owner={} 失敗", s.getOwnerUserId(), e);
         }
+        executionStore.complete(s, LocalDateTime.now(TW_ZONE), localStatus, driveStatus);
     }
 
     // ===== 輔助 =====
+
+    /** Null local file is handled without any remote I/O, preserving the existing skipped status. */
+    private String failedDriveStatus(CapturedExport s) {
+        return s.isGdriveEnabled() ? gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), null).status() : null;
+    }
 
     private Long requireOwnerId() {
         CurrentUserContext ctx = currentUserProvider.getObject();
@@ -441,7 +426,7 @@ public class ExportScheduleService {
      * {@code resolveDir} 不可省略——它擋的是子路徑跳脫基底，是另一道防線。
      */
     private com.steven.assets.service.export.DualFormatExportWriter.DualResult writeDual(
-            ExportScheduleSetting s, Long ownerId,
+            CapturedExport s, Long ownerId,
             com.steven.assets.service.export.ExportDoc doc, String subpath) throws IOException {
         byte[] xlsx = null;
         byte[] json = null;
@@ -460,15 +445,7 @@ public class ExportScheduleService {
                 s.isGdriveEnabled(), s.getGdriveSubpath());
     }
 
-    /** 寫回 Drive 狀態欄。未啟用時 {@code gdriveStatus} 為 null，此時兩欄一律不碰（沿用既有語意）。 */
-    private void applyGdriveStatus(ExportScheduleSetting s,
-                                   com.steven.assets.service.export.DualFormatExportWriter.DualResult r) {
-        if (r.gdriveStatus() == null) return;
-        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(truncate(r.gdriveStatus(), GDRIVE_STATUS_MAX));
-    }
-
-    /**
+/**
      * 本機檔寫成功後的 Drive 同步（best-effort）。<b>順序不可顛倒</b>：本機那一份是既有的留存機制，
      * 必須先確定它寫成功才上傳；本機失敗時傳 {@code null} ——完全不上傳，絕不上傳前一次的舊檔。
      *
@@ -478,14 +455,7 @@ public class ExportScheduleService {
      *
      * @return 未啟用時回 {@code null}（不碰狀態欄）；否則為本輪結果，供 run-now 回報落點
      */
-    private GdriveOutputSupport.SyncResult syncGdrive(ExportScheduleSetting s, Path localFile) {
-        if (!s.isGdriveEnabled()) return null;
-        GdriveOutputSupport.SyncResult r =
-                gdrive.syncQuietly(s.getOwnerUserId(), s.getGdriveSubpath(), localFile);
-        s.setGdriveLastRunAt(LocalDateTime.now(TW_ZONE));
-        s.setGdriveLastStatus(truncate(r.status(), GDRIVE_STATUS_MAX));
-        return r;
-    }
+
 
     private ExportScheduleDto.SettingResponse toResponse(ExportScheduleSetting s) {
         return toResponse(s, null);   // 讀取路徑不做自檢：自檢只在「使用者這次把開關打開」時才有意義

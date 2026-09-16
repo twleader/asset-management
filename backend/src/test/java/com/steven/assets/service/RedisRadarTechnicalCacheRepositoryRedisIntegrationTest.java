@@ -147,7 +147,7 @@ class RedisRadarTechnicalCacheRepositoryRedisIntegrationTest {
         root.put("origin", "LOCAL_CALCULATED");
         root.put("binding", "BOUND_CONTEXT");
         root.put("contextFingerprint", FINGERPRINT);
-        root.put("decisionInputVersion", "TW_RULES_V18|FUBON_OVERLAY_V1");
+        root.put("decisionInputVersion", "TW_RULES_V19|FUBON_OVERLAY_V1");
         root.put("calculatedAt", calculatedAt.toString());
         root.put("freshUntil", freshUntil.toString());
         root.put("freshUntilEpochMillis", freshUntil.toEpochMilli());

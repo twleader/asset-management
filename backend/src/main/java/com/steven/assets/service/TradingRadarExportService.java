@@ -244,6 +244,7 @@ public class TradingRadarExportService {
         // Task 357／Requirement 94：「下一配息」四個日期同樣附加在真正最末，理由同上——
         // 既有「下一配息日」欄（EVIDENCE_HEADERS）保留為 anchorDate，不動既有欄位索引。
         headers.addAll(DIVIDEND_FOUR_DATES_HEADERS);
+        headers.addAll(BOLLINGER_HEADERS);
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -302,6 +303,7 @@ public class TradingRadarExportService {
                         num(d, "etfPremiumLivePct"), nullableText(d, "etfPremiumLiveNavAsOf")));
                 row.addAll(weeklyCandleCells(d));
                 row.addAll(dividendFourDatesCells(evidence));
+                row.addAll(bollingerCells(d));
                 rows.add(row);
             }
         }
@@ -342,7 +344,8 @@ public class TradingRadarExportService {
         formats.addAll(VALUATION_COMPONENT_FORMATS);
         formats.addAll(LIVE_PREMIUM_FORMATS); // Task 320：與 headers／rows 同位置（尾端）
         formats.addAll(WEEKLY_CANDLE_FORMATS); // Task 356.12a：與 headers／rows 同位置（真正最末）
-        formats.addAll(DIVIDEND_FOUR_DATES_FORMATS); // Task 357：同上，真正最末
+        formats.addAll(DIVIDEND_FOUR_DATES_FORMATS);
+        formats.addAll(BOLLINGER_FORMATS); // Completed local BB columns stay at the true end.
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
@@ -366,6 +369,22 @@ public class TradingRadarExportService {
         return new ExportDoc.Sheet("台美公開資訊",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());
+    }
+
+    private static final List<String> BOLLINGER_HEADERS = List.of(
+            "布林完成日K", "布林根數", "布林標準差倍數", "布林中軌", "布林上軌", "布林下軌",
+            "布林%B", "布林寬度%", "布林來源與用途");
+    private static final List<ExportDoc.Format> BOLLINGER_FORMATS = List.of(
+            ExportDoc.Format.TEXT, ExportDoc.Format.TEXT, ExportDoc.Format.TEXT,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.NUM2,
+            ExportDoc.Format.NUM2, ExportDoc.Format.NUM2, ExportDoc.Format.TEXT);
+
+    private static List<Object> bollingerCells(JsonNode decision) {
+        JsonNode value = decision.path("bollinger");
+        return Arrays.asList(txt(value, "asOfDate"), num(value, "period"), num(value, "standardDeviationMultiplier"),
+                num(value, "middleBand"), num(value, "upperBand"), num(value, "lowerBand"),
+                num(value, "percentB"), num(value, "bandWidthPercent"), value.isObject()
+                        ? "本機完成權息還原K；既有乖離因子上方延伸扣分，非單獨買賣訊號" : "");
     }
 
     // ── JsonNode 取值 helper（容忍缺欄位）──────────────────────────────

@@ -12238,3 +12238,34 @@ Before the native/non-null dedupe branch, recorder code validates the catalog th
 ### Performance acceptance protocol
 
 Use one authenticated owner with 38 fixed eligible targets, a warm Docker stack and warm Redis/data. Make seven serial requests to authenticated BFF list and full endpoints, discard each endpoint's first request, then record all six TTFB values, bodies and medians. Every list TTFB must be at most 800ms, list body must be below 70 KiB, and the legacy full median must be at least twice the list median. The report records endpoint, timestamp, bytes and each sample; 9090/public measurements cannot substitute for this browser proof. If an existing authorized session is unavailable, this browser measurement is explicitly pending rather than claimed as completed.
+
+
+## Requirement 156／Task 438：完成日布林延伸扣分
+
+RadarInputAssembler從已權息還原且排除進行中K的firstCompletedIndex切連續20收盤，產一次immutable BollingerInput，傳入StockInput與唯一nullable detail/snapshot/export projection。公式20日SMA及population σ、上下軌2σ、width百分點/%B；BigDecimal DECIMAL128、輸出8位。constant width0不算%B，任何無效窗不跨缺口補根。production BIAS既有值減最多.25的上方延伸扣分：p=.25*clamp(2*(%B−.5),0,1)*min(1,width/2)*min(1,20/width)；原BIAS null仍null，布林null沿用原值。23因子/三軌各.06 BIAS/V13 candidate不變；不新增直接action覆寫。這是判斷性保守成本偏好，不是獲利或回檔機率模型。
+
+RULE_VERSION V19與decisionInputVersion現行source組合共同隔離cache/notification，first-version transition只建baseline。BOUND fingerprint包含有效20日期/close及公式／來源版本（同份Prepared有效窗唯一決定完整布林結果），避免舊cache命中。list compact core使用同一計算但不建detail；full/detail投影布林date/int/decimal DTO，舊快照缺欄null。nullable bollinger只追加至既有可達typed契約、不新增路由，OpenAPI相容minor及Swagger兩鏡像同步。risks按三軌局部揭露且EvidenceGate最後仍保持同軌安全裁切。offline production共用assembler、history截斷，不alter candidate V13。
+
+
+布林與完成 dailyCandle 使用 Prepared 既有共同權息價基，不另作第二次還原。20 根不含 live；極端 live 觸發既有分割啟發式時，完成 K 的共同縮放可能使 absolute bands 改變，但 %B、width 與延伸扣分在 scale8 容差內保持比例不變；不宣稱其他盤中因子的分數不變。
+
+## Requirement 157／Task 439：匯出capture／短交易結果寫回
+
+四匯出服務先以短讀取準備不可變run input（scheduleId/ownerId/childId或明確legacy身份、當日guard、目錄/Drive等執行設定）；退出交易後完成現有一次doc→雙格式及I/O，finally產immutable outcome。獨立結果writer Spring proxy開短交易，以schedule id+owner讀current並鎖parent，child exact id只局部last-run欄更新；current不存在skip，removed child skip，不save captured aggregate。UIupdate同parent鎖、在鎖內fresh read/config mutate，child lock order parent→child，避免writer與UI在各短交易之間繼續stale merge。不得在長I/O持鎖。legacy只在執行前短交易鎖parent、新讀確認仍空且legacy時間一致時建立並flush既有fallback child取得id，結果不建child。child id與captured hour/minute皆相同才記結果（disabled可記，改時間skip）；parent摘要只在completedAt不早於current summary時依current現行代表算法更新，防late completion倒退。
+
+Drive outcome與captured destination config完整比對後才更新metadata；不同時保留最新Drive metadata。本機status仍可記入現存對象。manual同writer而不寫child日guard；執行前無persisted setting的default run不在結果階段插入設定，避免競態吞新UI。status截斷遵守現有各欄上限，成功/失敗均保留原guard語意，background個別失敗不連坐。transaction proxy、tenant explicit owner、不變API由focused測試證明；所有I/O為fake，禁止為驗收真的runNow/export/Drive。
+
+
+執行日 guard 必須取 max(current.lastRunDate,captured attemptDate)，只能前進；child lastRunAt 與 lastRunStatus 在同一 completedAt>=current.lastRunAt 條件下原子更新。四服務均測跨日 D1 長 I/O 晚於 D2 完成，D1 收尾不可倒退 D2 guard，D2 後續 due 判定不得再執行。
+
+## Requirement 158／Task 440：現金股利可證enrichment
+
+獨立enrichment bean REQUIRES_NEW，從既有side-effect findFromDb在projection之後呼叫，兩段try/catch獨立；pure-read flow不呼叫。candidate僅ACTIVE現金>0/exDividendDate且previousClose或yieldPct或fillDays缺值，保留完整兩除權息日/金額身份。重用MarketDataService.isTradingDayCachedOnly(market,date)，UNKNOWN fail closed，以市場本地cache-only交易曆和完成Kauthority產asOf，bounded native價格讀至asOf。previousClose需除息日完成bar及權威前session正raw收盤，不跨gap；yield4位，fillDays0起權威session數且hit前coverage完整。純配股不填现金enrichment；另一公司行動改basis且無證明不算fillDays。缺曆/完K/null/非正/未來皆保留未知。writer以identity+ACTIVE及每欄IS NULL／COALESCE守門，防cancellation/amendment競態；不改event/date/payment/provider facts，不復活。existing非null值不覆蓋，無candidate不查價格，不新增schema或外部查詢。
+
+## Requirement 159／Task 441：現有八匯出卡dialog草稿
+
+八頁保持各自現行BFF/DTO和多times結構。canonical setting只由load或成功save回應更新，card render canonical摘要。dialog open做deep copy至draft（不同市場/子time完全隔離），所有輸入與browse結果只動draft。cancel/close丟棄draft無寫入；save一次busy gate，沿用現行normalize與endpoint，成功canonical replace+close，失敗保留draft+error。busy阻擋save/close/runNow等衝突動作；runNow保留既有已保存設定語意、不得暗中保存draft。不動頁面其他CRUD、圖表、SSE；frontend render與狀態處理不添加business規則。
+
+## Requirement 32／Task 442：投組建議三模式與現有逾時註解校正
+
+僅同步現存實作的注釋/說明：LOCAL同步終態、不建client/不查key/無外呼；HYBRID非同步PROCESSING、數字本機、僅兩段文字LLM且停web search；LLM完整非同步PROCESSING與現有捕捉adviceId的背景結果寫回。MarketAnalysis client現已有90秒transport timeout，batch poll/catch/stale守門維持原行為。controller文案不得一律宣稱同步或每模式都PROCESSING；不重做已存在timeout、不新增模型/參數/API/SQL/排程。

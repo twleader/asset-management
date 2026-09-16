@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -136,8 +137,40 @@ public class RadarInputAssembler {
              * contract, so its raw/adjusted price basis is deliberately
              * independent of {@link #distributionAdjusted()}.
              */
-            boolean weeklyDistributionAdjusted
+            boolean weeklyDistributionAdjusted,
+            TradingRadarRuleEngine.BollingerInput bollinger
     ) {
+        /** Previous canonical shape, retained for old fixtures/snapshots with no Bollinger observation. */
+        public Assembled(
+            TechnicalIndicatorService.FullIndicators indicators,
+            List<StockPriceHistory> adjustedRowsDesc,
+            boolean distributionAdjusted,
+            List<BigDecimal> completedCloses,
+            BigDecimal previousAdjustedClose,
+            BigDecimal completedChangePercent,
+            BigDecimal week52High,
+            BigDecimal week52Low,
+            BigDecimal kdBandWidthPercent,
+            TradingRadarRuleEngine.Confirmation ma20Confirmation,
+            TradingRadarRuleEngine.Confirmation ma60Confirmation,
+            TradingRadarRuleEngine.Confirmation ma240Confirmation,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal ruleChangePercent,
+            BigDecimal volumeRatio,
+            VolatilityObservation volatility60,
+            TradingRadarRuleEngine.CandleInput dailyCandle,
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+            TechnicalIndicatorService.FullIndicators weeklyIndicators,
+
+            boolean weeklyDistributionAdjusted
+) {
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, null);
+        }
+
         /** t274 primitive 的欄位捷徑；正式 normalized action 尚未在此任務啟用。 */
         public BigDecimal returnStdDev60Ratio() {
             return volatility60 == null ? null : volatility60.returnStdDev60Ratio();
@@ -360,7 +393,50 @@ public class RadarInputAssembler {
                 weekly,
                 prepared.weeklyBarsDesc(),
                 weeklyIndicators,
-                prepared.weeklyDistributionAdjusted());
+                prepared.weeklyDistributionAdjusted(),
+                prepared.completedCloses().size() < 20 ? null
+                        : completedBollinger(prepared.dailyContractRowsDesc(), firstCompleted));
+    }
+
+    /** Price-only calculation, including fresh-local cache hits: never consumes provider BB values. */
+    public static TradingRadarRuleEngine.BollingerInput completedBollinger(
+            List<StockPriceHistory> rowsDesc, int firstCompleted) {
+        final int period = 20;
+        if (rowsDesc == null || firstCompleted < 0 || rowsDesc.size() - firstCompleted < period) return null;
+        MathContext context = MathContext.DECIMAL128;
+        BigDecimal sum = BigDecimal.ZERO;
+        LocalDate previousDate = null;
+        for (int i = firstCompleted; i < firstCompleted + period; i++) {
+            StockPriceHistory row = rowsDesc.get(i);
+            if (row == null || row.getTradingDate() == null || row.getClosePrice() == null
+                    || row.getClosePrice().signum() <= 0 || !Double.isFinite(row.getClosePrice().doubleValue())
+                    || previousDate != null && !row.getTradingDate().isBefore(previousDate)) return null;
+            previousDate = row.getTradingDate();
+            sum = sum.add(row.getClosePrice(), context);
+        }
+        BigDecimal middle = sum.divide(BigDecimal.valueOf(period), context);
+        BigDecimal squared = BigDecimal.ZERO;
+        for (int i = firstCompleted; i < firstCompleted + period; i++) {
+            BigDecimal deviation = rowsDesc.get(i).getClosePrice().subtract(middle, context);
+            squared = squared.add(deviation.multiply(deviation, context), context);
+        }
+        BigDecimal sigma = squared.divide(BigDecimal.valueOf(period), context).sqrt(context);
+        BigDecimal upper = middle.add(sigma.multiply(BigDecimal.valueOf(2), context), context);
+        BigDecimal lower = middle.subtract(sigma.multiply(BigDecimal.valueOf(2), context), context);
+        BigDecimal range = upper.subtract(lower, context);
+        BigDecimal width = range.divide(middle, context).multiply(BigDecimal.valueOf(100), context);
+        BigDecimal position = range.signum() == 0 ? null
+                : rowsDesc.get(firstCompleted).getClosePrice().subtract(lower, context).divide(range, context);
+        if (!Double.isFinite(middle.doubleValue()) || !Double.isFinite(upper.doubleValue())
+                || !Double.isFinite(lower.doubleValue()) || !Double.isFinite(width.doubleValue())
+                || position != null && !Double.isFinite(position.doubleValue())) return null;
+        return new TradingRadarRuleEngine.BollingerInput(rowsDesc.get(firstCompleted).getTradingDate(), period, 2,
+                bollingerScale(middle), bollingerScale(upper), bollingerScale(lower),
+                position == null ? null : bollingerScale(position), bollingerScale(width));
+    }
+
+    private static BigDecimal bollingerScale(BigDecimal value) {
+        return value.setScale(8, RoundingMode.HALF_UP);
     }
 
     /**
