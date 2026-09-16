@@ -5398,3 +5398,11 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - 現金昨收是exDividendDate前一個權威交易session的原始正收盤，除息日已完成且bar存在；本地交易日曆可證該session且價格完整才填。從exDate到第一個已完成close>=previousClose的區間不得缺任何權威交易session，fillDays為0起算完成交易session位移；無hit或曆／資料缺口為null。資料日期嚴格升序/唯一、null/非正拒絕；不得跳過無效價格或以週末推斷future。跨另一除權息／分割等公司行動且無同basis證據時fillDays仍null，不以raw跨基礎比大小。
 - yieldPct=cashDividend/previousClose*100，scale4 HALF_UP；previousClose遵守DB numeric(15,4)範圍、yield與fill範圍先驗證。只有本次可證值且current仍ACTIVE、owner-independent exact stock/market/event id/兩除權息日及金額身份相同時原子COALESCE缺值更新；若併發projection變更／取消／刪除則零寫，不復活、不覆寫剛填值。無價格／證據直接無寫入，零新增券商功能、零schema變更。
 
+### Requirement 159／Task 441：八頁匯出設定以摘要與可取消草稿編輯
+
+**User Story:** 身為匯出設定使用者，我希望卡片摘要顯示已保存狀態，開啟對話框編輯且取消不改設定。
+
+**Acceptance Criteria:**
+- TransactionView、StockAlertView、AssetHistoryView、TradingRadarView、ExchangeRateView、CommodityPriceView、RealizedGainView、CrawlerDataView八頁現有匯出卡只呈現已保存摘要與編輯入口；所有原先可寫設定移至dialog，保留目前各頁多times／台美市場／enabled／輸出路徑／Drive及所有其餘功能，不套舊單時間版實作。
+- 每次open從最新canonical已載入setting深複製draft（times子陣列不共享）；draft增刪時點／toggle／browse路徑不寫canonical、不自動呼叫update。Cancel、X、ESC、遮罩關閉都丟棄draft、零write；browse若只讀沿用原contract。save既有endpoint/body/normalize/validate，只busy=false時允許一次請求；busy期間禁重複save、close、runNow與移除時點，避免不一致。
+- save成功以server canonical response替換摘要並關閉；失敗dialog保持draft與錯誤、不關閉／不重讀覆蓋草稿，不假裝保存成功；再次開啟用新canonical。runNow與現有狀態刷新沿用原行為且不隱式保存draft，頁面其他交易／CRUD／圖表／SSE／查詢不變；不新增API、DB、排程或券商動作。

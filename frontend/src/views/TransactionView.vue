@@ -144,33 +144,41 @@
         <div class="schedule-row-head">
           <span class="schedule-row-title">{{ s.name || `排程 #${idx + 1}` }}</span>
           <div style="display:flex;gap:8px">
-            <el-button size="small" :icon="Download" :loading="s._running" @click="handleRunNow(idx)">
+            <el-button size="small" :icon="Download" :loading="s._running" :disabled="scheduleDialog.saving" @click="handleRunNow(idx)">
               立即匯出
             </el-button>
-            <el-button size="small" type="primary" :loading="s._saving" @click="saveSchedule(idx)">儲存</el-button>
+            <el-button size="small" type="primary" :disabled="scheduleDialog.saving || s._running || s._deleting" @click="openScheduleDialog(idx)">編輯設定</el-button>
             <el-popconfirm title="確定刪除這筆排程？" width="200" @confirm="handleDeleteSchedule(idx)">
               <template #reference>
-                <el-button size="small" type="danger" :icon="Delete" :loading="s._deleting">刪除</el-button>
+                <el-button size="small" type="danger" :icon="Delete" :loading="s._deleting" :disabled="scheduleDialog.saving">刪除</el-button>
               </template>
             </el-popconfirm>
           </div>
         </div>
-        <el-form :inline="true" label-width="100px" class="schedule-form">
+        <div>已儲存：{{ s.enabled ? '啟用' : '停用' }}；{{ s._time }}；{{ s.outputSubpath || '家目錄根' }}</div>
+
+        <div class="schedule-status">
+          上次執行：{{ s.lastRunAt || '—' }}　{{ s.lastRunStatus || '' }}
+        </div>
+      </div>
+
+      <el-dialog v-model="scheduleDialog.visible" title="編輯交易匯出排程" width="680px" :close-on-click-modal="!scheduleDialog.saving" :close-on-press-escape="!scheduleDialog.saving" :show-close="!scheduleDialog.saving" :before-close="closeScheduleDialog">
+        <el-form v-if="scheduleDialog.draft" :disabled="scheduleDialog.saving || (scheduleDialog.saving)" :inline="true" label-width="100px" class="schedule-form">
           <el-form-item label="名稱">
-            <el-input v-model="s.name" maxlength="20" show-word-limit style="width:190px"
+            <el-input v-model="scheduleDialog.draft.name" maxlength="20" show-word-limit style="width:190px"
               placeholder="（選填，會進檔名）" />
           </el-form-item>
           <el-form-item label="啟用每日排程">
-            <el-switch v-model="s.enabled" />
+            <el-switch v-model="scheduleDialog.draft.enabled" />
           </el-form-item>
           <el-form-item label="每日執行時間">
-            <el-time-picker v-model="s._time" format="HH:mm" value-format="HH:mm"
+            <el-time-picker v-model="scheduleDialog.draft._time" format="HH:mm" value-format="HH:mm"
               placeholder="時:分" style="width:130px" />
           </el-form-item>
           <el-form-item label="輸出資料夾">
-            <el-input v-model="s.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+            <el-input v-model="scheduleDialog.draft.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
               <template #append>
-                <el-button :icon="FolderOpened" @click="openDirPicker(idx)">選擇</el-button>
+                <el-button :disabled="scheduleDialog.saving" :icon="FolderOpened" @click="openDirPicker(scheduleDialog.draft.id)">選擇</el-button>
               </template>
             </el-input>
           </el-form-item>
@@ -182,39 +190,36 @@
           <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
             <div style="display:flex; flex-direction:column; gap:6px">
               <div style="display:flex; align-items:center; gap:12px">
-                <el-switch v-model="s.gdriveEnabled" />
+                <el-switch v-model="scheduleDialog.draft.gdriveEnabled" />
                 <el-input
-                  v-model="s.gdriveSubpath"
+                  v-model="scheduleDialog.draft.gdriveSubpath"
                   readonly
                   placeholder="（尚未選擇 Drive 資料夾）"
-                  :disabled="!s.gdriveEnabled"
+                  :disabled="scheduleDialog.saving || (!scheduleDialog.draft.gdriveEnabled)"
                   style="width:260px"
                 >
                   <template #append>
-                    <el-button :disabled="!s.gdriveEnabled" @click="openDirPicker(idx, 'gdrive')">選擇</el-button>
+                    <el-button :disabled="scheduleDialog.saving || (!scheduleDialog.draft.gdriveEnabled)" @click="openDirPicker(scheduleDialog.draft.id, 'gdrive')">選擇</el-button>
                   </template>
                 </el-input>
               </div>
               <div style="font-size:12px; color:var(--el-text-color-secondary); line-height:1.7">
                 開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
                 <strong>本機那一份永遠照寫、不受影響</strong>。
-                <template v-if="s.gdriveEnabled && s.gdriveSubpath">
-                  <br />Drive 落點：<code>{{ gdriveRemote || 'GDriveOutput' }}:{{ s.gdriveSubpath }}</code>
+                <template v-if="scheduleDialog.draft.gdriveEnabled && scheduleDialog.draft.gdriveSubpath">
+                  <br />Drive 落點：<code>{{ gdriveRemote || 'GDriveOutput' }}:{{ scheduleDialog.draft.gdriveSubpath }}</code>
                 </template>
                 <br />上次上傳：
-                <template v-if="s.gdriveLastRunAt">
-                  {{ s.gdriveLastRunAt }} — <code>{{ s.gdriveLastStatus || '—' }}</code>
+                <template v-if="scheduleDialog.draft.gdriveLastRunAt">
+                  {{ scheduleDialog.draft.gdriveLastRunAt }} — <code>{{ scheduleDialog.draft.gdriveLastStatus || '—' }}</code>
                 </template>
                 <template v-else>—（尚未執行過）</template>
               </div>
             </div>
           </el-form-item>
         </el-form>
-        <div class="schedule-status">
-          上次執行：{{ s.lastRunAt || '—' }}　{{ s.lastRunStatus || '' }}
-        </div>
-      </div>
-
+        <template #footer><el-button :disabled="scheduleDialog.saving" @click="scheduleDialog.visible = false">取消</el-button><el-button type="primary" :loading="scheduleDialog.saving" :disabled="scheduleDialog.saving" @click="saveSchedule">儲存設定</el-button></template>
+      </el-dialog>
       <div class="schedule-hint">
         以主機家目錄 <code>{{ baseDir || '/home/steven' }}</code> 為根（對映主機
         <code>/Users/steven</code>）。按「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
@@ -412,6 +417,7 @@ import dayjs from 'dayjs'
 import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
+import { cloneExportSetting } from '@/utils/exportSettingDraft'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -433,6 +439,7 @@ const formRef = ref(null)
 // 排程自動匯出設定（Task t238；Task 255 起每人可多筆）
 // baseDir／gdriveRemote 是後端給的顯示值、全清單共用一份（不入庫、不放進單筆內）
 const schedules = ref([])
+const scheduleDialog = reactive({ visible: false, draft: null, saving: false })
 const baseDir = ref('')
 const gdriveRemote = ref('')
 const addingSchedule = ref(false)
@@ -782,6 +789,7 @@ function applySchedules(res) {
 
 /** 新增：直接建一筆停用的預設排程，使用者再自行設定並儲存（不做前端草稿列，避免 id 為 null 的分支狀態）。 */
 async function addSchedule() {
+  if (scheduleDialog.saving) return
   addingSchedule.value = true
   try {
     applySchedules(await bffApi.transaction.createExportSchedule({
@@ -795,15 +803,24 @@ async function addSchedule() {
   }
 }
 
-async function saveSchedule(idx) {
+function openScheduleDialog(idx) {
+  if (scheduleDialog.saving) return
   const s = schedules.value[idx]
-  if (!s) return
+  if (!s || s._running || s._deleting) return
+  scheduleDialog.draft = cloneExportSetting(s)
+  scheduleDialog.visible = true
+}
+function closeScheduleDialog(done) { if (!scheduleDialog.saving) done() }
+
+async function saveSchedule() {
+  const s = scheduleDialog.draft
+  if (!s || scheduleDialog.saving) return
   // 前後端都擋：開了同步卻沒選資料夾，後端也會回 400
   if (s.gdriveEnabled && !(s.gdriveSubpath || '').trim()) {
     ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
     return
   }
-  s._saving = true
+  scheduleDialog.saving = true
   try {
     const [h, m] = (s._time || '08:00').split(':').map(Number)
     applySchedules(await bffApi.transaction.updateExportSchedule(s.id, {
@@ -815,15 +832,18 @@ async function saveSchedule(idx) {
       runMinute: m,
       outputSubpath: (s.outputSubpath || 'input').trim()
     }))
+    scheduleDialog.visible = false
     ElMessage.success('排程設定已儲存')
   } catch (e) {
     // 名稱不合法／時分越界等後端會回可讀訊息，直接顯示比「請稍後再試」有用
     ElMessage.error(e?.response?.data?.detail || '儲存失敗，請稍後再試')
-    s._saving = false
+  } finally {
+    scheduleDialog.saving = false
   }
 }
 
 async function handleDeleteSchedule(idx) {
+  if (scheduleDialog.saving) return
   const s = schedules.value[idx]
   if (!s) return
   s._deleting = true
@@ -837,6 +857,7 @@ async function handleDeleteSchedule(idx) {
 }
 
 async function handleRunNow(idx) {
+  if (scheduleDialog.saving) return
   const s = schedules.value[idx]
   if (!s) return
   s._running = true
@@ -872,7 +893,8 @@ const dirPickerPreview = computed(() => {
 
 /** dialog 只有一個，故必須記住這次是為哪一筆排程（rowIndex）而開，確定時才寫得回正確的那一筆。 */
 function openDirPicker(rowIndex, mode = 'local') {
-  const s = schedules.value[rowIndex]
+  if (scheduleDialog.saving || !scheduleDialog.draft) return
+  const s = scheduleDialog.draft
   dirPicker.rowIndex = rowIndex
   dirPicker.mode = mode
   dirPicker.picked = (mode === 'gdrive' ? s?.gdriveSubpath : s?.outputSubpath) || ''
@@ -913,7 +935,8 @@ function confirmDirPick() {
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
-  const s = schedules.value[dirPicker.rowIndex]
+  if (scheduleDialog.saving) return
+  const s = scheduleDialog.draft
   if (s) {
     if (dirPicker.mode === 'gdrive') s.gdriveSubpath = p
     else s.outputSubpath = p

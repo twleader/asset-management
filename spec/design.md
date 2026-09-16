@@ -12262,3 +12262,7 @@ Drive outcome與captured destination config完整比對後才更新metadata；�
 
 獨立enrichment bean REQUIRES_NEW，從既有side-effect findFromDb在projection之後呼叫，兩段try/catch獨立；pure-read flow不呼叫。candidate僅ACTIVE現金>0/exDividendDate且previousClose或yieldPct或fillDays缺值，保留完整兩除權息日/金額身份。重用MarketDataService.isTradingDayCachedOnly(market,date)，UNKNOWN fail closed，以市場本地cache-only交易曆和完成Kauthority產asOf，bounded native價格讀至asOf。previousClose需除息日完成bar及權威前session正raw收盤，不跨gap；yield4位，fillDays0起權威session數且hit前coverage完整。純配股不填现金enrichment；另一公司行動改basis且無證明不算fillDays。缺曆/完K/null/非正/未來皆保留未知。writer以identity+ACTIVE及每欄IS NULL／COALESCE守門，防cancellation/amendment競態；不改event/date/payment/provider facts，不復活。existing非null值不覆蓋，無candidate不查價格，不新增schema或外部查詢。
 
+## Requirement 159／Task 441：現有八匯出卡dialog草稿
+
+八頁保持各自現行BFF/DTO和多times結構。canonical setting只由load或成功save回應更新，card render canonical摘要。dialog open做deep copy至draft（不同市場/子time完全隔離），所有輸入與browse結果只動draft。cancel/close丟棄draft無寫入；save一次busy gate，沿用現行normalize與endpoint，成功canonical replace+close，失敗保留draft+error。busy阻擋save/close/runNow等衝突動作；runNow保留既有已保存設定語意、不得暗中保存draft。不動頁面其他CRUD、圖表、SSE；frontend render與狀態處理不添加business規則。
+
