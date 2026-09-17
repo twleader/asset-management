@@ -54,8 +54,8 @@ local function valid_pair_document(doc, timeframe, expectedProfiles)
       or type(doc.origin) ~= 'string' or type(doc.binding) ~= 'string'
       or type(doc.profiles) ~= 'table' then return false end
   local oldest = epoch_millis(doc.oldestObservedAt)
-  local until = epoch_millis(doc.freshUntil)
-  if not oldest or not until or until ~= oldest + 100000 then return false end
+  local documentFreshUntil = epoch_millis(doc.freshUntil)
+  if not oldest or not documentFreshUntil or documentFreshUntil ~= oldest + 100000 then return false end
   if doc.origin == 'LOCAL_CALCULATED' then
     -- Local calculation is carried exclusively in localSnapshot.  Empty
     -- provider profiles are intentional: inventing synthetic Fubon facts here
@@ -103,9 +103,9 @@ if currentD and (not valid_pair_document(currentD, 'D', 10) or not valid_pair_do
 local function current_bound_fubon_fresh(current)
   -- PEXPIREAT should remove the key at freshUntil, but an independently
   -- corrupted/manual key must not make a stale source block a local result.
-  local until = epoch_millis(current.freshUntil)
+  local documentFreshUntil = epoch_millis(current.freshUntil)
   return current and current.origin == 'FUBON_SDK' and current.binding == 'BOUND_CONTEXT'
-      and until and now < until
+      and documentFreshUntil and now < documentFreshUntil
       and redis.call('PTTL', KEYS[1]) > 0 and redis.call('PTTL', KEYS[2]) > 0
 end
 local function dominates(incoming, current)

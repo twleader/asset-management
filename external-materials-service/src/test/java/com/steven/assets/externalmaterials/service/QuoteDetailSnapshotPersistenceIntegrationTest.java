@@ -129,7 +129,7 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
                     .isEqualTo(QuoteDetailCache.WriteOutcome.REJECTED_STALE);
         }
 
-        assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("新名");
+        assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("台積電");
         Instant afterFetched = jdbc.queryForObject("SELECT fetched_at FROM stock_intraday_order_book",
                 (org.springframework.jdbc.core.RowMapper<Instant>) (rs, rowNum) -> rs.getTimestamp(1).toInstant());
         assertThat(afterFetched).isEqualTo(beforeFetched);
@@ -284,7 +284,9 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
             var result = reader.get(10, TimeUnit.SECONDS);
             assertThat(result.status()).isEqualTo(IntradayOrderBookSnapshotStore.ReadStatus.FOUND);
             assertThat(result.canonical().canonicalRevision()).isEqualTo(older.canonical().canonicalRevision());
-            assertThat(result.canonical().snapshot().stockName()).isEqualTo("富邦舊名");
+            assertThat(result.canonical().snapshot().stockName()).isEqualTo("台積電");
+            assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class))
+                    .isEqualTo("台積電");
             assertThat(result.canonical().snapshot().levels().getFirst().bidPrice()).isEqualByComparingTo("99");
         } finally {
             allowLevelRead.countDown();

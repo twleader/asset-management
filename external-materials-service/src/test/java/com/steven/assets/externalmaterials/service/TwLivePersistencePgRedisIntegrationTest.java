@@ -93,7 +93,10 @@ class TwLivePersistencePgRedisIntegrationTest {
                         .readTree(redis.opsForValue().get("price:台股:2330"));
                 assertThat(repaired.path("price").decimalValue()).isEqualByComparingTo("101");
                 assertThat(repaired.path("highPrice").decimalValue()).isEqualByComparingTo("102");
-                assertThat(repaired.path("stockName").asText()).isEqualTo("名稱一");
+                assertThat(repaired.path("stockName").asText()).isEqualTo("舊名");
+
+                assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class))
+                        .isEqualTo("舊名");
 
                 // Actual persistence failure happens before the Redis writer, so there is no replacement cache entry.
                 redis.delete("price:台股:2330");
