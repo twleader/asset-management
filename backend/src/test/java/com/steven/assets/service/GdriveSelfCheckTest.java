@@ -219,9 +219,10 @@ class GdriveSelfCheckTest {
         // dangling inode 下 Files.exists() 仍回 true，故判準必須是實際讀取
         String warning = selfCheck.checkConfigSource(tmp.resolve("gone.conf"));
 
+        // Task 443 之後：讀不到只代表當下讀不到，下一次操作會自動重試，不再是「本次生命週期全部跳過」
         assertThat(warning).isNotNull()
-                .contains("本次生命週期")        // 使用者真正需要知道的後果
-                .contains("--force-recreate");  // 以及唯一的修法
+                .contains("下一次上傳或列目錄操作會自動重試讀取設定")  // 使用者真正需要知道的後果
+                .contains("--force-recreate");  // 以及持續讀不到時的修法
     }
 
     @Test

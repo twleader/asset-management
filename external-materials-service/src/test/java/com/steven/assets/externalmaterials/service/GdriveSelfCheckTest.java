@@ -1,8 +1,11 @@
 package com.steven.assets.externalmaterials.service;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -123,7 +126,10 @@ class GdriveSelfCheckTest {
 
     // ===== L1（Task 247.6.7）=====
 
-    /** 來源讀不到＝掛載已 dangling；只能 warn，且必須點出「本容器整個生命週期都不會再同步」。 */
+    /**
+     * 來源讀不到＝掛載已 dangling；只能 warn。Task 443 之後不再斷言「本容器整個生命週期都不會再同步」——
+     * isAvailable()／ensureConfigCurrent() 每次呼叫都會重試，讀不到只代表這一刻讀不到。
+     */
     @Test
     void L1_來源讀不到時只warn不擲例外() {
         GdriveSelfCheck check = new GdriveSelfCheck(uploader, exportPathQuery, new ObjectMapper(),
@@ -131,10 +137,10 @@ class GdriveSelfCheckTest {
 
         List<String> warnings = check.localWarnings(REMOTE);
 
-        // L1 與 L2 各報一則：修法不同（重建容器 vs 重新授權），不能合成一句
+        // L1 與 L2 各報一則：修法不同（等下一次操作自動重新載入 vs 重新授權），不能合成一句
         assertThat(warnings).hasSize(2);
         assertThat(warnings.get(0)).contains("L1").contains("force-recreate")
-                .contains("本次生命週期");
+                .contains("下一次上傳或自檢操作會自動重試");
     }
 
     @Test
@@ -197,6 +203,36 @@ class GdriveSelfCheckTest {
                 .when(uploader).probe();
 
         assertThatCode(check::runStartupCheck).doesNotThrowAnyException();
+    }
+
+    /**
+     * L3 失敗時的 WARN 訊息須含第四個成因（Task 443／Requirement 160）：client_secret 與其他共用服務
+     * （如 app 登入）不同步——這是 2026-09-17 事故的真正根因，舊版三個成因（Drive API 未啟用／remote
+     * 名稱設錯／授權已撤銷）都不涵蓋，會誤導排查方向。
+     */
+    @Test
+    void L3失敗時WARN訊息含client_secret不同步這個成因() throws IOException {
+        GdriveSelfCheck check = withConfig(config(
+                "{\"access_token\":\"" + FAKE_ACCESS + "\",\"refresh_token\":\"" + FAKE_REFRESH + "\"}"));
+        when(exportPathQuery.anyGdriveEnabled()).thenReturn(true);
+        when(uploader.remoteName()).thenReturn(REMOTE);
+        when(uploader.isAvailable()).thenReturn(true);
+        doThrow(new RuntimeException("couldn't fetch token: invalid_client")).when(uploader).probe();
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(GdriveSelfCheck.class);
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            check.runStartupCheck();
+        } finally {
+            logger.detachAppender(logs);
+        }
+
+        assertThat(logs.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(msg -> assertThat(msg).contains("client_secret 與其他共用服務"));
     }
 
     /** config 未就緒時 L3 必然失敗，且原因 L1 已經講完；再打一次網路只是噪音。 */

@@ -69,12 +69,9 @@ public class GdriveSelfCheck {
             + "裸的 rclone config reconnect %s: 會跳過同意畫面而再次拿不到 refresh_token，"
             + "換一組新的 client id/secret 同樣無效（Google 的授權記錄綁「應用程式」而非 client id）。"
             + "判斷指標：授權過程若數秒內就結束、沒讓你按「繼續／允許」，就是沒拿到。"
-            // L2 解析的是啟動時複製到 /tmp 的副本，而本 client 啟動時複製一次、執行期不重讀來源
-            // （刻意不做熱重載，Task 247.5.1）。不講這句，使用者在 host 重新授權後會看到警告一字不變，
-            // 以為修法沒效而繞回頭。
-            + "在 host 重新授權後仍須重建容器才會生效："
-            + "docker compose -p asset-management up -d --force-recreate "
-            + "business-services external-materials-service";
+            // 本 client 現在會在下一次操作時自動重新載入（Task 443），故此提示不再需要特別強調
+            // 「仍須重建容器」。
+            + "在 host 重新授權後，下一次上傳或自檢操作即會自動偵測設定變更並重新載入，不需要重建容器。";
 
     /**
      * host 端改過 rclone 設定後的處置。純文件約束擋不住它再犯，故直接寫進 WARN 讓使用者照抄。
@@ -83,7 +80,9 @@ public class GdriveSelfCheck {
      * 只列自己會讓使用者修了一半。
      */
     private static final String RECREATE_HINT =
-            "host 改過 rclone 設定後需 docker compose -p asset-management up -d --force-recreate "
+            "若確認 host 端 rclone 設定的『內容』已經修好，下一次操作會自動重新載入、不需要重建容器；"
+            + "只有在 ~/.config/rclone 這個掛載目錄本身被整個替換（而非目錄內檔案內容變更）時，"
+            + "才需要 docker compose -p asset-management up -d --force-recreate "
             + "business-services external-materials-service";
 
     private final GdriveUploader uploader;
@@ -150,17 +149,15 @@ public class GdriveSelfCheck {
                 log.warn("{}", warning);
             }
             if (!uploader.isAvailable()) {
-                // **這一句不能省，它是本自檢最該報的狀況。**
-                // 原本以為「config 未就緒時 L3 必然失敗，失敗原因 L1 已經講過」而直接 return，但那個前提不成立：
-                // isAvailable() 回的是 configReady，而 configReady 是 @PostConstruct 判定一次、失敗後永不重試的
-                // 旗標；L1 檢查的則是「現在」讀不讀得到。兩者取樣時間不同，故存在這個組合——
-                // 啟動當下讀不到（configReady=false）、之後 host 端修好了（L1 過關），
-                // 於是 L1／L2 全部靜默，而這個容器整個生命週期其實一次都不會同步。
-                // 2026-07-28 實測就發生過（ext 16:02:26 讀 config 得 NoSuchFileException，
-                // 而 business 逃過一劫），症狀偽裝成「Drive 還在收檔案」——各匯出頁的 xlsx 由 business 上傳、
-                // 照常出現，只有爬蟲 JSON 停止更新。
-                log.warn("Drive 輸出自檢：rclone 設定在本服務啟動當下未能就緒（configReady=false，"
-                        + "該旗標啟動時判定一次且不重試），**本容器本次生命週期的 Drive 同步將全部跳過**"
+                // Task 443 之後 isAvailable() 每次呼叫都會先嘗試 reloadIfSourceChanged()，本輪讀不到只代表
+                // 「這一次呼叫的當下」讀不到，不再是「這個容器整個生命週期都不會同步」——下一次呼叫
+                // （下一輪 warmup 或排程觸發的 upload/probe）會自動重試。啟動自檢仍值得記一筆 WARN：
+                // 啟動當下讀不到，代表使用者這時候去看 Drive 會暫時看不到更新，但不代表要手動介入。
+                // 2026-07-28 曾實測發生過（ext 16:02:26 讀 config 得 NoSuchFileException）：症狀偽裝成
+                // 「Drive 還在收檔案」——各匯出頁的 xlsx 由 business 上傳、照常出現，只有爬蟲 JSON 停止更新；
+                // 這段歷史脈絡仍保留，但「整個生命週期都不會同步」的後果已被本任務修正，不再成立。
+                log.warn("Drive 輸出自檢：rclone 設定在本服務啟動當下未能就緒（configReady=false）。"
+                        + "本次呼叫讀不到只代表這一刻讀不到，下一次上傳或自檢操作會自動重試"
                         + "（本機 JSON 照常產生，故症狀會偽裝成「Drive 還在收檔案」）。{}", RECREATE_HINT);
                 return;
             }
@@ -173,8 +170,8 @@ public class GdriveSelfCheck {
     /**
      * L1＋L2：純本地檔案讀取與 JSON 解析，毫秒級、無副作用、不打網路。
      *
-     * <p>兩層各自回報而非「L1 失敗就不做 L2」：兩者的修法完全不同（一個是重建容器、一個是重新授權），
-     * 合成一句會讓使用者只看到其中一半。
+     * <p>兩層各自回報而非「L1 失敗就不做 L2」：兩者的修法完全不同（一個是等下一次操作自動重新載入、
+     * 極端情況才需重建容器；一個是重新授權），合成一句會讓使用者只看到其中一半。
      *
      * @return 0～2 則可直接顯示給使用者的警告；一切正常時為空清單
      */
@@ -194,10 +191,12 @@ public class GdriveSelfCheck {
      * 會讓單檔掛載的 inode link count 歸零（2026-07-28 實測 {@code links=0}），此時 {@code stat} 照樣成功、
      * {@code cat} 才回 ENOENT。
      *
-     * <p>這一層的價值來自一個既有設計：{@code configReady} 是<b>啟動時判定一次、失敗後永不重試</b>的旗標，
-     * 讀不到 config 的那一刻起，這個容器<b>整個生命週期</b>的 Drive 同步都會被跳過。實測 2026-07-28 16:02
-     * 就發生過：ext 啟動時剛好撞上 host 改寫 config，business 逃過而 ext 靜默失效——症狀還會偽裝成
-     * 「Drive 好像還在收檔案」（各匯出頁的 xlsx 由 business 上傳、照常出現），只有爬蟲 JSON 停止更新。
+     * <p>Task 443 之後，{@code isAvailable()}／{@code ensureConfigCurrent()} 每次呼叫都會重新嘗試讀取
+     * source（見 {@code ProcessGdriveUploader.reloadIfSourceChanged}），這一層讀不到只代表「這一刻」
+     * 讀不到，不再是「這個容器整個生命週期都會跳過」。2026-07-28 16:02 曾發生過 ext 啟動時剛好撞上 host
+     * 改寫 config、business 逃過而 ext 靜默失效的事故（症狀偽裝成「Drive 好像還在收檔案」，因為各匯出頁的
+     * xlsx 由 business 上傳、照常出現，只有爬蟲 JSON 停止更新）——保留作為歷史脈絡，但該事故「整個生命
+     * 週期不會同步」的後果已被本任務修正，不再成立。
      *
      * <p><b>絕不 dump 檔案內容</b>：該檔含 {@code [gdrive-crypt]} 的 crypt 解密密碼。
      */
@@ -216,7 +215,7 @@ public class GdriveSelfCheck {
             return "Drive 輸出自檢 L1 失敗：讀不到 rclone 設定 " + configSource + "（" + e.getClass().getSimpleName()
                     + "）。掛載點可能已 dangling——host 端 rclone 每次續期 OAuth token 都會原子替換這個檔案，"
                     + "單檔掛載的舊 inode 會就此失效（stat 仍成功、實際讀取才 ENOENT）。"
-                    + "本容器本次生命週期的 Drive 同步將全部跳過（config 只在啟動時判定一次、失敗後不重試）。"
+                    + "本次檢查當下讀不到；下一次上傳或自檢操作會自動重試。"
                     + RECREATE_HINT;
         }
     }
@@ -305,7 +304,8 @@ public class GdriveSelfCheck {
         } catch (RuntimeException e) {
             log.warn("Drive 輸出自檢 L3 失敗：對 remote「{}」的唯讀探測（rclone lsd）不成功——{}。"
                     + "常見成因：該 OAuth client 所屬的 GCP 專案未啟用 Drive API（錯誤訊息內含啟用連結，"
-                    + "照著開即可）、remote 名稱設錯、或授權已被撤銷。"
+                    + "照著開即可）、remote 名稱設錯、或授權已被撤銷、或此 client 的 client_secret 與其他共用服務"
+                    + "（如 app 登入）不同步。"
                     + "注意 DB 備份走的是另一個 remote，備份正常不代表本 remote 正常。",
                     remote, e.getMessage());
         }

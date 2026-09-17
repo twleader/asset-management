@@ -198,9 +198,10 @@ public class GdriveSelfCheck {
      * 的原子替換，單檔掛載下容器內舊 inode 的 link count 會歸零，此時 {@code exists()} 走 stat 仍回 true，
      * 只有真的讀才會 {@code ENOENT}。
      *
-     * <p><b>這一層的價值被一個既有設計放大</b>：{@code ProcessRcloneClient.configReady} 是啟動時判定一次的
-     * 旗標、失敗後永不重試——一旦啟動當下讀不到 config，該容器<b>整個生命週期</b>的 Drive 同步都會被跳過，
-     * 而症狀會偽裝成「Drive 好像還在收檔案」（另一個服務上傳的檔案照常出現）。故訊息必須明寫這個後果。
+     * <p>Task 443 之後，{@code ProcessRcloneClient.ensureConfigCurrent()} 每次呼叫都會重新嘗試讀取來源
+     * （見 {@link ProcessRcloneClient#reloadIfSourceChanged}），這一層讀不到只代表「現在」讀不到，
+     * 不再是「該容器整個生命週期的 Drive 同步都會被跳過」。2026-07-28 事故（另一個服務照常上傳、
+     * 症狀偽裝成「Drive 好像還在收檔案」）保留作為歷史脈絡，但其「整個生命週期跳過」的後果已被本任務修正。
      *
      * @param source 來源 config 路徑（參數化只為了讓測試能給替身路徑）
      */
@@ -238,8 +239,9 @@ public class GdriveSelfCheck {
      */
     private static String configBroken(Path source, String reason) {
         return "讀不到 rclone 設定 " + source + "（" + reason + "）。"
-                + "伺服器端本次生命週期的 Drive 同步將全部跳過（本機檔案照常產生）。"
-                + "host 改過 rclone 設定後請重建容器："
+                + "本機檔案照常產生；下一次上傳或列目錄操作會自動重試讀取設定，讀得到時即自動恢復，"
+                + "不需要重建容器。"
+                + "若持續讀不到（例如 ~/.config/rclone 這個掛載目錄本身被整個替換），才需要 "
                 + "docker compose -p asset-management up -d --force-recreate "
                 + "business-services external-materials-service";
     }
@@ -340,12 +342,9 @@ public class GdriveSelfCheck {
                 + ": --drive-auth-url \"https://accounts.google.com/o/oauth2/auth?prompt=consent\""
                 + "（授權過程若數秒內就完成、沒讓你按「繼續／允許」，就是沒拿到；"
                 + "換一組新的 client id/secret 無效，必須帶 prompt=consent）。"
-                // **這句不能省**：L2 解析的是啟動時複製到 /tmp 的副本，而兩支 client 都是啟動時複製一次、
-                // 執行期不重讀來源（刻意不做熱重載，Task 247.5.1）。使用者在 host 重新授權後，
-                // 執行中的容器仍在用舊快照，警告會一字不變——不講這句，他會以為修法沒效而繞回頭。
-                + "在 host 重新授權後仍須重建容器才會生效："
-                + "docker compose -p asset-management up -d --force-recreate "
-                + "business-services external-materials-service";
+                // Task 443 後兩支 client（ProcessRcloneClient／ProcessGdriveUploader）都會在下一次操作時
+                // 自動重新載入 source，此註解與其原本解釋的「仍須重建容器」文字一併作廢。
+                + "在 host 重新授權後，下一次上傳或列目錄操作即會自動偵測設定變更並重新載入，不需要重建容器。";
     }
 
     // ===== L3：實跑一次唯讀探測 =====
