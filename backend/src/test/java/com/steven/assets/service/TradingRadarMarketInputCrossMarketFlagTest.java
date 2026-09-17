@@ -233,6 +233,8 @@ class TradingRadarMarketInputCrossMarketFlagTest {
 
     @Test
     void 台股組的跨市場旗標必須為適用() {
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(java.util.Optional.of(true));
         when(indicatorService.computeAll(anyString(), anyString()))
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
 

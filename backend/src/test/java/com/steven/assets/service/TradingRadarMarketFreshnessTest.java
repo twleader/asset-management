@@ -20,7 +20,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -47,7 +46,8 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TradingRadarMarketFreshnessTest {
 
-    private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
+    private static final LocalDate FRIDAY = LocalDate.of(2026, 9, 18);
+    private static final LocalDate THURSDAY = FRIDAY.minusDays(1);
 
     @Mock private TechnicalIndicatorService indicatorService;
     @Mock private DistributionAdjustedPriceService adjustedPriceService;
@@ -118,7 +118,10 @@ class TradingRadarMarketFreshnessTest {
                 new TaiexDisplayPriceService.DisplayQuote(
                         null, null, null, null, null, null,
                         null, null, true, "CLOSE_PENDING"));
-        lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenAnswer(call -> Optional.of(((LocalDate) call.getArgument(0)).getDayOfWeek().getValue() <= 5));
+        lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenAnswer(call -> Optional.of(((LocalDate) call.getArgument(0)).getDayOfWeek().getValue() <= 5));
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
@@ -192,63 +195,165 @@ class TradingRadarMarketFreshnessTest {
                 tradingDate.toString(), "2026-07-20T10:30:00", false, "TWSE指數(5m)", "LIVE");
     }
 
-    @Test
-    void completedKNotToday_liveFreshToday_stale_false_intraday_true() {
-        stubCommon();
-        LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
-        when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(20500))));
+    /** Exercise the shared production builder with a fixed decision instant, without a wall clock. */
+    private TradingRadarDto.MarketSummary market(String instant, boolean cacheOnly) throws Exception {
+        return market(instant, cacheOnly, TradingRadarMarketContextService.MarketContext.EMPTY);
+    }
 
-        TradingRadarDto.Response resp = newService().get();
+    private TradingRadarDto.MarketSummary market(String instant, boolean cacheOnly,
+            TradingRadarMarketContextService.MarketContext context) throws Exception {
+        var method = TradingRadarService.class.getDeclaredMethod("buildMarket",
+                TradingRadarMarketContextService.MarketContext.class, Instant.class, boolean.class);
+        method.setAccessible(true);
+        Object state = method.invoke(newService(), context, Instant.parse(instant), cacheOnly);
+        var summary = state.getClass().getDeclaredMethod("summary");
+        summary.setAccessible(true);
+        return (TradingRadarDto.MarketSummary) summary.invoke(state);
+    }
 
-        assertFalse(resp.market().stale());
-        assertTrue(resp.market().intraday());
-        assertNotNull(resp.market().liveUpdatedAt());
+    private void history(LocalDate latest) {
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(latest, 20000));
+    }
+
+    private PriceQueryService.LivePrice live(LocalDate date, BigDecimal price, Boolean closed, String status) {
+        var quote = liveOn(date, price);
+        return new PriceQueryService.LivePrice(quote.stockCode(), quote.stockName(), quote.market(),
+                price, null, null, null, null, null, null, null, null, null,
+                date.toString(), quote.updatedAt(), closed, quote.source(), status);
     }
 
     @Test
-    void completedKNotToday_liveMissing_stale_true_intraday_false() {
-        stubCommon();
-        LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
-        when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.empty());
-
-        TradingRadarDto.Response resp = newService().get();
-
-        assertTrue(resp.market().stale());
-        assertFalse(resp.market().intraday());
-        assertNull(resp.market().liveUpdatedAt());
+    void midnightAndPreopenAcceptPreviousCompletedCloseWithoutLive() throws Exception {
+        stubCommon(); history(THURSDAY);
+        for (String instant : List.of("2026-09-17T16:01:00Z", "2026-09-18T00:59:59Z")) {
+            var summary = market(instant, false);
+            assertFalse(summary.stale());
+            assertFalse(summary.intraday());
+            assertNull(summary.liveUpdatedAt());
+        }
     }
 
     @Test
-    void completedKAlreadyToday_eodWins_stale_false_intraday_false() {
-        stubCommon();
-        LocalDate today = LocalDate.now(TAIPEI);
-        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today, 20000));
-        // Redis 也剛好留著今天的即時價：完成日 K 優先，不得誤判成 intraday。
-        when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(20500))));
-
-        TradingRadarDto.Response resp = newService().get();
-
-        assertFalse(resp.market().stale());
-        assertFalse(resp.market().intraday());
-        assertNull(resp.market().liveUpdatedAt());
+    void intradayUsesTodayLiveAndKeepsCompletedConfirmationAndTimestamp() throws Exception {
+        stubCommon(); history(THURSDAY);
+        when(priceQueryService.getLive("0000", "台股"))
+                .thenReturn(Optional.of(liveOn(FRIDAY, BigDecimal.valueOf(99999))));
+        var summary = market("2026-09-18T02:30:00Z", false);
+        assertFalse(summary.stale());
+        assertTrue(summary.intraday());
+        assertEquals("2026-07-20T10:30:00", summary.liveUpdatedAt(),
+                "保留來源時間，不新增秒級新鮮度主張");
+        assertEquals("BELOW", summary.quarterlyConfirmation());
+        assertEquals("BELOW", summary.annualConfirmation());
     }
 
     @Test
-    void confirmation_usesOnlyCompletedCloses_notLivePrice() {
+    void intradayRejectsMissingPreviousDayClosedFallbackAndNonpositiveLive() throws Exception {
+        stubCommon(); history(THURSDAY);
+        List<Optional<PriceQueryService.LivePrice>> rejected = List.of(Optional.empty(),
+                Optional.of(liveOn(THURSDAY, BigDecimal.valueOf(20500))),
+                Optional.of(live(FRIDAY, BigDecimal.valueOf(20500), true, "LIVE")),
+                Optional.of(live(FRIDAY, BigDecimal.valueOf(20500), false, "PREVIOUS_CLOSE")),
+                Optional.of(live(FRIDAY, BigDecimal.valueOf(20500), false, "VERIFIED_CLOSE")),
+                Optional.of(live(FRIDAY, BigDecimal.ZERO, false, "LIVE")),
+                Optional.of(live(FRIDAY, null, false, "LIVE")),
+                Optional.of(liveOn(FRIDAY.plusDays(1), BigDecimal.valueOf(20500))));
+        for (var quote : rejected) {
+            when(priceQueryService.getLive("0000", "台股")).thenReturn(quote);
+            var summary = market("2026-09-18T02:30:00Z", false);
+            assertTrue(summary.stale(), "rejected live: " + quote);
+            assertFalse(summary.intraday());
+            assertNull(summary.liveUpdatedAt());
+        }
+    }
+
+    @Test
+    void atOpenRequiresLiveAndAtCloseRequiresCurrentCompletedClose() throws Exception {
+        stubCommon(); history(THURSDAY);
+        assertTrue(market("2026-09-18T01:00:00Z", false).stale());
+        assertTrue(market("2026-09-18T05:30:00Z", false).stale());
+        history(FRIDAY);
+        when(priceQueryService.getLive("0000", "台股"))
+                .thenReturn(Optional.of(liveOn(FRIDAY, BigDecimal.valueOf(20500))));
+        var summary = market("2026-09-18T05:30:00Z", false);
+        assertFalse(summary.stale());
+        assertFalse(summary.intraday());
+        assertNull(summary.liveUpdatedAt());
+    }
+
+    @Test
+    void weekendAndConsecutiveHolidaysUseLastCompletedTradingSession() throws Exception {
+        stubCommon(); history(FRIDAY);
+        assertFalse(market("2026-09-19T02:30:00Z", false).stale());
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class))).thenAnswer(call -> {
+            LocalDate date = call.getArgument(0);
+            return Optional.of(date.getDayOfWeek().getValue() <= 5
+                    && !date.equals(LocalDate.of(2026, 9, 21)) && !date.equals(LocalDate.of(2026, 9, 22)));
+        });
+        var holiday = market("2026-09-22T02:30:00Z", false);
+        assertFalse(holiday.stale()); assertFalse(holiday.intraday());
+        assertFalse(market("2026-09-23T00:30:00Z", false).stale());
+    }
+
+    @Test
+    void liveCannotExemptMissingOrInvalidCompletedBaseline() throws Exception {
+        stubCommon(); history(THURSDAY.minusDays(1));
+        when(priceQueryService.getLive("0000", "台股"))
+                .thenReturn(Optional.of(liveOn(FRIDAY, BigDecimal.valueOf(20500))));
+        assertTrue(market("2026-09-18T02:30:00Z", false).stale());
+        history(THURSDAY);
+        var rows = descRows(THURSDAY, 20000);
+        rows.get(0).setClosePoint(BigDecimal.ZERO);
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(rows);
+        assertTrue(market("2026-09-18T02:30:00Z", false).stale());
+    }
+
+    @Test
+    void futureAndUncompletedTodayRowsNeverEnterCompletedConfirmation() throws Exception {
         stubCommon();
-        LocalDate today = LocalDate.now(TAIPEI);
-        // 完成日序列：近期收盤持續低於遠期（下跌趨勢），兩收盤日確認理論值＝BELOW。
-        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(descRows(today.minusDays(1), 20000));
-        // 即時價刻意設得遠高於所有均線；若被誤併入 confirm() 的 closes，確認狀態會被拉成 ABOVE／MIXED。
-        when(priceQueryService.getLive("0000", "台股")).thenReturn(Optional.of(liveOn(today, BigDecimal.valueOf(99999))));
+        var rows = descRows(THURSDAY, 20000);
+        var future = new TwseIndexDailyHistory();
+        future.setTradingDate(FRIDAY.plusDays(1)); future.setClosePoint(BigDecimal.valueOf(99999));
+        var today = new TwseIndexDailyHistory();
+        today.setTradingDate(FRIDAY); today.setClosePoint(BigDecimal.valueOf(99999));
+        rows.add(0, today); rows.add(0, future);
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(rows);
+        var summary = market("2026-09-18T00:30:00Z", false);
+        assertFalse(summary.stale());
+        assertEquals("BELOW", summary.quarterlyConfirmation());
+        assertEquals("BELOW", summary.annualConfirmation());
+        // A future row alone cannot stand in for the exact completed baseline.
+        when(twseRepo.findTopNByOrderByTradingDateDesc(500)).thenReturn(List.of(future));
+        assertTrue(market("2026-09-18T00:30:00Z", false).stale());
+    }
 
-        TradingRadarDto.Response resp = newService().get();
+    @Test
+    void existingMarketAsOfCutoffCannotBeBypassedByBaselineOrLive() throws Exception {
+        stubCommon(); history(THURSDAY);
+        when(priceQueryService.getLive("0000", "台股"))
+                .thenReturn(Optional.of(liveOn(FRIDAY, BigDecimal.valueOf(20500))));
+        var context = new TradingRadarMarketContextService.MarketContext(
+                THURSDAY.minusDays(1), null, null, null, null, null, null, null, false);
+        assertTrue(market("2026-09-18T02:30:00Z", false, context).stale());
+    }
 
-        assertEquals("BELOW", resp.market().quarterlyConfirmation());
-        assertEquals("BELOW", resp.market().annualConfirmation());
-        // 同時仍應正確判為 intraday（即時價本身仍用於 price／MA／KD／regime）。
-        assertTrue(resp.market().intraday());
+    @Test
+    void unknownCurrentOrPreviousCalendarFailsClosedDespiteLive() throws Exception {
+        stubCommon();
+        when(marketDataService.isTwTradingDayKnown(any(LocalDate.class))).thenReturn(Optional.empty());
+        assertTrue(market("2026-09-18T02:30:00Z", false).stale());
+        when(marketDataService.isTwTradingDayKnown(FRIDAY)).thenReturn(Optional.of(true));
+        assertTrue(market("2026-09-18T02:30:00Z", false).stale());
+        verify(twseRepo, never()).findTopNByOrderByTradingDateDesc(anyInt());
+    }
+
+    @Test
+    void listBuilderUsesOnlyCachedCalendarAndFailsClosedOnCacheMiss() throws Exception {
+        stubCommon(); history(THURSDAY);
+        assertFalse(market("2026-09-18T00:30:00Z", true).stale());
+        verify(marketDataService, never()).isTwTradingDayKnown(any(LocalDate.class));
+        verify(marketDataService, never()).isTradingDay(anyString(), any(LocalDate.class));
+        when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class))).thenReturn(Optional.empty());
+        assertTrue(market("2026-09-18T00:30:00Z", true).stale());
     }
 }

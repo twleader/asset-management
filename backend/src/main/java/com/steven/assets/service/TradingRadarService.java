@@ -933,28 +933,43 @@ public class TradingRadarService {
             // Task 356.4a：查詢與 as-of 截斷<b>兩處都</b>放大到 500——只改查詢那個等於沒改，
             // 序列仍會被第二個 limit 截回 241 列 ≈ 48 個 ISO 週 < 60 根完成週，
             // 台股大盤的週K 因子會永遠缺值，畫面只多一則「不採計」風險句、沒有任何錯誤訊息。
-            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS);
-            if (context.marketAsOfDate() != null) {
-                rows = rows.stream()
-                        .filter(r -> !r.getTradingDate().isAfter(context.marketAsOfDate()))
-                        .limit(SERIES_FETCH_ROWS)
-                        .toList();
+            RadarObservationResolver.DecisionSessions sessions =
+                    RadarObservationResolver.decisionSessionsStrict(TW_MARKET, decisionInstant,
+                            cacheOnlyCalendar ? marketDataService::isTwTradingDayCachedOnly
+                                    : marketDataService::isTwTradingDayKnown);
+            LocalDate completedSession = sessions == null ? null : sessions.targetCompletedSession();
+            if (completedSession == null) {
+                return incompleteMarket("台股交易日曆無法確認最近完成交易日，暫停產生交易訊號。");
             }
-            // 既有日K 路徑一律只吃最新 241 列，長清單只供週K 聚合（Task 356.4b）。
+            LocalDate historyCutoff = context.marketAsOfDate() != null
+                    && context.marketAsOfDate().isBefore(completedSession)
+                    ? context.marketAsOfDate() : completedSession;
+            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS)
+                    .stream()
+                    .filter(r -> r != null && r.getTradingDate() != null
+                            && !r.getTradingDate().isAfter(historyCutoff))
+                    .sorted(java.util.Comparator.comparing(TwseIndexDailyHistory::getTradingDate).reversed())
+                    .limit(SERIES_FETCH_ROWS)
+                    .toList();
+            // 日K 確認只吃完成日收盤；長清單保留供週K 聚合。
             List<TwseIndexDailyHistory> contractRows = rows.size() <= RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS
                     ? rows
                     : rows.subList(0, RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS);
             List<BigDecimal> closes = contractRows.stream().map(TwseIndexDailyHistory::getClosePoint).toList();
-            LocalDate currentTradingDay = cacheOnlyCalendar
-                    ? currentTwTradingDayCachedOnly(decisionInstant) : currentTwTradingDay(decisionInstant);
-            LocalDate latestEodDate = contractRows.isEmpty() ? null : contractRows.get(0).getTradingDate();
-            boolean todayEodPresent = latestEodDate != null && latestEodDate.equals(currentTradingDay);
-
+            boolean completedClosePresent = !contractRows.isEmpty()
+                    && completedSession.equals(contractRows.get(0).getTradingDate())
+                    && contractRows.get(0).getClosePoint() != null
+                    && contractRows.get(0).getClosePoint().signum() > 0;
+            java.time.LocalTime localTime = decisionInstant.atZone(MarketZones.TW_ZONE).toLocalTime();
+            boolean open = sessions.currentSessionTrading()
+                    && !localTime.isBefore(MarketZones.openTime(TW_MARKET))
+                    && localTime.isBefore(MarketZones.closeTime(TW_MARKET));
             Optional<PriceQueryService.LivePrice> liveOpt = priceQueryService.getLive(TAIEX_CODE, TW_MARKET);
-            boolean liveFreshToday = !todayEodPresent && liveOpt.isPresent()
-                    && liveOpt.get().tradingDate() != null
-                    && currentTradingDay != null
-                    && currentTradingDay.toString().equals(liveOpt.get().tradingDate());
+            boolean liveFreshToday = open && liveOpt.isPresent()
+                    && sessions.currentLiveDate().equals(RadarObservationResolver.parseDate(liveOpt.get().tradingDate()))
+                    && liveOpt.get().price() != null && liveOpt.get().price().signum() > 0
+                    && !Boolean.TRUE.equals(liveOpt.get().closed())
+                    && "LIVE".equals(liveOpt.get().quoteStatus());
 
             BigDecimal price;
             BigDecimal changePercent;
@@ -998,8 +1013,8 @@ public class TradingRadarService {
                             marketCandle(twIndexRowsDesc),
                             weekly.weekly()));
 
-            // stale＝「完成日 K 未到今日」且「Redis 也無今日即時價」時才成立；任一者成立即非 stale（Task 228）。
-            boolean stale = !todayEodPresent && !liveFreshToday;
+            // 必要完成收盤不能由 live 豁免；只有盤中另外要求當日 eligible live。
+            boolean stale = !completedClosePresent || (open && !liveFreshToday);
             TaiexDisplayPriceService.DisplayQuote display = taiexDisplayPriceService.resolve();
             String asOf = display.tradingDate();
             String liveUpdatedAt = liveFreshToday ? liveOpt.get().updatedAt() : null;
@@ -1111,7 +1126,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V19（完成日布林延伸扣分）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V20（台股最近完成交易日收盤基準）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日

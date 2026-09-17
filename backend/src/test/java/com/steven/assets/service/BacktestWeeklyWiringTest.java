@@ -275,6 +275,10 @@ class BacktestWeeklyWiringTest {
         when(twseRepo.findTopNByOrderByTradingDateDesc(anyInt())).thenReturn(descending(asc));
         when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc(anyString())).thenReturn(List.of());
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
         // production 的 MA／KD 取自 indicatorService.computeAll(TAIEX)（讀 DB），回測則由 assembler
         // 對同一段視窗算出。這裡把 computeAll stub 成「同一段視窗的 computeFromSeries」，
         // 即 production 讀到同一份資料時的實際結果——否則 production 會因為 EMPTY 指標而落在

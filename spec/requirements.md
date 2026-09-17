@@ -5439,3 +5439,18 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - 不新增endpoint、DB migration、排程、外部vendor I/O或券商動作；四支失敗測試、兩服務Lua parity及backend/external全量測試需實際執行且零失敗，不能skip原失敗案例或弱化assertion。
 
 - Task 444 測試生命週期驗收補充：僅已有Spring context、@Testcontainers class、effective create-drop及PostgreSQL datasource的測試於class結束清除CURRENT_LEVEL context，再由JUnit關閉container；其餘context不建立／不變。test-only listener gate單元測試、真實PG及backend全量須驗證沒有等待已停PG的Surefire teardown timeout；禁止增加timeout或silence錯誤，不修改碰撞中的fixture及正式runtime。
+
+**Requirement 43 修訂／Task 445：台股交易雷達以最近完成交易日作收盤基準**
+
+**本修訂取代 Task 217／Task 228 中「今日完成日 K 或今日 live 任一成立即 fresh」與相應舊驗證期待，其餘因子、指標公式及完成K確認原則保留。**
+
+**User Story：** 身為交易雷達使用者，我希望開盤前與盤中以「上一交易日」收盤為歷史基準，搭配當日即時行情，避免尚未收盤就被誤判資料過期。
+
+**Acceptance Criteria：**
+- 台股大盤完成收盤基準由同一 decision instant、Asia/Taipei 交易時段與權威交易日曆決定：交易日收盤前取上一交易日；收盤後取當日；休市取最近完成交易日。不能以減一天或推測週一至週五替代日曆；日曆未知維持 stale。
+- 大盤日K／週K歷史列不得晚於完成交易日或現有 marketAsOfDate 截斷，最新必要完成列須與目標日一致且收盤為正。缺列／落後／未來列不能由當日 live 解除歷史資料缺口。
+- 開盤前／休市只需有效最近完成收盤，不要求當日 live。盤中只需上一交易日收盤，不要求今日收盤，但仍須現有當日 live eligibility（當地當日交易日期、正價格，且不能是 closed 或收盤 fallback）成立；上一交易日收盤不得掩蓋盤中 live 缺失。盤後有效當日完成收盤可單獨成立。
+- 保留現有 live 來源與時間戳資訊，不新增秒級延遲門檻，也不宣稱此修正已驗證連線／秒級即時性。intraday 僅標記交易時段內被採用的當日 live。
+- 列表、明細、通知與快照共用台股大盤判定；列表日曆必須 cache-only，不觸發外部刷新。美股判定不變；不新增 API／DTO／DB 欄位、排程、vendor I/O 或券商交易。
+- 因 stale 對買進閘門有可觀察變更，RULE_VERSION 從現有 V19 升下一版本 V20（本修訂覆寫 Requirement 156 的當前 production V19；保留其歷史交付），同步 FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION、有效 OpenAPI 描述／範例、generated Markdown mirrors 與 active version tests，manifest semantic fixtures／proof／APPROVALS 不變，ACTION_POLICY_VERSION 保持 EVIDENCE_GATE_V1。通知沿用版本變更首輪只建 baseline、不寄 transition email。
+- 測試以固定 decision instant 覆蓋凌晨、開盤前、盤中有效／缺失／前日／收盤 fallback live、盤後、週末／連假、缺完成列、未來列、未知日曆及列表 cache-only，並驗證美股回歸。Docker rebuild/recreate 後唯讀實際雷達回傳驗證。

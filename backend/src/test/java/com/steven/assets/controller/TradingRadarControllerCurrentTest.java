@@ -31,7 +31,7 @@ class TradingRadarControllerCurrentTest {
     void current只委派service且controller不持有repository或webClient() {
         TradingRadarService service = mock(TradingRadarService.class);
         TradingRadarDto.Response expected = new TradingRadarDto.Response(
-                "TW_RULES_V19", "EVIDENCE_GATE_V1", "2026-08-21T00:00:00Z",
+                "TW_RULES_V20", "EVIDENCE_GATE_V1", "2026-08-21T00:00:00Z",
                 null, null, List.of(), 0, List.of());
         when(service.getCurrent()).thenReturn(expected);
         TradingRadarController controller = controller(service);
@@ -48,10 +48,10 @@ class TradingRadarControllerCurrentTest {
     void list與單檔detail只委派各自的service入口() {
         TradingRadarService service = mock(TradingRadarService.class);
         TradingRadarDto.ListResponse list = new TradingRadarDto.ListResponse(
-                "TW_RULES_V19", "EVIDENCE_GATE_V1", "2026-09-12T00:00:00Z",
+                "TW_RULES_V20", "EVIDENCE_GATE_V1", "2026-09-12T00:00:00Z",
                 null, null, List.of(), 0, List.of());
         TradingRadarDto.StockDetailResponse detail = new TradingRadarDto.StockDetailResponse(
-                "TW_RULES_V19", "EVIDENCE_GATE_V1", "2026-09-12T00:00:00Z", null);
+                "TW_RULES_V20", "EVIDENCE_GATE_V1", "2026-09-12T00:00:00Z", null);
         when(service.getList()).thenReturn(list);
         when(service.getStockDetail("2330", "台股")).thenReturn(detail);
         TradingRadarController controller = controller(service);

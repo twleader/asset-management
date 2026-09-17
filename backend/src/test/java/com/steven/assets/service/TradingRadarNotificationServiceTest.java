@@ -239,7 +239,7 @@ class TradingRadarNotificationServiceTest {
         service.queueEvaluation(STOCK_CODE, MARKET);
         service.flushEvaluations();
 
-        assertEquals("TW_RULES_V19", setting.getRuleVersion());
+        assertEquals("TW_RULES_V20", setting.getRuleVersion());
         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
         assertEquals(originalOwner, setting.getOwnerUserId());
         assertEquals(originalActive, setting.getActive());

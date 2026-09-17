@@ -19,7 +19,7 @@ import java.util.Set;
  */
 public final class FubonRadarCompatibilityManifest {
     public static final String TECHNICAL_SOURCE_VERSION = "FUBON_OVERLAY_V1";
-    public static final String DECISION_INPUT_VERSION = "TW_RULES_V19|" + TECHNICAL_SOURCE_VERSION;
+    public static final String DECISION_INPUT_VERSION = "TW_RULES_V20|" + TECHNICAL_SOURCE_VERSION;
     public static final String TECHNICAL_RULE_COMPATIBILITY_VERSION = "FUBON_TW_SEMANTIC_PROOF_REQUIRED_V1";
     public static final String SEMANTIC_FIXTURE_ID = "fubon-tw-semantic-proof-unavailable-v1";
     /** SHA-256 of the checked-in fail-closed semantic-evidence policy fixture. */

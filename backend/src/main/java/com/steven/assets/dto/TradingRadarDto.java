@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * 今日交易雷達（Requirement 43）純讀 response。
  *
- * <p>所有分數／建議皆為 {@code TW_RULES_V19} 即時計算的衍生值，不入庫；
+ * <p>所有分數／建議皆為 {@code TW_RULES_V20} 即時計算的衍生值，不入庫；
  * {@code score=null} 代表必要資料不足，不以 0 分冒充有效判斷。</p>
  */
 public final class TradingRadarDto {
@@ -815,7 +815,7 @@ public final class TradingRadarDto {
             String regimeLabel,
             Integer score,
             boolean dataComplete,
-            /** 大盤最新完成日 K 非當前交易日、且 Redis 亦無今日即時價：買進閘門關閉、不採計 RISK_ON 加分（Task 217.1，語意於 Task 228 擴充）。 */
+            /** 台股必須具有最近完成交易日正值收盤；盤中另須有效當日 LIVE，未知日曆一律 stale。 */
             boolean stale,
             String asOfDate,
             BigDecimal price,
@@ -832,7 +832,7 @@ public final class TradingRadarDto {
             String annualConfirmation,
             List<String> reasons,
             List<String> risks,
-            /** regime 是否由 Redis 今日即時點位算出（相對於「已入庫完成日 K」）（Task 228）。 */
+            /** 台股僅 OPEN 時採用當日正值 LIVE 且 closed 非 true；不代表驗證秒級延遲。 */
             boolean intraday,
             /** intraday=true 時為 Redis 即時價的 updatedAt（ISO 字串）；否則為 null（Task 228）。 */
             String liveUpdatedAt,
