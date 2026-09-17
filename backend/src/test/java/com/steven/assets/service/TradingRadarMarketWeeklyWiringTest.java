@@ -108,6 +108,10 @@ class TradingRadarMarketWeeklyWiringTest {
         when(indicatorService.computeAllForNasdaq())
                 .thenReturn(TechnicalIndicatorService.FullIndicators.EMPTY);
         when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
         when(marketDataService.mostRecentCompletedUsTradingDay(any(Instant.class)))
                 .thenAnswer(inv -> ((Instant) inv.getArgument(0))
                         .atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().minusDays(1));

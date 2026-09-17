@@ -1463,7 +1463,7 @@ holiday authority 回傳並正規化的單日假日。
 | `regimeLabel` | 是 | `string | null` | 是 |  | 市場趨勢型態的顯示名稱。 |
 | `score` | 是 | `integer | null (int32)` | 是 |  | 策略或市場判斷使用的量化分數。 |
 | `dataComplete` | 是 | `boolean` | 否 |  | 決策需要的必要輸入是否齊全。 |
-| `stale` | 是 | `boolean` | 否 |  | 內容是否超過對應的新鮮度門檻。 |
+| `stale` | 是 | `boolean` | 否 |  | 台股須有權威日曆選定的正值完成收盤（收盤前為上一交易日、盤後為當日、休市為最近完成交易日）；盤中另須當日正值 LIVE 且 closed 非 true。未知日曆或缺完成收盤一律 stale，live 不可豁免；此欄不驗證秒級延遲；美股維持既有最近完成美股交易日判準。 |
 | `asOfDate` | 是 | `string | null (date)` | 是 |  | 此數值、來源或市場觀測所對應的日期。 |
 | `price` | 是 | `number | null` | 是 |  | 大盤摘要採用的最新價格。 |
 | `changePercent` | 是 | `number | null` | 是 |  | 相對比較基準的變動百分比。 |
@@ -1478,7 +1478,7 @@ holiday authority 回傳並正規化的單日假日。
 | `annualConfirmation` | 是 | `string | null` | 是 |  | 年線訊號是否確認策略判斷。 |
 | `reasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：支持該判斷的可讀理由清單。 | 支持該判斷的可讀理由清單。 |
 | `risks` | 是 | `array of string` | 否 | items: string<br>items 說明: 陣列中的單一元素：可能改變或削弱判斷的風險清單。 | 可能改變或削弱判斷的風險清單。 |
-| `intraday` | 是 | `boolean` | 否 |  | 當日分時價格與技術狀態。 |
+| `intraday` | 是 | `boolean` | 否 |  | 台股僅於權威交易日開盤時段採用當日正值 LIVE 且 closed 非 true 時為 true；開盤前、休市與盤後均為 false。 美股維持既有判斷。 |
 | `liveUpdatedAt` | 是 | `string | null` | 是 |  | PriceCacheWriter 產生的 Asia/Taipei local wall-clock ISO LocalDateTime 字串， 不含 UTC offset，因此刻意不宣告 OpenAPI date-time；null 表示無盤中時間。 |
 | `extendedIndicators` | 是 | `ExtendedIndicators | null` | 是 |  | 延伸技術指標集合。 |
 | `marketVolumeRatio` | 是 | `number | null` | 是 |  | 大盤成交量相對基準期的比率。 |
@@ -1615,7 +1615,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V19\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V20\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |

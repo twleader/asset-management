@@ -559,7 +559,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V19", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V20", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══

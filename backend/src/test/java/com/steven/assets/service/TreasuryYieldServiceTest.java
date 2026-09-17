@@ -205,7 +205,7 @@ class TreasuryYieldServiceTest {
      */
     @Test
     void productionRuleVersion升V18而v12Default仍為回測baseline標籤() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V19");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V20");
         assertThat(RuleParameters.v12Default().ruleVersion()).isEqualTo("TW_RULES_V12");
         assertThat(TradingRadarRuleEngine.RULE_VERSION).isNotEqualTo(RuleParameters.V13_VERSION);
         assertThat(RuleParameters.v12Default().ruleVersion()).isNotEqualTo(RuleParameters.V13_VERSION);

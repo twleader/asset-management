@@ -12289,3 +12289,11 @@ external-materials 的 paired technical cache 仍使用既有 Redis Lua 原子 C
 
 
 Task 444 測試清理補充：backend 的 Testcontainers/create-drop Spring context 在class結束需close，不能cache到JVM exit後對已stopPG執行SchemaDropper。使用test-only global TestExecutionListener，afterTestClass僅已有context＋@Testcontainers＋effective create-drop＋PostgreSQL URL時markApplicationContextDirty(CURRENT_LEVEL)；test META-INF/spring.factories註冊且保留其他listeners。其他context不建立、不改；不改九支fixture class，因此不碰另一worktree未提交的FubonTradeWriterPostgresTest。listener單元測試證明四個排除gate、成功close，真PG focused及backend全量證明關閉順序且無Surefire shutdown timeout，runtime與timeout設定均不變。
+
+### 台股大盤完成日基準修正（Requirement 43 修訂／Task 445）
+
+此節取代舊 Task 228 的「今日收盤或今日 live 任一成立即 fresh」台股大盤日期判準。TradingRadarService.buildMarket 使用 RadarObservationResolver.decisionSessionsStrict 的現有交易時段／權威日曆解析，列表提供 MarketDataService.isTwTradingDayCachedOnly，明細／通知提供 isTwTradingDayKnown。完成日為收盤前上一交易日、盤後當日、休市最近完成日；解析未知即 fail closed。歷史 rows 同時截於目標完成日與既有 marketAsOfDate，不使未完成／未來列參與日K或週K判斷。最新收盤列日期必須等於目標且收盤為正。
+
+stale 同時表達必要完成日缺口及盤中當日 live 缺口：開盤前／休市由完成日判定；OPEN 時必須完成日與當日 eligible live 同時完整；盤後由當日完成日判定。即時取價保留 PriceQueryService.getLive Redis／歷史降級路徑，但採用 live 時拒絕 closed 或收盤 fallback，價格須為正、交易日期為 decision 當地當日。沒有新增秒級新鮮度界限，時間戳仍依現有契約揭露。intraday 僅在 OPEN 且 eligible live 被採用時成立，live changePercent 對最近完成日收盤比較。
+
+本次不改美股流程、指標公式與各權重、DTO／資料庫／路由／producer。RULE_VERSION 升 TW_RULES_V20，同步 FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION、TradingRadarDto 有效版本說明、OpenAPI 有效描述／範例與生成的 Markdown mirrors、active version tests；保留 semantic fixture hash／proof／APPROVALS 及歷史版本敘述，ACTION_POLICY_VERSION 保持 EVIDENCE_GATE_V1，既有通知版本不同首輪只更新 baseline。不增加 request-time vendor I/O，也不接券商下單。

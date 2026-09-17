@@ -420,6 +420,10 @@ class TradingRadarStockWeeklyWiringTest {
 
     private void stubBaseline() {
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));

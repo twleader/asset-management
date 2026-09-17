@@ -96,7 +96,7 @@ class RadarTechnicalResolverFubonOverlayTest {
                 CODE, "台股", localIndicators(), localWeekly(), localIndicators(),
                 false, false, false, DAILY_AS_OF, WEEKLY_AS_OF, FINGERPRINT, NOW);
         assertThat(result.resolution().source()).isEqualTo("LOCAL_CALCULATED");
-        assertThat(result.resolution().decisionInputVersion()).isEqualTo("TW_RULES_V19|FUBON_OVERLAY_V1");
+        assertThat(result.resolution().decisionInputVersion()).isEqualTo("TW_RULES_V20|FUBON_OVERLAY_V1");
         verify(facts).findFreshCompleteCaptures(List.of(CODE), NOW);
     }
 

@@ -145,11 +145,12 @@ class TradingRadarUsStockEngineTest {
 
     /** 241 筆「由新到舊」台股加權指數收盤：closes[i] = 15000+5i，近期最低（下跌趨勢）。 */
     private List<TwseIndexDailyHistory> twDownRows() {
-        LocalDate today = LocalDate.now(TAIPEI);
+        LocalDate completed = RadarObservationResolver.decisionSessionsStrict(
+                "台股", Instant.now(), date -> Optional.of(true)).targetCompletedSession();
         List<TwseIndexDailyHistory> rows = new ArrayList<>();
         for (int i = 0; i < 241; i++) {
             TwseIndexDailyHistory h = new TwseIndexDailyHistory();
-            h.setTradingDate(today.minusDays(i));
+            h.setTradingDate(completed.minusDays(i));
             h.setClosePoint(BigDecimal.valueOf(15000 + i * 5));
             rows.add(h);
         }
@@ -191,6 +192,10 @@ class TradingRadarUsStockEngineTest {
                         null, null, null, null, null, null,
                         null, null, true, "CLOSE_PENDING"));
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        org.mockito.Mockito.lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
         // Task 332：mostRecentCompletedUsTradingDay 由 TradingRadarService 的 private 方法提升為
         // MarketDataService 的共用方法（與 IndexDailyRefreshScheduler 的回補判準同源）。marketDataService
         // 是 @Mock，未 stub 會回 null，buildUsMarket 的 stale 判斷即 NPE、被 catch 吞成 DATA_INCOMPLETE。

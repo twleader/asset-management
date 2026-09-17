@@ -131,6 +131,10 @@ class TradingRadarIndicatorSeriesProvenanceTest {
 
     private void stubBaseline() {
         lenient().when(marketDataService.isTradingDay(anyString(), any(LocalDate.class))).thenReturn(true);
+        lenient().when(marketDataService.isTwTradingDayKnown(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
+        lenient().when(marketDataService.isTwTradingDayCachedOnly(any(LocalDate.class)))
+                .thenReturn(Optional.of(true));
         lenient().when(marketContextService.resolve(any())).thenReturn(
                 new TradingRadarMarketContextService.Resolved(
                         TradingRadarMarketContextService.MarketContext.EMPTY, List.of()));
@@ -270,10 +274,10 @@ class TradingRadarIndicatorSeriesProvenanceTest {
         return rows;
     }
 
-    /** 241 根台股加權指數收盤，讓大盤那一組拿得到 confirm(60)／confirm(240)。 */
+    /** 242 根台股加權指數收盤，盤中剔除當日未完成列後仍具 confirm(240) 的 241 根。 */
     private static List<TwseIndexDailyHistory> twseRows() {
         List<TwseIndexDailyHistory> rows = new ArrayList<>();
-        for (int i = 0; i < 241; i++) {
+        for (int i = 0; i < 242; i++) {
             TwseIndexDailyHistory row = new TwseIndexDailyHistory();
             row.setTradingDate(TODAY.minusDays(i));
             row.setClosePoint(BigDecimal.valueOf(20000 - i * 5));
