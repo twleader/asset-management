@@ -43,6 +43,14 @@ class FubonDividendEvidencePgIntegrationTest {
             while (matcher.find()) { jdbc.execute(matcher.group()); count++; }
             assertThat(count).isPositive();
         }
+        // Stock identity is required by the production scope query; preserve the canonical master shape.
+        for (String regex : List.of("CREATE TABLE public\\.stock \\(.*?\\);",
+                "ALTER TABLE ONLY public\\.stock\\s+ADD CONSTRAINT.*?;")) {
+            var matcher = Pattern.compile(regex, Pattern.DOTALL).matcher(schema);
+            int count = 0;
+            while (matcher.find()) { jdbc.execute(matcher.group()); count++; }
+            assertThat(count).isPositive();
+        }
         jdbc.execute("CREATE TABLE asset_snapshot (id bigint, owner_user_id bigint, snapshot_date date)");
         jdbc.execute("CREATE TABLE stock_holding (stock_code varchar(20), market varchar(20), snapshot_id bigint)");
         jdbc.execute("CREATE TABLE stock_alert (stock_code varchar(20), market varchar(20))");
@@ -55,7 +63,8 @@ class FubonDividendEvidencePgIntegrationTest {
     }
     @BeforeEach void reset() {
         jdbc.execute("TRUNCATE stock_dividend_fetch_attempt,stock_dividend_fetch_observation,stock_dividend_snapshot_event,stock_dividend_snapshot RESTART IDENTITY CASCADE");
-        jdbc.execute("TRUNCATE asset_snapshot,stock_holding,stock_alert");
+        jdbc.execute("TRUNCATE asset_snapshot,stock_holding,stock_alert,stock");
+        jdbc.update("INSERT INTO stock (code,market,name) VALUES ('0050','台股','元大台灣50'),('2330','台股','台積電')");
         jdbc.update("INSERT INTO stock_alert VALUES ('2330','台股'),('0050','台股'),('0000','台股')");
     }
     private FubonDividendEvidenceSyncService service(FubonMarketDataPort client) {

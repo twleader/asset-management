@@ -12279,3 +12279,13 @@ Drive outcome與captured destination config完整比對後才更新metadata；�
 ## Requirement 32／Task 442：投組建議三模式與現有逾時註解校正
 
 僅同步現存實作的注釋/說明：LOCAL同步終態、不建client/不查key/無外呼；HYBRID非同步PROCESSING、數字本機、僅兩段文字LLM且停web search；LLM完整非同步PROCESSING與現有捕捉adviceId的背景結果寫回。MarketAnalysis client現已有90秒transport timeout，batch poll/catch/stale守門維持原行為。controller文案不得一律宣稱同步或每模式都PROCESSING；不重做已存在timeout、不新增模型/參數/API/SQL/排程。
+
+
+## Task 444：Redis Lua 執行與 canonical fixture 回歸修復
+
+external-materials 的 paired technical cache 仍使用既有 Redis Lua 原子 CAS/fence；將兩處 reserved keyword `until` 的 local 變數改為合法名稱，不更動 comparator、鍵、TTL、JSON、API或讀寫策略。backend同名Lua同步改名以保留兩服務逐位元parity。真實 Redis integration 必須證明有效pair接受以及晚到舊／unbound pair拒絕。
+
+配息 PostgreSQL fixture補齊canonical stock CREATE TABLE 與既有 constraints（stock 無 sequence/default，不新增；原 dividend 表 sequence/default 擷取維持）並seed所測兩股票，保留 production stock-anchored radar scope。五檔canonical read與Taiwan LIVE名稱使用既有stock.name；fixture expected值與master一致並查回master沒有被incoming name更動。既有並發revision／stale-write／TTL／DB-to-Redis repair assertions完整保留。同名Lua也存在backend，兩份必須逐位元一致；同步修兩份Lua及四支回歸測試，不調整正式資料庫或券商／公開路由。
+
+
+Task 444 測試清理補充：backend 的 Testcontainers/create-drop Spring context 在class結束需close，不能cache到JVM exit後對已stopPG執行SchemaDropper。使用test-only global TestExecutionListener，afterTestClass僅已有context＋@Testcontainers＋effective create-drop＋PostgreSQL URL時markApplicationContextDirty(CURRENT_LEVEL)；test META-INF/spring.factories註冊且保留其他listeners。其他context不建立、不改；不改九支fixture class，因此不碰另一worktree未提交的FubonTradeWriterPostgresTest。listener單元測試證明四個排除gate、成功close，真PG focused及backend全量證明關閉順序且無Surefire shutdown timeout，runtime與timeout設定均不變。
