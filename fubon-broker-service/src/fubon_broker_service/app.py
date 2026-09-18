@@ -443,7 +443,9 @@ def create_app(
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         except TradeReadError as exc:
             outcome_counters.increment(Outcome.RECONCILE_FAILED)
-            logger.warning("Fubon filled-trades reconciliation rejected reason=%s", exc.reason)
+            logger.warning(
+                "Fubon filled-trades reconciliation rejected reason=%s detail=%s", exc.reason, exc.detail
+            )
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         outcome_counters.increment(Outcome.SUCCESS)
         return result

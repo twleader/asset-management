@@ -9,8 +9,8 @@ from helpers import TOKEN, account, filled_trade_row, response
 
 
 class Gateway:
-    def __init__(self, rows, *, success: bool = True):
-        self.response = response(rows, success=success)
+    def __init__(self, rows, *, success: bool = True, message: object | None = None):
+        self.response = response(rows, success=success, message=message)
         self.selected = SelectedAccount(account(), "001", "00001234567")
         self.read_calls = 0
         self.selected_account_calls = 0
@@ -25,8 +25,8 @@ class Gateway:
         return self.selected
 
 
-def service(rows, *, success: bool = True, batch_id=None):
-    gateway = Gateway(rows, success=success)
+def service(rows, *, success: bool = True, batch_id=None, message: object | None = None):
+    gateway = Gateway(rows, success=success, message=message)
     svc = TradeReadService(gateway, batch_id=batch_id or (lambda: "fixed-batch-id"))
     return svc, gateway
 
@@ -65,8 +65,17 @@ def test_empty_rows_is_a_legal_confirmed_empty_batch():
 
 def test_filled_history_business_failure_is_rejected():
     svc, _gateway = service([], success=False)
-    with pytest.raises(TradeReadError, match="FILLED_HISTORY_FAILED"):
+    with pytest.raises(TradeReadError, match="FILLED_HISTORY_FAILED") as exc_info:
         svc.read("2026-08-21", "2026-08-21")
+    assert exc_info.value.detail is None
+
+
+def test_filled_history_business_failure_captures_vendor_message():
+    svc, _gateway = service([], success=False, message="帳號未開通此查詢")
+    with pytest.raises(TradeReadError) as exc_info:
+        svc.read("2026-08-21", "2026-08-21")
+    assert exc_info.value.reason == "FILLED_HISTORY_FAILED"
+    assert exc_info.value.detail == "帳號未開通此查詢"
 
 
 @pytest.mark.parametrize(

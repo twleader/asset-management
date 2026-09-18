@@ -17,9 +17,10 @@ _MAX_FILLED_NO_LENGTH = 50
 
 
 class TradeReadError(ValueError):
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, detail: str | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.detail = detail
 
 
 class TradeReadService:
@@ -53,7 +54,9 @@ class TradeReadService:
             raise TradeReadError("INVALID_DATE_RANGE") from None
         read = self._gateway.read_filled_trades(start_date, end_date)
         if raw_field(read.response, "is_success") is not True:
-            raise TradeReadError("FILLED_HISTORY_FAILED")
+            vendor_message = raw_field(read.response, "message")
+            detail = vendor_message[:500] if isinstance(vendor_message, str) and vendor_message else None
+            raise TradeReadError("FILLED_HISTORY_FAILED", detail=detail)
         rows = raw_field(read.response, "data")
         if not isinstance(rows, list):
             raise TradeReadError("FILLED_HISTORY_DATA_NOT_LIST")
