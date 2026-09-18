@@ -1991,8 +1991,12 @@ const summaryFundProfit = computed(() => summaryFundValue.value - summaryFundCos
 const summaryTotalAssets = computed(() =>
   Number(summaryDeposit.value) + Number(summaryFundValue.value)
   + Number(twSummary.value.value) + Number(usSummary.value.value) + Number(ukSummary.value.value))
-// 預估年配息合計 = 股票 + 基金 + 存款預估年利息（即時計算；不用 pickStored 因為基金部分使用者改 units 時要即時反應）
-const summaryDividend = computed(() => allSummary.value.dividend + fundTotalDividend.value + depositInterestTotal.value)
+// 預估年配息合計 = 股票 + 基金 + 存款預估年利息。編輯模式下、使用者尚未編輯前顯示 DB 凍結值
+// （與 Dashboard 同源，見 spec/design.md「預估配息資料來源」單一資料來源原則）；
+// 使用者改動 deposits/funds/stocks/usdExchangeRate（含 fund units，watcher 為 deep）任一項後，
+// pickStored 依既有機制自動切換成即時重算，與 summaryFundValue／summaryFundCost 同一套邏輯。
+const summaryDividend = computed(() =>
+  pickStored('estimatedAnnualDividend', allSummary.value.dividend + fundTotalDividend.value + depositInterestTotal.value))
 
 // ===== Deposit helpers =====
 const transitTypeOptions = ref([])
