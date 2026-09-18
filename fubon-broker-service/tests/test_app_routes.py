@@ -632,6 +632,22 @@ def test_trades_read_maps_sdk_call_error_to_sanitized_503(tmp_path):
     assert response.json() == {"detail": {"reason": "FILLED_HISTORY_UNAVAILABLE"}}
 
 
+def test_trades_read_vendor_detail_never_reaches_sanitized_503_body(tmp_path):
+    class RejectingTradesWithVendorDetail:
+        def read(self, start_date, end_date):
+            raise TradeReadError("FILLED_HISTORY_FAILED", detail="帳號未開通此查詢")
+
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), RejectingTradesWithVendorDetail())
+    headers = {"X-Internal-Service-Token": TOKEN}
+    with TestClient(application) as client:
+        response = client.post(
+            "/internal/trades/read", headers=headers, json={"startDate": "2026-08-21", "endDate": "2026-08-21"}
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": {"reason": "FILLED_HISTORY_FAILED"}}
+    assert "帳號未開通此查詢" not in response.text
+
+
 def test_enabled_missing_shared_token_is_healthy_but_functionally_misconfigured(tmp_path):
     loader = ready_config(tmp_path)
     (tmp_path / "shared" / "internal-service-token").unlink()

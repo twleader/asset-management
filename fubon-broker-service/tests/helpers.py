@@ -41,8 +41,8 @@ def ready_config(
     )
 
 
-def response(data, success: bool = True, code: object | None = None):
-    return SimpleNamespace(is_success=success, data=data, code=code)
+def response(data, success: bool = True, code: object | None = None, message: object | None = None):
+    return SimpleNamespace(is_success=success, data=data, code=code, message=message)
 
 
 def account(branch: str = "001", number: str = "00001234567"):
