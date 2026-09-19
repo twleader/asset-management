@@ -96,6 +96,28 @@ class TradingRadarCalibrationSelectorTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    /**
+     * Task 446：兩個候選除了 chasedDailyMoveThresholdPct／buyGateOverboughtBiasPct 外
+     * 其餘完全相同（同用 v13BuyGateCandidate 工廠，僅這兩個新維度不同），
+     * distanceFrom(baseline) 必須為非零，且離 V12 預設值（5／12）較近者距離較小。
+     */
+    @Test
+    void distanceFromIncludesBuyGateVetoThresholdsAndOrdersCandidatesByProximity() {
+        RuleParameters baseline = RuleParameters.v12Default();
+        var thresholds = new RuleParameters.ActionThresholds(75, 55, 40, 25);
+        RuleParameters near = RuleParameters.v13BuyGateCandidate("NEAR_BUYGATE", thresholds, thresholds,
+                new BigDecimal("6.0"), new BigDecimal("13.0"));
+        RuleParameters far = RuleParameters.v13BuyGateCandidate("FAR_BUYGATE", thresholds, thresholds,
+                new BigDecimal("8.0"), new BigDecimal("15.0"));
+
+        assertThat(near.distanceFrom(baseline)).isGreaterThan(BigDecimal.ZERO);
+        assertThat(far.distanceFrom(baseline)).isGreaterThan(BigDecimal.ZERO);
+        assertThat(near.distanceFrom(baseline)).isLessThan(far.distanceFrom(baseline));
+        assertThat(select(baseline,
+                score(far, "9", "0.3", "0.2"),
+                score(near, "9", "0.3", "0.2"))).isEqualTo(near);
+    }
+
     @Test
     void invalidParameterGridFailsBeforeCalibration() {
         assertThatThrownBy(() -> new RuleParameters.ActionThresholds(55, 75, 40, 25))

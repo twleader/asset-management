@@ -149,6 +149,31 @@ class BacktestServiceTest {
         return out;
     }
 
+    /**
+     * Task 446：除 {@code spikeIndex} 當日以 {@code spikePct} 跳空外，其餘每日以 {@code drift}
+     * 複利；用於精確產生「整段序列僅單一交易日」完成收盤漲幅達到門檻的合成序列
+     * （{@code series(...)} 的 {@code rallyPct} 是永久 regime 改變、從 {@code rallyFrom} 起
+     * 每天都套用，無法用於「只有一天」的場景）。
+     */
+    private List<StockPriceHistory> seriesWithSingleDaySpike(
+            int n, double base, double drift, int spikeIndex, double spikePct) {
+        List<StockPriceHistory> out = new ArrayList<>(n);
+        double px = base;
+        LocalDate d = START;
+        for (int i = 0; i < n; i++) {
+            px = i == spikeIndex ? px * (1 + spikePct) : px * (1 + drift);
+            BigDecimal c = BigDecimal.valueOf(px).setScale(4, java.math.RoundingMode.HALF_UP);
+            out.add(StockPriceHistory.builder()
+                    .stockCode(CODE).market(TW).tradingDate(d)
+                    .openPrice(c).highPrice(c.multiply(BigDecimal.valueOf(1.01)))
+                    .lowPrice(c.multiply(BigDecimal.valueOf(0.99))).closePrice(c)
+                    .volume(1_000_000L + i)
+                    .build());
+            d = d.plusDays(1);
+        }
+        return out;
+    }
+
     private List<StockPriceHistory> desc(List<StockPriceHistory> asc, int fromIdx, int toIdxInclusive) {
         List<StockPriceHistory> w = new ArrayList<>(asc.subList(fromIdx, toIdxInclusive + 1));
         Collections.reverse(w);
@@ -494,8 +519,14 @@ class BacktestServiceTest {
         assertThat(selective.pooledMeanDeltaPct())
                 .as("held REDUCE 在下跌樣本應呈現避免損失，而不是 short P&L")
                 .isGreaterThan(BigDecimal.ZERO);
+        // Task 446：本測試的 mock evaluateCandidate 只依 parameterSetId 是否為 V13_BASELINE 分流，
+        // 其餘候選（含新增的三個買進閘門候選）一律回傳相同的 REDUCE_CANDIDATE／NO_TRADE，
+        // 績效完全同分，故最終由 distanceFrom(V12 baseline) tie-break 決定；新候選的
+        // shortThresholds／mediumThresholds／candidateWeightDeltas 皆與 baseline 相同，
+        // 只有兩個新維度偏離，距離比 V13_SELECTIVE（門檻與權重皆偏離）更近，加入 tie-break
+        // 候選集後選中者不再保證是 SELECTIVE——本斷言只需確認選出的不是表現較差的 V13_BASELINE。
         assertThat(response.v13().selectedCandidates().values())
-                .anyMatch(id -> id.contains("SELECTIVE"));
+                .anyMatch(id -> id.contains("SELECTIVE") || id.contains("BUYGATE"));
         assertThat(response.v13().universeMode()).isEqualTo(BacktestDto.UniverseMode.FULL_MARKET);
         assertThat(report.calibration().status()).isEqualTo("AVAILABLE");
         assertThat(report.calibration().candidate()).isNotNull();
@@ -768,6 +799,65 @@ class BacktestServiceTest {
     }
 
     @Test
+    @DisplayName("t446：單日完成收盤漲幅 ≥5% 只在該日命中 CHASED_DAILY_MOVE，門檻掃描能框出真實數值")
+    void chasedDailyMovePredicateHitsOnlyTheEngineeredSpikeDay() {
+        int spikeIndex = WARMUP_ROWS + 10;
+        List<StockPriceHistory> asc = seriesWithSingleDaySpike(
+                WARMUP_ROWS + 40, 100, 0.001, spikeIndex, 0.08);
+        stubRepos(asc, List.of());
+
+        BacktestDto.Response r = service().run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(5),
+                java.util.Map.of("chasedDailyMove",
+                        List.of(new BigDecimal("7.9"), new BigDecimal("8.1"))),
+                null));
+
+        var fixedFivePct = r.results().stream()
+                .filter(s -> s.predicate().equals("CHASED_DAILY_MOVE") && s.horizon() == 5 && s.held())
+                .findFirst().orElseThrow();
+        var below = r.results().stream()
+                .filter(s -> s.predicate().equals("CHASED_DAILY_MOVE_OVER@7.9") && s.horizon() == 5 && s.held())
+                .findFirst().orElseThrow();
+        var above = r.results().stream()
+                .filter(s -> s.predicate().equals("CHASED_DAILY_MOVE_OVER@8.1") && s.horizon() == 5 && s.held())
+                .findFirst().orElseThrow();
+
+        assertThat(fixedFivePct.n())
+                .as("整段合成序列只有一天真正完成收盤漲幅 ≥5%，其餘日皆為 0.1% 小漲")
+                .isEqualTo(1);
+        assertThat(below.n())
+                .as("實際約 8% 的漲幅必須高於 7.9% 門檻，驗證 completedChangePercent 數值正確而非恰好卡在 5%")
+                .isEqualTo(1);
+        assertThat(above.n())
+                .as("實際約 8% 的漲幅不得誤判為高於 8.1%")
+                .isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("t446：v13CandidateGrid 新增的買進閘門候選會被 v13() 回報，且 parameterSnapshot 無損回顯非預設值")
+    void parameterSnapshotRoundTripsBuyGateVetoThresholds() {
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 30, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+
+        BacktestDto.Response response = service().run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(1), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, true));
+
+        assertThat(response.v13().candidateParameterSetIds())
+                .contains("V13_BUYGATE_CHASE8", "V13_BUYGATE_BIAS15", "V13_BUYGATE_CHASE8_BIAS15");
+
+        BacktestDto.RuleParameterSnapshot snapshot = response.v13().marketHorizons().stream()
+                .flatMap(report -> report.candidateCalibration().stream())
+                .filter(candidate -> "V13_BUYGATE_CHASE8_BIAS15".equals(candidate.parameterSetId()))
+                .map(BacktestDto.CandidateCalibration::parameterSnapshot)
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(snapshot.chasedDailyMoveThresholdPct()).isEqualByComparingTo("8.0");
+        assertThat(snapshot.buyGateOverboughtBiasPct()).isEqualByComparingTo("15.0");
+    }
+
+    @Test
     @DisplayName("組合述詞：基礎條件 ∧ 附加條件（273.4b.2）")
     void composedPredicateIsAccepted() {
         List<StockPriceHistory> asc = series(400, 100, 0.001, 999, 0.0);
@@ -850,6 +940,7 @@ class BacktestServiceTest {
                 .containsExactly("V12_DEFAULT", "V13_BASELINE", "V13_SELECTIVE",
                         "V13_SHORT_BASELINE_MEDIUM_SELECTIVE",
                         "V13_SHORT_SELECTIVE_MEDIUM_BASELINE",
+                        "V13_BUYGATE_CHASE8", "V13_BUYGATE_BIAS15", "V13_BUYGATE_CHASE8_BIAS15",
                         "V13_P05_BASE", "V13_P05_SAT_LOW",
                         "V13_P05_SAT_HIGH", "V13_P05_UPPER_LOW",
                         "V13_P05_UPPER_HIGH", "V13_P05_LOWER_LOW",
@@ -920,7 +1011,7 @@ class BacktestServiceTest {
             assertThat(report.rejectionReason())
                     .isEqualTo("INSUFFICIENT_DIAGNOSTIC_ONLY");
             assertThat(report.promotionEvidenceScope()).isEqualTo("NONE");
-            assertThat(report.candidateCalibration()).hasSize(34)
+            assertThat(report.candidateCalibration()).hasSize(37)
                     .allSatisfy(candidate -> assertThat(candidate.ruleVersion())
                             .isEqualTo(RuleParameters.V13_VERSION));
             assertThat(report.candidateCalibration()).allSatisfy(candidate -> {

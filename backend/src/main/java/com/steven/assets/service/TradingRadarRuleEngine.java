@@ -2130,7 +2130,15 @@ public class TradingRadarRuleEngine {
         RuleParameters.ActionThresholds thresholds = candidate == null
                 ? V12_ACTION_THRESHOLDS
                 : shortTerm ? candidate.shortThresholds() : candidate.mediumThresholds();
-        Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds);
+        // Task 446：買進閘門否決可校準維度，candidate==null（production）沿用現行硬編值，
+        // BIAS_HIGH 具名常數在此處被引用而非重複寫一次 magic number 12；與 v12Default() 的
+        // BigDecimal.valueOf(12) scale 不同（12.0 對 12）但數值相等，下游比較皆對 scale 不敏感。
+        BigDecimal chasedDailyMoveThresholdPct = candidate == null
+                ? BigDecimal.valueOf(5) : candidate.chasedDailyMoveThresholdPct();
+        BigDecimal buyGateOverboughtBiasPct = candidate == null
+                ? BigDecimal.valueOf(BIAS_HIGH) : candidate.buyGateOverboughtBiasPct();
+        Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds,
+                chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
         return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));
     }
 
@@ -3021,7 +3029,9 @@ public class TradingRadarRuleEngine {
     private Action actionFor(StockInput input, int score, TimingState timing,
                              boolean profitTaking,
                              List<String> risks, List<String> reasons,
-                             RuleParameters.ActionThresholds thresholds) {
+                             RuleParameters.ActionThresholds thresholds,
+                             BigDecimal chasedDailyMoveThresholdPct,
+                             BigDecimal buyGateOverboughtBiasPct) {
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
         if (qualifiesForTrialBuy(input)) {
@@ -3053,9 +3063,19 @@ public class TradingRadarRuleEngine {
         boolean stillFalling = input.completedChangePercent() == null
                 || input.completedChangePercent().signum() < 0;
         boolean chasedDailyMove = input.completedChangePercent() != null
-                && input.completedChangePercent().compareTo(BigDecimal.valueOf(5)) >= 0;
-        boolean overbought = timing == TimingState.OVERBOUGHT
-                || timing == TimingState.EXTREME_OVERBOUGHT;
+                && input.completedChangePercent().compareTo(chasedDailyMoveThresholdPct) >= 0;
+        // Task 446：中檔乖離否決改用可校準的 buyGateOverboughtBiasPct，但刻意不讓 timingOf() 的
+        // BIAS_HIGH 本身可校準（見 446.7）。EXTREME_OVERSOLD 排除條件是正確性關鍵，不可省略——
+        // timingOf() 是先中先返回的優先權階梯，一檔股票的分位路徑可能已鎖定 EXTREME_OVERSOLD，
+        // 即使其原始 ma60BiasPercent() 絕對值仍 >= buyGateOverboughtBiasPct（高動能股短線拉回，
+        // 自身歷史乖離分位極低、但當前乖離絕對值仍不小，與 AMD 案例同一類型），也不得因為這個
+        // 新否決條件被誤判為 overbought。
+        boolean midTierOverboughtForBuyGate = kdOverheated
+                || premiumExpensive
+                || (input.ma60BiasPercent() != null
+                    && input.ma60BiasPercent().doubleValue() >= buyGateOverboughtBiasPct.doubleValue());
+        boolean overbought = timing == TimingState.EXTREME_OVERBOUGHT
+                || (timing != TimingState.EXTREME_OVERSOLD && midTierOverboughtForBuyGate);
         boolean fundamentalsBlockBuy = fundamentalDeteriorating(input);
         if (fundamentalsBlockBuy) {
             risks.add("基本面多項惡化，三軌的買進／加碼／試單閘門關閉；本條件不直接產生賣出。 ");

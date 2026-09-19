@@ -281,6 +281,10 @@ public final class BacktestDto {
             BigDecimal normalizedBiasUpperMultiple,
             BigDecimal normalizedBiasLowerMultiple,
             BigDecimal downsideActionThresholdPct,
+            /** 買進閘門否決用的「當日完成收盤漲幅」上限百分比（Task 446）。 */
+            BigDecimal chasedDailyMoveThresholdPct,
+            /** 買進閘門否決用的「中檔乖離」上限百分比（Task 446）。 */
+            BigDecimal buyGateOverboughtBiasPct,
             WeakeningSnapshot weakeningCondition,
             Map<String, BigDecimal> candidateWeightDeltas,
             BondRateSnapshot bondRate,

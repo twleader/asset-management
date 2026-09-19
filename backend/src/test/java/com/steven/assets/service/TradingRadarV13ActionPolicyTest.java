@@ -682,6 +682,116 @@ class TradingRadarV13ActionPolicyTest {
         assertThat(result.risks()).anyMatch(text -> text.contains("V13_SIGMA_GATE"));
     }
 
+    // ═══ Task 446：買進閘門「單日漲幅」與「中檔乖離」否決門檻可校準化 ═══════════════════
+
+    /**
+     * 帶預設值（chasedDailyMoveThresholdPct=5、buyGateOverboughtBiasPct=12，與 V12 硬編值相同）
+     * 的候選在邊界樣本（completedChangePercent=5、ma60BiasPercent=12）上，動作必須與無候選路徑
+     * 逐位元相同——證明兩個新維度等於預設值時完全不改變既有行為。
+     */
+    @Test
+    void buyGateVetoCandidateAtDefaultThresholdsMatchesProductionAtBoundary() {
+        var boundaryInput = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "12"), "5");
+        RuleParameters defaultVetoCandidate = RuleParameters.v13BuyGateCandidate(
+                "BUYGATE_DEFAULT", new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("5"), new BigDecimal("12"));
+
+        var production = engine.evaluateStock(boundaryInput);
+        var candidateResult = engine.evaluateCandidate(
+                boundaryInput, defaultVetoCandidate, contextWithConfidence(new BigDecimal("0.75")));
+
+        assertThat(production.score()).isGreaterThanOrEqualTo(75);
+        assertThat(production.action())
+                .as("邊界值本身仍應被兩個否決條件擋下（vetoed）")
+                .isNotIn(TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                        TradingRadarRuleEngine.Action.ADD_CANDIDATE);
+        assertThat(candidateResult.score()).isEqualTo(production.score());
+        assertThat(candidateResult.action()).isEqualTo(production.action());
+    }
+
+    /**
+     * chasedDailyMoveThresholdPct=8 的候選在 completedChangePercent=6（其餘條件不變、score≥75）
+     * 的樣本上允許買進；同一樣本在 V12 預設 5% 門檻下會被 chasedDailyMove 否決。
+     */
+    @Test
+    void widerChasedDailyMoveCandidateAllowsBuyBeyondDefaultFivePercentVeto() {
+        var input = withCompletedChangePercent(strongCandidateInput(false), "6");
+        RuleParameters wideChaseCandidate = RuleParameters.v13BuyGateCandidate(
+                "BUYGATE_CHASE8", new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("8"), new BigDecimal("12"));
+
+        var vetoedByDefault = engine.evaluateStock(input);
+        var allowedByCandidate = engine.evaluateCandidate(
+                input, wideChaseCandidate, contextWithConfidence(new BigDecimal("0.75")));
+
+        assertThat(vetoedByDefault.score()).isGreaterThanOrEqualTo(75);
+        assertThat(vetoedByDefault.action())
+                .as("V12 預設 5% 門檻下，completedChangePercent=6 必須被 chasedDailyMove 否決")
+                .isEqualTo(TradingRadarRuleEngine.Action.WATCH);
+        assertThat(allowedByCandidate.action()).isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+    }
+
+    /**
+     * buyGateOverboughtBiasPct=15 的候選在 ma60BiasPercent=13（其餘條件不變、score≥75）的樣本上
+     * 允許買進，且同一樣本 {@code result.timingState()} 仍回報 {@code TimingState.OVERBOUGHT}——
+     * 證明 446.7／446.8 的「不外溢」隔離設計成立：{@code timingOf()} 的 {@code BIAS_HIGH} 常數
+     * 本身不可校準，只有買進閘門否決本身的比較門檻可校準。
+     */
+    @Test
+    void widerOverboughtBiasCandidateAllowsBuyWithoutChangingReportedTimingState() {
+        var input = withBias(strongCandidateInput(false), "13");
+        RuleParameters wideBiasCandidate = RuleParameters.v13BuyGateCandidate(
+                "BUYGATE_BIAS15", new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("5"), new BigDecimal("15"));
+
+        var vetoedByDefault = engine.evaluateStock(input);
+        var allowedByCandidate = engine.evaluateCandidate(
+                input, wideBiasCandidate, contextWithConfidence(new BigDecimal("0.75")));
+
+        assertThat(vetoedByDefault.timingState()).isEqualTo(TradingRadarRuleEngine.TimingState.OVERBOUGHT);
+        assertThat(vetoedByDefault.action()).isNotEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+        assertThat(allowedByCandidate.timingState())
+                .as("buyGateOverboughtBiasPct 只影響買進閘門否決，不得外溢改變 timingOf() 的回報")
+                .isEqualTo(TradingRadarRuleEngine.TimingState.OVERBOUGHT);
+        assertThat(allowedByCandidate.action()).isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+    }
+
+    /**
+     * 446.8 的核心正確性條件：一檔股票經分位路徑觸發 {@code timing==EXTREME_OVERSOLD}
+     * （KD 深度超賣＋{@code ma60BiasPercentile()<=BIAS_EXTREME_PCT_LOW}），但其原始
+     * {@code ma60BiasPercent()>=12}（等於預設 buyGateOverboughtBiasPct）——高動能股短線拉回，
+     * 自身歷史乖離分位極低、但當前乖離絕對值仍不小，與本任務動機案例 AMD 同一類型。
+     * 帶預設值候選與無候選路徑在此樣本上算出的 overbought 皆必須為 false，
+     * 動作仍可為 BUY_CANDIDATE，不得被新公式誤否決。
+     */
+    @Test
+    void extremeOversoldPriorityExclusionPreventsWrongfulBuyGateVetoAtDefaultBias() {
+        var input = withKd(
+                withBiasAndPercentile(strongCandidateInput(false), "12", "1"),
+                "14", "10", "10", "12");
+        RuleParameters defaultVetoCandidate = RuleParameters.v13BuyGateCandidate(
+                "BUYGATE_DEFAULT_OVERSOLD_REGRESSION",
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("5"), new BigDecimal("12"));
+
+        var production = engine.evaluateStock(input);
+        var candidateResult = engine.evaluateCandidate(
+                input, defaultVetoCandidate, contextWithConfidence(new BigDecimal("0.75")));
+
+        assertThat(production.timingState()).isEqualTo(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD);
+        assertThat(production.score()).isGreaterThanOrEqualTo(75);
+        assertThat(production.action())
+                .as("EXTREME_OVERSOLD 優先權排除：ma60BiasPercent>=12 不得在此狀態下誤觸發否決")
+                .isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+        assertThat(candidateResult.timingState()).isEqualTo(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD);
+        assertThat(candidateResult.action()).isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+    }
+
     private static RuleParameters candidate(Map<RuleParameters.CandidateWeight, BigDecimal> weights) {
         return RuleParameters.v13Candidate("CANDIDATE_ACTION",
                 new RuleParameters.ActionThresholds(75, 55, 40, 25),
@@ -845,6 +955,34 @@ class TradingRadarV13ActionPolicyTest {
                 new TradingRadarRuleEngine.Indicators(input.indicators().ma20(), input.indicators().ma60(),
                         input.indicators().ma240(), bd("90"), bd("85")),
                 bd("80"), bd("70"), input.ma20Confirmation(), input.ma60Confirmation(),
+                input.ma240Confirmation(), input.instrumentType(), input.marketRegime(), input.marketStale(),
+                input.fxPercentile(), input.ma60BiasPercent(), input.ma60BiasPercentile(),
+                input.ma240BiasPercent(), input.week52Position(), input.kdBandWidthPercent(),
+                input.etfPremiumPct(), input.etfPremiumPercentile(), input.weeklyMa(), input.extendedIndicators(),
+                input.volumeRatio(), input.fundamental());
+    }
+
+    /** Task 446：覆寫 completedChangePercent，其餘欄位原封不動複製，供 chasedDailyMove 否決測試使用。 */
+    private static TradingRadarRuleEngine.StockInput withCompletedChangePercent(
+            TradingRadarRuleEngine.StockInput input, String completedChangePercent) {
+        return new TradingRadarRuleEngine.StockInput(
+                input.held(), input.price(), input.changePercent(), new BigDecimal(completedChangePercent),
+                input.indicators(), input.previousK(), input.previousD(), input.ma20Confirmation(),
+                input.ma60Confirmation(), input.ma240Confirmation(), input.instrumentType(),
+                input.marketRegime(), input.marketStale(), input.fxPercentile(), input.ma60BiasPercent(),
+                input.ma60BiasPercentile(), input.ma240BiasPercent(), input.week52Position(),
+                input.kdBandWidthPercent(), input.etfPremiumPct(), input.etfPremiumPercentile(),
+                input.weeklyMa(), input.extendedIndicators(), input.volumeRatio(), input.fundamental());
+    }
+
+    /** Task 446：覆寫 K／D／前一期 K／D，其餘欄位原封不動複製，供 EXTREME_OVERSOLD 回歸測試使用。 */
+    private static TradingRadarRuleEngine.StockInput withKd(
+            TradingRadarRuleEngine.StockInput input, String k, String d, String previousK, String previousD) {
+        return new TradingRadarRuleEngine.StockInput(
+                input.held(), input.price(), input.changePercent(), input.completedChangePercent(),
+                new TradingRadarRuleEngine.Indicators(input.indicators().ma20(), input.indicators().ma60(),
+                        input.indicators().ma240(), bd(k), bd(d)),
+                bd(previousK), bd(previousD), input.ma20Confirmation(), input.ma60Confirmation(),
                 input.ma240Confirmation(), input.instrumentType(), input.marketRegime(), input.marketStale(),
                 input.fxPercentile(), input.ma60BiasPercent(), input.ma60BiasPercentile(),
                 input.ma240BiasPercent(), input.week52Position(), input.kdBandWidthPercent(),
