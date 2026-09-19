@@ -198,6 +198,36 @@ public class JdbcTreasuryYieldBatchRepository implements TreasuryYieldBatchRepos
                 """, params);
     }
 
+    /**
+     * Task 447.3：與 {@link #findSelected} 完全相同的 completeness／tenor 有效性 WHERE 子句，
+     * 但刻意不做 {@link #findCompleteSeriesThrough} 的 {@code ROW_NUMBER() PARTITION BY curve_date}
+     * collapse——回傳每個 curve_date 的<b>全部</b> revision，交由呼叫端對每一個
+     * decisionInstant 各自在記憶體內重現選批次規則（見介面 Javadoc）。
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<TreasuryYieldDto.StoredBatch> findAllRevisionsThrough(Instant decisionInstant) {
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("decisionInstant", Timestamp.from(decisionInstant));
+        return readBatches("""
+                SELECT b.id, b.curve_date, b.provider, b.source_url AS batch_source_url,
+                       b.available_at, b.availability_basis, b.fetched_at, b.complete, b.content_hash,
+                       d.tenor, d.yield_percent, d.source_url AS tenor_source_url
+                  FROM treasury_yield_batch b
+                  JOIN treasury_yield_daily d ON d.batch_id = b.id
+                 WHERE b.complete = TRUE
+                   AND b.available_at <= :decisionInstant
+                   AND 4 = (
+                       SELECT COUNT(*) FROM treasury_yield_daily checked
+                        WHERE checked.batch_id = b.id
+                          AND checked.tenor IN ('M3','Y5','Y10','Y30')
+                          AND checked.yield_percent >= 0 AND checked.yield_percent <= 100
+                   )
+                 ORDER BY b.curve_date ASC, b.id ASC,
+                          CASE d.tenor WHEN 'M3' THEN 1 WHEN 'Y5' THEN 2 WHEN 'Y10' THEN 3 WHEN 'Y30' THEN 4 END
+                """, params);
+    }
+
     @Transactional(readOnly = true)
     public java.util.Optional<TreasuryYieldDto.StoredBatch> findById(long batchId) {
         List<TreasuryYieldDto.StoredBatch> batches = readBatches("""

@@ -10,6 +10,7 @@ import com.steven.assets.repository.ExchangeRateHistoryRepository;
 import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.StockStyleRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -227,6 +228,33 @@ class BacktestServiceTest {
 
         verify(fundamentalAnalysisService).resolveInputsForBacktest(eq(CODE), eq(TW), any());
         verify(fundamentalAnalysisService, never()).resolve(anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Task 447.1：appendV13Code 內 stockStyleIncomeThreshold 全域門檻只查一次，不隨訊號日數重算")
+    void stockStyleIncomeThresholdIsResolvedOncePerAppendV13CodeExecution() {
+        // run() 對同一個 code 一定會先跑一次既有 legacy V11 runOne()（呼叫一次，447.1 未觸及、
+        // 不受影響），再跑 V13 buildV13Report() 的兩段式重新校準（各跑一次 appendV13Code）。
+        // 40 個訊號日：修好前 appendV13Code 每次執行是「迴圈外一次＋迴圈內每天一次」＝41 次，
+        // 兩段合計 82 次，加上 runOne 的 1 次＝83 次；修好後 appendV13Code 每次執行只查一次，
+        // 兩段＋runOne 合計固定 3 次，不隨訊號日數增加。
+        List<StockPriceHistory> asc = series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0);
+        stubRepos(asc, List.of());
+        StockStyleRepository stockStyleRepository = org.mockito.Mockito.mock(StockStyleRepository.class);
+        when(stockStyleRepository.findByCode(anyString())).thenReturn(java.util.Optional.empty());
+        StockStyleThresholdProvider stockStyleThresholdProvider =
+                new StockStyleThresholdProvider(stockStyleRepository);
+        BacktestService candidateService = new BacktestService(
+                engine, assembler(), new AssetClassifier(),
+                priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo, exchangeRateRepo,
+                etfNavHistoryRepo, stockRepo, adjust, marketContextService, fundamentalAnalysisService,
+                null, null, null, null, null, stockStyleThresholdProvider);
+
+        candidateService.run(new BacktestDto.Request(
+                List.of(CODE), null, null, List.of(1), null, null,
+                Set.of(TW), new BigDecimal("0.70"), 3, null, false));
+
+        verify(stockStyleRepository, org.mockito.Mockito.times(3)).findByCode(anyString());
     }
 
     @Test

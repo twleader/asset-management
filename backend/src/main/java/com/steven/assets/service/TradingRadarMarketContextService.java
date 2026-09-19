@@ -427,6 +427,19 @@ public class TradingRadarMarketContextService {
         return resolveFxFromRowsAtTarget(currency, target, suppliedRows);
     }
 
+    /**
+     * Task 447.2：{@link #resolveFxFromRows(String, Instant, List)} 的請求生命週期快取版本，
+     * 邏輯逐行相同，只把 {@link #fxTargetDate(Instant)} 換成 {@link #fxTargetDate(Instant, Map)}。
+     */
+    public FxContext resolveFxFromRows(
+            String currency, Instant decisionInstant, List<ExchangeRateHistory> suppliedRows,
+            Map<Integer, Map<String, String>> requestScopedCache) {
+        if (currency == null || currency.isBlank() || decisionInstant == null) return FxContext.EMPTY;
+        LocalDate target = fxTargetDate(decisionInstant, requestScopedCache);
+        if (target == null) return FxContext.EMPTY;
+        return resolveFxFromRowsAtTarget(currency, target, suppliedRows);
+    }
+
     private FxContext resolveFxFromRowsAtTarget(
             String currency, LocalDate target, List<ExchangeRateHistory> suppliedRows) {
         if (currency == null || currency.isBlank() || target == null) return FxContext.EMPTY;
@@ -465,6 +478,29 @@ public class TradingRadarMarketContextService {
                 : local.toLocalDate();
         for (int i = 0; i < MAX_CALENDAR_LOOKBACK; i++) {
             Optional<Boolean> tradingDay = marketDataService.isTwTradingDayKnown(candidate);
+            if (tradingDay.isEmpty()) return null;
+            if (tradingDay.get()) return candidate;
+            candidate = candidate.minusDays(1);
+        }
+        return null;
+    }
+
+    /**
+     * Task 447.2：{@link #fxTargetDate(Instant)} 的請求生命週期快取版本，邏輯逐行相同，只把
+     * {@link MarketDataService#isTwTradingDayKnown(LocalDate)} 換成
+     * {@link MarketDataService#isTwTradingDayKnown(LocalDate, Map)}。<b>不得</b>改用
+     * {@link MarketDataService#isTwTradingDayCachedOnly(LocalDate)}——該方法只查當年度 TTL
+     * 快取，回測歷史日期絕大多數是非當年度，誤用會讓幾乎全部歷史外幣標的的 FX 證據
+     * fail closed 為不可得。
+     */
+    public LocalDate fxTargetDate(Instant decisionInstant, Map<Integer, Map<String, String>> requestScopedCache) {
+        if (decisionInstant == null) return null;
+        ZonedDateTime local = decisionInstant.atZone(TAIPEI);
+        LocalDate candidate = local.toLocalTime().isBefore(FX_COMPLETE)
+                ? local.toLocalDate().minusDays(1)
+                : local.toLocalDate();
+        for (int i = 0; i < MAX_CALENDAR_LOOKBACK; i++) {
+            Optional<Boolean> tradingDay = marketDataService.isTwTradingDayKnown(candidate, requestScopedCache);
             if (tradingDay.isEmpty()) return null;
             if (tradingDay.get()) return candidate;
             candidate = candidate.minusDays(1);
