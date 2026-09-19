@@ -64,6 +64,26 @@ class TradingRadarRuleEngineTest {
         assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
     }
 
+    // ═══ Task 446：買進閘門「單日漲幅」與「中檔乖離」否決門檻邊界回歸 ═══════════════════
+
+    /**
+     * completedChangePercent=5、ma60BiasPercent=12 為現行硬編門檻（{@code chasedDailyMove} 的
+     * {@code BigDecimal.valueOf(5)} 與 {@code BIAS_HIGH=12.0}）的邊界值；其餘 buyGate 條件與
+     * strongStock 相同（皆滿足），score 與 strongStock 相同（≥ 買進門檻 75，因為 completedChangePercent
+     * 與 ma60BiasPercent 皆不參與分數計算，只參與 buyGate 否決判定）。無候選路徑（production 唯一
+     * 路徑）在本任務改動前後，同一組輸入必須逐位元相同——本測試證明本任務完全沒有動到 production
+     * 行為：兩個否決條件在邊界值上仍然各自成立，動作仍是 HOLD／WATCH。
+     */
+    @Test
+    void chasedDailyMoveAndMidTierOverboughtBoundary_stillVetoesProductionBuyGate() {
+        var notHeld = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(false));
+        var held = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(true));
+
+        assertTrue(notHeld.score() >= 75, "fixture 必須維持在買進門檻之上，否則本測試沒有驗證到否決邏輯");
+        assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
+    }
+
     @Test
     void riskOff_neverProducesBuyOrAdd() {
         var notHeld = engine.evaluateStock(strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_OFF));
@@ -1490,6 +1510,40 @@ class TradingRadarRuleEngineTest {
                 null,
                 // Task 264 新增：季線乖離／年線乖離／52 週位置／9 日帶寬／ETF 折溢價／折溢價分位
                 null, null, null, null, null, null);
+    }
+
+    /**
+     * Task 446 邊界回歸專用 fixture：以 {@code strongStock} 為底，
+     * completedChangePercent=5（現行 chasedDailyMove 5% 門檻邊界）、
+     * ma60BiasPercent=12（現行 BIAS_HIGH 邊界）、其餘欄位（含 extendedIndicators 缺值）不變。
+     * completedChangePercent／ma60BiasPercent 皆不參與 score 計算（score 的 bias 因子讀
+     * extendedIndicators，非 ma60BiasPercent；completedChangePercent 只用於 buyGate 判定），
+     * 故 score 與 strongStock 相同、仍 ≥ 買進門檻 75，只有 buyGate 的兩個否決條件受影響。
+     */
+    private TradingRadarRuleEngine.StockInput chasedAndMidTierOverboughtBoundaryStock(boolean held) {
+        return new TradingRadarRuleEngine.StockInput(
+                held,
+                new BigDecimal("120"),
+                new BigDecimal("1"),
+                new BigDecimal("5"),
+                new TradingRadarRuleEngine.Indicators(
+                        new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"),
+                        new BigDecimal("60"), new BigDecimal("40")),
+                new BigDecimal("55"),
+                new BigDecimal("45"),
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.Confirmation.ABOVE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false,
+                null,
+                new BigDecimal("12"),
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     private TradingRadarRuleEngine.StockInput counterTrendStock(

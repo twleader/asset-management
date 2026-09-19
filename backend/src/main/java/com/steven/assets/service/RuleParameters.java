@@ -30,7 +30,11 @@ public record RuleParameters(
         BigDecimal downsideActionThresholdPct,
         WeakeningCondition weakeningCondition,
         Map<CandidateWeight, BigDecimal> candidateWeightDeltas,
-        BondRateCandidate bondRateCandidate
+        BondRateCandidate bondRateCandidate,
+        /** 買進閘門否決用的「當日完成收盤漲幅」上限百分比（Task 446）；V12 正式預設為 5。 */
+        BigDecimal chasedDailyMoveThresholdPct,
+        /** 買進閘門否決用的「中檔乖離」上限百分比（Task 446）；V12 正式預設為 12（同 BIAS_HIGH）。 */
+        BigDecimal buyGateOverboughtBiasPct
 ) {
 
     public static final String V12_VERSION = "TW_RULES_V12";
@@ -64,6 +68,10 @@ public record RuleParameters(
         }
         requireRange(downsideActionThresholdPct, BigDecimal.ZERO, BigDecimal.valueOf(100),
                 "downsideActionThresholdPct");
+        requireRange(chasedDailyMoveThresholdPct, BigDecimal.ZERO, BigDecimal.valueOf(100),
+                "chasedDailyMoveThresholdPct");
+        requireRange(buyGateOverboughtBiasPct, BigDecimal.ZERO, BigDecimal.valueOf(100),
+                "buyGateOverboughtBiasPct");
         Objects.requireNonNull(weakeningCondition, "weakeningCondition");
 
         Map<CandidateWeight, BigDecimal> copied = new LinkedHashMap<>();
@@ -79,6 +87,34 @@ public record RuleParameters(
         candidateWeightDeltas = Map.copyOf(copied);
         bondRateCandidate = bondRateCandidate == null
                 ? BondRateCandidate.v12Fallback() : bondRateCandidate;
+    }
+
+    /**
+     * Compatibility constructor before the buy-gate veto thresholds (chased daily move /
+     * mid-tier overbought bias) became independently calibrated dimensions (Task 446).
+     * Every pre-existing caller that passes exactly this shape keeps V12's hard-coded
+     * defaults (5 / 12) rather than silently going uncalibrated.
+     */
+    public RuleParameters(
+            String parameterSetId,
+            String ruleVersion,
+            ActionThresholds shortThresholds,
+            ActionThresholds mediumThresholds,
+            BigDecimal confidenceThreshold,
+            BigDecimal normalizedBiasFloor,
+            BigDecimal normalizedBiasMultiple,
+            BigDecimal normalizedBiasUpperMultiple,
+            BigDecimal normalizedBiasLowerMultiple,
+            boolean normalizedBiasEnabled,
+            BigDecimal downsideActionThresholdPct,
+            WeakeningCondition weakeningCondition,
+            Map<CandidateWeight, BigDecimal> candidateWeightDeltas,
+            BondRateCandidate bondRateCandidate) {
+        this(parameterSetId, ruleVersion, shortThresholds, mediumThresholds, confidenceThreshold,
+                normalizedBiasFloor, normalizedBiasMultiple, normalizedBiasUpperMultiple,
+                normalizedBiasLowerMultiple, normalizedBiasEnabled, downsideActionThresholdPct,
+                weakeningCondition, candidateWeightDeltas, bondRateCandidate,
+                BigDecimal.valueOf(5), BigDecimal.valueOf(12));
     }
 
     /** Compatibility constructor before candidate timing had separate sides. */
@@ -239,14 +275,38 @@ public record RuleParameters(
         }
     }
 
-    /** 現行 production baseline；建立 candidate 不會修改此物件。 */
+    /**
+     * 現行 production baseline；建立 candidate 不會修改此物件。
+     *
+     * <p>直接呼叫 16 引數的正式（canonical）建構子，顯式寫出 {@code chasedDailyMoveThresholdPct}／
+     * {@code buyGateOverboughtBiasPct} 的 5／12——這是刻意鎖定的正式預設值，不依賴 14 引數
+     * 相容建構子的隱式補值（Task 446）。</p>
+     */
     public static RuleParameters v12Default() {
         ActionThresholds thresholds = new ActionThresholds(75, 55, 40, 25);
         return new RuleParameters("V12_DEFAULT", V12_VERSION, thresholds, thresholds,
                 BigDecimal.ZERO, null, null,
                 BigDecimal.valueOf(100), BigDecimal.valueOf(100), false,
                 BigDecimal.valueOf(100), WeakeningCondition.conservativeV13(), Map.of(),
-                BondRateCandidate.v12Fallback());
+                BondRateCandidate.v12Fallback(), BigDecimal.valueOf(5), BigDecimal.valueOf(12));
+    }
+
+    /**
+     * Task 446 買進閘門否決可校準維度專用 candidate 工廠：除 {@code chasedDailyMoveThresholdPct}／
+     * {@code buyGateOverboughtBiasPct} 與 short／medium thresholds／parameterSetId 外，其餘全部固定在
+     * 中性／停用值（normalized BIAS 停用、downside 停用、無 candidate weight、V12 fallback 公債曲線），
+     * 確保候選網格比較時只有這兩個新維度在變動。
+     */
+    public static RuleParameters v13BuyGateCandidate(
+            String parameterSetId,
+            ActionThresholds shortThresholds,
+            ActionThresholds mediumThresholds,
+            BigDecimal chasedDailyMoveThresholdPct,
+            BigDecimal buyGateOverboughtBiasPct) {
+        return new RuleParameters(parameterSetId, V13_VERSION, shortThresholds, mediumThresholds,
+                new BigDecimal("0.70"), null, null, null, null, false,
+                BigDecimal.valueOf(100), WeakeningCondition.conservativeV13(), Map.of(),
+                BondRateCandidate.v12Fallback(), chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
     }
 
     /** 便於固定 calibration grid 建立 V13 candidate；所有值仍經 canonical constructor 驗證。 */
@@ -407,7 +467,9 @@ public record RuleParameters(
         distance = distance
                 .add(curveShapeDistance(bondRateCandidate, baseline.bondRateCandidate))
                 .add(bondRateCandidate.returnPctAtUnit()
-                        .subtract(baseline.bondRateCandidate.returnPctAtUnit()).abs());
+                        .subtract(baseline.bondRateCandidate.returnPctAtUnit()).abs())
+                .add(chasedDailyMoveThresholdPct.subtract(baseline.chasedDailyMoveThresholdPct).abs())
+                .add(buyGateOverboughtBiasPct.subtract(baseline.buyGateOverboughtBiasPct).abs());
         return distance;
     }
 

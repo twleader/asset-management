@@ -310,6 +310,8 @@ public class BacktestService {
             boolean longTermBroken,
             boolean profitTakingConfirmed,
             BigDecimal ma60BiasPercent,
+            /** 當日完成收盤漲幅（Task 446）；供 {@code CHASED_DAILY_MOVE} 描述性述詞與門檻掃描使用。 */
+            BigDecimal completedChangePercent,
             BigDecimal k,
             BigDecimal d,
             BigDecimal sigma,
@@ -820,6 +822,7 @@ public class BacktestService {
                     held.kdDeadCross(), held.longTermBroken(),
                     held.profitTakingConfirmed(),
                     a.ma60BiasPercent(),
+                    a.completedChangePercent(),
                     a.indicators().k(), a.indicators().d(),
                     a.returnStdDev60Ratio(),
                     a.volumeRatio(),
@@ -2528,6 +2531,14 @@ public class BacktestService {
         grid.add(RuleParameters.v13DisabledCandidate("V13_SHORT_SELECTIVE_MEDIUM_BASELINE",
                 selectiveShort, baseline, new BigDecimal("0.70"), new BigDecimal("100"), Map.of(),
                 RuleParameters.BondRateCandidate.v12Fallback()));
+        // Task 446：買進閘門「單日漲幅」／「中檔乖離」否決可校準維度，與 sigma/normalized-bias
+        // 維度正交、不依賴 sigma 是否已校準，故無條件加入（不受下方 profile.available() 限制）。
+        grid.add(RuleParameters.v13BuyGateCandidate("V13_BUYGATE_CHASE8", baseline, baseline,
+                new BigDecimal("8.0"), new BigDecimal("12.0")));
+        grid.add(RuleParameters.v13BuyGateCandidate("V13_BUYGATE_BIAS15", baseline, baseline,
+                new BigDecimal("5.0"), new BigDecimal("15.0")));
+        grid.add(RuleParameters.v13BuyGateCandidate("V13_BUYGATE_CHASE8_BIAS15", baseline, baseline,
+                new BigDecimal("8.0"), new BigDecimal("15.0")));
         if (profile.available()) {
             // Each volatility/timing/weakening dimension is independently bounded.  The base
             // candidate keeps the calibrated profile values; LOW/HIGH variants let the selector
@@ -2676,6 +2687,7 @@ public class BacktestService {
                 parameters.normalizedBiasFloor(), parameters.normalizedBiasMultiple(),
                 parameters.normalizedBiasUpperMultiple(), parameters.normalizedBiasLowerMultiple(),
                 parameters.downsideActionThresholdPct(),
+                parameters.chasedDailyMoveThresholdPct(), parameters.buyGateOverboughtBiasPct(),
                 new BacktestDto.WeakeningSnapshot(
                         parameters.weakeningCondition().requireStructureBelow(),
                         parameters.weakeningCondition().requireKdDeadCross(),
@@ -3893,6 +3905,10 @@ public class BacktestService {
                 o.timing() == TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD
                         && o.longTermBroken() && isNeutral(o.action(h)));
         m.put("KD_OVERHEATED", (o, h) -> o.kdHeat() == TradingRadarRuleEngine.KdHeat.OVERHEATED);
+        // Task 446：固定用現行 production 門檻 5，描述性統計、非可調參數——比較用途見 sweepPredicate
+        // 的 "chasedDailyMove" case。
+        m.put("CHASED_DAILY_MOVE", (o, h) -> o.completedChangePercent() != null
+                && o.completedChangePercent().compareTo(BigDecimal.valueOf(5)) >= 0);
         m.put("BUY_GATE", (o, h) -> isBuy(o.action(h)));
         m.put("TRIAL_BUY", (o, h) -> o.action(h) == TradingRadarRuleEngine.Action.TRIAL_BUY);
         m.put("SCORE_GTE_75", (o, h) -> o.score() != null && o.score() >= 75);
@@ -3947,6 +3963,8 @@ public class BacktestService {
             });
             case "volumeRatio" -> new NamedPredicate("VOLUME_RATIO_OVER" + suffix, (o, h) ->
                     o.volumeRatio() != null && o.volumeRatio().compareTo(c) > 0);
+            case "chasedDailyMove" -> new NamedPredicate("CHASED_DAILY_MOVE_OVER" + suffix, (o, h) ->
+                    o.completedChangePercent() != null && o.completedChangePercent().compareTo(c) >= 0);
             default -> {
                 log.warn("回測：不支援的門檻掃描 key {}", key);
                 yield null;
@@ -4577,7 +4595,7 @@ public class BacktestService {
                   .append(evidence.heldCoverage().intersectionCodes()).append('\n');
             }
             sb.append('\n')
-              .append("v13_parameter_snapshot,scope,key,parameterSetId,ruleVersion,normalizedBiasEnabled,shortBuy,shortHold,shortCaution,shortReduce,mediumBuy,mediumHold,mediumCaution,mediumReduce,confidenceThreshold,normalizedBiasFloor,normalizedBiasSaturationMultiple,normalizedBiasUpperMultiple,normalizedBiasLowerMultiple,downsideActionThresholdPct,weakeningRequireStructureBelow,weakeningRequireKdDeadCross,weakeningDownVolumeRatioFloor,candidateWeightDeltas,bondTenorByBondTerm,bondCurveShapeWeight,bondReturnPctAtUnit,sigmaStatus,rawSigmaRatio,effectiveSigmaRatio,sigmaFloorRatio,p05SigmaRatio,p10SigmaRatio,p25SigmaRatio,sigmaSampleN,sigmaCalibrationCutoff,sigmaAsOfFrom,sigmaAsOfTo,sigmaSource\n");
+              .append("v13_parameter_snapshot,scope,key,parameterSetId,ruleVersion,normalizedBiasEnabled,shortBuy,shortHold,shortCaution,shortReduce,mediumBuy,mediumHold,mediumCaution,mediumReduce,confidenceThreshold,normalizedBiasFloor,normalizedBiasSaturationMultiple,normalizedBiasUpperMultiple,normalizedBiasLowerMultiple,downsideActionThresholdPct,chasedDailyMoveThresholdPct,buyGateOverboughtBiasPct,weakeningRequireStructureBelow,weakeningRequireKdDeadCross,weakeningDownVolumeRatioFloor,candidateWeightDeltas,bondTenorByBondTerm,bondCurveShapeWeight,bondReturnPctAtUnit,sigmaStatus,rawSigmaRatio,effectiveSigmaRatio,sigmaFloorRatio,p05SigmaRatio,p10SigmaRatio,p25SigmaRatio,sigmaSampleN,sigmaCalibrationCutoff,sigmaAsOfFrom,sigmaAsOfTo,sigmaSource\n");
             for (BacktestDto.MarketHorizonExecution execution : r.v13().marketHorizons()) {
                 for (BacktestDto.CandidateCalibration candidate : execution.candidateCalibration()) {
                     appendParameterSnapshotCsv(sb, "CANDIDATE", execution.market() + "/h="
@@ -4646,7 +4664,7 @@ public class BacktestService {
         fields.add(scope);
         fields.add(key);
         if (snapshot == null) {
-            fields.addAll(Collections.nCopies(36, null));
+            fields.addAll(Collections.nCopies(38, null));
         } else {
             fields.add(snapshot.parameterSetId());
             fields.add(snapshot.ruleVersion());
@@ -4665,6 +4683,8 @@ public class BacktestService {
             fields.add(csvNum(snapshot.normalizedBiasUpperMultiple()));
             fields.add(csvNum(snapshot.normalizedBiasLowerMultiple()));
             fields.add(csvNum(snapshot.downsideActionThresholdPct()));
+            fields.add(csvNum(snapshot.chasedDailyMoveThresholdPct()));
+            fields.add(csvNum(snapshot.buyGateOverboughtBiasPct()));
             fields.add(Boolean.toString(snapshot.weakeningCondition().requireStructureBelow()));
             fields.add(Boolean.toString(snapshot.weakeningCondition().requireKdDeadCross()));
             fields.add(csvNum(snapshot.weakeningCondition().downVolumeRatioFloor()));
