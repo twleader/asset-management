@@ -13,14 +13,19 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -167,6 +172,62 @@ class TradingRadarMarketContextServiceTest {
 
         assertEquals(target, result.asOfDate());
         assertEquals("100.00", result.percentile().toPlainString());
+    }
+
+    /**
+     * Task 447.2：帶 {@code requestScopedCache} 的 {@code resolveFxFromRows} overload必須與既有
+     * 無快取版本在相同輸入下回傳完全相同的 {@link TradingRadarMarketContextService.FxContext}
+     * （{@code percentile}／{@code asOfDate} 兩欄逐位元相同）。同一個 cache 實例橫跨兩個不同年度
+     * 內的 decisionInstant，各自都要與無快取版本一致。
+     */
+    @Test
+    void resolveFxFromRowsWithRequestScopedCacheMatchesUncachedResultAcrossMultipleDecisionInstants() {
+        LocalDate day1 = LocalDate.of(2026, 8, 7);
+        LocalDate day2 = LocalDate.of(2026, 8, 10);
+        Map<Integer, Map<String, String>> requestScopedCache = new HashMap<>();
+        when(marketData.isTwTradingDayKnown(day1)).thenReturn(Optional.of(true));
+        when(marketData.isTwTradingDayKnown(day2)).thenReturn(Optional.of(true));
+        when(marketData.isTwTradingDayKnown(eq(day1), eq(requestScopedCache))).thenReturn(Optional.of(true));
+        when(marketData.isTwTradingDayKnown(eq(day2), eq(requestScopedCache))).thenReturn(Optional.of(true));
+
+        List<ExchangeRateHistory> rows = new ArrayList<>();
+        for (int i = 599; i >= 1; i--) rows.add(fx("USD", day1.minusDays(i), "30", "32"));
+        rows.add(fx("USD", day1, "39", "41"));
+        rows.add(fx("USD", day2, "41", "43"));
+
+        Instant decision1 = Instant.parse("2026-08-08T02:00:00Z"); // 台北 10:00，早於 17:00 → target=day1
+        Instant decision2 = Instant.parse("2026-08-10T10:00:00Z"); // 台北 18:00，晚於 17:00 → target=day2
+
+        var uncached1 = service.resolveFxFromRows("usd", decision1, rows);
+        var cached1 = service.resolveFxFromRows("usd", decision1, rows, requestScopedCache);
+        var uncached2 = service.resolveFxFromRows("usd", decision2, rows);
+        var cached2 = service.resolveFxFromRows("usd", decision2, rows, requestScopedCache);
+
+        assertEquals(day1, cached1.asOfDate());
+        assertEquals(uncached1.asOfDate(), cached1.asOfDate());
+        assertEquals(uncached1.percentile(), cached1.percentile());
+        assertEquals(day2, cached2.asOfDate());
+        assertEquals(uncached2.asOfDate(), cached2.asOfDate());
+        assertEquals(uncached2.percentile(), cached2.percentile());
+    }
+
+    /**
+     * Task 447.2：{@code fxTargetDate(Instant, Map)} 不得改用
+     * {@code MarketDataService.isTwTradingDayCachedOnly}——本測試以 mock 直接斷言呼叫的是
+     * {@code isTwTradingDayKnown(LocalDate, Map)} overload，而非 cached-only 版本或無快取版本。
+     */
+    @Test
+    void fxTargetDateWithRequestScopedCacheCallsKnownOverloadNotCachedOnly() {
+        LocalDate target = LocalDate.of(2026, 8, 7);
+        Map<Integer, Map<String, String>> requestScopedCache = new HashMap<>();
+        when(marketData.isTwTradingDayKnown(eq(target), eq(requestScopedCache)))
+                .thenReturn(Optional.of(true));
+
+        LocalDate result = service.fxTargetDate(Instant.parse("2026-08-08T02:00:00Z"), requestScopedCache);
+
+        assertEquals(target, result);
+        verify(marketData).isTwTradingDayKnown(target, requestScopedCache);
+        verify(marketData, org.mockito.Mockito.never()).isTwTradingDayCachedOnly(any(LocalDate.class));
     }
 
     private static TwseIndexDailyHistory tw(LocalDate date, int close, long volume, long value) {

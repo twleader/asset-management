@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -121,30 +122,84 @@ public class TreasuryYieldService {
     }
 
     private Optional<SelectedRateBatch> selectedRateBatch(Instant at) {
-        return repository.findSelected(at).map(batch -> {
-            if (!batch.complete() || batch.values().size() != 4) {
-                throw new IllegalStateException("Treasury selected batch 不完整：" + batch.batchId());
-            }
-            LocalDate decisionDateEt = at.atZone(NEW_YORK).toLocalDate();
-            CompletedSessionResolution completed = latestCompletedUsSession(decisionDateEt,
-                    at.atZone(NEW_YORK).toLocalTime().isBefore(US_CLOSE));
-            LocalDate expected = completed.date();
-            String staleReason;
-            if (completed.unknown() != null) {
-                staleReason = unknownCalendarReason(completed.unknown());
-            } else if (batch.curveDate().isAfter(expected)) {
-                staleReason = FUTURE_CURVE_DATE_CODE + ": Treasury curve date "
-                        + batch.curveDate() + " 晚於 decision-time expected completed US session " + expected;
-            } else {
-                SessionLagResolution lag = sessionLag(batch.curveDate(), expected);
-                staleReason = lag.unknown() != null ? unknownCalendarReason(lag.unknown())
-                        : lag.sessions() > MAX_CURVE_LAG_SESSIONS
-                        ? "Treasury curve 落後要求 completed US session " + lag.sessions()
-                        + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
-            }
-            long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
-            return new SelectedRateBatch(batch, lagDays, staleReason);
-        });
+        return repository.findSelected(at).map(batch -> toSelectedRateBatch(batch, at));
+    }
+
+    /**
+     * Task 447.3：預先載入請求範圍內全部 curve batch 的所有 revision（不去重複，見
+     * {@link TreasuryYieldBatchRepository#findAllRevisionsThrough}），供
+     * {@link #resolveRateContextFromSeries} 在記憶體內對每個 decisionInstant 各自選批次，
+     * 取代回測逐日觸發 {@link TreasuryYieldBatchRepository#findSelected} 的真實 SQL 查詢。
+     * {@code latestDecisionInstant} 只需是「不早於本次請求任何 decisionInstant」的上界
+     * （呼叫端一律傳目前時刻），不必是精確值。
+     */
+    public List<TreasuryYieldDto.StoredBatch> preloadRevisionsThrough(Instant latestDecisionInstant) {
+        return repository.findAllRevisionsThrough(
+                latestDecisionInstant == null ? clock.instant() : latestDecisionInstant);
+    }
+
+    /**
+     * Task 447.3：{@link #resolveRateContext} 的 series 版本——消費
+     * {@link #preloadRevisionsThrough} 預先載入、未去重複的 revision 列表，在記憶體內重現
+     * {@link TreasuryYieldBatchRepository#findSelected} 的選批次規則，不逐日觸發 SQL。
+     *
+     * <p>{@code series} 中每一列都已經通過與 {@code findSelected} 完全相同的 completeness／
+     * tenor 有效性 SQL 篩選，故此處不重新驗證合法 tenor 集合。任一 {@code (series,
+     * decisionInstant, tenor)} 組合的輸出必須與「先 {@code repository.findSelected(decisionInstant)}
+     * 取得同一個 batch id、再呼叫 {@link #rateContext}」的結果逐位元相同。</p>
+     */
+    public Optional<TreasuryYieldDto.RateContext> resolveRateContextFromSeries(
+            List<TreasuryYieldDto.StoredBatch> series, Instant decisionInstant, String tenor) {
+        if (!TreasuryYieldBatchRepository.TENOR_ORDER.contains(tenor)) {
+            throw new IllegalArgumentException("Treasury tenor 必須是 M3/Y5/Y10/Y30：" + tenor);
+        }
+        Instant at = decisionInstant == null ? clock.instant() : decisionInstant;
+        return selectFromSeries(series, at).map(selected -> rateContext(selected, tenor));
+    }
+
+    /**
+     * 在記憶體內重現 {@code findSelected} 的 {@code ORDER BY curve_date DESC, provider CASE
+     * (US_TREASURY 優先於 YAHOO_PROXY), available_at DESC, fetched_at DESC, id DESC LIMIT 1}：
+     * 先篩出 {@code available_at <= at}，再用鏡射該排序的比較器取整體最大值（非逐 curve_date
+     * 分組後取最大——SQL 本身就是對整個候選集合排序取第一筆，不是先分組）。provider 的比較鍵
+     * 刻意讓 {@code US_TREASURY} 對應較大值，以便用 {@code max} 語意直接表達「優先」。
+     */
+    private Optional<SelectedRateBatch> selectFromSeries(
+            List<TreasuryYieldDto.StoredBatch> series, Instant at) {
+        if (series == null || series.isEmpty()) return Optional.empty();
+        return series.stream()
+                .filter(batch -> batch.availableAt() != null && !batch.availableAt().isAfter(at))
+                .max(Comparator.comparing(TreasuryYieldDto.StoredBatch::curveDate)
+                        .thenComparing(batch -> "US_TREASURY".equals(batch.provider()) ? 1 : 0)
+                        .thenComparing(TreasuryYieldDto.StoredBatch::availableAt)
+                        .thenComparing(TreasuryYieldDto.StoredBatch::fetchedAt)
+                        .thenComparing(TreasuryYieldDto.StoredBatch::batchId))
+                .map(batch -> toSelectedRateBatch(batch, at));
+    }
+
+    private SelectedRateBatch toSelectedRateBatch(TreasuryYieldDto.StoredBatch batch, Instant at) {
+        if (!batch.complete() || batch.values().size() != 4) {
+            throw new IllegalStateException("Treasury selected batch 不完整：" + batch.batchId());
+        }
+        LocalDate decisionDateEt = at.atZone(NEW_YORK).toLocalDate();
+        CompletedSessionResolution completed = latestCompletedUsSession(decisionDateEt,
+                at.atZone(NEW_YORK).toLocalTime().isBefore(US_CLOSE));
+        LocalDate expected = completed.date();
+        String staleReason;
+        if (completed.unknown() != null) {
+            staleReason = unknownCalendarReason(completed.unknown());
+        } else if (batch.curveDate().isAfter(expected)) {
+            staleReason = FUTURE_CURVE_DATE_CODE + ": Treasury curve date "
+                    + batch.curveDate() + " 晚於 decision-time expected completed US session " + expected;
+        } else {
+            SessionLagResolution lag = sessionLag(batch.curveDate(), expected);
+            staleReason = lag.unknown() != null ? unknownCalendarReason(lag.unknown())
+                    : lag.sessions() > MAX_CURVE_LAG_SESSIONS
+                    ? "Treasury curve 落後要求 completed US session " + lag.sessions()
+                    + " sessions（上限 " + MAX_CURVE_LAG_SESSIONS + "）" : null;
+        }
+        long lagDays = Math.max(0, ChronoUnit.DAYS.between(batch.curveDate(), decisionDateEt));
+        return new SelectedRateBatch(batch, lagDays, staleReason);
     }
 
     private TreasuryYieldDto.RateContext rateContext(SelectedRateBatch selected, String tenor) {

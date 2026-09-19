@@ -156,6 +156,35 @@ class JdbcTreasuryYieldBatchRepositoryTest {
                 .contains("r.rn = 1");
     }
 
+    /**
+     * Task 447.3：{@code findAllRevisionsThrough} 必須與 {@code findSelected} 共用完全相同的
+     * completeness／tenor 有效性 WHERE 子句，但刻意<b>不</b>做 {@code findCompleteSeriesThrough}
+     * 的 {@code ROW_NUMBER() PARTITION BY curve_date} collapse——回傳每個 curve_date 的全部
+     * revision，交由 {@code TreasuryYieldService} 對每個 decisionInstant 各自在記憶體內選批次。
+     */
+    @Test
+    void allRevisionsSql與findSelected共用WhereClause但不做RowNumberCollapse() {
+        NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
+        JdbcTreasuryYieldBatchRepository store = new JdbcTreasuryYieldBatchRepository(jdbc);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        when(jdbc.query(sql.capture(), any(MapSqlParameterSource.class),
+                org.mockito.ArgumentMatchers
+                        .<org.springframework.jdbc.core.ResultSetExtractor<List<TreasuryYieldDto.StoredBatch>>>any()))
+                .thenReturn(List.of());
+
+        assertThat(store.findAllRevisionsThrough(FETCHED)).isEmpty();
+
+        assertThat(sql.getValue()).contains("b.complete = TRUE")
+                .contains("b.available_at <= :decisionInstant")
+                .contains("SELECT COUNT(*) FROM treasury_yield_daily")
+                .contains("checked.tenor IN ('M3','Y5','Y10','Y30')")
+                .contains("checked.yield_percent >= 0 AND checked.yield_percent <= 100")
+                .contains("ORDER BY b.curve_date ASC, b.id ASC")
+                .doesNotContain("ROW_NUMBER")
+                .doesNotContain("PARTITION BY")
+                .doesNotContain("r.rn = 1");
+    }
+
     private static TreasuryYieldDto.FetchBatch batch(boolean complete, List<TreasuryYieldDto.FetchTenor> tenors) {
         Map<String, BigDecimal> values = new java.util.LinkedHashMap<>();
         tenors.forEach(t -> values.putIfAbsent(t.tenor(), t.yieldPercent()));

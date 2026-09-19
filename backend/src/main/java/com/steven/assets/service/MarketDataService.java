@@ -328,6 +328,23 @@ public class MarketDataService {
     }
 
     /**
+     * Task 447.2：請求生命週期的年度快取 overlay。與 {@link #twHolidayCurrentYearCache}
+     * 完全獨立——那份快取只保留「當年度」且有 TTL，非當年度（回測歷史資料的絕大多數情境）
+     * 每次都會直接呼叫 {@link #fetchTwHolidaysFromExt(int)}。一個回測請求逐日掃描同一年度
+     * 上百次時，{@code requestScopedCache} 讓同一年度只在該請求內第一次遇到時查一次，
+     * 之後（含「該年度查無資料」這個空 map 答案）直接沿用；不同請求／不同呼叫端傳入不同的
+     * map 實例即可各自獨立，不會互相污染，也不需要額外的失效機制。
+     */
+    public Map<String, String> getTwHolidays(int year, Map<Integer, Map<String, String>> requestScopedCache) {
+        if (requestScopedCache != null && requestScopedCache.containsKey(year)) {
+            return requestScopedCache.get(year);
+        }
+        Map<String, String> result = getTwHolidays(year);
+        if (requestScopedCache != null) requestScopedCache.put(year, result);
+        return result;
+    }
+
+    /**
      * 花錢前先做一次「權威即時颱風假偵測」（Task 163），回傳今日台股是否休市（true＝颱風假 / 臨時休市）。
      * 主動觸發 ext 立刻爬 DGPA 停班公告並 upsert {@code tw_market_closure}，**直接採用 ext 回傳的權威
      * {@code closedToday}** 作短路依據，呼叫端據此不送 LLM 批次。
@@ -467,6 +484,22 @@ public class MarketDataService {
             return Optional.of(false);
         }
         Map<String, String> holidays = getTwHolidays(date.getYear());
+        if (holidays == null || holidays.isEmpty()) return Optional.empty();
+        return Optional.of(!holidays.containsKey(date.toString()));
+    }
+
+    /**
+     * Task 447.2：{@link #isTwTradingDayKnown(LocalDate)} 的請求生命週期快取版本，邏輯逐行相同，
+     * 只把 {@link #getTwHolidays(int)} 換成 {@link #getTwHolidays(int, Map)}。
+     */
+    public Optional<Boolean> isTwTradingDayKnown(
+            LocalDate date, Map<Integer, Map<String, String>> requestScopedCache) {
+        if (date == null) return Optional.empty();
+        DayOfWeek dow = date.getDayOfWeek();
+        if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+            return Optional.of(false);
+        }
+        Map<String, String> holidays = getTwHolidays(date.getYear(), requestScopedCache);
         if (holidays == null || holidays.isEmpty()) return Optional.empty();
         return Optional.of(!holidays.containsKey(date.toString()));
     }

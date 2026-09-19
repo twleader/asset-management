@@ -938,6 +938,18 @@ public class BacktestService {
         // per-code resolveBatch would otherwise repeat the same nine JPA range queries.
         Map<String, Map<java.time.Instant, TradingRadarMarketFeatureResolver.Evidence>>
                 marketFeatureEvidenceCache = new LinkedHashMap<>();
+        // Task 447.2：台股假日曆是全域資料，不因標的而異——放在 buildV13Report() 的請求層級，
+        // 讓本次請求全部標的（含下面的兩次 appendV13Code 全市場重跑）共用同一份年度快取，
+        // 取代 appendV13Code() 內對外幣標的逐日觸發 fetchTwHolidaysFromExt 的 HTTP 呼叫。
+        Map<Integer, Map<String, String>> twHolidayRequestCache = new HashMap<>();
+        // Task 447.3：Treasury curve 同樣是全域資料。只在本次請求至少有一檔標的分類為債券、
+        // 且 treasuryYieldService 已注入時才預先載入（避免無債券標的的請求觸發此查詢，也避免
+        // treasuryYieldService 未注入時對 preloadRevisionsThrough NPE）；上界用目前時刻即可，
+        // 不必逐 code 找出最大 decisionInstant——回測的 decisionInstant 必然不晚於現在。
+        List<TreasuryYieldDto.StoredBatch> treasurySeries = treasuryYieldService != null
+                && requestHasBondCode(codesByMarket)
+                ? treasuryYieldService.preloadRevisionsThrough(java.time.Instant.now())
+                : List.of();
 
         for (String market : markets) {
             for (String code : codesByMarket.getOrDefault(market, List.of())) {
@@ -946,7 +958,8 @@ public class BacktestService {
                     costs, candidateGridsByMarket.getOrDefault(market, unavailableGrid),
                             regimesByMarket.getOrDefault(market, Map.of()),
                             baseAttempts, opportunities, failures, marketFeatureSources,
-                            marketCalendarCache, marketFeatureEvidenceCache);
+                            marketCalendarCache, marketFeatureEvidenceCache,
+                            twHolidayRequestCache, treasurySeries);
                 } catch (Exception e) {
                     log.warn("V13 可成交回測 {}/{} 失敗，明確排除", market, code, e);
                     failures.add(market + "/" + code + ":EXECUTION_BUILD_FAILED["
@@ -981,7 +994,8 @@ public class BacktestService {
                                 costs, candidateGridsByMarket.getOrDefault(market, unavailableGrid),
                                 regimesByMarket.getOrDefault(market, Map.of()),
                                 baseAttempts, opportunities, failures, marketFeatureSources,
-                                marketCalendarCache, marketFeatureEvidenceCache);
+                                marketCalendarCache, marketFeatureEvidenceCache,
+                                twHolidayRequestCache, treasurySeries);
                     } catch (Exception e) {
                         log.warn("V13 可成交回測/{}/{} 重新建立失敗，明確排除", market, code, e);
                         failures.add(market + "/" + code + ":EXECUTION_BUILD_FAILED["
@@ -1073,6 +1087,32 @@ public class BacktestService {
                 Map.copyOf(selectedParameterSnapshots));
     }
 
+    /**
+     * Task 447.3：gate {@code treasuryYieldService.preloadRevisionsThrough(...)} on whether this
+     * request actually contains a bond-classified code, so a request with no bond instrument
+     * never triggers the preload. Mirrors the exact profile construction at the top of
+     * {@link #appendV13Code}（{@code valuationYieldPct=null}、全域 income threshold）——
+     * {@code AssetProfile.bond()} 只由 {@code assetClass} 決定，{@code assetClass} 的分類邏輯
+     * 完全不讀 {@code valuationYieldPct}／{@code incomeThresholdRatio}（見
+     * {@code TradingRadarAssetProfileResolver.resolve}），故此處的判定不可能與
+     * {@code appendV13Code} 內、逐日重新計算 {@code evidenceProfile} 時得到的 {@code bond()}
+     * 結果分岔。
+     */
+    private boolean requestHasBondCode(Map<String, List<String>> codesByMarket) {
+        BigDecimal incomeThreshold = stockStyleIncomeThreshold();
+        for (Map.Entry<String, List<String>> entry : codesByMarket.entrySet()) {
+            String market = entry.getKey();
+            for (String code : entry.getValue()) {
+                Optional<Stock> stock = stockRepo.findByCodeAndMarket(code, market);
+                TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
+                        stock.orElse(null), code, market, stock.map(Stock::getName).orElse(code),
+                        null, incomeThreshold);
+                if (profile.bond()) return true;
+            }
+        }
+        return false;
+    }
+
     private void appendV13Code(
             String code,
             String market,
@@ -1089,7 +1129,13 @@ public class BacktestService {
             TradingRadarMarketFeatureResolver.Sources marketFeatureSources,
             Map<MarketCalendarKey, CalendarResolution> marketCalendarCache,
             Map<String, Map<java.time.Instant, TradingRadarMarketFeatureResolver.Evidence>>
-                    marketFeatureEvidenceCache) {
+                    marketFeatureEvidenceCache,
+            // Task 447.2／447.3：兩者都是「涵蓋整次請求」的 request-scoped 快取／預載資料，
+            // 由 buildV13Report() 建立一次後傳入每次 appendV13Code() 呼叫，取代逐日觸發台股
+            // 假日曆 HTTP 呼叫與逐日觸發 Treasury SQL 查詢。非台股假日／非債券標的的呼叫可以
+            // 收到但不使用。
+            Map<Integer, Map<String, String>> twHolidayRequestCache,
+            List<TreasuryYieldDto.StoredBatch> treasurySeries) {
         List<StockPriceHistory> raw = priceHistoryRepo
                 .findAllByStockCodeAndMarketOrderByTradingDateAsc(code, market);
         if (raw == null || raw.isEmpty()) {
@@ -1120,9 +1166,13 @@ public class BacktestService {
                 : resolveV13Calendar(RadarBacktestExecution.US_MARKET, bars, from, to, marketCalendarCache);
 
         Optional<Stock> stock = stockRepo.findByCodeAndMarket(code, market);
+        // Task 447.1：整個 appendV13Code 執行只查一次全域門檻，`evidenceProfile`（迴圈內）
+        // 重用同一個值，不得重算——JPA StockStyleRepository.findByCode 無快取，逐日重算屬
+        // 純粹重複 I/O。
+        BigDecimal incomeThreshold = stockStyleIncomeThreshold();
         TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
                 stock.orElse(null), code, market, stock.map(Stock::getName).orElse(code),
-                null, stockStyleIncomeThreshold());
+                null, incomeThreshold);
         RadarBacktestExecution.InstrumentKind kind = executionInstrumentKind(profile.instrumentKind());
         if (kind == null) {
             failures.add(market + "/" + code + ":UNKNOWN_INSTRUMENT_KIND");
@@ -1205,7 +1255,7 @@ public class BacktestService {
             TradingRadarRuleEngine.MarketRegime regime = regimes.getOrDefault(
                     signalDate, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
             TradingRadarMarketContextService.FxContext fx = fxSeries == null
-                    ? null : fxAt(currency, fxSeries, signalDate, market);
+                    ? null : fxAt(currency, fxSeries, signalDate, market, twHolidayRequestCache);
             BigDecimal fxPct = fx == null ? null : fx.percentile();
             java.time.Instant decisionInstant = signalInstant(signalDate, market);
             TradingRadarPremiumResolver.DecisionObservation premiumObservation =
@@ -1240,7 +1290,7 @@ public class BacktestService {
                             stock.orElse(null), code, market, stock.map(Stock::getName).orElse(code),
                             resolvedFundamental == null || resolvedFundamental.snapshot() == null
                                     ? null : resolvedFundamental.snapshot().dividendYieldPct(),
-                            stockStyleIncomeThreshold());
+                            incomeThreshold);
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext =
                     marketContextsByDate.getOrDefault(signalDate,
                             TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY);
@@ -1261,7 +1311,7 @@ public class BacktestService {
             TradingRadarEvidenceConfidenceResolver.RateObservation rateObservation =
                     resolveV13TreasuryRateObservation(
                             evidenceProfile, decisionInstant, baselineParameters, bondYieldBeta,
-                            treasuryObservationCache);
+                            treasuryObservationCache, treasurySeries);
             DividendEventEvidenceResolver.Resolution dividendEvent = dividendByInstant.getOrDefault(
                     decisionInstant, DividendEventEvidenceResolver.Resolution.MISSING);
             TradingRadarRuleEngine.CandidateContext context = v13Context(
@@ -1281,7 +1331,7 @@ public class BacktestService {
                 TradingRadarEvidenceConfidenceResolver.RateObservation candidateRateObservation =
                         resolveV13TreasuryRateObservation(
                                 evidenceProfile, decisionInstant, candidate, candidateBondYieldBeta,
-                                treasuryObservationCache);
+                                treasuryObservationCache, treasurySeries);
                 TradingRadarRuleEngine.CandidateContext candidateContext = v13Context(
                         assembled, regime, fundamental, price, market, decisionInstant, acceptedPrice,
                         marketContext, fundamentalSnapshot, evidenceProfile, premium, signalDate,
@@ -3247,16 +3297,66 @@ public class BacktestService {
     }
 
     /**
+     * Task 447.3：上一個方法（單次 SQL 查詢版本）的 series 版本——guard clause 與 tenor 解析
+     * 邏輯逐行鏡射，唯一差異是最後改呼叫 {@link TreasuryYieldService#resolveRateContextFromSeries}
+     * 消費 {@code buildV13Report()} 預先載入、未去重複的 revision 列表，取代逐日觸發
+     * {@code treasuryYieldService.resolveRateContext(decisionInstant, tenor)} 的真實 SQL 查詢。
+     * 兩者刻意分開維護而非用一個 functional 參數合併：本方法只在 5-引數 cache 版本的
+     * {@code computeIfAbsent} 內被呼叫，維持與既有 4-引數版本同樣簡單、可獨立閱讀的形狀。
+     */
+    private TradingRadarEvidenceConfidenceResolver.RateObservation resolveV13TreasuryRateObservationFromSeries(
+            TradingRadarAssetProfileResolver.AssetProfile profile,
+            java.time.Instant decisionInstant,
+            RuleParameters parameters,
+            BondYieldBetaResolver.Result bondYieldBeta,
+            List<TreasuryYieldDto.StoredBatch> series) {
+        if (profile == null || !profile.bond()) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable();
+        }
+        if (!profile.profileComplete()) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "strict bond profile 不完整，禁止猜測 Treasury tenor");
+        }
+        if (treasuryYieldService == null) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "V13 backtest Treasury resolver 未注入");
+        }
+        BondRateQueryResolver.Selection selection = BondRateQueryResolver.select(
+                profile.bondTerm(), parameters);
+        String tenor = bondYieldBeta != null && bondYieldBeta.tenor() != null
+                ? bondYieldBeta.tenor()
+                : selection == null ? null : selection.primaryTenor();
+        if (tenor == null) {
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "strict bond term 缺漏，禁止猜測 Treasury tenor");
+        }
+        try {
+            return treasuryYieldService.resolveRateContextFromSeries(series, decisionInstant, tenor)
+                    .map(context -> rateObservation(context, bondYieldBeta))
+                    .orElseGet(() -> TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                            "決策時點前無完整 Treasury curve batch"));
+        } catch (RuntimeException e) {
+            log.warn("V13 Treasury context 解析失敗：{}", e.getMessage());
+            return TradingRadarEvidenceConfidenceResolver.RateObservation.missing(
+                    "Treasury context 解析失敗");
+        }
+    }
+
+    /**
      * Cached Treasury context lookup for one code/request.  Candidate grid entries commonly
      * share the same tenor; the cache key is the typed decision instant plus tenor, never a
      * mutable current-state snapshot.
+     *
+     * <p>Task 447.3：cache miss 時改呼叫 series 版本（見上）取代逐日 SQL；{@code cache == null}
+     * 的防禦分支（目前無實際呼叫端使用）維持呼叫原本的單次查詢版本，行為不變。</p>
      */
     private TradingRadarEvidenceConfidenceResolver.RateObservation resolveV13TreasuryRateObservation(
             TradingRadarAssetProfileResolver.AssetProfile profile,
             java.time.Instant decisionInstant,
             RuleParameters parameters,
             BondYieldBetaResolver.Result bondYieldBeta,
-            Map<TreasuryObservationKey, TradingRadarEvidenceConfidenceResolver.RateObservation> cache) {
+            Map<TreasuryObservationKey, TradingRadarEvidenceConfidenceResolver.RateObservation> cache,
+            List<TreasuryYieldDto.StoredBatch> series) {
         if (cache == null) {
             return resolveV13TreasuryRateObservation(profile, decisionInstant, parameters, bondYieldBeta);
         }
@@ -3265,8 +3365,8 @@ public class BacktestService {
         String tenor = bondYieldBeta != null && bondYieldBeta.tenor() != null
                 ? bondYieldBeta.tenor() : selection == null ? null : selection.primaryTenor();
         TreasuryObservationKey key = new TreasuryObservationKey(decisionInstant, tenor);
-        return cache.computeIfAbsent(key, ignored -> resolveV13TreasuryRateObservation(
-                profile, decisionInstant, parameters, bondYieldBeta));
+        return cache.computeIfAbsent(key, ignored -> resolveV13TreasuryRateObservationFromSeries(
+                profile, decisionInstant, parameters, bondYieldBeta, series));
     }
 
     /**
@@ -4274,6 +4374,21 @@ public class BacktestService {
         return series.resolved().computeIfAbsent(signalDate,
                 date -> marketContextService.resolveFxFromRows(
                         currency, signalInstant(date, market), series.rows()));
+    }
+
+    /**
+     * Task 447.2：{@code fxAt} 的請求生命週期快取版本，取代 {@code appendV13Code} 內對 4-引數
+     * {@code fxAt} 的呼叫。{@link FxSeries#resolved()} 既有的 per-signalDate 快取結構不變；
+     * 本 overload 只是在快取未命中時，多把 {@code requestScopedCache} 傳給
+     * {@link TradingRadarMarketContextService#resolveFxFromRows(String, Instant, List, Map)}，
+     * 讓台股假日曆年度查詢也能跨標的、跨訊號日共用。
+     */
+    private TradingRadarMarketContextService.FxContext fxAt(
+            String currency, FxSeries series, LocalDate signalDate, String market,
+            Map<Integer, Map<String, String>> requestScopedCache) {
+        return series.resolved().computeIfAbsent(signalDate,
+                date -> marketContextService.resolveFxFromRows(
+                        currency, signalInstant(date, market), series.rows(), requestScopedCache));
     }
 
     private BacktestDto.CodeCoverage coverage(
