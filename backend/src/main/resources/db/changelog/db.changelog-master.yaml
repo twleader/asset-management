@@ -437,3 +437,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.134.0-ledger-stock-cost-aggregate-rounding.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.135.0-transit-processing-date.sql
+      relativeToChangelogFile: false

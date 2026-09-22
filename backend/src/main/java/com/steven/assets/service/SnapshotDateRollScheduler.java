@@ -27,7 +27,8 @@ import java.time.ZoneId;
  * 比照 {@link ExportScheduleService}（背景全 owner + per-owner 隔離）與 {@link IndexDailyRefreshScheduler}
  * （cron + 開機 self-heal）。
  *
- * <p><b>冪等</b>：{@code rollLatestSnapshotToTodayForOwner} 對「已是當日／未來日期」的最新快照 no-op，
+ * <p><b>冪等</b>：{@code rollLatestSnapshotToTodayForOwner} 同時清除明確處理日已到期的在途款。
+ * 已是當日且沒有到期款、或未來日期的最新快照 no-op，
  * 故重跑安全。{@code lastRolledDate} 為純效率的當日 guard（避免 cron 與 self-heal 同日重複掃全 owner），
  * 記憶體變數、重啟歸零；正確性不依賴它。
  */
@@ -44,7 +45,7 @@ public class SnapshotDateRollScheduler {
     /** 純效率的當日 guard；roll 本身冪等，重啟歸零多跑無害。僅整輪無失敗才標記，讓部分失敗者可於重啟 self-heal 補跑。 */
     private volatile LocalDate lastRolledDate;
 
-    /** 每日 00:05 Asia/Taipei 釘定當日並重算。 */
+    /** 每日 00:05 Asia/Taipei 釘定當日、清除到期在途款並重算。 */
     @Scheduled(cron = "0 5 0 * * *", zone = "Asia/Taipei")
     public void scheduledRoll() {
         rollAll("scheduled");

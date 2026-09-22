@@ -97,9 +97,12 @@ class LatestAssetsConfiguredAdminContextTest {
     }
 
     @Test
-    void financialJsonIsRelayedByteForByteWithoutMapDoubleRoundTrip() {
+    void financialJsonAndTransitDatesAreRelayedByteForByteWithoutMapDoubleRoundTrip() {
         String payload = "{\"preciseAmount\":0.123456789012345678901234567890,"
-                + "\"snapshot\":{\"id\":8},\"liveAssets\":{\"snapshotId\":8}}";
+                + "\"snapshot\":{\"id\":8,\"deposits\":["
+                + "{\"id\":101,\"currency\":\"TRANSIT_TWD\",\"updateMode\":\"AUTO\",\"processingDate\":\"2026-01-19\"},"
+                + "{\"id\":102,\"currency\":\"TWD\",\"updateMode\":\"MANUAL\",\"processingDate\":null}]},"
+                + "\"liveAssets\":{\"snapshotId\":8}}";
         LatestAssetsPublicService service = serviceFor(ADMIN_JSON, payload, new ArrayList<>());
 
         byte[] body = service.getLatest(null).block().getBody();

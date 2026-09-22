@@ -25,8 +25,15 @@ public class AssetSnapshotDto {
             BigDecimal originalAmount,
             String currency,
             BigDecimal annualInterestRate, // 年利率（百分比，1.5 = 1.5%）
-            String notes
-    ) {}
+            String notes,
+            Long id,                       // optional；只可對應本快照既有列，不能指定來源
+            LocalDate processingDate        // TRANSIT_* 才適用，null 不代表今天
+    ) {
+        public DepositRequest(Long bankId, String depositType, BigDecimal amount, BigDecimal originalAmount,
+                String currency, BigDecimal annualInterestRate, String notes) {
+            this(bankId, depositType, amount, originalAmount, currency, annualInterestRate, notes, null, null);
+        }
+    }
 
     public record FundRequest(
             @NotNull String fundName,
@@ -103,7 +110,8 @@ public class AssetSnapshotDto {
             BigDecimal annualInterestRate,    // 年利率（百分比；nullable）
             BigDecimal estimatedAnnualInterest, // 預估年利息（TWD，amount × rate / 100；rate null 時為 null）
             String notes,
-            String updateMode                 // 唯讀 MANUAL / AUTO；不接受任何寫入 payload
+            String updateMode,                // 唯讀 MANUAL / AUTO；不接受任何寫入 payload
+            LocalDate processingDate
     ) {}
 
     public record FundResponse(

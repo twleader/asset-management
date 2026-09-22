@@ -33,6 +33,21 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
+    @DisplayName("最新快照沿用每日 00:05，說明同步涵蓋在途款到期移除與開機補跑（Task 448）")
+    void 最新快照與在途款到期移除共用排程() {
+        assertThat(jobs()).filteredOn(j -> "最新快照釘定當日".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.schedule()).isEqualTo("每日 00:05");
+                    assertThat(job.cron()).isEqualTo("0 5 0 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("最新快照", "非未來快照", "重算資產",
+                            "處理日已到", "台幣／外幣在途款", "開機時補跑",
+                            "未填日期、未到期、歷史及未來快照不清除");
+                });
+    }
+
+    @Test
     @DisplayName("Task425 的分價量與日K各有唯一 external 排程，且不宣稱 request-time 外呼")
     void Task425富邦分價量與日K排程契約() {
         assertThat(jobs()).filteredOn(j -> "富邦個股當日分價量同步".equals(j.name())).singleElement().satisfies(job -> {

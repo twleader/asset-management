@@ -3,6 +3,7 @@
 
 require 'set'
 require 'yaml'
+require 'date'
 
 # 讀取 nginx.conf／SecurityConfig.java 等含中文註解的檔案時，不能依賴呼叫端 shell 的
 # locale（LANG/LC_ALL 未設定時 Ruby 預設 external encoding 為 US-ASCII，讀到中文字元
@@ -167,7 +168,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.12.0', 'Task 438 後 OpenAPI info.version 必須為 1.12.0')
+assert!(document.dig('info', 'version') == '1.13.0', 'Task 448 後 OpenAPI info.version 必須為 1.13.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -398,6 +399,44 @@ assert!(commodity.dig('responses', '503', 'content').keys == ['application/probl
         'commodity-prices 503 只可為 BFF transport ProblemDetail')
 
 schemas = document.dig('components', 'schemas')
+deposit_snapshot = schemas.fetch('DepositSnapshot')
+deposit_keys = %w[id bankId bankDisplayName depositType depositDisplayName amount originalAmount currency
+                  annualInterestRate estimatedAnnualInterest notes updateMode processingDate]
+assert!(deposit_snapshot.fetch('required') == deposit_keys &&
+        deposit_snapshot.fetch('properties').keys == deposit_keys,
+        'DepositSnapshot 必須完整揭露既有 updateMode 與 nullable processingDate，不得省略 required 欄位')
+update_mode = deposit_snapshot.dig('properties', 'updateMode')
+assert!(update_mode.fetch('type') == 'string' && update_mode.fetch('enum') == %w[MANUAL AUTO] &&
+        update_mode.fetch('readOnly') == true,
+        'DepositSnapshot.updateMode 必須是唯讀 MANUAL/AUTO string')
+processing_date = deposit_snapshot.dig('properties', 'processingDate')
+assert!(processing_date.fetch('type').sort == %w[null string] && processing_date.fetch('format') == 'date' &&
+        processing_date.fetch('readOnly') == true,
+        'DepositSnapshot.processingDate 必須是可空的唯讀 ISO date')
+%w[TRANSIT_TWD TRANSIT_USD null Asia/Taipei 00:05 GET].each do |meaning|
+  assert!(processing_date.fetch('description').include?(meaning),
+          "DepositSnapshot.processingDate 必須說明 #{meaning} 語意")
+end
+deposit_examples = document.dig('components', 'examples', 'LatestAssetsSynthetic', 'value', 'snapshot', 'deposits')
+assert!(deposit_examples.map { |deposit| deposit.fetch('updateMode') }.to_set == Set['MANUAL', 'AUTO'],
+        'latest assets synthetic deposits 必須涵蓋 MANUAL 與 AUTO')
+assert!(deposit_examples.any? { |deposit| deposit.fetch('processingDate').nil? } &&
+        deposit_examples.any? { |deposit| !deposit.fetch('processingDate').nil? },
+        'latest assets synthetic deposits 必須涵蓋 null 與已知 processingDate')
+deposit_examples.each do |deposit|
+  assert!(deposit.keys.to_set == deposit_keys.to_set,
+          'latest assets synthetic deposit 不得缺欄位或額外漂移')
+  date = deposit.fetch('processingDate')
+  next if date.nil?
+
+  assert!(%w[TRANSIT_TWD TRANSIT_USD].include?(deposit.fetch('currency')) &&
+          date.is_a?(String) && date.match?(/\A\d{4}-\d{2}-\d{2}\z/) && Date.iso8601(date).iso8601 == date,
+          '有 processingDate 的 synthetic deposit 必須是合法 ISO date 的在途款')
+end
+synthetic_snapshot = document.dig('components', 'examples', 'LatestAssetsSynthetic', 'value', 'snapshot')
+assert!(deposit_examples.sum { |deposit| deposit.fetch('amount') } == synthetic_snapshot.fetch('totalDeposit'),
+        'latest assets synthetic 存款與在途款合計必須吻合 totalDeposit')
+
 commodity_batch = schemas.fetch('CommodityPriceBatchResponse')
 assert!(commodity_batch.fetch('required') == %w[marketOpen quotes] &&
         commodity_batch.fetch('properties').keys == %w[marketOpen quotes] &&

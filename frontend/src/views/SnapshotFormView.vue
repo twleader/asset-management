@@ -5,13 +5,20 @@
       <h2>{{ isEdit ? '管理資產' : '新增快照' }}</h2>
     </div>
 
-    <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
+    <el-alert v-if="canonicalReloadRequired" type="warning" :closable="false" show-icon
+      title="資料已儲存，但最新內容載入失敗。請重新載入後再編輯。" style="margin-bottom:16px">
+      <el-button size="small" :loading="loading" @click="retrySavedSnapshotReload">重新載入</el-button>
+    </el-alert>
+
+    <el-form :model="form" :rules="rules" ref="formRef" label-width="100px"
+      :disabled="canonicalReloadRequired || saving">
       <!-- Basic Info + 資產彙整 -->
       <el-card style="margin-bottom:16px">
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">基本資訊</span>
-            <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
+            <el-button size="small" type="primary" :loading="saving"
+              :disabled="loading || canonicalReloadRequired" @click="submit">存檔</el-button>
           </div>
         </template>
         <!-- 基本欄位 -->
@@ -280,6 +287,9 @@
 
           <!-- 在途款項 Tab -->
           <el-tab-pane label="在途款項" name="TRANSIT">
+            <p class="transit-processing-date-hint">
+              儲存後，款項會於處理日自動移除；自動更新的舊款項若尚無日期，仍可補填。
+            </p>
             <el-tabs v-model="transitTab" size="small" style="margin-top:4px">
               <!-- 台幣 -->
               <el-tab-pane label="台幣" name="TWD">
@@ -309,6 +319,13 @@
                         <el-option label="手動" value="MANUAL" />
                         <el-option label="自動" value="AUTO" />
                       </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="款項處理日" width="145">
+                    <template #default="{ row }">
+                      <el-date-picker v-model="row.processingDate" type="date" size="small" style="width:100%"
+                        format="YYYY-MM-DD" value-format="YYYY-MM-DD" clearable
+                        :disabled="isProcessingDateReadonly(row)" />
                     </template>
                   </el-table-column>
                   <el-table-column label="金額（TWD）" align="right">
@@ -379,6 +396,13 @@
                         <el-option label="手動" value="MANUAL" />
                         <el-option label="自動" value="AUTO" />
                       </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="款項處理日" width="145">
+                    <template #default="{ row }">
+                      <el-date-picker v-model="row.processingDate" type="date" size="small" style="width:100%"
+                        format="YYYY-MM-DD" value-format="YYYY-MM-DD" clearable
+                        :disabled="isProcessingDateReadonly(row)" />
                     </template>
                   </el-table-column>
                   <el-table-column label="金額（USD）" align="right">
@@ -2026,6 +2050,7 @@ const mapDepositFromApi = (d, rate = 1) => {
   const interestRate = d.annualInterestRate != null ? Number(d.annualInterestRate) : null
   return {
     _rowId: `dep_${_idSeq++}`,
+    id: d.id ?? null,
     bankId: d.bankId || null,
     depositType: d.depositType,
     currency,
@@ -2034,12 +2059,16 @@ const mapDepositFromApi = (d, rate = 1) => {
     annualInterestRate: interestRate,
     annualInterestRateStr: interestRate != null ? numFmt(interestRate) : '',
     notes: d.notes,
+    processingDate: d.processingDate ?? null,
+    // server 原值與草稿分開；AUTO 舊列在儲存前即使已首次選日，仍可修改或清除。
+    serverProcessingDate: d.processingDate ?? null,
     // API only projects this read-only field. It is intentionally omitted from submit payloads.
     updateMode: d.updateMode === 'AUTO' ? 'AUTO' : 'MANUAL'
   }
 }
 
 const isAutoTransit = (row) => row?.updateMode === 'AUTO'
+const isProcessingDateReadonly = (row) => isAutoTransit(row) && row.serverProcessingDate != null
 
 // ===== Deposit Tabs =====
 const depositTab  = ref('TWD')
@@ -2067,11 +2096,11 @@ const addDeposit = (outerTab = 'TWD') => {
   if (outerTab === 'TRANSIT') {
     const currency = transitTab.value === 'USD' ? 'TRANSIT_USD' : 'TRANSIT_TWD'
     const defaultType = transitTypeOptions.value[0]?.value ?? '信用卡待付款'
-    form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', updateMode: 'MANUAL' })
+    form.deposits.push({ _rowId: `dep_${_idSeq++}`, id: null, bankId: null, depositType: defaultType, currency, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', processingDate: null, serverProcessingDate: null, updateMode: 'MANUAL' })
     return
   }
   const typeMap = { USD: '美元活存', TWD: '活存' }
-  form.deposits.push({ _rowId: `dep_${_idSeq++}`, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', updateMode: 'MANUAL' })
+  form.deposits.push({ _rowId: `dep_${_idSeq++}`, id: null, bankId: null, depositType: typeMap[outerTab] ?? '活存', currency: outerTab, amount: 0, amountStr: '0', annualInterestRate: null, annualInterestRateStr: '', processingDate: null, serverProcessingDate: null, updateMode: 'MANUAL' })
 }
 
 const addFund = () =>
@@ -2242,7 +2271,12 @@ const copyPrevDeposits = async () => {
   try {
     const detail = await bffApi.snapshotForm.get(prevId)
     const rate = form.usdExchangeRate || 1
-    form.deposits = detail.deposits.map(d => mapDepositFromApi(d, rate))
+    // 即使正在編輯，這仍是跨快照複製，不能攜帶來源列 ID。
+    form.deposits = detail.deposits.map(d => {
+      const row = mapDepositFromApi(d, rate)
+      row.id = null
+      return row
+    })
     ElMessage.success(`已複製前一版存款明細（${detail.snapshotDate}，共 ${detail.deposits.length} 筆）`)
   } catch (e) { if (e?.message !== 'cancel') throw e
   } finally { copyingPrev.deposits = false }
@@ -2550,26 +2584,37 @@ watch(() => form.snapshotDate, async (newDate, oldDate) => {
 // 防止 router-view 元件被重用（同一 SnapshotFormView 實例）但資料尚未（或載入中）換成新頁面對應的快照時，
 // 使用者誤送出上一筆殘留資料（即使 App.vue 的 <router-view :key> 已從根本避免重用，這裡是雙重防護）。
 const loadedFormKey = ref(null)
+const canonicalReloadRequired = ref(false)
 let stopUserEditedWatch = null
 
+// 在 setup 同步註冊一次，由元件生命週期清理；存檔讀回不可重複建立 watcher。
+watchEffect(() => {
+  if (Object.keys(fundMasterMap.value).length === 0) return
+  for (const row of form.funds) {
+    if (row.fundCode && row.units != null && row.units !== '' && row.estimatedDividend == null) {
+      const v = autoCalcFundDividend(row.fundCode, row.units)
+      if (v != null) row.estimatedDividend = v
+    }
+  }
+})
+
 async function loadFormData() {
+  loadedFormKey.value = null
+  loading.value = true
+  try {
+    await populateFormData()
+    canonicalReloadRequired.value = false
+  } finally {
+    loading.value = false
+  }
+}
+
+async function populateFormData() {
   const targetKey = String(route.params.id ?? 'new')
   // 銀行/券商選項 + fund_master 並行載入（彼此獨立）
   await Promise.allSettled([loadInstitutions(), loadFundMasters()])
-  // 編輯模式時：fund_master 載入後自動算入既有 row 的預估年配息（原值若 DB 已凍結，這裡只覆寫顯示用）
-  // 這個 watcher 會在 form.funds 更新後觸發一次（loadDetail 之後）
-  watchEffect(() => {
-    if (Object.keys(fundMasterMap.value).length === 0) return
-    for (const row of form.funds) {
-      if (row.fundCode && row.units != null && row.units !== '' && row.estimatedDividend == null) {
-        const v = autoCalcFundDividend(row.fundCode, row.units)
-        if (v != null) row.estimatedDividend = v
-      }
-    }
-  })
 
   if (isEdit.value) {
-    loading.value = true
     const detail = await bffApi.snapshotForm.get(route.params.id)
     store.currentSnapshot = detail
     Object.assign(form, {
@@ -2598,7 +2643,6 @@ async function loadFormData() {
     // 用 detail 已附帶的收盤價先填 latestPrice，首次 paint 的總額即為「收盤價 × 股數」，
     // 避免先顯示快照凍結舊值、待 loadAllPrices 回來才跳成正解的閃動（與 loadAllPrices 同源不二跳）。
     applyMergedClosePrices(detail.mergedStocks)
-    loading.value = false
     // 舊快照若未存匯率，補抓
     if (!form.usdExchangeRate) {
       await loadExchangeRateForDate(form.snapshotDate)
@@ -2654,6 +2698,15 @@ async function loadFormData() {
   loadedFormKey.value = targetKey
 }
 
+async function retrySavedSnapshotReload() {
+  try {
+    await loadFormData()
+  } catch (e) {
+    console.warn('已儲存資料重新載入失敗', e)
+    ElMessage.warning('最新資料仍無法載入，請稍後再試。')
+  }
+}
+
 onMounted(loadFormData)
 
 // 雙重防護：即使 App.vue 的 <router-view :key="route.fullPath"> 已保證同類路由切換時
@@ -2667,6 +2720,7 @@ watch(() => route.params.id, (newId, oldId) => {
 
 // ===== Submit =====
 const submit = async () => {
+  if (saving.value || loading.value || canonicalReloadRequired.value) return
   // 送出前比對「表單資料實際載入自哪個路由參數」與「目前路由參數」是否一致；
   // 不一致代表元件被重用但資料尚未（或載入中）換成當下頁面對應的快照，
   // 送出會把上一筆殘留資料存成錯誤的一筆，一律阻擋並要求重新整理頁面。
@@ -2687,13 +2741,15 @@ const submit = async () => {
       const rate = !isTransit && d.annualInterestRate != null && Number(d.annualInterestRate) > 0
         ? Number(d.annualInterestRate) : null
       return {
+        id: d.id ?? null,
         bankId: d.bankId || null,
         depositType: d.depositType,
         currency: d.currency,
         amount: isUs ? null : absAmt,
         originalAmount: isUs ? absAmt : null,
         annualInterestRate: rate,
-        notes: d.notes || null
+        notes: d.notes || null,
+        processingDate: isTransit ? d.processingDate || null : null
       }
     })
     const funds = form.funds.map(f => ({
@@ -2715,9 +2771,22 @@ const submit = async () => {
     }
     if (isEdit.value) {
       await bffApi.snapshotForm.update(route.params.id, payload)
-      // 這個頁面只需同步全域快照清單；歷史頁會自行透過 asset-history BFF 載入。
-      await store.fetchSnapshots()
-      ElMessage.success('更新成功')
+      // PUT 可能清理到期列並重建 MANUAL 列 ID，必須讀回 server canonical state，
+      // 清單載入失敗不能阻斷讀回；讀回完成前不能再提交舊草稿。
+      const [detailResult, listResult] = await Promise.allSettled([
+        loadFormData(), store.fetchSnapshots()
+      ])
+      if (detailResult.status === 'rejected') {
+        canonicalReloadRequired.value = true
+        console.warn('資料已儲存，但最新內容載入失敗', detailResult.reason)
+        return
+      }
+      if (listResult.status === 'rejected') {
+        console.warn('資料已儲存，但快照清單更新失敗', listResult.reason)
+        ElMessage.warning('資料已儲存，快照清單暫時無法更新，請稍後重新整理頁面。')
+      } else {
+        ElMessage.success('更新成功')
+      }
     } else {
       const created = await bffApi.snapshotForm.create(payload)
       await store.fetchSnapshots()
