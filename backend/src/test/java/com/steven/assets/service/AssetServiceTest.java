@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.*;
+import com.steven.assets.dto.AssetSnapshotDto;
 import com.steven.assets.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -173,6 +174,138 @@ class AssetServiceTest {
         verify(snapshotRepo).save(captured.capture());
         assertThat(captured.getValue().getDeposits()).singleElement()
                 .extracting(BankDeposit::getSource).isEqualTo("MANUAL");
+    }
+
+    @Test
+    void updateTransitSupplementsOnlyExactLegacyAutoAndProtectsAllOtherFields() {
+        LocalDate date = LocalDate.now(java.time.ZoneId.of("Asia/Taipei")).plusDays(3);
+        BankDeposit auto = autoDeposit(10L, null);
+        prepareUpdate();
+        service.updateSnapshot(1L, request(List.of(depositRequest(auto, date, "TRANSIT_TWD"))));
+        assertThat(snapshot.getDeposits()).containsExactly(auto);
+        assertThat(auto.getProcessingDate()).isEqualTo(date);
+        assertThat(auto.getAmount()).isEqualByComparingTo("-1002");
+        assertThat(auto.getNotes()).isEqualTo("source note");
+        assertThat(auto.getSource()).isEqualTo("FUBON_SYNC");
+    }
+
+    @Test
+    void updateTransitDoesNotModifyExistingDateOrLegacyWithoutExactIdAndCurrency() {
+        LocalDate date = LocalDate.of(2035, 1, 1);
+        BankDeposit first = autoDeposit(10L, date);
+        BankDeposit legacy = autoDeposit(11L, null);
+        prepareUpdate();
+        service.updateSnapshot(1L, request(List.of(
+                depositRequest(first, date.plusDays(1), "TRANSIT_TWD"),
+                depositRequest(legacy, date, "USD"),
+                new AssetSnapshotDto.DepositRequest(7L, "買股待付款", BigDecimal.ONE, null,
+                        "TRANSIT_TWD", null, "legacy client", null, date))));
+        assertThat(snapshot.getDeposits()).containsExactly(first, legacy);
+        assertThat(first.getProcessingDate()).isEqualTo(date);
+        assertThat(legacy.getProcessingDate()).isNull();
+        service.updateSnapshot(1L, request(List.of(depositRequest(first, null, "TRANSIT_TWD"))));
+        assertThat(first.getProcessingDate()).isEqualTo(date);
+    }
+
+    @Test
+    void updateTransitAutoIdCannotBeClonedWithChangedBankOrType() {
+        BankDeposit auto = autoDeposit(10L, null);
+        prepareUpdate();
+        service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(99L, "活存",
+                BigDecimal.ONE, null, "TWD", null, "overwrite", auto.getId(), LocalDate.of(2035, 1, 1)))));
+        assertThat(snapshot.getDeposits()).containsExactly(auto);
+        assertThat(auto.getProcessingDate()).isNull();
+        verifyNoInteractions(bankRepo);
+    }
+
+    @Test
+    void updateTransitDueAutoCannotBeRecreatedFromSamePayloadAndRecalculatesTotals() {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        snapshot.setSnapshotDate(today);
+        BankDeposit due = autoDeposit(10L, null);
+        BankDeposit future = autoDeposit(11L, today.plusDays(1));
+        prepareUpdate();
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L)).thenReturn(Optional.of(snapshot));
+        service.updateSnapshot(1L, request(List.of(depositRequest(due, today, "TRANSIT_TWD"),
+                depositRequest(future, null, "TRANSIT_TWD"))));
+        assertThat(snapshot.getDeposits()).containsExactly(future);
+        assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-1002");
+        assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-1002");
+    }
+
+    @Test
+    void updateTransitRejectsUnknownOrDuplicateIdsBeforeAnyMutation() {
+        BankDeposit auto = autoDeposit(10L, null);
+        when(snapshotMutationLock.lockById(1L)).thenReturn(snapshot);
+        var valid = depositRequest(auto, LocalDate.of(2035, 1, 1), "TRANSIT_TWD");
+        var stale = new AssetSnapshotDto.DepositRequest(7L, "買股待付款", BigDecimal.ONE, null,
+                "TRANSIT_TWD", null, null, 999L, null);
+        for (List<AssetSnapshotDto.DepositRequest> requests : List.of(List.of(valid, stale), List.of(valid, valid))) {
+            assertThatThrownBy(() -> service.updateSnapshot(1L, request(requests)))
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("重新載入");
+            assertThat(snapshot.getDeposits()).containsExactly(auto);
+            assertThat(auto.getProcessingDate()).isNull();
+            assertThat(snapshot.getNotes()).isNull();
+        }
+        verifyNoInteractions(stockScopeOwnershipPort, snapshotRepo, bankRepo, aggregateCalculator);
+    }
+
+    @Test
+    void createTransitRejectsCopiedIdsAndClearsDueRowsOnlyOnNewLatest() {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        when(tenantGuard.requireCurrentUserId()).thenReturn(9L);
+        var due = new AssetSnapshotDto.DepositRequest(null, "賣股待收款", BigDecimal.TEN,
+                null, "TRANSIT_TWD", null, null, null, today);
+        var normal = new AssetSnapshotDto.DepositRequest(null, "活存", BigDecimal.ONE,
+                null, "TWD", null, null, null, today);
+        when(snapshotRepo.save(any())).thenAnswer(call -> call.getArgument(0));
+        var result = service.createSnapshot(new AssetSnapshotDto.CreateSnapshotRequest(
+                today, BigDecimal.ONE, null, List.of(due, normal), List.of(), List.of()));
+        assertThat(result.totalDeposit()).isEqualByComparingTo("1");
+        ArgumentCaptor<AssetSnapshot> captured = ArgumentCaptor.forClass(AssetSnapshot.class);
+        verify(snapshotRepo).save(captured.capture());
+        assertThat(captured.getValue().getDeposits()).singleElement()
+                .extracting(BankDeposit::getProcessingDate).isNull();
+        assertThatThrownBy(() -> service.createSnapshot(new AssetSnapshotDto.CreateSnapshotRequest(
+                today, BigDecimal.ONE, null, List.of(new AssetSnapshotDto.DepositRequest(null, "活存",
+                BigDecimal.ONE, null, "TWD", null, null, 10L, null)), List.of(), List.of())))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void manualTransitDateCanBeClearedOnUpdate() {
+        BankDeposit manual = BankDeposit.builder().id(21L).snapshot(snapshot).currency("TRANSIT_USD")
+                .depositType("賣股待收款").amount(BigDecimal.TEN).processingDate(LocalDate.of(2035, 1, 1)).build();
+        snapshot.getDeposits().add(manual);
+        prepareUpdate();
+        service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(null, "賣股待收款",
+                BigDecimal.TEN, null, "TRANSIT_USD", null, null, manual.getId(), null))));
+        assertThat(snapshot.getDeposits()).singleElement().extracting(BankDeposit::getProcessingDate).isNull();
+    }
+
+    private void prepareUpdate() {
+        when(snapshotMutationLock.lockById(1L)).thenReturn(snapshot);
+        when(stockScopeOwnershipPort.capture(any())).thenReturn(SnapshotStockScopeOwnership.payloadOwned());
+        when(snapshotRepo.save(snapshot)).thenReturn(snapshot);
+    }
+
+    private BankDeposit autoDeposit(Long id, LocalDate processingDate) {
+        BankDeposit auto = BankDeposit.builder().id(id).snapshot(snapshot)
+                .bank(Bank.builder().id(7L).code("fubon").build()).depositType("買股待付款")
+                .currency("TRANSIT_TWD").amount(new BigDecimal("-1002")).source("FUBON_SYNC")
+                .processingDate(processingDate).notes("source note").build();
+        snapshot.getDeposits().add(auto);
+        return auto;
+    }
+
+    private AssetSnapshotDto.DepositRequest depositRequest(BankDeposit deposit, LocalDate date, String currency) {
+        return new AssetSnapshotDto.DepositRequest(deposit.getBank().getId(), deposit.getDepositType(),
+                BigDecimal.ONE, null, currency, BigDecimal.TEN, "malicious edit", deposit.getId(), date);
+    }
+
+    private AssetSnapshotDto.CreateSnapshotRequest request(List<AssetSnapshotDto.DepositRequest> deposits) {
+        return new AssetSnapshotDto.CreateSnapshotRequest(snapshot.getSnapshotDate(), BigDecimal.ONE,
+                "updated", deposits, List.of(), List.of());
     }
 
     @Test

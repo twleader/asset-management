@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 /**
  * 銀行存款明細
@@ -53,6 +54,10 @@ public class BankDeposit {
     /** 年利率（百分比，1.5 表示 1.5%；TRANSIT_* 一律 null） */
     @Column(name = "annual_interest_rate", precision = 7, scale = 4)
     private BigDecimal annualInterestRate;
+
+    /** 在途款項的明確處理日；一般存款及尚未取得日期的舊列保持 null。 */
+    @Column(name = "processing_date")
+    private LocalDate processingDate;
 
     /** 備註 (例如定存到期日、利率等) */
     @Column(length = 200)

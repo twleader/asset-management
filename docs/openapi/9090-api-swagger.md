@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.12.0` |
+| 契約版本 | `1.13.0` |
 | 對外路徑 | 13 條：12 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -141,7 +141,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 4. `GET /api/assets/latest`
 
-唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId； 不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定 （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
+唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId； 不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定 （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。 存款明細含唯讀 `updateMode` 與可空 `processingDate`；此 GET 只讀取已保存資料，不觸發在途款到期移除。
 
 #### Query 參數
 
@@ -925,6 +925,8 @@ Java LocalDateTime 的 ISO 字串，沒有 UTC offset；刻意不使用 date-tim
 | `annualInterestRate` | 是 | `number | null` | 是 |  | 百分比，例如 1.5 表示 1.5%。 |
 | `estimatedAnnualInterest` | 是 | `number | null` | 是 |  | 台幣；rate 為 null 或計算結果非正數時為 null。 |
 | `notes` | 是 | `string | null` | 是 |  | 建立快照或帳本時保留的附註。 |
+| `updateMode` | 是 | `string` | 否 | enum: `MANUAL`, `AUTO` | 唯讀更新方式；MANUAL 為手動管理，AUTO 為來源同步管理，不能由寫入 payload 指定或改變。 |
+| `processingDate` | 是 | `string | null (date)` | 是 |  | 在途款的款項處理日（YYYY-MM-DD），只適用 currency 為 TRANSIT_TWD／TRANSIT_USD； 一般存款與尚未確認處理日的舊在途款為 null，不從金額、快照日或 T+2 推測日期。 每位 owner 的最新且非未來快照中，處理日小於或等於 Asia/Taipei 今天的在途款， 於每日 00:05、開機補跑或儲存該快照時移除並重算總額；此 GET 不觸發移除。 |
 
 ### `FundSnapshot`
 

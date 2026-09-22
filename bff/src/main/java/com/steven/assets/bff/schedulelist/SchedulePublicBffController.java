@@ -69,7 +69,8 @@ public class SchedulePublicBffController {
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（28）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
-                    "將每位使用者的最新快照日期釘為當日並重算資產，讓即時股價覆蓋生效",
+                    "檢查每位使用者的最新快照；非未來快照釘為當日並重算資產，讓即時股價覆蓋生效，"
+                            + "同時移除處理日已到的台幣／外幣在途款，開機時補跑。未填日期、未到期、歷史及未來快照不清除",
                     "每日 00:05", "0 5 0 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料清理", "警示觸發紀錄清理",
                     "清理 30 天前的股票警示觸發紀錄",

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.12.0
+  version: 1.13.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
     十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
@@ -316,6 +316,7 @@ paths:
         唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId；
         不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定
         （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
+        存款明細含唯讀 `updateMode` 與可空 `processingDate`；此 GET 只讀取已保存資料，不觸發在途款到期移除。
       parameters:
         - name: email
           in: query
@@ -3121,6 +3122,8 @@ components:
       - annualInterestRate
       - estimatedAnnualInterest
       - notes
+      - updateMode
+      - processingDate
       properties:
         id:
           type: integer
@@ -3171,6 +3174,22 @@ components:
           - string
           - 'null'
           description: 建立快照或帳本時保留的附註。
+        updateMode:
+          type: string
+          enum: [MANUAL, AUTO]
+          readOnly: true
+          description: 唯讀更新方式；MANUAL 為手動管理，AUTO 為來源同步管理，不能由寫入 payload 指定或改變。
+        processingDate:
+          type:
+          - string
+          - 'null'
+          format: date
+          readOnly: true
+          description: >-
+            在途款的款項處理日（YYYY-MM-DD），只適用 currency 為 TRANSIT_TWD／TRANSIT_USD；
+            一般存款與尚未確認處理日的舊在途款為 null，不從金額、快照日或 T+2 推測日期。
+            每位 owner 的最新且非未來快照中，處理日小於或等於 Asia/Taipei 今天的在途款，
+            於每日 00:05、開機補跑或儲存該快照時移除並重算總額；此 GET 不觸發移除。
       additionalProperties: false
       description: 單筆存款部位的快照明細。
     FundSnapshot:
@@ -7581,7 +7600,8 @@ components:
           realizedGain: 1200.00
           notes: 去識別化範例
           deposits:
-            - {id: 910001, bankId: 501, bankDisplayName: 範例銀行, depositType: DEMAND_TWD, depositDisplayName: DEMAND_TWD, amount: 100000.00, originalAmount: null, currency: TWD, annualInterestRate: 0.8000, estimatedAnnualInterest: 800.00, notes: null}
+            - {id: 910001, bankId: 501, bankDisplayName: 範例銀行, depositType: DEMAND_TWD, depositDisplayName: DEMAND_TWD, amount: 104000.00, originalAmount: null, currency: TWD, annualInterestRate: 0.8000, estimatedAnnualInterest: 832.00, notes: null, updateMode: MANUAL, processingDate: null}
+            - {id: 910002, bankId: 501, bankDisplayName: 範例銀行, depositType: 買股待付款, depositDisplayName: 買股待付款, amount: -4000.00, originalAmount: null, currency: TRANSIT_TWD, annualInterestRate: null, estimatedAnnualInterest: null, notes: 合成在途款範例, updateMode: AUTO, processingDate: '2026-01-19'}
           funds:
             - {id: 920001, fundName: 範例平衡基金, fundCode: EXM-FUND, bankId: 501, bankDisplayName: 範例銀行, investmentAmount: 48000.00, currentValue: 50000.00, units: 100.0000, estimatedDividend: 1000.00, dividendRate: 0.020000, profit: 2000.00, profitRate: 0.041667}
           stocks:

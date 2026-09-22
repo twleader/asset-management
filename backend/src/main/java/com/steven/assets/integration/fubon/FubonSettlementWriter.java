@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 
@@ -73,7 +74,9 @@ public class FubonSettlementWriter {
             FubonAccountingContract.SettlementProjection projection) {
         FubonAccountingContract.validateSettlement(observation, clock);
         FubonAccountingContract.fresh(observation.queryDate(), observation.observedAt(), clock);
-        if (projection == null) throw new WriteRejected(FubonSettlementOutcome.SETTLEMENT_FAILED);
+        if (projection == null || !projection.equals(FubonAccountingContract.settlementProjection(observation))) {
+            throw new WriteRejected(FubonSettlementOutcome.SETTLEMENT_FAILED);
+        }
 
         AssetSnapshot snapshot = mutationLock.lockLatestForFubonConfiguredOwner(expectedOwnerId)
                 .orElseThrow(() -> new WriteRejected(FubonSettlementOutcome.NO_SNAPSHOT));
@@ -97,15 +100,18 @@ public class FubonSettlementWriter {
             throw new WriteRejected(FubonSettlementOutcome.BANK_MISSING);
         }
         boolean changed = false;
-        if (projection.payableAmount().signum() != 0) {
-            requireTransitType(PAYABLE, true);
-            changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(), PAYABLE,
-                    projection.payableAmount(), true);
-        }
-        if (projection.receivableAmount().signum() != 0) {
-            requireTransitType(RECEIVABLE, false);
-            changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(), RECEIVABLE,
-                    projection.receivableAmount(), false);
+        for (FubonDtos.SettlementDay day : observation.details()) {
+            if (!"AVAILABLE".equals(day.status()) || !day.settlementDate().isAfter(observation.queryDate())) continue;
+            if (day.buySettlement().value().signum() != 0) {
+                requireTransitType(PAYABLE, true);
+                changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(),
+                        day.settlementDate(), PAYABLE, day.buySettlement().value(), true);
+            }
+            if (day.sellSettlement().value().signum() != 0) {
+                requireTransitType(RECEIVABLE, false);
+                changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(),
+                        day.settlementDate(), RECEIVABLE, day.sellSettlement().value(), false);
+            }
         }
         if (!changed) {
             return new CommitResult(false, projection.payableAmount(), projection.receivableAmount());
@@ -132,7 +138,7 @@ public class FubonSettlementWriter {
     }
 
     private boolean projectDirection(AssetSnapshot snapshot, Bank bank, Long expectedOwnerId,
-            java.time.LocalDate queryDate, String type, BigDecimal sourceAmount, boolean payable) {
+            LocalDate queryDate, LocalDate processingDate, String type, BigDecimal sourceAmount, boolean payable) {
         BigDecimal amount = FubonAccountingContract.money(sourceAmount);
         if ((payable && amount.signum() >= 0) || (!payable && amount.signum() <= 0)) {
             throw new WriteRejected(FubonSettlementOutcome.SETTLEMENT_FAILED);
@@ -142,21 +148,27 @@ public class FubonSettlementWriter {
                         && Objects.equals(deposit.getBank().getId(), bank.getId())
                         && type.equals(deposit.getDepositType()))
                 .toList();
-        if (candidates.size() > 1 || (!candidates.isEmpty()
-                && !TRANSIT_TWD.equals(candidates.getFirst().getCurrency()))) {
+        if (candidates.stream().anyMatch(target -> !TRANSIT_TWD.equals(target.getCurrency()))) {
             throw new WriteRejected(FubonSettlementOutcome.AMBIGUOUS_TARGET);
         }
-        if (candidates.isEmpty()) {
+        if (candidates.stream().anyMatch(target -> !"FUBON_SYNC".equals(target.getSource()))) {
+            throw new WriteRejected(FubonSettlementOutcome.UNMANAGED_TARGET);
+        }
+        // null 日期舊列不代表目前 observation 的任何一天；相同金額也不能當成身份證據。
+        if (candidates.stream().anyMatch(target -> target.getProcessingDate() == null)
+                || candidates.stream().map(BankDeposit::getProcessingDate).distinct().count() != candidates.size()) {
+            throw new WriteRejected(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        }
+        BankDeposit target = candidates.stream()
+                .filter(candidate -> processingDate.equals(candidate.getProcessingDate())).findFirst().orElse(null);
+        if (target == null) {
             BankDeposit created = BankDeposit.builder()
                     .snapshot(snapshot).bank(bank).depositType(type).currency(TRANSIT_TWD)
+                    .processingDate(processingDate)
                     .amount(amount).originalAmount(null).annualInterestRate(null)
                     .notes(transitNote(expectedOwnerId, queryDate, type)).source("FUBON_SYNC").build();
             snapshot.getDeposits().add(created);
             return true;
-        }
-        BankDeposit target = candidates.getFirst();
-        if (!"FUBON_SYNC".equals(target.getSource())) {
-            throw new WriteRejected(FubonSettlementOutcome.UNMANAGED_TARGET);
         }
         BigDecimal existing = target.getAmount() == null ? null : FubonAccountingContract.money(target.getAmount());
         String note = transitNote(expectedOwnerId, queryDate, type);

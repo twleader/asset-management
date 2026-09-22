@@ -469,6 +469,8 @@ CREATE TABLE public.bank_deposit (
     bank_id bigint,
     annual_interest_rate numeric(7,4),
     source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
+    processing_date date,
+    CONSTRAINT ck_bank_deposit_processing_date_transit CHECK (((processing_date IS NULL) OR ((currency IS NOT NULL) AND ((currency)::text = ANY ((ARRAY['TRANSIT_TWD'::character varying, 'TRANSIT_USD'::character varying])::text[]))))),
     CONSTRAINT ck_bank_deposit_source CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 

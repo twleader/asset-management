@@ -15,6 +15,12 @@ import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.RealizedGainRepository;
 import com.steven.assets.repository.TransitFundTypeRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
+import com.steven.assets.service.AssetService;
+import com.steven.assets.service.AssetClassifier;
+import com.steven.assets.service.FundDividendService;
+import com.steven.assets.service.FundNavService;
+import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.SnapshotStockScopeOwnershipPort;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
@@ -48,6 +54,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -74,7 +81,7 @@ import static org.mockito.Mockito.*;
         "app.admin-email=sync-owner@example.invalid"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class,
+@Import({AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class, AssetService.class,
         FubonAccountingProjectionPostgresTest.Config.class})
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -100,9 +107,16 @@ class FubonAccountingProjectionPostgresTest {
     @MockBean FubonConfigState configState;
     @MockBean FubonBrokerClient brokerClient;
     @MockBean StockMasterService stockNames;
+    @MockBean MarketDataService marketDataService;
+    @MockBean FundNavService fundNavService;
+    @MockBean FundDividendService fundDividendService;
+    @MockBean AssetClassifier assetClassifier;
+    @MockBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
+    @MockBean com.steven.assets.security.TenantGuard tenantGuard;
     @SpyBean SnapshotAggregateCalculator aggregates;
 
     @Autowired AssetSnapshotRepository snapshots;
+    @Autowired AssetService assetService;
     @Autowired AssetTransactionRepository assetTransactions;
     @Autowired AppUserRepository users;
     @Autowired BankRepository banks;
@@ -223,6 +237,7 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(target.getOriginalAmount()).isNull();
             assertThat(target.getAnnualInterestRate()).isNull();
             assertThat(target.getSource()).isEqualTo("FUBON_SYNC");
+            assertThat(target.getProcessingDate()).isEqualTo(LocalDate.of(2026, 9, 1));
             assertThat(target.getNotes()).isEqualTo("富邦證券交割款；當日無已同步成交明細");
             assertThat(snapshot.getDeposits()).hasSize(2);
             assertThat(transit(snapshot, RECEIVABLE)).isEmpty();
@@ -305,6 +320,89 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(target.getAnnualInterestRate()).isEqualByComparingTo("4.00");
             assertThat(target.getOriginalAmount()).isEqualByComparingTo("77.0000");
         });
+    }
+
+    @Test
+    void settlementKeepsSeparateOfficialDaysAndMissingDayNeverClearsFutureRows() {
+        String secondDay = SETTLEMENT_ROW.replace("2026-09-01", "2026-09-02")
+                .replace("1000", "2000").replace("-1002", "-2002");
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(SETTLEMENT_ROW + "," + secondDay), FubonDtos.SettlementBatch.class)));
+        var result = settlementService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(result.payableAmount()).isEqualByComparingTo("-3004");
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).extracting(BankDeposit::getProcessingDate)
+                    .containsExactlyInAnyOrder(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2));
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-2904");
+        });
+        clearInvocations(aggregates);
+        sqlTrace.start();
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(sqlTrace.stop()).noneMatch(sql -> sql.startsWith("insert") || sql.startsWith("update")
+                || sql.startsWith("delete"));
+        verify(aggregates, never()).recalculate(any());
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlement()));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(NO_DATA_ROW), FubonDtos.SettlementBatch.class)));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).hasSize(2);
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-2904");
+        });
+        // Same production lifecycle method used by the daily and startup jobs, independent of vendor success.
+        assertThat(assetService.rollLatestSnapshotToTodayForOwner(ownerId, LocalDate.of(2026, 9, 1))).isTrue();
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).singleElement().satisfies(target -> {
+                assertThat(target.getProcessingDate()).isEqualTo(LocalDate.of(2026, 9, 2));
+                assertThat(target.getAmount()).isEqualByComparingTo("-2002");
+            });
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-1902");
+            assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-1902");
+        });
+    }
+
+    @Test
+    void settlementLegacyNullDateFailsClosedEvenWhenAmountsMatch() {
+        addTransit(PAYABLE, "-1002.00", "TRANSIT_TWD", null, "legacy", null);
+        tx(() -> transit(snapshots.findById(snapshotId).orElseThrow(), PAYABLE).getFirst().setProcessingDate(null));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).hasSize(1);
+            assertThat(transit(snapshot, PAYABLE).getFirst().getProcessingDate()).isNull();
+            assertThat(transit(snapshot, PAYABLE).getFirst().getNotes()).isEqualTo("legacy");
+        });
+    }
+
+    @Test
+    void legacyNullDateOnSecondDirectionRollsBackEarlierDirectionUpdate() {
+        addTransit(PAYABLE, "-5.00", "TRANSIT_TWD", null, "payable", null);
+        addTransit(RECEIVABLE, "7.00", "TRANSIT_TWD", null, "legacy", null);
+        tx(() -> transit(snapshots.findById(snapshotId).orElseThrow(), RECEIVABLE).getFirst().setProcessingDate(null));
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlementWithBothDirections()));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE).getFirst().getAmount()).isEqualByComparingTo("-5");
+            assertThat(transit(snapshot, PAYABLE).getFirst().getNotes()).isEqualTo("payable");
+            assertThat(transit(snapshot, RECEIVABLE).getFirst().getProcessingDate()).isNull();
+            assertThat(transit(snapshot, RECEIVABLE).getFirst().getAmount()).isEqualByComparingTo("7");
+            assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("102");
+        });
+    }
+
+    @Test
+    void sameDayAndPastNonzeroSettlementRemainRejectedWithoutChangingPersistedFuture() {
+        addTransit(PAYABLE, "-77.00", "TRANSIT_TWD", null, "keep", null);
+        for (String invalidDay : List.of("2026-08-28", "2026-08-27")) {
+            String row = SETTLEMENT_ROW.replace("2026-09-01", invalidDay)
+                    .replace("\"sourceQueryDate\":\"2026-08-28\"", "\"sourceQueryDate\":\"2026-08-27\"");
+            when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                    read(settlementJson(row), FubonDtos.SettlementBatch.class)));
+            assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_SETTLEMENT);
+        }
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getAmount())
+                .isEqualByComparingTo("-77"));
     }
 
     @Test
@@ -538,6 +636,7 @@ class FubonAccountingProjectionPostgresTest {
             AssetSnapshot snapshot = snapshots.findById(snapshotId).orElseThrow();
             BankDeposit deposit = BankDeposit.builder().snapshot(snapshot).bank(fubonBank).depositType(type)
                     .currency(currency).amount(new BigDecimal(amount)).notes(notes)
+                    .processingDate(LocalDate.of(2026, 9, 1))
                     .annualInterestRate(rate == null ? null : new BigDecimal(rate))
                     .originalAmount(original == null ? null : new BigDecimal(original)).source(source).build();
             snapshot.getDeposits().add(deposit);

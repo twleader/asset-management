@@ -12317,3 +12317,16 @@ stale 同時表達必要完成日缺口及盤中當日 live 缺口：開盤前�
 **架構分層備註**：這兩處批次化主要留在既有 Service 層（`BacktestService`／`TreasuryYieldService`／`TradingRadarMarketContextService`／`MarketDataService`）內部；Treasury 這項額外在 `TreasuryYieldBatchRepository` 介面與其 JDBC 實作新增一支 `findAllRevisionsThrough` 方法（與既有 `findCompleteSeriesThrough`／`findSelected` 共用同一段 completeness 篩選 SQL，只是不做 collapse），FX 這項則完全不新增 Repository 方法。兩者都不新增 Controller endpoint、不變更 `InternalBacktestController` 的請求／回應 DTO。`BacktestService` 中的請求範圍快取（`twHolidayRequestCache`）以方法引數顯式傳遞（而非執行緒本地變數或欄位），維持既有「業務邏輯不依賴框架、可離線單元測試」的原則。
 
 **與 Requirement 161 的關係**：Requirement 161 acceptance criteria 明文排除 V13 逐股回測迴圈的平行化，理由是規劃階段發現本 Requirement 描述的三個 I/O 依賴，「要安全平行化需要先對 appendV13Code() 的完整 I/O 依賴做一次獨立盤點」。本 Requirement 是該獨立盤點與修正的落地。**本 Requirement 完成後，逐股迴圈是否仍需要平行化維持未決**——Docker 環境對照實測顯示，光是單一標的全歷史 × 完整 V13 候選網格的純運算就約 34 秒，換算全市場規模（歷史任務 t316 的 69 檔）遠超過既有 10 分鐘診斷視窗，即使本 Requirement 三項 I/O 修正全部完成也不例外。是否平行化、或改用其他方式縮減每碼運算量，須另開獨立 Requirement／Task 並通過規格審查，不在本 Requirement 範圍內處理。
+
+
+## Requirement 150 修訂／Task 448：在途處理日生命週期
+
+新增 nullable LocalDate processingDate 對映 bank_deposit.processing_date。一般存款不用此欄；歷史 null 不自動推算。DepositResponse 顯示日期；DepositRequest 的 optional id 僅對應 locked snapshot 既有列，不能指定來源。來源已有日期的 AUTO 唯讀；原 null 日期允許 owner 在既有完整 PUT 補填，須 exact id/bank/type/currency 身份，不放鬆其他 source-owned 保護。前端兩個 TRANSIT 表只 render/date input，完成儲存後讀回 server；舊 AUTO 沒被使用者補日期以前保留，並在 source writer 遇其 identity 時 fail closed。
+
+FubonSettlementWriter 以合法 observation 每 future day 的 buy/sell settlement 分列（key snapshot/bank/type/processingDate），保留 aggregate SyncResult 形狀、驗證 freshness 與 owner race fence。不同日期不合併；missing/zero 不清既有未到期列；manual collisions 仍拒絕；null 日期 legacy 無憑據不得改配。此版本不修改 Python adapter 的合法性閘門。
+
+業務層共用純到期判定 helper，僅判斷 TRANSIT_* 且日期非 null 且 <= 台北今天。AssetService 在既有 row lock 的當前 latest 非未來快照上套用並重算，供完整 PUT/create 與 rollLatestSnapshotToTodayForOwner 使用。SnapshotDateRollScheduler 既有每日 00:05／開機 self-heal 外部 bean transaction 路徑不變；即使當日日期不用 roll，仍清到期款。未來快照與非 latest 歷史快照不動；每 owner 獨立 transaction。JOBS 修改既有描述即可，GET 無任何 mutation。到期只移除本機在途列，完全不模擬或執行支付。
+
+完整 PUT 的 request id 先唯一／歸屬驗證（before delete），再捕捉所有保護 identity、補 legacy AUTO 日期、處理手動 collection replacement，最後在可清理 snapshot 清到期列並重算。舊 UI 帶不存在的 id 以 validation error 原子拒絕，不能將已到期 AUTO 再插為 MANUAL。相同身份多日期 AUTO 全部保留且忽略其普通編輯 payload。Excel 缺 id／日期不能覆蓋 source-managed 日期。日期有效性由 LocalDate 型別與服務層檢查，空日期不是今天。
+
+資料來源與API契約以本次 Requirement 150 修訂 的八項 AC 為實作及驗收範圍；若 latest public projection 包含新日期，同步其 typed schema/validator/OpenAPI/fixtures及產生文件。migration 後以 live schema-only dump 重產 db/schema.sql，不透過資料修復 migration 猜測使用者的實際支付日。
