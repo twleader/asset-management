@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading">
+  <div v-loading="loading && !isEdit" :data-snapshot-panels-ready="panelsReady">
     <div class="page-header">
       <el-button :icon="ArrowLeft" @click="$router.back()">返回</el-button>
       <h2>{{ isEdit ? '管理資產' : '新增快照' }}</h2>
@@ -7,18 +7,29 @@
 
     <el-alert v-if="canonicalReloadRequired" type="warning" :closable="false" show-icon
       title="資料已儲存，但最新內容載入失敗。請重新載入後再編輯。" style="margin-bottom:16px">
-      <el-button size="small" :loading="loading" @click="retrySavedSnapshotReload">重新載入</el-button>
+      <button type="button" class="panel-retry" :disabled="loading" @click="retrySavedSnapshotReload">重新載入</button>
+    </el-alert>
+
+    <el-alert v-if="panelContext.mismatch" type="warning" :closable="false" show-icon
+      title="資料已更新，請完整重新載入。" style="margin-bottom:16px">
+      <button type="button" class="panel-retry" :disabled="loading" @click="retrySavedSnapshotReload">完整重新載入</button>
+    </el-alert>
+
+    <el-alert v-if="dateError" type="error" :closable="false" show-icon
+      title="此日期的資料尚未完整載入，請重試後再儲存。" style="margin-bottom:16px">
+      <button type="button" class="panel-retry" :disabled="dateLoading" @click="reloadDateData">重新載入日期資料</button>
     </el-alert>
 
     <el-form :model="form" :rules="rules" ref="formRef" label-width="100px"
-      :disabled="canonicalReloadRequired || saving">
+      :disabled="formBlocked">
       <!-- Basic Info + 資產彙整 -->
-      <el-card style="margin-bottom:16px">
+      <SnapshotFormPanelState name="basic" label="基本資訊" :enabled="isEdit" :state="panelStates.basic" @retry="retryPanel('basic')">
+      <el-card>
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">基本資訊</span>
             <el-button size="small" type="primary" :loading="saving"
-              :disabled="loading || canonicalReloadRequired" @click="submit">存檔</el-button>
+              :disabled="formBlocked" @click="submit">存檔</el-button>
           </div>
         </template>
         <!-- 基本欄位 -->
@@ -31,7 +42,7 @@
           </el-col>
           <el-col :span="6">
             <el-form-item label="美元匯率">
-              <el-input :model-value="numFmt(form.usdExchangeRate)" style="width:100%" disabled
+              <el-input :model-value="numFmt(valuationUsdExchangeRate)" style="width:100%" disabled
                 :input-style="{ textAlign: 'right' }" />
             </el-form-item>
           </el-col>
@@ -42,7 +53,7 @@
           </el-col>
         </el-row>
         <!-- 資產彙整列 -->
-        <div class="summary-bar">
+        <div v-if="panelsReady && !dateLoading && !dateError" class="summary-bar" data-testid="snapshot-summary">
           <!-- 總資產 -->
           <div class="sb-item sb-total">
             <div class="sb-label">🏆 總資產</div>
@@ -114,10 +125,12 @@
           </div>
         </div>
       </el-card>
+      </SnapshotFormPanelState>
 
       <!-- Deposits -->
       <!-- Deposits -->
-      <el-card style="margin-bottom:16px">
+      <SnapshotFormPanelState name="deposits" label="存款明細" :enabled="isEdit" :state="panelStates.deposits" @retry="retryPanel('deposits')">
+      <el-card>
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">💰 存款明細</span>
@@ -131,7 +144,7 @@
 
         <el-tabs v-model="depositTab">
           <!-- 台幣 Tab -->
-          <el-tab-pane label="台幣" name="TWD">
+          <el-tab-pane lazy label="台幣" name="TWD">
             <el-table ref="twdDepositTableRef" :data="twdDeposits" size="small" row-key="_rowId">
               <el-table-column width="36" align="center">
                 <template #default>
@@ -189,7 +202,7 @@
           </el-tab-pane>
 
           <!-- 美元 Tab -->
-          <el-tab-pane label="美元" name="USD">
+          <el-tab-pane lazy label="美元" name="USD">
             <el-table ref="usdDepositTableRef" :data="usdDeposits" size="small" row-key="_rowId">
               <el-table-column width="36" align="center">
                 <template #default>
@@ -280,19 +293,19 @@
               <div class="ds-sep" />
               <div class="ds-item">
                 <span class="ds-label">匯率</span>
-                <span class="ds-val" style="font-size:13px">{{ numFmt(form.usdExchangeRate) }} TWD/USD</span>
+                <span class="ds-val" style="font-size:13px">{{ numFmt(valuationUsdExchangeRate) }} TWD/USD</span>
               </div>
             </div>
           </el-tab-pane>
 
           <!-- 在途款項 Tab -->
-          <el-tab-pane label="在途款項" name="TRANSIT">
+          <el-tab-pane lazy label="在途款項" name="TRANSIT">
             <p class="transit-processing-date-hint">
               儲存後，款項會於處理日自動移除；自動更新的舊款項若尚無日期，仍可補填。
             </p>
             <el-tabs v-model="transitTab" size="small" style="margin-top:4px">
               <!-- 台幣 -->
-              <el-tab-pane label="台幣" name="TWD">
+              <el-tab-pane lazy label="台幣" name="TWD">
                 <el-table ref="transitTwdDepositTableRef" :data="transitTwdDeposits" size="small" row-key="_rowId">
                   <el-table-column width="36" align="center">
                     <template #default="{ row }">
@@ -369,7 +382,7 @@
                 </div>
               </el-tab-pane>
               <!-- 外幣 -->
-              <el-tab-pane label="外幣" name="USD">
+              <el-tab-pane lazy label="外幣" name="USD">
                 <el-table ref="transitUsdDepositTableRef" :data="transitUsdDeposits" size="small" row-key="_rowId">
                   <el-table-column width="36" align="center">
                     <template #default="{ row }">
@@ -488,9 +501,11 @@
           </div>
         </div>
       </el-card>
+      </SnapshotFormPanelState>
 
       <!-- Stocks -->
-      <el-card style="margin-bottom:16px">
+      <SnapshotFormPanelState name="stocks" label="股票明細" :enabled="isEdit" :state="panelStates.stocks" @retry="retryPanel('stocks')">
+      <el-card>
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">📈 股票</span>
@@ -506,7 +521,7 @@
 
         <el-tabs v-model="stockTab">
           <!-- 台股 Tab -->
-          <el-tab-pane name="tw">
+          <el-tab-pane lazy name="tw">
             <template #label>
               <span style="display:inline-flex;align-items:center;gap:4px">
                 <TaiwanMap :size="12" /> 台股
@@ -742,7 +757,7 @@
           </el-tab-pane>
 
           <!-- 美股 Tab -->
-          <el-tab-pane name="us">
+          <el-tab-pane lazy name="us">
             <template #label>
               <span style="display:inline-flex;align-items:center;gap:4px">
                 <UsFlag :size="20" /> 美股
@@ -1039,7 +1054,7 @@
           </el-tab-pane>
 
           <!-- 英股 Tab（LSE UCITS ETF，USD 計價，欄位結構同美股） -->
-          <el-tab-pane name="uk">
+          <el-tab-pane lazy name="uk">
             <template #label>
               <span style="display:inline-flex;align-items:center;gap:4px">
                 <span style="font-size:18px">🇬🇧</span> 英股
@@ -1314,9 +1329,11 @@
         </el-tabs>
 
       </el-card>
+      </SnapshotFormPanelState>
 
       <!-- Funds -->
-      <el-card style="margin-bottom:16px">
+      <SnapshotFormPanelState name="funds" label="共同基金" :enabled="isEdit" :state="panelStates.funds" @retry="retryPanel('funds')">
+      <el-card>
         <template #header>
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">📊 信託基金</span>
@@ -1433,16 +1450,17 @@
           </div>
         </div>
       </el-card>
+      </SnapshotFormPanelState>
 
       <div style="text-align:center;margin-top:20px">
         <el-button @click="$router.back()">取消</el-button>
-        <el-button type="primary" @click="submit" :loading="saving">
+        <el-button type="primary" @click="submit" :loading="saving" :disabled="formBlocked">
           {{ isEdit ? '存檔' : '儲存快照' }}
         </el-button>
       </div>
     </el-form>
 
-    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" :usd-rate="form.usdExchangeRate" />
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" :usd-rate="valuationUsdExchangeRate" />
   </div>
 </template>
 
@@ -1458,18 +1476,48 @@ import UsFlag from '@/components/UsFlag.vue'
 import Sortable from 'sortablejs'
 import { todayLocal, toLocalDateString } from '@/utils/localDate'
 import { applyEnrichedQuote, isClosePending } from '@/utils/displayQuote'
+import { createSnapshotFormPanelLoader, panelContext as calculatePanelContext } from '@/utils/snapshotFormPanelLoader'
+import { createSnapshotFormReadScope } from '@/utils/snapshotFormReadScope'
+import SnapshotFormPanelState from '@/components/SnapshotFormPanelState.vue'
 
 const route  = useRoute()
 const router = useRouter()
 const store  = useAssetStore()
 const formRef = ref()
 const saving  = ref(false)
+let saveGeneration = 0
+const loadedFormKey = ref(null)
+const canonicalReloadRequired = ref(false)
 const loading = ref(false)
+const routeKey = () => String(route.params.id ?? 'new')
+const readScope = createSnapshotFormReadScope(() => ({ routeId: routeKey(), date: form.snapshotDate }))
+const readOptions = context => ({ signal: context.signal, skipErrorToast: true })
+let programmaticChange = false
+function withoutDirtyChange(change) {
+  const previous = programmaticChange
+  programmaticChange = true
+  try { return change() } finally { programmaticChange = previous }
+}
+const rowReadOwners = new WeakMap()
+function rowReadContext(row) {
+  const code = row.stockCode, market = row.market
+  const owner = {}
+  rowReadOwners.set(row, owner)
+  row._fetchingPrice = row._fetchingDividend = false
+  const read = readScope.capture({ slot: row, accept: () => form.stocks.includes(row) && row.stockCode === code && row.market === market })
+  return { ...read, finish() {
+    if (rowReadOwners.get(row) === owner) {
+      row._fetchingPrice = row._fetchingDividend = false
+      rowReadOwners.delete(row)
+    }
+    read.finish()
+  } }
+}
 
 // ===== Row sort helpers =====
 // 將某市場（台股 / 美股）內的股票，從 oldIndex 拖移到 newIndex（皆為市場內視覺索引）
 const reorderStockByMarket = (market, oldIndex, newIndex) => {
-  if (oldIndex === newIndex) return
+  if (formBlocked.value || oldIndex === newIndex) return
   const peers = form.stocks.filter(s => s.market === market)
   const moving = peers[oldIndex]
   if (!moving) return
@@ -1505,6 +1553,7 @@ function initStockSortable(market) {
   if (!tbody || tbody.children.length === 0) return null
   const sortable = Sortable.create(tbody, {
     handle: '.stock-drag-handle',
+    disabled: formBlocked.value,
     animation: 150,
     onEnd({ oldIndex, newIndex, item, from }) {
       if (oldIndex === newIndex) return
@@ -1526,6 +1575,7 @@ function initStockSortable(market) {
 
 function refreshStockSortables() {
   nextTick(() => {
+    if (readScope.disposed) return
     initStockSortable('台股')
     initStockSortable('美股')
     initStockSortable('英股')
@@ -1542,6 +1592,7 @@ function bindRowSortable(tableRef, handleSelector, onReorder) {
   if (!tbody || tbody.children.length === 0) return null
   return Sortable.create(tbody, {
     handle: handleSelector,
+    disabled: formBlocked.value,
     animation: 150,
     onEnd({ oldIndex, newIndex, item, from }) {
       if (oldIndex === newIndex) return
@@ -1557,7 +1608,7 @@ function bindRowSortable(tableRef, handleSelector, onReorder) {
 // form.deposits 是單一陣列，但畫面依 currency 篩出多個子表（TWD/USD/TRANSIT_TWD/TRANSIT_USD）。
 // 拖拉發生在子表內，需要將子表內的 oldIndex/newIndex 對應回 form.deposits 的真實位置。
 const reorderDepositByCurrency = (currency, oldIndex, newIndex) => {
-  if (oldIndex === newIndex) return
+  if (formBlocked.value || oldIndex === newIndex) return
   const peers = form.deposits.filter(d => d.currency === currency)
   const moving = peers[oldIndex]
   if (!moving) return
@@ -1585,6 +1636,7 @@ let fundSortable              = null
 
 function refreshDepositSortables() {
   nextTick(() => {
+    if (readScope.disposed) return
     if (twdDepositSortable)        { twdDepositSortable.destroy();        twdDepositSortable = null }
     if (usdDepositSortable)        { usdDepositSortable.destroy();        usdDepositSortable = null }
     if (transitTwdDepositSortable) { transitTwdDepositSortable.destroy(); transitTwdDepositSortable = null }
@@ -1598,6 +1650,7 @@ function refreshDepositSortables() {
 
 function refreshFundSortable() {
   nextTick(() => {
+    if (readScope.disposed) return
     if (fundSortable) { fundSortable.destroy(); fundSortable = null }
     fundSortable = bindRowSortable(fundTableRef, '.row-drag-handle', (oldIndex, newIndex) => {
       const moved = form.funds.splice(oldIndex, 1)[0]
@@ -1616,6 +1669,8 @@ const form = reactive({
   funds: [],
   stocks: []   // grouped: each item has brokerRows[]
 })
+// 原始匯率留在各 Panel 的 snapshot；form 與 PUT 沿用既有補值後的有效匯率。
+const valuationUsdExchangeRate = computed(() => Number(form.usdExchangeRate) || 1)
 
 
 const rules = {
@@ -1641,37 +1696,34 @@ const fundOptions        = computed(() =>
 )
 const refreshingFundNav  = ref(false)
 
-async function loadInstitutions() {
-  const { banks, brokers, depositTypes, transitFundTypes } = await bffApi.snapshotForm.getLookups()
-  bankOptions.value        = banks.map(b => ({ value: b.id, label: b.displayName }))
-  brokerOptions.value      = brokers.map(b => ({ value: b.id, label: b.displayName }))
+async function loadInstitutions(context) {
+  const result = await bffApi.snapshotForm.getLookups(readOptions(context))
+  if (!context.isCurrent()) return
+  const { banks, brokers, depositTypes, transitFundTypes } = result
+  bankOptions.value = banks.map(b => ({ value: b.id, label: b.displayName }))
+  brokerOptions.value = brokers.map(b => ({ value: b.id, label: b.displayName }))
   depositTypeOptions.value = depositTypes.map(d => ({ value: d.code, label: d.displayName }))
   transitTypeOptions.value = transitFundTypes.map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
-  transitPayableSet.value  = new Set(transitFundTypes.filter(t => t.payable).map(t => t.code))
+  transitPayableSet.value = new Set(transitFundTypes.filter(t => t.payable).map(t => t.code))
 }
 
-async function loadFundMasters() {
+async function loadFundMasters({ date = form.snapshotDate, context = null, strict = false } = {}) {
+  const read = context ?? readScope.capture()
+  const targets = form.funds.map(row => ({ row, code: row.fundCode, units: row.units }))
   try {
-    // Requirement 21：傳 snapshotDate 讓 backend 取「基準日 NAV / FX / 配息」而非最新值
-    const list = await bffApi.snapshotForm.getFunds(form.snapshotDate || undefined)
-    const map = {}
-    for (const f of list) map[f.fundCode] = f
-    fundMasterMap.value = map
-    // 重抓後既有 row 的現值 / 預估配息要用新基準日 NAV 重算
-    for (const row of form.funds) {
-      if (row.fundCode && row.units != null && row.units !== '') {
-        const cv = autoCalcFundCurrentValue(row.fundCode, row.units)
-        if (cv != null) {
-          row.currentValue = cv
-          row.currentValueStr = numFmt(cv)
-        }
-        const div = autoCalcFundDividend(row.fundCode, row.units)
-        if (div != null) row.estimatedDividend = div
-      }
+    const list = await bffApi.snapshotForm.getFunds(date || undefined, readOptions(read))
+    if (!read.isCurrent()) return
+    if (!Array.isArray(list)) throw new Error('基金資料不完整')
+    fundMasterMap.value = Object.fromEntries(list.map(master => [master.fundCode, master]))
+    for (const { row, code, units } of targets) {
+      if (form.funds.includes(row) && row.fundCode === code && row.units === units) recalcRowCurrentValue(row)
     }
-  } catch (e) {
-    console.warn('載入基金主檔失敗', e)
-  }
+  } catch (error) {
+    if (read.isCurrent()) {
+      if (strict) throw error
+      console.warn('載入基金主檔失敗', error)
+    }
+  } finally { if (!context) read.finish() }
 }
 
 /** 給定 fundCode + units 算 台幣現值；無 NAV / FX 時回 null（caller 應 fallback 手填值）。 */
@@ -1740,29 +1792,20 @@ function navHint(row) {
 }
 
 async function refreshFundNav() {
+  const context = readScope.capture({ slot: 'fund-refresh' })
   refreshingFundNav.value = true
   try {
-    const r = await bffApi.snapshotForm.refreshFundNav()
-    await loadFundMasters()
-    // 重新計算現值
-    for (const row of form.funds) {
-      if (row.fundCode && row.units != null && row.units !== '') {
-        const v = autoCalcFundCurrentValue(row.fundCode, row.units)
-        if (v != null) {
-          row.currentValue = v
-          row.currentValueStr = numFmt(v)
-        }
-      }
-    }
-    if (r && r.failed > 0) {
-      ElMessage.warning(`刷新完成：成功 ${r.success}、失敗 ${r.failed} / 共 ${r.total} 支`)
-    } else if (r && r.success != null) {
-      ElMessage.success(`刷新完成：${r.success} 支基金 NAV 已更新`)
-    }
-  } catch (e) {
-    ElMessage.error('刷新 NAV 失敗：' + (e?.message || e))
+    const result = await bffApi.snapshotForm.refreshFundNav(readOptions(context))
+    if (!context.isCurrent()) return
+    await loadFundMasters({ context, strict: true })
+    if (!context.isCurrent()) return
+    if (result?.failed > 0) ElMessage.warning(`刷新完成：成功 ${result.success}、失敗 ${result.failed} / 共 ${result.total} 支`)
+    else if (result?.success != null) ElMessage.success(`刷新完成：${result.success} 支基金 NAV 已更新`)
+  } catch (error) {
+    if (context.isCurrent()) ElMessage.error('刷新 NAV 失敗：' + (error?.message || error))
   } finally {
-    refreshingFundNav.value = false
+    if (context.isCurrent()) refreshingFundNav.value = false
+    context.finish()
   }
 }
 
@@ -1816,13 +1859,13 @@ const calcBrOriginalValue = (br, stock) => {
   if (stock.market === '美股' || stock.market === '英股') {
     // currentValueOriginal 為 USD；若無則由台幣存檔值反推
     if (br.currentValueOriginal) return Number(br.currentValueOriginal)
-    return Number(br.currentValue || 0) / (form.usdExchangeRate || 1)
+    return Number(br.currentValue || 0) / valuationUsdExchangeRate.value
   }
   return Number(br.currentValue || 0)
 }
 
 /** 取得 br 的有效匯率：優先用交易日匯率，備援快照匯率 */
-const effectiveRate = (br) => br.transactionExchangeRate || form.usdExchangeRate || 1
+const effectiveRate = (br) => br.transactionExchangeRate || valuationUsdExchangeRate.value
 
 /** 依幣別重新填入持股成本顯示字串：TWD 顯示 investmentCostTwd，USD 顯示 investmentCost */
 function syncBrCostStr(br) {
@@ -1837,26 +1880,38 @@ function syncBrCostStr(br) {
  *  - TWD 幣別：investmentCostTwd（台幣固定支出）÷ 新匯率 → USD 成本
  *  - USD 幣別：成本本身就是 USD，不受匯率影響 */
 async function onUsTransactionDateChange(br, date) {
-  if (!date) { br.transactionExchangeRate = null; return }
-  // el-date-picker 可能回傳 Date 物件，統一轉為 yyyy-MM-dd 字串
-  const dateStr = toLocalDateString(date)
+  const dateStr = date ? toLocalDateString(date) : null
+  const stock = form.stocks.find(stock => stock.brokerRows.includes(br))
+  if (!stock) return
+  const code = stock.stockCode
+  const context = readScope.capture({ slot: br, accept: () => form.stocks.includes(stock)
+    && stock.stockCode === code && stock.brokerRows.includes(br) && toLocalDateString(br.transactionDate) === dateStr })
+  if (!dateStr) { br.transactionExchangeRate = null; context.finish(); return }
   try {
-    const res = await bffApi.snapshotForm.exchangeRate(dateStr)
-    const newRate = Number(res.midRate)
-    br.transactionExchangeRate = newRate
-    // TWD 幣別：以台幣固定支出反推新 USD 成本（顯示維持 TWD）
-    if (br.currency === 'TWD' && br.investmentCostTwd && newRate > 0) {
-      const newUsd = Number((br.investmentCostTwd / newRate).toFixed(6))
-      br.investmentCost = newUsd
-      syncBrCostStr(br)
-      if (br.shares > 0) {
-        br.avgCost = Number((newUsd / br.shares).toFixed(6))
-        br.avgCostStr = numFmt(br.avgCost)
-        br.originalCurrencyValue = br.avgCost
-      }
-    }
+    const result = await bffApi.snapshotForm.exchangeRate(dateStr, readOptions(context))
+    if (!context.isCurrent()) return
+    const rate = Number(result?.midRate)
+    if (Number.isFinite(rate) && rate > 0) applyUsTransactionRate(br, rate)
+    else br.transactionExchangeRate = null
   } catch {
-    br.transactionExchangeRate = null
+    if (context.isCurrent()) br.transactionExchangeRate = null
+  } finally { context.finish() }
+}
+
+// 保留舊 onUsTransactionDateChange 的同步 mutation 順序；Panel 初始資料已帶
+// transactionRates 時直接呼叫，避免再發逐列 exchange-rate request。
+function applyUsTransactionRate(br, newRate) {
+  if (!(Number(newRate) > 0)) return
+  br.transactionExchangeRate = Number(newRate)
+  if (br.currency === 'TWD' && br.investmentCostTwd) {
+    const newUsd = Number((br.investmentCostTwd / newRate).toFixed(6))
+    br.investmentCost = newUsd
+    syncBrCostStr(br)
+    if (br.shares > 0) {
+      br.avgCost = Number((newUsd / br.shares).toFixed(6))
+      br.avgCostStr = numFmt(br.avgCost)
+      br.originalCurrencyValue = br.avgCost
+    }
   }
 }
 
@@ -1871,7 +1926,7 @@ function recalcCostByRate(br) {
 /** 單一 brokerRow 的台幣現值（美股 / 英股 UCITS 原幣 × 快照匯率；台股直接為 TWD） */
 const calcBrTwdValue = (br, stock) => {
   const orig = calcBrOriginalValue(br, stock)
-  if (stock.market === '美股' || stock.market === '英股') return Math.round(orig * (form.usdExchangeRate || 1))
+  if (stock.market === '美股' || stock.market === '英股') return Math.round(orig * valuationUsdExchangeRate.value)
   return Math.round(orig)
 }
 
@@ -1912,11 +1967,11 @@ const isTransitPayable = (d) => transitPayableSet.value.has(d.depositType)
 
 const depositTwd = (d) => {
   const amt = Number(d.amount || 0)
-  if (d.currency === 'USD')         return Math.round(amt * (form.usdExchangeRate || 1))
+  if (d.currency === 'USD')         return Math.round(amt * valuationUsdExchangeRate.value)
   if (d.currency === 'DEBT')        return -amt   // 舊版相容
   if (d.currency === 'TRANSIT_TWD') return isTransitPayable(d) ? -amt : amt
   if (d.currency === 'TRANSIT_USD') {
-    const twd = Math.round(amt * (form.usdExchangeRate || 1))
+    const twd = Math.round(amt * valuationUsdExchangeRate.value)
     return isTransitPayable(d) ? -twd : twd
   }
   return amt
@@ -2089,7 +2144,7 @@ const usdDemandAmt     = computed(() => usdDeposits.value.filter(d => !d.deposit
 const usdFixedAmt      = computed(() => usdDeposits.value.filter(d => d.depositType?.includes('定存')).reduce((s, d) => s + Number(d.amount || 0), 0))
 const transitUsdNetAmt = computed(() => transitUsdDeposits.value.reduce((s, d) => s + (isTransitPayable(d) ? -1 : 1) * Number(d.amount || 0), 0))
 const usdGrandAmt      = computed(() => usdDemandAmt.value + usdFixedAmt.value + transitUsdNetAmt.value)
-const usdGrandTwd      = computed(() => Math.round(usdGrandAmt.value * (form.usdExchangeRate || 1)))
+const usdGrandTwd      = computed(() => Math.round(usdGrandAmt.value * valuationUsdExchangeRate.value))
 
 // ===== Mutations =====
 const addDeposit = (outerTab = 'TWD') => {
@@ -2177,26 +2232,25 @@ const removeBrokerRow = (stockRow, idx) => {
  */
 async function fetchPriceForRow(row) {
   if (!row.stockCode || !form.snapshotDate) return
+  const context = rowReadContext(row)
   try {
-    // 一支 BFF 端點處理：歷史收盤價 + 自動 backfill + 名稱 + 配息率 + 漲跌
-    const result = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
-    applyEnrichedPrices(result, [row])
-  } catch {
-    // 查不到就靜默略過
-  }
+    const result = await bffApi.snapshotForm.prices(context.date,
+      [{ code: row.stockCode, market: row.market }], readOptions(context))
+    if (context.isCurrent()) applyEnrichedPrices(result, [row])
+  } catch { /* Optional name/quote lookup; the current row remains editable. */ }
+  finally { context.finish() }
 }
 
 /** 把 BFF 批次回傳的 enriched prices 套用到指定的 rows 上 */
-function applyEnrichedPrices(prices, rows) {
+function applyEnrichedPrices(prices, rows, metadata = true) {
   const map = {}
   for (const p of prices ?? []) map[`${p.market}_${p.stockCode}`] = p
   for (const row of rows) {
     const p = map[`${row.market}_${row.stockCode}`]
     if (!p) continue
     applyEnrichedQuote(row, p)
-    if (p.stockName && !row.stockName) row.stockName = p.stockName
-    if (p.dividendRate != null) row.dividendRate = Number(p.dividendRate)
+    if (metadata && p.stockName && !row.stockName) row.stockName = p.stockName
+    if (metadata && p.dividendRate != null) row.dividendRate = Number(p.dividendRate)
   }
 }
 
@@ -2218,29 +2272,22 @@ function applyMergedClosePrices(mergedStocks) {
 
 // ===== Data fetching: price =====
 const fetchPrice = async (row) => {
-  if (!row.stockCode) {
-    ElMessage.warning('請先輸入股票代號')
-    return
-  }
+  if (!row.stockCode) { ElMessage.warning('請先輸入股票代號'); return }
+  const context = rowReadContext(row)
   row._fetchingPrice = true
   try {
-    const list = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
+    const list = await bffApi.snapshotForm.prices(context.date,
+      [{ code: row.stockCode, market: row.market }], readOptions(context))
+    if (!context.isCurrent()) return
+    applyEnrichedPrices(list, [row])
     const result = list?.[0] ?? {}
-    applyEnrichedQuote(row, result)
-    if (result.stockName && !row.stockName) row.stockName = result.stockName
-    if (result.dividendRate != null) row.dividendRate = Number(result.dividendRate)
     const change = Number(result.priceChange ?? 0)
-    const changePctVal = Number(result.changePercent ?? 0)
-    const sign = change >= 0 ? '▲' : '▼'
-    const changePctStr = Math.abs(changePctVal).toFixed(2)
-    ElMessage.success(
-      `${row.stockCode} ${fmtPrice(result.price)}　${sign}${Math.abs(Number(result.change)).toFixed(2)} (${changePctStr}%)　來源：${result.source}`
-    )
-  } catch {
-    // interceptor shows error
+    ElMessage.success(`${row.stockCode} ${fmtPrice(result.price)}　${change >= 0 ? '▲' : '▼'}${Math.abs(change).toFixed(2)} (${Math.abs(Number(result.changePercent ?? 0)).toFixed(2)}%)　來源：${result.source ?? '未知'}`)
+  } catch (error) {
+    if (context.isCurrent()) ElMessage.warning('股價暫時無法取得，請稍後重試。')
   } finally {
-    row._fetchingPrice = false
+    if (context.isCurrent()) row._fetchingPrice = false
+    context.finish()
   }
 }
 
@@ -2251,25 +2298,30 @@ const copyingPrev = reactive({ deposits: false, funds: false, stocks: false })
  *  - 新增模式：清單第一筆（最新）
  *  - 編輯模式：日期嚴格小於目前快照日期的最新那筆
  */
-const getPrevSnapshotId = async () => {
+const getPrevSnapshotId = async (context) => {
   // 表單讀取快照清單也必須走本頁 BFF；同步快取供全域最新快照選擇使用。
-  const snaps = await bffApi.snapshotForm.listSnapshots() // 依日期 DESC 排列
+  const snaps = await bffApi.snapshotForm.listSnapshots(readOptions(context)) // 依日期 DESC 排列
+  if (!context.isCurrent()) return null
   store.snapshots = snaps
   if (snaps.length === 0) return null
   if (!isEdit.value) return snaps[0].id
-  const prev = snaps.find(s => s.snapshotDate < form.snapshotDate)
+  const prev = snaps.find(s => s.snapshotDate < context.date)
   return prev?.id ?? null
 }
 
 const copyPrevDeposits = async () => {
-  const prevId = await getPrevSnapshotId()
-  if (!prevId) { ElMessage.warning('找不到前一版本'); return }
-  await ElMessageBox.confirm('確定要複製前一版的存款明細？目前內容將被取代。', '複製前一版', {
-    confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
-  }).catch(() => { throw new Error('cancel') })
+  const context = readScope.capture({ slot: 'copy-deposits' })
   copyingPrev.deposits = true
   try {
-    const detail = await bffApi.snapshotForm.get(prevId)
+    const prevId = await getPrevSnapshotId(context)
+    if (!context.isCurrent()) return
+    if (!prevId) { ElMessage.warning('找不到前一版本'); return }
+    await ElMessageBox.confirm('確定要複製前一版的存款明細？目前內容將被取代。', '複製前一版', {
+      confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
+    })
+    if (!context.isCurrent()) return
+    const detail = await bffApi.snapshotForm.get(prevId, readOptions(context))
+    if (!context.isCurrent()) return
     const rate = form.usdExchangeRate || 1
     // 即使正在編輯，這仍是跨快照複製，不能攜帶來源列 ID。
     form.deposits = detail.deposits.map(d => {
@@ -2278,19 +2330,28 @@ const copyPrevDeposits = async () => {
       return row
     })
     ElMessage.success(`已複製前一版存款明細（${detail.snapshotDate}，共 ${detail.deposits.length} 筆）`)
-  } catch (e) { if (e?.message !== 'cancel') throw e
-  } finally { copyingPrev.deposits = false }
+  } catch (error) {
+    if (context.isCurrent() && !['cancel', 'close'].includes(error) && error?.message !== 'cancel')
+      ElMessage.warning('前一版資料暫時無法載入，請重試。')
+  } finally {
+    if (context.isCurrent()) copyingPrev.deposits = false
+    context.finish()
+  }
 }
 
 const copyPrevFunds = async () => {
-  const prevId = await getPrevSnapshotId()
-  if (!prevId) { ElMessage.warning('找不到前一版本'); return }
-  await ElMessageBox.confirm('確定要複製前一版的信託基金？目前內容將被取代。', '複製前一版', {
-    confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
-  }).catch(() => { throw new Error('cancel') })
+  const context = readScope.capture({ slot: 'copy-funds' })
   copyingPrev.funds = true
   try {
-    const detail = await bffApi.snapshotForm.get(prevId)
+    const prevId = await getPrevSnapshotId(context)
+    if (!context.isCurrent()) return
+    if (!prevId) { ElMessage.warning('找不到前一版本'); return }
+    await ElMessageBox.confirm('確定要複製前一版的信託基金？目前內容將被取代。', '複製前一版', {
+      confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
+    })
+    if (!context.isCurrent()) return
+    const detail = await bffApi.snapshotForm.get(prevId, readOptions(context))
+    if (!context.isCurrent()) return
     form.funds = detail.funds.map(f => ({
       _rowId: `fund_${_idSeq++}`,
       fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
@@ -2301,19 +2362,28 @@ const copyPrevFunds = async () => {
       estimatedDividend: f.estimatedDividend != null ? f.estimatedDividend : null
     }))
     ElMessage.success(`已複製前一版信託基金（${detail.snapshotDate}，共 ${detail.funds.length} 筆）`)
-  } catch (e) { if (e?.message !== 'cancel') throw e
-  } finally { copyingPrev.funds = false }
+  } catch (error) {
+    if (context.isCurrent() && !['cancel', 'close'].includes(error) && error?.message !== 'cancel')
+      ElMessage.warning('前一版資料暫時無法載入，請重試。')
+  } finally {
+    if (context.isCurrent()) copyingPrev.funds = false
+    context.finish()
+  }
 }
 
 const copyPrevStocks = async () => {
-  const prevId = await getPrevSnapshotId()
-  if (!prevId) { ElMessage.warning('找不到前一版本'); return }
-  await ElMessageBox.confirm('確定要複製前一版的股票？目前內容將被取代。', '複製前一版', {
-    confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
-  }).catch(() => { throw new Error('cancel') })
+  const context = readScope.capture({ slot: 'copy-stocks' })
   copyingPrev.stocks = true
   try {
-    const detail = await bffApi.snapshotForm.get(prevId)
+    const prevId = await getPrevSnapshotId(context)
+    if (!context.isCurrent()) return
+    if (!prevId) { ElMessage.warning('找不到前一版本'); return }
+    await ElMessageBox.confirm('確定要複製前一版的股票？目前內容將被取代。', '複製前一版', {
+      confirmButtonText: '確定複製', cancelButtonText: '取消', type: 'warning'
+    })
+    if (!context.isCurrent()) return
+    const detail = await bffApi.snapshotForm.get(prevId, readOptions(context))
+    if (!context.isCurrent()) return
     form.stocks = groupStocks(detail.stocks.map(s => ({
       stockCode: s.stockCode, stockName: s.stockName, market: s.market,
       brokerId: s.brokerId || null, shares: s.shares, investmentCost: s.investmentCost,
@@ -2327,47 +2397,44 @@ const copyPrevStocks = async () => {
     for (const row of form.stocks) {
       if (!row.stockName && row.stockCode) fetchPriceForRow(row)
     }
-  } catch (e) { if (e?.message !== 'cancel') throw e
-  } finally { copyingPrev.stocks = false }
+  } catch (error) {
+    if (context.isCurrent() && !['cancel', 'close'].includes(error) && error?.message !== 'cancel')
+      ElMessage.warning('前一版資料暫時無法載入，請重試。')
+  } finally {
+    if (context.isCurrent()) copyingPrev.stocks = false
+    context.finish()
+  }
 }
 
 // ===== 一次更新所有股票股價＋配息率 =====
 const refreshingAll = ref(false)
 const refreshAllPrices = async () => {
+  const context = readScope.capture({ slot: 'manual-prices' })
   refreshingAll.value = true
   try {
-    // 新增模式：先觸發後端 refresh live 行情，再載入
-    if (!isEdit.value) {
-      try { await bffApi.snapshotForm.realtime() } catch {}
-    }
-    // 一支 BFF 端點處理批次：歷史價 + 自動 backfill + 名稱 + 配息率 + 漲跌
-    await loadAllPrices()
-    const count = form.stocks.filter(s => s.latestPrice != null).length
-    if (count > 0) {
-      ElMessage.success(isEdit.value
-        ? `已載入 ${count} 支股票的歷史收盤價及配息率（${form.snapshotDate}）`
-        : `已更新 ${count} 支股票的股價及配息率`)
-    } else if (isEdit.value) {
-      ElMessage.warning(`找不到 ${form.snapshotDate} 的歷史收盤價，請確認歷史資料是否已回補`)
-    }
+    await loadAllPrices({ context, strict: true, metadata: true })
+    if (!context.isCurrent()) return
+    userEdited.value = true
+    const count = form.stocks.filter(stock => stock.latestPrice != null).length
+    if (count > 0) ElMessage.success(`已更新 ${count} 支股票的股價及配息率（${context.date}）`)
+    else ElMessage.warning(`找不到 ${context.date} 的股價資料，請稍後再試。`)
   } catch {
-    ElMessage.error('更新失敗')
+    if (context.isCurrent()) ElMessage.error('更新失敗')
   } finally {
-    refreshingAll.value = false
+    if (context.isCurrent()) refreshingAll.value = false
+    context.finish()
   }
 }
 
 // ===== Data fetching: dividend rate =====
 const fetchDividendRate = async (row) => {
-  if (!row.stockCode) {
-    ElMessage.warning('請先輸入股票代號')
-    return
-  }
+  if (!row.stockCode) { ElMessage.warning('請先輸入股票代號'); return }
+  const context = rowReadContext(row)
   row._fetchingDividend = true
   try {
-    // 透過 BFF 批次端點取得配息率（同時也會帶回名稱與股價）
-    const list = await bffApi.snapshotForm.prices(form.snapshotDate,
-      [{ code: row.stockCode, market: row.market }])
+    const list = await bffApi.snapshotForm.prices(context.date,
+      [{ code: row.stockCode, market: row.market }], readOptions(context))
+    if (!context.isCurrent()) return
     const result = list?.[0] ?? {}
     if (result.dividendRate != null) {
       row.dividendRate = Number(result.dividendRate)
@@ -2377,11 +2444,10 @@ const fetchDividendRate = async (row) => {
     }
     if (result.stockName && !row.stockName) row.stockName = result.stockName
   } catch {
-    if (row.market === '台股' && /^0\d/.test(row.stockCode)) {
-      ElMessage.warning(`${row.stockCode} 為台灣ETF，請手動填入配息率`)
-    }
+    if (context.isCurrent()) ElMessage.warning('配息率暫時無法取得，請稍後重試。')
   } finally {
-    row._fetchingDividend = false
+    if (context.isCurrent()) row._fetchingDividend = false
+    context.finish()
   }
 }
 
@@ -2465,6 +2531,81 @@ const groupStocks = (flat) => {
   return [...map.values()]
 }
 
+// ===== Task 450：edit 四 Panel 初始載入 =====
+const hydratingPanels = ref(false)
+const panelLoader = createSnapshotFormPanelLoader({
+  stateFactory: reactive,
+  request: (panel, id, { signal }) => bffApi.snapshotForm[`${panel}Panel`](id, { signal }),
+  onData: applyPanelData
+})
+const panelStates = panelLoader.states
+const panelContext = computed(() => calculatePanelContext(panelStates))
+const panelsReady = computed(() => !isEdit.value || (panelContext.value.ready && panelContext.value.routeId === routeKey()))
+const dateLoading = ref(false)
+const dateError = ref(null)
+const formBlocked = computed(() => saving.value || loading.value || canonicalReloadRequired.value || dateLoading.value || !!dateError.value || !panelsReady.value || Object.values(copyingPrev).some(Boolean))
+
+function applyPanelData(panel, envelope) {
+  const data = envelope.data
+  const snapshot = data.snapshot
+  if (form.usdExchangeRate == null) form.usdExchangeRate = Number(data.effectiveUsdExchangeRate)
+  if (panel === 'basic') {
+    Object.assign(form, {
+      snapshotDate: snapshot.snapshotDate,
+      // 原始匯率保留在 Panel snapshot；表單沿既有行為使用驗證過的有效匯率。
+      usdExchangeRate: Number(data.effectiveUsdExchangeRate),
+      notes: snapshot.notes || ''
+    })
+    store.currentSnapshot = snapshot
+    return
+  }
+  if (panel === 'deposits') {
+    bankOptions.value = (data.banks ?? []).map(b => ({ value: b.id, label: b.displayName }))
+    depositTypeOptions.value = (data.depositTypes ?? []).map(d => ({ value: d.code, label: d.displayName }))
+    transitTypeOptions.value = (data.transitFundTypes ?? []).map(t => ({ value: t.code, label: t.displayName, payable: t.payable }))
+    transitPayableSet.value = new Set((data.transitFundTypes ?? []).filter(t => t.payable).map(t => t.code))
+    // legacy originalAmount=null 必須以 raw snapshot rate（或 1）反推，不可用 effective rate 改帳。
+    form.deposits = (snapshot.deposits ?? []).map(d => mapDepositFromApi(d, Number(snapshot.usdExchangeRate) || 1))
+    return
+  }
+  if (panel === 'stocks') {
+    brokerOptions.value = (data.brokers ?? []).map(b => ({ value: b.id, label: b.displayName }))
+    form.stocks = groupStocks((snapshot.stocks ?? []).map(s => ({
+      stockCode: s.stockCode, stockName: s.stockName, market: s.market,
+      brokerId: s.brokerId || null, shares: s.shares, investmentCost: s.investmentCost,
+      currentValue: s.currentValue, estimatedDividend: s.estimatedDividend, dividendRate: s.dividendRate,
+      currency: s.currency, originalCurrencyValue: s.originalCurrencyValue,
+      transactionType: s.transactionType, transactionDate: s.transactionDate,
+      transactionExchangeRate: s.transactionExchangeRate
+    })))
+    // 先套 merged close，再完整 quote（含 pending）覆蓋，首次 paint 不會回退為凍結值。
+    applyMergedClosePrices(data.mergedStocks)
+    applyEnrichedPrices(data.stockPrices, form.stocks)
+    marketStatus.value = data.marketStatus ?? marketStatus.value
+    const rates = data.transactionRates ?? {}
+    for (const stock of form.stocks.filter(stock => stock.market === '美股')) for (const br of stock.brokerRows) {
+      const rate = rates[br.transactionDate]
+      if (!br.transactionExchangeRate && Number(rate) > 0) applyUsTransactionRate(br, Number(rate))
+    }
+    return
+  }
+  if (panel === 'funds') {
+    if (data.banks) bankOptions.value = data.banks.map(b => ({ value: b.id, label: b.displayName }))
+    const masters = {}
+    for (const master of data.fundMasters ?? []) masters[master.fundCode] = master
+    fundMasterMap.value = masters
+    // 初次只設定主檔 map，保留 snapshot 保存的現值和配息。
+    form.funds = (snapshot.funds ?? []).map(f => ({
+      _rowId: `fund_${_idSeq++}`, _preserveSnapshotValue: true,
+      fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
+      investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
+      units: f.units != null ? f.units : null, unitsStr: f.units != null ? String(f.units) : '',
+      currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue),
+      estimatedDividend: f.estimatedDividend != null ? f.estimatedDividend : null
+    }))
+  }
+}
+
 const flattenStocks = () =>
   form.stocks.flatMap(stock =>
     stock.brokerRows.map(br => ({
@@ -2494,44 +2635,57 @@ let priceTimer = null
  *  - 一支 BFF 端點處理：歷史收盤價 (USD/TWD 原幣別) + 自動 backfill + 名稱 + 配息率 + 漲跌
  *  - 同步取得即時市場開盤狀態（供「漲跌(%)」顯示用）
  */
-async function loadAllPrices() {
-  try {
-    const stocks = form.stocks
-      .filter(s => s.stockCode)
-      .map(s => ({ code: s.stockCode, market: s.market }))
-
-    if (stocks.length > 0 && form.snapshotDate) {
-      const prices = await bffApi.snapshotForm.prices(form.snapshotDate, stocks)
-      applyEnrichedPrices(prices, form.stocks)
-    }
-
-    try {
-      const realtime = await bffApi.snapshotForm.realtime()
-      marketStatus.value = realtime?.marketStatus ?? marketStatus.value
-    } catch {}
-  } catch (e) {
-    console.warn('批次載入股價失敗:', e)
-  }
+let pricePollRun = null
+function loadAllPrices({ context = null, strict = false, metadata = false } = {}) {
+  if (!metadata && pricePollRun?.read.isCurrent()) return pricePollRun.promise
+  const read = readScope.capture({ slot: 'prices' })
+  const targets = form.stocks.filter(row => row.stockCode).map(row => ({ row, code: row.stockCode, market: row.market }))
+  const canApply = () => read.isCurrent() && (!context || context.isCurrent())
+  const run = { read, promise: null }
+  pricePollRun = run
+  run.promise = (async () => {
+    const [prices, realtime] = await Promise.allSettled([
+      targets.length && read.date ? bffApi.snapshotForm.prices(read.date, targets.map(({ code, market }) => ({ code, market })), readOptions(read)) : Promise.resolve([]),
+      bffApi.snapshotForm.realtime(readOptions(read))
+    ])
+    if (!canApply()) return
+    if (realtime.status === 'fulfilled') marketStatus.value = realtime.value?.marketStatus ?? {}
+    if (prices.status === 'fulfilled' && Array.isArray(prices.value)) {
+      const rows = targets.filter(({ row, code, market }) => form.stocks.includes(row) && row.stockCode === code && row.market === market).map(target => target.row)
+      withoutDirtyChange(() => applyEnrichedPrices(prices.value, rows, metadata))
+    } else if (strict) throw prices.reason ?? new Error('股價資料不完整')
+  })().finally(() => {
+    read.finish()
+    if (pricePollRun === run) pricePollRun = null
+  })
+  return run.promise
 }
 
-/** 啟動 2 分鐘定時刷新（盤中自動更新） */
 function startPriceAutoRefresh() {
   stopPriceAutoRefresh()
-  priceTimer = setInterval(loadAllPrices, 2 * 60 * 1000)
+  if (readScope.disposed || loadedFormKey.value !== routeKey()) return
+  priceTimer = setInterval(() => {
+    if (!formBlocked.value) loadAllPrices().catch(error => console.warn('股價更新失敗', error))
+  }, 2 * 60 * 1000)
 }
 function stopPriceAutoRefresh() {
   if (priceTimer) { clearInterval(priceTimer); priceTimer = null }
 }
 
 onUnmounted(() => {
+  readScope.dispose()
   stopPriceAutoRefresh()
-  if (twStockSortable)          { twStockSortable.destroy();          twStockSortable = null }
-  if (usStockSortable)          { usStockSortable.destroy();          usStockSortable = null }
-  if (twdDepositSortable)        { twdDepositSortable.destroy();        twdDepositSortable = null }
-  if (usdDepositSortable)        { usdDepositSortable.destroy();        usdDepositSortable = null }
-  if (transitTwdDepositSortable) { transitTwdDepositSortable.destroy(); transitTwdDepositSortable = null }
-  if (transitUsdDepositSortable) { transitUsdDepositSortable.destroy(); transitUsdDepositSortable = null }
-  if (fundSortable)              { fundSortable.destroy();              fundSortable = null }
+  panelLoader.dispose()
+  if (stopUserEditedWatch) { stopUserEditedWatch(); stopUserEditedWatch = null }
+  for (const sortable of [twStockSortable, usStockSortable, ukStockSortable, twdDepositSortable, usdDepositSortable,
+    transitTwdDepositSortable, transitUsdDepositSortable, fundSortable]) sortable?.destroy()
+  twStockSortable = usStockSortable = ukStockSortable = null
+  twdDepositSortable = usdDepositSortable = transitTwdDepositSortable = transitUsdDepositSortable = fundSortable = null
+})
+
+watch(formBlocked, disabled => {
+  for (const sortable of [twStockSortable, usStockSortable, ukStockSortable, twdDepositSortable, usdDepositSortable,
+    transitTwdDepositSortable, transitUsdDepositSortable, fundSortable]) sortable?.option('disabled', disabled)
 })
 
 // 切換 Tab 或筆數變動時，重新綁定對應 Sortable
@@ -2547,51 +2701,64 @@ watch(() => transitUsdDeposits.value.length, refreshDepositSortables)
 watch(() => form.funds.length, refreshFundSortable)
 
 // ===== 依日期查詢匯率（一支 BFF 端點處理 today 刷新 + 假日 fallback） =====
-async function loadExchangeRateForDate(date) {
-  if (!date) return
+async function loadExchangeRateForDate(date, { context = null, strict = false } = {}) {
+  const read = context ?? readScope.capture()
   try {
-    const res = await bffApi.snapshotForm.exchangeRate(date)
-    if (res && res.midRate != null) {
-      form.usdExchangeRate = Number(res.midRate)
+    const result = await bffApi.snapshotForm.exchangeRate(date, readOptions(read))
+    if (!read.isCurrent()) return
+    const rate = Number(result?.midRate)
+    if (!(rate > 0) || !Number.isFinite(rate)) throw new Error('匯率資料不完整')
+    form.usdExchangeRate = rate
+  } catch (error) {
+    if (read.isCurrent()) {
+      if (strict) throw error
+      console.warn('載入匯率失敗', error)
     }
-  } catch (e) {
-    console.warn('載入匯率失敗:', e)
-  }
+  } finally { if (!context) read.finish() }
 }
 
-// ===== 日期變更：自動查詢匯率 + 重新抓取各股收盤價 =====
-// oldDate 為 '' 時代表 onMounted 初始賦值，不重複觸發（onMounted 自行呼叫 loadAllPrices）
-watch(() => form.snapshotDate, async (newDate, oldDate) => {
-  if (!oldDate || !newDate || newDate === oldDate) return
-  // 1. 匯率（新增與編輯都查）
-  loadExchangeRateForDate(newDate)
-  // 2. 清空舊股價，讓畫面立即反映「正在查詢」
+async function reloadDateData() {
+  readScope.invalidate()
+  stopPriceAutoRefresh()
+  const context = readScope.capture({ slot: 'date' })
+  dateLoading.value = true
+  dateError.value = null
+  userEdited.value = true
+  refreshingAll.value = refreshingFundNav.value = false
+  for (const key of Object.keys(copyingPrev)) copyingPrev[key] = false
   for (const row of form.stocks) {
-    row.latestPrice    = null
-    row.priceChange    = null
-    row.priceChangePct = null
-    row.quoteStatus = null
-    row.priceSource = null
+    row.latestPrice = row.priceChange = row.priceChangePct = row.quoteStatus = row.priceSource = null
+    row._fetchingPrice = row._fetchingDividend = false
   }
-  // 3 + 4. 並行：批次查詢新日期收盤價 + 依基準日重抓 fund_master NAV / 配息（彼此獨立）
-  const tasks = [loadFundMasters()]
-  if (form.stocks.length > 0) tasks.push(loadAllPrices())
-  await Promise.allSettled(tasks)
-})
+  const results = await Promise.allSettled([
+    loadExchangeRateForDate(context.date, { context, strict: true }),
+    loadFundMasters({ date: context.date, context, strict: true }),
+    loadAllPrices({ context, strict: true, metadata: true })
+  ])
+  if (context.isCurrent()) {
+    dateError.value = results.find(result => result.status === 'rejected')?.reason ?? null
+    dateLoading.value = false
+    if (!dateError.value) startPriceAutoRefresh()
+  }
+  context.finish()
+}
+
+watch(() => form.snapshotDate, (newDate, oldDate) => {
+  if (hydratingPanels.value || !loadedFormKey.value || !newDate || newDate === oldDate) return
+  reloadDateData().catch(error => console.warn('日期資料載入失敗', error))
+}, { flush: 'sync' })
 
 // ===== Lifecycle =====
 // loadedFormKey 記錄「目前表單資料實際對應哪一個路由參數」，供送出前比對，
 // 防止 router-view 元件被重用（同一 SnapshotFormView 實例）但資料尚未（或載入中）換成新頁面對應的快照時，
 // 使用者誤送出上一筆殘留資料（即使 App.vue 的 <router-view :key> 已從根本避免重用，這裡是雙重防護）。
-const loadedFormKey = ref(null)
-const canonicalReloadRequired = ref(false)
 let stopUserEditedWatch = null
 
 // 在 setup 同步註冊一次，由元件生命週期清理；存檔讀回不可重複建立 watcher。
 watchEffect(() => {
   if (Object.keys(fundMasterMap.value).length === 0) return
   for (const row of form.funds) {
-    if (row.fundCode && row.units != null && row.units !== '' && row.estimatedDividend == null) {
+    if (!row._preserveSnapshotValue && row.fundCode && row.units != null && row.units !== '' && row.estimatedDividend == null) {
       const v = autoCalcFundDividend(row.fundCode, row.units)
       if (v != null) row.estimatedDividend = v
     }
@@ -2599,103 +2766,97 @@ watchEffect(() => {
 })
 
 async function loadFormData() {
+  readScope.invalidate()
+  stopPriceAutoRefresh()
+  const context = readScope.capture({ dateSensitive: false })
   loadedFormKey.value = null
   loading.value = true
+  hydratingPanels.value = true
+  dateLoading.value = false
+  dateError.value = null
+  clearEditDraft()
   try {
-    await populateFormData()
+    if (isEdit.value) {
+      await panelLoader.load(context.routeId)
+      if (!context.isCurrent()) return
+      if (!panelsReady.value) throw new Error('必要區塊尚未載入或版本不一致')
+    } else {
+      await populateFormData(context)
+    }
+    await nextTick()
+    if (!context.isCurrent()) return
+    activateLoadedForm(context)
     canonicalReloadRequired.value = false
   } finally {
-    loading.value = false
+    if (context.isCurrent()) {
+      loading.value = false
+      hydratingPanels.value = false
+    }
+    context.finish()
   }
 }
 
-async function populateFormData() {
-  const targetKey = String(route.params.id ?? 'new')
-  // 銀行/券商選項 + fund_master 並行載入（彼此獨立）
-  await Promise.allSettled([loadInstitutions(), loadFundMasters()])
+function clearEditDraft() {
+  if (stopUserEditedWatch) { stopUserEditedWatch(); stopUserEditedWatch = null }
+  userEdited.value = false
+  Object.assign(form, { snapshotDate: '', usdExchangeRate: null, notes: '', deposits: [], funds: [], stocks: [] })
+  bankOptions.value = []
+  brokerOptions.value = []
+  depositTypeOptions.value = []
+  transitTypeOptions.value = []
+  fundMasterMap.value = {}
+  marketStatus.value = {}
+  store.currentSnapshot = null
+  for (const key of Object.keys(copyingPrev)) copyingPrev[key] = false
+  refreshingFundNav.value = refreshingAll.value = false
+}
 
+function activateLoadedForm(context) {
+  if (!context.isCurrent() || (isEdit.value && !panelsReady.value)) return
   if (isEdit.value) {
-    const detail = await bffApi.snapshotForm.get(route.params.id)
-    store.currentSnapshot = detail
-    Object.assign(form, {
-      snapshotDate:    detail.snapshotDate,
-      usdExchangeRate: detail.usdExchangeRate,
-      notes:           detail.notes,
-      deposits: detail.deposits.map(d => mapDepositFromApi(d, detail.usdExchangeRate || 1)),
-      funds: detail.funds.map(f => ({
-        _rowId: `fund_${_idSeq++}`,
-        fundName: f.fundName, fundCode: f.fundCode, bankId: f.bankId || null,
-        investmentAmount: f.investmentAmount, investmentAmountStr: numFmt(f.investmentAmount),
-        units: f.units != null ? f.units : null,
-        unitsStr: f.units != null ? String(f.units) : '',
-        currentValue: f.currentValue, currentValueStr: numFmt(f.currentValue),
-        estimatedDividend: f.estimatedDividend != null ? f.estimatedDividend : null
-      })),
-      stocks: groupStocks(detail.stocks.map(s => ({
-        stockCode: s.stockCode, stockName: s.stockName, market: s.market,
-        brokerId: s.brokerId || null, shares: s.shares, investmentCost: s.investmentCost,
-        currentValue: s.currentValue, dividendRate: s.dividendRate,
-        currency: s.currency, originalCurrencyValue: s.originalCurrencyValue,
-        transactionType: s.transactionType, transactionDate: s.transactionDate,
-        transactionExchangeRate: s.transactionExchangeRate
-      })))
-    })
-    // 用 detail 已附帶的收盤價先填 latestPrice，首次 paint 的總額即為「收盤價 × 股數」，
-    // 避免先顯示快照凍結舊值、待 loadAllPrices 回來才跳成正解的閃動（與 loadAllPrices 同源不二跳）。
-    applyMergedClosePrices(detail.mergedStocks)
-    // 舊快照若未存匯率，補抓
-    if (!form.usdExchangeRate) {
-      await loadExchangeRateForDate(form.snapshotDate)
-    }
+    store.currentSnapshot = { ...panelStates.basic.data.data.snapshot,
+      deposits: panelStates.deposits.data.data.snapshot.deposits,
+      stocks: panelStates.stocks.data.data.snapshot.stocks,
+      funds: panelStates.funds.data.data.snapshot.funds }
   }
-
-  // 新增快照時：載入今天匯率作為預設值
-  if (!isEdit.value) {
-    const today = todayLocal()
-    form.snapshotDate = today
-    await loadExchangeRateForDate(today)
-  }
-
-  // 載入所有已快取的股價，並啟動自動更新；BFF 已用 per-market basedate 規則決定要不要回即時值，
-  // 基準日非今日時 polling 取得的還是同一筆歷史收盤，行為仍正確。
-  await loadAllPrices()
-  startPriceAutoRefresh()
-
-  // 補抓美股 broker row 有交易日期但無匯率的情況
-  for (const stock of form.stocks) {
-    if (stock.market === '美股') {
-      for (const br of stock.brokerRows) {
-        if (br.transactionDate && !br.transactionExchangeRate) {
-          onUsTransactionDateChange(br, br.transactionDate)
-        }
-      }
-    }
-  }
-
-  // 補查缺名稱或缺配息率的股票（載入後靜默補齊）
-  for (const row of form.stocks) {
-    if (row.stockCode && (!row.stockName || row.dividendRate == null)) {
-      fetchPriceForRow(row)
-    }
-  }
-
   refreshStockSortables()
   refreshDepositSortables()
   refreshFundSortable()
-
-  // 等所有 post-load 的程式化 mutation（loadExchangeRateForDate / onUsTransactionDateChange / fetchPriceForRow）
-  // 都 settle 後再註冊 watcher，避免初始化噪音誤觸 userEdited
-  await nextTick()
-  if (stopUserEditedWatch) { stopUserEditedWatch() }
+  if (stopUserEditedWatch) stopUserEditedWatch()
   userEdited.value = false
   stopUserEditedWatch = watch(
     () => [form.deposits, form.funds, form.stocks, form.usdExchangeRate],
-    () => { userEdited.value = true },
-    { deep: true }
+    () => { if (!programmaticChange) userEdited.value = true }, { deep: true, flush: 'sync' }
   )
+  loadedFormKey.value = context.routeId
+  startPriceAutoRefresh()
+}
 
-  // 資料真正載入完成才標記 loadedFormKey，submit() 送出前會比對它與當下路由參數是否一致。
-  loadedFormKey.value = targetKey
+async function retryPanel(panel) {
+  const context = readScope.capture({ dateSensitive: false })
+  hydratingPanels.value = true
+  try {
+    await panelLoader.retry(panel)
+    await nextTick()
+    if (context.isCurrent() && panelsReady.value) {
+      activateLoadedForm(context)
+      canonicalReloadRequired.value = false
+    }
+  } finally {
+    if (context.isCurrent()) hydratingPanels.value = false
+    context.finish()
+  }
+}
+
+// New snapshots retain their complete bootstrap and existing write contract.
+async function populateFormData(context) {
+  form.snapshotDate = todayLocal()
+  form.usdExchangeRate = 31.5
+  await Promise.allSettled([loadInstitutions(context), loadFundMasters({ date: '', context })])
+  if (!context.isCurrent()) return
+  await loadExchangeRateForDate(form.snapshotDate, { context })
+  if (!context.isCurrent()) return
+  await loadAllPrices({ context })
 }
 
 async function retrySavedSnapshotReload() {
@@ -2707,20 +2868,24 @@ async function retrySavedSnapshotReload() {
   }
 }
 
-onMounted(loadFormData)
+onMounted(() => {
+  loadFormData().catch(error => console.warn('初始快照載入失敗', error))
+})
 
 // 雙重防護：即使 App.vue 的 <router-view :key="route.fullPath"> 已保證同類路由切換時
 // 整個元件會重新掛載（不會走到這個 watcher），仍以 route.params.id 變化觸發重新載入，
 // 避免日後有人移除 :key 或引入其他會重用元件實例的路由設定時，表單又悄悄殘留上一筆資料。
 watch(() => route.params.id, (newId, oldId) => {
-  if (oldId === undefined) return // onMounted 已處理首次載入
   if (String(newId ?? 'new') === String(oldId ?? 'new')) return
-  loadFormData()
-})
+  saveGeneration += 1
+  saving.value = false
+  canonicalReloadRequired.value = false
+  loadFormData().catch(error => console.warn('切換快照載入失敗', error))
+}, { flush: 'sync' })
 
 // ===== Submit =====
 const submit = async () => {
-  if (saving.value || loading.value || canonicalReloadRequired.value) return
+  if (saving.value || loading.value || canonicalReloadRequired.value || formBlocked.value) return
   // 送出前比對「表單資料實際載入自哪個路由參數」與「目前路由參數」是否一致；
   // 不一致代表元件被重用但資料尚未（或載入中）換成當下頁面對應的快照，
   // 送出會把上一筆殘留資料存成錯誤的一筆，一律阻擋並要求重新整理頁面。
@@ -2729,9 +2894,17 @@ const submit = async () => {
     ElMessage.error('頁面資料尚未完成載入或與目前網址不一致，請重新整理頁面後再儲存，避免存成錯誤的快照。')
     return
   }
+  const submitContext = readScope.capture()
+  const operation = ++saveGeneration
+  const isCurrentSave = () => operation === saveGeneration && !readScope.disposed && currentKey === routeKey()
   saving.value = true
   try {
     await formRef.value.validate()
+    // validate 是非同步；期間 route/panel context 可能改變，不能 PUT 舊 children。
+    if (currentKey !== routeKey() || loadedFormKey.value !== currentKey || !panelsReady.value || dateLoading.value || dateError.value || !submitContext.isCurrent()) {
+      ElMessage.error('表單資料在驗證期間已變更，請等待完整載入後再儲存。')
+      return
+    }
     const deposits = form.deposits.map(d => {
       const isUs = d.currency === 'USD' || d.currency === 'TRANSIT_USD'
       const isTransit = d.currency === 'TRANSIT_TWD' || d.currency === 'TRANSIT_USD'
@@ -2771,11 +2944,14 @@ const submit = async () => {
     }
     if (isEdit.value) {
       await bffApi.snapshotForm.update(route.params.id, payload)
+      if (!submitContext.isCurrent()) return
+      canonicalReloadRequired.value = true
       // PUT 可能清理到期列並重建 MANUAL 列 ID，必須讀回 server canonical state，
       // 清單載入失敗不能阻斷讀回；讀回完成前不能再提交舊草稿。
       const [detailResult, listResult] = await Promise.allSettled([
         loadFormData(), store.fetchSnapshots()
       ])
+      if (!isCurrentSave()) return
       if (detailResult.status === 'rejected') {
         canonicalReloadRequired.value = true
         console.warn('資料已儲存，但最新內容載入失敗', detailResult.reason)
@@ -2789,7 +2965,9 @@ const submit = async () => {
       }
     } else {
       const created = await bffApi.snapshotForm.create(payload)
+      if (!submitContext.isCurrent()) return
       await store.fetchSnapshots()
+      if (!submitContext.isCurrent()) return
       ElMessage.success('建立成功')
       // 新建完成後跳到該快照的編輯頁
       if (created?.id) {
@@ -2797,6 +2975,7 @@ const submit = async () => {
       }
     }
   } catch (e) {
+    if (!isCurrentSave()) return
     console.error('存檔失敗', e)
     const detail = e.response?.data?.detail || ''
     // 日期唯一鍵衝突：給明確、可行動的提示（常見於「新增 → 複製前一版 → 選到已存在日期」）
@@ -2810,7 +2989,8 @@ const submit = async () => {
       ElMessage.error('儲存失敗：' + msg)
     }
   } finally {
-    saving.value = false
+    if (isCurrentSave()) saving.value = false
+    submitContext.finish()
   }
 }
 </script>
@@ -2818,6 +2998,8 @@ const submit = async () => {
 <style scoped>
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .section-title { font-size: 15px; font-weight: 600; }
+.panel-retry { border: 0; padding: 4px 8px; border-radius: 4px; color: #2563eb; background: #eff6ff; cursor: pointer; }
+.panel-retry:disabled { color: #94a3b8; cursor: not-allowed; }
 /* 存款小計 — reuses sec-summary base */
 .deposit-summary {
   display: flex;

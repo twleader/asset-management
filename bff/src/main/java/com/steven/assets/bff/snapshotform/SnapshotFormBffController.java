@@ -1,6 +1,7 @@
 package com.steven.assets.bff.snapshotform;
 
 import com.steven.assets.bff.common.SnapshotEnricher;
+import com.steven.assets.bff.snapshotform.dto.SnapshotFormPanelResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
@@ -44,11 +45,32 @@ public class SnapshotFormBffController {
 
     private final WebClient businessServicesClient;
     private final SnapshotEnricher enricher;
+    private final SnapshotFormPanelService panelService;
 
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
             new ParameterizedTypeReference<>() {};
+
+    @GetMapping("/panels/basic/{id}")
+    public Mono<SnapshotFormPanelResponse> basicPanel(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return panelService.basic(id);
+    }
+
+    @GetMapping("/panels/deposits/{id}")
+    public Mono<SnapshotFormPanelResponse> depositsPanel(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return panelService.deposits(id);
+    }
+
+    @GetMapping("/panels/stocks/{id}")
+    public Mono<SnapshotFormPanelResponse> stocksPanel(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return panelService.stocks(id);
+    }
+
+    @GetMapping("/panels/funds/{id}")
+    public Mono<SnapshotFormPanelResponse> fundsPanel(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return panelService.funds(id);
+    }
 
     /**
      * GET /api/bff/snapshot-form/snapshots

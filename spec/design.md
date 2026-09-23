@@ -12358,3 +12358,21 @@ FubonSettlementWriter 以合法 observation 每 future day 的 buy/sell settleme
 `GET /api/snapshots/history?snapshotId={id}` 使用 AssetService 既有 history builder，先 owner-check 指定 root、再以 owner-scoped Repository 找較早的一筆，最多兩個 roots 才接原分類與合計程式。不帶參數走原完整 roots。選中列與完整 history 同值；前一列僅比較基底（無更早資料時 increase/increaseRate 可 null）。不增加 Entity、table、migration，不影響 asset-history 舊 consumer。
 
 Dashboard 不再在 mount 執行 enrich POST／再次 summary。SSE 既有路徑保留本次既有技術債、不擴散至其他頁；僅作載入後價格增量。週期更新 single-flight，cancel／generation 保護以免跨日期；unmount 同時清除 EventSource、自訂 reconnect timeout、輪詢及排序 timeout，不得從晚到 promise 再開串流。
+
+
+### Task 450：SnapshotForm 編輯頁 Panel 邊界與載入生命週期
+
+既有單一 get/detail 與後續 prices 的串行 bootstrap 只留給相容消費者；`/snapshots/:id/edit` 改走下表。四個方法仍屬 SnapshotFormBffController，只委派新的 SnapshotFormPanelService，傳輸用 immutable record envelope `{panel,snapshotId,data,warnings}`。panel 固定 basic/deposits/stocks/funds；snapshotId為所請求id。每個 data.snapshot 包含原 root 標量但移除三個children，指定區塊才加入自己的children；缺少或型別不正確的必要children/lookup不能fallback為[]。每份data另含snapshotVersion與effectiveUsdExchangeRate。snapshotVersion在任何enrich/投影前，以原始完整business detail（含children IDs及順序）做遞迴map key排序、數值標準化後的SHA-256；不得包含quote/lookup/NAV/補值，不能用id或總額代替。
+
+| Panel | data 欄位 | 來源與邊界 |
+|---|---|---|
+| basic | snapshot | 同一 business GET /api/snapshots/{id}，完整 root 欄位供日期、備註、匯率、stored summary。raw snapshot.usdExchangeRate保留；每個Panel均用同一helper提供有效正值effectiveUsdExchangeRate，原匯率缺失/非正值時pure-read同日期on-date補值，失敗回明確error，不能完成或以假值顯示 |
+| deposits | snapshot（只含deposits）, banks, depositTypes, transitFundTypes | detail與三個既有設定API平行；設定只保留active；完整DepositResponse保留id/updateMode/processingDate，不推算日期 |
+| stocks | snapshot（只含stocks）, brokers, mergedStocks, stockPrices, marketStatus, transactionRates | detail/enrichment→同一SnapshotEnricher.fetchSnapshotCloseData(detail,true)；brokers、display prices、market-status可平行。mergedStocks保留原enrichInvestmentCostOriginal／buildMergedStocks語意；stockPrices沿用相同per-market basedate判斷，但新Service採限縮resolver：當日市場優先live（包括null CLOSE_PENDING），缺live用displayRows；歷史市場只採close的完整displayRows並原樣保留真正tradingDate/source/updatedAt/quoteStatus。缺close不得採今日live，保留既有mergedStocks frozen fallback並加CLOSE_PRICES_UNAVAILABLE警告；不能把快照日期冒充實際交易日。不得直接依賴目前mergePerMarketPrices重建的frozen rows滿足metadata契約，也不改其他caller的helper語意。名稱/配息率沿用snapshot；不作逐股dividend-rate/backfill/refresh。transactionRates是有transactionDate但缺transactionExchangeRate之美股列，按相異日期去重、至多4路並行純讀同一USD exchange-rate/on-date取得的date→正匯率map；只用已有API，不刷新。各讀5秒選配預算仍納入20秒總預算，暫時失敗或查無有效值省略該key並加TRANSACTION_RATES_UNAVAILABLE，前端沿用原有效快照匯率fallback並顯示成本暫採快照匯率；只有transactionRates的確切on-date GET 404按缺值fallback，401/403仍relay，detail/lookups/close及必要effectiveUSD的404不能吞。raw snapshot與version不變，前端group後依原onUsTransactionDateChange同步賦值/重算順序套用，已有交易匯率不查不改 |
+| funds | snapshot（只含funds）, banks, fundMasters | detail與banks平行；date確認後以/api/funds?date=snapshotDate取主檔。只初始化主檔map，保留snapshot已存currentValue/estimatedDividend；使用者後續換日期/單位才循既有preview計算 |
+
+每 Panel 20秒總預算包含其detail、設定、close／funds後續鏈，逾時504、暫時上游失敗502、401/403/404交既有BusinessErrorAdvice原樣relay。stocks display quotes／market-status各5秒選配預算，失敗用warning `PRICES_UNAVAILABLE`／`MARKET_STATUS_UNAVAILABLE`，凍結價格或未知市場狀態；status失敗不能否定可用price。SnapshotEnricher既有temporary close fallback保持，新panel auth/404不能被吞。沒有schema/public API/vendor/broker/cache寫入，POST prices-on-date只是既有唯讀批次查詢。
+
+前端四份狀態/請求同時啟動（Promise.allSettled只作完成統整，每份成功立即映射自己的完整rows+options並顯示）。各區在有完整data前不掛載編輯表格；取消全頁v-loading，基本欄位可先顯示但在全部required panels ready前禁用。整份表單與所有save按鈕/submit guard共用ready條件，loadedFormKey只在四份同route id、snapshotDate、snapshotVersion及effectiveUsdExchangeRate完成且一致後才設定；summary列同時才顯示，避免缺資料顯示零值。錯誤局部retry，其他已完成rows不被重建；若retry取得不同版本/日期/有效匯率，保留鎖定並顯示「資料已更新，請完整重新載入」，使用者完整retry才重載全部，此為明示例外。各Panel可先填入自己的有效匯率，不能等待basic才用預設估值；原始snapshot.usdExchangeRate不覆寫，deposits的originalAmount缺失反推仍用rawRate||1（維持legacy已存語意），不得改用補值匯率反推。四份不一致時summary隱藏且整份不可編輯。新建模式維持原有完整bootstrap與save語意。
+
+完整重載先停poll與dirty watch、清除舊data/loaded key，route generation防late success/error/finally；每個panel另有generation/AbortController。canonical reload延續整份PUT後readback規則，任一panel失败使loadFormData reject、canonicalReloadRequired維持鎖定，全部重試成功才解鎖。離頁/換route cancel舊請求與timer，後到回應不能啟動poll。日期變更期間禁存檔，舊date的fx/fund/price/row補值不得污染新date/route。兩分鐘價格更新先同步啟動prices/realtime、single-flight，允許只更新quote/status欄位，保留使用者原始持股、存款與基金草稿。使用者未打開的el-tab-pane可lazy掛載，資料仍完整保存在form。
