@@ -50,7 +50,7 @@ job response record `{jobId,status,createdAt,completedAt,priceRefresh}`；status
 - [x] 451.5 Vue獨立完整載入、局部retry、刷新保留／輪詢進度、cancel/race與compiled component行為測試。
 - [x] 451.6 完整 diff 獨立架構審查，spec-check 無 BLOCK。
 - [x] 451.7 feature Docker重建、正式登入UI／slow network／資料一致性與新舊TTFB驗收。
-- [ ] 451.8 短中文feature commit、no-ff main merge、push並核對remote兩親；main Docker重建及功能確認。
+- [x] 451.8 短中文feature commit、no-ff main merge、push並核對remote兩親；main Docker重建及功能確認。
 
 ## 驗證
 
@@ -74,7 +74,7 @@ bash scripts/spec-check.sh
 - Backend：90 suites／746 tests，零失敗、零略過；固定 Instant 比對完整 compact rows、排序、大盤、單股兩份 projection；45 秒 job 期限／fence／容量與 owner 隔離皆涵蓋。
 - BFF：72 suites／504 tests，零失敗、零略過；五區、單股、工作 API 之租戶傳遞、欄位驗證、三軌一致性、decimal、取消及 timeout。
 - Frontend：原套件 59 tests、新增動態 17 tests 全數通過；Vue SFC 實際 setup/lifecycle 驗證並行、再展開、三軌拒絕、舊回應、跨市場取消範圍、完整明細、SSE 及刷新硬期限。production build 通過。
-- 全部實作及效能增量的獨立架構審查：未解 critical／major／minor 均為 0。驗收基準補充的獨立規格審查為 critical 0／major 0／minor 1；唯一 minor 是文件測試指令範圍不足，已補成實際 clean test selector。後端 90 suites／746 tests 範圍包含 Radar、基本面、債券、回測、日曆、technical、owner／tenant。尚未 commit／merge／push。
+- 全部實作及效能增量的獨立架構審查：未解 critical／major／minor 均為 0。驗收基準補充的獨立規格審查為 critical 0／major 0／minor 1；唯一 minor 是文件測試指令範圍不足，已補成實際 clean test selector。後端 90 suites／746 tests 範圍包含 Radar、基本面、債券、回測、日曆、technical、owner／tenant。已完成 code／spec commit、no-ff merge 與遠端 refs 核對；main 部署結果如下。
 
 
 ### 效能驗收基準修訂與實測（2026-09-23）
@@ -89,3 +89,12 @@ bash scripts/spec-check.sh
 - 真實展開台積電只發一次 evaluation GET，三軌 summary/detail 一致，收合再展開有新的 generatedAt。瀏覽器攔截模擬一次 job POST 202、一次 status GET 200，再觀察五區並行重新載入；成功替換 Panel 會實際收合舊展開列。未在正式服務觸發 provider refresh。
 
 最終 feature 再驗展開／重開：evaluation 各只發一個 GET，HTTP 200；第二次約 69 ms，generatedAt 確實前進，summary/detail 九個三軌 action／label／score 欄位完全相同。架構查證 gate `3af5063d2178`。
+
+
+### Main 部署與最終驗證（2026-09-24）
+
+- Feature commit `4e6e1e8052f3eaa1b00941d4213f5067937bca6a`；main no-ff merge `ab053f662ea00866b7205840be0c1fe9968b3462`，兩親為 `06e06d8b37fdcfa330b3f5c2af38f80e3b1df54a`／上述 feature commit；兩分支已 push 且 ls-remote 完整 SHA 相符。
+- 從乾淨 `/Users/steven/Project/asset-management-main` 與其既有 `.env` 重建並 recreate 三服務。Business image `sha256:5161b291715fd48c48a55c14501638d4714070e8e7267e6416a0044f379ba7fc`、BFF `sha256:f6010a48eb7d317cad49febd3db743c3a7e6db57ee327a11eb12464bc2d945b1` 均 healthy；frontend `sha256:911b430762ed63dde648c5b9f31a4beb4647f464a41e5071c74b7731b1bc4bda` running。三者 config source 均 main，restart count 均 0；safe market-index JSON、BFF actuator 與 HTTPS 成功。
+- 正式 HTTPS Google 既有帳戶登入後，最後一次 reload 五區皆 HTTP 200，起跑差 2.1 ms。部署後首批台股約 1.55 秒、美股 0.93 秒，大盤／資訊 40–51 ms；這是冷啟動功能確認，未重做或取代上述六輪效能比較。導航後立刻 reload 所取消的前批請求另保留於診斷紀錄，不混算為成功批次。
+- 真實點擊展開 2330，只出現一次 evaluation GET，HTTP 200、約 213 ms，generatedAt `2026-09-24T00:15:28.161776304+08:00`；summary/detail 身份與九個三軌欄位全部相同，頁面清單顯示該次新時間且完整明細可見。私有驗證資料 `/tmp/radar451-main-network.json`、`/tmp/radar451-main-evaluation.json` 不提交 Git。
+- 本段僅補記完成事實；後續文件提交不更動服務建置輸入，無須再次部署或重跑已通過測試。功能、測試、正式登入驗證與部署均完成，無待續實作。
