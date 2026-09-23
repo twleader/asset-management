@@ -129,17 +129,17 @@ test('Trading Radar detail 將設定頁等價分類與 strict radar profile 分�
   assert.ok(tradingRadarView.includes('不得依股票名稱、代碼或技術資料自行補推或互相替代'))
 })
 
-test('Task426 首屏只讀 list，展開才讀單檔 detail，SSE 只按 mapping patch 同列行情欄位', () => {
+test('Task451 首屏平行讀獨立 panel，展開讀完整 tuple，SSE 只按 mapping patch 同列行情欄位', () => {
   for (const fragment of [
-    "bffApi.tradingRadar.list()",
-    "bffApi.tradingRadar.stock(row.market, row.stockCode)",
+    'loadPanels()',
+    "bffApi.tradingRadar.stockEvaluation(row.market, row.stockCode",
     '@expand-change="onRowExpand"',
     'PRICE_UPDATE_FIELD_MAPPING',
     "payload: 'price + changePercent|changePct'",
     'applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)',
-    'Object.assign(row, response.stock)',
-    'generation === listGeneration',
-    'expandedDetailKeys.has(key)'
+    'applyStockEvaluationTuple',
+    'expandedDetailKeys.has(key)',
+    'cancelMarketDetails(marketName)'
   ]) {
     assert.ok(tradingRadarView.includes(fragment), `missing Task426 list/detail/SSE fragment: ${fragment}`)
   }
@@ -180,10 +180,10 @@ test('Task427 reactive 明細 state 讀回 proxy，current success 可完成且 
   assert.deepEqual(replacement, { loading: true, loaded: false, error: '', generation: 2 })
 })
 
-test('Task427 明細 request state 必從 reactive map 寫回後讀取，禁止 raw assignment-expression identity', () => {
+test('Task451 明細 request state 必從 reactive map 寫回後讀取，禁止 raw assignment-expression identity', () => {
   assert.match(
     tradingRadarView,
-    /detailStates\[key\] = \{ loading: true, loaded: false, error: '', generation \}\s+const state = detailStates\[key\]/
+    /detailStates\[key\] = \{ loading: true, loaded: !!previous, error: '', generation, controller: new AbortController\(\), tuple: previous \}\s+const state = detailStates\[key\]/
   )
   assert.doesNotMatch(tradingRadarView, /const state = detailStates\[key\] =/)
 })

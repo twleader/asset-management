@@ -57,17 +57,16 @@ public class JdbcTradingRadarListBatchRepository implements TradingRadarListBatc
         List<Object> args = pairArguments(keys);
         args.add(limit);
         List<StockPriceHistory> rows = jdbc.query("""
-                WITH requested(stock_code, market) AS (VALUES %s), ranked AS (
-                    SELECT h.*, row_number() OVER (
-                        PARTITION BY h.stock_code, h.market ORDER BY h.trading_date DESC
-                    ) AS row_rank
-                    FROM stock_price_history h
-                    JOIN requested r ON r.stock_code=h.stock_code AND r.market=h.market
-                )
-                SELECT id, stock_code, market, trading_date, open_price, high_price, low_price,
-                       close_price, volume, close_source
-                FROM ranked WHERE row_rank <= ?
-                ORDER BY market ASC, stock_code ASC, trading_date DESC
+                WITH requested(stock_code, market) AS (VALUES %s)
+                SELECT h.id, h.stock_code, h.market, h.trading_date, h.open_price, h.high_price,
+                       h.low_price, h.close_price, h.volume, h.close_source
+                FROM requested r
+                CROSS JOIN LATERAL (
+                    SELECT h.* FROM stock_price_history h
+                    WHERE h.stock_code=r.stock_code AND h.market=r.market
+                    ORDER BY h.trading_date DESC LIMIT ?
+                ) h
+                ORDER BY h.market ASC, h.stock_code ASC, h.trading_date DESC
                 """.formatted(values(keys.size())), this::price, args.toArray());
         return groupPrices(keys, rows);
     }

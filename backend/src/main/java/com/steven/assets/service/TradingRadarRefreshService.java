@@ -34,12 +34,18 @@ public class TradingRadarRefreshService {
     private final StringRedisTemplate redis;
 
     public TradingRadarDto.RefreshResponse refreshAndGet() {
+        Long ownerId = currentUserContext.hasUser() ? currentUserContext.getEffectiveUserId() : null;
+        return refreshForOwner(ownerId);
+    }
+
+    /** Explicit immutable identity for the manual background worker; never resolves request scope here. */
+    public TradingRadarDto.RefreshResponse refreshForOwner(Long ownerId) {
         long t0 = System.nanoTime();
         // 開／休市判斷在呼叫 external 之前求值一次、全程沿用（含 COOLDOWN 分支）。
         // 若等 external 回來（最長 30 秒）才算，13:29:55 按下會得到「抓了即時報價卻標成休市」的矛盾 payload。
         boolean twOpen = marketDataService.isMarketOpenNow(TW_MARKET);
 
-        String outcome = acquireCooldown()
+        String outcome = acquireCooldown(ownerId)
                 ? refreshPrices(twOpen)
                 : "COOLDOWN";
 
@@ -56,9 +62,9 @@ public class TradingRadarRefreshService {
      *
      * <p>Redis 本身失敗時 fail-open（視為取得），不因 Redis 抖動就永遠不抓。</p>
      */
-    private boolean acquireCooldown() {
+    private boolean acquireCooldown(Long ownerId) {
         String ownerKey = COOLDOWN_KEY_PREFIX
-                + (currentUserContext.hasUser() ? currentUserContext.getEffectiveUserId() : "anonymous");
+                + (ownerId == null ? "anonymous" : ownerId);
         Duration ttl = Duration.ofSeconds(COOLDOWN_SECONDS);
         try {
             if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(ownerKey, "1", ttl))) {

@@ -185,7 +185,7 @@ public class TradingRadarMarketContextService {
 
         List<TradingRadarDto.PublicInformationItem> publicInformation;
         try {
-            publicInformation = publicInformation(decisionInstant);
+            publicInformation = resolvePublicInformation(decisionInstant);
         } catch (Exception e) {
             log.warn("交易雷達公開財經資訊讀取失敗：{}", e.toString());
             publicInformation = List.of();
@@ -213,6 +213,21 @@ public class TradingRadarMarketContextService {
                     decisionInstant,
                     twseRepo.findTopNByOrderByTradingDateDesc(MARKET_TW_BOUNDED_ROWS),
                     usRows);
+        } catch (Exception e) {
+            log.warn("交易雷達市場脈絡讀取失敗：{}", e.toString());
+            return MarketContext.EMPTY;
+        }
+    }
+
+    /** Same bounded context, reusing the request's unfiltered Taiwan history read. */
+    public MarketContext resolveMarketFromTwRows(Instant decisionInstant, List<TwseIndexDailyHistory> rawRows) {
+        if (decisionInstant == null) return MarketContext.EMPTY;
+        try {
+            List<UsIndexDailyHistory> usRows = new ArrayList<>();
+            usRows.addAll(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", MARKET_US_BOUNDED_ROWS));
+            usRows.addAll(usIndexRepo.findTopNByIndexCodeOrderByTradingDateDesc("SOX", MARKET_US_BOUNDED_ROWS));
+            return resolveMarketFromRows(decisionInstant,
+                    rawRows == null ? List.of() : rawRows.stream().limit(MARKET_TW_BOUNDED_ROWS).toList(), usRows);
         } catch (Exception e) {
             log.warn("交易雷達市場脈絡讀取失敗：{}", e.toString());
             return MarketContext.EMPTY;
@@ -527,10 +542,13 @@ public class TradingRadarMarketContextService {
                 value -> value, ignored -> FxContext.EMPTY));
     }
 
-    private List<TradingRadarDto.PublicInformationItem> publicInformation(Instant decisionInstant) {
+    /** The independent panel must distinguish an unavailable repository from a genuinely empty window. */
+    public List<TradingRadarDto.PublicInformationItem> resolvePublicInformation(Instant decisionInstant) {
+        if (decisionInstant == null) return List.of();
         Instant cutoff = decisionInstant.minus(72, ChronoUnit.HOURS);
         List<News> rows = newsRepo.findByPublishedAtGreaterThanEqualOrderByPublishedAtDesc(cutoff);
-        if (rows == null || rows.isEmpty()) return List.of();
+        if (rows == null) throw new IllegalStateException("公開資訊資料來源不可得");
+        if (rows.isEmpty()) return List.of();
         Comparator<News> newest = Comparator
                 .comparing(News::getPublishedAt, Comparator.nullsLast(Comparator.reverseOrder()))
                 .thenComparing(News::getId, Comparator.nullsLast(Comparator.reverseOrder()));

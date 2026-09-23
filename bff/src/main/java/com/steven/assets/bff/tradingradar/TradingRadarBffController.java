@@ -1,9 +1,14 @@
 package com.steven.assets.bff.tradingradar;
 
+import com.steven.assets.bff.tradingradar.dto.TradingRadarPanelResponse;
+import com.steven.assets.bff.tradingradar.dto.TradingRadarRefreshJobResponse;
+import com.steven.assets.bff.tradingradar.dto.TradingRadarStockEvaluationResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,8 +20,9 @@ import java.util.Map;
 /**
  * 今日交易雷達頁的 BFF controller（Requirement 48 追加 / Task 231）。
  *
- * <p>本頁其餘 API 走 {@link TradingRadarBffRoutes} 的 Gateway rewrite passthrough；
- * <b>唯獨資料夾瀏覽必須用 controller，不能加 gateway route</b>：
+ * <p>Task 451 的完整 Panel、單股評估與更新工作由本 controller 委派同頁 service；
+ * legacy API 仍走 {@link TradingRadarBffRoutes} 的 Gateway rewrite passthrough。
+ * <b>資料夾瀏覽亦須保留 controller，不能加 gateway route</b>：
  * {@code /api/bff/trading-radar/export/browse} 完全落在既有 wildcard {@code /api/bff/trading-radar/**} 之內，
  * Gateway 同 order 時依宣告順序先匹配者勝出，新 route 若排在 wildcard 之後，請求會被 rewrite 成 business
  * 不存在的 {@code /api/trading-radar/export/browse} → 404，資料夾選擇器靜默失效。
@@ -32,6 +38,38 @@ public class TradingRadarBffController {
             new ParameterizedTypeReference<>() {};
 
     private final WebClient businessServicesClient;
+    private final TradingRadarPanelService panelService;
+
+    @GetMapping("/panels/tw-market")
+    public Mono<TradingRadarPanelResponse> twMarketPanel() { return panelService.twMarket(); }
+
+    @GetMapping("/panels/us-market")
+    public Mono<TradingRadarPanelResponse> usMarketPanel() { return panelService.usMarket(); }
+
+    @GetMapping("/panels/tw-stocks")
+    public Mono<TradingRadarPanelResponse> twStocksPanel() { return panelService.twStocks(); }
+
+    @GetMapping("/panels/us-stocks")
+    public Mono<TradingRadarPanelResponse> usStocksPanel() { return panelService.usStocks(); }
+
+    @GetMapping("/panels/public-information")
+    public Mono<TradingRadarPanelResponse> publicInformationPanel() { return panelService.publicInformation(); }
+
+    @GetMapping("/stock-evaluation")
+    public Mono<TradingRadarStockEvaluationResponse> stockEvaluation(
+            @RequestParam String stockCode, @RequestParam String market) {
+        return panelService.stockEvaluation(stockCode, market);
+    }
+
+    @PostMapping("/refresh-jobs")
+    public Mono<ResponseEntity<TradingRadarRefreshJobResponse>> startRefreshJob() {
+        return panelService.startRefreshJob().map(job -> ResponseEntity.accepted().body(job));
+    }
+
+    @GetMapping("/refresh-jobs/{jobId}")
+    public Mono<TradingRadarRefreshJobResponse> refreshJob(@PathVariable String jobId) {
+        return panelService.refreshJob(jobId);
+    }
 
     /**
      * 資料夾瀏覽（唯讀）。轉呼 Requirement 34 既有的「同一支」business API

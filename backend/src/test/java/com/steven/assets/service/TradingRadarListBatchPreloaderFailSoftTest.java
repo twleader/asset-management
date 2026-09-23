@@ -40,6 +40,7 @@ class TradingRadarListBatchPreloaderFailSoftTest {
         when(priceQueryService.getEtfNavBatch(any())).thenReturn(null);
         when(marketContextService.resolveFxBatchCachedOnly(any(), any()))
                 .thenThrow(new IllegalStateException("fx unavailable"));
+        when(stockStyleThresholdProvider.incomeThreshold()).thenReturn(new java.math.BigDecimal("0.07"));
 
         TradingRadarListBatchPreloader.Context context = preloader.preload(
                 List.of(
@@ -60,7 +61,10 @@ class TradingRadarListBatchPreloaderFailSoftTest {
             assertThat(entry.fx()).isEqualTo(TradingRadarMarketContextService.FxContext.EMPTY);
             assertThat(entry.fundamental()).isNotNull();
             assertThat(entry.marketFeatures()).isNotNull();
+            assertThat(entry.incomeThreshold()).isEqualByComparingTo("0.07");
         });
+        assertThat(context.incomeThreshold()).isEqualByComparingTo("0.07");
+        verify(stockStyleThresholdProvider).incomeThreshold();
         assertThat(context.entry("2330", "台股").premiumTargetDate()).isEqualTo(LocalDate.of(2026, 9, 12));
         assertThat(context.entry("AAPL", "美股").premiumTargetDate()).isEqualTo(LocalDate.of(2026, 9, 11));
         verify(priceQueryService).getLiveBatch(any(), any());
@@ -68,5 +72,27 @@ class TradingRadarListBatchPreloaderFailSoftTest {
         verify(marketContextService).resolveFxBatchCachedOnly(any(), any());
         verify(priceQueryService, never()).getLive(anyString(), anyString());
         verify(priceQueryService, never()).getEtfNav(anyString(), anyString());
+    }
+
+    @Test
+    void materializationFailureAndMissingEntriesRetainTheSameNondefaultThreshold() {
+        var threshold = mock(StockStyleThresholdProvider.class);
+        when(threshold.incomeThreshold()).thenReturn(new java.math.BigDecimal("0.08"));
+        var preloader = new TradingRadarListBatchPreloader(mock(TradingRadarListBatchRepository.class),
+                mock(PriceQueryService.class), mock(DividendEventEvidenceRepository.class),
+                mock(FundamentalAnalysisService.class), threshold, mock(BondYieldBetaEvidencePort.class),
+                mock(TreasuryYieldService.class), mock(TradingRadarMarketContextService.class),
+                mock(TradingRadarMarketFeaturePort.class));
+        @SuppressWarnings("unchecked") Map<String, LocalDate> brokenDates = mock(Map.class);
+        when(brokenDates.get(anyString())).thenThrow(new IllegalStateException("materialization failure"));
+        var now = Instant.parse("2026-09-23T08:00:00Z");
+        var target = new TradingRadarListBatchPreloader.Target("2330", "台股", true);
+        var inputs = preloader.preload(List.of(target), now, Map.of(), Map.of(), brokenDates, 500);
+        assertThat(inputs.entry("2330", "台股").incomeThreshold()).isEqualByComparingTo("0.08");
+        assertThat(inputs.entry("2330", "台股").prices()).isEmpty();
+        var complete = TradingRadarListBatchPreloader.Context.complete(List.of(target),
+                new TradingRadarListBatchPreloader.Context(Map.of(), inputs.incomeThreshold()), now);
+        assertThat(complete.entry("2330", "台股").incomeThreshold()).isEqualByComparingTo("0.08");
+        verify(threshold).incomeThreshold();
     }
 }

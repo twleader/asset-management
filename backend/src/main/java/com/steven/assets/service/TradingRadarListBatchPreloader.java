@@ -49,7 +49,22 @@ public class TradingRadarListBatchPreloader {
             TradingRadarMarketContextService.FxContext fx,
             TradingRadarMarketFeatureResolver.Evidence marketFeatures,
             LocalDate premiumTargetDate,
-            List<EtfNavObservation> premiumObservations) {
+            List<EtfNavObservation> premiumObservations,
+            java.math.BigDecimal incomeThreshold) {
+        /** Compatibility shape for existing adapters; the catalog fallback is immutable. */
+        public Entry(Optional<Stock> stock, List<StockPriceHistory> prices,
+                     Optional<PriceQueryService.LivePrice> live, Optional<PriceQueryService.EtfNav> liveNav,
+                     List<StockDividendHistory> adjustmentEvents,
+                     DividendEventEvidenceResolver.Resolution dividendEvidence,
+                     FundamentalAnalysisService.Resolved fundamental, BondYieldBetaResolver.Result bondYieldBeta,
+                     TreasuryYieldDto.RateContext rateContext, TradingRadarMarketContextService.FxContext fx,
+                     TradingRadarMarketFeatureResolver.Evidence marketFeatures, LocalDate premiumTargetDate,
+                     List<EtfNavObservation> premiumObservations) {
+            this(stock, prices, live, liveNav, adjustmentEvents, dividendEvidence, fundamental, bondYieldBeta,
+                    rateContext, fx, marketFeatures, premiumTargetDate, premiumObservations,
+                    AssetClassifier.defaultDividendThreshold());
+        }
+
         public Entry {
             stock = stock == null ? Optional.empty() : stock;
             prices = prices == null ? List.of() : List.copyOf(prices);
@@ -63,9 +78,14 @@ public class TradingRadarListBatchPreloader {
             marketFeatures = marketFeatures == null ? TradingRadarMarketFeatureResolver.Evidence.empty(
                     null, null, "清單批次資料不可得") : marketFeatures;
             premiumObservations = premiumObservations == null ? List.of() : List.copyOf(premiumObservations);
+            incomeThreshold = Objects.requireNonNullElse(incomeThreshold, AssetClassifier.defaultDividendThreshold());
         }
 
         static Entry unavailable(String market, Instant decisionInstant) {
+            return unavailable(market, decisionInstant, AssetClassifier.defaultDividendThreshold());
+        }
+
+        static Entry unavailable(String market, Instant decisionInstant, java.math.BigDecimal incomeThreshold) {
             return new Entry(Optional.empty(), List.of(), Optional.empty(), Optional.empty(), List.of(),
                     DividendEventEvidenceResolver.Resolution.MISSING,
                     FundamentalAnalysisService.Resolved.unavailable(false),
@@ -73,13 +93,18 @@ public class TradingRadarListBatchPreloader {
                     TradingRadarMarketContextService.FxContext.EMPTY,
                     TradingRadarMarketFeatureResolver.Evidence.empty(
                             market, decisionInstant, "清單批次資料不可得"),
-                    null, List.of());
+                    null, List.of(), incomeThreshold);
         }
     }
 
-    public record Context(Map<Key, Entry> entries) {
+    public record Context(Map<Key, Entry> entries, java.math.BigDecimal incomeThreshold) {
+        public Context(Map<Key, Entry> entries) {
+            this(entries, AssetClassifier.defaultDividendThreshold());
+        }
+
         public Context {
             entries = entries == null ? Map.of() : Map.copyOf(entries);
+            incomeThreshold = Objects.requireNonNullElse(incomeThreshold, AssetClassifier.defaultDividendThreshold());
         }
 
         public Entry entry(String code, String market) {
@@ -89,12 +114,15 @@ public class TradingRadarListBatchPreloader {
         /** Materialize every requested exact pair even when an upstream batch was unavailable. */
         static Context complete(Collection<Target> rawTargets, Context source, Instant decisionInstant) {
             Map<Key, Entry> sourceEntries = source == null ? Map.of() : source.entries();
+            java.math.BigDecimal threshold = source == null
+                    ? AssetClassifier.defaultDividendThreshold() : source.incomeThreshold();
             Map<Key, Entry> complete = new LinkedHashMap<>();
             for (Target target : canonicalTargets(rawTargets)) {
                 Key key = new Key(target.code(), target.market());
-                complete.put(key, sourceEntries.getOrDefault(key, Entry.unavailable(target.market(), decisionInstant)));
+                complete.put(key, sourceEntries.getOrDefault(key,
+                        Entry.unavailable(target.market(), decisionInstant, threshold)));
             }
-            return new Context(complete);
+            return new Context(complete, threshold);
         }
     }
 
@@ -248,13 +276,13 @@ public class TradingRadarListBatchPreloader {
                         featuresByMarket.getOrDefault(target.market(), TradingRadarMarketFeatureResolver.Evidence.empty(
                                 target.market(), decisionInstant, "市場 feature batch 缺少市場")),
                         premiumTargetDates == null ? null : premiumTargetDates.get(target.market()),
-                        premiumObservations.getOrDefault(readerKey, List.of())));
+                        premiumObservations.getOrDefault(readerKey, List.of()), incomeThreshold));
             } catch (RuntimeException unavailable) {
                 logBatchUnavailable("entry-materialization", unavailable);
-                entries.put(key, Entry.unavailable(target.market(), decisionInstant));
+                entries.put(key, Entry.unavailable(target.market(), decisionInstant, incomeThreshold));
             }
         }
-        return Context.complete(targets, new Context(entries), decisionInstant);
+        return Context.complete(targets, new Context(entries, incomeThreshold), decisionInstant);
     }
 
     private static List<Target> canonicalTargets(Collection<Target> rawTargets) {

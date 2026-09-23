@@ -15,6 +15,12 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(com.steven.assets.service.TradingRadarRefreshUnavailableException.class)
+    public ProblemDetail handleTradingRadarRefreshUnavailable(
+            com.steven.assets.service.TradingRadarRefreshUnavailableException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(NoSuchElementException.class)
     public ProblemDetail handleNotFound(NoSuchElementException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());

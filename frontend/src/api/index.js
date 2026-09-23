@@ -329,6 +329,18 @@ export const bffApi = {
     // Requirement 148: page initial/manual list and lazy single-stock detail stay on this page BFF.
     list: () => api.get('/bff/trading-radar/list'),
     stock: (market, stockCode) => api.get('/bff/trading-radar/stock', { params: { market, stockCode } }),
+    twMarketPanel: ({ signal } = {}) => api.get('/bff/trading-radar/panels/tw-market', { signal, skipErrorToast: true }),
+    usMarketPanel: ({ signal } = {}) => api.get('/bff/trading-radar/panels/us-market', { signal, skipErrorToast: true }),
+    twStocksPanel: ({ signal } = {}) => api.get('/bff/trading-radar/panels/tw-stocks', { signal, skipErrorToast: true }),
+    usStocksPanel: ({ signal } = {}) => api.get('/bff/trading-radar/panels/us-stocks', { signal, skipErrorToast: true }),
+    publicInformationPanel: ({ signal } = {}) => api.get('/bff/trading-radar/panels/public-information', { signal, skipErrorToast: true }),
+    stockEvaluation: (market, stockCode, { signal } = {}) => api.get('/bff/trading-radar/stock-evaluation', {
+      params: { market, stockCode }, signal, skipErrorToast: true
+    }),
+    startRefreshJob: ({ signal } = {}) => api.post('/bff/trading-radar/refresh-jobs', null, { timeout: 5000, signal, skipErrorToast: true }),
+    getRefreshJob: (jobId, { signal } = {}) => api.get(`/bff/trading-radar/refresh-jobs/${encodeURIComponent(jobId)}`, {
+      signal, skipErrorToast: true
+    }),
     // Task 249：手動「重新整理」＝先同步回補台股行情再重算。
     // 外部抓取需時，全域 timeout 30s 不夠用，必須 per-call 覆寫（鏈路上界為 nginx /api/ 的 60s）
     refresh: () => api.post('/bff/trading-radar/refresh', null, { timeout: 45000 }),
