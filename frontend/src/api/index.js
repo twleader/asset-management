@@ -121,18 +121,24 @@ export const bffApi = {
 
   // SnapshotForm
   snapshotForm: {
-    listSnapshots: () => api.get('/bff/snapshot-form/snapshots'),
+    listSnapshots: (options = {}) => api.get('/bff/snapshot-form/snapshots', options),
     create: (data) => api.post('/bff/snapshot-form', data, { skipErrorToast: true }),
     update: (id, data) => api.put(`/bff/snapshot-form/${id}`, data, { skipErrorToast: true }),
-    get: (id) => api.get(`/bff/snapshot-form/${id}`),
-    prices: (date, stocks) =>
-      api.post('/bff/snapshot-form/prices', stocks, { params: { date } }),
-    realtime: () => api.get('/bff/snapshot-form/realtime'),
-    exchangeRate: (date) =>
-      api.get('/bff/snapshot-form/exchange-rate', { params: { date } }),
-    getLookups: () => api.get('/bff/snapshot-form/lookups'),
-    getFunds: (date) => api.get('/bff/snapshot-form/funds', { params: date ? { date } : {} }),
-    refreshFundNav: () => api.post('/bff/snapshot-form/fund-nav/refresh')
+    get: (id, options = {}) => api.get(`/bff/snapshot-form/${id}`, options),
+    prices: (date, stocks, { signal, skipErrorToast = false } = {}) =>
+      api.post('/bff/snapshot-form/prices', stocks, { params: { date }, signal, skipErrorToast }),
+    realtime: ({ signal, skipErrorToast = false } = {}) => api.get('/bff/snapshot-form/realtime', { signal, skipErrorToast }),
+    exchangeRate: (date, options = {}) =>
+      api.get('/bff/snapshot-form/exchange-rate', { ...options, params: { date } }),
+    getLookups: (options = {}) => api.get('/bff/snapshot-form/lookups', options),
+    getFunds: (date, options = {}) => api.get('/bff/snapshot-form/funds', { ...options, params: date ? { date } : {} }),
+    refreshFundNav: (options = {}) => api.post('/bff/snapshot-form/fund-nav/refresh', null, options),
+    // Task 450：編輯頁的四個完整、彼此獨立的資料面板。錯誤由 view 顯示在
+    // 對應面板，AbortSignal 讓路由切換/重載能取消舊 request。
+    basicPanel: (id, { signal } = {}) => api.get(`/bff/snapshot-form/panels/basic/${id}`, { signal, skipErrorToast: true }),
+    depositsPanel: (id, { signal } = {}) => api.get(`/bff/snapshot-form/panels/deposits/${id}`, { signal, skipErrorToast: true }),
+    stocksPanel: (id, { signal } = {}) => api.get(`/bff/snapshot-form/panels/stocks/${id}`, { signal, skipErrorToast: true }),
+    fundsPanel: (id, { signal } = {}) => api.get(`/bff/snapshot-form/panels/funds/${id}`, { signal, skipErrorToast: true })
   },
 
   // StockAnalysisDialog（跨 view 共用元件）

@@ -7,7 +7,10 @@ import com.steven.assets.bff.common.SnapshotEnricher;
 import com.steven.assets.bff.security.AuthConstants;
 import com.steven.assets.bff.security.TenantIdentity;
 import com.steven.assets.bff.snapshotform.SnapshotFormBffController;
+import com.steven.assets.bff.snapshotform.SnapshotFormPanelService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -31,7 +34,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 
 /**
  * Task 410：SnapshotForm 的新增／更新必須沿用 tenant-aware businessServicesClient。
@@ -133,13 +135,53 @@ class SnapshotFormBffControllerTest {
                 .jsonPath("$.detail").isEqualTo("該日期的快照已存在");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"basic", "deposits", "stocks", "funds"})
+    void everyPanelAndItsDependentRequestsUseTheActualTenantHeaderFilter(String panel) {
+        CopyOnWriteArrayList<CapturedRequest> calls = new CopyOnWriteArrayList<>();
+        WebClient business = WebClient.builder().baseUrl("http://business")
+                .filter(WebClientConfig.tenantHeaderFilter())
+                .exchangeFunction(request -> requestBody(request).flatMap(body -> {
+                    calls.add(new CapturedRequest(request.method(), request.url().getPath(), body,
+                            request.headers().getFirst(AuthConstants.HDR_USER_ID),
+                            request.headers().getFirst(AuthConstants.HDR_USER_ROLE),
+                            request.headers().getFirst(AuthConstants.HDR_USER_STATUS)));
+                    String result = switch (request.url().getPath()) {
+                        case "/api/snapshots/15" -> """
+                                {"id":15,"snapshotDate":"2020-01-04","usdExchangeRate":null,"deposits":[],"funds":[],
+                                 "stocks":[{"id":7,"stockCode":"VTI","market":"美股","currency":"USD","shares":1,
+                                   "investmentCost":100,"currentValue":3000,"transactionDate":"2020-01-02","transactionExchangeRate":null}]}
+                                """;
+                        case "/api/market-data/exchange-rate/on-date" -> "{\"midRate\":30}";
+                        case "/api/market-data/market-status" -> "{}";
+                        default -> "[]";
+                    };
+                    return response(HttpStatus.OK, result);
+                })).build();
+        SnapshotFormBffController controller = controller(business);
+        Mono<?> result = switch (panel) {
+            case "basic" -> controller.basicPanel(15L);
+            case "deposits" -> controller.depositsPanel(15L);
+            case "stocks" -> controller.stocksPanel(15L);
+            case "funds" -> controller.fundsPanel(15L);
+            default -> throw new IllegalArgumentException(panel);
+        };
+        assertThat(result.contextWrite(TENANT).block()).isNotNull();
+        assertThat(calls).isNotEmpty().allSatisfy(SnapshotFormBffControllerTest::assertTenantHeaders);
+        assertThat(calls).extracting(CapturedRequest::path)
+                .contains("/api/snapshots/15", "/api/market-data/exchange-rate/on-date");
+        if (panel.equals("stocks")) assertThat(calls).extracting(CapturedRequest::path)
+                .contains("/api/market-data/history/prices-on-date", "/api/market-data/prices", "/api/market-data/market-status");
+    }
+
     private static Map<String, Object> payload(String snapshotDate, String notes) {
         return Map.of("snapshotDate", snapshotDate, "notes", notes,
                 "deposits", List.of(Map.of("bankId", 1, "amount", 1000)));
     }
 
     private static SnapshotFormBffController controller(WebClient client) {
-        return new SnapshotFormBffController(client, mock(SnapshotEnricher.class));
+        SnapshotEnricher enricher = new SnapshotEnricher(client);
+        return new SnapshotFormBffController(client, enricher, new SnapshotFormPanelService(client, enricher));
     }
 
     private static WebTestClient webTestClient(HttpStatus status, String body) {
