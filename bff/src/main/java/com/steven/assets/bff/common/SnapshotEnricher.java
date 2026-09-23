@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
@@ -211,7 +212,13 @@ public class SnapshotEnricher {
      *  與 {@link #fetchSnapshotClosePrices} 同一支 business API、同一次 HTTP，供 Dashboard 摘要
      *  在收盤 / 週末（frozen）時「股價/漲跌(%)」欄仍顯示漲跌，避免另發一次查詢。 */
     public Mono<SnapshotCloseData> fetchSnapshotCloseData(Map<String, Object> detail) {
-        return fetchSnapshotPriceRows(detail).map(prices -> {
+        return fetchSnapshotCloseData(detail, false);
+    }
+
+    /** 新 Panel 保留 access/not-found 錯誤；既有 callers 的 temporary-price fallback 不變。 */
+    public Mono<SnapshotCloseData> fetchSnapshotCloseData(
+            Map<String, Object> detail, boolean preserveAccessErrors) {
+        return fetchSnapshotPriceRows(detail, preserveAccessErrors).map(prices -> {
             Map<String, BigDecimal> closeMap = new HashMap<>();
             Map<String, Map<String, Object>> changeMap = new HashMap<>();
             Map<String, Map<String, Object>> displayRows = new HashMap<>();
@@ -243,8 +250,13 @@ public class SnapshotEnricher {
                                     Map<String, Map<String, Object>> displayRows) {}
 
     /** 內部：POST /history/prices-on-date 取回原始 price rows（含 price / priceChange / changePercent / tradingDate）。 */
-    @SuppressWarnings("unchecked")
     private Mono<List<Map<String, Object>>> fetchSnapshotPriceRows(Map<String, Object> detail) {
+        return fetchSnapshotPriceRows(detail, false);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Mono<List<Map<String, Object>>> fetchSnapshotPriceRows(
+            Map<String, Object> detail, boolean preserveAccessErrors) {
         Object stocksObj = detail.get("stocks");
         Object dateObj = detail.get("snapshotDate");
         if (!(stocksObj instanceof List<?> list) || dateObj == null || list.isEmpty()) {
@@ -272,7 +284,13 @@ public class SnapshotEnricher {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList());
+                .onErrorResume(error -> {
+                    if (preserveAccessErrors && error instanceof WebClientResponseException response) {
+                        int status = response.getStatusCode().value();
+                        if (status == 401 || status == 403 || status == 404) return Mono.error(error);
+                    }
+                    return Mono.just(Collections.emptyList());
+                });
     }
 
     /**

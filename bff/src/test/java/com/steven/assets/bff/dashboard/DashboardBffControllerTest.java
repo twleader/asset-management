@@ -23,7 +23,8 @@ class DashboardBffControllerTest {
     @Test
     void summaryProjectsLiveAssetsPricesWithoutCallingTheSeparatePricesEndpoint() {
         List<String> requests = new CopyOnWriteArrayList<>();
-        DashboardBffController controller = new DashboardBffController(client(requests), mock(SnapshotEnricher.class));
+        DashboardBffController controller = new DashboardBffController(client(requests), mock(SnapshotEnricher.class),
+                mock(DashboardLookthroughService.class), mock(DashboardPanelService.class));
 
         ResponseEntity<DashboardSummaryDto> response = controller.getSummary().block();
 
@@ -49,7 +50,8 @@ class DashboardBffControllerTest {
     @Test
     void realtimeKeepsPerStockTimestampInsteadOfReplacingItWithRootMaximumTimestamp() {
         List<String> requests = new CopyOnWriteArrayList<>();
-        DashboardBffController controller = new DashboardBffController(client(requests), mock(SnapshotEnricher.class));
+        DashboardBffController controller = new DashboardBffController(client(requests), mock(SnapshotEnricher.class),
+                mock(DashboardLookthroughService.class), mock(DashboardPanelService.class));
 
         ResponseEntity<Map<String, Object>> response = controller.getRealtime().block();
 

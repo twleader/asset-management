@@ -17,6 +17,8 @@ import java.time.LocalDate;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -86,10 +88,40 @@ class AssetSnapshotControllerTest {
 
     @Test
     void getHistory_回傳200() throws Exception {
-        when(assetService.getAssetHistory()).thenReturn(List.of());
+        when(assetService.getAssetHistory(null)).thenReturn(List.of());
 
         mvc.perform(get("/api/snapshots/history"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$").isArray());
+        verify(assetService).getAssetHistory(null);
+        verifyNoMoreInteractions(assetService);
+    }
+
+    @Test
+    void getHistory_snapshotIdDelegatesBoundedQuery() throws Exception {
+        when(assetService.getAssetHistory(42L)).thenReturn(List.of());
+
+        mvc.perform(get("/api/snapshots/history").param("snapshotId", "42"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        verify(assetService).getAssetHistory(42L);
+        verifyNoMoreInteractions(assetService);
+    }
+
+    @Test
+    void getHistory_missingSnapshotKeepsExisting404() throws Exception {
+        when(assetService.getAssetHistory(99L)).thenThrow(new java.util.NoSuchElementException("找不到快照 ID: 99"));
+
+        mvc.perform(get("/api/snapshots/history").param("snapshotId", "99"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getHistory_otherOwnerKeepsExisting404() throws Exception {
+        when(assetService.getAssetHistory(88L)).thenThrow(new com.steven.assets.security.TenantAccessException());
+
+        mvc.perform(get("/api/snapshots/history").param("snapshotId", "88"))
+                .andExpect(status().isNotFound());
     }
 }

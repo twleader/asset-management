@@ -457,7 +457,18 @@ public class AssetService {
 
     @Transactional(readOnly = true)
     public List<AssetSnapshotDto.AssetHistoryResponse> getAssetHistory() {
-        List<AssetSnapshot> snapshots = snapshotRepo.findAllByOrderBySnapshotDateAsc();
+        return buildAssetHistory(snapshotRepo.findAllByOrderBySnapshotDateAsc());
+    }
+
+    @Transactional(readOnly = true)
+    public List<AssetSnapshotDto.AssetHistoryResponse> getAssetHistory(Long snapshotId) {
+        if (snapshotId == null) return getAssetHistory();
+        AssetSnapshot selected = findSnapshot(snapshotId);
+        return buildAssetHistory(snapshotRepo.findHistoryWindow(
+                selected.getOwnerUserId(), selected.getId(), selected.getSnapshotDate()));
+    }
+
+    private List<AssetSnapshotDto.AssetHistoryResponse> buildAssetHistory(List<AssetSnapshot> snapshots) {
         BigDecimal prevTotal = null;
         var result = new java.util.ArrayList<AssetSnapshotDto.AssetHistoryResponse>();
 

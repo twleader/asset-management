@@ -10,14 +10,22 @@
         @change="onSnapshotChange"
         placeholder="選擇快照">
         <el-option
-          v-for="s in store.snapshots"
+          v-for="s in snapshots"
           :key="s.id"
           :label="s.snapshotDate"
           :value="s.id" />
       </el-select>
     </div>
 
+    <div v-if="metadataError" class="metadata-error" role="alert">
+      快照清單載入失敗，請重試。
+      <el-button size="small" type="primary" plain @click="loadSnapshots">重試</el-button>
+    </div>
+    <div v-else-if="metadataLoading" role="status">快照清單載入中…</div>
+    <div v-else-if="!snapshots.length" role="status">目前沒有資產快照</div>
+
     <!-- KPI Cards -->
+    <DashboardPanelState panel="kpis" label="資產總覽" :state="panels.kpis" :height="96" @retry="retryPanel('kpis')">
     <div class="kpi-row kpi-flex">
       <el-card v-for="kpi in kpiCards" :key="kpi.label" class="kpi-card kpi-flex-item">
         <div class="kpi-icon" :style="{ background: kpi.bg }">
@@ -32,6 +40,8 @@
         </div>
       </el-card>
     </div>
+
+    </DashboardPanelState>
 
     <!-- Charts Row -->
     <el-row :gutter="20" class="chart-row chart-row-main">
@@ -52,13 +62,10 @@
               </el-tabs>
             </div>
           </template>
+          <DashboardPanelState panel="allocation" label="資產配置" :state="panels.allocation" :height="400" @retry="retryPanel('allocation')">
           <v-chart v-if="allocationTab === 'category'" :option="pieOption" style="height: 400px" autoresize />
           <div v-else-if="allocationTab === 'twStock'">
-            <div v-if="twLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
-              <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
-              載入台股個股穿透中…
-            </div>
-            <div v-else-if="!twLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            <div v-if="!twLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無台股部位
             </div>
             <v-chart v-else :option="twStockPieOption" style="height: 400px; cursor: pointer" autoresize
@@ -68,11 +75,7 @@
             </div>
           </div>
           <div v-else-if="allocationTab === 'usStock'">
-            <div v-if="usLookthroughLoading" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
-              <el-icon class="is-loading" style="margin-right:6px"><Loading /></el-icon>
-              載入美股個股穿透中…
-            </div>
-            <div v-else-if="!usLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
+            <div v-if="!usLookthroughHasData" style="height:400px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
               此快照無美股部位
             </div>
             <v-chart v-else :option="usStockPieOption" style="height: 400px; cursor: pointer" autoresize
@@ -84,6 +87,7 @@
           <div v-else>
             <v-chart :option="assetClassPieOption" style="height: 400px" autoresize />
           </div>
+          </DashboardPanelState>
         </el-card>
       </el-col>
 
@@ -94,6 +98,7 @@
             <span class="card-title">資產歷史趨勢</span>
             <span class="card-sub">{{ pieDate }}</span>
           </template>
+          <DashboardPanelState panel="trend" label="資產趨勢" :state="panels.trend" :height="400" @retry="retryPanel('trend')">
           <div class="trend-legend">
             <div v-for="item in trendLegendItems" :key="item.name" class="trend-legend-item">
               <span class="tl-dot" :style="{ background: item.color }"></span>
@@ -107,6 +112,7 @@
           <v-chart :option="trendOption" style="height: 318px; cursor: pointer" autoresize
             @updateAxisPointer="onTrendAxisPointer"
             @click="onTrendClick" />
+          </DashboardPanelState>
         </el-card>
       </el-col>
     </el-row>
@@ -125,6 +131,7 @@
               </el-tabs>
             </div>
           </template>
+          <DashboardPanelState panel="deposits" label="銀行存款" :state="panels.deposits" :height="440" @retry="retryPanel('deposits')">
           <v-chart :option="bankOption" style="height: 440px" autoresize />
           <div class="chart-summary-bar">
             <template v-if="bankCurrencyTab === 'TWD'">
@@ -160,6 +167,7 @@
               </div>
             </template>
           </div>
+          </DashboardPanelState>
         </el-card>
       </el-col>
 
@@ -176,6 +184,7 @@
               </el-tabs>
             </div>
           </template>
+          <DashboardPanelState panel="stock-values" label="持股現值" :state="panels['stock-values']" :height="440" @retry="retryPanel('stock-values')">
           <v-chart :option="stockBarOption" style="height: 440px" autoresize
             @dblclick="onBarDblClick" />
           <div class="chart-summary-bar">
@@ -197,6 +206,7 @@
               </span>
             </div>
           </div>
+          </DashboardPanelState>
         </el-card>
       </el-col>
     </el-row>
@@ -209,18 +219,21 @@
             <div style="display:flex;align-items:center;justify-content:space-between">
               <span class="card-title">📊 股票持股</span>
               <div style="display:flex;align-items:center;gap:12px">
-                <span style="font-size:12px">
-                  台股 <span :style="{ color: marketStatus.twMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
-                  {{ marketStatus.twMarketOpen ? '開盤中' : '休市' }}
-                </span>
-                <span style="font-size:12px">
-                  美股 <span :style="{ color: marketStatus.usMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
-                  {{ marketStatus.usMarketOpen ? '開盤中' : '休市' }}
-                </span>
-                <span style="font-size:12px">
-                  英股 <span :style="{ color: marketStatus.ukMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
-                  {{ marketStatus.ukMarketOpen ? '開盤中' : '休市' }}
-                </span>
+                <template v-if="marketStatusAvailable">
+                  <span style="font-size:12px">
+                    台股 <span :style="{ color: marketStatus.twMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
+                    {{ marketStatus.twMarketOpen ? '開盤中' : '休市' }}
+                  </span>
+                  <span style="font-size:12px">
+                    美股 <span :style="{ color: marketStatus.usMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
+                    {{ marketStatus.usMarketOpen ? '開盤中' : '休市' }}
+                  </span>
+                  <span style="font-size:12px">
+                    英股 <span :style="{ color: marketStatus.ukMarketOpen ? '#16a34a' : '#94a3b8' }">●</span>
+                    {{ marketStatus.ukMarketOpen ? '開盤中' : '休市' }}
+                  </span>
+                </template>
+                <span v-else style="font-size:12px;color:#94a3b8">市場狀態暫無資料</span>
                 <el-button type="primary" size="small" :icon="ArrowRight"
                   @click="$router.push('/snapshots/' + latest?.id + '/edit')">
                   管理資產
@@ -228,6 +241,7 @@
               </div>
             </div>
           </template>
+          <DashboardPanelState panel="holdings" label="股票持股" :state="panels.holdings" :height="280" @retry="retryPanel('holdings')">
           <el-tabs v-model="stockMarketTab" class="stock-tabs">
             <el-tab-pane label="台股" name="台股" />
             <el-tab-pane label="美股" name="美股" />
@@ -343,6 +357,7 @@
               <span class="csb-val">{{ stockTableSummary.count }} 檔</span>
             </div>
           </div>
+          </DashboardPanelState>
         </el-card>
       </el-col>
     </el-row>
@@ -355,6 +370,7 @@
             <span class="card-title">信託基金（現值）</span>
             <span class="card-sub">{{ latest?.snapshotDate }}</span>
           </template>
+          <DashboardPanelState panel="funds" label="信託基金" :state="panels.funds" :height="280" @retry="retryPanel('funds')">
           <div v-if="!fundFilteredHoldings.length"
                style="height:280px;display:flex;align-items:center;justify-content:center;color:#94a3b8">
             尚無基金資料
@@ -384,11 +400,12 @@
               <span class="csb-val" style="color:#16a34a">{{ formatCurrency(fundSummary.totalDividend) }}</span>
             </div>
           </div>
+          </DashboardPanelState>
         </el-card>
       </el-col>
     </el-row>
 
-    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" :usd-rate="detail?.usdExchangeRate" />
+    <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" :usd-rate="analysisUsdRate" />
   </div>
 </template>
 
@@ -398,13 +415,14 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { PieChart, LineChart, BarChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { ArrowRight, Loading, Operation } from '@element-plus/icons-vue'
+import { ArrowRight, Operation } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
-import { useAssetStore } from '@/stores/assetStore'
 import { bffApi } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import DashboardPanelState from '@/components/DashboardPanelState.vue'
 import { escapeHtml } from '@/utils/escapeHtml'
 import { isAcceptedTodayQuote, isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
+import { createDashboardPanelLoader } from '@/utils/dashboardPanelLoader'
 
 let orderSaveTimer = null
 let stockSortable = null
@@ -412,47 +430,118 @@ const stockTableRef = ref(null)
 
 use([CanvasRenderer, PieChart, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent])
 
-const store = useAssetStore()
-const stockPrices = ref({})
-const mergedStocksFromBff = ref([]) // 由 BFF 預先彙總（含 stockPrice、profit、profitRate 等）
-const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
-// 由 /api/market-data/live-assets 回傳：含 liveStockValue / liveTotalAssets / per-stock liveValue。
-// 收盤後 backend 會 fallback 至 stock_price_history（前一交易日收盤價），故此值一律存在。
-// 與「歷年資產管理」共用同源 API，確保 KPI「資產總計」兩頁一致。
-const liveAssets = ref(null)
 const selectedSnapshotId = ref(null)
-
-// 「資產配置分佈」面板 tab 與台股個股穿透資料（lazy fetch + per-snapshot cache）
 const allocationTab = ref('category')
-const twLookthrough = ref(null)
-const twLookthroughLoading = ref(false)
-const twLookthroughCache = new Map() // snapshotId -> payload
-const usLookthrough = ref(null)
-const usLookthroughLoading = ref(false)
-const usLookthroughCache = new Map() // snapshotId -> payload
+const snapshots = ref([])
+const panelNames = ['kpis', 'allocation', 'trend', 'deposits', 'stock-values', 'holdings', 'funds']
+const panelLoader = createDashboardPanelLoader({
+  panelNames,
+  stateFactory: reactive,
+  isEmpty(panel, payload) {
+    const data = payload?.data ?? {}
+    if (panel === 'trend') return Array.isArray(data.history) && data.history.length === 0
+    if (panel === 'deposits') return Array.isArray(data.snapshot?.deposits) && data.snapshot.deposits.length === 0
+    if (panel === 'funds') return Array.isArray(data.snapshot?.funds) && data.snapshot.funds.length === 0
+    if (panel === 'holdings' || panel === 'stock-values') {
+      return Array.isArray(data.mergedStocks) && data.mergedStocks.length === 0
+    }
+    return false
+  },
+  request(panel, { snapshotId, context, signal }) {
+    const id = snapshotId
+    switch (panel) {
+      case 'kpis': return bffApi.dashboard.kpis(id, { signal })
+      case 'allocation': return bffApi.dashboard.allocation(id, context.tab ?? 'category', { signal })
+      case 'trend': return bffApi.dashboard.trend({ signal })
+      case 'deposits': return bffApi.dashboard.deposits(id, { signal })
+      case 'stock-values': return bffApi.dashboard.stockValues(id, { signal })
+      case 'holdings': return bffApi.dashboard.holdings(id, { signal })
+      case 'funds': return bffApi.dashboard.funds(id, { signal })
+      default: throw new Error(`未知 Dashboard panel: ${panel}`)
+    }
+  }
+})
+const panels = panelLoader.states
+const panelData = panel => panels[panel]?.data?.data ?? null
+const retryPanel = panel => panelLoader.retry(panel)
+
+// 各 Panel 只維護自己的即時價副本；SSE 只是完成 payload 後的增量，不能成為首屏資料來源。
+const livePrices = reactive({ kpis: {}, allocation: {}, 'stock-values': {}, holdings: {} })
+function priceMap(prices) {
+  return Object.fromEntries((prices ?? []).map(p => [`${p.market}_${p.stockCode}`, p]))
+}
+for (const panel of Object.keys(livePrices)) {
+  watch(() => panelData(panel)?.stockPrices, prices => { livePrices[panel] = priceMap(prices) }, { immediate: true })
+}
+const stockPrices = computed(() => livePrices.holdings)
+const holdingPayload = computed(() => panelData('holdings'))
+const stockValuesPayload = computed(() => panelData('stock-values'))
+const kpiPayload = computed(() => panelData('kpis'))
+const allocationPayload = computed(() => panelData('allocation'))
+const trendPayload = computed(() => panelData('trend'))
+const depositsPayload = computed(() => panelData('deposits'))
+const fundsPayload = computed(() => panelData('funds'))
+const marketStatus = computed(() => holdingPayload.value?.marketStatus ?? {})
+const marketStatusAvailable = computed(() =>
+  ['twMarketOpen', 'usMarketOpen', 'ukMarketOpen'].every(key => marketStatus.value[key] != null)
+)
+const liveAssets = computed(() => holdingPayload.value?.liveAssets ?? null)
+const latest = computed(() => snapshots.value.find(s => s.id === selectedSnapshotId.value) ?? null)
+const detail = computed(() => holdingPayload.value?.snapshot ?? null)
 
 let priceStream = null
 let statusTimer = null
+let reconnectTimer = null
+let statusInFlight = false
+let isMounted = false
+let metadataController = null
+let statusController = null
 
-onMounted(async () => {
-  // Single BFF call aggregates: snapshots + history + latestSnapshotDetail + prices + marketStatus
-  await loadDashboardSummary()
+const metadataLoading = ref(false)
+const metadataError = ref(null)
 
-  // 即時股價：透過 SSE 訂閱 external-materials-service 推送（取代原本 2 分鐘 polling）
-  openPriceStream()
+async function loadSnapshots() {
+  metadataController?.abort()
+  const controller = new AbortController()
+  metadataController = controller
+  metadataLoading.value = true
+  metadataError.value = null
+  try {
+    const metadata = await bffApi.dashboard.snapshots({ signal: controller.signal })
+    if (!isMounted || metadataController !== controller) return
+    snapshots.value = metadata ?? []
+    const id = snapshots.value[0]?.id
+    if (id != null) {
+      selectedSnapshotId.value = id
+      // 每個 panel 在自己的 request 完成時立即提交，不等待其它 panel。
+      panelLoader.select(id, { allocation: { tab: allocationTab.value } })
+      if (!priceStream) openPriceStream()
+      if (!statusTimer) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
+    }
+  } catch (error) {
+    if (isMounted && metadataController === controller && !controller.signal.aborted) metadataError.value = error
+  } finally {
+    if (metadataController === controller) {
+      metadataLoading.value = false
+      metadataController = null
+    }
+  }
+}
 
-  // marketStatus 仍用低頻 polling（每分鐘）— 純時區判斷，不需要即時推
-  statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
-
-  // 背景補齊所有快照缺漏的配息率（不阻塞頁面載入）
-  bffApi.dashboard.enrichDividendRates().then(() => {
-    return loadDashboardSummary()
-  }).catch(() => {})
+onMounted(() => {
+  isMounted = true
+  loadSnapshots()
 })
 
 onUnmounted(() => {
+  isMounted = false
+  panelLoader.dispose()
+  metadataController?.abort()
+  statusController?.abort()
   if (priceStream) { priceStream.close(); priceStream = null }
   if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+  if (orderSaveTimer) { clearTimeout(orderSaveTimer); orderSaveTimer = null }
   if (stockSortable) { stockSortable.destroy(); stockSortable = null }
 })
 
@@ -465,75 +554,73 @@ function openPriceStream() {
       // 後端 SSE payload 用 changePct，前端內部用 changePercent，順手 mirror 一下
       if (p.changePct != null && p.changePercent == null) p.changePercent = p.changePct
       const key = `${p.market}_${p.stockCode}`
-      const merged = mergeSseQuote(stockPrices.value[key], p, marketToday(p.market))
-      stockPrices.value = { ...stockPrices.value, [key]: merged }
+      for (const panel of Object.keys(livePrices)) {
+        const current = livePrices[panel][key]
+        if (current) livePrices[panel] = { ...livePrices[panel], [key]: mergeSseQuote(current, p, marketToday(p.market)) }
+      }
     } catch (e) {
       console.warn('SSE 解析失敗:', e)
     }
   })
   priceStream.onerror = () => {
     // EventSource 內建 reconnect；只在被永久關閉時重建
-    if (priceStream && priceStream.readyState === EventSource.CLOSED) {
-      setTimeout(openPriceStream, 5000)
+    if (isMounted && priceStream && priceStream.readyState === EventSource.CLOSED && !reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        if (isMounted) openPriceStream()
+      }, 5000)
     }
   }
 }
 
 async function refreshMarketStatus() {
+  if (statusInFlight || !isMounted) return
+  statusInFlight = true
+  const controller = new AbortController()
+  statusController = controller
+  const selectedId = selectedSnapshotId.value
+  const generations = Object.fromEntries(Object.keys(livePrices).map(panel => [panel, panels[panel].generation]))
+  // 趨勢圖的即時估值也由自己的 BFF 完整更新；失敗保留上一份完整圖。
+  if (panels.trend.data && !panels.trend.loading) panelLoader.run('trend', { preserve: true })
   try {
-    const data = await bffApi.dashboard.realtime()
-    if (data?.stockPrices) applyPricesAndStatus(data.stockPrices, data.marketStatus ?? marketStatus.value)
-    if (data?.marketStatus) marketStatus.value = data.marketStatus
-    if (data?.liveAssets) liveAssets.value = data.liveAssets
-  } catch (e) {
-    /* silent */
-  }
-}
-
-async function loadDashboardSummary() {
-  try {
-    const summary = await bffApi.dashboard.summary()
-    store.snapshots = summary.snapshots ?? []
-    store.history = summary.history ?? []
-    // 僅在使用者尚未選擇任何快照、或目前選的就是最新時才更新；保留使用者選擇避免被輪詢覆蓋
-    const latestId = summary.latestSnapshotDetail?.id
-    if (latestId != null && (selectedSnapshotId.value == null || selectedSnapshotId.value === latestId)) {
-      store.currentSnapshot = summary.latestSnapshotDetail
-      selectedSnapshotId.value = latestId
-      mergedStocksFromBff.value = summary.mergedStocks ?? []
+    const data = await bffApi.dashboard.realtime({ signal: controller.signal })
+    if (!isMounted || controller.signal.aborted || selectedSnapshotId.value !== selectedId) return
+    for (const panel of Object.keys(livePrices)) {
+      panelLoader.update(panel, generations[panel], payload => {
+        const next = { ...payload.data }
+        // 資產分類/穿透 tab 不需要 stockPrices 與 liveAssets。
+        if (Array.isArray(next.stockPrices) && data?.stockPrices?.length) {
+          const prices = { ...livePrices[panel] }
+          for (const quote of data.stockPrices) {
+            const key = `${quote.market}_${quote.stockCode}`
+            if (prices[key]) prices[key] = mergeSseQuote(prices[key], quote, marketToday(quote.market))
+          }
+          next.stockPrices = Object.values(prices)
+        }
+        const hasLive = next.liveAssets != null && data?.liveAssets?.snapshotDate === next.snapshot?.snapshotDate
+        const hasStatus = next.marketStatus != null &&
+          ['twMarketOpen', 'usMarketOpen', 'ukMarketOpen'].every(key => typeof data?.marketStatus?.[key] === 'boolean')
+        if (hasLive) next.liveAssets = data.liveAssets
+        if (hasStatus) next.marketStatus = data.marketStatus
+        return { ...payload, data: next, warnings: (payload.warnings ?? []).filter(warning =>
+          !(hasLive && warning === 'LIVE_ASSETS_UNAVAILABLE') && !(hasStatus && warning === 'MARKET_STATUS_UNAVAILABLE')) }
+      })
     }
-    applyPricesAndStatus(summary.stockPrices ?? [], summary.marketStatus ?? {})
-    liveAssets.value = summary.liveAssets ?? null
   } catch (e) {
-    console.warn('載入儀表板摘要失敗:', e)
+    // 背景失敗不取代已完成的 panel 資料。
+  } finally {
+    statusInFlight = false
+    if (statusController === controller) statusController = null
   }
 }
 
-
-async function onSnapshotChange(id) {
-  try {
-    const detail = await bffApi.dashboard.snapshot(id)
-    store.currentSnapshot = detail
-    selectedSnapshotId.value = id
-    mergedStocksFromBff.value = detail.mergedStocks ?? []
-  } catch (e) {
-    console.warn('載入快照失敗:', e)
-  }
+function onSnapshotChange(id) {
+  if (id == null) return
+  statusController?.abort()
+  if (orderSaveTimer) { clearTimeout(orderSaveTimer); orderSaveTimer = null }
+  selectedSnapshotId.value = id
+  panelLoader.select(id, { allocation: { tab: allocationTab.value } })
 }
-
-function applyPricesAndStatus(prices, status) {
-  marketStatus.value = status
-  const map = {}
-  for (const p of prices) {
-    map[`${p.market}_${p.stockCode}`] = p
-  }
-  stockPrices.value = map
-}
-
-const latest = computed(() =>
-  store.snapshots.find(s => s.id === selectedSnapshotId.value) ?? store.latestSnapshot
-)
-const detail = computed(() => store.currentSnapshot)
 
 function isBaselineToday(market) {
   // 跨時區處理：基準日要與「該市場當地時區的今天」比，不是 host machine 時區。
@@ -556,8 +643,8 @@ function shouldApplyLive(market) {
  *  注意：liveAssets.stocks 是「每 broker 每股票」一筆（同一檔在多家券商會有多筆），
  *  customTableData 是依 stockCode+market 合併過的（一檔一列），故必須 sum 全部 match 的 broker 列。
  *  若沒有任何一筆有 liveValue，回傳 null 讓上層 fallback。 */
-function getLiveValueFromAssets(row) {
-  const list = liveAssets.value?.stocks
+function getLiveValueFromAssets(row, sourceLiveAssets = liveAssets.value) {
+  const list = sourceLiveAssets?.stocks
   if (!Array.isArray(list)) return null
   let sum = 0
   let any = false
@@ -570,12 +657,12 @@ function getLiveValueFromAssets(row) {
   return any ? sum : null
 }
 
-function getRealtimePrice(row) {
+function getRealtimePrice(row, sourcePrices = stockPrices.value) {
   // 基準日 != 該市場當地今日時，股價欄一律凍結為快照儲存的收盤價（priceChange 顯示由模板 fallback 處理）。
   // 不加閘門會讓 SSE 推送的 live 價滲入歷史快照的「股價」欄，與其他欄位（現值/損益/預估配息）凍結值不一致。
   if (!shouldApplyLive(row.market)) return null
   const key = `${row.market}_${row.stockCode}`
-  const p = stockPrices.value[key]
+  const p = sourcePrices[key]
   if (!p || p.price == null) return null
   if (!isAcceptedTodayQuote(p, marketToday(row.market))) return null
   return {
@@ -585,12 +672,12 @@ function getRealtimePrice(row) {
   }
 }
 
-function getQuoteForRow(row) {
-  return stockPrices.value[`${row.market}_${row.stockCode}`]
+function getQuoteForRow(row, sourcePrices = stockPrices.value) {
+  return sourcePrices[`${row.market}_${row.stockCode}`]
 }
 
-function isRowClosePending(row) {
-  return isBaselineToday(row.market) && isClosePending(getQuoteForRow(row))
+function isRowClosePending(row, sourcePrices = stockPrices.value) {
+  return isBaselineToday(row.market) && isClosePending(getQuoteForRow(row, sourcePrices))
 }
 
 // 台股慣例配色：漲紅、跌綠、平盤灰（與股票走勢圖 markPoint「紅漲綠跌」一致）。
@@ -614,7 +701,7 @@ function getPriceCell(row) {
   if (row.stockPrice == null) return null
   const p = stockPrices.value[`${row.market}_${row.stockCode}`]
   // stockPrices map 只對應「目前正在檢視的是最新快照」的情境；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
-  const isLatestSnapshotView = selectedSnapshotId.value == null || selectedSnapshotId.value === store.latestSnapshot?.id
+  const isLatestSnapshotView = selectedSnapshotId.value != null && selectedSnapshotId.value === snapshots.value[0]?.id
   const belongsToRow = p && isLatestSnapshotView
   return {
     price: Number(row.stockPrice),
@@ -652,9 +739,11 @@ const formatPct = (v) => v ? `${(Number(v) * 100).toFixed(1)}%` : '-'
 
 const filteredHistory = computed(() => {
   const baseline = latest.value?.snapshotDate
-  if (!baseline) return store.history
-  return store.history.filter(r => r.snapshotDate <= baseline)
+  const history = kpiPayload.value?.history ?? []
+  if (!baseline) return history
+  return history.filter(r => r.snapshotDate <= baseline)
 })
+const categoryHistory = computed(() => allocationPayload.value?.history ?? [])
 
 const kpiCards = computed(() => {
   // 整個 dashboard（含 KPI）由 selectedSnapshotId 驅動；liveLatest = 選中快照（含盤中 live overlay）。
@@ -674,7 +763,7 @@ const kpiCards = computed(() => {
   //   債券現值 = bondValue（債券型：債券 ETF ＋ 債券型基金）
   // 與圓餅圖同源（history row）、同值：兩卡佔比 == 圓餅圖股票／債券；存款+股票現值+債券現值 == 資產總計。
   // 採快照凍結逐筆 currentValue、不套盤中 live（同 Req 25，與圓餅圖一致）。
-  const classRow = store.history.find(r => r.id === s.id)
+  const classRow = filteredHistory.value.find(r => r.id === s.id)
   const stockClassified = Number(classRow?.stockValue || 0)
   const bondClassified = Number(classRow?.bondValue || 0)
   const pctOfTotal = v => total > 0 ? (v / total * 100).toFixed(1) : '0.0'
@@ -733,7 +822,7 @@ function onTrendClick(params) {
   // 點在線/點上：params.dataIndex；點在格線空白處：用 hover 追蹤的 index
   const idx = (params && typeof params.dataIndex === 'number') ? params.dataIndex : trendHoverIdx.value
   if (idx == null) return
-  const row = store.history[idx]
+  const row = trendPayload.value?.history?.[idx]
   if (row?.id != null && row.id !== selectedSnapshotId.value) {
     selectedSnapshotId.value = row.id     // 同步反映到下拉，避免閃動
     onSnapshotChange(row.id)              // 載入該快照明細，KPI/圓餅/銀行/持股一次切換
@@ -754,7 +843,7 @@ const effectiveSnapshotId = computed(() => {
 
 // 趨勢圖下方自訂 legend：跟著 pieDate（hover 或選中快照）顯示金額與佔比
 const trendLegendItems = computed(() => {
-  const baseRow = filteredHistory.value.find(x => x.snapshotDate === pieDate.value)
+  const baseRow = (trendPayload.value?.history ?? []).find(x => x.snapshotDate === pieDate.value)
   if (!baseRow) {
     return [
       { name: '總資產', value: 0, pct: '-', color: '#8b5cf6' },
@@ -762,14 +851,7 @@ const trendLegendItems = computed(() => {
       { name: '投資',   value: 0, pct: '-', color: '#f59e0b' }
     ]
   }
-  // 若選中快照 == 最新且盤中有 live overlay，使用 liveLatest 覆蓋的值，與上方 KPI / 趨勢線最後一點一致
-  const live = liveLatest.value
-  const useLive = live && latest.value && pieDate.value === latest.value.snapshotDate
-  const r = useLive
-    ? { ...baseRow,
-        totalStockValue: live.totalStockValue,
-        totalAssets: live.totalAssets }
-    : baseRow
+  const r = baseRow
   const total   = Number(r.totalAssets || 0)
   const deposit = Number(r.totalDeposit || 0)
   const invest  = Number(r.totalFundValue || 0) + Number(r.totalStockValue || 0)
@@ -786,17 +868,13 @@ const pieOption = computed(() => {
   // 取資料：hover 時用對應日期那筆；否則用選中／最新快照那筆。
   // 這樣不論選的是哪個快照，5 區都能正確顯示。
   const targetDate = hoveredHistoryDate.value ?? latest.value?.snapshotDate
-  const r = filteredHistory.value.find(x => x.snapshotDate === targetDate)
+  const r = categoryHistory.value.find(x => x.snapshotDate === targetDate)
   if (!r) return {}
-  // 若顯示的是「最新／選中快照 + 該快照=最新」且盤中即時跳動：用 liveLatest 的台股/美股/英股值覆蓋（hover 時不覆蓋）
-  const useLive = !hoveredHistoryDate.value && liveLatest.value
-        && targetDate === liveLatest.value.snapshotDate
-  const twStock = useLive ? Number(liveLatest.value.totalTwStockValue ?? r.totalTwStockValue ?? 0)
-                          : Number(r.totalTwStockValue || 0)
-  const usStock = useLive ? Number(liveLatest.value.totalUsStockValue ?? r.totalUsStockValue ?? 0)
-                          : Number(r.totalUsStockValue || 0)
-  const ukStock = useLive ? Number(liveLatest.value.totalUkStockValue ?? r.totalUkStockValue ?? 0)
-                          : Number(r.totalUkStockValue || 0)
+  const live = allocationLiveLatest.value
+  const useLive = !hoveredHistoryDate.value && live && targetDate === live.snapshotDate
+  const twStock = useLive ? Number(live.totalTwStockValue ?? r.totalTwStockValue ?? 0) : Number(r.totalTwStockValue || 0)
+  const usStock = useLive ? Number(live.totalUsStockValue ?? r.totalUsStockValue ?? 0) : Number(r.totalUsStockValue || 0)
+  const ukStock = useLive ? Number(live.totalUkStockValue ?? r.totalUkStockValue ?? 0) : Number(r.totalUkStockValue || 0)
   const segments = [
     { value: Math.round(Number(r.totalTwdDeposit || 0)),    name: '台幣存款',  color: '#3b82f6' },
     { value: Math.round(Number(r.totalUsdDeposit || 0)),    name: '美元存款',  color: '#60a5fa' },
@@ -807,6 +885,7 @@ const pieOption = computed(() => {
   ]
   const data = segments.filter(d => d.value > 0)
   return {
+    animation: false,
     tooltip: { trigger: 'item', formatter: p => `${p.name}: $${Number(p.value).toLocaleString()} (${p.percent}%)` },
     legend: { show: false },
     series: [{
@@ -823,19 +902,7 @@ const pieOption = computed(() => {
 // 現金/債券/股票 三分類圓餅圖（Requirement 25）：與「資產類別」tab 同源，讀 history 的
 // cashValue/bondValue/stockValue（business-services 算好），hover/換快照即時反應、不另抓。
 // 雙層圓餅外圈 hover 用：載入該快照逐持股分類，群組成 { 成長型/收益型/短期/中期/長期: [{name,value}] }
-const classifiedHoldings = ref([])
-const classifiedCache = new Map()
-async function loadHoldingsClassified(snapshotId) {
-  if (!snapshotId) return
-  if (classifiedCache.has(snapshotId)) { classifiedHoldings.value = classifiedCache.get(snapshotId); return }
-  try {
-    const data = await bffApi.dashboard.holdingsClassified(snapshotId)
-    classifiedCache.set(snapshotId, data)
-    if (effectiveSnapshotId.value === snapshotId) classifiedHoldings.value = data
-  } catch (e) {
-    console.warn('逐持股分類載入失敗:', e)
-  }
-}
+const classifiedHoldings = computed(() => allocationPayload.value?.classifiedHoldings ?? [])
 const holdingsByBucket = computed(() => {
   // 以代號合併同一標的的多筆 broker 持股，避免 tooltip 同名重複多列
   const buckets = { 成長型: {}, 收益型: {}, 短期: {}, 中期: {}, 長期: {} }
@@ -863,7 +930,7 @@ const holdingsByBucket = computed(() => {
 // 資料同源（history 的 totalTwd/UsdDeposit + cash/bond/stock + bondShort/Mid/Long + growth/income）。
 const assetClassPieOption = computed(() => {
   const targetDate = hoveredHistoryDate.value ?? latest.value?.snapshotDate
-  const r = filteredHistory.value.find(x => x.snapshotDate === targetDate)
+  const r = categoryHistory.value.find(x => x.snapshotDate === targetDate)
   if (!r) return {}
   const num = k => Math.round(Number(r[k] || 0))
   const twd = num('totalTwdDeposit'), usd = num('totalUsdDeposit')
@@ -905,6 +972,7 @@ const assetClassPieOption = computed(() => {
     return head
   }
   return {
+    animation: false,
     tooltip: { trigger: 'item', confine: true, extraCssText: 'max-width:300px;', formatter: fmtTooltip },
     legend: { show: false },
     series: [
@@ -934,6 +1002,7 @@ const TW_PIE_COLORS = [
   '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#0ea5e9',
   '#94a3b8'  // 「其它」灰色
 ]
+const twLookthrough = computed(() => allocationPayload.value?.twLookthrough ?? null)
 const twLookthroughHasData = computed(() => {
   const lt = twLookthrough.value
   return !!(lt && Array.isArray(lt.items) && (lt.items.length > 0 || Number(lt.others?.value || 0) > 0))
@@ -959,6 +1028,7 @@ const twStockPieOption = computed(() => {
   }
   const data = segs.filter(d => d.value > 0)
   return {
+    animation: false,
     tooltip: {
       trigger: 'item',
       // hover 細節：有代號則顯示「代號 股名」，否則只顯示股名
@@ -980,29 +1050,8 @@ const twStockPieOption = computed(() => {
   }
 })
 
-async function loadTwStockLookthrough(snapshotId) {
-  if (!snapshotId) return
-  if (twLookthroughCache.has(snapshotId)) {
-    twLookthrough.value = twLookthroughCache.get(snapshotId)
-    return
-  }
-  twLookthroughLoading.value = true
-  try {
-    const data = await bffApi.dashboard.twStockLookthrough(snapshotId)
-    twLookthroughCache.set(snapshotId, data)
-    // 防止 race：抓回來時若 effective snapshot 已切走（hover 移動或下拉換快照），不覆寫畫面
-    if (effectiveSnapshotId.value === snapshotId) {
-      twLookthrough.value = data
-    }
-  } catch (e) {
-    console.warn('台股個股穿透載入失敗:', e)
-    twLookthrough.value = null
-  } finally {
-    twLookthroughLoading.value = false
-  }
-}
-
 // 美股個股穿透（鏡像台股；穿透演算法差異在 BFF /us-stock-lookthrough：依真實權重、未揭露歸其它、代號聚合）
+const usLookthrough = computed(() => allocationPayload.value?.usLookthrough ?? null)
 const usLookthroughHasData = computed(() => {
   const lt = usLookthrough.value
   return !!(lt && Array.isArray(lt.items) && (lt.items.length > 0 || Number(lt.others?.value || 0) > 0))
@@ -1028,6 +1077,7 @@ const usStockPieOption = computed(() => {
   }
   const data = segs.filter(d => d.value > 0)
   return {
+    animation: false,
     tooltip: {
       trigger: 'item',
       // hover 細節：顯示「代號 英文全名」+ 金額（台幣）+ 佔比
@@ -1049,59 +1099,18 @@ const usStockPieOption = computed(() => {
   }
 })
 
-async function loadUsStockLookthrough(snapshotId) {
-  if (!snapshotId) return
-  if (usLookthroughCache.has(snapshotId)) {
-    usLookthrough.value = usLookthroughCache.get(snapshotId)
-    return
-  }
-  usLookthroughLoading.value = true
-  try {
-    const data = await bffApi.dashboard.usStockLookthrough(snapshotId)
-    usLookthroughCache.set(snapshotId, data)
-    // race 防護：抓回來時若 effective snapshot 已切走（hover 移動或下拉換快照），不覆寫畫面
-    if (effectiveSnapshotId.value === snapshotId) {
-      usLookthrough.value = data
-    }
-  } catch (e) {
-    console.warn('美股個股穿透載入失敗:', e)
-    usLookthrough.value = null
-  } finally {
-    usLookthroughLoading.value = false
-  }
-}
-
-watch([allocationTab, effectiveSnapshotId], ([tab, sid]) => {
-  if (sid == null) return
-  if (tab === 'twStock') {
-    if (twLookthroughCache.has(sid)) twLookthrough.value = twLookthroughCache.get(sid)
-    else loadTwStockLookthrough(sid)
-  } else if (tab === 'usStock') {
-    if (usLookthroughCache.has(sid)) usLookthrough.value = usLookthroughCache.get(sid)
-    else loadUsStockLookthrough(sid)
-  } else if (tab === 'assetClass') {
-    if (classifiedCache.has(sid)) classifiedHoldings.value = classifiedCache.get(sid)
-    else loadHoldingsClassified(sid)
-  }
+watch(allocationTab, tab => {
+  if (selectedSnapshotId.value != null) panelLoader.run('allocation', { context: { tab }, preserve: false })
 })
 
 const trendOption = computed(() => {
   // 趨勢圖一律顯示完整歷史（不以基準日收合），點選某日只切換 dashboard、不改變此圖範圍
-  const baseH = store.history
+  const baseH = trendPayload.value?.history ?? []
   if (!baseH.length) return {}
-  // 若選中快照=該市場當地今日且市場開盤，把該日 history row 的對應欄位用 liveLatest 覆蓋，
-  // 讓趨勢線最後一點隨輪詢同步跳動。
-  const live = liveLatest.value
-  const h = (live && latest.value) ? baseH.map(r =>
-    r.snapshotDate === latest.value.snapshotDate
-      ? { ...r,
-          totalStockValue: live.totalStockValue,
-          totalTwStockValue: live.totalTwStockValue ?? r.totalTwStockValue,
-          totalUsStockValue: live.totalUsStockValue ?? r.totalUsStockValue,
-          totalAssets: live.totalAssets }
-      : r
-  ) : baseH
+  // trend response 已由 BFF 套用 LiveAssetsOverlay；不可依賴 KPI panel 的資料。
+  const h = baseH
   return {
+    animation: false,
     tooltip: { trigger: 'axis', formatter: (params) =>
       params[0].axisValue + '<br>' +
       params.map(p => `${p.seriesName}: $${Number(p.value).toLocaleString()}`).join('<br>')
@@ -1130,7 +1139,7 @@ const trendOption = computed(() => {
 const bankCurrencyTab = ref('TWD')
 
 const bankSummary = computed(() => {
-  const deposits = detail.value?.deposits || []
+  const deposits = depositsPayload.value?.snapshot?.deposits || []
   let fixed = 0, demand = 0, usdFixed = 0, usdDemand = 0
   deposits.forEach(d => {
     const amt = Number(d.amount || 0)
@@ -1153,7 +1162,7 @@ const bankSummary = computed(() => {
 })
 
 const bankOption = computed(() => {
-  const deposits = detail.value?.deposits || []
+  const deposits = depositsPayload.value?.snapshot?.deposits || []
   if (!deposits.length) return {}
 
   // 依銀行分組，區分定存 vs 活存；依頁籤決定幣別
@@ -1179,6 +1188,7 @@ const bankOption = computed(() => {
   const sorted = Object.entries(bankMap).sort((a, b) => (a[1].fixed + a[1].demand) - (b[1].fixed + b[1].demand))
   const banks = sorted.map(e => e[0])
   return {
+    animation: false,
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
@@ -1232,8 +1242,8 @@ const bankOption = computed(() => {
 })
 
 // 由 BFF 預先彙總、排序好的持股清單；前端只負責 render
-const mergedStocks = computed(() =>
-  (mergedStocksFromBff.value ?? []).map(g => ({
+function normalizeMergedStocks(stocks) {
+  return (stocks ?? []).map(g => ({
     ...g,
     shares: Number(g.shares || 0),
     investmentCost: Number(g.investmentCost || 0),
@@ -1246,7 +1256,10 @@ const mergedStocks = computed(() =>
     avgCostOriginal: g.avgCostOriginal != null ? Number(g.avgCostOriginal) : null,
     dividendRate: g.dividendRate != null ? Number(g.dividendRate) : null
   }))
-)
+}
+const mergedStocks = computed(() => normalizeMergedStocks(holdingPayload.value?.mergedStocks))
+const stockValueMergedStocks = computed(() => normalizeMergedStocks(stockValuesPayload.value?.mergedStocks))
+const kpiMergedStocks = computed(() => normalizeMergedStocks(kpiPayload.value?.mergedStocks))
 
 const stockMarketTab = ref('台股')
 
@@ -1282,17 +1295,17 @@ watch(mergedStocks, (stocks) => {
 //  1. liveAssets.stocks[].liveValue（與「歷年資產管理」共用同一支 API，收盤後 fallback 至最近收盤價）
 //  2. stockPrices map 即時價（SSE 推播；收盤後 Redis cache 24h TTL 過後此來源才會失效）
 //  3. row 原值（BFF 凍結在基準日的快照值）
-function overlayLivePrice(row) {
+function overlayLivePrice(row, snapshot = holdingPayload.value?.snapshot, sourceLiveAssets = liveAssets.value, sourcePrices = stockPrices.value) {
   if (!shouldApplyLive(row.market)) return row
   const shares = Number(row.shares ?? 0)
   if (shares <= 0) return row
 
   // 即時原幣股價（與表格「股價」欄同源 getRealtimePrice），供 tooltip 顯示，避免顯示快照舊收盤價
-  const live = getRealtimePrice(row)
-  let cv = getLiveValueFromAssets(row)
+  const live = getRealtimePrice(row, sourcePrices)
+  let cv = getLiveValueFromAssets(row, sourceLiveAssets)
   if (cv == null) {
     if (!live) return row
-    const fx = Number(detail.value?.usdExchangeRate ?? 0)
+    const fx = Number(snapshot?.usdExchangeRate ?? 0)
     // 美股 / 英股 UCITS（USD 計價）：live price 為原幣 USD，乘 fx 換算台幣
     const livePriceTwd = (row.market === '美股' || row.market === '英股') ? Number(live.price) * fx : Number(live.price)
     cv = shares * livePriceTwd
@@ -1322,8 +1335,7 @@ function overlayLivePrice(row) {
  * 否則一律 per-market 加總，避免把較新交易日收盤洩漏進一個過去基準日的估值。
  * 「預估配息」一律讀 snapshot 凍結值 s.estimatedAnnualDividend（含基金），不前端重算 — 與歷年資產管理同源。
  */
-const liveLatest = computed(() => {
-  const s = latest.value
+function withPanelLiveOverlay(s, stocks, live, prices) {
   if (!s) return null
   // per-market 基準日閘門：basedate == 該市場當地今日才套 live；非今日市場（含昨日快照、今日尚未
   // 建檔、週末）一律維持快照凍結收盤值（= 該基準日收盤）。三市場皆非今日 → 走下方 sumOf 全 frozen 分支，
@@ -1332,11 +1344,11 @@ const liveLatest = computed(() => {
   const usLive = shouldApplyLive('美股')
   const ukLive = shouldApplyLive('英股')
 
-  const tw = customTableData['台股'] ?? []
-  const us = customTableData['美股'] ?? []
-  const uk = customTableData['英股'] ?? []
+  const tw = stocks.filter(row => row.market === '台股')
+  const us = stocks.filter(row => row.market === '美股')
+  const uk = stocks.filter(row => row.market === '英股')
   const sumOf = (rows, applyLive) => rows.reduce((a, row) => {
-    const r = applyLive ? overlayLivePrice(row) : row
+    const r = applyLive ? overlayLivePrice(row, s, live, prices) : row
     a.value += Number(r.currentValue || 0)
     a.cost  += Number(r.investmentCost || 0)
     return a
@@ -1354,7 +1366,6 @@ const liveLatest = computed(() => {
   // per-market 加總相等，可採用以與「歷年資產管理」最新列同值；只要有任一市場非今日（昨日快照、今日尚未
   // 建檔、跨午夜），一律用 per-market 加總（非今日市場為基準日凍結收盤），避免把較新收盤洩漏進基準日估值。
   const allLive = twLive && usLive && ukLive
-  const live = liveAssets.value
   const liveMatchesLatest = live && live.snapshotDate === s.snapshotDate
   const totalAssets = allLive && liveMatchesLatest && live.liveTotalAssets != null
         ? Number(live.liveTotalAssets)
@@ -1368,10 +1379,23 @@ const liveLatest = computed(() => {
     totalStockValue, totalStockCost, stockProfit,
     totalAssets, totalTwStockValue, totalUsStockValue, totalUkStockValue
   }
-})
+}
+
+const liveLatest = computed(() => withPanelLiveOverlay(
+  kpiPayload.value?.snapshot,
+  kpiMergedStocks.value,
+  kpiPayload.value?.liveAssets,
+  livePrices.kpis
+))
+const allocationLiveLatest = computed(() => withPanelLiveOverlay(
+  allocationPayload.value?.snapshot,
+  normalizeMergedStocks(allocationPayload.value?.mergedStocks),
+  allocationPayload.value?.liveAssets,
+  livePrices.allocation
+))
 
 const stockTableData = computed(() =>
-  (customTableData[stockMarketTab.value] ?? []).map(overlayLivePrice)
+  (customTableData[stockMarketTab.value] ?? []).map(row => overlayLivePrice(row))
 )
 
 const stockTableSummary = computed(() => {
@@ -1427,7 +1451,7 @@ function scheduleSaveOrder() {
 }
 
 // ── 信託基金圖（資料來自 detail.funds，不參與盤中輪詢） ─────────────
-const fundFilteredHoldings = computed(() => detail.value?.funds ?? [])
+const fundFilteredHoldings = computed(() => fundsPayload.value?.snapshot?.funds ?? [])
 
 const fundSummary = computed(() => {
   const funds = fundFilteredHoldings.value
@@ -1448,6 +1472,7 @@ const fundBarOption = computed(() => {
   const profitColor = '#16a34a'
   const lossColor   = '#dc2626'
   return {
+    animation: false,
     tooltip: {
       trigger: 'axis',
       formatter: (p) => {
@@ -1490,7 +1515,8 @@ const fundBarOption = computed(() => {
 const chartMarketTab = ref('台股')
 
 const chartFilteredStocks = computed(() =>
-  mergedStocks.value.filter(s => s.market === chartMarketTab.value).map(overlayLivePrice)
+  stockValueMergedStocks.value.filter(s => s.market === chartMarketTab.value)
+    .map(row => overlayLivePrice(row, stockValuesPayload.value?.snapshot, stockValuesPayload.value?.liveAssets, livePrices['stock-values']))
 )
 
 const chartSummary = computed(() => {
@@ -1510,6 +1536,7 @@ const stockBarOption = computed(() => {
   const profitColor = '#16a34a'  // 賺錢：綠色
   const lossColor   = '#dc2626'  // 賠錢：紅色
   return {
+    animation: false,
     tooltip: {
       trigger: 'axis',
       confine: true,
@@ -1563,9 +1590,11 @@ const stockBarOption = computed(() => {
 // ── Stock Analysis Dialog ─────────────────────────────────────
 const analysisVisible = ref(false)
 const analysisStock = ref(null)
+const analysisUsdRate = ref(null)
 
 function onStockDblClick(row) {
   analysisStock.value = row
+  analysisUsdRate.value = holdingPayload.value?.snapshot?.usdExchangeRate ?? null
   analysisVisible.value = true
 }
 
@@ -1573,6 +1602,7 @@ function onBarDblClick(params) {
   const s = params?.data?.stock
   if (!s) return
   analysisStock.value = s
+  analysisUsdRate.value = stockValuesPayload.value?.snapshot?.usdExchangeRate ?? null
   analysisVisible.value = true
 }
 
@@ -1587,6 +1617,7 @@ function onLookthroughPieClick(params, market) {
   // 若為直接持有的個股，沿用完整列（含成本，可畫成本均價線）；否則只帶代號/股名/市場
   const full = mergedStocks.value.find(s => s.stockCode === code && s.market === market)
   analysisStock.value = full || { stockCode: code, stockName, market }
+  analysisUsdRate.value = allocationPayload.value?.snapshot?.usdExchangeRate ?? null
   analysisVisible.value = true
 }
 
@@ -1599,6 +1630,7 @@ function onLookthroughPieClick(params, market) {
   padding-bottom: 4px;
 }
 .dashboard-title { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0; }
+.metadata-error { padding: 12px; background: #fef2f2; color: #b42318; border-radius: 6px; }
 .kpi-row, .chart-row { margin: 0 !important; }
 /* 左右兩個 panel 等高：整列 flex 拉伸，兩張卡片同高 */
 .chart-row-main { display: flex; align-items: stretch; }

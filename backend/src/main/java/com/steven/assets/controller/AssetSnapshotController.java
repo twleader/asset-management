@@ -55,8 +55,9 @@ public class AssetSnapshotController {
     }
 
     @GetMapping("/history")
-    public List<AssetSnapshotDto.AssetHistoryResponse> getHistory() {
-        return assetService.getAssetHistory();
+    public List<AssetSnapshotDto.AssetHistoryResponse> getHistory(
+            @RequestParam(required = false) Long snapshotId) {
+        return assetService.getAssetHistory(snapshotId);
     }
 
     @GetMapping("/{id}/holdings-classified")

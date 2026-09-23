@@ -12041,7 +12041,7 @@ Fubon 呼叫只在 external-materials 已有的 feature/config/交易時段 gate
 
 唯一有效台股代碼規則為 `^[0-9]{4,6}[A-Z]?$`。`StockSourceQuery` 以此規則在 SQL／唯一後置篩選中排除不合法但存在於主檔的代碼；`TwLiveQuoteDispatcher`、Fubon technical 與 push path 都只接受該 collector 結果，不能另以更寬鬆 regex 擴張 Fubon 範圍。
 
-Dashboard `/summary` 仍是單一 browser request。BFF 並行讀 snapshots、history、market status、live assets，將 `liveAssets.stocks[]` 正規化為原 `stockPrices` consumer shape，再沿用 `LiveAssetsOverlay` 與 `SnapshotEnricher` 做 latest／basedate 處理。`/realtime` 同樣只讀 market status + live assets。這只刪除重複 price fan-out，不變更前端 API、DTO 欄位、error fallback 或 snapshot detail/close-data 的既有行為。
+（歷史相容路徑；新 Dashboard 首屏由 Requirement 9 修訂 取代）Dashboard `/summary` 仍是單一 browser request。BFF 並行讀 snapshots、history、market status、live assets，將 `liveAssets.stocks[]` 正規化為原 `stockPrices` consumer shape，再沿用 `LiveAssetsOverlay` 與 `SnapshotEnricher` 做 latest／basedate 處理。`/realtime` 同樣只讀 market status + live assets。這只刪除重複 price fan-out，不變更前端 API、DTO 欄位、error fallback 或 snapshot detail/close-data 的既有行為。
 
 ## Requirement 147／Task 425：富邦分價量／歷史日 K 的儲存與讀取分流
 
@@ -12330,3 +12330,31 @@ FubonSettlementWriter 以合法 observation 每 future day 的 buy/sell settleme
 完整 PUT 的 request id 先唯一／歸屬驗證（before delete），再捕捉所有保護 identity、補 legacy AUTO 日期、處理手動 collection replacement，最後在可清理 snapshot 清到期列並重算。舊 UI 帶不存在的 id 以 validation error 原子拒絕，不能將已到期 AUTO 再插為 MANUAL。相同身份多日期 AUTO 全部保留且忽略其普通編輯 payload。Excel 缺 id／日期不能覆蓋 source-managed 日期。日期有效性由 LocalDate 型別與服務層檢查，空日期不是今天。
 
 資料來源與API契約以本次 Requirement 150 修訂 的八項 AC 為實作及驗收範圍；若 latest public projection 包含新日期，同步其 typed schema/validator/OpenAPI/fixtures及產生文件。migration 後以 live schema-only dump 重產 db/schema.sql，不透過資料修復 migration 猜測使用者的實際支付日。
+
+
+## Requirement 9 修訂／Task 449：Dashboard Panel 資料邊界
+
+既有單頁 summary 保留相容；DashboardView 首次顯示改用下列 method。選擇器先 GET `/api/bff/dashboard/snapshots`（原 `/api/snapshots` summary list），固定 snapshotId 後七個 Panel 平行啟動。Panel 的 `Mono` 產生完整 JSON 後才回應，沒有分段 JSON／SSE 首屏。前端不在收到一部分資料時先畫零值圖。
+
+共同 record envelope：`{ panel: string, snapshotId: Long|null, data: object, warnings: string[] }`。panel 固定為 kpis|allocation|trend|deposits|stock-values|holdings|funds，下表第一欄僅代表 route suffix；allocation 四個 tab 的 panel 一律 allocation。trend 的 snapshotId=null；其餘必等於 URL id。`snapshot` 是原 detail/summary 同義欄位投影，可省略該 Panel 不用的 child collection；所有需要的金額／日期保留原格式。arrays 真空用 []，warnings 無警告用 []。
+
+| panel／GET suffix（prefix /api/bff/dashboard/panels） | data 欄位與資料範圍 |
+|---|---|
+| kpis/{id} | snapshot、history（selected + previous，最多 2）、mergedStocks、stockPrices、liveAssets；足以獨立計算既有五張 KPI 與較上次，不讀 holdings Panel state |
+| allocation/{id}?tab=category | snapshot、history（最多 2）、mergedStocks、stockPrices、liveAssets；完整六區資料與日期 |
+| allocation/{id}?tab=assetClass | snapshot、history（最多 2）、classifiedHoldings；包含雙層圓餅、分類 tooltip 全部資料，無第二個 browser call |
+| allocation/{id}?tab=twStock | snapshot、twLookthrough；既有台股 DTO 包含 items/others/degradedEtfs，完整金額與 tooltip |
+| allocation/{id}?tab=usStock | snapshot、usLookthrough；既有美股 DTO 包含 items/others/lookthroughEtfCount |
+| trend | history；完整 owner history，先套同一 LiveAssetsOverlay；每個點的 id/date 及圖例值都在此回應，無其他 Panel 依賴 |
+| deposits/{id} | snapshot（含 deposits）；所有幣別與存款 tooltip、小計自足，不含 stocks/funds |
+| stock-values/{id} | snapshot（含匯率、不含原始 children）、mergedStocks、stockPrices、marketStatus、liveAssets；股票橫條圖／tooltip／小計自足 |
+| holdings/{id} | snapshot（含匯率、不含原始 children）、mergedStocks、stockPrices、marketStatus、liveAssets；股票表／小計／排序自足 |
+| funds/{id} | snapshot（含 funds）；基金 bar、tooltip、小計自足，不含 stocks/deposits |
+
+既有展示用計算不改金融語意；新資料聚合只放 BFF Service，前端既有 ECharts option／formatting 可沿用但必改讀自己 Panel 的完整 payload，不再讀共享 Pinia currentSnapshot/history 或另一 Panel 的 refs。首屏與快照切換用 Promise.allSettled，`runPanel` 各自提交 payload；allSettled 僅收集結束狀態，不是 render barrier。每個 Panel 具 loading/error/data/generation/AbortController，換選擇一律遞增 generation，所有 success/catch/finally 都確認 generation 與 mounted；retry 只重發本 panel 及目前 id/tab。背景相同 id 更新可保留舊 payload，改 id/tab 必清除舊畫面，日期來自 payload。真空顯示 empty，失敗顯示 error/retry，refresh 失敗加標記且保留舊圖。
+
+`DashboardPanelService` 透過 tenant-aware businessServicesClient，必要請求用 Mono.zip 並行，共用 `SnapshotEnricher` 計算 close 與 mergedStocks；lookthrough 抽到 Service 後舊 controller route 與新 panel 均委派同一 helper，不能 Service 呼叫 Controller。新 `DashboardPanelResponse` 為 record；舊 DTO 如未改契約可保留。所有新 panel Mono 整體 timeout 20 秒，必要讀取失敗映射 502/504，401/403/404 保留。live-assets / market-status 是 optional，失敗 fallback 帶 warning，不能吞必要 detail/history。20 秒必包括 ETF 與 close-data 子請求，取消應傳到 upstream。不得加全域 owner-insensitive cache。
+
+`GET /api/snapshots/history?snapshotId={id}` 使用 AssetService 既有 history builder，先 owner-check 指定 root、再以 owner-scoped Repository 找較早的一筆，最多兩個 roots 才接原分類與合計程式。不帶參數走原完整 roots。選中列與完整 history 同值；前一列僅比較基底（無更早資料時 increase/increaseRate 可 null）。不增加 Entity、table、migration，不影響 asset-history 舊 consumer。
+
+Dashboard 不再在 mount 執行 enrich POST／再次 summary。SSE 既有路徑保留本次既有技術債、不擴散至其他頁；僅作載入後價格增量。週期更新 single-flight，cancel／generation 保護以免跨日期；unmount 同時清除 EventSource、自訂 reconnect timeout、輪詢及排序 timeout，不得從晚到 promise 再開串流。
