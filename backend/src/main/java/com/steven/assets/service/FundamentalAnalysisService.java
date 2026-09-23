@@ -164,6 +164,18 @@ public class FundamentalAnalysisService {
                 .forEach(query -> canonical.putIfAbsent(new BatchKey(query.stockCode(), query.market()), query));
         List<BatchQuery> queries = List.copyOf(canonical.values());
         if (queries.isEmpty()) return Map.of();
+        Map<BatchQuery, Resolved> out = new LinkedHashMap<>();
+        List<BatchKey> applicableKeys = new ArrayList<>();
+        for (BatchQuery query : queries) {
+            TradingRadarAssetProfileResolver.AssetProfile profile = query.profile();
+            if (profile != null && profile.equity()
+                    && profile.instrumentKind() == TradingRadarAssetProfileResolver.InstrumentKind.STOCK) {
+                applicableKeys.add(new BatchKey(query.stockCode(), query.market()));
+            } else {
+                out.put(query, Resolved.unavailable(false));
+            }
+        }
+        if (applicableKeys.isEmpty()) return Map.copyOf(out);
         List<News> evidenceRows;
         try {
             evidenceRows = publicInfo.loadForEarliestDecision(decisionInstant);
@@ -173,20 +185,13 @@ public class FundamentalAnalysisService {
         }
         Map<BatchKey, PreparedData> preparedByKey;
         try {
-            preparedByKey = loadPreparedDataBatch(canonical.keySet(), decisionInstant);
+            preparedByKey = loadPreparedDataBatch(applicableKeys, decisionInstant);
         } catch (Exception unavailable) {
             log.warn("基本面清單批次 observation 讀取失敗：{}", unavailable.getMessage());
             preparedByKey = Map.of();
         }
-        Map<BatchQuery, Resolved> out = new LinkedHashMap<>();
         for (BatchQuery query : queries) {
-            TradingRadarAssetProfileResolver.AssetProfile profile = query.profile();
-            boolean applicable = profile != null && profile.equity()
-                    && profile.instrumentKind() == TradingRadarAssetProfileResolver.InstrumentKind.STOCK;
-            if (!applicable) {
-                out.put(query, Resolved.unavailable(false));
-                continue;
-            }
+            if (out.containsKey(query)) continue;
             try {
                 PreparedData prepared = preparedByKey.getOrDefault(
                         new BatchKey(query.stockCode(), query.market()), PreparedData.EMPTY);
@@ -372,8 +377,8 @@ public class FundamentalAnalysisService {
     /**
      * One immutable exact-pair snapshot for the list path.  The four source tables are still
      * intentionally separate evidence families, but each family is read once for every requested
-     * natural key rather than once per row.  All as-of/revision/provider choices remain in
-     * {@link #resolvePrepared}; this method only transports rows.
+     * natural key rather than once per row. A single-decision batch applies the same as-of
+     * selector before materializing PreparedData; repository snapshots retain every revision.
      */
     private Map<BatchKey, PreparedData> loadPreparedDataBatch(
             Collection<BatchKey> rawKeys, Instant latestInstant) {
@@ -385,40 +390,79 @@ public class FundamentalAnalysisService {
                 .distinct().sorted(Comparator.comparing(FundamentalAnalysisBatchRepository.Key::market)
                         .thenComparing(FundamentalAnalysisBatchRepository.Key::stockCode)).toList();
         Map<BatchKey, PreparedData> out = new LinkedHashMap<>();
+        // The same source URL JSON accompanies many historical revisions. Parse each exact
+        // value once for this batch; no observations or provider/as-of choices are discarded.
+        Map<String, List<String>> parsedUrls = new LinkedHashMap<>();
         fundamentalBatchRepository.findSnapshots(keys, latestInstant).forEach((key, snapshot) ->
-                out.put(new BatchKey(key.stockCode(), key.market()), toPreparedData(snapshot)));
+                out.put(new BatchKey(key.stockCode(), key.market()),
+                        toPreparedData(selectSnapshotAsOf(snapshot, latestInstant), parsedUrls)));
         return Map.copyOf(out);
     }
 
+    /** The raw snapshot remains intact for other decisions; the selected rows keep first-seen order. */
+    static FundamentalAnalysisBatchRepository.Snapshot selectSnapshotAsOf(
+            FundamentalAnalysisBatchRepository.Snapshot snapshot, Instant decisionInstant) {
+        if (snapshot == null) return FundamentalAnalysisBatchRepository.Snapshot.empty();
+        return new FundamentalAnalysisBatchRepository.Snapshot(
+                latestAsOf(snapshot.financials(), decisionInstant,
+                        row -> row.provider() + '|' + row.year() + '|' + row.quarter(),
+                        FundamentalAnalysisBatchRepository.FinancialObservation::availableAt,
+                        FundamentalAnalysisBatchRepository.FinancialObservation::observedAt),
+                latestAsOf(snapshot.revenues(), decisionInstant,
+                        row -> row.provider() + '|' + row.year() + '|' + row.month(),
+                        FundamentalAnalysisBatchRepository.RevenueObservation::availableAt,
+                        FundamentalAnalysisBatchRepository.RevenueObservation::observedAt),
+                latestAsOf(snapshot.valuations(), decisionInstant,
+                        row -> row.provider() + '|' + row.date(),
+                        FundamentalAnalysisBatchRepository.ValuationObservation::availableAt,
+                        FundamentalAnalysisBatchRepository.ValuationObservation::observedAt),
+                latestAsOf(snapshot.industries(), decisionInstant,
+                        row -> row.provider() + '|' + row.industryName() + '|' + row.year() + '|' + row.month(),
+                        FundamentalAnalysisBatchRepository.IndustryObservation::availableAt,
+                        FundamentalAnalysisBatchRepository.IndustryObservation::observedAt));
+    }
+
     private PreparedData toPreparedData(FundamentalAnalysisBatchRepository.Snapshot snapshot) {
+        return toPreparedData(snapshot, new LinkedHashMap<>());
+    }
+
+    private PreparedData toPreparedData(FundamentalAnalysisBatchRepository.Snapshot snapshot,
+                                       Map<String, List<String>> parsedUrls) {
         if (snapshot == null) return PreparedData.EMPTY;
         return new PreparedData(
                 snapshot.financials().stream().map(row -> new FinancialRow(
                         row.year(), row.quarter(), row.eps(), row.income(), row.equity(), row.provider(),
-                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                        parsedUrls.computeIfAbsent(row.sourceUrls(), this::urls), row.availableAt(), row.observedAt())).toList(),
                 snapshot.revenues().stream().map(row -> new RevenueRow(
                         row.year(), row.month(), row.industryName(), row.yoy(), row.provider(),
-                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                        parsedUrls.computeIfAbsent(row.sourceUrls(), this::urls), row.availableAt(), row.observedAt())).toList(),
                 snapshot.valuations().stream().map(row -> new ValuationRow(
                         row.date(), row.pe(), row.pb(), normalizeDividendYieldPct(row.dividendYieldPct(), false),
-                        row.loss(), row.provider(), urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList(),
+                        row.loss(), row.provider(), parsedUrls.computeIfAbsent(row.sourceUrls(), this::urls),
+                        row.availableAt(), row.observedAt())).toList(),
                 snapshot.industries().stream().map(row -> new IndustryRow(
                         row.industryName(), row.year(), row.month(), row.yoy(), row.companyCount(), row.provider(),
-                        urls(row.sourceUrls()), row.availableAt(), row.observedAt())).toList());
+                        parsedUrls.computeIfAbsent(row.sourceUrls(), this::urls), row.availableAt(), row.observedAt())).toList());
     }
 
     static <T extends SourcedRow> List<T> latestAsOf(
             List<T> rows, Instant decisionInstant, Function<T, String> revisionKey) {
+        return latestAsOf(rows, decisionInstant, revisionKey, SourcedRow::availableAt, SourcedRow::observedAt);
+    }
+
+    private static <T> List<T> latestAsOf(
+            List<T> rows, Instant decisionInstant, Function<T, String> revisionKey,
+            Function<T, Instant> availableAt, Function<T, Instant> observedAt) {
         if (rows == null || decisionInstant == null) return List.of();
         Map<String, T> latest = new LinkedHashMap<>();
         for (T row : rows) {
-            if (row == null || row.availableAt() == null || row.observedAt() == null
-                    || row.availableAt().isAfter(decisionInstant)
-                    || row.observedAt().isAfter(decisionInstant)) continue;
+            if (row == null || availableAt.apply(row) == null || observedAt.apply(row) == null
+                    || availableAt.apply(row).isAfter(decisionInstant)
+                    || observedAt.apply(row).isAfter(decisionInstant)) continue;
             String key = revisionKey.apply(row);
             if (key == null) continue;
             latest.merge(key, row, (left, right) ->
-                    left.observedAt().compareTo(right.observedAt()) >= 0 ? left : right);
+                    observedAt.apply(left).compareTo(observedAt.apply(right)) >= 0 ? left : right);
         }
         return List.copyOf(latest.values());
     }

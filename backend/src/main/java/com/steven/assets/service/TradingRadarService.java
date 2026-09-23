@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
+import com.steven.assets.dto.TradingRadarPanelDto;
 import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.EtfNavObservation;
@@ -20,6 +21,7 @@ import com.steven.assets.repository.StockRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.security.UnauthenticatedException;
 import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -528,18 +530,33 @@ public class TradingRadarService {
      */
     @Transactional(readOnly = true)
     public TradingRadarDto.ListResponse getList() {
-        Instant decisionInstant = Instant.now();
+        return getList(Instant.now());
+    }
+
+    /** Fixed-clock test seam; HTTP callers cannot choose the decision instant. */
+    TradingRadarDto.ListResponse getList(Instant decisionInstant) {
         TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
         // First-screen rendering uses only a pre-existing calendar snapshot.
         // A miss remains incomplete/stale and must never refresh the holiday proxy.
         MarketState twMarket = buildMarket(context.market(), decisionInstant, true);
         MarketState usMarket = buildUsMarket(decisionInstant);
-        Map<String, DecisionClock> decisionClocks = resolveListDecisionClocks(decisionInstant);
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skippedNonTw = new HashSet<>();
         loadLatestHoldings(targets, skippedNonTw, null);
         loadWatchList(targets, skippedNonTw, null);
         List<Target> eligibleTargets = targets.values().stream().filter(this::isSupportedTarget).toList();
+        List<TradingRadarDto.ListStock> stocks = assembleListStocks(eligibleTargets, decisionInstant, twMarket, usMarket);
+        return new TradingRadarDto.ListResponse(TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
+                generatedAt(decisionInstant), twMarket.summary(),
+                usMarket.summary(), stocks, skippedNonTw.size(), context.publicInformation());
+    }
+
+    private record CompactInputs(Map<String, DecisionClock> clocks, RadarTechnicalResolver.Batch technical,
+                                 TradingRadarListBatchPreloader.Context entries) {}
+
+    private CompactInputs compactInputs(List<Target> eligibleTargets, Instant decisionInstant) {
+        Map<String, DecisionClock> decisionClocks = resolveListDecisionClocks(decisionInstant);
         RadarTechnicalResolver.Batch technicalBatch = preloadListTechnical(eligibleTargets, decisionInstant);
         Map<String, List<LocalDate>> futureSessionsByMarket = new LinkedHashMap<>();
         for (String market : eligibleTargets.stream().map(Target::market)
@@ -552,23 +569,124 @@ public class TradingRadarService {
                 decisionClocks);
         TradingRadarListBatchPreloader.Context listInputs = preloadListInputs(eligibleTargets, decisionInstant,
                 futureSessionsByMarket, expectedMarketSessions, premiumTargetDates);
+        return new CompactInputs(decisionClocks, technicalBatch, listInputs);
+    }
+
+    private List<TradingRadarDto.ListStock> assembleListStocks(List<Target> eligibleTargets, Instant decisionInstant,
+                                                             MarketState twMarket, MarketState usMarket) {
+        CompactInputs inputs = compactInputs(eligibleTargets, decisionInstant);
         Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
-        List<TradingRadarDto.ListStock> stocks = eligibleTargets.stream()
+        return eligibleTargets.stream()
                 .map(target -> safeListStock(target, () -> buildDecisionCore(target,
                         regimeFor(target.market(), twMarket, usMarket),
                         staleFor(target.market(), twMarket, usMarket),
                         marketSummaryFor(target.market(), twMarket, usMarket), decisionInstant, fxCache,
-                        decisionClocks.getOrDefault(target.market(), new DecisionClock(null, false)),
-                        decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch,
-                        false, listInputs.entry(target.code(), target.market()))))
+                        inputs.clocks().getOrDefault(target.market(), new DecisionClock(null, false)),
+                        inputs.clocks().getOrDefault(US_MARKET, new DecisionClock(null, false)), inputs.technical(),
+                        false, inputs.entries().entry(target.code(), target.market()))))
                 .sorted(Comparator.comparing(TradingRadarService::bestListScore,
                                 Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(TradingRadarDto.ListStock::stockCode))
                 .toList();
-        return new TradingRadarDto.ListResponse(TradingRadarRuleEngine.RULE_VERSION,
-                TradingRadarEvidenceGate.ACTION_POLICY_VERSION,
-                decisionInstant.atZone(TAIPEI).toOffsetDateTime().toString(), twMarket.summary(),
-                usMarket.summary(), stocks, skippedNonTw.size(), context.publicInformation());
+    }
+
+    @Transactional(readOnly = true)
+    public TradingRadarPanelDto.Panel<TradingRadarPanelDto.MarketData> getMarketPanel(String market) {
+        return getMarketPanel(market, Instant.now());
+    }
+
+    TradingRadarPanelDto.Panel<TradingRadarPanelDto.MarketData> getMarketPanel(String market, Instant instant) {
+        requireSupportedMarket(market);
+        return panel(TW_MARKET.equals(market) ? "tw-market" : "us-market", instant,
+                new TradingRadarPanelDto.MarketData(buildPanelMarket(market, instant).summary()));
+    }
+
+    @Transactional(readOnly = true)
+    public TradingRadarPanelDto.Panel<TradingRadarPanelDto.StocksData> getStocksPanel(String market) {
+        return getStocksPanel(market, Instant.now());
+    }
+
+    TradingRadarPanelDto.Panel<TradingRadarPanelDto.StocksData> getStocksPanel(String market, Instant instant) {
+        requireSupportedMarket(market);
+        Set<String> skipped = new HashSet<>();
+        List<Target> targets = ownerTargets(skipped).stream().filter(target -> market.equals(target.market())).toList();
+        MarketState ownMarket = buildPanelMarket(market, instant);
+        List<TradingRadarDto.ListStock> stocks = assembleListStocks(targets, instant,
+                TW_MARKET.equals(market) ? ownMarket : null, US_MARKET.equals(market) ? ownMarket : null);
+        return panel(TW_MARKET.equals(market) ? "tw-stocks" : "us-stocks", instant,
+                new TradingRadarPanelDto.StocksData(ownMarket.summary(), stocks, skipped.size()));
+    }
+
+    @Transactional(readOnly = true)
+    public TradingRadarPanelDto.Panel<TradingRadarPanelDto.PublicInformationData> getPublicInformationPanel() {
+        return getPublicInformationPanel(Instant.now());
+    }
+
+    TradingRadarPanelDto.Panel<TradingRadarPanelDto.PublicInformationData> getPublicInformationPanel(Instant instant) {
+        return panel("public-information", instant,
+                new TradingRadarPanelDto.PublicInformationData(marketContextService.resolvePublicInformation(instant)));
+    }
+
+    @Transactional(readOnly = true)
+    public TradingRadarPanelDto.StockEvaluation getStockEvaluation(String stockCode, String market) {
+        return getStockEvaluation(stockCode, market, Instant.now());
+    }
+
+    TradingRadarPanelDto.StockEvaluation getStockEvaluation(String rawCode, String rawMarket, Instant instant) {
+        String code = normalizeSelector(rawCode, STOCK_CODE_SELECTOR, "股票代號格式不合法");
+        String market = normalizeSelector(rawMarket, MARKET_SELECTOR, "市場別格式不合法");
+        Target target = ownerTargets(new HashSet<>()).stream()
+                .filter(value -> code.equals(value.code()) && market.equals(value.market())).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("找不到可分析標的"));
+        MarketState ownMarket = buildPanelMarket(market, instant);
+        CompactInputs inputs = compactInputs(List.of(target), instant);
+        DecisionCore core;
+        try {
+            core = buildDecisionCore(target, ownMarket.regime(), ownMarket.stale(), ownMarket.summary(), instant,
+                    new java.util.HashMap<>(), inputs.clocks().get(target.market()),
+                    inputs.clocks().get(US_MARKET), inputs.technical(), true,
+                    inputs.entries().entry(target.code(), target.market()));
+        } catch (RuntimeException unavailable) {
+            logListBatchUnavailable("single-stock-evaluation", unavailable);
+            core = DecisionCore.failed(target, target.code(), "UNKNOWN", null, "讀取個股資料失敗，該檔今日不交易。");
+        }
+        return new TradingRadarPanelDto.StockEvaluation(TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION, generatedAt(instant), ownMarket.summary(),
+                toListStock(core), toFullDecision(core));
+    }
+
+    private List<Target> ownerTargets(Set<String> skipped) {
+        if (!currentUserContext.hasUser()) throw new UnauthenticatedException();
+        Long owner = currentUserContext.getEffectiveUserId();
+        if (owner == null) throw new UnauthenticatedException();
+        Map<String, Target> targets = new LinkedHashMap<>();
+        loadLatestHoldings(targets, skipped, owner);
+        loadWatchList(targets, skipped, owner);
+        return targets.values().stream().filter(this::isSupportedTarget).toList();
+    }
+
+    private void requireSupportedMarket(String market) {
+        if (!isSupportedMarket(market)) throw new IllegalArgumentException("市場別格式不合法");
+    }
+
+    private static String generatedAt(Instant instant) {
+        return instant.atZone(TAIPEI).toOffsetDateTime().toString();
+    }
+
+    private static <T> TradingRadarPanelDto.Panel<T> panel(String name, Instant instant, T data) {
+        return new TradingRadarPanelDto.Panel<>(name, TradingRadarRuleEngine.RULE_VERSION,
+                TradingRadarEvidenceGate.ACTION_POLICY_VERSION, generatedAt(instant), data);
+    }
+
+    private MarketState buildPanelMarket(String market, Instant instant) {
+        if (US_MARKET.equals(market)) return buildUsMarket(instant, true);
+        try {
+            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS);
+            return buildMarket(marketContextService.resolveMarketFromTwRows(instant, rows), instant, true, rows);
+        } catch (RuntimeException unavailable) {
+            logListBatchUnavailable("taiwan-market", unavailable);
+            return incompleteMarket("讀取大盤資料失敗，所有個股暫停產生交易訊號。");
+        }
     }
 
     /** Lazy detail read for exactly one current-user target; it never assembles every target first. */
@@ -929,6 +1047,12 @@ public class TradingRadarService {
             TradingRadarMarketContextService.MarketContext context,
             Instant decisionInstant,
             boolean cacheOnlyCalendar) {
+        return buildMarket(context, decisionInstant, cacheOnlyCalendar, null);
+    }
+
+    private MarketState buildMarket(TradingRadarMarketContextService.MarketContext context,
+                                   Instant decisionInstant, boolean cacheOnlyCalendar,
+                                   List<TwseIndexDailyHistory> suppliedRows) {
         try {
             // Task 356.4a：查詢與 as-of 截斷<b>兩處都</b>放大到 500——只改查詢那個等於沒改，
             // 序列仍會被第二個 limit 截回 241 列 ≈ 48 個 ISO 週 < 60 根完成週，
@@ -944,7 +1068,8 @@ public class TradingRadarService {
             LocalDate historyCutoff = context.marketAsOfDate() != null
                     && context.marketAsOfDate().isBefore(completedSession)
                     ? context.marketAsOfDate() : completedSession;
-            List<TwseIndexDailyHistory> rows = twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS)
+            List<TwseIndexDailyHistory> rows = (suppliedRows == null
+                    ? twseRepo.findTopNByOrderByTradingDateDesc(SERIES_FETCH_ROWS) : suppliedRows)
                     .stream()
                     .filter(r -> r != null && r.getTradingDate() != null
                             && !r.getTradingDate().isAfter(historyCutoff))
@@ -981,7 +1106,10 @@ public class TradingRadarService {
                 changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
             }
 
-            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(TAIEX_CODE, TW_MARKET);
+            TechnicalIndicatorService.FullIndicators ind = suppliedRows == null
+                    ? indicatorService.computeAll(TAIEX_CODE, TW_MARKET)
+                    : indicatorService.computeAllForTaiexFromRows(suppliedRows,
+                            decisionInstant.atZone(TAIPEI).toLocalDate(), liveOpt);
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
             // Task 356.10b：台股大盤週K 由 open_point／high_point／low_point／close_point／
@@ -1015,7 +1143,9 @@ public class TradingRadarService {
 
             // 必要完成收盤不能由 live 豁免；只有盤中另外要求當日 eligible live。
             boolean stale = !completedClosePresent || (open && !liveFreshToday);
-            TaiexDisplayPriceService.DisplayQuote display = taiexDisplayPriceService.resolve();
+            TaiexDisplayPriceService.DisplayQuote display = suppliedRows == null
+                    ? taiexDisplayPriceService.resolve()
+                    : taiexDisplayPriceService.resolveFromRows(decisionInstant, sessions, suppliedRows, liveOpt);
             String asOf = display.tradingDate();
             String liveUpdatedAt = liveFreshToday ? liveOpt.get().updatedAt() : null;
             TradingRadarDto.MarketSummary summary = new TradingRadarDto.MarketSummary(
@@ -1083,6 +1213,10 @@ public class TradingRadarService {
      * 不是資料缺失。</p>
      */
     private MarketState buildUsMarket(Instant decisionInstant) {
+        return buildUsMarket(decisionInstant, false);
+    }
+
+    private MarketState buildUsMarket(Instant decisionInstant, boolean reuseRows) {
         try {
             List<UsIndexDailyHistory> rows =
                     usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc(
@@ -1102,7 +1236,8 @@ public class TradingRadarService {
             BigDecimal price = closes.isEmpty() ? null : closes.get(0);
             BigDecimal changePercent = closes.size() >= 2 ? changePercent(closes.get(0), closes.get(1)) : null;
 
-            TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAllForNasdaq();
+            TechnicalIndicatorService.FullIndicators ind = reuseRows
+                    ? indicatorService.computeAllForNasdaqFromRows(rows) : indicatorService.computeAllForNasdaq();
             TradingRadarRuleEngine.Confirmation c60 = ruleEngine.confirm(closes, 60);
             TradingRadarRuleEngine.Confirmation c240 = ruleEngine.confirm(closes, 240);
             // Task 356.10b：美股大盤週K 由 us_index_daily_history 的 OHLC＋volume 映射後聚合，
@@ -1267,7 +1402,7 @@ public class TradingRadarService {
                 : null;
         TradingRadarAssetProfileResolver.AssetProfile profile = TradingRadarAssetProfileResolver.resolve(
                 stock.orElse(null), target.code(), target.market(), name,
-                null, stockStyleIncomeThreshold());
+                null, listEntry == null ? stockStyleIncomeThreshold() : listEntry.incomeThreshold());
         String assetClass = profile.assetClass();
         TradingRadarRuleEngine.InstrumentType instrumentType = profile.bond()
                 ? TradingRadarRuleEngine.InstrumentType.BOND
@@ -1399,7 +1534,8 @@ public class TradingRadarService {
             // provenance remains explicit in the evidence payload.
             profile = TradingRadarAssetProfileResolver.resolve(
                     stock.orElse(null), target.code(), target.market(), name,
-                    fundamental.snapshot().dividendYieldPct(), stockStyleIncomeThreshold());
+                    fundamental.snapshot().dividendYieldPct(),
+                    listEntry == null ? stockStyleIncomeThreshold() : listEntry.incomeThreshold());
             assetClass = profile.assetClass();
             instrumentType = profile.bond()
                     ? TradingRadarRuleEngine.InstrumentType.BOND

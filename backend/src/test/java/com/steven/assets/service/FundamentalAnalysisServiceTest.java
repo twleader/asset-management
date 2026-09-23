@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.steven.assets.repository.FundamentalAnalysisBatchRepository;
 import org.junit.jupiter.api.Test;
 
@@ -16,12 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /** Task 292 基本面公式守門：這些錯誤都會靜默產生「很合理」的假分數。Task 293 新增美股市場閘門守門。 */
 class FundamentalAnalysisServiceTest {
@@ -433,6 +438,243 @@ class FundamentalAnalysisServiceTest {
         assertEquals(2, results.size());
         verify(publicInfo, times(1)).loadForEarliestDecision(decision);
         verify(repository, times(1)).findSnapshots(any(), eq(decision));
+    }
+
+    @Test
+    void batchOnlyReadsApplicablePairsAndKeepsSingleStockFullSnapshotParity() {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        Instant decision = Instant.parse("2026-08-08T14:00:00Z");
+        var tw = batchQuery("2330", "台股", "台積電");
+        var us = batchQuery("2330", "美股", "US ordinary stock");
+        var etf = batchQuery("0050", "台股", "元大台灣50");
+        var bond = batchQuery("00679B", "台股", "元大美債20年");
+        var unknown = new FundamentalAnalysisService.BatchQuery(
+                "UNKNOWN", "unknown", "台股", TradingRadarAssetProfileResolver.AssetProfile.unknown("missing"));
+        var twKey = new FundamentalAnalysisBatchRepository.Key(tw.stockCode(), tw.market());
+        var usKey = new FundamentalAnalysisBatchRepository.Key(us.stockCode(), us.market());
+        var twRows = snapshot(financialRows("EXCHANGE", 2026, 2), valuationRows("EXCHANGE", LocalDate.of(2026, 8, 8)));
+        var usRows = snapshot(financialRows("SEC_EDGAR", 2026, 2), valuationRows("YAHOO", LocalDate.of(2026, 8, 8)));
+        when(repository.findSnapshot(twKey, decision)).thenReturn(twRows);
+        when(repository.findSnapshot(usKey, decision)).thenReturn(usRows);
+        when(repository.findSnapshots(List.of(twKey, usKey), decision)).thenReturn(Map.of(twKey, twRows, usKey, usRows));
+        when(publicInfo.loadForEarliestDecision(decision)).thenReturn(List.of());
+        var service = new FundamentalAnalysisService(repository, new ObjectMapper(), publicInfo);
+
+        var results = service.resolveBatch(List.of(us, etf, tw, bond, unknown, tw), decision);
+
+        assertEquals(5, results.size());
+        assertEquals(service.resolve(tw.stockCode(), tw.stockName(), tw.market(), decision, tw.profile()), results.get(tw));
+        assertEquals(service.resolve(us.stockCode(), us.stockName(), us.market(), decision, us.profile()), results.get(us));
+        assertEquals(3, results.get(us).snapshot().coverage());
+        for (var query : List.of(etf, bond, unknown)) {
+            assertEquals(FundamentalAnalysisService.Resolved.unavailable(false), results.get(query));
+        }
+        verify(repository).findSnapshots(List.of(twKey, usKey), decision);
+    }
+
+    @Test
+    void nonApplicableBatchNeedsNeitherObservationsNorPublicInformation() {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        var service = new FundamentalAnalysisService(repository, new ObjectMapper(), publicInfo);
+        var queries = List.of(batchQuery("0050", "台股", "元大台灣50"),
+                batchQuery("00679B", "台股", "元大美債20年"),
+                new FundamentalAnalysisService.BatchQuery("UNKNOWN", "unknown", "美股", null));
+
+        var results = service.resolveBatch(queries, Instant.parse("2026-08-08T14:00:00Z"));
+
+        assertEquals(queries.size(), results.size());
+        queries.forEach(query -> assertEquals(FundamentalAnalysisService.Resolved.unavailable(false), results.get(query)));
+        verifyNoInteractions(repository, publicInfo);
+    }
+
+    @Test
+    void failedApplicableBatchPreservesEveryTargetAndInapplicableFlags() {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        var service = new FundamentalAnalysisService(repository, new ObjectMapper(), publicInfo);
+        Instant decision = Instant.parse("2026-08-08T14:00:00Z");
+        var stock = batchQuery("2330", "台股", "台積電");
+        var etf = batchQuery("0050", "台股", "元大台灣50");
+        var keys = List.of(new FundamentalAnalysisBatchRepository.Key(stock.stockCode(), stock.market()));
+        when(repository.findSnapshots(keys, decision)).thenThrow(new IllegalStateException("unavailable"));
+        when(publicInfo.loadForEarliestDecision(decision)).thenReturn(List.of());
+
+        var results = service.resolveBatch(List.of(stock, etf), decision);
+
+        assertEquals(2, results.size());
+        assertTrue(results.get(stock).snapshot().applicable());
+        assertEquals(0, results.get(stock).snapshot().coverage());
+        assertEquals(FundamentalAnalysisService.Resolved.unavailable(false), results.get(etf));
+        verify(repository).findSnapshots(keys, decision);
+    }
+
+    @Test
+    void sourceUrlParsingIsSharedOnlyWithinOneBatchIncludingMalformedAndImmutableResults() throws Exception {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        ObjectMapper mapper = spy(new ObjectMapper());
+        Instant decision = Instant.parse("2026-08-08T14:00:00Z");
+        String good = "[\"https://example.test/evidence\"]";
+        String malformed = "not-json";
+        var valuations = new ArrayList<FundamentalAnalysisBatchRepository.ValuationObservation>();
+        for (int i = 0; i < 250; i++) {
+            valuations.add(new FundamentalAnalysisBatchRepository.ValuationObservation(
+                    LocalDate.of(2026, 8, 8).minusDays(i), bd(10 + i), bd(2), bd(4), false,
+                    "EXCHANGE", good, Instant.EPOCH, Instant.EPOCH));
+        }
+        // Older revisions still reach the unchanged as-of selector. Invalid URL JSON remains empty.
+        for (int i = 0; i < 50; i++) {
+            valuations.add(new FundamentalAnalysisBatchRepository.ValuationObservation(
+                    LocalDate.of(2024, 1, 1).minusDays(i), bd(12), bd(2), bd(4), false,
+                    "YAHOO", malformed, Instant.EPOCH, Instant.EPOCH));
+        }
+        var observations = new FundamentalAnalysisBatchRepository.Snapshot(
+                List.of(new FundamentalAnalysisBatchRepository.FinancialObservation(
+                        2026, 2, bd(1), bd(100), bd(1000), "EXCHANGE", good, Instant.EPOCH, Instant.EPOCH)),
+                List.of(new FundamentalAnalysisBatchRepository.RevenueObservation(
+                        2026, 7, "industry", bd(10), "EXCHANGE", good, Instant.EPOCH, Instant.EPOCH)),
+                valuations,
+                List.of(new FundamentalAnalysisBatchRepository.IndustryObservation(
+                        "industry", 2026, 7, bd(10), 10, "EXCHANGE", malformed, Instant.EPOCH, Instant.EPOCH)));
+        var first = batchQuery("2330", "台股", "台積電");
+        var second = batchQuery("2317", "台股", "鴻海");
+        when(repository.findSnapshots(any(), eq(decision))).thenReturn(Map.of(
+                new FundamentalAnalysisBatchRepository.Key(first.stockCode(), first.market()), observations,
+                new FundamentalAnalysisBatchRepository.Key(second.stockCode(), second.market()), observations));
+        when(publicInfo.loadForEarliestDecision(decision)).thenReturn(List.of());
+        var service = new FundamentalAnalysisService(repository, mapper, publicInfo);
+
+        var firstResult = service.resolveBatch(List.of(first, second), decision);
+
+        assertEquals(List.of("https://example.test/evidence"), firstResult.get(first).snapshot().peEvidence().sourceUrls());
+        assertThrows(UnsupportedOperationException.class,
+                () -> firstResult.get(first).snapshot().peEvidence().sourceUrls().add("mutate"));
+        verify(mapper, times(2)).readValue(anyString(), org.mockito.ArgumentMatchers.<TypeReference<List<String>>>any());
+        assertEquals(firstResult, service.resolveBatch(List.of(first, second), decision));
+        verify(mapper, times(4)).readValue(anyString(), org.mockito.ArgumentMatchers.<TypeReference<List<String>>>any());
+    }
+
+    private static FundamentalAnalysisService.BatchQuery batchQuery(String code, String market, String name) {
+        return new FundamentalAnalysisService.BatchQuery(code, name, market,
+                TradingRadarAssetProfileResolver.resolve(null, code, market, name, null,
+                        AssetClassifier.defaultDividendThreshold()));
+    }
+
+    @Test
+    void rawSingleDecisionSelectionKeepsFirstSeenOrderTieLeftAndEveryEvidenceFamily() {
+        Instant now = Instant.parse("2026-09-23T08:00:00Z");
+        Instant old = now.minusSeconds(60);
+        var fOld = new FundamentalAnalysisBatchRepository.FinancialObservation(
+                2026, 2, bd(1), bd(2), bd(3), "EXCHANGE", "[]", old, old);
+        var fNew = new FundamentalAnalysisBatchRepository.FinancialObservation(
+                2026, 2, bd(4), bd(5), bd(6), "EXCHANGE", null, old, now);
+        var fTie = new FundamentalAnalysisBatchRepository.FinancialObservation(
+                2026, 2, bd(7), bd(8), bd(9), "EXCHANGE", "[]", old, now);
+        var rOld = new FundamentalAnalysisBatchRepository.RevenueObservation(
+                2026, 8, "old", bd(1), "EXCHANGE", "[]", old, old);
+        var rNew = new FundamentalAnalysisBatchRepository.RevenueObservation(
+                2026, 8, "new", bd(2), "EXCHANGE", "[]", old, now);
+        var iOld = new FundamentalAnalysisBatchRepository.IndustryObservation(
+                "industry", 2026, 8, bd(1), 3, "EXCHANGE", "[]", old, old);
+        var iNew = new FundamentalAnalysisBatchRepository.IndustryObservation(
+                "industry", 2026, 8, bd(2), 4, "EXCHANGE", "[]", old, now);
+        LocalDate date = LocalDate.of(2026, 9, 23);
+        var vOld = valuationObservation(date, 1, "[]", old, old);
+        var anotherKey = valuationObservation(date.minusDays(1), 2, "[]", old, old);
+        var vNew = valuationObservation(date, 3, "not-json", old, now);
+        var vTie = valuationObservation(date, 4, "[]", old, now);
+        var futureObserved = valuationObservation(date, 5, "[]", old, now.plusNanos(1));
+        var futureAvailable = valuationObservation(date, 6, "[]", now.plusNanos(1), old);
+        var missingAvailable = valuationObservation(date, 7, "[]", null, old);
+        var missingObserved = valuationObservation(date, 8, "[]", old, null);
+        var raw = new FundamentalAnalysisBatchRepository.Snapshot(List.of(fOld, fNew, fTie),
+                List.of(rOld, rNew), List.of(vOld, anotherKey, vNew, vTie, futureObserved,
+                futureAvailable, missingAvailable, missingObserved), List.of(iOld, iNew));
+
+        var selected = FundamentalAnalysisService.selectSnapshotAsOf(raw, now);
+
+        assertEquals(List.of(fNew), selected.financials());
+        assertEquals(List.of(rNew), selected.revenues());
+        assertEquals(List.of(vNew, anotherKey), selected.valuations());
+        assertEquals(List.of(iNew), selected.industries());
+        assertEquals(8, raw.valuations().size(), "repository snapshot must retain all revisions");
+        assertEquals(List.of(vOld, anotherKey), FundamentalAnalysisService.selectSnapshotAsOf(raw, old).valuations());
+        assertEquals(FundamentalAnalysisBatchRepository.Snapshot.empty(),
+                FundamentalAnalysisService.selectSnapshotAsOf(raw, null));
+    }
+
+    @Test
+    void earlySelectionKeepsFullSnapshotParityAndNeverParsesDiscardedRevisions() throws Exception {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        ObjectMapper mapper = spy(new ObjectMapper());
+        Instant now = Instant.parse("2026-08-08T14:00:00Z");
+        var query = batchQuery("2330", "台股", "台積電");
+        var key = new FundamentalAnalysisBatchRepository.Key(query.stockCode(), query.market());
+        var observations = new ArrayList<FundamentalAnalysisBatchRepository.ValuationObservation>();
+        for (int day = 0; day < 250; day++) {
+            LocalDate date = LocalDate.of(2026, 8, 8).minusDays(day);
+            for (int revision = 0; revision < 4; revision++) {
+                observations.add(valuationObservation(date, 900 + revision,
+                        "[\"https://example.test/discarded/" + revision + "\"]", Instant.EPOCH,
+                        now.minusSeconds(20 - revision)));
+            }
+            observations.add(valuationObservation(date, 10 + day,
+                    "[\"https://example.test/selected\"]", Instant.EPOCH, now.minusSeconds(1)));
+            // Equal timestamp ties keep the first row, even if the later row looks more complete.
+            observations.add(valuationObservation(date, 500, "[]", Instant.EPOCH, now.minusSeconds(1)));
+        }
+        var raw = new FundamentalAnalysisBatchRepository.Snapshot(List.of(), List.of(), observations, List.of());
+        when(repository.findSnapshot(key, now)).thenReturn(raw);
+        when(repository.findSnapshots(List.of(key), now)).thenReturn(Map.of(key, raw));
+        when(publicInfo.loadForEarliestDecision(now)).thenReturn(List.of());
+        var service = new FundamentalAnalysisService(repository, mapper, publicInfo);
+        var baseline = service.resolve(query.stockCode(), query.stockName(), query.market(), now, query.profile());
+        org.mockito.Mockito.clearInvocations(mapper);
+
+        var batch = service.resolveBatch(List.of(query), now).get(query);
+
+        assertEquals(baseline, batch);
+        assertEquals(new BigDecimal("10"), batch.snapshot().peValue());
+        assertEquals(1500, raw.valuations().size());
+        verify(mapper, times(1)).readValue(anyString(), org.mockito.ArgumentMatchers.<TypeReference<List<String>>>any());
+        assertEquals(baseline, service.resolveBatch(List.of(query), now).get(query));
+        verify(mapper, times(2)).readValue(anyString(), org.mockito.ArgumentMatchers.<TypeReference<List<String>>>any());
+    }
+
+    @Test
+    void selectedMalformedUrlsAndNullObservationsKeepExistingFailSoftSnapshot() {
+        FundamentalAnalysisBatchRepository repository = mock(FundamentalAnalysisBatchRepository.class);
+        PublicInfoEvidenceResolver publicInfo = mock(PublicInfoEvidenceResolver.class);
+        Instant now = Instant.parse("2026-08-08T14:00:00Z");
+        var query = batchQuery("2330", "台股", "台積電");
+        var key = new FundamentalAnalysisBatchRepository.Key(query.stockCode(), query.market());
+        var observations = new ArrayList<FundamentalAnalysisBatchRepository.ValuationObservation>();
+        for (int i = 0; i < 250; i++) {
+            observations.add(valuationObservation(LocalDate.of(2026, 8, 8).minusDays(i), 10 + i,
+                    i == 0 ? "[null]" : null, Instant.EPOCH, Instant.EPOCH));
+        }
+        observations.add(valuationObservation(LocalDate.of(2026, 8, 8), 99, "not-json", null, now));
+        var raw = new FundamentalAnalysisBatchRepository.Snapshot(List.of(), List.of(), observations, List.of());
+        when(repository.findSnapshot(key, now)).thenReturn(raw);
+        when(repository.findSnapshots(List.of(key), now)).thenReturn(Map.of(key, raw));
+        when(publicInfo.loadForEarliestDecision(now)).thenReturn(List.of());
+        var service = new FundamentalAnalysisService(repository, new ObjectMapper(), publicInfo);
+
+        var baseline = service.resolve(query.stockCode(), query.stockName(), query.market(), now, query.profile());
+        var actual = service.resolveBatch(List.of(query), now).get(query);
+
+        assertEquals(baseline, actual);
+        assertEquals(List.of(), actual.snapshot().peEvidence().sourceUrls());
+        assertEquals(new BigDecimal("10"), actual.snapshot().peValue());
+    }
+
+    private static FundamentalAnalysisBatchRepository.ValuationObservation valuationObservation(
+            LocalDate date, long pe, String urls, Instant available, Instant observed) {
+        return new FundamentalAnalysisBatchRepository.ValuationObservation(
+                date, bd(pe), bd(2), bd(4), false, "EXCHANGE", urls, available, observed);
     }
 
     /** 測試 (k)：resolveInputsForBacktest() 對 market="美股" 也能組出非 unavailable 的結果（不再卡在獨立閘門）。 */

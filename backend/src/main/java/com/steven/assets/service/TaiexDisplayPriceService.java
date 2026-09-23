@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.Instant;
+import com.steven.assets.util.MarketZones;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,9 +40,34 @@ public class TaiexDisplayPriceService {
     public DisplayQuote resolve() {
         PriceQueryService.DisplaySession session = priceQuery.displaySession(MARKET);
         List<TwseIndexDailyHistory> recent = historyRepo.findTop60ByOrderByTradingDateDesc();
+        Optional<PriceQueryService.LivePrice> live = session.phase() == PriceQueryService.DisplayPhase.OPEN
+                ? priceQuery.getLive(CODE, MARKET) : Optional.empty();
+        Optional<TwseIndexDailyHistory> exact = session.phase() == PriceQueryService.DisplayPhase.OPEN
+                ? Optional.empty() : historyRepo.findById(session.targetTradingDate());
+        return project(session, recent, live, exact);
+    }
+
+    /** Pure request-local display using the same calendar snapshot as the decision. */
+    DisplayQuote resolveFromRows(Instant instant, RadarObservationResolver.DecisionSessions sessions,
+                                 List<TwseIndexDailyHistory> rows, Optional<PriceQueryService.LivePrice> live) {
+        var time = instant.atZone(MarketZones.TW_ZONE).toLocalTime();
+        var phase = sessions.currentSessionTrading() && !time.isBefore(MarketZones.openTime(MARKET))
+                && time.isBefore(MarketZones.closeTime(MARKET)) ? PriceQueryService.DisplayPhase.OPEN
+                : sessions.currentSessionTrading() && !time.isBefore(MarketZones.closeTime(MARKET))
+                ? PriceQueryService.DisplayPhase.AFTER_CLOSE : PriceQueryService.DisplayPhase.PREVIOUS_SESSION;
+        LocalDate target = phase == PriceQueryService.DisplayPhase.OPEN
+                ? sessions.currentLiveDate() : sessions.targetCompletedSession();
+        var session = new PriceQueryService.DisplaySession(phase, target, sessions.currentLiveDate());
+        return project(session, rows.stream().limit(60).toList(), live,
+                rows.stream().filter(row -> target.equals(row.getTradingDate())).findFirst());
+    }
+
+    private static DisplayQuote project(PriceQueryService.DisplaySession session, List<TwseIndexDailyHistory> recent,
+                                        Optional<PriceQueryService.LivePrice> suppliedLive,
+                                        Optional<TwseIndexDailyHistory> exact) {
 
         if (session.phase() == PriceQueryService.DisplayPhase.OPEN) {
-            Optional<PriceQueryService.LivePrice> live = priceQuery.getLive(CODE, MARKET)
+            Optional<PriceQueryService.LivePrice> live = suppliedLive
                     .filter(row -> session.marketToday().toString().equals(row.tradingDate()));
             if (live.isPresent()) {
                 PriceQueryService.LivePrice row = live.get();
@@ -57,7 +84,6 @@ public class TaiexDisplayPriceService {
             return pending(session.marketToday());
         }
 
-        Optional<TwseIndexDailyHistory> exact = historyRepo.findById(session.targetTradingDate());
         if (exact.isEmpty()) return pending(session.targetTradingDate());
         String status = session.phase() == PriceQueryService.DisplayPhase.AFTER_CLOSE
                 ? "VERIFIED_CLOSE" : "PREVIOUS_CLOSE";

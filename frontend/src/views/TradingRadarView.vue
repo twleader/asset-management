@@ -1,5 +1,5 @@
 <template>
-  <div v-loading="loading" element-loading-text="讀取本地行情與技術指標…">
+  <div>
     <div class="header-row">
       <div>
         <div class="page-heading">今日交易雷達</div>
@@ -26,10 +26,11 @@
         <div class="card-head">
           <div>
             <span class="section-title">{{ marketCardTab }}大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ radar.ruleVersion || 'TW_RULES_V18' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ currentMarketPanel?.ruleVersion || 'TW_RULES_V20' }}</el-tag>
           </div>
-          <div class="as-of-group">
+          <div v-if="currentMarketPanel" class="as-of-group">
             <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
+            <span class="as-of">本區產生：{{ formatTime(currentMarketPanel?.generatedAt) }}</span>
             <span v-if="currentMarket.intraday" class="as-of live-as-of">即時更新：{{ fmtTime(currentMarket.liveUpdatedAt) }}</span>
           </div>
         </div>
@@ -56,6 +57,12 @@
         </el-tab-pane>
       </el-tabs>
 
+      <el-alert v-if="currentMarketPanelState.loading" type="info" :closable="false" show-icon :title="currentMarketPanel ? '正在更新大盤；保留前次完整資料。' : '正在載入此大盤區塊…'" />
+      <el-alert v-else-if="currentMarketPanelState.error" type="error" :closable="false" show-icon :title="currentMarketPanelState.error.message || '大盤載入失敗'">
+        <template #default><el-button text type="primary" @click="retryPanel(marketCardTab === '美股' ? 'us-market' : 'tw-market')">重新載入此區</el-button></template>
+      </el-alert>
+
+      <template v-if="currentMarketPanel">
       <el-alert
         v-if="currentMarket.stale"
         class="stale-alert"
@@ -134,6 +141,7 @@
           <div v-else class="muted">目前沒有額外風險提醒。</div>
         </el-col>
       </el-row>
+      </template>
     </el-card>
 
     <el-card shadow="never" class="public-info-card">
@@ -143,7 +151,11 @@
           <span class="as-of">近 72 小時；原文揭露，不做關鍵字情緒評分</span>
         </div>
       </template>
-      <el-row :gutter="18">
+      <el-alert v-if="panelStates['public-information'].loading" type="info" :closable="false" show-icon :title="panelStates['public-information'].data ? '正在更新公開資訊；保留前次完整資料。' : '正在載入公開資訊…'" />
+      <el-alert v-else-if="panelStates['public-information'].error" type="error" :closable="false" show-icon :title="panelStates['public-information'].error.message || '公開資訊載入失敗'">
+        <template #default><el-button text type="primary" @click="retryPanel('public-information')">重新載入此區</el-button></template>
+      </el-alert>
+      <el-row v-if="panelStates['public-information'].data" :gutter="18">
         <el-col v-for="group in informationGroups" :key="group.region" :xs="24" :md="12">
           <div class="reason-title">{{ group.label }}</div>
           <div v-if="group.items.length" class="info-list">
@@ -162,9 +174,10 @@
         <div class="card-head">
           <div>
             <span class="section-title">我的{{ marketTab }}決策</span>
-            <span class="stock-count">{{ currentStocks.length }} 檔</span>
+            <span v-if="currentStocksPanel" class="stock-count">{{ currentStocks.length }} 檔</span>
           </div>
           <span v-if="radar.skippedNonTwStocks" class="as-of">第一版未評分英股 {{ radar.skippedNonTwStocks }} 檔</span>
+          <span v-if="currentStocksPanel" class="as-of">整批載入時間：{{ formatTime(currentStocksPanel.generatedAt) }}</span>
         </div>
       </template>
 
@@ -173,7 +186,7 @@
           <template #label>
             <span style="display:inline-flex;align-items:center;gap:6px">
               <TaiwanMap :size="18" />
-              台股 <el-tag size="small" style="margin-left:2px">{{ twStocks.length }}</el-tag>
+              台股 <el-tag v-if="panelStates['tw-stocks'].data" size="small" style="margin-left:2px">{{ twStocks.length }}</el-tag>
             </span>
           </template>
         </el-tab-pane>
@@ -181,11 +194,16 @@
           <template #label>
             <span style="display:inline-flex;align-items:center;gap:6px">
               <UsFlag :size="22" />
-              美股 <el-tag size="small" style="margin-left:2px">{{ usStocks.length }}</el-tag>
+              美股 <el-tag v-if="panelStates['us-stocks'].data" size="small" style="margin-left:2px">{{ usStocks.length }}</el-tag>
             </span>
           </template>
         </el-tab-pane>
       </el-tabs>
+
+      <div v-if="currentStocksPanel?.data?.market" class="updated-at">
+        本區判斷大盤：{{ currentStocksPanel.data.market.regimeLabel || currentStocksPanel.data.market.regime || '資料不足' }}
+        · 完成日 K：{{ currentStocksPanel.data.market.asOfDate || '資料不足' }} · 整批載入時間：{{ formatTime(currentStocksPanel.generatedAt) }}
+      </div>
 
       <div class="holding-period-focus" aria-label="本次資金預定持有期">
         <div>
@@ -211,33 +229,42 @@
         description="本分頁個股的買賣建議依據那斯達克綜合指數（IXIC）自身的均線與 KD 技術面判斷大盤環境，與台股加權指數 regime 為不同的大盤情境、彼此不互相影響，請勿誤以為兩者同源；IXIC 的完整 regime、分數與各項指標可至頁面頂部「美股大盤風險」分頁檢視。"
       />
 
+      <el-alert v-if="currentStocksPanelState.loading" type="info" :closable="false" show-icon :title="currentStocksPanel ? '正在更新本市場個股；保留前次完整資料。' : '正在載入此市場個股…'" />
+      <el-alert v-else-if="currentStocksPanelState.error" type="error" :closable="false" show-icon :title="currentStocksPanelState.error.message || '個股載入失敗'">
+        <template #default><el-button text type="primary" @click="retryPanel(marketTab === '美股' ? 'us-stocks' : 'tw-stocks')">重新載入此區</el-button></template>
+      </el-alert>
+
       <el-table
-        v-if="currentStocks.length"
+        v-if="currentStocksPanel && currentStocks.length"
         :data="currentStocks"
         :row-key="row => `${row.market}_${row.stockCode}`"
+        :expand-row-keys="expandedRowKeys"
         stripe
         style="width:100%"
         @row-dblclick="onStockDblClick"
         @expand-change="onRowExpand"
       >
         <el-table-column type="expand">
-          <template #default="{ row }">
+          <template #default="{ row: summaryRow }">
+          <template v-for="row in [detailPresentationRow(summaryRow)]" :key="detailKey(row)">
             <div class="expand-panel">
               <el-alert
-                v-if="isDetailLoading(row)"
+                v-if="isDetailLoading(row) && !hasDetail(row)"
                 type="info"
                 :closable="false"
                 show-icon
                 title="正在載入此股票的明細…"
               />
               <el-alert
-                v-else-if="detailError(row)"
+                v-else-if="detailError(row) && !hasDetail(row)"
                 type="error"
                 :closable="false"
                 show-icon
                 :title="detailError(row)"
-              />
+              ><template #default><el-button text type="primary" @click="retryStockDetail(row)">重新計算此股</el-button></template></el-alert>
               <template v-else-if="hasDetail(row)">
+              <el-alert v-if="isDetailLoading(row)" type="info" :closable="false" show-icon title="正在重新計算此股票；下方保留前次完整資料。" />
+              <el-alert v-else-if="detailError(row)" type="warning" :closable="false" show-icon :title="`${detailError(row)}；下方保留前次完整資料。`"><template #default><el-button text type="primary" @click="retryStockDetail(row)">重新計算此股</el-button></template></el-alert>
               <div class="evidence-summary">
                 <div class="confirm-grid">
                   <div class="confirm-item">
@@ -778,10 +805,14 @@
               <div class="updated-at">
                 行情更新：{{ formatTime(row.priceUpdatedAt) }}　·　完成日 K：{{ row.dailyCandle?.asOfDate || '資料不足' }}
                 <span v-if="row.distributionAdjusted">　·　技術價基：還原權息／分割</span>
+                <template v-if="row.evaluationGeneratedAt">
+                  <br>此列重新評估：{{ formatTime(row.evaluationGeneratedAt) }}　·　判斷大盤：{{ row.evaluationMarket?.regimeLabel || row.evaluationMarket?.regime || '資料不足' }}（完成日 K：{{ row.evaluationMarket?.asOfDate || '資料不足' }}）
+                </template>
               </div>
               </template>
               <div v-else class="muted">展開後才會載入此股票的明細。</div>
             </div>
+          </template>
           </template>
         </el-table-column>
 
@@ -789,6 +820,10 @@
           <template #default="{ row }">
             <div class="stock-code">{{ row.stockCode }}</div>
             <div class="stock-name">{{ row.stockName }}</div>
+            <div v-if="row.evaluationGeneratedAt" class="updated-at">
+              此列評估：{{ formatTime(row.evaluationGeneratedAt) }}
+              <br>大盤：{{ row.evaluationMarket?.regimeLabel || row.evaluationMarket?.regime || '資料不足' }}
+            </div>
             <div v-if="row.assetClass === 'BOND' || row.distributionAdjusted || row.fxPercentile != null" class="stock-meta">
               <el-tag v-if="row.assetClass === 'BOND'" size="small" type="info" effect="plain">債券</el-tag>
               <el-tag v-if="row.distributionAdjusted" size="small" type="success" effect="plain">還原權息／分割</el-tag>
@@ -940,7 +975,7 @@
         </el-table-column>
       </el-table>
 
-      <el-empty v-else :description="`目前沒有可分析的${marketTab}標的`">
+      <el-empty v-else-if="currentStocksPanel && currentStocksPanelState.empty" :description="`目前沒有可分析的${marketTab}標的`">
         <el-button type="primary" @click="router.push('/stocks')">前往股票觀察新增標的</el-button>
       </el-empty>
     </el-card>
@@ -1293,6 +1328,8 @@ import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import { isClosePending } from '@/utils/displayQuote'
 import { applyTradingRadarSsePriceUpdate } from '@/utils/tradingRadarSsePriceUpdate'
+import { applyStockEvaluationTuple, createTradingRadarPanelLoader } from '@/utils/tradingRadarPanelLoader'
+import { createTradingRadarRefreshJob } from '@/utils/tradingRadarRefreshJob'
 import { projectValuationEvidence } from '@/utils/valuationEvidence'
 import {
   HOLDING_PERIOD_OPTIONS,
@@ -1305,7 +1342,6 @@ import {
 
 const router = useRouter()
 const route = useRoute()
-const loading = ref(false)
 const refreshing = ref(false)
 const exporting = ref(false)
 const exportDialog = reactive({ visible: false, range: [] })
@@ -1360,7 +1396,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V18' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V20' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)
@@ -1379,9 +1415,18 @@ const RECONNECT_DELAY_MS = 5000
 let priceStream = null
 let reconnectTimer = null
 let disposed = false
-let listGeneration = 0
-const expandedDetailKeys = new Set()
+const expandedDetailKeys = reactive(new Set())
 const detailStates = reactive({})
+const PANEL_METHODS = Object.freeze({
+  'tw-market': 'twMarketPanel', 'us-market': 'usMarketPanel', 'tw-stocks': 'twStocksPanel',
+  'us-stocks': 'usStocksPanel', 'public-information': 'publicInformationPanel'
+})
+const panelLoader = createTradingRadarPanelLoader({
+  stateFactory: reactive,
+  request: (panel, { signal }) => bffApi.tradingRadar[PANEL_METHODS[panel]]({ signal }),
+  onData: commitPanel
+})
+const panelStates = panelLoader.states
 
 // Requirement 148 SSE mapping table: this is the complete allow-list for a price-update.
 // Identity is selection-only; no payload field is spread or implicitly merged into a row.
@@ -1398,6 +1443,8 @@ const market = computed(() => radar.value.market || {})
 const marketCardTab = ref('台股')
 const usMarket = computed(() => radar.value.usMarket || {})
 const currentMarket = computed(() => marketCardTab.value === '美股' ? usMarket.value : market.value)
+const currentMarketPanel = computed(() => panelStates[marketCardTab.value === '美股' ? 'us-market' : 'tw-market'].data)
+const currentMarketPanelState = computed(() => panelStates[marketCardTab.value === '美股' ? 'us-market' : 'tw-market'])
 // 335.10：分頁標籤上的 stale 標記必須各自反映該組狀態，故刻意不走 currentMarket。
 const twStale = computed(() => !!market.value.stale)
 const usStale = computed(() => !!usMarket.value.stale)
@@ -1409,30 +1456,41 @@ const selectedHorizon = ref(HOLDING_PERIOD_STATES.NONE)
 const selectedHorizonPresentation = computed(() => presentHorizonDecision({}, selectedHorizon.value, selectedHorizon.value))
 const twStocks = computed(() => stocks.value.filter(s => s.market === '台股'))
 const usStocks = computed(() => stocks.value.filter(s => s.market === '美股'))
+const currentStocksPanel = computed(() => panelStates[marketTab.value === '美股' ? 'us-stocks' : 'tw-stocks'].data)
+const currentStocksPanelState = computed(() => panelStates[marketTab.value === '美股' ? 'us-stocks' : 'tw-stocks'])
 const currentStocks = computed(() => marketTab.value === '美股' ? usStocks.value : twStocks.value)
+const expandedRowKeys = computed(() => currentStocks.value
+  .filter(row => expandedDetailKeys.has(detailKey(row))).map(row => `${row.market}_${row.stockCode}`))
 const informationGroups = computed(() => [
   { region: 'TW', label: '台灣', items: (radar.value.publicInformation || []).filter(item => item.region === 'TW') },
   { region: 'US', label: '美國', items: (radar.value.publicInformation || []).filter(item => item.region === 'US') }
 ])
 const marketClass = computed(() => `regime-${String(currentMarket.value.regime || 'DATA_INCOMPLETE').toLowerCase().replace('_', '-')}`)
 
-// First screen and explicit manual refresh read only this page's compact list contract.
-async function load(silent = false) {
-  if (!silent) loading.value = true
-  try {
-    const next = await bffApi.tradingRadar.list()
-    if (!disposed) replaceList(next)
-  } finally {
-    if (!silent) loading.value = false
+function commitPanel(panel, envelope) {
+  if (panel === 'tw-market') {
+    radar.value.market = envelope.data.market
+    radar.value.ruleVersion = envelope.ruleVersion
+    return
   }
+  if (panel === 'us-market') {
+    radar.value.usMarket = envelope.data.market
+    return
+  }
+  if (panel === 'public-information') {
+    radar.value.publicInformation = envelope.data.publicInformation
+    return
+  }
+  const marketName = panel === 'tw-stocks' ? '台股' : '美股'
+  cancelMarketDetails(marketName)
+  const retained = (radar.value.stocks || []).filter(row => row.market !== marketName)
+  radar.value.stocks = [...retained, ...envelope.data.stocks]
+  radar.value.skippedNonTwStocks = envelope.data.skippedNonTwStocks
+  radar.value.ruleVersion = envelope.ruleVersion
 }
 
-function replaceList(next) {
-  listGeneration += 1
-  expandedDetailKeys.clear()
-  for (const key of Object.keys(detailStates)) delete detailStates[key]
-  radar.value = next
-}
+function retryPanel(panel) { return panelLoader.load(panel, { preserve: true }) }
+function loadPanels() { return panelLoader.loadAll({ preserve: true }) }
 
 // Task 249：outcome → 提示文案。不得宣稱做了沒做的事。
 const REFRESH_MESSAGES = {
@@ -1448,21 +1506,47 @@ const REFRESH_MESSAGES = {
 /**
  * 手動「重新整理」只取得行情回補 outcome，再明確替換 compact list。SSE 絕不走此路。
  */
+const refreshJob = createTradingRadarRefreshJob({
+  start: ({ signal }) => bffApi.tradingRadar.startRefreshJob({ signal }),
+  status: (jobId, { signal }) => bffApi.tradingRadar.getRefreshJob(jobId, { signal }),
+  onCompleted: async job => {
+    const settled = await loadPanels()
+    const allSucceeded = settled.every(result => result.status === 'fulfilled' && result.value != null)
+    return { job, completed: allSucceeded, partial: !allSucceeded }
+  }
+})
+
 async function manualRefresh() {
+  if (refreshing.value || refreshJob.active) return
   refreshing.value = true
   try {
-    const resp = await bffApi.tradingRadar.refresh()
-    if (disposed) return
-    const hint = REFRESH_MESSAGES[resp?.priceRefresh?.outcome] || REFRESH_MESSAGES.TIMEOUT
-    ElMessage({ type: hint.type, message: hint.text })
-    await load(true)
-  } finally {
-    refreshing.value = false
-  }
+    const result = await refreshJob.run()
+    if (disposed || !result) return
+    if (result.completed) {
+      const hint = REFRESH_MESSAGES[result.job?.priceRefresh?.outcome] || REFRESH_MESSAGES.FETCHED
+      ElMessage({ type: hint.type, message: hint.text })
+    } else if (result.partial) {
+      ElMessage.warning('行情工作已完成，但部分分析區塊更新失敗；保留原資料。')
+    } else {
+      ElMessage.warning(result.timeout ? '行情更新逾時，保留原資料，未宣稱已重算。' : '行情工作未完成，保留原資料。')
+    }
+  } catch (error) {
+    if (!disposed) ElMessage.warning(error?.message || '無法啟動行情更新工作')
+  } finally { refreshing.value = false }
 }
 
 function applyPriceUpdate(payload) {
-  applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)
+  const row = (radar.value.stocks || []).find(item => item.market === payload?.market && String(item.stockCode) === String(payload?.stockCode))
+  if (!row || staleSse(row, payload)) return
+  if (!applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)) return
+  const state = detailStates[detailKey(row)]
+  if (state?.tuple?.stock) applyTradingRadarSsePriceUpdate([state.tuple.stock], payload)
+}
+
+function staleSse(row, payload) {
+  const incoming = Date.parse(payload?.updatedAt)
+  const present = Date.parse(row?.priceUpdatedAt)
+  return Number.isFinite(incoming) && Number.isFinite(present) && incoming <= present
 }
 
 function detailKey(row) {
@@ -1478,7 +1562,14 @@ function detailError(row) {
 }
 
 function hasDetail(row) {
-  return detailStates[detailKey(row)]?.loaded === true
+  return detailStates[detailKey(row)]?.loaded === true && !!detailStates[detailKey(row)]?.tuple?.stock
+}
+
+function detailPresentationRow(row) {
+  const state = detailStates[detailKey(row)]
+  if (!state?.tuple?.stock) return row
+  // 僅明細的暫態呈現採完整 decision；清單仍保留 compact summary。
+  return { ...row, ...state.tuple.stock }
 }
 
 function onRowExpand(row, expandedRows) {
@@ -1486,30 +1577,63 @@ function onRowExpand(row, expandedRows) {
   const expanded = Array.isArray(expandedRows) && expandedRows.some(candidate => detailKey(candidate) === key)
   if (!expanded) {
     expandedDetailKeys.delete(key)
+    cancelDetail(key)
     return
   }
+  if (expandedDetailKeys.has(key)) return
   expandedDetailKeys.add(key)
-  if (hasDetail(row) || isDetailLoading(row)) return
-  void loadStockDetail(row, key, listGeneration)
+  if (isDetailLoading(row)) return
+  void loadStockDetail(row, key)
 }
 
-async function loadStockDetail(row, key, generation) {
-  detailStates[key] = { loading: true, loaded: false, error: '', generation }
+function retryStockDetail(row) {
+  const key = detailKey(row)
+  expandedDetailKeys.add(key)
+  if (!isDetailLoading(row)) void loadStockDetail(row, key)
+}
+
+async function loadStockDetail(row, key) {
+  cancelDetail(key)
+  const previous = detailStates[key]?.tuple || null
+  const generation = (detailStates[key]?.generation || 0) + 1
+  detailStates[key] = { loading: true, loaded: !!previous, error: '', generation, controller: new AbortController(), tuple: previous }
   const state = detailStates[key]
+  const isCurrent = () => !disposed && expandedDetailKeys.has(key) && detailStates[key] === state && state.generation === generation
   try {
-    const response = await bffApi.tradingRadar.stock(row.market, row.stockCode)
-    const stillCurrent = !disposed && generation === listGeneration && expandedDetailKeys.has(key)
-      && detailStates[key] === state && (radar.value.stocks || []).includes(row)
+    const response = await bffApi.tradingRadar.stockEvaluation(row.market, row.stockCode, { signal: state.controller.signal })
+    const stillCurrent = isCurrent()
+      && (radar.value.stocks || []).some(item => detailKey(item) === key)
     if (!stillCurrent) return
-    if (!response?.stock) throw new Error('未取得股票明細')
-    Object.assign(row, response.stock)
+    const tuple = applyStockEvaluationTuple(radar.value.stocks || [], row.market, row.stockCode, response)
+    // validate + tuple projection 都成功後才在同一同步區段換 row 與 detail，沒有半份成功。
+    radar.value.stocks = tuple.rows
+    state.tuple = tuple.detail
     state.loaded = true
   } catch (error) {
-    if (!disposed && generation === listGeneration && expandedDetailKeys.has(key) && detailStates[key] === state) {
+    if (isCurrent() && error?.code !== 'ERR_CANCELED' && error?.name !== 'AbortError') {
       state.error = error?.message || '載入股票明細失敗，請稍後再試。'
     }
   } finally {
-    if (detailStates[key] === state) state.loading = false
+    if (isCurrent()) { state.loading = false; state.controller = null }
+  }
+}
+
+function cancelDetail(key) {
+  const state = detailStates[key]
+  if (!state) return
+  state.generation += 1
+  state.controller?.abort()
+  state.controller = null
+  state.loading = false
+}
+
+function cancelMarketDetails(market) {
+  for (const key of Object.keys(detailStates)) {
+    if (key.startsWith(`${market}\u0000`)) {
+      expandedDetailKeys.delete(key)
+      cancelDetail(key)
+      delete detailStates[key]
+    }
   }
 }
 
@@ -2357,7 +2481,8 @@ function handleBlogOauthRedirect() {
 }
 
 onMounted(() => {
-  load().catch(() => {}).finally(openPriceStream)
+  openPriceStream()
+  loadPanels().catch(() => {})
   loadExportSchedule().catch(() => {})
   loadBlogStatus().catch(() => {})
   handleBlogOauthRedirect()
@@ -2365,6 +2490,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   disposed = true
+  panelLoader.dispose()
+  refreshJob.dispose()
+  for (const key of Object.keys(detailStates)) cancelDetail(key)
   if (priceStream) {
     priceStream.close()
     priceStream = null

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Fits per-instrument beta from adjusted closes and immutable Treasury curves.
@@ -106,6 +107,9 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
         }
         Map<BatchKey, BatchHistory> histories = loadBatchHistories(grouped);
         Map<BondYieldBetaResolver.Query, BondYieldBetaResolver.Result> out = new LinkedHashMap<>();
+        Map<LocalDate, Boolean> tradingDays = new HashMap<>();
+        Predicate<LocalDate> usTradingDay = date ->
+                tradingDays.computeIfAbsent(date, marketDataService::isUsTradingDay);
         for (Map.Entry<BatchKey, List<BondYieldBetaResolver.Query>> entry : grouped.entrySet()) {
             BatchKey key = entry.getKey();
             List<BondYieldBetaResolver.Query> group = entry.getValue();
@@ -122,7 +126,7 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
                 history = loadBatchHistory(key.code(), key.market(), latestDecision, fxRequired);
             }
             for (BondYieldBetaResolver.Query query : group) {
-                Evidence evidence = loadEvidence(query, history);
+                Evidence evidence = loadEvidence(query, history, usTradingDay);
                 out.put(query, BondYieldBetaResolver.resolve(query, evidence.samples(), evidence.rateSignal()));
             }
         }
@@ -172,6 +176,11 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
     }
 
     private Evidence loadEvidence(BondYieldBetaResolver.Query query, BatchHistory history) {
+        return loadEvidence(query, history, marketDataService::isUsTradingDay);
+    }
+
+    private Evidence loadEvidence(BondYieldBetaResolver.Query query, BatchHistory history,
+                                  Predicate<LocalDate> usTradingDay) {
         if (query == null || query.decisionInstant() == null || query.code() == null
                 || query.market() == null || query.tenor() == null || query.signalSpec() == null) {
             return Evidence.empty();
@@ -217,7 +226,7 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
         }
         List<TreasuryYieldDto.StoredBatch> batches = history.treasuryBatches();
         List<YieldChange> yieldChanges = yieldChanges(
-                batches, query.signalSpec(), query.decisionInstant());
+                batches, query.signalSpec(), query.decisionInstant(), usTradingDay);
         if (yieldChanges.isEmpty()) return Evidence.empty();
         Map<LocalDate, YieldChange> yieldByDate = new LinkedHashMap<>();
         yieldChanges.forEach(change -> yieldByDate.put(change.date(), change));
@@ -229,7 +238,7 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
             StockPriceHistory previous = adjusted.get(i - 1);
             StockPriceHistory current = adjusted.get(i);
             LocalDate returnDate = current.getTradingDate();
-            LocalDate expectedYieldDate = previousUsTradingSession(returnDate, query.lagSessions());
+            LocalDate expectedYieldDate = previousUsTradingSession(returnDate, query.lagSessions(), usTradingDay);
             YieldChange yield = expectedYieldDate == null ? null : yieldByDate.get(expectedYieldDate);
             if (yield == null || !positive(previous.getClosePrice())
                     || !positive(current.getClosePrice())) continue;
@@ -304,7 +313,7 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
     private List<YieldChange> yieldChanges(
             List<TreasuryYieldDto.StoredBatch> batches,
             BondYieldBetaResolver.RateSignalSpec spec,
-            Instant decisionInstant) {
+            Instant decisionInstant, Predicate<LocalDate> usTradingDay) {
         if (batches == null || batches.size() < 2 || spec == null
                 || decisionInstant == null) return List.of();
         List<TreasuryYieldDto.StoredBatch> valid = batches.stream()
@@ -321,7 +330,7 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
             TreasuryYieldDto.StoredBatch current = valid.get(i);
             // A missing middle curve row is not a one-session move. Weekends and
             // statutory holidays are accepted because nextUsTradingSession skips them.
-            if (!current.curveDate().equals(nextUsTradingSession(previous.curveDate()))) continue;
+            if (!current.curveDate().equals(nextUsTradingSession(previous.curveDate(), usTradingDay))) continue;
             if (!nonBlank(current.provider()) || !current.provider().equals(previous.provider())) continue;
             BigDecimal primary = current.values().get(spec.primaryTenor())
                     .subtract(previous.values().get(spec.primaryTenor()));
@@ -357,21 +366,21 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
                 change.availabilityBasis(), change.provider());
     }
 
-    private LocalDate nextUsTradingSession(LocalDate date) {
+    private LocalDate nextUsTradingSession(LocalDate date, Predicate<LocalDate> usTradingDay) {
         if (date == null) return null;
         LocalDate candidate = date.plusDays(1);
         for (int guard = 0; guard < 14; guard++, candidate = candidate.plusDays(1)) {
-            if (marketDataService.isUsTradingDay(candidate)) return candidate;
+            if (usTradingDay.test(candidate)) return candidate;
         }
         return null;
     }
 
-    private LocalDate previousUsTradingSession(LocalDate date, int sessions) {
+    private LocalDate previousUsTradingSession(LocalDate date, int sessions, Predicate<LocalDate> usTradingDay) {
         if (date == null || sessions < 1) return null;
         LocalDate candidate = date.minusDays(1);
         int remaining = sessions;
         for (int guard = 0; guard < 30; guard++, candidate = candidate.minusDays(1)) {
-            if (marketDataService.isUsTradingDay(candidate) && --remaining == 0) return candidate;
+            if (usTradingDay.test(candidate) && --remaining == 0) return candidate;
         }
         return null;
     }

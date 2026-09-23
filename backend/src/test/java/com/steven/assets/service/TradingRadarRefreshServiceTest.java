@@ -36,6 +36,18 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class TradingRadarRefreshServiceTest {
 
+    @Test
+    void explicitOwnerBackgroundPathNeverResolvesRequestScopeAndKeepsBothCooldownKeys() {
+        when(marketDataService.isMarketOpenNow("台股")).thenReturn(true);
+        when(priceQueryService.refreshTradingRadarPrices()).thenReturn(summary("{}"));
+
+        assertEquals("FETCHED", service.refreshForOwner(42L).priceRefresh().outcome());
+
+        org.mockito.Mockito.verifyNoInteractions(currentUserContext);
+        verify(valueOps).setIfAbsent(eq("radar:refresh:cooldown:42"), eq("1"), any(Duration.class));
+        verify(valueOps).setIfAbsent(eq("radar:refresh:cooldown:global"), eq("1"), any(Duration.class));
+    }
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Mock private PriceQueryService priceQueryService;

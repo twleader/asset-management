@@ -20,6 +20,9 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.times;
@@ -232,6 +235,62 @@ class HistoricalBondYieldBetaEvidenceAdapterTest {
         return new BondYieldBetaResolver.Query(
                 CODE, MARKET, "Y30", DECISION, BondYieldBetaResolver.FxControl.NONE,
                 1, 3, 3, 3);
+    }
+
+    @Test
+    void batchCalendarReusesEachDateWhileKeepingLagDecisionAndHolidayParity() {
+        Fixture fixture = fixture(true);
+        stubHistory(fixture.prices(), fixture.curves());
+        Map<LocalDate, Integer> calls = new HashMap<>();
+        Set<LocalDate> closed = new HashSet<>(Set.of(LocalDate.of(2026, 1, 1)));
+        when(marketDataService.isUsTradingDay(any())).thenAnswer(invocation -> {
+            LocalDate day = invocation.getArgument(0);
+            calls.merge(day, 1, Integer::sum);
+            return day.getDayOfWeek() != java.time.DayOfWeek.SATURDAY
+                    && day.getDayOfWeek() != java.time.DayOfWeek.SUNDAY && !closed.contains(day);
+        });
+        var laterLag = new BondYieldBetaResolver.Query(CODE, MARKET, "Y30", DECISION,
+                BondYieldBetaResolver.FxControl.NONE, 2, 3, 3, 3);
+        var earlier = new BondYieldBetaResolver.Query(CODE, MARKET, "Y30", DECISION.minusSeconds(3 * 86400),
+                BondYieldBetaResolver.FxControl.NONE, 1, 3, 3, 3);
+        List<BondYieldBetaResolver.Query> queries = List.of(query(), laterLag, earlier);
+        Map<BondYieldBetaResolver.Query, BondYieldBetaResolver.Result> baseline = new LinkedHashMap<>();
+        queries.forEach(query -> baseline.put(query, adapter.resolve(query)));
+        int originalCalls = calls.values().stream().mapToInt(Integer::intValue).sum();
+        calls.clear();
+
+        assertThat(adapter.resolveBatch(queries)).isEqualTo(baseline);
+
+        assertThat(calls).isNotEmpty();
+        assertThat(calls.values()).allMatch(count -> count == 1);
+        assertThat(originalCalls).isGreaterThan(calls.size());
+        // A later request must consult the calendar again rather than keep the earlier result.
+        closed.add(LocalDate.of(2026, 1, 5));
+        baseline.clear();
+        queries.forEach(query -> baseline.put(query, adapter.resolve(query)));
+        calls.clear();
+        assertThat(adapter.resolveBatch(queries)).isEqualTo(baseline);
+        assertThat(calls).containsKey(LocalDate.of(2026, 1, 5));
+        assertThat(calls.values()).allMatch(count -> count == 1);
+    }
+
+    @Test
+    void closedCalendarStillHonorsBoundedSearchAndEmptyEvidence() {
+        Fixture fixture = fixture(true);
+        stubHistory(fixture.prices(), fixture.curves());
+        Map<LocalDate, Integer> calls = new HashMap<>();
+        when(marketDataService.isUsTradingDay(any())).thenAnswer(invocation -> {
+            calls.merge(invocation.getArgument(0), 1, Integer::sum);
+            return false;
+        });
+        var baseline = adapter.resolve(query());
+        calls.clear();
+
+        assertThat(adapter.resolveBatch(List.of(query())).get(query())).isEqualTo(baseline);
+
+        assertThat(calls).isNotEmpty();
+        assertThat(calls.values()).allMatch(count -> count == 1);
+        assertThat(calls.keySet()).allMatch(day -> !day.isAfter(FIRST.plusDays(22)));
     }
 
     private void stubHistory(

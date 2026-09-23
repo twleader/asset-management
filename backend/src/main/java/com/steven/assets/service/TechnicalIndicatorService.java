@@ -570,8 +570,21 @@ public class TechnicalIndicatorService {
             List<TwseIndexDailyHistory> desc = new ArrayList<>(twseDailyRepo.findTopNByOrderByTradingDateDesc(240));
             // Task 252：台股大盤，顯式用台北時區（本方法無 market 參數）
             LocalDate today = LocalDate.now(MarketZones.TW_ZONE);
+            Optional<PriceQueryService.LivePrice> live = desc.isEmpty() || !today.equals(desc.get(0).getTradingDate())
+                    ? priceQuery.getLive("0000", "台股") : Optional.empty();
+            return computeAllForTaiexFromRows(desc, today, live);
+        } catch (Exception e) {
+            log.warn("compute TAIEX indicators failed", e);
+            return FullIndicators.EMPTY;
+        }
+    }
+
+    /** Request-local reuse of raw descending rows, retaining the original 240/live arithmetic contract. */
+    FullIndicators computeAllForTaiexFromRows(List<TwseIndexDailyHistory> rows, LocalDate today,
+                                             Optional<PriceQueryService.LivePrice> liveOpt) {
+        try {
+            List<TwseIndexDailyHistory> desc = new ArrayList<>(rows.stream().limit(240).toList());
             if (desc.isEmpty() || !today.equals(desc.get(0).getTradingDate())) {
-                Optional<PriceQueryService.LivePrice> liveOpt = priceQuery.getLive("0000", "台股");
                 if (liveOpt.isPresent() && liveOpt.get().tradingDate() != null
                         && today.toString().equals(liveOpt.get().tradingDate())) {
                     PriceQueryService.LivePrice live = liveOpt.get();
@@ -649,8 +662,18 @@ public class TechnicalIndicatorService {
     @Transactional(readOnly = true)
     public FullIndicators computeAllForNasdaq() {
         try {
-            List<UsIndexDailyHistory> desc = new ArrayList<>(
+            return computeAllForNasdaqFromRows(
                     usIndexDailyHistoryRepo.findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 240));
+        } catch (Exception e) {
+            log.warn("compute NASDAQ (IXIC) indicators failed", e);
+            return FullIndicators.EMPTY;
+        }
+    }
+
+    /** The same exact-decimal index calculation; raw history remains capped at 240, not the daily 241. */
+    FullIndicators computeAllForNasdaqFromRows(List<UsIndexDailyHistory> rows) {
+        try {
+            List<UsIndexDailyHistory> desc = new ArrayList<>(rows.stream().limit(240).toList());
             if (desc.isEmpty()) return FullIndicators.EMPTY;
 
             BigDecimal ma5   = nasdaqSimpleMa(desc, 5);
