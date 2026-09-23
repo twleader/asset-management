@@ -422,6 +422,137 @@ class AssetServiceTest {
         assertThat(result.get(1).increaseRate()).isEqualByComparingTo("0.250000");
     }
 
+    @Test
+    void getAssetHistory_optionalIdAbsentPreservesCompleteHistory() {
+        AssetSnapshot older = historySnapshot(1L, LocalDate.of(2023, 1, 1), "4000");
+        AssetSnapshot newer = historySnapshot(2L, LocalDate.of(2024, 1, 1), "5000");
+        when(snapshotRepo.findAllByOrderBySnapshotDateAsc()).thenReturn(List.of(older, newer));
+
+        var result = service.getAssetHistory(null);
+
+        assertThat(result).extracting(AssetSnapshotDto.AssetHistoryResponse::id).containsExactly(1L, 2L);
+        assertThat(result.getLast().increase()).isEqualByComparingTo("1000");
+        verify(snapshotRepo).findAllByOrderBySnapshotDateAsc();
+        verifyNoMoreInteractions(snapshotRepo);
+        verifyNoInteractions(tenantGuard);
+    }
+
+    @Test
+    void getAssetHistory_selectedRowMatchesFullHistoryWithoutReadingAllRoots() {
+        AssetSnapshot older = historySnapshot(1L, LocalDate.of(2023, 12, 31), "4000");
+        AssetSnapshot previous = historySnapshot(2L, LocalDate.of(2024, 1, 31), "5000");
+        AssetSnapshot selected = historySnapshot(3L, LocalDate.of(2024, 2, 29), "5950");
+        AssetSnapshot future = historySnapshot(4L, LocalDate.of(2024, 3, 31), "6500");
+        selected.setTotalDeposit(new BigDecimal("1450"));
+        selected.setTotalStockValue(new BigDecimal("3500"));
+        selected.setTotalFundValue(new BigDecimal("1000"));
+        selected.setEstimatedAnnualDividend(new BigDecimal("180"));
+        selected.getDeposits().addAll(List.of(
+                BankDeposit.builder().currency("TWD").amount(new BigDecimal("1000")).build(),
+                BankDeposit.builder().currency("USD").amount(new BigDecimal("400")).build(),
+                BankDeposit.builder().currency("TRANSIT_TWD").amount(new BigDecimal("100")).build(),
+                BankDeposit.builder().currency("TRANSIT_USD").amount(new BigDecimal("-50")).build()));
+        selected.getStocks().addAll(List.of(
+                StockHolding.builder().stockCode("0050").market("台股").currentValue(new BigDecimal("1000")).build(),
+                StockHolding.builder().stockCode("TLT").market("美股").currentValue(new BigDecimal("2000")).build(),
+                StockHolding.builder().stockCode("CSPX.L").market("英股").currentValue(new BigDecimal("500")).build()));
+        selected.getFunds().addAll(List.of(
+                FundHolding.builder().fundName("全球債券").currentValue(new BigDecimal("600")).build(),
+                FundHolding.builder().fundName("全球入息").currentValue(new BigDecimal("400")).build()));
+        when(stockMasterRepo.findAll()).thenReturn(List.of(
+                Stock.builder().code("0050").market("台股").name("台灣50")
+                        .stockStyle(AssetClassifier.INCOME).build(),
+                Stock.builder().code("TLT").market("美股").name("20年公債").build()));
+        when(fundClassOverrideRepo.findAll()).thenReturn(List.of(
+                FundClassOverride.builder().fundName("全球入息").assetClass(AssetClassifier.STOCK)
+                        .stockStyle(AssetClassifier.INCOME).build()));
+        when(assetClassifier.classifyStock(any(), any(), any())).thenCallRealMethod();
+        when(assetClassifier.classifyStockByRule(any(), any())).thenCallRealMethod();
+        when(assetClassifier.classifyStockStyle(any(), any(), any(), any(), any())).thenCallRealMethod();
+        when(assetClassifier.classifyBondTerm(any(), any(), any(), any())).thenCallRealMethod();
+        when(assetClassifier.classifyFund(any(), any())).thenCallRealMethod();
+        when(gainRepo.findDistinctYears()).thenReturn(List.of(2024));
+        when(gainRepo.findByYearOrderByTradeDateAsc(2024)).thenReturn(List.of(
+                RealizedGain.builder().currency("TWD").proceeds(new BigDecimal("500"))
+                        .investmentCost(new BigDecimal("300")).build()));
+        when(snapshotRepo.findAllByOrderBySnapshotDateAsc()).thenReturn(List.of(older, previous, selected, future));
+        var full = service.getAssetHistory();
+        clearInvocations(snapshotRepo);
+
+        when(snapshotRepo.findById(3L)).thenReturn(Optional.of(selected));
+        when(snapshotRepo.findHistoryWindow(9L, 3L, selected.getSnapshotDate()))
+                .thenReturn(List.of(previous, selected));
+        var bounded = service.getAssetHistory(3L);
+
+        assertThat(bounded).extracting(AssetSnapshotDto.AssetHistoryResponse::id).containsExactly(2L, 3L);
+        assertThat(bounded.getLast()).isEqualTo(full.get(2));
+        assertThat(bounded.getLast().increase()).isEqualByComparingTo("950");
+        assertThat(bounded.getLast().cashValue()).isEqualByComparingTo("1450");
+        assertThat(bounded.getLast().bondValue()).isEqualByComparingTo("2600");
+        assertThat(bounded.getLast().growthValue()).isEqualByComparingTo("500");
+        assertThat(bounded.getLast().incomeValue()).isEqualByComparingTo("1400");
+        assertThat(bounded.getLast().realizedGain()).isEqualByComparingTo("200");
+        assertThat(full.get(1).increase()).isNotNull();
+        assertThat(bounded.getFirst().increase()).isNull();
+        assertThat(bounded.getFirst().increaseRate()).isNull();
+        InOrder order = inOrder(snapshotRepo, tenantGuard);
+        order.verify(snapshotRepo).findById(3L);
+        order.verify(tenantGuard).assertOwned(9L);
+        order.verify(snapshotRepo).findHistoryWindow(9L, 3L, selected.getSnapshotDate());
+        verify(snapshotRepo, never()).findAllByOrderBySnapshotDateAsc();
+        verifyNoMoreInteractions(snapshotRepo);
+    }
+
+    @Test
+    void getAssetHistory_firstSnapshotHasNoPreviousComparison() {
+        snapshot.setTotalAssets(new BigDecimal("5000"));
+        when(snapshotRepo.findById(1L)).thenReturn(Optional.of(snapshot));
+        when(snapshotRepo.findHistoryWindow(9L, 1L, snapshot.getSnapshotDate())).thenReturn(List.of(snapshot));
+
+        var result = service.getAssetHistory(1L);
+
+        assertThat(result).singleElement().satisfies(row -> {
+            assertThat(row.id()).isEqualTo(1L);
+            assertThat(row.totalAssets()).isEqualByComparingTo("5000");
+            assertThat(row.increase()).isNull();
+            assertThat(row.increaseRate()).isNull();
+        });
+        verify(snapshotRepo, never()).findAllByOrderBySnapshotDateAsc();
+        verify(snapshotRepo, never()).findLatest();
+    }
+
+    @Test
+    void getAssetHistory_missingIdFailsBeforeHistoryOrClassificationQueries() {
+        when(snapshotRepo.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getAssetHistory(99L))
+                .isInstanceOf(NoSuchElementException.class).hasMessageContaining("99");
+
+        verify(snapshotRepo).findById(99L);
+        verifyNoMoreInteractions(snapshotRepo);
+        verifyNoInteractions(tenantGuard, gainRepo, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo);
+    }
+
+    @Test
+    void getAssetHistory_otherOwnerFailsBeforeHistoryOrClassificationQueries() {
+        snapshot.setOwnerUserId(88L);
+        when(snapshotRepo.findById(1L)).thenReturn(Optional.of(snapshot));
+        doThrow(new com.steven.assets.security.TenantAccessException()).when(tenantGuard).assertOwned(88L);
+
+        assertThatThrownBy(() -> service.getAssetHistory(1L))
+                .isInstanceOf(com.steven.assets.security.TenantAccessException.class);
+
+        verify(snapshotRepo).findById(1L);
+        verify(tenantGuard).assertOwned(88L);
+        verifyNoMoreInteractions(snapshotRepo);
+        verifyNoInteractions(gainRepo, stockMasterRepo, fundClassOverrideRepo, stockStyleRepo);
+    }
+
+    private static AssetSnapshot historySnapshot(Long id, LocalDate date, String total) {
+        return AssetSnapshot.builder().id(id).ownerUserId(9L).snapshotDate(date)
+                .totalAssets(new BigDecimal(total)).build();
+    }
+
     // ---- rollLatestSnapshotToTodayForOwner (Requirement 35 / Task 174) ----
 
     @Test

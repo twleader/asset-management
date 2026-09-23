@@ -5526,3 +5526,20 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 到期定義為 processingDate <= Asia/Taipei 的今天。只清理每 owner 當前 latest snapshot、且 snapshotDate <= today 的 TRANSIT_TWD／TRANSIT_USD 有日期列；手動、自動皆適用。null 日期、未到期、普通存款、歷史快照及未來快照保持不變。沿用 SnapshotDateRollScheduler 每日 00:05 Asia/Taipei 與開機 self-heal，清理與 roll 在同一個 per-owner transaction、同一個既有 snapshot row lock 下完成；即使 snapshotDate 已是今天也必清理。服務停機跨日後下次啟動補跑；逐 owner 失敗隔離、idempotent、不因 Fubon feature flag 或來源 503 停止清理。更新既有 JOBS 此工作的描述，不新增排程或變更節拍。
 - [ ] 使用者建立／儲存當前最新且非未來快照時，已到期列在同次 transaction 立即移除；先取得 AUTO 保護 identity 再清理，確保該 payload 不會重建已刪 AUTO。到期移除用 orphan removal 並重算該 snapshot totalDeposit／totalAssets 等既有 aggregates；不改活存金額、不新增付款／交易／已實現損益，不修改券商、銀行端或歷史快照。GET 全程 pure read，不在畫面或公開 API 讀取時觸發刪除。
 - [ ] 驗證涵蓋台北跨日、已是今天仍清理、停機補跑、過期／today／future／null、兩幣別、多 owner／歷史／future snapshot、aggregate、重跑零寫、writer 多日期與 missing/zero 保留、legacy null-date fail closed、手動來源保護、AUTO 日期補填及不可改既有日期、stale/跨 owner/重複 id 的全交易拒絕與 Excel round-trip。採 Java 21 focused tests＋真 PostgreSQL lifecycle/rollback 驗證、前端既有測試及 build、Docker affected images rebuild/recreate 與實際 GET。重產 db/schema.sql、schema drift/spec-check 零 BLOCK、架構審查後依專案流程 commit/no-ff merge/push，再驗 main runtime。使用者指出的舊款項，只在取得實際處理日後透過受 owner 保護的應用程式寫入路徑補填並驗證消失；不得把猜測日期或測試資料寫入實帳。
+
+
+#### Requirement 9 修訂／Task 449：儀表板各 Panel 完整回應、平行載入與失敗隔離
+
+**User Story：**身為透過網際網路查看儀表板的使用者，我希望各 Panel 平行取得完整顯示資料，慢速或失敗的請求只影響該 Panel，已完成的圖表不會消失或被舊快照覆蓋。
+
+**相容性修訂：**本需求取代 Requirement 9／25／146 對 Dashboard 開頁使用單一 summary、切換快照共用 snapshot response、分類 tooltip 二次補抓及開頁補算後重載的資料載入安排；既有估值、分類、配息、歷史凍結與 ETF 穿透計算不變。舊 summary／snapshot／realtime／lookthrough 等端點保留相容，但新 Dashboard 不再依賴它們完成首次繪圖。Realtime 為純讀，不觸發行情 refresh；取代 Requirement 9 的舊 refresh 描述。
+
+**Acceptance Criteria：**
+- [ ] 同一 DashboardBffController 提供快照選擇器 GET /api/bff/dashboard/snapshots，以及七個具名 Panel method：GET /api/bff/dashboard/panels/kpis/{id}、allocation/{id}、trend（無 id，完整歷史）、deposits/{id}、stock-values/{id}、holdings/{id}、funds/{id}。allocation 以 tab=category|assetClass|twStock|usStock 選取目前子頁，未知值回 400；每次回應必含該子頁含 tooltip／小計的全部資料，切 tab 可重新取得整份該 tab 資料，不允許同一圖先畫一部分再補分類。Controller 只委派 Service；新 DTO 使用 record，金額保持 BigDecimal 語意，既有端點相容。
+- [ ] 初始化先用輕量 snapshots 選定確切 id；接著以 Promise.allSettled 同時啟動七個 Panel，各自完成即提交與 render，不能等最慢者完成才一起顯示。所有含 id 請求固定同一 id；切換快照以新 generation 清除不屬該日期的內容並平行重載，不得跨 Panel 共用可變明細／價格／history 造成耦合。趨勢每份回應仍含完整歷史，選擇只改標記，不裁切。
+- [ ] Panel 回應統一 envelope {panel,snapshotId,data,warnings}；data 僅投影該 Panel 所需欄位（精確清單在設計與任務檔），不重包整份全頁 summary。每個 Panel 在資料完整前顯示載入中；失敗顯示該 Panel 的重試，真空集合才顯示無資料。同一快照背景刷新失敗時保留完整舊圖並標示更新失敗；切到不同快照時不得把舊圖標成新日期。generation 與 AbortController 同時防護晚到的成功、失敗及 finally，不得取消其他 Panel 的請求。離頁取消請求、輪詢、SSE 重連及排序 timer，完成後不得重新開串流。
+- [ ] KPI／配置不得為單筆快照載入所有歷史明細。既有 GET /api/snapshots/history 新增 optional snapshotId；帶值時由相同 AssetService 計算路徑只載該 owner 的指定快照與其前一筆（依日期升冪，最多兩筆），選中列分類、總額、較上次與原完整 history 同源同值；前一筆只作比較基底，其 increase 欄位可 null。不帶參數維持既有完整歷史契約。by-id 必沿用 owner guard，跨 owner 或不存在不得退回別人的 latest。Repository 先限縮 roots，不能先算全部 history 再 filter；不得新增 DB schema。
+- [ ] 新 Panel 僅讀既有 business API；現值與歷史估值沿用 SnapshotEnricher 與 LiveAssetsOverlay 的 per-market 日期規則，逐股 updatedAt 保留原來源，不得變更股利、分類、成本、幣別或 ETF 權重演算法。Panel 自足所需共用程式抽到 Service；不同 Panel 不等待其他 Panel 的 browser response。不得新增跨 request 的無 owner 快取、BFF DB 存取或券商／行情 provider 外呼。
+- [ ] 每個 Panel 的服務端總預算 20 秒，逾時回明確 504；必要的快照／history 失敗不能 onErrorReturn 偽裝零資產。401／403／404 維持原狀；暫時性 upstream 失敗用 502。可選即時行情失敗可沿用凍結快照，但 warnings 明示。瀏覽器保留 30 秒預算與單 Panel 錯誤呈現，不能藉延長全域 timeout 掩蓋問題。ETF 缺成分沿用明示 degraded fallback，但基礎 snapshot 不得吞錯。
+- [ ] 移除 Dashboard mount 時 POST enrich-dividend-rates 及其後第二次 summary，不改補算 endpoint 或其他已授權寫入功能。股價 SSE 是首次完整資料之後的增量更新；斷線不清空圖表，輪詢不能重疊，切換快照或離頁後的舊更新不覆寫新狀態。保留持股排序與分析對話框，Panel 的第一次顯示不依賴 SSE 成功。
+- [ ] 以可控制延遲／失敗的測試證明：各 Panel 同時啟動且獨立完成、單一超時不清掉其他圖、僅重試失敗 Panel、A→B 快速切換後 A 成功／失敗／finally 不覆寫 B、離頁無後續 timer／stream、真空資料與失敗不同。BFF 測試驗必要 upstream errors、20 秒 budget、各 payload 自足、tenant relay、無價格重複 fan-out、既有 summary/realtime 回歸；backend 驗 bounded history 與完整 history 選中列一致及 owner guard。Docker 重建 backend／bff／frontend、驗真實 JSON 及瀏覽器；需區分本機、模擬慢網路與使用者實際 internet 線路的證據，不能宣稱未量測的速度或斷線根因。

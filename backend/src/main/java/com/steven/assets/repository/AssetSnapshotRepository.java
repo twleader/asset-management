@@ -31,6 +31,19 @@ public interface AssetSnapshotRepository extends JpaRepository<AssetSnapshot, Lo
 
     List<AssetSnapshot> findAllByOrderBySnapshotDateAsc();
 
+    /**
+     * 儀表板指定快照的 history：只讀該 owner 的指定列及前一列，再交由共用 builder 計算。
+     * owner/date 唯一鍵使 MAX(previous date) 至多匹配一列，整個查詢至多回傳兩個 roots。
+     */
+    @Query("SELECT s FROM AssetSnapshot s WHERE s.ownerUserId = :ownerUserId " +
+            "AND (s.id = :snapshotId OR s.snapshotDate = " +
+            "(SELECT MAX(previous.snapshotDate) FROM AssetSnapshot previous " +
+            "WHERE previous.ownerUserId = :ownerUserId AND previous.snapshotDate < :snapshotDate)) " +
+            "ORDER BY s.snapshotDate ASC")
+    List<AssetSnapshot> findHistoryWindow(@Param("ownerUserId") Long ownerUserId,
+                                        @Param("snapshotId") Long snapshotId,
+                                        @Param("snapshotDate") LocalDate snapshotDate);
+
     @Query("SELECT s FROM AssetSnapshot s ORDER BY s.snapshotDate DESC")
     List<AssetSnapshot> findAllOrderByDateDesc();
 

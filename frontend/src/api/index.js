@@ -83,8 +83,25 @@ export const bffApi = {
   dashboard: {
     summary: () => api.get('/bff/dashboard/summary'),
     snapshot: (id) => api.get(`/bff/dashboard/snapshot/${id}`),
-    realtime: () => api.get('/bff/dashboard/realtime'),
+    realtime: ({ signal } = {}) => api.get('/bff/dashboard/realtime', { signal, skipErrorToast: true }),
     enrichDividendRates: () => api.post('/bff/dashboard/enrich-dividend-rates'),
+    // Task 449：每個 Dashboard panel 的完整 payload。錯誤交由面板局部顯示，
+    // signal 直接交 axios，讓換快照與離頁能取消舊請求。
+    snapshots: ({ signal } = {}) => api.get('/bff/dashboard/snapshots', { signal, skipErrorToast: true }),
+    kpis: (snapshotId, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/kpis/${snapshotId}`, { signal, skipErrorToast: true }),
+    allocation: (snapshotId, tab, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/allocation/${snapshotId}`, { params: { tab }, signal, skipErrorToast: true }),
+    trend: ({ signal } = {}) =>
+      api.get('/bff/dashboard/panels/trend', { signal, skipErrorToast: true }),
+    deposits: (snapshotId, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/deposits/${snapshotId}`, { signal, skipErrorToast: true }),
+    stockValues: (snapshotId, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/stock-values/${snapshotId}`, { signal, skipErrorToast: true }),
+    holdings: (snapshotId, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/holdings/${snapshotId}`, { signal, skipErrorToast: true }),
+    funds: (snapshotId, { signal } = {}) =>
+      api.get(`/bff/dashboard/panels/funds/${snapshotId}`, { signal, skipErrorToast: true }),
     updateStockOrder: (snapshotId, orders) =>
       api.patch(`/bff/dashboard/snapshot/${snapshotId}/stock-order`, orders),
     twStockLookthrough: (snapshotId) =>

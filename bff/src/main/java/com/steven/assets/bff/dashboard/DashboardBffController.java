@@ -3,10 +3,10 @@ package com.steven.assets.bff.dashboard;
 import com.steven.assets.bff.common.LiveAssetsOverlay;
 import com.steven.assets.bff.common.SnapshotEnricher;
 import com.steven.assets.bff.dashboard.dto.DashboardSummaryDto;
+import com.steven.assets.bff.dashboard.dto.DashboardPanelResponse;
 import com.steven.assets.bff.dashboard.dto.TwStockLookthroughDto;
 import com.steven.assets.bff.dashboard.dto.UsStockLookthroughDto;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,19 +15,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,7 +32,6 @@ import java.util.Map;
  * 設計原則：一個前端頁面對應一支 BFF controller。前端只 render，
  * aggregation 與計算（profit / profitRate / 收盤價對齊等）一律由 BFF 預先處理。
  */
-@Slf4j
 @RestController
 @RequestMapping("/api/bff/dashboard")
 @RequiredArgsConstructor
@@ -45,11 +39,54 @@ public class DashboardBffController {
 
     private final WebClient businessServicesClient;
     private final SnapshotEnricher enricher;
+    private final DashboardLookthroughService lookthroughService;
+    private final DashboardPanelService panelService;
 
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
     private static final ParameterizedTypeReference<Map<String, Object>> MAP =
             new ParameterizedTypeReference<>() {};
+
+    @GetMapping("/snapshots")
+    public Mono<ResponseEntity<List<Map<String, Object>>>> getSnapshots() {
+        return panelService.snapshots().map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/kpis/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getKpis(@PathVariable Long id) {
+        return panelService.kpis(id).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/allocation/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getAllocation(
+            @PathVariable Long id, @RequestParam(defaultValue = "category") String tab) {
+        return panelService.allocation(id, tab).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/trend")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getTrend() {
+        return panelService.trend().map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/deposits/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getDeposits(@PathVariable Long id) {
+        return panelService.deposits(id).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/stock-values/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getStockValues(@PathVariable Long id) {
+        return panelService.stockValues(id).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/holdings/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getHoldings(@PathVariable Long id) {
+        return panelService.holdings(id).map(ResponseEntity::ok);
+    }
+
+    @GetMapping("/panels/funds/{id}")
+    public Mono<ResponseEntity<DashboardPanelResponse>> getFunds(@PathVariable Long id) {
+        return panelService.funds(id).map(ResponseEntity::ok);
+    }
 
     @GetMapping("/summary")
     public Mono<ResponseEntity<DashboardSummaryDto>> getSummary() {
@@ -83,7 +120,7 @@ public class DashboardBffController {
                     List<Map<String, Object>> history = tuple.getT2();
                     Map<String, Object> marketStatus = tuple.getT3();
                     Map<String, Object> liveAssets = tuple.getT4();
-                    List<Map<String, Object>> prices = stockPricesFromLiveAssets(liveAssets);
+                    List<Map<String, Object>> prices = DashboardStockPrices.fromLiveAssets(liveAssets);
 
                     // 最新一筆 history 套 per-market 基準日閘門覆蓋（僅「該市場今日」用 live，過去日期保留
                     // 凍結收盤），與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
@@ -143,42 +180,11 @@ public class DashboardBffController {
                         .retrieve().bodyToMono(MAP).onErrorReturn(Collections.emptyMap())
         ).map(t -> {
             Map<String, Object> body = new HashMap<>();
-            body.put("stockPrices", stockPricesFromLiveAssets(t.getT2()));
+            body.put("stockPrices", DashboardStockPrices.fromLiveAssets(t.getT2()));
             body.put("marketStatus", t.getT1());
             body.put("liveAssets", t.getT2());
             return ResponseEntity.ok(body);
         });
-    }
-
-    /**
-     * 將同一輪 live-assets 持股報價投影回 dashboard 既有的 stockPrices 契約。
-     * 每筆 updatedAt 必須保留該筆 LivePrice 的時間，不能以 root 的最大時間覆蓋。
-     */
-    private static List<Map<String, Object>> stockPricesFromLiveAssets(Map<String, Object> liveAssets) {
-        if (liveAssets == null || !(liveAssets.get("stocks") instanceof List<?> stocks)) {
-            return Collections.emptyList();
-        }
-        List<Map<String, Object>> prices = new ArrayList<>();
-        for (Object item : stocks) {
-            if (!(item instanceof Map<?, ?> stock)) continue;
-            Map<String, Object> projected = new LinkedHashMap<>();
-            projected.put("stockCode", stock.get("stockCode"));
-            projected.put("stockName", stock.get("stockName"));
-            projected.put("market", stock.get("market"));
-            projected.put("price", stock.get("currentPrice"));
-            projected.put("previousClose", stock.get("previousClose"));
-            projected.put("priceChange", stock.get("priceChange"));
-            projected.put("changePercent", stock.get("changePercent"));
-            projected.put("tradingDate", stock.get("tradingDate"));
-            projected.put("updatedAt", stock.get("updatedAt"));
-            projected.put("closed", stock.get("closed"));
-            projected.put("source", stock.get("source"));
-            projected.put("quoteStatus", stock.get("quoteStatus"));
-            prices.add(projected);
-        }
-        prices.sort(Comparator.comparing((Map<String, Object> row) -> String.valueOf(row.get("market")))
-                .thenComparing(row -> String.valueOf(row.get("stockCode"))));
-        return prices;
     }
 
     /**
@@ -273,121 +279,9 @@ public class DashboardBffController {
                     return enricher.fetchSnapshotClosePrices(detail).flatMap(closeMap -> {
                         List<Map<String, Object>> merged =
                                 enricher.buildMergedStocks(detail, closeMap, false, true);
-                        return buildLookthrough(detail, merged);
+                        return lookthroughService.legacyTaiwan(detail, merged).map(ResponseEntity::ok);
                     });
                 });
-    }
-
-    private Mono<ResponseEntity<TwStockLookthroughDto>> buildLookthrough(
-            Map<String, Object> detail, List<Map<String, Object>> merged) {
-        List<Map<String, Object>> twEtfs = new ArrayList<>();
-        List<Map<String, Object>> twStocks = new ArrayList<>();
-        BigDecimal totalTwValue = BigDecimal.ZERO;
-        for (Map<String, Object> r : merged) {
-            if (!"台股".equals(SnapshotEnricher.asString(r.get("market")))) continue;
-            BigDecimal cv = SnapshotEnricher.toBigDecimal(r.get("currentValue"));
-            if (cv == null) cv = BigDecimal.ZERO;
-            totalTwValue = totalTwValue.add(cv);
-            String code = SnapshotEnricher.asString(r.get("stockCode"));
-            if (code != null && code.startsWith("00")) twEtfs.add(r);
-            else twStocks.add(r);
-        }
-        final BigDecimal totalFinal = totalTwValue;
-
-        // 並行抓 ETF holdings，concurrency 限 4：成分股來源 Yahoo quoteSummary 對單一 IP 有 rate limit，
-        // 8 並行易觸發 429（ext-materials 端 getYahooCrumb 已 synchronized 共用 crumb，但 quoteSummary 仍各自打）
-        Mono<List<EtfHoldingsFetched>> etfMono = twEtfs.isEmpty()
-                ? Mono.just(Collections.emptyList())
-                : Flux.fromIterable(twEtfs)
-                        .flatMap(row -> fetchEtfHoldings(row, "台股"), 4)
-                        .collectList();
-
-        return etfMono.map(fetched -> {
-            Map<String, Aggregate> agg = new LinkedHashMap<>();
-            List<TwStockLookthroughDto.DegradedEtf> degraded = new ArrayList<>();
-
-            // 直接持股（以股名為聚合鍵：MoneyDJ 成分股只給名稱無代號，故統一用股名合併）
-            for (Map<String, Object> row : twStocks) {
-                String code = SnapshotEnricher.asString(row.get("stockCode"));
-                String name = SnapshotEnricher.asString(row.get("stockName"));
-                BigDecimal cv = SnapshotEnricher.toBigDecimal(row.get("currentValue"));
-                if (cv == null) continue;
-                mergeInto(agg, name, code, cv);
-            }
-
-            // ETF 穿透
-            for (EtfHoldingsFetched ef : fetched) {
-                BigDecimal cv = ef.currentValue() == null ? BigDecimal.ZERO : ef.currentValue();
-                List<Map<String, Object>> holdings = ef.holdings();
-                if (holdings == null || holdings.isEmpty()) {
-                    // 退回以 ETF 自身計入
-                    mergeInto(agg, ef.etfName(), ef.etfCode(), cv);
-                    TwStockLookthroughDto.DegradedEtf d = new TwStockLookthroughDto.DegradedEtf();
-                    d.setCode(ef.etfCode());
-                    d.setMessage(ef.message() != null ? ef.message() : "查無成分股資料");
-                    degraded.add(d);
-                    continue;
-                }
-                // 先加總已揭露成分股權重，再依比例把整筆 ETF 市值正規化分配給成分股。
-                // 成分股來源可能只揭露前 N 大（未滿 100%），正規化後 ETF 完全穿透、不殘留「ETF 自身」slice
-                // （ETF 不該出現在「個股」圖中）。代價：未揭露尾段假設與已揭露分布相同（誤差小且為穿透標準作法）。
-                BigDecimal weightSum = BigDecimal.ZERO;
-                List<Map<String, Object>> valid = new ArrayList<>();
-                for (Map<String, Object> h : holdings) {
-                    String name = SnapshotEnricher.asString(h.get("stockName"));
-                    BigDecimal w = SnapshotEnricher.toBigDecimal(h.get("weight"));
-                    if (name == null || name.isBlank() || w == null
-                            || w.compareTo(BigDecimal.ZERO) <= 0) continue;
-                    weightSum = weightSum.add(w);
-                    valid.add(h);
-                }
-                if (weightSum.compareTo(BigDecimal.ZERO) <= 0) {
-                    // 理論上不會走到（holdings 非空但無有效權重）：退回以 ETF 自身計入
-                    mergeInto(agg, ef.etfName(), ef.etfCode(), cv);
-                    continue;
-                }
-                for (Map<String, Object> h : valid) {
-                    String code = SnapshotEnricher.asString(h.get("stockCode"));
-                    String name = SnapshotEnricher.asString(h.get("stockName"));
-                    BigDecimal w = SnapshotEnricher.toBigDecimal(h.get("weight"));
-                    BigDecimal share = cv.multiply(w).divide(weightSum, 4, RoundingMode.HALF_UP);
-                    mergeInto(agg, name, code, share);
-                }
-            }
-
-            // 排序 + 切 top10
-            List<Aggregate> sorted = new ArrayList<>(agg.values());
-            sorted.sort(Comparator.comparing((Aggregate a) -> a.value).reversed());
-            List<TwStockLookthroughDto.Item> items = new ArrayList<>();
-            BigDecimal others = BigDecimal.ZERO;
-            int othersCount = 0;
-            for (int i = 0; i < sorted.size(); i++) {
-                Aggregate a = sorted.get(i);
-                if (i < 10) {
-                    TwStockLookthroughDto.Item item = new TwStockLookthroughDto.Item();
-                    item.setStockCode(a.code);
-                    item.setStockName(a.name);
-                    item.setValue(a.value.setScale(2, RoundingMode.HALF_UP));
-                    item.setPercent(pct(a.value, totalFinal));
-                    items.add(item);
-                } else {
-                    others = others.add(a.value);
-                    othersCount++;
-                }
-            }
-            TwStockLookthroughDto.Others othersDto = new TwStockLookthroughDto.Others();
-            othersDto.setValue(others.setScale(2, RoundingMode.HALF_UP));
-            othersDto.setPercent(pct(others, totalFinal));
-            othersDto.setConstituentCount(othersCount);
-
-            TwStockLookthroughDto dto = new TwStockLookthroughDto();
-            dto.setSnapshotDate(SnapshotEnricher.asString(detail.get("snapshotDate")));
-            dto.setTotalTwStockValue(totalFinal.setScale(2, RoundingMode.HALF_UP));
-            dto.setItems(items);
-            dto.setOthers(othersDto);
-            dto.setDegradedEtfs(degraded);
-            return ResponseEntity.ok(dto);
-        });
     }
 
     // ===== 美股個股穿透（「資產配置分佈」第 3 tab）=====
@@ -406,174 +300,8 @@ public class DashboardBffController {
                     return enricher.fetchSnapshotClosePrices(detail).flatMap(closeMap -> {
                         List<Map<String, Object>> merged =
                                 enricher.buildMergedStocks(detail, closeMap, false, true);
-                        return buildUsLookthrough(detail, merged);
+                        return lookthroughService.legacyUnitedStates(detail, merged).map(ResponseEntity::ok);
                     });
                 });
-    }
-
-    private Mono<ResponseEntity<UsStockLookthroughDto>> buildUsLookthrough(
-            Map<String, Object> detail, List<Map<String, Object>> merged) {
-        List<Map<String, Object>> usRows = new ArrayList<>();
-        BigDecimal totalUsValue = BigDecimal.ZERO;
-        for (Map<String, Object> r : merged) {
-            if (!"美股".equals(SnapshotEnricher.asString(r.get("market")))) continue;
-            BigDecimal cv = SnapshotEnricher.toBigDecimal(r.get("currentValue"));
-            if (cv == null) cv = BigDecimal.ZERO;
-            totalUsValue = totalUsValue.add(cv);
-            usRows.add(r);
-        }
-        final BigDecimal totalFinal = totalUsValue;
-
-        // 對每檔美股並行抓 etf-holdings（concurrency 4，Yahoo quoteSummary 對單 IP 有 rate limit）。
-        // external isEtf() 白名單對非 ETF（個股）短路直接回空、不打 Yahoo，故個股呼叫成本低，
-        // 不需在 BFF 重複維護美股 ETF 白名單（單一事實來源）。
-        Mono<List<EtfHoldingsFetched>> fetchMono = usRows.isEmpty()
-                ? Mono.just(Collections.emptyList())
-                : Flux.fromIterable(usRows)
-                        .flatMap(row -> fetchEtfHoldings(row, "美股"), 4)
-                        .collectList();
-
-        return fetchMono.map(fetched -> {
-            Map<String, Aggregate> agg = new LinkedHashMap<>();
-            BigDecimal etfUndisclosed = BigDecimal.ZERO;  // 各 ETF 未揭露尾段加總，最後歸「其它」
-            int etfCount = 0;
-
-            for (EtfHoldingsFetched ef : fetched) {
-                BigDecimal cv = ef.currentValue() == null ? BigDecimal.ZERO : ef.currentValue();
-                List<Map<String, Object>> holdings = ef.holdings();
-                if (holdings == null || holdings.isEmpty()) {
-                    // 非 ETF（個股）或查無成分股的 ETF：整筆計入該代號（不拆解）
-                    mergeByCode(agg, ef.etfCode(), ef.etfName(), cv);
-                    continue;
-                }
-                // ETF 穿透：依「真實權重」分配，不正規化。美股 Yahoo topHoldings 僅前 10 大
-                // （Σweight 常 30~50%），若正規化會把未揭露的 50~70% 也當前 10 大、嚴重高估權值股，
-                // 故 share = cv × weight/100，殘留 cv × (1 − Σweight/100) 歸「其它」（使用者拍板：誠實優先）。
-                etfCount++;
-                BigDecimal disclosedRatio = BigDecimal.ZERO;  // Σ(weight/100)
-                for (Map<String, Object> h : holdings) {
-                    String code = SnapshotEnricher.asString(h.get("stockCode"));
-                    String name = SnapshotEnricher.asString(h.get("stockName"));
-                    BigDecimal w = SnapshotEnricher.toBigDecimal(h.get("weight"));
-                    if (w == null || w.compareTo(BigDecimal.ZERO) <= 0) continue;
-                    BigDecimal frac = w.divide(BigDecimal.valueOf(100), 6, RoundingMode.HALF_UP);
-                    if (frac.compareTo(BigDecimal.ONE) > 0) frac = BigDecimal.ONE;  // 防呆：單檔權重 > 100%
-                    disclosedRatio = disclosedRatio.add(frac);
-                    mergeByCode(agg, code, name, cv.multiply(frac));
-                }
-                BigDecimal undisclosed = BigDecimal.ONE.subtract(disclosedRatio);  // 未揭露尾段
-                if (undisclosed.compareTo(BigDecimal.ZERO) > 0) {
-                    etfUndisclosed = etfUndisclosed.add(cv.multiply(undisclosed));
-                }
-            }
-
-            // 排序取 top10；「其它」= 第 11 名以後個股 + 所有 ETF 未揭露尾段
-            List<Aggregate> sorted = new ArrayList<>(agg.values());
-            sorted.sort(Comparator.comparing((Aggregate a) -> a.value).reversed());
-            List<UsStockLookthroughDto.Item> items = new ArrayList<>();
-            BigDecimal othersValue = etfUndisclosed;
-            int othersCount = 0;
-            for (int i = 0; i < sorted.size(); i++) {
-                Aggregate a = sorted.get(i);
-                if (i < 10) {
-                    UsStockLookthroughDto.Item item = new UsStockLookthroughDto.Item();
-                    item.setStockCode(a.code);
-                    item.setStockName(a.name);
-                    item.setValue(a.value.setScale(2, RoundingMode.HALF_UP));
-                    item.setPercent(pct(a.value, totalFinal));
-                    items.add(item);
-                } else {
-                    othersValue = othersValue.add(a.value);
-                    othersCount++;
-                }
-            }
-            UsStockLookthroughDto.Others othersDto = new UsStockLookthroughDto.Others();
-            othersDto.setValue(othersValue.setScale(2, RoundingMode.HALF_UP));
-            othersDto.setPercent(pct(othersValue, totalFinal));
-            othersDto.setConstituentCount(othersCount);
-
-            UsStockLookthroughDto dto = new UsStockLookthroughDto();
-            dto.setSnapshotDate(SnapshotEnricher.asString(detail.get("snapshotDate")));
-            dto.setTotalUsStockValue(totalFinal.setScale(2, RoundingMode.HALF_UP));
-            dto.setItems(items);
-            dto.setOthers(othersDto);
-            dto.setLookthroughEtfCount(etfCount);
-            return ResponseEntity.ok(dto);
-        });
-    }
-
-    private static BigDecimal pct(BigDecimal value, BigDecimal total) {
-        if (total == null || total.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
-        return value.multiply(BigDecimal.valueOf(100))
-                .divide(total, 4, RoundingMode.HALF_UP);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Mono<EtfHoldingsFetched> fetchEtfHoldings(Map<String, Object> etfRow, String market) {
-        String code = SnapshotEnricher.asString(etfRow.get("stockCode"));
-        String name = SnapshotEnricher.asString(etfRow.get("stockName"));
-        BigDecimal cv = SnapshotEnricher.toBigDecimal(etfRow.get("currentValue"));
-        return businessServicesClient.get()
-                .uri(uriBuilder -> uriBuilder.path("/api/market-data/etf-holdings")
-                        .queryParam("code", code)
-                        .queryParam("market", market)
-                        .build())
-                .retrieve()
-                .bodyToMono(MAP)
-                .onErrorResume(e -> {
-                    log.warn("ETF 成分股查詢失敗 {}: {}", code, e.getMessage());
-                    return Mono.just(Collections.emptyMap());
-                })
-                .map(resp -> {
-                    Object holdingsObj = resp.get("holdings");
-                    List<Map<String, Object>> holdings = (holdingsObj instanceof List<?> l)
-                            ? (List<Map<String, Object>>) l : Collections.emptyList();
-                    Boolean supported = resp.get("supported") instanceof Boolean b ? b : null;
-                    String message = SnapshotEnricher.asString(resp.get("message"));
-                    boolean effective = holdings != null && !holdings.isEmpty()
-                            && !Boolean.FALSE.equals(supported);
-                    return new EtfHoldingsFetched(
-                            code, name, cv,
-                            effective ? holdings : Collections.emptyList(),
-                            effective ? null : (message != null ? message : "查無成分股資料"));
-                });
-    }
-
-    /** 以股名為聚合鍵；code 為 best-effort（直接持股有、MoneyDJ 成分股無）。 */
-    private static void mergeInto(Map<String, Aggregate> agg, String name, String code, BigDecimal v) {
-        if (name == null || name.isBlank() || v == null) return;
-        Aggregate a = agg.computeIfAbsent(name, Aggregate::new);
-        if ((a.code == null || a.code.isBlank()) && code != null && !code.isBlank()) {
-            a.code = code;
-        }
-        a.value = a.value.add(v);
-    }
-
-    /**
-     * 以代號為聚合鍵（美股 Yahoo 成分股有 symbol；台股 mergeInto 則以股名為鍵）。
-     * key 取 code，缺代號時 fallback 用 name；displayName / code 取首見非空值。
-     */
-    private static void mergeByCode(Map<String, Aggregate> agg, String code, String name, BigDecimal v) {
-        if (v == null) return;
-        String key = (code != null && !code.isBlank()) ? code
-                : (name != null && !name.isBlank() ? name : null);
-        if (key == null) return;
-        String displayName = (name != null && !name.isBlank()) ? name : code;
-        Aggregate a = agg.computeIfAbsent(key, k -> new Aggregate(displayName));
-        if ((a.code == null || a.code.isBlank()) && code != null && !code.isBlank()) {
-            a.code = code;
-        }
-        a.value = a.value.add(v);
-    }
-
-    private record EtfHoldingsFetched(
-            String etfCode, String etfName, BigDecimal currentValue,
-            List<Map<String, Object>> holdings, String message) {}
-
-    private static final class Aggregate {
-        final String name;
-        String code;
-        BigDecimal value = BigDecimal.ZERO;
-        Aggregate(String name) { this.name = name; }
     }
 }
