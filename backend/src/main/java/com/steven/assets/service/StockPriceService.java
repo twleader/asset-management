@@ -16,6 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoField;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,6 +36,11 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class StockPriceService {
+
+    private static final DateTimeFormatter API_LOCAL_DATE_TIME = new DateTimeFormatterBuilder()
+            .appendPattern("uuuu-MM-dd'T'HH:mm:ss")
+            .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+            .toFormatter();
 
     private final AssetSnapshotRepository snapshotRepo;
     private final ExchangeRateHistoryRepository rateHistRepo;
@@ -194,8 +202,18 @@ public class StockPriceService {
             exchangeRate, totalDeposit, totalFundValue, liveStockValue, liveTotalAssets,
             stockItems,
             isTwMarketOpen(), isUsMarketOpen(), isUkMarketOpen(),
-            latestUpdate != null ? latestUpdate.toString() : null
+            formatApiUpdatedAt(latestUpdate)
         );
+    }
+
+    /**
+     * The public live-assets contract exposes the aggregate quote time as a Taipei wall-clock
+     * LocalDateTime without an offset. Keep the Instant above for cross-market ordering, and only
+     * convert at the API boundary so the per-stock provenance timestamps remain Instants.
+     */
+    private static String formatApiUpdatedAt(Instant value) {
+        return value == null ? null : API_LOCAL_DATE_TIME.format(
+                LocalDateTime.ofInstant(value, MarketZones.TW_ZONE));
     }
 
     /**

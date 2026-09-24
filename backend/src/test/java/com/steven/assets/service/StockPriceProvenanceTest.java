@@ -95,7 +95,7 @@ class StockPriceProvenanceTest {
                 .containsExactly("台積電", "Apple");
         assertThat(response.stocks()).extracting(StockPriceService.LiveStockItem::updatedAt)
                 .containsExactly(Instant.parse("2026-08-13T02:01:00Z"), Instant.parse("2026-08-13T14:05:00Z"));
-        assertThat(response.priceUpdatedAt()).isEqualTo("2026-08-13T14:05:00Z");
+        assertThat(response.priceUpdatedAt()).isEqualTo("2026-08-13T22:05:00");
         verify(stocks).findAllByCodeIn(Set.of("2330", "AAPL"));
         verify(stocks, never()).findByCodeAndMarket(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString());
