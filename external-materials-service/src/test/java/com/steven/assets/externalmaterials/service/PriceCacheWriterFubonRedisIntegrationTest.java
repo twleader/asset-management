@@ -44,6 +44,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /** Executes the production Lua against a real Redis process. This class is never conditionally skipped. */
 @Testcontainers(disabledWithoutDocker = false)
@@ -240,6 +241,27 @@ class PriceCacheWriterFubonRedisIntegrationTest {
 
         assertThat(MAPPER.readTree(redis.opsForValue().get(priceKey())).path("quoteStatus").asText())
                 .isEqualTo("VERIFIED_CLOSE");
+    }
+
+    @Test
+    void newerPreviousCloseReplacesStaleLiveFromPriorCacheWarmup() throws Exception {
+        StockSourceQuery sourceQuery = mock(StockSourceQuery.class);
+        writer = new PriceCacheWriter(redis, sourceQuery, highLowTracker, new IntradayTickStore(redis));
+        redis.opsForValue().set(priceKey(),
+                currentPayload("Yahoo", false, "LIVE", DATE.toString(), "2026-08-21T03:58:00"),
+                Duration.ofHours(1));
+        when(sourceQuery.findPreviousCloseBefore("2330", "台股", DATE))
+                .thenReturn(java.util.Optional.of(new BigDecimal("101.25")));
+
+        assertThat(writer.syncClosedFromDb(
+                "2330", "台股", new StockSourceQuery.DatedClose(DATE, new BigDecimal("101.25")),
+                Instant.parse("2026-08-21T05:00:00Z")))
+                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+
+        JsonNode payload = MAPPER.readTree(redis.opsForValue().get(priceKey()));
+        assertThat(payload.path("quoteStatus").asText()).isEqualTo("PREVIOUS_CLOSE");
+        assertThat(payload.path("closed").asBoolean()).isTrue();
+        assertThat(payload.path("updatedAt").asText()).isEqualTo("2026-08-21T13:00:00.000000000");
     }
 
     @Test

@@ -120,6 +120,25 @@ class StockPriceProvenanceTest {
     }
 
     @Test
+    void naiveUsCacheTimestampUsesTaipeiCacheContractInsteadOfUsMarketZone() {
+        StockHolding holding = StockHolding.builder().stockCode("AAPL").market("美股")
+                .shares(BigDecimal.ONE).build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().id(9L).snapshotDate(TARGET)
+                .usdExchangeRate(BigDecimal.ONE).stocks(List.of(holding)).build();
+        when(snapshots.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        when(prices.displaySession("美股")).thenReturn(session(TARGET));
+        when(prices.getDisplayPrice("AAPL", "美股")).thenReturn(Optional.of(
+                livePrice("AAPL", "美股", "2026-08-13", "2026-08-13T03:58:00")));
+        when(stocks.findAllByCodeIn(Set.of("AAPL"))).thenReturn(List.of());
+
+        StockPriceService.LiveAssetsResponse response = service().getLiveAssets();
+
+        assertThat(response.stocks().getFirst().updatedAt())
+                .isEqualTo(Instant.parse("2026-08-12T19:58:00Z"));
+        assertThat(response.priceUpdatedAt()).isEqualTo("2026-08-13T03:58:00");
+    }
+
+    @Test
     void allPricesUsesOneBoundedMasterReadWithoutPerPriceLookup() {
         StockHolding tw = StockHolding.builder().stockCode("2330").market("台股").build();
         StockHolding us = StockHolding.builder().stockCode("AAPL").market("美股").build();

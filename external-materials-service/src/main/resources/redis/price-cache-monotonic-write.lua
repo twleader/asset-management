@@ -211,9 +211,17 @@ if existing_raw then
       elseif existing_date == incoming_date then
         local incoming_rank = status_rank(incoming_status)
         local existing_rank = status_rank(existing_status)
-        if incoming_rank < existing_rank then
+        -- DB close sync intentionally carries PREVIOUS_CLOSE. If an old LIVE value
+        -- survived a prior session, the newer close observation must be allowed to
+        -- replace it even though its evidence rank is lower.
+        local previous_close_recovery = incoming_status == 'PREVIOUS_CLOSE'
+            and existing_status == 'LIVE'
+            and existing_time ~= nil
+            and incoming_time > existing_time
+        if incoming_rank < existing_rank and not previous_close_recovery then
           should_write = false
-        elseif existing_time ~= nil and (incoming_time < existing_time
+        elseif existing_time ~= nil and not previous_close_recovery
+            and (incoming_time < existing_time
             or (strict_newer and incoming_time == existing_time)) then
           -- Time remains monotonic even when evidence status is upgraded.
           should_write = false
