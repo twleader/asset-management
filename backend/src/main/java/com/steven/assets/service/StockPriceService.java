@@ -153,7 +153,7 @@ public class StockPriceService {
                 changePercent = lp.changePercent();
                 quoteStatus = lp.quoteStatus();
                 source = lp.source();
-                updatedAt = parseLiveUpdatedAt(lp.updatedAt(), sh.getMarket());
+                updatedAt = parseLiveUpdatedAt(lp.updatedAt());
                 if (updatedAt != null && (latestUpdate == null || updatedAt.isAfter(latestUpdate))) {
                     latestUpdate = updatedAt;
                 }
@@ -217,10 +217,11 @@ public class StockPriceService {
     }
 
     /**
-     * 將 Redis/歷史相容的報價時間正規化為 Instant。帶 offset 的值使用其明示時間，舊有
-     * 無 offset 時間則以該市場的牆鐘時區解讀；損壞值只降級為 null，不能中斷 live-assets 讀取。
+     * 將 Redis/歷史相容的報價時間正規化為 Instant。帶 offset 的值使用其明示時間；快取
+     * 契約中的無 offset 時間一律是 Asia/Taipei 牆鐘時間，不可依市場時區重新解讀。損壞
+     * 值只降級為 null，不能中斷 live-assets 讀取。
      */
-    private static Instant parseLiveUpdatedAt(String raw, String market) {
+    private static Instant parseLiveUpdatedAt(String raw) {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Instant.parse(raw);
@@ -233,7 +234,7 @@ public class StockPriceService {
             // 下一個相容格式。
         }
         try {
-            return LocalDateTime.parse(raw).atZone(MarketZones.resolve(market)).toInstant();
+            return LocalDateTime.parse(raw).atZone(MarketZones.TW_ZONE).toInstant();
         } catch (DateTimeException ignored) {
             return null;
         }
