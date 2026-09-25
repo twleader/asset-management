@@ -12414,7 +12414,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 ```text
 [producer, business-services, 每 5 分鐘 Asia/Taipei]
-  暖 getTwHolidays(今年)（含週末）→ isTwTradingDayKnown(今天)
+  warmTwHolidaysIfExpiringWithin(6 分鐘)（含週末；剩餘 TTL ≤6 分鐘即重抓）→ isTwTradingDayKnown(今天)
   → 開市 && 09:05 ≤ now < 14:00 ?
   → 對 SrppPolicyRegistryService.supportedPolicies() × ACTIVE owner（有快照）
       SrppSourceCapture.capture(ownerId, policy, slot, date)      ← read-only tx；owner-explicit
@@ -12472,7 +12472,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 - 以 owner-explicit 讀取重構既有路徑：`LatestAssetsService.getLatestForOwner(long ownerId)` 以 `findLatestWithStocksByOwnerUserId`；`StockPriceService.getLiveAssets(AssetSnapshot)` 與 `AssetService.getSnapshotDetail(AssetSnapshot)` 為接受已載入 entity 的 overload。既有無參數方法改為委派同一核心，行為與 wire 不變（`LatestAssetsServiceTest` 仍通過）。背景執行緒沒有 request scope，因此絕不呼叫依賴 `ownerFilter` 的 `findLatestWithStocks()`。
 - `assets` body：以應用程式 `ObjectMapper` 序列化該 `LatestAssetsDto.Response` 的字串，原樣保存。`capturedAt` = 序列化完成時間；`dataAsOf` = 各持股 `LiveStockItem.updatedAt`（Instant）非 null 者的最小值與 capturedAt 取較早者；任一 updatedAt > capturedAt 拒絕發布（`FUTURE_DATA_AS_OF`）。不使用無 offset 的 `priceUpdatedAt` 字串；無 offset 時間一律以 Asia/Taipei 解讀（manifest `offsetLessTimezone`）。
-- `SrppSnapshotRevision.of(SnapshotDetailResponse)`：投影 `{id, snapshotDate, usdExchangeRate, total*, estimatedAnnualDividend, realizedGain, deposits[], funds[], stocks[]}`（各列全部 DTO 欄位，但排除非資產內容的顯示欄位：所有 `notes`、`bankDisplayName`、`depositDisplayName`、`stockName`、`brokerDisplayName`、`displayOrder`；版本標記 `SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1`），列依 id 排序，BigDecimal 全用 `SrppDecimal.format`，null 保留 null，JCS→SHA-256；revision 字串 `snapshot-<id>-<64hex>`。讀取路徑用同一函式。
+- `SrppSnapshotRevision.of(SnapshotDetailResponse)`：投影 `{id, snapshotDate, usdExchangeRate, total*, estimatedAnnualDividend, realizedGain, deposits[], funds[], stocks[]}`（各列全部 DTO 欄位，但排除非資產內容的顯示欄位：頂層與 deposits 的 `notes`、`bankDisplayName`、`depositDisplayName`、`stockName`、`brokerDisplayName`、`displayOrder`；版本標記 `SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1`），列依 id 排序，BigDecimal 全用 `SrppDecimal.format`，null 保留 null，JCS→SHA-256；revision 字串 `snapshot-<id>-<64hex>`。讀取路徑用同一函式。
 - `calendar` body：`{"schema":"SRPP_CALENDAR_EVIDENCE_V1","market":"台股","date":"<tradingDate>","twTrading":true,"authority":"MARKET_DATA_SERVICE"}` 的 JCS 字串；revision `calendar-<date>-open`；dataAsOf=capturedAt。
 - `policy` body：`{"schema":"SRPP_POLICY_EVIDENCE_V1","policyBundleSha256":…,"formulaVersion":…,"calculationPolicy":<policy document>,"formulaManifest":<manifest>}` 的 JCS 字串；revision `policy-<calculationPolicySha256>`；dataAsOf = capturedAt 與 `registered_at` 之較早者。
 - `dataCutoffAt` = assets capturedAt；`generatedAt` = 發布前取樣，須 ≥ 所有 capturedAt。時間序列化 `yyyy-MM-dd'T'HH:mm:ssXXX`（Asia/Taipei，截到秒）。
@@ -12496,7 +12496,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 ### 讀取（SrppDailyContextReadService，`@Transactional(readOnly=true)`）
 
-需 `CurrentUserContext.hasUser()`，否則 503 `OWNER_UNAVAILABLE`。流程與錯誤碼同 Requirement 163 AC「讀取模式與錯誤碼」。freshness：以 owner 最新快照（`findLatestWithStocksByOwnerUserId(currentUser)` → `getSnapshotDetail(entity)`）計算 revision 與 package 的 assets revision 比較（不同 → STALE `["assets"]`，reason `SOURCE_REVISION_CHANGED`）；cached-only 日曆：false → STALE `["calendar"]` `CALENDAR_CHANGED`，empty → UNKNOWN `CALENDAR_UNVERIFIABLE`；registry 驗證已在前一步。`checkedAt` = now（≥ generatedAt，否則以 generatedAt 為下限不成立時回 500 `INTERNAL_ERROR`）。回應以 `StringBuilder` 組 `{"kind":"SUMMARY","context":<context_jcs 原文>,"contextContentSha256":"…","freshness":{…}}` 或 evidence JSON（body 以 Jackson 字串逸出），`Content-Type: application/json`；錯誤回 problem+json（business 端同格式、`instance` 為公開路徑）。
+需 `CurrentUserContext.hasUser()`，否則 503 `OWNER_UNAVAILABLE`。流程與錯誤碼同 Requirement 163 AC「讀取模式與錯誤碼」。freshness：以 owner 最新快照（`findLatestWithStocksByOwnerUserId(currentUser)` → `getSnapshotDetail(entity)`）計算 revision 與 package 的 assets revision 比較（不同 → STALE `["assets"]`，reason `SOURCE_REVISION_CHANGED`）；cached-only 日曆：false → STALE `["calendar"]` `CALENDAR_CHANGED`，empty → UNKNOWN `CALENDAR_UNVERIFIABLE`；registry 驗證已在前一步。`checkedAt` = now；若 `checkedAt < generatedAt`（時鐘異常）回 500 `INTERNAL_ERROR`。回應以 `StringBuilder` 組 `{"kind":"SUMMARY","context":<context_jcs 原文>,"contextContentSha256":"…","freshness":{…}}` 或 evidence JSON（body 以 Jackson 字串逸出），`Content-Type: application/json`；錯誤回 problem+json（business 端同格式、`instance` 為公開路徑）。
 
 ### BFF
 
@@ -12506,7 +12506,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 | `SrppDailyContextQuery` | 純函式解析／400 驗證，產生 business URI（只傳驗證後參數，不傳 email） |
 | `PublicSrppDailyContextService` | owner resolve（Requirement 140 同語意，5 秒）、`contextWrite(ctx.delete(CTX_IDENTITY))`、顯式 `X-User-*`、business 5 秒 timeout、problem 轉譯、呼叫 validator |
 | `SrppDailyContextResponseValidator` | strict 驗證（Requirement 163 AC），含 `SrppJcs` hash 重算 |
-| `PublicSrppDailyContextExceptionAdvice` | `@Order(HIGHEST_PRECEDENCE)` scoped advice，固定清理後 problem 與 `Cache-Control`；既有 filter 對最終 5xx 一律記錄、對 4xx 僅在呼叫 `capture` 時記錄，故只在 500／502 呼叫 `PublicApiErrorCaptureWebFilter.capture`，400／404／409 不呼叫 |
+| `PublicSrppDailyContextExceptionAdvice` | `@Order(HIGHEST_PRECEDENCE)` scoped advice，固定清理後 problem 與 `Cache-Control`；既有 filter 對最終 5xx 一律記錄、對 4xx 僅在呼叫 `capture` 時記錄，依 Requirement 143 對 400／404／409／5xx 皆呼叫 `PublicApiErrorCaptureWebFilter.capture`，唯一具名例外是 409 `POLICY_UNSUPPORTED` 不呼叫 |
 
 錯誤碼對照（BFF 對外輸出；title 固定英文、detail 固定繁中）：
 

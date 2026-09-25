@@ -11,7 +11,7 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
 既有事實：
 - BFF→business 以 `X-User-Id`／`X-User-Role`／`X-User-Status` 傳 owner，由 `CurrentUserFilter` 填入 request-scoped `CurrentUserContext`；無 header 時 `TenantFilterAspect` 以 ownerId −1 fail-closed。
 - 內部端點慣例參考 `InternalPublicTransactionHistoryController`（`/internal/public-transaction-history/current`）；`AdminGateInterceptor` 的掛載範圍（`WebConfig`）不涵蓋 `/internal/public-srpp/**`。
-- `MarketDataService.isTwTradingDayCachedOnly(LocalDate)`：無 I/O，週末 `Optional.of(false)`，cache 缺或過期（10 分鐘）回 empty。t452 producer 每 5 分鐘會暖此 cache。
+- `MarketDataService.isTwTradingDayCachedOnly(LocalDate)`：無 I/O，週末 `Optional.of(false)`，cache 缺或過期（10 分鐘）回 empty。t452 producer 每 5 分鐘以 `warmTwHolidaysIfExpiringWithin(6 分鐘)` 預先續期此 cache（全週），因此正常運作下 cached-only 不會出現空窗；producer 停擺時 cached-only 回 empty 屬預期的 fail-closed。
 
 ## 要做什麼
 
