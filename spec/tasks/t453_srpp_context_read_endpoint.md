@@ -10,14 +10,14 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
 
 既有事實：
 - BFF→business 以 `X-User-Id`／`X-User-Role`／`X-User-Status` 傳 owner，由 `CurrentUserFilter` 填入 request-scoped `CurrentUserContext`；無 header 時 `TenantFilterAspect` 以 ownerId −1 fail-closed。
-- 內部端點慣例參考 `InternalPublicTransactionHistoryController`（`/internal/public-transaction-history/current`）；`AdminGateInterceptor` 只管 `/internal/users/**`。
+- 內部端點慣例參考 `InternalPublicTransactionHistoryController`（`/internal/public-transaction-history/current`）；`AdminGateInterceptor` 的掛載範圍（`WebConfig`）不涵蓋 `/internal/public-srpp/**`。
 - `MarketDataService.isTwTradingDayCachedOnly(LocalDate)`：無 I/O，週末 `Optional.of(false)`，cache 缺或過期（10 分鐘）回 empty。t452 producer 每 5 分鐘會暖此 cache。
 
 ## 要做什麼
 
 - [ ] 453.1 **Controller `InternalSrppDailyContextController`。** `@GetMapping("/internal/public-srpp/daily-context")`，參數 `tradingDate`、`slot`、`policyBundleSha256`、`view`（預設 summary）、`packageId`、`sourceId`（皆字串、`required=false`，由 service 驗證）；只委派 `SrppDailyContextReadService`，回 `ResponseEntity<String>`，header `Content-Type`（成功 `application/json`、錯誤 `application/problem+json`）與 `Cache-Control: private, no-store`。不得注入 repository、不得有業務判斷。不接受 `email`、`ownerId` 或任何 owner 參數；owner 只來自 `CurrentUserContext`。
 
-- [ ] 453.2 **`SrppDailyContextReadService`（`@Transactional(readOnly = true)`，注入 `Clock`）。** 判斷順序固定，第一個命中的錯誤即回：
+- [ ] 453.2 **`SrppDailyContextReadService`（`@Transactional(readOnly = true)`；`Clock` 比照 `FubonTradeSyncScheduler` 雙建構子慣例注入，Spring 用 `Clock.system(ZoneId.of("Asia/Taipei"))`，不新增全域 Clock bean）。** 判斷順序固定，第一個命中的錯誤即回：
   1. 參數防禦性驗證（同 BFF：日期嚴格 ISO、slot 僅 `09:05`／`11:40`、hash `^[0-9a-f]{64}$`、view `summary|evidence`、packageId 小寫 canonical UUID、sourceId `^[a-z][a-z0-9_-]{0,63}$`、evidence 必須有 packageId 與 sourceId、summary 不得有 sourceId）→ 400 `INVALID_REQUEST`。
   2. `CurrentUserContext.hasUser()` 為 false → 503 `OWNER_UNAVAILABLE`。
   3. `SrppPolicyRegistryService.find(hash)` 空 → 409 `POLICY_UNSUPPORTED`。
@@ -35,6 +35,8 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
   - 快照：以 `findLatestWithStocksByOwnerUserId(owner)` ＋ `AssetService.getSnapshotDetail(entity)` ＋ `SrppSnapshotRevision.of(...)` 計算目前 revision，與 context 中 `sources[assets].revision` 比較；不同或已無快照 → `changedSourceIds` 加 `assets`、reason `SOURCE_REVISION_CHANGED`。DB 讀取例外 → UNKNOWN（`SOURCE_UNVERIFIABLE`）。
   - 日曆：`isTwTradingDayCachedOnly(package.tradingDate)`：`false` → 加 `calendar`、`CALENDAR_CHANGED`；empty → UNKNOWN、`CALENDAR_UNVERIFIABLE`。
   - 政策：步驟 3 已確認仍受支援。
+  - **已知行為：** `MarketDataService` 只快取當年度台股假日，跨年讀取前一年度的 pinned package（例如 1 月初讀去年 12 月）時 cached-only 必回 empty → freshness UNKNOWN＋`CALENDAR_UNVERIFIABLE`（pinned 仍回 200）；須有對應測試。
+  - **本版刻意範圍：** assets 的 freshness 只核對快照 persisted 投影 revision；live 估值與匯率變動不在讀取時判 STALE，而是由 producer 每 5 分鐘重新發布、最新模式取最新 `generated_at` 涵蓋（proposal §9：CURRENT 不代表行情時效）。
   - status：任一 changed → STALE（changedSourceIds 字典序）；否則任一 unverifiable → UNKNOWN（changedSourceIds []）；否則 CURRENT（兩陣列皆空）。reasonCodes 字典序去重。
   - **不得呼叫 `StockPriceService.getLiveAssets`、`PriceQueryService`、Redis、`isTwTradingDayKnown` 或任何會外呼的方法。**
 

@@ -12430,7 +12430,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 | 表 | 欄位 | 約束 |
 |---|---|---|
-| `srpp_policy_registry` | `policy_bundle_sha256 char(64) PK`、`formula_version varchar(64) NOT NULL`、`policy_document text NOT NULL`、`formula_manifest text NOT NULL`、`registered_at timestamptz NOT NULL DEFAULT now()` | PK CHECK `^[0-9a-f]{64}$`；`BEFORE UPDATE` trigger 拒絕；DELETE 允許（退役，但被 package FK RESTRICT 保護） |
+| `srpp_policy_registry` | `policy_bundle_sha256 char(64) PK`（CHECK 64 位小寫 hex 且不得全零，全零保留給 preflight）、`formula_version varchar(64) NOT NULL`、`policy_document text NOT NULL`、`formula_manifest text NOT NULL`、`registered_at timestamptz NOT NULL DEFAULT now()` | PK CHECK `^[0-9a-f]{64}$`；`BEFORE UPDATE` trigger 拒絕；DELETE 允許（退役，但被 package FK RESTRICT 保護） |
 | `srpp_owner_key` | `owner_user_id bigint PK FK app_user(id)`、`owner_key uuid NOT NULL UNIQUE`、`created_at timestamptz NOT NULL DEFAULT now()` | `BEFORE UPDATE` 拒絕；只由 producer 以 `INSERT … ON CONFLICT DO NOTHING` 建立 |
 | `srpp_context_package` | `package_id uuid PK`、`owner_user_id bigint NOT NULL FK app_user(id)`、`trading_date date NOT NULL`、`slot varchar(5) NOT NULL CHECK IN ('09:05','11:40')`、`policy_bundle_sha256 char(64) NOT NULL FK registry RESTRICT`、`generated_at timestamptz NOT NULL`、`context_jcs text NOT NULL` | index `(owner_user_id, trading_date, slot, policy_bundle_sha256, generated_at DESC, package_id DESC)`、index `(trading_date)`；`BEFORE UPDATE` 拒絕 |
 | `srpp_context_evidence` | `package_id uuid FK package ON DELETE CASCADE`、`source_id varchar(64)`、`body text NOT NULL` | PK `(package_id, source_id)`；`BEFORE UPDATE` 拒絕 |
@@ -12439,7 +12439,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 **正規化說明：** `calculationPolicySha256`／`formulaSetSha256`、`contextContentSha256`、`bodySha256` 都可由文件計算，不設欄位，讀取時計算。`srpp_context_package` 的 owner／日期／時段／規則包／generated_at 與 `context_jcs` 內同義值重複，是「不可變證據＋查詢鍵」的刻意 denormalization（與 `asset_snapshot.total_*` 同類）：package 是可重建的派生快取，內容一經發布不再變更，查詢鍵由 producer 同一程式路徑寫入並由測試保證一致。這四張表不寫持倉、交易、存款或任何權威資料。
 
-保留期：`SrppContextRetentionScheduler` 每日 03:25（`Asia/Taipei`）刪除 `trading_date < 今天 − srpp.retention-days`（預設 7，最小 7）的 package，evidence cascade；不刪 registry、owner key。
+保留期：`SrppContextRetentionScheduler` 每日 03:25（`Asia/Taipei`；與 producer 一併登錄至 BFF `SchedulePublicBffController.JOBS`）刪除 `trading_date < 今天 − srpp.retention-days`（預設 7，最小 7）的 package，evidence cascade；不刪 registry、owner key。
 
 ### 政策 registry 與公式版本
 
@@ -12453,26 +12453,26 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
   "cashIncome":{"calculationId":"ASSET_MGMT_GROSS_INCOME_V1","netCalculation":"NOT_VERIFIED"},
   "funding":{"calculationId":"ASSET_MGMT_FUNDING_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"},
   "completedTechnicals":{"calculationId":"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"}},
- "timezone":"Asia/Taipei","decimal":"canonical-string","hash":"RFC8785-JCS+SHA-256"}
+ "timezone":"Asia/Taipei","offsetLessTimezone":"Asia/Taipei","decimal":"canonical-string","hash":"RFC8785-JCS+SHA-256"}
 ```
 
 （實際常數以實作檔為準，但必須是單一 Java 常數、有測試固定其 JCS digest；改動 manifest 即產生不同 `formulaSetSha256`，既有 registry 列自然失效。）
 
 `SRPP_POLICY_DOCUMENT_V1`：`{"schema":"SRPP_POLICY_DOCUMENT_V1","targets":{"<assetKey>":"<canonical decimal 0–1>",...}}`，不得有其他 key；assetKey 需符合 `ASSET_KEY_V1` 形狀；權重皆 ≥0 且總和 ≤1（不要求等於 1，未涵蓋部分即無目標）。
 
-`SrppPolicyRegistryService.find(hash)` 讀列 → 三項驗證（版本已實作、manifest JCS 相等、文件結構）→ 回 `SupportedPolicy(bundleHash, formulaVersion, calculationPolicySha256, formulaSetSha256, policyDocumentJcs, targets)`；失敗回 empty（呼叫端 409）。`scripts/srpp-policy-register.rb`：讀 policy JSON 與 manifest JSON（不接受浮點數，金額必須字串），輸出 JCS 後的 `INSERT … ON CONFLICT DO NOTHING` SQL 與兩個計算出的 hash 至 stdout；不連 DB。
+`SrppPolicyRegistryService.find(hash)` 讀列 → 三項驗證（版本已實作、manifest JCS 相等、文件結構）→ 回 `SupportedPolicy(bundleHash, formulaVersion, calculationPolicySha256, formulaSetSha256, policyDocument, manifest, targets, registeredAt)`；失敗回 empty（呼叫端 409）。`scripts/srpp-policy-register.rb`：讀 policy JSON 與 manifest JSON（不接受浮點數，金額必須字串），輸出 JCS 後的 `INSERT … ON CONFLICT DO NOTHING` SQL 與兩個計算出的 hash 至 stdout；不連 DB。
 
 ### JCS 與 canonical Decimal
 
-`SrppJcs`（backend 與 bff 各一份，BFF 不依賴 backend jar）：輸入 Jackson `JsonNode`，只接受 object／array／string／boolean／null／可無損轉 `long` 的整數；object key 依 Java `String.compareTo`（UTF-16 code unit）排序；字串逸出依 RFC 8785（`"`、`\`、`\b\f\n\r\t`，其餘 <0x20 為 `\u00xx` 小寫 hex，其他字元原樣 UTF-8）；無空白。浮點或超出 long 的數字拋例外。golden：proposal 三份 summary 範例的 context → 對應 `contextContentSha256`。
+`SrppJcs`（backend 與 bff 各一份，BFF 不依賴 backend jar）：輸入 Jackson `JsonNode`，只接受 object／array／string／boolean／null／絕對值 ≤ 2^53−1 的整數；object key 依 Java `String.compareTo`（UTF-16 code unit）排序；字串逸出依 RFC 8785（`"`、`\`、`\b\f\n\r\t`，其餘 <0x20 為 `\u00xx` 小寫 hex，其他字元原樣 UTF-8）；無空白。浮點或超出 long 的數字拋例外。golden：proposal 三份 summary 範例的 context → 對應 `contextContentSha256`。
 
 `SrppDecimal.format(BigDecimal)`：`signum==0 → "0"`，否則 `stripTrailingZeros().toPlainString()`。驗證 regex `^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$`、長度 ≤80、非 `-0`。
 
 ### 來源凍結（SrppSourceCapture）
 
 - 以 owner-explicit 讀取重構既有路徑：`LatestAssetsService.getLatestForOwner(long ownerId)` 以 `findLatestWithStocksByOwnerUserId`；`StockPriceService.getLiveAssets(AssetSnapshot)` 與 `AssetService.getSnapshotDetail(AssetSnapshot)` 為接受已載入 entity 的 overload。既有無參數方法改為委派同一核心，行為與 wire 不變（`LatestAssetsServiceTest` 仍通過）。背景執行緒沒有 request scope，因此絕不呼叫依賴 `ownerFilter` 的 `findLatestWithStocks()`。
-- `assets` body：以應用程式 `ObjectMapper` 序列化該 `LatestAssetsDto.Response` 的字串，原樣保存。`capturedAt` = 序列化完成時間；`dataAsOf` = `liveAssets.priceUpdatedAt`（有值且 ≤ capturedAt）否則 capturedAt；若 priceUpdatedAt > capturedAt 拒絕發布（`FUTURE_DATA_AS_OF`）。
-- `SrppSnapshotRevision.of(SnapshotDetailResponse)`：投影 `{id, snapshotDate, usdExchangeRate, total*, estimatedAnnualDividend, deposits[], funds[], stocks[]}`，列依 id 排序，BigDecimal 全用 `SrppDecimal.format`，null 保留 null，JCS→SHA-256；revision 字串 `snapshot-<id>-<64hex>`。讀取路徑用同一函式。
+- `assets` body：以應用程式 `ObjectMapper` 序列化該 `LatestAssetsDto.Response` 的字串，原樣保存。`capturedAt` = 序列化完成時間；`dataAsOf` = 各持股 `LiveStockItem.updatedAt`（Instant）非 null 者的最小值與 capturedAt 取較早者；任一 updatedAt > capturedAt 拒絕發布（`FUTURE_DATA_AS_OF`）。不使用無 offset 的 `priceUpdatedAt` 字串；無 offset 時間一律以 Asia/Taipei 解讀（manifest `offsetLessTimezone`）。
+- `SrppSnapshotRevision.of(SnapshotDetailResponse)`：投影 `{id, snapshotDate, usdExchangeRate, total*, estimatedAnnualDividend, realizedGain, deposits[], funds[], stocks[]}`（各列全部 DTO 欄位，但排除主檔查得的顯示名稱 `bankDisplayName`、`depositDisplayName`、`stockName`、`brokerDisplayName`），列依 id 排序，BigDecimal 全用 `SrppDecimal.format`，null 保留 null，JCS→SHA-256；revision 字串 `snapshot-<id>-<64hex>`。讀取路徑用同一函式。
 - `calendar` body：`{"schema":"SRPP_CALENDAR_EVIDENCE_V1","market":"台股","date":"<tradingDate>","twTrading":true,"authority":"MARKET_DATA_SERVICE"}` 的 JCS 字串；revision `calendar-<date>-open`；dataAsOf=capturedAt。
 - `policy` body：`{"schema":"SRPP_POLICY_EVIDENCE_V1","policyBundleSha256":…,"formulaVersion":…,"calculationPolicy":<policy document>,"formulaManifest":<manifest>}` 的 JCS 字串；revision `policy-<calculationPolicySha256>`；dataAsOf = capturedAt 與 `registered_at` 之較早者。
 - `dataCutoffAt` = assets capturedAt；`generatedAt` = 發布前取樣，須 ≥ 所有 capturedAt。時間序列化 `yyyy-MM-dd'T'HH:mm:ssXXX`（Asia/Taipei，截到秒）。
@@ -12506,7 +12506,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 | `SrppDailyContextQuery` | 純函式解析／400 驗證，產生 business URI（只傳驗證後參數，不傳 email） |
 | `PublicSrppDailyContextService` | owner resolve（Requirement 140 同語意，5 秒）、`contextWrite(ctx.delete(CTX_IDENTITY))`、顯式 `X-User-*`、business 5 秒 timeout、problem 轉譯、呼叫 validator |
 | `SrppDailyContextResponseValidator` | strict 驗證（Requirement 163 AC），含 `SrppJcs` hash 重算 |
-| `PublicSrppDailyContextExceptionAdvice` | `@Order(HIGHEST_PRECEDENCE)` scoped advice，固定清理後 problem 與 `Cache-Control`，並呼叫 `PublicApiErrorCaptureWebFilter.capture`（只記 5xx） |
+| `PublicSrppDailyContextExceptionAdvice` | `@Order(HIGHEST_PRECEDENCE)` scoped advice，固定清理後 problem 與 `Cache-Control`；既有 filter 對最終 5xx 一律記錄、對 4xx 僅在呼叫 `capture` 時記錄，故只在 500／502 呼叫 `PublicApiErrorCaptureWebFilter.capture`，400／404／409 不呼叫 |
 
 錯誤碼對照（BFF 對外輸出；title 固定英文、detail 固定繁中）：
 
@@ -12522,4 +12522,4 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 ### Gateway／Tailscale／frontend／OpenAPI
 
-比照 Requirement 140／Task 416 的 14 處接線（gateway exact location、`SERVE_PATHS` 與 `expected`、preflight、mock、frontend exact 404 與 matrix regex、SecurityConfig、OpenAPI YAML＋contract test＋frontend contract test、error-log catalog、路由計數文件）。Tailscale preflight 以台北今天、全零 hash 呼叫，期待 409 problem+json `POLICY_UNSUPPORTED` 與 `Cache-Control: private, no-store`（全零 hash 不可能被登錄，故結果穩定且證明鏈路直達 business）。OpenAPI 完整採用 proposal 的 `Srpp*` schema（名稱不變），描述移除「提案／尚未部署」字樣並加入本版空 registry 與模組降級語意，`info.version` 1.14.0。
+比照 Requirement 140／Task 416 的 14 處接線（gateway exact location、`SERVE_PATHS` 與 `expected`、preflight、mock、frontend exact 404 與 matrix regex、SecurityConfig、OpenAPI YAML＋contract test＋frontend contract test、error-log catalog、路由計數文件）。Tailscale preflight 以台北今天、全零 hash 呼叫，期待 409 problem+json `POLICY_UNSUPPORTED` 與 `Cache-Control: private, no-store`（全零 hash 不可能被登錄，故結果穩定且證明鏈路直達 business）。OpenAPI 完整採用 proposal 的 `Srpp*` schema（名稱、結構、限制不變），描述補齊至通過既有 description audit（每節點具體用途、每個 enum／const 值逐一說明），移除「提案／尚未部署」字樣並加入本版空 registry 與模組降級語意；`09:05` 一律加引號避免 YAML 1.1 解析成整數；參數 schema 依 BFF 實際規則；`info.version` 1.14.0。
