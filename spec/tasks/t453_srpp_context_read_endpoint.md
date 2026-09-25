@@ -15,9 +15,9 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
 
 ## 要做什麼
 
-- [ ] 453.1 **Controller `InternalSrppDailyContextController`。** `@GetMapping("/internal/public-srpp/daily-context")`，參數 `tradingDate`、`slot`、`policyBundleSha256`、`view`（預設 summary）、`packageId`、`sourceId`（皆字串、`required=false`，由 service 驗證）；只委派 `SrppDailyContextReadService`，回 `ResponseEntity<String>`，header `Content-Type`（成功 `application/json`、錯誤 `application/problem+json`）與 `Cache-Control: private, no-store`。不得注入 repository、不得有業務判斷。不接受 `email`、`ownerId` 或任何 owner 參數；owner 只來自 `CurrentUserContext`。
+- [ ] 453.1 **Controller `InternalSrppDailyContextController`。** `@GetMapping("/internal/public-srpp/daily-context")`，參數 `tradingDate`、`slot`、`policyBundleSha256`、`view`（預設 summary）、`packageId`、`sourceId`（皆字串、`required=false`，由 service 驗證）；只委派 `SrppDailyContextReadService`，並把其領域結果轉成 `ResponseEntity<String>`（HTTP status 與 problem body 由 controller 經 `SrppProblemCatalog` 對照產生，屬 HTTP 轉換、不算業務判斷），header `Content-Type`（成功 `application/json`、錯誤 `application/problem+json`）與 `Cache-Control: private, no-store`。不得注入 repository、不得有業務判斷。不接受 `email`、`ownerId` 或任何 owner 參數；owner 只來自 `CurrentUserContext`。
 
-- [ ] 453.2 **`SrppDailyContextReadService`（`@Transactional(readOnly = true)`；`Clock` 比照 `FubonTradeSyncScheduler` 雙建構子慣例注入，Spring 用 `Clock.system(ZoneId.of("Asia/Taipei"))`，不新增全域 Clock bean）。** 判斷順序固定，第一個命中的錯誤即回：
+- [ ] 453.2 **`SrppDailyContextReadService`（`@Transactional(readOnly = true)`；`Clock` 比照 `FubonTradeSyncScheduler` 雙建構子慣例注入，Spring 用 `Clock.system(ZoneId.of("Asia/Taipei"))`，不新增全域 Clock bean）。** 判斷順序固定，第一個命中的錯誤即回（下列「→ 4xx／5xx `CODE`」只表示該 code 最終對應的 HTTP status，service 本身只回傳 code，不回 status）：
   1. 參數防禦性驗證（同 BFF：日期嚴格 ISO、slot 僅 `09:05`／`11:40`、hash `^[0-9a-f]{64}$`、view `summary|evidence`、packageId 小寫 canonical UUID、sourceId `^[a-z][a-z0-9_-]{0,63}$`、evidence 必須有 packageId 與 sourceId、summary 不得有 sourceId）→ 400 `INVALID_REQUEST`。
   2. `CurrentUserContext.hasUser()` 為 false → 503 `OWNER_UNAVAILABLE`。
   3. `SrppPolicyRegistryService.find(hash)` 空 → 409 `POLICY_UNSUPPORTED`。
@@ -46,9 +46,9 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
   - problem：`{"type":"about:blank","title":…,"status":…,"detail":…,"instance":"/api/public/srpp/daily-context","code":…,"retryable":…}`，title／detail 用 `SrppProblemCatalog` 的固定文案（每個 code 一組固定英文 title＋繁中 detail；retryable 逐 code 固定：`CALENDAR_UNAVAILABLE`、`CONTEXT_NOT_READY` 為 true，其餘（含 503 `OWNER_UNAVAILABLE`——帳號不存在或停用時重試無益）一律 false），不得含帳號、SQL、例外訊息。未預期例外由本 controller 範圍的 `@RestControllerAdvice(assignableTypes = InternalSrppDailyContextController.class)` 轉 500 `INTERNAL_ERROR`。
 
 - [ ] 453.5 **測試。**
-  - `SrppDailyContextReadService` 的單元測試（Mockito、固定 `Clock`、不啟 Spring）：每一個錯誤碼分支一個案例，並驗證判斷順序（例如未知政策＋錯誤日期 → 409）；latest 09:04 → 503、11:39 查 `11:40` → 503；cached 日曆 false／empty；他人 packageId → 404 且 repository 只被以本人 ownerId 查詢；pinned STALE／UNKNOWN 回 200；evidence 非 AVAILABLE／查無 → 404；summary 回應中 context 片段逐位元等於 `context_jcs`、hash 相符。
+  - `SrppDailyContextReadService` 的單元測試（Mockito、固定 `Clock`、不啟 Spring）：每一個錯誤碼分支一個案例；package 與 evidence 查詢都以本人 ownerId 呼叫（evidence 查詢帶 owner 比對）；並驗證判斷順序（例如未知政策＋錯誤日期 → 409）；latest 09:04 → 503、11:39 查 `11:40` → 503；cached 日曆 false／empty；他人 packageId → 404 且 repository 只被以本人 ownerId 查詢；pinned STALE／UNKNOWN 回 200；evidence 非 AVAILABLE／查無 → 404；summary 回應中 context 片段逐位元等於 `context_jcs`、hash 相符。
   - 零副作用：以 Mockito `verifyNoInteractions` 證明 `StockPriceService`、`PriceQueryService`、Redis template、`SrppPackagePublisher`、所有 repository 的 save／delete 方法都沒有被呼叫，`MarketDataService` 只被呼叫 `isTwTradingDayCachedOnly`。
-  - `InternalSrppDailyContextController` 的單元測試（`@WebMvcTest` 或 standalone MockMvc）：Content-Type、`Cache-Control: private, no-store`、problem JSON 欄位精確。
+  - `InternalSrppDailyContextController` 的單元測試（`@WebMvcTest` 或 standalone MockMvc）：Content-Type、`Cache-Control: private, no-store`、problem JSON 欄位精確；每個 problem code 的 HTTP status 由 controller 依 `SrppProblemCatalog` 對照（逐 code 斷言）。
 
 - [ ] 453.6 **鐵則。** 本端點只供 container 內 BFF 呼叫，不加入 frontend proxy、`MarketDataBffRoutes` 或 9090 gateway（9090 對外路由由 t454 的 BFF 公開 route 負責）；不 import 券商 SDK、不寫任何表、不觸發 producer。
 
