@@ -26,7 +26,7 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"}}}}}'
+    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"},"/api/public/srpp/daily-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/daily-context"}}}}}'
   else
     printf '%s\n' '{}'
   fi
@@ -156,6 +156,11 @@ PY
       body='{"marketOpen":false,"quotes":{"WTI":null,"BRENT":null,"GOLD":null}}'
     fi
     ;;
+  # 第十四條：全零規則包探測，business registry 必定查無 → 合成 409 POLICY_UNSUPPORTED problem。
+  */api/public/srpp/daily-context)
+    endpoint=srpp
+    body='{"type":"about:blank","title":"SRPP policy bundle unsupported","status":409,"detail":"指定的規則包尚未登錄或未通過驗證。","instance":"/api/public/srpp/daily-context","code":"POLICY_UNSUPPORTED","retryable":false}'
+    ;;
   *)
     printf 'unexpected URL: %s\n' "$url" >&2
     exit 2
@@ -180,6 +185,17 @@ if [[ "$endpoint" == commodity-invalid ]]; then
   printf '%s' "$body" >"$output_file"
   printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\n\r\n' >"$headers_file"
   printf '400'
+  exit 0
+fi
+
+if [[ "$endpoint" == srpp ]]; then
+  srpp_content_type=application/problem+json
+  if [[ "${FAIL_CONTENT_TYPE:-}" == srpp ]]; then
+    srpp_content_type=application/json
+  fi
+  printf '%s' "$body" >"$output_file"
+  printf 'HTTP/1.1 409 Conflict\r\nContent-Type: %s\r\nCache-Control: private, no-store\r\n\r\n' "$srpp_content_type" >"$headers_file"
+  printf '409'
   exit 0
 fi
 
@@ -230,7 +246,8 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 13 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 14 ]]
+  grep -Fq -- '--set-path=/api/public/srpp/daily-context http://127.0.0.1:9090/api/public/srpp/daily-context' "$case_dir/tailscale.log"
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -241,6 +258,7 @@ run_content_type_failure trading-radar '本機今日交易雷達 Content-Type �
 run_content_type_failure transactions '本機交易紀錄 Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure trading-calendar '本機交易日曆 Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure commodity '本機商品批次報價 Content-Type 不是 application/json；不會 reset Serve。'
+run_content_type_failure srpp '本機 SRPP 共用計算結果 Content-Type 不是 application/problem+json；不會 reset Serve。'
 run_success
 
-printf '%s\n' 'PASS: 十三路 preflight Content-Type、commodity request gate／reset fail-closed regression'
+printf '%s\n' 'PASS: 十四路 preflight Content-Type、commodity request gate、SRPP 409 POLICY_UNSUPPORTED 探測／reset fail-closed regression'

@@ -16,6 +16,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/transactions'
   '/api/public/trading-calendar'
   '/api/public/commodity-prices'
+  '/api/public/srpp/daily-context'
 )
 
 die() {
@@ -190,6 +191,7 @@ expected = {
     "/api/public/transactions": "http://127.0.0.1:9090/api/public/transactions",
     "/api/public/trading-calendar": "http://127.0.0.1:9090/api/public/trading-calendar",
     "/api/public/commodity-prices": "http://127.0.0.1:9090/api/public/commodity-prices",
+    "/api/public/srpp/daily-context": "http://127.0.0.1:9090/api/public/srpp/daily-context",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -200,7 +202,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的十三條 path handler")
+    raise SystemExit("必須精確只有本任務管理的十四條 path handler")
 if mode == "subset" and not handler_paths.issubset(expected):
     raise SystemExit("partial config 含非本任務 path handler")
 for path in handler_paths:
@@ -504,7 +506,38 @@ for filename in sys.argv[1:]:
         raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機十三路 API preflight 通過，開始更新 path-scoped Serve…\n'
+# 第十四條（Requirement 163／Task 454）：SRPP 共用計算結果唯讀 GET。以台北今天、slot=09:05、全零
+# policyBundleSha256 探測——全零 hash 被 DB CHECK 與登錄腳本禁止登錄，結果穩定為 409 POLICY_UNSUPPORTED，
+# 並證明 gateway → BFF → business 鏈路直達；此回應是錯誤日誌的具名例外，不會寫入 API 錯誤紀錄。
+srpp_date="$(python3 - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+print(datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d"))
+PY
+)"
+srpp_zero_hash="$(printf '0%.0s' {1..64})"
+srpp_json="$work_dir/srpp-daily-context.json"
+srpp_headers="$work_dir/srpp-daily-context.headers"
+srpp_status=''
+if ! srpp_status="$(curl -sS --get --data-urlencode "tradingDate=$srpp_date" --data-urlencode 'slot=09:05' \
+  --data-urlencode "policyBundleSha256=$srpp_zero_hash" -D "$srpp_headers" -o "$srpp_json" -w '%{http_code}' \
+  "$LOCAL_BASE/api/public/srpp/daily-context")"; then
+  die '本機 SRPP 共用計算結果 transport 失敗；不會 reset Serve。'
+fi
+[[ "$srpp_status" == 409 ]] || \
+  die "本機 SRPP 共用計算結果以全零規則包探測必須回 HTTP 409，實際為 ${srpp_status}；不會 reset Serve。"
+grep -Eiq '^content-type:[[:space:]]*application/problem\+json([;[:space:]]|$)' "$srpp_headers" || \
+  die '本機 SRPP 共用計算結果 Content-Type 不是 application/problem+json；不會 reset Serve。'
+grep -Eiq '^cache-control:[[:space:]]*private, no-store[[:space:]]*$' "$srpp_headers" || \
+  die '本機 SRPP 共用計算結果缺少 Cache-Control: private, no-store；不會 reset Serve。'
+python3 - "$srpp_json" <<'PY' || die '本機 SRPP 共用計算結果 problem 不是 POLICY_UNSUPPORTED。'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+if not isinstance(data, dict) or data.get("code") != "POLICY_UNSUPPORTED" or data.get("status") != 409:
+    raise SystemExit(1)
+PY
+
+printf '現有 Serve 設定所有權與本機十四路 API preflight 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -532,7 +565,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十三條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十四條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

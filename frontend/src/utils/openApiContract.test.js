@@ -47,13 +47,13 @@ test('缺少必要結構時 fail closed', () => {
   )
 })
 
-test('現行 9090 契約的十三個精確 method/path 全數可辨識', () => {
+test('現行 9090 契約的十四個精確 method/path 全數可辨識', () => {
   const yaml = readFileSync(new URL('../../../docs/openapi/docker-external-api.yaml', import.meta.url), 'utf8')
   const entries = parseOpenApiContract(yaml).operations
     .map(operation => `${operation.method.toUpperCase()} ${operation.path}`)
     .sort()
 
-  assert.equal(entries.length, 13)
+  assert.equal(entries.length, 14)
   assert.deepEqual(entries, [
     'GET /api/assets/latest',
     'GET /api/public/commodity-prices',
@@ -61,6 +61,7 @@ test('現行 9090 契約的十三個精確 method/path 全數可辨識', () => {
     'GET /api/public/market-analysis/today',
     'GET /api/public/market-index',
     'GET /api/public/portfolio-advice/latest',
+    'GET /api/public/srpp/daily-context',
     'GET /api/public/trading-calendar',
     'GET /api/public/trading-radar/stock',
     'GET /api/public/trading-radar/today',
