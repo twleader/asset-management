@@ -9,10 +9,12 @@ require 'yaml'
 
 ROOT = File.expand_path('..', __dir__)
 OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
-TARGETS = [
-  File.join(ROOT, 'docs/openapi/9090-api-swagger.md'),
-  '/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md'
-].freeze
+REPO_TARGET = File.join(ROOT, 'docs/openapi/9090-api-swagger.md')
+SRPP_MIRROR_TARGET = '/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md'
+# SRPP 鏡像只在地端同步（寫入與 --check 皆然）；雲端（Claude Code on the web 等遠端環境，
+# 以 CLAUDE_CODE_REMOTE=true 辨識）沒有 SRPP 專案，一律略過，只維護本專案鏡像。
+CLOUD_SESSION = ENV['CLAUDE_CODE_REMOTE'] == 'true'
+TARGETS = (CLOUD_SESSION ? [REPO_TARGET] : [REPO_TARGET, SRPP_MIRROR_TARGET]).freeze
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 WEAK_DESCRIPTION = /\A(?:`?[A-Za-z0-9_.-]+`?\s*)?(?:資料|欄位|物件|陣列|schema)\.?\z/i
 LEGACY_DESCRIPTION_FALLBACK = '型別、可空性與限制以本 OpenAPI schema 為準。'
@@ -319,6 +321,7 @@ elsif ARGV == ['--check']
   stale = TARGETS.reject { |target| File.file?(target) && File.binread(target) == rendered.b }
   if stale.empty?
     puts 'PASS: 9090 OpenAPI Markdown mirrors are byte-identical and current'
+    puts 'SKIP: 雲端環境（CLAUDE_CODE_REMOTE=true）不檢查 SRPP 鏡像，地端才同步' if CLOUD_SESSION
   else
     warn "generated OpenAPI Markdown is stale: #{stale.join(', ')}"
     exit 1
@@ -326,4 +329,5 @@ elsif ARGV == ['--check']
 else
   TARGETS.each { |target| File.binwrite(target, rendered) }
   puts "rendered #{TARGETS.length} byte-identical 9090 OpenAPI Markdown mirrors"
+  puts 'SKIP: 雲端環境（CLAUDE_CODE_REMOTE=true）不覆寫 SRPP 鏡像，地端才同步' if CLOUD_SESSION
 end

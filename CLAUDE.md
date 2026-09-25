@@ -392,7 +392,7 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - 每一條掛載到 9090 的 API 都必須在 `docs/openapi/docker-external-api.yaml` 提供完整、可驗證的
   OpenAPI 3 契約；路徑、HTTP method、參數、成功與錯誤回應、所有可達巢狀 schema、必填／nullable
   語意與安全邊界都不得省略。Gateway allowlist 與 OpenAPI paths 必須由自動化 contract test 雙向比對，
-  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；每次 9090 API 變更必須由它重產本專案 Swagger Markdown，並覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
+  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；每次 9090 API 變更必須由它重產本專案 Swagger Markdown，並在**地端**覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`（雲端 session 不需覆寫：renderer 以 `CLAUDE_CODE_REMOTE=true` 辨識雲端，寫入與 `--check` 都只處理本專案鏡像；雲端變更 merge 後，下次在地端重產即補同步），文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
 
 ### 從任一 worktree 重建 Docker 服務前，先比對該 worktree 的 `.env` 與 main 的 `.env`
 
