@@ -1,0 +1,61 @@
+{
+  "status": "",
+  "checked_at": "2026-09-23T23:06:02.302186+08:00",
+  "scope": "SRPP tracked worktree, HEAD and named runtime policy files; specification artifacts are outside SRPP",
+  "before_equals_after": true,
+  "head": "46bba5750f27b6676ac15069fd4f4008bd6da7f9",
+  "files": {
+    "assumptions/policy_manifest.json": "8a2944c8f5e42c626680269e01a4140130fa0a1ea41dbd8eecf4064ea1e3db60",
+    "assumptions/daily_runtime_contract.json": "05fb736e5e485251cda4ba70ac7bb37660412edcb6900fae958b1d77291a9833",
+    "docs/9090 Port API Swagger.md": "80aa2571b9ed4cd56ce7018716bd6a5b11979bc63b97368104880215a1587bac",
+    "docs/DAILY_TRADING_AUTOMATION.md": "72478863e2ef5df3f29a7843a0b26d62b8e5f5881ae2db64055c788702e18886"
+  },
+  "deployed_entries": {
+    "status": "PASS",
+    "policy_bundle_sha256": "842ba22f07a4061eb7e3216579ff84e3e3f983aed0d3181185614958edc2d43f",
+    "entries": [
+      {
+        "consumer": "Codex",
+        "slot": "09:05",
+        "id": "codex-srpp-09-30",
+        "entry_sha256": "2e69655bcac2910d643bae38baf5734954622bb863d314cb2003b031036b971d",
+        "status": "PASS"
+      },
+      {
+        "consumer": "Codex",
+        "slot": "11:40",
+        "id": "codex-srpp",
+        "entry_sha256": "db1f290461eb753221276bcfc38a4648a6dfdc7b902205466e9e6b6255cd9e60",
+        "status": "PASS"
+      },
+      {
+        "consumer": "Claude",
+        "slot": "09:05",
+        "id": "srpp-0905-claude",
+        "entry_sha256": "23d91c0dbb5216d995e79b2fd066c55caec763a9188d067210579183de8ccd77",
+        "status": "PASS"
+      },
+      {
+        "consumer": "Claude",
+        "slot": "11:40",
+        "id": "srpp-1150-claude",
+        "entry_sha256": "bf23c3087462427912f64908b8b1c1df4a66c58acb33815128444565c0d6a754",
+        "status": "PASS"
+      }
+    ],
+    "claude_schedules": [
+      {
+        "id": "srpp-0905-claude",
+        "slot": "09:05",
+        "status": "PASS"
+      },
+      {
+        "id": "srpp-1150-claude",
+        "slot": "11:40",
+        "status": "PASS"
+      }
+    ],
+    "claude_guest_execution_verified": false,
+    "scope": "Read-only deployment parity check; no automation update or live daily run."
+  }
+}

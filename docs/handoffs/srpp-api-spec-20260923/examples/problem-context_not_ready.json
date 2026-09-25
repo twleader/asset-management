@@ -1,0 +1,9 @@
+{
+  "type": "about:blank",
+  "title": "SRPP calculation context unavailable",
+  "status": 503,
+  "detail": "共用計算結果目前不可使用，請沿用既有資料取得及計算流程。",
+  "instance": "/api/public/srpp/daily-context",
+  "code": "CONTEXT_NOT_READY",
+  "retryable": true
+}

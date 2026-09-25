@@ -1,0 +1,48 @@
+{
+  "status": "PASS",
+  "policy_bundle_sha256": "842ba22f07a4061eb7e3216579ff84e3e3f983aed0d3181185614958edc2d43f",
+  "entries": [
+    {
+      "consumer": "Codex",
+      "slot": "09:05",
+      "id": "codex-srpp-09-30",
+      "entry_sha256": "2e69655bcac2910d643bae38baf5734954622bb863d314cb2003b031036b971d",
+      "status": "PASS"
+    },
+    {
+      "consumer": "Codex",
+      "slot": "11:40",
+      "id": "codex-srpp",
+      "entry_sha256": "db1f290461eb753221276bcfc38a4648a6dfdc7b902205466e9e6b6255cd9e60",
+      "status": "PASS"
+    },
+    {
+      "consumer": "Claude",
+      "slot": "09:05",
+      "id": "srpp-0905-claude",
+      "entry_sha256": "23d91c0dbb5216d995e79b2fd066c55caec763a9188d067210579183de8ccd77",
+      "status": "PASS"
+    },
+    {
+      "consumer": "Claude",
+      "slot": "11:40",
+      "id": "srpp-1150-claude",
+      "entry_sha256": "bf23c3087462427912f64908b8b1c1df4a66c58acb33815128444565c0d6a754",
+      "status": "PASS"
+    }
+  ],
+  "claude_schedules": [
+    {
+      "id": "srpp-0905-claude",
+      "slot": "09:05",
+      "status": "PASS"
+    },
+    {
+      "id": "srpp-1150-claude",
+      "slot": "11:40",
+      "status": "PASS"
+    }
+  ],
+  "claude_guest_execution_verified": false,
+  "scope": "Read-only deployment parity check; no automation update or live daily run."
+}
