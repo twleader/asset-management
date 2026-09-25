@@ -7,22 +7,22 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.13.0` |
-| 對外路徑 | 13 條：12 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.14.0` |
+| 對外路徑 | 14 條：13 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
-十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
+十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
 ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+十四條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-十二條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+十三條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 暴露文件端點。
@@ -32,6 +32,11 @@ Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管
 匯率的 `liveUpdateStatus`／`spot.quoteStatus`，以及交易雷達的 `generatedAt` 與各項證據。
 交易雷達會揭露 configured admin 的持倉／觀察清單與決策證據；只能透過本機 loopback
 或獲准 Tailscale identity 讀取，不可開成公網。本 API 不構成交易執行依據。
+
+第十四條 `GET /api/public/srpp/daily-context`（Requirement 163）讀取 business 背景 producer 已發布的不可變
+SRPP 共用計算結果 package（資產對帳、總曝險配置差距、基礎收益加總）；GET 純讀、不觸發計算或任何外呼。
+規則包 registry 上線時為空，在使用者另行登錄正式規則包前一律回 409 `POLICY_UNSUPPORTED`；funding、
+completedTechnicals 與稅後欄位本版固定具名 UNAVAILABLE（模組降級而非填 0），`tradingAuthorized` 恆為 false。
 
 ## 路由總覽
 
@@ -50,6 +55,7 @@ Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管
 | 11 | `GET` | `/api/public/transactions` | `getPublicTransactionHistory` | 取得指定帳號或預設主要管理者的唯讀交易紀錄 | 200 application/json: PublicTransactionHistoryResponse |
 | 12 | `GET` | `/api/public/trading-calendar` | `getPublicTradingCalendar` | 取得指定年度台、美、英交易日曆 | 200 application/json: PublicTradingCalendarResponse |
 | 13 | `GET` | `/api/public/commodity-prices` | `getPublicCommodityPrices` | 一次取得 WTI、Brent 與黃金的已持久化報價 | 200 application/json: CommodityPriceBatchResponse |
+| 14 | `GET` | `/api/public/srpp/daily-context` | `getSrppDailyContext` | 取得本輪 SRPP 共用計算摘要或重播其已凍結來源 | 200 application/json: schema |
 
 ## 路由詳情
 
@@ -176,7 +182,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 6. `POST /api/public/crawler-data/rescan`
 
-十三條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+十四條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
 「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
 HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
 本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -358,6 +364,62 @@ PostgreSQL 前收投影固定三個 slot。它不讀 caller identity、owner、�
 | `502` | application/problem+json: PublicCommodityPriceProblemDetail; text/html: NginxErrorHtml | BFF 將 business non-2xx、空／HTML／malformed 或違反固定 slot invariants 的成功 body 消毒為 ProblemDetail；若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。 |
 | `503` | application/problem+json: PublicCommodityPriceProblemDetail | BFF 的唯一 no-tenant business connection/transport 無法建立；回應不含 downstream URL、exception 或 tenant 資訊。 |
 | `504` | application/problem+json: PublicCommodityPriceProblemDetail; text/html: NginxErrorHtml | BFF 對唯一 business GET 的五秒 timeout 會回 ProblemDetail；Nginx upstream timeout 則是並列 text/html gateway alternative。 |
+
+### 14. `GET /api/public/srpp/daily-context`
+
+Requirement 163／Task 452–454 的第十四條 exact 路由。固定公式（資產對帳、總曝險配置差距、基礎收益加總）由
+business-services 背景 producer 每 5 分鐘在台股交易日 09:05–13:55 先算好、凍結來源並發布成不可變 package；
+本 GET 只讀 PostgreSQL 已發布的 package、規則包 registry 與 owner 最新快照（供 freshness 比對），日曆只用
+cached-only 判斷。GET 絕不觸發計算、補抓、refresh、匯出、通知、券商或外部行情呼叫，也不寫 DB／Redis；
+冷啟動沒有 package 回 503 `CONTEXT_NOT_READY`。
+
+owner 選擇沿用 Requirement 140 的雙態：不帶 `email` 時為 configured-admin（主要管理者）；帶合法 `email`
+時為該 ACTIVE 帳號（不需為 configured-admin）。BFF 清除 caller 身分後以顯式 owner header 呼叫 business，
+email 不會轉送；cookie、caller `X-User-*`、Tailscale header 都不能改變 owner。回應不含 owner id 或 email，
+`ownerKey` 是每個帳號一個的隨機識別。其他帳號的 packageId 與不存在相同，回 404 `CONTEXT_NOT_FOUND`。
+
+讀取模式：`view=summary` 且不帶 `packageId` 為最新模式，`tradingDate` 必須是台北今天，只回 freshness
+CURRENT 的最新 package（時段未到或尚未產生 503、休市 409 `NON_TRADING_DAY`、日曆未知 503、來源已變更 409
+`CONTEXT_STALE`）；帶 `packageId` 為固定模式，可回 CURRENT／STALE／UNKNOWN 供稽核，日期／時段／規則包不符
+回 409 `CONTEXT_IDENTITY_MISMATCH`；`view=evidence` 必須同時帶 `packageId` 與 `sourceId`，回該 AVAILABLE
+來源的原文。判斷順序固定：query 400 → owner 503 → 規則包 409 `POLICY_UNSUPPORTED` → 模式判斷。
+
+**規則包 registry 上線時為空表**：在使用者另行離線登錄正式規則包前，本路由對任何 `policyBundleSha256`
+一律回 409 `POLICY_UNSUPPORTED`，這是刻意的 fail-closed，也不寫 API 錯誤紀錄。本版 funding 與
+completedTechnicals 模組固定具名 UNAVAILABLE、cashIncome 的稅後欄位固定 UNAVAILABLE，因此 coverage 恆為
+PARTIAL；缺資料一律以原因碼降級，不以 0 或猜值冒充完整。`tradingAuthorized` 恆為 false：HTTP 200 與
+COMPLETE 都不構成交易授權，本 API 不下單、不代為交易。
+
+BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical Decimal、排序、source 引用、coverage、
+重新計算 `contextContentSha256`／`bodySha256`、與 query 一致、最新模式只接受 CURRENT），任一不符回 502
+`UPSTREAM_INVALID`；通過後原位元組轉送。成功與所有應用錯誤都帶 `Cache-Control: private, no-store`，不使用
+304／ETag。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `tradingDate` | 是 | `string (date)` | pattern: `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`<br>example: `2026-09-24` | 台股交易日，嚴格 `YYYY-MM-DD` 且為合法日期；最新模式只接受 Asia/Taipei 今天，固定模式與 evidence 可讀保留期內（預設 7 天）的歷史日期。 |
+| `slot` | 是 | `string` | enum: `09:05`, `11:40`<br>example: `09:05` | 業務時段，只接受 `09:05`（早盤，09:05–11:39 產生）或 `11:40`（午盤，11:40–13:55 產生）；最新模式在時段時間到之前回 503，不會回較早時段。 |
+| `policyBundleSha256` | 是 | `SrppSha256` | example: `bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3` | 期望的已登錄規則包雜湊（64 位小寫 hex）；只當查詢鍵，伺服器會查驗證過的 registry，查無或驗證失敗回 409 POLICY_UNSUPPORTED。呼叫端不能提交公式、分數或通過收據。 |
+| `email` | 否 | `string (email)` | example: `selected@example.invalid` | 選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。 帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。 格式不合法回 400；本路由另外把空字串或含前後空白的 email 也視為格式不合法回 400（不像其他路由視為省略）。 查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用、lookup 五秒逾時或錯誤相同的 OWNER_UNAVAILABLE 契約，刻意不區分以避免此參數成為帳號列舉工具）。email 只用於 BFF owner lookup，不會轉送 business。 |
+| `view` | 否 | `string` | enum: `summary`, `evidence`<br>example: `summary` | 回應種類：`summary`（預設）回不可變 context、contextContentSha256 與 freshness；`evidence` 回單一凍結來源原文，必須同時帶 packageId 與 sourceId。 |
+| `packageId` | 否 | `string (uuid)` | pattern: `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`<br>example: `7e1fb982-4ae4-4e7e-baa5-c2c80bd93491` | 固定讀取的 package（小寫 canonical UUID）；summary 帶此參數為固定模式，evidence 必填。他人或不存在的 package 回 404 CONTEXT_NOT_FOUND。 |
+| `sourceId` | 否 | `string` | pattern: `^[a-z][a-z0-9_-]{0,63}$`<br>example: `assets` | 要重播的來源（`^[a-z][a-z0-9_-]{0,63}$`，本版為 assets、calendar、policy）；只用於 evidence 且必填，summary 帶此參數回 400。必須是該 package 的 AVAILABLE source，否則 404 SOURCE_EVIDENCE_NOT_FOUND。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: schema | 不可變摘要（SUMMARY）或單一凍結來源（EVIDENCE），為 business 原位元組、已通過 BFF strict 驗證。HTTP 200 不代表可執行交易；最新模式只會是 freshness CURRENT。 |
+| `400` | application/problem+json: SrppProblem | INVALID_REQUEST：未知或重複 query key、空值或前後空白、日期／時段／雜湊／email／view／packageId／sourceId 格式錯、 evidence 缺 packageId 或 sourceId、summary 帶 sourceId、GET 帶 body，或最新模式 tradingDate 不是台北今天。 BFF 本地驗證的錯誤不會發出任何 owner lookup 或 business 呼叫。 |
+| `404` | application/problem+json: SrppProblem | CONTEXT_NOT_FOUND（查無該 owner 的 packageId；他人 package 同樣 404）或 SOURCE_EVIDENCE_NOT_FOUND（package 中查無該 AVAILABLE 來源）。 |
+| `405` | text/html: NginxErrorHtml | Gateway 對這條 known exact path 的非 GET method 回應；帶 `Allow: GET`，不會轉送 BFF。 |
+| `409` | application/problem+json: SrppProblem | POLICY_UNSUPPORTED（規則包未登錄或未通過驗證；registry 為空時一律如此，且不寫 API 錯誤紀錄）、 CONTEXT_STALE（最新 package 的快照 revision 或日曆已變更）、CONTEXT_IDENTITY_MISMATCH（固定 package 的 日期／時段／規則包與 query 不符）或 NON_TRADING_DAY（cached-only 日曆判定休市）。 |
+| `500` | application/problem+json: SrppProblem | INTERNAL_ERROR：BFF 未預期例外；business 自身的 500 會被轉成 502 UPSTREAM_INVALID，不外洩細節。 |
+| `502` | application/problem+json: SrppProblem; text/html: NginxErrorHtml | UPSTREAM_INVALID：business 2xx 未通過 strict 驗證、business 非預期 status（含 500）、problem 格式錯誤或 code 與 status 不符；回應已消毒。若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。 |
+| `503` | application/problem+json: SrppProblem | OWNER_UNAVAILABLE（configured-admin 或指定 email 查無、非 ACTIVE、lookup 五秒逾時或錯誤，一律同一 body，不可重試）、 CALENDAR_UNAVAILABLE（cached-only 日曆無法確認，可重試）或 CONTEXT_NOT_READY（時段未到、尚未產生 package、 freshness 無法核對、business 五秒逾時或連線失敗，可重試）。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ## Schema 欄位
 
@@ -1984,3 +2046,360 @@ sourceUrl），不代表已被採計。
 | `summary` | 是 | `string | null` | 是 |  | 公開資訊內容的精簡摘要。 |
 | `knownAt` | 是 | `string | null (date-time)` | 是 |  | 服務首次確認此公開資訊的時間點。 |
 | `availabilityBasis` | 是 | `string | null` | 是 |  | 判斷內容可用性的來源依據。 |
+
+### `SrppSha256`
+
+64 位小寫 hex 的 SHA-256 摘要（`^[0-9a-f]{64}$`）；用於規則包、公式集、context 與來源 body 的內容雜湊。
+
+型別：`string`。
+
+### `SrppDecimal`
+
+Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零或負零（`-0`），長度 ≤80；金額與比例一律以此字串傳輸，不轉 double、不因傳輸另行四捨五入。
+
+型別：`string`。
+
+### `SrppId`
+
+不透明識別字串（1–128 字元）；數字型 DB id 也以字串傳輸，比較與排序一律依字串序，不得轉成數值。
+
+型別：`string`。
+
+### `SrppMetric`
+
+單一計算值與其品質：value、unit、quality、reasonCodes、sourceIds 五欄必備。計算完整性與經濟確定性不同——預估配息仍標 ESTIMATE；未知一律 UNAVAILABLE＋value=null，不得以 0 代替。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `value` | 是 | `SrppDecimal | null` | 是 |  | 計算值；quality 為 UNAVAILABLE 時必為 null，其他品質必為 canonical Decimal 字串。 |
+| `unit` | 是 | `string` | 否 | enum: `TWD`, `RATIO`, `NATIVE_PRICE`, `POINT` | 數值單位：`TWD` 新台幣金額；`RATIO` 0–1 比例；`NATIVE_PRICE` 標的原幣價格；`POINT` 指標點數（如 KD）。各欄位的單位由其所在 schema 固定。 |
+| `quality` | 是 | `string` | 否 | enum: `EXACT`, `ESTIMATE`, `UPPER_BOUND`, `LOWER_BOUND`, `UNAVAILABLE` | 數值品質：`EXACT` 相對凍結來源的確定值；`ESTIMATE` 含估計（如一年配息、存款利息）；`UPPER_BOUND` 明確上界；`LOWER_BOUND` 明確下界（如有列缺配息時的收益加總）；`UNAVAILABLE` 未知或未驗證，value 必為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。UNAVAILABLE 時至少一項；LOWER_BOUND 等降級也以此說明原因。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項。 |
+
+### `SrppSource`
+
+一份凍結來源的身分與時間：AVAILABLE 必須能以 view=evidence 取回同一份不可變 body（bodySha256 相符）；revision 代表內容版本，不是重新查詢時間。本版每個 package 固定三個 AVAILABLE source：assets、calendar、policy。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `SrppId` | 否 |  | 來源識別（本版為 `assets`、`calendar`、`policy`）；context.sources 依此字串序排序且不重複，也是 evidence 查詢的 sourceId 參數。 |
+| `kind` | 是 | `string` | 否 | enum: `ASSETS`, `POLICY`, `CALENDAR`, `DAILY_BARS`, `CORPORATE_ACTIONS`, `ETF_COMPONENTS`, `TEN_YEAR_HISTORY`, `BOND_FORWARD_YIELDS`, `TAX_INPUTS` | 來源類別：`ASSETS` 與 /api/assets/latest 同一 domain service 產生的資產 JSON；`POLICY` 已登錄規則包與公式 manifest；`CALENDAR` 本次台股交易日判定；`DAILY_BARS` 完成日 K 線；`CORPORATE_ACTIONS` 除權息等公司行為；`ETF_COMPONENTS` ETF 成分與分配組成；`TEN_YEAR_HISTORY` 十年歷史序列；`BOND_FORWARD_YIELDS` 債券遠期殖利率；`TAX_INPUTS` 稅務計算輸入。本版只會輸出 ASSETS、CALENDAR、POLICY。 |
+| `state` | 是 | `string` | 否 | enum: `AVAILABLE`, `MISSING` | 來源狀態：`AVAILABLE` 已凍結可重播，revision／capturedAt／dataAsOf／bodySha256 必填且 reasonCodes 為空；`MISSING` 未取得，上述四欄必為 null 且 reasonCodes 至少一項。 |
+| `revision` | 是 | `SrppId | null` | 是 |  | 來源內容版本；assets 為 `snapshot-<snapshotId>-<快照投影 digest>`、calendar 為 `calendar-<date>-open`、policy 為 `policy-<calculationPolicySha256>`。MISSING 時為 null。 |
+| `capturedAt` | 是 | `string (date-time) | null` | 是 |  | 來源凍結完成時間（RFC 3339，含時區，秒精度）；必須 ≥ dataAsOf 且 ≤ context.generatedAt。MISSING 時為 null。 |
+| `dataAsOf` | 是 | `string (date-time) | null` | 是 |  | 來源資料所代表的時點（RFC 3339，含時區）；assets 取最舊的即時報價時間與 capturedAt 之較早者。必須 ≤ capturedAt；MISSING 時為 null。 |
+| `bodySha256` | 是 | `SrppSha256 | null` | 是 |  | SHA-256(UTF-8(evidence body))；以 view=evidence 取回的 body 必須算出相同值。MISSING 時為 null。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。AVAILABLE 時必為空陣列，MISSING 時至少一項。 |
+
+### `SrppReconciliationCheck`
+
+八項對帳之一：detail 加總與來源回報總額的差距及容差；全部通過才可發布 package，因此回應中 passed 恆為 true。容差為 max(0.01, max(|detail|,|reported|)×0.0001)。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `name` | 是 | `string` | 否 | enum: `snapshot_deposits`, `live_deposits`, `snapshot_funds`, `live_funds`, `snapshot_stocks`, `live_stocks`, `snapshot_total`, `live_total` | 對帳項目：`snapshot_deposits` 存款明細合計對快照存款總額；`live_deposits` 存款明細合計對 live 存款總額；`snapshot_funds` 基金現值合計對快照基金總額；`live_funds` 基金現值合計對 live 基金總額；`snapshot_stocks` 快照股票現值合計對快照股票總額；`live_stocks` live 股票市值合計對 live 股票總額；`snapshot_total` 快照三類合計對快照總資產；`live_total` 存款＋基金＋live 股票合計對 live 總資產。 |
+| `detailTwd` | 是 | `SrppDecimal` | 否 |  | 由明細列加總得到的新台幣金額。 |
+| `reportedTwd` | 是 | `SrppDecimal` | 否 |  | 來源回報的新台幣總額（快照或 live 彙總欄位）。 |
+| `differenceTwd` | 是 | `SrppDecimal` | 否 |  | detailTwd − reportedTwd 的差額（可為負）。 |
+| `toleranceTwd` | 是 | `SrppDecimal` | 否 |  | 本項容差：max(0.01, max(\|detailTwd\|,\|reportedTwd\|)×0.0001)。 |
+| `passed` | 是 | `boolean` | 否 | enum: `true` | 是否 \|differenceTwd\| ≤ toleranceTwd；只有全部通過才會發布，因此恆為常數 `true`。 |
+
+### `SrppDepositGroup`
+
+依 (currency, depositType, bankId) 分組的存款彙總；amountTwd 已是台幣、不再乘匯率，應付在途款保留負號；bankId／bankName 為 null 的列也必須保留在某一組。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `bankId` | 是 | `SrppId | null` | 是 |  | 銀行識別（DB id 以字串傳輸）；排序以 wire 字串比較，null 排最前。沒有銀行資訊的存款列為 null。 |
+| `bankName` | 是 | `string | null` | 是 |  | 凍結當下的銀行顯示名稱；沒有銀行資訊時為 null。 |
+| `currency` | 是 | `string` | 否 |  | 來源幣別代碼，本版只會是 TWD、USD、TRANSIT_TWD、TRANSIT_USD；禁止只因銀行資訊為 null 而刪除列。 |
+| `depositType` | 是 | `string` | 否 |  | 來源存款產品代碼。 |
+| `sourceRowIds` | 是 | `array of SrppId` | 否 | minItems: 1<br>items: SrppId<br>items 說明: 一筆存款列的識別字串。 | 構成本組的存款列識別（`DEPOSIT-<id>`），依字串序排序、不重複、至少一項。 |
+| `amountTwd` | 是 | `SrppDecimal` | 否 |  | 本組存款新台幣金額合計（canonical Decimal；應付在途款為負）。 |
+| `originalAmount` | 是 | `SrppDecimal | null` | 是 |  | 本組原幣金額合計；任一列原幣金額未知時為 null。 |
+| `estimatedAnnualInterest` | 是 | `schema` | 否 |  | 本組年利息估計（新台幣），沿用既有存款利息公式（在途款與無利率列為 0），品質 ESTIMATE。 |
+
+### `SrppAssetsData`
+
+同一份凍結 assets 來源（與 /api/assets/latest 相同 domain service）的對帳與彙總結果；不是新的資產帳本，也不寫回任何資產資料。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `snapshotTotalDeposit` | 是 | `schema` | 否 |  | 快照存款總額（新台幣，EXACT）。 |
+| `snapshotStockValue` | 是 | `schema` | 否 |  | 快照股票現值總額（新台幣，EXACT）。 |
+| `snapshotFundValue` | 是 | `schema` | 否 |  | 快照基金現值總額（新台幣，EXACT）。 |
+| `snapshotTotalAssets` | 是 | `schema` | 否 |  | 快照總資產（新台幣，EXACT）。 |
+| `liveStockValue` | 是 | `schema` | 否 |  | 凍結當下以即時／目標交易時段價格估算的股票市值（新台幣，EXACT 相對於凍結來源；不代表行情時效）。 |
+| `liveTotalAssets` | 是 | `schema` | 否 |  | 凍結當下的 live 總資產（新台幣）；也是 allocation 模組的分母。 |
+| `targetPriceComplete` | 是 | `boolean` | 否 |  | 是否所有持股都取得目標交易時段價格；false 時 assets 模組為 PARTIAL 並帶 TARGET_PRICE_INCOMPLETE。 |
+| `rowCounts` | 是 | `object` | 否 |  | 凍結來源中各類持有列數，供核對列是否遺漏。 |
+| `checks` | 是 | `array of SrppReconciliationCheck` | 否 | minItems: 8<br>maxItems: 8<br>items: SrppReconciliationCheck<br>items 說明: 一項對帳結果。 | 固定八項對帳結果，名稱完整且不重複；任一不通過即不發布 package。 |
+| `depositGroups` | 是 | `array of SrppDepositGroup` | 否 | items: SrppDepositGroup<br>items 說明: 一個存款分組。 | 存款分組彙總，依 currency → depositType → bankId（null 最前）字串序排序且主鍵不重複。 |
+
+### `SrppAllocationRow`
+
+一個 assetKey 的總曝險描述性差距；持有與政策目標的 assetKey 取聯集。不扣 SRPP 私有短線帳本，不得當成核心可買張數或下單依據。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `assetKey` | 是 | `SrppId` | 否 |  | 資產分類鍵（ASSET_KEY_V1）：股票 `STOCK:<market>:<stockCode>`（同市場同代號跨券商合併）、基金 `FUND:<fundCode>`、存款 `CASH:<currency>:<depositType>`；rows 依此字串序排序且不重複。 |
+| `market` | 是 | `string | null` | 是 |  | 股票列的市場名稱；基金與存款列為 null。 |
+| `symbol` | 是 | `string | null` | 是 |  | 股票列的代號；基金與存款列為 null。 |
+| `sourceHoldingIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一筆持有列的識別字串。 | 構成本列曝險的持有列識別（`STOCK-<id>`／`FUND-<id>`／`DEPOSIT-<id>`），依字串序排序且不重複；未持有但有政策目標的列為空陣列。 |
+| `exposureTwd` | 是 | `schema` | 否 |  | 本列曝險（新台幣）：股票取 live 市值、基金取現值、存款取金額；未持有者為 "0"。 |
+| `currentWeight` | 是 | `schema` | 否 |  | 曝險 ÷ 分母（MathContext 34 位 HALF_EVEN）的目前權重。 |
+| `targetWeight` | 是 | `schema` | 否 |  | 已登錄政策的目標權重；政策沒有此 assetKey 時為 UNAVAILABLE＋TARGET_NOT_MAPPED（不猜 0）。 |
+| `gapWeight` | 是 | `schema` | 否 |  | 目標權重 − 目前權重；可為負。無目標時為 UNAVAILABLE。 |
+| `gapValueTwd` | 是 | `schema` | 否 |  | 目標權重 × 分母 − 曝險的新台幣差距；可為負，僅供描述，不是可買金額。無目標時為 UNAVAILABLE。 |
+
+### `SrppAllocationData`
+
+總曝險配置差距：資產分類由版本化 ASSET_KEY_V1 決定，目標由已登錄政策文件決定；未映射不可猜成零目標。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `basis` | 是 | `string` | 否 | enum: `TOTAL_EXPOSURE_REFERENCE` | 差距計算基礎，常數 `TOTAL_EXPOSURE_REFERENCE`：以全部持有的總曝險為參考，不區分短線與核心部位。 |
+| `denominatorTwd` | 是 | `schema` | 否 |  | 權重分母（新台幣）＝同 package 的 liveTotalAssets；必須 >0，否則模組 UNAVAILABLE＋DENOMINATOR_NOT_POSITIVE。 |
+| `shortTermSleeveSeparated` | 是 | `boolean` | 否 |  | 是否已扣除短線部位，本版恆為常數 `false`：總曝險差距不得當成核心可買容量。 |
+| `rows` | 是 | `array of SrppAllocationRow` | 否 | items: SrppAllocationRow<br>items 說明: 一個 assetKey 的配置列。 | 持有與政策目標 assetKey 聯集的配置列，依 assetKey 字串序排序且不重複。 |
+| `unmappedHoldingIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一筆未映射持有列的識別字串。 | 無法映射成 assetKey 的持有列（如基金沒有代號），依字串序排序且不重複；非空時模組為 PARTIAL＋HOLDING_NOT_MAPPED。 |
+
+### `SrppCashIncomeData`
+
+基礎收益：來源估計額與可支配現金分列。本版只加總股票／ETF 配息、基金配息與存款利息；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stockAndEtfDistributions` | 是 | `schema` | 否 |  | 股票與 ETF 一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING）。 |
+| `fundDistributions` | 是 | `schema` | 否 |  | 基金一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND）。 |
+| `depositInterest` | 是 | `schema` | 否 |  | 存款一年估計利息合計（新台幣，ESTIMATE）。 |
+| `sourceAccruedAnnualIncome` | 是 | `schema` | 否 |  | 上述三項之和的來源估計年收入（新台幣）；與快照 estimatedAnnualDividend 以同一容差對帳，不符時模組加 INCOME_RECONCILIATION_MISMATCH。 |
+| `permanentTermInterestReinvested` | 是 | `schema` | 否 |  | 永久定存利息再投入金額；本版 UNAVAILABLE（NET_CALCULATION_NOT_VERIFIED）。 |
+| `spendableAnnualGross` | 是 | `schema` | 否 |  | 可支配年收入（稅前）；本版 UNAVAILABLE。 |
+| `taiwanIncomeTaxOrRefund` | 是 | `schema` | 否 |  | 台灣綜合所得稅應納或退稅額；本版 UNAVAILABLE。 |
+| `usWithholding` | 是 | `schema` | 否 |  | 美國股利預扣稅；本版 UNAVAILABLE。 |
+| `additionalBasicTax` | 是 | `schema` | 否 |  | 基本稅額（最低稅負制）；本版 UNAVAILABLE。 |
+| `supplementaryNhi` | 是 | `schema` | 否 |  | 二代健保補充保費；本版 UNAVAILABLE。 |
+| `afterAllTaxAnnualCashIncome` | 是 | `schema` | 否 |  | 全部稅費後的年現金收入；本版 UNAVAILABLE。 |
+| `missingIncomeRowIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一筆缺配息估計的持有列識別字串。 | estimatedDividend 為 null 的持有列識別，依字串序排序且不重複；非空時受影響加總改為 LOWER_BOUND。 |
+| `netCalculationStandard` | 是 | `string | null` | 是 |  | 稅後計算所依據的標準識別；本版未驗證稅後計算，恆為 null。 |
+| `taxYear` | 是 | `integer` | 否 | minimum: 2000<br>maximum: 2200 | 收益所屬稅務年度＝交易日年份。 |
+
+### `SrppFundingData`
+
+買前資金基礎（本版不輸出，funding 模組恆為 UNAVAILABLE）：不代表可下單金額，不包含批次分配、成交去重、換股帳本或張數判斷。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `basis` | 是 | `string` | 否 | enum: `BEFORE_PROPOSED_TRADE` | 資金計算基礎，常數 `BEFORE_PROPOSED_TRADE`：尚未扣除任何建議交易前的資金狀態。 |
+| `calculationDate` | 是 | `string (date)` | 否 |  | 資金計算所依據的日期（ISO 8601）。 |
+| `snapshotAllCurrencyDepositTwdEquivalent` | 是 | `schema` | 否 |  | 快照全部幣別存款的新台幣等值合計。 |
+| `twdTermDeposits` | 是 | `schema` | 否 |  | 新台幣定存合計。 |
+| `twdTotalIncludingNegativeTransit` | 是 | `schema` | 否 |  | 新台幣存款合計，已含應付在途款（負值）。 |
+| `excludedPositiveTransit` | 是 | `schema` | 否 |  | 未計入資金的應收在途款（正值）合計。 |
+| `usdDepositsTwdEquivalent` | 是 | `schema` | 否 |  | 美元存款的新台幣等值合計。 |
+| `inflationIndex` | 是 | `schema` | 否 |  | 計算底線用的通膨指數比例。 |
+| `permanentTermFloorNominal` | 是 | `schema` | 否 |  | 永久定存底線的名目金額。 |
+| `totalTwdDepositFloorNominal` | 是 | `schema` | 否 |  | 新台幣存款總底線的名目金額。 |
+| `headroomAboveTotalFloor` | 是 | `schema` | 否 |  | 新台幣存款高於總底線的空間；不代表可下單金額。 |
+| `termFloorMet` | 是 | `boolean | null` | 是 |  | 定存是否達永久底線；無法判斷時為 null。 |
+| `tradingAuthorized` | 是 | `boolean` | 否 |  | 是否授權交易，恆為常數 `false`：本 API 只提供判讀資料，不構成任何交易授權。 |
+
+### `SrppKdObservation`
+
+一個已完成交易日的 KD 觀測值。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `date` | 是 | `string (date)` | 否 |  | 已完成交易日（ISO 8601）；陣列內依日期升冪且不重複。 |
+| `k` | 是 | `SrppDecimal | null` | 是 |  | K 值（0–100 點，canonical Decimal）；無法計算時為 null。 |
+| `d` | 是 | `SrppDecimal | null` | 是 |  | D 值（0–100 點，canonical Decimal）；無法計算時為 null。 |
+
+### `SrppAdjustedClose`
+
+一個已完成交易日的還原收盤價。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `date` | 是 | `string (date)` | 否 |  | 已完成交易日（ISO 8601）；陣列內依日期升冪且不重複。 |
+| `close` | 是 | `SrppDecimal` | 否 |  | 該日還原收盤價（原幣，canonical Decimal）。 |
+
+### `SrppTechnicalRow`
+
+單一台股標的的完成日技術資料（本版不輸出）：只能使用已完成交易日，與盤中雷達指標不同；均線及 KD 基礎依 formula manifest，不能混用 raw／adjusted。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `market` | 是 | `string` | 否 | enum: `台股` | 市場，常數 `台股`。 |
+| `symbol` | 是 | `string` | 否 |  | 台股代號；rows 依 market/symbol 字串序排序且不重複。 |
+| `currency` | 是 | `string` | 否 |  | 價格幣別代碼（台股為 TWD）。 |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 本列完整度：`COMPLETE` 全部指標可驗證；`PARTIAL` 部分指標缺漏並以 reasonCodes 說明；`UNAVAILABLE` 缺資料但仍保留此 symbol 列。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。 |
+| `completedSession` | 是 | `string (date)` | 否 |  | 本列指標所依據的最後已完成交易日（ISO 8601）。 |
+| `calculationVersion` | 是 | `string` | 否 |  | 本列指標的計算版本識別。 |
+| `adjustmentBasis` | 是 | `string` | 否 | enum: `VERIFIED_CASH_ADJUSTED`, `UNVERIFIED` | 價格還原基礎：`VERIFIED_CASH_ADJUSTED` 已以驗證過的現金股利還原；`UNVERIFIED` 公司行為證據未驗證，還原價不可視為可靠。 |
+| `corporateActionEvidenceComplete` | 是 | `boolean` | 否 |  | 公司行為（除權息）證據是否完整。 |
+| `ma5` | 是 | `schema` | 否 |  | 5 日均線（原幣價格）。 |
+| `ma20` | 是 | `schema` | 否 |  | 20 日均線（原幣價格）。 |
+| `ma60` | 是 | `schema` | 否 |  | 60 日均線（原幣價格）。 |
+| `kdLastThreeCompletedSessions` | 是 | `array of SrppKdObservation` | 否 | maxItems: 3<br>items: SrppKdObservation<br>items 說明: 一日 KD 觀測值。 | 最近三個已完成交易日的 KD，依日期升冪，最多 3 項。 |
+| `adjustedClosesLast20` | 是 | `array of SrppAdjustedClose` | 否 | maxItems: 20<br>items: SrppAdjustedClose<br>items 說明: 一日還原收盤價。 | 最近 20 個已完成交易日的還原收盤價，依日期升冪，最多 20 項。 |
+| `highOf20AdjustedCloses` | 是 | `schema` | 否 |  | 最近 20 個還原收盤價的最高值（原幣價格）。 |
+
+### `SrppTechnicalsData`
+
+完成日技術資料（本版不輸出，completedTechnicals 模組恆為 UNAVAILABLE）：固定含持股與已登錄政策的台股目標；缺資料仍須留下該 symbol 的 UNAVAILABLE 列。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `market` | 是 | `string` | 否 | enum: `台股` | 市場，常數 `台股`。 |
+| `requiredCompletedSession` | 是 | `string (date)` | 否 |  | 本次要求的已完成交易日（ISO 8601）。 |
+| `symbolScope` | 是 | `string` | 否 | enum: `TW_HOLDINGS_UNION_POLICY_TARGETS` | 標的範圍，常數 `TW_HOLDINGS_UNION_POLICY_TARGETS`：台股持股與政策台股目標的聯集。 |
+| `rows` | 是 | `array of SrppTechnicalRow` | 否 | items: SrppTechnicalRow<br>items 說明: 一個標的的技術資料列。 | 各標的技術資料列，依 market/symbol 字串序排序且不重複。 |
+
+### `SrppAssetsModule`
+
+資產對帳與存款分組模組（calculationId 本版為 `ASSET_MGMT_ASSETS_RECON_V1`）：以凍結的 assets 來源做八項對帳並彙總存款分組；targetPriceComplete=false 時為 PARTIAL＋TARGET_PRICE_INCOMPLETE。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。 |
+| `calculationId` | 是 | `SrppId` | 否 |  | assets 模組的計算識別；對應 formula manifest 中同名計算。 |
+| `data` | 是 | `SrppAssetsData | null` | 是 |  | assets 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppAssetsData。 |
+
+### `SrppAllocationModule`
+
+總曝險配置差距模組（calculationId 本版為 `ASSET_MGMT_TOTAL_EXPOSURE_V1`）：以 liveTotalAssets 為分母，比較持有曝險與已登錄政策目標；未映射目標或持有時為 PARTIAL。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。 |
+| `calculationId` | 是 | `SrppId` | 否 |  | allocation 模組的計算識別；對應 formula manifest 中同名計算。 |
+| `data` | 是 | `SrppAllocationData | null` | 是 |  | allocation 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppAllocationData。 |
+
+### `SrppCashIncomeModule`
+
+基礎收益加總模組（calculationId 本版為 `ASSET_MGMT_GROSS_INCOME_V1`）：只加總來源估計的股票／ETF 配息、基金配息與存款利息；稅後與可支配欄位本版一律 UNAVAILABLE，模組固定 PARTIAL。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。 |
+| `calculationId` | 是 | `SrppId` | 否 |  | cashIncome 模組的計算識別；對應 formula manifest 中同名計算。 |
+| `data` | 是 | `SrppCashIncomeData | null` | 是 |  | cashIncome 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppCashIncomeData。 |
+
+### `SrppFundingModule`
+
+買前資金基礎模組：本版一律 status=UNAVAILABLE、data=null、reasonCodes=["CALCULATOR_NOT_VERIFIED"]（calculationId `ASSET_MGMT_FUNDING_UNAVAILABLE_V1`），不輸出任何底線或 headroom。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。 |
+| `calculationId` | 是 | `SrppId` | 否 |  | funding 模組的計算識別；對應 formula manifest 中同名計算。 |
+| `data` | 是 | `SrppFundingData | null` | 是 |  | funding 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppFundingData。 |
+
+### `SrppTechnicalsModule`
+
+完成日技術資料模組：本版一律 status=UNAVAILABLE、data=null、reasonCodes=["CALCULATOR_NOT_VERIFIED"]（calculationId `ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1`），不輸出 MA、KD 或 20 日高點。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。 |
+| `sourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。 | 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。 |
+| `calculationId` | 是 | `SrppId` | 否 |  | completedTechnicals 模組的計算識別；對應 formula manifest 中同名計算。 |
+| `data` | 是 | `SrppTechnicalsData | null` | 是 |  | completedTechnicals 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppTechnicalsData。 |
+
+### `SrppPolicyIdentity`
+
+本 package 使用的已登錄規則包身分；伺服器查驗證過的 registry 後才輸出，不會把 query 的雜湊原樣回傳冒充支援。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `policyBundleSha256` | 是 | `SrppSha256` | 否 |  | 呼叫端指定且已登錄的規則包雜湊（registry 主鍵），必須等於 query 的 policyBundleSha256。 |
+| `calculationPolicySha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(政策文件)) 計算的政策內容雜湊。 |
+| `formulaSetSha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。 |
+| `formulaVersion` | 是 | `string` | 否 |  | 公式版本識別（本版唯一實作 ASSET_MGMT_SRPP_V1）。 |
+| `scope` | 是 | `string` | 否 | enum: `LISTED_CALCULATIONS_ONLY` | 適用範圍，常數 `LISTED_CALCULATIONS_ONLY`：只涵蓋 manifest 明列的計算，不是完整投資政策或交易決策。 |
+
+### `SrppContext`
+
+一個不可變 package 的計算內容：發布後不可更改；同一 package 的輸入截點、資料修訂與政策相同。contextContentSha256 = SHA-256(UTF-8(JCS(context)))。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `packageId` | 是 | `string (uuid)` | 否 |  | package 識別（小寫 UUID）；固定摘要與 evidence 以此查詢。 |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1.0.0` | context 結構版本，常數 `1.0.0`。 |
+| `generatedAt` | 是 | `string (date-time)` | 否 |  | package 發布前的產生時間（RFC 3339，+08:00，秒精度）；必須 ≥ dataCutoffAt 與所有 source 的 capturedAt，且 ≤ freshness.checkedAt。 |
+| `dataCutoffAt` | 是 | `string (date-time)` | 否 |  | 輸入截點（＝assets 來源的 capturedAt）；必須 ≤ generatedAt。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 台股交易日（ISO 8601），必須等於 query 的 tradingDate。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 業務時段，必須等於 query 的 slot：`09:05` 早盤時段（09:05–11:39 產生）；`11:40` 午盤時段（11:40–13:55 產生）。 |
+| `timezone` | 是 | `string` | 否 | enum: `Asia/Taipei` | 所有日期與無時區時間的解讀時區，常數 `Asia/Taipei`。 |
+| `ownerKey` | 是 | `SrppId` | 否 |  | 每個帳號一個、由 producer 產生的隨機識別（UUID 字串）；不是 owner id 或 email，無法反推帳號。 |
+| `assetSnapshotId` | 是 | `SrppId` | 否 |  | 凍結所依據的資產快照 id（以字串傳輸）。 |
+| `assetSnapshotDate` | 是 | `string (date)` | 否 |  | 凍結所依據的資產快照日期（ISO 8601）。 |
+| `policy` | 是 | `SrppPolicyIdentity` | 否 |  | 本 package 的規則包身分。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL` | 整體涵蓋度：`COMPLETE` 五個模組全部 COMPLETE；`PARTIAL` 至少一個模組非 COMPLETE（本版 funding 與 completedTechnicals 固定 UNAVAILABLE，故恆為 PARTIAL）。 |
+| `sources` | 是 | `array of SrppSource` | 否 | minItems: 2<br>items: SrppSource<br>items 說明: 一份凍結來源。 | 本 package 凍結的來源，依 sourceId 字串序排序且不重複，至少兩項（本版固定 assets、calendar、policy）。 |
+| `modules` | 是 | `object` | 否 |  | 固定五個計算模組，缺一不可。 |
+| `tradingAuthorized` | 是 | `boolean` | 否 |  | 是否授權交易，恆為常數 `false`：HTTP 200 與 COMPLETE 都不代表可執行交易。 |
+| `requiresOriginalDailyChecks` | 是 | `boolean` | 否 | enum: `true` | 恆為常數 `true`：使用端仍必須執行原有每日檢查與即時資料核對，不得以本結果取代。 |
+
+### `SrppFreshness`
+
+讀取當下另行核對的新鮮度（不在 context hash 內）；CURRENT 只代表來源修訂、日曆與規則包仍相符，不代表行情時效。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `CURRENT`, `STALE`, `UNKNOWN` | 新鮮度：`CURRENT` 快照 revision、日曆與規則包皆仍相符（最新模式唯一接受的狀態），兩個陣列皆空；`STALE` 至少一個來源已變更，列於 changedSourceIds，僅供稽核；`UNKNOWN` 無法核對（例如日曆快取不可用），changedSourceIds 為空。 |
+| `checkedAt` | 是 | `string (date-time)` | 否 |  | 本次核對時間（RFC 3339，+08:00）；必須 ≥ context.generatedAt。 |
+| `changedSourceIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一個已變更來源的 sourceId。 | 已變更的 sourceId（例如 assets、calendar），依字串序排序且不重複；CURRENT 時為空。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。 | 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。例如 SOURCE_REVISION_CHANGED、CALENDAR_CHANGED、CALENDAR_UNVERIFIABLE；CURRENT 時為空，其他狀態至少一項。 |
+
+### `SrppSummaryResponse`
+
+view=summary 的回應：不可變 context、其內容雜湊與本次讀取的 freshness。contextContentSha256 = SHA-256(RFC 8785 JCS(context))，不是 SRPP 既有的 INPUT_SNAPSHOT_SHA256。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `SUMMARY` | 回應種類，常數 `SUMMARY`。 |
+| `context` | 是 | `SrppContext` | 否 |  | 不可變的 package 計算內容。 |
+| `contextContentSha256` | 是 | `SrppSha256` | 否 |  | SHA-256(UTF-8(JCS(context)))；BFF 會重新計算並拒絕不符的上游回應。 |
+| `freshness` | 是 | `SrppFreshness` | 否 |  | 本次讀取的新鮮度核對結果。 |
+
+### `SrppEvidenceResponse`
+
+view=evidence 的回應：只讀該 owner／package 已凍結的單一來源原文，不抓取新證據，也不暴露來源 URL 或檔案路徑。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `EVIDENCE` | 回應種類，常數 `EVIDENCE`。 |
+| `packageId` | 是 | `string (uuid)` | 否 |  | 來源所屬 package（小寫 UUID），必須等於 query 的 packageId。 |
+| `sourceId` | 是 | `SrppId` | 否 |  | 來源識別，必須等於 query 的 sourceId，且在該 package 為 AVAILABLE。 |
+| `bodyMediaType` | 是 | `string` | 否 | enum: `application/json` | body 的媒體型別，常數 `application/json`。 |
+| `bodyEncoding` | 是 | `string` | 否 | enum: `UTF-8` | body 的字元編碼，常數 `UTF-8`。 |
+| `body` | 是 | `string` | 否 |  | 凍結當下的來源 JSON 原文，以字串回傳；依 UTF-8 計算 bodySha256，不得 parse 後重新 stringify。 |
+| `bodySha256` | 是 | `SrppSha256` | 否 |  | SHA-256(UTF-8(body))，必須等於 context 中該 source 的 bodySha256。 |
+
+### `SrppProblem`
+
+RFC 9457 Problem Details：本路由所有應用錯誤的固定七欄格式，文案由 BFF 固定目錄輸出，不含帳號、SQL、URI 或例外堆疊；Nginx 自身的 502／504 仍可能是 HTML。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `type` | 是 | `string` | 否 | enum: `about:blank` | problem 類型，常數 `about:blank`。 |
+| `title` | 是 | `string` | 否 |  | 依 code 固定的英文標題。 |
+| `status` | 是 | `integer` | 否 | minimum: 400<br>maximum: 599 | 與 HTTP status 相同的整數狀態碼。 |
+| `detail` | 是 | `string` | 否 |  | 依 code 固定、經清理的繁體中文說明。 |
+| `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/daily-context` | 發生錯誤的公開路徑，常數 `/api/public/srpp/daily-context`。 |
+| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `CONTEXT_NOT_FOUND`, `SOURCE_EVIDENCE_NOT_FOUND`, `CONTEXT_STALE`, `POLICY_UNSUPPORTED`, `CONTEXT_IDENTITY_MISMATCH`, `NON_TRADING_DAY`, `CALENDAR_UNAVAILABLE`, `OWNER_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR` | 穩定錯誤碼：`INVALID_REQUEST`（400）query 不合法；`CONTEXT_NOT_FOUND`（404）查無該 owner 的 package；`SOURCE_EVIDENCE_NOT_FOUND`（404）package 中查無該 AVAILABLE 來源；`CONTEXT_STALE`（409）最新 package 的來源已變更；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證（registry 空時一律如此）；`CONTEXT_IDENTITY_MISMATCH`（409）package 的日期／時段／規則包與 query 不符；`NON_TRADING_DAY`（409）非台股交易日；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CONTEXT_NOT_READY`（503，可重試）時段未到、尚未產生或上游逾時；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤。 |
+| `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘（含 OWNER_UNAVAILABLE）為 false。 |

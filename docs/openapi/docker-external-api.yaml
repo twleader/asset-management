@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.13.0
+  version: 1.14.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十三條精確路徑：
-    十二條 GET（其中 transactions／trading-radar 是 configured-admin owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
+    十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
     ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    十四條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    十二條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    十三條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -23,11 +23,16 @@ info:
     匯率的 `liveUpdateStatus`／`spot.quoteStatus`，以及交易雷達的 `generatedAt` 與各項證據。
     交易雷達會揭露 configured admin 的持倉／觀察清單與決策證據；只能透過本機 loopback
     或獲准 Tailscale identity 讀取，不可開成公網。本 API 不構成交易執行依據。
+
+    第十四條 `GET /api/public/srpp/daily-context`（Requirement 163）讀取 business 背景 producer 已發布的不可變
+    SRPP 共用計算結果 package（資產對帳、總曝險配置差距、基礎收益加總）；GET 純讀、不觸發計算或任何外呼。
+    規則包 registry 上線時為空，在使用者另行登錄正式規則包前一律回 409 `POLICY_UNSUPPORTED`；funding、
+    completedTechnicals 與稅後欄位本版固定具名 UNAVAILABLE（模組降級而非填 0），`tradingAuthorized` 恆為 false。
 servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的十三條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的十四條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -451,7 +456,7 @@ paths:
       operationId: triggerPublicCrawlerRescan
       summary: 免登入觸發爬蟲重新搜尋
       description: |
-        十三條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+        十四條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
         「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
         HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
         本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -1049,6 +1054,214 @@ paths:
             text/html:
               schema: {$ref: '#/components/schemas/NginxErrorHtml'}
               example: "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+  /api/public/srpp/daily-context:
+    get:
+      tags: [SRPP 共用計算結果]
+      operationId: getSrppDailyContext
+      summary: 取得本輪 SRPP 共用計算摘要或重播其已凍結來源
+      description: |
+        Requirement 163／Task 452–454 的第十四條 exact 路由。固定公式（資產對帳、總曝險配置差距、基礎收益加總）由
+        business-services 背景 producer 每 5 分鐘在台股交易日 09:05–13:55 先算好、凍結來源並發布成不可變 package；
+        本 GET 只讀 PostgreSQL 已發布的 package、規則包 registry 與 owner 最新快照（供 freshness 比對），日曆只用
+        cached-only 判斷。GET 絕不觸發計算、補抓、refresh、匯出、通知、券商或外部行情呼叫，也不寫 DB／Redis；
+        冷啟動沒有 package 回 503 `CONTEXT_NOT_READY`。
+
+        owner 選擇沿用 Requirement 140 的雙態：不帶 `email` 時為 configured-admin（主要管理者）；帶合法 `email`
+        時為該 ACTIVE 帳號（不需為 configured-admin）。BFF 清除 caller 身分後以顯式 owner header 呼叫 business，
+        email 不會轉送；cookie、caller `X-User-*`、Tailscale header 都不能改變 owner。回應不含 owner id 或 email，
+        `ownerKey` 是每個帳號一個的隨機識別。其他帳號的 packageId 與不存在相同，回 404 `CONTEXT_NOT_FOUND`。
+
+        讀取模式：`view=summary` 且不帶 `packageId` 為最新模式，`tradingDate` 必須是台北今天，只回 freshness
+        CURRENT 的最新 package（時段未到或尚未產生 503、休市 409 `NON_TRADING_DAY`、日曆未知 503、來源已變更 409
+        `CONTEXT_STALE`）；帶 `packageId` 為固定模式，可回 CURRENT／STALE／UNKNOWN 供稽核，日期／時段／規則包不符
+        回 409 `CONTEXT_IDENTITY_MISMATCH`；`view=evidence` 必須同時帶 `packageId` 與 `sourceId`，回該 AVAILABLE
+        來源的原文。判斷順序固定：query 400 → owner 503 → 規則包 409 `POLICY_UNSUPPORTED` → 模式判斷。
+
+        **規則包 registry 上線時為空表**：在使用者另行離線登錄正式規則包前，本路由對任何 `policyBundleSha256`
+        一律回 409 `POLICY_UNSUPPORTED`，這是刻意的 fail-closed，也不寫 API 錯誤紀錄。本版 funding 與
+        completedTechnicals 模組固定具名 UNAVAILABLE、cashIncome 的稅後欄位固定 UNAVAILABLE，因此 coverage 恆為
+        PARTIAL；缺資料一律以原因碼降級，不以 0 或猜值冒充完整。`tradingAuthorized` 恆為 false：HTTP 200 與
+        COMPLETE 都不構成交易授權，本 API 不下單、不代為交易。
+
+        BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical Decimal、排序、source 引用、coverage、
+        重新計算 `contextContentSha256`／`bodySha256`、與 query 一致、最新模式只接受 CURRENT），任一不符回 502
+        `UPSTREAM_INVALID`；通過後原位元組轉送。成功與所有應用錯誤都帶 `Cache-Control: private, no-store`，不使用
+        304／ETag。
+      parameters:
+        - name: tradingDate
+          in: query
+          required: true
+          description: 台股交易日，嚴格 `YYYY-MM-DD` 且為合法日期；最新模式只接受 Asia/Taipei 今天，固定模式與 evidence 可讀保留期內（預設 7 天）的歷史日期。
+          schema: {type: string, format: date, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'}
+          example: '2026-09-24'
+        - name: slot
+          in: query
+          required: true
+          description: 業務時段，只接受 `09:05`（早盤，09:05–11:39 產生）或 `11:40`（午盤，11:40–13:55 產生）；最新模式在時段時間到之前回 503，不會回較早時段。
+          schema: {type: string, enum: ['09:05', '11:40']}
+          example: '09:05'
+        - name: policyBundleSha256
+          in: query
+          required: true
+          description: 期望的已登錄規則包雜湊（64 位小寫 hex）；只當查詢鍵，伺服器會查驗證過的 registry，查無或驗證失敗回 409 POLICY_UNSUPPORTED。呼叫端不能提交公式、分數或通過收據。
+          schema: {$ref: '#/components/schemas/SrppSha256'}
+          example: bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            format: email
+            maxLength: 254
+          description: >-
+            選擇要查詢的帳號 email；省略時預設回傳 configured-admin（主要管理者）的資料。
+            帶入時僅需該帳號存在且狀態為 ACTIVE，不需為 configured-admin。
+            格式不合法回 400；本路由另外把空字串或含前後空白的 email 也視為格式不合法回 400（不像其他路由視為省略）。
+            查無帳號或帳號非 ACTIVE 回 503（與 configured-admin 不可用、lookup 五秒逾時或錯誤相同的 OWNER_UNAVAILABLE
+            契約，刻意不區分以避免此參數成為帳號列舉工具）。email 只用於 BFF owner lookup，不會轉送 business。
+          example: selected@example.invalid
+        - name: view
+          in: query
+          required: false
+          description: 回應種類：`summary`（預設）回不可變 context、contextContentSha256 與 freshness；`evidence` 回單一凍結來源原文，必須同時帶 packageId 與 sourceId。
+          schema: {type: string, enum: [summary, evidence], default: summary}
+          example: summary
+        - name: packageId
+          in: query
+          required: false
+          description: 固定讀取的 package（小寫 canonical UUID）；summary 帶此參數為固定模式，evidence 必填。他人或不存在的 package 回 404 CONTEXT_NOT_FOUND。
+          schema: {type: string, format: uuid, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'}
+          example: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+        - name: sourceId
+          in: query
+          required: false
+          description: 要重播的來源（`^[a-z][a-z0-9_-]{0,63}$`，本版為 assets、calendar、policy）；只用於 evidence 且必填，summary 帶此參數回 400。必須是該 package 的 AVAILABLE source，否則 404 SOURCE_EVIDENCE_NOT_FOUND。
+          schema: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+          example: assets
+      responses:
+        '200':
+          description: 不可變摘要（SUMMARY）或單一凍結來源（EVIDENCE），為 business 原位元組、已通過 BFF strict 驗證。HTTP 200 不代表可執行交易；最新模式只會是 freshness CURRENT。
+          headers:
+            Cache-Control:
+              description: 個人計算結果不得被中介快取；值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/SrppSummaryResponse'}
+                  - {$ref: '#/components/schemas/SrppEvidenceResponse'}
+              examples:
+                partial:
+                  $ref: '#/components/examples/SrppSummaryPartial'
+                stalePinned:
+                  $ref: '#/components/examples/SrppSummaryStalePinned'
+                evidence:
+                  $ref: '#/components/examples/SrppEvidenceAssets'
+        '400':
+          description: >-
+            INVALID_REQUEST：未知或重複 query key、空值或前後空白、日期／時段／雜湊／email／view／packageId／sourceId 格式錯、
+            evidence 缺 packageId 或 sourceId、summary 帶 sourceId、GET 帶 body，或最新模式 tradingDate 不是台北今天。
+            BFF 本地驗證的錯誤不會發出任何 owner lookup 或 business 呼叫。
+          headers:
+            Cache-Control:
+              description: 值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              example: {type: 'about:blank', title: Invalid SRPP daily context request, status: 400, detail: 查詢參數不合法，請確認參數名稱、格式與組合。, instance: /api/public/srpp/daily-context, code: INVALID_REQUEST, retryable: false}
+        '404':
+          description: CONTEXT_NOT_FOUND（查無該 owner 的 packageId；他人 package 同樣 404）或 SOURCE_EVIDENCE_NOT_FOUND（package 中查無該 AVAILABLE 來源）。
+          headers:
+            Cache-Control:
+              description: 值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              examples:
+                contextNotFound:
+                  value: {type: 'about:blank', title: SRPP daily context not found, status: 404, detail: 查無指定的共用計算結果套件。, instance: /api/public/srpp/daily-context, code: CONTEXT_NOT_FOUND, retryable: false}
+                sourceEvidenceNotFound:
+                  value: {type: 'about:blank', title: SRPP source evidence not found, status: 404, detail: 指定套件中查無可重播的來源。, instance: /api/public/srpp/daily-context, code: SOURCE_EVIDENCE_NOT_FOUND, retryable: false}
+        '405':
+          description: "Gateway 對這條 known exact path 的非 GET method 回應；帶 `Allow: GET`，不會轉送 BFF。"
+          headers:
+            Allow:
+              description: 此 exact path 唯一允許的 HTTP method；值固定為 GET。
+              schema: {type: string, const: GET}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><head><title>405 Not Allowed</title></head><body><center><h1>405 Not Allowed</h1></center><hr><center>nginx</center></body></html>"
+        '409':
+          description: >-
+            POLICY_UNSUPPORTED（規則包未登錄或未通過驗證；registry 為空時一律如此，且不寫 API 錯誤紀錄）、
+            CONTEXT_STALE（最新 package 的快照 revision 或日曆已變更）、CONTEXT_IDENTITY_MISMATCH（固定 package 的
+            日期／時段／規則包與 query 不符）或 NON_TRADING_DAY（cached-only 日曆判定休市）。
+          headers:
+            Cache-Control:
+              description: 值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              examples:
+                policyUnsupported:
+                  value: {type: 'about:blank', title: SRPP policy bundle unsupported, status: 409, detail: 指定的規則包尚未登錄或未通過驗證。, instance: /api/public/srpp/daily-context, code: POLICY_UNSUPPORTED, retryable: false}
+                contextStale:
+                  value: {type: 'about:blank', title: SRPP daily context stale, status: 409, detail: 最新共用計算結果的來源已變更，請沿用既有資料取得及計算流程。, instance: /api/public/srpp/daily-context, code: CONTEXT_STALE, retryable: false}
+                contextIdentityMismatch:
+                  value: {type: 'about:blank', title: SRPP daily context identity mismatch, status: 409, detail: 指定套件的交易日、時段或規則包與查詢條件不符。, instance: /api/public/srpp/daily-context, code: CONTEXT_IDENTITY_MISMATCH, retryable: false}
+                nonTradingDay:
+                  value: {type: 'about:blank', title: Non-trading day, status: 409, detail: 指定日期不是台股交易日。, instance: /api/public/srpp/daily-context, code: NON_TRADING_DAY, retryable: false}
+        '500':
+          description: INTERNAL_ERROR：BFF 未預期例外；business 自身的 500 會被轉成 502 UPSTREAM_INVALID，不外洩細節。
+          headers:
+            Cache-Control:
+              description: 值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              example: {type: 'about:blank', title: SRPP internal error, status: 500, detail: 共用計算結果服務發生未預期錯誤。, instance: /api/public/srpp/daily-context, code: INTERNAL_ERROR, retryable: false}
+        '502':
+          description: >-
+            UPSTREAM_INVALID：business 2xx 未通過 strict 驗證、business 非預期 status（含 500）、problem 格式錯誤或 code 與
+            status 不符；回應已消毒。若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。
+          headers:
+            Cache-Control:
+              description: BFF problem 回應的值固定為 private, no-store（Nginx HTML 不保證）。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              example: {type: 'about:blank', title: SRPP upstream response invalid, status: 502, detail: 共用計算結果的上游回應不合法。, instance: /api/public/srpp/daily-context, code: UPSTREAM_INVALID, retryable: false}
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx</center></body></html>"
+        '503':
+          description: >-
+            OWNER_UNAVAILABLE（configured-admin 或指定 email 查無、非 ACTIVE、lookup 五秒逾時或錯誤，一律同一 body，不可重試）、
+            CALENDAR_UNAVAILABLE（cached-only 日曆無法確認，可重試）或 CONTEXT_NOT_READY（時段未到、尚未產生 package、
+            freshness 無法核對、business 五秒逾時或連線失敗，可重試）。
+          headers:
+            Cache-Control:
+              description: 值固定為 private, no-store。
+              schema: {type: string, const: 'private, no-store'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/SrppProblem'}
+              examples:
+                contextNotReady:
+                  value: {type: 'about:blank', title: SRPP daily context not ready, status: 503, detail: 本時段的共用計算結果尚未就緒，請稍後再試。, instance: /api/public/srpp/daily-context, code: CONTEXT_NOT_READY, retryable: true}
+                ownerUnavailable:
+                  value: {type: 'about:blank', title: SRPP owner unavailable, status: 503, detail: 指定帳號不可用。, instance: /api/public/srpp/daily-context, code: OWNER_UNAVAILABLE, retryable: false}
+                calendarUnavailable:
+                  value: {type: 'about:blank', title: Trading calendar unavailable, status: 503, detail: 台股交易日曆暫時無法確認，請稍後再試。, instance: /api/public/srpp/daily-context, code: CALENDAR_UNAVAILABLE, retryable: true}
+        '504':
+          $ref: '#/components/responses/NginxGatewayTimeout'
 components:
   schemas:
     ProblemDetail:
@@ -7556,6 +7769,1721 @@ components:
           description: 判斷內容可用性的來源依據。
       additionalProperties: false
       description: 可公開引用的市場、公司或產業資訊項目。
+    SrppSha256:
+      type: string
+      description: 64 位小寫 hex 的 SHA-256 摘要（`^[0-9a-f]{64}$`）；用於規則包、公式集、context 與來源 body 的內容雜湊。
+      pattern: "^[0-9a-f]{64}$"
+    SrppDecimal:
+      type: string
+      description: Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零或負零（`-0`），長度 ≤80；金額與比例一律以此字串傳輸，不轉 double、不因傳輸另行四捨五入。
+      pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      maxLength: 80
+      not:
+        const: "-0"
+    SrppId:
+      type: string
+      description: 不透明識別字串（1–128 字元）；數字型 DB id 也以字串傳輸，比較與排序一律依字串序，不得轉成數值。
+      minLength: 1
+      maxLength: 128
+    SrppMetric:
+      type: object
+      additionalProperties: false
+      description: 單一計算值與其品質：value、unit、quality、reasonCodes、sourceIds 五欄必備。計算完整性與經濟確定性不同——預估配息仍標 ESTIMATE；未知一律 UNAVAILABLE＋value=null，不得以 0 代替。
+      properties:
+        value:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppDecimal"
+            description: 有值時為 canonical Decimal 字串（見 SrppDecimal）。
+          - type: 'null'
+            description: null 僅在 quality=UNAVAILABLE 時出現，代表此值未知或未經驗證，不代表 0。
+          description: 計算值；quality 為 UNAVAILABLE 時必為 null，其他品質必為 canonical Decimal 字串。
+        unit:
+          type: string
+          description: 數值單位：`TWD` 新台幣金額；`RATIO` 0–1 比例；`NATIVE_PRICE` 標的原幣價格；`POINT` 指標點數（如 KD）。各欄位的單位由其所在 schema 固定。
+          enum:
+          - TWD
+          - RATIO
+          - NATIVE_PRICE
+          - POINT
+        quality:
+          type: string
+          description: 數值品質：`EXACT` 相對凍結來源的確定值；`ESTIMATE` 含估計（如一年配息、存款利息）；`UPPER_BOUND` 明確上界；`LOWER_BOUND` 明確下界（如有列缺配息時的收益加總）；`UNAVAILABLE` 未知或未驗證，value 必為 null 且 reasonCodes 至少一項。
+          enum:
+          - EXACT
+          - ESTIMATE
+          - UPPER_BOUND
+          - LOWER_BOUND
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。UNAVAILABLE 時至少一項；LOWER_BOUND 等降級也以此說明原因。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項。
+      required:
+      - value
+      - unit
+      - quality
+      - reasonCodes
+      - sourceIds
+      allOf:
+      - if:
+          properties:
+            quality:
+              const: UNAVAILABLE
+        then:
+          properties:
+            value:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            value:
+              "$ref": "#/components/schemas/SrppDecimal"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：quality 為 `UNAVAILABLE` 時 value 必須為 null 且 reasonCodes 至少一項；其他品質時 value 必須是 canonical Decimal 且 sourceIds 至少一項。
+    SrppSource:
+      type: object
+      additionalProperties: false
+      description: 一份凍結來源的身分與時間：AVAILABLE 必須能以 view=evidence 取回同一份不可變 body（bodySha256 相符）；revision 代表內容版本，不是重新查詢時間。本版每個 package 固定三個 AVAILABLE source：assets、calendar、policy。
+      properties:
+        sourceId:
+          "$ref": "#/components/schemas/SrppId"
+          description: 來源識別（本版為 `assets`、`calendar`、`policy`）；context.sources 依此字串序排序且不重複，也是 evidence 查詢的 sourceId 參數。
+        kind:
+          type: string
+          description: 來源類別：`ASSETS` 與 /api/assets/latest 同一 domain service 產生的資產 JSON；`POLICY` 已登錄規則包與公式 manifest；`CALENDAR` 本次台股交易日判定；`DAILY_BARS` 完成日 K 線；`CORPORATE_ACTIONS` 除權息等公司行為；`ETF_COMPONENTS` ETF 成分與分配組成；`TEN_YEAR_HISTORY` 十年歷史序列；`BOND_FORWARD_YIELDS` 債券遠期殖利率；`TAX_INPUTS` 稅務計算輸入。本版只會輸出 ASSETS、CALENDAR、POLICY。
+          enum:
+          - ASSETS
+          - POLICY
+          - CALENDAR
+          - DAILY_BARS
+          - CORPORATE_ACTIONS
+          - ETF_COMPONENTS
+          - TEN_YEAR_HISTORY
+          - BOND_FORWARD_YIELDS
+          - TAX_INPUTS
+        state:
+          type: string
+          description: 來源狀態：`AVAILABLE` 已凍結可重播，revision／capturedAt／dataAsOf／bodySha256 必填且 reasonCodes 為空；`MISSING` 未取得，上述四欄必為 null 且 reasonCodes 至少一項。
+          enum:
+          - AVAILABLE
+          - MISSING
+        revision:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppId"
+            description: AVAILABLE 時的內容版本字串。
+          - type: 'null'
+            description: null 表示 MISSING，沒有可比對的內容版本。
+          description: 來源內容版本；assets 為 `snapshot-<snapshotId>-<快照投影 digest>`、calendar 為 `calendar-<date>-open`、policy 為 `policy-<calculationPolicySha256>`。MISSING 時為 null。
+        capturedAt:
+          anyOf:
+          - type: string
+            description: RFC 3339 時間，必須含時區（輸出 +08:00，秒精度）。
+            format: date-time
+          - type: 'null'
+            description: null 表示 MISSING，未曾凍結。
+          description: 來源凍結完成時間（RFC 3339，含時區，秒精度）；必須 ≥ dataAsOf 且 ≤ context.generatedAt。MISSING 時為 null。
+        dataAsOf:
+          anyOf:
+          - type: string
+            description: RFC 3339 時間，必須含時區（輸出 +08:00，秒精度）。
+            format: date-time
+          - type: 'null'
+            description: null 表示 MISSING，沒有資料時點。
+          description: 來源資料所代表的時點（RFC 3339，含時區）；assets 取最舊的即時報價時間與 capturedAt 之較早者。必須 ≤ capturedAt；MISSING 時為 null。
+        bodySha256:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppSha256"
+            description: AVAILABLE 時的 body 摘要。
+          - type: 'null'
+            description: null 表示 MISSING，沒有可重播 body。
+          description: SHA-256(UTF-8(evidence body))；以 view=evidence 取回的 body 必須算出相同值。MISSING 時為 null。
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。AVAILABLE 時必為空陣列，MISSING 時至少一項。
+      required:
+      - sourceId
+      - kind
+      - state
+      - revision
+      - capturedAt
+      - dataAsOf
+      - bodySha256
+      - reasonCodes
+      allOf:
+      - if:
+          properties:
+            state:
+              const: AVAILABLE
+        then:
+          properties:
+            revision:
+              "$ref": "#/components/schemas/SrppId"
+            capturedAt:
+              type: string
+              description: RFC3339，必須含時區；輸出 UTC 或 +08:00。
+              format: date-time
+            dataAsOf:
+              type: string
+              description: RFC3339，必須含時區；輸出 UTC 或 +08:00。
+              format: date-time
+            bodySha256:
+              "$ref": "#/components/schemas/SrppSha256"
+            reasonCodes:
+              maxItems: 0
+        else:
+          properties:
+            revision:
+              type: 'null'
+            capturedAt:
+              type: 'null'
+            dataAsOf:
+              type: 'null'
+            bodySha256:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：state 為 `AVAILABLE` 時 revision、capturedAt、dataAsOf、bodySha256 皆非 null 且 reasonCodes 為空；`MISSING` 時四欄皆為 null 且 reasonCodes 至少一項。
+    SrppReconciliationCheck:
+      type: object
+      additionalProperties: false
+      description: 八項對帳之一：detail 加總與來源回報總額的差距及容差；全部通過才可發布 package，因此回應中 passed 恆為 true。容差為 max(0.01, max(|detail|,|reported|)×0.0001)。
+      properties:
+        name:
+          type: string
+          description: 對帳項目：`snapshot_deposits` 存款明細合計對快照存款總額；`live_deposits` 存款明細合計對 live 存款總額；`snapshot_funds` 基金現值合計對快照基金總額；`live_funds` 基金現值合計對 live 基金總額；`snapshot_stocks` 快照股票現值合計對快照股票總額；`live_stocks` live 股票市值合計對 live 股票總額；`snapshot_total` 快照三類合計對快照總資產；`live_total` 存款＋基金＋live 股票合計對 live 總資產。
+          enum:
+          - snapshot_deposits
+          - live_deposits
+          - snapshot_funds
+          - live_funds
+          - snapshot_stocks
+          - live_stocks
+          - snapshot_total
+          - live_total
+        detailTwd:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: 由明細列加總得到的新台幣金額。
+        reportedTwd:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: 來源回報的新台幣總額（快照或 live 彙總欄位）。
+        differenceTwd:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: detailTwd − reportedTwd 的差額（可為負）。
+        toleranceTwd:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: 本項容差：max(0.01, max(|detailTwd|,|reportedTwd|)×0.0001)。
+        passed:
+          type: boolean
+          const: true
+          description: 是否 |differenceTwd| ≤ toleranceTwd；只有全部通過才會發布，因此恆為常數 `true`。
+      required:
+      - name
+      - detailTwd
+      - reportedTwd
+      - differenceTwd
+      - toleranceTwd
+      - passed
+    SrppDepositGroup:
+      type: object
+      additionalProperties: false
+      description: 依 (currency, depositType, bankId) 分組的存款彙總；amountTwd 已是台幣、不再乘匯率，應付在途款保留負號；bankId／bankName 為 null 的列也必須保留在某一組。
+      properties:
+        bankId:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppId"
+            description: 有銀行時的銀行識別字串。
+          - type: 'null'
+            description: null 表示該組存款沒有銀行資訊（例如在途款）；不得因此刪除列。
+          description: 銀行識別（DB id 以字串傳輸）；排序以 wire 字串比較，null 排最前。沒有銀行資訊的存款列為 null。
+        bankName:
+          anyOf:
+          - type: string
+            description: 銀行顯示名稱字串。
+          - type: 'null'
+            description: null 表示沒有銀行名稱。
+          description: 凍結當下的銀行顯示名稱；沒有銀行資訊時為 null。
+        currency:
+          type: string
+          description: 來源幣別代碼，本版只會是 TWD、USD、TRANSIT_TWD、TRANSIT_USD；禁止只因銀行資訊為 null 而刪除列。
+        depositType:
+          type: string
+          description: 來源存款產品代碼。
+        sourceRowIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 一筆存款列的識別字串。
+          minItems: 1
+          uniqueItems: true
+          description: 構成本組的存款列識別（`DEPOSIT-<id>`），依字串序排序、不重複、至少一項。
+        amountTwd:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: 本組存款新台幣金額合計（canonical Decimal；應付在途款為負）。
+        originalAmount:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppDecimal"
+            description: 所有列原幣金額皆已知時的合計（canonical Decimal）。
+          - type: 'null'
+            description: null 表示至少一列原幣金額未知，不以 0 代替。
+          description: 本組原幣金額合計；任一列原幣金額未知時為 null。
+        estimatedAnnualInterest:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 本組年利息估計（新台幣），沿用既有存款利息公式（在途款與無利率列為 0），品質 ESTIMATE。
+      required:
+      - bankId
+      - bankName
+      - currency
+      - depositType
+      - sourceRowIds
+      - amountTwd
+      - originalAmount
+      - estimatedAnnualInterest
+    SrppAssetsData:
+      type: object
+      additionalProperties: false
+      description: 同一份凍結 assets 來源（與 /api/assets/latest 相同 domain service）的對帳與彙總結果；不是新的資產帳本，也不寫回任何資產資料。
+      properties:
+        snapshotTotalDeposit:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 快照存款總額（新台幣，EXACT）。
+        snapshotStockValue:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 快照股票現值總額（新台幣，EXACT）。
+        snapshotFundValue:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 快照基金現值總額（新台幣，EXACT）。
+        snapshotTotalAssets:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 快照總資產（新台幣，EXACT）。
+        liveStockValue:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 凍結當下以即時／目標交易時段價格估算的股票市值（新台幣，EXACT 相對於凍結來源；不代表行情時效）。
+        liveTotalAssets:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 凍結當下的 live 總資產（新台幣）；也是 allocation 模組的分母。
+        targetPriceComplete:
+          type: boolean
+          description: 是否所有持股都取得目標交易時段價格；false 時 assets 模組為 PARTIAL 並帶 TARGET_PRICE_INCOMPLETE。
+        rowCounts:
+          type: object
+          additionalProperties: false
+          description: 凍結來源中各類持有列數，供核對列是否遺漏。
+          properties:
+            deposits:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: 存款列數（含在途款）。
+            stocks:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: 股票持有列數。
+            funds:
+              type: integer
+              minimum: 0
+              maximum: 1000000
+              description: 基金持有列數。
+          required:
+          - deposits
+          - stocks
+          - funds
+        checks:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppReconciliationCheck"
+            description: 一項對帳結果。
+          minItems: 8
+          maxItems: 8
+          description: 固定八項對帳結果，名稱完整且不重複；任一不通過即不發布 package。
+        depositGroups:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppDepositGroup"
+            description: 一個存款分組。
+          description: 存款分組彙總，依 currency → depositType → bankId（null 最前）字串序排序且主鍵不重複。
+      required:
+      - snapshotTotalDeposit
+      - snapshotStockValue
+      - snapshotFundValue
+      - snapshotTotalAssets
+      - liveStockValue
+      - liveTotalAssets
+      - targetPriceComplete
+      - rowCounts
+      - checks
+      - depositGroups
+    SrppAllocationRow:
+      type: object
+      additionalProperties: false
+      description: 一個 assetKey 的總曝險描述性差距；持有與政策目標的 assetKey 取聯集。不扣 SRPP 私有短線帳本，不得當成核心可買張數或下單依據。
+      properties:
+        assetKey:
+          "$ref": "#/components/schemas/SrppId"
+          description: 資產分類鍵（ASSET_KEY_V1）：股票 `STOCK:<market>:<stockCode>`（同市場同代號跨券商合併）、基金 `FUND:<fundCode>`、存款 `CASH:<currency>:<depositType>`；rows 依此字串序排序且不重複。
+        market:
+          anyOf:
+          - type: string
+            description: 股票列的市場名稱字串。
+          - type: 'null'
+            description: null 表示非股票列，沒有市場。
+          description: 股票列的市場名稱；基金與存款列為 null。
+        symbol:
+          anyOf:
+          - type: string
+            description: 股票代號字串。
+          - type: 'null'
+            description: null 表示非股票列，沒有代號。
+          description: 股票列的代號；基金與存款列為 null。
+        sourceHoldingIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 一筆持有列的識別字串。
+          uniqueItems: true
+          description: 構成本列曝險的持有列識別（`STOCK-<id>`／`FUND-<id>`／`DEPOSIT-<id>`），依字串序排序且不重複；未持有但有政策目標的列為空陣列。
+        exposureTwd:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 本列曝險（新台幣）：股票取 live 市值、基金取現值、存款取金額；未持有者為 "0"。
+        currentWeight:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: RATIO
+                description: 本欄單位常數 `RATIO`：0–1 的比例值（差距可為負），不是百分比。
+            description: 限定本欄 unit 為 RATIO。
+          description: 曝險 ÷ 分母（MathContext 34 位 HALF_EVEN）的目前權重。
+        targetWeight:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: RATIO
+                description: 本欄單位常數 `RATIO`：0–1 的比例值（差距可為負），不是百分比。
+            description: 限定本欄 unit 為 RATIO。
+          description: 已登錄政策的目標權重；政策沒有此 assetKey 時為 UNAVAILABLE＋TARGET_NOT_MAPPED（不猜 0）。
+        gapWeight:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: RATIO
+                description: 本欄單位常數 `RATIO`：0–1 的比例值（差距可為負），不是百分比。
+            description: 限定本欄 unit 為 RATIO。
+          description: 目標權重 − 目前權重；可為負。無目標時為 UNAVAILABLE。
+        gapValueTwd:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 目標權重 × 分母 − 曝險的新台幣差距；可為負，僅供描述，不是可買金額。無目標時為 UNAVAILABLE。
+      required:
+      - assetKey
+      - market
+      - symbol
+      - sourceHoldingIds
+      - exposureTwd
+      - currentWeight
+      - targetWeight
+      - gapWeight
+      - gapValueTwd
+    SrppAllocationData:
+      type: object
+      additionalProperties: false
+      description: 總曝險配置差距：資產分類由版本化 ASSET_KEY_V1 決定，目標由已登錄政策文件決定；未映射不可猜成零目標。
+      properties:
+        basis:
+          type: string
+          const: TOTAL_EXPOSURE_REFERENCE
+          description: 差距計算基礎，常數 `TOTAL_EXPOSURE_REFERENCE`：以全部持有的總曝險為參考，不區分短線與核心部位。
+        denominatorTwd:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 權重分母（新台幣）＝同 package 的 liveTotalAssets；必須 >0，否則模組 UNAVAILABLE＋DENOMINATOR_NOT_POSITIVE。
+        shortTermSleeveSeparated:
+          type: boolean
+          const: false
+          description: 是否已扣除短線部位，本版恆為常數 `false`：總曝險差距不得當成核心可買容量。
+        rows:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppAllocationRow"
+            description: 一個 assetKey 的配置列。
+          description: 持有與政策目標 assetKey 聯集的配置列，依 assetKey 字串序排序且不重複。
+        unmappedHoldingIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 一筆未映射持有列的識別字串。
+          uniqueItems: true
+          description: 無法映射成 assetKey 的持有列（如基金沒有代號），依字串序排序且不重複；非空時模組為 PARTIAL＋HOLDING_NOT_MAPPED。
+      required:
+      - basis
+      - denominatorTwd
+      - shortTermSleeveSeparated
+      - rows
+      - unmappedHoldingIds
+    SrppCashIncomeData:
+      type: object
+      additionalProperties: false
+      description: 基礎收益：來源估計額與可支配現金分列。本版只加總股票／ETF 配息、基金配息與存款利息；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+      properties:
+        stockAndEtfDistributions:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 股票與 ETF 一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING）。
+        fundDistributions:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 基金一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND）。
+        depositInterest:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 存款一年估計利息合計（新台幣，ESTIMATE）。
+        sourceAccruedAnnualIncome:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 上述三項之和的來源估計年收入（新台幣）；與快照 estimatedAnnualDividend 以同一容差對帳，不符時模組加 INCOME_RECONCILIATION_MISMATCH。
+        permanentTermInterestReinvested:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 永久定存利息再投入金額；本版 UNAVAILABLE（NET_CALCULATION_NOT_VERIFIED）。
+        spendableAnnualGross:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 可支配年收入（稅前）；本版 UNAVAILABLE。
+        taiwanIncomeTaxOrRefund:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 台灣綜合所得稅應納或退稅額；本版 UNAVAILABLE。
+        usWithholding:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 美國股利預扣稅；本版 UNAVAILABLE。
+        additionalBasicTax:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 基本稅額（最低稅負制）；本版 UNAVAILABLE。
+        supplementaryNhi:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 二代健保補充保費；本版 UNAVAILABLE。
+        afterAllTaxAnnualCashIncome:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 全部稅費後的年現金收入；本版 UNAVAILABLE。
+        missingIncomeRowIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 一筆缺配息估計的持有列識別字串。
+          uniqueItems: true
+          description: estimatedDividend 為 null 的持有列識別，依字串序排序且不重複；非空時受影響加總改為 LOWER_BOUND。
+        netCalculationStandard:
+          anyOf:
+          - type: string
+            description: 已驗證稅後計算時的標準識別字串。
+          - type: 'null'
+            description: null 表示沒有已驗證的稅後計算標準（本版固定）。
+          description: 稅後計算所依據的標準識別；本版未驗證稅後計算，恆為 null。
+        taxYear:
+          type: integer
+          minimum: 2000
+          maximum: 2200
+          description: 收益所屬稅務年度＝交易日年份。
+      required:
+      - stockAndEtfDistributions
+      - fundDistributions
+      - depositInterest
+      - sourceAccruedAnnualIncome
+      - permanentTermInterestReinvested
+      - spendableAnnualGross
+      - taiwanIncomeTaxOrRefund
+      - usWithholding
+      - additionalBasicTax
+      - supplementaryNhi
+      - afterAllTaxAnnualCashIncome
+      - missingIncomeRowIds
+      - netCalculationStandard
+      - taxYear
+    SrppFundingData:
+      type: object
+      additionalProperties: false
+      description: 買前資金基礎（本版不輸出，funding 模組恆為 UNAVAILABLE）：不代表可下單金額，不包含批次分配、成交去重、換股帳本或張數判斷。
+      properties:
+        basis:
+          type: string
+          const: BEFORE_PROPOSED_TRADE
+          description: 資金計算基礎，常數 `BEFORE_PROPOSED_TRADE`：尚未扣除任何建議交易前的資金狀態。
+        calculationDate:
+          type: string
+          description: 資金計算所依據的日期（ISO 8601）。
+          format: date
+        snapshotAllCurrencyDepositTwdEquivalent:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 快照全部幣別存款的新台幣等值合計。
+        twdTermDeposits:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 新台幣定存合計。
+        twdTotalIncludingNegativeTransit:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 新台幣存款合計，已含應付在途款（負值）。
+        excludedPositiveTransit:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 未計入資金的應收在途款（正值）合計。
+        usdDepositsTwdEquivalent:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 美元存款的新台幣等值合計。
+        inflationIndex:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: RATIO
+                description: 本欄單位常數 `RATIO`：0–1 的比例值（差距可為負），不是百分比。
+            description: 限定本欄 unit 為 RATIO。
+          description: 計算底線用的通膨指數比例。
+        permanentTermFloorNominal:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 永久定存底線的名目金額。
+        totalTwdDepositFloorNominal:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 新台幣存款總底線的名目金額。
+        headroomAboveTotalFloor:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: TWD
+                description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
+            description: 限定本欄 unit 為 TWD。
+          description: 新台幣存款高於總底線的空間；不代表可下單金額。
+        termFloorMet:
+          anyOf:
+          - type: boolean
+            description: true 表示已達底線、false 表示未達。
+          - type: 'null'
+            description: null 表示無法判斷。
+          description: 定存是否達永久底線；無法判斷時為 null。
+        tradingAuthorized:
+          type: boolean
+          const: false
+          description: 是否授權交易，恆為常數 `false`：本 API 只提供判讀資料，不構成任何交易授權。
+      required:
+      - basis
+      - calculationDate
+      - snapshotAllCurrencyDepositTwdEquivalent
+      - twdTermDeposits
+      - twdTotalIncludingNegativeTransit
+      - excludedPositiveTransit
+      - usdDepositsTwdEquivalent
+      - inflationIndex
+      - permanentTermFloorNominal
+      - totalTwdDepositFloorNominal
+      - headroomAboveTotalFloor
+      - termFloorMet
+      - tradingAuthorized
+    SrppKdObservation:
+      type: object
+      additionalProperties: false
+      description: 一個已完成交易日的 KD 觀測值。
+      properties:
+        date:
+          type: string
+          description: 已完成交易日（ISO 8601）；陣列內依日期升冪且不重複。
+          format: date
+        k:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppDecimal"
+            description: 有值時的 K 值字串。
+          - type: 'null'
+            description: null 表示該日 K 值無法計算。
+          description: K 值（0–100 點，canonical Decimal）；無法計算時為 null。
+        d:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppDecimal"
+            description: 有值時的 D 值字串。
+          - type: 'null'
+            description: null 表示該日 D 值無法計算。
+          description: D 值（0–100 點，canonical Decimal）；無法計算時為 null。
+      required:
+      - date
+      - k
+      - d
+    SrppAdjustedClose:
+      type: object
+      additionalProperties: false
+      description: 一個已完成交易日的還原收盤價。
+      properties:
+        date:
+          type: string
+          description: 已完成交易日（ISO 8601）；陣列內依日期升冪且不重複。
+          format: date
+        close:
+          "$ref": "#/components/schemas/SrppDecimal"
+          description: 該日還原收盤價（原幣，canonical Decimal）。
+      required:
+      - date
+      - close
+    SrppTechnicalRow:
+      type: object
+      additionalProperties: false
+      description: 單一台股標的的完成日技術資料（本版不輸出）：只能使用已完成交易日，與盤中雷達指標不同；均線及 KD 基礎依 formula manifest，不能混用 raw／adjusted。
+      properties:
+        market:
+          type: string
+          const: 台股
+          description: 市場，常數 `台股`。
+        symbol:
+          type: string
+          description: 台股代號；rows 依 market/symbol 字串序排序且不重複。
+          minLength: 1
+        currency:
+          type: string
+          description: 價格幣別代碼（台股為 TWD）。
+          minLength: 1
+        status:
+          type: string
+          description: 本列完整度：`COMPLETE` 全部指標可驗證；`PARTIAL` 部分指標缺漏並以 reasonCodes 說明；`UNAVAILABLE` 缺資料但仍保留此 symbol 列。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。
+        completedSession:
+          type: string
+          description: 本列指標所依據的最後已完成交易日（ISO 8601）。
+          format: date
+        calculationVersion:
+          type: string
+          description: 本列指標的計算版本識別。
+          minLength: 1
+        adjustmentBasis:
+          type: string
+          description: 價格還原基礎：`VERIFIED_CASH_ADJUSTED` 已以驗證過的現金股利還原；`UNVERIFIED` 公司行為證據未驗證，還原價不可視為可靠。
+          enum:
+          - VERIFIED_CASH_ADJUSTED
+          - UNVERIFIED
+        corporateActionEvidenceComplete:
+          type: boolean
+          description: 公司行為（除權息）證據是否完整。
+        ma5:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: NATIVE_PRICE
+                description: 本欄單位常數 `NATIVE_PRICE`：標的交易幣別的原幣價格。
+            description: 限定本欄 unit 為 NATIVE_PRICE。
+          description: 5 日均線（原幣價格）。
+        ma20:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: NATIVE_PRICE
+                description: 本欄單位常數 `NATIVE_PRICE`：標的交易幣別的原幣價格。
+            description: 限定本欄 unit 為 NATIVE_PRICE。
+          description: 20 日均線（原幣價格）。
+        ma60:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: NATIVE_PRICE
+                description: 本欄單位常數 `NATIVE_PRICE`：標的交易幣別的原幣價格。
+            description: 限定本欄 unit 為 NATIVE_PRICE。
+          description: 60 日均線（原幣價格）。
+        kdLastThreeCompletedSessions:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppKdObservation"
+            description: 一日 KD 觀測值。
+          maxItems: 3
+          description: 最近三個已完成交易日的 KD，依日期升冪，最多 3 項。
+        adjustedClosesLast20:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppAdjustedClose"
+            description: 一日還原收盤價。
+          maxItems: 20
+          description: 最近 20 個已完成交易日的還原收盤價，依日期升冪，最多 20 項。
+        highOf20AdjustedCloses:
+          allOf:
+          - "$ref": "#/components/schemas/SrppMetric"
+            description: 共用 SrppMetric 結構（value、unit、quality、reasonCodes、sourceIds）。
+          - properties:
+              unit:
+                const: NATIVE_PRICE
+                description: 本欄單位常數 `NATIVE_PRICE`：標的交易幣別的原幣價格。
+            description: 限定本欄 unit 為 NATIVE_PRICE。
+          description: 最近 20 個還原收盤價的最高值（原幣價格）。
+      required:
+      - market
+      - symbol
+      - currency
+      - status
+      - reasonCodes
+      - sourceIds
+      - completedSession
+      - calculationVersion
+      - adjustmentBasis
+      - corporateActionEvidenceComplete
+      - ma5
+      - ma20
+      - ma60
+      - kdLastThreeCompletedSessions
+      - adjustedClosesLast20
+      - highOf20AdjustedCloses
+    SrppTechnicalsData:
+      type: object
+      additionalProperties: false
+      description: 完成日技術資料（本版不輸出，completedTechnicals 模組恆為 UNAVAILABLE）：固定含持股與已登錄政策的台股目標；缺資料仍須留下該 symbol 的 UNAVAILABLE 列。
+      properties:
+        market:
+          type: string
+          const: 台股
+          description: 市場，常數 `台股`。
+        requiredCompletedSession:
+          type: string
+          description: 本次要求的已完成交易日（ISO 8601）。
+          format: date
+        symbolScope:
+          type: string
+          const: TW_HOLDINGS_UNION_POLICY_TARGETS
+          description: 標的範圍，常數 `TW_HOLDINGS_UNION_POLICY_TARGETS`：台股持股與政策台股目標的聯集。
+        rows:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppTechnicalRow"
+            description: 一個標的的技術資料列。
+          description: 各標的技術資料列，依 market/symbol 字串序排序且不重複。
+      required:
+      - market
+      - requiredCompletedSession
+      - symbolScope
+      - rows
+    SrppAssetsModule:
+      type: object
+      additionalProperties: false
+      description: 資產對帳與存款分組模組（calculationId 本版為 `ASSET_MGMT_ASSETS_RECON_V1`）：以凍結的 assets 來源做八項對帳並彙總存款分組；targetPriceComplete=false 時為 PARTIAL＋TARGET_PRICE_INCOMPLETE。
+      properties:
+        status:
+          type: string
+          description: 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。
+        calculationId:
+          "$ref": "#/components/schemas/SrppId"
+          description: assets 模組的計算識別；對應 formula manifest 中同名計算。
+        data:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppAssetsData"
+            description: assets 模組的計算結果（SrppAssetsData）。
+          - type: 'null'
+            description: null 表示 assets 模組 UNAVAILABLE，原因見 reasonCodes。
+          description: assets 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppAssetsData。
+      required:
+      - status
+      - reasonCodes
+      - sourceIds
+      - calculationId
+      - data
+      allOf:
+      - if:
+          properties:
+            status:
+              const: UNAVAILABLE
+        then:
+          properties:
+            data:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            data:
+              "$ref": "#/components/schemas/SrppAssetsData"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：status 為 `UNAVAILABLE` 時 data 必須為 null 且 reasonCodes 至少一項；否則 data 必須是模組資料且 sourceIds 至少一項。
+      - if:
+          properties:
+            status:
+              const: COMPLETE
+        then:
+          properties:
+            reasonCodes:
+              maxItems: 0
+        description: 條件規則：status 為 `COMPLETE` 時 reasonCodes 必須為空陣列。
+      - if:
+          properties:
+            status:
+              const: PARTIAL
+        then:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `PARTIAL` 時 reasonCodes 至少一項。
+    SrppAllocationModule:
+      type: object
+      additionalProperties: false
+      description: 總曝險配置差距模組（calculationId 本版為 `ASSET_MGMT_TOTAL_EXPOSURE_V1`）：以 liveTotalAssets 為分母，比較持有曝險與已登錄政策目標；未映射目標或持有時為 PARTIAL。
+      properties:
+        status:
+          type: string
+          description: 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。
+        calculationId:
+          "$ref": "#/components/schemas/SrppId"
+          description: allocation 模組的計算識別；對應 formula manifest 中同名計算。
+        data:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppAllocationData"
+            description: allocation 模組的計算結果（SrppAllocationData）。
+          - type: 'null'
+            description: null 表示 allocation 模組 UNAVAILABLE，原因見 reasonCodes。
+          description: allocation 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppAllocationData。
+      required:
+      - status
+      - reasonCodes
+      - sourceIds
+      - calculationId
+      - data
+      allOf:
+      - if:
+          properties:
+            status:
+              const: UNAVAILABLE
+        then:
+          properties:
+            data:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            data:
+              "$ref": "#/components/schemas/SrppAllocationData"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：status 為 `UNAVAILABLE` 時 data 必須為 null 且 reasonCodes 至少一項；否則 data 必須是模組資料且 sourceIds 至少一項。
+      - if:
+          properties:
+            status:
+              const: COMPLETE
+        then:
+          properties:
+            reasonCodes:
+              maxItems: 0
+        description: 條件規則：status 為 `COMPLETE` 時 reasonCodes 必須為空陣列。
+      - if:
+          properties:
+            status:
+              const: PARTIAL
+        then:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `PARTIAL` 時 reasonCodes 至少一項。
+    SrppCashIncomeModule:
+      type: object
+      additionalProperties: false
+      description: 基礎收益加總模組（calculationId 本版為 `ASSET_MGMT_GROSS_INCOME_V1`）：只加總來源估計的股票／ETF 配息、基金配息與存款利息；稅後與可支配欄位本版一律 UNAVAILABLE，模組固定 PARTIAL。
+      properties:
+        status:
+          type: string
+          description: 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。
+        calculationId:
+          "$ref": "#/components/schemas/SrppId"
+          description: cashIncome 模組的計算識別；對應 formula manifest 中同名計算。
+        data:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppCashIncomeData"
+            description: cashIncome 模組的計算結果（SrppCashIncomeData）。
+          - type: 'null'
+            description: null 表示 cashIncome 模組 UNAVAILABLE，原因見 reasonCodes。
+          description: cashIncome 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppCashIncomeData。
+      required:
+      - status
+      - reasonCodes
+      - sourceIds
+      - calculationId
+      - data
+      allOf:
+      - if:
+          properties:
+            status:
+              const: UNAVAILABLE
+        then:
+          properties:
+            data:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            data:
+              "$ref": "#/components/schemas/SrppCashIncomeData"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：status 為 `UNAVAILABLE` 時 data 必須為 null 且 reasonCodes 至少一項；否則 data 必須是模組資料且 sourceIds 至少一項。
+      - if:
+          properties:
+            status:
+              const: COMPLETE
+        then:
+          properties:
+            reasonCodes:
+              maxItems: 0
+        description: 條件規則：status 為 `COMPLETE` 時 reasonCodes 必須為空陣列。
+      - if:
+          properties:
+            status:
+              const: PARTIAL
+        then:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `PARTIAL` 時 reasonCodes 至少一項。
+    SrppFundingModule:
+      type: object
+      additionalProperties: false
+      description: 買前資金基礎模組：本版一律 status=UNAVAILABLE、data=null、reasonCodes=["CALCULATOR_NOT_VERIFIED"]（calculationId `ASSET_MGMT_FUNDING_UNAVAILABLE_V1`），不輸出任何底線或 headroom。
+      properties:
+        status:
+          type: string
+          description: 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。
+        calculationId:
+          "$ref": "#/components/schemas/SrppId"
+          description: funding 模組的計算識別；對應 formula manifest 中同名計算。
+        data:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppFundingData"
+            description: funding 模組的計算結果（SrppFundingData）。
+          - type: 'null'
+            description: null 表示 funding 模組 UNAVAILABLE，原因見 reasonCodes。
+          description: funding 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppFundingData。
+      required:
+      - status
+      - reasonCodes
+      - sourceIds
+      - calculationId
+      - data
+      allOf:
+      - if:
+          properties:
+            status:
+              const: UNAVAILABLE
+        then:
+          properties:
+            data:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            data:
+              "$ref": "#/components/schemas/SrppFundingData"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：status 為 `UNAVAILABLE` 時 data 必須為 null 且 reasonCodes 至少一項；否則 data 必須是模組資料且 sourceIds 至少一項。
+      - if:
+          properties:
+            status:
+              const: COMPLETE
+        then:
+          properties:
+            reasonCodes:
+              maxItems: 0
+        description: 條件規則：status 為 `COMPLETE` 時 reasonCodes 必須為空陣列。
+      - if:
+          properties:
+            status:
+              const: PARTIAL
+        then:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `PARTIAL` 時 reasonCodes 至少一項。
+    SrppTechnicalsModule:
+      type: object
+      additionalProperties: false
+      description: 完成日技術資料模組：本版一律 status=UNAVAILABLE、data=null、reasonCodes=["CALCULATOR_NOT_VERIFIED"]（calculationId `ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1`），不輸出 MA、KD 或 20 日高點。
+      properties:
+        status:
+          type: string
+          description: 模組完整度：`COMPLETE` 表示本模組所列必備值都有可驗證依據（可含 ESTIMATE／界限值，但不得含 UNAVAILABLE Metric、未映射或缺列，reasonCodes 必須為空；不代表可交易）；`PARTIAL` 表示 data 非 null 但有具名缺口，reasonCodes 至少一項；`UNAVAILABLE` 表示 data 為 null 且 reasonCodes 至少一項。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。COMPLETE 時為空，PARTIAL／UNAVAILABLE 時至少一項。
+        sourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 被引用的 sourceId；必須對應 context.sources 中一筆 AVAILABLE source。
+          uniqueItems: true
+          description: 本值依據的 source 清單：只引用同一 context 中 state=AVAILABLE 的 sourceId，依字串序排序且不重複，可用 `view=evidence` 逐一重播。非 UNAVAILABLE 時至少一項；UNAVAILABLE 時為空。
+        calculationId:
+          "$ref": "#/components/schemas/SrppId"
+          description: completedTechnicals 模組的計算識別；對應 formula manifest 中同名計算。
+        data:
+          anyOf:
+          - "$ref": "#/components/schemas/SrppTechnicalsData"
+            description: completedTechnicals 模組的計算結果（SrppTechnicalsData）。
+          - type: 'null'
+            description: null 表示 completedTechnicals 模組 UNAVAILABLE，原因見 reasonCodes。
+          description: completedTechnicals 模組資料；status 為 UNAVAILABLE 時為 null，否則為 SrppTechnicalsData。
+      required:
+      - status
+      - reasonCodes
+      - sourceIds
+      - calculationId
+      - data
+      allOf:
+      - if:
+          properties:
+            status:
+              const: UNAVAILABLE
+        then:
+          properties:
+            data:
+              type: 'null'
+            reasonCodes:
+              minItems: 1
+        else:
+          properties:
+            data:
+              "$ref": "#/components/schemas/SrppTechnicalsData"
+            sourceIds:
+              minItems: 1
+        description: 條件規則：status 為 `UNAVAILABLE` 時 data 必須為 null 且 reasonCodes 至少一項；否則 data 必須是模組資料且 sourceIds 至少一項。
+      - if:
+          properties:
+            status:
+              const: COMPLETE
+        then:
+          properties:
+            reasonCodes:
+              maxItems: 0
+        description: 條件規則：status 為 `COMPLETE` 時 reasonCodes 必須為空陣列。
+      - if:
+          properties:
+            status:
+              const: PARTIAL
+        then:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `PARTIAL` 時 reasonCodes 至少一項。
+    SrppPolicyIdentity:
+      type: object
+      additionalProperties: false
+      description: 本 package 使用的已登錄規則包身分；伺服器查驗證過的 registry 後才輸出，不會把 query 的雜湊原樣回傳冒充支援。
+      properties:
+        policyBundleSha256:
+          "$ref": "#/components/schemas/SrppSha256"
+          description: 呼叫端指定且已登錄的規則包雜湊（registry 主鍵），必須等於 query 的 policyBundleSha256。
+        calculationPolicySha256:
+          "$ref": "#/components/schemas/SrppSha256"
+          description: 伺服器以 SHA-256(JCS(政策文件)) 計算的政策內容雜湊。
+        formulaSetSha256:
+          "$ref": "#/components/schemas/SrppSha256"
+          description: 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。
+        formulaVersion:
+          type: string
+          description: 公式版本識別（本版唯一實作 ASSET_MGMT_SRPP_V1）。
+          minLength: 1
+        scope:
+          type: string
+          const: LISTED_CALCULATIONS_ONLY
+          description: 適用範圍，常數 `LISTED_CALCULATIONS_ONLY`：只涵蓋 manifest 明列的計算，不是完整投資政策或交易決策。
+      required:
+      - policyBundleSha256
+      - calculationPolicySha256
+      - formulaSetSha256
+      - formulaVersion
+      - scope
+    SrppContext:
+      type: object
+      additionalProperties: false
+      description: 一個不可變 package 的計算內容：發布後不可更改；同一 package 的輸入截點、資料修訂與政策相同。contextContentSha256 = SHA-256(UTF-8(JCS(context)))。
+      properties:
+        packageId:
+          type: string
+          description: package 識別（小寫 UUID）；固定摘要與 evidence 以此查詢。
+          format: uuid
+        schemaVersion:
+          type: string
+          const: 1.0.0
+          description: context 結構版本，常數 `1.0.0`。
+        generatedAt:
+          type: string
+          description: package 發布前的產生時間（RFC 3339，+08:00，秒精度）；必須 ≥ dataCutoffAt 與所有 source 的 capturedAt，且 ≤ freshness.checkedAt。
+          format: date-time
+        dataCutoffAt:
+          type: string
+          description: 輸入截點（＝assets 來源的 capturedAt）；必須 ≤ generatedAt。
+          format: date-time
+        tradingDate:
+          type: string
+          description: 台股交易日（ISO 8601），必須等於 query 的 tradingDate。
+          format: date
+        slot:
+          type: string
+          description: 業務時段，必須等於 query 的 slot：`09:05` 早盤時段（09:05–11:39 產生）；`11:40` 午盤時段（11:40–13:55 產生）。
+          enum:
+          - '09:05'
+          - '11:40'
+        timezone:
+          type: string
+          const: Asia/Taipei
+          description: 所有日期與無時區時間的解讀時區，常數 `Asia/Taipei`。
+        ownerKey:
+          "$ref": "#/components/schemas/SrppId"
+          description: 每個帳號一個、由 producer 產生的隨機識別（UUID 字串）；不是 owner id 或 email，無法反推帳號。
+        assetSnapshotId:
+          "$ref": "#/components/schemas/SrppId"
+          description: 凍結所依據的資產快照 id（以字串傳輸）。
+        assetSnapshotDate:
+          type: string
+          description: 凍結所依據的資產快照日期（ISO 8601）。
+          format: date
+        policy:
+          "$ref": "#/components/schemas/SrppPolicyIdentity"
+          description: 本 package 的規則包身分。
+        coverage:
+          type: string
+          description: 整體涵蓋度：`COMPLETE` 五個模組全部 COMPLETE；`PARTIAL` 至少一個模組非 COMPLETE（本版 funding 與 completedTechnicals 固定 UNAVAILABLE，故恆為 PARTIAL）。
+          enum:
+          - COMPLETE
+          - PARTIAL
+        sources:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppSource"
+            description: 一份凍結來源。
+          minItems: 2
+          description: 本 package 凍結的來源，依 sourceId 字串序排序且不重複，至少兩項（本版固定 assets、calendar、policy）。
+        modules:
+          type: object
+          additionalProperties: false
+          description: 固定五個計算模組，缺一不可。
+          properties:
+            assets:
+              "$ref": "#/components/schemas/SrppAssetsModule"
+              description: 資產對帳與存款分組模組。
+            allocation:
+              "$ref": "#/components/schemas/SrppAllocationModule"
+              description: 總曝險配置差距模組。
+            cashIncome:
+              "$ref": "#/components/schemas/SrppCashIncomeModule"
+              description: 基礎收益加總模組。
+            funding:
+              "$ref": "#/components/schemas/SrppFundingModule"
+              description: 買前資金基礎模組（本版 UNAVAILABLE）。
+            completedTechnicals:
+              "$ref": "#/components/schemas/SrppTechnicalsModule"
+              description: 完成日技術資料模組（本版 UNAVAILABLE）。
+          required:
+          - assets
+          - allocation
+          - cashIncome
+          - funding
+          - completedTechnicals
+        tradingAuthorized:
+          type: boolean
+          const: false
+          description: 是否授權交易，恆為常數 `false`：HTTP 200 與 COMPLETE 都不代表可執行交易。
+        requiresOriginalDailyChecks:
+          type: boolean
+          const: true
+          description: 恆為常數 `true`：使用端仍必須執行原有每日檢查與即時資料核對，不得以本結果取代。
+      required:
+      - packageId
+      - schemaVersion
+      - generatedAt
+      - dataCutoffAt
+      - tradingDate
+      - slot
+      - timezone
+      - ownerKey
+      - assetSnapshotId
+      - assetSnapshotDate
+      - policy
+      - coverage
+      - sources
+      - modules
+      - tradingAuthorized
+      - requiresOriginalDailyChecks
+    SrppFreshness:
+      type: object
+      additionalProperties: false
+      description: 讀取當下另行核對的新鮮度（不在 context hash 內）；CURRENT 只代表來源修訂、日曆與規則包仍相符，不代表行情時效。
+      properties:
+        status:
+          type: string
+          description: 新鮮度：`CURRENT` 快照 revision、日曆與規則包皆仍相符（最新模式唯一接受的狀態），兩個陣列皆空；`STALE` 至少一個來源已變更，列於 changedSourceIds，僅供稽核；`UNKNOWN` 無法核對（例如日曆快取不可用），changedSourceIds 為空。
+          enum:
+          - CURRENT
+          - STALE
+          - UNKNOWN
+        checkedAt:
+          type: string
+          description: 本次核對時間（RFC 3339，+08:00）；必須 ≥ context.generatedAt。
+          format: date-time
+        changedSourceIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/SrppId"
+            description: 一個已變更來源的 sourceId。
+          uniqueItems: true
+          description: 已變更的 sourceId（例如 assets、calendar），依字串序排序且不重複；CURRENT 時為空。
+        reasonCodes:
+          type: array
+          items:
+            type: string
+            description: 具名穩定原因碼，不包含帳號、SQL 或例外堆疊。
+            pattern: "^[A-Z][A-Z0-9_]*$"
+          uniqueItems: true
+          description: 具名穩定原因碼清單（`^[A-Z][A-Z0-9_]*$`、不重複）；說明本層級降級、缺漏或狀態原因，不含帳號、SQL 或例外堆疊。例如 SOURCE_REVISION_CHANGED、CALENDAR_CHANGED、CALENDAR_UNVERIFIABLE；CURRENT 時為空，其他狀態至少一項。
+      required:
+      - status
+      - checkedAt
+      - changedSourceIds
+      - reasonCodes
+      allOf:
+      - if:
+          properties:
+            status:
+              const: CURRENT
+        then:
+          properties:
+            changedSourceIds:
+              maxItems: 0
+            reasonCodes:
+              maxItems: 0
+        else:
+          properties:
+            reasonCodes:
+              minItems: 1
+        description: 條件規則：status 為 `CURRENT` 時 changedSourceIds 與 reasonCodes 都必須為空陣列；其他狀態 reasonCodes 至少一項。
+    SrppSummaryResponse:
+      type: object
+      additionalProperties: false
+      description: view=summary 的回應：不可變 context、其內容雜湊與本次讀取的 freshness。contextContentSha256 = SHA-256(RFC 8785 JCS(context))，不是 SRPP 既有的 INPUT_SNAPSHOT_SHA256。
+      properties:
+        kind:
+          type: string
+          const: SUMMARY
+          description: 回應種類，常數 `SUMMARY`。
+        context:
+          "$ref": "#/components/schemas/SrppContext"
+          description: 不可變的 package 計算內容。
+        contextContentSha256:
+          "$ref": "#/components/schemas/SrppSha256"
+          description: SHA-256(UTF-8(JCS(context)))；BFF 會重新計算並拒絕不符的上游回應。
+        freshness:
+          "$ref": "#/components/schemas/SrppFreshness"
+          description: 本次讀取的新鮮度核對結果。
+      required:
+      - kind
+      - context
+      - contextContentSha256
+      - freshness
+    SrppEvidenceResponse:
+      type: object
+      additionalProperties: false
+      description: view=evidence 的回應：只讀該 owner／package 已凍結的單一來源原文，不抓取新證據，也不暴露來源 URL 或檔案路徑。
+      properties:
+        kind:
+          type: string
+          const: EVIDENCE
+          description: 回應種類，常數 `EVIDENCE`。
+        packageId:
+          type: string
+          description: 來源所屬 package（小寫 UUID），必須等於 query 的 packageId。
+          format: uuid
+        sourceId:
+          "$ref": "#/components/schemas/SrppId"
+          description: 來源識別，必須等於 query 的 sourceId，且在該 package 為 AVAILABLE。
+        bodyMediaType:
+          type: string
+          const: application/json
+          description: body 的媒體型別，常數 `application/json`。
+        bodyEncoding:
+          type: string
+          const: UTF-8
+          description: body 的字元編碼，常數 `UTF-8`。
+        body:
+          type: string
+          description: 凍結當下的來源 JSON 原文，以字串回傳；依 UTF-8 計算 bodySha256，不得 parse 後重新 stringify。
+        bodySha256:
+          "$ref": "#/components/schemas/SrppSha256"
+          description: SHA-256(UTF-8(body))，必須等於 context 中該 source 的 bodySha256。
+      required:
+      - kind
+      - packageId
+      - sourceId
+      - bodyMediaType
+      - bodyEncoding
+      - body
+      - bodySha256
+    SrppProblem:
+      type: object
+      additionalProperties: false
+      description: RFC 9457 Problem Details：本路由所有應用錯誤的固定七欄格式，文案由 BFF 固定目錄輸出，不含帳號、SQL、URI 或例外堆疊；Nginx 自身的 502／504 仍可能是 HTML。
+      properties:
+        type:
+          type: string
+          const: about:blank
+          description: problem 類型，常數 `about:blank`。
+        title:
+          type: string
+          description: 依 code 固定的英文標題。
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: 與 HTTP status 相同的整數狀態碼。
+        detail:
+          type: string
+          description: 依 code 固定、經清理的繁體中文說明。
+        instance:
+          type: string
+          const: "/api/public/srpp/daily-context"
+          description: 發生錯誤的公開路徑，常數 `/api/public/srpp/daily-context`。
+        code:
+          type: string
+          description: 穩定錯誤碼：`INVALID_REQUEST`（400）query 不合法；`CONTEXT_NOT_FOUND`（404）查無該 owner 的 package；`SOURCE_EVIDENCE_NOT_FOUND`（404）package 中查無該 AVAILABLE 來源；`CONTEXT_STALE`（409）最新 package 的來源已變更；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證（registry 空時一律如此）；`CONTEXT_IDENTITY_MISMATCH`（409）package 的日期／時段／規則包與 query 不符；`NON_TRADING_DAY`（409）非台股交易日；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CONTEXT_NOT_READY`（503，可重試）時段未到、尚未產生或上游逾時；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤。
+          enum:
+          - INVALID_REQUEST
+          - CONTEXT_NOT_FOUND
+          - SOURCE_EVIDENCE_NOT_FOUND
+          - CONTEXT_STALE
+          - POLICY_UNSUPPORTED
+          - CONTEXT_IDENTITY_MISMATCH
+          - NON_TRADING_DAY
+          - CALENDAR_UNAVAILABLE
+          - OWNER_UNAVAILABLE
+          - CONTEXT_NOT_READY
+          - UPSTREAM_INVALID
+          - INTERNAL_ERROR
+        retryable:
+          type: boolean
+          description: 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘（含 OWNER_UNAVAILABLE）為 false。
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - instance
+      - code
+      - retryable
   responses:
     NginxBadGateway:
       description: HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。
@@ -7620,3 +9548,885 @@ components:
           usMarketOpen: false
           ukMarketOpen: false
           priceUpdatedAt: '2026-01-15T10:00:00'
+    SrppSummaryPartial:
+      summary: 合成資料（非實際持倉）：最新模式 CURRENT；assets／allocation 完成、cashIncome 部分、funding 與 completedTechnicals 具名 UNAVAILABLE，coverage=PARTIAL。
+      value:
+        kind: SUMMARY
+        context:
+          packageId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+          schemaVersion: 1.0.0
+          generatedAt: '2026-09-24T09:05:01+08:00'
+          dataCutoffAt: '2026-09-24T09:05:01+08:00'
+          tradingDate: '2026-09-24'
+          slot: '09:05'
+          timezone: Asia/Taipei
+          ownerKey: synthetic-owner
+          assetSnapshotId: '1'
+          assetSnapshotDate: '2026-09-24'
+          policy:
+            policyBundleSha256: bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3
+            calculationPolicySha256: bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3
+            formulaSetSha256: f106417375d46a2dd0302ba019be72462d99ad8b51e121b27a52a2e24c9adec3
+            formulaVersion: SYNTHETIC_TEST_ONLY
+            scope: LISTED_CALCULATIONS_ONLY
+          coverage: PARTIAL
+          sources:
+          - sourceId: assets
+            kind: ASSETS
+            state: AVAILABLE
+            revision: synthetic-assets-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8
+            reasonCodes: []
+          - sourceId: calendar
+            kind: CALENDAR
+            state: AVAILABLE
+            revision: synthetic-calendar-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: 6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607
+            reasonCodes: []
+          - sourceId: policy
+            kind: POLICY
+            state: AVAILABLE
+            revision: synthetic-policy-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: 8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7
+            reasonCodes: []
+          modules:
+            assets:
+              status: COMPLETE
+              reasonCodes: []
+              sourceIds:
+              - assets
+              calculationId: SYNTHETIC_ASSETS_V1
+              data:
+                snapshotTotalDeposit:
+                  value: '3000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotStockValue:
+                  value: '2000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotFundValue:
+                  value: '0'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotTotalAssets:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                liveStockValue:
+                  value: '2000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                liveTotalAssets:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                targetPriceComplete: true
+                rowCounts:
+                  deposits: 2
+                  stocks: 1
+                  funds: 0
+                checks:
+                - name: snapshot_deposits
+                  detailTwd: '3000000'
+                  reportedTwd: '3000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '300'
+                  passed: true
+                - name: live_deposits
+                  detailTwd: '3000000'
+                  reportedTwd: '3000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '300'
+                  passed: true
+                - name: snapshot_funds
+                  detailTwd: '0'
+                  reportedTwd: '0'
+                  differenceTwd: '0'
+                  toleranceTwd: '0.01'
+                  passed: true
+                - name: live_funds
+                  detailTwd: '0'
+                  reportedTwd: '0'
+                  differenceTwd: '0'
+                  toleranceTwd: '0.01'
+                  passed: true
+                - name: snapshot_stocks
+                  detailTwd: '2000000'
+                  reportedTwd: '2000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '200'
+                  passed: true
+                - name: live_stocks
+                  detailTwd: '2000000'
+                  reportedTwd: '2000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '200'
+                  passed: true
+                - name: snapshot_total
+                  detailTwd: '5000000'
+                  reportedTwd: '5000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '500'
+                  passed: true
+                - name: live_total
+                  detailTwd: '5000000'
+                  reportedTwd: '5000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '500'
+                  passed: true
+                depositGroups:
+                - bankId: SYNTHETIC_BANK
+                  bankName: 合成範例銀行
+                  currency: TWD
+                  depositType: DEMAND
+                  sourceRowIds:
+                  - '2'
+                  amountTwd: '1000000'
+                  originalAmount: '1000000'
+                  estimatedAnnualInterest:
+                    value: '0'
+                    unit: TWD
+                    quality: ESTIMATE
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                - bankId: SYNTHETIC_BANK
+                  bankName: 合成範例銀行
+                  currency: TWD
+                  depositType: TERM
+                  sourceRowIds:
+                  - '1'
+                  amountTwd: '2000000'
+                  originalAmount: '2000000'
+                  estimatedAnnualInterest:
+                    value: '30000'
+                    unit: TWD
+                    quality: ESTIMATE
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+            allocation:
+              status: COMPLETE
+              reasonCodes: []
+              sourceIds:
+              - assets
+              - policy
+              calculationId: SYNTHETIC_ALLOCATION_V1
+              data:
+                basis: TOTAL_EXPOSURE_REFERENCE
+                denominatorTwd:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                shortTermSleeveSeparated: false
+                rows:
+                - assetKey: CASH:TWD:DEMAND
+                  market:
+                  symbol:
+                  sourceHoldingIds: []
+                  exposureTwd:
+                    value: '1000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: '1000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                - assetKey: CASH:TWD:TERM
+                  market:
+                  symbol:
+                  sourceHoldingIds: []
+                  exposureTwd:
+                    value: '2000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: '0'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: '0'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                - assetKey: TW:EXAMPLE_TW
+                  market: 台股
+                  symbol: EXAMPLE_TW
+                  sourceHoldingIds:
+                  - '1'
+                  exposureTwd:
+                    value: '2000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: "-0.2"
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: "-1000000"
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                unmappedHoldingIds: []
+            cashIncome:
+              status: PARTIAL
+              reasonCodes:
+              - NET_CALCULATION_NOT_VERIFIED
+              sourceIds:
+              - assets
+              calculationId: SYNTHETIC_GROSS_INCOME_V1
+              data:
+                stockAndEtfDistributions:
+                  value: '60000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                fundDistributions:
+                  value: '0'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                depositInterest:
+                  value: '30000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                sourceAccruedAnnualIncome:
+                  value: '90000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                permanentTermInterestReinvested:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                spendableAnnualGross:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                taiwanIncomeTaxOrRefund:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                usWithholding:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                additionalBasicTax:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                supplementaryNhi:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                afterAllTaxAnnualCashIncome:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                missingIncomeRowIds: []
+                netCalculationStandard:
+                taxYear: 2026
+            funding:
+              status: UNAVAILABLE
+              reasonCodes:
+              - CALCULATOR_NOT_VERIFIED
+              sourceIds: []
+              calculationId: SYNTHETIC_UNAVAILABLE
+              data:
+            completedTechnicals:
+              status: UNAVAILABLE
+              reasonCodes:
+              - COMPLETED_SESSION_DATA_MISSING
+              sourceIds: []
+              calculationId: SYNTHETIC_UNAVAILABLE
+              data:
+          tradingAuthorized: false
+          requiresOriginalDailyChecks: true
+        contextContentSha256: 5cce95711223327508a71246a9adac632d78059c8966ff1d2cbb6de300668ae4
+        freshness:
+          status: CURRENT
+          checkedAt: '2026-09-24T09:05:01+08:00'
+          changedSourceIds: []
+          reasonCodes: []
+    SrppSummaryStalePinned:
+      summary: 合成資料：以 packageId 固定讀取的舊 package，快照 revision 已變更而 freshness=STALE；僅供稽核，不可作為現行建議。
+      value:
+        kind: SUMMARY
+        context:
+          packageId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+          schemaVersion: 1.0.0
+          generatedAt: '2026-09-24T09:05:01+08:00'
+          dataCutoffAt: '2026-09-24T09:05:01+08:00'
+          tradingDate: '2026-09-24'
+          slot: '09:05'
+          timezone: Asia/Taipei
+          ownerKey: synthetic-owner
+          assetSnapshotId: '1'
+          assetSnapshotDate: '2026-09-24'
+          policy:
+            policyBundleSha256: bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3
+            calculationPolicySha256: bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3
+            formulaSetSha256: f106417375d46a2dd0302ba019be72462d99ad8b51e121b27a52a2e24c9adec3
+            formulaVersion: SYNTHETIC_TEST_ONLY
+            scope: LISTED_CALCULATIONS_ONLY
+          coverage: PARTIAL
+          sources:
+          - sourceId: assets
+            kind: ASSETS
+            state: AVAILABLE
+            revision: synthetic-assets-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8
+            reasonCodes: []
+          - sourceId: calendar
+            kind: CALENDAR
+            state: AVAILABLE
+            revision: synthetic-calendar-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: 6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607
+            reasonCodes: []
+          - sourceId: policy
+            kind: POLICY
+            state: AVAILABLE
+            revision: synthetic-policy-1
+            capturedAt: '2026-09-24T09:05:01+08:00'
+            dataAsOf: '2026-09-24T09:05:01+08:00'
+            bodySha256: 8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7
+            reasonCodes: []
+          modules:
+            assets:
+              status: COMPLETE
+              reasonCodes: []
+              sourceIds:
+              - assets
+              calculationId: SYNTHETIC_ASSETS_V1
+              data:
+                snapshotTotalDeposit:
+                  value: '3000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotStockValue:
+                  value: '2000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotFundValue:
+                  value: '0'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                snapshotTotalAssets:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                liveStockValue:
+                  value: '2000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                liveTotalAssets:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                targetPriceComplete: true
+                rowCounts:
+                  deposits: 2
+                  stocks: 1
+                  funds: 0
+                checks:
+                - name: snapshot_deposits
+                  detailTwd: '3000000'
+                  reportedTwd: '3000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '300'
+                  passed: true
+                - name: live_deposits
+                  detailTwd: '3000000'
+                  reportedTwd: '3000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '300'
+                  passed: true
+                - name: snapshot_funds
+                  detailTwd: '0'
+                  reportedTwd: '0'
+                  differenceTwd: '0'
+                  toleranceTwd: '0.01'
+                  passed: true
+                - name: live_funds
+                  detailTwd: '0'
+                  reportedTwd: '0'
+                  differenceTwd: '0'
+                  toleranceTwd: '0.01'
+                  passed: true
+                - name: snapshot_stocks
+                  detailTwd: '2000000'
+                  reportedTwd: '2000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '200'
+                  passed: true
+                - name: live_stocks
+                  detailTwd: '2000000'
+                  reportedTwd: '2000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '200'
+                  passed: true
+                - name: snapshot_total
+                  detailTwd: '5000000'
+                  reportedTwd: '5000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '500'
+                  passed: true
+                - name: live_total
+                  detailTwd: '5000000'
+                  reportedTwd: '5000000'
+                  differenceTwd: '0'
+                  toleranceTwd: '500'
+                  passed: true
+                depositGroups:
+                - bankId: SYNTHETIC_BANK
+                  bankName: 合成範例銀行
+                  currency: TWD
+                  depositType: DEMAND
+                  sourceRowIds:
+                  - '2'
+                  amountTwd: '1000000'
+                  originalAmount: '1000000'
+                  estimatedAnnualInterest:
+                    value: '0'
+                    unit: TWD
+                    quality: ESTIMATE
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                - bankId: SYNTHETIC_BANK
+                  bankName: 合成範例銀行
+                  currency: TWD
+                  depositType: TERM
+                  sourceRowIds:
+                  - '1'
+                  amountTwd: '2000000'
+                  originalAmount: '2000000'
+                  estimatedAnnualInterest:
+                    value: '30000'
+                    unit: TWD
+                    quality: ESTIMATE
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+            allocation:
+              status: COMPLETE
+              reasonCodes: []
+              sourceIds:
+              - assets
+              - policy
+              calculationId: SYNTHETIC_ALLOCATION_V1
+              data:
+                basis: TOTAL_EXPOSURE_REFERENCE
+                denominatorTwd:
+                  value: '5000000'
+                  unit: TWD
+                  quality: EXACT
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                shortTermSleeveSeparated: false
+                rows:
+                - assetKey: CASH:TWD:DEMAND
+                  market:
+                  symbol:
+                  sourceHoldingIds: []
+                  exposureTwd:
+                    value: '1000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: '1000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                - assetKey: CASH:TWD:TERM
+                  market:
+                  symbol:
+                  sourceHoldingIds: []
+                  exposureTwd:
+                    value: '2000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: '0'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: '0'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                - assetKey: TW:EXAMPLE_TW
+                  market: 台股
+                  symbol: EXAMPLE_TW
+                  sourceHoldingIds:
+                  - '1'
+                  exposureTwd:
+                    value: '2000000'
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  currentWeight:
+                    value: '0.4'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                  targetWeight:
+                    value: '0.2'
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - policy
+                  gapWeight:
+                    value: "-0.2"
+                    unit: RATIO
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                  gapValueTwd:
+                    value: "-1000000"
+                    unit: TWD
+                    quality: EXACT
+                    reasonCodes: []
+                    sourceIds:
+                    - assets
+                    - policy
+                unmappedHoldingIds: []
+            cashIncome:
+              status: PARTIAL
+              reasonCodes:
+              - NET_CALCULATION_NOT_VERIFIED
+              sourceIds:
+              - assets
+              calculationId: SYNTHETIC_GROSS_INCOME_V1
+              data:
+                stockAndEtfDistributions:
+                  value: '60000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                fundDistributions:
+                  value: '0'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                depositInterest:
+                  value: '30000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                sourceAccruedAnnualIncome:
+                  value: '90000'
+                  unit: TWD
+                  quality: ESTIMATE
+                  reasonCodes: []
+                  sourceIds:
+                  - assets
+                permanentTermInterestReinvested:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                spendableAnnualGross:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                taiwanIncomeTaxOrRefund:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                usWithholding:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                additionalBasicTax:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                supplementaryNhi:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                afterAllTaxAnnualCashIncome:
+                  value:
+                  unit: TWD
+                  quality: UNAVAILABLE
+                  reasonCodes:
+                  - NET_CALCULATION_NOT_VERIFIED
+                  sourceIds: []
+                missingIncomeRowIds: []
+                netCalculationStandard:
+                taxYear: 2026
+            funding:
+              status: UNAVAILABLE
+              reasonCodes:
+              - CALCULATOR_NOT_VERIFIED
+              sourceIds: []
+              calculationId: SYNTHETIC_UNAVAILABLE
+              data:
+            completedTechnicals:
+              status: UNAVAILABLE
+              reasonCodes:
+              - COMPLETED_SESSION_DATA_MISSING
+              sourceIds: []
+              calculationId: SYNTHETIC_UNAVAILABLE
+              data:
+          tradingAuthorized: false
+          requiresOriginalDailyChecks: true
+        contextContentSha256: 5cce95711223327508a71246a9adac632d78059c8966ff1d2cbb6de300668ae4
+        freshness:
+          status: STALE
+          checkedAt: '2026-09-24T09:07:00+08:00'
+          changedSourceIds:
+          - assets
+          reasonCodes:
+          - SOURCE_REVISION_CHANGED
+    SrppEvidenceAssets:
+      summary: 合成資料：view=evidence 重播 assets 來源原文，bodySha256 = SHA-256(UTF-8(body))。
+      value:
+        kind: EVIDENCE
+        packageId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+        sourceId: assets
+        bodyMediaType: application/json
+        bodyEncoding: UTF-8
+        body: '{"synthetic":true,"snapshotId":"1","snapshotDate":"2026-09-24","snapshotDepositsTwd":"3000000","snapshotStockValueTwd":"2000000","snapshotFundValueTwd":"0","liveStockValueTwd":"2000000","snapshotTotalAssetsTwd":"5000000","depositRows":[{"id":"1","bankId":"SYNTHETIC_BANK","currency":"TWD","type":"TERM","amountTwd":"2000000","annualInterestTwd":"30000"},{"id":"2","bankId":"SYNTHETIC_BANK","currency":"TWD","type":"DEMAND","amountTwd":"1000000","annualInterestTwd":"0"}],"stockRows":[{"id":"1","market":"台股","symbol":"EXAMPLE_TW","liveValueTwd":"2000000","annualDividendTwd":"60000"}]}'
+        bodySha256: f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8

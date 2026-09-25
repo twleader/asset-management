@@ -43,7 +43,7 @@ class PublicApiErrorCaptureWebFilterTest {
      * capture=true) under the same {@code verifyNoInteractions(ingest)}. That sub-case now records (see
      * {@link #captured_4xx_on_matched_route_records_once_with_real_status()} below), so only the two
      * still-zero-row cases remain here: a successful 204 (no Throwable ever captured — the
-     * `GET /api/quotes/one` contractual cache-miss) and a 404 on a path outside the 13-route allowlist
+     * `GET /api/quotes/one` contractual cache-miss) and a 404 on a path outside the 14-route allowlist
      * (the filter never even resolves an {@code Operation} for it).
      */
     @Test void successful_204_and_unknown_404_produce_no_row() {
