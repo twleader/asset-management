@@ -119,6 +119,13 @@ trading-radar:
     retention-days: ${TRADING_RADAR_SNAPSHOT_RETENTION_DAYS:90}
     max-per-owner: ${TRADING_RADAR_SNAPSHOT_MAX_PER_OWNER:5000}
 
+# Requirement 163／Task 452：SRPP 共用計算結果 producer 與保留期（Asia/Taipei）。
+# retention-days 小於 7 時啟動視為 7。
+srpp:
+  producer-cron: ${SRPP_PRODUCER_CRON:0 */5 * * * *}
+  retention-cron: ${SRPP_RETENTION_CRON:0 25 3 * * *}
+  retention-days: ${SRPP_RETENTION_DAYS:7}
+
 server:
   port: ${SERVER_PORT:8080}
 

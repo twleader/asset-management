@@ -328,6 +328,36 @@ public class MarketDataService {
     }
 
     /**
+     * Requirement 163／Task 452.10：當年度台股假日快取不存在、已過期或剩餘 TTL ≤ {@code window} 時主動重抓並重設 TTL，
+     * 否則不動。由 SRPP producer 每 5 分鐘（含週末）呼叫，讓 {@link #isTwTradingDayCachedOnly(LocalDate)} 全週連續可用
+     * （既有「僅過期才重抓」在 5 分鐘間隔下會留下最長約 5 分鐘空窗）。抓取失敗沿用 {@link #getTwHolidays(int)}
+     * 「不毒化快取」規則：保留舊快取不動。
+     *
+     * @return true 表示本次有成功重抓並重設 TTL
+     */
+    public boolean warmTwHolidaysIfExpiringWithin(Duration window) {
+        return warmTwHolidaysIfExpiringWithin(window,
+                ZonedDateTime.now(MarketZones.TW_ZONE).getYear(), System.currentTimeMillis());
+    }
+
+    boolean warmTwHolidaysIfExpiringWithin(Duration window, int year, long nowMillis) {
+        TimedHolidays cached = twHolidayCurrentYearCache.get(year);
+        if (cached != null && cached.value() != null && !cached.value().isEmpty()
+                && cached.expiresAt() - nowMillis > window.toMillis()) {
+            return false;
+        }
+        Map<String, String> fresh = fetchTwHolidaysFromExt(year);
+        if (fresh == null || fresh.isEmpty()) return false;
+        twHolidayCurrentYearCache.put(year, new TimedHolidays(fresh, nowMillis + CURRENT_YEAR_TTL_MS));
+        return true;
+    }
+
+    /** 測試專用：以指定到期時刻植入當年度假日快取。 */
+    void seedTwHolidayCacheForTest(int year, Map<String, String> holidays, long expiresAtMillis) {
+        twHolidayCurrentYearCache.put(year, new TimedHolidays(holidays, expiresAtMillis));
+    }
+
+    /**
      * Task 447.2：請求生命週期的年度快取 overlay。與 {@link #twHolidayCurrentYearCache}
      * 完全獨立——那份快取只保留「當年度」且有 TTL，非當年度（回測歷史資料的絕大多數情境）
      * 每次都會直接呼叫 {@link #fetchTwHolidaysFromExt(int)}。一個回測請求逐日掃描同一年度

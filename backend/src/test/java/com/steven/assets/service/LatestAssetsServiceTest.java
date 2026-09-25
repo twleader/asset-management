@@ -92,6 +92,41 @@ class LatestAssetsServiceTest {
         assertThat(service().getLatest().targetPriceComplete()).isTrue();
     }
 
+    /** Requirement 163／Task 452.5：owner-explicit 版本不得呼叫依賴 ownerFilter 的無參數查詢。 */
+    @Test
+    void ownerExplicitReadUsesOwnerQueryAndLoadedEntityOnly() {
+        AssetSnapshot latest = snapshot(10L);
+        AssetSnapshotDto.SnapshotDetailResponse detail = mock(AssetSnapshotDto.SnapshotDetailResponse.class);
+        StockPriceService.LiveAssetsResponse live = live(10L, "TARGET_SESSION_PRICE");
+        when(snapshots.findLatestWithStocksByOwnerUserId(7L)).thenReturn(Optional.of(latest));
+        when(assets.getSnapshotDetail(latest)).thenReturn(detail);
+        when(prices.getLiveAssets(latest)).thenReturn(live);
+        when(prices.getMarketStatus()).thenReturn(Map.of("twTradingDate", "2026-08-13"));
+
+        var response = service().getLatestForOwner(7L);
+
+        assertThat(response.snapshot()).isSameAs(detail);
+        assertThat(response.liveAssets()).isSameAs(live);
+        assertThat(response.targetPriceComplete()).isTrue();
+        assertThat(response.valuationPolicy()).isEqualTo("TARGET_SESSION_WITH_EXPLICIT_FALLBACK");
+        verify(snapshots, never()).findLatestWithStocks();
+        verify(prices, never()).getLiveAssets();
+        verify(assets, never()).getSnapshotDetail(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void ownerExplicitReadFailsClosedWithoutSnapshotOrOnMismatch() {
+        when(snapshots.findLatestWithStocksByOwnerUserId(7L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service().getLatestForOwner(7L)).isInstanceOf(NoSuchElementException.class);
+
+        AssetSnapshot latest = snapshot(10L);
+        when(snapshots.findLatestWithStocksByOwnerUserId(8L)).thenReturn(Optional.of(latest));
+        when(prices.getLiveAssets(latest)).thenReturn(live(11L, "TARGET_SESSION_PRICE"));
+        assertThatThrownBy(() -> service().getLatestForOwner(8L))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("不一致");
+        verify(snapshots, never()).findLatestWithStocks();
+    }
+
     private LatestAssetsService service() {
         return new LatestAssetsService(snapshots, assets, prices);
     }

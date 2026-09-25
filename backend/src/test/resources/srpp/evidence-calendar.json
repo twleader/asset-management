@@ -1,0 +1,9 @@
+{
+  "kind": "EVIDENCE",
+  "packageId": "7e1fb982-4ae4-4e7e-baa5-c2c80bd93491",
+  "sourceId": "calendar",
+  "bodyMediaType": "application/json",
+  "bodyEncoding": "UTF-8",
+  "body": "{\"synthetic\": true, \"tradingDate\": \"2026-09-24\", \"tw\": true}",
+  "bodySha256": "6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607"
+}
