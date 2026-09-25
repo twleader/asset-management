@@ -43,7 +43,7 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
 - [ ] 453.4 **回應組裝。**
   - summary：以字串組 `{"kind":"SUMMARY","context":<context_jcs 原文>,"contextContentSha256":"<sha256(context_jcs)>","freshness":{"status":…,"checkedAt":…,"changedSourceIds":[…],"reasonCodes":[…]}}`；context 原文不得 parse 後重新序列化。
   - evidence：`{"kind":"EVIDENCE","packageId":…,"sourceId":…,"bodyMediaType":"application/json","bodyEncoding":"UTF-8","body":<body 以 Jackson 字串逸出>,"bodySha256":"<sha256(body)>"}`。
-  - problem：`{"type":"about:blank","title":…,"status":…,"detail":…,"instance":"/api/public/srpp/daily-context","code":…,"retryable":…}`，title／detail 用 `SrppProblemCatalog` 的固定文案（每個 code 一組固定英文 title＋繁中 detail；503 類 retryable=true，其他 false），不得含帳號、SQL、例外訊息。未預期例外由本 controller 範圍的 `@RestControllerAdvice(assignableTypes = InternalSrppDailyContextController.class)` 轉 500 `INTERNAL_ERROR`。
+  - problem：`{"type":"about:blank","title":…,"status":…,"detail":…,"instance":"/api/public/srpp/daily-context","code":…,"retryable":…}`，title／detail 用 `SrppProblemCatalog` 的固定文案（每個 code 一組固定英文 title＋繁中 detail；retryable 逐 code 固定：`CALENDAR_UNAVAILABLE`、`CONTEXT_NOT_READY` 為 true，其餘（含 503 `OWNER_UNAVAILABLE`——帳號不存在或停用時重試無益）一律 false），不得含帳號、SQL、例外訊息。未預期例外由本 controller 範圍的 `@RestControllerAdvice(assignableTypes = InternalSrppDailyContextController.class)` 轉 500 `INTERNAL_ERROR`。
 
 - [ ] 453.5 **測試。**
   - `SrppDailyContextReadService` 的單元測試（Mockito、固定 `Clock`、不啟 Spring）：每一個錯誤碼分支一個案例，並驗證判斷順序（例如未知政策＋錯誤日期 → 409）；latest 09:04 → 503、11:39 查 `11:40` → 503；cached 日曆 false／empty；他人 packageId → 404 且 repository 只被以本人 ownerId 查詢；pinned STALE／UNKNOWN 回 200；evidence 非 AVAILABLE／查無 → 404；summary 回應中 context 片段逐位元等於 `context_jcs`、hash 相符。
