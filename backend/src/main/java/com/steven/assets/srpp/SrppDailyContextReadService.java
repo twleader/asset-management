@@ -32,7 +32,8 @@ import java.util.regex.Pattern;
  *
  * <p>只讀 PostgreSQL 已發布 package、registry 與 owner 最新快照（供 freshness 比對），日曆只用
  * {@link MarketDataService#isTwTradingDayCachedOnly}。絕不計算、不補抓、不寫入；不依賴 Redis、行情、
- * 外部 HTTP 或 producer。所有 repository 查詢一律帶明確 ownerId（{@link CurrentUserContext#getEffectiveUserId()}）。
+ * 外部 HTTP 或 producer。所有 repository 查詢（含 evidence body）一律帶明確 ownerId（{@link CurrentUserContext#getEffectiveUserId()}）。
+ * 只回傳領域結果 {@link SrppReadResult}（Ok／Problem code），HTTP status 與 problem body 由 controller 對照。
  */
 @Service
 public class SrppDailyContextReadService {
@@ -101,7 +102,7 @@ public class SrppDailyContextReadService {
             return SrppReadResult.problem("CONTEXT_IDENTITY_MISMATCH");
         }
         JsonNode context = SrppJcs.parseStrict(pkg.getContextJcs());
-        if (query.evidenceView()) return evidenceResponse(pkg, context, query.sourceId());
+        if (query.evidenceView()) return evidenceResponse(pkg, context, query.sourceId(), ownerId);
         Freshness freshness = freshness(pkg, context, ownerId);
         if (freshness == null) return SrppReadResult.problem("INTERNAL_ERROR");
         return SrppReadResult.ok(summary(pkg, freshness));
@@ -184,7 +185,7 @@ public class SrppDailyContextReadService {
                 + ",\"freshness\":" + fresh + "}";
     }
 
-    private SrppReadResult evidenceResponse(SrppContextPackage pkg, JsonNode context, String sourceId) {
+    private SrppReadResult evidenceResponse(SrppContextPackage pkg, JsonNode context, String sourceId, long ownerId) {
         boolean available = false;
         for (JsonNode source : context.path("sources")) {
             if (sourceId.equals(source.path("sourceId").asText()) && "AVAILABLE".equals(source.path("state").asText())) {
@@ -192,7 +193,7 @@ public class SrppDailyContextReadService {
             }
         }
         if (!available) return SrppReadResult.problem("SOURCE_EVIDENCE_NOT_FOUND");
-        Optional<String> body = evidence.findBody(pkg.getPackageId(), sourceId);
+        Optional<String> body = evidence.findBody(pkg.getPackageId(), sourceId, ownerId);
         if (body.isEmpty()) return SrppReadResult.problem("SOURCE_EVIDENCE_NOT_FOUND");
         String escaped;
         try {

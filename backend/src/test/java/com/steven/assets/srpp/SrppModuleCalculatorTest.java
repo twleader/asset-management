@@ -2,6 +2,8 @@ package com.steven.assets.srpp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.steven.assets.dto.AssetSnapshotDto;
+import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockPriceService;
 import org.junit.jupiter.api.Test;
 
@@ -275,8 +277,55 @@ class SrppModuleCalculatorTest {
         assertThat(income.at("/data/fundDistributions/quality").asText()).isEqualTo("LOWER_BOUND");
         assertThat(income.at("/data/depositInterest/quality").asText()).isEqualTo("ESTIMATE");
         assertThat(income.at("/data/depositInterest/value").asText()).isEqualTo("10000");
+        // sourceAccrued 直接輸出快照值（非三項和 14000），缺列時品質為 LOWER_BOUND。
         assertThat(income.at("/data/sourceAccruedAnnualIncome/quality").asText()).isEqualTo("LOWER_BOUND");
-        assertThat(income.at("/data/sourceAccruedAnnualIncome/value").asText()).isEqualTo("14000");
+        assertThat(income.at("/data/sourceAccruedAnnualIncome/value").asText()).isEqualTo("99999");
+        assertThat(income.at("/data/sourceAccruedAnnualIncome/reasonCodes").toString()).isEqualTo("[\"INCOME_ROWS_MISSING\"]");
+    }
+
+    @Test
+    void sourceAccruedIsSnapshotValueEvenWhenClassifiedSumDiffers() {
+        SrppTestData data = SrppTestData.proposal();
+        data.estimatedAnnualDividend = new BigDecimal("91234.56");
+        JsonNode income = ok(data, PROPOSAL_POLICY).get("cashIncome");
+        assertThat(income.at("/data/sourceAccruedAnnualIncome").toString()).isEqualTo(
+                "{\"value\":\"91234.56\",\"unit\":\"TWD\",\"quality\":\"ESTIMATE\",\"reasonCodes\":[],\"sourceIds\":[\"assets\"]}");
+        assertThat(income.path("reasonCodes").toString())
+                .isEqualTo("[\"INCOME_RECONCILIATION_MISMATCH\",\"NET_CALCULATION_NOT_VERIFIED\"]");
+
+        SrppTestData withinTolerance = SrppTestData.proposal();
+        withinTolerance.estimatedAnnualDividend = new BigDecimal("90009");   // 容差 max(0.01, 90009×0.0001)=9.0009
+        JsonNode ok = ok(withinTolerance, PROPOSAL_POLICY).get("cashIncome");
+        assertThat(ok.at("/data/sourceAccruedAnnualIncome/value").asText()).isEqualTo("90009");
+        assertThat(ok.path("reasonCodes").toString()).isEqualTo("[\"NET_CALCULATION_NOT_VERIFIED\"]");
+    }
+
+    @Test
+    void nullSnapshotEstimatedDividendIsUnavailableAndNotMismatch() {
+        SrppTestData data = new SrppTestData()
+                .deposit(1, 1L, "b", "活存", "1000000", null, "TWD", "1")
+                .stock(1, "台股", "0050", "100", "200000", null);
+        data.estimatedAnnualDividendNull = true;
+        JsonNode income = ok(data, SrppTestData.policy(Map.of())).get("cashIncome");
+        assertThat(income.at("/data/sourceAccruedAnnualIncome").toString()).isEqualTo(
+                "{\"value\":null,\"unit\":\"TWD\",\"quality\":\"UNAVAILABLE\","
+                        + "\"reasonCodes\":[\"SNAPSHOT_ESTIMATED_DIVIDEND_MISSING\"],\"sourceIds\":[]}");
+        assertThat(income.path("reasonCodes").toString()).isEqualTo(
+                "[\"INCOME_ROWS_MISSING\",\"NET_CALCULATION_NOT_VERIFIED\",\"SNAPSHOT_ESTIMATED_DIVIDEND_MISSING\"]");
+        assertThat(income.at("/data/stockAndEtfDistributions/quality").asText()).isEqualTo("LOWER_BOUND");
+        assertThat(income.at("/data/depositInterest/value").asText()).isEqualTo("10000");
+    }
+
+    @Test
+    void depositInterestDelegatesToSharedFormula() {
+        for (String[] c : new String[][]{{"TWD", "1.5"}, {"USD", "4.25"}, {"TRANSIT_TWD", "2"}, {"TRANSIT_USD", "2"},
+                {"TWD", null}, {"TWD", "0"}, {"TWD", "-1"}}) {
+            SrppTestData data = new SrppTestData().deposit(1, 1L, "b", "D", "123457", null, c[0], c[1]);
+            AssetSnapshotDto.DepositResponse deposit = data.snapshot().deposits().get(0);
+            assertThat(SrppModuleCalculator.depositInterest(deposit)).as(c[0] + "/" + c[1]).isEqualTo(
+                    SnapshotAggregateCalculator.depositEstimatedInterest(
+                            deposit.amount(), deposit.annualInterestRate(), deposit.currency()));
+        }
     }
 
     @Test

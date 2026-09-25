@@ -16,7 +16,10 @@ public interface SrppContextEvidenceRepository extends JpaRepository<SrppContext
     int insertEvidence(@Param("packageId") UUID packageId, @Param("sourceId") String sourceId,
                        @Param("body") String body);
 
-    /** 呼叫端必須先以 (packageId, ownerId) 確認 package 屬於本人。 */
-    @Query("select e.body from SrppContextEvidence e where e.id.packageId = :packageId and e.id.sourceId = :sourceId")
-    Optional<String> findBody(@Param("packageId") UUID packageId, @Param("sourceId") String sourceId);
+    /** 以 join package 比對 owner（packageId＋sourceId＋ownerUserId），不只依賴呼叫端先前的 package 驗證。 */
+    @Query("select e.body from SrppContextEvidence e, SrppContextPackage p "
+            + "where p.packageId = e.id.packageId and e.id.packageId = :packageId "
+            + "and e.id.sourceId = :sourceId and p.ownerUserId = :ownerUserId")
+    Optional<String> findBody(@Param("packageId") UUID packageId, @Param("sourceId") String sourceId,
+                              @Param("ownerUserId") long ownerUserId);
 }

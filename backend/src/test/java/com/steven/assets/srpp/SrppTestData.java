@@ -27,6 +27,8 @@ final class SrppTestData {
     BigDecimal totalDeposit, totalFundValue, totalStockValue, totalAssets, estimatedAnnualDividend;
     BigDecimal liveTotalDeposit, liveTotalFundValue, liveStockValue, liveTotalAssets;
     boolean targetPriceComplete = true;
+    /** true 時快照 estimatedAnnualDividend 為 null（模擬舊快照缺值）。 */
+    boolean estimatedAnnualDividendNull = false;
     String notes = "note";
 
     static BigDecimal d(String value) {
@@ -71,7 +73,8 @@ final class SrppTestData {
         BigDecimal fnd = totalFundValue != null ? totalFundValue : sum(funds.stream().map(AssetSnapshotDto.FundResponse::currentValue).toList());
         BigDecimal stk = totalStockValue != null ? totalStockValue : sum(stocks.stream().map(AssetSnapshotDto.StockResponse::currentValue).toList());
         BigDecimal total = totalAssets != null ? totalAssets : dep.add(fnd).add(stk);
-        BigDecimal income = estimatedAnnualDividend != null ? estimatedAnnualDividend
+        BigDecimal income = estimatedAnnualDividendNull ? null
+                : estimatedAnnualDividend != null ? estimatedAnnualDividend
                 : sum(stocks.stream().map(AssetSnapshotDto.StockResponse::estimatedDividend).toList())
                 .add(sum(funds.stream().map(AssetSnapshotDto.FundResponse::estimatedDividend).toList()))
                 .add(sum(deposits.stream().map(SrppModuleCalculator::depositInterest).toList()));

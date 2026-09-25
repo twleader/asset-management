@@ -1,6 +1,5 @@
 package com.steven.assets.controller;
 
-import com.steven.assets.srpp.SrppReadResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -20,6 +19,6 @@ public class InternalSrppDailyContextExceptionAdvice {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<String> unexpected(Exception exception) {
         log.warn("SRPP daily-context 讀取發生未預期錯誤 type={}", exception.getClass().getSimpleName());
-        return InternalSrppDailyContextController.toResponse(SrppReadResult.problem("INTERNAL_ERROR"));
+        return InternalSrppDailyContextController.problemResponse("INTERNAL_ERROR");
     }
 }

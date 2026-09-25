@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.srpp.SrppDailyContextReadService;
 import com.steven.assets.srpp.SrppReadResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -80,5 +82,35 @@ class InternalSrppDailyContextControllerTest {
         assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("private, no-store");
         String text = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(text).contains("\"code\":\"INTERNAL_ERROR\"").doesNotContain("SELECT").doesNotContain("x@y");
+    }
+
+    /** 每個 problem code 的 HTTP status 由 controller 依 SrppProblemCatalog 對照（service 只回 code）。 */
+    @ParameterizedTest(name = "{0} → {1}")
+    @CsvSource({
+            "INVALID_REQUEST, 400, false",
+            "CONTEXT_NOT_FOUND, 404, false",
+            "SOURCE_EVIDENCE_NOT_FOUND, 404, false",
+            "CONTEXT_STALE, 409, false",
+            "POLICY_UNSUPPORTED, 409, false",
+            "CONTEXT_IDENTITY_MISMATCH, 409, false",
+            "NON_TRADING_DAY, 409, false",
+            "CALENDAR_UNAVAILABLE, 503, true",
+            "OWNER_UNAVAILABLE, 503, false",
+            "CONTEXT_NOT_READY, 503, true",
+            "INTERNAL_ERROR, 500, false"})
+    void eachProblemCodeMapsToCatalogStatus(String code, int status, boolean retryable) throws Exception {
+        when(service.read(any(), any(), any(), any(), any(), any())).thenReturn(SrppReadResult.problem(code));
+
+        MvcResult result = mvc.perform(get(PATH).param("tradingDate", "2026-09-24")).andReturn();
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(status);
+        assertThat(result.getResponse().getContentType()).startsWith("application/problem+json");
+        assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("private, no-store");
+        String text = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(text).isEqualTo(com.steven.assets.srpp.SrppProblemCatalog.body(code));
+        JsonNode problem = new ObjectMapper().readTree(text);
+        assertThat(problem.path("status").asInt()).isEqualTo(status);
+        assertThat(problem.path("code").asText()).isEqualTo(code);
+        assertThat(problem.path("retryable").asBoolean()).isEqualTo(retryable);
     }
 }

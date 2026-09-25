@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.dto.AssetSnapshotDto;
 import com.steven.assets.dto.LatestAssetsDto;
+import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockPriceService;
 
 import java.math.BigDecimal;
@@ -51,7 +52,6 @@ public final class SrppModuleCalculator {
     private static final MathContext DIVISION = new MathContext(34, RoundingMode.HALF_EVEN);
     private static final BigDecimal MIN_TOLERANCE = new BigDecimal("0.01");
     private static final BigDecimal RELATIVE_TOLERANCE = new BigDecimal("0.0001");
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
     private static final JsonNodeFactory F = JsonNodeFactory.instance;
     private static final List<String> ASSETS_ONLY = List.of("assets");
     private static final List<String> POLICY_ONLY = List.of("policy");
@@ -241,16 +241,10 @@ public final class SrppModuleCalculator {
         return out;
     }
 
-    /**
-     * 與 {@code SnapshotAggregateCalculator.depositEstimatedInterest} 相同公式（該方法吃 entity 無法直接呼叫）：
-     * {@code amount × rate / 100}，scale 0、HALF_UP；rate null／≤0 或 currency 以 {@code TRANSIT_} 開頭為 0。
-     */
+    /** 委派共用純函式 {@link SnapshotAggregateCalculator#depositEstimatedInterest(BigDecimal, BigDecimal, String)}，不另寫公式。 */
     static BigDecimal depositInterest(AssetSnapshotDto.DepositResponse deposit) {
-        BigDecimal rate = deposit.annualInterestRate();
-        if (rate == null || rate.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
-        if (deposit.currency() != null && deposit.currency().startsWith("TRANSIT_")) return BigDecimal.ZERO;
-        BigDecimal amount = deposit.amount() == null ? BigDecimal.ZERO : deposit.amount();
-        return amount.multiply(rate).divide(HUNDRED, 0, RoundingMode.HALF_UP);
+        return SnapshotAggregateCalculator.depositEstimatedInterest(
+                deposit.amount(), deposit.annualInterestRate(), deposit.currency());
     }
 
     // ───────────── allocation ─────────────
@@ -368,22 +362,30 @@ public final class SrppModuleCalculator {
         }
         BigDecimal depositIncome = nullSafe(snapshot.deposits()).stream()
                 .map(SrppModuleCalculator::depositInterest).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal accrued = stockIncome.add(fundIncome).add(depositIncome);
+        BigDecimal classifiedSum = stockIncome.add(fundIncome).add(depositIncome);
         boolean anyMissing = stockMissing || fundMissing;
 
         TreeSet<String> moduleReasons = new TreeSet<>();
         moduleReasons.add("NET_CALCULATION_NOT_VERIFIED");
         if (anyMissing) moduleReasons.add("INCOME_ROWS_MISSING");
+        // sourceAccruedAnnualIncome 單一來源：快照 estimatedAnnualDividend；三項分類和只用於對帳。
         BigDecimal reported = snapshot.estimatedAnnualDividend();
-        if (reported == null || accrued.subtract(reported).abs().compareTo(tolerance(accrued, reported)) > 0) {
-            moduleReasons.add("INCOME_RECONCILIATION_MISMATCH");
+        ObjectNode sourceAccrued;
+        if (reported == null) {
+            moduleReasons.add("SNAPSHOT_ESTIMATED_DIVIDEND_MISSING");
+            sourceAccrued = unavailable("TWD", "SNAPSHOT_ESTIMATED_DIVIDEND_MISSING");
+        } else {
+            if (classifiedSum.subtract(reported).abs().compareTo(tolerance(classifiedSum, reported)) > 0) {
+                moduleReasons.add("INCOME_RECONCILIATION_MISMATCH");
+            }
+            sourceAccrued = income(reported, anyMissing);
         }
 
         ObjectNode data = F.objectNode();
         data.set("stockAndEtfDistributions", income(stockIncome, stockMissing));
         data.set("fundDistributions", income(fundIncome, fundMissing));
         data.set("depositInterest", income(depositIncome, false));
-        data.set("sourceAccruedAnnualIncome", income(accrued, anyMissing));
+        data.set("sourceAccruedAnnualIncome", sourceAccrued);
         for (String field : NET_UNAVAILABLE_FIELDS) {
             data.set(field, unavailable("TWD", "NET_CALCULATION_NOT_VERIFIED"));
         }

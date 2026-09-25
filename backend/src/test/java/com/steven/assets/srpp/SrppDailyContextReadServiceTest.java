@@ -80,7 +80,7 @@ class SrppDailyContextReadServiceTest {
         when(snapshots.findLatestWithStocksByOwnerUserId(OWNER)).thenReturn(Optional.of(entity));
         when(assets.getSnapshotDetail(entity)).thenReturn(SrppTestData.proposal().snapshot());
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.of(true));
-        when(evidence.findBody(SrppContextInvariantsTest.PACKAGE, "assets")).thenReturn(Optional.of("{\"a\":\"台股\\n\"}"));
+        when(evidence.findBody(SrppContextInvariantsTest.PACKAGE, "assets", OWNER)).thenReturn(Optional.of("{\"a\":\"台股\\n\"}"));
     }
 
     @AfterEach
@@ -108,8 +108,14 @@ class SrppDailyContextReadServiceTest {
                 new ObjectMapper(), clock);
     }
 
+    /** service 只回領域結果：Problem 的 code；Ok 則回 null。HTTP status 由 controller 對照（見 controller 測試）。 */
     private static String code(SrppReadResult result) {
-        return result.code();
+        return result instanceof SrppReadResult.Problem problem ? problem.code() : null;
+    }
+
+    private static String body(SrppReadResult result) {
+        assertThat(result).isInstanceOf(SrppReadResult.Ok.class);
+        return ((SrppReadResult.Ok) result).body();
     }
 
     // ───── 400 ─────
@@ -140,7 +146,6 @@ class SrppDailyContextReadServiceTest {
         user.setEffectiveUserId(null);
         SrppReadResult result = service("10:00").read(date, slot, "HASH".equals(hash) ? HASH : hash,
                 "EMPTY".equals(view) ? "" : view, "PKG".equals(packageId) ? PKG : packageId, sourceId);
-        assertThat(result.status()).isEqualTo(400);
         assertThat(code(result)).isEqualTo("INVALID_REQUEST");
         verifyNoInteractions(registry, packages, evidence, snapshots, assets);
     }
@@ -151,16 +156,13 @@ class SrppDailyContextReadServiceTest {
     void missingOwnerIs503BeforePolicy() {
         user.setEffectiveUserId(null);
         SrppReadResult result = service("10:00").read("2026-09-24", "09:05", "b".repeat(64), null, null, null);
-        assertThat(result.status()).isEqualTo(503);
         assertThat(code(result)).isEqualTo("OWNER_UNAVAILABLE");
-        assertThat(SrppJcs.parseStrict(result.body()).path("retryable").asBoolean()).isFalse();
         verifyNoInteractions(registry, packages, evidence, snapshots, assets);
     }
 
     @Test
     void unknownPolicyWithWrongDateIs409PolicyUnsupported() {
         SrppReadResult result = service("10:00").read("2026-09-20", "09:05", "0".repeat(64), null, null, null);
-        assertThat(result.status()).isEqualTo(409);
         assertThat(code(result)).isEqualTo("POLICY_UNSUPPORTED");
         verifyNoInteractions(packages, evidence, snapshots, assets);
     }
@@ -184,13 +186,10 @@ class SrppDailyContextReadServiceTest {
     void latestCalendarClosedOrUnknown() {
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.of(false));
         SrppReadResult closed = service("10:00").read("2026-09-24", "09:05", HASH, null, null, null);
-        assertThat(closed.status()).isEqualTo(409);
         assertThat(code(closed)).isEqualTo("NON_TRADING_DAY");
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.empty());
         SrppReadResult unknown = service("10:00").read("2026-09-24", "09:05", HASH, null, null, null);
-        assertThat(unknown.status()).isEqualTo(503);
         assertThat(code(unknown)).isEqualTo("CALENDAR_UNAVAILABLE");
-        assertThat(SrppJcs.parseStrict(unknown.body()).path("retryable").asBoolean()).isTrue();
         verifyNoInteractions(packages);
     }
 
@@ -198,18 +197,16 @@ class SrppDailyContextReadServiceTest {
     void latestWithoutPackageIsNotReady() {
         when(packages.findLatestForOwner(OWNER, DATE, "11:40", HASH)).thenReturn(Optional.empty());
         SrppReadResult result = service("12:00").read("2026-09-24", "11:40", HASH, null, null, null);
-        assertThat(result.status()).isEqualTo(503);
         assertThat(code(result)).isEqualTo("CONTEXT_NOT_READY");
     }
 
     @Test
     void latestCurrentReturnsRawContextBytesAndHash() throws Exception {
         SrppReadResult result = service("10:00").read("2026-09-24", "09:05", HASH, "summary", null, null);
-        assertThat(result.status()).isEqualTo(200);
-        assertThat(result.isProblem()).isFalse();
+        assertThat(result).isInstanceOf(SrppReadResult.Ok.class);
         String prefix = "{\"kind\":\"SUMMARY\",\"context\":";
-        assertThat(result.body()).startsWith(prefix + pkg.getContextJcs() + ",\"contextContentSha256\":\"");
-        JsonNode body = new ObjectMapper().readTree(result.body());
+        assertThat(body(result)).startsWith(prefix + pkg.getContextJcs() + ",\"contextContentSha256\":\"");
+        JsonNode body = new ObjectMapper().readTree(body(result));
         assertThat(body.path("contextContentSha256").asText()).isEqualTo(SrppJcs.sha256Hex(pkg.getContextJcs()));
         assertThat(SrppJcs.hash(body.get("context"))).isEqualTo(body.path("contextContentSha256").asText());
         assertThat(body.get("freshness").toString()).isEqualTo(
@@ -231,7 +228,6 @@ class SrppDailyContextReadServiceTest {
     @Test
     void clockBeforeGeneratedAtIsInternalError() {
         SrppReadResult latest = service("09:05").read("2026-09-24", "09:05", HASH, null, null, null);
-        assertThat(latest.status()).isEqualTo(500);
         assertThat(code(latest)).isEqualTo("INTERNAL_ERROR");
         SrppReadResult pinned = service("09:05").read("2026-09-24", "09:05", HASH, null, PKG, null);
         assertThat(code(pinned)).isEqualTo("INTERNAL_ERROR");
@@ -244,7 +240,6 @@ class SrppDailyContextReadServiceTest {
         UUID foreign = UUID.fromString("11111111-2222-4333-8444-555555555555");
         when(packages.findByPackageIdAndOwner(foreign, OWNER)).thenReturn(Optional.empty());
         SrppReadResult result = service("10:00").read("2026-09-24", "09:05", HASH, null, foreign.toString(), null);
-        assertThat(result.status()).isEqualTo(404);
         assertThat(code(result)).isEqualTo("CONTEXT_NOT_FOUND");
         verify(packages).findByPackageIdAndOwner(foreign, OWNER);
         verify(packages, never()).findByPackageIdAndOwner(any(), eq(8L));
@@ -271,17 +266,17 @@ class SrppDailyContextReadServiceTest {
         when(assets.getSnapshotDetail(entity)).thenReturn(changed.snapshot());
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.of(false));
         SrppReadResult stale = service(LocalDate.of(2026, 9, 25), "10:00").read("2026-09-24", "09:05", HASH, null, PKG, null);
-        assertThat(stale.status()).isEqualTo(200);
-        assertThat(new ObjectMapper().readTree(stale.body()).get("freshness").toString()).isEqualTo(
+        assertThat(stale).isInstanceOf(SrppReadResult.Ok.class);
+        assertThat(new ObjectMapper().readTree(body(stale)).get("freshness").toString()).isEqualTo(
                 "{\"status\":\"STALE\",\"checkedAt\":\"2026-09-25T10:00:00+08:00\",\"changedSourceIds\":[\"assets\",\"calendar\"],"
                         + "\"reasonCodes\":[\"CALENDAR_CHANGED\",\"SOURCE_REVISION_CHANGED\"]}");
 
         when(assets.getSnapshotDetail(entity)).thenReturn(SrppTestData.proposal().snapshot());
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.empty());
         SrppReadResult unknown = service("10:00").read("2026-09-24", "09:05", HASH, null, PKG, null);
-        assertThat(unknown.status()).isEqualTo(200);
-        assertThat(new ObjectMapper().readTree(unknown.body()).at("/freshness/status").asText()).isEqualTo("UNKNOWN");
-        assertThat(new ObjectMapper().readTree(unknown.body()).at("/freshness/changedSourceIds")).isEmpty();
+        assertThat(unknown).isInstanceOf(SrppReadResult.Ok.class);
+        assertThat(new ObjectMapper().readTree(body(unknown)).at("/freshness/status").asText()).isEqualTo("UNKNOWN");
+        assertThat(new ObjectMapper().readTree(body(unknown)).at("/freshness/changedSourceIds")).isEmpty();
     }
 
     @Test
@@ -290,8 +285,8 @@ class SrppDailyContextReadServiceTest {
         // cached-only 對前一年度日期必回 empty → UNKNOWN＋CALENDAR_UNVERIFIABLE，pinned 仍回 200。
         when(marketData.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.empty());
         SrppReadResult result = service(LocalDate.of(2027, 1, 5), "10:00").read("2026-09-24", "09:05", HASH, null, PKG, null);
-        assertThat(result.status()).isEqualTo(200);
-        JsonNode freshness = new ObjectMapper().readTree(result.body()).get("freshness");
+        assertThat(result).isInstanceOf(SrppReadResult.Ok.class);
+        JsonNode freshness = new ObjectMapper().readTree(body(result)).get("freshness");
         assertThat(freshness.path("status").asText()).isEqualTo("UNKNOWN");
         assertThat(freshness.path("changedSourceIds")).isEmpty();
         assertThat(freshness.path("reasonCodes").toString()).isEqualTo("[\"CALENDAR_UNVERIFIABLE\"]");
@@ -303,8 +298,8 @@ class SrppDailyContextReadServiceTest {
     @Test
     void evidenceReturnsEscapedBodyAndHash() throws Exception {
         SrppReadResult result = service("10:00").read("2026-09-24", "09:05", HASH, "evidence", PKG, "assets");
-        assertThat(result.status()).isEqualTo(200);
-        JsonNode body = new ObjectMapper().readTree(result.body());
+        assertThat(result).isInstanceOf(SrppReadResult.Ok.class);
+        JsonNode body = new ObjectMapper().readTree(body(result));
         assertThat(body.path("kind").asText()).isEqualTo("EVIDENCE");
         assertThat(body.path("packageId").asText()).isEqualTo(PKG);
         assertThat(body.path("sourceId").asText()).isEqualTo("assets");
@@ -314,15 +309,18 @@ class SrppDailyContextReadServiceTest {
         assertThat(body.path("bodySha256").asText()).isEqualTo(SrppJcs.sha256Hex("{\"a\":\"台股\\n\"}"));
         assertThat(body.size()).isEqualTo(7);
         verify(marketData, never()).isTwTradingDayCachedOnly(any());
+        // package 與 evidence body 查詢都以本人 ownerId 呼叫（evidence 由 repository join package 比對 owner）
+        verify(packages).findByPackageIdAndOwner(SrppContextInvariantsTest.PACKAGE, OWNER);
+        verify(evidence).findBody(SrppContextInvariantsTest.PACKAGE, "assets", OWNER);
+        verify(evidence, never()).findBody(any(), any(), org.mockito.ArgumentMatchers.longThat(id -> id != OWNER));
     }
 
     @Test
     void evidenceForUnknownOrMissingSourceIs404() {
         SrppReadResult unknown = service("10:00").read("2026-09-24", "09:05", HASH, "evidence", PKG, "funding");
-        assertThat(unknown.status()).isEqualTo(404);
         assertThat(code(unknown)).isEqualTo("SOURCE_EVIDENCE_NOT_FOUND");
-        verify(evidence, never()).findBody(any(), eq("funding"));
-        when(evidence.findBody(SrppContextInvariantsTest.PACKAGE, "calendar")).thenReturn(Optional.empty());
+        verify(evidence, never()).findBody(any(), eq("funding"), anyLong());
+        when(evidence.findBody(SrppContextInvariantsTest.PACKAGE, "calendar", OWNER)).thenReturn(Optional.empty());
         assertThat(code(service("10:00").read("2026-09-24", "09:05", HASH, "evidence", PKG, "calendar")))
                 .isEqualTo("SOURCE_EVIDENCE_NOT_FOUND");
     }

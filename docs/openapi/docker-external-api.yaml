@@ -8314,7 +8314,7 @@ components:
     SrppCashIncomeData:
       type: object
       additionalProperties: false
-      description: 基礎收益：來源估計額與可支配現金分列。本版只加總股票／ETF 配息、基金配息與存款利息；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+      description: 基礎收益：來源估計額與可支配現金分列。本版三項分類（股票／ETF 配息、基金配息、存款利息）為各自加總；sourceAccruedAnnualIncome 取快照 estimatedAnnualDividend，三項和只用於對帳；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
       properties:
         stockAndEtfDistributions:
           allOf:
@@ -8355,7 +8355,7 @@ components:
                 const: TWD
                 description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
             description: 限定本欄 unit 為 TWD。
-          description: 上述三項之和的來源估計年收入（新台幣）；與快照 estimatedAnnualDividend 以同一容差對帳，不符時模組加 INCOME_RECONCILIATION_MISMATCH。
+          description: 來源估計年收入（新台幣）：直接輸出快照 estimatedAnnualDividend（單一來源）；三項分類加總只用於容差對帳、不保證精確相等（不符時模組加 INCOME_RECONCILIATION_MISMATCH）；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING；快照值為 null 時 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。
         permanentTermInterestReinvested:
           allOf:
           - "$ref": "#/components/schemas/SrppMetric"

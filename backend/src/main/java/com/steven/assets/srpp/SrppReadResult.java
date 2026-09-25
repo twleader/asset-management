@@ -1,20 +1,23 @@
 package com.steven.assets.srpp;
 
 /**
- * Requirement 163／Task 453：讀取端點的 HTTP 狀態與已組好的 JSON 字串。
- * {@code code} 非 null 表示 body 是 RFC 9457 problem。
+ * Requirement 163／Task 453：讀取端點的領域結果。
+ *
+ * <p>service 只回傳 {@link Ok}（已組好的 SUMMARY／EVIDENCE JSON 字串）或 {@link Problem}（problem code），
+ * 不決定 HTTP status、不組 problem body；code→status 對照與 problem JSON 由 controller 經
+ * {@link SrppProblemCatalog} 產生。
  */
-public record SrppReadResult(int status, String code, String body) {
+public sealed interface SrppReadResult {
 
-    public static SrppReadResult ok(String body) {
-        return new SrppReadResult(200, null, body);
+    record Ok(String body) implements SrppReadResult {}
+
+    record Problem(String code) implements SrppReadResult {}
+
+    static SrppReadResult ok(String body) {
+        return new Ok(body);
     }
 
-    public static SrppReadResult problem(String code) {
-        return new SrppReadResult(SrppProblemCatalog.get(code).status(), code, SrppProblemCatalog.body(code));
-    }
-
-    public boolean isProblem() {
-        return code != null;
+    static SrppReadResult problem(String code) {
+        return new Problem(code);
     }
 }

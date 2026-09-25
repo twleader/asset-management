@@ -2167,14 +2167,14 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 
 ### `SrppCashIncomeData`
 
-基礎收益：來源估計額與可支配現金分列。本版只加總股票／ETF 配息、基金配息與存款利息；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+基礎收益：來源估計額與可支配現金分列。本版三項分類（股票／ETF 配息、基金配息、存款利息）為各自加總；sourceAccruedAnnualIncome 取快照 estimatedAnnualDividend，三項和只用於對帳；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
 | `stockAndEtfDistributions` | 是 | `schema` | 否 |  | 股票與 ETF 一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING）。 |
 | `fundDistributions` | 是 | `schema` | 否 |  | 基金一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND）。 |
 | `depositInterest` | 是 | `schema` | 否 |  | 存款一年估計利息合計（新台幣，ESTIMATE）。 |
-| `sourceAccruedAnnualIncome` | 是 | `schema` | 否 |  | 上述三項之和的來源估計年收入（新台幣）；與快照 estimatedAnnualDividend 以同一容差對帳，不符時模組加 INCOME_RECONCILIATION_MISMATCH。 |
+| `sourceAccruedAnnualIncome` | 是 | `schema` | 否 |  | 來源估計年收入（新台幣）：直接輸出快照 estimatedAnnualDividend（單一來源）；三項分類加總只用於容差對帳、不保證精確相等（不符時模組加 INCOME_RECONCILIATION_MISMATCH）；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING；快照值為 null 時 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。 |
 | `permanentTermInterestReinvested` | 是 | `schema` | 否 |  | 永久定存利息再投入金額；本版 UNAVAILABLE（NET_CALCULATION_NOT_VERIFIED）。 |
 | `spendableAnnualGross` | 是 | `schema` | 否 |  | 可支配年收入（稅前）；本版 UNAVAILABLE。 |
 | `taiwanIncomeTaxOrRefund` | 是 | `schema` | 否 |  | 台灣綜合所得稅應納或退稅額；本版 UNAVAILABLE。 |

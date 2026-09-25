@@ -157,8 +157,10 @@ class SrppRepositoriesPostgresTest {
         assertThat(packages.findLatestForOwner(7L, DATE, "11:40", HASH)).isEmpty();
         assertThat(packages.findByPackageIdAndOwner(foreign, 7L)).isEmpty();
         assertThat(packages.findByPackageIdAndOwner(foreign, 8L)).isPresent();
-        assertThat(evidence.findBody(newerHigh, "assets")).contains("{\"body\":\"台股\"}");
-        assertThat(evidence.findBody(newerHigh, "calendar")).isEmpty();
+        assertThat(evidence.findBody(newerHigh, "assets", 7L)).contains("{\"body\":\"台股\"}");
+        assertThat(evidence.findBody(newerHigh, "calendar", 7L)).isEmpty();
+        // evidence body 查詢 join package 比對 owner：他人 ownerId 讀不到
+        assertThat(evidence.findBody(newerHigh, "assets", 8L)).isEmpty();
 
         assertThatThrownBy(() -> jdbc.update("UPDATE srpp_context_package SET slot='11:40'"))
                 .hasMessageContaining("immutable");
