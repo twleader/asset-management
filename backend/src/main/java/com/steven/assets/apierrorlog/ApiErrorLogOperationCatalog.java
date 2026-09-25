@@ -15,7 +15,7 @@ public final class ApiErrorLogOperationCatalog {
             new Operation(OPEN_API,"OPEN_PORTFOLIO_ADVICE_LATEST","最新資產配置建議","GET /api/public/portfolio-advice/latest",70), new Operation(OPEN_API,"OPEN_TRADING_RADAR_TODAY","今日交易雷達","GET /api/public/trading-radar/today",80),
             new Operation(OPEN_API,"OPEN_TRADING_RADAR_STOCK","單一標的交易雷達","GET /api/public/trading-radar/stock",90), new Operation(OPEN_API,"OPEN_TRANSACTIONS","公開交易紀錄","GET /api/public/transactions",100),
             new Operation(OPEN_API,"OPEN_TRADING_CALENDAR","交易日曆","GET /api/public/trading-calendar",110), new Operation(OPEN_API,"OPEN_COMMODITY_PRICES","油價金價","GET /api/public/commodity-prices",120),
-            new Operation(OPEN_API,"OPEN_CRAWLER_RESCAN","公開爬蟲重新掃描","POST /api/public/crawler-data/rescan",130),
+            new Operation(OPEN_API,"OPEN_CRAWLER_RESCAN","公開爬蟲重新掃描","POST /api/public/crawler-data/rescan",130), new Operation(OPEN_API,"OPEN_SRPP_DAILY_CONTEXT","SRPP 共用計算結果","GET /api/public/srpp/daily-context",140),
             new Operation(FUBON_API,"FUBON_PORTFOLIO_READ","庫存與未實現損益","POST /internal/portfolio/read",10), new Operation(FUBON_API,"FUBON_TW_QUOTES_INVENTORY","庫存同步台股報價","POST /internal/market-data/tw-quotes",20),
             new Operation(FUBON_API,"FUBON_FILLED_TRADES_READ","已成交交易查詢","POST /internal/trades/read",30), new Operation(FUBON_API,"FUBON_ETF_HOLDINGS_READ","ETF 成分股查詢","POST /internal/market-data/etf-holdings",40),
             new Operation(FUBON_API,"FUBON_BANK_BALANCE_READ","交割銀行餘額","POST /internal/bank-balance/read",50), new Operation(FUBON_API,"FUBON_SETTLEMENT_READ","交割款查詢","POST /internal/settlement/read",60),

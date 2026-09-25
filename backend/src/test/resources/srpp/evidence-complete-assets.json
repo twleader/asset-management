@@ -1,0 +1,9 @@
+{
+  "kind": "EVIDENCE",
+  "packageId": "96c331dd-0015-4646-8a8c-9a304de0f322",
+  "sourceId": "assets",
+  "bodyMediaType": "application/json",
+  "bodyEncoding": "UTF-8",
+  "body": "{\"synthetic\":true,\"snapshotId\":\"1\",\"snapshotDate\":\"2026-09-24\",\"snapshotDepositsTwd\":\"3000000\",\"snapshotStockValueTwd\":\"2000000\",\"snapshotFundValueTwd\":\"0\",\"liveStockValueTwd\":\"2000000\",\"snapshotTotalAssetsTwd\":\"5000000\",\"depositRows\":[{\"id\":\"1\",\"bankId\":\"SYNTHETIC_BANK\",\"currency\":\"TWD\",\"type\":\"TERM\",\"amountTwd\":\"2000000\",\"annualInterestTwd\":\"30000\"},{\"id\":\"2\",\"bankId\":\"SYNTHETIC_BANK\",\"currency\":\"TWD\",\"type\":\"DEMAND\",\"amountTwd\":\"1000000\",\"annualInterestTwd\":\"0\"}],\"stockRows\":[{\"id\":\"1\",\"market\":\"台股\",\"symbol\":\"EXAMPLE_TW\",\"liveValueTwd\":\"2000000\",\"annualDividendTwd\":\"60000\"}]}",
+  "bodySha256": "f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8"
+}

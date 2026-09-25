@@ -1,0 +1,9 @@
+{
+  "kind": "EVIDENCE",
+  "packageId": "96c331dd-0015-4646-8a8c-9a304de0f322",
+  "sourceId": "policy",
+  "bodyMediaType": "application/json",
+  "bodyEncoding": "UTF-8",
+  "body": "{\"synthetic\":true,\"formulaVersion\":\"SYNTHETIC_TEST_ONLY\",\"targetWeights\":{\"TW:EXAMPLE_TW\":\"0.2\",\"CASH:TWD:TERM\":\"0.4\",\"CASH:TWD:DEMAND\":\"0.4\"}}",
+  "bodySha256": "8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7"
+}

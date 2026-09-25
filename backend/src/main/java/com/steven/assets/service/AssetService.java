@@ -80,6 +80,15 @@ public class AssetService {
     }
 
     /**
+     * Requirement 163／Task 452.5：以呼叫端已依明確 owner 條件載入的 entity 產生 detail，
+     * 供背景 producer 與 SRPP freshness 讀取使用；投影邏輯與 {@link #getSnapshotDetail(Long)} 相同。
+     */
+    @Transactional(readOnly = true)
+    public AssetSnapshotDto.SnapshotDetailResponse getSnapshotDetail(AssetSnapshot snapshot) {
+        return toDetailResponse(snapshot);
+    }
+
+    /**
      * 對快照中所有缺少 dividendRate 的持股，呼叫 MarketDataService 補齊，
      * 並更新 estimatedDividend 及快照層級 estimatedAnnualDividend，最後存回 DB。
      */

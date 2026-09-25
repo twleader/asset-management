@@ -477,13 +477,13 @@ curl -fsS http://127.0.0.1:9090/api/quotes
 
 看到 JSON array（可為空）代表本機 API gateway 與 quote upstream 正常。
 
-Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十三條 exact route——
-十二條唯讀 GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
+Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十四條 exact route——
+十三條唯讀 GET：`/api/quotes`、`/api/quotes/one`、`/api/public/market-index`、
 `/api/assets/latest`、`/api/public/exchange-rate/usd-twd`、
 `/api/public/market-analysis/today`、`/api/public/portfolio-advice/latest`、
 `/api/public/trading-radar/today`、`/api/public/trading-radar/stock`、
-`/api/public/transactions`、`/api/public/trading-calendar`、`/api/public/commodity-prices`，
-以及一條寫入 POST：`/api/public/crawler-data/rescan`（免登入觸發重新搜尋，
+`/api/public/transactions`、`/api/public/trading-calendar`、`/api/public/commodity-prices`、
+`/api/public/srpp/daily-context`，以及一條寫入 POST：`/api/public/crawler-data/rescan`（免登入觸發重新搜尋，
 經 business 端 30 秒全域冷卻節流）。BFF 8080 與 external-materials 8082
 不再發布到 host。
 
@@ -494,9 +494,9 @@ Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十�
 兩支交易雷達、`transactions`）另外接受 `email` query 參數改查指定帳號的資料**（Requirement 140），
 **不需額外密碼或 token**——這是刻意設計，不是遺漏；意味著任何能到達 9090 的人只要知道
 一個有效帳號的 email，就能讀到該帳號完整的個人資料，請務必只在信任的網路邊界內使用。`commodity-prices` 每次只讀既有已持久化 WTI、BRENT、GOLD spot，固定三個 slot；
-它不接受 query 或 GET body，也不會 refresh 或 request-time 外呼。十三支 API 的完整 OpenAPI 3.1 契約在
+它不接受 query 或 GET body，也不會 refresh 或 request-time 外呼。`srpp/daily-context`（Requirement 163）沿用同一 `email` owner selector，只讀背景 producer 已發布的 SRPP 共用計算結果；規則包 registry 為空時一律回 409 `POLICY_UNSUPPORTED`。十四支 API 的完整 OpenAPI 3.1 契約在
 `docs/openapi/docker-external-api.yaml`；由該 YAML 產生、供人閱讀的標準文件同時位於
-`docs/openapi/9090-api-swagger.md` 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`；Swagger UI 與 YAML 本身並沒有掛在 9090。
+`docs/openapi/9090-api-swagger.md` 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`（後者只在地端同步，雲端 session 不覆寫）；Swagger UI 與 YAML 本身並沒有掛在 9090。
 
 ### 6.3 開啟系統並登入
 
@@ -592,22 +592,22 @@ FINMIND_TOKEN=你的Token
 ### 8.5 Tailscale 私網 HTTPS（選用）
 
 先安裝 Tailscale 並在 app 中登入同一個 tailnet；macOS 可使用
-`brew install --cask tailscale-app`。確認上述十三條本機 API 都健康後執行：
+`brew install --cask tailscale-app`。確認上述十四條本機 API 都健康後執行：
 
 ```bash
 scripts/configure-tailscale-api-gateway.sh
 ```
 
-腳本在任何 Serve reset 前，會為十三支本機 API 各自保存 response headers/body：十二條唯讀 GET 逐支
+腳本在任何 Serve reset 前，會為十四支本機 API 各自保存 response headers/body：十二條唯讀 GET 逐支
 要求 HTTP 200、`application/json` 與既定 payload 契約，寫入用的 `crawler-data/rescan` 則只以 GET
 驗證回 `405` 帶 `Allow: POST`（刻意不發 POST，避免每次執行都真的觸發一輪對外抓取）；任一路失敗即
 停止且不會 reset。commodity batch 另會驗證 `marketOpen` boolean、固定 WTI／BRENT／GOLD slots，及 query／GET-body
-request gate 的 400 ProblemDetail。可先執行
-`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與十三路成功流程。
+request gate 的 400 ProblemDetail；`srpp/daily-context` 以台北今天、`slot=09:05`、全零規則包探測，要求 409 `application/problem+json`、`Cache-Control: private, no-store` 與 `POLICY_UNSUPPORTED`。可先執行
+`scripts/tests/configure-tailscale-api-gateway-test.sh` 驗證 Content-Type fail-closed 與十四路成功流程。
 
-腳本只會建立十三條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
+腳本只會建立十四條 path-scoped HTTPS `:9090`：quotes、quotes/one、market-index、
 assets/latest、USD/TWD 公開匯率、crawler-data/rescan、market-analysis/today、
-portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactions、trading-calendar、commodity-prices。
+portfolio-advice/latest、trading-radar/today、trading-radar/stock、transactions、trading-calendar、commodity-prices、srpp/daily-context。
 不需要購買憑證、自簽憑證或再加 OAuth2；TLS 與
 tailnet identity 由 Tailscale 管理。腳本不會啟用 Funnel，也不會建立 `/`、`/api/`
 萬用代理或額外 handler，看到陌生 Serve handler 時也不會自動 reset。

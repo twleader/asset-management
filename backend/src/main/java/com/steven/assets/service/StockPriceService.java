@@ -111,7 +111,15 @@ public class StockPriceService {
     public LiveAssetsResponse getLiveAssets() {
         Optional<AssetSnapshot> latestOpt = snapshotRepo.findLatestWithStocks();
         if (latestOpt.isEmpty()) return null;
-        AssetSnapshot snapshot = latestOpt.get();
+        return getLiveAssets(latestOpt.get());
+    }
+
+    /**
+     * Requirement 163／Task 452.5：以呼叫端已載入（owner-explicit）的快照 entity 計算即時資產。
+     * 無參數版本委派此方法，金額算法與 wire 完全相同。
+     */
+    @Transactional(readOnly = true)
+    public LiveAssetsResponse getLiveAssets(AssetSnapshot snapshot) {
         Set<PriceQueryService.PriceKey> holdingKeys = snapshot.getStocks().stream()
                 .map(row -> new PriceQueryService.PriceKey(row.getStockCode(), row.getMarket()))
                 .collect(Collectors.toCollection(LinkedHashSet::new));

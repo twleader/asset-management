@@ -69,11 +69,19 @@ public class SnapshotAggregateCalculator {
     }
 
     public BigDecimal depositEstimatedInterest(BankDeposit deposit) {
-        BigDecimal rate = deposit.getAnnualInterestRate();
+        return depositEstimatedInterest(deposit.getAmount(), deposit.getAnnualInterestRate(), deposit.getCurrency());
+    }
+
+    /**
+     * 存款預估年利息的唯一公式（entity 版與 SRPP 等以 DTO 為輸入者共用）：
+     * {@code amount × rate / 100}，scale 0、HALF_UP；amount null 視為 0；
+     * rate null 或 ≤0、或 currency 為 {@code TRANSIT_TWD}／{@code TRANSIT_USD} 時為 0。
+     */
+    public static BigDecimal depositEstimatedInterest(BigDecimal amount, BigDecimal rate, String currency) {
         if (rate == null || rate.compareTo(BigDecimal.ZERO) <= 0) return BigDecimal.ZERO;
-        String currency = deposit.getCurrency();
         if ("TRANSIT_TWD".equals(currency) || "TRANSIT_USD".equals(currency)) return BigDecimal.ZERO;
-        return zeroIfNull(deposit.getAmount())
+        BigDecimal safeAmount = amount != null ? amount : BigDecimal.ZERO;
+        return safeAmount
                 .multiply(rate)
                 .divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
     }

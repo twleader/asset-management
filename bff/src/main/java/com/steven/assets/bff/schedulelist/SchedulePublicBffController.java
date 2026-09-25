@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬三個服務：
- * {@code business-services}（28 個）、{@code external-materials-service}（39 個）與
+ * {@code business-services}（30 個）、{@code external-materials-service}（39 個）與
  * {@code bff}（1 個；Requirement 143／Task 421 新增的 {@code NginxGatewayFailureLogTailer}，
  * 是 bff 服務有史以來第一個 {@code @Scheduled} 元件）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
@@ -40,7 +40,8 @@ import java.util.List;
  *       FubonTradeSyncScheduler、FubonBankBalanceSyncScheduler（Requirement 128／Task 393）、
  *       FubonSettlementSyncScheduler（Requirement 129／Task 394）、
  *       FubonRealizedGainSyncScheduler（Requirement 130／Task 395）、
- *       ApiErrorLogRetentionScheduler（Task 417）</li>
+ *       ApiErrorLogRetentionScheduler（Task 417）、
+ *       SrppDailyContextProducerScheduler、SrppContextRetentionScheduler（Requirement 163／Task 452）</li>
 
  *   <li>external-materials-service：TwseIndexPoller、PricePoller、TaiexIndexPoller、TwClosurePoller、
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
@@ -65,9 +66,9 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（68 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
+    /** 全系統排程清單（70 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
-            // ===== business-services（28）=====
+            // ===== business-services（30）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
                     "檢查每位使用者的最新快照；非未來快照釘為當日並重算資產，讓即時股價覆蓋生效，"
                             + "同時移除處理日已到的台幣／外幣在途款，開機時補跑。未填日期、未到期、歷史及未來快照不清除",
@@ -155,6 +156,12 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "券商庫存", "富邦已實現損益同步",
                     "以隔離的富邦官方 Linux SDK 唯讀將回報淨損益映射為調節成本基礎，非原始取得成本或完整 ledger（完整成交帳）；僅接受真正 boolean accountBindingExplicit=true。手動等價（manual-equivalence）與 source-idempotency 保護會略過相同資料，僅缺少對應 occurrence 時新增，絕不覆寫既有紀錄",
                     "每日 08:00／13:45／19:30／22:00", "0 0 8 * * * / 0 45 13 * * * / 0 30 19 * * * / 0 0 22 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "SRPP 共用計算結果", "SRPP 共用計算結果 producer",
+                    "全天（含週末）每 5 分鐘預先續期當年度台股交易日曆快取；台股交易日 09:05–13:55 另對已登錄規則包 × 有快照的 ACTIVE 帳號凍結來源、計算並發布不可變 package（Requirement 163）。規則包 registry 為空時不做任何計算",
+                    "每 5 分鐘（產生僅限交易日 09:05–13:55）", "0 */5 * * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "SRPP 共用計算結果", "SRPP package 保留期清理",
+                    "刪除交易日早於保留天數（預設 7 天）的 SRPP package 與其凍結來源；不刪規則包 registry 與 owner key",
+                    "每日 03:25", "0 25 3 * * *", TPE),
 
             // ===== external-materials-service（39）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股即時推播訂閱更新",
@@ -286,11 +293,11 @@ public class SchedulePublicBffController {
 
             // ===== bff（1）=====
             new ScheduledJobDto(GATEWAY, "API 錯誤紀錄", "Nginx gateway 錯誤擷取",
-                    "定期讀取 Nginx 錯誤 log，比對既有 13 條白名單路由後寫入 API 錯誤紀錄",
+                    "定期讀取 Nginx 錯誤 log，比對既有 14 條白名單路由後寫入 API 錯誤紀錄",
                     "每 15 秒", "fixedDelay=15000ms", "")
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（68 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（70 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

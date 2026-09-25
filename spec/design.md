@@ -709,7 +709,7 @@ Requirement 109／Task 373 取代原本 Yahoo request-time 五檔決策；其後
 
 ##### Requirement 111：交易雷達 public list／detail 與完整 OpenAPI 3 文件
 
-> **Current-state 覆寫：**本節與後續 Requirement 112／113／118 取代本檔早期 Requirement 86／Task 347 當時的「九條」current-state snapshot；完整實作完成後唯一 9090 manifest 是十三條 exact path/method（十二 GET、一 POST）。早期段落僅供歷史追溯，不可作為 gateway、Tailscale、OpenAPI、文件或測試的現行上限。
+> **Current-state 覆寫：**本節與後續 Requirement 112／113／118 取代本檔早期 Requirement 86／Task 347 當時的「九條」current-state snapshot；完整實作完成後唯一 9090 manifest 是十四條 exact path/method（十三 GET、一 POST；第十四條為 Requirement 163 的 `GET /api/public/srpp/daily-context`）。早期段落僅供歷史追溯，不可作為 gateway、Tailscale、OpenAPI、文件或測試的現行上限。
 
 交易雷達的外部 consumer 有兩種不同負載：首頁需要所有股票的收合列和頁首資料；使用者展開一列才需要該標的的完整證據／基本面／指標樹。因此 9090 不再 relay 一個含每一列 full `StockDecision` 的巨大 `today` payload，而是固定為以下兩個 exact GET：
 
@@ -736,7 +736,7 @@ api-gateway:9090
 
 兩支 path 維持 Requirement 86 configured-admin owner scope：BFF 不直查 DB，cookie／caller header／Tailscale identity 都不是 tenant selector。BFF 只帶 bootstrap 過的 `X-User-*` 到 business，並在 outbound Reactor context 刪除 caller identity。
 
-> **Requirement 140 現行狀態規則：** 上一句「public caller 無法選 owner」自 Requirement 140 起改為「public caller 只能透過明列的 `email` query 參數選 owner，其餘 cookie／header／Tailscale identity 仍不是 tenant selector」——兩支 path 各自新增 optional `email` 參數，帶有效 email 時改呼叫 `BusinessUserClient.byEmail(email)`（只驗 `isActive()`，不要求 `configuredAdmin()`），不帶時 `configuredAdmin()` bootstrap 逐字不變。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節。bootstrap unavailable 保持 503，downstream non-2xx 保持 sanitized 502，transport 保持 503，timeout 保持 504；detail 的 projection not-found 是唯一安全的 404。Nginx、BFF SecurityConfig、Tailscale serve config 皆只能加入各自明列的 exact GET；全 branch 最終十三條 9090 route 的 allowlist（十二 GET、一 POST）與 OpenAPI path/method 集合必須雙向相同；trailing slash、matrix、descendant 不藉 wildcard 被放行。
+> **Requirement 140 現行狀態規則：** 上一句「public caller 無法選 owner」自 Requirement 140 起改為「public caller 只能透過明列的 `email` query 參數選 owner，其餘 cookie／header／Tailscale identity 仍不是 tenant selector」——兩支 path 各自新增 optional `email` 參數，帶有效 email 時改呼叫 `BusinessUserClient.byEmail(email)`（只驗 `isActive()`，不要求 `configuredAdmin()`），不帶時 `configuredAdmin()` bootstrap 逐字不變。完整規則見本檔末「Requirement 140：9090 個人資料公開端點依 email 參數選擇帳號」一節。bootstrap unavailable 保持 503，downstream non-2xx 保持 sanitized 502，transport 保持 503，timeout 保持 504；detail 的 projection not-found 是唯一安全的 404。Nginx、BFF SecurityConfig、Tailscale serve config 皆只能加入各自明列的 exact GET；全 branch 最終十四條 9090 route 的 allowlist（十三 GET、一 POST；Requirement 163 起）與 OpenAPI path/method 集合必須雙向相同；trailing slash、matrix、descendant 不藉 wildcard 被放行。
 
 `docs/openapi/docker-external-api.yaml` 是 9090 的機器可讀 OpenAPI 3 source of truth。每個 operation 要明述用途、輸入限制、讀寫副作用、owner／network scope、資料新鮮度與交易限制；每個 parameter、request body、response、header、schema、nested property、array item、enum 都要有具體 `description`，並明確保留 type／format／required／nullable／items／ref。不得使用 untyped `object`、free-form map 或只有名稱重述的 description 逃避 class attribute 字典。公開文件產生器以這個 YAML 為唯一輸入、固定 YAML path order，輸出完整 Markdown 到版本庫 `docs/openapi/9090-api-swagger.md`，再以同一 bytes 覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`。輸出必包括：安全與網路邊界、每支 API 的用途／完整 input／status response、所有可達 schema 的 class attribute 表（JSON 名稱、用途、type/format、required、nullable、enum、array item/ref）。產生器要有 `--check` mode，能失敗於任一 mirror 缺失或 bytes 不同；OpenAPI Ruby contract test 必須驗 operation/schema/property documentation completeness 和產生文件同步，令日後任何 9090 API 變更未重產文件即無法通過。
 
@@ -1507,8 +1507,8 @@ Google Drive 上每一份備份檔的本地索引；UI 列表 / 還原選單一�
 
 ### Base URL
 - Browser UI（本機）: `http://localhost/`；登入後頁面 API 由 frontend Nginx 轉至 BFF
-- Docker 外部 API（本機）: `http://127.0.0.1:9090`（十三條路由：十二支唯讀 exact GET ＋ Requirement 71 的唯一寫入 exact `POST /api/public/crawler-data/rescan`。十二支 GET＝原始五支 ＋ Requirement 79／Task 338 的 `GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest` ＋ Requirement 111／Task 376 的交易雷達列表 `GET /api/public/trading-radar/today` 及指定股票明細 `GET /api/public/trading-radar/stock` ＋ Requirement 112／Task 377 的 configured-admin `GET /api/public/transactions` ＋ Requirement 113／Task 378 的 global `GET /api/public/trading-calendar` ＋ Requirement 118／Task 383 的 global persisted commodity batch `GET /api/public/commodity-prices`）
-- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同十三條 exact path；不使用 Funnel；path/method 與完整 OpenAPI 3 契約及 SRPP 標準文件機械對齊）
+- Docker 外部 API（本機）: `http://127.0.0.1:9090`（十四條路由：十三支唯讀 exact GET ＋ Requirement 71 的唯一寫入 exact `POST /api/public/crawler-data/rescan`。十三支 GET＝原始五支 ＋ Requirement 79／Task 338 的 `GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest` ＋ Requirement 111／Task 376 的交易雷達列表 `GET /api/public/trading-radar/today` 及指定股票明細 `GET /api/public/trading-radar/stock` ＋ Requirement 112／Task 377 的 configured-admin `GET /api/public/transactions` ＋ Requirement 113／Task 378 的 global `GET /api/public/trading-calendar` ＋ Requirement 118／Task 383 的 global persisted commodity batch `GET /api/public/commodity-prices` ＋ Requirement 163／Task 452–454 的 SRPP 共用計算結果 `GET /api/public/srpp/daily-context`）
+- Docker 外部 API（遠端）: `https://<device>.<tailnet>.ts.net:9090`（Tailscale Serve 掛載相同十四條 exact path；不使用 Funnel；path/method 與完整 OpenAPI 3 契約及 SRPP 標準文件機械對齊）
 - Docker network 內部: `http://bff:8080`／`http://external-materials-service:8080`
 
 ### Endpoints
@@ -12404,3 +12404,122 @@ job response record `{jobId,status,createdAt,completedAt,priceRefresh}`；status
 
 
 Task 451 效能量測採改動前已保存的 authenticated list 基準與新版同版 legacy 對照，兩者分開回報。驗收協定與可比條件以 Requirement 148 的 Task 451 補充及自足任務檔為準：新台股 Panel 相較事前基準至少改善 20%；同版 legacy 也受共用最佳化影響，必須揭露差距而不再要求其差距 20%。不得重新挑選較慢基準、人工拖慢 legacy、減少標的或縮短歷史來達標。此變更只修訂驗收比較基準，不改任何 API／金融／資料新鮮度契約。
+
+
+## Requirement 163／Task 452、Task 453、Task 454：9090 SRPP 共用計算結果唯讀 API
+
+來源規格：`docs/handoffs/srpp-api-spec-20260923/`（proposal 1.0.0-proposal.1）。本節只描述本系統「首個可交付版本」的實作設計；proposal 內的 SRPP 接入、reference parity、效能量測屬後續階段。
+
+### 資料流
+
+```text
+[producer, business-services, 每 5 分鐘 Asia/Taipei]
+  warmTwHolidaysIfExpiringWithin(6 分鐘)（含週末；剩餘 TTL ≤6 分鐘即重抓）→ isTwTradingDayKnown(今天)
+  → 開市 && 09:05 ≤ now < 14:00 ?
+  → 對 SrppPolicyRegistryService.supportedPolicies() × ACTIVE owner（有快照）
+      SrppSourceCapture.capture(ownerId, policy, slot, date)      ← read-only tx；owner-explicit
+      SrppModuleCalculator.calculate(capture)                      ← 純函式，不碰 Spring/DB
+      SrppPackagePublisher.publish(result)                         ← 新 tx：重驗快照 revision → INSERT package+evidence
+[GET 9090] api-gateway exact location → bff PublicSrppDailyContextController
+  → PublicSrppDailyContextService（query 驗證、owner resolve、清 caller identity、顯式 X-User-*）
+  → business GET /internal/public-srpp/daily-context（InternalSrppDailyContextController → SrppDailyContextReadService）
+  → BFF SrppDailyContextResponseValidator（strict schema＋JCS hash）→ 原位元組轉送＋Cache-Control: private, no-store
+```
+
+### 資料表（changeset v1.136.0-srpp-daily-context.sql，冪等）
+
+| 表 | 欄位 | 約束 |
+|---|---|---|
+| `srpp_policy_registry` | `policy_bundle_sha256 char(64) PK`（CHECK 64 位小寫 hex 且不得全零，全零保留給 preflight）、`formula_version varchar(64) NOT NULL`、`policy_document text NOT NULL`、`formula_manifest text NOT NULL`、`registered_at timestamptz NOT NULL DEFAULT now()` | PK CHECK `^[0-9a-f]{64}$`；`BEFORE UPDATE` trigger 拒絕；DELETE 允許（退役，但被 package FK RESTRICT 保護） |
+| `srpp_owner_key` | `owner_user_id bigint PK FK app_user(id)`、`owner_key uuid NOT NULL UNIQUE`、`created_at timestamptz NOT NULL DEFAULT now()` | `BEFORE UPDATE` 拒絕；只由 producer 以 `INSERT … ON CONFLICT DO NOTHING` 建立 |
+| `srpp_context_package` | `package_id uuid PK`、`owner_user_id bigint NOT NULL FK app_user(id)`、`trading_date date NOT NULL`、`slot varchar(5) NOT NULL CHECK IN ('09:05','11:40')`、`policy_bundle_sha256 char(64) NOT NULL FK registry RESTRICT`、`generated_at timestamptz NOT NULL`、`context_jcs text NOT NULL` | index `(owner_user_id, trading_date, slot, policy_bundle_sha256, generated_at DESC, package_id DESC)`、index `(trading_date)`；`BEFORE UPDATE` 拒絕 |
+| `srpp_context_evidence` | `package_id uuid FK package ON DELETE CASCADE`、`source_id varchar(64)`、`body text NOT NULL` | PK `(package_id, source_id)`；`BEFORE UPDATE` 拒絕 |
+
+`api_error_log_operation` 新增 `('OPEN_API','OPEN_SRPP_DAILY_CONTEXT','SRPP 共用計算結果',140)`（`ON CONFLICT DO NOTHING`）。
+
+**正規化說明：** `calculationPolicySha256`／`formulaSetSha256`、`contextContentSha256`、`bodySha256` 都可由文件計算，不設欄位，讀取時計算。`srpp_context_package` 的 owner／日期／時段／規則包／generated_at 與 `context_jcs` 內同義值重複，是「不可變證據＋查詢鍵」的刻意 denormalization（與 `asset_snapshot.total_*` 同類）：package 是可重建的派生快取，內容一經發布不再變更，查詢鍵由 producer 同一程式路徑寫入並由測試保證一致。這四張表不寫持倉、交易、存款或任何權威資料。
+
+保留期：`SrppContextRetentionScheduler` 每日 03:25（`Asia/Taipei`；與 producer 一併登錄至 BFF `SchedulePublicBffController.JOBS`）刪除 `trading_date < 今天 − srpp.retention-days`（預設 7，最小 7）的 package，evidence cascade；不刪 registry、owner key。
+
+### 政策 registry 與公式版本
+
+`SrppFormulaCatalog` 在程式內定義唯一支援版本 `ASSET_MGMT_SRPP_V1` 與其 manifest（JSON，JCS 後計算 `formulaSetSha256`）：
+
+```json
+{"schema":"SRPP_FORMULA_MANIFEST_V1","formulaVersion":"ASSET_MGMT_SRPP_V1",
+ "calculations":{
+  "assets":{"calculationId":"ASSET_MGMT_ASSETS_RECON_V1","inputs":"LatestAssetsDto.Response(snapshot,liveAssets,targetPriceComplete)","revisionProjection":"SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1","dataAsOf":"MIN_LIVE_STOCK_UPDATED_AT_V1","tolerance":"max(0.01,max(abs(detail),abs(reported))*0.0001)","depositInterest":"SnapshotAggregateCalculator.depositEstimatedInterest"},
+  "allocation":{"calculationId":"ASSET_MGMT_TOTAL_EXPOSURE_V1","assetKey":"ASSET_KEY_V1","division":"MathContext(34,HALF_EVEN)"},
+  "cashIncome":{"calculationId":"ASSET_MGMT_GROSS_INCOME_V1","netCalculation":"NOT_VERIFIED"},
+  "funding":{"calculationId":"ASSET_MGMT_FUNDING_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"},
+  "completedTechnicals":{"calculationId":"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"}},
+ "timezone":"Asia/Taipei","offsetLessTimezone":"Asia/Taipei","decimal":"canonical-string","hash":"RFC8785-JCS+SHA-256"}
+```
+
+（實際常數以實作檔為準，但必須是單一 Java 常數、有測試固定其 JCS digest；改動 manifest 即產生不同 `formulaSetSha256`，既有 registry 列自然失效。）
+
+`SRPP_POLICY_DOCUMENT_V1`：`{"schema":"SRPP_POLICY_DOCUMENT_V1","targets":{"<assetKey>":"<canonical decimal 0–1>",...}}`，不得有其他 key；assetKey 需符合 `ASSET_KEY_V1` 形狀；權重皆 ≥0 且總和 ≤1（不要求等於 1，未涵蓋部分即無目標）。
+
+`SrppPolicyRegistryService.find(hash)` 讀列 → 三項驗證（版本已實作、manifest JCS 相等、文件結構）→ 回 `SupportedPolicy(bundleHash, formulaVersion, calculationPolicySha256, formulaSetSha256, policyDocument, manifest, targets, registeredAt)`；失敗回 empty（呼叫端 409）。`scripts/srpp-policy-register.rb`：讀 policy JSON 與 manifest JSON（不接受浮點數，金額必須字串），輸出 JCS 後的 `INSERT … ON CONFLICT DO NOTHING` SQL 與兩個計算出的 hash 至 stdout；不連 DB。
+
+### JCS 與 canonical Decimal
+
+`SrppJcs`（backend 與 bff 各一份，BFF 不依賴 backend jar）：輸入 Jackson `JsonNode`，只接受 object／array／string／boolean／null／絕對值 ≤ 2^53−1 的整數；object key 依 Java `String.compareTo`（UTF-16 code unit）排序；字串逸出依 RFC 8785（`"`、`\`、`\b\f\n\r\t`，其餘 <0x20 為 `\u00xx` 小寫 hex，其他字元原樣 UTF-8）；無空白。浮點或絕對值超過 2^53−1 的數字拋例外。golden：proposal 三份 summary 範例的 context → 對應 `contextContentSha256`。
+
+`SrppDecimal.format(BigDecimal)`：`signum==0 → "0"`，否則 `stripTrailingZeros().toPlainString()`。驗證 regex `^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$`、長度 ≤80、非 `-0`。
+
+### 來源凍結（SrppSourceCapture）
+
+- 以 owner-explicit 讀取重構既有路徑：`LatestAssetsService.getLatestForOwner(long ownerId)` 以 `findLatestWithStocksByOwnerUserId`；`StockPriceService.getLiveAssets(AssetSnapshot)` 與 `AssetService.getSnapshotDetail(AssetSnapshot)` 為接受已載入 entity 的 overload。既有無參數方法改為委派同一核心，行為與 wire 不變（`LatestAssetsServiceTest` 仍通過）。背景執行緒沒有 request scope，因此絕不呼叫依賴 `ownerFilter` 的 `findLatestWithStocks()`。
+- `assets` body：以應用程式 `ObjectMapper` 序列化該 `LatestAssetsDto.Response` 的字串，原樣保存。`capturedAt` = 序列化完成時間；`dataAsOf` = 各持股 `LiveStockItem.updatedAt`（Instant）非 null 者的最小值與 capturedAt 取較早者；任一 updatedAt > capturedAt 拒絕發布（`FUTURE_DATA_AS_OF`）。不使用無 offset 的 `priceUpdatedAt` 字串；無 offset 時間一律以 Asia/Taipei 解讀（manifest `offsetLessTimezone`）。
+- `SrppSnapshotRevision.of(SnapshotDetailResponse)`：投影 `{id, snapshotDate, usdExchangeRate, total*, estimatedAnnualDividend, realizedGain, deposits[], funds[], stocks[]}`（各列全部 DTO 欄位，但排除非資產內容的顯示欄位：頂層與 deposits 的 `notes`、`bankDisplayName`、`depositDisplayName`、`stockName`、`brokerDisplayName`、`displayOrder`；版本標記 `SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1`），列依 id 排序，BigDecimal 全用 `SrppDecimal.format`，null 保留 null，JCS→SHA-256；revision 字串 `snapshot-<id>-<64hex>`。讀取路徑用同一函式。
+- `calendar` body：`{"schema":"SRPP_CALENDAR_EVIDENCE_V1","market":"台股","date":"<tradingDate>","twTrading":true,"authority":"MARKET_DATA_SERVICE"}` 的 JCS 字串；revision `calendar-<date>-open`；dataAsOf=capturedAt。
+- `policy` body：`{"schema":"SRPP_POLICY_EVIDENCE_V1","policyBundleSha256":…,"formulaVersion":…,"calculationPolicy":<policy document>,"formulaManifest":<manifest>}` 的 JCS 字串；revision `policy-<calculationPolicySha256>`；dataAsOf = capturedAt 與 `registered_at` 之較早者。
+- `dataCutoffAt` = assets capturedAt；`generatedAt` = 發布前取樣，須 ≥ 所有 capturedAt。時間序列化 `yyyy-MM-dd'T'HH:mm:ssXXX`（Asia/Taipei，截到秒）。
+
+### 模組計算（SrppModuleCalculator，純函式）
+
+輸入 `(LatestAssetsDto.Response, SupportedPolicy, tradingDate)`，輸出 context 的 `modules` 與「是否可發布」。ID 前綴：股票 `STOCK-<id>`、基金 `FUND-<id>`、存款 `DEPOSIT-<id>`。
+
+| 模組 | 規則 |
+|---|---|
+| assets | 身分（snapshotId、snapshotDate、股票 id 集合、每檔 market/code/shares 精確）→ 八項 checks（detail：deposits Σamount、funds ΣcurrentValue、snapshot stocks ΣcurrentValue、live stocks ΣliveValue、total = 三者；reported：snapshot.total*／live.total*）→ 幣別白名單。任一失敗 → 不發布（log reason code）。資料欄：snapshot 四總額＋liveStockValue、liveTotalAssets（EXACT）、targetPriceComplete、rowCounts、checks、depositGroups（`(currency, depositType, bankId)` 分組；bankName=bankDisplayName；amountTwd Σ；originalAmount 全非 null 才 Σ 否則 null；利息 Σ calculator 值，ESTIMATE）。status：targetPriceComplete ? COMPLETE : PARTIAL(`TARGET_PRICE_INCOMPLETE`)。 |
+| allocation | 見 Requirement 163；列排序 assetKey；exposure：股票 liveValue、基金 currentValue、存款 amount。 |
+| cashIncome | 見 Requirement 163；`sourceAccruedAnnualIncome` 直接取 `snapshot.estimatedAnnualDividend`（單一來源），三項加總只用於對帳，容差同 assets；存款利息呼叫 `SnapshotAggregateCalculator` 抽出的共用 static 純函式。 |
+| funding／completedTechnicals | 固定 UNAVAILABLE `CALCULATOR_NOT_VERIFIED`。 |
+
+`sourceIds` 引用：assets→`["assets"]`；allocation 的 exposure／currentWeight→`["assets"]`、targetWeight→`["policy"]`、gap→`["assets","policy"]`，模組→`["assets","policy"]`；cashIncome→`["assets"]`。
+
+### 發布（SrppPackagePublisher）
+
+`@Transactional` 新交易：`srpp_owner_key` 確保存在 → 以 `findLatestWithStocksByOwnerUserId` 重算 revision，與 capture 不同即 return（metrics log `SOURCE_REVISION_CHANGED`）→ 組 context（`packageId` = `UUID.randomUUID()`）→ `SrppContextInvariants.verify(context)`（排序、唯一、時間序、coverage、COMPLETE 規則，與 BFF 驗證同義）→ INSERT package（`context_jcs` = JCS）與三筆 evidence。任何例外 rollback，不留半套。producer 同一 JVM 以 `synchronized` 防重入；business-services 為單一實例（既有排程慣例）。
+
+### 讀取（SrppDailyContextReadService，`@Transactional(readOnly=true)`）
+
+需 `CurrentUserContext.hasUser()`，否則 503 `OWNER_UNAVAILABLE`。流程與錯誤碼同 Requirement 163 AC「讀取模式與錯誤碼」。freshness：以 owner 最新快照（`findLatestWithStocksByOwnerUserId(currentUser)` → `getSnapshotDetail(entity)`）計算 revision 與 package 的 assets revision 比較（不同 → STALE `["assets"]`，reason `SOURCE_REVISION_CHANGED`）；cached-only 日曆：false → STALE `["calendar"]` `CALENDAR_CHANGED`，empty → UNKNOWN `CALENDAR_UNVERIFIABLE`；registry 驗證已在前一步。`checkedAt` = now；若 `checkedAt < generatedAt`（時鐘異常）回 500 `INTERNAL_ERROR`。回應以 `StringBuilder` 組 `{"kind":"SUMMARY","context":<context_jcs 原文>,"contextContentSha256":"…","freshness":{…}}` 或 evidence JSON（body 以 Jackson 字串逸出），`Content-Type: application/json`；錯誤回 problem+json（business 端同格式、`instance` 為公開路徑）。
+
+### BFF
+
+| 類別 | 職責 |
+|---|---|
+| `PublicSrppDailyContextController` | `@GetMapping("/api/public/srpp/daily-context")`，取 `ServerHttpRequest` 原始 query（`getQueryParams()` 多值）與 body header，只委派 service |
+| `SrppDailyContextQuery` | 純函式解析／400 驗證，產生 business URI（只傳驗證後參數，不傳 email） |
+| `PublicSrppDailyContextService` | owner resolve（Requirement 140 同語意，5 秒）、`contextWrite(ctx.delete(CTX_IDENTITY))`、顯式 `X-User-*`、business 5 秒 timeout、problem 轉譯、呼叫 validator |
+| `SrppDailyContextResponseValidator` | strict 驗證（Requirement 163 AC），含 `SrppJcs` hash 重算 |
+| `PublicSrppDailyContextExceptionAdvice` | `@Order(HIGHEST_PRECEDENCE)` scoped advice，固定清理後 problem 與 `Cache-Control`；既有 filter 對最終 5xx 一律記錄、對 4xx 僅在呼叫 `capture` 時記錄，依 Requirement 143 對 400／404／409／5xx 皆呼叫 `PublicApiErrorCaptureWebFilter.capture`，唯一具名例外是 409 `POLICY_UNSUPPORTED` 不呼叫 |
+
+錯誤碼對照（BFF 對外輸出；title 固定英文、detail 固定繁中）：
+
+| status | code | retryable | 來源 |
+|---|---|---|---|
+| 400 | INVALID_REQUEST | false | BFF query／business 400 |
+| 404 | CONTEXT_NOT_FOUND、SOURCE_EVIDENCE_NOT_FOUND | false | business |
+| 409 | POLICY_UNSUPPORTED、CONTEXT_STALE、CONTEXT_IDENTITY_MISMATCH、NON_TRADING_DAY | false | business |
+| 503 | OWNER_UNAVAILABLE | false | BFF owner resolve 或 business 無身分 |
+| 503 | CALENDAR_UNAVAILABLE、CONTEXT_NOT_READY | true | business；BFF 逾時／連線失敗亦為 CONTEXT_NOT_READY |
+| 502 | UPSTREAM_INVALID | false | 回應格式、code 與 status 不符、未知 status |
+| 500 | INTERNAL_ERROR | false | BFF 未預期例外；business 500 也轉為 502 UPSTREAM_INVALID 以免洩漏 |
+
+### Gateway／Tailscale／frontend／OpenAPI
+
+比照 Requirement 140／Task 416 的 14 處接線（gateway exact location、`SERVE_PATHS` 與 `expected`、preflight、mock、frontend exact 404 與 matrix regex、SecurityConfig、OpenAPI YAML＋contract test＋frontend contract test、error-log catalog、路由計數文件）。Tailscale preflight 以台北今天、全零 hash 呼叫，期待 409 problem+json `POLICY_UNSUPPORTED` 與 `Cache-Control: private, no-store`（全零 hash 不可能被登錄，故結果穩定且證明鏈路直達 business）。OpenAPI 完整採用 proposal 的 `Srpp*` schema（名稱、結構、限制不變），描述補齊至通過既有 description audit（每節點具體用途、每個 enum／const 值逐一說明），移除「提案／尚未部署」字樣並加入本版空 registry 與模組降級語意；`09:05` 一律加引號避免 YAML 1.1 解析成整數；參數 schema 依 BFF 實際規則；`info.version` 1.14.0。

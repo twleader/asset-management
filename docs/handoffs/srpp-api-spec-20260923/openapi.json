@@ -1,0 +1,4512 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "SRPP 共用計算結果 API（實作交接提案）",
+    "version": "1.0.0-proposal.1",
+    "description": "尚未實作或部署。獨立交接規格；不得藉此修改現行 SRPP。新增一條 exact read-only GET。固定公式由背景 producer 處理；GET 只讀已發布結果，無券商/行情外呼、無 refresh、無交易。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:9090",
+      "description": "提案的本機 gateway 路由；目前尚不存在。"
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/api/public/srpp/daily-context": {
+      "get": {
+        "operationId": "getSrppDailyContext",
+        "tags": [
+          "SRPP 計算結果"
+        ],
+        "summary": "取得本輪共用計算摘要或重播其已凍結來源",
+        "description": "owner 選擇沿用 assets/latest：省略 email 使用 configured-admin；指定 email 僅可選 ACTIVE 帳號。清除 caller 身分並由 BFF 顯式傳遞 owner。summary 不帶 packageId 時只選 CURRENT 最新發布；帶 packageId 可回放 STALE 套件，但 consumer 不可用於現行建議。evidence 必須同時指定 packageId 和 sourceId。所有讀取均保持純唯讀。",
+        "parameters": [
+          {
+            "name": "tradingDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "ISO 8601 日期。",
+              "format": "date"
+            },
+            "description": "summary 的 latest 模式只允許 Asia/Taipei 今天；pinned/evidence 可回放保留中的歷史日期。"
+          },
+          {
+            "name": "slot",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "",
+              "enum": [
+                "09:05",
+                "11:40"
+              ]
+            },
+            "description": "實際業務時段，不能用舊任務 ID 推測。"
+          },
+          {
+            "name": "policyBundleSha256",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SrppSha256"
+            },
+            "description": "期望的已登錄 SRPP 規則包；不允許 caller 提交公式、分數或通過收據。"
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "",
+              "format": "email",
+              "maxLength": 254
+            },
+            "description": "沿用現有 optional email owner selector；省略為 configured-admin。"
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "",
+              "enum": [
+                "summary",
+                "evidence"
+              ],
+              "default": "summary"
+            },
+            "description": "預設摘要；evidence 是單一來源回放。"
+          },
+          {
+            "name": "packageId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "",
+              "format": "uuid"
+            },
+            "description": "固定不可變套件；evidence 必填。"
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "description": "僅 evidence 使用且必填；必須屬於同一套件的 AVAILABLE source。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "不可變摘要或單一凍結來源。HTTP 200 不代表可執行交易。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SrppSummaryResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SrppEvidenceResponse"
+                    }
+                  ]
+                },
+                "examples": {
+                  "partial": {
+                    "summary": "合成資料：基本彙總成功，稅後/資金/技術尚未可用；不可宣稱全部完成。",
+                    "value": {
+                      "kind": "SUMMARY",
+                      "context": {
+                        "packageId": "7e1fb982-4ae4-4e7e-baa5-c2c80bd93491",
+                        "schemaVersion": "1.0.0",
+                        "generatedAt": "2026-09-24T09:05:01+08:00",
+                        "dataCutoffAt": "2026-09-24T09:05:01+08:00",
+                        "tradingDate": "2026-09-24",
+                        "slot": "09:05",
+                        "timezone": "Asia/Taipei",
+                        "ownerKey": "synthetic-owner",
+                        "assetSnapshotId": "1",
+                        "assetSnapshotDate": "2026-09-24",
+                        "policy": {
+                          "policyBundleSha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "calculationPolicySha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "formulaSetSha256": "f106417375d46a2dd0302ba019be72462d99ad8b51e121b27a52a2e24c9adec3",
+                          "formulaVersion": "SYNTHETIC_TEST_ONLY",
+                          "scope": "LISTED_CALCULATIONS_ONLY"
+                        },
+                        "coverage": "PARTIAL",
+                        "sources": [
+                          {
+                            "sourceId": "assets",
+                            "kind": "ASSETS",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-assets-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "calendar",
+                            "kind": "CALENDAR",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-calendar-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "policy",
+                            "kind": "POLICY",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-policy-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7",
+                            "reasonCodes": []
+                          }
+                        ],
+                        "modules": {
+                          "assets": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets"
+                            ],
+                            "calculationId": "SYNTHETIC_ASSETS_V1",
+                            "data": {
+                              "snapshotTotalDeposit": {
+                                "value": "3000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotFundValue": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "targetPriceComplete": true,
+                              "rowCounts": {
+                                "deposits": 2,
+                                "stocks": 1,
+                                "funds": 0
+                              },
+                              "checks": [
+                                {
+                                  "name": "snapshot_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                }
+                              ],
+                              "depositGroups": [
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "DEMAND",
+                                  "sourceRowIds": [
+                                    "2"
+                                  ],
+                                  "amountTwd": "1000000",
+                                  "originalAmount": "1000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "TERM",
+                                  "sourceRowIds": [
+                                    "1"
+                                  ],
+                                  "amountTwd": "2000000",
+                                  "originalAmount": "2000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "30000",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "allocation": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets",
+                              "policy"
+                            ],
+                            "calculationId": "SYNTHETIC_ALLOCATION_V1",
+                            "data": {
+                              "basis": "TOTAL_EXPOSURE_REFERENCE",
+                              "denominatorTwd": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "shortTermSleeveSeparated": false,
+                              "rows": [
+                                {
+                                  "assetKey": "CASH:TWD:DEMAND",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "CASH:TWD:TERM",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "TW:EXAMPLE_TW",
+                                  "market": "台股",
+                                  "symbol": "EXAMPLE_TW",
+                                  "sourceHoldingIds": [
+                                    "1"
+                                  ],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "-0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "-1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                }
+                              ],
+                              "unmappedHoldingIds": []
+                            }
+                          },
+                          "cashIncome": {
+                            "status": "PARTIAL",
+                            "reasonCodes": [
+                              "NET_CALCULATION_NOT_VERIFIED"
+                            ],
+                            "sourceIds": [
+                              "assets"
+                            ],
+                            "calculationId": "SYNTHETIC_GROSS_INCOME_V1",
+                            "data": {
+                              "stockAndEtfDistributions": {
+                                "value": "60000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "fundDistributions": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "depositInterest": {
+                                "value": "30000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "sourceAccruedAnnualIncome": {
+                                "value": "90000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "permanentTermInterestReinvested": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "spendableAnnualGross": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "taiwanIncomeTaxOrRefund": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "usWithholding": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "additionalBasicTax": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "supplementaryNhi": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "afterAllTaxAnnualCashIncome": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "missingIncomeRowIds": [],
+                              "netCalculationStandard": null,
+                              "taxYear": 2026
+                            }
+                          },
+                          "funding": {
+                            "status": "UNAVAILABLE",
+                            "reasonCodes": [
+                              "CALCULATOR_NOT_VERIFIED"
+                            ],
+                            "sourceIds": [],
+                            "calculationId": "SYNTHETIC_UNAVAILABLE",
+                            "data": null
+                          },
+                          "completedTechnicals": {
+                            "status": "UNAVAILABLE",
+                            "reasonCodes": [
+                              "COMPLETED_SESSION_DATA_MISSING"
+                            ],
+                            "sourceIds": [],
+                            "calculationId": "SYNTHETIC_UNAVAILABLE",
+                            "data": null
+                          }
+                        },
+                        "tradingAuthorized": false,
+                        "requiresOriginalDailyChecks": true
+                      },
+                      "contextContentSha256": "5cce95711223327508a71246a9adac632d78059c8966ff1d2cbb6de300668ae4",
+                      "freshness": {
+                        "status": "CURRENT",
+                        "checkedAt": "2026-09-24T09:05:01+08:00",
+                        "changedSourceIds": [],
+                        "reasonCodes": []
+                      }
+                    }
+                  },
+                  "stalePinned": {
+                    "summary": "只能回放的過期套件；不是當輪可用結果。",
+                    "value": {
+                      "kind": "SUMMARY",
+                      "context": {
+                        "packageId": "7e1fb982-4ae4-4e7e-baa5-c2c80bd93491",
+                        "schemaVersion": "1.0.0",
+                        "generatedAt": "2026-09-24T09:05:01+08:00",
+                        "dataCutoffAt": "2026-09-24T09:05:01+08:00",
+                        "tradingDate": "2026-09-24",
+                        "slot": "09:05",
+                        "timezone": "Asia/Taipei",
+                        "ownerKey": "synthetic-owner",
+                        "assetSnapshotId": "1",
+                        "assetSnapshotDate": "2026-09-24",
+                        "policy": {
+                          "policyBundleSha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "calculationPolicySha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "formulaSetSha256": "f106417375d46a2dd0302ba019be72462d99ad8b51e121b27a52a2e24c9adec3",
+                          "formulaVersion": "SYNTHETIC_TEST_ONLY",
+                          "scope": "LISTED_CALCULATIONS_ONLY"
+                        },
+                        "coverage": "PARTIAL",
+                        "sources": [
+                          {
+                            "sourceId": "assets",
+                            "kind": "ASSETS",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-assets-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "calendar",
+                            "kind": "CALENDAR",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-calendar-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "policy",
+                            "kind": "POLICY",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-policy-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7",
+                            "reasonCodes": []
+                          }
+                        ],
+                        "modules": {
+                          "assets": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets"
+                            ],
+                            "calculationId": "SYNTHETIC_ASSETS_V1",
+                            "data": {
+                              "snapshotTotalDeposit": {
+                                "value": "3000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotFundValue": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "targetPriceComplete": true,
+                              "rowCounts": {
+                                "deposits": 2,
+                                "stocks": 1,
+                                "funds": 0
+                              },
+                              "checks": [
+                                {
+                                  "name": "snapshot_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                }
+                              ],
+                              "depositGroups": [
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "DEMAND",
+                                  "sourceRowIds": [
+                                    "2"
+                                  ],
+                                  "amountTwd": "1000000",
+                                  "originalAmount": "1000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "TERM",
+                                  "sourceRowIds": [
+                                    "1"
+                                  ],
+                                  "amountTwd": "2000000",
+                                  "originalAmount": "2000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "30000",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "allocation": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets",
+                              "policy"
+                            ],
+                            "calculationId": "SYNTHETIC_ALLOCATION_V1",
+                            "data": {
+                              "basis": "TOTAL_EXPOSURE_REFERENCE",
+                              "denominatorTwd": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "shortTermSleeveSeparated": false,
+                              "rows": [
+                                {
+                                  "assetKey": "CASH:TWD:DEMAND",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "CASH:TWD:TERM",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "TW:EXAMPLE_TW",
+                                  "market": "台股",
+                                  "symbol": "EXAMPLE_TW",
+                                  "sourceHoldingIds": [
+                                    "1"
+                                  ],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "-0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "-1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                }
+                              ],
+                              "unmappedHoldingIds": []
+                            }
+                          },
+                          "cashIncome": {
+                            "status": "PARTIAL",
+                            "reasonCodes": [
+                              "NET_CALCULATION_NOT_VERIFIED"
+                            ],
+                            "sourceIds": [
+                              "assets"
+                            ],
+                            "calculationId": "SYNTHETIC_GROSS_INCOME_V1",
+                            "data": {
+                              "stockAndEtfDistributions": {
+                                "value": "60000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "fundDistributions": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "depositInterest": {
+                                "value": "30000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "sourceAccruedAnnualIncome": {
+                                "value": "90000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "permanentTermInterestReinvested": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "spendableAnnualGross": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "taiwanIncomeTaxOrRefund": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "usWithholding": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "additionalBasicTax": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "supplementaryNhi": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "afterAllTaxAnnualCashIncome": {
+                                "value": null,
+                                "unit": "TWD",
+                                "quality": "UNAVAILABLE",
+                                "reasonCodes": [
+                                  "NET_CALCULATION_NOT_VERIFIED"
+                                ],
+                                "sourceIds": []
+                              },
+                              "missingIncomeRowIds": [],
+                              "netCalculationStandard": null,
+                              "taxYear": 2026
+                            }
+                          },
+                          "funding": {
+                            "status": "UNAVAILABLE",
+                            "reasonCodes": [
+                              "CALCULATOR_NOT_VERIFIED"
+                            ],
+                            "sourceIds": [],
+                            "calculationId": "SYNTHETIC_UNAVAILABLE",
+                            "data": null
+                          },
+                          "completedTechnicals": {
+                            "status": "UNAVAILABLE",
+                            "reasonCodes": [
+                              "COMPLETED_SESSION_DATA_MISSING"
+                            ],
+                            "sourceIds": [],
+                            "calculationId": "SYNTHETIC_UNAVAILABLE",
+                            "data": null
+                          }
+                        },
+                        "tradingAuthorized": false,
+                        "requiresOriginalDailyChecks": true
+                      },
+                      "contextContentSha256": "5cce95711223327508a71246a9adac632d78059c8966ff1d2cbb6de300668ae4",
+                      "freshness": {
+                        "status": "STALE",
+                        "checkedAt": "2026-09-24T09:07:00+08:00",
+                        "changedSourceIds": [
+                          "assets"
+                        ],
+                        "reasonCodes": [
+                          "SOURCE_REVISION_CHANGED"
+                        ]
+                      }
+                    }
+                  },
+                  "complete": {
+                    "summary": "僅驗證完整 schema 的合成數字；SYNTHETIC_TEST_ONLY 不是目前生產公式或規則包。",
+                    "value": {
+                      "kind": "SUMMARY",
+                      "context": {
+                        "packageId": "96c331dd-0015-4646-8a8c-9a304de0f322",
+                        "schemaVersion": "1.0.0",
+                        "generatedAt": "2026-09-24T09:05:01+08:00",
+                        "dataCutoffAt": "2026-09-24T09:05:01+08:00",
+                        "tradingDate": "2026-09-24",
+                        "slot": "09:05",
+                        "timezone": "Asia/Taipei",
+                        "ownerKey": "synthetic-owner",
+                        "assetSnapshotId": "1",
+                        "assetSnapshotDate": "2026-09-24",
+                        "policy": {
+                          "policyBundleSha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "calculationPolicySha256": "bb0749d678dec8ecf9363d15983721613147871e1064b3d82d6efd5c0e3f9af3",
+                          "formulaSetSha256": "f106417375d46a2dd0302ba019be72462d99ad8b51e121b27a52a2e24c9adec3",
+                          "formulaVersion": "SYNTHETIC_TEST_ONLY",
+                          "scope": "LISTED_CALCULATIONS_ONLY"
+                        },
+                        "coverage": "COMPLETE",
+                        "sources": [
+                          {
+                            "sourceId": "assets",
+                            "kind": "ASSETS",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-assets-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "f67ee4cb80475e72fdf647f8e3df0ac029151d57480d08dc58248dc9c8fd41d8",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "calendar",
+                            "kind": "CALENDAR",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-calendar-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "6f1a7a9b2443772174224af0f368d0ad700c36b3e2b8dedd23234af35cd9f607",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "policy",
+                            "kind": "POLICY",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-policy-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-24T09:05:01+08:00",
+                            "bodySha256": "8aefdba665faf3bd2a61bd6508e14fe3b2505a8cc9e5540aec1bed6e147f8aa7",
+                            "reasonCodes": []
+                          },
+                          {
+                            "sourceId": "technicals",
+                            "kind": "DAILY_BARS",
+                            "state": "AVAILABLE",
+                            "revision": "synthetic-tech-1",
+                            "capturedAt": "2026-09-24T09:05:01+08:00",
+                            "dataAsOf": "2026-09-23T13:30:00+08:00",
+                            "bodySha256": "a5845984c25e84454d3f0e16c9c5a1f1d5cfdaec3fd7d86e6dda5d962d93fc3b",
+                            "reasonCodes": []
+                          }
+                        ],
+                        "modules": {
+                          "assets": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets"
+                            ],
+                            "calculationId": "SYNTHETIC_ASSETS_V1",
+                            "data": {
+                              "snapshotTotalDeposit": {
+                                "value": "3000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotFundValue": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "snapshotTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveStockValue": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "liveTotalAssets": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "targetPriceComplete": true,
+                              "rowCounts": {
+                                "deposits": 2,
+                                "stocks": 1,
+                                "funds": 0
+                              },
+                              "checks": [
+                                {
+                                  "name": "snapshot_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_deposits",
+                                  "detailTwd": "3000000",
+                                  "reportedTwd": "3000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "300",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_funds",
+                                  "detailTwd": "0",
+                                  "reportedTwd": "0",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "0.01",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_stocks",
+                                  "detailTwd": "2000000",
+                                  "reportedTwd": "2000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "200",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "snapshot_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                },
+                                {
+                                  "name": "live_total",
+                                  "detailTwd": "5000000",
+                                  "reportedTwd": "5000000",
+                                  "differenceTwd": "0",
+                                  "toleranceTwd": "500",
+                                  "passed": true
+                                }
+                              ],
+                              "depositGroups": [
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "DEMAND",
+                                  "sourceRowIds": [
+                                    "2"
+                                  ],
+                                  "amountTwd": "1000000",
+                                  "originalAmount": "1000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "bankId": "SYNTHETIC_BANK",
+                                  "bankName": "合成範例銀行",
+                                  "currency": "TWD",
+                                  "depositType": "TERM",
+                                  "sourceRowIds": [
+                                    "1"
+                                  ],
+                                  "amountTwd": "2000000",
+                                  "originalAmount": "2000000",
+                                  "estimatedAnnualInterest": {
+                                    "value": "30000",
+                                    "unit": "TWD",
+                                    "quality": "ESTIMATE",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          },
+                          "allocation": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets",
+                              "policy"
+                            ],
+                            "calculationId": "SYNTHETIC_ALLOCATION_V1",
+                            "data": {
+                              "basis": "TOTAL_EXPOSURE_REFERENCE",
+                              "denominatorTwd": {
+                                "value": "5000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "shortTermSleeveSeparated": false,
+                              "rows": [
+                                {
+                                  "assetKey": "CASH:TWD:DEMAND",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "CASH:TWD:TERM",
+                                  "market": null,
+                                  "symbol": null,
+                                  "sourceHoldingIds": [],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "0",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "0",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                {
+                                  "assetKey": "TW:EXAMPLE_TW",
+                                  "market": "台股",
+                                  "symbol": "EXAMPLE_TW",
+                                  "sourceHoldingIds": [
+                                    "1"
+                                  ],
+                                  "exposureTwd": {
+                                    "value": "2000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "currentWeight": {
+                                    "value": "0.4",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets"
+                                    ]
+                                  },
+                                  "targetWeight": {
+                                    "value": "0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapWeight": {
+                                    "value": "-0.2",
+                                    "unit": "RATIO",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  },
+                                  "gapValueTwd": {
+                                    "value": "-1000000",
+                                    "unit": "TWD",
+                                    "quality": "EXACT",
+                                    "reasonCodes": [],
+                                    "sourceIds": [
+                                      "assets",
+                                      "policy"
+                                    ]
+                                  }
+                                }
+                              ],
+                              "unmappedHoldingIds": []
+                            }
+                          },
+                          "cashIncome": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets",
+                              "policy"
+                            ],
+                            "calculationId": "SYNTHETIC_NET_INCOME_V1",
+                            "data": {
+                              "stockAndEtfDistributions": {
+                                "value": "60000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "fundDistributions": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "depositInterest": {
+                                "value": "30000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "sourceAccruedAnnualIncome": {
+                                "value": "90000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "reasonCodes": [],
+                                "sourceIds": [
+                                  "assets"
+                                ]
+                              },
+                              "permanentTermInterestReinvested": {
+                                "value": "10000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "spendableAnnualGross": {
+                                "value": "80000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "taiwanIncomeTaxOrRefund": {
+                                "value": "4000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "usWithholding": {
+                                "value": "1000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "additionalBasicTax": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "supplementaryNhi": {
+                                "value": "1000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "afterAllTaxAnnualCashIncome": {
+                                "value": "74000",
+                                "unit": "TWD",
+                                "quality": "ESTIMATE",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "missingIncomeRowIds": [],
+                              "netCalculationStandard": "SYNTHETIC_TEST_ONLY",
+                              "taxYear": 2026
+                            }
+                          },
+                          "funding": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "assets",
+                              "policy"
+                            ],
+                            "calculationId": "SYNTHETIC_FUNDING_V1",
+                            "data": {
+                              "basis": "BEFORE_PROPOSED_TRADE",
+                              "calculationDate": "2026-09-24",
+                              "snapshotAllCurrencyDepositTwdEquivalent": {
+                                "value": "3000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "twdTermDeposits": {
+                                "value": "2000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "twdTotalIncludingNegativeTransit": {
+                                "value": "3000000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "excludedPositiveTransit": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "usdDepositsTwdEquivalent": {
+                                "value": "0",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "inflationIndex": {
+                                "value": "1",
+                                "unit": "RATIO",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "permanentTermFloorNominal": {
+                                "value": "1600000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "totalTwdDepositFloorNominal": {
+                                "value": "2350000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "headroomAboveTotalFloor": {
+                                "value": "650000",
+                                "unit": "TWD",
+                                "quality": "EXACT",
+                                "sourceIds": [
+                                  "assets",
+                                  "policy"
+                                ],
+                                "reasonCodes": []
+                              },
+                              "termFloorMet": true,
+                              "tradingAuthorized": false
+                            }
+                          },
+                          "completedTechnicals": {
+                            "status": "COMPLETE",
+                            "reasonCodes": [],
+                            "sourceIds": [
+                              "calendar",
+                              "technicals"
+                            ],
+                            "calculationId": "SYNTHETIC_TECHNICALS_V1",
+                            "data": {
+                              "market": "台股",
+                              "requiredCompletedSession": "2026-09-23",
+                              "symbolScope": "TW_HOLDINGS_UNION_POLICY_TARGETS",
+                              "rows": [
+                                {
+                                  "market": "台股",
+                                  "symbol": "EXAMPLE_TW",
+                                  "currency": "TWD",
+                                  "status": "COMPLETE",
+                                  "reasonCodes": [],
+                                  "sourceIds": [
+                                    "calendar",
+                                    "technicals"
+                                  ],
+                                  "completedSession": "2026-09-23",
+                                  "calculationVersion": "SYNTHETIC_TEST_ONLY",
+                                  "adjustmentBasis": "VERIFIED_CASH_ADJUSTED",
+                                  "corporateActionEvidenceComplete": true,
+                                  "ma5": {
+                                    "value": "97",
+                                    "unit": "NATIVE_PRICE",
+                                    "quality": "EXACT",
+                                    "sourceIds": [
+                                      "technicals"
+                                    ],
+                                    "reasonCodes": []
+                                  },
+                                  "ma20": {
+                                    "value": "89.5",
+                                    "unit": "NATIVE_PRICE",
+                                    "quality": "EXACT",
+                                    "sourceIds": [
+                                      "technicals"
+                                    ],
+                                    "reasonCodes": []
+                                  },
+                                  "ma60": {
+                                    "value": "69.5",
+                                    "unit": "NATIVE_PRICE",
+                                    "quality": "EXACT",
+                                    "sourceIds": [
+                                      "technicals"
+                                    ],
+                                    "reasonCodes": []
+                                  },
+                                  "kdLastThreeCompletedSessions": [
+                                    {
+                                      "date": "2026-09-21",
+                                      "k": "60",
+                                      "d": "59"
+                                    },
+                                    {
+                                      "date": "2026-09-22",
+                                      "k": "58",
+                                      "d": "59"
+                                    },
+                                    {
+                                      "date": "2026-09-23",
+                                      "k": "55",
+                                      "d": "58"
+                                    }
+                                  ],
+                                  "adjustedClosesLast20": [
+                                    {
+                                      "date": "2026-08-27",
+                                      "close": "80"
+                                    },
+                                    {
+                                      "date": "2026-08-28",
+                                      "close": "81"
+                                    },
+                                    {
+                                      "date": "2026-08-31",
+                                      "close": "82"
+                                    },
+                                    {
+                                      "date": "2026-09-01",
+                                      "close": "83"
+                                    },
+                                    {
+                                      "date": "2026-09-02",
+                                      "close": "84"
+                                    },
+                                    {
+                                      "date": "2026-09-03",
+                                      "close": "85"
+                                    },
+                                    {
+                                      "date": "2026-09-04",
+                                      "close": "86"
+                                    },
+                                    {
+                                      "date": "2026-09-07",
+                                      "close": "87"
+                                    },
+                                    {
+                                      "date": "2026-09-08",
+                                      "close": "88"
+                                    },
+                                    {
+                                      "date": "2026-09-09",
+                                      "close": "89"
+                                    },
+                                    {
+                                      "date": "2026-09-10",
+                                      "close": "90"
+                                    },
+                                    {
+                                      "date": "2026-09-11",
+                                      "close": "91"
+                                    },
+                                    {
+                                      "date": "2026-09-14",
+                                      "close": "92"
+                                    },
+                                    {
+                                      "date": "2026-09-15",
+                                      "close": "93"
+                                    },
+                                    {
+                                      "date": "2026-09-16",
+                                      "close": "94"
+                                    },
+                                    {
+                                      "date": "2026-09-17",
+                                      "close": "95"
+                                    },
+                                    {
+                                      "date": "2026-09-18",
+                                      "close": "96"
+                                    },
+                                    {
+                                      "date": "2026-09-21",
+                                      "close": "97"
+                                    },
+                                    {
+                                      "date": "2026-09-22",
+                                      "close": "98"
+                                    },
+                                    {
+                                      "date": "2026-09-23",
+                                      "close": "99"
+                                    }
+                                  ],
+                                  "highOf20AdjustedCloses": {
+                                    "value": "99",
+                                    "unit": "NATIVE_PRICE",
+                                    "quality": "EXACT",
+                                    "sourceIds": [
+                                      "technicals"
+                                    ],
+                                    "reasonCodes": []
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        },
+                        "tradingAuthorized": false,
+                        "requiresOriginalDailyChecks": true
+                      },
+                      "contextContentSha256": "2a853711e6deb465e303fcb687c517ab3734c0aaf4f48d30f15481c9db1cb47b",
+                      "freshness": {
+                        "status": "CURRENT",
+                        "checkedAt": "2026-09-24T09:05:01+08:00",
+                        "changedSourceIds": [],
+                        "reasonCodes": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "參數、重複參數、未知參數、GET body、view 組合或日期格式不合法。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "查無這個 owner/date/slot/package，或指定來源不可回放；不揭露其他 owner 的 package。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "政策尚未登錄、當輪沒有仍有效的套件、日期/時段與套件不符，或非台股交易日。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "內部錯誤；不得以舊內容假裝成功。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "下游內容格式或來源一致性錯誤；gateway 也可能回 HTML。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "<html><body>Bad Gateway</body></html>"
+              }
+            }
+          },
+          "503": {
+            "description": "owner、日曆、producer 或必要資料尚未就緒；不得同步現抓。",
+            "headers": {
+              "Cache-Control": {
+                "description": "個人資料不得由中介快取；固定 private, no-store。",
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrppProblem"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "同 exact path 的非 GET method。",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "const": "GET"
+                }
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Nginx upstream timeout；沿用現有 gateway 的 HTML 契約。",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SrppSha256": {
+        "type": "string",
+        "description": "64 位小寫 SHA-256。",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "SrppDecimal": {
+        "type": "string",
+        "description": "Canonical Decimal 字串；無千分位、指數、前導零、尾端零或負零。計算精度及捨入依公式版本，不因傳輸而另行四捨五入。",
+        "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+        "maxLength": 80,
+        "not": {
+          "const": "-0"
+        }
+      },
+      "SrppId": {
+        "type": "string",
+        "description": "不透明識別值；數字型 DB id 也以字串傳輸。",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "SrppMetric": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "計算完整性與經濟確定性不同：預估配息仍為 ESTIMATE；未知不能用 0。",
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "TWD",
+              "RATIO",
+              "NATIVE_PRICE",
+              "POINT"
+            ]
+          },
+          "quality": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "EXACT",
+              "ESTIMATE",
+              "UPPER_BOUND",
+              "LOWER_BOUND",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "value",
+          "unit",
+          "quality",
+          "reasonCodes",
+          "sourceIds"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "quality": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "value": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "value": {
+                  "$ref": "#/components/schemas/SrppDecimal"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "AVAILABLE 必須能以 view=evidence 取回同一份不可變來源；revision 代表內容，不是重新查詢時間。",
+        "properties": {
+          "sourceId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "kind": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "ASSETS",
+              "POLICY",
+              "CALENDAR",
+              "DAILY_BARS",
+              "CORPORATE_ACTIONS",
+              "ETF_COMPONENTS",
+              "TEN_YEAR_HISTORY",
+              "BOND_FORWARD_YIELDS",
+              "TAX_INPUTS"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "AVAILABLE",
+              "MISSING"
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "capturedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dataAsOf": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bodySha256": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppSha256"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "sourceId",
+          "kind",
+          "state",
+          "revision",
+          "capturedAt",
+          "dataAsOf",
+          "bodySha256",
+          "reasonCodes"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "AVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "revision": {
+                  "$ref": "#/components/schemas/SrppId"
+                },
+                "capturedAt": {
+                  "type": "string",
+                  "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+                  "format": "date-time"
+                },
+                "dataAsOf": {
+                  "type": "string",
+                  "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+                  "format": "date-time"
+                },
+                "bodySha256": {
+                  "$ref": "#/components/schemas/SrppSha256"
+                },
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "revision": {
+                  "type": "null"
+                },
+                "capturedAt": {
+                  "type": "null"
+                },
+                "dataAsOf": {
+                  "type": "null"
+                },
+                "bodySha256": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppReconciliationCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "八項對帳全部通過才可發布資產模組；容差沿用 asset_reconciliation.reconcile。",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "snapshot_deposits",
+              "live_deposits",
+              "snapshot_funds",
+              "live_funds",
+              "snapshot_stocks",
+              "live_stocks",
+              "snapshot_total",
+              "live_total"
+            ]
+          },
+          "detailTwd": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          },
+          "reportedTwd": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          },
+          "differenceTwd": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          },
+          "toleranceTwd": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          },
+          "passed": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "name",
+          "detailTwd",
+          "reportedTwd",
+          "differenceTwd",
+          "toleranceTwd",
+          "passed"
+        ]
+      },
+      "SrppDepositGroup": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "amountTwd 已是台幣，不再乘匯率；待付款保留負號。",
+        "properties": {
+          "bankId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bankName": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": ""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "保留來源代碼；禁止只因銀行資訊為 null 而刪除列。"
+          },
+          "depositType": {
+            "type": "string",
+            "description": "來源存款產品代碼。"
+          },
+          "sourceRowIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "amountTwd": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          },
+          "originalAmount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "estimatedAnnualInterest": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "bankId",
+          "bankName",
+          "currency",
+          "depositType",
+          "sourceRowIds",
+          "amountTwd",
+          "originalAmount",
+          "estimatedAnnualInterest"
+        ]
+      },
+      "SrppAssetsData": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "基於同一份 assets/latest 來源的對帳與彙總；不是新的資產帳本。",
+        "properties": {
+          "snapshotTotalDeposit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "snapshotStockValue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "snapshotFundValue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "snapshotTotalAssets": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "liveStockValue": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "liveTotalAssets": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "targetPriceComplete": {
+            "type": "boolean"
+          },
+          "rowCounts": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "",
+            "properties": {
+              "deposits": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "stocks": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              },
+              "funds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              }
+            },
+            "required": [
+              "deposits",
+              "stocks",
+              "funds"
+            ]
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppReconciliationCheck"
+            },
+            "minItems": 8,
+            "maxItems": 8
+          },
+          "depositGroups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppDepositGroup"
+            }
+          }
+        },
+        "required": [
+          "snapshotTotalDeposit",
+          "snapshotStockValue",
+          "snapshotFundValue",
+          "snapshotTotalAssets",
+          "liveStockValue",
+          "liveTotalAssets",
+          "targetPriceComplete",
+          "rowCounts",
+          "checks",
+          "depositGroups"
+        ]
+      },
+      "SrppAllocationRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "總曝險的描述性差距；不扣 SRPP 私有短線帳本，不得當成核心可買張數。",
+        "properties": {
+          "assetKey": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": ""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": ""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sourceHoldingIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "exposureTwd": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "currentWeight": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "RATIO"
+                  }
+                }
+              }
+            ]
+          },
+          "targetWeight": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "RATIO"
+                  }
+                }
+              }
+            ]
+          },
+          "gapWeight": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "RATIO"
+                  }
+                }
+              }
+            ]
+          },
+          "gapValueTwd": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "assetKey",
+          "market",
+          "symbol",
+          "sourceHoldingIds",
+          "exposureTwd",
+          "currentWeight",
+          "targetWeight",
+          "gapWeight",
+          "gapValueTwd"
+        ]
+      },
+      "SrppAllocationData": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "資產分類與目標由版本化 mapping 決定；未映射不可猜成零目標。",
+        "properties": {
+          "basis": {
+            "type": "string",
+            "const": "TOTAL_EXPOSURE_REFERENCE"
+          },
+          "denominatorTwd": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "shortTermSleeveSeparated": {
+            "type": "boolean",
+            "const": false
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppAllocationRow"
+            }
+          },
+          "unmappedHoldingIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "basis",
+          "denominatorTwd",
+          "shortTermSleeveSeparated",
+          "rows",
+          "unmappedHoldingIds"
+        ]
+      },
+      "SrppCashIncomeData": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "來源估計額與可支配現金分列；稅後值必須有正式分類、給付/估計依據及 reference calculator parity。",
+        "properties": {
+          "stockAndEtfDistributions": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "fundDistributions": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "depositInterest": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "sourceAccruedAnnualIncome": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "permanentTermInterestReinvested": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "spendableAnnualGross": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "taiwanIncomeTaxOrRefund": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "usWithholding": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "additionalBasicTax": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "supplementaryNhi": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "afterAllTaxAnnualCashIncome": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "missingIncomeRowIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "netCalculationStandard": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": ""
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "taxYear": {
+            "type": "integer",
+            "minimum": 2000,
+            "maximum": 2200
+          }
+        },
+        "required": [
+          "stockAndEtfDistributions",
+          "fundDistributions",
+          "depositInterest",
+          "sourceAccruedAnnualIncome",
+          "permanentTermInterestReinvested",
+          "spendableAnnualGross",
+          "taiwanIncomeTaxOrRefund",
+          "usWithholding",
+          "additionalBasicTax",
+          "supplementaryNhi",
+          "afterAllTaxAnnualCashIncome",
+          "missingIncomeRowIds",
+          "netCalculationStandard",
+          "taxYear"
+        ]
+      },
+      "SrppFundingData": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "買前資金基礎；不代表可下單金額，不包含批次分配、成交去重、換股帳本或張數判斷。",
+        "properties": {
+          "basis": {
+            "type": "string",
+            "const": "BEFORE_PROPOSED_TRADE"
+          },
+          "calculationDate": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "snapshotAllCurrencyDepositTwdEquivalent": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "twdTermDeposits": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "twdTotalIncludingNegativeTransit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "excludedPositiveTransit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "usdDepositsTwdEquivalent": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "inflationIndex": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "RATIO"
+                  }
+                }
+              }
+            ]
+          },
+          "permanentTermFloorNominal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "totalTwdDepositFloorNominal": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "headroomAboveTotalFloor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "TWD"
+                  }
+                }
+              }
+            ]
+          },
+          "termFloorMet": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tradingAuthorized": {
+            "type": "boolean",
+            "const": false
+          }
+        },
+        "required": [
+          "basis",
+          "calculationDate",
+          "snapshotAllCurrencyDepositTwdEquivalent",
+          "twdTermDeposits",
+          "twdTotalIncludingNegativeTransit",
+          "excludedPositiveTransit",
+          "usdDepositsTwdEquivalent",
+          "inflationIndex",
+          "permanentTermFloorNominal",
+          "totalTwdDepositFloorNominal",
+          "headroomAboveTotalFloor",
+          "termFloorMet",
+          "tradingAuthorized"
+        ]
+      },
+      "SrppKdObservation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "k": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppDecimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "date",
+          "k",
+          "d"
+        ]
+      },
+      "SrppAdjustedClose": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "close": {
+            "$ref": "#/components/schemas/SrppDecimal"
+          }
+        },
+        "required": [
+          "date",
+          "close"
+        ]
+      },
+      "SrppTechnicalRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "只能使用已完成交易日；與盤中雷達指標不同。均線及 KD 基礎各按 formula manifest，不能混用 raw/adjusted。",
+        "properties": {
+          "market": {
+            "type": "string",
+            "const": "台股"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "",
+            "minLength": 1
+          },
+          "currency": {
+            "type": "string",
+            "description": "",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "completedSession": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "calculationVersion": {
+            "type": "string",
+            "description": "",
+            "minLength": 1
+          },
+          "adjustmentBasis": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "VERIFIED_CASH_ADJUSTED",
+              "UNVERIFIED"
+            ]
+          },
+          "corporateActionEvidenceComplete": {
+            "type": "boolean"
+          },
+          "ma5": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "NATIVE_PRICE"
+                  }
+                }
+              }
+            ]
+          },
+          "ma20": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "NATIVE_PRICE"
+                  }
+                }
+              }
+            ]
+          },
+          "ma60": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "NATIVE_PRICE"
+                  }
+                }
+              }
+            ]
+          },
+          "kdLastThreeCompletedSessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppKdObservation"
+            },
+            "maxItems": 3
+          },
+          "adjustedClosesLast20": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppAdjustedClose"
+            },
+            "maxItems": 20
+          },
+          "highOf20AdjustedCloses": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SrppMetric"
+              },
+              {
+                "properties": {
+                  "unit": {
+                    "const": "NATIVE_PRICE"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "market",
+          "symbol",
+          "currency",
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "completedSession",
+          "calculationVersion",
+          "adjustmentBasis",
+          "corporateActionEvidenceComplete",
+          "ma5",
+          "ma20",
+          "ma60",
+          "kdLastThreeCompletedSessions",
+          "adjustedClosesLast20",
+          "highOf20AdjustedCloses"
+        ]
+      },
+      "SrppTechnicalsData": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "固定含持股與已登錄政策的台股目標；缺資料仍須留下該 symbol 的 UNAVAILABLE 列。",
+        "properties": {
+          "market": {
+            "type": "string",
+            "const": "台股"
+          },
+          "requiredCompletedSession": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "symbolScope": {
+            "type": "string",
+            "const": "TW_HOLDINGS_UNION_POLICY_TARGETS"
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppTechnicalRow"
+            }
+          }
+        },
+        "required": [
+          "market",
+          "requiredCompletedSession",
+          "symbolScope",
+          "rows"
+        ]
+      },
+      "SrppAssetsModule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "COMPLETE 指本模組欄位覆蓋；不代表投資可執行。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "calculationId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppAssetsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "calculationId",
+          "data"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/SrppAssetsData"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "COMPLETE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "PARTIAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppAllocationModule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "COMPLETE 指本模組欄位覆蓋；不代表投資可執行。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "calculationId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppAllocationData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "calculationId",
+          "data"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/SrppAllocationData"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "COMPLETE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "PARTIAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppCashIncomeModule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "COMPLETE 指本模組欄位覆蓋；不代表投資可執行。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "calculationId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppCashIncomeData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "calculationId",
+          "data"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/SrppCashIncomeData"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "COMPLETE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "PARTIAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppFundingModule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "COMPLETE 指本模組欄位覆蓋；不代表投資可執行。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "calculationId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppFundingData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "calculationId",
+          "data"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/SrppFundingData"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "COMPLETE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "PARTIAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppTechnicalsModule": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "COMPLETE 指本模組欄位覆蓋；不代表投資可執行。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "UNAVAILABLE"
+            ]
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          },
+          "sourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "calculationId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SrppTechnicalsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "reasonCodes",
+          "sourceIds",
+          "calculationId",
+          "data"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "UNAVAILABLE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "data": {
+                  "type": "null"
+                },
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "data": {
+                  "$ref": "#/components/schemas/SrppTechnicalsData"
+                },
+                "sourceIds": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "COMPLETE"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "PARTIAL"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppPolicyIdentity": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "伺服器必須查已驗證 registry，不能把 query 雜湊原樣回傳冒充支援。",
+        "properties": {
+          "policyBundleSha256": {
+            "$ref": "#/components/schemas/SrppSha256"
+          },
+          "calculationPolicySha256": {
+            "$ref": "#/components/schemas/SrppSha256"
+          },
+          "formulaSetSha256": {
+            "$ref": "#/components/schemas/SrppSha256"
+          },
+          "formulaVersion": {
+            "type": "string",
+            "description": "",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "const": "LISTED_CALCULATIONS_ONLY"
+          }
+        },
+        "required": [
+          "policyBundleSha256",
+          "calculationPolicySha256",
+          "formulaSetSha256",
+          "formulaVersion",
+          "scope"
+        ]
+      },
+      "SrppContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "發布後不可變；單一 package 的輸入截點、資料修訂與政策相同。",
+        "properties": {
+          "packageId": {
+            "type": "string",
+            "description": "",
+            "format": "uuid"
+          },
+          "schemaVersion": {
+            "type": "string",
+            "const": "1.0.0"
+          },
+          "generatedAt": {
+            "type": "string",
+            "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+            "format": "date-time"
+          },
+          "dataCutoffAt": {
+            "type": "string",
+            "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+            "format": "date-time"
+          },
+          "tradingDate": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "slot": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "09:05",
+              "11:40"
+            ]
+          },
+          "timezone": {
+            "type": "string",
+            "const": "Asia/Taipei"
+          },
+          "ownerKey": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "assetSnapshotId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "assetSnapshotDate": {
+            "type": "string",
+            "description": "ISO 8601 日期。",
+            "format": "date"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/SrppPolicyIdentity"
+          },
+          "coverage": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "COMPLETE",
+              "PARTIAL"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppSource"
+            },
+            "minItems": 2
+          },
+          "modules": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "",
+            "properties": {
+              "assets": {
+                "$ref": "#/components/schemas/SrppAssetsModule"
+              },
+              "allocation": {
+                "$ref": "#/components/schemas/SrppAllocationModule"
+              },
+              "cashIncome": {
+                "$ref": "#/components/schemas/SrppCashIncomeModule"
+              },
+              "funding": {
+                "$ref": "#/components/schemas/SrppFundingModule"
+              },
+              "completedTechnicals": {
+                "$ref": "#/components/schemas/SrppTechnicalsModule"
+              }
+            },
+            "required": [
+              "assets",
+              "allocation",
+              "cashIncome",
+              "funding",
+              "completedTechnicals"
+            ]
+          },
+          "tradingAuthorized": {
+            "type": "boolean",
+            "const": false
+          },
+          "requiresOriginalDailyChecks": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "packageId",
+          "schemaVersion",
+          "generatedAt",
+          "dataCutoffAt",
+          "tradingDate",
+          "slot",
+          "timezone",
+          "ownerKey",
+          "assetSnapshotId",
+          "assetSnapshotDate",
+          "policy",
+          "coverage",
+          "sources",
+          "modules",
+          "tradingAuthorized",
+          "requiresOriginalDailyChecks"
+        ]
+      },
+      "SrppFreshness": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "讀取時另行核對修訂/日曆；不在 immutable context hash 內，不是 quote 時效的替代品。",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "CURRENT",
+              "STALE",
+              "UNKNOWN"
+            ]
+          },
+          "checkedAt": {
+            "type": "string",
+            "description": "RFC3339，必須含時區；輸出 UTC 或 +08:00。",
+            "format": "date-time"
+          },
+          "changedSourceIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SrppId"
+            },
+            "uniqueItems": true
+          },
+          "reasonCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "具名穩定原因碼，不包含帳號、SQL 或例外堆疊。",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "status",
+          "checkedAt",
+          "changedSourceIds",
+          "reasonCodes"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "CURRENT"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "changedSourceIds": {
+                  "maxItems": 0
+                },
+                "reasonCodes": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "reasonCodes": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "SrppSummaryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "SHA-256(RFC8785 JCS(context))；不能冒稱現有 INPUT_SNAPSHOT_SHA256。",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "SUMMARY"
+          },
+          "context": {
+            "$ref": "#/components/schemas/SrppContext"
+          },
+          "contextContentSha256": {
+            "$ref": "#/components/schemas/SrppSha256"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/SrppFreshness"
+          }
+        },
+        "required": [
+          "kind",
+          "context",
+          "contextContentSha256",
+          "freshness"
+        ]
+      },
+      "SrppEvidenceResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "只讀該 owner/package 已凍結來源；不 fetch 新證據或暴露來源 URL/檔案路徑。",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "EVIDENCE"
+          },
+          "packageId": {
+            "type": "string",
+            "description": "",
+            "format": "uuid"
+          },
+          "sourceId": {
+            "$ref": "#/components/schemas/SrppId"
+          },
+          "bodyMediaType": {
+            "type": "string",
+            "const": "application/json"
+          },
+          "bodyEncoding": {
+            "type": "string",
+            "const": "UTF-8"
+          },
+          "body": {
+            "type": "string",
+            "description": "原始 JSON UTF-8 內容作為字串回傳；解碼後依 UTF-8 算 bodySha256，不重新 stringify。"
+          },
+          "bodySha256": {
+            "$ref": "#/components/schemas/SrppSha256"
+          }
+        },
+        "required": [
+          "kind",
+          "packageId",
+          "sourceId",
+          "bodyMediaType",
+          "bodyEncoding",
+          "body",
+          "bodySha256"
+        ]
+      },
+      "SrppProblem": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "RFC9457 Problem Details；僅應用層保證，Nginx 502/504 仍可能為 HTML。",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "about:blank"
+          },
+          "title": {
+            "type": "string",
+            "description": ""
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          },
+          "detail": {
+            "type": "string",
+            "description": "經清理的繁體中文說明。"
+          },
+          "instance": {
+            "type": "string",
+            "const": "/api/public/srpp/daily-context"
+          },
+          "code": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "INVALID_REQUEST",
+              "CONTEXT_NOT_FOUND",
+              "SOURCE_EVIDENCE_NOT_FOUND",
+              "CONTEXT_STALE",
+              "POLICY_UNSUPPORTED",
+              "CONTEXT_IDENTITY_MISMATCH",
+              "NON_TRADING_DAY",
+              "CALENDAR_UNAVAILABLE",
+              "OWNER_UNAVAILABLE",
+              "CONTEXT_NOT_READY",
+              "UPSTREAM_INVALID",
+              "INTERNAL_ERROR"
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "code",
+          "retryable"
+        ]
+      }
+    }
+  },
+  "x-implementation-status": "PROPOSAL_NOT_DEPLOYED",
+  "x-srpp-change-authorization": "DEFERRED_BY_USER_UNTIL_API_READY"
+}

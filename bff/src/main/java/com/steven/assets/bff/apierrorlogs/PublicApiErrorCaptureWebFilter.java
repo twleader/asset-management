@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 import java.time.*;
 
 /**
- * Exact 13-route capture. A final 5xx is always recorded; a final 4xx is recorded only when this
+ * Exact 14-route capture. A final 5xx is always recorded; a final 4xx is recorded only when this
  * request actually had a Throwable captured by an advice/resolver (i.e. it is not a controller
  * responding non-exceptionally with some 4xx). It never changes the public response.
  */
