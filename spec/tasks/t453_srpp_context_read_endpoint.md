@@ -29,7 +29,7 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
      - freshness（見 453.3）：STALE → 409 `CONTEXT_STALE`；UNKNOWN → 503 `CONTEXT_NOT_READY`；CURRENT → 200。
   5. **固定摘要**（summary 帶 packageId）：以 `(package_id, owner_user_id)` 查；無 → 404 `CONTEXT_NOT_FOUND`（他人 package 同樣 404，不得另外查存在性）；date、slot、hash 任一與 package 不同 → 409 `CONTEXT_IDENTITY_MISMATCH`；否則 200 附 freshness（CURRENT／STALE／UNKNOWN 皆可）。
   6. **evidence**：package 查詢與身分同 5；再以 `(package_id, source_id)` 查 evidence，查無或該 source 在 context 內非 AVAILABLE → 404 `SOURCE_EVIDENCE_NOT_FOUND`；否則 200。
-  - repository 查詢一律帶明確 ownerId（`CurrentUserContext.getEffectiveUserId()`），不依賴 `ownerFilter`。
+  - repository 查詢一律帶明確 ownerId（`CurrentUserContext.getEffectiveUserId()`），不依賴 `ownerFilter`；evidence body 查詢也須 join package 比對 owner（`package_id`＋`source_id`＋`owner_user_id`），不能只靠前一步驗證。
 
 - [ ] 453.3 **Freshness（讀取當下查核，不進 context hash）。** `checkedAt` = 現在（Asia/Taipei、秒精度、`yyyy-MM-dd'T'HH:mm:ssXXX`），若早於 package generatedAt → 500 `INTERNAL_ERROR`（時鐘異常，不得偽造）。
   - 快照：以 `findLatestWithStocksByOwnerUserId(owner)` ＋ `AssetService.getSnapshotDetail(entity)` ＋ `SrppSnapshotRevision.of(...)` 計算目前 revision，與 context 中 `sources[assets].revision` 比較；不同或已無快照 → `changedSourceIds` 加 `assets`、reason `SOURCE_REVISION_CHANGED`。DB 讀取例外 → UNKNOWN（`SOURCE_UNVERIFIABLE`）。
@@ -40,7 +40,7 @@ t452 已由背景 producer 把不可變 package（`srpp_context_package.context_
   - status：任一 changed → STALE（changedSourceIds 字典序）；否則任一 unverifiable → UNKNOWN（changedSourceIds []）；否則 CURRENT（兩陣列皆空）。reasonCodes 字典序去重。
   - **不得呼叫 `StockPriceService.getLiveAssets`、`PriceQueryService`、Redis、`isTwTradingDayKnown` 或任何會外呼的方法。**
 
-- [ ] 453.4 **回應組裝。**
+- [ ] 453.4 **回應組裝。** 分層：`SrppDailyContextReadService` 回傳領域結果（sealed interface，例如 `Ok(String body)` 與 `Problem(String code)`），**不決定 HTTP status、不組 problem body**；code→HTTP status 對照、problem JSON 與 Content-Type／Cache-Control 由 controller（或其 scoped advice）以 `SrppProblemCatalog` 產生（structure.md §2.2：Service 不直接組 HTTP response）。summary／evidence 的 context 嵌入與字串組裝可留在 service。
   - summary：以字串組 `{"kind":"SUMMARY","context":<context_jcs 原文>,"contextContentSha256":"<sha256(context_jcs)>","freshness":{"status":…,"checkedAt":…,"changedSourceIds":[…],"reasonCodes":[…]}}`；context 原文不得 parse 後重新序列化。
   - evidence：`{"kind":"EVIDENCE","packageId":…,"sourceId":…,"bodyMediaType":"application/json","bodyEncoding":"UTF-8","body":<body 以 Jackson 字串逸出>,"bodySha256":"<sha256(body)>"}`。
   - problem：`{"type":"about:blank","title":…,"status":…,"detail":…,"instance":"/api/public/srpp/daily-context","code":…,"retryable":…}`，title／detail 用 `SrppProblemCatalog` 的固定文案（每個 code 一組固定英文 title＋繁中 detail；retryable 逐 code 固定：`CALENDAR_UNAVAILABLE`、`CONTEXT_NOT_READY` 為 true，其餘（含 503 `OWNER_UNAVAILABLE`——帳號不存在或停用時重試無益）一律 false），不得含帳號、SQL、例外訊息。未預期例外由本 controller 範圍的 `@RestControllerAdvice(assignableTypes = InternalSrppDailyContextController.class)` 轉 500 `INTERNAL_ERROR`。

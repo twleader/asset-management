@@ -12485,7 +12485,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 |---|---|
 | assets | 身分（snapshotId、snapshotDate、股票 id 集合、每檔 market/code/shares 精確）→ 八項 checks（detail：deposits Σamount、funds ΣcurrentValue、snapshot stocks ΣcurrentValue、live stocks ΣliveValue、total = 三者；reported：snapshot.total*／live.total*）→ 幣別白名單。任一失敗 → 不發布（log reason code）。資料欄：snapshot 四總額＋liveStockValue、liveTotalAssets（EXACT）、targetPriceComplete、rowCounts、checks、depositGroups（`(currency, depositType, bankId)` 分組；bankName=bankDisplayName；amountTwd Σ；originalAmount 全非 null 才 Σ 否則 null；利息 Σ calculator 值，ESTIMATE）。status：targetPriceComplete ? COMPLETE : PARTIAL(`TARGET_PRICE_INCOMPLETE`)。 |
 | allocation | 見 Requirement 163；列排序 assetKey；exposure：股票 liveValue、基金 currentValue、存款 amount。 |
-| cashIncome | 見 Requirement 163；對帳容差同 assets。 |
+| cashIncome | 見 Requirement 163；`sourceAccruedAnnualIncome` 直接取 `snapshot.estimatedAnnualDividend`（單一來源），三項加總只用於對帳，容差同 assets；存款利息呼叫 `SnapshotAggregateCalculator` 抽出的共用 static 純函式。 |
 | funding／completedTechnicals | 固定 UNAVAILABLE `CALCULATOR_NOT_VERIFIED`。 |
 
 `sourceIds` 引用：assets→`["assets"]`；allocation 的 exposure／currentWeight→`["assets"]`、targetWeight→`["policy"]`、gap→`["assets","policy"]`，模組→`["assets","policy"]`；cashIncome→`["assets"]`。
