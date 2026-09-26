@@ -270,6 +270,10 @@
             <el-option value="MA_60"  label="季線偏離（60 日均線）" />
             <el-option value="MA_240" label="年線偏離（240 日均線）" />
             <el-option value="KD"     label="KD 值" />
+            <el-option value="RSI5"   label="RSI5" />
+            <el-option value="BIAS10" label="BIAS10（10 日乖離）" />
+            <el-option value="POS52W" label="52 週位置" />
+            <el-option value="WR9"    label="W%R9" />
           </el-select>
         </el-form-item>
 
@@ -311,8 +315,26 @@
             <el-radio-group v-model="form.kdIndicator">
               <el-radio value="K">K 值</el-radio>
               <el-radio value="D">D 值</el-radio>
+              <el-radio value="K_GT_D">K 大於 D</el-radio>
+              <el-radio value="K_LT_D">K 小於 D</el-radio>
             </el-radio-group>
           </el-form-item>
+          <template v-if="!isKdCompare(form)">
+            <el-form-item label="方向">
+              <el-radio-group v-model="form.direction">
+                <el-radio value="ABOVE">高於</el-radio>
+                <el-radio value="BELOW">低於</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="門檻值">
+              <el-input-number v-model="form.threshold" :min="0" :max="100" :step="1" />
+              <span style="margin-left:8px;color:#64748b">（例：高於 80 / 低於 20）</span>
+            </el-form-item>
+          </template>
+        </template>
+
+        <!-- RSI5 / BIAS10 / 52 週位置 / W%R9 -->
+        <template v-if="['RSI5','BIAS10','POS52W','WR9'].includes(form.conditionGroup)">
           <el-form-item label="方向">
             <el-radio-group v-model="form.direction">
               <el-radio value="ABOVE">高於</el-radio>
@@ -320,8 +342,11 @@
             </el-radio-group>
           </el-form-item>
           <el-form-item label="門檻值">
-            <el-input-number v-model="form.threshold" :min="0" :max="100" :step="1" />
-            <span style="margin-left:8px;color:#64748b">（例：高於 80 / 低於 20）</span>
+            <el-input-number v-model="form.threshold"
+              :min="form.conditionGroup === 'BIAS10' ? undefined : 0"
+              :max="form.conditionGroup === 'BIAS10' ? undefined : 100"
+              :precision="2" :step="1" style="width:160px" />
+            <span v-if="form.conditionGroup === 'BIAS10'" style="margin-left:8px;color:#64748b">（可負，例：-5）</span>
           </el-form-item>
         </template>
 
@@ -409,22 +434,30 @@
               <el-option value="MA_60"  label="季線偏離（60 日均線）" />
               <el-option value="MA_240" label="年線偏離（240 日均線）" />
               <el-option value="KD"     label="KD 值" />
+              <el-option value="RSI5"   label="RSI5" />
+              <el-option value="BIAS10" label="BIAS10（10 日乖離）" />
+              <el-option value="POS52W" label="52 週位置" />
+              <el-option value="WR9"    label="W%R9" />
             </el-select>
             <el-select v-if="c.conditionGroup === 'KD'" v-model="c.kdIndicator" style="width:92px">
               <el-option value="K" label="K 值" />
               <el-option value="D" label="D 值" />
+              <el-option value="K_GT_D" label="K 大於 D" />
+              <el-option value="K_LT_D" label="K 小於 D" />
             </el-select>
-            <el-select v-model="c.direction" style="width:132px">
+            <el-select v-if="!isKdCompare(c)" v-model="c.direction" style="width:132px">
               <el-option value="ABOVE" :label="isMaCondition(c) ? `高於${maNameOf(c)}` : '高於'" />
               <el-option value="BELOW" :label="isMaCondition(c) ? `低於${maNameOf(c)}` : '低於'" />
             </el-select>
-            <!-- 價位：金額；均線：固定五段幅度（與單一條件 dialog 同一組）；KD：0～100 門檻值 -->
+            <!-- 價位：金額；均線：固定五段幅度（與單一條件 dialog 同一組）；KD／延伸指標：門檻值；K>D／K<D：隱藏方向與門檻 -->
             <el-input-number v-if="c.conditionGroup === 'PRICE'" v-model="c.priceThreshold"
               :min="0" :precision="2" :step="1" style="width:150px" />
             <el-select v-else-if="isMaCondition(c)" v-model="c.threshold" style="width:100px">
               <el-option v-for="p in MA_PCT_OPTIONS" :key="p" :value="p" :label="`${p}%`" />
             </el-select>
-            <el-input-number v-else v-model="c.threshold" :min="0" :max="100" :step="1" style="width:130px" />
+            <el-input-number v-else-if="c.conditionGroup === 'BIAS10'" v-model="c.threshold"
+              :precision="2" :step="1" style="width:130px" />
+            <el-input-number v-else-if="!isKdCompare(c)" v-model="c.threshold" :min="0" :max="100" :step="1" style="width:130px" />
           </div>
         </div>
 
@@ -560,7 +593,16 @@ const MA_PCT_OPTIONS = [0, 5, 10, 15, 20]   // 均線偏離幅度的固定五段
 const isMaCondition = (c) => c.conditionGroup in MA_GROUPS
 const maNameOf = (c) => MA_NAMES[MA_GROUPS[c.conditionGroup]] || '均線'
 const maPeriodOf = (c) => (isMaCondition(c) ? MA_GROUPS[c.conditionGroup] : null)
-const thresholdOf = (c) => (c.conditionGroup === 'PRICE' ? c.priceThreshold : c.threshold)
+// KD 下的「K 大於 D」「K 小於 D」：隱藏方向與門檻輸入，threshold 固定送 0（Requirement 164）
+const isKdCompare = (c) => c.conditionGroup === 'KD' && (c.kdIndicator === 'K_GT_D' || c.kdIndicator === 'K_LT_D')
+const thresholdOf = (c) => {
+  if (c.conditionGroup === 'PRICE') return c.priceThreshold
+  if (isKdCompare(c)) return 0
+  return c.threshold
+}
+// RSI5／BIAS10／52 週位置／W%R9 四個延伸指標條件類型（Requirement 164）
+const EXT_INDICATOR_GROUPS = ['RSI5', 'BIAS10', 'POS52W', 'WR9']
+const EXT_INDICATOR_LABELS = { RSI5: 'RSI5', BIAS10: 'BIAS10', POS52W: '52 週位置', WR9: 'W%R9' }
 
 const isMaGroup = computed(() => isMaCondition(form))
 const maName = computed(() => maNameOf(form))
@@ -823,19 +865,36 @@ function parseAlertType(target, alertType, threshold, maPeriod) {
     target.conditionGroup = `MA_${maPeriod}`
     target.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     target.threshold = Number(threshold)
-  } else {
+  } else if (alertType === 'KD_K_GT_D' || alertType === 'KD_K_LT_D') {
+    // 須在 KD_D_ / KD_ 分支之前判斷，否則會被誤解成 K 門檻條件
+    target.conditionGroup = 'KD'
+    target.kdIndicator = alertType === 'KD_K_GT_D' ? 'K_GT_D' : 'K_LT_D'
+    target.direction = 'ABOVE'
+    target.threshold = 0
+  } else if (alertType.startsWith('KD_')) {
     target.conditionGroup = 'KD'
     target.kdIndicator = alertType.startsWith('KD_D') ? 'D' : 'K'
+    target.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
+    target.threshold = Number(threshold)
+  } else {
+    // RSI5 / BIAS10 / POS52W / WR9
+    const prefix = EXT_INDICATOR_GROUPS.find(p => alertType.startsWith(p))
+    target.conditionGroup = prefix
     target.direction = alertType.includes('ABOVE') ? 'ABOVE' : 'BELOW'
     target.threshold = Number(threshold)
   }
 }
 
-// 條件類型改變時重設同列其餘欄位（KD 預設 80、其餘 5%），避免留下前一個類型的門檻值
+// 條件類型改變時重設同列其餘欄位，避免留下前一個類型的門檻值
+// （KD／RSI5／52 週位置／W%R9 預設 80，BIAS10 預設 5 可負，其餘均線類 5%）
 function resetConditionDefaults(c) {
   c.direction = 'ABOVE'
   c.kdIndicator = 'K'
-  c.threshold = c.conditionGroup === 'KD' ? 80 : 5
+  if (c.conditionGroup === 'KD' || EXT_INDICATOR_GROUPS.includes(c.conditionGroup)) {
+    c.threshold = c.conditionGroup === 'BIAS10' ? 5 : 80
+  } else {
+    c.threshold = 5
+  }
   c.priceThreshold = 0
 }
 
@@ -847,7 +906,13 @@ function buildAlertType(c) {
   const dir = c.direction
   if (c.conditionGroup === 'PRICE') return `PRICE_${dir}`
   if (isMaCondition(c))             return `MA_${dir}_PCT`
-  return c.kdIndicator === 'D' ? `KD_D_${dir}` : `KD_${dir}`
+  if (c.conditionGroup === 'KD') {
+    if (c.kdIndicator === 'K_GT_D') return 'KD_K_GT_D'
+    if (c.kdIndicator === 'K_LT_D') return 'KD_K_LT_D'
+    return c.kdIndicator === 'D' ? `KD_D_${dir}` : `KD_${dir}`
+  }
+  // RSI5 / BIAS10 / POS52W / WR9
+  return `${c.conditionGroup}_${dir}`
 }
 
 // target 預設是單一條件 dialog 的 form；複合條件 dialog 傳 groupForm 進來共用同一支查詢
@@ -964,7 +1029,17 @@ function conditionPreview(c) {
   if (isMaCondition(c)) {
     return Number(c.threshold) === 0 ? `${dir}${maNameOf(c)}` : `${dir}${maNameOf(c)} ${c.threshold}%`
   }
-  return `${c.kdIndicator} 值${dir} ${c.threshold ?? 0}`
+  if (c.conditionGroup === 'KD') {
+    if (c.kdIndicator === 'K_GT_D') return 'K 值大於 D 值'
+    if (c.kdIndicator === 'K_LT_D') return 'K 值小於 D 值'
+    return `${c.kdIndicator} 值${dir} ${c.threshold ?? 0}`
+  }
+  // RSI5 / BIAS10 / POS52W / WR9，文案與後端 buildLabel 逐字一致
+  const label = EXT_INDICATOR_LABELS[c.conditionGroup] || c.conditionGroup
+  const unit = (c.conditionGroup === 'BIAS10' || c.conditionGroup === 'POS52W') ? '%' : ''
+  return c.conditionGroup === 'POS52W'
+    ? `${label}${dir} ${c.threshold ?? 0}${unit}`
+    : `${label} ${dir} ${c.threshold ?? 0}${unit}`
 }
 // 分隔符「 且 」（半形空白 + 且 + 半形空白）與後端 buildGroupLabel 逐字一致
 const groupPreview = computed(() => groupForm.conditions.map(conditionPreview).join(' 且 '))

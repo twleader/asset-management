@@ -1317,9 +1317,9 @@ Dashboard 每分鐘 realtime 回應必須同時套用 `stockPrices`、`marketSta
 | ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | stockCode | String | 股票代號 |
 | market | String | 市場代碼（台股/美股；股名由 `stock` 主檔 join 補上，v1.9.4 起不存冗餘 `stock_name`） |
-| alertType | String | 條件類型：`PRICE_ABOVE` / `PRICE_BELOW` / `MA_ABOVE_PCT` / `MA_BELOW_PCT` / `KD_ABOVE` / `KD_BELOW` / `KD_D_ABOVE` / `KD_D_BELOW` |
+| alertType | String | 條件類型：`PRICE_ABOVE` / `PRICE_BELOW` / `MA_ABOVE_PCT` / `MA_BELOW_PCT` / `KD_ABOVE` / `KD_BELOW` / `KD_D_ABOVE` / `KD_D_BELOW`；Requirement 164 起另有 `RSI5_ABOVE` / `RSI5_BELOW` / `BIAS10_ABOVE` / `BIAS10_BELOW` / `POS52W_ABOVE` / `POS52W_BELOW` / `WR9_ABOVE` / `WR9_BELOW`（門檻比較，指標取自 `TechnicalIndicatorService.computeAll`；52 週位置＝(現價−區間低)/(區間高−區間低)×100，區間為最近 240 根未還原完成日 K＋現價，不足 240 根為 null）與 `KD_K_GT_D` / `KD_K_LT_D`（K、D 相對狀態，threshold 固定 0）；新類型僅 live 評估、不做盤中補抓 |
 | maPeriod | Integer | 均線天數（僅 `MA_*_PCT` 類型使用，目前前端下拉提供 20 / 60 / 240；其他類型為 null。欄位本身為任意整數，新增天數不需 migration，見下方「均線通用化」） |
-| threshold | BigDecimal | 條件門檻：價位類為價格，均線類為百分比偏離，KD 類為 0–100 門檻 |
+| threshold | BigDecimal | 條件門檻：價位類為價格，均線類為百分比偏離，KD 類為 0–100 門檻；RSI5／W%R9／52 週位置為 0–100；BIAS10 為百分比、可為負；`KD_K_GT_D`／`KD_K_LT_D` 固定 0 |
 | active | Boolean | 是否啟用 |
 | displayOrder | Integer | 拖曳排序 |
 | lastTriggeredAt | LocalDateTime | 最近一次觸發時間 |

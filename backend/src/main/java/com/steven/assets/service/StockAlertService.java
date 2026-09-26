@@ -15,6 +15,7 @@ import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockAlertTriggerRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.util.MarketZones;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -69,6 +70,8 @@ public class StockAlertService {
     private final com.steven.assets.security.TenantGuard tenantGuard;
     private final StockAlertGroupRepository groupRepo;
     private final StockAlertGroupRecipientRepository groupRecipientRepo;
+    /** Requirement 164：0000 大盤的 52 週位置讀 {@code twse_index_daily_history} 完成日 K。 */
+    private final TwseIndexDailyHistoryRepository twseIndexHistoryRepo;
 
     /**
      * 供 {@link #evaluateGroup} detach 群組成員用（Task 253）。
@@ -121,6 +124,7 @@ public class StockAlertService {
         int maxOrder = maxDisplayOrder();
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
+        validateCondition(req.alertType(), req.maPeriod(), req.threshold());
         assertNoDuplicate(code, req.market(), req.alertType(),
                 req.maPeriod(), req.threshold(), null, req.stockName());
         StockAlert alert = StockAlert.builder()
@@ -217,6 +221,7 @@ public class StockAlertService {
         tenantGuard.assertOwned(alert.getOwnerUserId());
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
+        validateCondition(req.alertType(), req.maPeriod(), req.threshold());
         assertNoDuplicate(code, req.market(), req.alertType(),
                 req.maPeriod(), req.threshold(), id, req.stockName());
         alert.setStockCode(code);
@@ -335,7 +340,49 @@ public class StockAlertService {
     /** 合法的警示類型（複合條件驗證用；與 {@link #buildLabel} 的 switch 分支一一對應）。 */
     private static final Set<String> VALID_ALERT_TYPES = Set.of(
             "PRICE_ABOVE", "PRICE_BELOW", "MA_ABOVE_PCT", "MA_BELOW_PCT",
-            "KD_ABOVE", "KD_BELOW", "KD_D_ABOVE", "KD_D_BELOW");
+            "KD_ABOVE", "KD_BELOW", "KD_D_ABOVE", "KD_D_BELOW",
+            // Requirement 164 / Task 455：延伸指標條件
+            "RSI5_ABOVE", "RSI5_BELOW", "BIAS10_ABOVE", "BIAS10_BELOW",
+            "POS52W_ABOVE", "POS52W_BELOW", "WR9_ABOVE", "WR9_BELOW",
+            "KD_K_GT_D", "KD_K_LT_D");
+
+    /** Requirement 164：threshold 必須介於 0～100 的新類型（BIAS10 可負，不在此列）。 */
+    private static final Set<String> PERCENT_RANGE_TYPES = Set.of(
+            "RSI5_ABOVE", "RSI5_BELOW", "POS52W_ABOVE", "POS52W_BELOW", "WR9_ABOVE", "WR9_BELOW");
+
+    /** Requirement 164：K 與 D 的相對狀態條件，threshold 固定為 0。 */
+    private static final Set<String> KD_CROSS_STATE_TYPES = Set.of("KD_K_GT_D", "KD_K_LT_D");
+
+    /**
+     * 單一條件驗證（Requirement 164 / Task 455）：單一條件 create/update 與 {@link #validateConditions} 共用。
+     * 對所有類型檢查白名單、threshold 必填、maPeriod 規則；新類型另檢查 threshold 範圍。
+     *
+     * @throws IllegalArgumentException 違反任一條規則（→ 400）
+     */
+    public static void validateCondition(String type, Integer maPeriod, BigDecimal threshold) {
+        if (type == null || !VALID_ALERT_TYPES.contains(type)) {
+            throw new IllegalArgumentException("條件類型 %s 不合法".formatted(type));
+        }
+        // MA_*_PCT 必須有 maPeriod（沒有就無從決定比哪一條均線）；其餘型別必須沒有
+        // （KD / 價格條件帶 maPeriod 是前端組錯 payload，靜默忽略會讓使用者以為設定生效了）
+        boolean maType = type.startsWith("MA_");
+        if (maType && maPeriod == null) {
+            throw new IllegalArgumentException("條件類型 %s 不合法：均線條件必須指定均線天數".formatted(type));
+        }
+        if (!maType && maPeriod != null) {
+            throw new IllegalArgumentException("條件類型 %s 不合法：非均線條件不得指定均線天數".formatted(type));
+        }
+        if (threshold == null) {
+            throw new IllegalArgumentException("條件類型 %s 不合法：門檻值必填".formatted(type));
+        }
+        if (PERCENT_RANGE_TYPES.contains(type)
+                && (threshold.signum() < 0 || threshold.compareTo(BigDecimal.valueOf(100)) > 0)) {
+            throw new IllegalArgumentException("條件類型 %s 不合法：門檻值必須介於 0～100".formatted(type));
+        }
+        if (KD_CROSS_STATE_TYPES.contains(type) && threshold.signum() != 0) {
+            throw new IllegalArgumentException("條件類型 %s 不合法：K／D 相對狀態條件的門檻值必須為 0".formatted(type));
+        }
+    }
 
     /**
      * 複合條件群組的條件清單驗證（Task 253）。
@@ -357,22 +404,10 @@ public class StockAlertService {
             throw new IllegalArgumentException("複合條件最多 5 個條件");
         }
         for (StockAlertDto.ConditionItem c : conditions) {
-            String type = (c == null) ? null : c.alertType();
-            if (type == null || !VALID_ALERT_TYPES.contains(type)) {
-                throw new IllegalArgumentException("條件類型 %s 不合法".formatted(type));
+            if (c == null) {
+                throw new IllegalArgumentException("條件類型 null 不合法");
             }
-            // MA_*_PCT 必須有 maPeriod（沒有就無從決定比哪一條均線）；其餘型別必須沒有
-            // （KD / 價格條件帶 maPeriod 是前端組錯 payload，靜默忽略會讓使用者以為設定生效了）
-            boolean maType = type.startsWith("MA_");
-            if (maType && c.maPeriod() == null) {
-                throw new IllegalArgumentException("條件類型 %s 不合法：均線條件必須指定均線天數".formatted(type));
-            }
-            if (!maType && c.maPeriod() != null) {
-                throw new IllegalArgumentException("條件類型 %s 不合法：非均線條件不得指定均線天數".formatted(type));
-            }
-            if (c.threshold() == null) {
-                throw new IllegalArgumentException("條件類型 %s 不合法：門檻值必填".formatted(type));
-            }
+            validateCondition(c.alertType(), c.maPeriod(), c.threshold());
         }
         // 組內重複：同一個條件寫兩次對 AND 毫無意義，卻會讓合併 label 出現重複文案
         for (int i = 0; i < conditions.size(); i++) {
@@ -720,7 +755,29 @@ public class StockAlertService {
      * 上述回寫才不會被 flush 進 DB。
      */
     private boolean matches(StockAlert alert, double currentPrice) {
+        return matches(alert, currentPrice, new EvalCache(alert.getStockCode(), alert.getMarket()));
+    }
+
+    /**
+     * 同 {@link #matches(StockAlert, double)}，但延伸指標（Requirement 164）的 {@code computeAll}
+     * 與 52 週高低序列經 {@code cache} 在同一次評估內共用（複合條件群組的成員共用同一個 cache）。
+     */
+    private boolean matches(StockAlert alert, double currentPrice, EvalCache cache) {
         return switch (alert.getAlertType()) {
+            case "RSI5_ABOVE"   -> atOrAbove(extended(cache, TechnicalIndicatorService.ExtendedIndicators::rsi5), alert);
+            case "RSI5_BELOW"   -> atOrBelow(extended(cache, TechnicalIndicatorService.ExtendedIndicators::rsi5), alert);
+            case "BIAS10_ABOVE" -> atOrAbove(extended(cache, TechnicalIndicatorService.ExtendedIndicators::bias10), alert);
+            case "BIAS10_BELOW" -> atOrBelow(extended(cache, TechnicalIndicatorService.ExtendedIndicators::bias10), alert);
+            case "WR9_ABOVE"    -> atOrAbove(extended(cache, TechnicalIndicatorService.ExtendedIndicators::wr9), alert);
+            case "WR9_BELOW"    -> atOrBelow(extended(cache, TechnicalIndicatorService.ExtendedIndicators::wr9), alert);
+            case "POS52W_ABOVE" -> atOrAbove(week52PositionFor(cache, currentPrice), alert);
+            case "POS52W_BELOW" -> atOrBelow(week52PositionFor(cache, currentPrice), alert);
+            case "KD_K_GT_D", "KD_K_LT_D" -> {
+                TechnicalIndicatorService.FullIndicators ind = cache.indicators();
+                if (ind == null || ind.k() == null || ind.d() == null) yield false;
+                int cmp = ind.k().compareTo(ind.d());
+                yield "KD_K_GT_D".equals(alert.getAlertType()) ? cmp > 0 : cmp < 0;
+            }
             case "MA_ABOVE_PCT" -> alert.getMaPeriod() != null
                     && checkMaDeviation(alert, currentPrice, alert.getMaPeriod(), true);
             case "MA_BELOW_PCT" -> alert.getMaPeriod() != null
@@ -763,6 +820,131 @@ public class StockAlertService {
      *
      * <p>整支包 try/catch 只 log.warn，比照 {@link #evaluate}：單一群組評估失敗不得中斷整輪檢查。
      */
+    // ===== Requirement 164 / Task 455：延伸指標條件 =====
+
+    /** 52 週位置所需的完成日 K 根數（與交易雷達 daily.week52Position 相同視窗）。 */
+    static final int WEEK52_BARS = 240;
+
+    /**
+     * 單次評估內的 lazy 快取：同一檔股票的 {@code computeAll} 與 52 週高低序列各最多查一次。
+     * 生命週期只有一次 {@code evaluate}／{@code evaluateGroup}，不跨輪共用（避免吃到舊指標）。
+     */
+    private final class EvalCache {
+        private final String code;
+        private final String market;
+        private boolean indLoaded;
+        private TechnicalIndicatorService.FullIndicators ind;
+        private boolean hlLoaded;
+        private List<double[]> highLowAsc;
+
+        EvalCache(String code, String market) {
+            this.code = code;
+            this.market = market;
+        }
+
+        TechnicalIndicatorService.FullIndicators indicators() {
+            if (!indLoaded) {
+                indLoaded = true;
+                try {
+                    ind = indicatorService.computeAll(code, market);
+                } catch (Exception e) {
+                    log.warn("警示延伸指標計算失敗 {} {}: {}", market, code, e.getMessage());
+                    ind = null;
+                }
+            }
+            return ind;
+        }
+
+        List<double[]> highLowAsc() {
+            if (!hlLoaded) {
+                hlLoaded = true;
+                try {
+                    highLowAsc = loadCompletedHighLowAsc(code, market);
+                } catch (Exception e) {
+                    log.warn("警示 52 週高低序列讀取失敗 {} {}: {}", market, code, e.getMessage());
+                    highLowAsc = List.of();
+                }
+            }
+            return highLowAsc;
+        }
+    }
+
+    private static BigDecimal extended(EvalCache cache,
+            java.util.function.Function<TechnicalIndicatorService.ExtendedIndicators, BigDecimal> getter) {
+        TechnicalIndicatorService.FullIndicators ind = cache.indicators();
+        if (ind == null || ind.extended() == null) return null;
+        return getter.apply(ind.extended());
+    }
+
+    private static Double week52PositionFor(EvalCache cache, double currentPrice) {
+        return week52Position(currentPrice, cache.highLowAsc());
+    }
+
+    private static boolean atOrAbove(Number value, StockAlert alert) {
+        return value != null && value.doubleValue() >= alert.getThreshold().doubleValue();
+    }
+
+    private static boolean atOrBelow(Number value, StockAlert alert) {
+        return value != null && value.doubleValue() <= alert.getThreshold().doubleValue();
+    }
+
+    /**
+     * 52 週位置（Requirement 164）＝(現價 − 區間最低) ÷ (區間最高 − 區間最低) × 100。
+     * 區間＝最近 240 根完成日 K（每筆 {@code {high, low}}，缺值由呼叫端以收盤代入）＋今日現價。
+     *
+     * @param highLowAsc 完成日 K 高低序列（升序；只取最後 240 筆）
+     * @return 不足 240 筆或最高＝最低時回 null（條件不成立）
+     */
+    static Double week52Position(double currentPrice, List<double[]> highLowAsc) {
+        if (highLowAsc == null || highLowAsc.size() < WEEK52_BARS) return null;
+        double hi = currentPrice;
+        double lo = currentPrice;
+        for (double[] hl : highLowAsc.subList(highLowAsc.size() - WEEK52_BARS, highLowAsc.size())) {
+            hi = Math.max(hi, Math.max(hl[0], hl[1]));
+            lo = Math.min(lo, Math.min(hl[0], hl[1]));
+        }
+        if (hi == lo) return null;
+        return (currentPrice - lo) / (hi - lo) * 100.0;
+    }
+
+    /**
+     * 讀最近 240 根<b>完成日 K</b> 的未還原高低（升序）：一般股票讀 {@code stock_price_history}，
+     * {@code 0000} 讀 {@code twse_index_daily_history}；排除該市場今日（含之後）的列——今日由現價代表。
+     * 高／低缺值以收盤代；三者皆缺的列略過。
+     */
+    private List<double[]> loadCompletedHighLowAsc(String code, String market) {
+        LocalDate today = ZonedDateTime.now(MarketZones.resolve(market)).toLocalDate();
+        List<double[]> desc = new ArrayList<>(WEEK52_BARS);
+        if ("0000".equals(code) && "台股".equals(market)) {
+            for (var r : twseIndexHistoryRepo.findTopNByOrderByTradingDateDesc(WEEK52_BARS + 1)) {
+                if (!r.getTradingDate().isBefore(today)) continue;
+                double[] hl = highLow(r.getHighPoint(), r.getLowPoint(), r.getClosePoint());
+                if (hl != null) desc.add(hl);
+            }
+        } else {
+            for (var r : historyRepo.findRecentN(code, market, WEEK52_BARS + 1)) {
+                if (!r.getTradingDate().isBefore(today)) continue;
+                double[] hl = highLow(r.getHighPrice(), r.getLowPrice(), r.getClosePrice());
+                if (hl != null) desc.add(hl);
+            }
+        }
+        if (desc.size() > WEEK52_BARS) desc = desc.subList(0, WEEK52_BARS);
+        return new ArrayList<>(desc).reversed();
+    }
+
+    private static double[] highLow(BigDecimal high, BigDecimal low, BigDecimal close) {
+        BigDecimal h = high != null ? high : close;
+        BigDecimal l = low != null ? low : close;
+        if (h == null || l == null) return null;
+        return new double[]{h.doubleValue(), l.doubleValue()};
+    }
+
+    /** Requirement 164 的延伸指標類型：不做盤中補抓（{@code findRecentIntradayTrigger} 直接回 empty）。 */
+    static boolean isExtendedIndicatorType(String type) {
+        return type != null && (type.startsWith("RSI5_") || type.startsWith("BIAS10_")
+                || type.startsWith("POS52W_") || type.startsWith("WR9_") || KD_CROSS_STATE_TYPES.contains(type));
+    }
+
     private void evaluateGroup(StockAlertGroup group) {
         try {
             Optional<PriceQueryService.LivePrice> priceOpt =
@@ -792,12 +974,14 @@ public class StockAlertService {
             if (members.size() < 2) return;   // 空 / 單一成員群組：allMatch 恆真的陷阱，見 groupTriggered
 
             List<Boolean> memberResults = new ArrayList<>(members.size());
+            // Requirement 164：成員共用同一個 lazy 快取，computeAll／52 週高低序列最多各查一次
+            EvalCache cache = new EvalCache(group.getStockCode(), group.getMarket());
             boolean shortCircuited = false;
             for (StockAlert m : members) {
                 // 一旦有條件不成立，後續成員不必再查歷史（AND 已注定不成立）；
                 // 仍補一個 false 佔位，讓 memberResults 筆數與成員數一致，
                 // groupTriggered 的「至少 2 個成員」判定才不會被短路壓成 1 筆而誤判。
-                boolean ok = !shortCircuited && matches(m, currentPrice);
+                boolean ok = !shortCircuited && matches(m, currentPrice, cache);
                 if (!ok) shortCircuited = true;
                 memberResults.add(ok);
             }
@@ -914,6 +1098,8 @@ public class StockAlertService {
      * 抓不到 5m 資料時 fallback 用日內 HIGH/LOW，時間用該日 13:30/16:00 收盤時間（粗估）。
      */
     private Optional<IntradayMatch> findRecentIntradayTrigger(StockAlert alert, int recentDays) {
+        // Requirement 164：延伸指標類型不做盤中補抓（逐根 5 分 K 重算指標成本高於效益）
+        if (isExtendedIndicatorType(alert.getAlertType())) return Optional.empty();
         List<StockPriceHistory> asc = historyRepo
                 .findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
                         alert.getStockCode(), alert.getMarket(),
@@ -1490,6 +1676,16 @@ public class StockAlertService {
             case "KD_D_BELOW"            -> String.format("D 值低於 %.0f", thr);
             case "PRICE_ABOVE"           -> String.format("股價高於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
             case "PRICE_BELOW"           -> String.format("股價低於 %s", a.getThreshold().stripTrailingZeros().toPlainString());
+            case "RSI5_ABOVE"            -> "RSI5 高於 " + plain(a.getThreshold());
+            case "RSI5_BELOW"            -> "RSI5 低於 " + plain(a.getThreshold());
+            case "BIAS10_ABOVE"          -> "BIAS10 高於 " + plain(a.getThreshold()) + "%";
+            case "BIAS10_BELOW"          -> "BIAS10 低於 " + plain(a.getThreshold()) + "%";
+            case "POS52W_ABOVE"          -> "52 週位置高於 " + plain(a.getThreshold()) + "%";
+            case "POS52W_BELOW"          -> "52 週位置低於 " + plain(a.getThreshold()) + "%";
+            case "WR9_ABOVE"             -> "W%R9 高於 " + plain(a.getThreshold());
+            case "WR9_BELOW"             -> "W%R9 低於 " + plain(a.getThreshold());
+            case "KD_K_GT_D"             -> "K 值大於 D 值";
+            case "KD_K_LT_D"             -> "K 值小於 D 值";
             default -> a.getAlertType();
         };
     }
@@ -1525,6 +1721,11 @@ public class StockAlertService {
         BigDecimal price = ma.multiply(BigDecimal.valueOf(1 + (above ? pct : -pct) / 100.0))
                 .setScale(2, java.math.RoundingMode.HALF_UP);
         return String.format("（%s）", price.stripTrailingZeros().toPlainString());
+    }
+
+    /** threshold 去尾零字串（Requirement 164 label 用）。 */
+    private static String plain(BigDecimal v) {
+        return v.stripTrailingZeros().toPlainString();
     }
 
     /** maPeriod → 顯示名稱（20=月線、60=季線、240=年線，其他則回「MA{n}」）。 */

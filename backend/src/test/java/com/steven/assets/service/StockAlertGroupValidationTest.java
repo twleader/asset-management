@@ -143,4 +143,63 @@ class StockAlertGroupValidationTest {
                 cond("PRICE_ABOVE", null, "300"),
                 cond("PRICE_BELOW", null, "200"))));
     }
+
+    // ===== Requirement 164 / Task 455：延伸指標條件 =====
+
+    @Test
+    @DisplayName("10 個新類型的合法組合 → 放行")
+    void acceptsExtendedIndicatorTypes() {
+        assertDoesNotThrow(() -> StockAlertService.validateConditions(List.of(
+                cond("RSI5_ABOVE", null, "80"), cond("RSI5_BELOW", null, "0"),
+                cond("BIAS10_ABOVE", null, "5"), cond("BIAS10_BELOW", null, "-5"),
+                cond("POS52W_ABOVE", null, "100"))));
+        assertDoesNotThrow(() -> StockAlertService.validateConditions(List.of(
+                cond("POS52W_BELOW", null, "10"), cond("WR9_ABOVE", null, "80"),
+                cond("WR9_BELOW", null, "20"), cond("KD_K_GT_D", null, "0"),
+                cond("KD_K_LT_D", null, "0.0000"))));
+    }
+
+    @Test
+    @DisplayName("RSI5／POS52W／WR9 門檻超出 0～100 → 拒絕")
+    void rejectsOutOfRangeThreshold() {
+        for (String t : List.of("RSI5_ABOVE", "RSI5_BELOW", "POS52W_ABOVE", "POS52W_BELOW", "WR9_ABOVE", "WR9_BELOW")) {
+            assertRejects(List.of(cond(t, null, "100.01"), cond("KD_BELOW", null, "15")), "0～100");
+            assertRejects(List.of(cond(t, null, "-1"), cond("KD_BELOW", null, "15")), "0～100");
+        }
+    }
+
+    @Test
+    @DisplayName("BIAS10 不限範圍（可負、可大於 100）")
+    void acceptsBiasAnyRange() {
+        assertDoesNotThrow(() -> StockAlertService.validateCondition("BIAS10_BELOW", null, new BigDecimal("-150")));
+        assertDoesNotThrow(() -> StockAlertService.validateCondition("BIAS10_ABOVE", null, new BigDecimal("150")));
+    }
+
+    @Test
+    @DisplayName("K>D／K<D 門檻非 0 → 拒絕")
+    void rejectsNonZeroKdCrossThreshold() {
+        assertRejects(List.of(cond("KD_K_GT_D", null, "1"), cond("KD_BELOW", null, "15")), "必須為 0");
+        assertRejects(List.of(cond("KD_K_LT_D", null, "-0.5"), cond("KD_BELOW", null, "15")), "必須為 0");
+    }
+
+    @Test
+    @DisplayName("新類型帶 maPeriod → 拒絕")
+    void rejectsMaPeriodOnExtendedTypes() {
+        for (String t : List.of("RSI5_ABOVE", "BIAS10_BELOW", "POS52W_ABOVE", "WR9_BELOW", "KD_K_GT_D")) {
+            assertRejects(List.of(cond(t, 60, "0"), cond("KD_BELOW", null, "15")), "不得指定均線天數");
+        }
+    }
+
+    @Test
+    @DisplayName("單一條件驗證：未知類型、門檻缺漏、MA 缺天數 → 拒絕；既有類型合法 → 放行")
+    void singleConditionValidation() {
+        assertThrows(IllegalArgumentException.class,
+                () -> StockAlertService.validateCondition("FOO", null, BigDecimal.ONE));
+        assertThrows(IllegalArgumentException.class,
+                () -> StockAlertService.validateCondition("RSI5_ABOVE", null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> StockAlertService.validateCondition("MA_ABOVE_PCT", null, BigDecimal.TEN));
+        assertDoesNotThrow(() -> StockAlertService.validateCondition("MA_ABOVE_PCT", 60, BigDecimal.TEN));
+        assertDoesNotThrow(() -> StockAlertService.validateCondition("PRICE_ABOVE", null, new BigDecimal("1234.5")));
+    }
 }

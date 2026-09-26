@@ -5599,3 +5599,21 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **資料庫與正規化例外。** 新增 changeset `v1.136.0-srpp-daily-context.sql`（冪等）：`srpp_policy_registry`、`srpp_owner_key`、`srpp_context_package`、`srpp_context_evidence` 與 catalog 新列；`db/schema.sql` 依檔頭指令重產。package 表的 owner／日期／時段／規則包／generatedAt 查詢欄位與 `context_jcs` 內同名值重複，屬於**可重建派生快取／不可變證據的刻意 denormalization**，須在 design 與 changeset 註解中明載；這些表不得寫入持倉、交易、存款或任何權威資料。
 - [ ] **券商與交易鐵則。** 本功能全程不 import、不呼叫任何券商下單類 API，不新增任何交易、代下單或自動執行路徑；輸出僅供判讀，`tradingAuthorized=false` 永遠固定。
 - [ ] **測試與驗收界線。** 單元測試（不啟 Spring、不連 DB）覆蓋：JCS 與三份 proposal 合成摘要範例的 `contextContentSha256`、七份 evidence 範例的 `bodySha256` 逐位元相符；canonical Decimal 正反例；八項對帳與容差邊界、身分不符拒絕、負在途款、null 銀行列、不支援幣別、USD 不重乘；配置聯集／跨市場同代號不合併／未映射不猜零／分母非正；收益缺列 LOWER_BOUND；producer 的日曆未知／休市不產生、空 registry 零計算、revision 變動放棄發布；讀取路徑各錯誤碼與「零寫入、零 Redis、零外呼」；BFF query 400 矩陣零 outbound、owner 503 不可區辨、strict validator 反例、Cache-Control。政策 reference parity（SRPP Python calculator 差分）、30／100 持股效能量測與 SRPP shadow 接入屬規格包後續階段，本條不宣稱完成；未完成 Docker `127.0.0.1:9090` 與 Tailscale 實測前，不得回報「已部署」。
+
+---
+
+### Requirement 164／Task 455：警示條件新增 RSI5、BIAS10、52 週位置、W%R9 與 K>D／K<D
+
+**User Story:** 作為使用者，我希望警示條件除了價位、均線偏離與 KD 值之外，還能設定 RSI5、BIAS10、52 週位置、W%R9 的門檻，以及「K 值大於 D 值」「K 值小於 D 值」的狀態條件，這樣就能用走勢圖上已經看得到的指標直接設警示，不必自己盯盤。
+
+**Acceptance Criteria:**
+
+- [ ] **新增 10 個 `alertType` 字串**（沿用既有 VARCHAR(50) 欄位，無 DB migration、無新欄位）：`RSI5_ABOVE`／`RSI5_BELOW`、`BIAS10_ABOVE`／`BIAS10_BELOW`、`POS52W_ABOVE`／`POS52W_BELOW`、`WR9_ABOVE`／`WR9_BELOW`、`KD_K_GT_D`／`KD_K_LT_D`。`_ABOVE` 為「指標值 ≥ threshold」、`_BELOW` 為「指標值 ≤ threshold」（與既有 KD／價位條件同為含等號比較）；`KD_K_GT_D` 為「K > D」、`KD_K_LT_D` 為「K < D」（嚴格不等，K=D 兩者皆不成立）。既有 8 種類型的判定、label、盤中補抓完全不變。
+- [ ] **指標值單一來源**：RSI5、BIAS10、W%R9、K、D 一律取自 `TechnicalIndicatorService.computeAll(stockCode, market)`（其內部已自動把 `0000` 分派至大盤計算，呼叫端不另行分派）的 `extended().rsi5()`／`extended().bias10()`／`extended().wr9()`／`k()`／`d()`，與走勢圖指標選單同口徑；W%R9 採本系統既有 `100 − RSV9` 慣例（0～100，數值越高越接近區間低點），不另做負號轉換。指標因歷史不足為 null 時，該條件視為**不成立**（不觸發、不報錯）。
+- [ ] **52 週位置**＝`(現價 − 區間最低) ÷ (區間最高 − 區間最低) × 100`。區間與交易雷達 `daily.week52Position` 相同採「最近 240 根完成日 K ＋ 今日現價」，不足 240 根完成日 K 時為 null（不成立）；區間最高／最低取日最高／最低（缺值以收盤代）並與現價併比；最高 = 最低時不成立。**與雷達的唯一刻意差異**：雷達用還原權值序列，警示用未還原的 `stock_price_history`（`0000` 用 `twse_index_daily_history`，需於 `StockAlertService` 注入 `TwseIndexDailyHistoryRepository`）——警示比對的是使用者看到的實際現價，與未還原高低同一價格基準才有意義；除權息股兩者數值可能不同，屬已知取捨。計算抽成與實體無關的純函式（輸入為高低序列與現價）以利單元測試。
+- [ ] **門檻驗證**：目前單一條件 create/update **完全沒有類型驗證**（只有複合條件的 `validateConditions` 有），本需求新增一支單條件驗證函式，由單一條件 create/update 與 `validateConditions` 共用，對**所有**類型（含既有 8 種）檢查：`alertType` 在白名單、threshold 必填、`MA_*_PCT` 必須帶 maPeriod／其餘不得帶（既有資料皆符合，編輯舊條件不受影響）。新類型另檢查：RSI5／POS52W／WR9 的 threshold 必須介於 0～100；BIAS10 不限範圍（可負）；`KD_K_GT_D`／`KD_K_LT_D` 的 threshold 必須為 0（前端固定送 0）；新類型皆不得帶 `maPeriod`。違反回 400。重複守門沿用既有 `(alertType, maPeriod, threshold)` 比對；K>D／K<D 以 threshold=0 參與比對，故同股各只能有一筆，且與 `KD_ABOVE 0` 等既有類型互不相擋。
+- [ ] **label**（`StockAlertService.buildLabel` 單一來源，觀察頁、警示頁、email、匯出共用）：`RSI5 高於 80`、`RSI5 低於 20`、`BIAS10 高於 5%`、`BIAS10 低於 -5%`、`52 週位置高於 90%`、`52 週位置低於 10%`、`W%R9 高於 80`、`W%R9 低於 20`、`K 值大於 D 值`、`K 值小於 D 值`（threshold 以去尾零字串呈現）。
+- [ ] **評估路徑**：新類型併入共用的 `matches(alert, currentPrice)`，因此同時適用於獨立條件與複合條件（AND 群組）。同一次評估中同一檔股票的 `computeAll` 與 52 週高低序列最多各查一次（以 lazy 快取在該次評估內共用），不得為每個新類型成員各查一次。觸發時沿用既有「凍結當下 MA／K／D」寫入 `last_triggered_*` 與 `stock_alert_trigger`，不新增欄位——**刻意取捨**：觸發當下的 RSI5／BIAS10／W%R9／52 週位置數值不留存，使用者只看得到條件 label 與既有 MA／KD 欄；若日後需要另立需求。**新類型不做盤中補抓**（`findRecentIntradayTrigger` 對新類型直接回 empty），只在每 2 分鐘的 live 評估判定——理由同複合條件：補抓需逐根 5 分 K 重算指標，成本高於效益。
+- [ ] **前端**：`StockAlertView.vue` 單一條件表單與複合條件表單的「條件類型」下拉新增「RSI5」「BIAS10（10 日乖離）」「52 週位置」「W%R9」四項，各自提供高於／低於方向與數值輸入（RSI5／52 週位置／W%R9 範圍 0～100、切換時預設 80；BIAS10 可負、預設 5）；「KD 值」項下的指標選項新增「K 大於 D」「K 小於 D」，選到時隱藏方向與門檻輸入並送 threshold=0。必須同步修改 `buildAlertType`、`parseAlertType`（`KD_K_GT_D`／`KD_K_LT_D` 須在既有 `KD_D`／`KD_` 分支之前判斷，否則會被誤解成 K 門檻）、條件類型切換時的預設值重設，以及複合條件的 `conditionPreview`（文案與後端 `buildLabel` 逐字一致）。編輯既有新類型條件時能正確回填表單。
+- [ ] **券商鐵則**：本功能僅新增通知判定，不涉任何券商 API。
+- [ ] **測試**：新增單元測試（不啟 Spring）覆蓋 52 週位置純函式（一般值、最高=最低、無歷史）、10 個新類型的 `buildLabel`、`validateConditions` 對新類型的正反例（範圍、K>D 非零 threshold、帶 maPeriod）。
