@@ -133,7 +133,14 @@ paths:
       operationId: getLatestQuote
       summary: 查詢單一標的的快取報價與四頁籤公開市場資料
       description: |
-        只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
+        先讀目前 external-materials Redis raw cache。Requirement 165：只有 raw 回 204（price key cache miss、
+        price Redis 讀取失敗或 payload 無法解析，例如週末／連假 24 小時 TTL 過期）時，BFF 才經 business 既有唯讀
+        `GET /api/market-data/history/stock`（`stock_price_history`；`0000` 讀 `twse_index_daily_history`）取台北今天往前
+        30 個日曆天內最近收盤組出 19 欄：`source=STOCK_PRICE_HISTORY`、`quoteStatus=CLOSE_FALLBACK`、`closed=true`，
+        `price` 為最新有效 closePrice、`previousClose` 為前一筆（僅一筆時 null），漲跌 scale 6 HALF_UP；`stockName`、
+        買賣價、成交量、`updatedAt`、`premiumDiscountPct` 為 null；非台股排除台北今日列。此值是歷史收盤而非權威即時價，
+        不回寫任何快取、不觸發 quote producer 或回補，CLOSE_FALLBACK 列不呼叫 Fubon live-response bridge、Fubon
+        metadata 固定為 unavailable fallback 形狀。raw 200、raw 非 2xx／逾時的語意不變，`GET /api/quotes` 不套用本 fallback。
         raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
         normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。single response 只在最後追加去重的
         Fubon metadata、failure state 與 raw returned order-book，沒有 nested Fubon quote 或 global counters。台股五檔只讀 producer 已保存的
@@ -172,7 +179,7 @@ paths:
           example: '2026-01-15'
       responses:
         '200':
-          description: Redis 命中的最新報價。
+          description: Redis 命中的最新報價（`quoteStatus` 沿用 raw 值），或 raw 204 後由 30 日內最近收盤組成的 `quoteStatus=CLOSE_FALLBACK`／`source=STOCK_PRICE_HISTORY` 歷史收盤回應。
           content:
             application/json:
               schema:
@@ -181,8 +188,11 @@ paths:
                 synthetic:
                   summary: 去識別化合成範例
                   value: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, price: 100.25, previousClose: 99.50, priceChange: 0.75, changePercent: 0.753769, buyPrice: 100.20, sellPrice: 100.30, openPrice: 99.80, highPrice: 101.00, lowPrice: 99.60, volume: 123456, tradingDate: '2026-01-15', updatedAt: '2026-01-15T10:15:30.123456789', closed: false, source: SYNTHETIC_EXAMPLE, quoteStatus: LIVE, premiumDiscountPct: null, marketData: {chart: {status: NO_DATA, message: '目前無走勢資料', requestedStart: '2025-01-15', requestedEnd: '2026-01-15', series: {dates: [], prices: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], latest: null, daily: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}, weekly: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}}, intraday: {status: NO_DATA, message: '目前無分時資料', tradingDate: null, ticks: []}}, quoteDetail: {stockCode: EXM-TW-001, stockName: 範例科技, market: 台股, supported: true, available: false, source: null, message: '暫時無法取得行情五檔', sourceTime: null, fetchedAt: null, marketStatus: UNKNOWN, price: null, previousClose: null, openPrice: null, highPrice: null, lowPrice: null, averagePrice: null, change: null, changePercent: null, turnoverYi: null, volumeLots: null, previousVolumeLots: null, amplitudePercent: null, innerVolumeLots: null, outerVolumeLots: null, innerPercent: null, outerPercent: null, bidTotalLots: null, askTotalLots: null, levels: []}, etfConstituents: {stockCode: EXM-TW-001, market: 台股, supported: false, source: null, asOfDate: null, message: 'ETF 成分股資料暫時不可用', holdings: []}, dividends: {stockCode: EXM-TW-001, market: 台股, source: null, message: '股利資料暫時不可用', rows: []}}}
+                closeFallback:
+                  summary: 去識別化合成範例（raw 204 後的 30 日內最近收盤 fallback）
+                  value: {stockCode: EXM-TW-001, stockName: null, market: 台股, price: 100.000000, previousClose: 98.000000, priceChange: 2.000000, changePercent: 2.040816, buyPrice: null, sellPrice: null, openPrice: 98.500000, highPrice: 101.000000, lowPrice: 98.000000, volume: null, tradingDate: '2026-01-16', updatedAt: null, closed: true, source: STOCK_PRICE_HISTORY, quoteStatus: CLOSE_FALLBACK, premiumDiscountPct: null, marketData: {chart: {status: NO_DATA, message: '目前無走勢資料', requestedStart: '2025-01-15', requestedEnd: '2026-01-15', series: {dates: [], prices: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], latest: null, daily: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}, weekly: {dates: [], opens: [], highs: [], lows: [], closes: [], ma5: [], ma20: [], ma60: [], ma240: [], k: [], d: [], j9: [], k3d2: [], rsv: [], ema12: [], ema26: [], dif: [], macd: [], osc: [], rsi5: [], rsi10: [], bias10: [], bias20: [], b10b20: [], wr9: [], currentClose: null, previousClose: null, latest: null}}, intraday: {status: NO_DATA, message: '目前無分時資料', tradingDate: null, ticks: []}}, quoteDetail: {stockCode: EXM-TW-001, stockName: null, market: 台股, supported: true, available: false, source: null, message: '暫時無法取得行情五檔', sourceTime: null, fetchedAt: null, marketStatus: UNKNOWN, price: null, previousClose: null, openPrice: null, highPrice: null, lowPrice: null, averagePrice: null, change: null, changePercent: null, turnoverYi: null, volumeLots: null, previousVolumeLots: null, amplitudePercent: null, innerVolumeLots: null, outerVolumeLots: null, innerPercent: null, outerPercent: null, bidTotalLots: null, askTotalLots: null, levels: []}, etfConstituents: {stockCode: EXM-TW-001, market: 台股, supported: false, source: null, asOfDate: null, message: 'ETF 成分股資料暫時不可用', holdings: []}, dividends: {stockCode: EXM-TW-001, market: 台股, source: null, message: '股利資料暫時不可用', rows: []}}, fubonSupported: true, fubonAvailable: false, fubonMessage: 暫時無法取得富邦即時回應, fubonReceivedAt: null, fubonBatchId: null, fubonResponseStatus: null, fubonFailureReason: null, fubonReturnedOrderBook: null}
         '204':
-          description: Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。
+          description: raw 204（price cache miss、price Redis 讀取失敗或 price payload 無法解析）且 30 日內收盤 fallback 亦查無（空陣列或無有效 closePrice）或失敗（非 2xx、逾時）；沒有 response body。fallback 失敗不會改回 5xx，NAV enrichment 失敗也不會產生 204。
         '400':
           description: code／market 缺少，或 start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。
           content:
@@ -1515,7 +1525,7 @@ components:
       description: Nginx 自行產生的標準 HTML 錯誤頁；不是 JSON，也不保證空白或換行逐字固定。
     LatestQuote:
       type: object
-      description: "`PriceCacheReader.LatestQuote` 的 19 個 required record attribute response class。前 18 欄逐欄解析 price payload，`premiumDiscountPct` 則從獨立 ETF NAV cache best-effort 併入；每個 property 固定出現，但 type 含 null 表示來源欄位缺失或不可解析。source 與 quoteStatus 刻意是自由字串。"
+      description: "`PriceCacheReader.LatestQuote` 的 19 個 required record attribute response class；GET `/api/quotes/one` 在 `source=STOCK_PRICE_HISTORY`／`quoteStatus=CLOSE_FALLBACK` 時，這 19 欄來自 30 日內 `stock_price_history` 最近收盤（Requirement 165）而非 `PriceCacheReader`。前 18 欄逐欄解析 price payload，`premiumDiscountPct` 則從獨立 ETF NAV cache best-effort 併入；每個 property 固定出現，但 type 含 null 表示來源欄位缺失或不可解析。source 與 quoteStatus 刻意是自由字串。"
       required: [stockCode, stockName, market, price, previousClose, priceChange, changePercent, buyPrice, sellPrice, openPrice, highPrice, lowPrice, volume, tradingDate, updatedAt, closed, source, quoteStatus, premiumDiscountPct]
       properties:
         stockCode:
@@ -1745,7 +1755,7 @@ components:
           description: list 固定保留 shared quote fields 的名稱、順序與語義。
       unevaluatedProperties: false
     DetailedLatestQuote:
-      description: GET `/api/quotes/one` 專用 response class。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
+      description: GET `/api/quotes/one` 專用 response class；`source=STOCK_PRICE_HISTORY`／`quoteStatus=CLOSE_FALLBACK` 時 shared 19 欄來自 raw 204 後 30 日內收盤價歷史而非 `PriceCacheReader`，且 Fubon metadata 固定為 unavailable fallback 形狀（不呼叫 bridge）。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
       allOf:
         - $ref: '#/components/schemas/LatestQuoteShared'
           description: 原始 24 個 shared quote fields 依相同名稱和順序保留；list 與 single 的 shared quote semantics 相同。

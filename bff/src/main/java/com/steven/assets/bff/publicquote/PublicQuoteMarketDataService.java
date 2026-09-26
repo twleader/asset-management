@@ -17,6 +17,7 @@ import com.steven.assets.bff.stockanalysis.EtfHoldingsAggregator;
 import com.steven.assets.bff.stockanalysis.StockAnalysisChartDataService;
 import com.steven.assets.bff.stockanalysis.dto.ChartSeriesDto;
 import com.steven.assets.bff.stockanalysis.dto.EtfHoldingsDto;
+import com.steven.assets.bff.stockanalysis.dto.PricePointDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -62,6 +63,14 @@ public class PublicQuoteMarketDataService {
     private static final ParameterizedTypeReference<List<RawLatestQuote>> RAW_LIST =
             new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<List<PricePointDto>> PRICE_POINTS =
+            new ParameterizedTypeReference<>() {};
+
+    /** Requirement 165：raw 204 時由 {@code stock_price_history} 最近收盤組出的 19 欄來源標記。 */
+    static final String CLOSE_FALLBACK_SOURCE = "STOCK_PRICE_HISTORY";
+    static final String CLOSE_FALLBACK_STATUS = "CLOSE_FALLBACK";
+    static final int CLOSE_FALLBACK_LOOKBACK_DAYS = 30;
+
     private final WebClient rawQuoteClient;
     private final WebClient marketDataClient;
     private final StockAnalysisChartDataService chartDataService;
@@ -76,6 +85,7 @@ public class PublicQuoteMarketDataService {
     private final Duration rowTimeout;
     private final Duration globalTimeout;
     private final int listConcurrency;
+    private final Duration closeFallbackTimeout;
 
     @Autowired
     public PublicQuoteMarketDataService(
@@ -92,12 +102,13 @@ public class PublicQuoteMarketDataService {
             @Value("${public-quote.timeout.row-seconds:7}") long rowTimeoutSeconds,
             @Value("${public-quote.timeout.global-seconds:50}") long globalTimeoutSeconds,
             @Value("${public-quote.list-concurrency:8}") int listConcurrency,
-            @Value("${public-quote.timeout.fubon-live-response-seconds:2}") long fubonLiveResponseTimeoutSeconds) {
+            @Value("${public-quote.timeout.fubon-live-response-seconds:2}") long fubonLiveResponseTimeoutSeconds,
+            @Value("${public-quote.timeout.close-fallback-seconds:3}") long closeFallbackTimeoutSeconds) {
         this(rawQuoteClient, marketDataClient, chartDataService, clock,
                 seconds(rawTimeoutSeconds), seconds(chartTimeoutSeconds), seconds(quoteDetailTimeoutSeconds),
                 seconds(etfTimeoutSeconds), seconds(dividendsTimeoutSeconds), seconds(intradayTimeoutSeconds),
                 seconds(rowTimeoutSeconds), seconds(globalTimeoutSeconds), listConcurrency,
-                seconds(fubonLiveResponseTimeoutSeconds));
+                seconds(fubonLiveResponseTimeoutSeconds), seconds(closeFallbackTimeoutSeconds));
     }
 
     PublicQuoteMarketDataService(
@@ -134,6 +145,28 @@ public class PublicQuoteMarketDataService {
             Duration globalTimeout,
             int listConcurrency,
             Duration fubonLiveResponseTimeout) {
+        this(rawQuoteClient, marketDataClient, chartDataService, clock, rawTimeout, chartTimeout, quoteDetailTimeout,
+                etfTimeout, dividendsTimeout, intradayTimeout, rowTimeout, globalTimeout, listConcurrency,
+                fubonLiveResponseTimeout, Duration.ofSeconds(3));
+    }
+
+    PublicQuoteMarketDataService(
+            WebClient rawQuoteClient,
+            WebClient marketDataClient,
+            StockAnalysisChartDataService chartDataService,
+            Clock clock,
+            Duration rawTimeout,
+            Duration chartTimeout,
+            Duration quoteDetailTimeout,
+            Duration etfTimeout,
+            Duration dividendsTimeout,
+            Duration intradayTimeout,
+            Duration rowTimeout,
+            Duration globalTimeout,
+            int listConcurrency,
+            Duration fubonLiveResponseTimeout,
+            Duration closeFallbackTimeout) {
+        this.closeFallbackTimeout = closeFallbackTimeout;
         this.rawQuoteClient = rawQuoteClient;
         this.marketDataClient = marketDataClient;
         this.chartDataService = chartDataService;
@@ -161,6 +194,7 @@ public class PublicQuoteMarketDataService {
         Instant requestStarted = clock.instant();
         DateRange range = validateRange(start, end);
         return fetchRawOne(code, market)
+                .switchIfEmpty(Mono.defer(() -> fetchCloseFallback(code, market)))
                 .flatMap(raw -> enrichSingleRow(raw, range)
                         .timeout(remaining(requestStarted), Mono.just(fallbackQuote(raw, range))));
     }
@@ -194,6 +228,65 @@ public class PublicQuoteMarketDataService {
                         ex -> new PublicQuoteRawTimeoutException())
                 .onErrorMap(this::isUnexpectedRawFailure,
                         ex -> new PublicQuoteRawUnavailableException());
+    }
+
+    /**
+     * Requirement 165：只在 raw 204 時，經 business 既有唯讀 {@code /api/market-data/history/stock}
+     * 取 30 日內最近收盤。空、非 2xx、逾時、無有效 close 一律 empty，讓 controller 維持 204。
+     */
+    private Mono<RawLatestQuote> fetchCloseFallback(String code, String market) {
+        LocalDate today = LocalDate.now(clock);
+        return marketDataClient.get()
+                .uri(builder -> builder.path("/api/market-data/history/stock")
+                        .queryParam("code", code)
+                        .queryParam("market", market)
+                        .queryParam("start", today.minusDays(CLOSE_FALLBACK_LOOKBACK_DAYS))
+                        .queryParam("end", today)
+                        .build())
+                .retrieve()
+                .bodyToMono(PRICE_POINTS)
+                .timeout(closeFallbackTimeout)
+                .flatMap(rows -> Mono.justOrEmpty(closeFallbackQuote(code, market, rows, today)))
+                .onErrorResume(ignored -> Mono.empty());
+    }
+
+    /** 純函式：依 Requirement 165 取值規則組出 CLOSE_FALLBACK 列；無有效收盤時 empty。 */
+    static Optional<RawLatestQuote> closeFallbackQuote(
+            String code, String market, List<PricePointDto> rows, LocalDate taipeiToday) {
+        if (rows == null) {
+            return Optional.empty();
+        }
+        boolean taiwan = "台股".equals(market);
+        List<DatedPricePoint> valid = new ArrayList<>();
+        for (PricePointDto row : rows) {
+            if (row == null || !positive(row.closePrice())) continue;
+            LocalDate date;
+            try {
+                date = LocalDate.parse(row.tradingDate());
+            } catch (DateTimeParseException | NullPointerException invalid) {
+                continue;
+            }
+            if (!taiwan && date.equals(taipeiToday)) continue;
+            valid.add(new DatedPricePoint(date, row));
+        }
+        if (valid.isEmpty()) {
+            return Optional.empty();
+        }
+        valid.sort(Comparator.comparing(DatedPricePoint::date).reversed());
+        PricePointDto latest = valid.get(0).row();
+        BigDecimal previousClose = valid.size() > 1 ? valid.get(1).row().closePrice() : null;
+        BigDecimal change = previousClose == null ? null
+                : latest.closePrice().subtract(previousClose).setScale(6, RoundingMode.HALF_UP);
+        BigDecimal percent = previousClose == null ? null
+                : latest.closePrice().subtract(previousClose).multiply(HUNDRED)
+                        .divide(previousClose, 6, RoundingMode.HALF_UP);
+        return Optional.of(new RawLatestQuote(code, null, market, latest.closePrice(), previousClose, change, percent,
+                null, null, latest.openPrice(), latest.highPrice(), latest.lowPrice(), null,
+                valid.get(0).date().toString(), null, Boolean.TRUE, CLOSE_FALLBACK_SOURCE, CLOSE_FALLBACK_STATUS, null));
+    }
+
+    private static boolean isCloseFallback(RawLatestQuote raw) {
+        return CLOSE_FALLBACK_STATUS.equals(raw.quoteStatus());
     }
 
     private Mono<List<RawLatestQuote>> decodeRawList(ClientResponse response) {
@@ -267,7 +360,10 @@ public class PublicQuoteMarketDataService {
         Mono<EtfHoldingsDto> etfConstituents = fetchEtfConstituents(raw)
                 .onErrorReturn(fallback.marketData().etfConstituents());
         Mono<DividendHistory> dividends = fetchDividends(raw).onErrorReturn(fallback.marketData().dividends());
-        Mono<FubonProjection> fubon = fetchFubonLiveResponse(raw).onErrorReturn(fallbackFubon(raw));
+        // Requirement 165：收盤 fallback 列不呼叫 live-response bridge，避免附上別日 Fubon metadata。
+        Mono<FubonProjection> fubon = isCloseFallback(raw)
+                ? Mono.just(fallbackFubon(raw))
+                : fetchFubonLiveResponse(raw).onErrorReturn(fallbackFubon(raw));
         return Mono.zip(chart, quoteDetail, etfConstituents, dividends, fubon)
                 .map(tuple -> detailed(raw, new MarketData(
                                 tuple.getT1(), tuple.getT2(), tuple.getT3(), tuple.getT4()), tuple.getT5()))
@@ -823,6 +919,8 @@ public class PublicQuoteMarketDataService {
             String reason,
             FubonBridgeQuote quote,
             FubonReturnedOrderBook returnedOrderBook) {}
+
+    private record DatedPricePoint(LocalDate date, PricePointDto row) {}
 
     private record DateRange(LocalDate start, LocalDate end) {}
 
