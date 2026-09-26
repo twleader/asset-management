@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test src/utils/displayQuote.test.js src/utils/tradingRadarSsePriceUpdate.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js src/utils/tradingCalendarYearWindow.test.js src/utils/stockAnalysisDialog.contract.test.js src/utils/intradaySession.test.js src/utils/tradingRadarDecisionPresentation.test.js src/utils/openApiContract.test.js src/utils/assetClassSettings.contract.test.js src/utils/apiErrorLogsView.contract.test.js src/utils/exchangeRateMultiSchedule.contract.test.js src/utils/snapshotFormUpdateMode.contract.test.js src/utils/exportSettingDraft.test.js",
+    "test": "node --test src/utils/displayQuote.test.js src/utils/tradingRadarSsePriceUpdate.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js src/utils/tradingCalendarYearWindow.test.js src/utils/stockAnalysisDialog.contract.test.js src/utils/intradaySession.test.js src/utils/tradingRadarDecisionPresentation.test.js src/utils/openApiContract.test.js src/utils/assetClassSettings.contract.test.js src/utils/apiErrorLogsView.contract.test.js src/utils/exchangeRateMultiSchedule.contract.test.js src/utils/snapshotFormUpdateMode.contract.test.js src/utils/exportSettingDraft.test.js src/utils/transactionStockFilter.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

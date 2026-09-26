@@ -39,6 +39,22 @@
         <el-tab-pane label="英股" name="英股" />
       </el-tabs>
 
+      <div class="stock-filter-row" v-if="stockOptions.length">
+        <span class="stock-filter-label">股票：</span>
+        <el-select
+          v-model="stockFilter"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          clearable
+          placeholder="全部"
+          style="min-width:260px"
+          size="small"
+        >
+          <el-option v-for="opt in stockOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
+        </el-select>
+      </div>
+
       <el-empty v-if="!filteredRecords.length" description="尚無記錄，請點擊「新增」新增第一筆" />
 
       <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table"
@@ -418,6 +434,7 @@ import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { cloneExportSetting } from '@/utils/exportSettingDraft'
+import { filterByYearAndMarket, buildStockOptions, filterByStock, pruneInvalidStockFilter } from '@/utils/transactionStockFilter'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -430,6 +447,7 @@ const marketOptions = ref([])   // { code, label }
 const brokerOptions = ref([])   // displayName 字串
 const selectedYear = ref(null)
 const marketFilter = ref('')   // 市場 tab：''＝全部，否則 台股/美股/英股
+const stockFilter = ref([])    // 股票下拉篩選（可複選）：元素為 `${assetCode}__${market}` key，空陣列＝全部
 const dialogVisible = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
@@ -592,12 +610,17 @@ onMounted(() => {
   Promise.allSettled([load(), loadSchedules()])
 })
 
-// ===== 明細（依 selectedYear 過濾 summaries[].records）=====
-const filteredRecords = computed(() => {
-  const byYear = selectedYear.value === null
-    ? summaries.value.flatMap(s => s.records || [])
-    : (summaries.value.find(x => x.year === selectedYear.value)?.records || [])
-  return marketFilter.value ? byYear.filter(r => r.market === marketFilter.value) : byYear
+// ===== 明細（依 selectedYear／marketFilter 過濾 summaries[].records，再疊加股票篩選；Task 457）=====
+const marketYearRecords = computed(() =>
+  filterByYearAndMarket(summaries.value, selectedYear.value, marketFilter.value))
+const stockOptions = computed(() => buildStockOptions(marketYearRecords.value))
+const filteredRecords = computed(() => filterByStock(marketYearRecords.value, stockFilter.value))
+
+// 年度／市場改變（或 CRUD 後 summaries 重新載入）導致 stockOptions 重新計算時，
+// 移除已選但已不在新選項清單內的 key；仍有效的已選項要保留，不整批清空。
+watch(stockOptions, (opts) => {
+  const next = pruneInvalidStockFilter(stockFilter.value, opts)
+  if (next !== stockFilter.value) stockFilter.value = next
 })
 
 const totalBuyCount = computed(() => summaries.value.reduce((a, s) => a + (s.buyCount || 0), 0))
@@ -957,6 +980,10 @@ function confirmDirPick() {
 .year-sub.sell { color: #dc2626; }
 .tx-table :deep(.el-table__cell) { font-size: 13.5px; }
 .market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
+
+/* 股票下拉篩選（Task 457） */
+.stock-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.stock-filter-label { font-size: 13px; color: #475569; white-space: nowrap; }
 
 /* 匯率自動帶入的狀態提示（Task 251） */
 .fx-hint { display: block; font-size: 12px; color: #94a3b8; line-height: 1.5; margin-top: 2px; }
