@@ -5638,3 +5638,20 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **契約同步**：`docs/openapi/docker-external-api.yaml` 的 `/api/quotes/one` description 與 200 回應說明補上收盤價 fallback 與 `CLOSE_FALLBACK`／`STOCK_PRICE_HISTORY` 語意、並補一個 fallback 200 example；204 改述為「raw 204 且 30 日內收盤 fallback 亦查無或失敗」；`LatestQuote`／`DetailedLatestQuote` schema description 同步說明 `source=STOCK_PRICE_HISTORY` 時 19 欄來自收盤價歷史而非 `PriceCacheReader`。CLAUDE.md 與 `spec/steering/structure.md` 的 BFF 具名例外同步補述本 fallback。依規範重產 Swagger Markdown（地端同步覆寫 SRPP 鏡像）。`spec/design.md` 中「原始 quote 全程不 fallback 查 DB」的敘述改為本需求的精確例外（經 business 唯讀端點，非 BFF 直查）。
 - [ ] **券商鐵則**：僅讀既有收盤價歷史，不涉任何券商 API。
 - [ ] **測試**：BFF 單元測試（不啟 Spring、以 stub WebClient）覆蓋：raw 200 不呼叫 history；raw 204＋兩筆 history → 200 且 19 欄如上（含漲跌計算）；僅一筆 → previousClose／priceChange／changePercent 為 null；最新一筆 close 為 null 時改取下一筆；非台股今日列被排除；fallback 列不呼叫 Fubon bridge；history 空／500／逾時 → 204；raw 5xx → 維持既有錯誤、不呼叫 history；`list()` 不呼叫 history。
+
+### Requirement 166／Task 457：交易紀錄明細表新增「股票」篩選下拉（可複選）
+
+**User Story:** 作為使用者，我希望在交易紀錄頁的明細表上方能用下拉選單勾選一檔或數檔股票，只看這幾檔的買賣紀錄，這樣要回顧特定股票的交易歷史時不必在整份清單裡用眼睛找。
+
+**Acceptance Criteria:**
+
+- [ ] **純前端功能**：本需求不新增／修改任何 API、DTO 或資料表，僅在 `frontend/src/views/TransactionView.vue` 既有「依 `selectedYear`／`marketFilter` 過濾 `summaries[].records`」的既有 computed 邏輯上，再疊加一層純客戶端篩選；`bffApi.transaction.list()` 的呼叫與回傳形狀不變。
+- [ ] **篩選範圍僅限股票列**：下拉選單只列出**當前「年度卡片＋市場 tab」篩選後範圍內**、`assetType === '股票'` 且 `assetCode` 有值的紀錄，依 `assetCode + market` 去重為選項；`assetType === '基金'` 的紀錄**一律不受此篩選影響、恆常顯示**（不出現在下拉選項中，也不會因勾選股票而被隱藏）。
+- [ ] **選項文案與排序**：每個選項 label 為 `${資產名稱}（${資產代號}）`（`資產代號` 缺值的股票列已被上一條排除，不會出現此情形）；選項依 label 以 `localeCompare('zh-Hant')` 排序。
+- [ ] **預設「全部」、可複選**：下拉為多選（`el-select multiple`），初始值為空陣列，代表「全部」（不篩選、股票與基金列都顯示，即現行行為）；使用者可勾選一檔或數檔，明細表只保留「勾選中的股票列」＋「全部基金列」；清空已選項（或使用選單的清除功能）等同還原為「全部」。
+- [ ] **無股票列時隱藏此下拉**：若當前「年度＋市場」範圍內沒有任何符合條件的股票列（選項清單為空，例如市場 tab 切到只有基金交易的情境），不顯示此下拉，避免出現一個永遠選不到任何東西的空控制項。
+- [ ] **與年度／市場篩選連動、自動清除失效選項**：切換年度卡片或市場 tab 後，下拉選項會重新依新範圍計算；此時若目前勾選中的某個 `assetCode + market` 已不在新選項清單內，該筆選取需自動移除（不得殘留無效選取而讓使用者誤以為篩選仍在生效，也不得靜默清空全部已選項）；若移除後已選項變空陣列，明細表即回到未篩選狀態（顯示新範圍下的全部列）。
+- [ ] **不影響匯出**：「匯出 Excel」按鈕與「排程自動匯出」沿用既有 `ExcelExportService` 邏輯，維持**涵蓋所有年度、不受任何頁面篩選狀態影響**的既有行為（比照市場 tab 現行不影響匯出範圍的既有事實），本篩選下拉的選取狀態純粹是頁面顯示層級的暫存狀態，不隨匯出而序列化、不入庫、重新整理頁面後歸零。
+- [ ] **與雙擊開圖表既有行為相容**：明細表列的雙擊開啟 `StockAnalysisDialog`（Requirement 49 既有行為）不受本篩選影響，篩選後仍可見的列雙擊行為不變。
+- [ ] **券商鐵則**：本功能純屬前端顯示篩選，不涉及任何券商 API 呼叫。
+- [ ] **測試**：新增前端單元測試（不需啟動瀏覽器整合環境）覆蓋：預設全部（未選取時股票與基金列皆顯示）；勾選單一股票後只留該股票列＋全部基金列；勾選多檔股票時為聯集；切換年度／市場 tab 後，選項清單重新計算且不在新範圍內的已選 `assetCode+market` 自動移除；移除後全部清空時等同全部顯示；選項清單為空時（範圍內無股票列）不渲染下拉。
