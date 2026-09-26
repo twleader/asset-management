@@ -59,6 +59,12 @@ public class StockAlert {
      * MA_ABOVE_PCT / MA_BELOW_PCT — 現價偏離 MA{maPeriod} 達 threshold %（threshold=0 表示剛跨過）
      * KD_ABOVE / KD_BELOW        — K 值高於 / 低於 threshold
      * KD_D_ABOVE / KD_D_BELOW    — D 值高於 / 低於 threshold
+     * （Requirement 164 / Task 455，指標皆取自 TechnicalIndicatorService.computeAll，含等號比較）
+     * RSI5_ABOVE / RSI5_BELOW     — RSI5 ≥ / ≤ threshold（0～100）
+     * BIAS10_ABOVE / BIAS10_BELOW — 10 日乖離 ≥ / ≤ threshold %（可負）
+     * POS52W_ABOVE / POS52W_BELOW — 52 週位置（240 根完成日 K＋現價）≥ / ≤ threshold %（0～100）
+     * WR9_ABOVE / WR9_BELOW       — W%R9（100 − RSV9）≥ / ≤ threshold（0～100）
+     * KD_K_GT_D / KD_K_LT_D       — K > D / K < D（嚴格不等；threshold 固定 0）
      */
     @Column(nullable = false, length = 50)
     private String alertType;
