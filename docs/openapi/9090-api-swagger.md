@@ -95,7 +95,14 @@ canonical；絕不在 request-time 向 Yahoo、富邦、dispatcher 或 worker �
 
 ### 2. `GET /api/quotes/one`
 
-只讀目前 external-materials Redis raw cache；price key cache miss 維持 204，不查資料庫且不觸發 quote producer。
+先讀目前 external-materials Redis raw cache。Requirement 165：只有 raw 回 204（price key cache miss、
+price Redis 讀取失敗或 payload 無法解析，例如週末／連假 24 小時 TTL 過期）時，BFF 才經 business 既有唯讀
+`GET /api/market-data/history/stock`（`stock_price_history`；`0000` 讀 `twse_index_daily_history`）取台北今天往前
+30 個日曆天內最近收盤組出 19 欄：`source=STOCK_PRICE_HISTORY`、`quoteStatus=CLOSE_FALLBACK`、`closed=true`，
+`price` 為最新有效 closePrice、`previousClose` 為前一筆（僅一筆時 null），漲跌 scale 6 HALF_UP；`stockName`、
+買賣價、成交量、`updatedAt`、`premiumDiscountPct` 為 null；非台股排除台北今日列。此值是歷史收盤而非權威即時價，
+不回寫任何快取、不觸發 quote producer 或回補，CLOSE_FALLBACK 列不呼叫 Fubon live-response bridge、Fubon
+metadata 固定為 unavailable fallback 形狀。raw 200、raw 非 2xx／逾時的語意不變，`GET /api/quotes` 不套用本 fallback。
 raw 19 欄的名稱、型別、值與宣告順序不變，成功才加固定 `marketData` 四 child，後接同一份
 normalized direct quoteDetail／bidLevels／askLevels／dividendHistory。single response 只在最後追加去重的
 Fubon metadata、failure state 與 raw returned order-book，沒有 nested Fubon quote 或 global counters。台股五檔只讀 producer 已保存的
@@ -118,8 +125,8 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 | Status | Content／schema | 說明 |
 | --- | --- | --- |
-| `200` | application/json: DetailedLatestQuote | Redis 命中的最新報價。 |
-| `204` |  | Price cache miss、price Redis 讀取失敗或 price payload 無法解析；沒有 response body。NAV enrichment 失敗不會產生 204。 |
+| `200` | application/json: DetailedLatestQuote | Redis 命中的最新報價（`quoteStatus` 沿用 raw 值），或 raw 204 後由 30 日內最近收盤組成的 `quoteStatus=CLOSE_FALLBACK`／`source=STOCK_PRICE_HISTORY` 歷史收盤回應。 |
+| `204` |  | raw 204（price cache miss、price Redis 讀取失敗或 price payload 無法解析）且 30 日內收盤 fallback 亦查無（空陣列或無有效 closePrice）或失敗（非 2xx、逾時）；沒有 response body。fallback 失敗不會改回 5xx，NAV enrichment 失敗也不會產生 204。 |
 | `400` | application/problem+json: ProblemDetail | code／market 缺少，或 start/end 未同時提供、格式不合法、順序錯誤、未來日或超過十年窗口。 |
 | `502` | text/html: NginxErrorHtml | HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
@@ -543,7 +550,7 @@ GET `/api/quotes` 專用既有 list response class；只投影 `LatestQuoteShare
 
 ### `DetailedLatestQuote`
 
-GET `/api/quotes/one` 專用 response class。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
+GET `/api/quotes/one` 專用 response class；`source=STOCK_PRICE_HISTORY`／`quoteStatus=CLOSE_FALLBACK` 時 shared 19 欄來自 raw 204 後 30 日內收盤價歷史而非 `PriceCacheReader`，且 Fubon metadata 固定為 unavailable fallback 形狀（不呼叫 bridge）。它保留完全相同的一份 `LatestQuoteShared` quote fields，並只在最後追加不同意義的 Fubon metadata、failure state 與 returned raw order-book。沒有 nested quote、fubonQuote、第二份價格／OHLC／買賣價／成交量／日期／來源／closed／quoteStatus，也絕不公開 adapter-wide counters。internal bridge 與本 API 都是 Redis candidate 加 PostgreSQL receipt-time validation 的 pure read，request-time 不會呼叫 Fubon、Yahoo 或 dispatcher。最外層 `unevaluatedProperties=false` 在 shared fields 與 additions 合併後才關閉額外欄位，避免 `allOf` 錯誤拒絕合法 Fubon 欄位。
 
 型別：`schema`。
 

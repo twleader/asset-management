@@ -128,19 +128,19 @@ class PublicQuoteMarketDataServiceTest {
     }
 
     @Test
-    void rawCacheMissStaysEmptyAndDoesNotStartAnyMarketChild() {
-        AtomicInteger marketCalls = new AtomicInteger();
+    void rawCacheMissWithEmptyCloseHistoryStaysEmptyAndStartsOnlyTheHistoryRead() {
+        List<String> marketPaths = new ArrayList<>();
         PublicQuoteMarketDataService service = service(
                 request -> ClientResponse.create(HttpStatus.NO_CONTENT).build(),
                 request -> {
-                    marketCalls.incrementAndGet();
-                    return marketResponse(request);
+                    marketPaths.add(request.url().getPath());
+                    return ok("[]");
                 });
 
         DetailedLatestQuote quote = service.one("2330", "台股", null, null).block();
 
         assertThat(quote).isNull();
-        assertThat(marketCalls).hasValue(0);
+        assertThat(marketPaths).containsExactly("/api/market-data/history/stock");
     }
 
     @Test
@@ -455,7 +455,7 @@ class PublicQuoteMarketDataServiceTest {
     void productionQuoteDetailTimeoutDefaultIsTwoSeconds() {
         java.lang.reflect.Constructor<?> constructor = java.util.Arrays.stream(
                         PublicQuoteMarketDataService.class.getConstructors())
-                .filter(candidate -> candidate.getParameterCount() == 14)
+                .filter(candidate -> candidate.getParameterCount() == 15)
                 .findFirst()
                 .orElseThrow();
 
