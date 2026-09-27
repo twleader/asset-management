@@ -30,9 +30,6 @@ public final class ExportScheduleUnitHarness {
         } else if (repo instanceof RealizedGainExportScheduleRepository r) {
             doAnswer(i -> locked(r, i.getArgument(0))).when(r).findLockedByOwnerUserId(anyLong());
             delegate = new RealizedGainExportScheduleExecutionStore(r, fresh);
-        } else if (repo instanceof IndexExportScheduleRepository r) {
-            doAnswer(i -> locked(r, i.getArgument(0))).when(r).findLockedByOwnerUserId(anyLong());
-            delegate = new IndexExportScheduleExecutionStore(r, fresh);
         } else throw new IllegalArgumentException("Unsupported fixture repository");
         doAnswer(i -> {
             Object p = i.getArgument(0); assignIds(p); return repo.save(p);

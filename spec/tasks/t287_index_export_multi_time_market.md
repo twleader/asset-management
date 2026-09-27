@@ -4,6 +4,8 @@
 **前置任務:** Task 216（既有 GDP-TWSE 手動／排程匯出）、Task 270（單表雙格式匯出）、Task 242–243（Google Drive 輸出）
 **Liquibase changeset:** `v1.88.0-index-export-multi-time-market.sql`
 
+> **歷史任務（Task 464 已取代本任務的排程模型與 API）：**本檔記錄 Task 287 當時把單筆排程改為 parent＋多個 time child 的實作要求，只供理解 `v1.88.0` 與舊資料遷移來源。現行模型是一列 `index_export_schedule` 代表一筆獨立排程，指數集合存於 `index_export_schedule_market`；現行 API 為 `/api/index-export/schedules` 及其 by-id 路由。不得依本檔重新實作舊 `times[]`／`/schedule`／`/run-now` 契約，詳見 [Task 464](t464_index_export_independent_schedules.md)。
+
 ## 背景
 
 目前 GDP／台股大盤頁的 `index_export_schedule` 每位使用者只有一列，該列只有一個 `run_hour`／`run_minute` 與一個 `market`。設定卡的「每日執行時間」與「匯出指數」都是單選，因此無法設定「早上匯出台股、晚上匯出美股」，也無法在同一時段一次留存多個美股指數。

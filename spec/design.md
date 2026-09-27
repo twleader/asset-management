@@ -6004,7 +6004,7 @@ back-adjustment 等同總報酬序列，對高配息標的在市價不動時仍�
 
 ## Requirement 45（Task 216）：股市大盤指數日線 Excel 匯出（開/高/低/收＋四條均線＋成交股數/成交金額；第六欄為 Task 285、第七～九欄為 Task 286、第十～十一欄為 Task 289 新增）與排程自動匯出
 
-結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。這次把原本「每人一個時間＋一個指數」擴充成「每人一筆共用設定、底下多個時間點；每個時間點再複選多個指數」，讓 09:00 台股與 22:00 美股可以各自設定。
+結構比照 R41／R42（**全域公開行情 ＋ per-user 排程設定**），以下只記差異。Task 464 將原本「每人一筆共用設定、底下多個時間點」改為每人最多 10 筆彼此獨立的排程，每筆各有一個時間並可複選多個指數，讓 09:00 台股與 22:00 美股可以各自設定名稱、輸出目錄與其他選項。
 
 ### 與既有五套匯出排程的定位
 
@@ -6205,12 +6205,12 @@ JSON 那一份（R55 雙格式）欄名同為 `週線MA5`／`月線MA20`／`季�
 ### 指數維度：本頁與 R42 的關鍵差異
 
 R42 刻意不設 `currency` 欄（單一幣別頁，加欄＝為不存在的需求預留）。
-**R45 相反**：本頁下拉共有 10 個指數，且不同時間點可能要匯出不同市場；因此排程不把單一
-`market` 塞在 owner 設定列，而是在每個時間點的 `index_export_schedule_time_market` 以一列一指數保存，設定卡以 checkbox 多選。
+**R45 相反**：本頁下拉共有 10 個指數，每筆獨立排程都能複選多個市場；因此指數集合存在
+`index_export_schedule_market`，以一列一排程一指數保存，設定卡以 checkbox 多選。
 
 標籤同 R42 走單一來源 `ExcelExportService.indexLabel(market)`（`TWSE`→`台股集中市場`、`TPEX`→`台股櫃買市場`、`DJI`→`道瓊工業`…），
 工作表名／手動匯出檔名／排程檔名三處共用。未知代碼回傳代碼本身，不臆造名稱。
-（前端 `GdpTwseView.MARKETS` 的 label 是 render 用，後端不可依賴前端字串。）
+（前端 `GdpTwseView.MARKETS` 的 label 是圖表 render 用；排程列表與編輯器使用後端提供的 market options，避免雙重標籤表。）
 
 ### 「當日」分時模式不提供匯出
 
@@ -6222,61 +6222,63 @@ R42 刻意不設 `currency` 欄（單一幣別頁，加欄＝為不存在的需�
 ```sql
 CREATE TABLE index_export_schedule (
     id              BIGSERIAL PRIMARY KEY,
-    owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每人一列
+    owner_user_id   BIGINT       NOT NULL,      -- @Filter(ownerFilter)，每筆一個獨立排程
+    name            VARCHAR(20),                -- optional filename component
     enabled         BOOLEAN      NOT NULL DEFAULT FALSE,
-    output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
-    range_months    INT,                        -- NULL ＝ 全部十年
-    updated_at      TIMESTAMP,
-    CONSTRAINT uq_index_export_schedule_owner UNIQUE (owner_user_id),
-    CONSTRAINT ck_index_export_schedule_range  CHECK (range_months IS NULL OR range_months BETWEEN 1 AND 120)
-);
-
-CREATE TABLE index_export_schedule_time (
-    id              BIGSERIAL PRIMARY KEY,
-    schedule_id     BIGINT       NOT NULL REFERENCES index_export_schedule(id) ON DELETE CASCADE,
     run_hour        INT          NOT NULL DEFAULT 8,
     run_minute      INT          NOT NULL DEFAULT 0,
-    enabled         BOOLEAN      NOT NULL DEFAULT TRUE,
-    last_run_date   DATE,                       -- 每個時間點自己的當日 guard
+    output_subpath  VARCHAR(255) NOT NULL DEFAULT 'input',
+    range_months    INT,                        -- NULL ＝ 全部十年
+    last_run_date   DATE,                       -- 每筆排程自己的當日 guard
     last_run_at     TIMESTAMP,
     last_run_status VARCHAR(500),
+    gdrive_enabled  BOOLEAN      NOT NULL DEFAULT FALSE,
+    gdrive_subpath  VARCHAR(512),
+    gdrive_last_run_at TIMESTAMP,
+    gdrive_last_status VARCHAR(512),
     updated_at      TIMESTAMP,
-    CONSTRAINT uq_index_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute),
-    CONSTRAINT ck_index_export_schedule_time_hour CHECK (run_hour BETWEEN 0 AND 23),
-    CONSTRAINT ck_index_export_schedule_time_minute CHECK (run_minute BETWEEN 0 AND 59)
+    CONSTRAINT ck_index_export_schedule_range CHECK (range_months IS NULL OR range_months BETWEEN 1 AND 120),
+    CONSTRAINT ck_index_export_schedule_hour CHECK (run_hour BETWEEN 0 AND 23),
+    CONSTRAINT ck_index_export_schedule_minute CHECK (run_minute BETWEEN 0 AND 59)
 );
+CREATE INDEX idx_index_export_schedule_owner ON index_export_schedule(owner_user_id);
 
-CREATE TABLE index_export_schedule_time_market (
-    schedule_time_id BIGINT      NOT NULL REFERENCES index_export_schedule_time(id) ON DELETE CASCADE,
-    market           VARCHAR(16) NOT NULL,
-    PRIMARY KEY (schedule_time_id, market)
+CREATE TABLE index_export_schedule_market (
+    schedule_id BIGINT      NOT NULL REFERENCES index_export_schedule(id) ON DELETE CASCADE,
+    market      VARCHAR(16) NOT NULL,
+    PRIMARY KEY (schedule_id, market)
 );
 ```
 
 > ＋ **`gdrive_enabled` / `gdrive_subpath` / `gdrive_last_run_at` / `gdrive_last_status`**（Requirement 51 / Task 242，changeset `v1.76.0`）——型別與語意見「推廣至其餘八個匯出頁」段的統一定義。
 
 `market` 不設 CHECK 約束：合法代碼清單在 `MacroHistoryService.DAILY_INDEX_CODES`（Java 端單一來源），
-寫進 DDL 會變成第二份清單，日後新增指數要改兩處且漏改只在 runtime 才炸。改由 service 層對每個時間點的 market 清單逐一白名單驗證，並拒絕空清單。
+寫進 DDL 會變成第二份清單，日後新增指數要改兩處且漏改只在 runtime 才炸。改由 service 層逐筆排程驗證 market 集合並拒絕空集合。
 
-`index_export_schedule_time_market` 刻意一列一指數，不使用逗號字串、JSON 或 PostgreSQL array；同一時間點的一組指數是可增刪的關聯資料，符合資料庫正規化，也讓每個時間點可以有不同指數集合。`v1.88.0-index-export-multi-time-market.sql` 建立兩張新表，先將既有 `index_export_schedule.run_hour/run_minute/market/last_run_*` 轉成一個 `index_export_schedule_time` 與一筆關聯，再移除舊欄位與舊 constraint；migration 使用 `IF EXISTS`／`IF NOT EXISTS`／`ON CONFLICT DO NOTHING`，需以 PostgreSQL `DO $$ ... EXECUTE ... $$` block 讀取仍存在的舊欄位，Liquibase changeset 設 `splitStatements:false`（或可驗證的等價方案），才能安全應對多 worktree 版號避讓重跑。實作前必須以 `databasechangelog` 確認 v1.66.0 parent 已存在且已套用（「某個 migration 有沒有執行過」正是 `databasechangelog` 的正當用途）；schema 形貌一律以 `db/schema.sql` 為唯一標準——三張 `index_export_schedule*` 表現在都在其中，它記錄的是 v1.88.0 **遷移後**的現況，本來就不描述遷移前的欄位形貌，也不是 migration 的執行紀錄。
+`index_export_schedule_market` 刻意一列一指數，不使用逗號字串、JSON 或 PostgreSQL array。Task 464 的 `v1.137.0-index-export-schedules-multi.sql` 將 Task 287 既有的 parent＋時間點模型轉成一列一獨立排程：每個舊時間點成為一筆排程，保留有效啟用狀態（parent enabled AND time enabled）、本機 last-run guard／結果、選取指數及共同輸出／範圍／Drive 設定；依 `(run_hour, run_minute, id)` 升序的第一筆沿用既有 parent id，其餘建立新 id。若同 owner 的舊時間點重複選擇同一 market，該 market 涉及的每一列都命名為 `legacy_HHmm`（HHmm 取各列舊執行時間；parent 內時間點唯一），避免遷移後輸出互相覆寫，其餘列名稱為 null 以保留舊檔名。沒有時間點的舊 parent 保留為 disabled、08:00、空指數 placeholder，不捏造 TWSE 排程；更新時若 markets 仍空、或對空 markets placeholder 執行 run-now，回 400 並提示先選指數；選取合法指數後可正常儲存並成為一般排程。前端在 markets 空時停用其 run-now。遷移前若舊 time table 存在但舊 time-market mapping table 缺失，必須在任何 schema／資料變更前中止；同時須計算每位 owner 遷移後排程數，超過 10 時以包含 owner 與筆數的明確錯誤中止並回滾 changeset，舊 schema 與資料須完整保留供人工處理；不得截斷或丟棄。Drive 最近執行狀態原屬 owner 共用彙總，無法可靠歸屬到拆分後的某一列，因此拆分時清空該狀態，但保留 Drive 開關與路徑。migration 必須可重入、先複製再移除舊時間點資料，`DO` 區塊以 relation／column existence 條件守門後執行舊 schema 讀取；守門已保證舊 table 存在時可使用靜態 SQL，不強制動態 SQL；changeset 設 `splitStatements:false`；實作前檢查 changeset 在所有 worktree 與運行中 `databasechangelog` 的唯一性，並確認基準已包含 v1.88.0。`db/schema.sql` 是更新後 schema 的單一標準，migration 歷史則以 `databasechangelog` 判定。
 
-滾動範圍、路徑安全（`resolveDir` + `startsWith(base)`）、`writeAtomically`、
-每分鐘 poll ＋每時間點當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入、
-run-now 不動任何時間點 guard——全部同 R41／R42 的既有安全邊界。背景 loop 先以 owner 設定的 `enabled` 過濾，再逐時間點判斷時分；同一時間點內逐 market 產檔，單一 market 失敗只寫該時間點狀態並繼續下一 market。
-檔名 `{指數名}_{使用者ID}_{YYYYMMDD}.xlsx` 與同主檔名 `.json`；同一使用者同一指數被多個時間點選取時，當日後執行者覆寫前一份。
+每個 owner 的新增／更新／刪除都在同一短交易中以固定 namespace＋owner id 取得 PostgreSQL transaction-scoped advisory lock，再執行 count、碰撞檢查與寫入；鎖不依賴既有排程列，故空 owner 的併發新增也會序列化。滾動範圍、路徑安全（`resolveDir` + `startsWith(base)`）、`writeAtomically`、
+每分鐘 poll ＋每筆排程當日 guard ＋ `ApplicationReadyEvent` 自癒 ＋ `AtomicBoolean` 防重入、
+run-now 不動當日 guard——全部沿用 R41／R42 的既有安全邊界。背景 loop 直接逐列讀取各 owner 的排程，檢查該列 enabled／時分；一筆排程內逐 market 產檔，單一 market 失敗只記該列結果並繼續下一 market。
+檔名 `{指數標籤}_{使用者ID}[_{排程名}]_{YYYYMMDD}.xlsx` 與同主檔名 `.json`；排程名為 null 時保留舊檔名。碰撞鍵為 `(ownerId, normalizeName(name), market, target)`：名稱 null／純空白正規化為 null、其餘 trim；本機 target 是 `resolveDir(normalizeSubpath(outputSubpath))`。比較前以 `toRealPath` 解析 base 與 target 最近存在的前綴，再接回尚不存在的路徑元件；解析後 target 必須仍位於解析後 base 內，會跳出 base 的 symlink 必須拒絕，base 內指向同一實體位置的 symlink alias 視為同一 target。每次實際寫檔前重新解析及驗證，以阻止已儲存路徑後來改成外部 symlink。Drive 啟用時另以 `GdriveOutputSupport.normalizeSubpath(gdriveSubpath)` 為 target。本機名稱與 target 的比較遵從輸出 volume 實際大小寫語意：從最近已存在的 directory 開始，只檢查其中既有 entries 的大小寫變體 sibling；以 `BasicFileAttributes` 搭配 `NOFOLLOW_LINKS` 比較非 null 的 `fileKey`，兩個 entry 均不得是 symlink，且 directory listing 中不得有只差大小寫的另一 entry，才確認大小寫變體指向同一 entry。僅當 `Files.getFileStore(dir).equals(Files.getFileStore(parent))` 時才向 parent 繼續探測，遇到不同 volume 或無法確認 FileStore 時停止，避免從 mount parent 推斷 target volume 的行為。只在 target volume 有充分證據確認大小寫不敏感時才忽略本機大小寫；身份不明、symlink 或 entry 有大小寫歧義時維持精確比較。目標目錄不存在時不建立檔案或目錄作探針。Drive 比較保留既有 normalize 語意。命中相同鍵的排程不得並存，避免同日不同排程覆蓋同一檔案；名稱或落點不同時允許相同 market。
+
+Task 464 後，每列 `index_export_schedule` 是一筆完整排程，時間與 last-run guard 不再位於子表；`index_export_schedule_market` 保存該列的指數集合。Task 287 的 `index_export_schedule_time` 與 `_time_market` 只作為升級遷移來源，遷移後移除。
 
 ### API 端點
 
 | 層 | 端點 | 說明 |
 |---|---|---|
 | business | `GET /api/index-daily/export?market=&start=&end=` | 產出 .xlsx（UTF-8 檔名、`ByteArrayResource`） |
-| business | `GET /api/index-export/schedule` | 讀當前使用者排程設定（無則回預設值），回 `times[]`；每項含 `runHour`／`runMinute`／`enabled`／`markets[]`／該時間點執行狀態 |
-| business | `PUT /api/index-export/schedule` | 整包取代共用設定與 `times[]`（驗證每個時分不重複、每個 `markets[]` 非空且全為白名單、range_months、子路徑不跳脫） |
-| business | `POST /api/index-export/run-now` | 依所有時間點的 market 聯集立即產出每個指數的 `.xlsx`＋`.json`，回 `files[]` 與第一筆相容欄位；不動任何時間點 guard |
+| business | `GET /api/index-export/schedules` | 依執行時間及 id 排序回目前 owner 的 `schedules[]`、market options 與共用顯示資訊 |
+| business | `POST /api/index-export/schedules` | 建立一筆排程（每位 owner 上限 10）；回變更後清單 |
+| business | `PUT /api/index-export/schedules/{id}` | 更新 owner 的該筆排程；回變更後清單 |
+| business | `DELETE /api/index-export/schedules/{id}` | 刪除 owner 的該筆排程；回變更後清單 |
+| business | `POST /api/index-export/schedules/{id}/run-now` | 依該筆已儲存設定逐 market 立即產出 `.xlsx`＋`.json`，回逐指數 `results[]`；不動當日 guard |
 | business | `GET /api/export-schedule/browse?subpath=` | （既有，複用）列出基底下子目錄 |
 | BFF | `GET /api/bff/gdp-twse/export?market=&start=&end=` | passthrough 下載（原樣轉出 Content-Disposition） |
-| BFF | `GET`／`PUT /api/bff/gdp-twse/export/schedule` | passthrough |
-| BFF | `POST /api/bff/gdp-twse/export/run-now` | passthrough |
+| BFF | `GET`／`POST /api/bff/gdp-twse/export/schedules` | passthrough |
+| BFF | `PUT`／`DELETE /api/bff/gdp-twse/export/schedules/{id}` | passthrough |
+| BFF | `POST /api/bff/gdp-twse/export/schedules/{id}/run-now` | passthrough |
 | BFF | `GET /api/bff/gdp-twse/export/browse` | passthrough 至 business `/api/export-schedule/browse` |
 
 匯出端點掛 `/api/index-daily/export`（`MacroHistoryController`，與 `/api/twse-daily-index`、
@@ -6284,7 +6286,9 @@ run-now 不動任何時間點 guard——全部同 R41／R42 的既有安全邊�
 `/api/index-export`（同 R41 `/api/commodity-export`、R42 `/api/exchange-rate-export`）——
 前者是全域行情查詢，後者是 per-user 設定，語意不同。
 
-### 新增／異動檔案
+### Task 287 及後續工作的歷史異動紀錄（Task 464 已取代其排程模型與 API）
+
+以下檔案清單記錄 Task 287 與後續 Task 285／286／289 的歷史落地，不是 Task 464 的實作目標。Task 464 以本節前述的一列一排程資料模型及五支 schedules API 取代舊的 `times[]`／多時間點契約。
 
 **新增**
 - `backend/.../model/IndexExportScheduleTime.java`
@@ -6357,6 +6361,13 @@ run-now 不動任何時間點 guard——全部同 R41／R42 的既有安全邊�
 - `backend/.../export/ExportDocRendererTest.java`：**新增**一則對 `NUM0` 格式字串與獨立 `CellStyle` 實例的斷言
 - `backend/src/test/resources/golden/index_twse.xlsx`：再次重產（表頭 9 → 11 格）；
   `index_twse_pre_t289.xlsx` 新增（＝ Task 286 版，9 欄），供 identity 映射比對
+
+### Task 464 現行異動
+
+- Backend：`IndexExportSchedule`（以 `@ElementCollection` 對應 `index_export_schedule_market`）、`IndexExportScheduleCapture`、`LocalExportPathComparator`、`IndexExportScheduleRepository`、`IndexExportScheduleService`、`IndexExportScheduleExecutionStore`、`IndexExportDto`、`IndexExportController`，以及 `v1.137.0-index-export-schedules-multi.sql`／`db.changelog-master.yaml`。
+- Schema：以 migration 更新 `db/schema.sql`；保留既有 Task 287／v1.88.0 migration 作歷史，不修改已提交 migration。
+- BFF／Frontend：`GdpTwseBffController`、`frontend/src/api/index.js`、`frontend/src/views/GdpTwseView.vue`、既有 `SchedulePublicBffController.JOBS` 說明。
+- 驗證：新增或調整排程 service、execution store、migration、BFF route 測試，以及納入 `npm test` 的 `frontend/src/utils/gdpTwseSchedule.contract.test.js`；細節依 Task 464。
 
 ---
 

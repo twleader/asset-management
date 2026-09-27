@@ -67,103 +67,115 @@
       <el-empty v-else description="尚無資料" />
     </el-card>
 
-    <!-- 排程自動匯出設定（Requirement 45 / Task 216） -->
+    <!-- 大盤指數獨立排程（Requirement 45 / Task 464） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">⏱️ 排程自動匯出</span>
-          <div style="display:flex;gap:8px">
-            <el-button size="small" :loading="runningNow" @click="handleRunNow">立即匯出到目錄</el-button>
-            <el-button size="small" type="primary" :loading="savingSchedule" @click="saveSchedule">儲存設定</el-button>
-          </div>
+          <el-button size="small" type="primary" :disabled="schedules.length >= MAX_SCHEDULES"
+            @click="openNewSchedule">＋新增排程</el-button>
         </div>
       </template>
-      <el-form :inline="true" label-width="100px" class="schedule-form">
-        <el-form-item label="啟用每日排程">
+      <el-table v-if="schedules.length" :data="schedules" row-key="id" style="width:100%">
+        <el-table-column label="排程" min-width="150">
+          <template #default="{ row }">
+            <strong>{{ row.name || '未命名排程' }}</strong>
+            <div class="schedule-status">{{ row.enabled ? '每日啟用' : '已停用' }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="執行時間" width="110">
+          <template #default="{ row }">{{ formatScheduleTime(row) }}</template>
+        </el-table-column>
+        <el-table-column label="指數" min-width="190">
+          <template #default="{ row }">{{ scheduleMarketLabels(row).join('、') || '尚未選擇' }}</template>
+        </el-table-column>
+        <el-table-column label="範圍" width="100">
+          <template #default="{ row }">{{ scheduleRangeLabel(row.rangeMonths) }}</template>
+        </el-table-column>
+        <el-table-column label="本機落點" min-width="180">
+          <template #default="{ row }">{{ schedule.baseDir || '/home/steven' }}/{{ row.outputSubpath || 'input' }}</template>
+        </el-table-column>
+        <el-table-column label="Drive／上次狀態" min-width="220">
+          <template #default="{ row }">
+            <div>{{ row.gdriveEnabled ? `${schedule.gdriveRemote || 'GDriveOutput'}:${row.gdriveSubpath || ''}` : '未啟用' }}</div>
+            <div v-if="row.lastRunAt || row.lastRunStatus" class="schedule-status">
+              {{ row.lastRunAt || '—' }}　{{ row.lastRunStatus || '' }}
+            </div>
+            <div v-if="row.gdriveEnabled && (row.gdriveLastRunAt || row.gdriveLastStatus)" class="schedule-status">
+              Drive：{{ row.gdriveLastRunAt || '—' }}　{{ row.gdriveLastStatus || '' }}
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="260" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="openEditSchedule(row)">編輯</el-button>
+            <el-button size="small" type="danger" plain @click="handleDeleteSchedule(row)">刪除</el-button>
+            <el-tooltip :disabled="hasScheduleMarkets(row)" content="請先編輯排程並選擇至少一個指數" placement="top">
+              <el-button size="small" type="primary" :loading="runningScheduleId === row.id"
+                :disabled="!hasScheduleMarkets(row)" @click="handleRunNow(row)">立即匯出</el-button>
+            </el-tooltip>
+            <div v-if="!hasScheduleMarkets(row)" class="schedule-status">此排程尚無指數，請先選至少一個指數</div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="尚未建立匯出排程" />
+      <div class="schedule-hint" style="margin-top:12px">
+        每位使用者最多 {{ MAX_SCHEDULES }} 筆獨立排程。每筆排程可複選指數；每個指數各自產生 JSON 與 Excel。
+        檔名為 <code>{指數名}_{使用者ID}[_{排程名}]_YYYYMMDD</code>。
+      </div>
+      <div class="schedule-hint">
+        本機輸出以 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根；資料夾選擇器會在新增／編輯排程時開啟。
+        範圍以執行當日往前推算，檔案含開高低收、四條均線與可用的成交量資料。
+      </div>
+    </el-card>
+
+    <el-dialog v-model="scheduleDialogVisible" :title="editingScheduleId == null ? '新增匯出排程' : '編輯匯出排程'" width="700px">
+      <el-form label-width="110px" class="schedule-form">
+        <el-form-item label="排程名稱">
+          <el-input v-model="schedule.name" maxlength="20" placeholder="選填，例如早盤／美股" show-word-limit />
+        </el-form-item>
+        <el-form-item label="每日啟用">
           <el-switch v-model="schedule.enabled" />
         </el-form-item>
-        <el-form-item label="匯出時段" style="width:100%">
-          <div style="display:flex;flex-direction:column;gap:8px;width:100%">
-            <div v-for="(row, idx) in scheduleTimes" :key="row.key" style="display:flex;flex-direction:column;gap:2px">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <el-time-picker v-model="row.time" format="HH:mm" value-format="HH:mm"
-                  placeholder="時:分" style="width:130px" />
-                <el-select v-model="row.markets" multiple collapse-tags collapse-tags-tooltip
-                  placeholder="勾選指數" style="width:280px">
-                  <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value">
-                    <el-checkbox :model-value="row.markets.includes(m.value)" style="pointer-events:none">
-                      {{ m.label }}
-                    </el-checkbox>
-                  </el-option>
-                </el-select>
-                <el-switch v-model="row.enabled" active-text="啟用" />
-                <el-button text type="danger" @click="removeScheduleTime(idx)">移除</el-button>
-              </div>
-              <div v-if="row.lastRunAt || row.lastRunStatus" class="schedule-status" style="margin-top:0">
-                上次執行：{{ row.lastRunAt || '—' }}　{{ row.lastRunStatus || '' }}
-              </div>
-            </div>
-            <el-button text type="primary" @click="addScheduleTime">＋新增時間點</el-button>
-            <span style="font-size:12px;color:#94a3b8">每個時間點可複選指數，例如早上台股、晚上美股；清空時間點代表不自動匯出。</span>
-          </div>
+        <el-form-item label="執行時間">
+          <el-time-picker v-model="schedule.runTime" format="HH:mm" value-format="HH:mm"
+            placeholder="選擇每日執行時間" />
+        </el-form-item>
+        <el-form-item label="指數">
+          <el-select v-model="schedule.markets" multiple collapse-tags collapse-tags-tooltip
+            placeholder="至少選擇一個指數" style="width:100%">
+            <el-option v-for="option in marketOptions" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
         </el-form-item>
         <el-form-item label="匯出範圍">
-          <el-select v-model="schedule.rangeMonths" style="width:140px">
-            <el-option v-for="o in rangeMonthOptions" :key="String(o.value)"
-              :label="o.label" :value="o.value" />
+          <el-select v-model="schedule.rangeMonths" style="width:180px">
+            <el-option v-for="option in rangeMonthOptions" :key="String(option.value)"
+              :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="輸出資料夾">
-          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
-            <template #append>
-              <el-button @click="openDirPicker">選擇</el-button>
-            </template>
+          <el-input v-model="schedule.outputSubpath" readonly placeholder="（家目錄根）">
+            <template #append><el-button @click="openDirPicker('local')">選擇</el-button></template>
           </el-input>
         </el-form-item>
-        <!--
-          Google Drive 同步（Requirement 51 / Task 243）：本機一律照寫，這裡只是額外多上傳一份副本。
-          僅「主要管理者」可見可設——rclone remote 全機只有一份且綁定某個 Google 帳號，
-          若其他使用者能啟用，他的財務報表會被上傳到那個帳號的雲端硬碟。真正的閘門在後端。
-        -->
         <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
-          <div style="display:flex; flex-direction:column; gap:6px">
-            <div style="display:flex; align-items:center; gap:12px">
-              <el-switch v-model="schedule.gdriveEnabled" />
-              <el-input
-                v-model="schedule.gdriveSubpath"
-                readonly
-                placeholder="（尚未選擇 Drive 資料夾）"
-                :disabled="!schedule.gdriveEnabled"
-                style="width:260px"
-              >
-                <template #append>
-                  <el-button :disabled="!schedule.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button>
-                </template>
-              </el-input>
-            </div>
-            <div style="font-size:12px; color:var(--el-text-color-secondary); line-height:1.7">
-              開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
-              <strong>本機那一份永遠照寫、不受影響</strong>。
-              <template v-if="schedule.gdriveEnabled && schedule.gdriveSubpath">
-                <br />Drive 落點：<code>{{ schedule.gdriveRemote || 'GDriveOutput' }}:{{ schedule.gdriveSubpath }}</code>
-              </template>
-              <br />上次上傳：
-              <template v-if="schedule.gdriveLastRunAt">
-                {{ schedule.gdriveLastRunAt }} — <code>{{ schedule.gdriveLastStatus || '—' }}</code>
-              </template>
-              <template v-else>—（尚未執行過）</template>
-            </div>
+          <div style="display:flex;align-items:center;gap:10px;width:100%">
+            <el-switch v-model="schedule.gdriveEnabled" />
+            <el-input v-model="schedule.gdriveSubpath" readonly placeholder="（尚未選擇 Drive 資料夾）"
+              :disabled="!schedule.gdriveEnabled">
+              <template #append><el-button :disabled="!schedule.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button></template>
+            </el-input>
           </div>
         </el-form-item>
+        <div v-if="schedule.gdriveEnabled && schedule.gdriveSubpath" class="schedule-hint">
+          Drive 落點：{{ schedule.gdriveRemote || 'GDriveOutput' }}:{{ schedule.gdriveSubpath }}
+        </div>
       </el-form>
-      <div class="schedule-hint">
-        以主機家目錄 <code>{{ schedule.baseDir || '/home/steven' }}</code> 為根（對映主機
-        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。每日於各時間點匯出該列勾選指數的日線為
-        <code>{指數名}_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；欄位為日期／開盤／最高／最低／收盤／週線MA5／月線MA20／季線MA60／年線MA240／成交股數／成交金額，
-        內容同上方「匯出 Excel」）。匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
-      </div>
-    </el-card>
+      <template #footer>
+        <el-button @click="scheduleDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingSchedule" @click="saveSchedule">儲存排程</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 輸出資料夾選擇器 -->
     <el-dialog v-model="dirPicker.visible" :title="dirPickerTitle" width="560px">
@@ -255,7 +267,7 @@ import { bffApi, apiErrorMessage } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { View, Hide } from '@element-plus/icons-vue'
 
 use([CanvasRenderer, LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent,
@@ -506,34 +518,20 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-// ===== 排程自動匯出 =====
+// ===== 大盤指數獨立排程 =====
 
-const schedule = reactive({
-  // Drive 同步（Task 243）；gdriveRemote 是後端給的顯示值，不入庫
-  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
-  gdriveLastRunAt: null, gdriveLastStatus: '',
- 
-  enabled: false, outputSubpath: 'input', rangeMonths: 120, baseDir: ''
-})
-const scheduleTimes = ref([])
+const MAX_SCHEDULES = 10
+const schedules = ref([])
+const marketOptions = ref([])
+const scheduleDialogVisible = ref(false)
+const editingScheduleId = ref(null)
 const savingSchedule = ref(false)
-const runningNow = ref(false)
-let scheduleRowSeq = 0
-function newScheduleTime(time = '08:00', markets = ['TWSE'], enabled = true, lastRunAt = null, lastRunStatus = null) {
-  return { key: `schedule-${++scheduleRowSeq}`, time, markets: [...markets], enabled: enabled !== false, lastRunAt, lastRunStatus }
-}
-function addScheduleTime() { scheduleTimes.value.push(newScheduleTime()) }
-function removeScheduleTime(index) { scheduleTimes.value.splice(index, 1) }
-function scheduleRowsFromResponse(s) {
-  if (Array.isArray(s.times)) {
-    return s.times.map(t => newScheduleTime(
-      `${String(t.runHour ?? 8).padStart(2, '0')}:${String(t.runMinute ?? 0).padStart(2, '0')}`,
-      t.markets || [], t.enabled !== false, t.lastRunAt ?? null, t.lastRunStatus ?? null))
-  }
-  // 舊版 API 相容：單一時分／market 映射成一列。
-  return [newScheduleTime(`${String(s.runHour ?? 8).padStart(2, '0')}:${String(s.runMinute ?? 0).padStart(2, '0')}`,
-    [s.market || 'TWSE'], true)]
-}
+const runningScheduleId = ref(null)
+const schedule = reactive({
+  name: '', enabled: false, runTime: '08:00', markets: [],
+  outputSubpath: 'input', rangeMonths: 120, baseDir: '',
+  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: ''
+})
 
 // 全部十年以 120（月）表示而非 null：Element Plus 的 el-select 預設把 null 當成 empty value，
 // 綁 null 會顯示灰色 placeholder 而非「全部十年」，使用者無法分辨「已選」與「尚未選擇」（同 Task 203／204）。
@@ -557,49 +555,95 @@ const auth = useAuthStore()
 const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
 async function loadSchedule() {
-  const s = await bffApi.gdpTwse.getExportSchedule()
-  schedule.enabled = !!s.enabled
-  scheduleTimes.value = scheduleRowsFromResponse(s)
-  schedule.outputSubpath = s.outputSubpath ?? 'input'
-  // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
-  schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
+  const s = await bffApi.gdpTwse.getExportSchedules()
+  schedules.value = Array.isArray(s.schedules) ? s.schedules : []
+  marketOptions.value = Array.isArray(s.marketOptions) ? s.marketOptions : []
   schedule.baseDir = s.baseDir ?? ''
-  applyGdrive(s)
+  schedule.gdriveRemote = s.gdriveRemote ?? ''
+  return s
+}
+
+function blankScheduleDraft() {
+  return {
+    name: '', enabled: false, runTime: '08:00', markets: [],
+    outputSubpath: 'input', rangeMonths: ALL_TEN_YEARS_MONTHS,
+    gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: schedule.gdriveRemote
+  }
+}
+
+function openNewSchedule() {
+  if (schedules.value.length >= MAX_SCHEDULES) {
+    ElMessage.warning(`每位使用者最多建立 ${MAX_SCHEDULES} 筆排程`)
+    return
+  }
+  editingScheduleId.value = null
+  Object.assign(schedule, blankScheduleDraft())
+  scheduleDialogVisible.value = true
+}
+
+function openEditSchedule(row) {
+  editingScheduleId.value = row.id
+  Object.assign(schedule, {
+    ...blankScheduleDraft(),
+    name: row.name ?? '', enabled: !!row.enabled,
+    runTime: formatScheduleTime(row), markets: Array.isArray(row.markets) ? [...row.markets] : [],
+    outputSubpath: row.outputSubpath ?? 'input',
+    rangeMonths: row.rangeMonths ?? ALL_TEN_YEARS_MONTHS,
+    gdriveEnabled: !!row.gdriveEnabled, gdriveSubpath: row.gdriveSubpath ?? ''
+  })
+  scheduleDialogVisible.value = true
+}
+
+function formatScheduleTime(row) {
+  return `${String(row.runHour ?? 8).padStart(2, '0')}:${String(row.runMinute ?? 0).padStart(2, '0')}`
+}
+
+function scheduleMarketLabels(row) {
+  const labels = new Map(marketOptions.value.map(option => [option.value, option.label]))
+  return (row.markets || []).map(value => labels.get(value) || value)
+}
+
+function hasScheduleMarkets(row) {
+  return Array.isArray(row?.markets) && row.markets.length > 0
+}
+
+function scheduleRangeLabel(value) {
+  return rangeMonthOptions.find(option => option.value === value)?.label || '全部十年'
 }
 
 async function saveSchedule() {
-  // 前後端都擋：開了同步卻沒選資料夾，後端也會回 400
+  if (!schedule.runTime) {
+    ElMessage.warning('請選擇每日執行時間')
+    return
+  }
+  if (!schedule.markets.length) {
+    ElMessage.warning('請至少選擇一個指數')
+    return
+  }
   if (schedule.gdriveEnabled && !(schedule.gdriveSubpath || '').trim()) {
     ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
     return
   }
   savingSchedule.value = true
   try {
-    const seen = new Set()
-    const times = scheduleTimes.value.map(row => {
-      const [h, m] = (row.time || '08:00').split(':').map(Number)
-      const key = `${h}:${m}`
-      if (seen.has(key)) throw new Error('時間點不可重複')
-      seen.add(key)
-      if (!row.markets?.length) throw new Error('每個時間點至少勾選一個指數')
-      return { runHour: h, runMinute: m, enabled: row.enabled, markets: row.markets }
-    })
-    const s = await bffApi.gdpTwse.updateExportSchedule({
-      enabled: schedule.enabled,
-      gdriveEnabled: schedule.gdriveEnabled,
-      gdriveSubpath: (schedule.gdriveSubpath || '').trim(),
-      times,
+    const [runHour, runMinute] = schedule.runTime.split(':').map(Number)
+    const payload = {
+      name: (schedule.name || '').trim() || null,
+      enabled: !!schedule.enabled,
+      runHour, runMinute,
+      markets: [...schedule.markets],
+      rangeMonths: schedule.rangeMonths,
       outputSubpath: (schedule.outputSubpath || 'input').trim(),
-      rangeMonths: schedule.rangeMonths
-    })
-    scheduleTimes.value = scheduleRowsFromResponse(s)
-    schedule.outputSubpath = s.outputSubpath ?? schedule.outputSubpath
-    schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
-    schedule.baseDir = s.baseDir ?? schedule.baseDir
-    applyGdrive(s)
-    ElMessage.success('排程設定已儲存')
-    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
-    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
+      gdriveEnabled: schedule.gdriveEnabled,
+      gdriveSubpath: (schedule.gdriveSubpath || '').trim()
+    }
+    const result = editingScheduleId.value == null
+      ? await bffApi.gdpTwse.createExportSchedule(payload)
+      : await bffApi.gdpTwse.updateExportSchedule(editingScheduleId.value, payload)
+    await loadSchedule()
+    scheduleDialogVisible.value = false
+    ElMessage.success('排程已儲存')
+    showGdriveSelfCheckWarning(result.gdriveSelfCheckWarning)
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '儲存失敗，請稍後再試'))
   } finally {
@@ -607,23 +651,38 @@ async function saveSchedule() {
   }
 }
 
-async function handleRunNow() {
-  runningNow.value = true
+async function handleDeleteSchedule(row) {
   try {
-    const r = await bffApi.gdpTwse.runExportNow()
-    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
-    if (Array.isArray(r.files) && r.files.length > 1) {
-      const lines = r.files.map(f => `${f.marketLabel || f.market}: Excel ${f.path || '失敗'}；JSON ${f.jsonPath || '失敗'}`).join('\n')
-      ElMessage.success({ message: lines, duration: 8000, showClose: true })
-    } else {
-      showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
+    await ElMessageBox.confirm(`確定刪除「${row.name || '未命名排程'}」嗎？`, '刪除排程', { type: 'warning' })
+    await bffApi.gdpTwse.deleteExportSchedule(row.id)
+    await loadSchedule()
+    ElMessage.success('排程已刪除')
+  } catch (e) {
+    if (e === 'cancel' || e === 'close') return
+    ElMessage.error(apiErrorMessage(e, '刪除失敗，請稍後再試'))
+  }
+}
+
+async function handleRunNow(row) {
+  if (!hasScheduleMarkets(row)) {
+    ElMessage.warning('此排程尚未選擇指數，請先編輯並選擇至少一個指數')
+    return
+  }
+  runningScheduleId.value = row.id
+  try {
+    const result = await bffApi.gdpTwse.runExportNow(row.id)
+    for (const file of result.results || []) {
+      showDualExportResult({
+        jsonPath: file.jsonPath, xlsxPath: file.path, gdriveStatus: file.gdriveStatus,
+        localStatus: file.error, prefix: file.marketLabel || file.market
+      })
     }
   } catch (e) {
     ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
   } finally {
-    runningNow.value = false
+    runningScheduleId.value = null
+    loadSchedule().catch(() => {})
   }
-  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
 }
 
 

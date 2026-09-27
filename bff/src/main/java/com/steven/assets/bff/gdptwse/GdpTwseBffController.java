@@ -4,10 +4,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -229,30 +233,49 @@ public class GdpTwseBffController {
                 });
     }
 
-    @GetMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
+    @GetMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedules() {
         return businessServicesClient.get()
-                .uri("/api/index-export/schedule")
+                .uri("/api/index-export/schedules")
                 .retrieve()
                 .bodyToMono(MAP)
                 .map(ResponseEntity::ok);
     }
 
-    @org.springframework.web.bind.annotation.PutMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(
-            @org.springframework.web.bind.annotation.RequestBody Map<String, Object> body) {
-        return businessServicesClient.put()
-                .uri("/api/index-export/schedule")
+    @PostMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> createExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post()
+                .uri("/api/index-export/schedules")
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(MAP)
                 .map(ResponseEntity::ok);
     }
 
-    @PostMapping("/export/run-now")
-    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
+    @PutMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(
+            @PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return businessServicesClient.put()
+                .uri("/api/index-export/schedules/{id}", id)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @DeleteMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteExportSchedule(@PathVariable Long id) {
+        return businessServicesClient.delete()
+                .uri("/api/index-export/schedules/{id}", id)
+                .retrieve()
+                .bodyToMono(MAP)
+                .map(ResponseEntity::ok);
+    }
+
+    @PostMapping("/export/schedules/{id}/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow(@PathVariable Long id) {
         return businessServicesClient.post()
-                .uri("/api/index-export/run-now")
+                .uri("/api/index-export/schedules/{id}/run-now", id)
                 .retrieve()
                 .bodyToMono(MAP)
                 .map(ResponseEntity::ok);

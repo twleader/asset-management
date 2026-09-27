@@ -276,9 +276,11 @@ export const bffApi = {
         responseType: 'blob',
         timeout: 120000
       }),
-    getExportSchedule:    () => api.get('/bff/gdp-twse/export/schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/gdp-twse/export/schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/gdp-twse/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    getExportSchedules:   () => api.get('/bff/gdp-twse/export/schedules', { skipErrorToast: true }),
+    createExportSchedule: (data) => api.post('/bff/gdp-twse/export/schedules', data, { skipErrorToast: true }),
+    updateExportSchedule: (id, data) => api.put(`/bff/gdp-twse/export/schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule: (id) => api.delete(`/bff/gdp-twse/export/schedules/${id}`, { skipErrorToast: true }),
+    runExportNow:         (id) => api.post(`/bff/gdp-twse/export/schedules/${id}/run-now`, null, { timeout: 120000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') =>
       api.get('/bff/gdp-twse/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
