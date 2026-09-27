@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16 / pg_dump 16，來源隔離 schema.sql + v1.137 migration fixture，2026-09-28
+-- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres（v1.137.0 已套用），2026-09-28
 -- 產生當下表數：105 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
@@ -154,7 +154,7 @@ CREATE TABLE public.api_error_log (
     http_status smallint,
     dedupe_key character varying(64),
     CONSTRAINT api_error_log_http_status_check CHECK (((http_status IS NULL) OR ((http_status >= 100) AND (http_status <= 599)))),
-    CONSTRAINT api_error_log_source_check CHECK (((source)::text = ANY (ARRAY[('OPEN_API'::character varying)::text, ('FUBON_API'::character varying)::text])))
+    CONSTRAINT api_error_log_source_check CHECK (((source)::text = ANY ((ARRAY['OPEN_API'::character varying, 'FUBON_API'::character varying])::text[])))
 );
 
 
@@ -182,7 +182,7 @@ CREATE TABLE public.api_error_log_operation (
     operation_label character varying(255) NOT NULL,
     display_order smallint NOT NULL,
     CONSTRAINT api_error_log_operation_display_order_check CHECK ((display_order > 0)),
-    CONSTRAINT api_error_log_operation_source_check CHECK (((source)::text = ANY (ARRAY[('OPEN_API'::character varying)::text, ('FUBON_API'::character varying)::text])))
+    CONSTRAINT api_error_log_operation_source_check CHECK (((source)::text = ANY ((ARRAY['OPEN_API'::character varying, 'FUBON_API'::character varying])::text[])))
 );
 
 
@@ -335,7 +335,7 @@ CREATE TABLE public.asset_transaction (
     transaction_tax numeric(15,2),
     source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
     broker_filled_no character varying(50),
-    CONSTRAINT asset_transaction_source_check CHECK (((source)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('FUBON_SYNC'::character varying)::text])))
+    CONSTRAINT asset_transaction_source_check CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 
 
@@ -483,8 +483,8 @@ CREATE TABLE public.bank_deposit (
     annual_interest_rate numeric(7,4),
     source character varying(20) DEFAULT 'MANUAL'::character varying NOT NULL,
     processing_date date,
-    CONSTRAINT ck_bank_deposit_processing_date_transit CHECK (((processing_date IS NULL) OR ((currency IS NOT NULL) AND ((currency)::text = ANY (ARRAY[('TRANSIT_TWD'::character varying)::text, ('TRANSIT_USD'::character varying)::text]))))),
-    CONSTRAINT ck_bank_deposit_source CHECK (((source)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('FUBON_SYNC'::character varying)::text])))
+    CONSTRAINT ck_bank_deposit_processing_date_transit CHECK (((processing_date IS NULL) OR ((currency IS NOT NULL) AND ((currency)::text = ANY ((ARRAY['TRANSIT_TWD'::character varying, 'TRANSIT_USD'::character varying])::text[]))))),
+    CONSTRAINT ck_bank_deposit_source CHECK (((source)::text = ANY ((ARRAY['MANUAL'::character varying, 'FUBON_SYNC'::character varying])::text[])))
 );
 
 
@@ -593,7 +593,7 @@ CREATE TABLE public.broker_filled_trade_cost_projection (
     shares numeric(15,5) NOT NULL,
     buy_cost numeric(20,2) NOT NULL,
     status character varying(40) NOT NULL,
-    CONSTRAINT broker_filled_trade_cost_projection_status_check CHECK (((status)::text = ANY (ARRAY[('PENDING'::character varying)::text, ('APPLIED'::character varying)::text, ('SKIPPED_NO_PRETRADE_BASIS'::character varying)::text])))
+    CONSTRAINT broker_filled_trade_cost_projection_status_check CHECK (((status)::text = ANY ((ARRAY['PENDING'::character varying, 'APPLIED'::character varying, 'SKIPPED_NO_PRETRADE_BASIS'::character varying])::text[])))
 );
 
 
@@ -1263,7 +1263,7 @@ CREATE TABLE public.fubon_historical_daily_candle (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT ck_fubon_historical_daily_candle_ohlc CHECK (((high >= open) AND (high >= close) AND (open >= low) AND (close >= low))),
     CONSTRAINT fubon_historical_daily_candle_close_check CHECK ((close > (0)::numeric)),
-    CONSTRAINT fubon_historical_daily_candle_exchange_check CHECK (((exchange)::text = ANY (ARRAY[('TWSE'::character varying)::text, ('TPEx'::character varying)::text, ('ESB'::character varying)::text]))),
+    CONSTRAINT fubon_historical_daily_candle_exchange_check CHECK (((exchange)::text = ANY ((ARRAY['TWSE'::character varying, 'TPEx'::character varying, 'ESB'::character varying])::text[]))),
     CONSTRAINT fubon_historical_daily_candle_high_check CHECK ((high > (0)::numeric)),
     CONSTRAINT fubon_historical_daily_candle_low_check CHECK ((low > (0)::numeric)),
     CONSTRAINT fubon_historical_daily_candle_market_check CHECK (((market)::text = '台股'::text)),
@@ -1296,7 +1296,7 @@ CREATE TABLE public.fubon_intraday_candle (
     volume bigint NOT NULL,
     observed_at timestamp with time zone NOT NULL,
     content_hash character(64) NOT NULL,
-    CONSTRAINT ck_fubon_intraday_candle_exchange CHECK (((exchange)::text = ANY (ARRAY[('TWSE'::character varying)::text, ('TPEx'::character varying)::text]))),
+    CONSTRAINT ck_fubon_intraday_candle_exchange CHECK (((exchange)::text = ANY ((ARRAY['TWSE'::character varying, 'TPEx'::character varying])::text[]))),
     CONSTRAINT ck_fubon_intraday_candle_hash CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_fubon_intraday_candle_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text) AND (timeframe = 1))),
     CONSTRAINT ck_fubon_intraday_candle_minute CHECK ((date_trunc('minute'::text, candle_at) = candle_at)),
@@ -1330,7 +1330,7 @@ CREATE TABLE public.fubon_stock_basic_info (
     currency character varying(10),
     observed_at timestamp with time zone NOT NULL,
     content_hash character(64) NOT NULL,
-    CONSTRAINT ck_fubon_stock_basic_info_exchange CHECK ((((exchange)::text = ANY (ARRAY[('TWSE'::character varying)::text, ('TPEx'::character varying)::text])) AND ((instrument_type)::text = 'EQUITY'::text))),
+    CONSTRAINT ck_fubon_stock_basic_info_exchange CHECK ((((exchange)::text = ANY ((ARRAY['TWSE'::character varying, 'TPEx'::character varying])::text[])) AND ((instrument_type)::text = 'EQUITY'::text))),
     CONSTRAINT ck_fubon_stock_basic_info_hash CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_fubon_stock_basic_info_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text))),
     CONSTRAINT ck_fubon_stock_basic_info_interval CHECK (((matching_interval IS NULL) OR (matching_interval >= 0))),
@@ -1378,9 +1378,9 @@ CREATE TABLE public.fubon_technical_capture_member (
     CONSTRAINT ck_fubon_technical_capture_member_hash CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_fubon_technical_capture_member_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text))),
     CONSTRAINT ck_fubon_technical_capture_member_previous_hash CHECK (((previous_content_hash IS NULL) OR (previous_content_hash ~ '^[0-9a-f]{64}$'::text))),
-    CONSTRAINT ck_fubon_technical_capture_member_previous_kdj CHECK ((((previous_source_date IS NULL) AND (previous_content_hash IS NULL)) OR (((profile_id)::text = ANY (ARRAY[('kdj_d_9_3_3'::character varying)::text, ('kdj_w_9_3_3'::character varying)::text])) AND (previous_source_date < source_date)))),
+    CONSTRAINT ck_fubon_technical_capture_member_previous_kdj CHECK ((((previous_source_date IS NULL) AND (previous_content_hash IS NULL)) OR (((profile_id)::text = ANY ((ARRAY['kdj_d_9_3_3'::character varying, 'kdj_w_9_3_3'::character varying])::text[])) AND (previous_source_date < source_date)))),
     CONSTRAINT ck_fubon_technical_capture_member_previous_pair CHECK (((previous_source_date IS NULL) = (previous_content_hash IS NULL))),
-    CONSTRAINT ck_fubon_technical_capture_member_profile CHECK (((((profile_id)::text = ANY (ARRAY[('sma_d_5'::character varying)::text, ('sma_d_10'::character varying)::text, ('sma_d_20'::character varying)::text, ('sma_d_60'::character varying)::text, ('sma_d_240'::character varying)::text])) AND (timeframe = 'D'::bpchar)) OR (((profile_id)::text = ANY (ARRAY[('rsi_d_5'::character varying)::text, ('rsi_d_10'::character varying)::text, ('kdj_d_9_3_3'::character varying)::text, ('macd_d_12_26_9'::character varying)::text, ('bb_d_20'::character varying)::text])) AND (timeframe = 'D'::bpchar)) OR (((profile_id)::text = ANY (ARRAY[('sma_w_5'::character varying)::text, ('sma_w_10'::character varying)::text, ('sma_w_20'::character varying)::text, ('rsi_w_5'::character varying)::text, ('rsi_w_10'::character varying)::text, ('kdj_w_9_3_3'::character varying)::text, ('macd_w_12_26_9'::character varying)::text])) AND (timeframe = 'W'::bpchar))))
+    CONSTRAINT ck_fubon_technical_capture_member_profile CHECK (((((profile_id)::text = ANY ((ARRAY['sma_d_5'::character varying, 'sma_d_10'::character varying, 'sma_d_20'::character varying, 'sma_d_60'::character varying, 'sma_d_240'::character varying])::text[])) AND (timeframe = 'D'::bpchar)) OR (((profile_id)::text = ANY ((ARRAY['rsi_d_5'::character varying, 'rsi_d_10'::character varying, 'kdj_d_9_3_3'::character varying, 'macd_d_12_26_9'::character varying, 'bb_d_20'::character varying])::text[])) AND (timeframe = 'D'::bpchar)) OR (((profile_id)::text = ANY ((ARRAY['sma_w_5'::character varying, 'sma_w_10'::character varying, 'sma_w_20'::character varying, 'rsi_w_5'::character varying, 'rsi_w_10'::character varying, 'kdj_w_9_3_3'::character varying, 'macd_w_12_26_9'::character varying])::text[])) AND (timeframe = 'W'::bpchar))))
 );
 
 
@@ -2112,7 +2112,7 @@ CREATE TABLE public.srpp_context_package (
     policy_bundle_sha256 character(64) NOT NULL,
     generated_at timestamp with time zone NOT NULL,
     context_jcs text NOT NULL,
-    CONSTRAINT srpp_context_package_slot_check CHECK (((slot)::text = ANY (ARRAY[('09:05'::character varying)::text, ('11:40'::character varying)::text])))
+    CONSTRAINT srpp_context_package_slot_check CHECK (((slot)::text = ANY ((ARRAY['09:05'::character varying, '11:40'::character varying])::text[])))
 );
 
 
@@ -2692,8 +2692,8 @@ CREATE TABLE public.stock_intraday_order_book (
     CONSTRAINT ck_stock_intraday_order_book_market CHECK (((market)::text = '台股'::text)),
     CONSTRAINT ck_stock_intraday_order_book_optional_price CHECK ((((open_price IS NULL) OR (open_price > (0)::numeric)) AND ((high_price IS NULL) OR (high_price > (0)::numeric)) AND ((low_price IS NULL) OR (low_price > (0)::numeric)) AND ((average_price IS NULL) OR (average_price >= (0)::numeric)) AND ((turnover_yi IS NULL) OR (turnover_yi >= (0)::numeric)))),
     CONSTRAINT ck_stock_intraday_order_book_required_price CHECK (((actual_price > (0)::numeric) AND (previous_close > (0)::numeric))),
-    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = ANY (ARRAY[('FUBON_BOOKS'::character varying)::text, ('YAHOO_TW'::character varying)::text]))),
-    CONSTRAINT ck_stock_intraday_order_book_status CHECK (((market_status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('CLOSED'::character varying)::text, ('UNKNOWN'::character varying)::text])))
+    CONSTRAINT ck_stock_intraday_order_book_source CHECK (((source)::text = ANY ((ARRAY['FUBON_BOOKS'::character varying, 'YAHOO_TW'::character varying])::text[]))),
+    CONSTRAINT ck_stock_intraday_order_book_status CHECK (((market_status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLOSED'::character varying, 'UNKNOWN'::character varying])::text[])))
 );
 
 
@@ -2866,7 +2866,7 @@ CREATE TABLE public.stock_technical_indicator (
     CONSTRAINT ck_stock_technical_indicator_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text))),
     CONSTRAINT ck_stock_technical_indicator_json CHECK (((jsonb_typeof(parameters) = 'object'::text) AND (jsonb_typeof(payload) = 'object'::text))),
     CONSTRAINT ck_stock_technical_indicator_observed CHECK ((first_observed_at <= observed_at)),
-    CONSTRAINT ck_stock_technical_indicator_profile CHECK (((((profile_id)::text = ANY (ARRAY[('sma_d_5'::character varying)::text, ('sma_d_10'::character varying)::text, ('sma_d_20'::character varying)::text, ('sma_d_60'::character varying)::text, ('sma_d_240'::character varying)::text])) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'SMA'::text)) OR (((profile_id)::text = ANY (ARRAY[('rsi_d_5'::character varying)::text, ('rsi_d_10'::character varying)::text])) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'RSI'::text)) OR (((profile_id)::text = 'kdj_d_9_3_3'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'KDJ'::text)) OR (((profile_id)::text = 'macd_d_12_26_9'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'MACD'::text)) OR (((profile_id)::text = 'bb_d_20'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'BBANDS'::text)) OR (((profile_id)::text = ANY (ARRAY[('sma_w_5'::character varying)::text, ('sma_w_10'::character varying)::text, ('sma_w_20'::character varying)::text])) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'SMA'::text)) OR (((profile_id)::text = ANY (ARRAY[('rsi_w_5'::character varying)::text, ('rsi_w_10'::character varying)::text])) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'RSI'::text)) OR (((profile_id)::text = 'kdj_w_9_3_3'::text) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'KDJ'::text)) OR (((profile_id)::text = 'macd_w_12_26_9'::text) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'MACD'::text)))),
+    CONSTRAINT ck_stock_technical_indicator_profile CHECK (((((profile_id)::text = ANY ((ARRAY['sma_d_5'::character varying, 'sma_d_10'::character varying, 'sma_d_20'::character varying, 'sma_d_60'::character varying, 'sma_d_240'::character varying])::text[])) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'SMA'::text)) OR (((profile_id)::text = ANY ((ARRAY['rsi_d_5'::character varying, 'rsi_d_10'::character varying])::text[])) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'RSI'::text)) OR (((profile_id)::text = 'kdj_d_9_3_3'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'KDJ'::text)) OR (((profile_id)::text = 'macd_d_12_26_9'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'MACD'::text)) OR (((profile_id)::text = 'bb_d_20'::text) AND (timeframe = 'D'::bpchar) AND ((indicator_kind)::text = 'BBANDS'::text)) OR (((profile_id)::text = ANY ((ARRAY['sma_w_5'::character varying, 'sma_w_10'::character varying, 'sma_w_20'::character varying])::text[])) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'SMA'::text)) OR (((profile_id)::text = ANY ((ARRAY['rsi_w_5'::character varying, 'rsi_w_10'::character varying])::text[])) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'RSI'::text)) OR (((profile_id)::text = 'kdj_w_9_3_3'::text) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'KDJ'::text)) OR (((profile_id)::text = 'macd_w_12_26_9'::text) AND (timeframe = 'W'::bpchar) AND ((indicator_kind)::text = 'MACD'::text)))),
     CONSTRAINT ck_stock_technical_indicator_timeframe CHECK ((timeframe = ANY (ARRAY['D'::bpchar, 'W'::bpchar])))
 );
 
@@ -2942,7 +2942,7 @@ CREATE TABLE public.trading_calendar_export_schedule (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
-    CONSTRAINT ck_tc_export_schedule_format CHECK (((format)::text = ANY (ARRAY[('json'::character varying)::text, ('excel'::character varying)::text]))),
+    CONSTRAINT ck_tc_export_schedule_format CHECK (((format)::text = ANY ((ARRAY['json'::character varying, 'excel'::character varying])::text[]))),
     CONSTRAINT ck_tc_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_tc_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
 );
@@ -3143,7 +3143,7 @@ CREATE TABLE public.trading_radar_notification_state (
     state_type character varying(30) NOT NULL,
     state_code character varying(50) NOT NULL,
     last_notified_at timestamp with time zone,
-    CONSTRAINT ck_trn_state_type CHECK (((state_type)::text = ANY (ARRAY[('ACTION'::character varying)::text, ('COUNTER_TREND'::character varying)::text])))
+    CONSTRAINT ck_trn_state_type CHECK (((state_type)::text = ANY ((ARRAY['ACTION'::character varying, 'COUNTER_TREND'::character varying])::text[])))
 );
 
 
@@ -3204,7 +3204,7 @@ CREATE TABLE public.treasury_yield_batch (
     complete boolean NOT NULL,
     content_hash character varying(64) NOT NULL,
     CONSTRAINT ck_treasury_yield_batch_hash_length CHECK ((char_length((content_hash)::text) = 64)),
-    CONSTRAINT ck_treasury_yield_batch_provider CHECK (((provider)::text = ANY (ARRAY[('US_TREASURY'::character varying)::text, ('YAHOO_PROXY'::character varying)::text])))
+    CONSTRAINT ck_treasury_yield_batch_provider CHECK (((provider)::text = ANY ((ARRAY['US_TREASURY'::character varying, 'YAHOO_PROXY'::character varying])::text[])))
 );
 
 
@@ -3231,7 +3231,7 @@ CREATE TABLE public.treasury_yield_daily (
     tenor character varying(8) NOT NULL,
     yield_percent numeric(10,4) NOT NULL,
     source_url text NOT NULL,
-    CONSTRAINT ck_treasury_yield_daily_tenor CHECK (((tenor)::text = ANY (ARRAY[('M3'::character varying)::text, ('Y5'::character varying)::text, ('Y10'::character varying)::text, ('Y30'::character varying)::text]))),
+    CONSTRAINT ck_treasury_yield_daily_tenor CHECK (((tenor)::text = ANY ((ARRAY['M3'::character varying, 'Y5'::character varying, 'Y10'::character varying, 'Y30'::character varying])::text[]))),
     CONSTRAINT ck_treasury_yield_daily_value CHECK (((yield_percent >= (0)::numeric) AND (yield_percent <= (100)::numeric)))
 );
 
@@ -3294,7 +3294,7 @@ CREATE TABLE public.twse_institutional_daily (
     status character varying(20) NOT NULL,
     error_reason text,
     CONSTRAINT ck_twse_institutional_available_values CHECK ((((status)::text <> 'AVAILABLE'::text) OR ((trading_date IS NOT NULL) AND (foreign_net IS NOT NULL) AND (trust_net IS NOT NULL) AND (dealer_net IS NOT NULL) AND (total_net IS NOT NULL) AND (source_url IS NOT NULL)))),
-    CONSTRAINT ck_twse_institutional_status CHECK (((status)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('UNAVAILABLE'::character varying)::text])))
+    CONSTRAINT ck_twse_institutional_status CHECK (((status)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'UNAVAILABLE'::character varying])::text[])))
 );
 
 
