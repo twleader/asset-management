@@ -3378,6 +3378,8 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 - **前端**（`views/AssetAllocationAdviceView.vue`）：條件表單（生日／退休日期 `el-date-picker`、退休前年薪／年支出 `el-input-number`、理財目標 `el-select multiple`、風險 `el-radio-group`、獲利預期 `el-select`）＋「儲存條件」「產生建議」；現況配置與建議目標配置以純 CSS bar 呈現（避免 echarts tree-shaking 漏註冊風險）；建議卡片顯示 summary／風險評估／目標配置（比例＋理由，Task 165 加「目前→目標→增減碼金額」）／再平衡操作明細 `rebalancePlan`（紅減碼綠增碼＋估計金額）／調整動作（優先度 tag）／風險提醒／參考來源（`safeUrl` 擋非 http(s)）；免責聲明；歷次建議 `el-table` 可展開回顧當時條件與建議；管理者頁首成本設定（模型／思考深度／web 搜尋 `el-select`，`change` 即持久化）。**退休現金流試算卡（Task 165、退休後兩階段 Task 167）**：白話結論（撐到 100 歲剩餘／缺口年齡）＋假設列＋**ECharts 逐年資產餘額折線圖**（`use([CanvasRenderer, LineChart, Title/Tooltip/Legend/Grid/MarkLine/MarkPointComponent])` per-view 註冊，退休 markLine／長照起始 markLine／缺口 markPoint／0 軸 dashed）；退休試算假設欄（長照前年生活費、長照後年生活費、長照起始年齡、累積期／退休後年報酬率，報酬率留空 placeholder 顯示帶入預設）。現況與目標配置比例仍以純 CSS bar 呈現。`api/index.js` 加 `bffApi.portfolioAdvice`（generate 覆寫 60s timeout；`/generate` 為非同步立即回 `PROCESSING`，故毋須長 timeout，實際等待由 `PROCESSING` 輪詢承擔）。左選單 icon `Compass`。
 
+- **聚合區塊的失敗隔離**：BFF 對 `latest`、`history`、`profile`、`settings`、`currentAllocation`、`projection` 維持平行請求。每個下游錯誤或空 response body 各自轉成既有 fallback，並將固定區塊識別值放入根層 `fetchErrors`；回應仍為 HTTP 200，六個區塊皆成功時 `fetchErrors` 為空陣列。HTTP 200 的合法空資料不算錯誤。前端依 `fetchErrors` 逐區更新：失敗區塊保留先前內容與對應選項，成功區塊照常更新；不以 fallback 空物件覆蓋已顯示資料。手動／初次載入對有錯誤的回應顯示一次固定警告，靜默輪詢不顯示提示，也不把上游例外或 body 轉給使用者。
+
 ### 不處理
 
 - 不做定期／排程自動產生（互動式即時，使用者按鈕觸發；不像 Requirement 31 有每日 cron）。
@@ -8151,6 +8153,8 @@ UPDATE portfolio_advice_setting SET engine = 'local' WHERE engine IS NULL OR eng
 ### 前端
 
 `AssetAllocationAdviceView.vue` 新增「分析引擎」下拉（三檔）。`local` 時「模型」「思考深度」「搜尋次數」三個既有下拉全部**停用而非隱藏**；`hybrid` 時「模型」「思考深度」可用、「搜尋次數」停用並顯示 0。沿用既有 `PUT /api/bff/portfolio-advice/settings`，不新增端點。
+
+常駐說明須準確描述 `local`／`hybrid` 的範圍：配置類別比例由固定規則模板決定，屬常見經驗法則、未經回測或個人情境驗證且不構成個人化投資建議。股票與信託基金依相同 `(assetClass, subClass)` 群組內的現有持倉市值比例分攤；存款（現金）增碼按存款市值比例分攤，減碼依提領優先序逐筆抽取。不推薦未持有的新標的，也不分析個別標的基本面、損益、交易成本或稅務。當目前引擎為 `local`／`hybrid`，管理者提示只有在 `availableEngines` 包含 `id=llm` 時才顯示可切換 CTA，名稱由同一清單的 label 取得；若不存在則明確說完整 AI 引擎目前不可用並提示管理者檢查設定。一般使用者不會看到設定下拉，提示其洽系統管理者；目前已是 `llm` 時不顯示要求切換到 `llm` 的 CTA。這是前端說明，不改引擎、權限或 API。
 
 ---
 

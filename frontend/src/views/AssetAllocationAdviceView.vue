@@ -34,8 +34,10 @@
     <el-alert
       type="info" show-icon :closable="false" style="margin-bottom:16px"
       title="關於「本機配置模板」"
-      description="本機配置模板（local／hybrid 檔位使用）依可忍受風險與距退休年數套用常見經驗法則比例，未經回測或個人情境驗證，不構成個人化投資建議；如需 AI 結合你的資產與市場脈絡產生完整建議，請切換為 llm 引擎。"
+      :description="LOCAL_HYBRID_TEMPLATE_NOTICE"
     />
+    <el-alert v-if="engineNotice" type="warning" show-icon :closable="false" style="margin-bottom:16px"
+      title="完整 AI 引擎" :description="engineNotice" />
 
     <!-- 條件設定表單 -->
     <el-card shadow="never" class="section-card">
@@ -476,6 +478,7 @@ import { MagicStick, Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bffApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
+import { LOCAL_HYBRID_TEMPLATE_NOTICE, portfolioAdviceEngineNotice } from '@/utils/portfolioAdviceEngineNotice'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -612,6 +615,11 @@ const availableModels = computed(() => settings.value.availableModels || [])
 const availableEfforts = computed(() => settings.value.availableEfforts || [])
 const availableWebSearches = computed(() => settings.value.availableWebSearches || [])
 const availableEngines = computed(() => settings.value.availableEngines || [])
+const engineNotice = computed(() => portfolioAdviceEngineNotice({
+  isAdmin: auth.isAdmin,
+  engine: selectedEngine.value,
+  availableEngines: availableEngines.value
+}))
 const busy = computed(() => generating.value || isProcessing.value || savingProfile.value || savingEngine.value || savingModel.value || savingEffort.value || savingWebSearch.value)
 // local 檔位：模型／思考深度／搜尋次數全部停用；hybrid 檔位：搜尋次數另外停用（強制不搜尋）
 const modelEffortDisabled = computed(() => busy.value || selectedEngine.value === 'local')
@@ -783,52 +791,61 @@ async function load(silent = false) {
   if (!silent) loading.value = true
   try {
     const data = await bffApi.portfolioAdvice.get(20)
-    // profile → 表單 + 可選清單
-    const p = data.profile || {}
-    goalOptions.value = p.goalOptions || []
-    riskOptions.value = p.riskOptions || []
-    returnOptions.value = p.returnOptions || []
-    form.value = {
-      birthDate: p.birthDate ?? null,
-      preRetirementAnnualSalary: p.preRetirementAnnualSalary ?? null,
-      preRetirementAnnualExpense: p.preRetirementAnnualExpense ?? null,
-      retirementDate: p.retirementDate ?? null,
-      laborInsuranceMonthly: p.laborInsuranceMonthly ?? null,
-      laborInsuranceStartDate: p.laborInsuranceStartDate ?? null,
-      laborPensionLumpSum: p.laborPensionLumpSum ?? null,
-      laborPensionClaimDate: p.laborPensionClaimDate ?? null,
-      assumedAnnualInflationRate: p.assumedAnnualInflationRate ?? DEFAULT_INFLATION_RATE,
-      retirementAnnualExpense: p.retirementAnnualExpense ?? null,
-      longTermCareAnnualExpense: p.longTermCareAnnualExpense ?? null,
-      longTermCareStartAge: p.longTermCareStartAge ?? null,
-      accumulationAnnualReturnRate: p.accumulationAnnualReturnRate ?? null,
-      retirementAnnualReturnRate: p.retirementAnnualReturnRate ?? null,
-      goals: p.goals || [],
-      riskTolerance: p.riskTolerance || '',
-      expectedAnnualReturn: p.expectedAnnualReturn || '',
-      plannedExpenses: (p.plannedExpenses || []).map(e => ({
-        expenseDate: e.expenseDate ?? null,
-        name: e.name ?? '',
-        amount: e.amount ?? null
-      }))
+    const fetchErrors = new Set(Array.isArray(data.fetchErrors) ? data.fetchErrors : [])
+    if (!fetchErrors.has('profile')) {
+      const p = data.profile || {}
+      goalOptions.value = p.goalOptions || []
+      riskOptions.value = p.riskOptions || []
+      returnOptions.value = p.returnOptions || []
+      form.value = {
+        birthDate: p.birthDate ?? null,
+        preRetirementAnnualSalary: p.preRetirementAnnualSalary ?? null,
+        preRetirementAnnualExpense: p.preRetirementAnnualExpense ?? null,
+        retirementDate: p.retirementDate ?? null,
+        laborInsuranceMonthly: p.laborInsuranceMonthly ?? null,
+        laborInsuranceStartDate: p.laborInsuranceStartDate ?? null,
+        laborPensionLumpSum: p.laborPensionLumpSum ?? null,
+        laborPensionClaimDate: p.laborPensionClaimDate ?? null,
+        assumedAnnualInflationRate: p.assumedAnnualInflationRate ?? DEFAULT_INFLATION_RATE,
+        retirementAnnualExpense: p.retirementAnnualExpense ?? null,
+        longTermCareAnnualExpense: p.longTermCareAnnualExpense ?? null,
+        longTermCareStartAge: p.longTermCareStartAge ?? null,
+        accumulationAnnualReturnRate: p.accumulationAnnualReturnRate ?? null,
+        retirementAnnualReturnRate: p.retirementAnnualReturnRate ?? null,
+        goals: p.goals || [],
+        riskTolerance: p.riskTolerance || '',
+        expectedAnnualReturn: p.expectedAnnualReturn || '',
+        plannedExpenses: (p.plannedExpenses || []).map(e => ({
+          expenseDate: e.expenseDate ?? null,
+          name: e.name ?? '',
+          amount: e.amount ?? null
+        }))
+      }
     }
-    // latest / history / allocation
-    latest.value = data.latest && data.latest.status && data.latest.status !== 'NONE' ? data.latest : (data.latest || null)
-    history.value = (data.history || []).filter(h => h && h.status)
-    allocation.value = data.currentAllocation && data.currentAllocation.items
-      ? data.currentAllocation
-      : { snapshotId: null, snapshotDate: null, totalAssets: null, items: [] }
-    projection.value = data.projection && typeof data.projection.available === 'boolean'
-      ? data.projection
-      : null
-    // settings
-    settings.value = data.settings && data.settings.availableModels
-      ? data.settings
-      : { engine: '', model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [], availableEngines: [] }
-    selectedEngine.value = settings.value.engine || ''
-    selectedModel.value = settings.value.model || ''
-    selectedEffort.value = settings.value.effort || ''
-    selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
+    if (!fetchErrors.has('latest')) {
+      latest.value = data.latest && data.latest.status && data.latest.status !== 'NONE' ? data.latest : (data.latest || null)
+    }
+    if (!fetchErrors.has('history')) history.value = (data.history || []).filter(h => h && h.status)
+    if (!fetchErrors.has('currentAllocation')) {
+      allocation.value = data.currentAllocation && data.currentAllocation.items
+        ? data.currentAllocation
+        : { snapshotId: null, snapshotDate: null, totalAssets: null, items: [] }
+    }
+    if (!fetchErrors.has('projection')) {
+      projection.value = data.projection && typeof data.projection.available === 'boolean'
+        ? data.projection
+        : null
+    }
+    if (!fetchErrors.has('settings')) {
+      settings.value = data.settings && data.settings.availableModels
+        ? data.settings
+        : { engine: '', model: '', effort: '', webSearchMaxUses: null, availableModels: [], availableEfforts: [], availableWebSearches: [], availableEngines: [] }
+      selectedEngine.value = settings.value.engine || ''
+      selectedModel.value = settings.value.model || ''
+      selectedEffort.value = settings.value.effort || ''
+      selectedWebSearch.value = settings.value.webSearchMaxUses ?? null
+    }
+    if (!silent && fetchErrors.size) ElMessage.warning('部分資料更新失敗，已保留原本內容')
   } finally {
     loading.value = false
   }
