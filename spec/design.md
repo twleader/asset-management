@@ -12527,3 +12527,15 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 ### Requirement 167／Task 458：已實現損益明細依交易日期排序
 
 一般頁面資料排序由 BFF 負責；Requirement 167／Task 458 是明確限縮的純顯示例外：`RealizedGainView` 先依選中的年度取得 records，再依現有市場分頁篩選，最後才對已載入的可見列暫時排序，不改變 BFF 回傳或資料語意。日期欄使用自訂排序事件把方向交給純前端日期排序 helper；上箭頭明確套用升冪，下箭頭明確套用降冪。Element Plus 在再次點擊目前作用中的方向箭頭時會發出 `order: null`，頁面需保留目前排序並同步箭頭狀態，不得清除排序。升冪比較 ISO `YYYY-MM-DD` 日期，由早至晚；降冪反轉日期比較方向，而同日列一律以原始索引由前至後作 tie-break，禁止反轉整個升冪結果。排序 helper 複製陣列後排序，不修改 API 回傳的 `records`。`filteredStats` 仍對同一批年度／市場篩選記錄求和，列順序不影響總額。此互動不新增請求、不持久化狀態，也不改變匯出服務的全部年度範圍或其他列操作。
+
+### Requirement 168／Task 459：已實現損益明細股票篩選
+
+一般資料篩選由 BFF 預先處理；Requirement 168／Task 459 是限縮的純顯示例外，沿用 `RealizedGainView` 已載入的 selected-year records 與 market tab 範圍，在其上建立股票選項及暫時篩選列。`RealizedGainResponse` 沒有資產類型欄位，因此只以非空白 `assetCode` 建立 `(assetCode, market)` 選項，不新增 DTO 或推測股票／基金類型；無代號列不參與選項但恆常顯示。選項以 `assetName（assetCode）` 呈現並按 `zh-Hant` 排序；多選為聯集，空選取顯示範圍內所有列。年度／市場或資料變更時只移除已失效 key。明細統計沿用股票篩選後的可見列計算；年度卡片摘要及全年度匯出不受影響。篩選與 Requirement 167 日期排序依序組合為「年度資料 → 市場 → 股票 → 日期排序」，不改寫 BFF records、不新增 I/O，且不影響 CRUD／雙擊等既有行為。
+
+### Requirement 169／Task 460：富邦證 API 一覽的 Cron 執行時間欄位
+
+FubonApiInfoDto 增加不可變 List<String> cronExpressions。原 52 筆靜態 APIS 清單與 constructor 呼叫保留；BFF 以唯一 sdkReference 對照表為 18 個實際具備 Spring @Scheduled(cron=...) 觸發來源的 SDK API 加上該排程註記，list() 回傳副本並為其他項目附空 list。此表只供資訊頁呈現，不讀 scheduler registry、不反射讀取註解、不呼叫任何 runtime 服務。排程註記的表達式須與排程類別原始 Cron 字串完全一致，保留秒欄與每一個註冊表達式；所有本次列出的時區皆為 Asia/Taipei。
+
+排程對照範圍為：inventories 與 unrealized_gains_and_loses 使用 0 5,35 9-13 * * MON-FRI；bank_remain 使用 0 0 8 * * *、0 20 9 * * *、0 20 14 * * *、0 0 22 * * *；query_settlement 與 realized_gains_and_loses 使用 0 0 8 * * *、0 45 13 * * *、0 30 19 * * *、0 0 22 * * *；filled_history 使用 0 0,30 9-13 * * MON-FRI 與 0 0 14 * * MON-FRI。行情 API 中，intraday.quote 使用 */10 * 9-13 * * MON-FRI，以及庫存同步實際呼叫同一報價 endpoint 的 0 5,35 9-13 * * MON-FRI；intraday.ticker、intraday.candles、SMA、RSI、KDJ、MACD、BB 使用 0 40 13 * * MON-FRI；intraday.volumes 使用 0 * * * * *；歷史日 K 使用 0 35 15 * * MON-FRI；dividends 使用 0 0 9 * * MON-FRI 與 0 30 13 * * MON-FRI；ETF holdings 使用 0 50 8 * * MON-FRI 與 0 30 15 * * MON-FRI。
+
+前端在既有 HTTP 端點後新增「執行時間（Cron）」欄，採等寬 code 顯示每個原始 expression，存在多筆時逐行呈現；同欄清楚標示 Asia/Taipei。空 list 顯示「無固定 Cron」。手動、SDK stream 啟動、事件觸發與 fixedDelay／fixedRate 等非 Cron 排程不可被換算或猜成 Cron，原 consumer 欄位繼續提供上下文。Cron 是觸發時間，不保證 flag、日曆、時段、就緒及 in-flight gate 放行。未修改 schedule 註冊、SchedulePublicBffController.JOBS、既有 endpoint 行為、資料寫入或交易能力。
