@@ -10,6 +10,13 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
 
 > 觸發詞：commit & push、commit + merge + push、merge 到 main、上 main、推上去、把這個 push。
 
+## Codex 執行模型
+
+使用 Codex 執行本 skill 時，固定使用 `gpt-6-luna` 模型與 `max` reasoning effort。Codex skill
+frontmatter 不支援 `model` 欄位，因此呼叫端必須在派遣執行本流程的 subagent 時明確指定
+`model: "gpt-6-luna"` 和 `reasoning_effort: "max"`；不得繼承呼叫端模型或靜默改用其他模型／effort。
+若執行環境無法提供這組設定，停止並回報，不要降級執行。
+
 ---
 
 ## 鐵則（違反就是錯）
