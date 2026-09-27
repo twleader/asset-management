@@ -53,14 +53,15 @@
         <el-tab-pane label="英股" name="英股" />
       </el-tabs>
 
-      <el-table :data="filteredRecords" size="small" stripe class="gain-table"
-        @row-dblclick="onRowDblClick">
+      <el-table ref="realizedGainTable" :data="filteredRecords" size="small" stripe class="gain-table"
+        @sort-change="handleDateSortChange" @row-dblclick="onRowDblClick">
         <el-table-column prop="broker" label="券商" width="90">
           <template #default="{ row }">
             <span class="broker-text">{{ row.broker || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="tradeDate" label="交易日期" width="105" />
+        <el-table-column prop="tradeDate" label="交易日期" width="105"
+          sortable="custom" :sort-orders="['ascending', 'descending']" />
         <el-table-column prop="assetCode" label="股號" width="75" />
         <el-table-column prop="assetName" label="股名" width="110" show-overflow-tooltip />
         <el-table-column label="市場" width="60" align="center">
@@ -364,6 +365,7 @@ import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingDraft'
+import { resolveRealizedGainDateSortOrder, sortRealizedGainRecords } from '@/utils/realizedGainDateSort'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -636,14 +638,30 @@ const reload = async () => {
 onMounted(() => { reload(); loadSchedule().catch(() => {}) })
 
 const marketFilter = ref('')
+const dateSortOrder = ref(null)
+const realizedGainTable = ref(null)
 
 const yearSummaries = computed(() => realizedGains.value)
 const selectedData = computed(() => realizedGains.value.find(g => g.year === selectedYear.value) || realizedGains.value[0])
 
 const filteredRecords = computed(() => {
   const records = selectedData.value?.records || []
-  return marketFilter.value ? records.filter(r => r.market === marketFilter.value) : records
+  const marketFiltered = marketFilter.value ? records.filter(r => r.market === marketFilter.value) : records
+  return sortRealizedGainRecords(marketFiltered, dateSortOrder.value)
 })
+
+function handleDateSortChange({ prop, order }) {
+  if (prop !== 'tradeDate') return
+
+  const resolvedOrder = resolveRealizedGainDateSortOrder(dateSortOrder.value, order)
+  dateSortOrder.value = resolvedOrder
+  if (order === resolvedOrder) return
+
+  // 點擊目前啟用的 caret 時，Element Plus 會送出 order=null；在下一次畫面更新後
+  // 用公開 table API 還原同一方向的指示器。sort() 隨後送出的同方向事件會在上方 return，
+  // 因此不會形成遞迴。
+  nextTick(() => realizedGainTable.value?.sort('tradeDate', resolvedOrder))
+}
 
 // 使用 API 回傳的台幣金額計算統計
 const filteredStats = computed(() => {

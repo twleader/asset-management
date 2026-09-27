@@ -12523,3 +12523,7 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 ### Gateway／Tailscale／frontend／OpenAPI
 
 比照 Requirement 140／Task 416 的 14 處接線（gateway exact location、`SERVE_PATHS` 與 `expected`、preflight、mock、frontend exact 404 與 matrix regex、SecurityConfig、OpenAPI YAML＋contract test＋frontend contract test、error-log catalog、路由計數文件）。Tailscale preflight 以台北今天、全零 hash 呼叫，期待 409 problem+json `POLICY_UNSUPPORTED` 與 `Cache-Control: private, no-store`（全零 hash 不可能被登錄，故結果穩定且證明鏈路直達 business）。OpenAPI 完整採用 proposal 的 `Srpp*` schema（名稱、結構、限制不變），描述補齊至通過既有 description audit（每節點具體用途、每個 enum／const 值逐一說明），移除「提案／尚未部署」字樣並加入本版空 registry 與模組降級語意；`09:05` 一律加引號避免 YAML 1.1 解析成整數；參數 schema 依 BFF 實際規則；`info.version` 1.14.0。
+
+### Requirement 167／Task 458：已實現損益明細依交易日期排序
+
+一般頁面資料排序由 BFF 負責；Requirement 167／Task 458 是明確限縮的純顯示例外：`RealizedGainView` 先依選中的年度取得 records，再依現有市場分頁篩選，最後才對已載入的可見列暫時排序，不改變 BFF 回傳或資料語意。日期欄使用自訂排序事件把方向交給純前端日期排序 helper；上箭頭明確套用升冪，下箭頭明確套用降冪。Element Plus 在再次點擊目前作用中的方向箭頭時會發出 `order: null`，頁面需保留目前排序並同步箭頭狀態，不得清除排序。升冪比較 ISO `YYYY-MM-DD` 日期，由早至晚；降冪反轉日期比較方向，而同日列一律以原始索引由前至後作 tie-break，禁止反轉整個升冪結果。排序 helper 複製陣列後排序，不修改 API 回傳的 `records`。`filteredStats` 仍對同一批年度／市場篩選記錄求和，列順序不影響總額。此互動不新增請求、不持久化狀態，也不改變匯出服務的全部年度範圍或其他列操作。
