@@ -107,7 +107,7 @@ class ApiErrorLogServiceTest {
                 operation("FUBON_API", "FUBON_TW_QUOTES_LIVE", "盤中台股即時報價", "POST /internal/market-data/tw-quotes", 80),
                 operation("FUBON_API", "FUBON_TAIEX_INDEX_STREAM", "加權指數串流", "GET /internal/market-data/taiex-index/stream", 90),
                 operation("FUBON_API", "FUBON_DIVIDENDS_READ", "股利資料查詢", "POST /internal/market-data/dividends/read", 100),
-                operation("FUBON_API", "FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "POST /internal/market-data/technical-indicators/read", 110),
+                operation("FUBON_API", "FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "POST /internal/market-data/technical-indicators/read (D/W)；POST /internal/market-data/intraday-technical-indicators/read (1m/5m)", 110),
                 operation("FUBON_API", "FUBON_STOCK_BASIC_READ", "個股基本資料查詢", "POST /internal/market-data/stock-basic/read", 120),
                 operation("FUBON_API", "FUBON_INTRADAY_CANDLES_READ", "分鐘 K 線查詢", "POST /internal/market-data/intraday-candles/read", 130),
                 operation("FUBON_API", "FUBON_STOCK_PUSH_SUBSCRIPTIONS", "個股推播訂閱", "POST /internal/market-data/stock-push/subscriptions", 140),

@@ -58,9 +58,9 @@ public class FubonApiInfoBffController {
             Map.entry("marketdata.rest_client.stock.historical.candles", List.of("0 35 15 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.technical.sma", List.of("0 40 13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.technical.rsi", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.corporate_actions.dividends", List.of("0 0 9 * * MON-FRI", "0 30 13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.ownership.etf_holdings", List.of("0 50 8 * * MON-FRI", "0 30 15 * * MON-FRI"))
     );
@@ -348,32 +348,36 @@ public class FubonApiInfoBffController {
                             + "欄位 provenance 明示 FUBON／LOCAL／DETAIL_ONLY／未採用原因"),
             new FubonApiInfoDto(true, "行情查詢", "個股 KD 隨機指標查詢",
                     "marketdata.rest_client.stock.technical.kdj", "POST /internal/market-data/technical-indicators/read",
-                    "以 immutable 17-profile bundle 查詢日／週 KDJ(9,3,3)；富邦全歷史在 PostgreSQL 為權威，"
-                            + "雷達 Redis overlay 僅 100 秒且 K／D 的 direct overlay 必須有同一 response previous-row 證明" + RO,
+                    "以 immutable 17-profile bundle 查詢日／週 KDJ(9,3,3)，並由盤中技術排程查詢 1 分／5 分最新點；"
+                            + "盤中僅寫獨立 Redis、detail-only，六個官方指標呼叫共用每分鐘 60 次 actual-start 閘門；"
+                            + "富邦全歷史在 PostgreSQL 為權威，雷達 D/W Redis overlay 僅 100 秒且 K／D direct overlay 仍需同一 response previous-row 證明" + RO,
                     "external-materials-service（交易日 13:40，需另啟用設定；"
-                            + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "body 僅允許 {symbol}；固定日／週 KDJ(9,3,3) 與 queryDate−420 天至 queryDate",
-                    "schemaVersion=2 exact17 profiles；kdj payload 為 k／d／j、same-response previous pointer 與 candidate hash。"
+                            + "盤中另於交易日每分鐘觸發 1m／5m 排程；POST /internal/technical-indicators/fubon-sync；"
+                            + "純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
+                    "日／週 body 僅允許 {symbol}；盤中 adapter 固定 timeframe 字串 1／5 與 KDJ(9,3,3)，不接受 caller 參數",
+                    "日／週 schemaVersion=2 exact17 profiles；盤中只保留 1m／5m 最新共同 sourceDate 的 k／d／j 與來源時間，"
                             + "vendor J 僅 detail 對照，絕不取代 local J9"),
 
             new FubonApiInfoDto(true, "行情查詢", "個股 MACD 指標查詢",
                     "marketdata.rest_client.stock.technical.macd", "POST /internal/market-data/technical-indicators/read",
-                    "以 immutable 17-profile bundle 查詢日／週 MACD(12,26,9)；全歷史寫 PostgreSQL，"
-                            + "100 秒 Redis overlay 僅供雷達即時優先讀取，MACD 保持 detail-only、不改 V18 score" + RO,
-                    "external-materials-service（交易日 13:40，需另啟用設定；"
+                    "以 immutable 17-profile bundle 查詢日／週 MACD(12,26,9)，並由盤中技術排程查詢 1 分／5 分最新點；"
+                            + "盤中只寫獨立 Redis、detail-only，六個官方指標呼叫共用每分鐘 60 次 actual-start 閘門；"
+                            + "全歷史寫 PostgreSQL，日／週 Redis overlay 僅 100 秒，不改 V18 score" + RO,
+                    "external-materials-service（交易日 13:40 及盤中每分鐘 gated 排程；需另啟用設定；"
                             + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "body 僅允許 {symbol}；固定日／週 MACD(12,26,9) 與 queryDate−420 天至 queryDate",
-                    "schemaVersion=2 exact17 profiles；macd payload 為 macdLine／signalLine、candidate hash 與 observedAt；"
-                            + "不捏造 EMA／DIF／OSC，也不將 vendor MACD 填入 V18 score"),
+                    "日／週 body 僅允許 {symbol}；盤中 adapter 固定 timeframe 字串 1／5 與 MACD(12,26,9)，不接受 caller 參數",
+                    "日／週 schemaVersion=2 exact17 profiles；盤中只保留 1m／5m 最新共同 sourceDate 的 macdLine／signalLine 與來源時間；"
+                            + "不捏造 EMA／DIF／OSC，亦不補造 histogram，也不將 vendor MACD 填入 V18 score"),
 
             new FubonApiInfoDto(true, "行情查詢", "個股布林通道查詢",
                     "marketdata.rest_client.stock.technical.bb", "POST /internal/market-data/technical-indicators/read",
-                    "以 immutable 17-profile bundle 查詢日線 BB(20)；全歷史寫 PostgreSQL，100 秒 Redis overlay"
-                            + "只供雷達即時優先讀取，BB 保持 detail-only、不改 V18 score" + RO,
-                    "external-materials-service（交易日 13:40，需另啟用設定；"
+                    "以 immutable 17-profile bundle 查詢日／週 BB(20)，並由盤中技術排程查詢 1 分／5 分最新點；"
+                            + "盤中只寫獨立 Redis、detail-only，六個官方指標呼叫共用每分鐘 60 次 actual-start 閘門；"
+                            + "全歷史寫 PostgreSQL，日／週 Redis overlay 僅 100 秒，不改 V18 score" + RO,
+                    "external-materials-service（交易日 13:40 及盤中每分鐘 gated 排程；需另啟用設定；"
                             + "POST /internal/technical-indicators/fubon-sync；純讀 GET /internal/technical-indicators/fubon-cache?symbol=...）",
-                    "body 僅允許 {symbol}；固定日線 BB(20) 與 queryDate−420 天至 queryDate",
-                    "schemaVersion=2 exact17 profiles；bb payload 為 upper／middle／lower、candidate hash 與 observedAt；"
+                    "日／週 body 僅允許 {symbol}；盤中 adapter 固定 timeframe 字串 1／5 與 BB(20)，不接受 caller 參數",
+                    "日／週 schemaVersion=2 exact17 profiles；盤中只保留 1m／5m 最新共同 sourceDate 的 upper／middle／lower 與來源時間；"
                             + "不由富邦 BB 改寫本地 BIAS 或任一 V18 rule 欄位"),
 
             new FubonApiInfoDto(false, "行情查詢", "減資／除權息等資本變動查詢",

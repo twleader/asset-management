@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.14.0` |
+| 契約版本 | `1.15.0` |
 | 對外路徑 | 14 條：13 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -1696,6 +1696,63 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `ageSeconds` | 是 | `integer | null (int64)` | 是 |  | 回應生成時相對 oldestObservedAt 的秒數；99/100 為可讀邊界，101 必回 local fallback。 |
 | `profiles` | 是 | `array of TechnicalProfileResolution` | 否 | items: TechnicalProfileResolution<br>items 說明: 一個固定 timeframe/profile 的候選結果。 | manifest-order fixed profiles 的候選與是否可被 V18 採用。完整正常 bundle 為 17 項。 |
 | `fieldProvenance` | 是 | `array of TechnicalFieldProvenance` | 否 | items: TechnicalFieldProvenance<br>items 說明: 一個技術欄位的來源稽核。 | 每個 direct overlay、local derivation 或 detail-only 值的來源與未採用原因。 |
+| `intraday` | 是 | `IntradayTechnicalResolution | null` | 是 |  | 唯讀盤中技術明細，完全獨立於雷達評分與動作。 |
+
+### `IntradayTechnicalResolution`
+
+Redis 中富邦 1 分與 5 分最新 KD、MACD、布林通道值及 freshness；盤中值只供明細顯示。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `AVAILABLE`, `STALE`, `UNAVAILABLE` | AVAILABLE 表示觀測時間與所有非 null 來源 bar 時間的 age 均不超過 420 秒；STALE 表示 key 未到期但任一時間超過 420 秒；UNAVAILABLE 表示 miss、過期或資料無效。 |
+| `observedAt` | 是 | `string | null (date-time)` | 是 |  | 六個官方指標查詢組成此 bundle 的根觀測時間；UNAVAILABLE 時為 null。 |
+| `ageSeconds` | 是 | `integer | null (int64)` | 是 |  | 回應時相對 observedAt 的非負秒數；資料不可用時為 null。 |
+| `oneMinute` | 是 | `IntradayTechnicalFrame | null` | 是 |  | timeframe 固定字串 1 的最新 point。 |
+| `fiveMinute` | 是 | `IntradayTechnicalFrame | null` | 是 |  | timeframe 固定字串 5 的最新 point。 |
+
+### `IntradayTechnicalFrame`
+
+一個富邦盤中 timeframe 最新來源 point 與三組直接回傳指標數值。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `AVAILABLE`, `STALE` | AVAILABLE 表示 timeframe 觀測時間與非 null 來源 bar 時間的 age 均不超過 420 秒；STALE 表示其中任一時間超過 420 秒且 key 尚未到期。 |
+| `timeframe` | 是 | `string` | 否 | enum: `1`, `5` | 富邦官方 timeframe 字串；1 代表 1 分 K，5 代表 5 分 K。 |
+| `sourceDate` | 是 | `string (date)` | 否 |  | 三個技術 endpoint 最新列共同的台北交易日期。 |
+| `sourceTimestamp` | 是 | `string | null (date-time)` | 是 |  | 來源 bar 時間；官方只提供日期字串時為 null，不以 observedAt 代填。 |
+| `observedAt` | 是 | `string (date-time)` | 否 |  | 此 timeframe 三個 endpoint 的來源回應觀測時間。 |
+| `kdj` | 是 | `IntradayKdj` | 否 |  | 官方 KDJ(9,3,3) 最新 k、d、j 值。 |
+| `macd` | 是 | `IntradayMacd` | 否 |  | 官方 MACD(12,26,9) 最新 MACD 線與 signal 線，不推導 histogram。 |
+| `bollinger` | 是 | `IntradayBollinger` | 否 |  | 官方 BBANDS(20) 最新上軌、中軌與下軌。 |
+
+### `IntradayKdj`
+
+富邦 KDJ(9,3,3) 最新來源數值；不參與本地雷達計算。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `k` | 是 | `number` | 否 |  | 富邦回傳的 K 值，未重新計算。 |
+| `d` | 是 | `number` | 否 |  | 富邦回傳的 D 值，未重新計算。 |
+| `j` | 是 | `number` | 否 |  | 富邦回傳的 J 值，detail-only。 |
+
+### `IntradayMacd`
+
+富邦 MACD(12,26,9) 直接回傳的兩項最新值。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `macdLine` | 是 | `number` | 否 |  | 富邦回傳的 MACD 線值；不推導 EMA 或 DIF。 |
+| `signalLine` | 是 | `number` | 否 |  | 富邦回傳的 signal 線值；不推導 histogram。 |
+
+### `IntradayBollinger`
+
+富邦 BBANDS(20) 直接回傳的最新上下軌與中軌。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `upper` | 是 | `number` | 否 |  | 富邦回傳的布林上軌值。 |
+| `middle` | 是 | `number` | 否 |  | 富邦回傳的布林中軌值。 |
+| `lower` | 是 | `number` | 否 |  | 富邦回傳的布林下軌值。 |
 
 ### `TechnicalProfileResolution`
 

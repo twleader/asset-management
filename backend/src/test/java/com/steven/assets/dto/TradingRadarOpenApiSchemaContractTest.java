@@ -36,6 +36,11 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
             new Binding(TradingRadarDto.Bollinger.class, "Bollinger"),
             new Binding(TradingRadarDto.TechnicalResolution.class, "TechnicalResolution"),
+            new Binding(TradingRadarDto.IntradayTechnicalResolution.class, "IntradayTechnicalResolution"),
+            new Binding(TradingRadarDto.IntradayTechnicalFrame.class, "IntradayTechnicalFrame"),
+            new Binding(TradingRadarDto.IntradayKdj.class, "IntradayKdj"),
+            new Binding(TradingRadarDto.IntradayMacd.class, "IntradayMacd"),
+            new Binding(TradingRadarDto.IntradayBollinger.class, "IntradayBollinger"),
             new Binding(TradingRadarDto.TechnicalProfileResolution.class, "TechnicalProfileResolution"),
             new Binding(TradingRadarDto.TechnicalFieldProvenance.class, "TechnicalFieldProvenance"),
             new Binding(TradingRadarDto.ExtendedIndicators.class, "ExtendedIndicators"),
@@ -95,7 +100,12 @@ class TradingRadarOpenApiSchemaContractTest {
                     "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger")),
             Map.entry("TechnicalResolution", set(
                     "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
-                    "oldestObservedAt", "freshUntil", "ageSeconds")),
+                    "oldestObservedAt", "freshUntil", "ageSeconds", "intraday")),
+            Map.entry("IntradayTechnicalResolution", set("observedAt", "ageSeconds", "oneMinute", "fiveMinute")),
+            Map.entry("IntradayTechnicalFrame", set("sourceTimestamp")),
+            Map.entry("IntradayKdj", set()),
+            Map.entry("IntradayMacd", set()),
+            Map.entry("IntradayBollinger", set()),
             Map.entry("TechnicalProfileResolution", set(
                     "profileId", "status", "reason", "parameters", "payload", "sourceDate", "observedAt",
                     "eligibility")),
@@ -156,6 +166,9 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("StockDecision", formats("asOfDate", "date", "fxAsOfDate", "date")),
             Map.entry("TechnicalResolution", formats(
                     "oldestObservedAt", "date-time", "freshUntil", "date-time")),
+            Map.entry("IntradayTechnicalResolution", formats("observedAt", "date-time")),
+            Map.entry("IntradayTechnicalFrame", formats(
+                    "sourceDate", "date", "sourceTimestamp", "date-time", "observedAt", "date-time")),
             Map.entry("TechnicalProfileResolution", formats(
                     "sourceDate", "date", "observedAt", "date-time")),
             Map.entry("DailyCandle", formats("asOfDate", "date")),
@@ -178,7 +191,7 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("PublicInformationItem", formats("knownAt", "date-time")));
 
     @Test
-    void allTwentyRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
+    void allTwentyFiveRecordSchemasMatchFieldsTypesGenericsRefsFormatsAndNullability() throws IOException {
         Map<String, Object> document = loadOpenApi();
         Map<String, Object> schemas = map(map(document.get("components")).get("schemas"));
 
@@ -238,6 +251,7 @@ class TradingRadarOpenApiSchemaContractTest {
         assertThat(example).containsEntry("source", "FUBON_SDK")
                 .containsEntry("binding", "BOUND_CONTEXT")
                 .containsEntry("decisionInputVersion", "TW_RULES_V20|FUBON_OVERLAY_V1");
+        assertThat(map(example.get("intraday"))).containsEntry("status", "AVAILABLE");
         assertThat((List<?>) example.get("profiles"))
                 .extracting(profile -> map(profile).get("profileId"))
                 .contains("sma_d_20", "sma_w_20");

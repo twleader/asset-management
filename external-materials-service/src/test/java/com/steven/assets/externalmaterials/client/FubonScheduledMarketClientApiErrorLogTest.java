@@ -66,6 +66,32 @@ class FubonScheduledMarketClientApiErrorLogTest {
         verifyNoMoreInteractions(writer);
     }
 
+    @Test void task461IntradayTechnicalRouteReusesTheImmutableTechnicalIndicatorIdentity() {
+        MarketClock clock = mock(MarketClock.class);
+        when(clock.instant()).thenReturn(NOW);
+        ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+        FubonScheduledMarketClient client = client(clock, writer,
+                (uri, token, body, limit, timeout) -> new FubonScheduledMarketClient.RawResponse(503, "{}".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> client.intradayTechnical("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+
+        verify(writer).record(eq("FUBON_TECHNICAL_INDICATORS_READ"), eq("技術指標查詢"), any(Throwable.class), eq(NOW));
+        verifyNoMoreInteractions(writer);
+    }
+
+    @Test void task461IntradayTechnicalSchemaFailureReusesTheImmutableTechnicalIndicatorIdentity() {
+        MarketClock clock = mock(MarketClock.class);
+        when(clock.instant()).thenReturn(NOW);
+        ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+        FubonScheduledMarketClient client = client(clock, writer,
+                (uri, token, body, limit, timeout) -> new FubonScheduledMarketClient.RawResponse(200, "{}".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> client.intradayTechnical("2330", DAY)).hasMessage("INVALID_RESPONSE");
+
+        verify(writer).record(eq("FUBON_TECHNICAL_INDICATORS_READ"), eq("技術指標查詢"), any(Throwable.class), eq(NOW));
+        verifyNoMoreInteractions(writer);
+    }
+
     private static FubonScheduledMarketClient client(MarketClock clock, ExternalApiErrorLogWriter writer,
                                                        FubonScheduledMarketClient.Transport transport) {
         return new FubonScheduledMarketClient(

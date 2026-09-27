@@ -21,6 +21,8 @@
         <java.version>21</java.version>
         <!-- Task 252：測試 JVM 額外參數（見 surefire 設定）。例：-DextraArgLine=-Dnet.bytebuddy.experimental=true -->
         <extraArgLine></extraArgLine>
+        <!-- Testcontainers 只用於 test scope；與 backend 對齊 1.21.4，支援 Docker Engine API minimum 1.40。 -->
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>

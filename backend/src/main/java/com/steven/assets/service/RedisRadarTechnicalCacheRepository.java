@@ -54,6 +54,22 @@ public class RedisRadarTechnicalCacheRepository implements RadarTechnicalCachePo
     }
 
     @Override
+    public Map<String, String> readIntradayDocuments(List<String> codes) {
+        if (codes == null || codes.isEmpty()) return Map.of();
+        try {
+            List<String> keys = codes.stream().map(RedisRadarTechnicalCacheRepository::intradayKey).toList();
+            List<String> values = redis.opsForValue().multiGet(keys);
+            if (values == null || values.size() != keys.size()) return Map.of();
+            Map<String, String> result = new LinkedHashMap<>();
+            for (int index = 0; index < codes.size(); index++) {
+                String value = values.get(index);
+                if (value != null) result.put(codes.get(index), value);
+            }
+            return Map.copyOf(result);
+        } catch (RuntimeException unavailable) { return Map.of(); }
+    }
+
+    @Override
     public String writePair(PairWrite request) {
         if (request == null || request.code() == null || request.expected() == null
                 || request.dailyDocument() == null || request.weeklyDocument() == null
@@ -123,6 +139,10 @@ public class RedisRadarTechnicalCacheRepository implements RadarTechnicalCachePo
 
     static String key(String code, String timeframe) {
         return "fubon:technical:tw:{" + code + "}:" + timeframe + ":v2";
+    }
+
+    static String intradayKey(String code) {
+        return "fubon:technical:intraday:tw:" + code + ":v1";
     }
 
     /** Stable UTF-8 identity prevents `code` reuse in another market from colliding. */

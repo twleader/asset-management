@@ -30,6 +30,9 @@ DIVIDENDS = "/internal/market-data/dividends/read"
 TECHNICAL = "/internal/market-data/technical-indicators/read"
 BASIC = "/internal/market-data/stock-basic/read"
 CANDLES = "/internal/market-data/intraday-candles/read"
+VOLUMES = "/internal/market-data/intraday-volumes/read"
+HISTORICAL_CANDLES = "/internal/market-data/historical-daily-candles/read"
+INTRADAY_TECHNICAL = "/internal/market-data/intraday-technical-indicators/read"
 SUBSCRIPTIONS = "/internal/market-data/stock-push/subscriptions"
 STOCK_STREAM = "/internal/market-data/stock-push/stream"
 ACCOUNTING = ["/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read"]
@@ -43,6 +46,7 @@ PROTECTED = [
     *[("POST", path, None) for path in ACCOUNTING],
     ("POST", DIVIDENDS, {"symbols": ["2330"], "from": DIVIDEND_FROM, "to": DIVIDEND_TO}),
     ("POST", TECHNICAL, {"symbol": "2330"}),
+    ("POST", INTRADAY_TECHNICAL, {"symbol": "2330"}),
     ("POST", SUBSCRIPTIONS, {"symbols": ["2330"]}),
     ("GET", STOCK_STREAM, None),
 ]
@@ -129,19 +133,25 @@ def test_every_protected_route_enforces_config_three_state_without_sdk(tmp_path,
         assert sdk.events == []
 
 
-def test_exact_sixteen_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
+def test_exact_nineteen_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
     client, sdk = app_fixture(tmp_path)
     actual = {(route.path, tuple(route.methods)) for route in client.app.routes}
     expected = {(path, (method,)) for method, path, _body in PROTECTED} | {
-        (BASIC, ("POST",)), (CANDLES, ("POST",)), ("/internal/health", ("GET",))}
-    assert actual == expected and len(actual) == 16
+        (BASIC, ("POST",)), (CANDLES, ("POST",)), (VOLUMES, ("POST",)),
+        (HISTORICAL_CANDLES, ("POST",)), ("/internal/health", ("GET",))}
+    assert actual == expected and len(actual) == 19
     with client:
-        for method, path, _body in [*PROTECTED, ("POST", BASIC, {"symbol": "2330"}), ("POST", CANDLES, {"symbol": "2330"})]:
+        for method, path, _body in [*PROTECTED, ("POST", BASIC, {"symbol": "2330"}),
+                                    ("POST", CANDLES, {"symbol": "2330"}), ("POST", VOLUMES, {"symbol": "2330"}),
+                                    ("POST", HISTORICAL_CANDLES, {"symbol": "2330", "from": "2026-01-01", "to": "2026-01-02"})]:
             for wrong in {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"} - {method}:
                 assert client.request(wrong, path, headers=HEADER).status_code == 405, (wrong, path)
             assert client.request(method, path + "/", headers=HEADER, follow_redirects=False).status_code == 404
-        for path in ("/docs", "/openapi.json", "/internal/orders", "/internal/market-data/history"):
+        for path in ("/docs", "/openapi.json", "/internal/orders", "/internal/market-data/history",
+                     "/internal/market-data/intraday-technical-indicators",
+                     "/internal/market-data/intraday-technical-indicators/write"):
             assert client.get(path, headers=HEADER).status_code == 404
+            assert client.post(path, headers=HEADER).status_code == 404
         assert sdk.events == []
 
 
@@ -159,7 +169,8 @@ def test_new_json_routes_reject_unknown_fields_duplicate_keys_and_bad_iso_dates(
     client, sdk = app_fixture(tmp_path)
     with client:
         for method, path, body in PROTECTED:
-            if method != "POST" or body is None or path not in {DIVIDENDS, TECHNICAL, SUBSCRIPTIONS, "/internal/trades/read"}:
+            if method != "POST" or body is None or path not in {DIVIDENDS, TECHNICAL, INTRADAY_TECHNICAL,
+                                                                  SUBSCRIPTIONS, "/internal/trades/read"}:
                 continue
             assert client.post(path, json={**body, "account": "FAKE"}, headers=HEADER).status_code == 400
             key, value = next(iter(body.items()))

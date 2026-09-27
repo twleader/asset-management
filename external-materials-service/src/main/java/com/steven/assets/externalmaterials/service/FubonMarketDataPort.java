@@ -20,6 +20,9 @@ public interface FubonMarketDataPort {
     default IntradayVolumesRead intradayVolumes(String symbol, LocalDate queryDate) {
         throw new Unavailable("INTRADAY_VOLUMES_UNAVAILABLE");
     }
+    default FubonIntradayTechnical.Bundle intradayTechnical(String symbol, LocalDate queryDate) {
+        throw new Unavailable("INTRADAY_TECHNICAL_UNAVAILABLE");
+    }
     default HistoricalDailyCandlesRead historicalDailyCandles(String symbol, LocalDate from, LocalDate to) {
         throw new Unavailable("HISTORICAL_DAILY_CANDLES_UNAVAILABLE");
     }

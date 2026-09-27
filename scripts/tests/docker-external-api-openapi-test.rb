@@ -170,7 +170,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.14.0', 'Task 454 後 OpenAPI info.version 必須為 1.14.0')
+assert!(document.dig('info', 'version') == '1.15.0', 'Task 461 後 OpenAPI info.version 必須為 1.15.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -708,6 +708,20 @@ assert!(!radar_list_stock.fetch('properties').key?('evidence') &&
 assert!(schemas.fetch('TradingRadarStockDetailResponse').dig('properties', 'stock', '$ref') ==
           '#/components/schemas/StockDecision',
         'TradingRadarStockDetailResponse.stock 必須精確重用完整 StockDecision')
+technical_resolution = schemas.fetch('TechnicalResolution')
+intraday_variants = technical_resolution.dig('properties', 'intraday', 'anyOf')
+assert!(technical_resolution.fetch('required').include?('intraday') &&
+        intraday_variants.any? { |variant| variant['$ref'] == '#/components/schemas/IntradayTechnicalResolution' } &&
+        intraday_variants.any? { |variant| variant['type'] == 'null' },
+        'TechnicalResolution.intraday 必須是 required nullable 的 typed child')
+intraday_schema = schemas.fetch('IntradayTechnicalResolution')
+assert!(intraday_schema.fetch('required') == %w[status observedAt ageSeconds oneMinute fiveMinute] &&
+        intraday_schema.dig('properties', 'status', 'enum') == %w[AVAILABLE STALE UNAVAILABLE],
+        'IntradayTechnicalResolution 必須描述 freshness 狀態與兩個 timeframe')
+frame_schema = schemas.fetch('IntradayTechnicalFrame')
+assert!(frame_schema.fetch('required') == %w[status timeframe sourceDate sourceTimestamp observedAt kdj macd bollinger] &&
+        frame_schema.dig('properties', 'timeframe', 'enum') == %w[1 5],
+        'IntradayTechnicalFrame 必須描述來源時間與完整三組指標')
 
 transaction_response = schemas.fetch('PublicTransactionHistoryResponse')
 assert!(transaction_response.fetch('properties').keys == %w[selection allTimeSummary summary yearSummaries records],
@@ -741,8 +755,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 119,
-        "全量 strict audit 預期 119 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 124,
+        "全量 strict audit 預期 124 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end

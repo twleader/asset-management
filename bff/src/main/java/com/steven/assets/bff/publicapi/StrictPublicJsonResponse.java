@@ -9,7 +9,9 @@ import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.Year;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -24,6 +26,8 @@ import java.util.function.Supplier;
  * tree as its own {@code application/json} response.</p>
  */
 public final class StrictPublicJsonResponse {
+
+    private static final long INTRADAY_AVAILABLE_AGE_SECONDS = 420L;
 
     public enum Contract {
         TRANSACTION_HISTORY,
@@ -382,12 +386,82 @@ public final class StrictPublicJsonResponse {
 
     private static void technicalResolution(JsonNode value) {
         exactObject(value, "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
-                "oldestObservedAt", "freshUntil", "ageSeconds", "profiles", "fieldProvenance");
+                "oldestObservedAt", "freshUntil", "ageSeconds", "profiles", "fieldProvenance", "intraday");
         nullableTexts(value, "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
                 "oldestObservedAt", "freshUntil");
         nullableInteger(field(value, "ageSeconds"));
         array(field(value, "profiles"), StrictPublicJsonResponse::technicalProfileResolution);
         array(field(value, "fieldProvenance"), StrictPublicJsonResponse::technicalFieldProvenance);
+        nullableObject(field(value, "intraday"), StrictPublicJsonResponse::intradayTechnicalResolution);
+    }
+
+    private static void intradayTechnicalResolution(JsonNode value) {
+        exactObject(value, "status", "observedAt", "ageSeconds", "oneMinute", "fiveMinute");
+        JsonNode statusNode = field(value, "status");
+        enumText(statusNode, Set.of("AVAILABLE", "STALE", "UNAVAILABLE"));
+        JsonNode observedAt = field(value, "observedAt");
+        nullableDateTime(observedAt);
+        JsonNode ageSeconds = field(value, "ageSeconds");
+        nullableInteger(ageSeconds);
+        if (!ageSeconds.isNull() && (!ageSeconds.canConvertToLong() || ageSeconds.longValue() < 0)) {
+            invalid();
+        }
+        JsonNode oneMinute = field(value, "oneMinute");
+        JsonNode fiveMinute = field(value, "fiveMinute");
+
+        if ("UNAVAILABLE".equals(statusNode.textValue())) {
+            if (!observedAt.isNull() || !ageSeconds.isNull() || !oneMinute.isNull() || !fiveMinute.isNull()) invalid();
+            return;
+        }
+        if (observedAt.isNull() || ageSeconds.isNull() || oneMinute.isNull() || fiveMinute.isNull()) invalid();
+        Instant rootObservedAt = instant(observedAt);
+        long rootAgeSeconds = ageSeconds.longValue();
+        intradayTechnicalFrame(oneMinute, "1", rootObservedAt, rootAgeSeconds);
+        intradayTechnicalFrame(fiveMinute, "5", rootObservedAt, rootAgeSeconds);
+        boolean oneMinuteStale = "STALE".equals(field(oneMinute, "status").textValue());
+        boolean fiveMinuteStale = "STALE".equals(field(fiveMinute, "status").textValue());
+        boolean ageExceeded = ageSeconds.longValue() > INTRADAY_AVAILABLE_AGE_SECONDS;
+        if ("AVAILABLE".equals(statusNode.textValue()) && (ageExceeded || oneMinuteStale || fiveMinuteStale)) invalid();
+        if ("STALE".equals(statusNode.textValue())
+                && (!ageExceeded && !oneMinuteStale && !fiveMinuteStale
+                    || ageExceeded && (!oneMinuteStale || !fiveMinuteStale))) invalid();
+    }
+
+    private static void intradayTechnicalFrame(JsonNode value, String expectedTimeframe,
+                                                Instant rootObservedAt, long rootAgeSeconds) {
+        exactObject(value, "status", "timeframe", "sourceDate", "sourceTimestamp", "observedAt", "kdj", "macd", "bollinger");
+        JsonNode status = field(value, "status");
+        enumText(status, Set.of("AVAILABLE", "STALE"));
+        enumText(field(value, "timeframe"), Set.of("1", "5"));
+        if (!expectedTimeframe.equals(field(value, "timeframe").textValue())) invalid();
+        requiredDate(field(value, "sourceDate"));
+        JsonNode sourceTimestampNode = field(value, "sourceTimestamp");
+        nullableDateTime(sourceTimestampNode);
+        Instant sourceTimestamp = sourceTimestampNode.isNull() ? null : instant(sourceTimestampNode);
+        Instant frameObservedAt = instant(field(value, "observedAt"));
+        if (frameObservedAt.isAfter(rootObservedAt)
+                || sourceTimestamp != null && (sourceTimestamp.isAfter(frameObservedAt)
+                    || sourceTimestamp.isAfter(rootObservedAt))) invalid();
+        if (!frameStatusCouldMatch(status.textValue(), rootObservedAt, rootAgeSeconds,
+                frameObservedAt, sourceTimestamp)) invalid();
+        intradayKdj(field(value, "kdj"));
+        intradayMacd(field(value, "macd"));
+        intradayBollinger(field(value, "bollinger"));
+    }
+
+    private static void intradayKdj(JsonNode value) {
+        exactObject(value, "k", "d", "j");
+        numbers(value, "k", "d", "j");
+    }
+
+    private static void intradayMacd(JsonNode value) {
+        exactObject(value, "macdLine", "signalLine");
+        numbers(value, "macdLine", "signalLine");
+    }
+
+    private static void intradayBollinger(JsonNode value) {
+        exactObject(value, "upper", "middle", "lower");
+        numbers(value, "upper", "middle", "lower");
     }
 
     private static void technicalProfileResolution(JsonNode value) {
@@ -722,6 +796,45 @@ public final class StrictPublicJsonResponse {
             return;
         }
         requiredDate(value);
+    }
+
+    private static void nullableDateTime(JsonNode value) {
+        if (!value.isNull()) instant(value);
+    }
+
+    private static Instant instant(JsonNode value) {
+        if (!value.isTextual()) invalid();
+        try {
+            return OffsetDateTime.parse(value.textValue()).toInstant();
+        } catch (RuntimeException invalidDateTime) {
+            invalid();
+            return null;
+        }
+    }
+
+    private static boolean frameStatusCouldMatch(String status, Instant rootObservedAt, long rootAgeSeconds,
+                                                  Instant frameObservedAt, Instant sourceTimestamp) {
+        Instant oldestSourceTime = sourceTimestamp == null || frameObservedAt.isBefore(sourceTimestamp)
+                ? frameObservedAt : sourceTimestamp;
+        Instant earliestPossibleNow;
+        Instant latestPossibleNowExclusive;
+        try {
+            if (rootAgeSeconds == 0) {
+                // Backend permits a cache observation up to 30 seconds ahead of its local clock.
+                earliestPossibleNow = rootObservedAt.minusSeconds(30);
+                latestPossibleNowExclusive = rootObservedAt.plusSeconds(1);
+            } else {
+                earliestPossibleNow = rootObservedAt.plusSeconds(rootAgeSeconds);
+                latestPossibleNowExclusive = earliestPossibleNow.plusSeconds(1);
+            }
+            Instant staleThreshold = oldestSourceTime.plusSeconds(INTRADAY_AVAILABLE_AGE_SECONDS + 1);
+            boolean availablePossible = earliestPossibleNow.isBefore(staleThreshold);
+            boolean stalePossible = latestPossibleNowExclusive.isAfter(staleThreshold);
+            return "AVAILABLE".equals(status) ? availablePossible : stalePossible;
+        } catch (RuntimeException invalidTimeRange) {
+            invalid();
+            return false;
+        }
     }
 
     private static void invalid() {

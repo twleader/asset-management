@@ -24,11 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 30 個業務、39 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 30 個業務、40 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(70);
+        assertThat(jobs()).hasSize(71);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(30);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(39);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(40);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
     }
 
@@ -62,6 +62,23 @@ class SchedulePublicBffControllerTest {
             assertThat(job.schedule()).isEqualTo("交易日 15:35");
             assertThat(job.description()).contains("366 日 K", "immutable PostgreSQL fact", "可信官方收盤永不覆寫");
         });
+    }
+
+    @Test
+    @DisplayName("Task461 盤中技術排程列出每分鐘觸發、時段／範圍 gate 與實際 SDK starts 上限")
+    void 富邦盤中技術指標同步排程契約() {
+        assertThat(jobs()).filteredOn(j -> "富邦個股盤中技術指標快取同步".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("外部行情服務");
+                    assertThat(job.category()).isEqualTo("即時行情");
+                    assertThat(job.schedule()).isEqualTo("交易日 09:00–13:30 每分鐘（gate 後）");
+                    assertThat(job.cron()).isEqualTo("0 * 9-13 * * MON-FRI");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("FUBON_ENABLED", "SDK READY", "09:00–13:30",
+                            "FubonRadarScope.current(30)", "round-robin", "最多 5 檔", "最多 10 檔",
+                            "六次", "60 次 actual-start", "原子寫獨立 Redis", "request path 不外呼",
+                            "不改評分或動作");
+                });
     }
 
     @Test

@@ -117,7 +117,7 @@ public class RadarTechnicalResolver {
         Source source = cache.source();
         if (source != null && "LOCAL_CALCULATED".equals(source.origin())) {
             ResolvedTechnicalInputs cached = localFromSnapshot(source, contextFingerprint, now);
-            if (cached != null) return cached;
+            if (cached != null) return withIntraday(cached, code, now, batch);
             source = null;
         }
         if (source == null) source = databaseCapture(code, now, batch);
@@ -125,7 +125,7 @@ public class RadarTechnicalResolver {
             ResolvedTechnicalInputs fallback = local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
                     contextFingerprint, null, now, now.plusSeconds(FRESH_SECONDS), Map.of(), "NO_FRESH_FUBON_CAPTURE");
             writeLocal(code, contextFingerprint, fallback, cache, now);
-            return fallback;
+            return withIntraday(fallback, code, now, batch);
         }
         ResolvedTechnicalInputs resolved = overlay(local, localWeekly, localWeeklyIndicators, source, dailyDistributionAdjusted,
                 weeklyDistributionAdjusted, liveAdded,
@@ -133,7 +133,7 @@ public class RadarTechnicalResolver {
         if ("POSTGRESQL_FUBON".equals(source.source())) {
             writeBoundFubon(code, contextFingerprint, source, cache, now);
         }
-        return resolved;
+        return withIntraday(resolved, code, now, batch);
     }
 
     /**
@@ -164,17 +164,17 @@ public class RadarTechnicalResolver {
         Source source = cache.source();
         if (source != null && "LOCAL_CALCULATED".equals(source.origin())) {
             ResolvedTechnicalInputs cached = localFromSnapshot(source, contextFingerprint, now);
-            if (cached != null) return cached;
+            if (cached != null) return withIntraday(cached, code, now, batch);
             source = null;
         }
         if (source == null) source = databaseCapture(code, now, batch);
         if (source == null) {
-            return local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
+            return withIntraday(local(local, localWeekly, localWeeklyIndicators, "LOCAL_CALCULATED", "BOUND_CONTEXT",
                     contextFingerprint, null, now, now.plusSeconds(FRESH_SECONDS), Map.of(),
-                    "NO_FRESH_FUBON_CAPTURE");
+                    "NO_FRESH_FUBON_CAPTURE"), code, now, batch);
         }
-        return overlay(local, localWeekly, localWeeklyIndicators, source, dailyDistributionAdjusted,
-                weeklyDistributionAdjusted, liveAdded, dailyAsOf, completedWeekEnd, contextFingerprint, now);
+        return withIntraday(overlay(local, localWeekly, localWeeklyIndicators, source, dailyDistributionAdjusted,
+                weeklyDistributionAdjusted, liveAdded, dailyAsOf, completedWeekEnd, contextFingerprint, now), code, now, batch);
     }
 
     private ResolvedTechnicalInputs overlay(
@@ -343,7 +343,42 @@ public class RadarTechnicalResolver {
         Map<String, RadarTechnicalFactPort.Capture> captures = preloadCaptures(codes, now);
         Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments =
                 preloadMarketLocalDocuments(marketLocalKeys);
-        return new Batch(cachePairs, captures, marketLocalDocuments, !codes.isEmpty(), !marketLocalKeys.isEmpty());
+        Map<String, String> intradayDocuments = preloadIntradayDocuments(codes);
+        return new Batch(cachePairs, captures, marketLocalDocuments, intradayDocuments,
+                !codes.isEmpty(), !marketLocalKeys.isEmpty(), !codes.isEmpty());
+    }
+
+    private Map<String, String> preloadIntradayDocuments(List<String> codes) {
+        if (codes.isEmpty()) return Map.of();
+        try {
+            Set<String> requested = Set.copyOf(codes);
+            Map<String, String> raw = cachePort.readIntradayDocuments(codes);
+            if (raw == null) return Map.of();
+            Map<String, String> safe = new LinkedHashMap<>();
+            raw.forEach((code, document) -> {
+                if (code != null && document != null && requested.contains(code)) safe.put(code, document);
+            });
+            return Map.copyOf(safe);
+        } catch (RuntimeException unavailable) {
+            logTechnicalBatchUnavailable("taiwan-intraday-cache", unavailable);
+            return Map.of();
+        }
+    }
+
+    private ResolvedTechnicalInputs withIntraday(ResolvedTechnicalInputs value, String code, Instant now, Batch batch) {
+        if (value == null || value.resolution() == null) return value;
+        String raw = null;
+        if (validCode(code) && !"0000".equals(code)) {
+            if (batch != null) {
+                if (batch.intradayLoaded) raw = batch.intradayDocuments.get(code);
+            } else {
+                try { raw = cachePort.readIntradayDocuments(List.of(code)).get(code); }
+                catch (RuntimeException unavailable) { raw = null; }
+            }
+        }
+        var intraday = RadarIntradayTechnicalCacheDocument.resolve(raw, code, now);
+        return new ResolvedTechnicalInputs(value.indicators(), value.weekly(), value.weeklyIndicators(),
+                value.resolution().withIntraday(intraday));
     }
 
     /**
@@ -1224,13 +1259,15 @@ public class RadarTechnicalResolver {
 
     /** Per-radar-request preloaded values; no mutable singleton cache is used. */
     public static final class Batch {
-        private static final Batch EMPTY = new Batch(Map.of(), Map.of(), Map.of(), false, false);
+        private static final Batch EMPTY = new Batch(Map.of(), Map.of(), Map.of(), Map.of(), false, false, false);
         private final Map<String, RadarTechnicalCachePort.Pair> cachePairs;
         private final Map<String, RadarTechnicalFactPort.Capture> captures;
         private final Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments;
+        private final Map<String, String> intradayDocuments;
         private final boolean cacheLoaded;
         private final boolean captureLoaded;
         private final boolean marketLocalLoaded;
+        private final boolean intradayLoaded;
 
         /**
          * Marks a failed list preload as already attempted.  List evaluators must consume only
@@ -1238,19 +1275,22 @@ public class RadarTechnicalResolver {
          * read for each target.
          */
         static Batch unavailable(boolean taiwanRequested, boolean marketLocalRequested) {
-            return new Batch(Map.of(), Map.of(), Map.of(), taiwanRequested, marketLocalRequested);
+            return new Batch(Map.of(), Map.of(), Map.of(), Map.of(), taiwanRequested, marketLocalRequested, taiwanRequested);
         }
 
         private Batch(Map<String, RadarTechnicalCachePort.Pair> cachePairs,
                       Map<String, RadarTechnicalFactPort.Capture> captures,
                       Map<RadarTechnicalCachePort.MarketLocalKey, String> marketLocalDocuments,
-                      boolean twLoaded, boolean marketLocalLoaded) {
+                      Map<String, String> intradayDocuments,
+                      boolean twLoaded, boolean marketLocalLoaded, boolean intradayLoaded) {
             this.cachePairs = cachePairs == null ? Map.of() : Map.copyOf(cachePairs);
             this.captures = captures == null ? Map.of() : Map.copyOf(captures);
             this.marketLocalDocuments = marketLocalDocuments == null ? Map.of() : Map.copyOf(marketLocalDocuments);
+            this.intradayDocuments = intradayDocuments == null ? Map.of() : Map.copyOf(intradayDocuments);
             this.cacheLoaded = twLoaded;
             this.captureLoaded = twLoaded;
             this.marketLocalLoaded = marketLocalLoaded;
+            this.intradayLoaded = intradayLoaded;
         }
     }
 }

@@ -905,8 +905,51 @@ public final class TradingRadarDto {
             String freshUntil,
             Long ageSeconds,
             List<TechnicalProfileResolution> profiles,
-            List<TechnicalFieldProvenance> fieldProvenance
+            List<TechnicalFieldProvenance> fieldProvenance,
+            IntradayTechnicalResolution intraday
+    ) {
+        public TechnicalResolution(String decisionInputVersion, String source, String binding,
+                                   String contextFingerprint, String captureId, String oldestObservedAt,
+                                   String freshUntil, Long ageSeconds,
+                                   List<TechnicalProfileResolution> profiles,
+                                   List<TechnicalFieldProvenance> fieldProvenance) {
+            this(decisionInputVersion, source, binding, contextFingerprint, captureId, oldestObservedAt,
+                    freshUntil, ageSeconds, profiles, fieldProvenance, IntradayTechnicalResolution.unavailable());
+        }
+
+        public TechnicalResolution withIntraday(IntradayTechnicalResolution value) {
+            return new TechnicalResolution(decisionInputVersion, source, binding, contextFingerprint, captureId,
+                    oldestObservedAt, freshUntil, ageSeconds, profiles, fieldProvenance,
+                    value == null ? IntradayTechnicalResolution.unavailable() : value);
+        }
+    }
+
+    public record IntradayTechnicalResolution(
+            String status,
+            String observedAt,
+            Long ageSeconds,
+            IntradayTechnicalFrame oneMinute,
+            IntradayTechnicalFrame fiveMinute
+    ) {
+        public static IntradayTechnicalResolution unavailable() {
+            return new IntradayTechnicalResolution("UNAVAILABLE", null, null, null, null);
+        }
+    }
+
+    public record IntradayTechnicalFrame(
+            String status,
+            String timeframe,
+            String sourceDate,
+            String sourceTimestamp,
+            String observedAt,
+            IntradayKdj kdj,
+            IntradayMacd macd,
+            IntradayBollinger bollinger
     ) {}
+
+    public record IntradayKdj(BigDecimal k, BigDecimal d, BigDecimal j) {}
+    public record IntradayMacd(BigDecimal macdLine, BigDecimal signalLine) {}
+    public record IntradayBollinger(BigDecimal upper, BigDecimal middle, BigDecimal lower) {}
 
     public record Bollinger(
             String asOfDate, int period, int standardDeviationMultiplier,
