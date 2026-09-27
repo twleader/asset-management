@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 富邦證 API 頁的資料模型守門（Requirement 121 / Task 386，第二版：SDK 全量唯讀查詢盤點）。
@@ -73,6 +74,28 @@ class FubonApiInfoBffControllerTest {
             "marketdata.websocket_client.stock（channel=\"aggregates\"）|GET /internal/market-data/stock-push/stream"
     );
 
+    /** Requirement 169／Task 460：只有排程宣告對應到的 18 個 SDK reference 可列出 Cron。 */
+    private static final Map<String, List<String>> CRON_EXPRESSIONS = Map.ofEntries(
+            Map.entry("sdk.accounting.inventories", List.of("0 5,35 9-13 * * MON-FRI")),
+            Map.entry("sdk.accounting.unrealized_gains_and_loses", List.of("0 5,35 9-13 * * MON-FRI")),
+            Map.entry("sdk.accounting.bank_remain", List.of("0 0 8 * * *", "0 20 9 * * *", "0 20 14 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.accounting.query_settlement", List.of("0 0 8 * * *", "0 45 13 * * *", "0 30 19 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.accounting.realized_gains_and_loses", List.of("0 0 8 * * *", "0 45 13 * * *", "0 30 19 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.stock.filled_history", List.of("0 0,30 9-13 * * MON-FRI", "0 0 14 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.quote", List.of("*/10 * 9-13 * * MON-FRI", "0 5,35 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.ticker", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.candles", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.volumes", List.of("0 * * * * *")),
+            Map.entry("marketdata.rest_client.stock.historical.candles", List.of("0 35 15 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.sma", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.rsi", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.corporate_actions.dividends", List.of("0 0 9 * * MON-FRI", "0 30 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.ownership.etf_holdings", List.of("0 50 8 * * MON-FRI", "0 30 15 * * MON-FRI"))
+    );
+
     /** 透過公開查詢方法取清單（APIS 是 private static，刻意不用反射）。 */
     private static List<FubonApiInfoDto> apis() {
         return new FubonApiInfoBffController().list();
@@ -82,6 +105,28 @@ class FubonApiInfoBffControllerTest {
     @DisplayName("清單恰好列出 52 筆富邦 SDK 唯讀查詢能力")
     void 筆數恰為52() {
         assertThat(apis()).hasSize(52);
+    }
+
+    @Test
+    @DisplayName("每筆 Cron 清單非 null，18 項實際排程完整且其餘項目明確為空")
+    void cronExpressions精確對照且不虛構其他排程() {
+        List<FubonApiInfoDto> apiRows = apis();
+        Map<String, List<String>> actual = apiRows.stream()
+                .collect(Collectors.toMap(FubonApiInfoDto::sdkReference, FubonApiInfoDto::cronExpressions,
+                        (first, second) -> first));
+
+        assertThat(apiRows).hasSize(52)
+                .allSatisfy(api -> assertThat(api.cronExpressions()).isNotNull());
+        assertThat(actual).containsAllEntriesOf(CRON_EXPRESSIONS);
+        assertThat(apiRows)
+                .filteredOn(api -> !CRON_EXPRESSIONS.containsKey(api.sdkReference()))
+                .allSatisfy(api -> assertThat(api.cronExpressions()).isEmpty());
+        var scheduledApi = apiRows.stream()
+                .filter(api -> !api.cronExpressions().isEmpty())
+                .findFirst()
+                .orElseThrow();
+        assertThatThrownBy(() -> scheduledApi.cronExpressions().add("0 0 0 * * *"))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test

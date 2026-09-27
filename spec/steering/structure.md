@@ -329,7 +329,7 @@ Task406 的私人來源報表頁已延後；現有 BFF 不建立該 route、clie
      理由對 IXIC 不成立」才揭出第二組；Task 342 的稽核則是發現量比欄同時被兩支 helper 餵養；
      Task 357 的稽核則是發現 `external-materials-service` 內部三處各有一份等價的錨定日實作，
      而它們同屬一個 artifact、「無共用模組」在那裡不成立（已收斂，見例外之五）。
-5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。** Requirement 167／Task 458 是限縮例外：`RealizedGainView` 可只對已載入且依年度／市場篩選後的可見明細列做暫時日期排序；不得改變 BFF 回傳或資料語意，亦不得新增 API／BFF。
+5. **前端只 render，BFF 預先聚合 / 排序 / 過濾 / 計算 profit / profitRate 等衍生值。** Requirement 167／Task 458 是限縮例外：`RealizedGainView` 可只對已載入且依年度／市場篩選後的可見明細列做暫時日期排序；不得改變 BFF 回傳或資料語意，亦不得新增 API／BFF。Requirement 166／Task 457 與 Requirement 168／Task 459 是限縮的純顯示例外：`TransactionView` 與 `RealizedGainView` 可在已載入明細中依股票暫時篩選，範圍僅限目前年度／市場可見列，不改變 BFF 回傳或來源資料，亦不得新增 API／BFF。
 
 ---
 
@@ -558,9 +558,9 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 160 個 Requirements（最新編號為 167，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 162 個 Requirements（最新編號為 169，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
-├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417 僅有獨立 t417 任務檔，不追加索引
+├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417、459、460 僅有獨立任務檔，不追加索引
 ├── tasks/                # 任務檔
 │   ├── README.md         # 自足任務檔規範
 │   ├── archive/          # Task 1–200 歷史，已凍結

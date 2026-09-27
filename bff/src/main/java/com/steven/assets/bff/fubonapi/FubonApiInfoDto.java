@@ -1,5 +1,8 @@
 package com.steven.assets.bff.fubonapi;
 
+import java.util.List;
+import java.util.Objects;
+
 /**
  * FubonApiView 專屬 BFF（「系統資訊」分組，Requirement 121）單筆富邦 SDK 唯讀查詢能力。
  *
@@ -17,6 +20,7 @@ package com.steven.assets.bff.fubonapi;
  * @param consumer         實際 consumer 與能力限制；尚無呼叫端時為「－（尚未串接）」
  * @param requestSummary   請求參數摘要
  * @param responseSummary  回應內容摘要
+ * @param cronExpressions  實際 Spring Cron 觸發式；無固定 Cron 時為空清單
  */
 public record FubonApiInfoDto(
         boolean connected,
@@ -27,6 +31,26 @@ public record FubonApiInfoDto(
         String description,
         String consumer,
         String requestSummary,
-        String responseSummary
+        String responseSummary,
+        List<String> cronExpressions
 ) {
+    public FubonApiInfoDto {
+        cronExpressions = List.copyOf(Objects.requireNonNull(cronExpressions, "cronExpressions"));
+    }
+
+    /** 保留既有靜態清單的九參數建構方式；未指定者明確沒有固定 Cron。 */
+    public FubonApiInfoDto(
+            boolean connected,
+            String category,
+            String name,
+            String sdkReference,
+            String httpEndpoint,
+            String description,
+            String consumer,
+            String requestSummary,
+            String responseSummary
+    ) {
+        this(connected, category, name, sdkReference, httpEndpoint, description, consumer, requestSummary,
+                responseSummary, List.of());
+    }
 }

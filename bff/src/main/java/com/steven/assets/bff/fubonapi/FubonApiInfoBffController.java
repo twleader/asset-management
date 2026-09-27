@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * FubonApiView 專屬 BFF（「系統資訊」分組，Requirement 121）。
@@ -38,6 +39,31 @@ public class FubonApiInfoBffController {
     private static final String NO_HTTP = "";
     private static final String NO_SDK_DOC =
             "SDK 未提供可查證的參數／回傳說明（docstring 為空），僅能確認此方法存在於 sdk.stock 命名空間。";
+
+    /**
+     * Requirement 169／Task 460：只展示排程宣告中實際使用的六欄 Cron 字串。
+     * 這是展示用靜態對照，不讀取 scheduler registry，也不代表 feature gate 每次都會放行 SDK 呼叫。
+     */
+    private static final Map<String, List<String>> CRON_EXPRESSIONS_BY_SDK_REFERENCE = Map.ofEntries(
+            Map.entry("sdk.accounting.inventories", List.of("0 5,35 9-13 * * MON-FRI")),
+            Map.entry("sdk.accounting.unrealized_gains_and_loses", List.of("0 5,35 9-13 * * MON-FRI")),
+            Map.entry("sdk.accounting.bank_remain", List.of("0 0 8 * * *", "0 20 9 * * *", "0 20 14 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.accounting.query_settlement", List.of("0 0 8 * * *", "0 45 13 * * *", "0 30 19 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.accounting.realized_gains_and_loses", List.of("0 0 8 * * *", "0 45 13 * * *", "0 30 19 * * *", "0 0 22 * * *")),
+            Map.entry("sdk.stock.filled_history", List.of("0 0,30 9-13 * * MON-FRI", "0 0 14 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.quote", List.of("*/10 * 9-13 * * MON-FRI", "0 5,35 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.ticker", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.candles", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.intraday.volumes", List.of("0 * * * * *")),
+            Map.entry("marketdata.rest_client.stock.historical.candles", List.of("0 35 15 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.sma", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.rsi", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.corporate_actions.dividends", List.of("0 0 9 * * MON-FRI", "0 30 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.ownership.etf_holdings", List.of("0 50 8 * * MON-FRI", "0 30 15 * * MON-FRI"))
+    );
 
     /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：21 已串接、31 未串接）。 */
     private static final List<FubonApiInfoDto> APIS = List.of(
@@ -409,6 +435,11 @@ public class FubonApiInfoBffController {
     /** GET /api/bff/fubon-api —— 回傳富邦 SDK 唯讀查詢能力全量盤點（52 筆靜態資料）。 */
     @GetMapping
     public List<FubonApiInfoDto> list() {
-        return APIS;
+        return APIS.stream()
+                .map(api -> new FubonApiInfoDto(
+                        api.connected(), api.category(), api.name(), api.sdkReference(), api.httpEndpoint(),
+                        api.description(), api.consumer(), api.requestSummary(), api.responseSummary(),
+                        CRON_EXPRESSIONS_BY_SDK_REFERENCE.getOrDefault(api.sdkReference(), List.of())))
+                .toList();
     }
 }

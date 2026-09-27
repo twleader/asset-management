@@ -82,6 +82,17 @@
             <span v-else class="not-connected">－</span>
           </template>
         </el-table-column>
+        <el-table-column label="執行時間（Cron）" width="250">
+          <template #default="{ row }">
+            <template v-if="row.cronExpressions?.length">
+              <div class="cron-expressions">
+                <code v-for="expression in row.cronExpressions" :key="expression" class="cron-expression">{{ expression }}</code>
+              </div>
+              <span class="cron-timezone">Asia/Taipei</span>
+            </template>
+            <span v-else class="not-connected">無固定 Cron</span>
+          </template>
+        </el-table-column>
         <el-table-column label="唯讀用途說明" prop="description" min-width="280" show-overflow-tooltip />
         <el-table-column label="呼叫端／使用情境" prop="consumer" min-width="220" show-overflow-tooltip />
       </el-table>
@@ -141,6 +152,14 @@ onMounted(fetchData)
   background: #f1f5f9; padding: 2px 6px; border-radius: 4px;
 }
 .not-connected { color: #94a3b8; }
+.cron-expressions { display: flex; flex-direction: column; gap: 3px; }
+.cron-expression {
+  font-family: 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: #475569;
+  white-space: nowrap;
+}
+.cron-timezone { display: block; margin-top: 4px; font-size: 11px; color: #64748b; }
 
 .expand-panel { padding: 8px 24px 16px; display: flex; flex-direction: column; gap: 10px; }
 .expand-item { display: flex; flex-direction: column; gap: 4px; }

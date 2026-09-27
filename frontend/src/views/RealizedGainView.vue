@@ -53,6 +53,22 @@
         <el-tab-pane label="英股" name="英股" />
       </el-tabs>
 
+      <div v-if="stockOptions.length" class="stock-filter-row">
+        <span class="stock-filter-label">股票：</span>
+        <el-select
+          v-model="stockFilter"
+          multiple
+          collapse-tags
+          collapse-tags-tooltip
+          clearable
+          placeholder="全部"
+          style="min-width:260px"
+          size="small"
+        >
+          <el-option v-for="option in stockOptions" :key="option.value" :value="option.value" :label="option.label" />
+        </el-select>
+      </div>
+
       <el-table ref="realizedGainTable" :data="filteredRecords" size="small" stripe class="gain-table"
         @sort-change="handleDateSortChange" @row-dblclick="onRowDblClick">
         <el-table-column prop="broker" label="券商" width="90">
@@ -366,6 +382,7 @@ import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingDraft'
 import { resolveRealizedGainDateSortOrder, sortRealizedGainRecords } from '@/utils/realizedGainDateSort'
+import { buildRealizedGainStockOptions, filterRealizedGainByStock, pruneInvalidRealizedGainStockFilter } from '@/utils/realizedGainStockFilter'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -638,16 +655,26 @@ const reload = async () => {
 onMounted(() => { reload(); loadSchedule().catch(() => {}) })
 
 const marketFilter = ref('')
+const stockFilter = ref([])
 const dateSortOrder = ref(null)
 const realizedGainTable = ref(null)
 
 const yearSummaries = computed(() => realizedGains.value)
 const selectedData = computed(() => realizedGains.value.find(g => g.year === selectedYear.value) || realizedGains.value[0])
+const marketYearRecords = computed(() => {
+  const records = selectedData.value?.records || []
+  return marketFilter.value ? records.filter(record => record.market === marketFilter.value) : records
+})
+const stockOptions = computed(() => buildRealizedGainStockOptions(marketYearRecords.value))
 
 const filteredRecords = computed(() => {
-  const records = selectedData.value?.records || []
-  const marketFiltered = marketFilter.value ? records.filter(r => r.market === marketFilter.value) : records
-  return sortRealizedGainRecords(marketFiltered, dateSortOrder.value)
+  const stockFiltered = filterRealizedGainByStock(marketYearRecords.value, stockFilter.value)
+  return sortRealizedGainRecords(stockFiltered, dateSortOrder.value)
+})
+
+watch(stockOptions, (options) => {
+  const next = pruneInvalidRealizedGainStockFilter(stockFilter.value, options)
+  if (next !== stockFilter.value) stockFilter.value = next
 })
 
 function handleDateSortChange({ prop, order }) {
@@ -815,6 +842,8 @@ function onRowDblClick(row) {
 .loss { color: #dc2626; font-weight: 600; }
 .market-tabs { margin-bottom: 4px; }
 .market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
+.stock-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.stock-filter-label { font-size: 13px; color: #475569; white-space: nowrap; }
 .broker-text { font-size: 13px; color: #475569; }
 .gain-table :deep(.el-table__cell) { font-size: 13.5px; }
 

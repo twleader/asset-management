@@ -5668,3 +5668,52 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **其他顯示與資料行為不變。** 排序只改變畫面列順序，不改變年度摘要、統計數值、列的編輯／刪除／雙擊行為或匯出範圍；排序狀態不保存、不寫回任何資料。
 - [ ] **不新增資料介面。** 本功能只使用已載入的已實現損益記錄，不新增或修改 API、BFF、DTO、資料庫、券商呼叫或交易功能。
 - [ ] **測試。** 前端單元測試覆蓋 ISO 日期跨年、同日穩定順序、升冪與降冪、輸入陣列不被修改，以及已實現損益頁將上／下箭頭分別接到升／降冪；收到 `order: null` 時保留目前方向並同步恢復方向圖示，不清除排序。
+
+### Requirement 168／Task 459：已實現損益明細新增股票篩選下拉
+
+**User Story：**作為使用者，我希望和交易紀錄頁一樣，能在已實現損益明細依股票代號篩選，快速查看指定股票的已實現損益。
+
+**Acceptance Criteria：**
+
+- [ ] **篩選範圍與選項。** 下拉選單依目前選中的年度卡片與市場 tab 範圍建立選項，只收集 `assetCode` 非空白的已實現損益列；以 `assetCode + market` 去重，同一代號跨市場為不同選項，顯示名稱格式為「`assetName`（`assetCode`）」並依繁體中文排序。既有 `RealizedGainResponse` 沒有 `assetType`，不得新增 DTO／API／資料庫欄位或推測資產類型；沒有 `assetCode` 的列不列入選項且在任何股票篩選選擇下都保持可見。
+- [ ] **多選與明細過濾。** 使用與交易紀錄頁一致的可複選下拉互動；未選任何項目時顯示目前年度與市場範圍內全部記錄。選取一檔或多檔時，僅對有代號的列依選取的 `assetCode + market` 聯集過濾；無代號列維持可見。清除選取即回到該年度與市場的全部明細。沒有任何可選股票時隱藏下拉。
+- [ ] **範圍切換。** 切換年度、市場 tab，或已實現損益資料重新載入後，選項依新範圍重建；只移除已不在新選項中的已選 key，保留仍有效的選項，不得留下失效選取或無條件清空全部選項。移除後選取為空時顯示新範圍內全部明細。
+- [ ] **統計、排序與匯出。** 頁面上方年度卡片仍顯示未套用股票篩選的年度摘要；明細統計以股票篩選後可見列計算。既有交易日期升／降冪排序、列編輯／刪除／雙擊開啟分析、手動與排程匯出行為維持；篩選只作用於已載入的明細，不改變匯出涵蓋全部年度的範圍。
+- [ ] **資料與狀態邊界。** 篩選為 `RealizedGainView` 的純前端暫時顯示狀態，不新增請求、不修改 BFF/API/DTO/資料庫、不寫回來源資料、不持久化選取狀態，也不呼叫券商 API。
+- [ ] **測試。** 前端單元測試覆蓋選項去重與繁中排序、跨市場同代號隔離、空白代號列保留、空選取等同全部、多選聯集、年度／市場切換移除失效選取、空選項隱藏下拉，以及股票篩選後統計使用可見列；頁面接線不得破壞既有日期排序。
+
+### Requirement 169／Task 460：富邦證 API 一覽新增 Cron 執行時間欄位
+
+**User Story:** 作為使用者，我希望在富邦證 API 一覽中直接看到每項唯讀 API 對應的排程觸發時間；有 Cron 排程者以實際 Spring Cron 表達式列出，沒有 Cron 排程者明確標示，方便分辨固定排程與手動、事件或固定間隔觸發。
+
+**Acceptance Criteria:**
+
+- [ ] **DTO 契約。** 既有 GET /api/bff/fubon-api 每列新增非 null、不可變的 cronExpressions: string[]；不刪改既有欄位、排序、52 筆清單或 authenticated 保護。此欄位是 BFF 靜態資訊資料，不得在請求時呼叫排程服務、SDK、資料庫或其他服務。
+- [ ] **精確 Cron 對照。** 每個有 @Scheduled(cron=...) 觸發該 SDK 方法的 API，列出該實際排程宣告的完整六欄 Spring Cron（秒、分、時、日、月、週）；一個 API 有多個宣告時全部列出。18 筆對照固定如下，全部時區為 Asia/Taipei：
+
+  | SDK reference | Cron expressions |
+  |---|---|
+  | sdk.accounting.inventories | 0 5,35 9-13 * * MON-FRI |
+  | sdk.accounting.unrealized_gains_and_loses | 0 5,35 9-13 * * MON-FRI |
+  | sdk.accounting.bank_remain | 0 0 8 * * *；0 20 9 * * *；0 20 14 * * *；0 0 22 * * * |
+  | sdk.accounting.query_settlement | 0 0 8 * * *；0 45 13 * * *；0 30 19 * * *；0 0 22 * * * |
+  | sdk.accounting.realized_gains_and_loses | 0 0 8 * * *；0 45 13 * * *；0 30 19 * * *；0 0 22 * * * |
+  | sdk.stock.filled_history | 0 0,30 9-13 * * MON-FRI；0 0 14 * * MON-FRI |
+  | marketdata.rest_client.stock.intraday.quote | */10 * 9-13 * * MON-FRI；0 5,35 9-13 * * MON-FRI |
+  | marketdata.rest_client.stock.intraday.ticker | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.intraday.candles | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.intraday.volumes | 0 * * * * * |
+  | marketdata.rest_client.stock.historical.candles | 0 35 15 * * MON-FRI |
+  | marketdata.rest_client.stock.technical.sma | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.technical.rsi | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.technical.kdj | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.technical.macd | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.technical.bb | 0 40 13 * * MON-FRI |
+  | marketdata.rest_client.stock.corporate_actions.dividends | 0 0 9 * * MON-FRI；0 30 13 * * MON-FRI |
+  | marketdata.rest_client.stock.ownership.etf_holdings | 0 50 8 * * MON-FRI；0 30 15 * * MON-FRI |
+
+- [ ] **不虛構排程。** 沒有對應 @Scheduled(cron=...) 的項目，其 cronExpressions 為空陣列，畫面顯示「無固定 Cron」。不得把自然語言時間轉成猜測式、把 fixedRate／fixedDelay／啟動／事件觸發偽裝成 Cron，或將排程條件改成另一個 Cron。既有 consumer 說明保留固定間隔與啟動補齊等資訊。
+- [ ] **只表示觸發式。** 新欄位的 Cron 代表排程器觸發時間，不代表每次都會呼叫 SDK；現有 feature flag、交易日、盤中時段、服務就緒與 in-flight gate 均維持其原行為，尤其 intraday.volumes 的每分鐘 Cron 仍受原有交易時段 gate 限制。
+- [ ] **前端欄位。** FubonApiView 增加「執行時間（Cron）」欄；多個 expression 分行以等寬字體原樣呈現，並明示時區 Asia/Taipei；空陣列呈現「無固定 Cron」。不更動搜尋、連線篩選、分類篩選或其他欄位語意。
+- [ ] **範圍限制。** 不修改任何 @Scheduled、feature flags、SchedulePublicBffController.JOBS、外部 API 呼叫、排程觸發、SDK 呼叫、資料庫／Redis 寫入或交易功能；不新增 endpoint、migration 或資料表。
+- [ ] **測試。** BFF 單元測試精確核對以上 18 筆對照、未列入的 API 均回傳空陣列、每筆 Cron 欄位非 null，且既有 52 筆／已串接狀態／endpoint 欄位不變。前端須成功建置，Docker 重建後實際開啟富邦證 API 頁確認新欄、多 expression 換行與無 Cron 狀態。
