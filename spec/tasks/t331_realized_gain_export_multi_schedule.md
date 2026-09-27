@@ -18,7 +18,7 @@ Task 326 已在「歷年資產／最新資產匯出」把同一個問題解掉�
 |---|---|---|
 | 最新資產（R34／69、Task 326） | `export_schedule_setting` ＋ `export_schedule_time` | parent/child，child 各自 enabled／guard／status ← **本任務的參照實作** |
 | 油價金價（R41／72、Task 330） | `commodity_export_schedule` ＋ `commodity_export_schedule_time` | 同形，剛於 main landed（`v1.103.0`）——與本任務幾乎完全平行，可交叉參照 |
-| GDP-TWSE（R45、Task 287） | `index_export_schedule` ＋ `index_export_schedule_time`（＋ `_time_market`） | parent/child，另有每時間點複選指數 |
+| GDP-TWSE（R45、Task 464） | `index_export_schedule` ＋ `index_export_schedule_market` | 每列一筆獨立排程、每列一個執行時間，另可複選指數；Task 287 的 time-child 模型已退役 |
 | 交易雷達（R48、Task 231） | `trading_radar_export_setting` ＋ `trading_radar_export_time` | 一列一時間點，`lastRunDate` 刻意放時間點列 |
 | 交易紀錄（R49、Task 255） | `asset_transaction_export_schedule` 每人多列 | 不同形（整包排程多列，非時間 child） |
 

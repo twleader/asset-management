@@ -3,6 +3,7 @@ package com.steven.assets.service;
 import com.steven.assets.dto.*;
 import com.steven.assets.model.*;
 import com.steven.assets.repository.ExportScheduleFreshRead;
+import com.steven.assets.repository.IndexExportScheduleRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.service.export.DualFormatExportWriter;
@@ -13,6 +14,7 @@ import jakarta.persistence.EntityManagerFactory;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.aop.support.AopUtils;
@@ -66,8 +68,7 @@ class ExportScheduleWritebackPostgresTest {
     enum Kind {
         ASSETS(ExportScheduleSetting.class, ExportScheduleTime.class),
         COMMODITY(CommodityExportSchedule.class, CommodityExportScheduleTime.class),
-        GAIN(RealizedGainExportSchedule.class, RealizedGainExportScheduleTime.class),
-        INDEX(IndexExportSchedule.class, IndexExportScheduleTime.class);
+        GAIN(RealizedGainExportSchedule.class, RealizedGainExportScheduleTime.class);
         final Class<?> model, child;
         Kind(Class<?> model, Class<?> child) { this.model = model; this.child = child; }
     }
@@ -102,6 +103,7 @@ class ExportScheduleWritebackPostgresTest {
     @Autowired CommodityExportScheduleExecutionStore commodity;
     @Autowired RealizedGainExportScheduleExecutionStore gain;
     @Autowired IndexExportScheduleExecutionStore index;
+    @Autowired IndexExportScheduleRepository indexRepository;
     @Autowired ExportScheduleService assetsService;
     @Autowired CommodityExportScheduleService commodityService;
     @Autowired RealizedGainExportScheduleService gainService;
@@ -130,12 +132,12 @@ class ExportScheduleWritebackPostgresTest {
     }
     @SuppressWarnings("unchecked") private ExportExecutionPort<Object> port(Kind k) {
         return (ExportExecutionPort<Object>) (ExportExecutionPort<?>) switch (k) {
-            case ASSETS -> assets; case COMMODITY -> commodity; case GAIN -> gain; case INDEX -> index;
+            case ASSETS -> assets; case COMMODITY -> commodity; case GAIN -> gain;
         };
     }
     private Object service(Kind k) {
         return switch (k) { case ASSETS -> assetsService; case COMMODITY -> commodityService;
-            case GAIN -> gainService; case INDEX -> indexService; };
+            case GAIN -> gainService; };
     }
     private <T> T tx(Supplier<T> body) { return new TransactionTemplate(tm).execute(s -> body.get()); }
     private static Object get(Object bean, String field) { return new BeanWrapperImpl(bean).getPropertyValue(field); }
@@ -146,7 +148,6 @@ class ExportScheduleWritebackPostgresTest {
             Object child = k.child.getConstructor().newInstance();
             set(child, "schedule", parent); set(child, "runHour", hour); set(child, "runMinute", 0);
             set(child, "enabled", true);
-            if (k == Kind.INDEX) set(child, "markets", new LinkedHashSet<>(Set.of("TWSE")));
             return child;
         } catch (ReflectiveOperationException e) { throw new AssertionError(e); }
     }
@@ -179,7 +180,7 @@ class ExportScheduleWritebackPostgresTest {
                 Object c = times(p).get(0);
                 for (String field : List.of("id", "runHour", "lastRunDate", "lastRunAt", "lastRunStatus", "enabled", "updatedAt")) result.put("child." + field, get(c, field));
             }
-            if (k != Kind.INDEX) for (String field : List.of("runHour", "lastRunDate", "lastRunAt", "lastRunStatus")) result.put(field, get(p, field));
+            for (String field : List.of("runHour", "lastRunDate", "lastRunAt", "lastRunStatus")) result.put(field, get(p, field));
             return result;
         });
     }
@@ -197,6 +198,158 @@ class ExportScheduleWritebackPostgresTest {
     private static void await(CountDownLatch latch) {
         try { assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
     }
+
+    private IndexExportDto.ScheduleRequest indexRequest(String name, String outputSubpath) {
+        return new IndexExportDto.ScheduleRequest(name, false, 8, 15, List.of("TWSE"), 6,
+                outputSubpath, false, null);
+    }
+
+    private void seedIndexSchedules(int count) {
+        tx(() -> {
+            for (int i = 0; i < count; i++) {
+                IndexExportSchedule schedule = IndexExportSchedule.builder()
+                        .ownerUserId(owner).name("fixture_" + i).enabled(false).runHour(8).runMinute(i)
+                        .markets(new LinkedHashSet<>(Set.of("TWSE"))).rangeMonths(6)
+                        .outputSubpath("fixture-" + i).build();
+                em.persist(schedule);
+            }
+            em.flush();
+            return null;
+        });
+    }
+
+    private Long seedDueIndexSchedule(String market) {
+        return tx(() -> {
+            IndexExportSchedule schedule = IndexExportSchedule.builder()
+                    .ownerUserId(owner).name("due-" + market).enabled(true).runHour(0).runMinute(0)
+                    .lastRunDate(D1).markets(new LinkedHashSet<>(Set.of(market))).rangeMonths(6)
+                    .outputSubpath("due-" + market).gdriveEnabled(false).build();
+            em.persist(schedule);
+            em.flush();
+            return schedule.getId();
+        });
+    }
+
+    private Long seedIndexScheduleForOwner(Long scheduleOwner) {
+        return tx(() -> {
+            IndexExportSchedule schedule = IndexExportSchedule.builder()
+                    .ownerUserId(scheduleOwner).name("foreign-owner").enabled(false).runHour(8).runMinute(0)
+                    .markets(new LinkedHashSet<>(Set.of("TWSE"))).rangeMonths(6)
+                    .outputSubpath("foreign-owner").build();
+            em.persist(schedule);
+            em.flush();
+            return schedule.getId();
+        });
+    }
+
+    private Map<String, Object> readIndexSchedule(Long id) {
+        return tx(() -> {
+            em.clear();
+            IndexExportSchedule schedule = indexRepository.findByIdAndOwnerUserId(id, owner).orElseThrow();
+            return Map.of("lastRunDate", schedule.getLastRunDate(),
+                    "lastRunAt", schedule.getLastRunAt(), "lastRunStatus", schedule.getLastRunStatus());
+        });
+    }
+
+    private Object concurrentCreate(CountDownLatch ready, CountDownLatch start,
+                                    IndexExportDto.ScheduleRequest request) {
+        ready.countDown();
+        await(start);
+        try {
+            indexService.createForCurrentUser(request);
+            return "created";
+        } catch (RuntimeException exception) {
+            return exception;
+        }
+    }
+
+    @Test
+    void ownerAdvisoryLockSerializesTwoCreatesCompetingForTenthSlot() throws Exception {
+        seedIndexSchedules(9);
+        CountDownLatch ready = new CountDownLatch(2), start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Object> a = executor.submit(() -> concurrentCreate(ready, start, indexRequest("last_a", "last-a")));
+            Future<Object> b = executor.submit(() -> concurrentCreate(ready, start, indexRequest("last_b", "last-b")));
+            await(ready);
+            start.countDown();
+            List<Object> outcomes = List.of(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
+            assertThat(outcomes.stream().filter("created"::equals)).hasSize(1);
+            assertThat(outcomes.stream().filter(IllegalArgumentException.class::isInstance)).hasSize(1);
+            assertThat(tx(() -> indexRepository.countByOwnerUserId(owner))).isEqualTo(10);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void ownerAdvisoryLockSerializesSameConflictKeyFromZeroExistingRows() throws Exception {
+        CountDownLatch ready = new CountDownLatch(2), start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            IndexExportDto.ScheduleRequest same = indexRequest("same", "same-folder");
+            Future<Object> a = executor.submit(() -> concurrentCreate(ready, start, same));
+            Future<Object> b = executor.submit(() -> concurrentCreate(ready, start, same));
+            await(ready);
+            start.countDown();
+            List<Object> outcomes = List.of(a.get(10, TimeUnit.SECONDS), b.get(10, TimeUnit.SECONDS));
+            assertThat(outcomes.stream().filter("created"::equals)).hasSize(1);
+            assertThat(outcomes.stream().filter(IllegalArgumentException.class::isInstance)).hasSize(1);
+            assertThat(tx(() -> indexRepository.countByOwnerUserId(owner))).isEqualTo(1);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void foreignOwnedIndexScheduleIsNotVisibleForUpdateDeleteOrRunNow() {
+        Long foreignOwner = owner + 1_000_000;
+        Long foreignScheduleId = seedIndexScheduleForOwner(foreignOwner);
+
+        assertThat(tx(() -> indexRepository.findByIdAndOwnerUserId(foreignScheduleId, foreignOwner))).isPresent();
+        assertThat(tx(() -> indexRepository.findByIdAndOwnerUserId(foreignScheduleId, owner))).isEmpty();
+        assertThat(tx(() -> indexRepository.findLockedByIdAndOwnerUserId(foreignScheduleId, owner))).isEmpty();
+        assertThat(tx(() -> indexRepository.findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(owner)))
+                .noneMatch(schedule -> schedule.getId().equals(foreignScheduleId));
+
+        assertThatThrownBy(() -> indexService.updateForCurrentUser(foreignScheduleId,
+                indexRequest("attacker-edit", "attacker-edit")))
+                .isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> indexService.deleteForCurrentUser(foreignScheduleId))
+                .isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> indexService.runNowForCurrentUser(foreignScheduleId))
+                .isInstanceOf(NoSuchElementException.class);
+    }
+
+    @Test
+    void dueIndexRowsRunIndependentlyAndFailureStillAdvancesItsDateGuard() throws Exception {
+        Long successfulId = seedDueIndexSchedule("SPX");
+        Long failedId = seedDueIndexSchedule("TWSE");
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
+        fakeWriter(() -> new DualFormatExportWriter.DualResult(
+                Path.of("/synthetic/index.json"), Path.of("/synthetic/index.xlsx"),
+                "成功：synthetic", null, null, null));
+        doThrow(new IllegalStateException("synthetic TWSE failure"))
+                .when(excel).indexDailyDoc(eq("TWSE"), any(), any());
+
+        indexService.tick();
+
+        Map<String, Object> successful = readIndexSchedule(successfulId);
+        Map<String, Object> failed = readIndexSchedule(failedId);
+        assertThat(successful.get("lastRunDate")).isEqualTo(today);
+        assertThat(successful.get("lastRunAt")).isNotNull();
+        assertThat(successful.get("lastRunStatus").toString()).contains("SPX 成功");
+        assertThat(failed.get("lastRunDate")).isEqualTo(today);
+        assertThat(failed.get("lastRunAt")).isNotNull();
+        assertThat(failed.get("lastRunStatus").toString()).contains("TWSE 失敗", "synthetic TWSE failure");
+        verify(excel, org.mockito.Mockito.times(1)).indexDailyDoc(eq("SPX"), any(), any());
+        verify(excel, org.mockito.Mockito.times(1)).indexDailyDoc(eq("TWSE"), any(), any());
+        assertThat(index.due(successfulId, owner, today, LocalTime.MAX)).isEmpty();
+        assertThat(index.due(failedId, owner, today, LocalTime.MAX)).isEmpty();
+    }
+
     private void scheduled(Kind k, CapturedExport c) {
         Object target = AopTestUtils.getUltimateTargetObject(service(k));
         ReflectionTestUtils.invokeMethod(target, "runScheduled", c);
@@ -209,8 +362,6 @@ class ExportScheduleWritebackPostgresTest {
                     List.of(new CommodityExportDto.TimeRequest(hour, 0, enabled)), false, remote));
             case GAIN -> gainService.updateForCurrentUser(new RealizedGainExportDto.SettingRequest(true, local, false, remote,
                     List.of(new RealizedGainExportDto.TimeRequest(hour, 0, enabled))));
-            case INDEX -> indexService.updateForCurrentUser(new IndexExportDto.SettingRequest(true, local, 6,
-                    List.of(new IndexExportDto.TimeRequest(hour, 0, enabled, List.of("TWSE"))), false, remote));
         }
     }
 
@@ -266,10 +417,10 @@ class ExportScheduleWritebackPostgresTest {
         assertThat(current.get("child.lastRunAt")).isEqualTo(COMPLETED);
         assertThat(current.get("child.lastRunStatus")).isEqualTo("new");
         assertThat(current.get("gdriveLastStatus")).isEqualTo("drive-new");
-        if (k != Kind.INDEX) { assertThat(current.get("lastRunAt")).isEqualTo(COMPLETED); assertThat(current.get("lastRunStatus")).isEqualTo("new"); }
+        assertThat(current.get("lastRunAt")).isEqualTo(COMPLETED); assertThat(current.get("lastRunStatus")).isEqualTo("new");
     }
 
-    @ParameterizedTest @EnumSource(value = Kind.class, names = "INDEX", mode = EnumSource.Mode.EXCLUDE)
+    @ParameterizedTest @EnumSource(Kind.class)
     void olderCompletionAdvancesItsChildWithoutChangingNewerParentSummary(Kind k) {
         Long id = fixture(k, false);
         edit(k, p -> {
@@ -333,7 +484,7 @@ class ExportScheduleWritebackPostgresTest {
         port(k).complete(c, COMPLETED, "stale", "stale-drive"); assertThat(read(k, id)).isEmpty();
     }
 
-    @ParameterizedTest @EnumSource(value = Kind.class, names = "INDEX", mode = EnumSource.Mode.EXCLUDE)
+    @ParameterizedTest @EnumSource(Kind.class)
     void legacyChildIsPersistedBeforeCaptureAndNeverRecreatedAtCompletion(Kind k) {
         Long id = fixture(k, true); CapturedExport c = capture(k, id, D1);
         assertThat(c.childId()).isNotNull(); assertThat(read(k, id).get("child.id")).isEqualTo(c.childId());

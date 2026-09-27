@@ -3,20 +3,16 @@ package com.steven.assets.service.export;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.model.CommodityExportSchedule;
 import com.steven.assets.model.ExchangeRateExportSchedule;
-import com.steven.assets.model.IndexExportSchedule;
-import com.steven.assets.model.IndexExportScheduleTime;
 import com.steven.assets.model.RealizedGainExportSchedule;
 import com.steven.assets.repository.AppUserRepository;
 import com.steven.assets.repository.CommodityExportScheduleRepository;
 import com.steven.assets.repository.ExchangeRateExportScheduleRepository;
-import com.steven.assets.repository.IndexExportScheduleRepository;
 import com.steven.assets.repository.RealizedGainExportScheduleRepository;
 import com.steven.assets.service.CommodityExportScheduleService;
 import com.steven.assets.service.ExchangeRateExportScheduleService;
 import com.steven.assets.service.ExcelExportService;
 import com.steven.assets.service.GdriveOutputSupport;
 import com.steven.assets.service.GdriveSelfCheck;
-import com.steven.assets.service.IndexExportScheduleService;
 import com.steven.assets.service.RcloneClient;
 import com.steven.assets.service.RealizedGainExportScheduleService;
 import com.steven.assets.service.UserAdminService;
@@ -72,7 +68,6 @@ class SingleTableScheduleServiceDualFormatTest {
     @Mock private RealizedGainExportScheduleRepository gainRepo;
     @Mock private CommodityExportScheduleRepository commodityRepo;
     @Mock private ExchangeRateExportScheduleRepository rateRepo;
-    @Mock private IndexExportScheduleRepository indexRepo;
     @Mock private ExcelExportService excelExportService;
     @Mock private ObjectProvider<CurrentUserContext> currentUserProvider;
     @Mock private RcloneClient rcloneClient;
@@ -86,7 +81,6 @@ class SingleTableScheduleServiceDualFormatTest {
     private RealizedGainExportScheduleService gainService;
     private CommodityExportScheduleService commodityService;
     private ExchangeRateExportScheduleService rateService;
-    private IndexExportScheduleService indexService;
 
     @BeforeEach
     void setUp() {
@@ -103,14 +97,10 @@ class SingleTableScheduleServiceDualFormatTest {
         com.steven.assets.service.ExportScheduleUnitHarness.attach(commodityService, commodityRepo);
         rateService = new ExchangeRateExportScheduleService(
                 rateRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
-        indexService = new IndexExportScheduleService(
-                indexRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(indexService, indexRepo);
 
         when(gainRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(commodityRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(rateRepo.save(any())).thenAnswer(i -> i.getArgument(0));
-        when(indexRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
         when(excelExportService.realizedGainsDocForOwner(anyLong())).thenReturn(doc("已實現損益"));
         when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc("油價金價"));
@@ -189,21 +179,6 @@ class SingleTableScheduleServiceDualFormatTest {
         assertBothFormats("out", "台幣兌美元_1_" + today());
         verify(excelExportService, times(1)).exchangeRatesDoc(anyString(), any(), any());
         verify(excelExportService, never()).exportExchangeRates(anyString(), any(), any());
-    }
-
-    @Test
-    @DisplayName("大盤指數日線：兩份落檔、主檔名一致，且 doc 只取一次")
-    void 指數() throws Exception {
-        var s = IndexExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true).outputSubpath("out").build();
-        s.addTime(IndexExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0)
-                .lastRunDate(LocalDate.now(TW).minusDays(1)).markets(new java.util.LinkedHashSet<>(java.util.Set.of("TWSE"))).build());
-        when(indexRepo.findAll()).thenReturn(List.of(s));
-
-        indexService.tick();
-
-        assertBothFormats("out", "台股集中市場_1_" + today());
-        verify(excelExportService, times(1)).indexDailyDoc(anyString(), any(), any());
-        verify(excelExportService, never()).exportIndexDaily(anyString(), any(), any());
     }
 
     // ===== (h) Drive 兩份 =====

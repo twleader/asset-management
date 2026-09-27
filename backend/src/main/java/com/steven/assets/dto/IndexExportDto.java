@@ -1,33 +1,31 @@
 package com.steven.assets.dto;
 
-import lombok.Builder;
+import java.time.LocalDate;
 import java.util.List;
 
-/** 大盤指數排程的多時間點／多指數 API DTO。 */
-public class IndexExportDto {
-    public record TimeRequest(Integer runHour, Integer runMinute, Boolean enabled, List<String> markets) {}
+/** API contracts for independently configured index export schedules (Requirement 45 / Task 464). */
+public final class IndexExportDto {
+    private IndexExportDto() {}
 
-    @Builder
-    public record TimeItem(Long id, Integer runHour, Integer runMinute, Boolean enabled,
-                           List<String> markets, String lastRunAt, String lastRunStatus) {}
+    /** Complete settings for one schedule. A null or blank name clears the optional name. */
+    public record ScheduleRequest(String name, Boolean enabled, Integer runHour, Integer runMinute,
+                                  List<String> markets, Integer rangeMonths, String outputSubpath,
+                                  Boolean gdriveEnabled, String gdriveSubpath) {}
 
-    @Builder
-    public record SettingResponse(Boolean enabled, String outputSubpath, Integer rangeMonths,
-                                  String baseDir, List<TimeItem> times,
-                                  boolean gdriveEnabled, String gdriveSubpath, String gdriveRemote,
-                                  String gdriveLastRunAt, String gdriveLastStatus,
-                                  String gdriveSelfCheckWarning) {}
+    public record MarketOption(String value, String label) {}
 
-    public record SettingRequest(Boolean enabled, String outputSubpath, Integer rangeMonths,
-                                 List<TimeRequest> times, Boolean gdriveEnabled, String gdriveSubpath) {}
+    public record ScheduleItem(Long id, String name, Boolean enabled, Integer runHour, Integer runMinute,
+                               List<String> markets, Integer rangeMonths, String outputSubpath,
+                               LocalDate lastRunDate, String lastRunAt, String lastRunStatus,
+                               boolean gdriveEnabled, String gdriveSubpath,
+                               String gdriveLastRunAt, String gdriveLastStatus) {}
 
-    @Builder
+    public record SettingResponse(List<ScheduleItem> schedules, String baseDir, String gdriveRemote,
+                                  String gdriveSelfCheckWarning, List<MarketOption> marketOptions) {}
+
     public record FileResult(String market, String marketLabel, String path, long sizeBytes,
                              String jsonPath, long jsonSizeBytes, String gdrivePath,
-                             String jsonGdrivePath, String gdriveStatus) {}
+                             String jsonGdrivePath, String gdriveStatus, String error) {}
 
-    @Builder
-    public record RunNowResponse(String path, long sizeBytes, String gdrivePath, String gdriveStatus,
-                                 String jsonPath, long jsonSizeBytes, String jsonGdrivePath,
-                                 List<FileResult> files) {}
+    public record RunNowResponse(Long id, List<FileResult> results, String gdriveStatus) {}
 }
