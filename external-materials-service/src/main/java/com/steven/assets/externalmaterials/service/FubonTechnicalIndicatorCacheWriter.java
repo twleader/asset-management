@@ -15,10 +15,21 @@ public class FubonTechnicalIndicatorCacheWriter implements FubonTechnicalCachePo
     static { WRITE.setLocation(new ClassPathResource("redis/fubon-technical-indicator-cache-write.lua")); WRITE.setResultType(String.class); }
     private final StringRedisTemplate redis;
     private final FubonTechnicalIndicatorCacheRepository repository;
-    public FubonTechnicalIndicatorCacheWriter(StringRedisTemplate redis, FubonTechnicalIndicatorCacheRepository repository) {
-        this.redis = redis; this.repository = repository;
+    private final FubonIntradayTechnicalCache intraday;
+    public FubonTechnicalIndicatorCacheWriter(StringRedisTemplate redis, FubonTechnicalIndicatorCacheRepository repository,
+                                              FubonIntradayTechnicalCache intraday) {
+        this.redis = redis; this.repository = repository; this.intraday = intraday;
     }
     @Override public FubonTechnicalCache.Read read(String symbol) { return repository.read(symbol); }
+    @Override public FubonTechnicalCachePort.IntradayWrite writeIntraday(FubonIntradayTechnical.Bundle observation) {
+        return switch (intraday.write(observation)) {
+            case WRITTEN -> FubonTechnicalCachePort.IntradayWrite.WRITTEN;
+            case REJECTED_STALE -> FubonTechnicalCachePort.IntradayWrite.REJECTED_STALE;
+            case FAILED -> FubonTechnicalCachePort.IntradayWrite.FAILED;
+        };
+    }
+    @Override public String readIntradayCursor() { return intraday.readCursor(); }
+    @Override public void advanceIntradayCursor(String symbol) { intraday.advanceCursor(symbol); }
     @Override public FubonTechnicalCache.Write write(TechnicalRead read) {
         try {
             FubonTechnicalCache.Document candidate = FubonTechnicalCache.candidate(read);

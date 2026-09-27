@@ -1,13 +1,20 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpServer;
+import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import org.junit.jupiter.api.Test;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -108,7 +115,70 @@ class FubonScheduledMarketClientTest {
                     assertThat(e.reason()).isEqualTo("RATE_LIMITED");
                     assertThat(e.stopRun()).isTrue();
                     assertThat(e).hasMessageNotContaining("fake-do-not-echo");
+        });
+    }
+    @Test void intradayTechnicalAloneUsesSeventySecondV1TransportTimeout() {
+        when(clock.instant()).thenReturn(NOW);
+        List<Duration> timeouts = new ArrayList<>();
+        var client = new FubonScheduledMarketClient(
+                new FubonMarketConfigState("true", "http://fake.invalid", "unused", p -> "fake-token"),
+                clock,
+                (uri, token, body, limit, timeout) -> {
+                    timeouts.add(timeout);
+                    return new FubonScheduledMarketClient.RawResponse(503, "{}".getBytes(StandardCharsets.UTF_8));
                 });
+
+        assertThatThrownBy(() -> client.basic("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+        assertThatThrownBy(() -> client.intradayTechnical("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+
+        assertThat(timeouts).containsExactly(Duration.ofSeconds(8), Duration.ofSeconds(70));
+    }
+
+    @Test void intradayTechnicalWaitsPastEightSecondsAndUsesExactRouteAndOperationIdentity() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<String> method = new AtomicReference<>();
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<String> token = new AtomicReference<>();
+        AtomicReference<String> body = new AtomicReference<>();
+        server.setExecutor(executor);
+        server.createContext("/", exchange -> {
+            method.set(exchange.getRequestMethod());
+            path.set(exchange.getRequestURI().getPath());
+            token.set(exchange.getRequestHeaders().getFirst(FubonScheduledMarketClient.TOKEN_HEADER));
+            body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            try { Thread.sleep(8_500); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                exchange.close();
+                return;
+            }
+            byte[] response = "{\"reason\":\"UPSTREAM_UNAVAILABLE\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(503, response.length);
+            try (var output = exchange.getResponseBody()) { output.write(response); }
+        });
+        server.start();
+        try {
+            when(clock.instant()).thenReturn(NOW);
+            ExternalApiErrorLogWriter writer = mock(ExternalApiErrorLogWriter.class);
+            var config = new FubonMarketConfigState(
+                    "true", "http://127.0.0.1:" + server.getAddress().getPort(), "unused", p -> "fake-token");
+            var client = new FubonScheduledMarketClient(config, clock, writer);
+            long startedAt = System.nanoTime();
+
+            assertThatThrownBy(() -> client.intradayTechnical("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+
+            assertThat(Duration.ofNanos(System.nanoTime() - startedAt).toMillis()).isGreaterThanOrEqualTo(8_000);
+            assertThat(method).hasValue("POST");
+            assertThat(path).hasValue("/internal/market-data/intraday-technical-indicators/read");
+            assertThat(token).hasValue("fake-token");
+            assertThat(body).hasValue("{\"symbol\":\"2330\"}");
+            verify(writer).record(eq("FUBON_TECHNICAL_INDICATORS_READ"), eq("技術指標查詢"), any(Throwable.class), eq(NOW));
+            verifyNoMoreInteractions(writer);
+        } finally {
+            server.stop(0);
+            executor.shutdownNow();
+        }
     }
     @Test void task425ExactVolumeAndDailyContractsRejectWrongStatusAndPreserveCanonicalNumbers() {
         var volumes = FubonMarketJson.intradayVolumes(FubonMarketJson.parse("""

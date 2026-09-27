@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.client;
 import com.steven.assets.externalmaterials.service.FubonMarketDataPort;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.MarketClock;
+import com.steven.assets.externalmaterials.service.FubonIntradayTechnical;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.io.IOException;
@@ -25,6 +26,7 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
     public static final Duration TIMEOUT = Duration.ofSeconds(30);
     public static final Duration TECHNICAL_V2_TIMEOUT = Duration.ofSeconds(70);
     public static final Duration MARKET_DATA_V1_TIMEOUT = Duration.ofSeconds(8);
+    public static final Duration INTRADAY_TECHNICAL_TIMEOUT = Duration.ofSeconds(70);
     private final FubonMarketConfigState config;
     private final MarketClock clock;
     private final Transport transport;
@@ -98,6 +100,17 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
         try { return FubonMarketJson.intradayVolumes(FubonMarketJson.parse(body), symbol, date, clock.instant()); }
         catch (RuntimeException invalid) { throw schemaFailure("FUBON_INTRADAY_VOLUMES_READ", "個股當日分價量查詢", "INVALID_RESPONSE", invalid); }
     }
+    @Override public FubonIntradayTechnical.Bundle intradayTechnical(String symbol, LocalDate date) {
+        validateSymbols(List.of(symbol), 1, false);
+        String body = postV1("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢",
+                "/internal/market-data/intraday-technical-indicators/read", Map.of("symbol", symbol), 512 * 1024,
+                INTRADAY_TECHNICAL_TIMEOUT);
+        try {
+            return FubonIntradayTechnicalJson.parse(FubonMarketJson.parse(body), symbol, date, clock.instant());
+        } catch (RuntimeException invalid) {
+            throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "INVALID_RESPONSE", invalid);
+        }
+    }
     @Override public HistoricalDailyCandlesRead historicalDailyCandles(String symbol, LocalDate from, LocalDate to) {
         validateSymbols(List.of(symbol), 1, false);
         if (from == null || to == null || from.isAfter(to) || from.plusDays(365).isBefore(to))
@@ -149,6 +162,10 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
     }
     /** Task408/425 v1 routes have an exact root error body, unlike frozen older routes. */
     private String postV1(String operationKey, String apiName, String path, Map<String, ?> request, int limit) {
+        return postV1(operationKey, apiName, path, request, limit, MARKET_DATA_V1_TIMEOUT);
+    }
+    private String postV1(String operationKey, String apiName, String path, Map<String, ?> request, int limit,
+                          Duration timeout) {
         FubonMarketConfigState.Snapshot access = config.snapshot();
         if (access.reason() != null) throw new Unavailable(access.reason(), true);
         boolean outboundStarted = false;
@@ -156,7 +173,7 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
             String requestBody = FubonMarketJson.MAPPER.writeValueAsString(request);
             outboundStarted = true;
             RawResponse response = transport.post(access.endpoint(path), access.token(),
-                    requestBody, limit, MARKET_DATA_V1_TIMEOUT);
+                    requestBody, limit, timeout);
             if (response.status() == 200 && response.body() != null && response.body().length <= limit)
                 return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();

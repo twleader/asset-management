@@ -521,6 +521,81 @@
                 <div v-else class="muted">舊快照（LEGACY_LOCAL_V0）未含 technicalResolution；請重新整理，畫面不將其視為 0 或最新富邦來源。</div>
               </div>
 
+              <!-- Task461：盤中指標只呈現 resolver 已讀入的 cache-only detail，不參與畫面端計算或決策。 -->
+              <div v-if="row.technicalResolution" class="fundamental-panel intraday-technical-panel">
+                <div class="fundamental-head">
+                  <div>
+                    <span class="fundamental-title">富邦盤中技術指標</span>
+                    <span class="intraday-technical-note">僅供明細檢視，不影響評分或動作</span>
+                  </div>
+                  <el-tag
+                    v-if="row.technicalResolution.intraday"
+                    size="small"
+                    :type="intradayTechnicalStatusType(row.technicalResolution.intraday.status)"
+                    effect="plain"
+                  >
+                    {{ row.technicalResolution.intraday.status || '—' }}
+                  </el-tag>
+                </div>
+                <template v-if="row.technicalResolution.intraday">
+                  <div class="technical-resolution-meta intraday-technical-root">
+                    <div class="technical-resolution-meta-item">
+                      <span>快取狀態</span>
+                      <strong>{{ row.technicalResolution.intraday.status || '—' }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>讀取時間</span>
+                      <strong>{{ formatTime(row.technicalResolution.intraday.observedAt) }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>資料年齡</span>
+                      <strong>{{ technicalAgeLabel(row.technicalResolution.intraday.ageSeconds) }}</strong>
+                    </div>
+                  </div>
+
+                  <div class="intraday-technical-frames">
+                    <div
+                      v-for="frameEntry in [
+                        { key: 'one-minute', label: '1 分 K', frame: row.technicalResolution.intraday.oneMinute },
+                        { key: 'five-minute', label: '5 分 K', frame: row.technicalResolution.intraday.fiveMinute }
+                      ]"
+                      :key="frameEntry.key"
+                      class="intraday-technical-frame"
+                    >
+                      <div class="intraday-technical-frame-head">
+                        <strong>{{ frameEntry.label }}</strong>
+                        <el-tag size="small" :type="intradayTechnicalStatusType(frameEntry.frame?.status)" effect="plain">
+                          {{ frameEntry.frame?.status || '—' }}
+                        </el-tag>
+                      </div>
+                      <div v-if="frameEntry.frame" class="intraday-technical-frame-meta">
+                        <small>timeframe：{{ frameEntry.frame.timeframe || '—' }} · 來源日：{{ frameEntry.frame.sourceDate || '—' }}</small>
+                        <small v-if="frameEntry.frame.sourceTimestamp">bar time：{{ formatTime(frameEntry.frame.sourceTimestamp) }}</small>
+                        <small v-else-if="frameEntry.frame.sourceDate">bar time：來源僅提供日期，無法得知</small>
+                        <small v-else>bar time：—</small>
+                        <small>讀取時間：{{ formatTime(frameEntry.frame.observedAt) }}</small>
+                      </div>
+                      <div v-else class="muted">本次未提供此時間框架資料；不補預設值。</div>
+                      <div v-if="frameEntry.frame" class="intraday-technical-indicator-grid">
+                        <div class="intraday-technical-indicator">
+                          <span>KD</span>
+                          <strong>K {{ intradayTechnicalValue(frameEntry.frame.kdj?.k) }} ／ D {{ intradayTechnicalValue(frameEntry.frame.kdj?.d) }} ／ J {{ intradayTechnicalValue(frameEntry.frame.kdj?.j) }}</strong>
+                        </div>
+                        <div class="intraday-technical-indicator">
+                          <span>MACD</span>
+                          <strong>Line {{ intradayTechnicalValue(frameEntry.frame.macd?.macdLine) }} ／ Signal {{ intradayTechnicalValue(frameEntry.frame.macd?.signalLine) }}</strong>
+                        </div>
+                        <div class="intraday-technical-indicator">
+                          <span>布林通道</span>
+                          <strong>上 {{ intradayTechnicalValue(frameEntry.frame.bollinger?.upper) }} ／ 中 {{ intradayTechnicalValue(frameEntry.frame.bollinger?.middle) }} ／ 下 {{ intradayTechnicalValue(frameEntry.frame.bollinger?.lower) }}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="muted">本次明細未提供盤中指標快取；不以日線或舊資料替代。</div>
+              </div>
+
               <div class="fundamental-panel">
                 <div class="fundamental-head">
                   <span class="fundamental-title">基本面與產業</span>
@@ -1989,6 +2064,18 @@ function technicalAgeLabel(ageSeconds) {
   return `${Number(ageSeconds)} 秒`
 }
 
+function intradayTechnicalStatusType(status) {
+  if (status === 'AVAILABLE') return 'success'
+  if (status === 'STALE') return 'warning'
+  if (status === 'SCHEMA_INVALID') return 'danger'
+  return 'info'
+}
+
+// Task461：保留後端 canonical decimal 字串；不轉數值、不截位，也不補零。
+function intradayTechnicalValue(value) {
+  return value == null || value === '' ? '—' : String(value)
+}
+
 function formatTechnicalMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return '—'
   const entries = Object.entries(value)
@@ -2617,6 +2704,19 @@ onUnmounted(() => {
 .dividend-date-cell strong { color: #0f172a; font-size: 13px; }
 .fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
 .technical-resolution-panel { border-color: #c7d2fe; background: #f8fafc; }
+.intraday-technical-panel { border-color: #99f6e4; background: #f0fdfa; }
+.intraday-technical-note { margin-left: 8px; color: #64748b; font-size: 12px; font-weight: 400; }
+.intraday-technical-root { margin-bottom: 14px; }
+.intraday-technical-frames { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.intraday-technical-frame { border: 1px solid #99f6e4; border-radius: 8px; background: #fff; padding: 11px; }
+.intraday-technical-frame-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.intraday-technical-frame-head strong { color: #0f172a; font-size: 13px; }
+.intraday-technical-frame-meta { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.intraday-technical-frame-meta small { color: #64748b; font-size: 11px; line-height: 1.45; }
+.intraday-technical-indicator-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.intraday-technical-indicator { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px; border-radius: 6px; background: #f8fafc; }
+.intraday-technical-indicator span { color: #64748b; font-size: 11px; }
+.intraday-technical-indicator strong { color: #0f172a; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .technical-resolution-meta { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 9px; }
 .technical-resolution-meta-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; padding: 9px 10px; }
 .technical-resolution-meta-item > span, .technical-resolution-meta-item small { color: #64748b; font-size: 11px; line-height: 1.45; }
@@ -2673,11 +2773,12 @@ onUnmounted(() => {
   .market-layout { grid-template-columns: 1fr; }
   .market-metrics { grid-template-columns: repeat(3, 1fr); }
   .confirm-grid { grid-template-columns: repeat(2, 1fr); }
-  .fundamental-grid, .valuation-component-grid, .technical-resolution-meta { grid-template-columns: repeat(2, 1fr); }
+  .fundamental-grid, .valuation-component-grid, .technical-resolution-meta, .intraday-technical-frames { grid-template-columns: repeat(2, 1fr); }
+  .intraday-technical-indicator-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   .header-row, .card-head { align-items: flex-start; flex-direction: column; }
-  .market-metrics, .confirm-grid, .fundamental-grid, .valuation-component-grid, .technical-resolution-meta { grid-template-columns: 1fr; }
+  .market-metrics, .confirm-grid, .fundamental-grid, .valuation-component-grid, .technical-resolution-meta, .intraday-technical-frames { grid-template-columns: 1fr; }
   .expand-panel { padding-left: 16px; padding-right: 16px; }
   .state-options { grid-template-columns: 1fr; }
 }

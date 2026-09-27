@@ -19,6 +19,12 @@ from .config import ConfigLoader, ConfigSnapshot
 from .counters import Outcome, OutcomeCounters
 from .dividends import DividendError, DividendService
 from .etf_holdings import EtfHoldingsService
+from .intraday_technical_indicators import (
+    IntradayTechnicalGateway,
+    IntradayTechnicalGatewayError,
+    IntradayTechnicalIndicatorError,
+    IntradayTechnicalIndicatorService,
+)
 from .normalization import stock_code, stock_codes, strict_iso_date
 from .market_data_v1 import MarketDataV1Error, MarketDataV1Service
 from .portfolio import PortfolioError, PortfolioService
@@ -43,6 +49,24 @@ class MarketDataV1RouteError(RuntimeError):
     def __init__(self, status_code: int, reason: str) -> None:
         super().__init__(reason)
         self.status_code, self.reason = status_code, reason
+
+
+class IntradayTechnicalGatewayAdapter:
+    """Translate the concrete SDK boundary into the indicator service's narrow port."""
+
+    def __init__(self, gateway: SdkGateway) -> None:
+        self._gateway = gateway
+
+    def read_intraday_technical_indicator(
+        self, kind: str, symbol: str, start_date: str, end_date: str, timeframe: str,
+        *, deadline: float | None = None,
+    ) -> object:
+        try:
+            return self._gateway.read_intraday_technical_indicator(
+                kind, symbol, start_date, end_date, timeframe, deadline=deadline,
+            )
+        except SdkCallError as exc:
+            raise IntradayTechnicalGatewayError(exc.reason, misconfigured=exc.misconfigured) from None
 
 # Central last line of defense: even if a future call site logs a raw SDK
 # exception or stringifies a credential field, the record is redacted before
@@ -142,6 +166,10 @@ class MarketDataV1ReadRequest(BaseModel):
         return stock_code(value)
 
 
+class IntradayTechnicalReadRequest(MarketDataV1ReadRequest):
+    """The intraday technical endpoint accepts only a stock symbol."""
+
+
 class HistoricalDailyCandlesReadRequest(MarketDataV1ReadRequest):
     from_date: StrictStr = Field(alias="from")
     to_date: StrictStr = Field(alias="to")
@@ -202,6 +230,7 @@ def create_app(
     technical_indicator_service: TechnicalIndicatorService | None = None,
     market_data_v1_service: MarketDataV1Service | None = None,
     stock_push_stream: StockPushStream | None = None,
+    intraday_technical_indicator_service: IntradayTechnicalIndicatorService | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
     sdk_gateway = gateway or SdkGateway(loader)
@@ -217,6 +246,9 @@ def create_app(
     dividends = dividend_service or DividendService(sdk_gateway)
     technical = technical_indicator_service or TechnicalIndicatorService(sdk_gateway)
     market_v1 = market_data_v1_service or MarketDataV1Service(sdk_gateway)
+    intraday_technical = intraday_technical_indicator_service or IntradayTechnicalIndicatorService(
+        IntradayTechnicalGatewayAdapter(sdk_gateway)
+    )
     stock_stream = stock_push_stream or StockPushStream(sdk_gateway, counters=outcome_counters)
 
     @asynccontextmanager
@@ -242,7 +274,8 @@ def create_app(
     no_body_paths = {"/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read",
                      "/internal/market-data/stock-push/stream"}
     v1_market_data_paths = {"/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read",
-                            "/internal/market-data/intraday-volumes/read", "/internal/market-data/historical-daily-candles/read"}
+                            "/internal/market-data/intraday-volumes/read", "/internal/market-data/historical-daily-candles/read",
+                            "/internal/market-data/intraday-technical-indicators/read"}
     strict_json_paths = {"/internal/trades/read", "/internal/market-data/dividends/read",
                          "/internal/market-data/technical-indicators/read",
                          "/internal/market-data/stock-push/subscriptions", *v1_market_data_paths}
@@ -543,6 +576,21 @@ def create_app(
         if exc.reason in {"RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED"}:
             return MarketDataV1RouteError(503, exc.reason)
         return MarketDataV1RouteError(503, "UPSTREAM_UNAVAILABLE")
+
+    @application.post("/internal/market-data/intraday-technical-indicators/read")
+    def intraday_technical_read(request: IntradayTechnicalReadRequest) -> dict[str, object]:
+        try:
+            result = intraday_technical.read(request.symbol)
+        except IntradayTechnicalGatewayError as exc:
+            if exc.misconfigured:
+                raise MarketDataV1RouteError(503, "MISCONFIGURED") from None
+            if exc.reason in {"RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED"}:
+                raise MarketDataV1RouteError(503, exc.reason) from None
+            raise MarketDataV1RouteError(503, "UPSTREAM_UNAVAILABLE") from None
+        except IntradayTechnicalIndicatorError as exc:
+            raise MarketDataV1RouteError(400 if exc.request_error else 503, exc.reason) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
 
     @application.post("/internal/market-data/stock-basic/read")
     def stock_basic_read(request: MarketDataV1ReadRequest) -> dict[str, object]:

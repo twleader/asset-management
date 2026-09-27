@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.14.0
+  version: 1.15.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
     十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
@@ -6210,6 +6210,7 @@ components:
       - ageSeconds
       - profiles
       - fieldProvenance
+      - intraday
       properties:
         decisionInputVersion:
           type:
@@ -6268,6 +6269,13 @@ components:
           items:
             "$ref": "#/components/schemas/TechnicalFieldProvenance"
             description: 一個技術欄位的來源稽核。
+        intraday:
+          anyOf:
+          - "$ref": "#/components/schemas/IntradayTechnicalResolution"
+            description: 盤中指標快取命中時的最新 1 分與 5 分技術值。
+          - type: 'null'
+            description: 舊版資料可能沒有盤中解析；新回應以 UNAVAILABLE 狀態物件表示快取不可用。
+          description: 唯讀盤中技術明細，完全獨立於雷達評分與動作。
       additionalProperties: false
       example:
         decisionInputVersion: TW_RULES_V20|FUBON_OVERLAY_V1
@@ -6304,6 +6312,143 @@ components:
           origin: DETAIL_ONLY
           profileId: macd_d_12_26_9
           reason: VENDOR_MACD_DETAIL_ONLY
+        intraday:
+          status: AVAILABLE
+          observedAt: '2026-09-25T02:13:00Z'
+          ageSeconds: 34
+          oneMinute:
+            status: AVAILABLE
+            timeframe: '1'
+            sourceDate: '2026-09-25'
+            sourceTimestamp: '2026-09-25T02:12:00Z'
+            observedAt: '2026-09-25T02:13:00Z'
+            kdj: {k: 51.2, d: 48.9, j: 55.8}
+            macd: {macdLine: 0.4, signalLine: 0.3}
+            bollinger: {upper: 1015, middle: 1004.5, lower: 994}
+          fiveMinute:
+            status: AVAILABLE
+            timeframe: '5'
+            sourceDate: '2026-09-25'
+            sourceTimestamp: '2026-09-25T02:10:00Z'
+            observedAt: '2026-09-25T02:13:00Z'
+            kdj: {k: 50.1, d: 47.2, j: 55.9}
+            macd: {macdLine: 0.5, signalLine: 0.2}
+            bollinger: {upper: 1018, middle: 1005, lower: 992}
+    IntradayTechnicalResolution:
+      type: object
+      description: Redis 中富邦 1 分與 5 分最新 KD、MACD、布林通道值及 freshness；盤中值只供明細顯示。
+      required: [status, observedAt, ageSeconds, oneMinute, fiveMinute]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, STALE, UNAVAILABLE]
+          description: AVAILABLE 表示觀測時間與所有非 null 來源 bar 時間的 age 均不超過 420 秒；STALE 表示 key 未到期但任一時間超過 420 秒；UNAVAILABLE 表示 miss、過期或資料無效。
+        observedAt:
+          type: [string, 'null']
+          format: date-time
+          description: 六個官方指標查詢組成此 bundle 的根觀測時間；UNAVAILABLE 時為 null。
+        ageSeconds:
+          type: [integer, 'null']
+          format: int64
+          description: 回應時相對 observedAt 的非負秒數；資料不可用時為 null。
+        oneMinute:
+          anyOf:
+          - "$ref": "#/components/schemas/IntradayTechnicalFrame"
+            description: 最新 1 分來源 point；根狀態為 UNAVAILABLE 時為 null。
+          - type: 'null'
+            description: 沒有可顯示的有效 1 分來源值。
+          description: timeframe 固定字串 1 的最新 point。
+        fiveMinute:
+          anyOf:
+          - "$ref": "#/components/schemas/IntradayTechnicalFrame"
+            description: 最新 5 分來源 point；根狀態為 UNAVAILABLE 時為 null。
+          - type: 'null'
+            description: 沒有可顯示的有效 5 分來源值。
+          description: timeframe 固定字串 5 的最新 point。
+      additionalProperties: false
+      example:
+        status: AVAILABLE
+        observedAt: '2026-09-25T02:13:00Z'
+        ageSeconds: 34
+        oneMinute:
+          status: AVAILABLE
+          timeframe: '1'
+          sourceDate: '2026-09-25'
+          sourceTimestamp: '2026-09-25T02:12:00Z'
+          observedAt: '2026-09-25T02:13:00Z'
+          kdj: {k: 51.2, d: 48.9, j: 55.8}
+          macd: {macdLine: 0.4, signalLine: 0.3}
+          bollinger: {upper: 1015, middle: 1004.5, lower: 994}
+        fiveMinute:
+          status: AVAILABLE
+          timeframe: '5'
+          sourceDate: '2026-09-25'
+          sourceTimestamp: '2026-09-25T02:10:00Z'
+          observedAt: '2026-09-25T02:13:00Z'
+          kdj: {k: 50.1, d: 47.2, j: 55.9}
+          macd: {macdLine: 0.5, signalLine: 0.2}
+          bollinger: {upper: 1018, middle: 1005, lower: 992}
+    IntradayTechnicalFrame:
+      type: object
+      description: 一個富邦盤中 timeframe 最新來源 point 與三組直接回傳指標數值。
+      required: [status, timeframe, sourceDate, sourceTimestamp, observedAt, kdj, macd, bollinger]
+      properties:
+        status:
+          type: string
+          enum: [AVAILABLE, STALE]
+          description: AVAILABLE 表示 timeframe 觀測時間與非 null 來源 bar 時間的 age 均不超過 420 秒；STALE 表示其中任一時間超過 420 秒且 key 尚未到期。
+        timeframe:
+          type: string
+          enum: ['1', '5']
+          description: 富邦官方 timeframe 字串；1 代表 1 分 K，5 代表 5 分 K。
+        sourceDate:
+          type: string
+          format: date
+          description: 三個技術 endpoint 最新列共同的台北交易日期。
+        sourceTimestamp:
+          type: [string, 'null']
+          format: date-time
+          description: 來源 bar 時間；官方只提供日期字串時為 null，不以 observedAt 代填。
+        observedAt:
+          type: string
+          format: date-time
+          description: 此 timeframe 三個 endpoint 的來源回應觀測時間。
+        kdj:
+          "$ref": "#/components/schemas/IntradayKdj"
+          description: 官方 KDJ(9,3,3) 最新 k、d、j 值。
+        macd:
+          "$ref": "#/components/schemas/IntradayMacd"
+          description: 官方 MACD(12,26,9) 最新 MACD 線與 signal 線，不推導 histogram。
+        bollinger:
+          "$ref": "#/components/schemas/IntradayBollinger"
+          description: 官方 BBANDS(20) 最新上軌、中軌與下軌。
+      additionalProperties: false
+    IntradayKdj:
+      type: object
+      description: 富邦 KDJ(9,3,3) 最新來源數值；不參與本地雷達計算。
+      required: [k, d, j]
+      properties:
+        k: {type: number, description: 富邦回傳的 K 值，未重新計算。}
+        d: {type: number, description: 富邦回傳的 D 值，未重新計算。}
+        j: {type: number, description: 富邦回傳的 J 值，detail-only。}
+      additionalProperties: false
+    IntradayMacd:
+      type: object
+      description: 富邦 MACD(12,26,9) 直接回傳的兩項最新值。
+      required: [macdLine, signalLine]
+      properties:
+        macdLine: {type: number, description: 富邦回傳的 MACD 線值；不推導 EMA 或 DIF。}
+        signalLine: {type: number, description: 富邦回傳的 signal 線值；不推導 histogram。}
+      additionalProperties: false
+    IntradayBollinger:
+      type: object
+      description: 富邦 BBANDS(20) 直接回傳的最新上下軌與中軌。
+      required: [upper, middle, lower]
+      properties:
+        upper: {type: number, description: 富邦回傳的布林上軌值。}
+        middle: {type: number, description: 富邦回傳的布林中軌值。}
+        lower: {type: number, description: 富邦回傳的布林下軌值。}
+      additionalProperties: false
     TechnicalProfileResolution:
       type: object
       description: 一個 immutable profile 的最大 valid source-date candidate，沒有 history array；完整歷史由 PostgreSQL fubon technical fact/member 保留。

@@ -105,10 +105,10 @@ class SdkGateway:
     CLEANUP_CALL_TIMEOUT_SECONDS = 2.0
     READER_DEADLINE_SECONDS = 30.0
     MAX_BLOCKING_CALLS = 5
-    # Task408 is stricter than the frozen historical 60/min limiter.  It is
-    # acquired immediately before *each actual* technical/ticker/candle SDK
-    # invocation, including an authentication retry.
-    MARKETDATA_START_LIMIT = 38
+    # Task461's shared market-data allowance is 60 actual SDK starts in every
+    # rolling 60-second window. The permit is acquired immediately before each
+    # technical/ticker/candle/volume/historical invocation, including retries.
+    MARKETDATA_START_LIMIT = 60
 
     def __init__(
         self,
@@ -301,6 +301,26 @@ class SdkGateway:
             "timeframe": timeframe, **parameters,
         }, deadline=deadline)
 
+    def read_intraday_technical_indicator(self, kind: str, symbol: str, start_date: str, end_date: str,
+                                          timeframe: str, *, deadline: float | None = None) -> object:
+        """Read one fixed Task461 intraday profile through the shared start gate.
+
+        The caller may choose only one of the three fixed indicator names and
+        the two supported minute frames. Parameter values stay here so the
+        HTTP request can never dispatch an SDK method or customize a profile.
+        """
+        parameters_by_kind: dict[str, dict[str, object]] = {
+            "kdj": {"rPeriod": 9, "kPeriod": 3, "dPeriod": 3},
+            "macd": {"fast": 12, "slow": 26, "signal": 9},
+            "bb": {"period": 20},
+        }
+        if kind not in parameters_by_kind or timeframe not in {"1", "5"}:
+            raise SdkCallError("TECHNICAL_METHOD_UNAVAILABLE", misconfigured=True)
+        return self._marketdata_read("technical", kind, {
+            "symbol": symbol, "from": start_date, "to": end_date,
+            "timeframe": timeframe, **parameters_by_kind[kind],
+        }, deadline=deadline)
+
     def read_ticker(self, symbol: str, *, deadline: float | None = None) -> object:
         # `type` is deliberately omitted: only an odd-lot request is allowed to set it.
         return self._marketdata_read("intraday", "ticker", {"symbol": symbol}, deadline=deadline)
@@ -419,11 +439,12 @@ class SdkGateway:
         raise SdkCallError("SERVICE_SHUTDOWN")
 
     def _take_marketdata_start_permit(self, *, deadline: float | None = None) -> None:
-        """Acquire the Task408 38-start rolling permit immediately before SDK I/O.
+        """Acquire the shared Task461 60-start rolling permit immediately before SDK I/O.
 
         It is intentionally independent from `_take_history_budget`: that older
         60/min gate remains a second defence and may account non-Task408 history
-        readers.  This permit only counts actual technical/ticker/candle starts.
+        readers.  This permit counts actual technical, ticker, candle, volume
+        and historical starts.
         """
         while not self._shutdown_event.is_set():
             with self._marketdata_start_lock:

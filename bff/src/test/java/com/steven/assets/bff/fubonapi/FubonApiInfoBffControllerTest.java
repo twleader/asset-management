@@ -89,9 +89,9 @@ class FubonApiInfoBffControllerTest {
             Map.entry("marketdata.rest_client.stock.historical.candles", List.of("0 35 15 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.technical.sma", List.of("0 40 13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.technical.rsi", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI")),
-            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.kdj", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.macd", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
+            Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.corporate_actions.dividends", List.of("0 0 9 * * MON-FRI", "0 30 13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.ownership.etf_holdings", List.of("0 50 8 * * MON-FRI", "0 30 15 * * MON-FRI"))
     );

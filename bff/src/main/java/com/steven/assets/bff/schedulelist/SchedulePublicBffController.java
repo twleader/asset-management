@@ -10,12 +10,12 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬三個服務：
- * {@code business-services}（30 個）、{@code external-materials-service}（39 個）與
+ * {@code business-services}（30 個）、{@code external-materials-service}（40 個）與
  * {@code bff}（1 個；Requirement 143／Task 421 新增的 {@code NginxGatewayFailureLogTailer}，
  * 是 bff 服務有史以來第一個 {@code @Scheduled} 元件）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
  *
- * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 39 筆對應 42 個標註
+ * <p><b>計數慣例：以 {@code @Scheduled} 方法計，一法一筆。</b>external 40 筆對應 43 個標註
  * （{@code TwClosurePoller} 與台股官方收盤對帳各為一法兩標、各併為一筆；富邦股利同步也是一法兩標；Task 228 直接以 {@code grep '@Scheduled'} 逐檔核對重新校正此數，
  * 修正了 Task 228 之前既已存在、與此清單無關的計數漂移；Task 337 新增 {@code CommodityPricePoller} 的
  * 每分鐘即時報價與收盤後校正兩筆，各一法一筆，不套用一法兩標的合併規則）。
@@ -47,7 +47,7 @@ import java.util.List;
  *       FundDividendPoller、NewsPoller、StockFundamentalPoller、KrStockPoller、FundNavPoller、DividendPersister、
  *       IntradayTickRefresher、HistoricalBackfillService、ExchangeRatePoller、ClosePersister、
  *       UsValuationDerivationScheduler、CommodityPricePoller、EtfNavPoller、FubonIntradayPriceVolumeSyncService、
- *       FubonHistoricalDailyCandleSyncService</li>
+ *       FubonHistoricalDailyCandleSyncService、FubonIntradayTechnicalSyncService</li>
  *   <li>bff：NginxGatewayFailureLogTailer（Requirement 143／Task 421）</li>
  * </ul>
  *
@@ -66,7 +66,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（70 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
+    /** 全系統排程清單（71 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（30）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -163,7 +163,7 @@ public class SchedulePublicBffController {
                     "刪除交易日早於保留天數（預設 7 天）的 SRPP package 與其凍結來源；不刪規則包 registry 與 owner key",
                     "每日 03:25", "0 25 3 * * *", TPE),
 
-            // ===== external-materials-service（39）=====
+            // ===== external-materials-service（40）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股即時推播訂閱更新",
                     "Normal mode aggregates 僅採實際成交與微秒時間，盤中只訂閱今日交易雷達台股，最多 300 檔；"
                             + "清單每 30 秒更新、lease 最長 120 秒，停用／離開盤中／日曆未知即撤銷，不使用試撮或覆寫官方收盤",
@@ -176,6 +176,11 @@ public class SchedulePublicBffController {
                     "只處理今日交易雷達台股，以 KDJ(9,3,3)／MACD(12,26,9)／BB(20) 寫獨立 Redis cache；"
                             + "各組依來源日期驗證、最長 7 天，不改本地技術計算或雷達評分",
                     "交易日 13:40", "0 40 13 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股盤中技術指標快取同步",
+                    "需同時啟用 FUBON_ENABLED 與盤中技術 feature flag，且 SDK READY、台股交易日及 09:00–13:30 時段 gate 通過；"
+                            + "每輪使用有效 FubonRadarScope.current(30)，依 Redis cursor round-robin，volume 同步啟用時最多 5 檔、否則最多 10 檔；"
+                            + "每檔固定六次 1 分／5 分 KDJ、MACD、BB 官方唯讀查詢，含重試共用每分鐘 60 次 actual-start 閘門，完整 bundle 原子寫獨立 Redis cache，request path 不外呼、不改評分或動作",
+                    "交易日 09:00–13:30 每分鐘（gate 後）", "0 * 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股當日分價量同步",
                     "交易日盤中每分鐘只查今日交易雷達台股，最多 30 檔；strict normalized OK／NO_DATA 快照只寫專用 Redis，"
                             + "交易雷達 request path 只讀同日新鮮快取，絕不現場呼叫富邦或寫 PostgreSQL",
@@ -297,7 +302,7 @@ public class SchedulePublicBffController {
                     "每 15 秒", "fixedDelay=15000ms", "")
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（70 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（71 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

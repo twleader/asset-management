@@ -49,7 +49,9 @@ class FubonTechnicalIndicatorCacheRedisIntegrationTest {
         }
         day = now.atZone(MarketClock.TW_ZONE).toLocalDate();
         repository = new FubonTechnicalIndicatorCacheRepository(redis);
-        writer = new FubonTechnicalIndicatorCacheWriter(redis, repository);
+        MarketClock clock = mock(MarketClock.class);
+        when(clock.instant()).thenReturn(now);
+        writer = new FubonTechnicalIndicatorCacheWriter(redis, repository, new FubonIntradayTechnicalCache(redis, clock));
     }
     @Test void normalThreeGroupRoundTripUsesExactSignedDecimalsAndFixedSourceExpiry() {
         var result = writer.write(technical("2330", day, now, "0"));

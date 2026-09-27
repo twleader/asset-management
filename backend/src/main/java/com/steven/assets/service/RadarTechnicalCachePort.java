@@ -37,6 +37,9 @@ public interface RadarTechnicalCachePort {
     /** Reads every requested D/W pair using one infrastructure batch. */
     Map<String, Pair> readPairs(List<String> codes);
 
+    /** Reads all requested minute technical documents through one cache-only MGET. */
+    default Map<String, String> readIntradayDocuments(List<String> codes) { return Map.of(); }
+
     /** Executes the pair CAS/Lua fence and returns its stable outcome token. */
     String writePair(PairWrite request);
 
