@@ -14,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -39,40 +40,30 @@ public class PortfolioAdviceBffController {
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
             new ParameterizedTypeReference<>() {};
 
+    private record FetchResult<T>(T value, boolean failed) {}
+
     /** GET /api/bff/portfolio-advice?historyLimit=20 → { latest, history, profile, settings, currentAllocation }。 */
     @GetMapping
     public Mono<ResponseEntity<Map<String, Object>>> get(
             @RequestParam(defaultValue = "20") int historyLimit) {
-        Mono<Map<String, Object>> latestMono = businessServicesClient.get()
-                .uri("/api/portfolio-advice/latest")
-                .retrieve().bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
+        Mono<FetchResult<Map<String, Object>>> latestMono = fetch(
+                businessServicesClient.get().uri("/api/portfolio-advice/latest"), MAP, Collections.emptyMap());
 
-        Mono<List<Map<String, Object>>> historyMono = businessServicesClient.get()
+        Mono<FetchResult<List<Map<String, Object>>>> historyMono = fetch(businessServicesClient.get()
                 .uri(uri -> uri.path("/api/portfolio-advice/history")
-                        .queryParam("limit", historyLimit).build())
-                .retrieve().bodyToMono(LIST_MAP)
-                .onErrorReturn(Collections.emptyList());
+                        .queryParam("limit", historyLimit).build()), LIST_MAP, Collections.emptyList());
 
-        Mono<Map<String, Object>> profileMono = businessServicesClient.get()
-                .uri("/api/portfolio-advice/profile")
-                .retrieve().bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
+        Mono<FetchResult<Map<String, Object>>> profileMono = fetch(
+                businessServicesClient.get().uri("/api/portfolio-advice/profile"), MAP, Collections.emptyMap());
 
-        Mono<Map<String, Object>> settingsMono = businessServicesClient.get()
-                .uri("/api/portfolio-advice/settings")
-                .retrieve().bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
+        Mono<FetchResult<Map<String, Object>>> settingsMono = fetch(
+                businessServicesClient.get().uri("/api/portfolio-advice/settings"), MAP, Collections.emptyMap());
 
-        Mono<Map<String, Object>> allocationMono = businessServicesClient.get()
-                .uri("/api/portfolio-advice/current-allocation")
-                .retrieve().bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
+        Mono<FetchResult<Map<String, Object>>> allocationMono = fetch(
+                businessServicesClient.get().uri("/api/portfolio-advice/current-allocation"), MAP, Collections.emptyMap());
 
-        Mono<Map<String, Object>> projectionMono = businessServicesClient.get()
-                .uri("/api/portfolio-advice/projection")
-                .retrieve().bodyToMono(MAP)
-                .onErrorReturn(Collections.emptyMap());
+        Mono<FetchResult<Map<String, Object>>> projectionMono = fetch(
+                businessServicesClient.get().uri("/api/portfolio-advice/projection"), MAP, Collections.emptyMap());
 
         return Mono.zip(latestMono, historyMono, profileMono, settingsMono, allocationMono, projectionMono).map(t -> {
             Map<String, Object> body = new HashMap<>();
@@ -80,16 +71,37 @@ public class PortfolioAdviceBffController {
             // 必須先複製再 put——上方 latestMono 的 onErrorReturn 回的是不可變的 Collections.emptyMap()，
             // 直接對它 put 會拋 UnsupportedOperationException，把「200 ＋ 空資料」降級路徑變成 500。
             // 既有先例：SnapshotDetailBffController、DashboardBffController 皆複製後再 put。
-            Map<String, Object> latest = new HashMap<>(t.getT1());
-            latest.put("rebalanceGroups", RebalanceGrouper.group(t.getT1()));
+            Map<String, Object> latest = new HashMap<>(t.getT1().value());
+            latest.put("rebalanceGroups", RebalanceGrouper.group(t.getT1().value()));
             body.put("latest", latest);
-            body.put("history", t.getT2());
-            body.put("profile", t.getT3());
-            body.put("settings", t.getT4());
-            body.put("currentAllocation", t.getT5());
-            body.put("projection", t.getT6());
+            body.put("history", t.getT2().value());
+            body.put("profile", t.getT3().value());
+            body.put("settings", t.getT4().value());
+            body.put("currentAllocation", t.getT5().value());
+            body.put("projection", t.getT6().value());
+            List<String> fetchErrors = new ArrayList<>();
+            if (t.getT1().failed()) fetchErrors.add("latest");
+            if (t.getT2().failed()) fetchErrors.add("history");
+            if (t.getT3().failed()) fetchErrors.add("profile");
+            if (t.getT4().failed()) fetchErrors.add("settings");
+            if (t.getT5().failed()) fetchErrors.add("currentAllocation");
+            if (t.getT6().failed()) fetchErrors.add("projection");
+            body.put("fetchErrors", fetchErrors);
             return ResponseEntity.ok(body);
         });
+    }
+
+    /**
+     * Downstream 的 HTTP、傳輸、解碼錯誤及成功但缺 response body 都只影響自己的聚合區塊。
+     * 不把例外細節帶到 BFF 回應，讓前端可安全地依固定識別值保留既有資料。
+     */
+    private <T> Mono<FetchResult<T>> fetch(WebClient.RequestHeadersSpec<?> request,
+                                            ParameterizedTypeReference<T> type,
+                                            T fallback) {
+        return request.retrieve().bodyToMono(type)
+                .map(value -> new FetchResult<>(value, false))
+                .switchIfEmpty(Mono.just(new FetchResult<>(fallback, true)))
+                .onErrorReturn(new FetchResult<>(fallback, true));
     }
 
     /** POST /api/bff/portfolio-advice/generate → 轉發 business（LOCAL 同步終態；HYBRID／LLM 立即回 PROCESSING；180s timeout 為轉發上限）。 */
