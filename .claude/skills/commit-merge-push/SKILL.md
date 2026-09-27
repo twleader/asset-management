@@ -1,6 +1,6 @@
 ---
 name: commit-merge-push
-description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令、且當前在 claude/* feature 分支時使用。
+description: 在 asset-management 的 feature worktree 上一次完成「commit → merge 進 main → push」。嚴守兩段式 merge 慣例：feature 分支單行短中文 commit，main 用 --no-ff merge commit，禁止 fast-forward 直推。當使用者說「commit & push」「commit + merge + push」「merge 到 main」「上 main」「推上去」之類指令，且目前位於 codex/*、claude/* 等非 main 的功能分支時使用。
 ---
 
 # Commit → Merge → Push（兩段式 merge）
@@ -19,7 +19,7 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
 2. **merge 訊息**：`merge: <該功能簡述>`（同一句中文簡述）。
 3. **禁止 fast-forward 直推 main**。一律 `git merge --no-ff`，讓每個功能單元在 main 上呈現為一個 merge commit。
 4. **SDD**：凡涉及商業邏輯（controller/model/dto/views/router/liquibase/bff）變更，**同一個 commit 必須含 `spec/` 變更**，否則 commit-msg hook 會擋。
-   純樣式 / CSS / CLAUDE.md / 本類 skill / typo / import 整理 → commit 訊息加 `[skip-spec]` 前綴即可，**不需要 `--no-verify`**。
+   純樣式 / CSS / AGENTS.md / CLAUDE.md / `.agents/skills/**` / `.claude/skills/**` / 本類 skill / typo / import 整理 → commit 訊息加 `[skip-spec]` 前綴即可，**不需要 `--no-verify`**。
 
 > ⚠ **舊寫法已失效，別再照抄。** 這個 gate 從前是 `pre-commit` hook，讀 `COMMIT_EDITMSG` 偵測
 > `[skip-spec]`；但那個階段 git 還沒把 `-m` 的訊息寫進該檔，造成兩個 bug：加了 `[skip-spec]`
@@ -35,16 +35,30 @@ description: 在 asset-management 的 feature worktree 上一次完成「commit 
 WT=$(git rev-parse --show-toplevel)                 # 當前 feature worktree
 FEAT=$(git -C "$WT" branch --show-current)           # 例：claude/beautiful-ellis-bfde40
 echo "feature 分支：$FEAT"
+if [ -z "$FEAT" ] || [ "$FEAT" = "main" ]; then
+  echo "⚠ 必須在已命名的 feature 分支執行，停"
+  exit 1
+fi
 git -C "$WT" status --short
 git -C "$WT" diff --stat
 ```
 
-- **若 `$FEAT` 是 `main`**：停。本 skill 只在 feature 分支用；直接在 main 上 commit 違反兩段式慣例。
+- **若 `$FEAT` 為空或是 `main`**：停。空值代表目前是 detached HEAD；本 skill 只在 feature 分支用，直接在 main 上 commit 違反兩段式慣例。
 - 找出 main 所在的 worktree（main 不在這個 worktree，通常 checkout 在主 repo 目錄）：
 
 ```bash
-MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/main$/{print p}')
+MAIN_WT=$(git -C "$WT" worktree list --porcelain | awk '
+  /^worktree / { path = substr($0, 10) }
+  /^branch refs\/heads\/main$/ { print path; exit }
+')
+test -n "$MAIN_WT" || { echo "⚠ 找不到 main worktree，停"; exit 1; }
 echo "main worktree：$MAIN_WT"
+```
+
+在建立 feature commit 或推送前，先確認 main worktree 乾淨；若有未提交變更，停下並回報：
+
+```bash
+test -z "$(git -C "$MAIN_WT" status --porcelain)" || { echo "⚠ main worktree 有未提交變更，停"; git -C "$MAIN_WT" status --short; exit 1; }
 ```
 
 ---
@@ -52,11 +66,13 @@ echo "main worktree：$MAIN_WT"
 ## Step 1 — 在 feature 分支 commit
 
 先判斷要不要 `[skip-spec]`：看 `git diff --stat` 的路徑。
-- 只動到 `frontend/src` 樣式、`CLAUDE.md`、`.claude/skills/**`、純 typo → 加 `[skip-spec]`。
+- 只動到 `frontend/src` 樣式、`AGENTS.md`、`CLAUDE.md`、`.agents/skills/**`、`.claude/skills/**`、純 typo → 加 `[skip-spec]`。
 - 動到 `*/controller`、`*/model`、`*/dto`、`views`、`router`、liquibase changelog、`bff/**` → **不可** skip；確認 `spec/` 也一起改了且會被 staged。
 
+執行 `git add` 前再次檢查 Step 0 的變更清單。若混有不屬於本任務的檔案，先停下，不要用 `git add -A` 一起提交；只 stage 本次任務的檔案。
+
 ```bash
-git -C "$WT" add -A                                  # .env 等已被 .gitignore，不會誤入
+git -C "$WT" add -A                                  # 僅限確認整個 worktree 的變更都屬於本任務時
 # 一般（含 spec/ 變更）：
 git -C "$WT" commit -m "<單行短中文簡述>"
 # 純樣式 / 工具（無商業邏輯）：加 [skip-spec] 前綴即可，**不需要** --no-verify
