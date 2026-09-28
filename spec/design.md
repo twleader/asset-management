@@ -11485,6 +11485,12 @@ Mono<BffUser> bootstrap = hasText(email)
 
 **`email` 宣告為單值 `String`，刻意不比照既有 `stockCode`／`market`／`year`／`start`／`end` 的 `List<String>` + 顯式拒絕多值慣例。** 那些既有參數用 `List<String>` 是為了讓 `?year=2020&year=2021` 這種重複 query key 能被明確攔成 400；`email` 不需要這層防護——重複 query key 時 Spring 對單值 `String` 只會靜默取其中一個值，取到任一個合法值都只是「查到那個人的資料」，不構成繞過驗證或多查到別人資料的風險。這是刻意的設計差異，不是疏漏。
 
+### Task 465：configured-admin lookup 五秒界線
+
+上方 Task 416 的虛擬碼為引入 email 分歧時的歷史設計；目前五條 public routes 的四個 service 另在 configured-admin publisher 加上 5 秒總期限。`LatestAssetsPublicService`、`PublicPortfolioAdviceService` 使用各自的 `OWNER_LOOKUP_TIMEOUT`，只將 `java.util.concurrent.TimeoutException` 映射為既有 Unavailable（「主要管理者不可用」），保留其他 error mapping。`PublicTradingRadarService` 與 `PublicTransactionHistoryService` 在現有 `Mono.defer(users::configuredAdmin)` 後、既有全面 `onErrorMap` 前套用 `DOWNSTREAM_TIMEOUT`，因此 bootstrap timeout 為 503，資料讀取 timeout 仍為 504。期限只包 owner lookup，不包整條資料 relay，不重試，不變更 `BusinessUserClient`、tenant headers 或 no-write 規則。到期取消未完成 lookup；逾時／取消之後不得再發出資料讀取。
+
+驗證用虛擬時間與只提供 owner lookup 的 WebClient stub：五個入口各自證明 5 秒之前不提早失敗、5 秒到期收到專用 Unavailable、lookup 已取消且資料 downstream 呼叫數為零；經 HTTP controller/advice 的回應為既有 503 ProblemDetail。既有 email／身分隔離／正常回應 tests 必須持續通過。OpenAPI 五個 operation 描述補充雙分支 5 秒 owner lookup 與 503，schema、status manifest 與路由集合不變，版本為 1.15.1，重新產生兩份 Swagger Markdown。
+
 ### Email 格式驗證
 
 新增（或在既有 Request/Invalid 例外類別旁新增同慣例的）400 例外類別，驗證：

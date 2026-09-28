@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.15.0` |
+| 契約版本 | `1.15.1` |
 | 對外路徑 | 14 條：13 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -154,7 +154,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 4. `GET /api/assets/latest`
 
-唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId； 不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定 （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。 存款明細含唯讀 `updateMode` 與可空 `processingDate`；此 GET 只讀取已保存資料，不觸發在途款到期移除。
+唯讀聚合完整快照、同源即時估值與三市場狀態。snapshot.id 必須等於 liveAssets.snapshotId； 不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定 （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。 存款明細含唯讀 `updateMode` 與可空 `processingDate`；此 GET 只讀取已保存資料，不觸發在途款到期移除。 configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
 
 #### Query 參數
 
@@ -171,7 +171,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 | `404` | application/problem+json: ProblemDetail | 主要管理者尚無資產快照；business 的 ProblemDetail 原樣 relay。 |
 | `500` | application/problem+json: ProblemDetail | Business 聚合發生未預期錯誤，例如 snapshot identity 不一致。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 驗證到空、malformed 或 identity 不一致的成功 payload，或 Nginx 無法連上 upstream。 |
-| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。 |
+| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。 configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 5. `GET /api/public/exchange-rate/usd-twd`
@@ -232,6 +232,7 @@ cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
 成功與下游非 2xx 都採 byte-relay（金融數值不經 Map/Double round-trip，狀態碼與 body 原樣傳回）；
 只有 bootstrap 階段（含 by-email 解析）的失敗才由 scoped advice 消毒。尚無任何一筆建議時回 HTTP 200 的
 `{"status":"NONE"}` 占位物件，`status` 亦可能是 `PROCESSING`／`FAILED`。
+configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
 
 #### Query 參數
 
@@ -246,7 +247,7 @@ cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
 | `200` | application/json: PortfolioAdviceResponse | 最新一筆建議；尚無資料時為 status=NONE 的占位物件。 |
 | `400` | application/problem+json: ProblemDetail | email 參數格式不合法（缺 `@`、缺網域或超過 254 字元）；不會呼叫 by-email 或 business。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 選定 owner 後的 portfolio-advice current read 非 2xx，或 Nginx 無法連上 upstream；by-email lookup 的任何失敗一律是 503，不會是 502。 |
-| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用（具名 503，不是 404）；帶 `email` 時，查無、非 ACTIVE、 by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。 |
+| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、未啟用或不可用（具名 503，不是 404）；帶 `email` 時，查無、非 ACTIVE、 by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。 configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 9. `GET /api/public/trading-radar/today`
@@ -265,6 +266,7 @@ tenant headers，並清除 Reactor 內可能存在的登入者／代看身分。
 HTTP 層本身沒有應用層認證；只能經 `127.0.0.1:9090` loopback 或獲准的
 Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI 與本 YAML
 都沒有掛在 9090。
+configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
 
 #### Query 參數
 
@@ -279,12 +281,12 @@ Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI
 | `200` | application/json: TradingRadarListResponse | 第一屏全域資料與每檔收合列；stocks 可為空。 |
 | `400` | application/problem+json: ProblemDetail | email 參數格式不合法；不會呼叫 configured-admin、by-email 或 business。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | Business 的任何非 2xx 被 scoped advice 消毒，或 Nginx 無法連上 upstream。 |
-| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、不合法或 current-read transport 失敗；帶 `email` 時，查無、非 ACTIVE、 by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 |
+| `503` | application/problem+json: ProblemDetail | Configured admin 不存在、不合法或 current-read transport 失敗；帶 `email` 時，查無、非 ACTIVE、 by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ### 10. `GET /api/public/trading-radar/stock`
 
-只接受一個已 URL-encoded 的 `stockCode` 與一個 `market`，兩者共同構成精確 selector， 用以消除跨市場同代號歧義。BFF 先在本地驗證參數，通過後才以已解析 owner 身分（不帶 `email` 時為 configured-admin；帶合法 `email` 時為該帳號）呼叫 business 一次 current read； `email` 格式驗證優先於 stockCode／market selector；email 合法或省略時，selector 的既有 400 契約不變。 不快取、不重新整理、不寫 snapshot，且只回本日結果已存在的標的。不存在時固定回已消毒的 404，不洩漏其他標的或 owner 資訊。
+只接受一個已 URL-encoded 的 `stockCode` 與一個 `market`，兩者共同構成精確 selector， 用以消除跨市場同代號歧義。BFF 先在本地驗證參數，通過後才以已解析 owner 身分（不帶 `email` 時為 configured-admin；帶合法 `email` 時為該帳號）呼叫 business 一次 current read； `email` 格式驗證優先於 stockCode／market selector；email 合法或省略時，selector 的既有 400 契約不變。 不快取、不重新整理、不寫 snapshot，且只回本日結果已存在的標的。不存在時固定回已消毒的 404，不洩漏其他標的或 owner 資訊。 configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
 
 #### Query 參數
 
@@ -302,12 +304,12 @@ Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI
 | `400` | application/problem+json: ProblemDetail | email 格式不合法時優先回 email detail；否則缺少、重複或格式不合法的 stockCode／market 維持 selector detail。 兩者都不會呼叫 configured-admin、by-email 或 business。 |
 | `404` | application/problem+json: ProblemDetail | 本日 current result 沒有精確 code/market 標的。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | Business 非 2xx 或 Nginx upstream failure；回應已消毒。 |
-| `503` | application/problem+json: ProblemDetail | configured-admin 或 current-read transport failure；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 |
+| `503` | application/problem+json: ProblemDetail | configured-admin 或 current-read transport failure；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。 |
 | `504` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF current-read 五秒 timeout 或 Nginx gateway timeout。 |
 
 ### 11. `GET /api/public/transactions`
 
-不帶 `email` 時 owner 由 BFF configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號 決定（仍不接受 `ownerId`、帳戶、券商或其他身分 header 作為額外的租戶選擇輸入）。無 query 時回全部紀錄； 可精確擇一提供 `year`，或成對提供 `start` 與 `end`。篩選與 `email` 各自獨立在 BFF 本地嚴格驗證， email 格式驗證優先於 filter；email 合法或省略時，filter 的既有 400 契約不變。錯誤不會觸發 bootstrap。 此 API 不同步、匯出、寫入或計算個別成交推論；records 固定按 `tradeDate DESC, id DESC`。
+不帶 `email` 時 owner 由 BFF configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號 決定（仍不接受 `ownerId`、帳戶、券商或其他身分 header 作為額外的租戶選擇輸入）。無 query 時回全部紀錄； 可精確擇一提供 `year`，或成對提供 `start` 與 `end`。篩選與 `email` 各自獨立在 BFF 本地嚴格驗證， email 格式驗證優先於 filter；email 合法或省略時，filter 的既有 400 契約不變。錯誤不會觸發 bootstrap。 此 API 不同步、匯出、寫入或計算個別成交推論；records 固定按 `tradeDate DESC, id DESC`。 configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
 
 #### Query 參數
 
@@ -325,7 +327,7 @@ Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI
 | `200` | application/json: PublicTransactionHistoryResponse | 選定範圍的 immutable 交易帳本、全期與選定範圍摘要。 |
 | `400` | application/problem+json: ProblemDetail | email 格式不合法時優先回 email detail；否則 year 重複、year 與 date range 混用、缺少 range 一端、 日期格式或順序不合法維持 filter detail。兩者都不會呼叫 configured-admin、by-email 或 business。 |
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | Business 非 2xx 或 Nginx upstream failure；回應已消毒。 |
-| `503` | application/problem+json: ProblemDetail | configured-admin 或 current-read transport 不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 |
+| `503` | application/problem+json: ProblemDetail | configured-admin 或 current-read transport 不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、 transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。 configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。 |
 | `504` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | BFF 五秒 timeout 或 Nginx gateway timeout。 |
 
 ### 12. `GET /api/public/trading-calendar`

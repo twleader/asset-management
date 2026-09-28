@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.15.0
+  version: 1.15.1
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
     十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
@@ -332,6 +332,7 @@ paths:
         不帶 `email` 時 owner 由 configured-admin bootstrap 決定；帶合法 `email` 時 owner 改由該帳號決定
         （仍不接受 `ownerId`、cookie、`X-User-*`、Tailscale identity 作為額外的租戶選擇輸入）。
         存款明細含唯讀 `updateMode` 與可空 `processingDate`；此 GET 只讀取已保存資料，不觸發在途款到期移除。
+        configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
       parameters:
         - name: email
           in: query
@@ -392,6 +393,7 @@ paths:
           description: >-
             Configured admin 不存在、未啟用或不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
             transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。
+            configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。
           content:
             application/problem+json:
               schema:
@@ -582,6 +584,7 @@ paths:
         成功與下游非 2xx 都採 byte-relay（金融數值不經 Map/Double round-trip，狀態碼與 body 原樣傳回）；
         只有 bootstrap 階段（含 by-email 解析）的失敗才由 scoped advice 消毒。尚無任何一筆建議時回 HTTP 200 的
         `{"status":"NONE"}` 占位物件，`status` 亦可能是 `PROCESSING`／`FAILED`。
+        configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
       parameters:
         - name: email
           in: query
@@ -658,6 +661,7 @@ paths:
           description: >-
             Configured admin 不存在、未啟用或不可用（具名 503，不是 404）；帶 `email` 時，查無、非 ACTIVE、
             by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 email lookup unavailable body，避免帳號列舉與上游細節外洩。
+            configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。
           content:
             application/problem+json:
               schema:
@@ -689,6 +693,7 @@ paths:
         HTTP 層本身沒有應用層認證；只能經 `127.0.0.1:9090` loopback 或獲准的
         Tailscale 私網 identity 讀取，禁止 Funnel 或公網 listener。Swagger UI 與本 YAML
         都沒有掛在 9090。
+        configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
       parameters:
         - name: email
           in: query
@@ -747,6 +752,7 @@ paths:
           description: >-
             Configured admin 不存在、不合法或 current-read transport 失敗；帶 `email` 時，查無、非 ACTIVE、
             by-email 的 HTTP、transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
+            configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。
           content:
             application/problem+json:
               schema:
@@ -770,6 +776,7 @@ paths:
         `email` 格式驗證優先於 stockCode／market selector；email 合法或省略時，selector 的既有 400 契約不變。
         不快取、不重新整理、不寫 snapshot，且只回本日結果已存在的標的。不存在時固定回已消毒的
         404，不洩漏其他標的或 owner 資訊。
+        configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
       parameters:
         - name: stockCode
           in: query
@@ -836,6 +843,7 @@ paths:
           description: >-
             configured-admin 或 current-read transport failure；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
             transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
+            configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}
@@ -861,6 +869,7 @@ paths:
         email 格式驗證優先於 filter；email 合法或省略時，filter 的既有 400 契約不變。錯誤不會觸發 bootstrap。
         此 API 不同步、匯出、寫入或計算個別成交推論；records 固定按
         `tradeDate DESC, id DESC`。
+        configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找，回該端點既有 503 ProblemDetail，不進入資料讀取。
       parameters:
         - name: year
           in: query
@@ -927,6 +936,7 @@ paths:
           description: >-
             configured-admin 或 current-read transport 不可用；帶 `email` 時，查無、非 ACTIVE、by-email 的 HTTP、
             transport、decode 或五秒 timeout 都回同一個 canonical unavailable body，避免帳號列舉與上游細節外洩。
+            configured-admin lookup 超過 5 秒亦回既有 owner unavailable 503，保留該端點既有 title 與 detail。
           content:
             application/problem+json:
               schema: {$ref: '#/components/schemas/ProblemDetail'}
