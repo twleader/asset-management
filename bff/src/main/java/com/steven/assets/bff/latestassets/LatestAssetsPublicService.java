@@ -60,7 +60,7 @@ public class LatestAssetsPublicService {
     /**
      * email trim 後非空白時，owner 改由該帳號決定（僅需 {@code id}／{@code role}／{@code status} 非 null
      * 且 active，不必是 configured-admin——與既有 bootstrap 分支的唯一差異）；否則沿用既有
-     * configured-admin bootstrap（逐位元組不變，含既有例外訊息與 503 契約）。
+     * configured-admin bootstrap（Task 465：查找最多五秒，保留既有例外訊息與 503 契約）。
      */
     private Mono<BffUser> resolveOwner(String email) {
         String trimmed = normalize(email);
@@ -81,6 +81,9 @@ public class LatestAssetsPublicService {
                     });
         }
         return users.configuredAdmin()
+                .timeout(OWNER_LOOKUP_TIMEOUT)
+                .onErrorMap(java.util.concurrent.TimeoutException.class,
+                        ignored -> new LatestAssetsUnavailableException("主要管理者不可用"))
                 .switchIfEmpty(Mono.error(new LatestAssetsUnavailableException("主要管理者尚未建立")))
                 .flatMap(admin -> {
                     if (admin == null || admin.id() == null || !admin.configuredAdmin() || !admin.isActive()) {

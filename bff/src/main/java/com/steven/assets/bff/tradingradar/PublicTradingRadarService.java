@@ -82,7 +82,7 @@ public class PublicTradingRadarService {
     /**
      * email trim 後非空白時，owner 改由該帳號決定（僅需 {@code id}／{@code role}／{@code status} 非 null
      * 且 active，不必是 configured-admin——與既有 bootstrap 分支的唯一差異）；否則沿用既有
-     * configured-admin bootstrap（逐位元組不變，含既有固定 503 契約）。
+     * configured-admin bootstrap（Task 465：查找最多五秒，保留既有固定 503 契約）。
      */
     private Mono<BffUser> resolveOwner(String email) {
         String trimmed = normalizeEmail(email);
@@ -101,6 +101,7 @@ public class PublicTradingRadarService {
                     });
         }
         Mono<BffUser> bootstrap = Mono.defer(users::configuredAdmin)
+                .timeout(DOWNSTREAM_TIMEOUT)
                 .onErrorMap(ignored -> new PublicTradingRadarUnavailableException())
                 .switchIfEmpty(Mono.error(new PublicTradingRadarUnavailableException()));
         return bootstrap.flatMap(admin -> {
