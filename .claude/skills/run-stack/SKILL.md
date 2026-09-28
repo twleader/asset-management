@@ -9,29 +9,38 @@ effort: high
 
 This project is **never** "done" until the change is built into the image and the container is recreated. There is no `npm run dev` / `mvn spring-boot:run` workflow — everything runs via Docker Compose.
 
-## Stack shape (5 services + 2 datastores)
+## Stack shape (7 application services + 2 datastores)
 
-`docker-compose.yml` at repo root:
+`docker-compose.yml` at repo root is the current service inventory:
 
 | Service | Source dir | Host port | Internal | Notes |
 |---|---|---|---|---|
-| `postgres` | — | 5432 | — | data in `asset-postgres-data` volume |
-| `redis` | — | (none) | 6379 | live prices, technical-indicator cache |
-| `business-services` | `backend/` | (none) | 8080 | Spring Boot, internal only |
-| `external-materials-service` | `external-materials-service/` | (none) | 8080 | scrapers + Redis writer |
-| `bff` | `bff/` | (none) | 8080 | Spring Cloud Gateway — browser application API entry |
-| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Five exact read-only GET routes; Tailscale mounts the same five |
-| `frontend` | `frontend/` | **80** | 80 | Nginx serving Vite build |
+| `postgres` | — | 127.0.0.1:5432 | 5432 | persistent PostgreSQL volume |
+| `redis` | — | none | 6379 | persistent price/cache volume |
+| `business-services` | `backend/` | none | 8080 | Spring Boot, internal only |
+| `external-materials-service` | `external-materials-service/` | none | 8080 | producers and Redis writer |
+| `fubon-broker-service` | `fubon-broker-service/` | none | 8080 | optional read-only broker adapter |
+| `yuanta-broker-service` | `yuanta-broker-service/` | none | 8080 | optional read-only broker adapter |
+| `bff` | `bff/` | none | 8080 | authenticated browser API entry |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | 14 exact routes: 13 GET + 1 POST |
+| `frontend` | `frontend/` | 80 / 443 | 80 / 443 | Nginx, existing TLS configuration |
 
-Browser entry: `http://localhost/` (frontend) → authenticated application APIs at `bff:8080`.
-Docker-external API entry: `http://127.0.0.1:9090` → five exact GET routes. Tailscale Serve
-exposes the same five exact paths, including the public USD/TWD exchange rate.
+Browser entry: `http://localhost/` → authenticated application APIs at `bff:8080`.
+Docker-external entry: `http://127.0.0.1:9090`; Tailscale Serve mounts the same 14 exact paths.
+The current authoritative route/method inventory is `docs/openapi/docker-external-api.yaml`,
+checked against `api-gateway/nginx.conf` by the existing contract test.
 
-- Local five: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`, `/api/assets/latest`,
-  `/api/public/exchange-rate/usd-twd`.
-- Tailscale five: the same five exact paths only. Never mount `/`, `/api/`, or any extra handler;
-  never use Funnel, self-signed certificates, another OAuth proxy, or a public host port.
-- Host 8080/8082 must have no listener. Check BFF health from its container and quote/BFF behavior through 9090.
+- GET: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`,
+  `/api/assets/latest`, `/api/public/exchange-rate/usd-twd`, `/api/public/market-analysis/today`,
+  `/api/public/portfolio-advice/latest`, `/api/public/trading-radar/today`,
+  `/api/public/trading-radar/stock`, `/api/public/transactions`, `/api/public/trading-calendar`,
+  `/api/public/commodity-prices`, `/api/public/srpp/daily-context`.
+- POST: `/api/public/crawler-data/rescan` (the sole route with an external-fetch side effect).
+  Do not invoke it as a deployment smoke test.
+- Never mount `/`, `/api/`, or extra handlers on Tailscale; never use Funnel, self-signed
+  API certificates, another OAuth proxy, or public host ports for internal services.
+- Host 8080/8082 must have no listener. Check BFF health inside its container and safe API
+  behavior through 9090. Broker adapters remain read-only; deployment never authorizes orders.
 
 ## Step 1 — Find the real Compose project name (critical)
 
@@ -77,34 +86,32 @@ echo "$MW"
 git -C "$MW" branch --show-current          # 必須回 main
 git -C "$MW" status --porcelain             # 必須是空的（非空＝別人正在那裡工作，停下來問）
 git -C "$MW" fetch origin && git -C "$MW" merge --ff-only origin/main
-cp /Users/steven/Project/asset-management/.env "$MW/.env"   # worktree 沒有 .env；env_file 相對 compose 檔解析，--env-file 救不了
+test -f "$MW/.env"                         # 缺權威部署設定就停止，不用其他 checkout 的舊副本覆蓋
 ```
 
-### ⚠ 不論最後決定從哪個目錄 build，先比對該目錄的 `.env` 跟 main 的 `.env`
+### 建置設定以 main 為基準，先比對再處理
 
-**這跟上面「從哪個目錄 build」是兩個獨立的風險軸——一個管程式碼新不新，這個管 `.env` 新不新。**
-`.env` 是 per-worktree、gitignored，可能是一份缺漏、過期的舊副本；即使乖乖照上面的表從對的目錄
-build 程式碼，如果那個目錄的 `.env` 本身就是舊的，一樣會讓服務套用錯誤或缺失的 secrets。
-2026-09-07 實測過：某 worktree 的 `.env` 比 main 的少了 `GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET`、
-`API_ERROR_LOG_INGEST_TOKEN`、`FRONTEND_PUBLIC_TLS_REQUIRED` 與兩個 TLS 路徑——從那裡重建
-`frontend`／`bff` 後，公網網域被套上本機自簽 fallback 憑證、Google OAuth 登入 `redirect_uri_mismatch`，
-且 `business-services`／`bff` 兩邊的內部 token 一度不一致（fail-soft 設計，不報錯、只是悄悄失效）。
-**build 成功、容器 healthy 全程都正常——這兩者都不代表 secrets 是對的**，等使用者回報憑證警告或登入
-失敗才回頭查，一次事故要來回好幾輪才收斂，非常浪費 token。
+main worktree 的 `.env` 是持續維護的部署基準。**不得把主 clone 或 feature 的 `.env`
+複製到 main**，否則 OAuth、TLS、內部 token 可能在檢查前就被舊值覆蓋。
+已合併的程式一律從 `$MW` 目錄執行 Compose，使用該目錄的 `.env`。
 
-**在 Step 3 執行 build/recreate 之前，先跑（`<TARGET>` 是你決定要 build 的那個目錄，可能是 `$MW`
-也可能是你自己所在的 feature worktree）：**
+尚未合併的驗收若使用 feature worktree，先設定 `TARGET` 為該 worktree 的絕對路徑，
+再只回報是否一致，**不要將 `.env` diff、secret 值或完整 container environment 印到輸出**：
 
 ```bash
-diff <(sort <TARGET>/.env) <(sort /Users/steven/Project/asset-management-main/.env)
+if cmp -s <(sort "$TARGET/.env") <(sort "$MW/.env"); then
+  echo '部署設定相同'
+else
+  echo '部署設定不同或缺漏；先確認來源再建置'
+fi
 ```
 
-（若 `<TARGET>` 就是 main 自己，這個指令會自動零差異，可安全略過不必特判。）任何差異都是紅旗——尤其
-`GOOGLE_CLIENT_*`、`*_TOKEN`、`FRONTEND_*_TLS_*` 這類直接影響對外憑證／第三方 OAuth／內部服務間認證
-的變數。不要假設「反正差不多」；main 的 `.env` 是持續維護、跟正式環境同步的那份，有差異時預設以它
-為準——若要繼續用 `<TARGET>` 建置，先把缺漏／不同的變數值同步過去（不要覆寫 `<TARGET>/.env` 裡
-main 沒有的其餘既有內容），再繼續 Step 3。修完後用 `docker exec <container> printenv <VAR>` 對照
-容器內的實際值確認，不能只看 build 有沒有報錯或容器是否 healthy。
+有差異時先確認原因；若 feature 尚無 `.env`，可從 main 同步到此隔離驗收目錄。
+若 feature 已有設定，只同步確認過的缺漏／過期鍵，保留其他既有內容；方向只能是
+main → 驗收目錄。main 缺設定時停止並回報缺少的鍵，不自行建立假憑證。
+另確認相對 secrets／TLS 掛載在 target 仍指向既有正式來源，必要時使用絕對路徑；
+不能因 worktree 改變而掛到空目錄。部署後在記憶體中比對 container effective config
+與 main 展開設定，僅報鍵名與相同／不同，不輸出秘密值。健康狀態不能代替此檢查。
 
 ### 被洗掉時怎麼認出來
 
@@ -129,6 +136,8 @@ Edit-target → what to rebuild. **Only rebuild what changed** (don't `docker co
 | `frontend/src/**`, `frontend/package.json`, `frontend/vite.config.js`, `frontend/nginx.conf` | `frontend` | |
 | `backend/**` (Java / pom.xml / resources / liquibase changelog) | `business-services` | Liquibase auto-runs on startup — schema migrations apply during recreate |
 | `external-materials-service/**` | `external-materials-service` | |
+| `fubon-broker-service/**` | `fubon-broker-service` | preserve read-only secrets and enabled flags |
+| `yuanta-broker-service/**` | `yuanta-broker-service` | preserve read-only secrets and enabled flags |
 | `bff/**` | `bff` | |
 | `api-gateway/**` | `api-gateway` | Rebuild and recreate; verify exact allowlist and deny matrix |
 | `db/init/**` | — | Only runs on **fresh** postgres volume; needs full down + volume rm to take effect (rarely the right move — usually do a Liquibase changeset in `backend/` instead) |

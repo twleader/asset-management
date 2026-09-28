@@ -22,32 +22,38 @@ stop and say so rather than silently falling back.
 > `sonnet 5` / `high` — the two harnesses use different model identifiers by necessity (Codex
 > has no Sonnet), but the effort level matches. Keep both in sync when either changes.
 
-## Stack shape (5 services + 2 datastores)
+## Stack shape (7 application services + 2 datastores)
 
-`docker-compose.yml` at repo root:
+`docker-compose.yml` at repo root is the current service inventory:
 
 | Service | Source dir | Host port | Internal | Notes |
 |---|---|---|---|---|
-| `postgres` | — | 5432 | — | data in `asset-postgres-data` volume |
-| `redis` | — | (none) | 6379 | live prices, technical-indicator cache |
-| `business-services` | `backend/` | (none) | 8080 | Spring Boot, internal only |
-| `external-materials-service` | `external-materials-service/` | (none) | 8080 | scrapers + Redis writer |
-| `bff` | `bff/` | (none) | 8080 | Spring Cloud Gateway — browser application API entry |
-| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | Twelve exact routes (11 GET + 1 POST); Tailscale mounts the same twelve |
-| `frontend` | `frontend/` | **80** | 80 | Nginx serving Vite build |
+| `postgres` | — | 127.0.0.1:5432 | 5432 | persistent PostgreSQL volume |
+| `redis` | — | none | 6379 | persistent price/cache volume |
+| `business-services` | `backend/` | none | 8080 | Spring Boot, internal only |
+| `external-materials-service` | `external-materials-service/` | none | 8080 | producers and Redis writer |
+| `fubon-broker-service` | `fubon-broker-service/` | none | 8080 | optional read-only broker adapter |
+| `yuanta-broker-service` | `yuanta-broker-service/` | none | 8080 | optional read-only broker adapter |
+| `bff` | `bff/` | none | 8080 | authenticated browser API entry |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | 14 exact routes: 13 GET + 1 POST |
+| `frontend` | `frontend/` | 80 / 443 | 80 / 443 | Nginx, existing TLS configuration |
 
-Browser entry: `http://localhost/` (frontend) → authenticated application APIs at `bff:8080`.
-Docker-external API entry: `http://127.0.0.1:9090` → twelve exact routes. Tailscale Serve
-exposes the same twelve exact paths.
+Browser entry: `http://localhost/` → authenticated application APIs at `bff:8080`.
+Docker-external entry: `http://127.0.0.1:9090`; Tailscale Serve mounts the same 14 exact paths.
+The current authoritative route/method inventory is `docs/openapi/docker-external-api.yaml`,
+checked against `api-gateway/nginx.conf` by the existing contract test.
 
-- Local/Tailscale GET routes: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`,
+- GET: `/api/quotes`, `/api/quotes/one`, `/api/public/market-index`,
   `/api/assets/latest`, `/api/public/exchange-rate/usd-twd`, `/api/public/market-analysis/today`,
   `/api/public/portfolio-advice/latest`, `/api/public/trading-radar/today`,
-  `/api/public/trading-radar/stock`, `/api/public/transactions`, `/api/public/trading-calendar`.
-- Local/Tailscale POST route: `/api/public/crawler-data/rescan` (the only route with an external-fetch side effect).
-- Tailscale mounts the same twelve exact paths only. Never mount `/`, `/api/`, or any extra handler;
-  never use Funnel, self-signed certificates, another OAuth proxy, or a public host port.
-- Host 8080/8082 must have no listener. Check BFF health from its container and quote/BFF behavior through 9090.
+  `/api/public/trading-radar/stock`, `/api/public/transactions`, `/api/public/trading-calendar`,
+  `/api/public/commodity-prices`, `/api/public/srpp/daily-context`.
+- POST: `/api/public/crawler-data/rescan` (the sole route with an external-fetch side effect).
+  Do not invoke it as a deployment smoke test.
+- Never mount `/`, `/api/`, or extra handlers on Tailscale; never use Funnel, self-signed
+  API certificates, another OAuth proxy, or public host ports for internal services.
+- Host 8080/8082 must have no listener. Check BFF health inside its container and safe API
+  behavior through 9090. Broker adapters remain read-only; deployment never authorizes orders.
 
 ## Step 1 — Find the real Compose project name (critical)
 
@@ -93,8 +99,32 @@ echo "$MW"
 git -C "$MW" branch --show-current          # 必須回 main
 git -C "$MW" status --porcelain             # 必須是空的（非空＝別人正在那裡工作，停下來問）
 git -C "$MW" fetch origin && git -C "$MW" merge --ff-only origin/main
-cp /Users/steven/Project/asset-management/.env "$MW/.env"   # worktree 沒有 .env；env_file 相對 compose 檔解析，--env-file 救不了
+test -f "$MW/.env"                         # 缺權威部署設定就停止，不用其他 checkout 的舊副本覆蓋
 ```
+
+### 建置設定以 main 為基準，先比對再處理
+
+main worktree 的 `.env` 是持續維護的部署基準。**不得把主 clone 或 feature 的 `.env`
+複製到 main**，否則 OAuth、TLS、內部 token 可能在檢查前就被舊值覆蓋。
+已合併的程式一律從 `$MW` 目錄執行 Compose，使用該目錄的 `.env`。
+
+尚未合併的驗收若使用 feature worktree，先設定 `TARGET` 為該 worktree 的絕對路徑，
+再只回報是否一致，**不要將 `.env` diff、secret 值或完整 container environment 印到輸出**：
+
+```bash
+if cmp -s <(sort "$TARGET/.env") <(sort "$MW/.env"); then
+  echo '部署設定相同'
+else
+  echo '部署設定不同或缺漏；先確認來源再建置'
+fi
+```
+
+有差異時先確認原因；若 feature 尚無 `.env`，可從 main 同步到此隔離驗收目錄。
+若 feature 已有設定，只同步確認過的缺漏／過期鍵，保留其他既有內容；方向只能是
+main → 驗收目錄。main 缺設定時停止並回報缺少的鍵，不自行建立假憑證。
+另確認相對 secrets／TLS 掛載在 target 仍指向既有正式來源，必要時使用絕對路徑；
+不能因 worktree 改變而掛到空目錄。部署後在記憶體中比對 container effective config
+與 main 展開設定，僅報鍵名與相同／不同，不輸出秘密值。健康狀態不能代替此檢查。
 
 ### 被洗掉時怎麼認出來
 
@@ -119,6 +149,8 @@ Edit-target → what to rebuild. **Only rebuild what changed** (don't `docker co
 | `frontend/src/**`, `frontend/package.json`, `frontend/vite.config.js`, `frontend/nginx.conf` | `frontend` | |
 | `backend/**` (Java / pom.xml / resources / liquibase changelog) | `business-services` | Liquibase auto-runs on startup — schema migrations apply during recreate |
 | `external-materials-service/**` | `external-materials-service` | |
+| `fubon-broker-service/**` | `fubon-broker-service` | preserve read-only secrets and enabled flags |
+| `yuanta-broker-service/**` | `yuanta-broker-service` | preserve read-only secrets and enabled flags |
 | `bff/**` | `bff` | |
 | `api-gateway/**` | `api-gateway` | Rebuild and recreate; verify exact allowlist and deny matrix |
 | `db/init/**` | — | Only runs on **fresh** postgres volume; needs full down + volume rm to take effect (rarely the right move — usually do a Liquibase changeset in `backend/` instead) |
