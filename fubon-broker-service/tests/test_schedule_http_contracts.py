@@ -32,6 +32,7 @@ BASIC = "/internal/market-data/stock-basic/read"
 CANDLES = "/internal/market-data/intraday-candles/read"
 VOLUMES = "/internal/market-data/intraday-volumes/read"
 HISTORICAL_CANDLES = "/internal/market-data/historical-daily-candles/read"
+HISTORICAL_INTRADAY = "/internal/market-data/historical-intraday-candles/read"
 INTRADAY_TECHNICAL = "/internal/market-data/intraday-technical-indicators/read"
 SUBSCRIPTIONS = "/internal/market-data/stock-push/subscriptions"
 STOCK_STREAM = "/internal/market-data/stock-push/stream"
@@ -47,6 +48,7 @@ PROTECTED = [
     ("POST", DIVIDENDS, {"symbols": ["2330"], "from": DIVIDEND_FROM, "to": DIVIDEND_TO}),
     ("POST", TECHNICAL, {"symbol": "2330"}),
     ("POST", INTRADAY_TECHNICAL, {"symbol": "2330"}),
+    ("POST", HISTORICAL_INTRADAY, {"symbol": "2330", "from": "2026-08-20", "to": "2026-08-21"}),
     ("POST", SUBSCRIPTIONS, {"symbols": ["2330"]}),
     ("GET", STOCK_STREAM, None),
 ]
@@ -133,13 +135,13 @@ def test_every_protected_route_enforces_config_three_state_without_sdk(tmp_path,
         assert sdk.events == []
 
 
-def test_exact_nineteen_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
+def test_exact_twenty_routes_and_http_methods_have_no_alias_or_write_surface(tmp_path):
     client, sdk = app_fixture(tmp_path)
     actual = {(route.path, tuple(route.methods)) for route in client.app.routes}
     expected = {(path, (method,)) for method, path, _body in PROTECTED} | {
         (BASIC, ("POST",)), (CANDLES, ("POST",)), (VOLUMES, ("POST",)),
-        (HISTORICAL_CANDLES, ("POST",)), ("/internal/health", ("GET",))}
-    assert actual == expected and len(actual) == 19
+        (HISTORICAL_CANDLES, ("POST",)), (HISTORICAL_INTRADAY, ("POST",)), ("/internal/health", ("GET",))}
+    assert actual == expected and len(actual) == 20
     with client:
         for method, path, _body in [*PROTECTED, ("POST", BASIC, {"symbol": "2330"}),
                                     ("POST", CANDLES, {"symbol": "2330"}), ("POST", VOLUMES, {"symbol": "2330"}),

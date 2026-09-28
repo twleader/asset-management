@@ -12590,3 +12590,37 @@ Redis 只保存來源最新點，不建立 SQL fact/history。Lua 對雙 timefra
 Fubon API inventory 說明 KDJ／MACD／BBANDS 現有 endpoint 同時供 D/W 盤後與 1m／5m 盤中 point；schedule inventory 加入此每分鐘 cron 及交易時段 gate。盤中技術查詢錯誤日誌沿用既有 immutable `FUBON_TECHNICAL_INDICATORS_READ`／`技術指標查詢` operation identity，不增加 `api_error_log_operation` seed row 或 Liquibase migration；static `ApiErrorLogOperationCatalog.apiUrl` 同列既有 D/W `POST /internal/market-data/technical-indicators/read` 與本次 1m／5m `POST /internal/market-data/intraday-technical-indicators/read`，讓外部錯誤日誌目錄呈現兩個實際路徑。新的 Compose flag 只傳 external-materials-service 且預設 false；既有 Compose `.env`、secrets 與 user credentials 不改。沒有任何下單 SDK、交易 HTTP、帳戶 API 或委託 side effect。
 
 external-materials-service 的 Redis Testcontainers integration dependencies 固定為 1.21.4，僅供 test scope，並與 backend 對齊以支援目前 Docker Engine 的 minimum API 1.40；此版本 pin 不影響 production dependencies。
+
+### Requirement 170／Task 466：富邦台股歷史日 K 與 1 分 K 可稽核回補
+
+#### 一次性執行邊界與 campaign
+
+將回補實作為 external-materials-service 的專用 CommandLineRunner／ApplicationRunner，使用正常 Spring DI、既有 `FubonMarketDataPort`、`FubonHistoricalDailyCandleStore`、`FubonMarketDataHistoryStore` 與 `StockSourceQuery`，不提供任何 HTTP route，也不改 production schedules。新 `FUBON_HISTORICAL_BACKFILL_ENABLED=false` 是單次執行的第二道明示 gate；一般 service 啟動及 scheduler 呼叫皆不得進入回補。Docker 一次性工作需顯式傳入 runner command 和此 flag，設定 web application type 為 none，完成後以非零退出碼表示失敗／部分結果；不得寫入或提交 `.env`、secret、Redis、交易 API，也不與正式服務的 deployment/recreate 並行。Runner 只接受建立或 resume campaign ID、受限日期範圍、`--resume`／`--retry-failed`；不接受代碼或 SDK request 欄位。
+
+Campaign start 透過既有 access/calendar/clock 抽象建立歷史專用 gate，驗證 `FUBON_ENABLED`、SDK READY、Asia/Taipei 已完成交易日及已知 trading calendar；不可直接呼叫以今日必須開市為條件的 `FubonMarketRunGate.reason`；上界為該日曆回傳且嚴格早於今日的 latest completed Taiwan session，不是 `LocalDate.now()`，下界為上界減 10 calendar years，含頭含尾。再讀 `FubonRadarScope.current(30)`，驗證 1–30 個合法唯一代碼，排序後凍結在 immutable campaign receipt，並計算 SHA-256 scope hash。campaign 的 `toDate`、`fromDate`、symbol 清單一旦建立不可編輯；Resume 只能操作相同 campaign。每 window 開始前重驗歷史專用 access/completed-date gate 與代碼仍在當下 `current(30)`；移出者寫 `SCOPE_CHANGED` 而不 request。Scope 新增的代碼屬新 campaign，不追加入既有 campaign。
+
+Campaign 固定兩個 vendor fact datasets：`DAILY_CANDLE`、`INTRADAY_CANDLE_1M`。日 K 從 campaign `fromDate` 起按最多 365 個包含曆日（start 至 end 日期差最多 364 日）分窗，以官方 API `<1 year` 限制留有界內餘裕。1m 從 `max(fromDate, 2023-05-23)` 起按最多 31 個包含曆日分窗。按 symbol、dataset、window start 升冪序列執行，每個 request 完成並 commit receipt 後才開始下一個；不並行。歷史沒有上市日期清單時，不推估掛牌日；官方無資料回應記 `NO_DATA`，其他錯誤不得當作空窗。結束報告的實際範圍以可寫成功的來源日期為準。
+
+`fubon_historical_backfill_campaign` 儲存 campaign immutable manifest：UUID、要求的起訖日期、latest-completed 日期、sorted symbol JSON、scope SHA-256、建立時間、完成時間、整體狀態及結束摘要。`fubon_historical_backfill_window_attempt` 以 identity/campaign/dataset/symbol/window/attempt number 儲存 request attempt（STARTED 僅可轉一次終態，終態不可更新或刪除）：開始／完成時間、status、observedAt、provider row count、inserted、unchanged、conflict、sanitized error code；不存 raw body、credential、token、account data 或原始 exception message。先寫 `STARTED` attempt，再做單一 SDK request 及 fact persistence，只有完整 response 及所有 facts 正常 commit 才改寫 attempt 終態；若程序中止，仍留 `STARTED` 並由下次 resume 明確標為 `FAILED/INTERRUPTED` 後新建下一 attempt。這些 attempt 不更新或刪除既有歷史 facts。
+
+Resume 先載入並校驗 campaign manifest 和 scope，再略過具有 `COMPLETE` 或 `NO_DATA` 的窗口；`STARTED` 只標記 interrupted，不重複假設完成。`FAILED` 僅在顯式 retry-failed option 下可產生新 attempt，且每個 invocation 每 window 最多一個 attempt。`CONFLICT`、`SCOPE_CHANGED`、429／stopRun、gate/SDK failure、契約 invalid 或 persistence fatal 皆停止本 invocation，留下可續跑狀態；不可快速重送或由 Java 隱藏重試。API history 60/min 與 shared actual-start 60/min 都由原 gateway 控制；單 worker確保不製造併發 request。
+
+#### Gateway normalization 與 persistence
+
+Python adapter 的 daily parser 對現有 root allowlist 增加精確的官方 echo 驗證：`timeframe` 和 `sort` 為 optional，前者出現只接受 `D`、後者出現只接受 `asc`；仍拒絕其他未知 root/row 欄位、錯誤資料型別及 query echo。現有 internal daily route 及 SDK method 不變，錯誤 response 不得落入 Java persistence。
+
+新增 token-protected `POST /internal/market-data/historical-intraday-candles/read`。body schema 精確 `{symbol, from, to}`，台股 symbol 採既有 strict validator，日期須有效且 `from <= to`、包含日期窗不超過 31 日、`to` 不晚於 latest completed date；API method 固定為官方 `stock.historical.candles`、exchange 由既有 stock master/API contract 決定、timeframe 固定字串 `"1"`，gateway global/history limiter 每次實際 SDK start 照常計數。此 route 只支援 equity；不提供 caller 可控 method、exchange、timeframe、minute start/end time、sort 或原始 SDK kwargs。
+
+成功輸出版本化 envelope：`schemaVersion=1`、symbol、market=`台股`、provider=`FUBON_SDK`、queryFrom/queryTo、observedAt、exchange、sourceMarket、`timeframe="1"`、status=`AVAILABLE|NO_DATA`、candles。每列 exact fields `candleAt,open,high,low,close,average,volume`；時間為有 offset 的 ISO instant，unique、strictly increasing、Asia/Taipei日期落在 query window、當日時間 09:00 至 13:30 整分，不能晚於 observedAt；合法窗口可跨交易日，Java 用台北日期作各 row `sourceDate`。response 最大 2 MiB 且最多 `31*271` rows；大小超限不作部分解析或寫入，gateway 回可分類 `RESPONSE_TOO_LARGE`，目前 attempt 記為 FAILED 並停止；本任務固定窗口、不自動拆分或建立 parent/child windows。若實際遇超限需先修復明確上限／窗口契約並測試，不得靜默改 campaign manifest。所有 decimals 為 canonical positive string 並符合既有 DB precision，volume 是官方 minute field 的原始整數 unit 原樣傳遞。
+
+日 K Java client 僅接受既有 daily envelope 與 validated echo；日 K response 的 unit contract 沿用 daily store／current SDK adapter，依官方 daily unit 保存 shares。1m Java client 另新增專屬 `HistoricalIntradayCandlesRead`，不冒用只代表單日的 `IntradayCandlesRead`，嚴格核對 envelope、時間、排序、identity、query window、row/body 上限及每列欄位。minute `volume` 與 `average` 不換算：volume 保持既有 minute schema 的 vendor raw unit；`average` 為官方 session-cumulative average，只須為正數，不受單 bar OHLC 邊界限制。現有 `fubon_intraday_candle` 唯一鍵與 content hash 保留；每列由既有 history store 的 REQUIRES_NEW transaction 寫入。相同 hash 為 unchanged；同 key 異 hash 為 `CONFLICT_NO_SOURCE_REVISION`，不更新或刪除既有 row。Daily 經 immutable facts store，只有 fact 已完成寫入才進行既有 guarded stock-price projection。
+
+Migration v1.138.0 新增兩張 receipt 表及索引/FK/checks，並將 `ck_fubon_intraday_candle_prices` 拆成 OHLC 有效性及 `average > 0`，移除 `average >= low AND average <= high`。保留 schema 中市場/provider/timeframe、正數價格、minute、source-day、volume、payload hash 與事實 PK 所有其他條件；既存 rows 不回填改值、不 delete。執行既有 db export／schema drift 檢查，`db/schema.sql` 必須精確反映 migration。
+
+#### 不提供歷史的 current-only 資料與結果
+
+`intraday.volumes` 目前是 current-day price-level snapshot，存在具 TTL Redis cache，官方未提供可查過去日期的 snapshot endpoint，且沒有持久來源。Campaign 在 manifest/終結報表中對 `CUMULATIVE_INTRADAY_QUOTE_VOLUME` 及 `INTRADAY_PRICE_VOLUME_DISTRIBUTION` 固定產生 `UNSUPPORTED` coverage 註記及原因，不能為歷史日期呼叫 current-day route，不能用 1m OHLC bar 推演或聲稱重建這類 vendor snapshot，也不新增假的 receipt fact row。1m candle 的 bar volume 是獨立原始 fact；不得誤稱為 cumulative quote-volume 或 price-volume distribution。
+
+執行後以 DB query 產出按 dataset、symbol 的既有事實 row count、最早／最晚 source date，以及本 campaign attempts 的 COMPLETE／NO_DATA／FAILED／CONFLICT／SCOPE_CHANGED 數，另列 unsupported current-only datasets、實際 latest completed date 與 campaign UUID。報告需比對執行前在 runbook 記錄的全表／campaign symbol counts；各 logical window 以最新 attempt 終態判定是否解決；未解決錯誤、未完成 windows 或 conflicts 使 campaign outcome 為 `PARTIAL`，CLI exit 非 0。只有每個可用 window 的最新 attempt 終態為 COMPLETE/NO_DATA、無未解決 scope/error/conflict 且 unsupported 範圍明列時才回成功；歷次 FAILED/INTERRUPTED 保留累積稽核統計，後續成功不改寫舊 attempt，但舊失敗不再阻擋 campaign 完成。CONFLICT/SCOPE_CHANGED 永久阻擋該 campaign，不得 retry；遇既有 FAILED 而未指定 retry-failed 則立即以非零退出，不略過後續執行。
+
+歷史專用 gate 允許休市日執行已完成交易日的回補，不更動既有當日排程 gate；最新完成日的解析使用日曆逐日回溯，遇未知日曆則停止，本歷史工作固定排除今日，不論今日是否已收盤。新 adapter minute route 的歷史日期上界由 Java runner 的已知完成日保證，Python 必須拒絕今日與未來日期（本次只補過往完整日），不可假稱 Python 現有 SDK 提供交易日曆。一次性 runner 使用獨立 Spring 啟動入口與明確 bean import，不能啟動一般 server component scan、@Scheduled、WebSocket、SSE consumers 或其他啟動同步；web-disabled 本身不構成排程隔離。這項隔離須有 context test 證明。

@@ -61,8 +61,15 @@ class FixedGateway:
         }
         self.daily_candle_source = {
             "type": "EQUITY", "exchange": "TWSE", "market": "TSE", "symbol": "2330",
+            "timeframe": "D", "sort": "asc",
             "data": [{"date": TODAY, "open": "950", "high": "960", "low": "945", "close": "955",
                       "volume": "123", "turnover": "117465", "change": "5"}],
+        }
+        self.historical_minute_source = {
+            "type": "EQUITY", "exchange": "TWSE", "market": "TSE", "symbol": "2330",
+            "timeframe": "1", "sort": "asc",
+            "data": [{"date": "2026-08-27T05:30:00Z", "open": "950", "high": "960", "low": "945",
+                      "close": "955", "volume": "123", "average": "940"}],
         }
 
     def shutdown(self) -> None:
@@ -94,6 +101,11 @@ class FixedGateway:
         self.calls.append(("daily-candles", {"symbol": symbol, "from": start, "to": end, "timeframe": "D",
                                               "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc"}))
         return deepcopy(self.daily_candle_source)
+
+    def read_historical_intraday_candles(self, symbol, start, end, *, deadline=None):
+        self.calls.append(("historical-minute-candles", {"symbol": symbol, "from": start, "to": end,
+                                                          "timeframe": "1", "sort": "asc"}))
+        return deepcopy(self.historical_minute_source)
 
 
 def test_fixed_17_profile_aggregate_has_exact_root_and_420_day_window():
@@ -263,7 +275,7 @@ def test_route_local_v1_maps_sdk_configuration_and_rate_limit_without_detail_env
 
 def test_task425_daily_route_requires_exact_date_window_and_never_accepts_extra_fields(tmp_path):
     client, gateway = app_client(tmp_path)
-    body = {"symbol": "2330", "from": (NOW.date() - timedelta(days=365)).isoformat(), "to": TODAY}
+    body = {"symbol": "2330", "from": (NOW.date() - timedelta(days=364)).isoformat(), "to": TODAY}
     with client:
         response = client.post("/internal/market-data/historical-daily-candles/read", headers={"X-Internal-Service-Token": TOKEN}, json=body)
         invalid = client.post("/internal/market-data/historical-daily-candles/read", headers={"X-Internal-Service-Token": TOKEN},
@@ -274,3 +286,97 @@ def test_task425_daily_route_requires_exact_date_window_and_never_accepts_extra_
     assert invalid.status_code == 400 and invalid.json() == {"reason": "INVALID_REQUEST"}
     assert too_long.status_code == 400 and too_long.json() == {"reason": "INVALID_REQUEST"}
     assert len(gateway.calls) == 1
+
+
+def test_task466_daily_historical_parser_accepts_only_exact_optional_echoes():
+    gateway = FixedGateway()
+    result = MarketDataV1Service(gateway, now=lambda: NOW).daily_candles(
+        "2330", (NOW.date() - timedelta(days=1)).isoformat(), TODAY)
+    assert result["status"] == "OK" and len(gateway.calls) == 1
+
+    for key, value in (("timeframe", "1"), ("sort", "desc"), ("unexpected", "field")):
+        invalid = FixedGateway()
+        invalid.daily_candle_source[key] = value
+        with pytest.raises(MarketDataV1Error) as failure:
+            MarketDataV1Service(invalid, now=lambda: NOW).daily_candles(
+                "2330", (NOW.date() - timedelta(days=1)).isoformat(), TODAY)
+        assert failure.value.reason == "INVALID_RESPONSE"
+        assert len(invalid.calls) == 1
+
+
+def test_task466_historical_minute_route_keeps_1330_and_cumulative_average(tmp_path):
+    client, gateway = app_client(tmp_path)
+    body = {"symbol": "2330", "from": "2026-08-27", "to": "2026-08-27"}
+    with client:
+        response = client.post("/internal/market-data/historical-intraday-candles/read",
+                               headers={"X-Internal-Service-Token": TOKEN}, json=body)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timeframe"] == "1" and payload["status"] == "AVAILABLE"
+    assert payload["candles"][0]["candleAt"] == "2026-08-27T05:30:00Z"
+    assert payload["candles"][0]["average"] == "940"
+    assert payload["candles"][0]["volume"] == "123"
+    assert gateway.calls == [("historical-minute-candles", {"symbol": "2330", "from": "2026-08-27",
+                                                               "to": "2026-08-27", "timeframe": "1", "sort": "asc"})]
+
+
+@pytest.mark.parametrize("body", [
+    {"symbol": "2330", "from": "2026-07-28", "to": "2026-08-27"},  # 31 included days is valid
+    {"symbol": "2330", "from": "2026-07-27", "to": "2026-08-27"},  # 32 included days
+    {"symbol": "2330", "from": "2026-08-28", "to": "2026-08-28"},  # today
+    {"symbol": "2330", "from": "2026-08-27", "to": "2026-08-27", "timeframe": "D"},
+])
+def test_task466_historical_minute_route_rejects_bad_request_without_sdk(tmp_path, body):
+    client, gateway = app_client(tmp_path)
+    with client:
+        response = client.post("/internal/market-data/historical-intraday-candles/read",
+                               headers={"X-Internal-Service-Token": TOKEN}, json=body)
+    if body["from"] == "2026-07-28":
+        assert response.status_code == 200
+        assert len(gateway.calls) == 1
+    else:
+        assert response.status_code == 400
+        assert response.json() == {"reason": "INVALID_REQUEST"}
+        assert gateway.calls == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("timeframe", "5"), ("sort", "desc"), ("unknown", "x"),
+])
+def test_task466_historical_minute_response_rejects_unapproved_echoes(field, value):
+    gateway = FixedGateway()
+    gateway.historical_minute_source[field] = value
+    with pytest.raises(MarketDataV1Error) as failure:
+        MarketDataV1Service(gateway, now=lambda: NOW).historical_intraday_candles(
+            "2330", "2026-08-27", "2026-08-27")
+    assert failure.value.reason == "INVALID_RESPONSE"
+
+
+def test_task466_historical_minute_response_rejects_nonascending_duplicate_and_out_of_session_rows():
+    gateway = FixedGateway()
+    valid = gateway.historical_minute_source["data"][0]
+    gateway.historical_minute_source["data"] = [valid, {**valid, "date": "2026-08-27T05:29:00Z"}]
+    with pytest.raises(MarketDataV1Error):
+        MarketDataV1Service(gateway, now=lambda: NOW).historical_intraday_candles(
+            "2330", "2026-08-27", "2026-08-27")
+
+    for timestamp in ("2026-08-27T00:59:00Z", "2026-08-27T05:31:00Z"):
+        bad = FixedGateway()
+        bad.historical_minute_source["data"][0]["date"] = timestamp
+        with pytest.raises(MarketDataV1Error):
+            MarketDataV1Service(bad, now=lambda: NOW).historical_intraday_candles(
+                "2330", "2026-08-27", "2026-08-27")
+
+
+def test_task466_historical_minute_route_requires_token_before_body_validation(tmp_path):
+    client, gateway = app_client(tmp_path)
+    with client:
+        missing = client.post("/internal/market-data/historical-intraday-candles/read", json={"unexpected": True})
+        wrong = client.post("/internal/market-data/historical-intraday-candles/read",
+                            headers={"X-Internal-Service-Token": "wrong"}, json={"unexpected": True})
+        invalid = client.post("/internal/market-data/historical-intraday-candles/read",
+                              headers={"X-Internal-Service-Token": TOKEN}, json={"symbol": "2330"})
+    assert missing.status_code == 401 and missing.json() == {"reason": "UNAUTHORIZED"}
+    assert wrong.status_code == 403 and wrong.json() == {"reason": "FORBIDDEN"}
+    assert invalid.status_code == 400 and invalid.json() == {"reason": "INVALID_REQUEST"}
+    assert gateway.calls == []

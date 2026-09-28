@@ -5727,6 +5727,23 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **範圍限制。** 不修改任何 @Scheduled、feature flags、SchedulePublicBffController.JOBS、外部 API 呼叫、排程觸發、SDK 呼叫、資料庫／Redis 寫入或交易功能；不新增 endpoint、migration 或資料表。
 - [ ] **測試。** BFF 單元測試精確核對以上 18 筆對照、未列入的 API 均回傳空陣列、每筆 Cron 欄位非 null，且既有 52 筆／已串接狀態／endpoint 欄位不變。前端須成功建置，Docker 重建後實際開啟富邦證 API 頁確認新欄、多 expression 換行與無 Cron 狀態。
 
+### Requirement 170／Task 466：富邦台股歷史日 K 與 1 分 K 可稽核回補
+
+**User Story：**作為資產管理系統使用者，我希望目前台股交易雷達追蹤標的有可查證的歷史富邦日 K 與 1 分 K（含富邦原始成交量），以便補齊已知歷史缺口並延續現有歷史事實資料路徑。
+
+#### Acceptance Criteria
+
+- [ ] **精確歷史區間。** 一次性、明確啟動的回補以啟動當下既有台股日曆與 Asia/Taipei 完成交易日 gate 決定嚴格早於今日的 `toDate`，不可自行假設今天已完成；`fromDate = toDate.minusYears(10)`，兩端 inclusive。若最新完成交易日為 2026-09-24，區間即 2016-09-24 至 2026-09-24。日 K 依富邦掛牌歷史實際可得範圍回傳；1 分 K 僅可從富邦官方歷史端點保留起始日 2023-05-23 起回補，並與 10 年區間取交集。不得為補資料偽造台股日曆或略過交易日／完成日 gate。
+- [ ] **範圍鎖定。** 每個回補 campaign 開始時只呼叫 `FubonRadarScope.current(30)`，將排序且去重的台股代號快照寫入 campaign receipt；空、超過 30、重複或非法代碼、scope 不可用、日曆未知、券商 SDK 非 READY、`FUBON_ENABLED` 關閉時，須在任何 SDK request 前停止。不得使用全市場、帳戶持倉、owner 私人資料或 caller 自選股票擴大範圍。Resume 沿用 campaign 固定代號及日期快照；若代號已不在目前 radar scope，須略過並將結果標為 `SCOPE_CHANGED`，不得以新 scope 靜默替換。
+- [ ] **只允許安全的一次性執行。** 增加無 public/internal HTTP route 的專用一次性執行入口，預設停用且不能由一般排程觸發；只有顯式命令列／一次性容器工作和獨立 backfill flag 同時指定時才執行，執行完畢即退出。輸入只能是新 campaign 或已存在 campaign ID、最多 10 年的日期範圍與明確 resume/retry 旗標，不可指定 SDK method、交易參數、股票代號、時間週期或原始 broker payload。不得新增、呼叫或排程任何下單、帳戶、委託 API。
+- [ ] **日 K 端點嚴格契約。** Python market-data adapter 固定使用官方歷史日 K API、`timeframe="D"`、台股代號與 exchange；request 日期區間不得達到或超過一個日曆年。response 僅容許已知 root 欄位與官方 optional echo：若有 `timeframe` 必為 `D`，若有 `sort` 必為 `asc`；未預期欄位、echo symbol／market／exchange 不一致、日期超界、重複或非遞增日期、OHLC 不合法、成交量／成交額單位格式錯誤，整個 response 拒絕，不得部分寫入。不可把嚴格 parser 改成忽略未知欄位。
+- [ ] **1 分 K 歷史端點嚴格契約。** 新增 token-protected internal read route，只允許精確的 `symbol/from/to`；adapter 固定呼叫官方歷史 K 線 API 的 1 分頻率，不接收 caller 指定 timeframe 或 method。request 日期不超過 31 個曆日、response 不超過 2 MiB，並須保留排序、唯一分鐘時間戳、identity、query 範圍與 observedAt 驗證；超限須安全失敗並停止，不自動拆分、不部分寫入。只接受台北交易時段 09:00–13:30（含 13:30）的完整分鐘 bar，精度到分鐘，禁止 future bar、重複／逆序資料或超出查詢日期；合法歷史窗口可跨多個台北交易日。每分鐘 OHLC 與原始 `volume` 依現有富邦 schema 與單位原樣保留；`average` 是官方「自開盤累計均價」，只驗證為合法正數，不要求落在該分鐘 OHLC 範圍。不得從 OHLC 推算或偽造歷史 `intraday.volumes` snapshot、累計報價量或分價量分布。
+- [ ] **有界呼叫與失敗停止。** 每次執行只處理一個 SDK request，request 前再次確認歷史完成日已知、campaign 日期、旗標、SDK READY、目前 scope 與非 current/future 日期；使用現有全域 market-data actual-start gate（最多 60 starts／rolling minute）及歷史端點限制，不新增可繞過的 quota、平行 worker、Java 重試或同時兩支以上請求。429／`stopRun`／auth／response-contract／persistence fatal error 立即停止本輪後續 window；其他單一 window 失敗記錄明確 sanitized failure code 後停止，不無限重試。Resume 只能略過已有 `COMPLETE`、`NO_DATA` receipt 的 windows；失敗 windows 必須明確 `--retry-failed` 才能重試，每 window 每次 invocation 最多一次。
+- [ ] **可稽核與可續跑。** 新增 campaign 與 window attempt 的資料庫 receipt，記錄 campaign ID、建立時間、from/to、完成交易日、固定 radar symbols、scope hash、資料集／symbol／request 日期、attempt、SDK observedAt、回傳列數、inserted／unchanged／conflict 數、終止狀態及不含 secrets／raw body 的錯誤類別。window 狀態至少區分 `STARTED`、`COMPLETE`、`NO_DATA`、`FAILED`、`CONFLICT`、`UNSUPPORTED`、`SCOPE_CHANGED`；每次重試新增 attempt，既有 attempt 只允許 STARTED 轉一次終態，終態不可修改或刪除，歷史事實仍由既有 immutable／idempotent store 寫入。中斷或失敗不可把 window 標為完成；resume 不得重覆觸發已完成 window 的 SDK request。
+- [ ] **沿用既有歷史事實與來源邊界。** 日 K 經既有 `FubonHistoricalDailyCandleStore` immutable fact writer，完成後才呼叫原有 `StockSourceQuery.upsertFubonHistoricalDailyCandle` guarded projection；不可覆寫官方或其他可信來源。1 分 K 經既有 `FubonMarketDataHistoryStore` 交易式 writer，重複相同 hash 為 unchanged；相同 identity／時間戳不同 payload 記錄 `CONFLICT`，保留現存資料並停止，不 update/delete 既有事實。schema migration 必須移除錯誤要求累計 `average` 屬於單分鐘 OHLC 範圍的 constraint，保留 OHLC、正數、分鐘、來源日期、volume、market/provider/timeframe 等 checks，並同步 `db/schema.sql`。
+- [ ] **歷史 coverage 如實呈現。** `intraday.volumes` 是官方 current-day snapshot 且目前僅 Redis TTL 儲存，沒有可用的官方歷史端點或持久歷史來源；回補 campaign 必須將「累計盤中 quote volume 歷史」與「分價量分布快照歷史」明列 `UNSUPPORTED`，不呼叫 current-day endpoint，不建立假歷史列。1 分 K 的原始 minute volume 獨立列為可回補 vendor fact，不能冒稱它是 quote-volume snapshot／price-volume distribution。
+- [ ] **覆蓋與驗證報告。** 執行完成後回報每 dataset 的初始與最終 row counts、symbol 數、最早／最晚 source date、inserted／unchanged／conflict／failed window counts、各 unsupported dataset、campaign ID 與實際完成日。空交易日／上市前窗須以 `NO_DATA` 記錄；不能只以 HTTP 200、feature flag 或 scheduler enabled 宣稱 backfill 完成。測試涵蓋 date chunk 邊界、日曆 gate、scope cap、resume/skip/retry、429 stop、未知 response 欄位、錯誤 timeframe/sort、平均價超 OHLC、13:30 bar、重複／衝突事實、unit 保留、secret redaction 與零交易 API 呼叫。
+
 ### Task 461 extension to Requirement 135／147：富邦盤中 1／5 分 KD、MACD、布林與 9090／SRPP 明細
 
 **User Story：**作為交易雷達使用者，我希望在台股交易時段看到富邦 1 分與 5 分 K 的 KD、MACD、布林通道最新值，並能由既有 9090 交易雷達單股明細提供給 SRPP；富邦查詢每分鐘最多 60 次即可。

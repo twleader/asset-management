@@ -343,8 +343,17 @@ class SdkGateway:
             "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc",
         }, deadline=deadline)
 
+    def read_historical_intraday_candles(self, symbol: str, start_date: str, end_date: str,
+                                         *, deadline: float | None = None) -> object:
+        """Fixed historical one-minute equity read; callers cannot select SDK method or timeframe."""
+        return self._marketdata_read("historical", "candles", {
+            "symbol": symbol, "from": start_date, "to": end_date, "timeframe": "1",
+            "adjusted": False, "fields": "open,high,low,close,volume,average", "sort": "asc",
+        }, deadline=deadline, max_response_bytes=2 * 1024 * 1024)
+
     def _marketdata_read(self, namespace: str, method_name: str, params: dict[str, object],
-                         *, deadline: float | None = None) -> object:
+                         *, deadline: float | None = None,
+                         max_response_bytes: int = 8 * 1024 * 1024) -> object:
         if (namespace, method_name) not in {
             ("corporate_actions", "dividends"), ("technical", "kdj"),
             ("technical", "macd"), ("technical", "bb"), ("technical", "sma"),
@@ -384,7 +393,7 @@ class SdkGateway:
                 )
                 if self._response_auth_invalid(response):
                     raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
-                self._check_marketdata_size(response)
+                self._check_marketdata_size(response, maximum_bytes=max_response_bytes)
                 return response
             except SdkCallError as exc:
                 if exc.auth_invalid and attempt == 0:
@@ -467,7 +476,7 @@ class SdkGateway:
         raise SdkCallError("SERVICE_SHUTDOWN")
 
     @staticmethod
-    def _check_marketdata_size(response: object) -> None:
+    def _check_marketdata_size(response: object, *, maximum_bytes: int = 8 * 1024 * 1024) -> None:
         # SDK responses are already decoded; bound the adapter payload without logging it or
         # allocating another unbounded serialized copy. The blocking-call semaphore also bounds
         # timed-out SDK requests that cannot be interrupted by Python.
@@ -475,7 +484,7 @@ class SdkGateway:
             size = 0
             for chunk in json.JSONEncoder(ensure_ascii=False, default=str).iterencode(response):
                 size += len(chunk.encode("utf-8"))
-                if size > 8 * 1024 * 1024:
+                if size > maximum_bytes:
                     raise SdkCallError("MARKETDATA_RESPONSE_TOO_LARGE")
         except (TypeError, ValueError):
             raise SdkCallError("MARKETDATA_SCHEMA_INVALID") from None
