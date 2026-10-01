@@ -2,19 +2,32 @@ package com.steven.assets.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import com.steven.assets.dto.BackupDto;
 import com.steven.assets.model.BackupRecord;
 import com.steven.assets.model.BackupSetting;
 import com.steven.assets.repository.BackupRecordRepository;
 import com.steven.assets.repository.BackupSettingRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.Session;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionOperations;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -24,6 +37,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 @Slf4j
@@ -40,6 +55,7 @@ public class BackupService {
     private static final String AUTO_PRE_RESTORE_PREFIX = "asset_auto-pre-restore_";
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     private static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Taipei");
+    private static final Path DEFAULT_PENDING_DIR = Path.of("/home/steven/.asset-backup-pending");
 
     private final MarketDataService marketDataService;
     private final BackupSettingRepository settingRepo;
@@ -47,35 +63,212 @@ public class BackupService {
     private final BackupRemoteClient remoteClient;
     private final BackupDatabaseProcess databaseProcess;
     private final ObjectMapper mapper;
+    private final Path pendingDir;
+    private final TransactionOperations indexTransaction;
+    private PlatformTransactionManager transactionManager;
+    @PersistenceContext
+    private EntityManager entityManager;
+    /** Lock order: operationLock, then remoteLock. Restore rescue reenters operationLock. */
+    private final ReentrantLock operationLock = new ReentrantLock(true);
+    private final AtomicBoolean destructiveWorkQuarantined = new AtomicBoolean();
 
+    @Autowired
     public BackupService(
             MarketDataService marketDataService,
             BackupSettingRepository settingRepo,
             BackupRecordRepository recordRepo,
             BackupRemoteClient remoteClient,
-            BackupDatabaseProcess databaseProcess) {
+            BackupDatabaseProcess databaseProcess,
+            PlatformTransactionManager transactionManager) {
+        this(marketDataService, settingRepo, recordRepo, remoteClient, databaseProcess, DEFAULT_PENDING_DIR,
+                new TransactionTemplate(transactionManager));
+        this.transactionManager = transactionManager;
+    }
+
+    BackupService(
+            MarketDataService marketDataService,
+            BackupSettingRepository settingRepo,
+            BackupRecordRepository recordRepo,
+            BackupRemoteClient remoteClient,
+            BackupDatabaseProcess databaseProcess,
+            Path pendingDir) {
+        this(marketDataService, settingRepo, recordRepo, remoteClient, databaseProcess, pendingDir,
+                TransactionOperations.withoutTransaction());
+    }
+
+    BackupService(
+            MarketDataService marketDataService,
+            BackupSettingRepository settingRepo,
+            BackupRecordRepository recordRepo,
+            BackupRemoteClient remoteClient,
+            BackupDatabaseProcess databaseProcess,
+            Path pendingDir,
+            TransactionOperations indexTransaction) {
         this.marketDataService = marketDataService;
         this.settingRepo = settingRepo;
         this.recordRepo = recordRepo;
         this.remoteClient = remoteClient;
         this.databaseProcess = databaseProcess;
+        this.pendingDir = pendingDir;
+        this.indexTransaction = indexTransaction;
         this.mapper = new ObjectMapper();
     }
 
+    private <T> T executeIndexTransaction(TransactionCallback<T> work) {
+        BackupWorkflowDeadline.requireWorkBudget();
+        TransactionOperations transaction = indexTransaction;
+        if (transactionManager != null) {
+            TransactionTemplate bounded = new TransactionTemplate(transactionManager);
+            long seconds = (BackupWorkflowDeadline.workMillis() + 999) / 1000;
+            bounded.setTimeout((int) Math.max(1, Math.min(Integer.MAX_VALUE, seconds)));
+            transaction = bounded;
+        }
+        return transaction.execute(status -> {
+            if (entityManager != null) {
+                // PostgreSQL 16 applies both limits to statements in this transaction only.
+                // A waiting row lock must not outlive the workflow's remaining budget.
+                String timeout = Math.max(1, Math.min(30_000, BackupWorkflowDeadline.workMillis())) + "ms";
+                // Also bound the JDBC wait for COMMIT, which statement_timeout does not cover.
+                entityManager.unwrap(Session.class).doWork(connection ->
+                        connection.setNetworkTimeout(Runnable::run, 25_000));
+                entityManager.createNativeQuery(
+                        "select set_config('statement_timeout', ?1, true), set_config('lock_timeout', ?2, true)")
+                        .setParameter(1, timeout)
+                        .setParameter(2, timeout)
+                        .getSingleResult();
+            }
+            T result = work.doInTransaction(status);
+            BackupWorkflowDeadline.requireWorkBudget();
+            return result;
+        });
+    }
+
+    private Path mutationMarker() { return pendingDir.resolve(".backup-index-commit-in-flight"); }
+
+    private void requireNoUncertainCommit() {
+        if (destructiveWorkQuarantined.get()) throw BackupIndexCommitUncertainException.forOperation("提交狀態");
+        try {
+            Files.readAttributes(mutationMarker(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation("提交狀態");
+        } catch (NoSuchFileException clear) {
+            // The previous mutation has a known completion and cleared its marker.
+        } catch (IOException unknown) {
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation("提交狀態");
+        }
+    }
+
+    private void markMutationInFlight(String operation, String exact) {
+        requireNoUncertainCommit();
+        try {
+            Files.createDirectories(pendingDir);
+            Files.setPosixFilePermissions(pendingDir, PosixFilePermissions.fromString("rwx------"));
+            // Retained across restarts. Only an operator who has read back the exact DB row
+            // and active remote object may remove this marker after resolving the outcome.
+            Files.writeString(mutationMarker(), "commit acknowledgement pending\noperation=" + operation
+                    + "\nexact=" + exact + "\n", StandardOpenOption.CREATE_NEW);
+            Files.setPosixFilePermissions(mutationMarker(), PosixFilePermissions.fromString("rw-------"));
+        } catch (IOException | RuntimeException unknown) {
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation("提交狀態");
+        }
+    }
+
+    private void clearMutationMarker() {
+        try {
+            Files.delete(mutationMarker());
+        } catch (IOException unknown) {
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation("提交狀態");
+        }
+    }
+
+    private <T> T executeDurableMutation(String label, TransactionCallback<T> work) {
+        return executeDurableMutation(label, "see exact DB and active Drive listing", work);
+    }
+
+    private <T> T executeDurableMutation(String label, String exact, TransactionCallback<T> work) {
+        // A deadline failure before entering the transaction cannot have written an index row.
+        BackupWorkflowDeadline.requireWorkBudget();
+        markMutationInFlight(label, exact);
+        return finishMarkedMutation(label, work);
+    }
+
+    private <T> T finishMarkedMutation(String label, TransactionCallback<T> work) {
+        AtomicBoolean callbackEntered = new AtomicBoolean();
+        final MutationOutcome<T> outcome;
+        try {
+            outcome = executeIndexTransaction(status -> {
+                callbackEntered.set(true);
+                try {
+                    return new MutationOutcome<>(work.doInTransaction(status), null);
+                } catch (RuntimeException failure) {
+                    // Returning with rollback-only lets TransactionTemplate finish rollback.
+                    // An exception from that completion is still an unknown outcome.
+                    status.setRollbackOnly();
+                    return new MutationOutcome<>(null, failure);
+                }
+            });
+        } catch (RuntimeException uncertain) {
+            if (!callbackEntered.get()) {
+                clearMutationMarker();
+                throw BackupIndexRollbackConfirmedException.beforeTransaction(label);
+            }
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation(label);
+        }
+        if (outcome == null) {
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation(label);
+        }
+        if (outcome.failure() != null) {
+            // The production PlatformTransactionManager returned normally after rollback-only.
+            // Test-only TransactionOperations without a manager cannot prove rollback.
+            if (transactionManager == null) {
+                destructiveWorkQuarantined.set(true);
+                throw BackupIndexCommitUncertainException.forOperation(label);
+            }
+            clearMutationMarker();
+            throw BackupIndexRollbackConfirmedException.forOperation(label);
+        }
+        // An acknowledgement arriving after the HTTP workflow budget cannot be reported as success.
+        if (BackupWorkflowDeadline.expired()) {
+            destructiveWorkQuarantined.set(true);
+            throw BackupIndexCommitUncertainException.forOperation(label);
+        }
+        clearMutationMarker();
+        return outcome.value();
+    }
+
+    private record MutationOutcome<T>(T value, RuntimeException failure) {}
+
     /** 取得目前保留代數設定（無資料時回預設值，不寫入）。 */
     public BackupSetting getSetting() {
-        return settingRepo.findById(1).orElseGet(() -> BackupSetting.builder()
+        return executeIndexTransaction(status -> settingRepo.findById(1).orElseGet(() -> BackupSetting.builder()
                 .id(1)
                 .manualRetention(DEFAULT_MANUAL_RETENTION)
                 .dailyRetention(DEFAULT_DAILY_RETENTION)
                 .weeklyRetention(DEFAULT_WEEKLY_RETENTION)
                 .backupEnabled(Boolean.TRUE)
                 .updatedAt(LocalDateTime.now(DISPLAY_ZONE))
-                .build());
+                .build()));
     }
 
     /** 更新保留代數設定（含啟用開關），數值需介於 1～999。 */
     public BackupSetting updateSetting(Integer manual, Integer daily, Integer weekly, Boolean backupEnabled) {
+        return BackupWorkflowDeadline.within(Duration.ofSeconds(1500), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                return updateSettingWithinDeadline(manual, daily, weekly, backupEnabled);
+            } finally {
+                operationLock.unlock();
+            }
+        });
+    }
+
+    private BackupSetting updateSettingWithinDeadline(Integer manual, Integer daily, Integer weekly, Boolean backupEnabled) {
         validateRange("manualRetention", manual);
         validateRange("dailyRetention", daily);
         validateRange("weeklyRetention", weekly);
@@ -90,7 +283,10 @@ public class BackupService {
         setting.setUpdatedAt(LocalDateTime.now(DISPLAY_ZONE));
 
         // Repository 自己的 transaction 在 return 前 commit；rotation 不得反轉已保存的設定。
-        BackupSetting saved = settingRepo.saveAndFlush(setting);
+        String intended = "manual=" + manual + ",daily=" + daily + ",weekly=" + weekly
+                + ",enabled=" + setting.getBackupEnabled();
+        BackupSetting saved = executeDurableMutation("保留設定", intended,
+                status -> settingRepo.saveAndFlush(setting));
         rotateQuietly("manual", saved.getManualRetention(), "更新保留代數");
         rotateQuietly("daily", saved.getDailyRetention(), "更新保留代數");
         rotateQuietly("weekly", saved.getWeeklyRetention(), "更新保留代數");
@@ -105,6 +301,18 @@ public class BackupService {
 
     /** 手動立即備份；自救點不受 backup_enabled 控制且不做 manual retention。 */
     public BackupDto.CreateResponse runBackup(boolean autoPreRestore) {
+        return BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                return runBackupWithinDeadline(autoPreRestore);
+            } finally {
+                operationLock.unlock();
+            }
+        });
+    }
+
+    private BackupDto.CreateResponse runBackupWithinDeadline(boolean autoPreRestore) {
         if (!autoPreRestore && !Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
             throw new IllegalStateException("備份功能已停用，請於「保留設定」中開啟「啟用備份」後再試");
         }
@@ -118,9 +326,23 @@ public class BackupService {
 
     /** dump → verified remote upload → durable backup_record；rotation 由呼叫端在成功後另行處理。 */
     private BackupDto.CreateResponse doBackup(String folder, String prefix, boolean autoPreRestore) {
+        return BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                return doBackupExclusive(folder, prefix, autoPreRestore);
+            } finally {
+                operationLock.unlock();
+            }
+        });
+    }
+
+    private BackupDto.CreateResponse doBackupExclusive(String folder, String prefix, boolean autoPreRestore) {
         LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
-        String filename = prefix + now.format(TS_FMT) + ".dump";
-        Path dumpFile = Path.of("/tmp", filename);
+        Path dumpFile = createPrivateDumpFile(prefix + now.format(TS_FMT) + "_");
+        String filename = dumpFile.getFileName().toString();
+        boolean preserveSource = false;
+        boolean confirmedRollback = false;
+        AtomicBoolean uploadAttempted = new AtomicBoolean();
 
         try {
             log.info("Backup start: {}/{}", folder, filename);
@@ -133,33 +355,84 @@ public class BackupService {
             }
             log.info("pg_dump done, size={} bytes", size);
 
-            remoteClient.withVerifiedSession(session -> {
+            BackupDto.CreateResponse response = remoteClient.withVerifiedSession(session -> {
+                uploadAttempted.set(true);
                 session.upload(dumpFile, folder);
-                return null;
+                // The transaction commits before the verified session releases remoteLock.
+                // Sync must never observe this upload without its durable index row.
+                try {
+                    return executeDurableMutation("索引", folder + "/" + filename, status -> {
+                        recordRepo.saveAndFlush(BackupRecord.builder()
+                                .folder(folder)
+                                .filename(filename)
+                                .sizeBytes(size)
+                                .modifiedAt(now)
+                                .autoPreRestore(autoPreRestore)
+                                .createdAt(now)
+                                .build());
+                        return BackupDto.CreateResponse.builder()
+                                .filename(filename)
+                                .sizeBytes(size)
+                                .uploadedAt(now)
+                                .build();
+                    });
+                } catch (BackupIndexCommitUncertainException ignored) {
+                    // A COMMIT error or timeout may mean committed or rolled back. Never infer absence.
+                    throw BackupIndexCommitUncertainException.forFilename(filename);
+                }
             });
-
-            // 本 method 無外層 transaction，saveAndFlush 的 repository transaction 會在 rotate 前提交。
-            recordRepo.saveAndFlush(BackupRecord.builder()
-                    .folder(folder)
-                    .filename(filename)
-                    .sizeBytes(size)
-                    .modifiedAt(now)
-                    .autoPreRestore(autoPreRestore)
-                    .createdAt(now)
-                    .build());
             log.info("Backup uploaded and indexed: {}/{}", folder, filename);
-
-            return BackupDto.CreateResponse.builder()
-                    .filename(filename)
-                    .sizeBytes(size)
-                    .uploadedAt(now)
-                    .build();
-        } finally {
-            try {
-                Files.deleteIfExists(dumpFile);
-            } catch (IOException ignored) {
-                log.warn("備份暫存檔清理失敗: {}", filename);
+            return response;
+        } catch (BackupRemoteUnavailableException unavailable) {
+            preserveSource = unavailable.resultUncertain();
+            throw unavailable;
+        } catch (BackupIndexCommitUncertainException uncertain) {
+            preserveSource = true;
+            throw uncertain;
+        } catch (BackupIndexRollbackConfirmedException rolledBack) {
+            preserveSource = true;
+            confirmedRollback = true;
+            throw rolledBack.beforeTransaction()
+                    ? BackupIndexRollbackConfirmedException.forFilenameBeforeTransaction(filename)
+                    : BackupIndexRollbackConfirmedException.forFilename(filename);
+        } catch (RuntimeException failure) {
+            if (uploadAttempted.get()) {
+                preserveSource = true;
+                throw BackupRemoteUnavailableException.uncertainUpload(filename);
             }
+            throw failure;
+        } finally {
+            if (preserveSource) {
+                if (confirmedRollback) {
+                    log.warn("備份索引已確認回滾，已保留遠端 orphan 與本地來源供唯讀對帳: {}", filename);
+                } else {
+                    log.warn("備份上傳或索引提交結果未定，已保留本地來源供唯讀對帳: {}", filename);
+                }
+            } else {
+                try {
+                    Files.deleteIfExists(dumpFile);
+                } catch (IOException ignored) {
+                    log.warn("備份暫存檔清理失敗: {}", filename);
+                }
+            }
+        }
+    }
+
+    private Path createPrivateDumpFile(String prefix) {
+        try {
+            Files.createDirectories(pendingDir);
+            if (Files.isSymbolicLink(pendingDir)) throw new IOException("pending directory link");
+            Files.setPosixFilePermissions(pendingDir, PosixFilePermissions.fromString("rwx------"));
+            Path temp = Files.createTempFile(pendingDir, prefix, ".dump");
+            try {
+                Files.setPosixFilePermissions(temp, PosixFilePermissions.fromString("rw-------"));
+            } catch (IOException | UnsupportedOperationException | SecurityException failure) {
+                Files.deleteIfExists(temp);
+                throw failure;
+            }
+            return temp;
+        } catch (IOException | UnsupportedOperationException | SecurityException ignored) {
+            throw new IllegalStateException("無法建立安全且可持續保存的備份來源暫存檔");
         }
     }
 
@@ -168,6 +441,19 @@ public class BackupService {
     /** 台股交易日 15:30（收盤後 2 小時）→ daily/asset_daily_tw_*.dump */
     @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledDailyTwBackup() {
+        BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                scheduledDailyTwWithinDeadline();
+            } finally {
+                operationLock.unlock();
+            }
+            return null;
+        });
+    }
+
+    private void scheduledDailyTwWithinDeadline() {
         if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
             log.info("Skip TW daily backup: 備份開關已關閉");
             return;
@@ -185,6 +471,19 @@ public class BackupService {
     /** 美股收盤後 2 小時，台北時間隔日 07:00 → daily/asset_daily_us_*.dump */
     @Scheduled(cron = "0 0 7 * * TUE-SAT", zone = "Asia/Taipei")
     public void scheduledDailyUsBackup() {
+        BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                scheduledDailyUsWithinDeadline();
+            } finally {
+                operationLock.unlock();
+            }
+            return null;
+        });
+    }
+
+    private void scheduledDailyUsWithinDeadline() {
         if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
             log.info("Skip US daily backup: 備份開關已關閉");
             return;
@@ -202,6 +501,19 @@ public class BackupService {
     /** 每周日 05:00 → weekly/asset_weekly_*.dump */
     @Scheduled(cron = "0 0 5 * * SUN", zone = "Asia/Taipei")
     public void scheduledWeeklyBackup() {
+        BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                scheduledWeeklyWithinDeadline();
+            } finally {
+                operationLock.unlock();
+            }
+            return null;
+        });
+    }
+
+    private void scheduledWeeklyWithinDeadline() {
         if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
             log.info("Skip weekly backup: 備份開關已關閉");
             return;
@@ -238,53 +550,127 @@ public class BackupService {
     }
 
     /** 四個 folder 必須在同一 verified session 依序列舉，全部成功後才開始 DB mutation。 */
-    @Transactional
     public BackupDto.SyncResponse syncFromRemote() {
-        List<RemoteBackupFile> remoteFiles = remoteClient.withVerifiedSession(session -> {
-            List<RemoteBackupFile> collected = new ArrayList<>();
-            for (String folder : FOLDERS) {
-                collected.addAll(parseRemoteFiles(folder, session.listJson(folder)));
+        return BackupWorkflowDeadline.within(Duration.ofSeconds(1500), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                return syncWithinDeadline();
+            } finally {
+                operationLock.unlock();
             }
-            return collected;
         });
-
-        int inserted = 0;
-        Set<String> remoteKeys = new HashSet<>();
-        LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
-        for (RemoteBackupFile remote : remoteFiles) {
-            remoteKeys.add(remote.folder() + "/" + remote.filename());
-            if (recordRepo.findByFolderAndFilename(remote.folder(), remote.filename()).isEmpty()) {
-                recordRepo.save(BackupRecord.builder()
-                        .folder(remote.folder())
-                        .filename(remote.filename())
-                        .sizeBytes(remote.size())
-                        .modifiedAt(remote.modifiedAt())
-                        .autoPreRestore(remote.filename().startsWith(AUTO_PRE_RESTORE_PREFIX))
-                        .createdAt(now)
-                        .build());
-                inserted++;
-            }
-        }
-
-        int deleted = 0;
-        for (BackupRecord row : recordRepo.findAll()) {
-            if (!remoteKeys.contains(row.getFolder() + "/" + row.getFilename())) {
-                recordRepo.delete(row);
-                deleted++;
-            }
-        }
-        log.info("Backup sync done: inserted={}, deleted={}", inserted, deleted);
-        return BackupDto.SyncResponse.builder()
-                .inserted(inserted)
-                .deleted(deleted)
-                .total(remoteFiles.size())
-                .build();
     }
 
-    private List<RemoteBackupFile> parseRemoteFiles(String folder, String json) {
+    private BackupDto.SyncResponse syncWithinDeadline() {
+        return remoteClient.withVerifiedSession(session -> {
+            List<RemoteBackupFile> collected = collectRemoteFiles(session);
+            Set<String> keys = new HashSet<>();
+            for (RemoteBackupFile file : collected) {
+                if (!keys.add(file.folder() + "/" + file.filename())) {
+                    throw new IllegalStateException("備份 remote 清單有重複項目");
+                }
+            }
+            return executeDurableMutation("同步", status -> {
+                List<BackupRecord> indexed = recordRepo.findAll();
+                List<BackupRecord> absent = new ArrayList<>();
+                for (BackupRecord row : indexed) {
+                    if (!isActiveRow(row)) continue; // frozen legacy is never reconciled away
+                    if (!keys.contains(row.getFolder() + "/" + row.getFilename())) {
+                        if (!session.proveAbsent(row.getFolder(), row.getFilename())) {
+                            throw BackupRemoteUnavailableException.remoteUnavailable();
+                        }
+                        absent.add(row);
+                    }
+                }
+                if (!absent.isEmpty()) requireDynamicAnchor(session, indexed, keys);
+                int inserted = 0;
+                LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
+                for (RemoteBackupFile remote : collected) {
+                    if (recordRepo.findByFolderAndFilename(remote.folder(), remote.filename()).isEmpty()) {
+                        recordRepo.save(BackupRecord.builder()
+                                .folder(remote.folder())
+                                .filename(remote.filename())
+                                .sizeBytes(remote.size())
+                                .modifiedAt(remote.modifiedAt())
+                                .autoPreRestore(remote.filename().startsWith(AUTO_PRE_RESTORE_PREFIX))
+                                .createdAt(now)
+                                .build());
+                        inserted++;
+                    }
+                }
+
+                int deleted = 0;
+                for (BackupRecord row : absent) {
+                    recordRepo.delete(row);
+                    deleted++;
+                }
+                log.info("Backup sync done: inserted={}, deleted={}", inserted, deleted);
+                return BackupDto.SyncResponse.builder()
+                        .inserted(inserted)
+                        .deleted(deleted)
+                        .total(collected.size())
+                        .build();
+            });
+        });
+    }
+
+    private List<RemoteBackupFile> collectRemoteFiles(BackupRemoteClient.Session session) {
+        final JsonNode directories;
+        try {
+            directories = mapper.readTree(session.listDateDirectoriesJson());
+            if (!directories.isArray()) throw new IOException("invalid date root listing");
+        } catch (IOException | RuntimeException invalid) {
+            throw BackupRemoteUnavailableException.remoteUnavailable();
+        }
+        Set<String> seen = new HashSet<>();
+        List<RemoteBackupFile> collected = new ArrayList<>();
+        for (JsonNode entry : directories) {
+            if (!entry.hasNonNull("Name") || !entry.has("IsDir")) {
+                throw BackupRemoteUnavailableException.remoteUnavailable();
+            }
+            String name = entry.path("Name").asText();
+            if (!name.matches("\\d{4}-\\d{2}-\\d{2}")) continue; // legacy/non-date paths remain untouched
+            final LocalDate date;
+            try {
+                date = LocalDate.parse(name);
+            } catch (RuntimeException invalid) {
+                throw BackupRemoteUnavailableException.remoteUnavailable();
+            }
+            if (!entry.path("IsDir").asBoolean(false) || !seen.add(name)) {
+                throw BackupRemoteUnavailableException.remoteUnavailable();
+            }
+            if (!date.isBefore(BackupPath.CUTOVER)) {
+                collected.addAll(parseRemoteFiles(name, session.listJson(name)));
+            }
+        }
+        return collected;
+    }
+
+    private static boolean isActiveRow(BackupRecord row) {
+        try {
+            return BackupPath.of(row.getFolder(), row.getFilename()).active();
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
+
+    private void requireDynamicAnchor(BackupRemoteClient.Session session, List<BackupRecord> indexed,
+                                      Set<String> remoteKeys) {
+        BackupRecord anchor = indexed.stream()
+                .filter(BackupService::isActiveRow)
+                .filter(row -> remoteKeys.contains(row.getFolder() + "/" + row.getFilename()))
+                .max(java.util.Comparator.comparing(BackupRecord::getModifiedAt))
+                .orElseThrow(BackupRemoteUnavailableException::remoteUnavailable);
+        if (!"PGDMP".equals(session.readHeader(anchor.getFolder(), anchor.getFilename()))) {
+            throw BackupRemoteUnavailableException.remoteUnavailable();
+        }
+    }
+
+    private List<RemoteBackupFile> parseRemoteFiles(String dateFolder, String json) {
         List<RemoteBackupFile> files = new ArrayList<>();
         if (json == null || json.isBlank()) {
-            return files;
+            throw new IllegalStateException("備份 remote 清單不完整");
         }
         try {
             JsonNode array = mapper.readTree(json);
@@ -292,15 +678,20 @@ public class BackupService {
                 throw new IOException("not an array");
             }
             for (JsonNode node : array) {
+                if (!node.hasNonNull("Name") || !node.has("IsDir")
+                        || !node.hasNonNull("Size") || !node.hasNonNull("ModTime")) {
+                    throw new IOException("incomplete listing row");
+                }
                 if (node.path("IsDir").asBoolean(false)) {
                     continue;
                 }
                 String name = node.path("Name").asText();
-                if (!isSafeDumpFilename(name)) {
-                    continue;
+                BackupPath path = BackupPath.fromFilename(name);
+                if (!path.active() || !path.dateFolder().equals(dateFolder)) {
+                    throw new IOException("mismatched backup date");
                 }
                 files.add(new RemoteBackupFile(
-                        folder,
+                        path.folder(),
                         name,
                         node.path("Size").asLong(0),
                         parseRcloneTime(node.path("ModTime").asText())));
@@ -313,27 +704,72 @@ public class BackupService {
 
     /** 還原：先守門 → 建自救點 → 再守門下載 → pg_restore。 */
     public BackupDto.RestoreResponse runRestore(String folder, String filename) {
+        return BackupWorkflowDeadline.within(Duration.ofSeconds(1500), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                return restoreWithinDeadline(folder, filename);
+            } finally {
+                operationLock.unlock();
+            }
+        });
+    }
+
+    private BackupDto.RestoreResponse restoreWithinDeadline(String folder, String filename) {
         if (!FOLDERS.contains(folder)) {
             throw new IllegalArgumentException("不允許的備份資料夾：" + folder);
         }
-        if (!isSafeDumpFilename(filename)) {
-            throw new IllegalArgumentException("不合法的備份檔名：" + filename);
+        final BackupPath path;
+        try {
+            path = BackupPath.of(folder, filename);
+        } catch (IllegalArgumentException unavailable) {
+            throw new BackupLegacyUnavailableException();
+        }
+        if (!path.active() || executeIndexTransaction(status ->
+                recordRepo.findByFolderAndFilename(folder, filename)).isEmpty()) {
+            throw new BackupLegacyUnavailableException();
         }
 
-        // 先獨立守門；若帳號／root 不對，禁止建立自救點，更不得進 pg_restore。
-        remoteClient.withVerifiedSession(session -> null);
-
-        log.info("Restore: creating pre-restore backup");
-        BackupDto.CreateResponse preRestore = doBackup("manual", AUTO_PRE_RESTORE_PREFIX, true);
-
-        Path localFile = Path.of("/tmp", filename);
+        // Keep the entire preflight within 570 seconds, preserving 900 + 30 for pg_restore and cleanup.
+        RestorePreflight preflight = BackupWorkflowDeadline.within(Duration.ofSeconds(570), () -> {
+            remoteClient.withVerifiedSession(session -> null);
+            log.info("Restore: creating pre-restore backup");
+            BackupDto.CreateResponse rescue = doBackup("manual", AUTO_PRE_RESTORE_PREFIX, true);
+            Path target;
+            try {
+                target = Files.createTempFile("backup-restore-", ".dump");
+            } catch (IOException ignored) {
+                throw new IllegalStateException("無法建立還原暫存檔；自救點為 " + rescue.filename());
+            }
+            try {
+                remoteClient.withVerifiedSession(session -> {
+                    session.download(folder, filename, target);
+                    return null;
+                });
+                databaseProcess.validate(target);
+                return new RestorePreflight(rescue, target);
+            } catch (RuntimeException failure) {
+                try { Files.deleteIfExists(target); } catch (IOException ignored) { }
+                throw new IllegalStateException("來源下載或驗證失敗，未執行 pg_restore；已保留自救點 "
+                        + rescue.filename());
+            }
+        });
+        BackupDto.CreateResponse preRestore = preflight.rescue();
+        Path localFile = preflight.localFile();
         try {
-            remoteClient.withVerifiedSession(session -> {
-                session.download(folder, filename);
-                return null;
-            });
+            try {
+                BackupWorkflowDeadline.requireSeconds(930);
+            } catch (IllegalStateException expired) {
+                throw new IllegalStateException("還原前置階段超過期限，未執行 pg_restore；已保留自救點 "
+                        + preRestore.filename());
+            }
             log.info("Restore: running pg_restore");
-            databaseProcess.restore(localFile);
+            try {
+                databaseProcess.restore(localFile);
+            } catch (RuntimeException ignored) {
+                throw new IllegalStateException("pg_restore 失敗或逾時，資料庫可能部分還原；已保留自救點 "
+                        + preRestore.filename() + "，請以該 exact 檔案重新還原");
+            }
             log.info("Restore done: {}/{}", folder, filename);
             return BackupDto.RestoreResponse.builder()
                     .status("success")
@@ -354,22 +790,49 @@ public class BackupService {
      * 第一筆 unavailable 會中止 lambda，後序 command 與 DB row 維持不動。
      */
     private void rotateFolder(String folder, int retention) {
+        requireNoUncertainCommit();
         remoteClient.withVerifiedSession(session -> {
-            List<BackupRecord> records =
-                    recordRepo.findByFolderAndAutoPreRestoreFalseOrderByModifiedAtDesc(folder);
+            List<BackupRecord> records = executeIndexTransaction(status ->
+                    recordRepo.findByFolderAndAutoPreRestoreFalseOrderByModifiedAtDesc(folder))
+                    .stream().filter(BackupService::isActiveRow).toList();
             if (records.size() <= retention) {
                 return null;
             }
+            List<RemoteBackupFile> remoteFiles = collectRemoteFiles(session);
+            Set<String> remoteKeys = new HashSet<>();
+            for (RemoteBackupFile file : remoteFiles) {
+                if (!remoteKeys.add(file.folder() + "/" + file.filename())) {
+                    throw BackupRemoteUnavailableException.remoteUnavailable();
+                }
+            }
+            List<BackupRecord> indexed = executeIndexTransaction(status -> recordRepo.findAll());
+            requireDynamicAnchor(session, indexed, remoteKeys);
             for (int index = retention; index < records.size(); index++) {
                 BackupRecord record = records.get(index);
                 String filename = record.getFilename();
-                if (!isSafeDumpFilename(filename)) {
-                    throw new IllegalStateException("備份索引含不合法檔名");
-                }
                 log.info("Rotate: deleting old backup {}/{}", folder, filename);
-                session.delete(folder, filename);
-                // rotateFolder 無外層 transaction；每次 repository delete 各自 commit。
-                recordRepo.delete(record);
+                // Persist the exact candidate before the first destructive command. A timed-out
+                // delete may have succeeded remotely; its result must remain quarantined.
+                markMutationInFlight("輪替", folder + "/" + filename);
+                try {
+                    if (remoteKeys.contains(folder + "/" + filename)) {
+                        session.delete(folder, filename);
+                    } else if (!session.proveAbsent(folder, filename)) {
+                        throw BackupRemoteUnavailableException.remoteUnavailable();
+                    }
+                    // Each row commits separately while both admission and remote locks remain held.
+                    finishMarkedMutation("輪替", status -> {
+                        recordRepo.delete(record);
+                        return null;
+                    });
+                } catch (BackupIndexRollbackConfirmedException rolledBack) {
+                    // The remote delete returned a known result and DB rollback completed.
+                    // A later full listing can reconcile the still-indexed row safely.
+                    throw rolledBack;
+                } catch (RuntimeException uncertain) {
+                    destructiveWorkQuarantined.set(true);
+                    throw BackupIndexCommitUncertainException.forOperation("輪替");
+                }
             }
             return null;
         });
@@ -403,21 +866,13 @@ public class BackupService {
         }
     }
 
-    private static boolean isSafeDumpFilename(String filename) {
-        return filename != null
-                && !filename.isBlank()
-                && !filename.contains("/")
-                && !filename.contains("\\")
-                && !filename.contains("..")
-                && filename.endsWith(".dump");
-    }
-
     private static LocalDateTime parseRcloneTime(String iso) {
         if (iso == null || iso.isBlank()) {
-            return LocalDateTime.now(DISPLAY_ZONE);
+            throw new IllegalArgumentException("remote timestamp missing");
         }
         return ZonedDateTime.parse(iso).withZoneSameInstant(DISPLAY_ZONE).toLocalDateTime();
     }
 
     private record RemoteBackupFile(String folder, String filename, long size, LocalDateTime modifiedAt) {}
+    private record RestorePreflight(BackupDto.CreateResponse rescue, Path localFile) {}
 }

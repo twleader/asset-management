@@ -4,6 +4,9 @@ import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.TenantAccessException;
 import com.steven.assets.security.UnauthenticatedException;
 import com.steven.assets.service.BackupRemoteUnavailableException;
+import com.steven.assets.service.BackupIndexCommitUncertainException;
+import com.steven.assets.service.BackupIndexRollbackConfirmedException;
+import com.steven.assets.service.BackupLegacyUnavailableException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -51,6 +54,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BackupRemoteUnavailableException.class)
     public ProblemDetail handleBackupRemoteUnavailable(BackupRemoteUnavailableException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
+    /** Upload was verified but DB commit acknowledgement is uncertain; clients must not retry automatically. */
+    @ExceptionHandler(BackupIndexCommitUncertainException.class)
+    public ProblemDetail handleBackupIndexCommitUncertain(BackupIndexCommitUncertainException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(BackupIndexRollbackConfirmedException.class)
+    public ProblemDetail handleBackupIndexRollbackConfirmed(BackupIndexRollbackConfirmedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(BackupLegacyUnavailableException.class)
+    public ProblemDetail handleBackupLegacyUnavailable(BackupLegacyUnavailableException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     /**

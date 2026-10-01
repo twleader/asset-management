@@ -15,9 +15,18 @@ interface BackupRemoteClient {
     interface Session {
         void upload(Path localFile, String folder);
 
-        void download(String folder, String filename);
+        void download(String folder, String filename, Path target);
 
-        String listJson(String folder);
+        /** Plaintext ISO date directory names directly below the pinned crypt root. */
+        String listDateDirectoriesJson();
+
+        String listJson(String dateFolder);
+
+        /** Exact decrypted archive header; only PGDMP proves a dynamic deletion anchor. */
+        String readHeader(String folder, String filename);
+
+        /** Return true only when an independent exact-path remote probe proves absence. */
+        boolean proveAbsent(String folder, String filename);
 
         DeleteResult delete(String folder, String filename);
     }

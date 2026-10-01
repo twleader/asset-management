@@ -507,12 +507,13 @@ export const bffApi = {
   // BackupRestore
   backupRestore: {
     list:           () => api.get('/bff/backup-restore'),
-    create:         () => api.post('/bff/backup-restore', null, { timeout: 120000 }),
+    // Task 468：server create deadline 900s，browser 必須比 server 多保留 60s。
+    create:         () => api.post('/bff/backup-restore', null, { timeout: 960000 }),
     restore:        ({ folder, filename, confirmation }) =>
-      api.post('/bff/backup-restore/restore', { folder, filename, confirmation }, { timeout: 180000 }),
-    sync:           () => api.post('/bff/backup-restore/sync', null, { timeout: 60000 }),
+      api.post('/bff/backup-restore/restore', { folder, filename, confirmation }, { timeout: 1530000 }),
+    sync:           () => api.post('/bff/backup-restore/sync', null, { timeout: 1530000 }),
     getSettings:    () => api.get('/bff/backup-restore/settings'),
-    updateSettings: (data) => api.put('/bff/backup-restore/settings', data)
+    updateSettings: (data) => api.put('/bff/backup-restore/settings', data, { timeout: 1530000 })
   },
 
   // Settings 頁面（CRUD 走各自 BFF）
