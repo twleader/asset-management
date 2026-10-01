@@ -62,6 +62,74 @@ class SrppOrchestratedResponseValidatorTest {
         assertThatThrownBy(() -> validate(query, root)).isInstanceOf(SrppPayloadException.class);
     }
 
+    @Test
+    void marketFactsAcceptsDateOnlyCloseAndRadarWithDateOnlySourceVector() throws Exception {
+        SrppOrchestratedQuery query = marketQuery("quote,radar");
+        ObjectNode root = base();
+        root.put("marketCaptureId", CONTEXT);
+        root.putArray("sourceVector")
+                .add(source("CANONICAL_MARKET_READ").put("dataAsOf", "2026-09-30"))
+                .add(source("TRADING_RADAR_SNAPSHOT").put("dataAsOf", "2026-09-30"));
+        ObjectNode symbol = staleQuoteOnlySymbol();
+        symbol.put("status", "COMPLETE");
+        symbol.put("quoteStatus", "CLOSE_FALLBACK");
+        symbol.put("quoteDataAsOf", "2026-09-30");
+        symbol.put("radarStatus", "AVAILABLE");
+        symbol.put("radarDataAsOf", "2026-09-30");
+        symbol.put("radarSourceId", "TRADING_RADAR_SNAPSHOT");
+        root.putArray("symbols").add(symbol);
+        root.set("coverage", coverage("COMPLETE", 1, 1, 0, 0));
+
+        validate(query, root);
+    }
+
+    @Test
+    void marketFactsRejectsInvalidDateOrTimestampWithoutTimezone() throws Exception {
+        SrppOrchestratedQuery query = marketQuery("quote");
+        ObjectNode invalidDate = marketQuoteOnly();
+        ((ObjectNode) invalidDate.path("sourceVector").get(0)).put("dataAsOf", "2026-02-30");
+        assertThatThrownBy(() -> validate(query, invalidDate)).isInstanceOf(SrppPayloadException.class);
+
+        ObjectNode noTimezone = marketQuoteOnly();
+        ((ObjectNode) noTimezone.path("symbols").get(0)).put("quoteDataAsOf", "2026-10-01T09:00:00");
+        assertThatThrownBy(() -> validate(query, noTimezone)).isInstanceOf(SrppPayloadException.class);
+    }
+
+    @Test
+    void calculationSourceRevisionStillRejectsDateOnlyAsOf() throws Exception {
+        var params = new LinkedMultiValueMap<String, String>();
+        params.add("contextId", CONTEXT);
+        params.add("calculationIds", "CASH_INCOME");
+        SrppOrchestratedQuery query = SrppOrchestratedQuery.parse(
+                SrppOrchestratedQuery.Route.CALCULATIONS, params, new HttpHeaders());
+        ObjectNode root = base();
+        root.put("formulaSetSha256", HASH);
+        root.putArray("sourceVector").add(source("assets").put("dataAsOf", "2026-10-01"));
+        root.set("coverage", coverage("COMPLETE", 1, 1, 0, 0));
+        root.putArray("calculations").add(calculation("CASH_INCOME", "COMPLETE", "assets"));
+
+        assertThatThrownBy(() -> validate(query, root)).isInstanceOf(SrppPayloadException.class);
+    }
+
+    private static SrppOrchestratedQuery marketQuery(String include) {
+        var params = new LinkedMultiValueMap<String, String>();
+        params.add("contextId", CONTEXT);
+        params.add("stockCodes", "2330");
+        params.add("include", include);
+        return SrppOrchestratedQuery.parse(SrppOrchestratedQuery.Route.MARKET_FACTS, params, new HttpHeaders());
+    }
+
+    private static ObjectNode marketQuoteOnly() {
+        ObjectNode root = base();
+        root.put("marketCaptureId", CONTEXT);
+        root.putArray("sourceVector").add(source("CANONICAL_MARKET_READ"));
+        ObjectNode symbol = staleQuoteOnlySymbol();
+        symbol.put("status", "PARTIAL");
+        root.putArray("symbols").add(symbol);
+        root.set("coverage", coverage("PARTIAL", 1, 0, 1, 0));
+        return root;
+    }
+
     private static ObjectNode base() {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("schemaVersion", "1.0");

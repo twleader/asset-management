@@ -38,7 +38,7 @@ final class SrppOrchestratedResponseValidator {
         common(root, query);
         text(root, "formulaSetSha256");
         dateTime(root, "capturedAt");
-        sources(root.get("sourceVector"));
+        sources(root.get("sourceVector"), false);
         uniqueTexts(root.get("allowedStockCodes"), 500);
     }
 
@@ -47,7 +47,7 @@ final class SrppOrchestratedResponseValidator {
                 "formulaSetSha256", "sourceVector", "coverage", "calculations", "contextContentSha256"));
         common(root, query);
         text(root, "formulaSetSha256");
-        Set<String> sourceIds = sources(root.get("sourceVector"));
+        Set<String> sourceIds = sources(root.get("sourceVector"), false);
         JsonNode coverage = coverage(root.get("coverage"));
         JsonNode results = root.get("calculations");
         if (!results.isArray() || results.size() != query.calculationIds().size()) fail();
@@ -80,7 +80,7 @@ final class SrppOrchestratedResponseValidator {
                 "policyBundleSha256", "sourceVector", "symbols", "coverage", "contextContentSha256"));
         common(root, query);
         text(root, "marketCaptureId");
-        Set<String> sourceIds = sources(root.get("sourceVector"));
+        Set<String> sourceIds = sources(root.get("sourceVector"), true);
         JsonNode coverage = coverage(root.get("coverage"));
         JsonNode symbols = root.get("symbols");
         if (!symbols.isArray() || symbols.size() != query.stockCodes().size()) fail();
@@ -97,7 +97,7 @@ final class SrppOrchestratedResponseValidator {
             if (!query.stockCodes().contains(code) || !seen.add(code)) fail();
             if (!Set.of("LIVE", "CLOSE_FALLBACK", "STALE", "UNAVAILABLE").contains(text(item, "quoteStatus"))) fail();
             if (!Set.of("AVAILABLE", "UNAVAILABLE").contains(text(item, "radarStatus"))) fail();
-            nullableDateTime(item, "quoteDataAsOf"); nullableDateTime(item, "radarDataAsOf");
+            nullableMarketAsOf(item, "quoteDataAsOf"); nullableMarketAsOf(item, "radarDataAsOf");
             nullableText(item, "quoteSourceId"); nullableText(item, "radarSourceId");
             sourceReference(item, "quoteSourceId", "quoteDataAsOf", sourceIds);
             sourceReference(item, "radarSourceId", "radarDataAsOf", sourceIds);
@@ -133,14 +133,16 @@ final class SrppOrchestratedResponseValidator {
         if (query.policyHash() != null && !query.policyHash().equals(text(root, "policyBundleSha256"))) fail();
     }
 
-    private static Set<String> sources(JsonNode node) {
+    private static Set<String> sources(JsonNode node, boolean marketFacts) {
         if (!node.isArray() || node.size() > 30) fail();
         Set<String> ids = new HashSet<>();
         for (JsonNode source : node) {
             fields(source, Set.of("sourceId", "revision", "dataAsOf", "bodySha256"));
             String id = text(source, "sourceId");
             if (!ids.add(id)) fail();
-            text(source, "revision"); dateTime(source, "dataAsOf"); sha(source, "bodySha256");
+            text(source, "revision");
+            if (marketFacts) marketAsOf(source, "dataAsOf"); else dateTime(source, "dataAsOf");
+            sha(source, "bodySha256");
         }
         return ids;
     }
@@ -228,6 +230,14 @@ final class SrppOrchestratedResponseValidator {
         try { OffsetDateTime.parse(text(node, field)); } catch (RuntimeException e) { fail(); }
     }
     private static void nullableDateTime(JsonNode node, String field) { if (!node.get(field).isNull()) dateTime(node, field); }
+    private static void marketAsOf(JsonNode node, String field) {
+        String value = text(node, field);
+        if (value.matches("\\d{4}-\\d{2}-\\d{2}")) date(node, field);
+        else dateTime(node, field);
+    }
+    private static void nullableMarketAsOf(JsonNode node, String field) {
+        if (!node.get(field).isNull()) marketAsOf(node, field);
+    }
     private static void uniqueTexts(JsonNode node, int max) {
         if (node == null || !node.isArray() || node.size() > max) fail();
         Set<String> values = new HashSet<>();

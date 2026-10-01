@@ -12,16 +12,20 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PriceQueryService;
 import com.steven.assets.service.TradingRadarSnapshotStore;
+import com.steven.assets.util.MarketZones;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -37,6 +41,10 @@ import java.util.regex.Pattern;
 public class SrppOrchestratedReadService {
     private static final JsonNodeFactory F = JsonNodeFactory.instance;
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
+    private static final Duration LIVE_MAX_AGE = Duration.ofMinutes(5);
+    private static final Set<String> QUOTE_MARKETS = Set.of("台股", "美股", "英股");
+    private static final Set<String> TRUSTED_TW_CLOSE_SOURCES = Set.of(
+            "TWSE_MI_INDEX", "TPEX_DAILY_CLOSE", "FINMIND_TW_CLOSE");
     private static final Pattern UUID_LOWER = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
     private static final Set<String> CALCULATION_IDS = Set.of(
             "ASSET_RECONCILIATION", "ALLOCATION_GAP", "CASH_INCOME",
@@ -218,11 +226,11 @@ public class SrppOrchestratedReadService {
             item.put("stockCode", code);
             boolean quoteIncluded = include.contains("quote");
             boolean radarIncluded = include.contains("radar");
-            String quoteDataAsOf = quoteIncluded && quote != null
-                    ? dateTime(quote.updatedAt(), quote.tradingDate()) : null;
-            String quoteStatus = quoteStatus(quote, quoteDataAsOf != null);
-            boolean quoteAvailable = quoteIncluded && quote != null && quote.price() != null && quoteDataAsOf != null
-                    && !"UNAVAILABLE".equals(quoteStatus);
+            QuoteFact quoteFact = quoteIncluded ? quoteFact(quote, market, marketData, clock)
+                    : new QuoteFact("UNAVAILABLE", null);
+            String quoteStatus = quoteFact.status();
+            String quoteDataAsOf = quoteFact.dataAsOf();
+            boolean quoteAvailable = quoteIncluded && !"UNAVAILABLE".equals(quoteStatus);
             item.put("quoteStatus", quoteStatus);
             if (quoteIncluded) {
                 putNullable(item, "quoteDataAsOf", quoteDataAsOf);
@@ -242,13 +250,13 @@ public class SrppOrchestratedReadService {
                 projected.put("quoteSourceId", quoteAvailable ? "CANONICAL_MARKET_READ" : null);
                 projected.set("lastPrice", lastPrice.deepCopy());
                 quoteProjection.put(market + ":" + code, projected);
-                if (quoteAvailable && (quoteAsOf == null || quoteDataAsOf.compareTo(quoteAsOf) < 0)) quoteAsOf = quoteDataAsOf;
+                if (quoteAvailable) quoteAsOf = earliestAsOf(quoteAsOf, quoteDataAsOf);
             } else {
                 item.putNull("quoteDataAsOf");
                 item.putNull("quoteSourceId");
                 item.putNull("lastPrice");
             }
-            String radarDataAsOf = radarIncluded && stock != null ? dateTime(null, stock.asOfDate()) : null;
+            String radarDataAsOf = radarIncluded && stock != null ? sourceDate(stock.asOfDate()) : null;
             boolean radarAvailable = radarIncluded && stock != null && radarDataAsOf != null;
             item.put("radarStatus", radarAvailable ? "AVAILABLE" : "UNAVAILABLE");
             if (radarAvailable) {
@@ -264,7 +272,7 @@ public class SrppOrchestratedReadService {
                 projected.put("radarSourceId", "TRADING_RADAR_SNAPSHOT");
                 projected.set("radarFacts", facts.deepCopy());
                 radarProjection.put(market + ":" + code, projected);
-                if (radarDataAsOf != null && (radarAsOf == null || radarDataAsOf.compareTo(radarAsOf) < 0)) radarAsOf = radarDataAsOf;
+                radarAsOf = earliestAsOf(radarAsOf, radarDataAsOf);
             } else {
                 item.putNull("radarDataAsOf");
                 item.putNull("radarSourceId");
@@ -461,26 +469,81 @@ public class SrppOrchestratedReadService {
     }
 
     private static SrppReadResult problem(String code) { return SrppReadResult.problem(code); }
-    private static String dateTime(String timestamp, String date) {
-        if (timestamp != null && timestamp.matches("\\d{4}-\\d{2}-\\d{2}T.*")) {
-            try { return OffsetDateTime.parse(timestamp).toString(); }
-            catch (RuntimeException noOffset) {
-                try { return LocalDateTime.parse(timestamp).atZone(TAIPEI).toOffsetDateTime().toString(); }
-                catch (RuntimeException malformed) { return null; }
-            }
+    record QuoteFact(String status, String dataAsOf) {}
+
+    static QuoteFact quoteFact(PriceQueryService.LivePrice quote, String market,
+                               MarketDataService marketData, Clock clock) {
+        QuoteFact unavailable = new QuoteFact("UNAVAILABLE", null);
+        if (quote == null || quote.price() == null || quote.price().signum() <= 0
+                || quote.quoteStatus() == null || quote.source() == null || quote.source().isBlank()
+                || !QUOTE_MARKETS.contains(market)
+                || !market.equals(quote.market())) return unavailable;
+        String sourceDate = sourceDate(quote.tradingDate());
+        if (sourceDate == null) return unavailable;
+        LocalDate tradingDate = LocalDate.parse(sourceDate);
+        ZonedDateTime now = ZonedDateTime.now(clock.withZone(MarketZones.resolve(market)));
+        if (tradingDate.isAfter(now.toLocalDate())) return unavailable;
+        if (Set.of("CLOSE_FALLBACK", "CLOSE", "VERIFIED_CLOSE", "PREVIOUS_CLOSE")
+                .contains(quote.quoteStatus())) {
+            boolean trustedClose = !"台股".equals(market) || TRUSTED_TW_CLOSE_SOURCES.contains(quote.source());
+            return Boolean.TRUE.equals(quote.closed()) && trustedClose
+                    ? new QuoteFact("CLOSE_FALLBACK", sourceDate) : unavailable;
         }
-        if (date != null && date.matches("\\d{4}-\\d{2}-\\d{2}")) return date + "T00:00:00+08:00";
-        return null;
+        if (!"LIVE".equals(quote.quoteStatus()) && !"STALE".equals(quote.quoteStatus())) return unavailable;
+        OffsetDateTime observed = sourceTime(quote.updatedAt());
+        if (observed == null) return unavailable;
+        Instant observedAt = observed.toInstant();
+        ZonedDateTime observedLocal = observedAt.atZone(MarketZones.resolve(market));
+        if (!tradingDate.equals(observedLocal.toLocalDate()) || observedAt.isAfter(clock.instant())) return unavailable;
+        String asOf = observed.toString();
+        if (!"LIVE".equals(quote.quoteStatus()) || !Boolean.FALSE.equals(quote.closed())) {
+            return new QuoteFact("STALE", asOf);
+        }
+        LocalTime open = MarketZones.openTime(market);
+        LocalTime close = MarketZones.closeTime(market);
+        boolean inSession = !now.toLocalTime().isBefore(open) && now.toLocalTime().isBefore(close)
+                && !observedLocal.toLocalTime().isBefore(open) && observedLocal.toLocalTime().isBefore(close);
+        if (!tradingDate.equals(now.toLocalDate()) || !inSession
+                || Duration.between(observedAt, clock.instant()).compareTo(LIVE_MAX_AGE) > 0) {
+            return new QuoteFact("STALE", asOf);
+        }
+        try {
+            Optional<Boolean> known = marketData.isTradingDayCachedOnly(market, tradingDate);
+            return known != null && known.orElse(false)
+                    ? new QuoteFact("LIVE", asOf) : new QuoteFact("STALE", asOf);
+        } catch (RuntimeException unknownCalendar) {
+            return new QuoteFact("STALE", asOf);
+        }
     }
 
-    private static String quoteStatus(PriceQueryService.LivePrice quote, boolean hasDataAsOf) {
-        if (!hasDataAsOf || quote == null || quote.quoteStatus() == null || quote.price() == null) return "UNAVAILABLE";
-        return switch (quote.quoteStatus()) {
-            case "LIVE" -> "LIVE";
-            case "CLOSE_FALLBACK", "CLOSE", "VERIFIED_CLOSE", "PREVIOUS_CLOSE" -> "CLOSE_FALLBACK";
-            case "STALE" -> "STALE";
-            default -> "UNAVAILABLE";
-        };
+    private static OffsetDateTime sourceTime(String timestamp) {
+        if (timestamp == null || timestamp.isBlank()) return null;
+        try { return OffsetDateTime.parse(timestamp); }
+        catch (RuntimeException noOffset) {
+            try { return LocalDateTime.parse(timestamp).atZone(TAIPEI).toOffsetDateTime(); }
+            catch (RuntimeException malformed) { return null; }
+        }
+    }
+
+    private static String sourceDate(String date) {
+        if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}")) return null;
+        try { return LocalDate.parse(date).toString(); }
+        catch (RuntimeException malformed) { return null; }
+    }
+
+    static String earliestAsOf(String previous, String candidate) {
+        if (candidate == null) return previous;
+        if (previous == null) return candidate;
+        boolean previousDate = previous.length() == 10;
+        boolean candidateDate = candidate.length() == 10;
+        if (previousDate != candidateDate) {
+            String previousDay = previousDate ? previous : OffsetDateTime.parse(previous).toLocalDate().toString();
+            String candidateDay = candidateDate ? candidate : OffsetDateTime.parse(candidate).toLocalDate().toString();
+            return previousDay.compareTo(candidateDay) <= 0 ? previousDay : candidateDay;
+        }
+        if (previousDate) return previous.compareTo(candidate) <= 0 ? previous : candidate;
+        return OffsetDateTime.parse(previous).toInstant().isBefore(OffsetDateTime.parse(candidate).toInstant())
+                ? previous : candidate;
     }
 
     private static boolean validCalculationIds(List<String> ids) {

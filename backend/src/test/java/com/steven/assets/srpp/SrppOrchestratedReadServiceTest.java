@@ -12,12 +12,14 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 class SrppOrchestratedReadServiceTest {
@@ -124,6 +126,110 @@ class SrppOrchestratedReadServiceTest {
 
         assertThat(SrppOrchestratedReadService.marketCaptureId(capture)).isEqualTo(expected);
         assertThat(SrppOrchestratedReadService.marketCaptureId(capture)).isEqualTo(expected);
+    }
+
+    @Test
+    void liveRequiresCurrentMarketSessionAndSourceTimeWithinFiveMinutes() {
+        MarketDataService calendar = mock(MarketDataService.class);
+        when(calendar.isTradingDayCachedOnly("台股", java.time.LocalDate.parse("2026-10-01")))
+                .thenReturn(Optional.of(true));
+        Clock now = at("2026-10-01T01:05:00Z");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T09:00:00"), calendar, now).status())
+                .isEqualTo("LIVE");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T08:59:59"), calendar, now).status())
+                .isEqualTo("STALE");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T08:59:59"), calendar,
+                at("2026-10-01T00:59:59Z")).status()).isEqualTo("STALE");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T09:00:00"), calendar,
+                at("2026-10-01T01:05:01Z")).status()).isEqualTo("STALE");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T13:29:00"), calendar,
+                at("2026-10-01T05:31:00Z")).status()).isEqualTo("STALE");
+    }
+
+    @Test
+    void cachedLiveFromPriorDayAndPreopenIsNeverLive() {
+        MarketDataService calendar = mock(MarketDataService.class);
+        var prior = live("台股", "2026-10-01", "2026-10-01T13:29:00");
+        assertThat(fact(prior, calendar, at("2026-10-02T00:30:00Z")).status()).isEqualTo("STALE");
+        assertThat(fact(prior, calendar, at("2026-10-02T01:05:00Z")).status()).isEqualTo("STALE");
+        assertThat(fact(live("台股", "2026-10-02", null), calendar,
+                at("2026-10-02T01:05:00Z")).status()).isEqualTo("UNAVAILABLE");
+    }
+
+    @Test
+    void calendarUnknownAndFutureObservationCannotBecomeLive() {
+        MarketDataService calendar = mock(MarketDataService.class);
+        when(calendar.isTradingDayCachedOnly("台股", java.time.LocalDate.parse("2026-10-01")))
+                .thenReturn(Optional.empty());
+        Clock now = at("2026-10-01T01:05:00Z");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T09:04:00"), calendar, now).status())
+                .isEqualTo("STALE");
+        assertThat(fact(live("台股", "2026-10-01", "2026-10-01T09:06:00"), calendar, now).status())
+                .isEqualTo("UNAVAILABLE");
+        assertThat(fact(live("未知", "2026-10-01", "2026-10-01T09:04:00"), calendar, now).status())
+                .isEqualTo("UNAVAILABLE");
+        verifyNoInteractions(packages, evidence);
+    }
+
+    @Test
+    void usAndUkUseMarketDatesAndSessionsAcrossTaipeiMidnight() {
+        MarketDataService calendar = mock(MarketDataService.class);
+        when(calendar.isTradingDayCachedOnly("美股", java.time.LocalDate.parse("2026-09-30")))
+                .thenReturn(Optional.of(true));
+        when(calendar.isTradingDayCachedOnly("英股", java.time.LocalDate.parse("2026-10-01")))
+                .thenReturn(Optional.of(true));
+        var us = fact(live("美股", "2026-09-30", "2026-10-01T00:28:00"), calendar,
+                at("2026-09-30T16:30:00Z"));
+        assertThat(us.status()).isEqualTo("LIVE");
+        assertThat(us.dataAsOf()).isEqualTo("2026-10-01T00:28+08:00");
+        assertThat(fact(live("英股", "2026-10-01", "2026-10-01T16:28:00"), calendar,
+                at("2026-10-01T08:30:00Z")).status()).isEqualTo("LIVE");
+    }
+
+    @Test
+    void verifiedCloseUsesOnlySourceTradingDateAndNeverProcessingTime() {
+        MarketDataService calendar = mock(MarketDataService.class);
+        var closed = new PriceQueryService.LivePrice("2330", null, "台股", BigDecimal.valueOf(100),
+                null, null, null, null, null, null, null, null, null,
+                "2026-09-30", "2026-10-01T16:00:00", true, "TWSE_MI_INDEX", "VERIFIED_CLOSE");
+        var fact = fact(closed, calendar, at("2026-10-01T09:00:00Z"));
+        assertThat(fact.status()).isEqualTo("CLOSE_FALLBACK");
+        assertThat(fact.dataAsOf()).isEqualTo("2026-09-30");
+        var unverified = new PriceQueryService.LivePrice("2330", null, "台股", BigDecimal.valueOf(100),
+                null, null, null, null, null, null, null, null, null,
+                "2026-09-30", "2026-10-01T16:00:00", false, "TWSE_MI_INDEX", "VERIFIED_CLOSE");
+        assertThat(fact(unverified, calendar, at("2026-10-01T09:00:00Z")).status())
+                .isEqualTo("UNAVAILABLE");
+        var untrustedSource = new PriceQueryService.LivePrice("2330", null, "台股", BigDecimal.valueOf(100),
+                null, null, null, null, null, null, null, null, null,
+                "2026-09-30", "2026-10-01T16:00:00", true, "UNVERIFIED_PROVIDER", "VERIFIED_CLOSE");
+        assertThat(fact(untrustedSource, calendar, at("2026-10-01T09:00:00Z")).status())
+                .isEqualTo("UNAVAILABLE");
+    }
+
+    @Test
+    void mixedMarketSourceTimesRetainTheCoarsestDatePrecision() {
+        assertThat(SrppOrchestratedReadService.earliestAsOf(
+                "2026-09-30T09:04+08:00", "2026-09-30"))
+                .isEqualTo("2026-09-30");
+        assertThat(SrppOrchestratedReadService.earliestAsOf(
+                "2026-10-01", "2026-09-30T09:04+08:00"))
+                .isEqualTo("2026-09-30");
+    }
+
+    private static SrppOrchestratedReadService.QuoteFact fact(PriceQueryService.LivePrice quote,
+                                                               MarketDataService calendar, Clock now) {
+        return SrppOrchestratedReadService.quoteFact(quote, quote.market(), calendar, now);
+    }
+
+    private static PriceQueryService.LivePrice live(String market, String date, String updatedAt) {
+        return new PriceQueryService.LivePrice("2330", null, market, BigDecimal.valueOf(100),
+                null, null, null, null, null, null, null, null, null,
+                date, updatedAt, false, "TEST_SOURCE", "LIVE");
+    }
+
+    private static Clock at(String instant) {
+        return Clock.fixed(Instant.parse(instant), ZoneId.of("Asia/Taipei"));
     }
     private static final class StubPolicyRegistryService extends SrppPolicyRegistryService {
         private int lookupCount;
