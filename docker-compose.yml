@@ -186,6 +186,12 @@ services:
       # Google Drive 目錄列舉（Requirement 50 / Task 241）：供「爬蟲資訊查詢」頁的 Drive 資料夾樹用。
       # 備份（gdrive-crypt）與輸出（GDriveOutput）共用同一份 rclone.conf 的不同 section。
       GDRIVE_OUTPUT_REMOTE: ${GDRIVE_OUTPUT_REMOTE:-GDriveOutput}
+      # Task 468：前兩項為必要的 Drive 目錄 ID 與 crypt 密碼指紋釘選；後兩項為可選的
+      # 既有 archive 驗證錨。不提供預設值，避免未完成 Drive 對帳時誤啟用遠端 mutation。
+      BACKUP_DRIVE_FOLDER_ID: ${BACKUP_DRIVE_FOLDER_ID:-}
+      BACKUP_CRYPT_CONFIG_SHA256: ${BACKUP_CRYPT_CONFIG_SHA256:-}
+      BACKUP_KNOWN_ARCHIVE_FOLDER: ${BACKUP_KNOWN_ARCHIVE_FOLDER:-}
+      BACKUP_KNOWN_ARCHIVE_FILENAME: ${BACKUP_KNOWN_ARCHIVE_FILENAME:-}
       # 配息四日期的一次性歷史回補（Requirement 94 / Task 357.3a）。**預設 false，常態不啟用**。
       # 這三個 passthrough 存在的唯一理由是：`docker compose up` 只會展開 compose 檔裡出現過的
       # 變數，沒有這幾行就無法用「DIVIDEND_BACKFILL_ENABLED=true docker compose up -d

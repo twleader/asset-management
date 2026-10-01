@@ -7,5 +7,8 @@ interface BackupDatabaseProcess {
 
     void dump(Path outputFile);
 
+    /** Read-only archive validation before any destructive restore command. */
+    void validate(Path inputFile);
+
     void restore(Path inputFile);
 }

@@ -11,11 +11,11 @@
       </template>
       <p class="hint">
         手動觸發一次 PostgreSQL 備份，加密上傳到 Google Drive 的
-        <code>backups/manual/</code>。手動備份僅保留最近 {{ settings.manualRetention }} 份（自救點不計入）。
+        <code>asset-management-backup/yyyy-MM-dd/</code>。手動備份僅保留最近 {{ settings.manualRetention }} 份（自救點不計入）。
       </p>
       <el-button type="primary" :icon="Upload"
                  :loading="backing"
-                 :disabled="!settings.backupEnabled"
+                 :disabled="backing || !settings.backupEnabled"
                  @click="doBackup">
         立即備份
       </el-button>
@@ -87,6 +87,9 @@
             <el-tag :type="folderTagType(row.folder)" size="small">{{ row.folder }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="路徑" min-width="300">
+          <template #default="{ row }">{{ backupLocation(row) }}</template>
+        </el-table-column>
         <el-table-column prop="filename" label="檔名" min-width="320">
           <template #default="{ row }">
             <span>{{ row.filename }}</span>
@@ -103,7 +106,8 @@
         </el-table-column>
         <el-table-column label="操作" width="120" align="center">
           <template #default="{ row }">
-            <el-button size="small" type="danger" :icon="Refresh" @click="openRestoreDialog(row)">
+            <el-button size="small" type="danger" :icon="Refresh"
+                       :disabled="!backupDateFolder(row)" @click="openRestoreDialog(row)">
               還原
             </el-button>
           </template>
@@ -151,6 +155,7 @@ import { Upload, Refresh, Connection } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import { bffApi } from '@/api'
+import { backupDateFolder, backupLocation } from '@/utils/backupPath'
 
 const loadingList = ref(false)
 const backing = ref(false)
@@ -237,6 +242,7 @@ async function doBackup() {
 }
 
 function openRestoreDialog(row) {
+  if (!backupDateFolder(row)) return
   selected.value = row
   confirmText.value = ''
   dialogVisible.value = true

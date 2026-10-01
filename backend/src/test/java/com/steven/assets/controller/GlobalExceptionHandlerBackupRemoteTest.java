@@ -1,6 +1,8 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.service.BackupRemoteUnavailableException;
+import com.steven.assets.service.BackupIndexCommitUncertainException;
+import com.steven.assets.service.BackupIndexRollbackConfirmedException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -25,7 +27,7 @@ class GlobalExceptionHandlerBackupRemoteTest {
         assertThat(detail.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE.value());
         assertThat(detail.getDetail())
                 .contains("reconnect GoogleDriver:")
-                .contains("GoogleDriver:asset-management-backup")
+                .contains("asset-management-backup")
                 .contains("source fingerprint 自動 reload")
                 .contains("不需要 recreate business-services");
         for (String sentinel : sentinels) {
@@ -40,8 +42,31 @@ class GlobalExceptionHandlerBackupRemoteTest {
 
         assertThat(detail.getStatus()).isEqualTo(503);
         assertThat(detail.getDetail())
-                .contains("可能 reconnect 時選錯 Google 帳號")
+                .contains("資料夾身分與獨立釘選不符")
                 .contains("系統不會自動建立")
-                .contains("GoogleDriver:asset-management-backup");
+                .contains("asset-management-backup");
+    }
+
+    @Test
+    void uncertainIndexCommitMapsToConflictWithoutClaimingRollbackOrRetrySafety() {
+        ProblemDetail detail = new GlobalExceptionHandler().handleBackupIndexCommitUncertain(
+                BackupIndexCommitUncertainException.forFilename("asset_manual_20261002_010101_123.dump"));
+
+        assertThat(detail.getStatus()).isEqualTo(HttpStatus.CONFLICT.value());
+        assertThat(detail.getDetail())
+                .contains("索引提交結果未定")
+                .contains("asset_manual_20261002_010101_123.dump")
+                .contains("不會自動重試、刪除或輪替")
+                .doesNotContain("已回滾")
+                .doesNotContain("確定未提交");
+    }
+
+    @Test
+    void confirmedRollbackHasDistinctSafeConflictMessage() {
+        ProblemDetail detail = new GlobalExceptionHandler().handleBackupIndexRollbackConfirmed(
+                BackupIndexRollbackConfirmedException.forFilename("asset_manual_20261002_010101_123.dump"));
+        assertThat(detail.getStatus()).isEqualTo(HttpStatus.CONFLICT.value());
+        assertThat(detail.getDetail()).contains("已確認回滾", "遠端 exact 檔案與本地來源")
+                .doesNotContain("提交結果未定");
     }
 }

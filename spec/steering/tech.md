@@ -133,7 +133,7 @@ cd frontend
 | **Yahoo FX** | USD/TWD 中間價備援 | 無 | 兩家銀行皆失敗時才用，`buy=sell=mid` 且公開 API 標 `INDICATIVE` |
 | **FinMind TaiwanExchangeRate** | 匯率歷史／收盤後對帳 | `FINMIND_TOKEN`（可匿名但限流） | 17:00 寫 `exchange_rate_history`，不負責 2 秒 live cache |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
-| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 `投資理財/資產管理/backups/` | `~/.config/rclone/rclone.conf` 的 `[GoogleDriver]`（`scope=drive`）＋`[gdrive-crypt]` | read-only volume 掛入 **business-services**；`BackupService` 每個 remote workflow 依 source fingerprint 熱重載 `/tmp/rclone.conf`，並先驗兩層 exact raw backing root；檔名與內容皆加密 |
+| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地：My Drive 根層 `asset-management-backup/<yyyy-MM-dd>/`，日期子目錄直接可見 | `~/.config/rclone/rclone.conf` 的 `[GoogleDriver]`（`scope=drive`、無 `root_folder_id`）＋`[gdrive-crypt]`（`remote=GoogleDriver,root_folder_id=<PINNED_ACTIVE_ID>:`、`directory_name_encryption=false`） | source 熱重載、唯一 active root ID gate；DB/API `folder` 類型不變，檔名及內容仍加密 |
 | **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 245 |
 
 > **單一 config 檔的已知取捨（使用者明示的決定）**：`~/.config/rclone/rclone.conf` 同時含
@@ -160,7 +160,7 @@ cd frontend
 > client（`RcloneClient`／`ProcessGdriveUploader`；Task 443）與 DB 備份專用 `BackupService`（Task 388）
 > 都在操作前重讀 source bytes，以各自 last-loaded source fingerprint 判斷是否原子熱重載自己的 `/tmp` writable snapshot；
 > host 修正設定內容或重新授權後，下一次操作自動載入，無須 recreate。Task 468 的 DB 備份在 crypt 操作前
-> 另以 raw `GoogleDriver:` exact 驗證 `投資理財/` 及其直屬 `資產管理/`，失敗時不自動建立、不清索引。
+> 另驗 source `[GoogleDriver] root_folder_id` 缺席／空、raw `GoogleDriver:` 唯一 active direct child exact `asset-management-backup/`，其 ID 與獨立釘選及 crypt `root_folder_id` 相同；crypt `directory_name_encryption=false` 使第一層 `yyyy-MM-dd/` 明文可見。2026-10-02 active ID `15oHMo5komrikQJaEiQ3INLqOGrs7IZUV`，同名 trashed ID `1GAqLTijmplfLgPYvltVO3-1uQpQAgz9Y` 不得混用。失敗時不碰 crypt、不建備份根、不清索引。
 > source 必須實際讀取，不得以 `ls` 或 writable snapshot 的 mtime 代替。
 >
 > **`[GDriveOutput]` 的 token 必須含 `refresh_token`**：缺了的話 access_token 一過期（實測約 1 小時）即回
@@ -242,14 +242,14 @@ cd frontend
 | 16:05 收盤後 | America/New_York | 美股收盤寫 `stock_price_history` | external-materials |
 | 每日 09:00 | Asia/Taipei | 抓 `fund_master` 啟用基金 NAV、配息 | external-materials |
 | 每日 | — | 警示觸發歷史輪替（保留 30 天） | business-services |
-| `0 30 15 * * MON-FRI` | Asia/Taipei | 台股交易日 → `daily/asset_daily_tw_*.dump` | business-services |
-| `0 0 7 * * TUE-SAT` | Asia/Taipei | 美股交易日 → `daily/asset_daily_us_*.dump` | business-services |
-| `0 0 5 * * SUN` | Asia/Taipei | 每周備份 → `weekly/asset_weekly_*.dump` | business-services |
+| `0 30 15 * * MON-FRI` | Asia/Taipei | 台股交易日 → `<yyyy-MM-dd>/asset_daily_tw_*.dump`（DB folder=`daily`） | business-services |
+| `0 0 7 * * TUE-SAT` | Asia/Taipei | 前一美股交易日 → 台北執行日 `<yyyy-MM-dd>/asset_daily_us_*.dump`（DB folder=`daily`） | business-services |
+| `0 0 5 * * SUN` | Asia/Taipei | 每周備份 → `<yyyy-MM-dd>/asset_weekly_*.dump`（DB folder=`weekly`） | business-services |
 
 ### 5.4 備份／還原
 
 - **工具：** `pg_dump` / `pg_restore` + `rclone gdrive-crypt`，皆透過 `ProcessBuilder` 呼叫。
-- **備份 config lifecycle：** `/etc/rclone/rclone.conf` 是唯讀 source，`/tmp/rclone.conf` 是 writable snapshot；`BackupService` 在每個 remote workflow 以 last-loaded source SHA-256 fingerprint 判斷原子熱重載，並於任何 crypt copy／list／delete 前依序 exact 驗證 raw `GoogleDriver:` 的 `投資理財/` 與其直屬 `資產管理/`。workflow 入口的主動 fingerprint reload 不消耗 auth recovery；進 `INITIAL_GATE` 時 recovery budget 仍未使用，只有後續 auth failure 且 source 再次 changed 才可消耗一次。`GDriveOutput` 另由 Task 443 熱重載，但不使用備份 raw-root gate。
+- **備份 config lifecycle：** `/etc/rclone/rclone.conf` 是唯讀 source、`/tmp/rclone.conf` 是 writable snapshot；每個 workflow 依 source SHA-256 熱重載。`[GoogleDriver] root_folder_id` 缺席／空，raw `GoogleDriver:` 真是 My Drive 根層；`[gdrive-crypt] remote=GoogleDriver,root_folder_id=<PINNED_ACTIVE_ID>:` 且 `directory_name_encryption=false`，實際 crypt 讀寫固定 active ID、日期目錄保持明文，檔名／內容加密。copy／list／delete 前完整列舉唯一 active exact root direct child，與獨立 pin 及 crypt remote ID 三方比對。`folder` 為 DB／API 類型，`manual` 接受 `asset_manual_` 及 `asset_auto-pre-restore_`；實體路徑只依 filename 日期。sync／rotate 刪除前從完整日期清單選最新且仍有 DB DATE row 的檔作動態錨，經 crypt 讀 PGDMP header，無錨即不刪；舊 `BACKUP_KNOWN_ARCHIVE_FOLDER/FILENAME` 僅可選相容，不作必要部署 pin。DB COMMIT ACK 不明須回「結果未定」並停止後續刪除／覆寫，直到唯讀對帳。入口 reload 不消耗 auth recovery；後續 auth failure 且 source 再次 changed 才可消耗一次。`GDriveOutput` 另依 Task 443 熱重載，不用備份 gate。
 - **保留代數（DB `backup_setting` 表單列）：** daily 50 / weekly 5 / manual 5（自救點不計入）。
 - **儲存設定當下立即套用 retention**，不等下一次排程。
 - **還原流程：** 自動先建 `asset_auto-pre-restore_*.dump` 自救點 → 跑 pg_restore → 前端遮罩 → HikariCP 自動重連。
@@ -323,5 +323,5 @@ git config core.hooksPath scripts/git-hooks
 - **目標環境：** 個人 Mac / NAS / 自架 Linux server，本機 Docker。
 - **入口：** `docker compose up -d`（讀 `.env`）。
 - **資料持久化：** named volumes `asset-postgres-data`、`asset-redis-data`。
-- **備份目的地：** My Drive `投資理財/資產管理/backups/`（rclone `gdrive-crypt:` 加密 remote；Task 468）。與匯出輸出用的 `GDriveOutput:` 是**兩個不同的 remote，但共用同一份 config 檔**——前者加密、只有 `BackupService` 使用；後者未加密、business ＋ ext 共用。兩者實測為同一個 Google 帳號。共用一檔的已知代價（ext 亦可讀備份憑證）與復原方式見 §4 的取捨說明。
+- **備份目的地：** My Drive 根層 `asset-management-backup/<yyyy-MM-dd>/`，日期從備份 filename 的台北 `yyyyMMdd` 嚴格取得；`gdrive-crypt:<yyyy-MM-dd>/<filename>`，第一層日期資料夾在 Drive UI 明文可見，檔名和內容加密。DB/API `folder` 仍是 daily／manual／weekly／monthly 類型，sync／rotate／restore 依 filename 日期定位；一次性 cutoff `2026-09-29` 以前的十筆 DB row 保留為 frozen legacy，不還原、不清索引、不輪替且不計 active retention；已搬六筆與未來新備份為 DATE。未列 DB 的 33 筆舊檔留原位、不另建 `legacy/`（Task 468）。備份加密 remote 與未加密匯出 `GDriveOutput:` 共用 config 但不合併；共用憑證代價及復原見 §4。
 - **不規劃：** Kubernetes、雲端託管、多區域、CI/CD pipeline（目前手動部署）。
