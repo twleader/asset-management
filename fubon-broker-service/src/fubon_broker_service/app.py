@@ -186,10 +186,37 @@ class HistoricalDailyCandlesReadRequest(MarketDataV1ReadRequest):
         start = info.data.get("from_date")
         if start is None:
             raise ValueError("INVALID_REQUEST")
-        if strict_iso_date(value) < strict_iso_date(start) or (strict_iso_date(value) - strict_iso_date(start)).days + 1 > 366:
+        if strict_iso_date(value) < strict_iso_date(start) or (strict_iso_date(value) - strict_iso_date(start)).days + 1 > 365:
             raise ValueError("INVALID_REQUEST")
         return value
 
+
+class HistoricalIntradayCandlesReadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    symbol: StrictStr
+    from_date: StrictStr = Field(alias="from")
+    to_date: StrictStr = Field(alias="to")
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        return stock_code(value)
+
+    @field_validator("from_date", "to_date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        strict_iso_date(value)
+        return value
+
+    @field_validator("to_date")
+    @classmethod
+    def validate_range(cls, value: str, info) -> str:
+        start = info.data.get("from_date")
+        if start is None:
+            raise ValueError("INVALID_REQUEST")
+        if strict_iso_date(value) < strict_iso_date(start) or (strict_iso_date(value) - strict_iso_date(start)).days + 1 > 31:
+            raise ValueError("INVALID_REQUEST")
+        return value
 
 class StockSubscriptionsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -275,6 +302,7 @@ def create_app(
                      "/internal/market-data/stock-push/stream"}
     v1_market_data_paths = {"/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read",
                             "/internal/market-data/intraday-volumes/read", "/internal/market-data/historical-daily-candles/read",
+                            "/internal/market-data/historical-intraday-candles/read",
                             "/internal/market-data/intraday-technical-indicators/read"}
     strict_json_paths = {"/internal/trades/read", "/internal/market-data/dividends/read",
                          "/internal/market-data/technical-indicators/read",
@@ -571,8 +599,12 @@ def create_app(
         return result
 
     def market_data_v1_sdk_error(exc: SdkCallError) -> MarketDataV1RouteError:
+        if exc.reason == "NO_DATA":
+            return MarketDataV1RouteError(404, "NO_DATA")
         if exc.misconfigured:
             return MarketDataV1RouteError(503, "MISCONFIGURED")
+        if exc.reason == "MARKETDATA_RESPONSE_TOO_LARGE":
+            return MarketDataV1RouteError(503, "RESPONSE_TOO_LARGE")
         if exc.reason in {"RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED"}:
             return MarketDataV1RouteError(503, exc.reason)
         return MarketDataV1RouteError(503, "UPSTREAM_UNAVAILABLE")
@@ -629,6 +661,17 @@ def create_app(
     def historical_daily_candles_read(request: HistoricalDailyCandlesReadRequest) -> dict[str, object]:
         try:
             result = market_v1.daily_candles(request.symbol, request.from_date, request.to_date)
+        except SdkCallError as exc:
+            raise market_data_v1_sdk_error(exc) from None
+        except MarketDataV1Error as exc:
+            raise MarketDataV1RouteError(400 if exc.request_error else 503, exc.reason) from None
+        outcome_counters.increment(Outcome.SUCCESS)
+        return result
+
+    @application.post("/internal/market-data/historical-intraday-candles/read")
+    def historical_intraday_candles_read(request: HistoricalIntradayCandlesReadRequest) -> dict[str, object]:
+        try:
+            result = market_v1.historical_intraday_candles(request.symbol, request.from_date, request.to_date)
         except SdkCallError as exc:
             raise market_data_v1_sdk_error(exc) from None
         except MarketDataV1Error as exc:

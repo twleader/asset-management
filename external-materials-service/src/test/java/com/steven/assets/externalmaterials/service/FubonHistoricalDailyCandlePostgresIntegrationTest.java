@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
@@ -41,7 +42,21 @@ class FubonHistoricalDailyCandlePostgresIntegrationTest {
                       api_name varchar(255) NOT NULL, message_header text NOT NULL, stack_trace text NOT NULL, occurred_at timestamptz NOT NULL,
                       FOREIGN KEY(source, operation_key, api_name) REFERENCES api_error_log_operation(source, operation_key, operation_label))
                     """);
+            jdbc.execute("""
+                    CREATE TABLE fubon_intraday_candle (
+                      stock_code varchar(20) NOT NULL, market varchar(20) NOT NULL, provider varchar(32) NOT NULL,
+                      timeframe smallint NOT NULL, candle_at timestamptz NOT NULL, source_date date NOT NULL,
+                      exchange varchar(20) NOT NULL, open numeric(20,10) NOT NULL, high numeric(20,10) NOT NULL,
+                      low numeric(20,10) NOT NULL, close numeric(20,10) NOT NULL, average numeric(20,10) NOT NULL,
+                      volume bigint NOT NULL, observed_at timestamptz NOT NULL, content_hash char(64) NOT NULL,
+                      CONSTRAINT pk_fubon_intraday_candle PRIMARY KEY (stock_code, market, provider, timeframe, candle_at),
+                      CONSTRAINT ck_fubon_intraday_candle_prices CHECK
+                        (open > 0 AND high > 0 AND low > 0 AND close > 0 AND average > 0 AND high >= open
+                         AND high >= close AND open >= low AND close >= low AND average >= low AND average <= high)
+                    )
+                    """);
             applyMigration(jdbc);
+            applyTask466Migration(jdbc);
             assertThat(jdbc.update("INSERT INTO api_error_log (source,operation_key,api_name,message_header,stack_trace,occurred_at) VALUES ('FUBON_API','FUBON_INTRADAY_VOLUMES_READ','個股當日分價量查詢','test','trace',CURRENT_TIMESTAMP)"))
                     .isEqualTo(1);
             assertThat(jdbc.update("INSERT INTO api_error_log (source,operation_key,api_name,message_header,stack_trace,occurred_at) VALUES ('FUBON_API','FUBON_HISTORICAL_DAILY_CANDLES_READ','個股歷史日K線查詢','test','trace',CURRENT_TIMESTAMP)"))
@@ -55,6 +70,64 @@ class FubonHistoricalDailyCandlePostgresIntegrationTest {
                     .hasMessageContaining("immutable");
             assertThatThrownBy(() -> jdbc.update("DELETE FROM fubon_historical_daily_candle WHERE stock_code='2330'"))
                     .hasMessageContaining("immutable");
+
+            var minuteStore = new FubonMarketDataHistoryStore(jdbc, new DataSourceTransactionManager(source));
+            Instant minuteAt = Instant.parse("2026-08-27T05:30:00Z");
+            var minute = new HistoricalIntradayCandlesRead("2330", candle.tradingDate().minusDays(1), candle.tradingDate().minusDays(1),
+                    Instant.parse("2026-08-28T05:40:00Z"), "TWSE", "TSE", "1", "AVAILABLE", null,
+                    List.of(new IntradayCandle(minuteAt, new BigDecimal("10"), new BigDecimal("11"), new BigDecimal("9"),
+                            new BigDecimal("10"), 123L, new BigDecimal("999"))));
+            assertThat(minuteStore.persistHistoricalCandles(minute).status()).isEqualTo(FubonMarketDataHistoryStore.Status.WRITTEN);
+            assertThat(minuteStore.persistHistoricalCandles(minute).status()).isEqualTo(FubonMarketDataHistoryStore.Status.UNCHANGED);
+            var changedMinute = new HistoricalIntradayCandlesRead(minute.symbol(), minute.queryFrom(), minute.queryTo(), minute.observedAt(),
+                    minute.exchange(), minute.sourceMarket(), minute.timeframe(), minute.status(), minute.reason(),
+                    List.of(new IntradayCandle(minuteAt, new BigDecimal("10"), new BigDecimal("11"), new BigDecimal("9"),
+                            new BigDecimal("10"), 123L, new BigDecimal("998")),
+                            new IntradayCandle(minuteAt.plusSeconds(60), new BigDecimal("10"), new BigDecimal("11"), new BigDecimal("9"),
+                                    new BigDecimal("10"), 123L, new BigDecimal("10"))));
+            var conflictResult = minuteStore.persistHistoricalCandles(changedMinute);
+            assertThat(conflictResult.status()).isEqualTo(FubonMarketDataHistoryStore.Status.CONFLICT_NO_SOURCE_REVISION);
+            assertThat(conflictResult.conflicts()).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM fubon_intraday_candle WHERE stock_code='2330'", Long.class)).isEqualTo(1L);
+            assertThat(jdbc.queryForObject("SELECT average FROM fubon_intraday_candle WHERE stock_code='2330'", BigDecimal.class))
+                    .isEqualByComparingTo("999");
+
+            var runner = new FubonHistoricalBackfillRunner("false", "false", null, null, null, null,
+                    new FubonHistoricalDailyCandleStore(jdbc, new DataSourceTransactionManager(source)), minuteStore,
+                    null, null, null, jdbc, com.fasterxml.jackson.databind.json.JsonMapper.builder().build());
+            var coverage = runner.coverageFor("INTRADAY_CANDLE_1M", "fubon_intraday_candle", "source_date",
+                    new Object[]{new String[]{"2317", "2330"}});
+            assertThat(coverage).hasSize(2);
+            assertThat(coverage.getFirst()).containsEntry("symbol", "2317").containsEntry("rows", 0L)
+                    .containsEntry("earliest", null).containsEntry("latest", null);
+            assertThat(coverage.get(1)).containsEntry("symbol", "2330").containsEntry("rows", 1L)
+                    .containsEntry("earliest", "2026-08-27").containsEntry("latest", "2026-08-27");
+
+            var receipts = new FubonHistoricalBackfillReceiptStore(jdbc, new DataSourceTransactionManager(source));
+            UUID campaignId = UUID.randomUUID();
+            var campaign = new FubonHistoricalBackfillReceiptStore.Campaign(campaignId, LocalDate.of(2016, 8, 27),
+                    LocalDate.of(2026, 8, 27), LocalDate.of(2026, 8, 27), List.of("2330"), "a".repeat(64), "RUNNING", Instant.now());
+            receipts.create(campaign);
+            var campaignLock = new FubonHistoricalBackfillCampaignLock(source);
+            var firstLease = campaignLock.tryAcquire(campaignId).orElseThrow();
+            assertThat(campaignLock.tryAcquire(campaignId)).isEmpty();
+            firstLease.close();
+            var resumedLease = campaignLock.tryAcquire(campaignId).orElseThrow();
+            resumedLease.close();
+            var key = new FubonHistoricalBackfillReceiptStore.WindowKey("INTRADAY_CANDLE_1M", "2330", LocalDate.of(2026, 8, 27), LocalDate.of(2026, 8, 27));
+            var firstAttempt = receipts.start(campaignId, key);
+            receipts.finish(firstAttempt, new FubonHistoricalBackfillReceiptStore.AttemptResult("FAILED", null, 0, 0, 0, 0, "RATE_LIMITED"));
+            receipts.finishCampaign(campaignId, "PARTIAL", "{}");
+            assertThatThrownBy(() -> jdbc.update("UPDATE fubon_historical_backfill_window_attempt SET status='COMPLETE' WHERE attempt_id=?", firstAttempt.id()))
+                    .hasMessageContaining("transition once");
+            assertThatThrownBy(() -> jdbc.update("UPDATE fubon_historical_backfill_campaign SET from_date='2017-01-01' WHERE campaign_id=?", campaignId))
+                    .hasMessageContaining("manifest is immutable");
+            receipts.beginResume(campaignId);
+            var secondAttempt = receipts.start(campaignId, key);
+            assertThat(secondAttempt.number()).isEqualTo(2);
+            receipts.finish(secondAttempt, new FubonHistoricalBackfillReceiptStore.AttemptResult("COMPLETE", Instant.now(), 1, 1, 0, 0, null));
+            assertThat(receipts.latestAttempts(campaignId).get(key).status()).isEqualTo("COMPLETE");
+            receipts.finishCampaign(campaignId, "SUCCESS", "{}");
 
             var history = new StockSourceQuery(jdbc);
             var pool = Executors.newFixedThreadPool(2);
@@ -80,8 +153,31 @@ class FubonHistoricalDailyCandlePostgresIntegrationTest {
     }
     private static void applyMigration(JdbcTemplate jdbc) throws Exception {
         Path migration = migrationPath();
-        String sql = Files.readString(migration).replaceAll("(?m)^--.*$", "").trim();
-        jdbc.execute(sql);
+        executeSqlStatements(jdbc, Files.readString(migration));
+    }
+    private static void applyTask466Migration(JdbcTemplate jdbc) throws Exception {
+        Path migration = migrationPath().resolveSibling("v1.138.0-fubon-historical-market-backfill-receipts-and-average-contract.sql");
+        executeSqlStatements(jdbc, Files.readString(migration));
+    }
+    private static void executeSqlStatements(JdbcTemplate jdbc, String script) {
+        String sql = script.replaceAll("(?m)^--.*$", "");
+        StringBuilder statement = new StringBuilder();
+        boolean inDollarQuote = false;
+        for (int i = 0; i < sql.length(); i++) {
+            if (sql.startsWith("$$", i)) {
+                inDollarQuote = !inDollarQuote;
+                statement.append("$$");
+                i++;
+            } else if (sql.charAt(i) == ';' && !inDollarQuote) {
+                String ready = statement.toString().trim();
+                if (!ready.isEmpty()) jdbc.execute(ready);
+                statement.setLength(0);
+            } else {
+                statement.append(sql.charAt(i));
+            }
+        }
+        String ready = statement.toString().trim();
+        if (!ready.isEmpty()) jdbc.execute(ready);
     }
     private static Path migrationPath() {
         for (Path current = Path.of("").toAbsolutePath(); current != null; current = current.getParent()) {

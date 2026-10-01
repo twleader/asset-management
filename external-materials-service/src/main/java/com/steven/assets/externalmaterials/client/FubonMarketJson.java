@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.*;
 import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
 
@@ -356,7 +357,7 @@ public final class FubonMarketJson {
                 "instrumentType", "exchange", "sourceMarket", "status", "reason", "candles"));
         task425Base(root, symbol, now);
         if (!date(root.get("queryFrom")).equals(from) || !date(root.get("queryTo")).equals(to)
-                || from.isAfter(to) || from.plusDays(365).isBefore(to)) throw invalid();
+                || from.isAfter(to) || from.plusDays(364).isBefore(to)) throw invalid();
         // A response receipt is a present-time observation, not a market-day field.
         // Historical callers may legitimately query a completed window ending before
         // today, so tying this timestamp to queryTo would reject a valid response.
@@ -389,6 +390,57 @@ public final class FubonMarketJson {
         }
         return new HistoricalDailyCandlesRead(symbol, from, to, observed, text(root.get("exchange")),
                 nullablePreservedAscii(root.get("sourceMarket"), 20), status, null, output);
+    }
+
+    /** Exact Task466 historical minute envelope.  Cumulative session average is only required to be positive. */
+    public static HistoricalIntradayCandlesRead historicalIntradayCandles(JsonNode root, String symbol,
+                                                                            LocalDate from, LocalDate to, Instant now) {
+        fields(root, Set.of("schemaVersion", "symbol", "market", "provider", "queryFrom", "queryTo", "observedAt",
+                "instrumentType", "exchange", "sourceMarket", "timeframe", "status", "reason", "candles"));
+        task425Base(root, symbol, now);
+        if (!Set.of("TWSE", "TPEx").contains(text(root.get("exchange")))) throw invalid();
+        if (!date(root.get("queryFrom")).equals(from) || !date(root.get("queryTo")).equals(to)
+                || from.isAfter(to) || from.plusDays(30).isBefore(to) || !to.isBefore(now.atZone(MarketClock.TW_ZONE).toLocalDate()))
+            throw invalid();
+        equal(root.get("timeframe"), "1");
+        Instant observed = task425Instant(root.get("observedAt"));
+        String status = text(root.get("status")), reason = nullableText(root.get("reason"));
+        JsonNode source = root.get("candles");
+        if (!source.isArray() || source.size() > 31 * 271) throw invalid();
+        if ("NO_DATA".equals(status)) {
+            if (!"NO_DATA".equals(reason) || !source.isEmpty()) throw invalid();
+            return new HistoricalIntradayCandlesRead(symbol, from, to, observed, text(root.get("exchange")),
+                    nullablePreservedAscii(root.get("sourceMarket"), 20), "1", status, reason, List.of());
+        }
+        if (!"AVAILABLE".equals(status) || reason != null || source.isEmpty()) throw invalid();
+        List<IntradayCandle> output = new ArrayList<>(source.size());
+        Instant previous = null;
+        for (JsonNode node : source) {
+            fields(node, Set.of("candleAt", "open", "high", "low", "close", "average", "volume"));
+            String timestamp = text(node.get("candleAt"));
+            Instant at;
+            try {
+                OffsetDateTime parsed = OffsetDateTime.parse(timestamp);
+                if (!timestamp.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})")) throw invalid();
+                at = parsed.toInstant();
+            } catch (RuntimeException failure) { throw invalid(); }
+            LocalDate sourceDate = at.atZone(MarketClock.TW_ZONE).toLocalDate();
+            LocalTime time = at.atZone(MarketClock.TW_ZONE).toLocalTime();
+            if (sourceDate.isBefore(from) || sourceDate.isAfter(to) || time.getSecond() != 0 || time.getNano() != 0
+                    || time.isBefore(LocalTime.of(9, 0)) || time.isAfter(LocalTime.of(13, 30))
+                    || at.isAfter(observed) || previous != null && !at.isAfter(previous)) throw invalid();
+            previous = at;
+            BigDecimal open = decimal(canonicalDecimalText(node.get("open"), 20, 10, true), 20, 10, true);
+            BigDecimal high = decimal(canonicalDecimalText(node.get("high"), 20, 10, true), 20, 10, true);
+            BigDecimal low = decimal(canonicalDecimalText(node.get("low"), 20, 10, true), 20, 10, true);
+            BigDecimal close = decimal(canonicalDecimalText(node.get("close"), 20, 10, true), 20, 10, true);
+            BigDecimal average = decimal(canonicalDecimalText(node.get("average"), 20, 10, true), 20, 10, true);
+            if (high.compareTo(open) < 0 || high.compareTo(close) < 0 || open.compareTo(low) < 0 || close.compareTo(low) < 0)
+                throw invalid();
+            output.add(new IntradayCandle(at, open, high, low, close, nonNegativeLongText(node.get("volume")), average));
+        }
+        return new HistoricalIntradayCandlesRead(symbol, from, to, observed, text(root.get("exchange")),
+                nullablePreservedAscii(root.get("sourceMarket"), 20), "1", status, null, output);
     }
 
     private static void baseV1(JsonNode root, String symbol, LocalDate queryDate, Instant now, boolean basic) {

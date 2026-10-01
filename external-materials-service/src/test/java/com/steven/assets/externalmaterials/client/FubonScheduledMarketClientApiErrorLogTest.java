@@ -59,7 +59,7 @@ class FubonScheduledMarketClientApiErrorLogTest {
                 (uri, token, body, limit, timeout) -> new FubonScheduledMarketClient.RawResponse(503, "{}".getBytes(StandardCharsets.UTF_8)));
 
         assertThatThrownBy(() -> client.intradayVolumes("2330", DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
-        assertThatThrownBy(() -> client.historicalDailyCandles("2330", DAY.minusDays(365), DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
+        assertThatThrownBy(() -> client.historicalDailyCandles("2330", DAY.minusDays(364), DAY)).hasMessage("UPSTREAM_UNAVAILABLE");
 
         verify(writer).record(eq("FUBON_INTRADAY_VOLUMES_READ"), eq("個股當日分價量查詢"), any(Throwable.class), eq(NOW));
         verify(writer).record(eq("FUBON_HISTORICAL_DAILY_CANDLES_READ"), eq("個股歷史日K線查詢"), any(Throwable.class), eq(NOW));

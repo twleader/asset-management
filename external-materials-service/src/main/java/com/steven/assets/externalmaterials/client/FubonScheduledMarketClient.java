@@ -113,13 +113,34 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
     }
     @Override public HistoricalDailyCandlesRead historicalDailyCandles(String symbol, LocalDate from, LocalDate to) {
         validateSymbols(List.of(symbol), 1, false);
-        if (from == null || to == null || from.isAfter(to) || from.plusDays(365).isBefore(to))
+        if (from == null || to == null || from.isAfter(to) || from.plusDays(364).isBefore(to))
             throw new Unavailable("INVALID_REQUEST");
-        String body = postV1("FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢",
-                "/internal/market-data/historical-daily-candles/read",
-                Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()), 2 * 1024 * 1024);
-        try { return FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse(body), symbol, from, to, clock.instant()); }
+        try {
+            String body = postV1("FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢",
+                    "/internal/market-data/historical-daily-candles/read",
+                    Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()), 2 * 1024 * 1024);
+            return FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse(body), symbol, from, to, clock.instant());
+        } catch (Unavailable failure) {
+            if (!"NO_DATA".equals(failure.reason())) throw failure;
+            return new HistoricalDailyCandlesRead(symbol, from, to, clock.instant(), null, null, "NO_DATA", "NO_DATA", List.of());
+        }
         catch (RuntimeException invalid) { throw schemaFailure("FUBON_HISTORICAL_DAILY_CANDLES_READ", "個股歷史日K線查詢", "INVALID_RESPONSE", invalid); }
+    }
+    @Override public HistoricalIntradayCandlesRead historicalIntradayCandles(String symbol, LocalDate from, LocalDate to) {
+        validateSymbols(List.of(symbol), 1, false);
+        if (from == null || to == null || from.isAfter(to) || from.plusDays(30).isBefore(to)
+                || !to.isBefore(clock.instant().atZone(MarketClock.TW_ZONE).toLocalDate()))
+            throw new Unavailable("INVALID_REQUEST");
+        try {
+            String body = postV1("FUBON_HISTORICAL_INTRADAY_CANDLES_READ", "個股歷史分鐘K線查詢",
+                    "/internal/market-data/historical-intraday-candles/read",
+                    Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()), 2 * 1024 * 1024);
+            return FubonMarketJson.historicalIntradayCandles(FubonMarketJson.parse(body), symbol, from, to, clock.instant());
+        } catch (Unavailable failure) {
+            if (!"NO_DATA".equals(failure.reason())) throw failure;
+            return new HistoricalIntradayCandlesRead(symbol, from, to, clock.instant(), null, null, "1", "NO_DATA", "NO_DATA", List.of());
+        }
+        catch (RuntimeException invalid) { throw schemaFailure("FUBON_HISTORICAL_INTRADAY_CANDLES_READ", "個股歷史分鐘K線查詢", "INVALID_RESPONSE", invalid); }
     }
     @Override public SubscriptionAck subscriptions(List<String> symbols) {
         validateSymbols(symbols, 300, true);
@@ -178,7 +199,8 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
                 return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
                     .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
             String reason = v1Reason(response);
-            if ("RATE_LIMITED".equals(reason) || "HISTORY_BUDGET_EXHAUSTED".equals(reason))
+            if (response.status() == 404 && "NO_DATA".equals(reason)) throw new Unavailable("NO_DATA");
+            if ("RATE_LIMITED".equals(reason) || "HISTORY_BUDGET_EXHAUSTED".equals(reason) || "RESPONSE_TOO_LARGE".equals(reason))
                 throw outboundFailure(operationKey, apiName, reason, true, response.status(), path);
             if ("MISCONFIGURED".equals(reason)) throw outboundFailure(operationKey, apiName, "MISCONFIGURED", true, response.status(), path);
             if ("STALE_QUERY".equals(reason) || "SCHEMA_INVALID".equals(reason) || "INVALID_RESPONSE".equals(reason))

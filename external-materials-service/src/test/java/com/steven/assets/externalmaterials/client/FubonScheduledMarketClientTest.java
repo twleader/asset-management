@@ -65,6 +65,26 @@ class FubonScheduledMarketClientTest {
                 failure("bb", "HISTORY_BUDGET_EXHAUSTED"))).toString());
         assertThat(client(200).technical("2330", DAY).groups().get("bb").reason()).isEqualTo("HISTORY_BUDGET_EXHAUSTED");
     }
+
+    @Test void officialHistoricalNotFoundIsAnEmptyNoDataWindow() {
+        when(clock.instant()).thenReturn(NOW);
+        response.set("{\"reason\":\"NO_DATA\"}");
+        var client = new FubonScheduledMarketClient(
+                new FubonMarketConfigState("true", "http://fake.invalid", "unused", p -> "fake-token"),
+                clock, (uri, token, body, limit, timeout) -> {
+                    calls.incrementAndGet();
+                    return new FubonScheduledMarketClient.RawResponse(404, response.get().getBytes(StandardCharsets.UTF_8));
+                });
+
+        var daily = client.historicalDailyCandles("00719B", LocalDate.of(2016, 9, 30), LocalDate.of(2017, 9, 29));
+        var minute = client.historicalIntradayCandles("00719B", LocalDate.of(2023, 5, 23), LocalDate.of(2023, 6, 22));
+
+        assertThat(daily.status()).isEqualTo("NO_DATA");
+        assertThat(daily.candles()).isEmpty();
+        assertThat(minute.status()).isEqualTo("NO_DATA");
+        assertThat(minute.candles()).isEmpty();
+        assertThat(calls).hasValue(2);
+    }
     @Test void identityFutureObservationDuplicateKeyAndExtraFieldRejectWholeEnvelope() {
         ObjectNode body = technicalJson(technical("9999", DAY, NOW.minusSeconds(1), "0"));
         response.set(body.toString());
@@ -77,6 +97,35 @@ class FubonScheduledMarketClientTest {
         body.put("observedAt", NOW.toString()).put("account", "fake-must-not-pass");
         response.set(body.toString());
         assertThatThrownBy(() -> client(200).technical("2330", DAY)).hasMessage("TECHNICAL_SCHEMA_INVALID");
+    }
+
+    @Test void historicalMinuteAcceptsCumulativeAverageOutsideBarAndInclusive1330() {
+        String json = historicalMinute("2026-08-28T05:30:00.000000Z", "2026-08-27T13:30:00+08:00", "999", "AVAILABLE", null);
+        var read = FubonMarketJson.historicalIntradayCandles(FubonMarketJson.parse(json), "2330", DAY.minusDays(1), DAY.minusDays(1), NOW);
+        assertThat(read.candles()).hasSize(1);
+        assertThat(read.candles().getFirst().average()).isEqualByComparingTo("999");
+        assertThat(read.candles().getFirst().volume()).isEqualTo(123456L);
+    }
+
+    @Test void historicalMinuteRejectsBadSessionsWindowsOrderingAndUnknownFields() {
+        assertThatThrownBy(() -> FubonMarketJson.historicalIntradayCandles(
+                FubonMarketJson.parse(historicalMinute("2026-08-28T05:40:06.000000Z", "2026-08-27T13:30:00+08:00", "20", "AVAILABLE", null)),
+                "2330", DAY.minusDays(1), DAY.minusDays(1), NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> FubonMarketJson.historicalIntradayCandles(
+                FubonMarketJson.parse(historicalMinute("2026-08-28T05:30:00.000000Z", "2026-08-27T13:31:00+08:00", "20", "AVAILABLE", null)),
+                "2330", DAY.minusDays(1), DAY.minusDays(1), NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> FubonMarketJson.historicalIntradayCandles(
+                FubonMarketJson.parse(historicalMinute("2026-08-28T05:30:00.000000Z", "2026-08-27T13:30:00+08:00", "20", "AVAILABLE", "extra")),
+                "2330", DAY.minusDays(1), DAY.minusDays(1), NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> FubonMarketJson.historicalIntradayCandles(
+                FubonMarketJson.parse(historicalMinute("2026-08-28T05:30:00.000000Z", "2026-08-27T13:30:00+08:00", "20", "AVAILABLE", null)),
+                "2330", DAY.minusDays(32), DAY.minusDays(1), NOW)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static String historicalMinute(String observedAt, String timestamp, String average, String status, String extra) {
+        String row = "{\"candleAt\":\"" + timestamp + "\",\"open\":\"10\",\"high\":\"11\",\"low\":\"9\",\"close\":\"10\",\"average\":\"" + average + "\",\"volume\":\"123456\"" + (extra == null ? "" : ",\"unexpected\":true") + "}";
+        String rows = "AVAILABLE".equals(status) ? "[" + row + "]" : "[]";
+        return "{\"schemaVersion\":1,\"symbol\":\"2330\",\"market\":\"台股\",\"provider\":\"FUBON_SDK\",\"queryFrom\":\"2026-08-27\",\"queryTo\":\"2026-08-27\",\"observedAt\":\"" + observedAt + "\",\"instrumentType\":\"EQUITY\",\"exchange\":\"TWSE\",\"sourceMarket\":null,\"timeframe\":\"1\",\"status\":\"" + status + "\",\"reason\":null,\"candles\":" + rows + "}";
     }
     @Test void disabledMakesZeroTokenReadsAndHttpAndConfigToStringNeverLeaks() {
         AtomicInteger tokens = new AtomicInteger();
@@ -189,10 +238,10 @@ class FubonScheduledMarketClientTest {
         assertThat(volumes.status()).isEqualTo("OK");
         assertThat(volumes.levels().getFirst().price()).isEqualByComparingTo("950");
         var daily = FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse("""
-                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-08-28","queryTo":"2026-08-28",
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-08-29","queryTo":"2026-08-28",
                  "observedAt":"2026-08-28T05:40:00.000000Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
                  "status":"OK","reason":null,"candles":[{"tradingDate":"2026-08-28","open":"950","high":"960","low":"945","close":"955","volume":"123","turnover":"117465","change":"5"}]}
-                """), "2330", DAY.minusDays(365), DAY, NOW);
+                """), "2330", DAY.minusDays(364), DAY, NOW);
         assertThat(daily.candles().getFirst().close()).isEqualByComparingTo("955");
         assertThatThrownBy(() -> FubonMarketJson.intradayVolumes(FubonMarketJson.parse("""
                 {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","sourceDate":"2026-08-28",
@@ -201,9 +250,9 @@ class FubonScheduledMarketClientTest {
                 """), "2330", DAY, NOW)).isInstanceOf(IllegalArgumentException.class);
     }
     @Test void historicalDailyObservationIsReceiptTimeNotTheLastRequestedMarketDate() {
-        LocalDate oldTo = DAY.minusDays(30), oldFrom = oldTo.minusDays(365);
+        LocalDate oldTo = DAY.minusDays(30), oldFrom = oldTo.minusDays(364);
         var daily = FubonMarketJson.historicalDailyCandles(FubonMarketJson.parse("""
-                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-07-29","queryTo":"2026-07-29",
+                {"schemaVersion":1,"symbol":"2330","market":"台股","provider":"FUBON_SDK","queryFrom":"2025-07-30","queryTo":"2026-07-29",
                  "observedAt":"2026-08-28T05:40:00.000000Z","instrumentType":"EQUITY","exchange":"TWSE","sourceMarket":"TSE",
                  "status":"OK","reason":null,"candles":[{"tradingDate":"2026-07-29","open":"950","high":"960","low":"945","close":"955","volume":"123","turnover":"117465","change":"5"}]}
                 """), "2330", oldFrom, oldTo, NOW);

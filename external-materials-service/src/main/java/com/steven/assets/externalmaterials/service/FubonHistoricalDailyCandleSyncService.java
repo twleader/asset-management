@@ -41,7 +41,7 @@ public class FubonHistoricalDailyCandleSyncService {
             try { codes = radar.current(30); }
             catch (Unavailable unavailable) { return finish(unavailable.reason(), 0, 0, 0, 0); }
             if (codes.isEmpty()) return finish("NO_SYMBOLS", 0, 0, 0, 0);
-            LocalDate to = gate.today(), from = to.minusDays(365);
+            LocalDate to = gate.today(), from = to.minusDays(364);
             int requested = 0, factCount = 0, projected = 0, failed = 0;
             for (String code : codes) {
                 requested++;

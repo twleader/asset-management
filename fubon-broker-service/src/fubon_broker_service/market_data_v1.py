@@ -7,6 +7,7 @@ format rather than a vendor-object serialization.
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from datetime import UTC, datetime, time as wall_time
 from decimal import Decimal
 
@@ -199,7 +200,7 @@ class MarketDataV1Service:
         try:
             stock_code(symbol)
             start, end = strict_iso_date(start_date), strict_iso_date(end_date)
-            if end < start or (end - start).days + 1 > 366:
+            if end < start or (end - start).days + 1 > 365:
                 raise ValueError("INVALID_REQUEST")
         except ValueError:
             raise MarketDataV1Error("INVALID_REQUEST", request_error=True) from None
@@ -209,14 +210,18 @@ class MarketDataV1Service:
         try:
             if returned < started or not isinstance(source, dict):
                 raise ValueError("SCHEMA_INVALID")
-            allowed = {"type", "exchange", "market", "symbol", "data"}
+            allowed = {"type", "exchange", "market", "symbol", "timeframe", "sort", "data"}
             if not set(source).issubset(allowed) or "data" not in source:
+                raise ValueError("SCHEMA_INVALID")
+            if "timeframe" in source and source["timeframe"] != "D":
+                raise ValueError("SCHEMA_INVALID")
+            if "sort" in source and source["sort"] != "asc":
                 raise ValueError("SCHEMA_INVALID")
             if source.get("symbol") != symbol or source.get("type") != "EQUITY" or source.get("exchange") not in {"TWSE", "TPEx", "ESB"}:
                 raise ValueError("SCHEMA_INVALID")
             source_market = _text(source.get("market"), maximum=20, nullable=True, ascii_only=True, preserve=True)
             rows = source.get("data")
-            if not isinstance(rows, list) or len(rows) > 366:
+            if not isinstance(rows, list) or len(rows) > 365:
                 raise ValueError("SCHEMA_INVALID")
             candles = [self._daily_candle(row, start, end) for row in rows]
             if [row["tradingDate"] for row in candles] != sorted(row["tradingDate"] for row in candles):
@@ -228,6 +233,54 @@ class MarketDataV1Service:
                     "queryFrom": start_date, "queryTo": end_date, "observedAt": _task425_observed_at(returned),
                     "instrumentType": "EQUITY", "exchange": source["exchange"], "sourceMarket": source_market,
                     "status": status, "reason": reason, "candles": candles}
+        except ValueError:
+            raise MarketDataV1Error("INVALID_RESPONSE") from None
+
+    def historical_intraday_candles(self, symbol: str, start_date: str, end_date: str) -> dict[str, object]:
+        """Read one bounded, completed historical minute window from the fixed Fubon route."""
+        try:
+            stock_code(symbol)
+            start, end = strict_iso_date(start_date), strict_iso_date(end_date)
+            today = instant(self._now()).astimezone(TAIPEI).date()
+            if end < start or (end - start).days + 1 > 31 or end >= today:
+                raise ValueError("INVALID_REQUEST")
+        except ValueError:
+            raise MarketDataV1Error("INVALID_REQUEST", request_error=True) from None
+
+        started = instant(self._now())
+        source = self._gateway.read_historical_intraday_candles(symbol, start_date, end_date)
+        returned = instant(self._now())
+        try:
+            if returned < started or not isinstance(source, dict):
+                raise ValueError("SCHEMA_INVALID")
+            allowed = {"type", "exchange", "market", "symbol", "timeframe", "sort", "data"}
+            if not set(source).issubset(allowed) or "data" not in source:
+                raise ValueError("SCHEMA_INVALID")
+            if "timeframe" in source and source["timeframe"] != "1":
+                raise ValueError("SCHEMA_INVALID")
+            if "sort" in source and source["sort"] != "asc":
+                raise ValueError("SCHEMA_INVALID")
+            if (source.get("symbol") != symbol or source.get("type") != "EQUITY"
+                    or source.get("exchange") not in {"TWSE", "TPEx"}):
+                raise ValueError("SCHEMA_INVALID")
+            source_market = _text(source.get("market"), maximum=20, nullable=True, ascii_only=True, preserve=True)
+            rows = source.get("data")
+            if not isinstance(rows, list) or len(rows) > 31 * 271:
+                raise ValueError("SCHEMA_INVALID")
+            candles = [self._historical_intraday_candle(row, start, end, returned) for row in rows]
+            times = [row["candleAt"] for row in candles]
+            if times != sorted(times) or len(set(times)) != len(times):
+                raise ValueError("SCHEMA_INVALID")
+            status, reason = ("NO_DATA", "NO_DATA") if not candles else ("AVAILABLE", None)
+            result = {"schemaVersion": 1, "symbol": symbol, "market": "台股", "provider": "FUBON_SDK",
+                      "queryFrom": start_date, "queryTo": end_date, "observedAt": _task425_observed_at(returned),
+                      "instrumentType": "EQUITY", "exchange": source["exchange"], "sourceMarket": source_market,
+                      "timeframe": "1", "status": status, "reason": reason, "candles": candles}
+            if len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 2 * 1024 * 1024:
+                raise MarketDataV1Error("RESPONSE_TOO_LARGE")
+            return result
+        except MarketDataV1Error:
+            raise
         except ValueError:
             raise MarketDataV1Error("INVALID_RESPONSE") from None
 
@@ -270,7 +323,42 @@ class MarketDataV1Service:
         average = canonical_number(row.get("average"), precision=20, scale=10, positive=True)
         if not Decimal(high) >= Decimal(open_) >= Decimal(low) or not Decimal(high) >= Decimal(close) >= Decimal(low):
             raise ValueError("SCHEMA_INVALID")
-        if not Decimal(low) <= Decimal(average) <= Decimal(high):
+        volume = row.get("volume")
+        if isinstance(volume, bool) or not isinstance(volume, (str, int)):
+            raise ValueError("SCHEMA_INVALID")
+        volume_text = str(volume)
+        if not (volume_text == "0" or (volume_text.isascii() and volume_text.isdigit() and not volume_text.startswith("0"))):
+            raise ValueError("SCHEMA_INVALID")
+        if int(volume_text) > 9223372036854775807:
+            raise ValueError("SCHEMA_INVALID")
+        return {"candleAt": observed_at(parsed), "open": open_, "high": high, "low": low,
+                "close": close, "volume": volume_text, "average": average}
+
+    @staticmethod
+    def _historical_intraday_candle(row: object, start: object, end: object, observed: datetime) -> dict[str, str]:
+        if not isinstance(row, dict) or set(row) != {"date", "open", "high", "low", "close", "volume", "average"}:
+            raise ValueError("SCHEMA_INVALID")
+        value = row.get("date")
+        if not isinstance(value, str):
+            raise ValueError("SCHEMA_INVALID")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("SCHEMA_INVALID") from None
+        if parsed.tzinfo is None or parsed.second != 0 or parsed.microsecond != 0:
+            raise ValueError("SCHEMA_INVALID")
+        parsed = parsed.astimezone(UTC)
+        local = parsed.astimezone(TAIPEI)
+        if (local.date() < start or local.date() > end
+                or not (wall_time(9, 0) <= local.time() <= wall_time(13, 30))
+                or parsed > observed):
+            raise ValueError("SCHEMA_INVALID")
+        open_ = canonical_number(row.get("open"), precision=20, scale=10, positive=True)
+        high = canonical_number(row.get("high"), precision=20, scale=10, positive=True)
+        low = canonical_number(row.get("low"), precision=20, scale=10, positive=True)
+        close = canonical_number(row.get("close"), precision=20, scale=10, positive=True)
+        average = canonical_number(row.get("average"), precision=20, scale=10, positive=True)
+        if not Decimal(high) >= Decimal(open_) >= Decimal(low) or not Decimal(high) >= Decimal(close) >= Decimal(low):
             raise ValueError("SCHEMA_INVALID")
         volume = row.get("volume")
         if isinstance(volume, bool) or not isinstance(volume, (str, int)):
