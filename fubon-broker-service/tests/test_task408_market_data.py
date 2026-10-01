@@ -193,7 +193,7 @@ def test_task425_volume_and_daily_candle_wire_contracts_are_exact_and_fixed():
     gateway = FixedGateway()
     service = MarketDataV1Service(gateway, now=lambda: NOW)
     volumes = service.volumes("2330")
-    daily = service.daily_candles("2330", (NOW.date() - timedelta(days=365)).isoformat(), TODAY)
+    daily = service.daily_candles("2330", (NOW.date() - timedelta(days=364)).isoformat(), TODAY)
     assert list(volumes) == ["schemaVersion", "symbol", "market", "provider", "sourceDate", "observedAt", "instrumentType",
                              "exchange", "sourceMarket", "status", "reason", "levels"]
     assert volumes["status"] == "OK" and volumes["levels"] == [{"price": "950", "volume": "123", "bidVolume": "100", "askVolume": None}]
@@ -201,7 +201,7 @@ def test_task425_volume_and_daily_candle_wire_contracts_are_exact_and_fixed():
     assert list(daily) == ["schemaVersion", "symbol", "market", "provider", "queryFrom", "queryTo", "observedAt",
                            "instrumentType", "exchange", "sourceMarket", "status", "reason", "candles"]
     assert daily["status"] == "OK" and daily["candles"][0]["tradingDate"] == TODAY
-    assert gateway.calls[-1][1] == {"symbol": "2330", "from": (NOW.date() - timedelta(days=365)).isoformat(), "to": TODAY,
+    assert gateway.calls[-1][1] == {"symbol": "2330", "from": (NOW.date() - timedelta(days=364)).isoformat(), "to": TODAY,
                                     "timeframe": "D", "adjusted": False, "fields": "open,high,low,close,volume,turnover,change", "sort": "asc"}
 
 

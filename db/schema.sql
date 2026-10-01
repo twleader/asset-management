@@ -45,8 +45,9 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生資訊：PostgreSQL 16.14 / pg_dump 16.14，來源 asset-postgres（v1.137.0 已套用），2026-09-28
--- 產生當下表數：105 張 CREATE TABLE（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：107 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+--
+--
 --
 --
 --
@@ -83,6 +84,45 @@ BEGIN
     RETURN OLD;
 END;
 $$;
+
+
+--
+-- Name: guard_fubon_historical_backfill_attempt_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_fubon_historical_backfill_attempt_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'fubon historical backfill attempt is immutable'; END IF;
+    IF OLD.status <> 'STARTED' OR NEW.status = 'STARTED'
+       OR NEW.attempt_id IS DISTINCT FROM OLD.attempt_id OR NEW.campaign_id IS DISTINCT FROM OLD.campaign_id
+       OR NEW.dataset IS DISTINCT FROM OLD.dataset OR NEW.symbol IS DISTINCT FROM OLD.symbol
+       OR NEW.window_from IS DISTINCT FROM OLD.window_from OR NEW.window_to IS DISTINCT FROM OLD.window_to
+       OR NEW.attempt_number IS DISTINCT FROM OLD.attempt_number OR NEW.started_at IS DISTINCT FROM OLD.started_at THEN
+        RAISE EXCEPTION 'fubon historical backfill attempt may transition once from STARTED';
+    END IF;
+    RETURN NEW;
+END $$;
+
+
+--
+-- Name: guard_fubon_historical_backfill_campaign_manifest(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_fubon_historical_backfill_campaign_manifest() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'fubon historical backfill campaign is immutable'; END IF;
+    IF NEW.campaign_id IS DISTINCT FROM OLD.campaign_id OR NEW.from_date IS DISTINCT FROM OLD.from_date
+       OR NEW.to_date IS DISTINCT FROM OLD.to_date OR NEW.latest_completed_date IS DISTINCT FROM OLD.latest_completed_date
+       OR NEW.symbols IS DISTINCT FROM OLD.symbols OR NEW.scope_sha256 IS DISTINCT FROM OLD.scope_sha256
+       OR NEW.unsupported_coverage IS DISTINCT FROM OLD.unsupported_coverage OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+        RAISE EXCEPTION 'fubon historical backfill campaign manifest is immutable';
+    END IF;
+    RETURN NEW;
+END $$;
 
 
 --
@@ -1239,6 +1279,80 @@ CREATE TABLE public.fubon_etf_holdings_snapshot (
 
 
 --
+-- Name: fubon_historical_backfill_campaign; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_historical_backfill_campaign (
+    campaign_id uuid NOT NULL,
+    from_date date NOT NULL,
+    to_date date NOT NULL,
+    latest_completed_date date NOT NULL,
+    symbols jsonb NOT NULL,
+    scope_sha256 character(64) NOT NULL,
+    unsupported_coverage jsonb NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    status character varying(16) DEFAULT 'RUNNING'::character varying NOT NULL,
+    finished_at timestamp with time zone,
+    summary jsonb,
+    CONSTRAINT ck_fubon_historical_backfill_campaign_coverage CHECK ((jsonb_typeof(unsupported_coverage) = 'object'::text)),
+    CONSTRAINT ck_fubon_historical_backfill_campaign_dates CHECK (((from_date <= to_date) AND (to_date = latest_completed_date))),
+    CONSTRAINT ck_fubon_historical_backfill_campaign_finished CHECK (((((status)::text = 'RUNNING'::text) AND (finished_at IS NULL)) OR (((status)::text <> 'RUNNING'::text) AND (finished_at IS NOT NULL)))),
+    CONSTRAINT ck_fubon_historical_backfill_campaign_hash CHECK ((scope_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_fubon_historical_backfill_campaign_status CHECK (((status)::text = ANY ((ARRAY['RUNNING'::character varying, 'SUCCESS'::character varying, 'PARTIAL'::character varying])::text[]))),
+    CONSTRAINT ck_fubon_historical_backfill_campaign_symbols CHECK (((jsonb_typeof(symbols) = 'array'::text) AND ((jsonb_array_length(symbols) >= 1) AND (jsonb_array_length(symbols) <= 30))))
+);
+
+
+--
+-- Name: fubon_historical_backfill_window_attempt; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_historical_backfill_window_attempt (
+    attempt_id bigint NOT NULL,
+    campaign_id uuid NOT NULL,
+    dataset character varying(32) NOT NULL,
+    symbol character varying(20) NOT NULL,
+    window_from date NOT NULL,
+    window_to date NOT NULL,
+    attempt_number integer NOT NULL,
+    status character varying(20) NOT NULL,
+    started_at timestamp with time zone NOT NULL,
+    completed_at timestamp with time zone,
+    observed_at timestamp with time zone,
+    provider_row_count integer DEFAULT 0 NOT NULL,
+    inserted_count integer DEFAULT 0 NOT NULL,
+    unchanged_count integer DEFAULT 0 NOT NULL,
+    conflict_count integer DEFAULT 0 NOT NULL,
+    error_code character varying(64),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_completion CHECK (((((status)::text = 'STARTED'::text) AND (completed_at IS NULL)) OR (((status)::text <> 'STARTED'::text) AND (completed_at IS NOT NULL)))),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_counts CHECK (((provider_row_count >= 0) AND (inserted_count >= 0) AND (unchanged_count >= 0) AND (conflict_count >= 0))),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_dataset CHECK (((dataset)::text = ANY ((ARRAY['DAILY_CANDLE'::character varying, 'INTRADAY_CANDLE_1M'::character varying])::text[]))),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_dates CHECK ((window_from <= window_to)),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_number CHECK ((attempt_number > 0)),
+    CONSTRAINT ck_fubon_historical_backfill_window_attempt_status CHECK (((status)::text = ANY ((ARRAY['STARTED'::character varying, 'COMPLETE'::character varying, 'NO_DATA'::character varying, 'FAILED'::character varying, 'CONFLICT'::character varying, 'SCOPE_CHANGED'::character varying])::text[])))
+);
+
+
+--
+-- Name: fubon_historical_backfill_window_attempt_attempt_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.fubon_historical_backfill_window_attempt_attempt_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: fubon_historical_backfill_window_attempt_attempt_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.fubon_historical_backfill_window_attempt_attempt_id_seq OWNED BY public.fubon_historical_backfill_window_attempt.attempt_id;
+
+
+--
 -- Name: fubon_historical_daily_candle; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1296,11 +1410,12 @@ CREATE TABLE public.fubon_intraday_candle (
     volume bigint NOT NULL,
     observed_at timestamp with time zone NOT NULL,
     content_hash character(64) NOT NULL,
+    CONSTRAINT ck_fubon_intraday_candle_average CHECK ((average > (0)::numeric)),
     CONSTRAINT ck_fubon_intraday_candle_exchange CHECK (((exchange)::text = ANY ((ARRAY['TWSE'::character varying, 'TPEx'::character varying])::text[]))),
     CONSTRAINT ck_fubon_intraday_candle_hash CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_fubon_intraday_candle_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text) AND (timeframe = 1))),
     CONSTRAINT ck_fubon_intraday_candle_minute CHECK ((date_trunc('minute'::text, candle_at) = candle_at)),
-    CONSTRAINT ck_fubon_intraday_candle_prices CHECK (((open > (0)::numeric) AND (high > (0)::numeric) AND (low > (0)::numeric) AND (close > (0)::numeric) AND (average > (0)::numeric) AND (high >= open) AND (high >= close) AND (open >= low) AND (close >= low) AND (average >= low) AND (average <= high))),
+    CONSTRAINT ck_fubon_intraday_candle_ohlc CHECK (((open > (0)::numeric) AND (high > (0)::numeric) AND (low > (0)::numeric) AND (close > (0)::numeric) AND (high >= open) AND (high >= close) AND (open >= low) AND (close >= low))),
     CONSTRAINT ck_fubon_intraday_candle_source_day CHECK ((((candle_at AT TIME ZONE 'Asia/Taipei'::text))::date = source_date)),
     CONSTRAINT ck_fubon_intraday_candle_volume CHECK ((volume >= 0))
 );
@@ -3419,6 +3534,13 @@ ALTER TABLE ONLY public.export_schedule_time ALTER COLUMN id SET DEFAULT nextval
 
 
 --
+-- Name: fubon_historical_backfill_window_attempt attempt_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_backfill_window_attempt ALTER COLUMN attempt_id SET DEFAULT nextval('public.fubon_historical_backfill_window_attempt_attempt_id_seq'::regclass);
+
+
+--
 -- Name: index_export_schedule id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -4076,6 +4198,22 @@ ALTER TABLE ONLY public.fubon_etf_holdings_snapshot
 
 
 --
+-- Name: fubon_historical_backfill_campaign pk_fubon_historical_backfill_campaign; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_backfill_campaign
+    ADD CONSTRAINT pk_fubon_historical_backfill_campaign PRIMARY KEY (campaign_id);
+
+
+--
+-- Name: fubon_historical_backfill_window_attempt pk_fubon_historical_backfill_window_attempt; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_backfill_window_attempt
+    ADD CONSTRAINT pk_fubon_historical_backfill_window_attempt PRIMARY KEY (attempt_id);
+
+
+--
 -- Name: fubon_intraday_candle pk_fubon_intraday_candle; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4684,6 +4822,14 @@ ALTER TABLE ONLY public.export_schedule_time
 
 
 --
+-- Name: fubon_historical_backfill_window_attempt uq_fubon_historical_backfill_window_attempt; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_backfill_window_attempt
+    ADD CONSTRAINT uq_fubon_historical_backfill_window_attempt UNIQUE (campaign_id, dataset, symbol, window_from, attempt_number);
+
+
+--
 -- Name: investment_profile uq_investment_profile_owner; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4965,6 +5111,20 @@ CREATE INDEX idx_exchange_rate_export_schedule_time_schedule ON public.exchange_
 --
 
 CREATE INDEX idx_export_schedule_time_schedule ON public.export_schedule_time USING btree (schedule_id);
+
+
+--
+-- Name: idx_fubon_historical_backfill_attempt_latest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fubon_historical_backfill_attempt_latest ON public.fubon_historical_backfill_window_attempt USING btree (campaign_id, dataset, symbol, window_from, attempt_number DESC);
+
+
+--
+-- Name: idx_fubon_historical_backfill_campaign_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fubon_historical_backfill_campaign_status ON public.fubon_historical_backfill_campaign USING btree (status, created_at DESC);
 
 
 --
@@ -5346,6 +5506,20 @@ CREATE TRIGGER api_error_log_retention_guard BEFORE DELETE OR UPDATE ON public.a
 
 
 --
+-- Name: fubon_historical_backfill_window_attempt trg_fubon_historical_backfill_attempt_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fubon_historical_backfill_attempt_immutable BEFORE DELETE OR UPDATE ON public.fubon_historical_backfill_window_attempt FOR EACH ROW EXECUTE FUNCTION public.guard_fubon_historical_backfill_attempt_immutable();
+
+
+--
+-- Name: fubon_historical_backfill_campaign trg_fubon_historical_backfill_campaign_manifest; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_fubon_historical_backfill_campaign_manifest BEFORE DELETE OR UPDATE ON public.fubon_historical_backfill_campaign FOR EACH ROW EXECUTE FUNCTION public.guard_fubon_historical_backfill_campaign_manifest();
+
+
+--
 -- Name: fubon_historical_daily_candle trg_fubon_historical_daily_candle_immutable; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5472,6 +5646,14 @@ ALTER TABLE ONLY public.stock_holding
 
 ALTER TABLE ONLY public.asset_snapshot
     ADD CONSTRAINT fk_asset_snapshot_owner FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: fubon_historical_backfill_window_attempt fk_fubon_historical_backfill_window_attempt_campaign; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_historical_backfill_window_attempt
+    ADD CONSTRAINT fk_fubon_historical_backfill_window_attempt_campaign FOREIGN KEY (campaign_id) REFERENCES public.fubon_historical_backfill_campaign(campaign_id);
 
 
 --

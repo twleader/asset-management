@@ -68,6 +68,8 @@ public class MarketDataFetchService {
     private final DgpaCalendarAuthority dgpaCalendarAuthority;
     private final Clock clock;
     private final ObjectProvider<FubonNormalizedQuoteClient> fubonQuotes;
+    @Value("${fubon.historical-backfill-only:false}")
+    private boolean historicalBackfillOnly;
 
     private volatile String yahooCrumb = null;
     private volatile long yahooCrumbBlockedUntil = 0L;
@@ -535,6 +537,7 @@ public class MarketDataFetchService {
     /** 啟動後背景預熱「股名→代號」字典，避免重啟後第一筆 ETF 請求同步載入而逾時。 */
     @EventListener(ApplicationReadyEvent.class)
     public void warmTwNameToCodeOnStartup() {
+        if (historicalBackfillOnly) return;
         Thread t = new Thread(() -> {
             try {
                 int n = twNameToCodeMap().size();

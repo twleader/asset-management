@@ -402,6 +402,8 @@ class SdkGateway:
                     continue
                 raise
             except Exception as exc:
+                if namespace == "historical" and self._exception_is_not_found(exc):
+                    raise SdkCallError("NO_DATA") from None
                 if self._exception_is_rate_limited(exc):
                     retry_after = self._exception_retry_after(exc)
                     with self._history_lock:
@@ -1127,6 +1129,15 @@ class SdkGateway:
     def _exception_is_rate_limited(exc: BaseException) -> bool:
         code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
         return str(code).upper() in {"429", "RATE_LIMITED", "TOO_MANY_REQUESTS"}
+
+    @staticmethod
+    def _exception_is_not_found(exc: BaseException) -> bool:
+        current: BaseException | None = exc
+        while current is not None:
+            if str(getattr(current, "status_code", "")) == "404":
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     @staticmethod
     def _exception_retry_after(exc: BaseException) -> float | None:

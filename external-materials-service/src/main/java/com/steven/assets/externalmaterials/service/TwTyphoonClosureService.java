@@ -3,6 +3,7 @@ package com.steven.assets.externalmaterials.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
@@ -37,6 +38,9 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class TwTyphoonClosureService {
 
+    @Value("${fubon.historical-backfill-only:false}")
+    private boolean historicalBackfillOnly;
+
     static final ZoneId TW_ZONE = ZoneId.of("Asia/Taipei");
     private static final String DGPA_URL = "https://www.dgpa.gov.tw/typh/daily/nds.html";
     // DGPA 為 .gov.tw 站，短 UA 即可（比照全站對外抓取慣例，避免長 Chrome UA 被部分 WAF 阻擋）。
@@ -60,6 +64,7 @@ public class TwTyphoonClosureService {
 
     @EventListener(ApplicationReadyEvent.class)
     void onApplicationReady() {
+        if (historicalBackfillOnly) return;
         loadFromDb();
         selfHealClosureMarketData();
     }

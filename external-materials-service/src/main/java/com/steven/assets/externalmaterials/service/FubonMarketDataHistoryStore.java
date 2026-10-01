@@ -208,6 +208,57 @@ public class FubonMarketDataHistoryStore {
         } catch (RuntimeException failure) { return new CandlesResult(Status.FAILED, 0, 0, 0); }
     }
 
+    /** Persist one complete validated historical window atomically, preserving each minute's Taiwan source date. */
+    public CandlesResult persistHistoricalCandles(HistoricalIntradayCandlesRead read) {
+        if (read == null || !"AVAILABLE".equals(read.status()) || !validSymbol(read.symbol())
+                || read.queryFrom() == null || read.queryTo() == null || read.queryFrom().isAfter(read.queryTo())
+                || read.candles().isEmpty() || read.candles().size() > 31 * 271
+                || !"1".equals(read.timeframe()) || read.observedAt() == null
+                || !Set.of("TWSE", "TPEx").contains(read.exchange())) return new CandlesResult(Status.FAILED, 0, 0, 0);
+        try {
+            CandlesResult result = writes.execute(ignored -> persistHistoricalCandlesInTransaction(read));
+            return result == null ? new CandlesResult(Status.FAILED, 0, 0, 0) : result;
+        } catch (RuntimeException failure) { return new CandlesResult(Status.FAILED, 0, 0, 0); }
+    }
+
+    private CandlesResult persistHistoricalCandlesInTransaction(HistoricalIntradayCandlesRead read) {
+        int written = 0, unchanged = 0, conflicts = 0;
+        Instant previous = null;
+        for (IntradayCandle candle : read.candles()) {
+            LocalDate sourceDate = candle.candleAt().atZone(MarketClock.TW_ZONE).toLocalDate();
+            if (sourceDate.isBefore(read.queryFrom()) || sourceDate.isAfter(read.queryTo())
+                    || previous != null && !candle.candleAt().isAfter(previous) || !validMinuteCandle(candle))
+                throw new IllegalArgumentException("INVALID_HISTORICAL_MINUTE");
+            previous = candle.candleAt();
+            String hash = FubonCanonicalHash.candle(historicalCandleCanonicalDocument(read, candle, sourceDate));
+            int inserted = jdbc.update("""
+                    INSERT INTO fubon_intraday_candle
+                      (stock_code, market, provider, timeframe, candle_at, source_date, exchange, open, high, low, close, average,
+                       volume, observed_at, content_hash)
+                    VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (stock_code, market, provider, timeframe, candle_at) DO NOTHING
+                    """, read.symbol(), MARKET, PROVIDER, Timestamp.from(candle.candleAt()), sourceDate, read.exchange(),
+                    candle.open(), candle.high(), candle.low(), candle.close(), candle.average(), candle.volume(),
+                    Timestamp.from(read.observedAt()), hash);
+            if (inserted == 1) { written++; continue; }
+            List<String> existing = jdbc.query("""
+                    SELECT content_hash FROM fubon_intraday_candle
+                    WHERE stock_code=? AND market=? AND provider=? AND timeframe=1 AND candle_at=?
+                    """, (rs, row) -> rs.getString(1), read.symbol(), MARKET, PROVIDER, Timestamp.from(candle.candleAt()));
+            if (existing.size() != 1) throw new IllegalStateException("minute fact disappeared");
+            if (hash.equals(existing.getFirst())) {
+                unchanged++;
+            } else {
+                conflicts++;
+                // Stop at the first source conflict. Prior inserts/unchanged reads in this window transaction commit;
+                // the conflicting fact is never changed and later response rows are not written.
+                return new CandlesResult(Status.CONFLICT_NO_SOURCE_REVISION, written, unchanged, conflicts);
+            }
+        }
+        Status status = conflicts > 0 ? Status.CONFLICT_NO_SOURCE_REVISION : written > 0 ? Status.WRITTEN : Status.UNCHANGED;
+        return new CandlesResult(status, written, unchanged, conflicts);
+    }
+
     private CandlesResult persistCandlesInTransaction(IntradayCandlesRead read) {
         int written = 0, unchanged = 0, conflicts = 0;
         for (IntradayCandle candle : read.candles()) {
@@ -262,6 +313,32 @@ public class FubonMarketDataHistoryStore {
         root.put("sourceDate", read.sourceDate().toString()); root.put("instrumentType", "EQUITY"); root.put("exchange", read.exchange());
         root.put("sourceMarket", read.sourceMarket()); root.put("timeframe", 1); root.put("candle", candle);
         return root;
+    }
+    private static Map<String, Object> historicalCandleCanonicalDocument(HistoricalIntradayCandlesRead read,
+                                                                           IntradayCandle value, LocalDate sourceDate) {
+        Map<String, Object> candle = new TreeMap<>();
+        candle.put("candleAt", value.candleAt().toString()); candle.put("open", FubonCanonicalHash.decimal(value.open()));
+        candle.put("high", FubonCanonicalHash.decimal(value.high())); candle.put("low", FubonCanonicalHash.decimal(value.low()));
+        candle.put("close", FubonCanonicalHash.decimal(value.close())); candle.put("volume", Long.toString(value.volume()));
+        candle.put("average", FubonCanonicalHash.decimal(value.average()));
+        Map<String, Object> root = new TreeMap<>();
+        root.put("symbol", read.symbol()); root.put("market", MARKET); root.put("provider", PROVIDER);
+        root.put("sourceDate", sourceDate.toString()); root.put("instrumentType", "EQUITY"); root.put("exchange", read.exchange());
+        root.put("sourceMarket", read.sourceMarket()); root.put("timeframe", 1); root.put("candle", candle);
+        return root;
+    }
+    private static boolean validMinuteCandle(IntradayCandle candle) {
+        if (candle == null || candle.candleAt() == null || !positiveMinute(candle.open()) || !positiveMinute(candle.high())
+                || !positiveMinute(candle.low()) || !positiveMinute(candle.close()) || !positiveMinute(candle.average()) || candle.volume() < 0)
+            return false;
+        var local = candle.candleAt().atZone(MarketClock.TW_ZONE).toLocalTime();
+        return !local.isBefore(java.time.LocalTime.of(9, 0)) && !local.isAfter(java.time.LocalTime.of(13, 30))
+                && local.getSecond() == 0 && local.getNano() == 0
+                && candle.high().compareTo(candle.open()) >= 0 && candle.high().compareTo(candle.close()) >= 0
+                && candle.open().compareTo(candle.low()) >= 0 && candle.close().compareTo(candle.low()) >= 0;
+    }
+    private static boolean positiveMinute(BigDecimal value) {
+        return value != null && value.signum() > 0 && value.precision() <= 20 && Math.max(value.scale(), 0) <= 10;
     }
     private record FactRef(LocalDate sourceDate, String hash) {}
     private record BasicExisting(LocalDate sourceDate, String hash) {}

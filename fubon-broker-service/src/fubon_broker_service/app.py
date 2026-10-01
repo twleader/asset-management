@@ -599,6 +599,8 @@ def create_app(
         return result
 
     def market_data_v1_sdk_error(exc: SdkCallError) -> MarketDataV1RouteError:
+        if exc.reason == "NO_DATA":
+            return MarketDataV1RouteError(404, "NO_DATA")
         if exc.misconfigured:
             return MarketDataV1RouteError(503, "MISCONFIGURED")
         if exc.reason == "MARKETDATA_RESPONSE_TOO_LARGE":

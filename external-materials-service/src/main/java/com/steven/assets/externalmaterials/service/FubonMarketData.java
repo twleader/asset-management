@@ -155,6 +155,13 @@ public final class FubonMarketData {
         public HistoricalDailyCandlesRead { candles = List.copyOf(candles); }
         public boolean usableSnapshot() { return "OK".equals(status) || "NO_DATA".equals(status); }
     }
+    /** Task466 multi-day historical minute response; unlike IntradayCandlesRead it has no single source day. */
+    public record HistoricalIntradayCandlesRead(String symbol, LocalDate queryFrom, LocalDate queryTo,
+                                                 Instant observedAt, String exchange, String sourceMarket,
+                                                 String timeframe, String status, String reason,
+                                                 List<IntradayCandle> candles) {
+        public HistoricalIntradayCandlesRead { candles = List.copyOf(candles); }
+    }
     public record DividendRow(String symbol, String status, boolean usable, String reason,
                               List<DividendEvent> events) {
         public DividendRow { events = List.copyOf(events); }

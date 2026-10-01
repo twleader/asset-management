@@ -27,6 +27,7 @@ finmind:
   token: ${FINMIND_TOKEN:}
 
 fubon:
+  historical-backfill-enabled: ${FUBON_HISTORICAL_BACKFILL_ENABLED:false}
   dividend-sync-enabled: ${FUBON_DIVIDEND_SYNC_ENABLED:false}
   stock-push-enabled: ${FUBON_STOCK_PUSH_ENABLED:false}
   technical-indicator-sync-enabled: ${FUBON_TECHNICAL_INDICATOR_SYNC_ENABLED:false}
