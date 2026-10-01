@@ -36,7 +36,10 @@ MANIFEST = {
   ['GET', '/api/public/transactions'] => %w[200 400 502 503 504],
   ['GET', '/api/public/trading-calendar'] => %w[200 400 502 503 504],
   ['GET', '/api/public/commodity-prices'] => %w[200 400 405 502 503 504],
-  ['GET', '/api/public/srpp/daily-context'] => %w[200 400 404 405 409 500 502 503 504]
+  ['GET', '/api/public/srpp/daily-context'] => %w[200 400 404 405 409 500 502 503 504],
+  ['GET', '/api/public/srpp/calculation-context'] => %w[200 400 404 405 409 500 502 503 504],
+  ['GET', '/api/public/srpp/calculations'] => %w[200 400 404 405 409 500 502 503 504],
+  ['GET', '/api/public/srpp/market-facts'] => %w[200 400 404 405 409 500 502 503 504]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -53,7 +56,10 @@ OPERATION_IDS = {
   ['GET', '/api/public/transactions'] => 'getPublicTransactionHistory',
   ['GET', '/api/public/trading-calendar'] => 'getPublicTradingCalendar',
   ['GET', '/api/public/commodity-prices'] => 'getPublicCommodityPrices',
-  ['GET', '/api/public/srpp/daily-context'] => 'getSrppDailyContext'
+  ['GET', '/api/public/srpp/daily-context'] => 'getSrppDailyContext',
+  ['GET', '/api/public/srpp/calculation-context'] => 'getSrppCalculationContext',
+  ['GET', '/api/public/srpp/calculations'] => 'getSrppCalculations',
+  ['GET', '/api/public/srpp/market-facts'] => 'getSrppMarketFacts'
 }.freeze
 
 def assert!(condition, message)
@@ -135,6 +141,7 @@ end
 
 def reachable_schema_names(document)
   schemas = document.dig('components', 'schemas')
+
   names = {}
   pending = schema_references(document.fetch('paths')).map { |ref| ref.delete_prefix('#/components/schemas/') }
   until pending.empty?
@@ -170,7 +177,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.15.1', 'Task 465 後 OpenAPI info.version 必須為 1.15.1')
+assert!(document.dig('info', 'version') == '1.16.0', 'Task 467 後 OpenAPI info.version 必須為 1.16.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -211,14 +218,14 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '十四路 operationId 必須與 Requirement 163 manifest 完全一致')
+        '十七路 operationId 必須與 Requirement 163 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與十四路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與十七路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與十四路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與十七路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -326,7 +333,10 @@ personal_owner_operations = {
   ['GET', '/api/public/trading-radar/today'] => %w[email],
   ['GET', '/api/public/trading-radar/stock'] => %w[stockCode market email],
   ['GET', '/api/public/transactions'] => %w[year start end email],
-  ['GET', '/api/public/srpp/daily-context'] => %w[tradingDate slot policyBundleSha256 email view packageId sourceId]
+  ['GET', '/api/public/srpp/daily-context'] => %w[tradingDate slot policyBundleSha256 email view packageId sourceId],
+  ['GET', '/api/public/srpp/calculation-context'] => %w[tradingDate slot policyBundleSha256 email],
+  ['GET', '/api/public/srpp/calculations'] => %w[contextId calculationIds stockCodes email],
+  ['GET', '/api/public/srpp/market-facts'] => %w[contextId stockCodes include email]
 }.freeze
 personal_owner_operations.each do |key, expected_parameters|
   operation = openapi_routes.fetch(key)
@@ -402,6 +412,53 @@ assert!(commodity.dig('responses', '503', 'content').keys == ['application/probl
         'commodity-prices 503 只可為 BFF transport ProblemDetail')
 
 schemas = document.dig('components', 'schemas')
+
+# Task 467: the three on-demand SRPP paths use strict exact parameters and their own response schemas.
+{
+  ['GET', '/api/public/srpp/calculation-context'] => ['SrppCalculationContextResponse', %w[tradingDate slot policyBundleSha256 email]],
+  ['GET', '/api/public/srpp/calculations'] => ['SrppCalculationsResponse', %w[contextId calculationIds stockCodes email]],
+  ['GET', '/api/public/srpp/market-facts'] => ['SrppMarketFactsResponse', %w[contextId stockCodes include email]]
+}.each do |key, (schema_name, parameter_names)|
+  operation = openapi_routes.fetch(key)
+  assert!(operation.fetch('parameters').map { |parameter| parameter.fetch('name') } == parameter_names,
+          "#{key.join(' ')} query parameter 順序或集合漂移")
+  assert!(operation.dig('responses', '200', 'headers', 'Cache-Control', 'schema') ==
+          {'type' => 'string', 'const' => 'private, no-store'},
+          "#{key.join(' ')} success 必須 no-store")
+  assert!(operation.dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'$ref' => "#/components/schemas/#{schema_name}"},
+          "#{key.join(' ')} success schema 漂移")
+  assert!(operation.dig('responses', '405', 'headers', 'Allow', 'schema') ==
+          {'type' => 'string', 'const' => 'GET'},
+          "#{key.join(' ')} 必須只允許 GET")
+  assert!(operation.dig('responses', '504') == {'$ref' => '#/components/responses/NginxGatewayTimeout'},
+          "#{key.join(' ')} 504 必須引用共用 gateway response")
+end
+assert!(schemas.fetch('SrppOrchestratedProblem').dig('properties', 'instance', 'enum') == [
+  '/api/public/srpp/calculation-context', '/api/public/srpp/calculations', '/api/public/srpp/market-facts'
+], '按需 SRPP RFC 9457 problem 只能出現在三條新路由')
+assert!(document.dig('components', 'responses', 'SrppOrchestratedProblem', 'content',
+                     'application/problem+json', 'schema') ==
+        {'$ref' => '#/components/schemas/SrppOrchestratedProblem'},
+        '新按需 SRPP error response 必須使用專用 problem schema')
+coverage_fields = %w[status requestedCount successCount partialCount unavailableCount]
+%w[SrppCalculationsResponse SrppMarketFactsResponse].each do |name|
+  coverage = schemas.fetch(name).dig('properties', 'coverage')
+  assert!(coverage.is_a?(Hash) && coverage['type'] == 'object' && coverage['additionalProperties'] == false,
+          "#{name}.coverage 必須是 strict object")
+  assert!(coverage.dig('required') == coverage_fields,
+          "#{name}.coverage 必須要求 status 與四種 query-subset 計數")
+  assert!(coverage_fields.all? { |field| coverage.dig('properties', field).is_a?(Hash) },
+          "#{name}.coverage 欄位 schema 缺漏")
+end
+symbol_fact = schemas.fetch('SrppSymbolMarketFact')
+assert!(symbol_fact['additionalProperties'] == false && symbol_fact.dig('required').include?('status'),
+        '每個 market-facts symbol 必須有 strict overall status')
+assert!(symbol_fact.dig('properties', 'status', 'enum') == %w[COMPLETE PARTIAL UNAVAILABLE],
+        'market-facts symbol status enum 漂移')
+assert!(openapi_routes.fetch(['GET', '/api/public/srpp/market-facts']).dig('description').include?('不 refresh') &&
+        openapi_routes.fetch(['GET', '/api/public/srpp/market-facts']).dig('description').include?('來源 revision'),
+        'market-facts 必須文件化呼叫時讀取既存 cache 且固定獨立 market revision')
 
 # Requirement 163／Task 454：SRPP 共用計算結果。YAML 1.1 會把未加引號的 09:05 解析成整數 32700，
 # 因此 slot parameter 與 SrppContext.slot 的 enum 必須精確為字串陣列。
@@ -755,8 +812,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 124,
-        "全量 strict audit 預期 124 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 132,
+        "全量 strict audit 預期 132 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -798,11 +855,12 @@ MANIFEST.each_key do |(_method, path)|
 end
 bff_security = File.read(BFF_SECURITY)
 %w[/api/public/trading-radar/stock /api/public/transactions /api/public/trading-calendar /api/public/commodity-prices
-   /api/public/srpp/daily-context].each do |path|
+   /api/public/srpp/daily-context /api/public/srpp/calculation-context
+   /api/public/srpp/calculations /api/public/srpp/market-facts].each do |path|
   assert!(bff_security.include?("\"#{path}\""), "BFF SecurityConfig 缺 exact anonymous GET #{path}")
 end
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
 assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且兩份文件必須 byte-identical')
 
-puts 'PASS: 9090 gateway/OpenAPI 十四路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 十七路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'

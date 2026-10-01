@@ -35,11 +35,11 @@ stop and say so rather than silently falling back.
 | `fubon-broker-service` | `fubon-broker-service/` | none | 8080 | optional read-only broker adapter |
 | `yuanta-broker-service` | `yuanta-broker-service/` | none | 8080 | optional read-only broker adapter |
 | `bff` | `bff/` | none | 8080 | authenticated browser API entry |
-| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | 14 exact routes: 13 GET + 1 POST |
+| `api-gateway` | `api-gateway/` | **127.0.0.1:9090** | 9090 | 17 exact routes: 16 GET + 1 POST |
 | `frontend` | `frontend/` | 80 / 443 | 80 / 443 | Nginx, existing TLS configuration |
 
 Browser entry: `http://localhost/` → authenticated application APIs at `bff:8080`.
-Docker-external entry: `http://127.0.0.1:9090`; Tailscale Serve mounts the same 14 exact paths.
+Docker-external entry: `http://127.0.0.1:9090`; Tailscale Serve mounts the same 17 exact paths.
 The current authoritative route/method inventory is `docs/openapi/docker-external-api.yaml`,
 checked against `api-gateway/nginx.conf` by the existing contract test.
 
@@ -47,7 +47,9 @@ checked against `api-gateway/nginx.conf` by the existing contract test.
   `/api/assets/latest`, `/api/public/exchange-rate/usd-twd`, `/api/public/market-analysis/today`,
   `/api/public/portfolio-advice/latest`, `/api/public/trading-radar/today`,
   `/api/public/trading-radar/stock`, `/api/public/transactions`, `/api/public/trading-calendar`,
-  `/api/public/commodity-prices`, `/api/public/srpp/daily-context`.
+  `/api/public/commodity-prices`, `/api/public/srpp/daily-context`,
+  `/api/public/srpp/calculation-context`, `/api/public/srpp/calculations`,
+  `/api/public/srpp/market-facts`.
 - POST: `/api/public/crawler-data/rescan` (the sole route with an external-fetch side effect).
   Do not invoke it as a deployment smoke test.
 - Never mount `/`, `/api/`, or extra handlers on Tailscale; never use Funnel, self-signed

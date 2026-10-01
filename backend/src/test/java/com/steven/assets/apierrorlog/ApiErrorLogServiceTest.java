@@ -27,7 +27,7 @@ class ApiErrorLogServiceTest {
         verifyNoInteractions(repository);
     }
 
-    @Test void catalog_has_all_31_fixed_source_key_name_url_and_order_values() {
+    @Test void catalog_has_all_34_fixed_source_key_name_url_and_order_values() {
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).containsExactlyElementsOf(expectedCatalog());
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).allSatisfy(operation ->
                 assertThat(operation.apiUrl()).isNotBlank());
@@ -38,8 +38,8 @@ class ApiErrorLogServiceTest {
         List<ApiErrorLogOperationCatalog.Operation> expected = expectedCatalog();
 
         assertThat(service.operations("ALL")).containsExactlyElementsOf(expected);
-        assertThat(service.operations(ApiErrorLogOperationCatalog.OPEN_API)).containsExactlyElementsOf(expected.subList(0, 14));
-        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(14, 31));
+        assertThat(service.operations(ApiErrorLogOperationCatalog.OPEN_API)).containsExactlyElementsOf(expected.subList(0, 17));
+        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(17, 34));
     }
 
     @Test void operations_json_has_exactly_five_fields_and_list_detail_do_not_expose_api_url() throws Exception {
@@ -97,6 +97,9 @@ class ApiErrorLogServiceTest {
                 operation("OPEN_API", "OPEN_COMMODITY_PRICES", "油價金價", "GET /api/public/commodity-prices", 120),
                 operation("OPEN_API", "OPEN_CRAWLER_RESCAN", "公開爬蟲重新掃描", "POST /api/public/crawler-data/rescan", 130),
                 operation("OPEN_API", "OPEN_SRPP_DAILY_CONTEXT", "SRPP 共用計算結果", "GET /api/public/srpp/daily-context", 140),
+                operation("OPEN_API", "OPEN_SRPP_CALCULATION_CONTEXT", "SRPP 計算脈絡", "GET /api/public/srpp/calculation-context", 150),
+                operation("OPEN_API", "OPEN_SRPP_CALCULATIONS", "SRPP 按需計算", "GET /api/public/srpp/calculations", 160),
+                operation("OPEN_API", "OPEN_SRPP_MARKET_FACTS", "SRPP 批次市場事實", "GET /api/public/srpp/market-facts", 170),
                 operation("FUBON_API", "FUBON_PORTFOLIO_READ", "庫存與未實現損益", "POST /internal/portfolio/read", 10),
                 operation("FUBON_API", "FUBON_TW_QUOTES_INVENTORY", "庫存同步台股報價", "POST /internal/market-data/tw-quotes", 20),
                 operation("FUBON_API", "FUBON_FILLED_TRADES_READ", "已成交交易查詢", "POST /internal/trades/read", 30),

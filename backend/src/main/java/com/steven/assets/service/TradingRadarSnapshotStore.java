@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
@@ -162,6 +163,23 @@ public class TradingRadarSnapshotStore {
             }
         }
         return new SnapshotRange(snaps, indexCount, missing);
+    }
+
+    /** Read the latest already-persisted owner snapshot without assembling radar inputs or writing Redis. */
+    public Optional<JsonNode> latest(long ownerId) {
+        try {
+            Set<ZSetOperations.TypedTuple<String>> newest = redis.opsForZSet()
+                    .reverseRangeWithScores(idxKey(ownerId), 0, 0);
+            if (newest == null || newest.isEmpty()) return Optional.empty();
+            Double score = newest.iterator().next().getScore();
+            if (score == null) return Optional.empty();
+            String raw = redis.opsForValue().get(valueKey(ownerId, score.longValue()));
+            if (raw == null) return Optional.empty();
+            return Optional.of(mapper.readTree(gunzip(Base64.getDecoder().decode(raw))));
+        } catch (Exception unavailable) {
+            log.warn("交易雷達最新快照讀取失敗 owner={}：{}", ownerId, unavailable.toString());
+            return Optional.empty();
+        }
     }
 
     private long epochMillis(String generatedAt) {

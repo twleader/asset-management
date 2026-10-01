@@ -10,6 +10,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
+make_serve_fixture() {
+  local output=$1
+  local include_new_routes=$2
+  local include_foreign=${3:-false}
+  python3 - "$output" "$include_new_routes" "$include_foreign" <<'PY'
+import json, sys
+path, include_new, include_foreign = sys.argv[1], sys.argv[2] == "true", sys.argv[3] == "true"
+routes = [
+    "/api/quotes", "/api/quotes/one", "/api/public/market-index", "/api/assets/latest",
+    "/api/public/exchange-rate/usd-twd", "/api/public/crawler-data/rescan",
+    "/api/public/market-analysis/today", "/api/public/portfolio-advice/latest",
+    "/api/public/trading-radar/today", "/api/public/trading-radar/stock",
+    "/api/public/transactions", "/api/public/trading-calendar", "/api/public/commodity-prices",
+    "/api/public/srpp/daily-context",
+]
+if include_new:
+    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts"]
+handlers = {route: {"Proxy": "http://127.0.0.1:9090" + route} for route in routes}
+if include_foreign:
+    handlers["/admin"] = {"Proxy": "http://127.0.0.1:9090/admin"}
+data = {"TCP": {"9090": {"HTTPS": True}}, "Web": {"mock-device.example.ts.net:9090": {"Handlers": handlers}}}
+with open(path, "w", encoding="utf-8") as stream:
+    json.dump(data, stream)
+PY
+}
+
 make_fakes() {
   local case_dir=$1
   mkdir -p "$case_dir/bin"
@@ -26,7 +52,9 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"},"/api/public/srpp/daily-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/daily-context"}}}}}'
+    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"},"/api/public/srpp/daily-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/daily-context"},"/api/public/srpp/calculation-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/calculation-context"},"/api/public/srpp/calculations":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/calculations"},"/api/public/srpp/market-facts":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/market-facts"}}}}}'
+  elif [[ -n "${MOCK_TAILSCALE_INITIAL:-}" && -f "$MOCK_TAILSCALE_INITIAL" ]]; then
+    cat "$MOCK_TAILSCALE_INITIAL"
   else
     printf '%s\n' '{}'
   fi
@@ -246,9 +274,52 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 14 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 17 ]]
   grep -Fq -- '--set-path=/api/public/srpp/daily-context http://127.0.0.1:9090/api/public/srpp/daily-context' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/calculation-context http://127.0.0.1:9090/api/public/srpp/calculation-context' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/calculations http://127.0.0.1:9090/api/public/srpp/calculations' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/market-facts http://127.0.0.1:9090/api/public/srpp/market-facts' "$case_dir/tailscale.log"
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
+}
+
+run_existing_subset_success() {
+  local case_dir="$test_root/existing-subset"
+  make_fakes "$case_dir"
+  make_serve_fixture "$case_dir/serve-initial.json" false
+  : >"$case_dir/tailscale.log"
+
+  env \
+    PATH="$case_dir/bin:$PATH" \
+    MOCK_TAILSCALE_LOG="$case_dir/tailscale.log" \
+    MOCK_TAILSCALE_STATE="$case_dir/tailscale.state" \
+    MOCK_TAILSCALE_INITIAL="$case_dir/serve-initial.json" \
+    "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
+
+  [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 17 ]]
+  grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
+}
+
+run_foreign_handler_rejected() {
+  local case_dir="$test_root/foreign-handler"
+  make_fakes "$case_dir"
+  make_serve_fixture "$case_dir/serve-initial.json" false true
+  : >"$case_dir/tailscale.log"
+
+  if env \
+      PATH="$case_dir/bin:$PATH" \
+      MOCK_TAILSCALE_LOG="$case_dir/tailscale.log" \
+      MOCK_TAILSCALE_STATE="$case_dir/tailscale.state" \
+      MOCK_TAILSCALE_INITIAL="$case_dir/serve-initial.json" \
+      "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"; then
+    printf '%s\n' 'FAIL: 非本任務 handler 竟通過 Serve preflight' >&2
+    exit 1
+  fi
+  grep -Fq '含非本任務 handler' "$case_dir/stderr"
+  if grep -Fxq reset "$case_dir/tailscale.log"; then
+    printf '%s\n' 'FAIL: 非本任務 handler 拒絕前竟 reset Serve' >&2
+    exit 1
+  fi
 }
 
 run_content_type_failure quotes '本機 /api/quotes Content-Type 不是 application/json；不會 reset Serve。'
@@ -260,5 +331,7 @@ run_content_type_failure trading-calendar '本機交易日曆 Content-Type 不�
 run_content_type_failure commodity '本機商品批次報價 Content-Type 不是 application/json；不會 reset Serve。'
 run_content_type_failure srpp '本機 SRPP 共用計算結果 Content-Type 不是 application/problem+json；不會 reset Serve。'
 run_success
+run_existing_subset_success
+run_foreign_handler_rejected
 
-printf '%s\n' 'PASS: 十四路 preflight Content-Type、commodity request gate、SRPP 409 POLICY_UNSUPPORTED 探測／reset fail-closed regression'
+printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 十七路與 preflight regression'
