@@ -133,11 +133,11 @@ cd frontend
 | **Yahoo FX** | USD/TWD 中間價備援 | 無 | 兩家銀行皆失敗時才用，`buy=sell=mid` 且公開 API 標 `INDICATIVE` |
 | **FinMind TaiwanExchangeRate** | 匯率歷史／收盤後對帳 | `FINMIND_TOKEN`（可匿名但限流） | 17:00 寫 `exchange_rate_history`，不負責 2 秒 live cache |
 | **IMF DataMapper** | 台灣 / 韓國人均 GDP（`NGDPDPC`、`NGDP_RPCH`） | 無 | GDP-TWSE 圖 |
-| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 | `~/.config/rclone/rclone.conf` 的 `[GoogleDriver]`＋`[gdrive-crypt]` | read-only volume 掛入 **business-services**；`BackupService` 每個 remote workflow 依 source fingerprint 熱重載 `/tmp/rclone.conf`，並先驗 exact raw backing root；檔名與內容皆加密 |
+| **Google Drive（rclone `gdrive-crypt`，crypt 加密）** | DB 備份目的地 `投資理財/資產管理/backups/` | `~/.config/rclone/rclone.conf` 的 `[GoogleDriver]`（`scope=drive`）＋`[gdrive-crypt]` | read-only volume 掛入 **business-services**；`BackupService` 每個 remote workflow 依 source fingerprint 熱重載 `/tmp/rclone.conf`，並先驗兩層 exact raw backing root；檔名與內容皆加密 |
 | **Google Drive（rclone `GDriveOutput`，`scope=drive`、未加密）** | 匯出檔案輸出目的地（**附加副本**，本機照寫不變） | **同一份** `~/.config/rclone/rclone.conf` 的 `[GDriveOutput]` | read-only 掛入 **business-services ＋ external-materials-service**；per-process `RCLONE_CONFIG` 指向 `/tmp` 可寫副本（token 續期需寫回）。Requirement 50 / Task 245 |
 
 > **單一 config 檔的已知取捨（使用者明示的決定）**：`~/.config/rclone/rclone.conf` 同時含
-> `[GoogleDriver]`（`drive.file`，備份底層）／`[gdrive-crypt]`（crypt 層，含解密密碼）／
+> `[GoogleDriver]`（Task 468 起 `scope=drive`，備份底層）／`[gdrive-crypt]`（crypt 層，含解密密碼）／
 > `[GDriveOutput]`（`scope=drive`，輸出用），且**同一份掛入 business 與 ext 兩個容器**。
 > 代價是 `external-materials-service`（全 stack 唯一對外打第三方者：TWSE／NASDAQ／FinMind／新聞爬蟲）
 > 也讀得到備份的 OAuth refresh token 與 crypt 解密密碼。原設計為分離兩份以避免此擴權；
@@ -157,11 +157,11 @@ cd frontend
 > 掛目錄後新檔即時可見；但**若 `~/.config/rclone` 目錄本身被替換**（`mv` 重建、還原備份、換機）仍會 dangling。
 >
 > **config lifecycle 依用途分流，不可再一概寫成 startup-only**：Drive 輸出用的兩支 `GDriveOutput`
-> client（`RcloneClient`／`ProcessGdriveUploader`）仍只在啟動時複製到 `/tmp/rclone-output.conf`，執行期不重讀；
-> host 重新授權 `GDriveOutput:` 後仍須 `--force-recreate` 對應容器。DB 備份專用 `BackupService` 則在啟動時
-> 與**每個** manual／scheduled／restore／sync／rotate remote workflow 重讀 source bytes，以 last-loaded source
-> fingerprint 判斷是否原子熱重載 `/tmp/rclone.conf`；host reconnect `GoogleDriver:` 後下一次 workflow 自動載入，
-> 無須 recreate `business-services`。兩者都禁止用 `ls` 代替實際讀取 source。
+> client（`RcloneClient`／`ProcessGdriveUploader`；Task 443）與 DB 備份專用 `BackupService`（Task 388）
+> 都在操作前重讀 source bytes，以各自 last-loaded source fingerprint 判斷是否原子熱重載自己的 `/tmp` writable snapshot；
+> host 修正設定內容或重新授權後，下一次操作自動載入，無須 recreate。Task 468 的 DB 備份在 crypt 操作前
+> 另以 raw `GoogleDriver:` exact 驗證 `投資理財/` 及其直屬 `資產管理/`，失敗時不自動建立、不清索引。
+> source 必須實際讀取，不得以 `ls` 或 writable snapshot 的 mtime 代替。
 >
 > **`[GDriveOutput]` 的 token 必須含 `refresh_token`**：缺了的話 access_token 一過期（實測約 1 小時）即回
 > `token expired and there's no refresh token`，且**無法自動續期**——2026-07-28 的實際事故。
@@ -249,7 +249,7 @@ cd frontend
 ### 5.4 備份／還原
 
 - **工具：** `pg_dump` / `pg_restore` + `rclone gdrive-crypt`，皆透過 `ProcessBuilder` 呼叫。
-- **備份 config lifecycle：** `/etc/rclone/rclone.conf` 是唯讀 source，`/tmp/rclone.conf` 是 writable snapshot；`BackupService` 在每個 remote workflow 以 last-loaded source SHA-256 fingerprint 判斷原子熱重載，並於任何 crypt copy／list／delete 前 exact 驗證 raw `GoogleDriver:asset-management-backup` 已存在。workflow 入口的主動 fingerprint reload 不消耗 auth recovery；進 `INITIAL_GATE` 時 recovery budget 仍未使用，只有後續 auth failure 且 source 再次 changed 才可消耗一次。此規則只適用 DB 備份；`GDriveOutput` 仍為 startup-only。
+- **備份 config lifecycle：** `/etc/rclone/rclone.conf` 是唯讀 source，`/tmp/rclone.conf` 是 writable snapshot；`BackupService` 在每個 remote workflow 以 last-loaded source SHA-256 fingerprint 判斷原子熱重載，並於任何 crypt copy／list／delete 前依序 exact 驗證 raw `GoogleDriver:` 的 `投資理財/` 與其直屬 `資產管理/`。workflow 入口的主動 fingerprint reload 不消耗 auth recovery；進 `INITIAL_GATE` 時 recovery budget 仍未使用，只有後續 auth failure 且 source 再次 changed 才可消耗一次。`GDriveOutput` 另由 Task 443 熱重載，但不使用備份 raw-root gate。
 - **保留代數（DB `backup_setting` 表單列）：** daily 50 / weekly 5 / manual 5（自救點不計入）。
 - **儲存設定當下立即套用 retention**，不等下一次排程。
 - **還原流程：** 自動先建 `asset_auto-pre-restore_*.dump` 自救點 → 跑 pg_restore → 前端遮罩 → HikariCP 自動重連。
@@ -323,5 +323,5 @@ git config core.hooksPath scripts/git-hooks
 - **目標環境：** 個人 Mac / NAS / 自架 Linux server，本機 Docker。
 - **入口：** `docker compose up -d`（讀 `.env`）。
 - **資料持久化：** named volumes `asset-postgres-data`、`asset-redis-data`。
-- **備份目的地：** Google Drive（rclone `gdrive-crypt:` 加密 remote）。與匯出輸出用的 `GDriveOutput:` 是**兩個不同的 remote，但共用同一份 config 檔**（Requirement 50）——前者加密、只有 `BackupService` 使用；後者未加密、business ＋ ext 共用。兩者實測為同一個 Google 帳號。共用一檔的已知代價（ext 亦可讀備份憑證）與復原方式見 §4 的取捨說明。
+- **備份目的地：** My Drive `投資理財/資產管理/backups/`（rclone `gdrive-crypt:` 加密 remote；Task 468）。與匯出輸出用的 `GDriveOutput:` 是**兩個不同的 remote，但共用同一份 config 檔**——前者加密、只有 `BackupService` 使用；後者未加密、business ＋ ext 共用。兩者實測為同一個 Google 帳號。共用一檔的已知代價（ext 亦可讀備份憑證）與復原方式見 §4 的取捨說明。
 - **不規劃：** Kubernetes、雲端託管、多區域、CI/CD pipeline（目前手動部署）。
