@@ -161,7 +161,14 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
             if (!read.usableSnapshot()) throw new Unavailable("INVALID_DAILY_RESPONSE", true);
             int inserted = 0, unchanged = 0, conflicts = 0;
             for (HistoricalDailyCandle candle : read.candles()) {
-                var result = dailyFacts.persist(read, candle);
+                FubonHistoricalDailyCandleStore.Result result;
+                try { result = dailyFacts.persist(read, candle); }
+                catch (RuntimeException failure) {
+                    return failedDailyAttempt(read, inserted, unchanged, conflicts, "DAILY_PERSISTENCE_FAILED");
+                }
+                if (result == null || result.status() == null) {
+                    return failedDailyAttempt(read, inserted, unchanged, conflicts, "DAILY_PERSISTENCE_FAILED");
+                }
                 switch (result.status()) {
                     case WRITTEN -> inserted++;
                     case UNCHANGED -> unchanged++;
@@ -170,11 +177,18 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
                         return new FubonHistoricalBackfillReceiptStore.AttemptResult("CONFLICT", read.observedAt(),
                                 read.candles().size(), inserted, unchanged, conflicts, "CONFLICT_NO_SOURCE_REVISION");
                     }
-                    case FAILED -> throw new Unavailable("DAILY_PERSISTENCE_FAILED", true);
+                    case FAILED -> {
+                        return failedDailyAttempt(read, inserted, unchanged, conflicts, "DAILY_PERSISTENCE_FAILED");
+                    }
                 }
                 if (result.status() == FubonHistoricalDailyCandleStore.Status.WRITTEN
                         || result.status() == FubonHistoricalDailyCandleStore.Status.UNCHANGED) {
-                    stockHistory.upsertFubonHistoricalDailyCandle(read.symbol(), candle.tradingDate(), candle.open(), candle.high(), candle.low(), candle.close(), candle.volume());
+                    try {
+                        stockHistory.upsertFubonHistoricalDailyCandle(read.symbol(), candle.tradingDate(), candle.open(),
+                                candle.high(), candle.low(), candle.close(), candle.volume());
+                    } catch (RuntimeException failure) {
+                        return failedDailyAttempt(read, inserted, unchanged, conflicts, "DAILY_PROJECTION_FAILED");
+                    }
                 }
             }
             if (conflicts > 0) return new FubonHistoricalBackfillReceiptStore.AttemptResult("CONFLICT", read.observedAt(), read.candles().size(), inserted, unchanged, conflicts, "CONFLICT_NO_SOURCE_REVISION");
@@ -187,6 +201,12 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
         if (persisted.status() == FubonMarketDataHistoryStore.Status.FAILED) throw new Unavailable("MINUTE_PERSISTENCE_FAILED", true);
         if (persisted.conflicts() > 0) return new FubonHistoricalBackfillReceiptStore.AttemptResult("CONFLICT", read.observedAt(), read.candles().size(), persisted.written(), persisted.unchanged(), persisted.conflicts(), "CONFLICT_NO_SOURCE_REVISION");
         return new FubonHistoricalBackfillReceiptStore.AttemptResult("COMPLETE", read.observedAt(), read.candles().size(), persisted.written(), persisted.unchanged(), 0, null);
+    }
+
+    private static FubonHistoricalBackfillReceiptStore.AttemptResult failedDailyAttempt(
+            HistoricalDailyCandlesRead read, int inserted, int unchanged, int conflicts, String errorCode) {
+        return new FubonHistoricalBackfillReceiptStore.AttemptResult("FAILED", read.observedAt(),
+                read.candles().size(), inserted, unchanged, conflicts, errorCode);
     }
 
     private String recheckAccessAndScope(String symbol, LocalDate campaignTo) {

@@ -21,6 +21,74 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class FubonHistoricalBackfillRunnerTest {
+    @Test void failedSecondDailyPersistPreservesPriorCommittedCountsAndRetryIsUnchanged() {
+        var client = mock(FubonMarketDataPort.class);
+        var dailyFacts = mock(FubonHistoricalDailyCandleStore.class);
+        var stockHistory = mock(StockSourceQuery.class);
+        var runner = runner(mock(MarketCalendar.class), client, dailyFacts, stockHistory, mock(JdbcTemplate.class));
+        LocalDate day = LocalDate.of(2026, 8, 28);
+        var first = candle(day.minusDays(1), "10");
+        var second = candle(day, "11");
+        var window = new FubonHistoricalBackfillPlanner.Window("DAILY_CANDLE", "2330", day.minusDays(1), day);
+        var read = new HistoricalDailyCandlesRead("2330", window.from(), window.to(),
+                Instant.parse("2026-08-28T06:00:00Z"), "TWSE", "TSE", "OK", null, List.of(first, second));
+        when(client.historicalDailyCandles("2330", window.from(), window.to())).thenReturn(read);
+        when(dailyFacts.persist(read, first)).thenReturn(new FubonHistoricalDailyCandleStore.Result(FubonHistoricalDailyCandleStore.Status.WRITTEN));
+        when(dailyFacts.persist(read, second)).thenReturn(new FubonHistoricalDailyCandleStore.Result(FubonHistoricalDailyCandleStore.Status.FAILED));
+
+        var failed = runner.process(window);
+
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.providerRows()).isEqualTo(2);
+        assertThat(failed.observedAt()).isEqualTo(read.observedAt());
+        assertThat(failed.inserted()).isEqualTo(1);
+        assertThat(failed.unchanged()).isZero();
+        assertThat(failed.conflicts()).isZero();
+        assertThat(failed.errorCode()).isEqualTo("DAILY_PERSISTENCE_FAILED");
+        verify(stockHistory).upsertFubonHistoricalDailyCandle("2330", first.tradingDate(),
+                first.open(), first.high(), first.low(), first.close(), first.volume());
+        verifyNoMoreInteractions(stockHistory);
+
+        reset(dailyFacts, stockHistory);
+        when(dailyFacts.persist(read, first)).thenReturn(new FubonHistoricalDailyCandleStore.Result(FubonHistoricalDailyCandleStore.Status.UNCHANGED));
+        when(dailyFacts.persist(read, second)).thenReturn(new FubonHistoricalDailyCandleStore.Result(FubonHistoricalDailyCandleStore.Status.WRITTEN));
+        var retried = runner.process(window);
+
+        assertThat(retried.status()).isEqualTo("COMPLETE");
+        assertThat(retried.providerRows()).isEqualTo(2);
+        assertThat(retried.inserted()).isEqualTo(1);
+        assertThat(retried.unchanged()).isEqualTo(1);
+        assertThat(failed.inserted()).isEqualTo(1);
+    }
+
+    @Test void projectionFailureAfterFactCommitKeepsInsertedCount() {
+        var client = mock(FubonMarketDataPort.class);
+        var dailyFacts = mock(FubonHistoricalDailyCandleStore.class);
+        var stockHistory = mock(StockSourceQuery.class);
+        var runner = runner(mock(MarketCalendar.class), client, dailyFacts, stockHistory, mock(JdbcTemplate.class));
+        LocalDate day = LocalDate.of(2026, 8, 28);
+        var first = candle(day.minusDays(1), "10");
+        var second = candle(day, "11");
+        var window = new FubonHistoricalBackfillPlanner.Window("DAILY_CANDLE", "2330", day.minusDays(1), day);
+        var read = new HistoricalDailyCandlesRead("2330", window.from(), window.to(),
+                Instant.parse("2026-08-28T06:00:00Z"), "TWSE", "TSE", "OK", null, List.of(first, second));
+        when(client.historicalDailyCandles("2330", window.from(), window.to())).thenReturn(read);
+        when(dailyFacts.persist(read, first)).thenReturn(new FubonHistoricalDailyCandleStore.Result(FubonHistoricalDailyCandleStore.Status.WRITTEN));
+        when(stockHistory.upsertFubonHistoricalDailyCandle("2330", first.tradingDate(),
+                first.open(), first.high(), first.low(), first.close(), first.volume()))
+                .thenThrow(new IllegalStateException("sensitive database details"));
+
+        var failed = runner.process(window);
+
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.providerRows()).isEqualTo(2);
+        assertThat(failed.observedAt()).isEqualTo(read.observedAt());
+        assertThat(failed.inserted()).isEqualTo(1);
+        assertThat(failed.unchanged()).isZero();
+        assertThat(failed.errorCode()).isEqualTo("DAILY_PROJECTION_FAILED");
+        verify(dailyFacts, never()).persist(read, second);
+    }
+
     @Test void dailyConflictStopsBeforeProjectingOrPersistingLaterFacts() {
         var client = mock(FubonMarketDataPort.class);
         var dailyFacts = mock(FubonHistoricalDailyCandleStore.class);

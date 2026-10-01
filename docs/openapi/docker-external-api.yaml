@@ -1475,8 +1475,8 @@ paths:
                 tradingDate: '2026-09-30'
                 slot: '09:05'
                 policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-                sourceVector: [{sourceId: CANONICAL_MARKET_READ, revision: market-revision-1, dataAsOf: '2026-09-30T09:04:00+08:00', bodySha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}, {sourceId: TRADING_RADAR_CURRENT, revision: radar-revision-1, dataAsOf: '2026-09-30T09:00:00+08:00', bodySha256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}]
-                symbols: [{status: COMPLETE, market: 台股, stockCode: '2330', quoteStatus: LIVE, quoteDataAsOf: '2026-09-30T09:04:00+08:00', quoteSourceId: CANONICAL_MARKET_READ, lastPrice: {value: '1000', unit: TWD_PER_SHARE, quality: EXACT, reasonCodes: [], sourceIds: [CANONICAL_MARKET_READ]}, radarStatus: AVAILABLE, radarDataAsOf: '2026-09-30T09:00:00+08:00', radarSourceId: TRADING_RADAR_CURRENT, radarFacts: {}, reasonCodes: []}]
+                sourceVector: [{sourceId: CANONICAL_MARKET_READ, revision: market-revision-1, dataAsOf: '2026-09-30T09:04:00+08:00', bodySha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}, {sourceId: TRADING_RADAR_SNAPSHOT, revision: radar-revision-1, dataAsOf: '2026-09-30', bodySha256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}]
+                symbols: [{status: COMPLETE, market: 台股, stockCode: '2330', quoteStatus: LIVE, quoteDataAsOf: '2026-09-30T09:04:00+08:00', quoteSourceId: CANONICAL_MARKET_READ, lastPrice: {value: '1000', unit: TWD_PER_SHARE, quality: EXACT, reasonCodes: [], sourceIds: [CANONICAL_MARKET_READ]}, radarStatus: AVAILABLE, radarDataAsOf: '2026-09-30', radarSourceId: TRADING_RADAR_SNAPSHOT, radarFacts: {}, reasonCodes: []}]
                 coverage: {status: COMPLETE, requestedCount: 1, successCount: 1, partialCount: 0, unavailableCount: 0}
                 contextContentSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
         '400': {$ref: '#/components/responses/SrppOrchestratedProblem'}
@@ -9920,6 +9920,20 @@ components:
           pattern: '^[0-9a-f]{64}$'
           description: 來源投影 UTF-8 內容的 SHA-256 小寫十六進位摘要。
       required: [sourceId, revision, dataAsOf, bodySha256]
+    SrppMarketSourceRevision:
+      type: object
+      additionalProperties: false
+      description: 市場擷取的來源修訂；收盤價或雷達只有交易日期時保留日期精度，即時觀測則保留含時區的時間。
+      properties:
+        sourceId: {type: string, description: 本次市場擷取使用的來源識別。}
+        revision: {type: string, description: 來源投影的內容版本識別。}
+        dataAsOf:
+          oneOf:
+          - {type: string, format: date, description: 來源僅能確認交易日期。}
+          - {type: string, format: date-time, description: 來源提供含時區的觀測時間。}
+          description: 來源資料的實際精度；不得用快取處理時間或補造的午夜時間。
+        bodySha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 來源投影的 SHA-256。}
+      required: [sourceId, revision, dataAsOf, bodySha256]
     SrppCalculationContextResponse:
       type: object
       additionalProperties: false
@@ -10029,7 +10043,12 @@ components:
         market: {type: string, description: "精確標的市場識別，用於防止跨市場代碼碰撞。"}
         stockCode: {type: string, description: "context 白名單內的股票代碼。"}
         quoteStatus: {type: string, enum: [LIVE, CLOSE_FALLBACK, STALE, UNAVAILABLE], description: "報價狀態：`LIVE` 即時、`CLOSE_FALLBACK` 收盤備援、`STALE` 過期、`UNAVAILABLE` 不可用。"}
-        quoteDataAsOf: {type: [string, 'null'], format: date-time, description: "報價來源資料時點，缺值時為 null，存在時必須含時區。"}
+        quoteDataAsOf:
+          oneOf:
+          - {type: string, format: date, description: 收盤報價的來源交易日期。}
+          - {type: string, format: date-time, description: 即時報價的來源觀測時間。}
+          - {type: 'null', description: 報價來源時點不可用或未要求報價。}
+          description: 收盤來源僅有交易日時保留 ISO 日期；即時來源有可信觀測時刻才使用含時區的時間。
         quoteSourceId: {type: [string, 'null'], description: "報價 canonical source ID，不可用或未要求時為 null。"}
         lastPrice:
           anyOf:
@@ -10039,7 +10058,12 @@ components:
             description: 未要求報價時為 null。
           description: 最近成交價；缺值不得轉成零。
         radarStatus: {type: string, enum: [AVAILABLE, UNAVAILABLE], description: "雷達狀態：`AVAILABLE` 有符合市場與代碼的事實、`UNAVAILABLE` 無可用資料。"}
-        radarDataAsOf: {type: [string, 'null'], format: date-time, description: "雷達來源資料時點，缺值時為 null，存在時必須含時區。"}
+        radarDataAsOf:
+          oneOf:
+          - {type: string, format: date, description: 雷達來源只能確認日期。}
+          - {type: string, format: date-time, description: 雷達來源提供含時區的觀測時間。}
+          - {type: 'null', description: 雷達來源時點不可用或未要求雷達。}
+          description: 雷達來源僅有 asOfDate 時保留 ISO 日期，不補造時分秒。
         radarSourceId: {type: [string, 'null'], description: "雷達來源識別，不可用或未要求時為 null。"}
         radarFacts: {type: object, description: "已公開的逐標的雷達事實；缺值欄位以 null 保留。"}
         reasonCodes:
@@ -10062,10 +10086,10 @@ components:
         sourceVector:
           type: array
           maxItems: 30
-          items: {$ref: '#/components/schemas/SrppSourceRevision', description: "一個本次市場擷取的來源 revision。"}
+          items: {$ref: '#/components/schemas/SrppMarketSourceRevision', description: "一個本次市場擷取的來源 revision。"}
           description: >-
             本批市場來源 revision 向量，每個不同來源／revision 一列並帶 revision、batch dataAsOf 與 bodySha256；逐標的
-            quoteDataAsOf／radarDataAsOf 保留該標的精確來源時點，且其非 null source ID 必須引用本向量中的來源。
+            quoteDataAsOf／radarDataAsOf 保留該標的來源日期或時間的實際精度，且其非 null source ID 必須引用本向量中的來源。
             dataAsOf 代表來源資料時點，不得使用 API 回應時間。
         symbols:
           type: array

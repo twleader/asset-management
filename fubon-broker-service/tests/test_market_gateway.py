@@ -53,6 +53,7 @@ class MarketSdk(FakeSdk):
     def init_realtime(self):
         result = super().init_realtime()
         stock = self.marketdata.rest_client.stock
+        stock.historical = SimpleNamespace(candles=lambda **kw: self.call("historical", kw))
         stock.corporate_actions = SimpleNamespace(dividends=lambda **kw: self.call("dividends", kw))
         stock.technical = SimpleNamespace(**{kind: (lambda kind=kind, **kw: self.call(kind, kw))
                                             for kind in ("sma", "rsi", "kdj", "macd", "bb")})
@@ -62,6 +63,10 @@ class MarketSdk(FakeSdk):
 class RateLimited(RuntimeError):
     status_code = 429
     retry_after = 61
+
+
+class ProviderNotFound(RuntimeError):
+    status_code = 404
 
 
 def make_gateway(tmp_path, *, handler=None):
@@ -197,6 +202,16 @@ def test_real_429_pauses_every_historical_reader_for_at_least_one_minute(tmp_pat
     clock.value += 1
     gateway.read_dividends(DIVIDEND_FROM, DIVIDEND_TO)
     assert len(sdk.market_calls) == 2
+
+
+def test_historical_404_is_classified_as_no_data_without_leaking_provider_error(tmp_path):
+    gateway, sdk, _clock = make_gateway(tmp_path, handler=lambda *_: (_ for _ in ()).throw(ProviderNotFound("sensitive response")))
+
+    with pytest.raises(SdkCallError, match="NO_DATA") as captured:
+        gateway.read_historical_daily_candles("00719B", "2016-09-30", "2017-09-29")
+
+    assert str(captured.value) == "NO_DATA"
+    assert len(sdk.market_calls) == 1
 
 
 def test_two_concurrent_symbols_share_session_and_budget_without_mixing_params(tmp_path):

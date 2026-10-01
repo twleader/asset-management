@@ -2585,6 +2585,17 @@ RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤�
 | `dataAsOf` | 是 | `string (date-time)` | 否 |  | 來源實際代表的資料時點，必須包含時區且不得填 API 回應時間。 |
 | `bodySha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 來源投影 UTF-8 內容的 SHA-256 小寫十六進位摘要。 |
 
+### `SrppMarketSourceRevision`
+
+市場擷取的來源修訂；收盤價或雷達只有交易日期時保留日期精度，即時觀測則保留含時區的時間。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `string` | 否 |  | 本次市場擷取使用的來源識別。 |
+| `revision` | 是 | `string` | 否 |  | 來源投影的內容版本識別。 |
+| `dataAsOf` | 是 | `schema` | 否 |  | 來源資料的實際精度；不得用快取處理時間或補造的午夜時間。 |
+| `bodySha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 來源投影的 SHA-256。 |
+
 ### `SrppCalculationContextResponse`
 
 建立本輪計算用的固定 context 身分、policy、來源 revision 與持股代碼白名單。
@@ -2655,11 +2666,11 @@ RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤�
 | `market` | 是 | `string` | 否 |  | 精確標的市場識別，用於防止跨市場代碼碰撞。 |
 | `stockCode` | 是 | `string` | 否 |  | context 白名單內的股票代碼。 |
 | `quoteStatus` | 是 | `string` | 否 | enum: `LIVE`, `CLOSE_FALLBACK`, `STALE`, `UNAVAILABLE` | 報價狀態：`LIVE` 即時、`CLOSE_FALLBACK` 收盤備援、`STALE` 過期、`UNAVAILABLE` 不可用。 |
-| `quoteDataAsOf` | 是 | `string | null (date-time)` | 是 |  | 報價來源資料時點，缺值時為 null，存在時必須含時區。 |
+| `quoteDataAsOf` | 是 | `schema` | 否 |  | 收盤來源僅有交易日時保留 ISO 日期；即時來源有可信觀測時刻才使用含時區的時間。 |
 | `quoteSourceId` | 是 | `string | null` | 是 |  | 報價 canonical source ID，不可用或未要求時為 null。 |
 | `lastPrice` | 是 | `SrppMarketMetric | null` | 是 |  | 最近成交價；缺值不得轉成零。 |
 | `radarStatus` | 是 | `string` | 否 | enum: `AVAILABLE`, `UNAVAILABLE` | 雷達狀態：`AVAILABLE` 有符合市場與代碼的事實、`UNAVAILABLE` 無可用資料。 |
-| `radarDataAsOf` | 是 | `string | null (date-time)` | 是 |  | 雷達來源資料時點，缺值時為 null，存在時必須含時區。 |
+| `radarDataAsOf` | 是 | `schema` | 否 |  | 雷達來源僅有 asOfDate 時保留 ISO 日期，不補造時分秒。 |
 | `radarSourceId` | 是 | `string | null` | 是 |  | 雷達來源識別，不可用或未要求時為 null。 |
 | `radarFacts` | 是 | `object` | 否 |  | 已公開的逐標的雷達事實；缺值欄位以 null 保留。 |
 | `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個可機器辨識的報價或雷達缺漏原因碼。 | 此標的各來源的缺漏原因碼清單。 |
@@ -2676,7 +2687,7 @@ RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤�
 | `tradingDate` | 是 | `string (date)` | 否 |  | 此批市場事實所屬的台北交易日期。 |
 | `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 此批市場事實所屬的 SRPP 時段，只能是 `09:05` 或 `11:40`。 |
 | `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | context 中經 registry 驗證的 policy bundle SHA-256。 |
-| `sourceVector` | 是 | `array of SrppSourceRevision` | 否 | maxItems: 30<br>items: SrppSourceRevision<br>items 說明: 一個本次市場擷取的來源 revision。 | 本批市場來源 revision 向量，每個不同來源／revision 一列並帶 revision、batch dataAsOf 與 bodySha256；逐標的 quoteDataAsOf／radarDataAsOf 保留該標的精確來源時點，且其非 null source ID 必須引用本向量中的來源。 dataAsOf 代表來源資料時點，不得使用 API 回應時間。 |
+| `sourceVector` | 是 | `array of SrppMarketSourceRevision` | 否 | maxItems: 30<br>items: SrppMarketSourceRevision<br>items 說明: 一個本次市場擷取的來源 revision。 | 本批市場來源 revision 向量，每個不同來源／revision 一列並帶 revision、batch dataAsOf 與 bodySha256；逐標的 quoteDataAsOf／radarDataAsOf 保留該標的來源日期或時間的實際精度，且其非 null source ID 必須引用本向量中的來源。 dataAsOf 代表來源資料時點，不得使用 API 回應時間。 |
 | `symbols` | 是 | `array of SrppSymbolMarketFact` | 否 | minItems: 1<br>maxItems: 100<br>items: SrppSymbolMarketFact<br>items 說明: 一個逐標的市場事實列。 | 每一要求標的均有一列，單列缺漏不會使其他列失敗。 |
 | `coverage` | 是 | `object` | 否 |  | 每個 query 要求標的的整批狀態及互斥 status 計數。 |
 | `contextContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。 |
