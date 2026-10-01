@@ -56,8 +56,7 @@
 > 的實作會躺在某個 worktree 的 `git status` 裡；下次在 main 或別的 worktree 找不到該功能，
 > 極容易被誤判成「還沒做」而整套重寫。自動收尾就是讓「寫完」與「進 main」不脫鉤。
 
-**執行方式沿用既有規範**：派 subagent 跑 `/commit-merge-push`（見下方〈Subagent 一律與主
-Agent 使用相同模型〉一節，該 skill 沒宣告模型 → 繼承主 agent），主 agent 只負責彙整並向
+**執行方式沿用既有規範**：派 subagent 跑 `/commit-merge-push`（Subagent 預設用 GPT-6 Luna max / Claude Opus 5.5 low 模型，該 skill 沒宣告模型時繼承主 agent），主 agent 只負責彙整並向
 使用者回報 merge commit SHA。
 
 **先驗收、再收尾。** 順序固定為：實作 → 驗收（涉及可執行的變更就先跑 `/run-stack`，確認
@@ -180,22 +179,6 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 > 無須手動安裝，`.claude/settings.json` 已掛載。但**修改該檔後需重啟 session 才生效**。
 > 另注意 `core.hooksPath` 設的是**絕對路徑**、指向主 clone；改 `scripts/git-hooks/`
 > 底下的檔案要 merge 進 main 後才會實際生效。
-
-### Subagent 一律與主 Agent 使用相同模型（例外：skill 可自行釘住模型；前端 Vue 變更固定模型）
-
-**所有 subagent**（包含實作、`spec-auditor`、`arch-auditor`，以及任何臨時派出的
-subagent）一律使用與當前主 agent **完全相同的模型與 reasoning effort**。
-禁止因任務較簡單、成本、速度或 fallback 而改用較低階模型。執行環境支援繼承時，
-省略 subagent 的 model／effort override；若工具要求明確指定，則兩者必須與主 agent
-一致。相同模型無法使用時應停止並回報，不得靜默降級。
-
-**例外一、例外二共用同一組固定模型，全專案的「模型例外」只有一種標準，不分開
-各自維護一組值：**
-
-| Harness | 固定模型 / effort |
-|---|---|
-| Claude Code | `sonnet 5` ／ `high` |
-| Codex | `gpt-5.6-terra` ／ `high` |
 
 **這組固定值本質上是刻意的降規格，目的就是省錢，不是妥協。** 若跟著主 agent 當下
 用的模型連動調整，例外就失去意義——兩項例外的重點正是「不論主 agent 開多高規格，
@@ -450,7 +433,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（164 個 Requirements；最新編號為 171，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（165 個 Requirements；最新編號為 172，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |

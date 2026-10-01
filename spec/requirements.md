@@ -5778,6 +5778,19 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **Swagger／API 目錄同步。** `docs/openapi/docker-external-api.yaml` 的既有單股明細 schema/example 完整描述新增欄位，`info.version` 遞增至 1.15.0；更新 OpenAPI contract test、由 YAML 重產 asset-management Markdown 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`，兩份鏡像 byte-identical。Fubon API 目錄與排程目錄補 intraday technical adapter、1 分 Cron、時段 gate、scope 與 60/min call 計數；不增加 9090 route 數。
 - [ ] **安全與功能旗標。** Compose／`.env.example` 將新非機密 feature flag 預設 false，僅傳給 external-materials-service。Docker 驗收 Task461 盤中同步旗標為 false，不登入真人券商、不用帳戶資料或憑證、不觸發任何交易。既有 credentials／`.env` 不修改。
 
+### Requirement 172／Task 470：近期新增富邦技術指標十年歷史缺口盤點與來源限定回補
+
+**User Story：**作為技術分析使用者，我希望近期新增的富邦技術指標資料可查證其歷史缺口；只在富邦證券或交易所官方來源實際提供資料時回補，目標區間為最近十年，來源沒有或無法證明的區間保留缺口。
+
+**Acceptance Criteria：**
+
+- [ ] **近期新增指標範圍。** 以 `Asia/Taipei` 日曆日固定定義為 `[2026-09-30 00:00:00, 2026-10-03 00:00:00)`。只檢查 `origin/main` first-parent 上於此區間首次納入的 merge commit；對每個 merge 比較其 first parent 與 merge tree，merge/rebase/cherry-pick 重複納入以 first-parent 首次出現去重，依實際程式碼／Task 變更辨認 indicator/profile/timeframe。不可把最近三天行情列當範圍，也不可預設某一種 timeframe。Task470 查證的 first-parent merges 為 `777505b9`（富邦日／分鐘 K 歷史回補）、`40aab454`、`d0b79e12`（回補驗證記錄）、`0f6a29a9`（SRPP 按需 API）、`5ae462ff`（備份規格）、`e367b0fe`（行情時效／回補計數修正）；這些 diff 未新增技術指標，因此本固定區間新增 indicator/profile/timeframe 集合為空。空集合時只交付唯讀查證，不建立／啟動回補、不把既有指標當近期新增，也不因現有技術事實表為空而擴大範圍。
+- [ ] **官方資料來源限制。** 只接受富邦證券或 TWSE／TPEx 等交易所官方直接回應的歷史技術指標值及其 source date；不得使用 Yahoo、FinMind、其他非官方供應商或本地公式推算補列，也不得把本地衍生值標示成 FUBON_SDK／交易所事實。對每個新增指標逐項引用官方 endpoint 契約並實際驗證可查的最早日期、最大 query window、空結果語意與 schema；行情 K 線歷史深度不得外推成技術指標歷史深度。
+- [ ] **十年請求範圍與可得性分開。** 回補目標起點為 latest completed Taiwan session 往前十個 calendar years（Java `LocalDate.minusYears(10)`、2/29 落至 2/28），但「十年」是欲查詢範圍，不是來源承諾。coverage 分類精確定義為：`AVAILABLE` 只表示官方成功回應實際包含的 sourceDate；`NO_DATA` 僅表示符合官方成功 schema 的回應明確回空集合；`SOURCE_UNAVAILABLE` 僅表示官方契約定義的明確來源不可用狀態；`UNSUPPORTED` 僅在官方文件明確表示該 profile/timeframe/歷史端點不支援時使用；`HISTORY_DEPTH_UNKNOWN` 表示官方允許日期查詢但未文件化可查最早日，或證據無法確定指定舊區段是否可查；`FAILED` 表示 transport、HTTP、schema 或 persistence error。404／5xx、timeout、未文件化錯誤及任意空 body 均不得解讀成 `NO_DATA` 或 `UNSUPPORTED`。單次較新日期有資料，只能證明該回應列出的 sourceDate，不證明更早日期的支援邊界。官方明確 empty response、來源拒絕、上市前／無資料區間及深度未知分別標示；若官方只有盤中近 30 日 latest-point API，盤中十年歷史不支援時標示 `status=UNSUPPORTED`、`reason=TEN_YEAR_HISTORY_UNSUPPORTED`，不以 candles 本地計算代替。
+- [ ] **只讀、不可變與隔離。** 回補只使用唯讀官方 market-data SDK／API；不觸發券商委託／交易、不取帳戶資料、不修改 Redis 即時 overlay、不重算雷達。官方 facts 保留 provider、symbol、market、timeframe、profile、source date、parameters、payload、capture provenance、observedAt 與 canonical hash；沿用或新增 immutable writer，重複相同 hash 為 unchanged，identity 相同但 payload 不同時保留原列並停止為 conflict。部分 profile 可用時只寫可驗證官方 facts，並以獨立 coverage 欄位保留各 profile 結果，不讓局部 bundle 冒充完整 capture。
+- [ ] **條件式持久追蹤及報告。** 先唯讀記錄相關 table／cache baseline。只有新增 indicator 集合非空，且至少一個 profile/timeframe 的官方歷史 endpoint 與 response 已驗證可用時，才建立必要的 campaign/window receipts 或擴充 writer/schema；先驗證既有 writer 對應的 profile、provider、immutable constraints，未涵蓋才做最小擴充。每筆記錄固定 scope、profile manifest、要求範圍、逐指標及逐 symbol 的 provider row counts、inserted／unchanged／conflict／unavailable counts、最早／最晚 source date 與安全錯誤碼；不保存 token／credentials/raw secrets。若新增集合為空或沒有任何官方技術歷史來源可用，不新增 migration／writer／runner，只交付唯讀缺口與來源報告。完成後逐項比對 baseline/final coverage，列出補到日期、來源明確無資料日期、不支援日期、深度未知範圍及錯誤；只有官方事實證明覆蓋的日期可稱已回補。
+- [ ] **驗證。** 涵蓋每種新增 indicator 的官方 query 邊界／窗口／profile ordering／strict schema／空結果與 unavailable/error 區別、日期連續無重疊、scope freeze、resume/idempotency、immutable conflict、quota／429 stop、receipt sanitization 及零交易 API 呼叫。正式回補須採獨立明確 one-shot command 與雙 gate；不得修改 `.env`／secrets，且不與服務重建並行。執行後 read-only 驗證 facts、receipts、source dates、hash immutability 與 DB/schema。
+
 ### Requirement 171／Task 467：LLM 排程可由 9090 呼叫 SRPP 按需唯讀 API
 
 **User Story：**作為 SRPP 的 LLM 排程，我希望透過資產管理系統既有的 9090 gateway 按需取得已發布的計算 context、可重播計算結果與持股市場事實，讓排程自行決定每輪需要的查詢與最終分析。
