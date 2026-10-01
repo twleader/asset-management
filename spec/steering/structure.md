@@ -558,7 +558,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 164 個 Requirements（最新編號為 171，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 165 個 Requirements（最新編號為 172，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417、459、460、466、467 僅有獨立任務檔，不追加索引
 ├── tasks/                # 任務檔
