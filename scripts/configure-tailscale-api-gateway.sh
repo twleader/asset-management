@@ -17,6 +17,9 @@ readonly -a SERVE_PATHS=(
   '/api/public/trading-calendar'
   '/api/public/commodity-prices'
   '/api/public/srpp/daily-context'
+  '/api/public/srpp/calculation-context'
+  '/api/public/srpp/calculations'
+  '/api/public/srpp/market-facts'
 )
 
 die() {
@@ -192,6 +195,9 @@ expected = {
     "/api/public/trading-calendar": "http://127.0.0.1:9090/api/public/trading-calendar",
     "/api/public/commodity-prices": "http://127.0.0.1:9090/api/public/commodity-prices",
     "/api/public/srpp/daily-context": "http://127.0.0.1:9090/api/public/srpp/daily-context",
+    "/api/public/srpp/calculation-context": "http://127.0.0.1:9090/api/public/srpp/calculation-context",
+    "/api/public/srpp/calculations": "http://127.0.0.1:9090/api/public/srpp/calculations",
+    "/api/public/srpp/market-facts": "http://127.0.0.1:9090/api/public/srpp/market-facts",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -201,10 +207,10 @@ handlers = web[expected_host].get("Handlers") if isinstance(web[expected_host], 
 if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
-if mode in {"allow-empty", "exact"} and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的十四條 path handler")
-if mode == "subset" and not handler_paths.issubset(expected):
-    raise SystemExit("partial config 含非本任務 path handler")
+if mode == "exact" and handler_paths != set(expected):
+    raise SystemExit("必須精確只有本任務管理的十七條 path handler")
+if mode in {"allow-empty", "subset"} and not handler_paths.issubset(expected):
+    raise SystemExit("Serve config 含非本任務 path handler")
 for path in handler_paths:
     if handlers[path] != {"Proxy": expected[path]}:
         raise SystemExit(f"handler 不屬於本任務: {path}")
@@ -537,7 +543,7 @@ if not isinstance(data, dict) or data.get("code") != "POLICY_UNSUPPORTED" or dat
     raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機十四路 API preflight 通過，開始更新 path-scoped Serve…\n'
+printf '現有 Serve 設定所有權與本機 17 路 gateway 設定檢查 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -565,7 +571,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十四條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十七條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

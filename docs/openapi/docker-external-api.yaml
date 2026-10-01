@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.15.1
+  version: 1.16.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
-    十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十七條精確路徑：
+    十六條 GET（其中 transactions／trading-radar／SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
     ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十四條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    十七條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    十三條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    十六條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -28,11 +28,16 @@ info:
     SRPP 共用計算結果 package（資產對帳、總曝險配置差距、基礎收益加總）；GET 純讀、不觸發計算或任何外呼。
     規則包 registry 上線時為空，在使用者另行登錄正式規則包前一律回 409 `POLICY_UNSUPPORTED`；funding、
     completedTechnicals 與稅後欄位本版固定具名 UNAVAILABLE（模組降級而非填 0），`tradingAuthorized` 恆為 false。
+
+    Task 467 新增三條由 LLM 按需呼叫的唯讀 API。計算固定重播 context evidence；market-facts 必須帶
+    stockCodes 子集，且代碼限定於 context 凍結持股，沿用相同 canonical 市場來源讀取 API 呼叫當下已存在的
+    cache/business 狀態，以獨立 capture 記錄該次 revision；兩類 response 都提供逐項 coverage 計數；
+    不抓取外部行情、不 refresh、不寫入資料。
 servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的十四條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的十七條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -468,7 +473,7 @@ paths:
       operationId: triggerPublicCrawlerRescan
       summary: 免登入觸發爬蟲重新搜尋
       description: |
-        十四條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+        十七條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
         「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
         HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
         本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -1282,6 +1287,217 @@ paths:
                   value: {type: 'about:blank', title: Trading calendar unavailable, status: 503, detail: 台股交易日曆暫時無法確認，請稍後再試。, instance: /api/public/srpp/daily-context, code: CALENDAR_UNAVAILABLE, retryable: true}
         '504':
           $ref: '#/components/responses/NginxGatewayTimeout'
+  /api/public/srpp/calculation-context:
+    get:
+      tags: [SRPP 按需計算]
+      operationId: getSrppCalculationContext
+      summary: 取得本輪固定計算脈絡
+      description: |
+        依台北交易日、slot、已驗證的 policy bundle 與 owner 選取最新不可變 package，回傳 contextId、固定計算來源修訂向量及該 package 持股代碼白名單。只讀 package/evidence、policy registry 與 cached-only 日曆，不觸發計算或外部抓取。
+        省略 email 使用 configured-admin；提供 email 則只接受 ACTIVE owner。contextId 不是授權憑證，後續每次仍解析 owner 並執行 owner-scoped 查詢。
+      parameters:
+        - name: tradingDate
+          in: query
+          required: true
+          description: 必須為合法的台北當日日期，且權威 cached-only 台股日曆確認為交易日；時段未到或 package 尚未發布回 503。
+          schema: {type: string, format: date, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'}
+          example: '2026-09-30'
+        - name: slot
+          in: query
+          required: true
+          description: 本輪 SRPP 計算時段，只接受早盤 09:05 或午盤 11:40。
+          schema: {type: string, enum: ['09:05', '11:40']}
+          example: '09:05'
+        - name: policyBundleSha256
+          in: query
+          required: true
+          description: 64 位小寫 SHA-256；伺服器須由 registry 驗證，未知或不支援回 409 POLICY_UNSUPPORTED。
+          schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+          example: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        - name: email
+          in: query
+          required: false
+          description: 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503 且不揭露帳號存在性。省略使用 configured-admin。
+          schema: {type: string, format: email, maxLength: 254}
+          example: selected@example.invalid
+      responses:
+        '200':
+          description: 不可變 package 的固定計算 context 與 owner 允許代碼。
+          headers:
+            Cache-Control: {description: 私人回應不得快取，值固定 private, no-store。, schema: {type: string, const: 'private, no-store'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SrppCalculationContextResponse'}
+              example:
+                schemaVersion: '1.0'
+                contextId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+                tradingDate: '2026-09-30'
+                slot: '09:05'
+                policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                formulaSetSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                capturedAt: '2026-09-30T09:05:01+08:00'
+                sourceVector: [{sourceId: assets, revision: snapshot-example, dataAsOf: '2026-09-30T09:00:00+08:00', bodySha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}]
+                allowedStockCodes: ['2330']
+                contextContentSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        '400': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '404': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '405':
+          description: "僅允許 GET，gateway 回 Allow: GET。"
+          headers: {Allow: {description: "唯一允許的方法。", schema: {type: string, const: GET}}}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><body><h1>405 Not Allowed</h1></body></html>"
+        '409': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '500': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '502':
+          description: BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/SrppOrchestratedProblem'}}
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '503': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
+      x-codex-route-policy: exact-read-only-get
+  /api/public/srpp/calculations:
+    get:
+      tags: [SRPP 按需計算]
+      operationId: getSrppCalculations
+      summary: 以固定 context 執行指定計算
+      description: |
+        只重播 contextId 指向的 owner-scoped assets evidence，呼叫既有 business 純函式計算器。已啟用 calculation ID 為 ASSET_RECONCILIATION、ALLOCATION_GAP、CASH_INCOME；其他允許 ID 逐項回 UNAVAILABLE，不補值、不把部分失敗升級成整批失敗。提供 stockCodes 僅適用逐標的 calculation。
+      parameters:
+        - name: contextId
+          in: query
+          required: true
+          description: calculation-context 回傳的不透明 UUID；每次呼叫仍會驗證 owner，跨 owner 與不存在皆回 404。
+          schema: {type: string, format: uuid, maxLength: 200}
+          example: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+        - name: calculationIds
+          in: query
+          required: true
+          description: 逗號分隔且不得重複的允許 ID，最多 6 項；未啟用項目逐項回 UNAVAILABLE。
+          schema: {type: string, maxLength: 256}
+          example: ASSET_RECONCILIATION,ALLOCATION_GAP,CASH_INCOME
+        - name: stockCodes
+          in: query
+          required: false
+          description: 僅適用 COMPLETED_TECHNICALS 或 SYMBOL_RULE_FACTS；最多 100 個唯一代碼，且必須屬於此 context 白名單。
+          schema: {type: string, maxLength: 1400}
+          example: 2330,2454
+        - name: email
+          in: query
+          required: false
+          description: 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503。省略使用 configured-admin。
+          schema: {type: string, format: email, maxLength: 254}
+          example: selected@example.invalid
+      responses:
+        '200':
+          description: 每項 calculation 各自帶狀態、formula version、data 與原因碼。
+          headers:
+            Cache-Control: {description: 私人回應不得快取，值固定 private, no-store。, schema: {type: string, const: 'private, no-store'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SrppCalculationsResponse'}
+              example:
+                schemaVersion: '1.0'
+                contextId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+                tradingDate: '2026-09-30'
+                slot: '09:05'
+                policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                formulaSetSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                sourceVector: [{sourceId: assets, revision: snapshot-example, dataAsOf: '2026-09-30T09:00:00+08:00', bodySha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc}]
+                coverage: {status: COMPLETE, requestedCount: 1, successCount: 1, partialCount: 0, unavailableCount: 0}
+                calculations: [{calculationId: ASSET_RECONCILIATION, status: COMPLETE, formulaVersion: '1.0', formulaSetSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, data: {}, reasonCodes: [], sourceIds: [assets]}]
+                contextContentSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        '400': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '404': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '405':
+          description: "僅允許 GET，gateway 回 Allow: GET。"
+          headers: {Allow: {description: "唯一允許的方法。", schema: {type: string, const: GET}}}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><body><h1>405 Not Allowed</h1></body></html>"
+        '409': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '500': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '502':
+          description: BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/SrppOrchestratedProblem'}}
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '503': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
+      x-codex-route-policy: exact-read-only-get
+  /api/public/srpp/market-facts:
+    get:
+      tags: [SRPP 按需計算]
+      operationId: getSrppMarketFacts
+      summary: 批次讀取 context 持股市場事實
+      description: |
+        以 context 綁定的持股名單和 owner 做單批 canonical market read。行情來源與服務不變；只讀 API 呼叫當下已存在的快取／business 狀態，建立獨立 marketCaptureId 與市場來源 revision，不抓取外部行情、不 refresh、不寫入。逐標的回報 quote/radar 狀態，一檔失敗不影響其他列。
+      parameters:
+        - name: contextId
+          in: query
+          required: true
+          description: calculation-context 回傳的不透明 UUID；每次呼叫仍會驗證 owner，跨 owner 與不存在皆回 404。
+          schema: {type: string, format: uuid, maxLength: 200}
+          example: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+        - name: stockCodes
+          in: query
+          required: true
+          description: 逗號分隔的 1 至 100 個唯一代碼，全部須屬於此 context 持股白名單。
+          schema: {type: string, maxLength: 1400}
+          example: 2330,2454
+        - name: include
+          in: query
+          required: false
+          description: quote、radar 或兩者，預設 quote,radar；不得重複或帶未知值。
+          schema: {type: string, default: 'quote,radar', pattern: '^(quote|radar|quote,radar|radar,quote)$'}
+          example: quote,radar
+        - name: email
+          in: query
+          required: false
+          description: 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503。省略使用 configured-admin。
+          schema: {type: string, format: email, maxLength: 254}
+          example: selected@example.invalid
+      responses:
+        '200':
+          description: 單一 market capture 的逐標的市場事實、各自 as-of 與來源 revision。
+          headers:
+            Cache-Control: {description: 私人回應不得快取，值固定 private, no-store。, schema: {type: string, const: 'private, no-store'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SrppMarketFactsResponse'}
+              example:
+                schemaVersion: '1.0'
+                contextId: 7e1fb982-4ae4-4e7e-baa5-c2c80bd93491
+                marketCaptureId: b95e251c-3a14-4d48-a2b9-9812f733208d
+                tradingDate: '2026-09-30'
+                slot: '09:05'
+                policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                sourceVector: [{sourceId: CANONICAL_MARKET_READ, revision: market-revision-1, dataAsOf: '2026-09-30T09:04:00+08:00', bodySha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee}, {sourceId: TRADING_RADAR_CURRENT, revision: radar-revision-1, dataAsOf: '2026-09-30T09:00:00+08:00', bodySha256: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff}]
+                symbols: [{status: COMPLETE, market: 台股, stockCode: '2330', quoteStatus: LIVE, quoteDataAsOf: '2026-09-30T09:04:00+08:00', quoteSourceId: CANONICAL_MARKET_READ, lastPrice: {value: '1000', unit: TWD_PER_SHARE, quality: EXACT, reasonCodes: [], sourceIds: [CANONICAL_MARKET_READ]}, radarStatus: AVAILABLE, radarDataAsOf: '2026-09-30T09:00:00+08:00', radarSourceId: TRADING_RADAR_CURRENT, radarFacts: {}, reasonCodes: []}]
+                coverage: {status: COMPLETE, requestedCount: 1, successCount: 1, partialCount: 0, unavailableCount: 0}
+                contextContentSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        '400': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '404': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '405':
+          description: "僅允許 GET，gateway 回 Allow: GET。"
+          headers: {Allow: {description: "唯一允許的方法。", schema: {type: string, const: GET}}}
+          content:
+            text/html:
+              schema: {$ref: '#/components/schemas/NginxErrorHtml'}
+              example: "<html><body><h1>405 Not Allowed</h1></body></html>"
+        '409': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '500': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '502':
+          description: BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/SrppOrchestratedProblem'}}
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '503': {$ref: '#/components/responses/SrppOrchestratedProblem'}
+        '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
+      x-codex-route-policy: exact-read-only-get
 components:
   schemas:
     ProblemDetail:
@@ -9649,6 +9865,227 @@ components:
       - instance
       - code
       - retryable
+    SrppOrchestratedProblem:
+      type: object
+      additionalProperties: false
+      description: RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤格式，不含帳號、SQL 或例外堆疊。
+      properties:
+        type:
+          type: string
+          const: about:blank
+          description: problem 類型，固定為 `about:blank`。
+        title:
+          type: string
+          description: 依穩定錯誤碼固定的英文標題。
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: 與 HTTP status 相同的整數狀態碼。
+        detail:
+          type: string
+          description: 經清理的繁體中文錯誤說明，不包含內部識別資料。
+        instance:
+          type: string
+          enum:
+          - /api/public/srpp/calculation-context
+          - /api/public/srpp/calculations
+          - /api/public/srpp/market-facts
+          description: 發生問題的三條 SRPP 按需唯讀路徑之一：`/api/public/srpp/calculation-context`、`/api/public/srpp/calculations` 或 `/api/public/srpp/market-facts`。
+        code:
+          type: string
+          enum: [INVALID_REQUEST, CONTEXT_NOT_FOUND, CONTEXT_STALE, POLICY_UNSUPPORTED, OWNER_UNAVAILABLE, CONTEXT_NOT_READY, UPSTREAM_INVALID, INTERNAL_ERROR]
+          description: 穩定錯誤碼；INVALID_REQUEST（400）、CONTEXT_NOT_FOUND（404）、CONTEXT_STALE／POLICY_UNSUPPORTED（409）、OWNER_UNAVAILABLE／CONTEXT_NOT_READY（503）、UPSTREAM_INVALID（502）、INTERNAL_ERROR（500）。
+        retryable:
+          type: boolean
+          description: 同一請求稍後重試是否可能成功；只有 CONTEXT_NOT_READY 為 true。
+      required: [type, title, status, detail, instance, code, retryable]
+    SrppSourceRevision:
+      type: object
+      additionalProperties: false
+      description: 單一來源在本計算或市場擷取中的固定 revision、資料時點與內容摘要。
+      properties:
+        sourceId:
+          type: string
+          description: 穩定來源識別，例如 package evidence 的 source ID 或 canonical market read。
+        revision:
+          type: string
+          description: 來源內容版本識別，不得以 API 回應時間代替。
+        dataAsOf:
+          type: string
+          format: date-time
+          description: 來源實際代表的資料時點，必須包含時區且不得填 API 回應時間。
+        bodySha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: 來源投影 UTF-8 內容的 SHA-256 小寫十六進位摘要。
+      required: [sourceId, revision, dataAsOf, bodySha256]
+    SrppCalculationContextResponse:
+      type: object
+      additionalProperties: false
+      description: 建立本輪計算用的固定 context 身分、policy、來源 revision 與持股代碼白名單。
+      properties:
+        schemaVersion: {type: string, const: '1.0', description: "此按需計算 API 的回應 schema 版本，固定為 `1.0`。"}
+        contextId: {type: string, format: uuid, description: "綁定 owner、package、日期、slot、policy 與來源向量的不透明識別。"}
+        tradingDate: {type: string, format: date, description: "此 context 所屬的台北交易日期。"}
+        slot: {type: string, enum: ['09:05', '11:40'], description: "本輪 SRPP 時段，只能是 `09:05` 或 `11:40`。"}
+        policyBundleSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "伺服器 registry 已驗證的 policy bundle SHA-256。"}
+        formulaSetSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "與已驗證 policy 綁定的公式集合 SHA-256。"}
+        capturedAt: {type: string, format: date-time, description: "建立 context 的時間，RFC 3339 且帶明確時區。"}
+        sourceVector:
+          type: array
+          maxItems: 30
+          items: {$ref: '#/components/schemas/SrppSourceRevision', description: "一個不可變 source revision。"}
+          description: 本輪計算必須重播的固定來源向量。
+        allowedStockCodes:
+          type: array
+          uniqueItems: true
+          maxItems: 500
+          items: {type: string, description: "一個由 immutable package 凍結的 owner 持股代碼；不含觀察名單或 caller 臨時代碼。"}
+          description: 後續 market-facts 查詢可選取的 owner-scoped 凍結持股代碼白名單。
+        contextContentSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。"}
+      required: [schemaVersion, contextId, tradingDate, slot, policyBundleSha256, formulaSetSha256, capturedAt, sourceVector, allowedStockCodes, contextContentSha256]
+    SrppCalculationResult:
+      type: object
+      additionalProperties: false
+      description: 單一 calculation ID 的獨立結果；不完整或尚未啟用時以 UNAVAILABLE 與原因碼明示。
+      properties:
+        calculationId: {type: string, enum: [ASSET_RECONCILIATION, ALLOCATION_GAP, CASH_INCOME, FUNDING_CAPACITY, COMPLETED_TECHNICALS, SYMBOL_RULE_FACTS], description: "要求的計算識別；允許 `ASSET_RECONCILIATION`、`ALLOCATION_GAP`、`CASH_INCOME`、`FUNDING_CAPACITY`、`COMPLETED_TECHNICALS`、`SYMBOL_RULE_FACTS`。"}
+        status: {type: string, enum: [COMPLETE, PARTIAL, UNAVAILABLE], description: "計算狀態：`COMPLETE` 完整、`PARTIAL` 部分欄位可用、`UNAVAILABLE` 無可採用結果。"}
+        formulaVersion: {type: string, description: "執行或嘗試執行的公式版本。"}
+        formulaSetSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "此結果使用的公式集合 SHA-256。"}
+        data: {type: object, description: "此計算的結果資料；數值使用 decimal 字串，缺值明確為 null。"}
+        reasonCodes:
+          type: array
+          uniqueItems: true
+          items: {type: string, pattern: '^[A-Z][A-Z0-9_]*$', description: "一個穩定且可機器辨識的結果原因碼。"}
+          description: 說明部分結果、依賴缺失或不可用原因的代碼清單。
+        sourceIds:
+          type: array
+          uniqueItems: true
+          items: {type: string, description: "一個支援此計算結果的來源識別。"}
+          description: 此計算實際使用或檢查的來源識別清單。
+      required: [calculationId, status, formulaVersion, formulaSetSha256, data, reasonCodes, sourceIds]
+    SrppCalculationsResponse:
+      type: object
+      additionalProperties: false
+      description: 以同一 context 固定來源向量執行一批指定計算的結果。
+      properties:
+        schemaVersion: {type: string, const: '1.0', description: "此按需計算 API 的回應 schema 版本，固定為 `1.0`。"}
+        contextId: {type: string, format: uuid, description: "本批結果綁定的 context 識別。"}
+        tradingDate: {type: string, format: date, description: "本批結果所屬的台北交易日期。"}
+        slot: {type: string, enum: ['09:05', '11:40'], description: "本批結果所屬的 SRPP 時段，只能是 `09:05` 或 `11:40`。"}
+        policyBundleSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "context 中經 registry 驗證的 policy bundle SHA-256。"}
+        formulaSetSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "所要求計算使用的公式集合 SHA-256。"}
+        sourceVector:
+          type: array
+          maxItems: 30
+          items: {$ref: '#/components/schemas/SrppSourceRevision', description: "一個固定計算來源 revision。"}
+          description: 與 calculation-context 相同且按 source ID 排序的來源向量。
+        coverage:
+          type: object
+          additionalProperties: false
+          description: 每個 query 要求 calculation 的整批狀態及互斥 status 計數。
+          properties:
+            status: {type: string, enum: [COMPLETE, PARTIAL], description: "整批狀態：所有項目完整可用為 COMPLETE，存在部分或不可用項目為 PARTIAL。"}
+            requestedCount: {type: integer, minimum: 0, description: "此次 query 要求的 calculation 數。"}
+            successCount: {type: integer, minimum: 0, description: "最終 status 為 COMPLETE 的 calculation 數。"}
+            partialCount: {type: integer, minimum: 0, description: "最終 status 為 PARTIAL 的 calculation 數。"}
+            unavailableCount: {type: integer, minimum: 0, description: "最終 status 為 UNAVAILABLE 的 calculation 數。"}
+          required: [status, requestedCount, successCount, partialCount, unavailableCount]
+        calculations:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items: {$ref: '#/components/schemas/SrppCalculationResult', description: "一個獨立 calculation 結果。"}
+          description: 逐項計算結果；單一項目失敗不得遮蔽其他成功項目。
+        contextContentSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。"}
+      required: [schemaVersion, contextId, tradingDate, slot, policyBundleSha256, formulaSetSha256, sourceVector, coverage, calculations, contextContentSha256]
+    SrppMarketMetric:
+      type: object
+      additionalProperties: false
+      description: 以 decimal 字串表達的市場數值、單位、品質、原因碼及來源識別。
+      properties:
+        value: {type: [string, 'null'], pattern: '^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$', description: "decimal 字串數值；不可用零代替未知值。"}
+        unit: {type: string, description: "數值的明確單位與幣別基準。"}
+        quality: {type: string, enum: [EXACT, ESTIMATE, UPPER_BOUND, LOWER_BOUND, UNAVAILABLE], description: "資料品質：`EXACT` 精確、`ESTIMATE` 估計、`UPPER_BOUND` 上界、`LOWER_BOUND` 下界、`UNAVAILABLE` 不可用。"}
+        reasonCodes:
+          type: array
+          uniqueItems: true
+          items: {type: string, description: "一個穩定的數值品質或缺漏原因碼。"}
+          description: 此數值的缺漏或品質原因；可用時為空。
+        sourceIds:
+          type: array
+          uniqueItems: true
+          items: {type: string, description: "一個提供此數值的來源識別。"}
+          description: 此數值實際使用的來源識別。
+      required: [value, unit, quality, reasonCodes, sourceIds]
+    SrppSymbolMarketFact:
+      type: object
+      additionalProperties: false
+      description: 單一持股標的在一個 market capture 中的報價及雷達事實，兩者可分別不可用。
+      properties:
+        status: {type: string, enum: [COMPLETE, PARTIAL, UNAVAILABLE], description: "依 include 中要求的 quote/radar 子項計算；全部完整可用為 COMPLETE，有部分可用為 PARTIAL，全部不可用為 UNAVAILABLE。"}
+        market: {type: string, description: "精確標的市場識別，用於防止跨市場代碼碰撞。"}
+        stockCode: {type: string, description: "context 白名單內的股票代碼。"}
+        quoteStatus: {type: string, enum: [LIVE, CLOSE_FALLBACK, STALE, UNAVAILABLE], description: "報價狀態：`LIVE` 即時、`CLOSE_FALLBACK` 收盤備援、`STALE` 過期、`UNAVAILABLE` 不可用。"}
+        quoteDataAsOf: {type: [string, 'null'], format: date-time, description: "報價來源資料時點，缺值時為 null，存在時必須含時區。"}
+        quoteSourceId: {type: [string, 'null'], description: "報價 canonical source ID，不可用或未要求時為 null。"}
+        lastPrice:
+          anyOf:
+          - $ref: '#/components/schemas/SrppMarketMetric'
+            description: 可用報價 metric。
+          - type: 'null'
+            description: 未要求報價時為 null。
+          description: 最近成交價；缺值不得轉成零。
+        radarStatus: {type: string, enum: [AVAILABLE, UNAVAILABLE], description: "雷達狀態：`AVAILABLE` 有符合市場與代碼的事實、`UNAVAILABLE` 無可用資料。"}
+        radarDataAsOf: {type: [string, 'null'], format: date-time, description: "雷達來源資料時點，缺值時為 null，存在時必須含時區。"}
+        radarSourceId: {type: [string, 'null'], description: "雷達來源識別，不可用或未要求時為 null。"}
+        radarFacts: {type: object, description: "已公開的逐標的雷達事實；缺值欄位以 null 保留。"}
+        reasonCodes:
+          type: array
+          uniqueItems: true
+          items: {type: string, description: "一個可機器辨識的報價或雷達缺漏原因碼。"}
+          description: 此標的各來源的缺漏原因碼清單。
+      required: [status, market, stockCode, quoteStatus, quoteDataAsOf, quoteSourceId, lastPrice, radarStatus, radarDataAsOf, radarSourceId, radarFacts, reasonCodes]
+    SrppMarketFactsResponse:
+      type: object
+      additionalProperties: false
+      description: 以單一 market capture 固定讀取的逐標的 canonical 報價與雷達事實。
+      properties:
+        schemaVersion: {type: string, const: '1.0', description: "此按需計算 API 的回應 schema 版本，固定為 `1.0`。"}
+        contextId: {type: string, format: uuid, description: "本批市場事實使用的計算 context 識別。"}
+        marketCaptureId: {type: string, format: uuid, description: "本批市場讀取的獨立擷取識別，可與 calculation source vector revision 不同。"}
+        tradingDate: {type: string, format: date, description: "此批市場事實所屬的台北交易日期。"}
+        slot: {type: string, enum: ['09:05', '11:40'], description: "此批市場事實所屬的 SRPP 時段，只能是 `09:05` 或 `11:40`。"}
+        policyBundleSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "context 中經 registry 驗證的 policy bundle SHA-256。"}
+        sourceVector:
+          type: array
+          maxItems: 30
+          items: {$ref: '#/components/schemas/SrppSourceRevision', description: "一個本次市場擷取的來源 revision。"}
+          description: >-
+            本批市場來源 revision 向量，每個不同來源／revision 一列並帶 revision、batch dataAsOf 與 bodySha256；逐標的
+            quoteDataAsOf／radarDataAsOf 保留該標的精確來源時點，且其非 null source ID 必須引用本向量中的來源。
+            dataAsOf 代表來源資料時點，不得使用 API 回應時間。
+        symbols:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items: {$ref: '#/components/schemas/SrppSymbolMarketFact', description: "一個逐標的市場事實列。"}
+          description: 每一要求標的均有一列，單列缺漏不會使其他列失敗。
+        coverage:
+          type: object
+          additionalProperties: false
+          description: 每個 query 要求標的的整批狀態及互斥 status 計數。
+          properties:
+            status: {type: string, enum: [COMPLETE, PARTIAL], description: "整批狀態：所有要求標的完整可用為 COMPLETE，存在部分或不可用標的為 PARTIAL。"}
+            requestedCount: {type: integer, minimum: 0, description: "此次 query 要求的凍結持股代碼數。"}
+            successCount: {type: integer, minimum: 0, description: "最終 status 為 COMPLETE 的標的數。"}
+            partialCount: {type: integer, minimum: 0, description: "最終 status 為 PARTIAL 的標的數。"}
+            unavailableCount: {type: integer, minimum: 0, description: "最終 status 為 UNAVAILABLE 的標的數。"}
+          required: [status, requestedCount, successCount, partialCount, unavailableCount]
+        contextContentSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。"}
+      required: [schemaVersion, contextId, marketCaptureId, tradingDate, slot, policyBundleSha256, sourceVector, symbols, coverage, contextContentSha256]
   responses:
     NginxBadGateway:
       description: HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。
@@ -9662,6 +10099,15 @@ components:
         text/html:
           schema: {$ref: '#/components/schemas/NginxErrorHtml'}
           example: "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+    SrppOrchestratedProblem:
+      description: RFC 9457 application problem response for the SRPP on-demand read endpoints.
+      headers:
+        Cache-Control:
+          description: 私人錯誤回應不得快取，固定為 private, no-store。
+          schema: {type: string, const: 'private, no-store'}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/SrppOrchestratedProblem'}
   examples:
     LatestAssetsSynthetic:
       summary: 去識別化、非實際持倉的穩定合成範例

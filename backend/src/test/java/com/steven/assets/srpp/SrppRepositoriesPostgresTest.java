@@ -65,12 +65,12 @@ class SrppRepositoriesPostgresTest {
 
     @BeforeEach
     void schema() throws Exception {
+        String apiErrorLogChangeset = new ClassPathResource("db/changelog/changes/v1.123.0-api-error-log.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
         String changeset = new ClassPathResource("db/changelog/changes/v1.136.0-srpp-daily-context.sql")
                 .getContentAsString(StandardCharsets.UTF_8);
         jdbc.execute("CREATE TABLE IF NOT EXISTS app_user (id bigint PRIMARY KEY)");
-        jdbc.execute("CREATE TABLE IF NOT EXISTS api_error_log_operation (source varchar(16) NOT NULL, "
-                + "operation_key varchar(160) NOT NULL, operation_label varchar(255) NOT NULL, "
-                + "display_order smallint NOT NULL, PRIMARY KEY (source, operation_key))");
+        jdbc.execute(apiErrorLogChangeset);
         jdbc.execute(changeset);
         jdbc.execute(changeset);   // 冪等
         jdbc.execute("DELETE FROM srpp_context_package");
@@ -97,6 +97,39 @@ class SrppRepositoriesPostgresTest {
         assertThat(jdbc.queryForObject("SELECT operation_label FROM api_error_log_operation WHERE source='OPEN_API' "
                 + "AND operation_key='OPEN_SRPP_DAILY_CONTEXT'", String.class)).isEqualTo("SRPP 共用計算結果");
         assertThat(registry.supportedPolicies()).isEmpty();
+    }
+
+    @Test
+    void orchestratedRouteCatalogChangesetIsInsertOnlyIdempotentAndMatchesErrorLogForeignKey() throws Exception {
+        String changeset = new ClassPathResource(
+                "db/changelog/changes/v1.140.0-srpp-llm-orchestrated-error-log-catalog.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+        jdbc.execute(changeset);
+        jdbc.execute(changeset);
+
+        record CatalogRow(String source, String key, String label, int displayOrder) {}
+        var rows = jdbc.query("SELECT source, operation_key, operation_label, display_order "
+                        + "FROM api_error_log_operation WHERE operation_key LIKE 'OPEN_SRPP_%' ORDER BY display_order",
+                (rs, row) -> new CatalogRow(rs.getString("source"), rs.getString("operation_key"),
+                        rs.getString("operation_label"), rs.getInt("display_order")));
+        assertThat(rows).containsExactly(
+                new CatalogRow("OPEN_API", "OPEN_SRPP_DAILY_CONTEXT", "SRPP 共用計算結果", 140),
+                new CatalogRow("OPEN_API", "OPEN_SRPP_CALCULATION_CONTEXT", "SRPP 計算脈絡", 150),
+                new CatalogRow("OPEN_API", "OPEN_SRPP_CALCULATIONS", "SRPP 按需計算", 160),
+                new CatalogRow("OPEN_API", "OPEN_SRPP_MARKET_FACTS", "SRPP 批次市場事實", 170));
+
+        for (String operationKey : java.util.List.of("OPEN_SRPP_CALCULATION_CONTEXT", "OPEN_SRPP_CALCULATIONS",
+                "OPEN_SRPP_MARKET_FACTS")) {
+            String label = jdbc.queryForObject("SELECT operation_label FROM api_error_log_operation "
+                    + "WHERE source='OPEN_API' AND operation_key=?", String.class, operationKey);
+            assertThatThrownBy(() -> jdbc.update("UPDATE api_error_log_operation SET operation_label='changed' "
+                    + "WHERE source='OPEN_API' AND operation_key=?", operationKey)).hasMessageContaining("immutable");
+            assertThatThrownBy(() -> jdbc.update("DELETE FROM api_error_log_operation "
+                    + "WHERE source='OPEN_API' AND operation_key=?", operationKey)).hasMessageContaining("immutable");
+            assertThat(jdbc.update("INSERT INTO api_error_log (source, operation_key, api_name, message_header, "
+                    + "stack_trace, occurred_at) VALUES ('OPEN_API', ?, ?, 'header', 'trace', now())",
+                    operationKey, label)).isEqualTo(1);
+        }
     }
 
     @Test

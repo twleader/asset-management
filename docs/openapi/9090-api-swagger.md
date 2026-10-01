@@ -7,22 +7,22 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.15.1` |
-| 對外路徑 | 14 條：13 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.16.0` |
+| 對外路徑 | 17 條：16 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十四條精確路徑：
-十三條 GET（其中 transactions／trading-radar／srpp daily-context 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十七條精確路徑：
+十六條 GET（其中 transactions／trading-radar／SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
 ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十四條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+十七條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-十三條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+十六條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 暴露文件端點。
@@ -37,6 +37,11 @@ Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管
 SRPP 共用計算結果 package（資產對帳、總曝險配置差距、基礎收益加總）；GET 純讀、不觸發計算或任何外呼。
 規則包 registry 上線時為空，在使用者另行登錄正式規則包前一律回 409 `POLICY_UNSUPPORTED`；funding、
 completedTechnicals 與稅後欄位本版固定具名 UNAVAILABLE（模組降級而非填 0），`tradingAuthorized` 恆為 false。
+
+Task 467 新增三條由 LLM 按需呼叫的唯讀 API。計算固定重播 context evidence；market-facts 必須帶
+stockCodes 子集，且代碼限定於 context 凍結持股，沿用相同 canonical 市場來源讀取 API 呼叫當下已存在的
+cache/business 狀態，以獨立 capture 記錄該次 revision；兩類 response 都提供逐項 coverage 計數；
+不抓取外部行情、不 refresh、不寫入資料。
 
 ## 路由總覽
 
@@ -56,6 +61,9 @@ completedTechnicals 與稅後欄位本版固定具名 UNAVAILABLE（模組降級
 | 12 | `GET` | `/api/public/trading-calendar` | `getPublicTradingCalendar` | 取得指定年度台、美、英交易日曆 | 200 application/json: PublicTradingCalendarResponse |
 | 13 | `GET` | `/api/public/commodity-prices` | `getPublicCommodityPrices` | 一次取得 WTI、Brent 與黃金的已持久化報價 | 200 application/json: CommodityPriceBatchResponse |
 | 14 | `GET` | `/api/public/srpp/daily-context` | `getSrppDailyContext` | 取得本輪 SRPP 共用計算摘要或重播其已凍結來源 | 200 application/json: schema |
+| 15 | `GET` | `/api/public/srpp/calculation-context` | `getSrppCalculationContext` | 取得本輪固定計算脈絡 | 200 application/json: SrppCalculationContextResponse |
+| 16 | `GET` | `/api/public/srpp/calculations` | `getSrppCalculations` | 以固定 context 執行指定計算 | 200 application/json: SrppCalculationsResponse |
+| 17 | `GET` | `/api/public/srpp/market-facts` | `getSrppMarketFacts` | 批次讀取 context 持股市場事實 | 200 application/json: SrppMarketFactsResponse |
 
 ## 路由詳情
 
@@ -189,7 +197,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 6. `POST /api/public/crawler-data/rescan`
 
-十四條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
+十七條路由中唯一有外部抓取副作用者（Requirement 71／Task 329），語意等同既有 ADMIN 端點
 「立即抓取並匯出」的匿名版本。由 business 端 30 秒全域 Redis 冷卻節流：冷卻窗口內回
 HTTP 200 但 `status=COOLDOWN`，不會真的觸發抓取。呼叫端必須看 `status` 而不是只看 200。
 本路徑只接受 POST；GET 等其他 method 回 `405` 並帶 `Allow: POST`。
@@ -428,6 +436,88 @@ BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical D
 | `500` | application/problem+json: SrppProblem | INTERNAL_ERROR：BFF 未預期例外；business 自身的 500 會被轉成 502 UPSTREAM_INVALID，不外洩細節。 |
 | `502` | application/problem+json: SrppProblem; text/html: NginxErrorHtml | UPSTREAM_INVALID：business 2xx 未通過 strict 驗證、business 非預期 status（含 500）、problem 格式錯誤或 code 與 status 不符；回應已消毒。若 Nginx 本身無法連上 BFF，則是並列的 text/html gateway alternative。 |
 | `503` | application/problem+json: SrppProblem | OWNER_UNAVAILABLE（configured-admin 或指定 email 查無、非 ACTIVE、lookup 五秒逾時或錯誤，一律同一 body，不可重試）、 CALENDAR_UNAVAILABLE（cached-only 日曆無法確認，可重試）或 CONTEXT_NOT_READY（時段未到、尚未產生 package、 freshness 無法核對、business 五秒逾時或連線失敗，可重試）。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
+### 15. `GET /api/public/srpp/calculation-context`
+
+依台北交易日、slot、已驗證的 policy bundle 與 owner 選取最新不可變 package，回傳 contextId、固定計算來源修訂向量及該 package 持股代碼白名單。只讀 package/evidence、policy registry 與 cached-only 日曆，不觸發計算或外部抓取。
+省略 email 使用 configured-admin；提供 email 則只接受 ACTIVE owner。contextId 不是授權憑證，後續每次仍解析 owner 並執行 owner-scoped 查詢。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `tradingDate` | 是 | `string (date)` | pattern: `^[0-9]{4}-[0-9]{2}-[0-9]{2}$`<br>example: `2026-09-30` | 必須為合法的台北當日日期，且權威 cached-only 台股日曆確認為交易日；時段未到或 package 尚未發布回 503。 |
+| `slot` | 是 | `string` | enum: `09:05`, `11:40`<br>example: `09:05` | 本輪 SRPP 計算時段，只接受早盤 09:05 或午盤 11:40。 |
+| `policyBundleSha256` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | 64 位小寫 SHA-256；伺服器須由 registry 驗證，未知或不支援回 409 POLICY_UNSUPPORTED。 |
+| `email` | 否 | `string (email)` | example: `selected@example.invalid` | 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503 且不揭露帳號存在性。省略使用 configured-admin。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppCalculationContextResponse | 不可變 package 的固定計算 context 與 owner 允許代碼。 |
+| `400` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `404` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET，gateway 回 Allow: GET。 |
+| `409` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `500` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `502` | application/problem+json: SrppOrchestratedProblem; text/html: NginxErrorHtml | BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。 |
+| `503` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
+### 16. `GET /api/public/srpp/calculations`
+
+只重播 contextId 指向的 owner-scoped assets evidence，呼叫既有 business 純函式計算器。已啟用 calculation ID 為 ASSET_RECONCILIATION、ALLOCATION_GAP、CASH_INCOME；其他允許 ID 逐項回 UNAVAILABLE，不補值、不把部分失敗升級成整批失敗。提供 stockCodes 僅適用逐標的 calculation。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `contextId` | 是 | `string (uuid)` | example: `7e1fb982-4ae4-4e7e-baa5-c2c80bd93491` | calculation-context 回傳的不透明 UUID；每次呼叫仍會驗證 owner，跨 owner 與不存在皆回 404。 |
+| `calculationIds` | 是 | `string` | example: `ASSET_RECONCILIATION,ALLOCATION_GAP,CASH_INCOME` | 逗號分隔且不得重複的允許 ID，最多 6 項；未啟用項目逐項回 UNAVAILABLE。 |
+| `stockCodes` | 否 | `string` | example: `23302454` | 僅適用 COMPLETED_TECHNICALS 或 SYMBOL_RULE_FACTS；最多 100 個唯一代碼，且必須屬於此 context 白名單。 |
+| `email` | 否 | `string (email)` | example: `selected@example.invalid` | 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503。省略使用 configured-admin。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppCalculationsResponse | 每項 calculation 各自帶狀態、formula version、data 與原因碼。 |
+| `400` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `404` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET，gateway 回 Allow: GET。 |
+| `409` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `500` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `502` | application/problem+json: SrppOrchestratedProblem; text/html: NginxErrorHtml | BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。 |
+| `503` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
+### 17. `GET /api/public/srpp/market-facts`
+
+以 context 綁定的持股名單和 owner 做單批 canonical market read。行情來源與服務不變；只讀 API 呼叫當下已存在的快取／business 狀態，建立獨立 marketCaptureId 與市場來源 revision，不抓取外部行情、不 refresh、不寫入。逐標的回報 quote/radar 狀態，一檔失敗不影響其他列。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `contextId` | 是 | `string (uuid)` | example: `7e1fb982-4ae4-4e7e-baa5-c2c80bd93491` | calculation-context 回傳的不透明 UUID；每次呼叫仍會驗證 owner，跨 owner 與不存在皆回 404。 |
+| `stockCodes` | 是 | `string` | example: `23302454` | 逗號分隔的 1 至 100 個唯一代碼，全部須屬於此 context 持股白名單。 |
+| `include` | 否 | `string` | pattern: `^(quote\|radar\|quote,radar\|radar,quote)$`<br>example: `quote,radar` | quote、radar 或兩者，預設 quote,radar；不得重複或帶未知值。 |
+| `email` | 否 | `string (email)` | example: `selected@example.invalid` | 選取 ACTIVE owner 的 email；格式不合法回 400，查無帳號或帳號非 ACTIVE 回 503。省略使用 configured-admin。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppMarketFactsResponse | 單一 market capture 的逐標的市場事實、各自 as-of 與來源 revision。 |
+| `400` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `404` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET，gateway 回 Allow: GET。 |
+| `409` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `500` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
+| `502` | application/problem+json: SrppOrchestratedProblem; text/html: NginxErrorHtml | BFF 驗證上游失敗時為 RFC 9457 problem；Nginx upstream failure 可能為 HTML。 |
+| `503` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ## Schema 欄位
@@ -2469,3 +2559,124 @@ RFC 9457 Problem Details：本路由所有應用錯誤的固定七欄格式，�
 | `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/daily-context` | 發生錯誤的公開路徑，常數 `/api/public/srpp/daily-context`。 |
 | `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `CONTEXT_NOT_FOUND`, `SOURCE_EVIDENCE_NOT_FOUND`, `CONTEXT_STALE`, `POLICY_UNSUPPORTED`, `CONTEXT_IDENTITY_MISMATCH`, `NON_TRADING_DAY`, `CALENDAR_UNAVAILABLE`, `OWNER_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR` | 穩定錯誤碼：`INVALID_REQUEST`（400）query 不合法；`CONTEXT_NOT_FOUND`（404）查無該 owner 的 package；`SOURCE_EVIDENCE_NOT_FOUND`（404）package 中查無該 AVAILABLE 來源；`CONTEXT_STALE`（409）最新 package 的來源已變更；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證（registry 空時一律如此）；`CONTEXT_IDENTITY_MISMATCH`（409）package 的日期／時段／規則包與 query 不符；`NON_TRADING_DAY`（409）非台股交易日；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CONTEXT_NOT_READY`（503，可重試）時段未到、尚未產生或上游逾時；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤。 |
 | `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘（含 OWNER_UNAVAILABLE）為 false。 |
+
+### `SrppOrchestratedProblem`
+
+RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤格式，不含帳號、SQL 或例外堆疊。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `type` | 是 | `string` | 否 | enum: `about:blank` | problem 類型，固定為 `about:blank`。 |
+| `title` | 是 | `string` | 否 |  | 依穩定錯誤碼固定的英文標題。 |
+| `status` | 是 | `integer` | 否 | minimum: 400<br>maximum: 599 | 與 HTTP status 相同的整數狀態碼。 |
+| `detail` | 是 | `string` | 否 |  | 經清理的繁體中文錯誤說明，不包含內部識別資料。 |
+| `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/calculation-context`, `/api/public/srpp/calculations`, `/api/public/srpp/market-facts` | 發生問題的三條 SRPP 按需唯讀路徑之一：`/api/public/srpp/calculation-context`、`/api/public/srpp/calculations` 或 `/api/public/srpp/market-facts`。 |
+| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `CONTEXT_NOT_FOUND`, `CONTEXT_STALE`, `POLICY_UNSUPPORTED`, `OWNER_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR` | 穩定錯誤碼；INVALID_REQUEST（400）、CONTEXT_NOT_FOUND（404）、CONTEXT_STALE／POLICY_UNSUPPORTED（409）、OWNER_UNAVAILABLE／CONTEXT_NOT_READY（503）、UPSTREAM_INVALID（502）、INTERNAL_ERROR（500）。 |
+| `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；只有 CONTEXT_NOT_READY 為 true。 |
+
+### `SrppSourceRevision`
+
+單一來源在本計算或市場擷取中的固定 revision、資料時點與內容摘要。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `string` | 否 |  | 穩定來源識別，例如 package evidence 的 source ID 或 canonical market read。 |
+| `revision` | 是 | `string` | 否 |  | 來源內容版本識別，不得以 API 回應時間代替。 |
+| `dataAsOf` | 是 | `string (date-time)` | 否 |  | 來源實際代表的資料時點，必須包含時區且不得填 API 回應時間。 |
+| `bodySha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 來源投影 UTF-8 內容的 SHA-256 小寫十六進位摘要。 |
+
+### `SrppCalculationContextResponse`
+
+建立本輪計算用的固定 context 身分、policy、來源 revision 與持股代碼白名單。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1.0` | 此按需計算 API 的回應 schema 版本，固定為 `1.0`。 |
+| `contextId` | 是 | `string (uuid)` | 否 |  | 綁定 owner、package、日期、slot、policy 與來源向量的不透明識別。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 此 context 所屬的台北交易日期。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 本輪 SRPP 時段，只能是 `09:05` 或 `11:40`。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 伺服器 registry 已驗證的 policy bundle SHA-256。 |
+| `formulaSetSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 與已驗證 policy 綁定的公式集合 SHA-256。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 |  | 建立 context 的時間，RFC 3339 且帶明確時區。 |
+| `sourceVector` | 是 | `array of SrppSourceRevision` | 否 | maxItems: 30<br>items: SrppSourceRevision<br>items 說明: 一個不可變 source revision。 | 本輪計算必須重播的固定來源向量。 |
+| `allowedStockCodes` | 是 | `array of string` | 否 | maxItems: 500<br>items: string<br>items 說明: 一個由 immutable package 凍結的 owner 持股代碼；不含觀察名單或 caller 臨時代碼。 | 後續 market-facts 查詢可選取的 owner-scoped 凍結持股代碼白名單。 |
+| `contextContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。 |
+
+### `SrppCalculationResult`
+
+單一 calculation ID 的獨立結果；不完整或尚未啟用時以 UNAVAILABLE 與原因碼明示。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `calculationId` | 是 | `string` | 否 | enum: `ASSET_RECONCILIATION`, `ALLOCATION_GAP`, `CASH_INCOME`, `FUNDING_CAPACITY`, `COMPLETED_TECHNICALS`, `SYMBOL_RULE_FACTS` | 要求的計算識別；允許 `ASSET_RECONCILIATION`、`ALLOCATION_GAP`、`CASH_INCOME`、`FUNDING_CAPACITY`、`COMPLETED_TECHNICALS`、`SYMBOL_RULE_FACTS`。 |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 計算狀態：`COMPLETE` 完整、`PARTIAL` 部分欄位可用、`UNAVAILABLE` 無可採用結果。 |
+| `formulaVersion` | 是 | `string` | 否 |  | 執行或嘗試執行的公式版本。 |
+| `formulaSetSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 此結果使用的公式集合 SHA-256。 |
+| `data` | 是 | `object` | 否 |  | 此計算的結果資料；數值使用 decimal 字串，缺值明確為 null。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個穩定且可機器辨識的結果原因碼。 | 說明部分結果、依賴缺失或不可用原因的代碼清單。 |
+| `sourceIds` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個支援此計算結果的來源識別。 | 此計算實際使用或檢查的來源識別清單。 |
+
+### `SrppCalculationsResponse`
+
+以同一 context 固定來源向量執行一批指定計算的結果。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1.0` | 此按需計算 API 的回應 schema 版本，固定為 `1.0`。 |
+| `contextId` | 是 | `string (uuid)` | 否 |  | 本批結果綁定的 context 識別。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 本批結果所屬的台北交易日期。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 本批結果所屬的 SRPP 時段，只能是 `09:05` 或 `11:40`。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | context 中經 registry 驗證的 policy bundle SHA-256。 |
+| `formulaSetSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 所要求計算使用的公式集合 SHA-256。 |
+| `sourceVector` | 是 | `array of SrppSourceRevision` | 否 | maxItems: 30<br>items: SrppSourceRevision<br>items 說明: 一個固定計算來源 revision。 | 與 calculation-context 相同且按 source ID 排序的來源向量。 |
+| `coverage` | 是 | `object` | 否 |  | 每個 query 要求 calculation 的整批狀態及互斥 status 計數。 |
+| `calculations` | 是 | `array of SrppCalculationResult` | 否 | minItems: 1<br>maxItems: 6<br>items: SrppCalculationResult<br>items 說明: 一個獨立 calculation 結果。 | 逐項計算結果；單一項目失敗不得遮蔽其他成功項目。 |
+| `contextContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。 |
+
+### `SrppMarketMetric`
+
+以 decimal 字串表達的市場數值、單位、品質、原因碼及來源識別。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `value` | 是 | `string | null` | 是 | pattern: ^-?(0\|[1-9][0-9]*)(\\.[0-9]*[1-9])?$ | decimal 字串數值；不可用零代替未知值。 |
+| `unit` | 是 | `string` | 否 |  | 數值的明確單位與幣別基準。 |
+| `quality` | 是 | `string` | 否 | enum: `EXACT`, `ESTIMATE`, `UPPER_BOUND`, `LOWER_BOUND`, `UNAVAILABLE` | 資料品質：`EXACT` 精確、`ESTIMATE` 估計、`UPPER_BOUND` 上界、`LOWER_BOUND` 下界、`UNAVAILABLE` 不可用。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個穩定的數值品質或缺漏原因碼。 | 此數值的缺漏或品質原因；可用時為空。 |
+| `sourceIds` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個提供此數值的來源識別。 | 此數值實際使用的來源識別。 |
+
+### `SrppSymbolMarketFact`
+
+單一持股標的在一個 market capture 中的報價及雷達事實，兩者可分別不可用。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 依 include 中要求的 quote/radar 子項計算；全部完整可用為 COMPLETE，有部分可用為 PARTIAL，全部不可用為 UNAVAILABLE。 |
+| `market` | 是 | `string` | 否 |  | 精確標的市場識別，用於防止跨市場代碼碰撞。 |
+| `stockCode` | 是 | `string` | 否 |  | context 白名單內的股票代碼。 |
+| `quoteStatus` | 是 | `string` | 否 | enum: `LIVE`, `CLOSE_FALLBACK`, `STALE`, `UNAVAILABLE` | 報價狀態：`LIVE` 即時、`CLOSE_FALLBACK` 收盤備援、`STALE` 過期、`UNAVAILABLE` 不可用。 |
+| `quoteDataAsOf` | 是 | `string | null (date-time)` | 是 |  | 報價來源資料時點，缺值時為 null，存在時必須含時區。 |
+| `quoteSourceId` | 是 | `string | null` | 是 |  | 報價 canonical source ID，不可用或未要求時為 null。 |
+| `lastPrice` | 是 | `SrppMarketMetric | null` | 是 |  | 最近成交價；缺值不得轉成零。 |
+| `radarStatus` | 是 | `string` | 否 | enum: `AVAILABLE`, `UNAVAILABLE` | 雷達狀態：`AVAILABLE` 有符合市場與代碼的事實、`UNAVAILABLE` 無可用資料。 |
+| `radarDataAsOf` | 是 | `string | null (date-time)` | 是 |  | 雷達來源資料時點，缺值時為 null，存在時必須含時區。 |
+| `radarSourceId` | 是 | `string | null` | 是 |  | 雷達來源識別，不可用或未要求時為 null。 |
+| `radarFacts` | 是 | `object` | 否 |  | 已公開的逐標的雷達事實；缺值欄位以 null 保留。 |
+| `reasonCodes` | 是 | `array of string` | 否 | items: string<br>items 說明: 一個可機器辨識的報價或雷達缺漏原因碼。 | 此標的各來源的缺漏原因碼清單。 |
+
+### `SrppMarketFactsResponse`
+
+以單一 market capture 固定讀取的逐標的 canonical 報價與雷達事實。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1.0` | 此按需計算 API 的回應 schema 版本，固定為 `1.0`。 |
+| `contextId` | 是 | `string (uuid)` | 否 |  | 本批市場事實使用的計算 context 識別。 |
+| `marketCaptureId` | 是 | `string (uuid)` | 否 |  | 本批市場讀取的獨立擷取識別，可與 calculation source vector revision 不同。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 此批市場事實所屬的台北交易日期。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 此批市場事實所屬的 SRPP 時段，只能是 `09:05` 或 `11:40`。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | context 中經 registry 驗證的 policy bundle SHA-256。 |
+| `sourceVector` | 是 | `array of SrppSourceRevision` | 否 | maxItems: 30<br>items: SrppSourceRevision<br>items 說明: 一個本次市場擷取的來源 revision。 | 本批市場來源 revision 向量，每個不同來源／revision 一列並帶 revision、batch dataAsOf 與 bodySha256；逐標的 quoteDataAsOf／radarDataAsOf 保留該標的精確來源時點，且其非 null source ID 必須引用本向量中的來源。 dataAsOf 代表來源資料時點，不得使用 API 回應時間。 |
+| `symbols` | 是 | `array of SrppSymbolMarketFact` | 否 | minItems: 1<br>maxItems: 100<br>items: SrppSymbolMarketFact<br>items 說明: 一個逐標的市場事實列。 | 每一要求標的均有一列，單列缺漏不會使其他列失敗。 |
+| `coverage` | 是 | `object` | 否 |  | 每個 query 要求標的的整批狀態及互斥 status 計數。 |
+| `contextContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。 |
