@@ -20,7 +20,7 @@ Production 的 Fubon 歷史日 K、盤中 1 分 K fact tables 初始為 0 rows�
 - [x] 466.6 以既有 immutable daily fact store 加原有 guarded projection、既有 intraday history transaction writer 寫入；相同 facts unchanged，不覆寫/刪除來源衝突。Migration v1.138.0 修正 minute `average` constraint，只解除平均價相對單分鐘 OHLC 的限制，並新增 receipt schema；保留其他價格/來源/單位/unique constraints，重新產生 `db/schema.sql`。
 - [x] 466.7 Campaign 固定將 cumulative intraday quote volume 與 price-volume distribution 標示 `UNSUPPORTED`，不查當日 volume endpoint、不製造歷史 snapshot；報告 1 分 K 原始 minute volume 為獨立 dataset。最終報表須含 campaign ID、初始／最終 row counts、symbol 數、日期 range、最早／最晚 fact date、inserted/unchanged/conflict/failed counts、unsupported datasets。
 - [x] 466.8 測試 daily optional echo allowlist；歷史 minute strict parser、13:30、平均值超 OHLC、units；31日/365日 chunk 間界；calendar/scope/symbol guards；resume/no duplicate requests/retry gating；同 campaign concurrent lock 與缺值/重複 CLI command；429 stop；idempotent/immutability/conflict；receipt sanitization；零交易方法呼叫。執行 Python 與 Java 對應 suites、Liquibase/schema drift、spec-check、diff-check；spec-check 外部文件 BLOCK 請見完成報告。
-- [ ] 466.9 依 run-stack skill 在主工作樹設定基準不變且不輸出 secrets 的條件下，以一次性 container command 驗證實際歷史回補並安全檢查 rows/receipts；不得改 `.env` 或與其他部署工作併行。Campaign 已成功，但 `commit-merge-push` 因 main worktree 存在無關未提交 `CLAUDE.md` 變更而依 skill 停止；落地及 remote SHA 證據仍待完成。
+- [x] 466.9 依 run-stack skill 在主工作樹設定基準不變且不輸出 secrets 的條件下，以一次性 container command 驗證實際歷史回補並安全檢查 rows/receipts；不得改 `.env` 或與其他部署工作併行。Campaign 與 stack 驗收完成。Feature commit `acb111d65ce1c95fd568ff3fd2996b762cb0e759` 已推至 `origin/codex/fubon-historical-backfill` 並 readback 同 SHA；main 以 `--no-ff` 合併為 `777505b99fe5ad63eb0de93b94f7ebaa30cc679c`，`origin/main` readback 同 SHA。
 
 ### 凍結執行契約
 
@@ -106,7 +106,7 @@ git diff --check
 - Current-only unsupported：`CUMULATIVE_INTRADAY_QUOTE_VOLUME`（無歷史 vendor endpoint／持久來源）、`INTRADAY_PRICE_VOLUME_DISTRIBUTION`（僅當日 Redis snapshot）。Campaign 未呼叫當日分價量 API，也未產生仿造歷史 snapshot；沒有交易或帳戶 endpoint 呼叫。
 - 驗證：Python broker suite 828 passed；Java focused suites 28 passed、0 failures；Liquibase/schema drift 通過，`db/schema.sql` 與執行資料庫一致；`git diff --check` 通過。`scripts/spec-check.sh` 仍被外部 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md` 產生檔 stale BLOCK；該文件屬另一個 SRPP workstream，本次未修改。
 - Run-stack：`external-materials-service`、`fubon-broker-service`、`business-services`、BFF、API gateway healthy；9090 `/api/quotes` JSON array smoke 通過。External image `sha256:410d19d171386b9a768cc52810b503d10facd87a30af37c41920e34d83ae5e56`；broker image `sha256:7497a1eb1b811014ada83f10860d24ce6c04da92d387cf06464d21bc86d73605`。未修改 main `.env` 或秘密設定。
-- Landing：尚未 commit／merge／push。`/Users/steven/Project/asset-management-main` 有一筆與 Task466 無關的未提交 `CLAUDE.md` 變更；`commit-merge-push` skill 的 preflight 規定 main worktree 非乾淨時停止，因此保留該變更並停止落地。尚無 remote SHA 可提供。
+- Landing：Feature commit `acb111d65ce1c95fd568ff3fd2996b762cb0e759` 已推至 `origin/codex/fubon-historical-backfill`；main `--no-ff` merge commit 為 `777505b99fe5ad63eb0de93b94f7ebaa30cc679c`，`origin/main` remote readback 與本地 SHA 一致，merge graph 保留 feature commit 父線。原先 main `CLAUDE.md` 的使用者 model-rule 編輯以 named stash 暫存後已完整還原，未進入 Task466 code commit；因 merge 同時納入 Task466 已提交 checkpoint 的 Requirements 計數更新，HEAD-relative diff 的 Git object index 行改變，但使用者 patch（排除該 index 行）前後 SHA-256 均為 `71d526f3b6d06fba4b0362d1b6817da0d70620b55225ddca7e87469a8322af31`。`scripts/spec-check.sh` 的 B9 仍因外部 SRPP Swagger 產生檔 stale 而 BLOCK；B10 schema drift PASS。Task466 未修改 SRPP Task467 文件或其 worktree。
 
 ### 2026-09-28 暫停保存紀錄
 
