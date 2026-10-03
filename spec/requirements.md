@@ -5814,7 +5814,7 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 **Acceptance Criteria：**
 
-- [ ] 交易雷達右上方管理者操作列新增「補齊技術指標資料」按鈕。只有管理者按下後，資產管理程式才啟動可追蹤的非同步回補工作；不由 LLM、排程或一般頁面載入啟動。頁面顯示 queued/running/partial/completed/failed、處理數量與依官方回應驗證的 coverage；不可僅顯示通用成功訊息。
+- [ ] 交易雷達右上方管理者操作列新增「補齊技術指標資料」按鈕。只有管理者按下後，資產管理程式才啟動可追蹤的非同步回補工作；不由 LLM、排程或一般頁面載入啟動。成功啟動與狀態查詢回應須正確交給頁面呈現並持續輪詢，不得因前後端 response envelope 解讀不一致而把已接受的工作顯示為啟動失敗。頁面顯示 queued/running/partial/completed/failed、處理數量與依官方回應驗證的 coverage；不可僅顯示通用成功訊息。
 - [ ] 僅呼叫由富邦證券、TWSE 或 TPEx 直接提供的官方技術指標資料 API。每筆值與來源日期必須直接來自經 schema 驗證的官方回應；禁止以 K 線、收盤價或任何本地演算法自行計算或補值。其他行情供應商 API 不因其底層行情宣稱源自交易所而自動納入；須先取得使用者明確確認。
 - [ ] 以目前交易雷達台股清單凍結本次標的，範圍最多 30 個；profile/timeframe 清單只取核准官方 endpoint 文件明列且 response schema 已驗證的組合，不得以其他 adapter 的 profile 推定支援。富邦每次日期視窗查詢一檔標的並回傳核准 profile manifest 的逐 profile 結果；35 個視窗預算由同一標的的所有 profile 共用，不是每 profile 各 35 個。每標的從最近已完成日期向前分段查詢，不設定十年目標或上限、不填補來源未提供日期。每檔最多探查 35 個 420 日視窗；若先遇兩個連續且符合成功 schema 的全 profile 空窗，也可停止。整個 job 最多發出 17,850 個 SDK profile request（30 標的 × 35 視窗 × 17 個核准 profile），並以啟動後 24 小時為總期限；任一上限先到即停止新查詢，保留已寫 facts，未完成標的/profile 標為 `HISTORY_DEPTH_UNKNOWN`／partial 並列出最後查詢範圍。SDK 配額不足、429、deadline 或 transport failure 必須標為對應來源不可用／FAILED 並停止，不得當成 NO_DATA。上述空窗停止也必須標示 `HISTORY_DEPTH_UNKNOWN`／partial，不得宣稱已完整補齊。來源明確回空、來源契約定義的暫不可用、來源不支援、歷史深度未知及請求／解析／儲存失敗必須依 Requirement 172 的 `NO_DATA`、`SOURCE_UNAVAILABLE`、`UNSUPPORTED`、`HISTORY_DEPTH_UNKNOWN`、`FAILED` 分別標示。
 - [ ] 只寫入官方原始指標事實，沿用 immutable/idempotent writer 語意；若現有 schema 不能如實保存核准來源識別，須以最小 migration/writer 擴充 provenance，禁止偽裝成 FUBON provider。不得建立 synthetic indicator、不得改寫 live Redis、雷達快照或即時快取，不觸發帳戶或交易功能。重複啟動需拒絕或回傳同一 active job，失敗可安全續跑且不重複事實。
