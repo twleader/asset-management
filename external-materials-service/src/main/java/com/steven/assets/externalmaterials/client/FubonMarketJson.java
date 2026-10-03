@@ -194,6 +194,11 @@ public final class FubonMarketJson {
 
     /** Strict Task408 v2 all-history technical document.  The v1 parser above stays frozen. */
     public static TechnicalBundle technicalV2(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
+        return technicalV2(root, symbol, queryDate.minusDays(420), queryDate, queryDate, now);
+    }
+
+    public static TechnicalBundle technicalV2(JsonNode root, String symbol, LocalDate expectedFrom,
+                                               LocalDate expectedTo, LocalDate observedDate, Instant now) {
         fields(root, Set.of("schemaVersion", "captureId", "symbol", "market", "provider", "queryFrom", "queryTo", "profiles"));
         if (integer(root.get("schemaVersion")) != 2) throw invalid();
         String captureText = text(root.get("captureId"));
@@ -203,12 +208,13 @@ public final class FubonMarketJson {
         if (!capture.toString().equals(captureText)) throw invalid();
         equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
         LocalDate from = date(root.get("queryFrom")), to = date(root.get("queryTo"));
-        if (!from.equals(queryDate.minusDays(420)) || !to.equals(queryDate)) throw invalid();
+        if (!from.equals(expectedFrom) || !to.equals(expectedTo) || from.isAfter(to)
+                || java.time.temporal.ChronoUnit.DAYS.between(from, to) > 420 || to.isAfter(observedDate)) throw invalid();
         JsonNode profiles = root.get("profiles");
         if (!profiles.isArray() || profiles.size() != TECHNICAL_PROFILES.size()) throw invalid();
         List<TechnicalProfileRead> output = new ArrayList<>();
         for (int index = 0; index < TECHNICAL_PROFILES.size(); index++)
-            output.add(technicalProfile(profiles.get(index), TECHNICAL_PROFILES.get(index), from, to, queryDate, now));
+            output.add(technicalProfile(profiles.get(index), TECHNICAL_PROFILES.get(index), from, to, observedDate, now));
         return new TechnicalBundle(capture, symbol, from, to, output);
     }
 

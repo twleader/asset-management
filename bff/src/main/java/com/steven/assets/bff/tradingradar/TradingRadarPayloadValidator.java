@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarPanelResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarRefreshJobResponse;
+import com.steven.assets.bff.tradingradar.dto.TradingRadarTechnicalBackfillJobResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarStockEvaluationResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -14,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -124,6 +126,68 @@ final class TradingRadarPayloadValidator {
                     price.get("twMarketOpen").booleanValue(), elapsed.longValue());
         }
         return new TradingRadarRefreshJobResponse(id, status, createdAt, completedAt, refresh);
+    }
+
+    static TradingRadarTechnicalBackfillJobResponse technicalBackfillJob(JsonNode root, String requestedId) {
+        fields(root, "jobId", "status", "createdAt", "completedAt", "symbols", "completedSymbols",
+                "currentSymbol", "currentFrom", "currentTo", "windows", "availableWindows", "factRows",
+                "profileResults", "reason", "coverage");
+        String id = text(root, "jobId", false);
+        try { UUID uuid = UUID.fromString(id); if (!uuid.toString().equals(id) || uuid.version() != 4) throw invalid(); }
+        catch (IllegalArgumentException malformed) { throw invalid(); }
+        if (requestedId != null && !requestedId.equals(id)) throw invalid();
+        String status = text(root, "status", false);
+        if (!Set.of("QUEUED", "RUNNING", "PARTIAL", "COMPLETED", "FAILED").contains(status)) throw invalid();
+        String createdAt = timestamp(root, "createdAt", false);
+        String completedAt = timestamp(root, "completedAt", true);
+        int symbols = nonNegativeInt(root, "symbols"), completedSymbols = nonNegativeInt(root, "completedSymbols");
+        String currentSymbol = text(root, "currentSymbol", true);
+        String currentFrom = dateText(root, "currentFrom", true), currentTo = dateText(root, "currentTo", true);
+        int windows = nonNegativeInt(root, "windows"), availableWindows = nonNegativeInt(root, "availableWindows");
+        int factRows = nonNegativeInt(root, "factRows");
+        int profileResults = nonNegativeInt(root, "profileResults");
+        String reason = text(root, "reason", true);
+        if (completedSymbols > symbols || availableWindows > windows || factRows < 0) throw invalid();
+        if (Set.of("COMPLETED", "PARTIAL", "FAILED").contains(status) != (completedAt != null)) throw invalid();
+        JsonNode coverageNode = array(root, "coverage");
+        if (coverageNode.size() != symbols * 17) throw invalid();
+        List<TradingRadarTechnicalBackfillJobResponse.Coverage> coverage = new ArrayList<>();
+        Set<String> seenCoverage = new HashSet<>();
+        for (JsonNode item : coverageNode) {
+            fields(item, "symbol", "profileId", "status", "reason", "depthStatus", "firstSourceDate", "lastSourceDate",
+                    "rows", "lastQueryFrom", "lastQueryTo");
+            String symbol = text(item, "symbol", false), profileId = text(item, "profileId", false);
+            if (!symbol.matches("[A-Z0-9.\\-]{1,12}") || profileId.isBlank()
+                    || !seenCoverage.add(symbol + "|" + profileId)) throw invalid();
+            String coverageStatus = text(item, "status", false), depthStatus = text(item, "depthStatus", false);
+            String coverageReason = text(item, "reason", true);
+            if (!Set.of("PENDING", "AVAILABLE", "NO_DATA", "FAILED").contains(coverageStatus)
+                    || !"HISTORY_DEPTH_UNKNOWN".equals(depthStatus)) throw invalid();
+            String first = dateText(item, "firstSourceDate", true), last = dateText(item, "lastSourceDate", true);
+            int rows = nonNegativeInt(item, "rows");
+            String queryFrom = dateText(item, "lastQueryFrom", true), queryTo = dateText(item, "lastQueryTo", true);
+            if ((queryFrom == null) != (queryTo == null) || (first == null) != (last == null)
+                    || (rows == 0) != (first == null)
+                    || (first != null && LocalDate.parse(first).isAfter(LocalDate.parse(last)))) throw invalid();
+            coverage.add(new TradingRadarTechnicalBackfillJobResponse.Coverage(symbol, profileId, coverageStatus,
+                    coverageReason, depthStatus, first, last, rows, queryFrom, queryTo));
+        }
+        if (profileResults > 17850 || profileResults != windows * 17) throw invalid();
+        return new TradingRadarTechnicalBackfillJobResponse(id, status, createdAt, completedAt, symbols,
+                completedSymbols, currentSymbol, currentFrom, currentTo, windows, availableWindows, factRows,
+                profileResults, reason, coverage);
+    }
+
+    private static int nonNegativeInt(JsonNode root, String key) {
+        JsonNode value = required(root, key);
+        if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) throw invalid();
+        return value.intValue();
+    }
+
+    private static String dateText(JsonNode root, String key, boolean nullable) {
+        String value = text(root, key, nullable);
+        if (value != null) try { LocalDate.parse(value); } catch (RuntimeException invalid) { throw invalid(); }
+        return value;
     }
 
     private static void versions(JsonNode root) {

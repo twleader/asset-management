@@ -8,9 +8,27 @@
       <div class="header-actions">
         <el-button :icon="Download" @click="openExport">匯出 Excel</el-button>
         <el-button :icon="Refresh" :loading="refreshing" @click="manualRefresh">重新整理</el-button>
+        <el-button v-if="auth.isConfiguredAdmin" :icon="Refresh" :loading="technicalBackfillLoading" title="只補入富邦官方回傳的日／週技術指標，不自行計算" @click="onBackfillTechnicalIndicators">補齊技術指標資料</el-button>
         <el-button v-if="auth.isConfiguredAdmin" :icon="Promotion" :loading="publishingBlog" @click="onPublishBlog">匯出到 blog</el-button>
       </div>
     </div>
+    <el-alert v-if="technicalBackfillJob" :closable="false" show-icon class="technical-backfill-status"
+      :type="technicalBackfillJob.status === 'COMPLETED' ? 'success' : ['FAILED','PARTIAL'].includes(technicalBackfillJob.status) ? 'warning' : 'info'"
+      :title="technicalBackfillStatusText" />
+    <el-table v-if="technicalBackfillJob?.coverage?.length" :data="technicalBackfillJob.coverage" size="small" border height="300" class="technical-backfill-coverage">
+      <el-table-column prop="symbol" label="標的" width="82" />
+      <el-table-column prop="profileId" label="官方指標 profile" min-width="180" />
+      <el-table-column prop="status" label="資料狀態" width="120" />
+      <el-table-column prop="reason" label="來源回報" min-width="180" />
+      <el-table-column prop="depthStatus" label="歷史深度" width="150" />
+      <el-table-column label="已取得日期" min-width="190">
+        <template #default="scope">{{ scope.row.firstSourceDate && scope.row.lastSourceDate ? `${scope.row.firstSourceDate}～${scope.row.lastSourceDate}` : '尚無可核對資料' }}</template>
+      </el-table-column>
+      <el-table-column prop="rows" label="筆數" width="80" />
+      <el-table-column label="最後查詢區間" min-width="190">
+        <template #default="scope">{{ scope.row.lastQueryFrom && scope.row.lastQueryTo ? `${scope.row.lastQueryFrom}～${scope.row.lastQueryTo}` : '尚未查詢' }}</template>
+      </el-table-column>
+    </el-table>
 
     <el-alert
       type="info"
@@ -1485,6 +1503,9 @@ const notificationForm = reactive({
 const notificationOptions = reactive({ actions: [], counterTrends: [], recipients: [] })
 const analysisVisible = ref(false)
 const analysisStock = ref(null)
+const technicalBackfillLoading = ref(false)
+const technicalBackfillJob = ref(null)
+let technicalBackfillTimer = null
 const RECONNECT_DELAY_MS = 5000
 
 let priceStream = null
@@ -1608,6 +1629,71 @@ async function manualRefresh() {
   } catch (error) {
     if (!disposed) ElMessage.warning(error?.message || '無法啟動行情更新工作')
   } finally { refreshing.value = false }
+}
+
+const TECHNICAL_BACKFILL_STATUS = {
+  QUEUED: '等待技術指標回補', RUNNING: '正在回補技術指標',
+  COMPLETED: '技術指標回補完成', PARTIAL: '技術指標部分回補', FAILED: '技術指標回補失敗'
+}
+const TECHNICAL_BACKFILL_REASON = {
+  HISTORY_DEPTH_UNKNOWN: '官方文件未確認最早歷史日期；以下列出已取得資料與實際查詢區間。',
+  TECHNICAL_HISTORY_BACKFILL_DISABLED: '回補功能尚未啟用。',
+  CALENDAR_UNKNOWN: '無法確認最近已完成的台股交易日，工作未啟動。',
+  RATE_LIMITED: '官方來源目前限流，工作已停止。',
+  HISTORY_BUDGET_EXHAUSTED: '官方行情查詢額度不足，工作已停止。',
+  UPSTREAM_UNAVAILABLE: '富邦官方技術資料暫時無法取得。',
+  TECHNICAL_SCHEMA_INVALID: '官方回應格式無法核實，工作已停止。',
+  TECHNICAL_PERSISTENCE_FAILED: '官方資料寫入失敗，工作已停止。'
+}
+const technicalBackfillStatusText = computed(() => {
+  const job = technicalBackfillJob.value
+  if (!job) return ''
+  const progress = `${job.completedSymbols}/${job.symbols} 檔，已完成 ${job.windows} 個日期區間、${job.profileResults} 筆 profile 結果，新增或核對 ${job.factRows} 筆官方資料`
+  const range = job.currentSymbol && job.currentFrom && job.currentTo
+    ? `；目前 ${job.currentSymbol} ${job.currentFrom}～${job.currentTo}` : ''
+  const reason = job.reason ? `；${TECHNICAL_BACKFILL_REASON[job.reason] || `原因：${job.reason}`}` : ''
+  return `${TECHNICAL_BACKFILL_STATUS[job.status] || job.status}：${progress}${range}${reason}`
+})
+
+async function pollTechnicalBackfill(jobId) {
+  if (disposed) return
+  try {
+    const response = await bffApi.tradingRadar.getTechnicalBackfillJob(jobId)
+    const job = response?.data
+    if (!job || job.jobId !== jobId) throw new Error('技術指標回補狀態回應無效')
+    technicalBackfillJob.value = job
+    if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(job.status)) {
+      technicalBackfillLoading.value = false
+      if (job.status === 'COMPLETED') ElMessage.success(technicalBackfillStatusText.value)
+      else ElMessage.warning(technicalBackfillStatusText.value)
+      return
+    }
+    technicalBackfillTimer = setTimeout(() => pollTechnicalBackfill(jobId), 5000)
+  } catch (error) {
+    technicalBackfillLoading.value = false
+    if (!disposed) ElMessage.warning(error?.message || '無法讀取技術指標回補狀態')
+  }
+}
+
+async function onBackfillTechnicalIndicators() {
+  if (technicalBackfillLoading.value) return
+  if (technicalBackfillTimer) clearTimeout(technicalBackfillTimer)
+  technicalBackfillLoading.value = true
+  try {
+    const response = await bffApi.tradingRadar.startTechnicalBackfillJob()
+    const job = response?.data
+    if (!job?.jobId) throw new Error('技術指標回補工作未能啟動')
+    technicalBackfillJob.value = job
+    if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(job.status)) {
+      technicalBackfillLoading.value = false
+      ElMessage({ type: job.status === 'COMPLETED' ? 'success' : 'warning', message: technicalBackfillStatusText.value })
+    } else {
+      technicalBackfillTimer = setTimeout(() => pollTechnicalBackfill(job.jobId), 1500)
+    }
+  } catch (error) {
+    technicalBackfillLoading.value = false
+    ElMessage.warning(error?.message || '無法啟動技術指標回補')
+  }
 }
 
 function applyPriceUpdate(payload) {
@@ -2577,6 +2663,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   disposed = true
+  if (technicalBackfillTimer) clearTimeout(technicalBackfillTimer)
   panelLoader.dispose()
   refreshJob.dispose()
   for (const key of Object.keys(detailStates)) cancelDetail(key)
@@ -2601,7 +2688,9 @@ onUnmounted(() => {
 }
 .page-heading { font-size: 23px; font-weight: 750; color: #0f172a; }
 .page-sub { margin-top: 4px; color: #64748b; font-size: 13px; }
-.header-actions { display: flex; gap: 8px; }
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.technical-backfill-status { margin: 8px 0 12px; }
+.technical-backfill-coverage { margin-top: 10px; }
 .dialog-note { color: #64748b; font-size: 13px; line-height: 1.6; }
 .local-rule-alert { margin-bottom: 16px; }
 .market-card { border-top: 4px solid #f59e0b; }

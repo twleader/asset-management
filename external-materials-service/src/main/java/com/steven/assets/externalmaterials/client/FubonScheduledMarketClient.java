@@ -70,11 +70,16 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
         catch (RuntimeException invalid) { throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "TECHNICAL_SCHEMA_INVALID", invalid); }
     }
     @Override public TechnicalBundle technicalV2(String symbol, LocalDate date) {
+        return technicalV2(symbol, date.minusDays(420), date);
+    }
+    @Override public TechnicalBundle technicalV2(String symbol, LocalDate from, LocalDate to) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = post("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "/internal/market-data/technical-indicators/read", Map.of("symbol", symbol),
+        String body = post("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "/internal/market-data/technical-indicators/read",
+                Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()),
                 4 * 1024 * 1024, TECHNICAL_V2_TIMEOUT);
         try {
-            TechnicalBundle result = FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, date, clock.instant());
+            TechnicalBundle result = FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, from, to,
+                    clock.instant().atZone(MarketClock.TW_ZONE).toLocalDate(), clock.instant());
             if (result.profiles().stream().anyMatch(profile -> !profile.available() && !"NO_DATA".equals(profile.reason())))
                 brokerFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "FAILED_OUTCOME");
             return result;

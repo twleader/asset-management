@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarPanelResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarRefreshJobResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarStockEvaluationResponse;
+import com.steven.assets.bff.tradingradar.dto.TradingRadarTechnicalBackfillJobResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
@@ -79,6 +80,19 @@ public class TradingRadarPanelService {
             String id = validJobId(jobId);
             return complete(read(businessServicesClient.get().uri("/api/trading-radar/refresh-jobs/{id}", id))
                     .map(body -> TradingRadarPayloadValidator.job(body, id)), jobBudget, JOB_ERRORS);
+        });
+    }
+
+    public Mono<TradingRadarTechnicalBackfillJobResponse> startTechnicalBackfillJob() {
+        return complete(read(businessServicesClient.post().uri("/api/trading-radar/technical-backfill-jobs"))
+                .map(body -> TradingRadarPayloadValidator.technicalBackfillJob(body, null)), jobBudget, JOB_ERRORS);
+    }
+
+    public Mono<TradingRadarTechnicalBackfillJobResponse> technicalBackfillJob(String jobId) {
+        return Mono.defer(() -> {
+            String id = validJobId(jobId);
+            return complete(read(businessServicesClient.get().uri("/api/trading-radar/technical-backfill-jobs/{id}", id))
+                    .map(body -> TradingRadarPayloadValidator.technicalBackfillJob(body, id)), jobBudget, JOB_ERRORS);
         });
     }
 

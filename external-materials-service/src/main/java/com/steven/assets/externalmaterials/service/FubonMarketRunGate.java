@@ -26,6 +26,21 @@ public class FubonMarketRunGate {
         if (afterClose && now.toLocalTime().isBefore(LocalTime.of(13, 40))) return "BEFORE_CLOSE";
         return null;
     }
+    /** Historical reads are independent of today's session; readiness and explicit flag still fail closed. */
+    public String reasonForHistoricalRead(String feature, String disabledReason) {
+        String reason = FubonMarketData.featureReason(feature, disabledReason);
+        if (reason != null) return reason;
+        return access.unavailableReason();
+    }
     public LocalDate today() { return clock.instant().atZone(MarketClock.TW_ZONE).toLocalDate(); }
+    public LocalDate latestCompletedTwDay() {
+        LocalDate candidate = today().minusDays(1);
+        for (int i = 0; i < 14; i++, candidate = candidate.minusDays(1)) {
+            var tradingDay = calendar.isTwTradingDayKnown(candidate);
+            if (tradingDay.isEmpty()) throw new FubonMarketData.Unavailable("CALENDAR_UNKNOWN");
+            if (tradingDay.get()) return candidate;
+        }
+        throw new FubonMarketData.Unavailable("CALENDAR_UNKNOWN");
+    }
     public boolean sameDay(LocalDate date) { return today().equals(date); }
 }

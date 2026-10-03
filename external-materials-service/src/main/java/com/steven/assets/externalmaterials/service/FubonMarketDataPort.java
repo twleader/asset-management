@@ -11,6 +11,10 @@ public interface FubonMarketDataPort {
     default TechnicalBundle technicalV2(String symbol, LocalDate queryDate) {
         throw new Unavailable("TECHNICAL_V2_UNAVAILABLE");
     }
+    default TechnicalBundle technicalV2(String symbol, LocalDate from, LocalDate to) {
+        if (from != null && to != null && from.equals(to.minusDays(420))) return technicalV2(symbol, to);
+        throw new Unavailable("TECHNICAL_V2_HISTORY_UNAVAILABLE");
+    }
     default StockBasicRead basic(String symbol, LocalDate queryDate) {
         throw new Unavailable("STOCK_BASIC_UNAVAILABLE");
     }

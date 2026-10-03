@@ -27,7 +27,9 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
     private static final Map<String, String> ROUTES = Map.of(
             "/internal/dividend/fubon-sync", "POST",
             "/internal/technical-indicators/fubon-sync", "POST",
-            "/internal/technical-indicators/fubon-cache", "GET");
+            "/internal/technical-indicators/fubon-cache", "GET",
+            "/internal/technical-indicators/history-backfill-jobs", "POST",
+            "/internal/technical-indicators/history-backfill-jobs/{jobId}", "GET");
     private final Supplier<FubonMarketConfigState> config;
     @Autowired
     public FubonScheduledMarketTokenFilter(ObjectProvider<FubonMarketConfigState> config) {
@@ -42,13 +44,15 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
         try { decoded = URLDecoder.decode(raw, StandardCharsets.UTF_8); }
         catch (IllegalArgumentException invalid) { decoded = raw; }
         String path = decoded;
-        return ROUTES.keySet().stream().noneMatch(p -> raw.startsWith(p) || path.startsWith(p)
-                || (request.getServletPath() != null && request.getServletPath().startsWith(p)));
+        String servletPath = request.getServletPath();
+        return ROUTES.keySet().stream().noneMatch(p -> matches(p, raw) || matches(p, path)
+                || (servletPath != null && matches(p, servletPath)));
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                                FilterChain chain) throws ServletException, IOException {
-        String path = request.getRequestURI();
-        if (!request.getMethod().equals(ROUTES.get(path))) { reject(response, 404, "NOT_FOUND"); return; }
+        String route = ROUTES.keySet().stream().filter(pattern -> matches(pattern, request.getRequestURI()))
+                .findFirst().orElse(null);
+        if (route == null || !request.getMethod().equals(ROUTES.get(route))) { reject(response, 404, "NOT_FOUND"); return; }
         FubonMarketConfigState state = config.get();
         if (state == null) { reject(response, 503, "MISCONFIGURED"); return; }
         var access = state.snapshot();
@@ -63,7 +67,11 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
         if (!MessageDigest.isEqual(digest(access.token()), digest(token))) { reject(response, 403, "FORBIDDEN"); return; }
         if (request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null
                 || request.getInputStream().read() != -1) { reject(response, 400, "INVALID_REQUEST"); return; }
-        Set<String> allowed = "GET".equals(request.getMethod()) ? Set.of("symbol") : Set.of("dryRun");
+        Set<String> allowed = switch (route) {
+            case "/internal/technical-indicators/fubon-cache" -> Set.of("symbol");
+            case "/internal/technical-indicators/history-backfill-jobs", "/internal/technical-indicators/history-backfill-jobs/{jobId}" -> Set.of();
+            default -> Set.of("dryRun");
+        };
         if (!allowed.containsAll(request.getParameterMap().keySet())
                 || request.getParameterMap().values().stream().anyMatch(v -> v.length != 1)) {
             reject(response, 400, "INVALID_REQUEST"); return;
@@ -77,6 +85,14 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
     private static byte[] digest(String value) {
         try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }
         catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+    private static boolean matches(String pattern, String path) {
+        if (path == null) return false;
+        int marker = pattern.indexOf("/{jobId}");
+        if (marker < 0) return pattern.equals(path);
+        String prefix = pattern.substring(0, marker + 1);
+        return path.startsWith(prefix) && path.length() > prefix.length()
+                && path.indexOf('/', prefix.length()) < 0;
     }
     private static void reject(HttpServletResponse response, int status, String reason) throws IOException {
         response.setStatus(status);

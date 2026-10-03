@@ -192,6 +192,58 @@ class TechnicalIndicatorService:
         return {"schemaVersion": 2, "captureId": capture_id, "symbol": symbol, "market": "台股",
                 "provider": "FUBON_SDK", "queryFrom": query_from, "queryTo": query_to, "profiles": profiles}
 
+    def read_history(self, symbol: str, start_date: str, end_date: str) -> dict[str, object]:
+        """Read one bounded historical window using the fixed official Fubon profile manifest."""
+        started = instant(self._now())
+        observed_date = started.astimezone(TAIPEI).date()
+        try:
+            stock_code(symbol)
+            start = strict_iso_date(start_date)
+            end = strict_iso_date(end_date)
+            if start > end or (end - start).days > 420 or end > observed_date:
+                raise ValueError("INVALID_DATE_RANGE")
+        except ValueError:
+            raise TechnicalIndicatorError("INVALID_REQUEST", request_error=True) from None
+        capture_id = str(uuid4())
+        deadline = self._monotonic() + 60.0
+        profiles: list[dict[str, object]] = []
+        stop_reason: str | None = None
+        for profile in PROFILES:
+            if instant(self._now()).astimezone(TAIPEI).date() != observed_date:
+                raise TechnicalIndicatorError("STALE_QUERY")
+            if stop_reason is not None:
+                profiles.append(_unavailable(profile, stop_reason, instant(self._now())))
+                continue
+            try:
+                source = self._gateway.read_technical_indicator(
+                    profile.kind, symbol, start.isoformat(), end.isoformat(), timeframe=profile.timeframe,
+                    parameters={key: value for key, value in profile.parameters.items() if key != "timeframe"},
+                    deadline=deadline,
+                )
+            except SdkCallError as exc:
+                if exc.misconfigured:
+                    raise
+                if exc.reason in {"RATE_LIMITED", "HISTORY_BUDGET_EXHAUSTED"} or (
+                    exc.reason == "MARKETDATA_TIMEOUT" and self._monotonic() >= deadline
+                ):
+                    stop_reason = exc.reason
+                profiles.append(_unavailable(profile, exc.reason, instant(self._now())))
+                continue
+            observed = instant(self._now())
+            try:
+                profiles.append(self._normalize_profile(profile, source, symbol,
+                                                        start.isoformat(), end.isoformat(), observed))
+            except ValueError:
+                profiles.append({"profileId": profile.profile_id, "status": "SCHEMA_INVALID",
+                                 "reason": "TECHNICAL_SCHEMA_INVALID", "parameters": dict(profile.parameters),
+                                 "observedAt": observed_at(observed), "history": []})
+        finished = instant(self._now())
+        if finished < started or finished.astimezone(TAIPEI).date() != observed_date:
+            raise TechnicalIndicatorError("STALE_QUERY")
+        return {"schemaVersion": 2, "captureId": capture_id, "symbol": symbol, "market": "台股",
+                "provider": "FUBON_SDK", "queryFrom": start.isoformat(), "queryTo": end.isoformat(),
+                "profiles": profiles}
+
     @staticmethod
     def _normalize_profile(profile: TechnicalProfile, source: object, symbol: str, start: str, end: str,
                            observed: datetime) -> dict[str, object]:

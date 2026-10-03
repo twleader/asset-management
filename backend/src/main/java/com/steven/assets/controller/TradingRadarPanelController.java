@@ -1,6 +1,8 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.dto.TradingRadarPanelDto;
+import com.steven.assets.dto.TradingRadarTechnicalBackfillJobDto;
+import com.steven.assets.service.TradingRadarTechnicalBackfillService;
 import com.steven.assets.service.TradingRadarRefreshJobService;
 import com.steven.assets.service.TradingRadarService;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class TradingRadarPanelController {
     private final TradingRadarService service;
     private final TradingRadarRefreshJobService jobs;
+    private final TradingRadarTechnicalBackfillService technicalBackfill;
 
     @GetMapping("/panels/tw-market")
     public TradingRadarPanelDto.Panel<TradingRadarPanelDto.MarketData> taiwanMarket() {
@@ -54,6 +57,16 @@ public class TradingRadarPanelController {
     @PostMapping("/refresh-jobs")
     public ResponseEntity<TradingRadarPanelDto.RefreshJob> startRefresh() {
         return ResponseEntity.accepted().body(jobs.start());
+    }
+
+    @PostMapping("/technical-backfill-jobs")
+    public ResponseEntity<TradingRadarTechnicalBackfillJobDto> startTechnicalBackfill() {
+        return ResponseEntity.accepted().body(technicalBackfill.start());
+    }
+
+    @GetMapping("/technical-backfill-jobs/{jobId}")
+    public TradingRadarTechnicalBackfillJobDto technicalBackfill(@PathVariable String jobId) {
+        return technicalBackfill.get(jobId);
     }
 
     @GetMapping("/refresh-jobs/{jobId}")
