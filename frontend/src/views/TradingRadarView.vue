@@ -1659,7 +1659,7 @@ async function pollTechnicalBackfill(jobId) {
   if (disposed) return
   try {
     const response = await bffApi.tradingRadar.getTechnicalBackfillJob(jobId)
-    const job = response?.data
+    const job = response
     if (!job || job.jobId !== jobId) throw new Error('技術指標回補狀態回應無效')
     technicalBackfillJob.value = job
     if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(job.status)) {
@@ -1681,7 +1681,7 @@ async function onBackfillTechnicalIndicators() {
   technicalBackfillLoading.value = true
   try {
     const response = await bffApi.tradingRadar.startTechnicalBackfillJob()
-    const job = response?.data
+    const job = response
     if (!job?.jobId) throw new Error('技術指標回補工作未能啟動')
     technicalBackfillJob.value = job
     if (['COMPLETED', 'PARTIAL', 'FAILED'].includes(job.status)) {

@@ -15,6 +15,7 @@
 - [ ] 471.3 實作管理者受保護的頁面專屬 BFF 及 async job。啟動需通過 admin authorization、明確 feature flag、來源相符 readiness、internal token 與配額 gate；Fubon enablement 僅用於富邦來源。一次僅一個 active job。job scope 凍結最多 30 個交易雷達台股代碼，從最近已完成日期起分段向前查詢，不設十年目標或上限，只寫官方成功回應的日期。每標的最多 35 個 420 日視窗，視窗內回傳全部核准 profile；最多 17,850 個 profile-level SDK request，總期限 24 小時。若先遇兩個連續、符合成功 schema 的全 profile 空窗亦可停止；此種停止、用盡預算或期限都須以 `HISTORY_DEPTH_UNKNOWN`／partial 結束並列出已查範圍。429／配額不足／transport 或解析錯誤保留對應 FAILED 或來源不可用分類並停止，不得當成空資料。狀態須可輪詢、短期保留、同一 job 可安全續跑；HTTP/BFF 不得直接對外行情 host 發送請求。
 - [ ] 471.4 加入「補齊技術指標資料」button，顯示 queued/running/partial/completed/failed、處理進度、symbol/profile 官方日期 coverage 及 NO_DATA／SOURCE_UNAVAILABLE／UNSUPPORTED／HISTORY_DEPTH_UNKNOWN／FAILED 分類（定義依 Requirement 172）；不能以部分成功顯示全部完成。未確認來源時清楚顯示目前沒有可用的核准官方指標來源。
 - [ ] 471.5 保持零 live Redis、雷達快照、帳戶及交易副作用；禁止使用 candles、本地演算法或非核准供應商資料填補。資料寫入僅使用既有 immutable facts 與 idempotency；重複啟動需拒絕或回傳相同 active job。
+- [ ] 471.6 修正按鈕啟動與狀態輪詢對本頁 Axios 已解包 response data 的讀取方式；已接受且包含 `jobId` 的 job 必須進入狀態顯示與輪詢，不能被誤判為缺少 `jobId`。
 
 ## 驗證
 
