@@ -343,6 +343,8 @@ export const bffApi = {
     getRefreshJob: (jobId, { signal } = {}) => api.get(`/bff/trading-radar/refresh-jobs/${encodeURIComponent(jobId)}`, {
       signal, skipErrorToast: true
     }),
+    startTechnicalBackfillJob: () => api.post('/bff/trading-radar/technical-backfill-jobs', null, { timeout: 10000 }),
+    getTechnicalBackfillJob: (jobId) => api.get(`/bff/trading-radar/technical-backfill-jobs/${encodeURIComponent(jobId)}`, { skipErrorToast: true }),
     // Task 249：手動「重新整理」＝先同步回補台股行情再重算。
     // 外部抓取需時，全域 timeout 30s 不夠用，必須 per-call 覆寫（鏈路上界為 nginx /api/ 的 60s）
     refresh: () => api.post('/bff/trading-radar/refresh', null, { timeout: 45000 }),

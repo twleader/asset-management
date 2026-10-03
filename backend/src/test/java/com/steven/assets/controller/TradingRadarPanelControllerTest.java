@@ -5,6 +5,7 @@ import com.steven.assets.security.UnauthenticatedException;
 import com.steven.assets.service.TradingRadarRefreshJobService;
 import com.steven.assets.service.TradingRadarRefreshUnavailableException;
 import com.steven.assets.service.TradingRadarService;
+import com.steven.assets.service.TradingRadarTechnicalBackfillService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -19,7 +20,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class TradingRadarPanelControllerTest {
     private final TradingRadarService service = mock(TradingRadarService.class);
     private final TradingRadarRefreshJobService jobs = mock(TradingRadarRefreshJobService.class);
-    private final MockMvc http = MockMvcBuilders.standaloneSetup(new TradingRadarPanelController(service, jobs))
+    private final TradingRadarTechnicalBackfillService technicalBackfill = mock(TradingRadarTechnicalBackfillService.class);
+    private final MockMvc http = MockMvcBuilders.standaloneSetup(new TradingRadarPanelController(service, jobs, technicalBackfill))
             .setControllerAdvice(new GlobalExceptionHandler()).build();
 
     @Test void fiveRoutesAndEvaluationDelegateExactlyOnceWithoutFullOrListAssembly() throws Exception {

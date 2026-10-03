@@ -5807,3 +5807,16 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **Task 469：market-facts 行情時效及來源精度。** `LIVE` 僅在 cache-only 已知交易日、標的市場當地日期與盤中時段正確，且 Redis 台北牆鐘 `updatedAt` 換算的來源觀測時點非未來、年齡介於 0 至 5 分鐘（含上界）時成立。台／美／英股分別用 Taipei／New York／London 時區；未知市場、日曆未知、觀測時間缺失、跨日或盤前不得標 LIVE，也不得因 GET 而刷新日曆、行情或呼叫外部來源。超過 5 分鐘且仍有可信日期／價格者降 STALE，來源不可證明者 UNAVAILABLE。`VERIFIED_CLOSE`、`CLOSE`、`CLOSE_FALLBACK`、`PREVIOUS_CLOSE` 只有在來源及交易日期可核實時才映為收盤備援，`quoteDataAsOf` 為原始 ISO 交易日期；不可用 cache 處理時間或補造午夜。雷達只有 `asOfDate` 時亦保留 ISO 日期。market-facts item 及市場 sourceVector 的 `dataAsOf` 可為 ISO date 或有時區 ISO date-time；context／calculations 共用 source revision 仍維持原有 date-time 契約，BFF／OpenAPI 不得一併放寬。JCS hash／coverage／純讀語意不變。
 - [ ] **安全及隔離。** 每次請求由 configured-admin／active-account selector 解析 owner 並 owner-scope 查詢；跨 owner 與不存在 context 對外同回 404。query 重複／未知 key、GET body、格式錯誤及 path 變體均拒絕；成功回應 `Cache-Control: private, no-store`。
 - [ ] **文件與驗收。** 更新 9090 權威清單、OpenAPI 3.1、contract tests、產生文件及使用者指定的 SRPP Swagger mirror；Docker stack 重建後由 9090 實測三條 exact routes。不得宣稱 reference calculator parity，除非另有對應證據。
+
+### Requirement 173／Task 471：交易雷達管理者啟動核准官方技術指標歷史回補
+
+**User Story：**作為管理者，我希望按下今日交易雷達上的按鈕後，由資產管理程式非同步查詢富邦證券或交易所官方 API 實際可提供的技術指標歷史資料，查看逐標的與指標日期範圍；不要求固定十年。
+
+**Acceptance Criteria：**
+
+- [ ] 交易雷達右上方管理者操作列新增「補齊技術指標資料」按鈕。只有管理者按下後，資產管理程式才啟動可追蹤的非同步回補工作；不由 LLM、排程或一般頁面載入啟動。頁面顯示 queued/running/partial/completed/failed、處理數量與依官方回應驗證的 coverage；不可僅顯示通用成功訊息。
+- [ ] 僅呼叫由富邦證券、TWSE 或 TPEx 直接提供的官方技術指標資料 API。每筆值與來源日期必須直接來自經 schema 驗證的官方回應；禁止以 K 線、收盤價或任何本地演算法自行計算或補值。其他行情供應商 API 不因其底層行情宣稱源自交易所而自動納入；須先取得使用者明確確認。
+- [ ] 以目前交易雷達台股清單凍結本次標的，範圍最多 30 個；profile/timeframe 清單只取核准官方 endpoint 文件明列且 response schema 已驗證的組合，不得以其他 adapter 的 profile 推定支援。富邦每次日期視窗查詢一檔標的並回傳核准 profile manifest 的逐 profile 結果；35 個視窗預算由同一標的的所有 profile 共用，不是每 profile 各 35 個。每標的從最近已完成日期向前分段查詢，不設定十年目標或上限、不填補來源未提供日期。每檔最多探查 35 個 420 日視窗；若先遇兩個連續且符合成功 schema 的全 profile 空窗，也可停止。整個 job 最多發出 17,850 個 SDK profile request（30 標的 × 35 視窗 × 17 個核准 profile），並以啟動後 24 小時為總期限；任一上限先到即停止新查詢，保留已寫 facts，未完成標的/profile 標為 `HISTORY_DEPTH_UNKNOWN`／partial 並列出最後查詢範圍。SDK 配額不足、429、deadline 或 transport failure 必須標為對應來源不可用／FAILED 並停止，不得當成 NO_DATA。上述空窗停止也必須標示 `HISTORY_DEPTH_UNKNOWN`／partial，不得宣稱已完整補齊。來源明確回空、來源契約定義的暫不可用、來源不支援、歷史深度未知及請求／解析／儲存失敗必須依 Requirement 172 的 `NO_DATA`、`SOURCE_UNAVAILABLE`、`UNSUPPORTED`、`HISTORY_DEPTH_UNKNOWN`、`FAILED` 分別標示。
+- [ ] 只寫入官方原始指標事實，沿用 immutable/idempotent writer 語意；若現有 schema 不能如實保存核准來源識別，須以最小 migration/writer 擴充 provenance，禁止偽裝成 FUBON provider。不得建立 synthetic indicator、不得改寫 live Redis、雷達快照或即時快取，不觸發帳戶或交易功能。重複啟動需拒絕或回傳同一 active job，失敗可安全續跑且不重複事實。
+- [ ] 工作依實際來源套用相符的 enablement、internal token、SDK/API readiness、配額與期限 gate；Fubon gate 僅適用於富邦來源。未授權管理者不可啟動或讀取 job。前端只經本頁 BFF，business 不直接呼叫外部行情 API。
+- [ ] 增加本頁 BFF、backend job 狀態/API 及 external-materials official history runner；狀態契約為 immutable records。無可驗證官方歷史 endpoint/profile 時，明確回報 unsupported/history depth unknown，不以其他資料源替代。Task 470 的十年盤點範圍只約束 Task 470，不構成本回補目標。

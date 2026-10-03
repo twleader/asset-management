@@ -3,6 +3,7 @@ package com.steven.assets.bff.tradingradar;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarPanelResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarRefreshJobResponse;
 import com.steven.assets.bff.tradingradar.dto.TradingRadarStockEvaluationResponse;
+import com.steven.assets.bff.tradingradar.dto.TradingRadarTechnicalBackfillJobResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
@@ -69,6 +70,16 @@ public class TradingRadarBffController {
     @GetMapping("/refresh-jobs/{jobId}")
     public Mono<TradingRadarRefreshJobResponse> refreshJob(@PathVariable String jobId) {
         return panelService.refreshJob(jobId);
+    }
+
+    @PostMapping("/technical-backfill-jobs")
+    public Mono<ResponseEntity<TradingRadarTechnicalBackfillJobResponse>> startTechnicalBackfillJob() {
+        return panelService.startTechnicalBackfillJob().map(job -> ResponseEntity.accepted().body(job));
+    }
+
+    @GetMapping("/technical-backfill-jobs/{jobId}")
+    public Mono<TradingRadarTechnicalBackfillJobResponse> technicalBackfillJob(@PathVariable String jobId) {
+        return panelService.technicalBackfillJob(jobId);
     }
 
     /**

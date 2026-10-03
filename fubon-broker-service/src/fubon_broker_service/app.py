@@ -149,11 +149,24 @@ class DividendReadRequest(BaseModel):
 class TechnicalReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     symbol: StrictStr
+    from_date: StrictStr | None = Field(default=None, alias="from")
+    to_date: StrictStr | None = Field(default=None, alias="to")
 
     @field_validator("symbol")
     @classmethod
     def validate_symbol(cls, value: str) -> str:
         return stock_code(value)
+
+    @field_validator("to_date")
+    @classmethod
+    def validate_range_pair(cls, value: str | None, info):
+        start = info.data.get("from_date")
+        if (start is None) != (value is None):
+            raise ValueError("from and to must be provided together")
+        if start is not None:
+            strict_iso_date(start)
+            strict_iso_date(value)
+        return value
 
 
 class MarketDataV1ReadRequest(BaseModel):
@@ -588,7 +601,8 @@ def create_app(
     @application.post("/internal/market-data/technical-indicators/read")
     def technical_read(request: TechnicalReadRequest, _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
         try:
-            result = technical.read(request.symbol)
+            result = (technical.read(request.symbol) if request.from_date is None
+                      else technical.read_history(request.symbol, request.from_date, request.to_date))
         except SdkCallError as exc:
             outcome_counters.increment(Outcome.MISCONFIGURED if exc.misconfigured else Outcome.QUOTE_FAILED)
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
