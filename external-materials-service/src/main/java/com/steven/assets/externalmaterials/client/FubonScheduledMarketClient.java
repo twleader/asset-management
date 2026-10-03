@@ -74,17 +74,24 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
     }
     @Override public TechnicalBundle technicalV2(String symbol, LocalDate from, LocalDate to) {
         validateSymbols(List.of(symbol), 1, false);
-        String body = post("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "/internal/market-data/technical-indicators/read",
-                Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()),
-                4 * 1024 * 1024, TECHNICAL_V2_TIMEOUT);
+        String operationKey = "FUBON_TECHNICAL_INDICATORS_READ";
+        String apiName = "技術指標查詢";
+        String body = postTechnicalV2(symbol, from, to, operationKey, apiName);
+        TechnicalBundle result;
         try {
-            TechnicalBundle result = FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, from, to,
+            result = FubonMarketJson.technicalV2(FubonMarketJson.parse(body), symbol, from, to,
                     clock.instant().atZone(MarketClock.TW_ZONE).toLocalDate(), clock.instant());
-            if (result.profiles().stream().anyMatch(profile -> !profile.available() && !"NO_DATA".equals(profile.reason())))
-                brokerFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "FAILED_OUTCOME");
-            return result;
         }
-        catch (RuntimeException invalid) { throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "TECHNICAL_SCHEMA_INVALID", invalid); }
+        catch (RuntimeException invalid) {
+            recordTechnicalInvocationFailure(symbol, from, to, "TECHNICAL_SCHEMA_INVALID", 200);
+            throw new Unavailable("TECHNICAL_SCHEMA_INVALID");
+        }
+        List<String> profileFailures = result.profiles().stream()
+                .filter(profile -> !profile.available() && !"NO_DATA".equals(profile.reason()))
+                .map(profile -> profile.profileId() + ":" + profile.reason())
+                .toList();
+        if (!profileFailures.isEmpty()) recordTechnicalProfileFailures(symbol, from, to, profileFailures);
+        return result;
     }
     @Override public StockBasicRead basic(String symbol, LocalDate date) {
         validateSymbols(List.of(symbol), 1, false);
@@ -185,6 +192,66 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
             if (outboundStarted) record(operationKey, apiName, failure);
             throw new Unavailable("UPSTREAM_UNAVAILABLE");
         }
+    }
+    /** Task 471 logs one safe, query-scoped diagnostic for each technical-history outbound invocation. */
+    private String postTechnicalV2(String symbol, LocalDate from, LocalDate to, String operationKey, String apiName) {
+        FubonMarketConfigState.Snapshot access = config.snapshot();
+        if (access.reason() != null) throw new Unavailable(access.reason(), true);
+        boolean outboundStarted = false;
+        try {
+            String requestBody = FubonMarketJson.MAPPER.writeValueAsString(
+                    Map.of("symbol", symbol, "from", from.toString(), "to", to.toString()));
+            outboundStarted = true;
+            RawResponse response = transport.post(access.endpoint("/internal/market-data/technical-indicators/read"),
+                    access.token(), requestBody, 4 * 1024 * 1024, TECHNICAL_V2_TIMEOUT);
+            if (response.status() != 200 || response.body() == null || response.body().length > 4 * 1024 * 1024) {
+                String reason = response.status() == 429 ? "RATE_LIMITED" : "UPSTREAM_UNAVAILABLE";
+                recordTechnicalInvocationFailure(symbol, from, to, reason, response.status());
+                throw new Unavailable(reason, response.status() == 429 || response.status() == 401
+                        || response.status() == 403 || response.status() == 503);
+            }
+            try {
+                return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(response.body())).toString();
+            } catch (Exception invalidEncoding) {
+                recordTechnicalInvocationFailure(symbol, from, to, "TECHNICAL_SCHEMA_INVALID", response.status());
+                throw new Unavailable("TECHNICAL_SCHEMA_INVALID");
+            }
+        } catch (Unavailable failure) {
+            throw failure;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new Unavailable("INTERRUPTED", true);
+        } catch (CancellationException cancelled) {
+            throw new Unavailable("CANCELLED", true);
+        } catch (Exception failure) {
+            if (outboundStarted) recordTechnicalInvocationFailure(symbol, from, to, "UPSTREAM_UNAVAILABLE", null);
+            throw new Unavailable("UPSTREAM_UNAVAILABLE");
+        }
+    }
+
+    private void recordTechnicalProfileFailures(String symbol, LocalDate from, LocalDate to, List<String> failures) {
+        String manifestOrdered = TECHNICAL_PROFILES.stream()
+                .map(profile -> failures.stream().filter(item -> item.startsWith(profile.profileId() + ":"))
+                        .findFirst().orElse(null))
+                .filter(Objects::nonNull)
+                .reduce((left, right) -> left + "," + right).orElse("");
+        record("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢",
+                new IllegalStateException(technicalDiagnostic(symbol, from, to)
+                        + " profileFailures=[" + manifestOrdered + "]"));
+    }
+
+    private void recordTechnicalInvocationFailure(String symbol, LocalDate from, LocalDate to,
+                                                  String reason, Integer httpStatus) {
+        String status = httpStatus == null ? "" : " httpStatus=" + httpStatus;
+        record("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢",
+                new IllegalStateException(technicalDiagnostic(symbol, from, to)
+                        + " profileFailures=[] invocationFailure=" + reason + status));
+    }
+
+    private static String technicalDiagnostic(String symbol, LocalDate from, LocalDate to) {
+        return "operation=FUBON_TECHNICAL_INDICATORS_READ symbol=" + symbol
+                + " queryFrom=" + from + " queryTo=" + to;
     }
     /** Task408/425 v1 routes have an exact root error body, unlike frozen older routes. */
     private String postV1(String operationKey, String apiName, String path, Map<String, ?> request, int limit) {
