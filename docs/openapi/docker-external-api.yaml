@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.16.0
+  version: 1.17.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十七條精確路徑：
-    十六條 GET（其中 transactions／trading-radar／SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十八條精確路徑：
+    十七條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices 與 completed-technicals 是 global no-tenant）
     ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十七條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    十八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    十六條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    十七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -33,11 +33,13 @@ info:
     stockCodes 子集，且代碼限定於 context 凍結持股，沿用相同 canonical 市場來源讀取 API 呼叫當下已存在的
     cache/business 狀態，以獨立 capture 記錄該次 revision；兩類 response 都提供逐項 coverage 計數；
     不抓取外部行情、不 refresh、不寫入資料。
+    `GET /api/public/srpp/completed-technicals` 不依賴空白 policy registry；它只讀已保存的逐日
+    OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降級；不回買賣建議或交易許可。
 servers:
   - url: http://127.0.0.1:9090
     description: Docker host 本機 loopback 入口
   - url: https://mac-mini-2.tailccc7be.ts.net:9090
-    description: Tailscale 私有網路的十七條 path-scoped HTTPS 入口
+    description: Tailscale 私有網路的十八條 path-scoped HTTPS 入口
 security: []
 paths:
   /api/quotes:
@@ -1498,8 +1500,141 @@ paths:
         '503': {$ref: '#/components/responses/SrppOrchestratedProblem'}
         '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
       x-codex-route-policy: exact-read-only-get
+  /api/public/srpp/completed-technicals:
+    get:
+      tags: [SRPP 技術事實]
+      operationId: getSrppCompletedTechnicals
+      summary: 批次計算已完成日 K 的 SRPP 技術事實
+      description: |
+        從資產系統已保存的逐日 OHLCV 計算；每檔只取截至 asOf 的兩年有界歷史，
+        並以既有權息／分割還原服務取得同一價量基準。asOf 必須早於該市場本地今日且
+        當日 bar 必須存在；短歷史、缺 OHLC/volume 時只讓相應指標為 null 並列出具名缺口。
+        不抓 vendor、不 refresh、不寫入、不讀 owner 資產，不計算買賣指令。
+      parameters:
+        - name: market
+          in: query
+          required: true
+          description: 唯一市場；只接受台股或美股，一批不可混合。
+          schema: {type: string, enum: [台股, 美股]}
+          example: 台股
+        - name: asOf
+          in: query
+          required: true
+          description: 必須早於市場本地今日且當日已保存的完成日 K 日期；不得以較早日替代。
+          schema: {type: string, format: date}
+          example: '2026-01-15'
+        - name: stockCodes
+          in: query
+          required: true
+          description: 逗號分隔的 1–40 個唯一代號，原順序逐檔回傳；單碼限 1–12 個英數字、點或連字號。
+          schema: {type: string, maxLength: 519}
+          example: 0050,00713
+      responses:
+        '200':
+          description: 逐檔完成日技術事實；缺日或缺欄位仍回該檔具名缺口，null 不代表零。
+          headers:
+            Cache-Control: {description: 私有回應不得快取，固定 private, no-store。, schema: {type: string, const: 'private, no-store'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SrppCompletedTechnicalsResponse'}
+              example:
+                formulaVersion: SRPP_DAILY_OHLCV_V1
+                market: 台股
+                asOf: '2026-01-15'
+                coverage: {requestedCount: 1, completeCount: 0, partialCount: 0, unavailableCount: 1}
+                symbols:
+                  - {stockCode: '0050', market: 台股, status: UNAVAILABLE, asOf: '2026-01-15', historyStart: null, sampleCount: 0, priceBasis: UNAVAILABLE, appliedEventDates: [], sourceSha256: null, indicators: null, missing: [AS_OF_BAR_MISSING]}
+        '400':
+          description: 參數缺漏、未知、重複，市場或日期不合格，日期未完成，或 stockCodes 非唯一／超過 40。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}
+        '405':
+          description: "僅允許 GET，gateway 回 Allow: GET。"
+          headers: {Allow: {description: 唯一允許的方法。, schema: {type: string, const: GET}}}
+          content:
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '502':
+          description: 上游服務失敗或回應身分不符合請求；gateway upstream failure 可能為 HTML。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
+      x-codex-route-policy: exact-read-only-get
 components:
   schemas:
+    SrppCompletedTechnicalsResponse:
+      type: object
+      description: 同一市場、同一完成日的 SRPP 逐檔技術事實批次；只包含公開市場資料。
+      required: [formulaVersion, market, asOf, coverage, symbols]
+      additionalProperties: false
+      properties:
+        formulaVersion: {type: string, const: SRPP_DAILY_OHLCV_V1, description: 固定公式版本 SRPP_DAILY_OHLCV_V1；各指標參數不可縮短。}
+        market: {type: string, enum: [台股, 美股], description: 本批唯一市場台股或美股。}
+        asOf: {type: string, format: date, description: 指定完成日 K 日期，並非最新報價日期。}
+        coverage: {$ref: '#/components/schemas/SrppCompletedTechnicalCoverage', description: 本次所有請求代碼逐檔最終狀態計數。}
+        symbols:
+          type: array
+          minItems: 1
+          maxItems: 40
+          description: 按請求代碼順序逐檔列出，缺資料也保留該列。
+          items: {$ref: '#/components/schemas/SrppCompletedTechnicalSymbol', description: 一檔在 asOf 的完成日技術事實及缺口。}
+    SrppCompletedTechnicalCoverage:
+      type: object
+      description: 四個計數恆滿足 completeCount + partialCount + unavailableCount = requestedCount。
+      required: [requestedCount, completeCount, partialCount, unavailableCount]
+      additionalProperties: false
+      properties:
+        requestedCount: {type: integer, minimum: 1, maximum: 40, description: 此批請求的代碼總數，介於 1 與 40。}
+        completeCount: {type: integer, minimum: 0, description: 所有指標皆有足額資料的 COMPLETE 檔數。}
+        partialCount: {type: integer, minimum: 0, description: 至少一項可用但仍有缺口的 PARTIAL 檔數。}
+        unavailableCount: {type: integer, minimum: 0, description: asOf 日 K 缺失或所有指標無資料的 UNAVAILABLE 檔數。}
+    SrppCompletedTechnicalSymbol:
+      type: object
+      description: 單檔以同一來源序列與價量基準計算出的完成日技術事實；不含買賣方向。
+      required: [stockCode, market, status, asOf, historyStart, sampleCount, priceBasis, appliedEventDates, sourceSha256, indicators, missing]
+      additionalProperties: false
+      properties:
+        stockCode: {type: string, description: 與請求順序一致的股票代號。}
+        market: {type: string, enum: [台股, 美股], description: 本檔的台股或美股市場。}
+        status: {type: string, enum: [COMPLETE, PARTIAL, UNAVAILABLE], description: COMPLETE 全數可用；PARTIAL 部分可用；UNAVAILABLE 當日 K 缺失或全數無法計算。}
+        asOf: {type: string, format: date, description: 嚴格等於請求 asOf 的完成日；即使缺日仍回請求日期。}
+        historyStart: {type: [string, 'null'], format: date, description: 兩年有界查詢中最早的保存日；沒有任何列時為 null。}
+        sampleCount: {type: integer, minimum: 0, description: 兩年有界查詢取得的已保存逐日 K 筆數，不是年數。}
+        priceBasis: {type: string, enum: [UNAVAILABLE, ADJUSTED_RECORDED_EVENTS, RAW_NO_APPLIED_EVENT], description: UNAVAILABLE 缺 asOf；ADJUSTED_RECORDED_EVENTS 實際縮放過；RAW_NO_APPLIED_EVENT 未套用可縮放事件。兩者皆不證明權息事件庫完整。}
+        appliedEventDates:
+          type: array
+          description: 真正套用而造成縮放的事件日期升冪清單；空清單不證明無企業行動。
+          items: {type: string, format: date, description: 價量基準使用的單一企業行動日期。}
+        sourceSha256: {type: [string, 'null'], pattern: '^[0-9a-f]{64}$', description: 公式版本、標的、市場、asOf、調整後 OHLCV、closeSource 與實際事件日期的 SHA-256；缺當日 K 時為 null。}
+        indicators:
+          description: 足額指標數值；缺當日 K 時為 null，其餘逐欄 null 表示資料不足或無效。
+          anyOf:
+            - {$ref: '#/components/schemas/SrppCompletedTechnicalValues', description: 已有 asOf 日 K 的逐欄 nullable 指標。}
+            - {type: 'null', description: 缺 asOf 日 K 或完全沒有可計算輸入時為 null。}
+        missing:
+          type: array
+          description: 每個無法使用的指標具名原因；AS_OF_BAR_MISSING 表示不可借用較早日。
+          items: {type: string, description: 例如 RSI14_HISTORY_OR_CLOSE、OBV20_HISTORY_OR_VOLUME 或 AS_OF_BAR_MISSING。}
+    SrppCompletedTechnicalValues:
+      type: object
+      description: 同一價量基準上的固定參數完成日數值；所有欄位必出現，資料不足時為 null。
+      required: [ma5, rsi14, macdLine, macdSignal, macdHistogram, bollingerMiddle, bollingerUpper, bollingerLower, adx14, plusDi14, minusDi14, obv20Change, volumeRatio20, oneYearPositionPct]
+      additionalProperties: false
+      properties:
+        ma5: {type: [number, 'null'], description: 最近五個完成日收盤均值；不足五筆為 null。}
+        rsi14: {type: [number, 'null'], description: Wilder 十四期 RSI，初始增減均值以首十四筆差分建立；不足十五筆為 null。}
+        macdLine: {type: [number, 'null'], description: EMA12 減 EMA26，兩條 EMA 各以初始同期間 SMA 建立。}
+        macdSignal: {type: [number, 'null'], description: MACD line 的 EMA9，首九個 line 以 SMA 初始化；至少三十四筆收盤。}
+        macdHistogram: {type: [number, 'null'], description: macdLine 減 macdSignal；和其他 MACD 欄位同時可用。}
+        bollingerMiddle: {type: [number, 'null'], description: 最近二十日收盤均值；不足二十筆為 null。}
+        bollingerUpper: {type: [number, 'null'], description: bollingerMiddle 加兩倍母體標準差。}
+        bollingerLower: {type: [number, 'null'], description: bollingerMiddle 減兩倍母體標準差。}
+        adx14: {type: [number, 'null'], description: Wilder 十四期 ADX；首十四個 DX 均值初始化，至少二十八筆有效 OHLC。}
+        plusDi14: {type: [number, 'null'], description: 與 ADX14 同窗同平滑的正向 DI 百分比。}
+        minusDi14: {type: [number, 'null'], description: 與 ADX14 同窗同平滑的負向 DI 百分比。}
+        obv20Change: {type: [number, 'null'], description: 最近二十個完成日逐日收盤方向加減成交量之和；是 OBV 變化而非任意起點累積值。}
+        volumeRatio20: {type: [number, 'null'], description: asOf 成交量除以前二十個完成日均量；均量為零或缺量時 null。}
+        oneYearPositionPct: {type: [number, 'null'], description: 近一曆年低高價區間的現收位置百分比；至少 180 筆且區間開端在一年起日七天內。}
     ProblemDetail:
       type: object
       description: Spring `ProblemDetail` 的 RFC 7807/9457 JSON；可帶 RFC extension members。

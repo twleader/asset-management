@@ -7,22 +7,22 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.16.0` |
-| 對外路徑 | 17 條：16 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.17.0` |
+| 對外路徑 | 18 條：17 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十七條精確路徑：
-十六條 GET（其中 transactions／trading-radar／SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar 與 commodity-prices 是 global no-tenant）
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十八條精確路徑：
+十七條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices 與 completed-technicals 是 global no-tenant）
 ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十七條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+十八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-十六條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+十七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 暴露文件端點。
@@ -42,6 +42,8 @@ Task 467 新增三條由 LLM 按需呼叫的唯讀 API。計算固定重播 cont
 stockCodes 子集，且代碼限定於 context 凍結持股，沿用相同 canonical 市場來源讀取 API 呼叫當下已存在的
 cache/business 狀態，以獨立 capture 記錄該次 revision；兩類 response 都提供逐項 coverage 計數；
 不抓取外部行情、不 refresh、不寫入資料。
+`GET /api/public/srpp/completed-technicals` 不依賴空白 policy registry；它只讀已保存的逐日
+OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降級；不回買賣建議或交易許可。
 
 ## 路由總覽
 
@@ -64,6 +66,7 @@ cache/business 狀態，以獨立 capture 記錄該次 revision；兩類 respons
 | 15 | `GET` | `/api/public/srpp/calculation-context` | `getSrppCalculationContext` | 取得本輪固定計算脈絡 | 200 application/json: SrppCalculationContextResponse |
 | 16 | `GET` | `/api/public/srpp/calculations` | `getSrppCalculations` | 以固定 context 執行指定計算 | 200 application/json: SrppCalculationsResponse |
 | 17 | `GET` | `/api/public/srpp/market-facts` | `getSrppMarketFacts` | 批次讀取 context 持股市場事實 | 200 application/json: SrppMarketFactsResponse |
+| 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
 
 ## 路由詳情
 
@@ -520,7 +523,94 @@ BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical D
 | `503` | application/problem+json: SrppOrchestratedProblem | RFC 9457 application problem response for the SRPP on-demand read endpoints. |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
+### 18. `GET /api/public/srpp/completed-technicals`
+
+從資產系統已保存的逐日 OHLCV 計算；每檔只取截至 asOf 的兩年有界歷史，
+並以既有權息／分割還原服務取得同一價量基準。asOf 必須早於該市場本地今日且
+當日 bar 必須存在；短歷史、缺 OHLC/volume 時只讓相應指標為 null 並列出具名缺口。
+不抓 vendor、不 refresh、不寫入、不讀 owner 資產，不計算買賣指令。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `market` | 是 | `string` | enum: `台股`, `美股`<br>example: `台股` | 唯一市場；只接受台股或美股，一批不可混合。 |
+| `asOf` | 是 | `string (date)` | example: `2026-01-15` | 必須早於市場本地今日且當日已保存的完成日 K 日期；不得以較早日替代。 |
+| `stockCodes` | 是 | `string` | example: `1311179` | 逗號分隔的 1–40 個唯一代號，原順序逐檔回傳；單碼限 1–12 個英數字、點或連字號。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppCompletedTechnicalsResponse | 逐檔完成日技術事實；缺日或缺欄位仍回該檔具名缺口，null 不代表零。 |
+| `400` | application/problem+json: ProblemDetail | 參數缺漏、未知、重複，市場或日期不合格，日期未完成，或 stockCodes 非唯一／超過 40。 |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET，gateway 回 Allow: GET。 |
+| `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游服務失敗或回應身分不符合請求；gateway upstream failure 可能為 HTML。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
 ## Schema 欄位
+
+### `SrppCompletedTechnicalsResponse`
+
+同一市場、同一完成日的 SRPP 逐檔技術事實批次；只包含公開市場資料。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `formulaVersion` | 是 | `string` | 否 | enum: `SRPP_DAILY_OHLCV_V1` | 固定公式版本 SRPP_DAILY_OHLCV_V1；各指標參數不可縮短。 |
+| `market` | 是 | `string` | 否 | enum: `台股`, `美股` | 本批唯一市場台股或美股。 |
+| `asOf` | 是 | `string (date)` | 否 |  | 指定完成日 K 日期，並非最新報價日期。 |
+| `coverage` | 是 | `SrppCompletedTechnicalCoverage` | 否 |  | 本次所有請求代碼逐檔最終狀態計數。 |
+| `symbols` | 是 | `array of SrppCompletedTechnicalSymbol` | 否 | minItems: 1<br>maxItems: 40<br>items: SrppCompletedTechnicalSymbol<br>items 說明: 一檔在 asOf 的完成日技術事實及缺口。 | 按請求代碼順序逐檔列出，缺資料也保留該列。 |
+
+### `SrppCompletedTechnicalCoverage`
+
+四個計數恆滿足 completeCount + partialCount + unavailableCount = requestedCount。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `requestedCount` | 是 | `integer` | 否 | minimum: 1<br>maximum: 40 | 此批請求的代碼總數，介於 1 與 40。 |
+| `completeCount` | 是 | `integer` | 否 | minimum: 0 | 所有指標皆有足額資料的 COMPLETE 檔數。 |
+| `partialCount` | 是 | `integer` | 否 | minimum: 0 | 至少一項可用但仍有缺口的 PARTIAL 檔數。 |
+| `unavailableCount` | 是 | `integer` | 否 | minimum: 0 | asOf 日 K 缺失或所有指標無資料的 UNAVAILABLE 檔數。 |
+
+### `SrppCompletedTechnicalSymbol`
+
+單檔以同一來源序列與價量基準計算出的完成日技術事實；不含買賣方向。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stockCode` | 是 | `string` | 否 |  | 與請求順序一致的股票代號。 |
+| `market` | 是 | `string` | 否 | enum: `台股`, `美股` | 本檔的台股或美股市場。 |
+| `status` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | COMPLETE 全數可用；PARTIAL 部分可用；UNAVAILABLE 當日 K 缺失或全數無法計算。 |
+| `asOf` | 是 | `string (date)` | 否 |  | 嚴格等於請求 asOf 的完成日；即使缺日仍回請求日期。 |
+| `historyStart` | 是 | `string | null (date)` | 是 |  | 兩年有界查詢中最早的保存日；沒有任何列時為 null。 |
+| `sampleCount` | 是 | `integer` | 否 | minimum: 0 | 兩年有界查詢取得的已保存逐日 K 筆數，不是年數。 |
+| `priceBasis` | 是 | `string` | 否 | enum: `UNAVAILABLE`, `ADJUSTED_RECORDED_EVENTS`, `RAW_NO_APPLIED_EVENT` | UNAVAILABLE 缺 asOf；ADJUSTED_RECORDED_EVENTS 實際縮放過；RAW_NO_APPLIED_EVENT 未套用可縮放事件。兩者皆不證明權息事件庫完整。 |
+| `appliedEventDates` | 是 | `array of string (date)` | 否 | items: string (date)<br>items 說明: 價量基準使用的單一企業行動日期。 | 真正套用而造成縮放的事件日期升冪清單；空清單不證明無企業行動。 |
+| `sourceSha256` | 是 | `string | null` | 是 | pattern: ^[0-9a-f]{64}$ | 公式版本、標的、市場、asOf、調整後 OHLCV、closeSource 與實際事件日期的 SHA-256；缺當日 K 時為 null。 |
+| `indicators` | 是 | `SrppCompletedTechnicalValues | null` | 是 |  | 足額指標數值；缺當日 K 時為 null，其餘逐欄 null 表示資料不足或無效。 |
+| `missing` | 是 | `array of string` | 否 | items: string<br>items 說明: 例如 RSI14_HISTORY_OR_CLOSE、OBV20_HISTORY_OR_VOLUME 或 AS_OF_BAR_MISSING。 | 每個無法使用的指標具名原因；AS_OF_BAR_MISSING 表示不可借用較早日。 |
+
+### `SrppCompletedTechnicalValues`
+
+同一價量基準上的固定參數完成日數值；所有欄位必出現，資料不足時為 null。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ma5` | 是 | `number | null` | 是 |  | 最近五個完成日收盤均值；不足五筆為 null。 |
+| `rsi14` | 是 | `number | null` | 是 |  | Wilder 十四期 RSI，初始增減均值以首十四筆差分建立；不足十五筆為 null。 |
+| `macdLine` | 是 | `number | null` | 是 |  | EMA12 減 EMA26，兩條 EMA 各以初始同期間 SMA 建立。 |
+| `macdSignal` | 是 | `number | null` | 是 |  | MACD line 的 EMA9，首九個 line 以 SMA 初始化；至少三十四筆收盤。 |
+| `macdHistogram` | 是 | `number | null` | 是 |  | macdLine 減 macdSignal；和其他 MACD 欄位同時可用。 |
+| `bollingerMiddle` | 是 | `number | null` | 是 |  | 最近二十日收盤均值；不足二十筆為 null。 |
+| `bollingerUpper` | 是 | `number | null` | 是 |  | bollingerMiddle 加兩倍母體標準差。 |
+| `bollingerLower` | 是 | `number | null` | 是 |  | bollingerMiddle 減兩倍母體標準差。 |
+| `adx14` | 是 | `number | null` | 是 |  | Wilder 十四期 ADX；首十四個 DX 均值初始化，至少二十八筆有效 OHLC。 |
+| `plusDi14` | 是 | `number | null` | 是 |  | 與 ADX14 同窗同平滑的正向 DI 百分比。 |
+| `minusDi14` | 是 | `number | null` | 是 |  | 與 ADX14 同窗同平滑的負向 DI 百分比。 |
+| `obv20Change` | 是 | `number | null` | 是 |  | 最近二十個完成日逐日收盤方向加減成交量之和；是 OBV 變化而非任意起點累積值。 |
+| `volumeRatio20` | 是 | `number | null` | 是 |  | asOf 成交量除以前二十個完成日均量；均量為零或缺量時 null。 |
+| `oneYearPositionPct` | 是 | `number | null` | 是 |  | 近一曆年低高價區間的現收位置百分比；至少 180 筆且區間開端在一年起日七天內。 |
 
 ### `ProblemDetail`
 
