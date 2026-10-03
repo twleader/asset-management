@@ -20,6 +20,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/srpp/calculation-context'
   '/api/public/srpp/calculations'
   '/api/public/srpp/market-facts'
+  '/api/public/srpp/completed-technicals'
 )
 
 die() {
@@ -198,6 +199,7 @@ expected = {
     "/api/public/srpp/calculation-context": "http://127.0.0.1:9090/api/public/srpp/calculation-context",
     "/api/public/srpp/calculations": "http://127.0.0.1:9090/api/public/srpp/calculations",
     "/api/public/srpp/market-facts": "http://127.0.0.1:9090/api/public/srpp/market-facts",
+    "/api/public/srpp/completed-technicals": "http://127.0.0.1:9090/api/public/srpp/completed-technicals",
 }
 web = data.get("Web")
 expected_host = f"{dns_name}:9090"
@@ -208,7 +210,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode == "exact" and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的十七條 path handler")
+    raise SystemExit("必須精確只有本任務管理的十八條 path handler")
 if mode in {"allow-empty", "subset"} and not handler_paths.issubset(expected):
     raise SystemExit("Serve config 含非本任務 path handler")
 for path in handler_paths:
@@ -543,7 +545,13 @@ if not isinstance(data, dict) or data.get("code") != "POLICY_UNSUPPORTED" or dat
     raise SystemExit(1)
 PY
 
-printf '現有 Serve 設定所有權與本機 17 路 gateway 設定檢查 通過，開始更新 path-scoped Serve…\n'
+# 新完成日技術事實路由只以無效參數探測 query gate；preflight 不抓取、重算或寫入市場資料。
+technicals_probe_json="$work_dir/srpp-completed-technicals-query.json"
+technicals_probe_headers="$work_dir/srpp-completed-technicals-query.headers"
+get_400_json "$LOCAL_BASE/api/public/srpp/completed-technicals?unexpected=1" \
+  "$technicals_probe_json" '本機 SRPP 完成日技術事實 query gate' "$technicals_probe_headers"
+
+printf '現有 Serve 設定所有權與本機 18 路 gateway 設定檢查 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
 # 卻被本腳本用過時的所有權判斷刪除。
@@ -571,7 +579,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十七條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期十八條 exact handler。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

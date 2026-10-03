@@ -19,6 +19,7 @@ public final class ApiErrorLogOperationCatalog {
             new Operation(OPEN_API,"OPEN_SRPP_CALCULATION_CONTEXT","SRPP 計算脈絡","GET /api/public/srpp/calculation-context",150),
             new Operation(OPEN_API,"OPEN_SRPP_CALCULATIONS","SRPP 按需計算","GET /api/public/srpp/calculations",160),
             new Operation(OPEN_API,"OPEN_SRPP_MARKET_FACTS","SRPP 批次市場事實","GET /api/public/srpp/market-facts",170),
+            new Operation(OPEN_API,"OPEN_SRPP_COMPLETED_TECHNICALS","SRPP 完成日技術事實","GET /api/public/srpp/completed-technicals",180),
             new Operation(FUBON_API,"FUBON_PORTFOLIO_READ","庫存與未實現損益","POST /internal/portfolio/read",10), new Operation(FUBON_API,"FUBON_TW_QUOTES_INVENTORY","庫存同步台股報價","POST /internal/market-data/tw-quotes",20),
             new Operation(FUBON_API,"FUBON_FILLED_TRADES_READ","已成交交易查詢","POST /internal/trades/read",30), new Operation(FUBON_API,"FUBON_ETF_HOLDINGS_READ","ETF 成分股查詢","POST /internal/market-data/etf-holdings",40),
             new Operation(FUBON_API,"FUBON_BANK_BALANCE_READ","交割銀行餘額","POST /internal/bank-balance/read",50), new Operation(FUBON_API,"FUBON_SETTLEMENT_READ","交割款查詢","POST /internal/settlement/read",60),

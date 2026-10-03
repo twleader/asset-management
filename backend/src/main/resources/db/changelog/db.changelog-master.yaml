@@ -455,3 +455,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.140.0-srpp-llm-orchestrated-error-log-catalog.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.141.0-srpp-completed-technicals-error-log-catalog.sql
+      relativeToChangelogFile: false

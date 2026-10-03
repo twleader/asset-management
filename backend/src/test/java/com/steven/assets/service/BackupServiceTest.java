@@ -404,10 +404,15 @@ class BackupServiceTest {
             uploadedName.set(((java.nio.file.Path) invocation.getArgument(0)).getFileName().toString());
             return null;
         }).when(session).upload(any(), org.mockito.ArgumentMatchers.eq("manual"));
-        when(session.listDateDirectoriesJson()).thenReturn(
-                "[{\"Name\":\"2026-10-02\",\"IsDir\":true}]");
+        when(session.listDateDirectoriesJson()).thenAnswer(invocation -> {
+            if (uploadedName.get() == null) return "[]";
+            return "[{\"Name\":\"" + BackupPath.fromFilename(uploadedName.get()).dateFolder()
+                    + "\",\"IsDir\":true}]";
+        });
         when(session.listJson(any())).thenAnswer(invocation -> {
-            if (!"2026-10-02".equals(invocation.getArgument(0)) || uploadedName.get() == null) return "[]";
+            if (uploadedName.get() == null
+                    || !BackupPath.fromFilename(uploadedName.get()).dateFolder()
+                            .equals(invocation.getArgument(0))) return "[]";
             return "[{\"Name\":\"" + uploadedName.get()
                     + "\",\"IsDir\":false,\"Size\":4,\"ModTime\":\"2026-10-02T00:00:00Z\"}]";
         });
