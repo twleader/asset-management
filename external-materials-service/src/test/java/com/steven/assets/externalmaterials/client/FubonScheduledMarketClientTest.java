@@ -28,18 +28,51 @@ class FubonScheduledMarketClientTest {
     private static final Instant NOW = Instant.parse("2026-08-28T05:40:05Z");
     private final MarketClock clock = mock(MarketClock.class);
     private final AtomicReference<String> response = new AtomicReference<>();
+    private final AtomicReference<String> request = new AtomicReference<>();
     private final AtomicInteger calls = new AtomicInteger();
     private FubonScheduledMarketClient client(int status) {
+        return client(status, 30);
+    }
+    private FubonScheduledMarketClient client(int status, int expectedTimeoutSeconds) {
         when(clock.instant()).thenReturn(NOW);
         return new FubonScheduledMarketClient(new FubonMarketConfigState("true", "http://fake.invalid", "unused", p -> "fake-token"),
                 clock, (uri, token, body, limit, timeout) -> {
             assertThat(uri.getHost()).isEqualTo("fake.invalid");
             assertThat(token).isEqualTo("fake-token");
-            assertThat(timeout.toSeconds()).isEqualTo(30);
+            assertThat(timeout.toSeconds()).isEqualTo(expectedTimeoutSeconds);
             assertThat(limit).isPositive();
+            request.set(body);
             calls.incrementAndGet();
             return new FubonScheduledMarketClient.RawResponse(status, response.get().getBytes(StandardCharsets.UTF_8));
         });
+    }
+    @Test void technicalV2Uses365InclusiveDaysAndRejects366BeforeOutbound() {
+        ObjectNode root = FubonMarketJson.MAPPER.createObjectNode();
+        root.put("schemaVersion", 2).put("captureId", java.util.UUID.randomUUID().toString())
+                .put("symbol", "2330").put("market", MARKET).put("provider", PROVIDER)
+                .put("queryFrom", DAY.minusDays(TECHNICAL_MAX_SPAN_DAYS).toString())
+                .put("queryTo", DAY.toString());
+        var profiles = root.putArray("profiles");
+        for (TechnicalProfile profile : TECHNICAL_PROFILES) {
+            ObjectNode read = profiles.addObject();
+            read.put("profileId", profile.profileId()).put("status", "NO_DATA")
+                    .put("reason", "NO_DATA").put("observedAt", NOW.toString());
+            read.set("parameters", FubonMarketJson.MAPPER.valueToTree(profile.parameters()));
+            read.putArray("history");
+        }
+        response.set(root.toString());
+        var adapter = client(200, 70);
+        var result = adapter.technicalV2("2330", DAY);
+        assertThat(result.queryFrom()).isEqualTo(DAY.minusDays(364));
+        assertThat(result.profiles()).hasSize(17);
+        assertThat(FubonMarketJson.parse(request.get()).path("from").asText())
+                .isEqualTo(DAY.minusDays(364).toString());
+        assertThatThrownBy(() -> adapter.technicalV2("2330", DAY.minusDays(365), DAY))
+                .isInstanceOf(Unavailable.class).hasMessage("INVALID_REQUEST");
+        assertThat(calls).hasValue(1);
+        root.put("queryFrom", DAY.minusDays(365).toString());
+        assertThatThrownBy(() -> FubonMarketJson.technicalV2(root, "2330", DAY.minusDays(365), DAY, DAY, NOW))
+                .isInstanceOf(IllegalArgumentException.class);
     }
     @Test void typedTechnicalRetainsIndependentDatesSigned38DigitsAndNormalGroups() {
         var read = technical("2330", DAY, NOW.minusSeconds(1), "0");

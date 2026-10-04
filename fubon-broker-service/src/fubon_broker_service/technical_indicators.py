@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import hashlib
 import json
+import logging
 import time
 from uuid import uuid4
 
@@ -55,6 +56,37 @@ PROFILES: tuple[TechnicalProfile, ...] = (
     _profile("macd_w_12_26_9", "macd", "W", {"timeframe": "W", "fast": 12, "slow": 26, "signal": 9}, ("macdLine", "signalLine")),
 )
 PROFILE_BY_ID = {profile.profile_id: profile for profile in PROFILES}
+_LOGGER = logging.getLogger(__name__)
+
+
+class _SchemaFailure(ValueError):
+    """Only allowlisted structure metadata may cross the logging boundary."""
+
+    def __init__(self, stage: str, *, expected: tuple[str, ...] = (),
+                 missing: tuple[str, ...] = (), unknown_count: int = 0,
+                 value_type: str = "none", row_count: int = 0) -> None:
+        super().__init__("TECHNICAL_SCHEMA_INVALID")
+        self.stage = stage
+        self.expected = expected
+        self.missing = missing
+        self.unknown_count = unknown_count
+        self.value_type = value_type
+        self.row_count = row_count
+
+
+def _safe_type(value: object) -> str:
+    """Never use a vendor object's repr or class name in a diagnostic."""
+    return {type(None): "null", bool: "bool", int: "int", float: "float",
+            str: "str", list: "list", dict: "dict"}.get(type(value), "other")
+
+
+def _schema_failure(profile: TechnicalProfile, failure: _SchemaFailure) -> None:
+    # Every name here comes from our immutable manifest, never the vendor map.
+    message = (f"technical_schema_invalid profile={profile.profile_id} stage={failure.stage} "
+               f"expected={','.join(failure.expected)} missing={','.join(failure.missing)} "
+               f"unknown_count={failure.unknown_count} type={failure.value_type} "
+               f"row_count={failure.row_count}")
+    _LOGGER.warning("%s", message[:512])
 
 # Frozen Task398 constants: v1 must never be derived from the v2 profile manifest.
 PARAMETERS = {
@@ -127,8 +159,12 @@ def _unavailable(profile: TechnicalProfile, reason: str, observed: datetime) -> 
             "parameters": dict(profile.parameters), "observedAt": observed_at(observed), "history": []}
 
 
+MAX_TECHNICAL_SPAN_DAYS = 364
+MAX_TECHNICAL_ROWS = MAX_TECHNICAL_SPAN_DAYS + 1
+
+
 class TechnicalIndicatorService:
-    """Fixed 420-day aggregate; no caller-controlled vendor method or parameters."""
+    """Fixed 365-day inclusive aggregate; no caller-controlled vendor method or parameters."""
 
     def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now,
                  monotonic: Callable[[], float] = time.monotonic) -> None:
@@ -149,7 +185,7 @@ class TechnicalIndicatorService:
             stock_code(symbol)
         except ValueError:
             raise TechnicalIndicatorError("INVALID_REQUEST", request_error=True) from None
-        query_from = (query_date - timedelta(days=420)).isoformat()
+        query_from = (query_date - timedelta(days=MAX_TECHNICAL_SPAN_DAYS)).isoformat()
         query_to = query_date.isoformat()
         deadline = self._monotonic() + 60.0
         profiles: list[dict[str, object]] = []
@@ -182,7 +218,8 @@ class TechnicalIndicatorService:
             observed = instant(self._now())
             try:
                 profiles.append(self._normalize_profile(profile, source, symbol, query_from, query_to, observed))
-            except ValueError:
+            except _SchemaFailure as failure:
+                _schema_failure(profile, failure)
                 profiles.append({"profileId": profile.profile_id, "status": "SCHEMA_INVALID",
                                  "reason": "TECHNICAL_SCHEMA_INVALID", "parameters": dict(profile.parameters),
                                  "observedAt": observed_at(observed), "history": []})
@@ -200,7 +237,7 @@ class TechnicalIndicatorService:
             stock_code(symbol)
             start = strict_iso_date(start_date)
             end = strict_iso_date(end_date)
-            if start > end or (end - start).days > 420 or end > observed_date:
+            if start > end or (end - start).days > MAX_TECHNICAL_SPAN_DAYS or end > observed_date:
                 raise ValueError("INVALID_DATE_RANGE")
         except ValueError:
             raise TechnicalIndicatorError("INVALID_REQUEST", request_error=True) from None
@@ -233,7 +270,8 @@ class TechnicalIndicatorService:
             try:
                 profiles.append(self._normalize_profile(profile, source, symbol,
                                                         start.isoformat(), end.isoformat(), observed))
-            except ValueError:
+            except _SchemaFailure as failure:
+                _schema_failure(profile, failure)
                 profiles.append({"profileId": profile.profile_id, "status": "SCHEMA_INVALID",
                                  "reason": "TECHNICAL_SCHEMA_INVALID", "parameters": dict(profile.parameters),
                                  "observedAt": observed_at(observed), "history": []})
@@ -248,37 +286,70 @@ class TechnicalIndicatorService:
     def _normalize_profile(profile: TechnicalProfile, source: object, symbol: str, start: str, end: str,
                            observed: datetime) -> dict[str, object]:
         if not isinstance(source, dict):
-            raise ValueError("TECHNICAL_SCHEMA_INVALID")
-        required = {"symbol", "from", "to", "timeframe", *profile.parameters.keys(), "data"}
-        if set(source) != required or source.get("symbol") != symbol or source.get("from") != start or source.get("to") != end:
-            raise ValueError("TECHNICAL_SCHEMA_INVALID")
+            raise _SchemaFailure("TOP_TYPE", value_type=_safe_type(source))
+        required = ("symbol", "from", "to", "timeframe",
+                    *(name for name in profile.parameters if name != "timeframe"), "data")
+        missing = tuple(name for name in required if name not in source)
+        unknown_count = sum(name not in required for name in source)
+        if missing or unknown_count:
+            raise _SchemaFailure("TOP_KEYS", expected=required, missing=missing,
+                                 unknown_count=unknown_count, value_type="dict")
+        if source.get("symbol") != symbol or source.get("from") != start or source.get("to") != end:
+            raise _SchemaFailure("ECHO", expected=("symbol", "from", "to"),
+                                 value_type="dict")
         if source.get("timeframe") != profile.timeframe:
-            raise ValueError("TECHNICAL_SCHEMA_INVALID")
+            raise _SchemaFailure("TIMEFRAME", expected=("timeframe",),
+                                 value_type=_safe_type(source.get("timeframe")))
         for name, expected in profile.parameters.items():
             if name == "timeframe":
                 continue
-            if profile.kind in {"sma", "rsi"} and name == "period":
-                _canonical_period(source.get(name), int(expected))
-            elif type(source.get(name)) is not int or source.get(name) != expected:
-                raise ValueError("TECHNICAL_SCHEMA_INVALID")
+            try:
+                if profile.kind in {"sma", "rsi"} and name == "period":
+                    _canonical_period(source.get(name), int(expected))
+                elif type(source.get(name)) is not int or source.get(name) != expected:
+                    raise ValueError("TECHNICAL_SCHEMA_INVALID")
+            except ValueError:
+                raise _SchemaFailure("PARAMETERS", expected=(name,),
+                                     value_type=_safe_type(source.get(name))) from None
         rows = source.get("data")
-        if not isinstance(rows, list) or len(rows) > 421:
-            raise ValueError("TECHNICAL_SCHEMA_INVALID")
+        if not isinstance(rows, list) or len(rows) > MAX_TECHNICAL_ROWS:
+            raise _SchemaFailure("DATA_TYPE_OR_COUNT", expected=("data",),
+                                 value_type=_safe_type(rows),
+                                 row_count=len(rows) if isinstance(rows, list) else 0)
         if not rows:
             return {"profileId": profile.profile_id, "status": "NO_DATA", "reason": "NO_DATA",
                     "parameters": dict(profile.parameters), "observedAt": observed_at(observed), "history": []}
         seen: set[str] = set()
         history: list[dict[str, object]] = []
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"date", *profile.payload_fields}:
-                raise ValueError("TECHNICAL_SCHEMA_INVALID")
-            source_date = strict_iso_date(row.get("date")).isoformat()
+            if not isinstance(row, dict):
+                raise _SchemaFailure("ROW_TYPE", value_type=_safe_type(row), row_count=len(rows))
+            expected_row = ("date", *profile.payload_fields)
+            missing_row = tuple(name for name in expected_row if name not in row)
+            unknown_row = sum(name not in expected_row for name in row)
+            if missing_row or unknown_row:
+                raise _SchemaFailure("ROW_KEYS", expected=expected_row, missing=missing_row,
+                                     unknown_count=unknown_row, value_type="dict", row_count=len(rows))
+            try:
+                source_date = strict_iso_date(row.get("date")).isoformat()
+            except ValueError:
+                raise _SchemaFailure("DATE", expected=("date",),
+                                     value_type=_safe_type(row.get("date")), row_count=len(rows)) from None
             if source_date < start or source_date > end or source_date in seen:
-                raise ValueError("TECHNICAL_SCHEMA_INVALID")
+                raise _SchemaFailure("DATE", expected=("date",),
+                                     value_type="str", row_count=len(rows))
             seen.add(source_date)
-            payload = {field: canonical_number(row.get(field), precision=38, scale=18) for field in profile.payload_fields}
+            payload: dict[str, str] = {}
+            for field in profile.payload_fields:
+                try:
+                    value = canonical_number(row.get(field), precision=38, scale=18)
+                except (ValueError, TypeError):
+                    raise _SchemaFailure("PAYLOAD", expected=(field,),
+                                         value_type=_safe_type(row.get(field)), row_count=len(rows)) from None
+                payload[field] = value
             if profile.kind == "bb" and not Decimal(payload["upper"]) >= Decimal(payload["middle"]) >= Decimal(payload["lower"]):
-                raise ValueError("TECHNICAL_SCHEMA_INVALID")
+                raise _SchemaFailure("PAYLOAD", expected=profile.payload_fields,
+                                     value_type="str", row_count=len(rows))
             history.append({"sourceDate": source_date, "sourceTimestamp": None, "payload": payload})
         history.sort(key=lambda row: str(row["sourceDate"]))
         return {"profileId": profile.profile_id, "status": "AVAILABLE", "reason": None,

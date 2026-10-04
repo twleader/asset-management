@@ -194,7 +194,7 @@ public final class FubonMarketJson {
 
     /** Strict Task408 v2 all-history technical document.  The v1 parser above stays frozen. */
     public static TechnicalBundle technicalV2(JsonNode root, String symbol, LocalDate queryDate, Instant now) {
-        return technicalV2(root, symbol, queryDate.minusDays(420), queryDate, queryDate, now);
+        return technicalV2(root, symbol, queryDate.minusDays(TECHNICAL_MAX_SPAN_DAYS), queryDate, queryDate, now);
     }
 
     public static TechnicalBundle technicalV2(JsonNode root, String symbol, LocalDate expectedFrom,
@@ -209,7 +209,7 @@ public final class FubonMarketJson {
         equal(root.get("symbol"), symbol); equal(root.get("market"), MARKET); equal(root.get("provider"), PROVIDER);
         LocalDate from = date(root.get("queryFrom")), to = date(root.get("queryTo"));
         if (!from.equals(expectedFrom) || !to.equals(expectedTo) || from.isAfter(to)
-                || java.time.temporal.ChronoUnit.DAYS.between(from, to) > 420 || to.isAfter(observedDate)) throw invalid();
+                || java.time.temporal.ChronoUnit.DAYS.between(from, to) > TECHNICAL_MAX_SPAN_DAYS || to.isAfter(observedDate)) throw invalid();
         JsonNode profiles = root.get("profiles");
         if (!profiles.isArray() || profiles.size() != TECHNICAL_PROFILES.size()) throw invalid();
         List<TechnicalProfileRead> output = new ArrayList<>();
@@ -240,7 +240,7 @@ public final class FubonMarketJson {
                 throw invalid();
             return new TechnicalProfileRead(profile.profileId(), status, reason, profile.parameters(), observed, List.of());
         }
-        if (reason != null || history.isEmpty() || history.size() > 421) throw invalid();
+        if (reason != null || history.isEmpty() || history.size() > TECHNICAL_MAX_ROWS_PER_PROFILE) throw invalid();
         List<TechnicalHistory> rows = new ArrayList<>();
         LocalDate previous = null;
         for (JsonNode row : history) {
