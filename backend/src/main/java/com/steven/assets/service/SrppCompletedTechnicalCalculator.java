@@ -128,14 +128,8 @@ public final class SrppCompletedTechnicalCalculator {
             minusDi14 = decimal(mdi);
         } else missing.add("ADX14_HISTORY_OR_OHLC");
 
-        if (n >= 21 && valid(close, n - 21, n) && validVolume(rows, n - 20, n)) {
-            BigDecimal delta = BigDecimal.ZERO;
-            for (int i = n - 20; i < n; i++) {
-                int direction = Double.compare(close[i], close[i - 1]);
-                delta = delta.add(BigDecimal.valueOf(rows.get(i).getVolume()).multiply(BigDecimal.valueOf(direction)));
-            }
-            obv20 = delta;
-        } else missing.add("OBV20_HISTORY_OR_VOLUME");
+        obv20 = obv20ChangeAt(rows, n);
+        if (obv20 == null) missing.add("OBV20_HISTORY_OR_VOLUME");
 
         if (n >= 21 && validVolume(rows, n - 21, n)) {
             BigDecimal previousVolumeSum = BigDecimal.ZERO;
@@ -190,6 +184,25 @@ public final class SrppCompletedTechnicalCalculator {
             if (rows.get(i).getVolume() == null || rows.get(i).getVolume() < 0) return false;
         }
         return true;
+    }
+
+    /** Last twenty signed daily volumes; the first close is only the direction anchor. */
+    static BigDecimal obv20ChangeAt(List<StockPriceHistory> rows, int exclusiveEnd) {
+        if (exclusiveEnd < 21 || exclusiveEnd > rows.size()
+                || !validVolume(rows, exclusiveEnd - 20, exclusiveEnd)) return null;
+        BigDecimal delta = BigDecimal.ZERO;
+        for (int i = exclusiveEnd - 20; i < exclusiveEnd; i++) {
+            BigDecimal previous = rows.get(i - 1).getClosePrice();
+            BigDecimal current = rows.get(i).getClosePrice();
+            if (previous == null || current == null
+                    || previous.signum() <= 0 || current.signum() <= 0) return null;
+            int direction = current.compareTo(previous);
+            if (direction != 0) {
+                delta = delta.add(BigDecimal.valueOf(rows.get(i).getVolume())
+                        .multiply(BigDecimal.valueOf(direction)));
+            }
+        }
+        return delta;
     }
 
     private static double mean(double[] values, int from, int to) {

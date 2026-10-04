@@ -7,22 +7,22 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.17.0` |
-| 對外路徑 | 18 條：17 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.18.0` |
+| 對外路徑 | 19 條：18 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十八條精確路徑：
-十七條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices 與 completed-technicals 是 global no-tenant）
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十九條精確路徑：
+十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
 ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+十九條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-十七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+十八條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 暴露文件端點。
@@ -67,6 +67,7 @@ OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降
 | 16 | `GET` | `/api/public/srpp/calculations` | `getSrppCalculations` | 以固定 context 執行指定計算 | 200 application/json: SrppCalculationsResponse |
 | 17 | `GET` | `/api/public/srpp/market-facts` | `getSrppMarketFacts` | 批次讀取 context 持股市場事實 | 200 application/json: SrppMarketFactsResponse |
 | 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
+| 19 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
 
 ## 路由詳情
 
@@ -548,7 +549,96 @@ BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical D
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游服務失敗或回應身分不符合請求；gateway upstream failure 可能為 HTML。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
+### 19. `GET /api/public/srpp/technical-series`
+
+只讀已保存完成日 OHLCV 與 active 權息事件，兩年有界資料一次還原後計算，
+輸出最後 21–250 筆中的實際可用日 K。每列 volume 是計算 OBV 使用的調整後量；
+rawVolume 是同日 DB 原值，單位沿用來源且未驗證跨標的一致。最後 21 列
+close/volume 足以重播 summary 的 OBV20；其他指標已由資產系統算好。
+asOf 必須早於市場本地今日且該日 bar 精確存在才會有序列。
+不讀 owner、不呼叫 vendor、不 refresh、不寫入、不產生買賣資格。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `market` | 是 | `string` | enum: `台股`, `美股`<br>example: `台股` | 唯一市場；只接受台股或美股。 |
+| `stockCode` | 是 | `string` | pattern: `^[A-Za-z0-9.\-]{1,12}$`<br>example: `00713` | 唯一代號，1–12 個英數字、點或連字號。 |
+| `asOf` | 是 | `string (date)` | example: `2026-01-15` | 嚴格 ISO 日期，早於市場本地今日；缺該日 K 不借用前日。 |
+| `bars` | 否 | `integer` | example: `21` | 只回最後 N 個完成日，範圍 21–250，省略預設 60；實際歷史不足時回較少筆。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppTechnicalSeriesResponse | 完成日技術摘要與逐日價量；缺精確 asOf 時 dailyBars 為空且摘要具名標缺口。 |
+| `400` | application/problem+json: ProblemDetail | 缺漏、未知或重複參數、body、無效代號／市場／日期，或 bars 非 21–250。 |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET，gateway 回 Allow: GET。 |
+| `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游失敗或回應身分、日期、序列結構不符；gateway upstream failure 可能為 HTML。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
 ## Schema 欄位
+
+### `SrppTechnicalSeriesResponse`
+
+一檔已完成日技術摘要與至多 250 筆升冪逐日價量；無個人資產或交易指令。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `formulaVersion` | 是 | `string` | 否 | enum: `SRPP_TECHNICAL_SERIES_V1` | 固定 SRPP_TECHNICAL_SERIES_V1 序列公式版本；摘要自身沿用 SRPP_DAILY_OHLCV_V1。 |
+| `market` | 是 | `string` | 否 | enum: `台股`, `美股` | 請求的唯一市場台股或美股。 |
+| `stockCode` | 是 | `string` | 否 |  | 請求的唯一股票代號。 |
+| `asOf` | 是 | `string (date)` | 否 |  | 請求的精確已完成日。 |
+| `requestedBars` | 是 | `integer` | 否 | minimum: 21<br>maximum: 250 | 本次請求的最大回傳日 K 筆數；實際可少於此值。 |
+| `volumeUnit` | 是 | `string` | 否 | enum: `SOURCE_UNIT_UNVERIFIED` | SOURCE_UNIT_UNVERIFIED 表示成交量沿用持久化來源的原單位；不可據此跨標的比較絕對量。 |
+| `summary` | 是 | `SrppCompletedTechnicalSymbol` | 否 |  | 與既有完成日批次 API 同一公式、來源雜湊、狀態及缺口的單檔摘要。 |
+| `additionalIndicators` | 是 | `SrppTechnicalSeriesAdditionalIndicators | null` | 是 |  | 同一調整後完成日序列套用既有技術指標核心的其他值；缺 asOf 日 K 時為 null。 |
+| `dailyBars` | 是 | `array of SrppTechnicalSeriesBar` | 否 | maxItems: 250<br>items: SrppTechnicalSeriesBar<br>items 說明: 同一還原價量基準的一個完成日。 | 最後 min(requestedBars, sampleCount) 筆升冪完成日 K；缺 asOf 時空陣列。 |
+
+### `SrppTechnicalSeriesBar`
+
+收盤與成交量足以重播最後一筆 OBV20；沒有資料的欄位為 null 而非零。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 此筆已保存完成日 K 日期。 |
+| `open` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | 調整後正數開盤價；來源無效或缺值時 null。 |
+| `high` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | 調整後正數最高價；來源無效或缺值時 null。 |
+| `low` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | 調整後正數最低價；來源無效或缺值時 null。 |
+| `close` | 是 | `number | null` | 是 | exclusiveMinimum: 0 | 計算 OBV 收盤方向用的調整後正數收盤價。 |
+| `rawVolume` | 是 | `integer | null` | 是 | minimum: 0 | 同日持久化原始成交量；來源單位未驗證，負值或缺值時 null。 |
+| `volume` | 是 | `integer | null` | 是 | minimum: 0 | 實際計算 OBV 的調整後成交量；與調整後價格同股數基準。 |
+| `closeSource` | 是 | `string | null` | 是 |  | 原始保存日 K 的收盤來源識別；null 代表來源未證實。 |
+| `obv20Change` | 是 | `number | null` | 是 |  | 截至本日最近 20 次收盤方向加減調整後成交量；21 筆有效 close 與後 20 筆有效量不足時 null。 |
+
+### `SrppTechnicalSeriesAdditionalIndicators`
+
+既有純序列技術核心對同一調整後完成日 K 的結果；相關衍生欄位不可重複計票。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ma10` | 是 | `number | null` | 是 |  | 最近 10 個完成日收盤均值。 |
+| `ma20` | 是 | `number | null` | 是 |  | 最近 20 個完成日收盤均值。 |
+| `ma60` | 是 | `number | null` | 是 |  | 最近 60 個完成日收盤均值。 |
+| `ma240` | 是 | `number | null` | 是 |  | 最近 240 個完成日收盤均值。 |
+| `k9` | 是 | `number | null` | 是 |  | 既有九期 KD 的 K 值。 |
+| `d9` | 是 | `number | null` | 是 |  | 既有九期 KD 的 D 值。 |
+| `previousK9` | 是 | `number | null` | 是 |  | 前一完成日的同一 K 值。 |
+| `previousD9` | 是 | `number | null` | 是 |  | 前一完成日的同一 D 值。 |
+| `j9` | 是 | `number | null` | 是 |  | 由同一 K/D 衍生的 J9，不是獨立訊號。 |
+| `k3d2` | 是 | `number | null` | 是 |  | 由同一 K/D 衍生的 K3D2，不是獨立訊號。 |
+| `rsv9` | 是 | `number | null` | 是 |  | 九期 RSV，與 W%R9 代數相依。 |
+| `ema12` | 是 | `number | null` | 是 |  | 既有核心十二期 EMA。 |
+| `ema26` | 是 | `number | null` | 是 |  | 既有核心二十六期 EMA。 |
+| `dif` | 是 | `number | null` | 是 |  | EMA12 減 EMA26，與 MACD/OSC 相依。 |
+| `macd` | 是 | `number | null` | 是 |  | 既有核心 DIF 平滑線；不是摘要的六位精度 MACD signal。 |
+| `osc` | 是 | `number | null` | 是 |  | 既有核心 DIF 與 MACD 的差。 |
+| `rsi5` | 是 | `number | null` | 是 |  | 既有核心 Wilder 五期 RSI，完成日值不代替盤中雷達門檻。 |
+| `rsi10` | 是 | `number | null` | 是 |  | 既有核心 Wilder 十期 RSI。 |
+| `bias10` | 是 | `number | null` | 是 |  | 現收盤相對 MA10 的乖離百分比。 |
+| `bias20` | 是 | `number | null` | 是 |  | 現收盤相對 MA20 的乖離百分比。 |
+| `b10b20` | 是 | `number | null` | 是 |  | BIAS10 減 BIAS20 的同源衍生值。 |
+| `wr9` | 是 | `number | null` | 是 |  | 九期威廉指標，與 RSV9 代數相依。 |
 
 ### `SrppCompletedTechnicalsResponse`
 

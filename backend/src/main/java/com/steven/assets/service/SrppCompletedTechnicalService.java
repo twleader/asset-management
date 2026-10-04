@@ -35,10 +35,13 @@ public class SrppCompletedTechnicalService {
     public record Response(String formulaVersion, String market, LocalDate asOf,
                            Coverage coverage, List<SymbolFacts> symbols) {}
 
+    record LoadedSymbol(SymbolFacts facts, List<StockPriceHistory> rawRows,
+                        List<StockPriceHistory> adjustedRows) {}
+
     @Transactional(readOnly = true)
     public Response read(String market, LocalDate asOf, List<String> codes) {
         List<SymbolFacts> symbols = new ArrayList<>();
-        for (String code : codes) symbols.add(readOne(code, market, asOf));
+        for (String code : codes) symbols.add(loadOne(code, market, asOf).facts());
         int complete = (int) symbols.stream().filter(s -> s.status().equals("COMPLETE")).count();
         int partial = (int) symbols.stream().filter(s -> s.status().equals("PARTIAL")).count();
         return new Response(SrppCompletedTechnicalCalculator.FORMULA_VERSION, market, asOf,
@@ -46,12 +49,16 @@ public class SrppCompletedTechnicalService {
                 List.copyOf(symbols));
     }
 
-    private SymbolFacts readOne(String code, String market, LocalDate asOf) {
+    LoadedSymbol loadOne(String code, String market, LocalDate asOf) {
         List<StockPriceHistory> rows = prices.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(
                 code, market, asOf.minusYears(2), asOf);
         if (rows.isEmpty() || !asOf.equals(rows.get(rows.size() - 1).getTradingDate())) {
-            return new SymbolFacts(code, market, "UNAVAILABLE", asOf, rows.isEmpty() ? null : rows.get(0).getTradingDate(),
-                    rows.size(), "UNAVAILABLE", List.of(), null, null, List.of("AS_OF_BAR_MISSING"));
+            return new LoadedSymbol(
+                    new SymbolFacts(code, market, "UNAVAILABLE", asOf,
+                            rows.isEmpty() ? null : rows.get(0).getTradingDate(),
+                            rows.size(), "UNAVAILABLE", List.of(), null, null,
+                            List.of("AS_OF_BAR_MISSING")),
+                    List.copyOf(rows), List.of());
         }
         LocalDate historyStart = rows.get(0).getTradingDate();
         var events = dividends.findAdjustmentEvents(code, market, historyStart, asOf);
@@ -67,11 +74,13 @@ public class SrppCompletedTechnicalService {
                 || values.obv20Change() != null || values.volumeRatio20() != null
                 || values.oneYearPositionPct() != null;
         String status = !any ? "UNAVAILABLE" : result.missing().isEmpty() ? "COMPLETE" : "PARTIAL";
-        return new SymbolFacts(code, market, status, asOf, historyStart, adjustedAsc.size(),
-                adjusted.adjusted() ? "ADJUSTED_RECORDED_EVENTS" : "RAW_NO_APPLIED_EVENT",
-                List.copyOf(adjusted.appliedEventDates()),
-                sha256(code, market, asOf, adjustedAsc, adjusted.appliedEventDates()),
-                values, result.missing());
+        return new LoadedSymbol(
+                new SymbolFacts(code, market, status, asOf, historyStart, adjustedAsc.size(),
+                        adjusted.adjusted() ? "ADJUSTED_RECORDED_EVENTS" : "RAW_NO_APPLIED_EVENT",
+                        List.copyOf(adjusted.appliedEventDates()),
+                        sha256(code, market, asOf, adjustedAsc, adjusted.appliedEventDates()),
+                        values, result.missing()),
+                List.copyOf(rows), List.copyOf(adjustedAsc));
     }
 
     private static String sha256(String code, String market, LocalDate asOf,

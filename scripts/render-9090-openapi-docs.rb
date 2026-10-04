@@ -185,7 +185,7 @@ def validate_document!(document)
   end
 
   reachable = reachable_schema_names(document)
-  assert!(reachable.length == 137, "預期 137 個 reachable component schema，實際為 #{reachable.length}")
+  assert!(reachable.length == 140, "預期 140 個 reachable component schema，實際為 #{reachable.length}")
   reachable.each do |name|
     validate_schema_node!(schemas.fetch(name), "components.schemas.#{name}")
   end
