@@ -35,6 +35,8 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.MarketSummary.class, "MarketSummary"),
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
             new Binding(TradingRadarDto.Bollinger.class, "Bollinger"),
+            new Binding(TradingRadarDto.OfficialSma20Verification.class, "OfficialSma20Verification"),
+            new Binding(TradingRadarDto.PriceReference.class, "RadarPriceReference"),
             new Binding(TradingRadarDto.TechnicalResolution.class, "TechnicalResolution"),
             new Binding(TradingRadarDto.IntradayTechnicalResolution.class, "IntradayTechnicalResolution"),
             new Binding(TradingRadarDto.IntradayTechnicalFrame.class, "IntradayTechnicalFrame"),
@@ -66,6 +68,8 @@ class TradingRadarOpenApiSchemaContractTest {
     private static final Map<String, Set<String>> NULLABLE = Map.ofEntries(
             Map.entry("TradingRadarResponse", set()),
             Map.entry("Bollinger", set("asOfDate", "middleBand", "upperBand", "lowerBand", "percentB", "bandWidthPercent")),
+            Map.entry("OfficialSma20Verification", set("sourceDate", "reason", "officialValue", "localValue", "difference")),
+            Map.entry("RadarPriceReference", set()),
             Map.entry("DailyCandle", set(
                     "open", "high", "low", "close", "closePosition", "bodyDirection",
                     "lowerShadowRatio", "asOfDate")),
@@ -97,7 +101,8 @@ class TradingRadarOpenApiSchemaContractTest {
                     // 與 boolean 欄不列入，其餘一律 nullable。
                     "swingAction", "swingActionLabel", "swingScore", "swingDownsideRisk",
                     "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
-                    "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger")),
+                    "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
+                    "officialSma20Verification", "priceReference")),
             Map.entry("TechnicalResolution", set(
                     "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
                     "oldestObservedAt", "freshUntil", "ageSeconds", "intraday")),
@@ -161,6 +166,8 @@ class TradingRadarOpenApiSchemaContractTest {
     private static final Map<String, Map<String, String>> STRING_FORMATS = Map.ofEntries(
             Map.entry("TradingRadarResponse", formats("generatedAt", "date-time")),
             Map.entry("Bollinger", formats("asOfDate", "date")),
+            Map.entry("OfficialSma20Verification", formats("sourceDate", "date")),
+            Map.entry("RadarPriceReference", formats("asOfDate", "date")),
             Map.entry("MarketSummary", formats(
                     "asOfDate", "date", "marketVolumeAsOfDate", "date", "usTechAsOfDate", "date")),
             Map.entry("StockDecision", formats("asOfDate", "date", "fxAsOfDate", "date")),

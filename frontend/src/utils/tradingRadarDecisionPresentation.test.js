@@ -105,6 +105,37 @@ test('Task408 detail 呈現 D/W profile、field provenance 與 legacy null，不
   assert.ok(tradingRadarView.includes('不將其視為 0 或最新富邦來源'))
 })
 
+test('Task475 明細分別呈現官方 SMA20 核對與完成日價格參考，不把入庫資料當成加分或委託價格', () => {
+  for (const requiredFragment of [
+    'row.officialSma20Verification',
+    'officialSma20VerificationLabel(row.officialSma20Verification.status)',
+    'row.officialSma20Verification.sourceDate',
+    'row.officialSma20Verification.officialValue',
+    'row.officialSma20Verification.localValue',
+    'row.officialSma20Verification.difference',
+    'verification?.gateApplied',
+    'officialSma20GateNote(row.officialSma20Verification)',
+    'row.priceReference',
+    'row.priceReference.buyLower',
+    'row.priceReference.buyUpper',
+    'row.priceReference.sellLower',
+    'row.priceReference.sellUpper',
+    'row.priceReference.asOfDate',
+    'row.priceReference.applicableSide',
+    'priceReferenceSideLabel(row.priceReference.applicableSide)'
+  ]) {
+    assert.ok(tradingRadarView.includes(requiredFragment), `missing Task475 detail fragment: ${requiredFragment}`)
+  }
+  for (const requiredDisclosure of [
+    '已存官方日線事實核對既有本地 MA20，不另計分',
+    '不把缺值當作相符、衝突或已納入評分',
+    '只供判讀，不是委託、停損或預測價格',
+    '它不進評分或動作 gate，也不表示可執行價格、預測報酬或建議準確率。'
+  ]) {
+    assert.ok(tradingRadarView.includes(requiredDisclosure), `missing Task475 disclosure: ${requiredDisclosure}`)
+  }
+})
+
 test('Trading Radar detail 將設定頁等價分類與 strict radar profile 分開顯示，且只排除台股 0000', () => {
   for (const requiredFragment of [
     "row?.market === '台股' && row?.stockCode === '0000'",

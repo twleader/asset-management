@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.18.0` |
+| 契約版本 | `1.19.0` |
 | 對外路徑 | 19 條：18 個 `GET`、1 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -1936,6 +1936,35 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `weeklyIndicators` | 是 | `WeeklyIndicators | null` | 是 |  | 交易雷達採用的週線技術指標。 |
 | `technicalResolution` | 是 | `TechnicalResolution | null` | 是 |  | Task408 技術指標來源決策。null 僅表示舊快照的 LEGACY_LOCAL_V0，不能當成現在的富邦資料或零值。 |
 | `bollinger` | 是 | `Bollinger | null` | 是 |  | 本機完成日布林，用於既有乖離因子中的上方延伸扣分，不是單獨買賣訊號，也不使用未證實富邦布林 overlay。 |
+| `officialSma20Verification` | 是 | `OfficialSma20Verification | null` | 是 |  | 已保存富邦 SMA20 與本地完成日原始價的核對結果；不重複加權。 |
+| `priceReference` | 是 | `RadarPriceReference | null` | 是 |  | 同日完成價本機 BB20/2 的買賣展示區間；不構成委託報價或預測。 |
+
+### `OfficialSma20Verification`
+
+固定 20 根原始完成日價與不可變 FUBON_SDK sma_d_20 事實核對；僅衝突能保守否決已成立候選。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `CONFIRMED`, `CONFLICT`, `NOT_COMPARABLE`, `UNAVAILABLE` | CONFIRMED 為原始價重播相符；CONFLICT 為差值超過容差；NOT_COMPARABLE 為價基或本地投影不符；UNAVAILABLE 為官方或完成日缺值。 |
+| `sourceDate` | 是 | `string | null (date)` | 是 |  | 比對的完成交易日。 |
+| `reason` | 是 | `string | null` | 是 |  | 固定原因代碼。 |
+| `officialValue` | 是 | `number | null` | 是 |  | 富邦官方原始 SMA20；缺值不當零。 |
+| `localValue` | 是 | `number | null` | 是 |  | 本地決策所用 MA20 兩位小數投影。 |
+| `difference` | 是 | `number | null` | 是 |  | 官方值與未捨入原始價重播平均的絕對差。 |
+| `gateApplied` | 是 | `boolean` | 否 |  | 是否實際把最終任一軌候選降級；不改分數。 |
+
+### `RadarPriceReference`
+
+最近完成日 BB20/2 原始與還原價格基準一致時的展示區間；兩位小數向外取整，不代表委託 tick。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `buyLower` | 是 | `number` | 否 | exclusiveMinimum: 0 | 下軌向下兩位小數，買進參考下界。 |
+| `buyUpper` | 是 | `number` | 否 | exclusiveMinimum: 0 | 中軌向上兩位小數，買進參考上界。 |
+| `sellLower` | 是 | `number` | 否 | exclusiveMinimum: 0 | 中軌向下兩位小數，賣出參考下界。 |
+| `sellUpper` | 是 | `number` | 否 | exclusiveMinimum: 0 | 上軌向上兩位小數，賣出參考上界。 |
+| `asOfDate` | 是 | `string (date)` | 否 |  | 使用的完成交易日。 |
+| `applicableSide` | 是 | `string` | 否 | enum: `BUY`, `SELL`, `NONE` | BUY 表示中期買進候選；SELL 表示中期減碼或出場候選；NONE 表示其他最終動作。 |
 
 ### `Bollinger`
 

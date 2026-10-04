@@ -230,6 +230,21 @@ class TradingRadarNotificationServiceTest {
     }
 
     @Test
+    void v1Policy升至v2首輪僅建立新動作Baseline() {
+        setting.setActionPolicyVersion("EVIDENCE_GATE_V1");
+        setting.setLastAction("BUY_CANDIDATE");
+
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+
+        assertEquals("EVIDENCE_GATE_V2", setting.getActionPolicyVersion());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
+        verify(settingRepo).save(setting);
+    }
+
+    @Test
     void v17RuleVersion首輪只重建V18Baseline且不改設定或收件人路徑() {
         setting.setRuleVersion(PREVIOUS_RULE_VERSION);
         setting.setLastAction("BUY_CANDIDATE");

@@ -539,6 +539,94 @@
                 <div v-else class="muted">舊快照（LEGACY_LOCAL_V0）未含 technicalResolution；請重新整理，畫面不將其視為 0 或最新富邦來源。</div>
               </div>
 
+              <!--
+                Task475：已存的富邦日線 SMA20 只用來核對同一個既有 MA20 家族。
+                Vue 不重算，也不會因資料存在就把它描述成已參與評分；最終動作是否被保守
+                gate 處理，完全以後端 gateApplied 為準。
+              -->
+              <div class="fundamental-panel official-sma20-panel">
+                <div class="fundamental-head">
+                  <div>
+                    <span class="fundamental-title">富邦 SMA20 核對</span>
+                    <span class="official-sma20-note">已存官方日線事實核對既有本地 MA20，不另計分</span>
+                  </div>
+                  <el-tag
+                    v-if="row?.officialSma20Verification"
+                    size="small"
+                    :type="officialSma20VerificationType(row.officialSma20Verification.status)"
+                    effect="plain"
+                  >
+                    {{ officialSma20VerificationLabel(row.officialSma20Verification.status) }}
+                  </el-tag>
+                </div>
+                <template v-if="row?.officialSma20Verification">
+                  <div class="technical-resolution-meta official-sma20-grid">
+                    <div class="technical-resolution-meta-item">
+                      <span>核對狀態</span>
+                      <strong>{{ officialSma20VerificationLabel(row.officialSma20Verification.status) }}</strong>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>官方事實來源日</span>
+                      <strong>{{ row.officialSma20Verification.sourceDate || '—' }}</strong>
+                      <small>僅讀取已存入資料庫的富邦 D 日線 SMA20。</small>
+                    </div>
+                    <div class="technical-resolution-meta-item">
+                      <span>最終動作保守 gate</span>
+                      <strong>{{ officialSma20GateLabel(row.officialSma20Verification) }}</strong>
+                      <small>{{ officialSma20GateNote(row.officialSma20Verification) }}</small>
+                    </div>
+                    <div v-if="row.officialSma20Verification.officialValue != null" class="technical-resolution-meta-item">
+                      <span>官方 SMA20</span>
+                      <strong>{{ technicalValueLabel(row.officialSma20Verification.officialValue) }}</strong>
+                    </div>
+                    <div v-if="row.officialSma20Verification.localValue != null" class="technical-resolution-meta-item">
+                      <span>本地 MA20</span>
+                      <strong>{{ technicalValueLabel(row.officialSma20Verification.localValue) }}</strong>
+                    </div>
+                    <div v-if="row.officialSma20Verification.difference != null" class="technical-resolution-meta-item">
+                      <span>未捨入差值</span>
+                      <strong>{{ technicalValueLabel(row.officialSma20Verification.difference) }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="row.officialSma20Verification.reason" class="official-sma20-reason">
+                    核對說明：{{ row.officialSma20Verification.reason }}
+                  </div>
+                </template>
+                <div v-else class="muted">舊快照未含官方 SMA20 核對結果；不把缺值當作相符、衝突或已納入評分。</div>
+              </div>
+
+              <!-- Task475：此 child 是完成日布林 20/2 的展示結果；不以盤中價重算，也不產生委託。 -->
+              <div v-if="row?.priceReference" class="fundamental-panel price-reference-panel">
+                <div class="fundamental-head">
+                  <div>
+                    <span class="fundamental-title">完成日價格參考區間</span>
+                    <span class="price-reference-note">只供判讀，不是委託、停損或預測價格</span>
+                  </div>
+                  <el-tag size="small" type="info" effect="plain">{{ priceReferenceSideLabel(row.priceReference.applicableSide) }}</el-tag>
+                </div>
+                <div class="confirm-grid">
+                  <div class="confirm-item">
+                    <span>買進參考區間</span>
+                    <strong>{{ priceReferenceRange(row.priceReference.buyLower, row.priceReference.buyUpper) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>賣出參考區間</span>
+                    <strong>{{ priceReferenceRange(row.priceReference.sellLower, row.priceReference.sellUpper) }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>完成日</span>
+                    <strong>{{ row.priceReference.asOfDate || '—' }}</strong>
+                  </div>
+                  <div class="confirm-item">
+                    <span>本次最終動作適用方向</span>
+                    <strong>{{ priceReferenceSideLabel(row.priceReference.applicableSide) }}</strong>
+                  </div>
+                </div>
+                <div class="price-reference-disclosure">
+                  區間只由同日完成資料產生，未以即時價格重新推導；它不進評分或動作 gate，也不表示可執行價格、預測報酬或建議準確率。
+                </div>
+              </div>
+
               <!-- Task461：盤中指標只呈現 resolver 已讀入的 cache-only detail，不參與畫面端計算或決策。 -->
               <div v-if="row.technicalResolution" class="fundamental-panel intraday-technical-panel">
                 <div class="fundamental-head">
@@ -2150,6 +2238,48 @@ function technicalAgeLabel(ageSeconds) {
   return `${Number(ageSeconds)} 秒`
 }
 
+function officialSma20VerificationLabel(status) {
+  return ({
+    CONFIRMED: '核對相符',
+    CONFLICT: '核對衝突',
+    NOT_COMPARABLE: '無法比較',
+    UNAVAILABLE: '官方事實不可用'
+  })[status] || (status || '—')
+}
+
+function officialSma20VerificationType(status) {
+  if (status === 'CONFIRMED') return 'success'
+  if (status === 'CONFLICT') return 'danger'
+  if (status === 'NOT_COMPARABLE' || status === 'UNAVAILABLE') return 'warning'
+  return 'info'
+}
+
+function officialSma20GateLabel(verification) {
+  if (verification?.gateApplied === true) return '已套用保守 gate'
+  if (verification?.status === 'CONFLICT') return '未適用（本動作不在降級範圍）'
+  return '未適用'
+}
+
+function officialSma20GateNote(verification) {
+  if (verification?.gateApplied === true) {
+    return '僅在既有證據 gate 後保守調整最終動作；分數與候選動作未增加或重複計算。'
+  }
+  if (verification?.status === 'CONFLICT') {
+    return '衝突不單獨產生買賣訊號；本檔最終動作沒有落在需降級的候選範圍。'
+  }
+  if (verification?.status === 'CONFIRMED') return '相符只記錄來源與核對結果，不增加分數或信心。'
+  return '缺值或價格基準不可比較時，保留既有最終動作，不將資料當作 0。'
+}
+
+function priceReferenceSideLabel(side) {
+  return ({ BUY: '買進參考', SELL: '賣出參考', NONE: '本次動作不適用' })[side] || (side || '—')
+}
+
+function priceReferenceRange(lower, upper) {
+  if (lower == null || upper == null) return '—'
+  return `${technicalValueLabel(lower)} ～ ${technicalValueLabel(upper)}`
+}
+
 function intradayTechnicalStatusType(status) {
   if (status === 'AVAILABLE') return 'success'
   if (status === 'STALE') return 'warning'
@@ -2793,6 +2923,11 @@ onUnmounted(() => {
 .dividend-date-cell strong { color: #0f172a; font-size: 13px; }
 .fundamental-panel { margin-top: 18px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; padding: 14px 16px; }
 .technical-resolution-panel { border-color: #c7d2fe; background: #f8fafc; }
+.official-sma20-panel { border-color: #bae6fd; background: #f0f9ff; }
+.official-sma20-note, .price-reference-note { margin-left: 8px; color: #64748b; font-size: 12px; font-weight: 400; }
+.official-sma20-grid { margin-bottom: 10px; }
+.official-sma20-reason, .price-reference-disclosure { margin-top: 10px; color: #475569; font-size: 12px; line-height: 1.6; }
+.price-reference-panel { border-color: #bbf7d0; background: #f0fdf4; }
 .intraday-technical-panel { border-color: #99f6e4; background: #f0fdfa; }
 .intraday-technical-note { margin-left: 8px; color: #64748b; font-size: 12px; font-weight: 400; }
 .intraday-technical-root { margin-bottom: 14px; }

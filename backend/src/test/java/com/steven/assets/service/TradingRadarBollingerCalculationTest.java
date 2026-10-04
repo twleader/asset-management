@@ -79,7 +79,7 @@ class TradingRadarBollingerCalculationTest {
         var gated = TradingRadarEvidenceGate.apply(modified.action(), modified.shortAction(), modified.swingAction(),
                 true, null, null);
         assertThat(gated.mediumAction()).isNotEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
-        assertThat(TradingRadarEvidenceGate.ACTION_POLICY_VERSION).isEqualTo("EVIDENCE_GATE_V1");
+        assertThat(TradingRadarEvidenceGate.ACTION_POLICY_VERSION).isEqualTo("EVIDENCE_GATE_V2");
     }
 
     @Test
@@ -100,7 +100,11 @@ class TradingRadarBollingerCalculationTest {
         assertThat(current.bollinger()).usingRecursiveComparison()
                 .withComparatorForType(BigDecimal::compareTo, BigDecimal.class).isEqualTo(snapshot.bollinger());
         ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("bollinger");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("officialSma20Verification");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("priceReference");
         assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).bollinger()).isNull();
+        assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).officialSma20Verification()).isNull();
+        assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).priceReference()).isNull();
     }
 
     @Test

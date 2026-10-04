@@ -57,8 +57,8 @@ class TradingRadarLivePremiumRuleIsolationTest {
         List<String> components =
                 componentNames(com.steven.assets.dto.TradingRadarDto.StockDecision.class);
 
-        // Task 356.11b/408/438：62 → 75（既有十二欄後再附加 completed-local bollinger）。
-        assertThat(components).hasSize(75);
+        // Task 475 在既有 75 欄末尾附加官方核對與價格參考，前面索引不變。
+        assertThat(components).hasSize(77);
         // Task 320 的兩欄仍緊接 actionGateReasons，且相對順序未變——
         // 中間插入會讓既有 positional 呼叫端一起位移。
         assertThat(components.subList(59, 62))
@@ -70,6 +70,7 @@ class TradingRadarLivePremiumRuleIsolationTest {
                 .containsExactly("swingAction", "swingActionLabel", "swingScore",
                         "swingReasons", "swingRisks", "swingDownsideRisk",
                         "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
-                        "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger");
+                        "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
+                        "officialSma20Verification", "priceReference");
     }
 }

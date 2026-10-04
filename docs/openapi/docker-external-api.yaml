@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.18.0
+  version: 1.19.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十九條精確路徑：
     十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -727,7 +727,7 @@ paths:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
                     ruleVersion: TW_RULES_V20
-                    actionPolicyVersion: EVIDENCE_GATE_V1
+                    actionPolicyVersion: EVIDENCE_GATE_V2
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:
                       {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: 100.00, changePercent: 0.00, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}
@@ -818,7 +818,7 @@ paths:
               schema: {$ref: '#/components/schemas/TradingRadarStockDetailResponse'}
               examples:
                 synthetic:
-                  value: {ruleVersion: TW_RULES_V20, actionPolicyVersion: EVIDENCE_GATE_V1, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null}}
+                  value: {ruleVersion: TW_RULES_V20, actionPolicyVersion: EVIDENCE_GATE_V2, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null, officialSma20Verification: null, priceReference: null}}
         '400':
           description: >-
             email 格式不合法時優先回 email detail；否則缺少、重複或格式不合法的 stockCode／market 維持 selector detail。
@@ -6254,6 +6254,8 @@ components:
       - weeklyIndicators
       - technicalResolution
       - bollinger
+      - officialSma20Verification
+      - priceReference
       properties:
         stockCode:
           type:
@@ -6657,6 +6659,45 @@ components:
           - type: 'null'
             description: 舊快照或不足 20 根有效完成日資料時未提供觀測。
           description: 本機完成日布林，用於既有乖離因子中的上方延伸扣分，不是單獨買賣訊號，也不使用未證實富邦布林 overlay。
+        officialSma20Verification:
+          anyOf:
+          - $ref: '#/components/schemas/OfficialSma20Verification'
+            description: 可比較時的官方 SMA20 狀態與來源。
+          - type: 'null'
+            description: 舊快照未包含官方 SMA20 核對欄位。
+          description: 已保存富邦 SMA20 與本地完成日原始價的核對結果；不重複加權。
+        priceReference:
+          anyOf:
+          - $ref: '#/components/schemas/RadarPriceReference'
+            description: 同一完成日的本機布林買賣參考區間。
+          - type: 'null'
+            description: 價格基準或布林資料不足時不提供區間。
+          description: 同日完成價本機 BB20/2 的買賣展示區間；不構成委託報價或預測。
+      additionalProperties: false
+    OfficialSma20Verification:
+      type: object
+      description: 固定 20 根原始完成日價與不可變 FUBON_SDK sma_d_20 事實核對；僅衝突能保守否決已成立候選。
+      required: [status, sourceDate, reason, officialValue, localValue, difference, gateApplied]
+      properties:
+        status: {type: string, enum: [CONFIRMED, CONFLICT, NOT_COMPARABLE, UNAVAILABLE], description: 'CONFIRMED 為原始價重播相符；CONFLICT 為差值超過容差；NOT_COMPARABLE 為價基或本地投影不符；UNAVAILABLE 為官方或完成日缺值。'}
+        sourceDate: {type: [string, 'null'], format: date, description: 比對的完成交易日。}
+        reason: {type: [string, 'null'], description: 固定原因代碼。}
+        officialValue: {type: [number, 'null'], description: 富邦官方原始 SMA20；缺值不當零。}
+        localValue: {type: [number, 'null'], description: 本地決策所用 MA20 兩位小數投影。}
+        difference: {type: [number, 'null'], description: 官方值與未捨入原始價重播平均的絕對差。}
+        gateApplied: {type: boolean, description: 是否實際把最終任一軌候選降級；不改分數。}
+      additionalProperties: false
+    RadarPriceReference:
+      type: object
+      description: 最近完成日 BB20/2 原始與還原價格基準一致時的展示區間；兩位小數向外取整，不代表委託 tick。
+      required: [buyLower, buyUpper, sellLower, sellUpper, asOfDate, applicableSide]
+      properties:
+        buyLower: {type: number, exclusiveMinimum: 0, description: 下軌向下兩位小數，買進參考下界。}
+        buyUpper: {type: number, exclusiveMinimum: 0, description: 中軌向上兩位小數，買進參考上界。}
+        sellLower: {type: number, exclusiveMinimum: 0, description: 中軌向下兩位小數，賣出參考下界。}
+        sellUpper: {type: number, exclusiveMinimum: 0, description: 上軌向上兩位小數，賣出參考上界。}
+        asOfDate: {type: string, format: date, description: 使用的完成交易日。}
+        applicableSide: {type: string, enum: [BUY, SELL, NONE], description: 'BUY 表示中期買進候選；SELL 表示中期減碼或出場候選；NONE 表示其他最終動作。'}
       additionalProperties: false
     Bollinger:
       type: object
