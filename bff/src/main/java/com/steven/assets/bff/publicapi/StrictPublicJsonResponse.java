@@ -346,7 +346,8 @@ public final class StrictPublicJsonResponse {
                 "shortEvidenceConfidence", "mediumEvidenceConfidence", "shortRiskCoverage", "mediumRiskCoverage", "candidateAction",
                 "shortCandidateAction", "actionGateReasons", "etfPremiumLivePct", "etfPremiumLiveNavAsOf", "swingAction",
                 "swingActionLabel", "swingScore", "swingReasons", "swingRisks", "swingDownsideRisk", "swingEvidenceConfidence",
-                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger");
+                "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
+                "officialSma20Verification", "priceReference");
         nullableTexts(value, "stockCode", "stockName", "market", "assetClass", "action", "actionLabel", "counterTrendState",
                 "counterTrendLabel", "quoteStatus", "priceUpdatedAt", "asOfDate", "monthlyConfirmation", "quarterlyConfirmation",
                 "annualConfirmation", "underlyingCurrency", "kdHeat", "timingState", "timingLabel", "shortAction",
@@ -367,6 +368,32 @@ public final class StrictPublicJsonResponse {
         nullableObject(field(value, "weeklyIndicators"), StrictPublicJsonResponse::weeklyIndicators);
         nullableObject(field(value, "technicalResolution"), StrictPublicJsonResponse::technicalResolution);
         nullableObject(field(value, "bollinger"), StrictPublicJsonResponse::bollinger);
+        nullableObject(field(value, "officialSma20Verification"), StrictPublicJsonResponse::officialSma20Verification);
+        nullableObject(field(value, "priceReference"), StrictPublicJsonResponse::priceReference);
+    }
+
+    private static void officialSma20Verification(JsonNode value) {
+        exactObject(value, "status", "sourceDate", "reason", "officialValue", "localValue", "difference", "gateApplied");
+        enumText(field(value, "status"), Set.of("CONFIRMED", "CONFLICT", "NOT_COMPARABLE", "UNAVAILABLE"));
+        nullableText(field(value, "sourceDate"));
+        if (!field(value, "sourceDate").isNull()) LocalDate.parse(field(value, "sourceDate").textValue());
+        nullableText(field(value, "reason"));
+        nullableNumbers(value, "officialValue", "localValue", "difference");
+        boolean gate = field(value, "gateApplied").isBoolean() && field(value, "gateApplied").booleanValue();
+        if (!field(value, "gateApplied").isBoolean()
+                || gate && !"CONFLICT".equals(field(value, "status").textValue())) invalid();
+    }
+
+    private static void priceReference(JsonNode value) {
+        exactObject(value, "buyLower", "buyUpper", "sellLower", "sellUpper", "asOfDate", "applicableSide");
+        for (String name : new String[]{"buyLower", "buyUpper", "sellLower", "sellUpper"}) {
+            JsonNode price = field(value, name);
+            if (!price.isNumber() || price.decimalValue().signum() <= 0 || price.decimalValue().scale() > 2) invalid();
+        }
+        if (field(value, "buyLower").decimalValue().compareTo(field(value, "buyUpper").decimalValue()) > 0
+                || field(value, "sellLower").decimalValue().compareTo(field(value, "sellUpper").decimalValue()) > 0) invalid();
+        requiredDate(field(value, "asOfDate"));
+        enumText(field(value, "applicableSide"), Set.of("BUY", "SELL", "NONE"));
     }
 
     private static void bollinger(JsonNode value) {

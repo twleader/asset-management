@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -26,6 +27,51 @@ public class JdbcRadarTechnicalFactRepository implements RadarTechnicalFactPort 
     public JdbcRadarTechnicalFactRepository(JdbcTemplate jdbc, ObjectMapper json) {
         this.jdbc = jdbc;
         this.json = json;
+    }
+
+    @Override
+    public Map<String, OfficialSma20> findOfficialSma20(Map<String, LocalDate> exactDates) {
+        if (exactDates == null || exactDates.isEmpty()) return Map.of();
+        Map<String, OfficialSma20> found = new LinkedHashMap<>();
+        List<Map.Entry<String, LocalDate>> pairs = exactDates.entrySet().stream()
+                .filter(e -> e.getKey() != null && !e.getKey().isBlank() && e.getValue() != null)
+                .sorted(Map.Entry.comparingByKey()).toList();
+        for (int start = 0; start < pairs.size(); start += 30) {
+            List<Map.Entry<String, LocalDate>> batch = pairs.subList(start, Math.min(start + 30, pairs.size()));
+            String values = String.join(",", Collections.nCopies(batch.size(), "(?,?)"));
+            String sql = """
+                    SELECT f.stock_code,f.source_date,f.payload->>'sma' AS sma,f.observed_at
+                    FROM stock_technical_indicator f
+                    JOIN (VALUES %s) AS requested(stock_code,source_date)
+                      ON f.stock_code=requested.stock_code AND f.source_date=requested.source_date
+                    WHERE f.market='台股' AND f.provider='FUBON_SDK' AND f.timeframe='D'
+                      AND f.profile_id='sma_d_20' AND f.indicator_kind='SMA'
+                      AND f.parameters='{"timeframe":"D","period":20}'::jsonb
+                      AND jsonb_typeof(f.payload->'sma')='string'
+                    """.formatted(values);
+            List<Object> args = new ArrayList<>(batch.size() * 2);
+            batch.forEach(e -> { args.add(e.getKey()); args.add(e.getValue()); });
+            try {
+                jdbc.query(sql, rs -> {
+                    try {
+                        BigDecimal value = new BigDecimal(rs.getString("sma"));
+                        if (value.signum() > 0 && Double.isFinite(value.doubleValue())) {
+                            String code = rs.getString("stock_code");
+                            LocalDate date = rs.getObject("source_date", LocalDate.class);
+                            if (date.equals(exactDates.get(code))) {
+                                found.put(code, new OfficialSma20(date, value,
+                                        rs.getTimestamp("observed_at").toInstant()));
+                            }
+                        }
+                    } catch (RuntimeException invalid) {
+                        // One malformed immutable row is unavailable, never zero.
+                    }
+                }, args.toArray());
+            } catch (RuntimeException unavailable) {
+                // A read failure cannot promote or veto a decision.
+            }
+        }
+        return Map.copyOf(found);
     }
 
     @Override

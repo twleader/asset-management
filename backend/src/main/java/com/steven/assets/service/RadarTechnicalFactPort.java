@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
 
 /**
  * Read-only historical Fubon technical capture boundary.
@@ -13,6 +14,12 @@ import java.util.Map;
  * capture into a decision.</p>
  */
 public interface RadarTechnicalFactPort {
+    record OfficialSma20(LocalDate sourceDate, BigDecimal value, Instant observedAt) {}
+
+    /** Exact completed date per symbol; callers chunk at 30, missing/invalid facts are absent. */
+    default Map<String, OfficialSma20> findOfficialSma20(Map<String, LocalDate> exactDates) {
+        return Map.of();
+    }
     record Candidate(String profileId, LocalDate sourceDate, String contentHash,
                      Map<String, Object> parameters, Map<String, String> payload,
                      Instant observedAt, LocalDate previousSourceDate,

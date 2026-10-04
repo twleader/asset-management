@@ -14,7 +14,7 @@ import java.util.List;
 public final class TradingRadarEvidenceGate {
 
     /** V12 final-action evidence semantics; independent from the unchanged rule/scoring version. */
-    public static final String ACTION_POLICY_VERSION = "EVIDENCE_GATE_V1";
+    public static final String ACTION_POLICY_VERSION = "EVIDENCE_GATE_V2";
 
     private TradingRadarEvidenceGate() {}
 
