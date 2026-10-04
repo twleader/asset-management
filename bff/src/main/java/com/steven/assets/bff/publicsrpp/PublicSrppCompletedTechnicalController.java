@@ -87,45 +87,8 @@ public class PublicSrppCompletedTechnicalController {
                         throw badGateway();
                     int complete = 0, partial = 0, unavailable = 0;
                     for (int i = 0; i < codes.size(); i++) {
-                        JsonNode symbol = body.path("symbols").get(i);
-                        if (!hasKeys(symbol, SYMBOL_KEYS)
-                                || !codes.get(i).equals(symbol.path("stockCode").asText())
-                                || !market.equals(symbol.path("market").asText())
-                                || !rawDate.equals(symbol.path("asOf").asText())
-                                || !Set.of("COMPLETE", "PARTIAL", "UNAVAILABLE").contains(symbol.path("status").asText())
-                                || !symbol.path("sampleCount").isIntegralNumber()
-                                || symbol.path("sampleCount").intValue() < 0
-                                || !symbol.path("missing").isArray()
-                                || !symbol.path("appliedEventDates").isArray())
-                            throw badGateway();
-                        JsonNode missing = symbol.path("missing");
-                        boolean missingBar = false;
-                        for (JsonNode reason : missing) {
-                            if (!reason.isTextual() || reason.asText().isBlank()) throw badGateway();
-                            if ("AS_OF_BAR_MISSING".equals(reason.asText())) missingBar = true;
-                        }
-                        String status = symbol.path("status").asText();
-                        JsonNode indicators = symbol.path("indicators");
-                        if (missingBar) {
-                            if (!"UNAVAILABLE".equals(status) || !indicators.isNull()
-                                    || !symbol.path("sourceSha256").isNull()
-                                    || !"UNAVAILABLE".equals(symbol.path("priceBasis").asText())) throw badGateway();
-                        } else {
-                            if (!hasKeys(indicators, INDICATOR_KEYS)
-                                    || !Set.of("ADJUSTED_RECORDED_EVENTS", "RAW_NO_APPLIED_EVENT")
-                                        .contains(symbol.path("priceBasis").asText())
-                                    || !symbol.path("sourceSha256").isTextual()
-                                    || !symbol.path("sourceSha256").asText().matches("[0-9a-f]{64}")) throw badGateway();
-                            int present = 0;
-                            for (String field : INDICATOR_KEYS) {
-                                JsonNode value = indicators.path(field);
-                                if (!value.isNull() && !value.isNumber()) throw badGateway();
-                                if (value.isNumber()) present++;
-                            }
-                            if (("COMPLETE".equals(status) && (!missing.isEmpty() || present != INDICATOR_KEYS.size()))
-                                    || ("PARTIAL".equals(status) && (missing.isEmpty() || present == 0))
-                                    || ("UNAVAILABLE".equals(status) && (missing.isEmpty() || present != 0))) throw badGateway();
-                        }
+                        String status = validateSymbol(body.path("symbols").get(i),
+                                codes.get(i), market, rawDate);
                         switch (status) {
                             case "COMPLETE" -> complete++;
                             case "PARTIAL" -> partial++;
@@ -151,7 +114,49 @@ public class PublicSrppCompletedTechnicalController {
         return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "INVALID_TECHNICAL_FACTS");
     }
 
-    private static boolean hasKeys(JsonNode node, Set<String> keys) {
+    static String validateSymbol(JsonNode symbol, String code, String market, String asOf) {
+        if (!hasKeys(symbol, SYMBOL_KEYS)
+                || !code.equals(symbol.path("stockCode").asText())
+                || !market.equals(symbol.path("market").asText())
+                || !asOf.equals(symbol.path("asOf").asText())
+                || !Set.of("COMPLETE", "PARTIAL", "UNAVAILABLE").contains(symbol.path("status").asText())
+                || !symbol.path("sampleCount").isIntegralNumber()
+                || symbol.path("sampleCount").intValue() < 0
+                || !symbol.path("missing").isArray()
+                || !symbol.path("appliedEventDates").isArray())
+            throw badGateway();
+        JsonNode missing = symbol.path("missing");
+        boolean missingBar = false;
+        for (JsonNode reason : missing) {
+            if (!reason.isTextual() || reason.asText().isBlank()) throw badGateway();
+            if ("AS_OF_BAR_MISSING".equals(reason.asText())) missingBar = true;
+        }
+        String status = symbol.path("status").asText();
+        JsonNode indicators = symbol.path("indicators");
+        if (missingBar) {
+            if (!"UNAVAILABLE".equals(status) || !indicators.isNull()
+                    || !symbol.path("sourceSha256").isNull()
+                    || !"UNAVAILABLE".equals(symbol.path("priceBasis").asText())) throw badGateway();
+        } else {
+            if (!hasKeys(indicators, INDICATOR_KEYS)
+                    || !Set.of("ADJUSTED_RECORDED_EVENTS", "RAW_NO_APPLIED_EVENT")
+                        .contains(symbol.path("priceBasis").asText())
+                    || !symbol.path("sourceSha256").isTextual()
+                    || !symbol.path("sourceSha256").asText().matches("[0-9a-f]{64}")) throw badGateway();
+            int present = 0;
+            for (String field : INDICATOR_KEYS) {
+                JsonNode value = indicators.path(field);
+                if (!value.isNull() && !value.isNumber()) throw badGateway();
+                if (value.isNumber()) present++;
+            }
+            if (("COMPLETE".equals(status) && (!missing.isEmpty() || present != INDICATOR_KEYS.size()))
+                    || ("PARTIAL".equals(status) && (missing.isEmpty() || present == 0))
+                    || ("UNAVAILABLE".equals(status) && (missing.isEmpty() || present != 0))) throw badGateway();
+        }
+        return status;
+    }
+
+    static boolean hasKeys(JsonNode node, Set<String> keys) {
         if (!node.isObject()) return false;
         Set<String> actual = new HashSet<>();
         node.fieldNames().forEachRemaining(actual::add);

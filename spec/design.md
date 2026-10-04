@@ -12679,3 +12679,11 @@ coverage 定義：`AVAILABLE` 僅表示成功官方 response 明列的 sourceDat
 ## Requirement 174／Task 472：SRPP 完成日技術事實
 
 在 9090 exact GET manifest 增加 `/api/public/srpp/completed-technicals`，總數為 18（17 GET、1 POST）。它是 global no-tenant market-data read，與 owner-scoped `COMPLETED_TECHNICALS` 計算模組分離；後者在 policy registry 未登錄時仍維持 `UNAVAILABLE`，不得用新路由假裝它已啟用。BFF 用 no-tenant business client 轉發嚴格驗證的單一 market、asOf、stockCodes；business 以兩年 bounded `stock_price_history` 加 `stock_dividend_history` active 事件，經既有 `DistributionAdjustedPriceService` 對整段日線一次還原，再按欄位個別計算。asOf 必須早於市場本地今日且尾列日期必須精確相等。每檔回 status、各指標 nullable 數值、具名缺口、資料日期與雜湊；沒有交易決策欄位。OpenAPI YAML 為唯一契約來源，Markdown 由既有 renderer 重產；既有 17 路不改語意。
+
+## Requirement 175／Task 473：SRPP 逐日價量與技術序列
+
+單檔 `GET /api/public/srpp/technical-series?market=&stockCode=&asOf=&bars=` 是第 19 條 exact 9090 route（18 GET、1 POST）。BFF 只用 no-tenant business client 呼叫 `GET /api/market-data/srpp-technical-series`，嚴格限制必填市場、單碼、完成日期及 21–250 筆輸出上限；預設 60 筆。business 將 Requirement 174 的單檔讀取抽成一次查詢／一次權息還原的共用載入，再供批次摘要與本單檔序列使用，不在 request-time 觸發行情來源。
+
+回應 `formulaVersion=SRPP_TECHNICAL_SERIES_V1`、請求身分、`requestedBars`、`volumeUnit=SOURCE_UNIT_UNVERIFIED`、`summary`（原 `SRPP_DAILY_OHLCV_V1` 單檔事實）、`additionalIndicators` 與 `dailyBars`。如缺精確 asOf，保留原摘要的 `AS_OF_BAR_MISSING`，其他二欄分別 null、空陣列。存在 asOf 時，對同一兩年有界原始／調整後升冪序列取尾端 N 筆；每列回 `tradingDate/open/high/low/close/rawVolume/volume/closeSource/obv20Change`。OHLC 與 `volume` 為權息／分割還原後價量基準；`rawVolume` 與 `closeSource` 來自同日持久化原列，絕不以最新單日 quote volume 回填。成交量沿用 DB 來源單位，不宣稱跨標的相同，也不以絕對量跨標的比較。逐列 `obv20Change` 用同一計算核心的最近 20 次收盤變化和各該日調整後成交量；暖機、缺價或缺量為 null。尾列與摘要 OBV20 數值相同，輸出的最後 21 筆足夠重播尾列。
+
+`additionalIndicators` 只從同一調整後序列呼叫既有 `TechnicalIndicatorService.computeFromSeries` 的純計算，欄位為 MA10/20/60/240、K/D 與前一期 K/D、J9、K3D2、RSV、EMA12/26、DIF/MACD/OSC、RSI5/10、BIAS10/20、B10B20、W%R9；這個完成日序列不包含當日盤中價格，也不輸出雷達的行動資格。既有摘要與此組指標採不同既有公式／輸出精度者，保留各自公式身分，不在 BFF 混算或宣稱逐位等於即時雷達。BFF 驗證回應結構、請求身分、完成日尾列、長度、升冪、不重複日期、量值及 nullable 指標型別；失敗回 502。SRPP 以最後 21 筆收盤／調整後量驗算 `summary.indicators.obv20Change`，並將本回應摘要與判讀納入輸入快照；只在日報必要時展開單檔。

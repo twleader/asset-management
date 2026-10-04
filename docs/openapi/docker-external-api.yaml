@@ -1,19 +1,19 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.17.0
+  version: 1.18.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十八條精確路徑：
-    十七條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices 與 completed-technicals 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十九條精確路徑：
+    十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
     ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十八條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    十九條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    十七條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    十八條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -1560,8 +1560,145 @@ paths:
             text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
         '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
       x-codex-route-policy: exact-read-only-get
+  /api/public/srpp/technical-series:
+    get:
+      tags: [SRPP 技術事實]
+      operationId: getSrppTechnicalSeries
+      summary: 單檔完成日逐日價量、OBV 與技術指標
+      description: |
+        只讀已保存完成日 OHLCV 與 active 權息事件，兩年有界資料一次還原後計算，
+        輸出最後 21–250 筆中的實際可用日 K。每列 volume 是計算 OBV 使用的調整後量；
+        rawVolume 是同日 DB 原值，單位沿用來源且未驗證跨標的一致。最後 21 列
+        close/volume 足以重播 summary 的 OBV20；其他指標已由資產系統算好。
+        asOf 必須早於市場本地今日且該日 bar 精確存在才會有序列。
+        不讀 owner、不呼叫 vendor、不 refresh、不寫入、不產生買賣資格。
+      parameters:
+        - name: market
+          in: query
+          required: true
+          description: 唯一市場；只接受台股或美股。
+          schema: {type: string, enum: [台股, 美股]}
+          example: 台股
+        - name: stockCode
+          in: query
+          required: true
+          description: 唯一代號，1–12 個英數字、點或連字號。
+          schema: {type: string, pattern: '^[A-Za-z0-9.\-]{1,12}$'}
+          example: '00713'
+        - name: asOf
+          in: query
+          required: true
+          description: 嚴格 ISO 日期，早於市場本地今日；缺該日 K 不借用前日。
+          schema: {type: string, format: date}
+          example: '2026-01-15'
+        - name: bars
+          in: query
+          required: false
+          description: 只回最後 N 個完成日，範圍 21–250，省略預設 60；實際歷史不足時回較少筆。
+          schema: {type: integer, minimum: 21, maximum: 250, default: 60}
+          example: 21
+      responses:
+        '200':
+          description: 完成日技術摘要與逐日價量；缺精確 asOf 時 dailyBars 為空且摘要具名標缺口。
+          headers:
+            Cache-Control: {description: 私有回應不得快取，固定 private, no-store。, schema: {type: string, const: 'private, no-store'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SrppTechnicalSeriesResponse'}
+              example:
+                formulaVersion: SRPP_TECHNICAL_SERIES_V1
+                market: 台股
+                stockCode: '00713'
+                asOf: '2026-01-15'
+                requestedBars: 60
+                volumeUnit: SOURCE_UNIT_UNVERIFIED
+                summary: {stockCode: '00713', market: 台股, status: UNAVAILABLE, asOf: '2026-01-15', historyStart: null, sampleCount: 0, priceBasis: UNAVAILABLE, appliedEventDates: [], sourceSha256: null, indicators: null, missing: [AS_OF_BAR_MISSING]}
+                additionalIndicators: null
+                dailyBars: []
+        '400':
+          description: 缺漏、未知或重複參數、body、無效代號／市場／日期，或 bars 非 21–250。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}
+        '405':
+          description: "僅允許 GET，gateway 回 Allow: GET。"
+          headers: {Allow: {description: 唯一允許的方法。, schema: {type: string, const: GET}}}
+          content:
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '502':
+          description: 上游失敗或回應身分、日期、序列結構不符；gateway upstream failure 可能為 HTML。
+          content:
+            application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}
+            text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
+        '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
+      x-codex-route-policy: exact-read-only-get
 components:
   schemas:
+    SrppTechnicalSeriesResponse:
+      type: object
+      description: 一檔已完成日技術摘要與至多 250 筆升冪逐日價量；無個人資產或交易指令。
+      required: [formulaVersion, market, stockCode, asOf, requestedBars, volumeUnit, summary, additionalIndicators, dailyBars]
+      additionalProperties: false
+      properties:
+        formulaVersion: {type: string, const: SRPP_TECHNICAL_SERIES_V1, description: 固定 SRPP_TECHNICAL_SERIES_V1 序列公式版本；摘要自身沿用 SRPP_DAILY_OHLCV_V1。}
+        market: {type: string, enum: [台股, 美股], description: 請求的唯一市場台股或美股。}
+        stockCode: {type: string, description: 請求的唯一股票代號。}
+        asOf: {type: string, format: date, description: 請求的精確已完成日。}
+        requestedBars: {type: integer, minimum: 21, maximum: 250, description: 本次請求的最大回傳日 K 筆數；實際可少於此值。}
+        volumeUnit: {type: string, const: SOURCE_UNIT_UNVERIFIED, description: SOURCE_UNIT_UNVERIFIED 表示成交量沿用持久化來源的原單位；不可據此跨標的比較絕對量。}
+        summary: {$ref: '#/components/schemas/SrppCompletedTechnicalSymbol', description: 與既有完成日批次 API 同一公式、來源雜湊、狀態及缺口的單檔摘要。}
+        additionalIndicators:
+          description: 同一調整後完成日序列套用既有技術指標核心的其他值；缺 asOf 日 K 時為 null。
+          anyOf:
+            - {$ref: '#/components/schemas/SrppTechnicalSeriesAdditionalIndicators', description: 不含盤中價或雷達行動資格的額外完成日指標。}
+            - {type: 'null', description: 缺精確 asOf 日 K。}
+        dailyBars:
+          type: array
+          maxItems: 250
+          description: 最後 min(requestedBars, sampleCount) 筆升冪完成日 K；缺 asOf 時空陣列。
+          items: {$ref: '#/components/schemas/SrppTechnicalSeriesBar', description: 同一還原價量基準的一個完成日。}
+    SrppTechnicalSeriesBar:
+      type: object
+      description: 收盤與成交量足以重播最後一筆 OBV20；沒有資料的欄位為 null 而非零。
+      required: [tradingDate, open, high, low, close, rawVolume, volume, closeSource, obv20Change]
+      additionalProperties: false
+      properties:
+        tradingDate: {type: string, format: date, description: 此筆已保存完成日 K 日期。}
+        open: {type: [number, 'null'], exclusiveMinimum: 0, description: 調整後正數開盤價；來源無效或缺值時 null。}
+        high: {type: [number, 'null'], exclusiveMinimum: 0, description: 調整後正數最高價；來源無效或缺值時 null。}
+        low: {type: [number, 'null'], exclusiveMinimum: 0, description: 調整後正數最低價；來源無效或缺值時 null。}
+        close: {type: [number, 'null'], exclusiveMinimum: 0, description: 計算 OBV 收盤方向用的調整後正數收盤價。}
+        rawVolume: {type: [integer, 'null'], minimum: 0, description: 同日持久化原始成交量；來源單位未驗證，負值或缺值時 null。}
+        volume: {type: [integer, 'null'], minimum: 0, description: 實際計算 OBV 的調整後成交量；與調整後價格同股數基準。}
+        closeSource: {type: [string, 'null'], description: 原始保存日 K 的收盤來源識別；null 代表來源未證實。}
+        obv20Change: {type: [number, 'null'], description: 截至本日最近 20 次收盤方向加減調整後成交量；21 筆有效 close 與後 20 筆有效量不足時 null。}
+    SrppTechnicalSeriesAdditionalIndicators:
+      type: object
+      description: 既有純序列技術核心對同一調整後完成日 K 的結果；相關衍生欄位不可重複計票。
+      required: [ma10, ma20, ma60, ma240, k9, d9, previousK9, previousD9, j9, k3d2, rsv9, ema12, ema26, dif, macd, osc, rsi5, rsi10, bias10, bias20, b10b20, wr9]
+      additionalProperties: false
+      properties:
+        ma10: {type: [number, 'null'], description: 最近 10 個完成日收盤均值。}
+        ma20: {type: [number, 'null'], description: 最近 20 個完成日收盤均值。}
+        ma60: {type: [number, 'null'], description: 最近 60 個完成日收盤均值。}
+        ma240: {type: [number, 'null'], description: 最近 240 個完成日收盤均值。}
+        k9: {type: [number, 'null'], description: 既有九期 KD 的 K 值。}
+        d9: {type: [number, 'null'], description: 既有九期 KD 的 D 值。}
+        previousK9: {type: [number, 'null'], description: 前一完成日的同一 K 值。}
+        previousD9: {type: [number, 'null'], description: 前一完成日的同一 D 值。}
+        j9: {type: [number, 'null'], description: 由同一 K/D 衍生的 J9，不是獨立訊號。}
+        k3d2: {type: [number, 'null'], description: 由同一 K/D 衍生的 K3D2，不是獨立訊號。}
+        rsv9: {type: [number, 'null'], description: 九期 RSV，與 W%R9 代數相依。}
+        ema12: {type: [number, 'null'], description: 既有核心十二期 EMA。}
+        ema26: {type: [number, 'null'], description: 既有核心二十六期 EMA。}
+        dif: {type: [number, 'null'], description: EMA12 減 EMA26，與 MACD/OSC 相依。}
+        macd: {type: [number, 'null'], description: 既有核心 DIF 平滑線；不是摘要的六位精度 MACD signal。}
+        osc: {type: [number, 'null'], description: 既有核心 DIF 與 MACD 的差。}
+        rsi5: {type: [number, 'null'], description: 既有核心 Wilder 五期 RSI，完成日值不代替盤中雷達門檻。}
+        rsi10: {type: [number, 'null'], description: 既有核心 Wilder 十期 RSI。}
+        bias10: {type: [number, 'null'], description: 現收盤相對 MA10 的乖離百分比。}
+        bias20: {type: [number, 'null'], description: 現收盤相對 MA20 的乖離百分比。}
+        b10b20: {type: [number, 'null'], description: BIAS10 減 BIAS20 的同源衍生值。}
+        wr9: {type: [number, 'null'], description: 九期威廉指標，與 RSV9 代數相依。}
     SrppCompletedTechnicalsResponse:
       type: object
       description: 同一市場、同一完成日的 SRPP 逐檔技術事實批次；只包含公開市場資料。

@@ -5829,3 +5829,12 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 以指定 `asOf` 當日已保存日 K 為唯一尾列；缺當日列不得借用較早日列。只從兩年有界歷史取得 OHLCV，經既有權息／分割還原服務產生同一價量基準。回傳觀測筆數、首尾日期、事件日期、來源雜湊及公式版本；不可宣稱事件資料完整驗證。歷史短於十年仍可計算已有足夠樣本的指標，不可縮短個別指標標準期間。
 - [ ] 回傳 MA5、Wilder RSI14、MACD(12,26,9)、布林(20,2 母體標準差)、Wilder ADX14 與 ±DI、OBV20 變化、當日對前 20 日均量之量比、近一曆年價格區間位置。缺 close、OHLC、逐日 volume 或視窗不足時，只將受影響指標設為 null 並列原因；null 不代表零。只回事實，不回 buy/sell、分數或交易許可。SRPP 以原有硬門檻決定，不可用技術事實單獨開啟交易。
 - [ ] 固定合成序列驗證公式邊界、短歷史、缺量、缺 asOf、日期截斷和跨市場；建置、Swagger/route parity、無副作用及實際 9090 讀取驗收後才能標示部署。
+
+### Requirement 175／Task 473：SRPP 逐日價量與技術序列唯讀 API
+
+**User Story：** 作為 SRPP 日報的 LLM，我需要資產管理系統回傳算 OBV 所用的逐日收盤價與成交量、逐日 OBV20 變化，以及同一完成日的各類技術指標，才能核對量能證據並把已算好的事實匯整到既有買賣規則。
+
+- [ ] 新增 global no-tenant exact `GET /api/public/srpp/technical-series`；`market=台股|美股`、單一 `stockCode`、嚴格 ISO `asOf` 必填，`bars` 選填且預設 60、只接受 21–250。拒絕未知／重複 query、body、無效代碼、當地市場今日及未來日期。與原完成日批次 API 分工：批次先篩選，本 API 才按需展開單檔；不引入 owner、vendor、刷新、排程、寫入或交易。
+- [ ] business 在一次唯讀請求內，只讀截至 asOf 的兩年已保存 OHLCV 與 active 權息事件，整段序列經既有還原服務一次處理。必須精確存在 asOf 日 K 才可回技術序列；否則 `summary.status=UNAVAILABLE`、`dailyBars=[]`、`additionalIndicators=null`，不得借用較早日期。返回最後 `min(bars, available)` 筆升冪日 K，短歷史仍逐欄提供可算值。每列有完成日、調整後 OHLC、原始成交量、與調整後價基一致的成交量、原始收盤來源及資產端計算的滾動 OBV20 變化；所有未知值用 null，不填零。成交量沿用資料庫保存的來源單位並明示單位未驗證，不跨標的比較絕對量。最後一列的 OBV20 與既有 `summary.indicators.obv20Change` 一致，最後 21 列足以依收盤方向和調整後成交量獨立重算。
+- [ ] `summary` 沿用既有 `SRPP_DAILY_OHLCV_V1` 單檔事實（包含來源期間、價基、事件日期、來源雜湊、缺口與 MA5／RSI14／MACD／布林／ADX±DI／OBV20／量比／一年位置）；`additionalIndicators` 以同一還原完成日序列呼叫既有純序列技術核心計算 MA10／20／60／240、K/D/J/RSV、RSI5/10、BIAS10/20、W%R9、EMA/DIF/MACD/OSC 等。它們只是指標事實，不能冒充交易雷達當輪的即時價基、評分、硬閘門或買賣指令；相依衍生值不得重複計票。回應須固定公式版本，並揭露價格與成交量基準及 null/缺口語意。
+- [ ] BFF 驗證上游回應與請求身分、asOf 尾列、筆數上限、日期順序、摘要欄位及指標型別；上游不一致回 502，不透傳無法辨識的資料。9090／Tailscale 同名 exact GET、Frontend deny、安全 allowlist、API log catalog、Swagger YAML/Markdown 鏡像與 route 測試同步到 19 路（18 GET、1 POST），其他路由行為不變。SRPP 保存回應並驗證最後 21 列能重播 OBV20；日報以現有批次 API 為主，僅對需要逐日證據的標的按需呼叫，不把回傳指標當成獨立交易資格。

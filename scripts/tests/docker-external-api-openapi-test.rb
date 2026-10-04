@@ -40,7 +40,8 @@ MANIFEST = {
   ['GET', '/api/public/srpp/calculation-context'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/calculations'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/market-facts'] => %w[200 400 404 405 409 500 502 503 504],
-  ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504]
+  ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504],
+  ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -61,7 +62,8 @@ OPERATION_IDS = {
   ['GET', '/api/public/srpp/calculation-context'] => 'getSrppCalculationContext',
   ['GET', '/api/public/srpp/calculations'] => 'getSrppCalculations',
   ['GET', '/api/public/srpp/market-facts'] => 'getSrppMarketFacts',
-  ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals'
+  ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals',
+  ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries'
 }.freeze
 
 def assert!(condition, message)
@@ -179,7 +181,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.17.0', 'Task 472 後 OpenAPI info.version 必須為 1.17.0')
+assert!(document.dig('info', 'version') == '1.18.0', 'Task 473 後 OpenAPI info.version 必須為 1.18.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -220,14 +222,14 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '十八路 operationId 必須與 Requirement 174 manifest 完全一致')
+        '十九路 operationId 必須與 Requirement 175 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與十八路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與十九路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與十八路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與十九路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -424,6 +426,16 @@ assert!(completed.dig('responses', '200', 'content', 'application/json', 'schema
 assert!(completed.dig('responses', '200', 'headers', 'Cache-Control', 'schema') ==
         {'type' => 'string', 'const' => 'private, no-store'},
         'completed-technicals success 必須 no-store')
+
+series = openapi_routes.fetch(['GET', '/api/public/srpp/technical-series'])
+assert!(series.fetch('parameters').map { |parameter| parameter.fetch('name') } ==
+        %w[market stockCode asOf bars], 'technical-series 必須固定四個參數')
+assert!(series.dig('responses', '200', 'content', 'application/json', 'schema') ==
+        {'$ref' => '#/components/schemas/SrppTechnicalSeriesResponse'},
+        'technical-series 200 必須使用嚴格 schema')
+assert!(series.dig('responses', '200', 'headers', 'Cache-Control', 'schema') ==
+        {'type' => 'string', 'const' => 'private, no-store'},
+        'technical-series success 必須 no-store')
 
 # Task 467: the three on-demand SRPP paths use strict exact parameters and their own response schemas.
 {
@@ -824,8 +836,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 137,
-        "全量 strict audit 預期 137 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 140,
+        "全量 strict audit 預期 140 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -869,11 +881,11 @@ bff_security = File.read(BFF_SECURITY)
 %w[/api/public/trading-radar/stock /api/public/transactions /api/public/trading-calendar /api/public/commodity-prices
    /api/public/srpp/daily-context /api/public/srpp/calculation-context
    /api/public/srpp/calculations /api/public/srpp/market-facts
-   /api/public/srpp/completed-technicals].each do |path|
+   /api/public/srpp/completed-technicals /api/public/srpp/technical-series].each do |path|
   assert!(bff_security.include?("\"#{path}\""), "BFF SecurityConfig 缺 exact anonymous GET #{path}")
 end
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
 assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且兩份文件必須 byte-identical')
 
-puts 'PASS: 9090 gateway/OpenAPI 十八路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 十九路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
