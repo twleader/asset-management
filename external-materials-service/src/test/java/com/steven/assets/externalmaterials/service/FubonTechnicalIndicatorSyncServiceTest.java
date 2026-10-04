@@ -145,4 +145,40 @@ class FubonTechnicalIndicatorSyncServiceTest {
         assertThat(result.get().reason()).isEqualTo("INTERRUPTED");
         verifyNoInteractions(cache);
     }
+
+    @Test void failedOrConflictedTechnicalWriterMakesPartialOutcomeWithoutRedisProjection() {
+        for (var status : List.of(FubonMarketDataHistoryStore.Status.FAILED,
+                FubonMarketDataHistoryStore.Status.CONFLICT_NO_SOURCE_REVISION)) {
+            FubonMarketDataHistoryStore history = mock(FubonMarketDataHistoryStore.class);
+            FubonTechnicalV2CacheRepository v2Cache = mock(FubonTechnicalV2CacheRepository.class);
+            UUID capture = UUID.randomUUID();
+            var profiles = TECHNICAL_PROFILES.stream().map(profile -> new TechnicalProfileRead(
+                    profile.profileId(), "AVAILABLE", null, profile.parameters(), NOW,
+                    List.of(new TechnicalHistory(DAY, null, profile.payloadFields().stream()
+                            .collect(java.util.stream.Collectors.toMap(field -> field, field -> "1")))))).toList();
+            var technical = new TechnicalBundle(capture, "2330", DAY.minusDays(TECHNICAL_MAX_SPAN_DAYS), DAY, profiles);
+            when(gate.today()).thenReturn(DAY); when(gate.sameDay(DAY)).thenReturn(true);
+            when(radar.current(Integer.MAX_VALUE)).thenReturn(List.of("2330"));
+            when(client.technicalV2("2330", DAY)).thenReturn(technical);
+            when(history.persistTechnical(technical)).thenReturn(new FubonMarketDataHistoryStore.TechnicalResult(
+                    status, false, 0, 0, status == FubonMarketDataHistoryStore.Status.FAILED ? 0 : 1, capture));
+            when(client.basic("2330", DAY)).thenReturn(new StockBasicRead("2330", DAY, NOW, "TWSE",
+                    null, "test", null, null, null, null, true, "NORMAL", null, 1000, "TWD"));
+            when(history.persistBasic(any())).thenReturn(new FubonMarketDataHistoryStore.BasicResult(
+                    FubonMarketDataHistoryStore.Status.UNCHANGED));
+            when(client.candles("2330", DAY)).thenReturn(new IntradayCandlesRead("2330", DAY, NOW, "TWSE",
+                    null, 1, "NO_DATA", "NO_DATA", List.of()));
+            var service = new FubonTechnicalIndicatorSyncService("true", gate, radar, client, cache,
+                    history, v2Cache, new FubonTechnicalIndicatorSyncService.Timing() {
+                public long nanos() { return 0; }
+                public void sleep(Duration duration) { }
+            });
+            var result = service.sync(false);
+            assertThat(result.outcome()).isEqualTo("PARTIAL");
+            assertThat(result.partialCount()).isEqualTo(1);
+            assertThat(result.groupWriteOutcomes()).containsEntry("technicalDb:" + status, 1);
+            verifyNoInteractions(v2Cache);
+            clearInvocations(client, history);
+        }
+    }
 }

@@ -144,7 +144,10 @@ public class FubonTechnicalIndicatorSyncService {
                     var persisted = history.persistTechnical(technical);
                     counts.merge("technicalDb:" + persisted.facts(), 1, Integer::sum);
                     written |= persisted.facts() == FubonMarketDataHistoryStore.Status.WRITTEN;
-                    if (persisted.completeCaptureCommitted()) {
+                    boolean persistenceFailed = persisted.facts() == FubonMarketDataHistoryStore.Status.FAILED
+                            || persisted.facts() == FubonMarketDataHistoryStore.Status.CONFLICT_NO_SOURCE_REVISION;
+                    anyFailure |= persistenceFailed;
+                    if (!persistenceFailed && persisted.completeCaptureCommitted()) {
                         var pair = FubonTechnicalV2Cache.fromBundle(technical, "FUBON_SDK", "UNBOUND_FUBON_SOURCE", null,
                                 UUID.randomUUID().toString(), null, null);
                         var expected = v2Cache.read(code, Instant.now(), null, false);

@@ -17,6 +17,7 @@ from fubon_broker_service.sdk_gateway import SdkCallError
 from fubon_broker_service.technical_indicators import (
     PROFILE_BY_ID,
     PROFILES,
+    TechnicalIndicatorError,
     TechnicalIndicatorService,
     technical_fact_canonical_bytes,
     technical_fact_sha256,
@@ -108,13 +109,13 @@ class FixedGateway:
         return deepcopy(self.historical_minute_source)
 
 
-def test_fixed_17_profile_aggregate_has_exact_root_and_420_day_window():
+def test_fixed_17_profile_aggregate_has_exact_root_and_365_day_window():
     gateway = FixedGateway()
     result = TechnicalIndicatorService(gateway, now=lambda: NOW).read("2330")
 
     assert list(result) == ["schemaVersion", "captureId", "symbol", "market", "provider", "queryFrom", "queryTo", "profiles"]
     assert result["schemaVersion"] == 2
-    assert result["queryFrom"] == (NOW.date() - timedelta(days=420)).isoformat()
+    assert result["queryFrom"] == (NOW.date() - timedelta(days=364)).isoformat()
     assert result["queryTo"] == TODAY
     assert [value["profileId"] for value in result["profiles"]] == [profile.profile_id for profile in PROFILES]
     assert all(value["status"] == "AVAILABLE" and value["reason"] is None
@@ -123,6 +124,22 @@ def test_fixed_17_profile_aggregate_has_exact_root_and_420_day_window():
         (profile.kind, profile.timeframe) for profile in PROFILES
     ]
     assert all(call["from"] == result["queryFrom"] and call["to"] == TODAY for _, call in gateway.calls)
+
+
+def test_historical_technical_read_accepts_365_inclusive_days_and_rejects_366_before_sdk():
+    gateway = FixedGateway()
+    service = TechnicalIndicatorService(gateway, now=lambda: NOW)
+    from_365 = (NOW.date() - timedelta(days=364)).isoformat()
+    result = service.read_history("2330", from_365, TODAY)
+    assert result["queryFrom"] == from_365
+    assert len(result["profiles"]) == 17
+    assert len(gateway.calls) == 17
+    gateway.calls.clear()
+    with pytest.raises(TechnicalIndicatorError) as error:
+        service.read_history("2330", (NOW.date() - timedelta(days=365)).isoformat(), TODAY)
+    assert error.value.reason == "INVALID_REQUEST"
+    assert error.value.request_error is True
+    assert gateway.calls == []
 
 
 def test_normalized_technical_fact_matches_cross_language_golden_bytes_and_hash():
@@ -171,6 +188,47 @@ def test_technical_v2_rejects_noncanonical_profile_payload_without_poisoning_oth
     assert rejected["status"] == "SCHEMA_INVALID"
     assert rejected["reason"] == "TECHNICAL_SCHEMA_INVALID"
     assert next(value for value in result["profiles"] if value["profileId"] == "sma_d_20")["status"] == "AVAILABLE"
+
+
+@pytest.mark.parametrize("stage,mutate", [
+    ("TOP_TYPE", lambda value: "VENDOR_SECRET_VALUE_X"),
+    ("TOP_KEYS", lambda value: {**value, "VENDOR_SECRET_KEY_X": "VENDOR_SECRET_VALUE_X"}),
+    ("ECHO", lambda value: {**value, "symbol": "VENDOR_SECRET_VALUE_X"}),
+    ("TIMEFRAME", lambda value: {**value, "timeframe": "VENDOR_SECRET_VALUE_X"}),
+    ("PARAMETERS", lambda value: {**value, "fast": "VENDOR_SECRET_VALUE_X"}),
+    ("DATA_TYPE_OR_COUNT", lambda value: {**value, "data": "VENDOR_SECRET_VALUE_X"}),
+    ("ROW_TYPE", lambda value: {**value, "data": ["VENDOR_SECRET_VALUE_X"]}),
+    ("ROW_KEYS", lambda value: {**value, "data": [{**value["data"][0],
+                                                      "VENDOR_SECRET_KEY_X": "VENDOR_SECRET_VALUE_X"}]}),
+    ("DATE", lambda value: {**value, "data": [{**value["data"][0],
+                                                  "date": "VENDOR_SECRET_VALUE_X"}]}),
+    ("PAYLOAD", lambda value: {**value, "data": [{**value["data"][0],
+                                                     "macdLine": "VENDOR_SECRET_VALUE_X"}]}),
+])
+def test_schema_diagnostic_exposes_only_allowlisted_structure(caplog, stage, mutate):
+    gateway = FixedGateway()
+    original = gateway.read_technical_indicator
+
+    def malformed(kind, symbol, start, end, *, timeframe="D", parameters=None, deadline=None):
+        source = original(kind, symbol, start, end, timeframe=timeframe,
+                          parameters=parameters, deadline=deadline)
+        if kind == "macd" and timeframe == "D":
+            return mutate(source)
+        return source
+
+    gateway.read_technical_indicator = malformed  # type: ignore[method-assign]
+    result = TechnicalIndicatorService(gateway, now=lambda: NOW).read_history(
+        "2330", (NOW.date() - timedelta(days=364)).isoformat(), TODAY)
+    rejected = next(value for value in result["profiles"] if value["profileId"] == "macd_d_12_26_9")
+    assert rejected["status"] == "SCHEMA_INVALID"
+    assert rejected["reason"] == "TECHNICAL_SCHEMA_INVALID"
+    messages = [record.getMessage() for record in caplog.records if "technical_schema_invalid" in record.getMessage()]
+    assert len(messages) == 1
+    assert f"profile=macd_d_12_26_9 stage={stage}" in messages[0]
+    assert len(messages[0]) <= 512
+    assert "VENDOR_SECRET_KEY_X" not in messages[0]
+    assert "VENDOR_SECRET_VALUE_X" not in messages[0]
+    assert len(gateway.calls) == 17
 
 
 def test_basic_and_candles_only_rebuild_allowed_normalized_fields():

@@ -70,10 +70,14 @@ public class FubonScheduledMarketClient implements FubonMarketDataPort {
         catch (RuntimeException invalid) { throw schemaFailure("FUBON_TECHNICAL_INDICATORS_READ", "技術指標查詢", "TECHNICAL_SCHEMA_INVALID", invalid); }
     }
     @Override public TechnicalBundle technicalV2(String symbol, LocalDate date) {
-        return technicalV2(symbol, date.minusDays(420), date);
+        return technicalV2(symbol, date.minusDays(TECHNICAL_MAX_SPAN_DAYS), date);
     }
     @Override public TechnicalBundle technicalV2(String symbol, LocalDate from, LocalDate to) {
         validateSymbols(List.of(symbol), 1, false);
+        if (from == null || to == null || from.isAfter(to)
+                || from.plusDays(TECHNICAL_MAX_SPAN_DAYS).isBefore(to)
+                || to.isAfter(clock.instant().atZone(MarketClock.TW_ZONE).toLocalDate()))
+            throw new Unavailable("INVALID_REQUEST");
         String operationKey = "FUBON_TECHNICAL_INDICATORS_READ";
         String apiName = "技術指標查詢";
         String body = postTechnicalV2(symbol, from, to, operationKey, apiName);

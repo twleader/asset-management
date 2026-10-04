@@ -16,6 +16,9 @@ public final class FubonMarketData {
     public static final String PROVIDER = "FUBON_SDK";
     public static final String STOCK_SOURCE = "FUBON_WS_AGGREGATES";
     public static final String MARKET = "台股";
+    /** Largest empirically accepted inclusive Fubon technical-history window. */
+    public static final int TECHNICAL_MAX_SPAN_DAYS = 364;
+    public static final int TECHNICAL_MAX_ROWS_PER_PROFILE = TECHNICAL_MAX_SPAN_DAYS + 1;
     public static final List<String> GROUPS = List.of("kdj", "macd", "bb");
     private static final Pattern CODE = Pattern.compile("[0-9A-Z]{2,10}");
     private static final Pattern DECIMAL = Pattern.compile("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?");

@@ -31,7 +31,18 @@ public class FubonMarketDataHistoryStore {
 
     public enum Status { WRITTEN, UNCHANGED, CONFLICT_NO_SOURCE_REVISION, FAILED }
     public record TechnicalResult(Status facts, boolean completeCaptureCommitted, int factWritten,
-                                  int factUnchanged, int conflicts, UUID captureId) {}
+                                  int factUnchanged, int conflicts, UUID captureId,
+                                  Map<String, List<LocalDate>> committedDatesByProfile) {
+        public TechnicalResult {
+            Map<String, List<LocalDate>> copy = new LinkedHashMap<>();
+            committedDatesByProfile.forEach((profile, dates) -> copy.put(profile, List.copyOf(dates)));
+            committedDatesByProfile = Map.copyOf(copy);
+        }
+        public TechnicalResult(Status facts, boolean completeCaptureCommitted, int factWritten,
+                               int factUnchanged, int conflicts, UUID captureId) {
+            this(facts, completeCaptureCommitted, factWritten, factUnchanged, conflicts, captureId, Map.of());
+        }
+    }
     public record BasicResult(Status status) {}
     public record CandlesResult(Status status, int written, int unchanged, int conflicts) {}
 
@@ -45,6 +56,7 @@ public class FubonMarketDataHistoryStore {
 
     private TechnicalResult persistTechnicalInTransaction(TechnicalBundle bundle) {
         int written = 0, unchanged = 0, conflicts = 0;
+        Map<String, List<LocalDate>> committedDates = new LinkedHashMap<>();
         Map<String, FactRef> candidateFacts = new LinkedHashMap<>();
         Map<String, FactRef> previousFacts = new HashMap<>();
         for (TechnicalProfileRead response : bundle.profiles()) {
@@ -57,6 +69,8 @@ public class FubonMarketDataHistoryStore {
                 if (result == Status.WRITTEN) written++;
                 else if (result == Status.UNCHANGED) unchanged++;
                 else if (result == Status.CONFLICT_NO_SOURCE_REVISION) conflicts++;
+                if (result == Status.WRITTEN || result == Status.UNCHANGED)
+                    committedDates.computeIfAbsent(profile.profileId(), ignored -> new ArrayList<>()).add(history.sourceDate());
                 if (history == response.candidate()) candidateFacts.put(profile.profileId(), new FactRef(history.sourceDate(), hash));
                 if (history == response.previous()) previousFacts.put(profile.profileId(), new FactRef(history.sourceDate(), hash));
             }
@@ -73,7 +87,7 @@ public class FubonMarketDataHistoryStore {
         }
         Status status = conflicts > 0 ? Status.CONFLICT_NO_SOURCE_REVISION
                 : written > 0 ? Status.WRITTEN : Status.UNCHANGED;
-        return new TechnicalResult(status, complete, written, unchanged, conflicts, bundle.captureId());
+        return new TechnicalResult(status, complete, written, unchanged, conflicts, bundle.captureId(), committedDates);
     }
 
     /**
@@ -84,6 +98,7 @@ public class FubonMarketDataHistoryStore {
     private static boolean validProfileManifest(TechnicalBundle bundle) {
         if (bundle.captureId() == null || bundle.queryFrom() == null || bundle.queryTo() == null
                 || bundle.queryFrom().isAfter(bundle.queryTo())
+                || bundle.queryFrom().plusDays(TECHNICAL_MAX_SPAN_DAYS).isBefore(bundle.queryTo())
                 || bundle.profiles().size() != TECHNICAL_PROFILES.size()) return false;
         for (int index = 0; index < TECHNICAL_PROFILES.size(); index++) {
             TechnicalProfile expected = TECHNICAL_PROFILES.get(index);
@@ -91,7 +106,7 @@ public class FubonMarketDataHistoryStore {
             if (actual == null || !expected.profileId().equals(actual.profileId())
                     || !expected.parameters().equals(actual.parameters()) || actual.observedAt() == null)
                 return false;
-            if (actual.available() && (actual.history().isEmpty() || actual.history().size() > 421
+            if (actual.available() && (actual.history().isEmpty() || actual.history().size() > TECHNICAL_MAX_ROWS_PER_PROFILE
                     || !strictHistory(actual.history(), bundle.queryFrom(), bundle.queryTo()))) return false;
             if (!actual.available() && !actual.history().isEmpty()) return false;
         }

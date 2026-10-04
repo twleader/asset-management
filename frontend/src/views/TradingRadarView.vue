@@ -1642,7 +1642,7 @@ const TECHNICAL_BACKFILL_REASON = {
   RATE_LIMITED: '官方來源目前限流，工作已停止。',
   HISTORY_BUDGET_EXHAUSTED: '官方行情查詢額度不足，工作已停止。',
   UPSTREAM_UNAVAILABLE: '富邦官方技術資料暫時無法取得。',
-  TECHNICAL_SCHEMA_INVALID: '官方回應格式無法核實，工作已停止。',
+  TECHNICAL_SCHEMA_INVALID: '部分標的官方回應格式無法核實，該標的後續探查已略過；其餘標的照常處理。',
   TECHNICAL_PERSISTENCE_FAILED: '官方資料寫入失敗，工作已停止。'
 }
 const technicalBackfillStatusText = computed(() => {

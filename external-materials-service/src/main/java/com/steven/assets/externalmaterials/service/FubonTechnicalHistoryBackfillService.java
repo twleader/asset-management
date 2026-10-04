@@ -26,7 +26,7 @@ import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
 /** Explicit, button-started Fubon official technical-history backfill. Never touches Redis. */
 @Service
 public class FubonTechnicalHistoryBackfillService {
-    // The API does not document a minimum history date. Probe at most 40 years and
+    // The API does not document a minimum history date. Probe at most 35 windows and
     // report unknown depth rather than implying that this bound is the source floor.
     private static final int MAX_WINDOWS_PER_SYMBOL = 35;
     private static final int MAX_PROFILE_REQUESTS = 30 * MAX_WINDOWS_PER_SYMBOL * TECHNICAL_PROFILES.size();
@@ -93,66 +93,127 @@ public class FubonTechnicalHistoryBackfillService {
     }
 
     private void run(Job job) {
-        job.status = "RUNNING";
+        synchronized (lock) { job.status = "RUNNING"; }
+        String terminalStatus = "FAILED";
         try {
             for (String symbol : job.symbols) {
-                job.currentSymbol = symbol;
+                synchronized (lock) { job.currentSymbol = symbol; }
                 LocalDate to = job.asOf;
                 int emptyWindows = 0;
                 int symbolWindows = 0;
                 boolean boundaryUnknown = false;
+                boolean symbolSchemaFailure = false;
                 while (symbolWindows < MAX_WINDOWS_PER_SYMBOL) {
                     if (Duration.between(job.createdAt, clock.instant()).compareTo(JOB_DEADLINE) >= 0
                             || job.windows * TECHNICAL_PROFILES.size() >= MAX_PROFILE_REQUESTS) {
-                        job.deadlineExceeded = Duration.between(job.createdAt, clock.instant()).compareTo(JOB_DEADLINE) >= 0;
-                        job.depthUnknown = true;
-                        job.reason = "HISTORY_DEPTH_UNKNOWN";
+                        synchronized (lock) {
+                            job.deadlineExceeded = Duration.between(job.createdAt, clock.instant()).compareTo(JOB_DEADLINE) >= 0;
+                            job.depthUnknown = true;
+                            // The budget/deadline stops every remaining symbol, so its
+                            // job-level reason supersedes an earlier symbol-local schema failure.
+                            job.reason = "HISTORY_DEPTH_UNKNOWN";
+                        }
                         break;
                     }
-                    LocalDate windowFrom = to.minusDays(420);
+                    LocalDate windowFrom = to.minusDays(TECHNICAL_MAX_SPAN_DAYS);
                     LocalDate windowTo = to;
-                    job.currentFrom = windowFrom.toString();
-                    job.currentTo = windowTo.toString();
+                    synchronized (lock) {
+                        job.currentFrom = windowFrom.toString();
+                        job.currentTo = windowTo.toString();
+                    }
                     TechnicalBundle bundle;
                     try {
                         bundle = client.technicalV2(symbol, windowFrom, windowTo);
                     } catch (RuntimeException failure) {
-                        job.coverage.values().stream().filter(item -> item.symbol.equals(symbol))
-                                .forEach(item -> item.failed(windowFrom, windowTo, failure instanceof Unavailable unavailable
-                                        ? unavailable.reason() : "TECHNICAL_HISTORY_FAILED"));
+                        if (failure instanceof Unavailable unavailable
+                                && "TECHNICAL_SCHEMA_INVALID".equals(unavailable.reason())) {
+                            synchronized (lock) {
+                                job.coverage.values().stream().filter(item -> item.symbol.equals(symbol))
+                                        .forEach(item -> item.failed(windowFrom, windowTo, unavailable.reason()));
+                                firstReason(job, unavailable.reason());
+                                job.depthUnknown = true;
+                            }
+                            symbolSchemaFailure = true;
+                            break;
+                        }
+                        synchronized (lock) {
+                            job.coverage.values().stream().filter(item -> item.symbol.equals(symbol))
+                                    .forEach(item -> item.failed(windowFrom, windowTo, failure instanceof Unavailable unavailable
+                                            ? unavailable.reason() : "TECHNICAL_HISTORY_FAILED"));
+                        }
                         throw failure;
                     }
-                    job.windows++;
                     symbolWindows++;
-                    job.profileResults += bundle.profiles().size();
+                    synchronized (lock) {
+                        job.windows++;
+                        job.profileResults += bundle.profiles().size();
+                    }
                     boolean available = bundle.profiles().stream().anyMatch(profile -> profile.available() && !profile.history().isEmpty());
                     boolean allNoData = bundle.profiles().stream().allMatch(profile -> "NO_DATA".equals(profile.status()));
-                    bundle.profiles().forEach(profile -> job.coverage.get(symbol + "|" + profile.profileId())
-                            .observe(profile, windowFrom, windowTo));
+                    // A transport/quota failure stays job-wide even when a different
+                    // profile in the same bundle has a symbol-local schema failure.
+                    String globalProfileFailure = bundle.profiles().stream()
+                            .filter(profile -> "UNAVAILABLE".equals(profile.status()))
+                            .map(TechnicalProfileRead::reason).filter(java.util.Objects::nonNull)
+                            .findFirst().orElse(null);
                     if (available) {
                         FubonMarketDataHistoryStore.TechnicalResult result = history.persistTechnical(bundle);
+                        // FAILED rolls back the whole window. A conflict may still have
+                        // committed other immutable facts, as reported by the writer.
                         if (result.facts() == FubonMarketDataHistoryStore.Status.FAILED
                                 || result.facts() == FubonMarketDataHistoryStore.Status.CONFLICT_NO_SOURCE_REVISION) {
-                            job.coverage.values().stream().filter(item -> item.symbol.equals(symbol))
-                                    .forEach(item -> item.fail("TECHNICAL_PERSISTENCE_FAILED"));
+                            synchronized (lock) {
+                                if (result.facts() != FubonMarketDataHistoryStore.Status.FAILED)
+                                    job.factRows += result.factWritten() + result.factUnchanged();
+                                job.coverage.values().stream().filter(item -> item.symbol.equals(symbol))
+                                        .forEach(item -> item.failed(windowFrom, windowTo, "TECHNICAL_PERSISTENCE_FAILED"));
+                                result.committedDatesByProfile().forEach((profileId, dates) ->
+                                        job.coverage.get(symbol + "|" + profileId).observeCommitted(dates));
+                            }
                             throw new Unavailable("TECHNICAL_PERSISTENCE_FAILED");
                         }
-                        job.factRows += result.factWritten() + result.factUnchanged();
-                        job.availableWindows++;
+                        synchronized (lock) {
+                            job.factRows += result.factWritten() + result.factUnchanged();
+                            bundle.profiles().forEach(profile -> job.coverage.get(symbol + "|" + profile.profileId())
+                                    .observe(profile, windowFrom, windowTo));
+                            job.availableWindows++;
+                        }
                         emptyWindows = 0;
+                        if (globalProfileFailure != null) throw new Unavailable(globalProfileFailure);
                         String error = bundle.profiles().stream().filter(profile -> !profile.available()
                                         && !"NO_DATA".equals(profile.status()))
                                 .map(profile -> "SCHEMA_INVALID".equals(profile.status())
                                         ? "TECHNICAL_SCHEMA_INVALID" : profile.reason())
                                 .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+                        if ("TECHNICAL_SCHEMA_INVALID".equals(error)) {
+                            synchronized (lock) {
+                                firstReason(job, error);
+                                job.depthUnknown = true;
+                            }
+                            symbolSchemaFailure = true;
+                            break;
+                        }
                         if (error != null) throw new Unavailable(error);
                     } else {
+                        synchronized (lock) {
+                            bundle.profiles().forEach(profile -> job.coverage.get(symbol + "|" + profile.profileId())
+                                    .observe(profile, windowFrom, windowTo));
+                        }
                         if (allNoData) emptyWindows++;
                         else {
+                            if (globalProfileFailure != null) throw new Unavailable(globalProfileFailure);
                             String reason = bundle.profiles().stream().filter(profile -> !"NO_DATA".equals(profile.status()))
                                     .map(profile -> "SCHEMA_INVALID".equals(profile.status())
                                             ? "TECHNICAL_SCHEMA_INVALID" : profile.reason())
                                     .filter(java.util.Objects::nonNull).findFirst().orElse("TECHNICAL_HISTORY_FAILED");
+                            if ("TECHNICAL_SCHEMA_INVALID".equals(reason)) {
+                                synchronized (lock) {
+                                    firstReason(job, reason);
+                                    job.depthUnknown = true;
+                                }
+                                symbolSchemaFailure = true;
+                                break;
+                            }
                             throw new Unavailable(reason);
                         }
                         if (emptyWindows >= 2) {
@@ -162,26 +223,38 @@ public class FubonTechnicalHistoryBackfillService {
                     }
                     to = windowFrom.minusDays(1);
                 }
-                if (symbolWindows >= MAX_WINDOWS_PER_SYMBOL || boundaryUnknown) {
-                    job.depthUnknown = true;
+                synchronized (lock) {
+                    if (symbolWindows >= MAX_WINDOWS_PER_SYMBOL || boundaryUnknown || symbolSchemaFailure)
+                        job.depthUnknown = true;
+                    if (!job.deadlineExceeded) job.completedSymbols++;
                 }
-                if (!job.deadlineExceeded) job.completedSymbols++;
                 if (job.deadlineExceeded) break;
             }
-            job.status = job.depthUnknown ? "PARTIAL" : "COMPLETED";
-            if (job.depthUnknown) job.reason = "HISTORY_DEPTH_UNKNOWN";
+            synchronized (lock) {
+                terminalStatus = job.depthUnknown ? "PARTIAL" : "COMPLETED";
+                if (job.depthUnknown) firstReason(job, "HISTORY_DEPTH_UNKNOWN");
+            }
         } catch (Unavailable failure) {
-            job.reason = failure.reason();
-            job.status = job.availableWindows > 0 ? "PARTIAL" : "FAILED";
+            synchronized (lock) {
+                job.reason = failure.reason();
+                terminalStatus = job.availableWindows > 0 || job.factRows > 0 ? "PARTIAL" : "FAILED";
+            }
         } catch (RuntimeException failure) {
-            job.reason = "TECHNICAL_HISTORY_FAILED";
-            job.status = job.availableWindows > 0 ? "PARTIAL" : "FAILED";
+            synchronized (lock) {
+                job.reason = "TECHNICAL_HISTORY_FAILED";
+                terminalStatus = job.availableWindows > 0 || job.factRows > 0 ? "PARTIAL" : "FAILED";
+            }
         } finally {
             synchronized (lock) {
+                job.status = terminalStatus;
                 job.completedAt = clock.instant();
                 if (job.id.equals(active)) active = null;
             }
         }
+    }
+
+    private static void firstReason(Job job, String reason) {
+        if (job.reason == null) job.reason = reason;
     }
 
     private void cleanup() {
@@ -234,7 +307,14 @@ public class FubonTechnicalHistoryBackfillService {
         synchronized void failed(LocalDate from, LocalDate to, String why) {
             status = "FAILED"; reason = why; lastQueryFrom = from.toString(); lastQueryTo = to.toString();
         }
-        synchronized void fail(String why) { status = "FAILED"; reason = why; }
+        synchronized void observeCommitted(List<LocalDate> dates) {
+            if (dates.isEmpty()) return;
+            LocalDate earliest = dates.stream().min(Comparator.naturalOrder()).orElseThrow();
+            LocalDate latest = dates.stream().max(Comparator.naturalOrder()).orElseThrow();
+            if (firstSourceDate == null || earliest.isBefore(LocalDate.parse(firstSourceDate))) firstSourceDate = earliest.toString();
+            if (lastSourceDate == null || latest.isAfter(LocalDate.parse(lastSourceDate))) lastSourceDate = latest.toString();
+            rows += dates.size();
+        }
         Coverage view() { return new Coverage(symbol, profileId, status, reason, "HISTORY_DEPTH_UNKNOWN",
                 firstSourceDate, lastSourceDate, rows, lastQueryFrom, lastQueryTo); }
     }
