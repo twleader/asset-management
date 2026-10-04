@@ -20,6 +20,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
 
@@ -31,6 +32,7 @@ public class FubonTechnicalHistoryBackfillService {
     private static final int MAX_WINDOWS_PER_SYMBOL = 35;
     private static final int MAX_PROFILE_REQUESTS = 30 * MAX_WINDOWS_PER_SYMBOL * TECHNICAL_PROFILES.size();
     private static final Duration JOB_DEADLINE = Duration.ofHours(24);
+    private static final Duration WINDOW_SPACING = Duration.ofSeconds(60);
     private static final Duration RETENTION = Duration.ofHours(24);
 
     private final String enabled;
@@ -39,6 +41,8 @@ public class FubonTechnicalHistoryBackfillService {
     private final FubonMarketDataPort client;
     private final FubonMarketDataHistoryStore history;
     private final Clock clock;
+    private final WindowSleeper sleeper;
+    private final LongSupplier ticker;
     private final ExecutorService executor = new ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(1), task -> Thread.ofVirtual().name("fubon-technical-history").unstarted(task),
             new ThreadPoolExecutor.AbortPolicy());
@@ -56,9 +60,19 @@ public class FubonTechnicalHistoryBackfillService {
 
     FubonTechnicalHistoryBackfillService(String enabled, FubonMarketRunGate gate, FubonRadarScope radar,
             FubonMarketDataPort client, FubonMarketDataHistoryStore history, Clock clock) {
-        this.enabled = enabled; this.gate = gate; this.radar = radar; this.client = client;
-        this.history = history; this.clock = clock;
+        this(enabled, gate, radar, client, history, clock,
+                delay -> TimeUnit.NANOSECONDS.sleep(delay.toNanos()), System::nanoTime);
     }
+
+    FubonTechnicalHistoryBackfillService(String enabled, FubonMarketRunGate gate, FubonRadarScope radar,
+            FubonMarketDataPort client, FubonMarketDataHistoryStore history, Clock clock,
+            WindowSleeper sleeper, LongSupplier ticker) {
+        this.enabled = enabled; this.gate = gate; this.radar = radar; this.client = client;
+        this.history = history; this.clock = clock; this.sleeper = sleeper; this.ticker = ticker;
+    }
+
+    @FunctionalInterface
+    interface WindowSleeper { void sleep(Duration delay) throws InterruptedException; }
 
     public View start() {
         String reason = gate.reasonForHistoricalRead(enabled, "TECHNICAL_HISTORY_BACKFILL_DISABLED");
@@ -68,7 +82,7 @@ public class FubonTechnicalHistoryBackfillService {
         synchronized (lock) {
             cleanup();
             if (active != null) return view(jobs.get(active));
-            Job job = new Job(UUID.randomUUID(), symbols, clock.instant(), gate.latestCompletedTwDay());
+            Job job = new Job(UUID.randomUUID(), symbols, clock.instant(), gate.latestCompletedTwDay(), ticker.getAsLong());
             jobs.put(job.id, job);
             active = job.id;
             try { executor.execute(() -> run(job)); }
@@ -95,6 +109,7 @@ public class FubonTechnicalHistoryBackfillService {
     private void run(Job job) {
         synchronized (lock) { job.status = "RUNNING"; }
         String terminalStatus = "FAILED";
+        Long lastWindowCompletedNanos = null;
         try {
             for (String symbol : job.symbols) {
                 synchronized (lock) { job.currentSymbol = symbol; }
@@ -104,23 +119,16 @@ public class FubonTechnicalHistoryBackfillService {
                 boolean boundaryUnknown = false;
                 boolean symbolSchemaFailure = false;
                 while (symbolWindows < MAX_WINDOWS_PER_SYMBOL) {
-                    if (Duration.between(job.createdAt, clock.instant()).compareTo(JOB_DEADLINE) >= 0
-                            || job.windows * TECHNICAL_PROFILES.size() >= MAX_PROFILE_REQUESTS) {
-                        synchronized (lock) {
-                            job.deadlineExceeded = Duration.between(job.createdAt, clock.instant()).compareTo(JOB_DEADLINE) >= 0;
-                            job.depthUnknown = true;
-                            // The budget/deadline stops every remaining symbol, so its
-                            // job-level reason supersedes an earlier symbol-local schema failure.
-                            job.reason = "HISTORY_DEPTH_UNKNOWN";
-                        }
-                        break;
-                    }
+                    if (limitsReached(job) || !waitForNextWindow(job, lastWindowCompletedNanos)
+                            || limitsReached(job)) break;
                     LocalDate windowFrom = to.minusDays(TECHNICAL_MAX_SPAN_DAYS);
                     LocalDate windowTo = to;
                     synchronized (lock) {
                         job.currentFrom = windowFrom.toString();
                         job.currentTo = windowTo.toString();
                     }
+                    if (Thread.currentThread().isInterrupted())
+                        throw new Unavailable("TECHNICAL_HISTORY_FAILED");
                     TechnicalBundle bundle;
                     try {
                         bundle = client.technicalV2(symbol, windowFrom, windowTo);
@@ -133,6 +141,7 @@ public class FubonTechnicalHistoryBackfillService {
                                 firstReason(job, unavailable.reason());
                                 job.depthUnknown = true;
                             }
+                            lastWindowCompletedNanos = ticker.getAsLong();
                             symbolSchemaFailure = true;
                             break;
                         }
@@ -190,6 +199,7 @@ public class FubonTechnicalHistoryBackfillService {
                                 firstReason(job, error);
                                 job.depthUnknown = true;
                             }
+                            lastWindowCompletedNanos = ticker.getAsLong();
                             symbolSchemaFailure = true;
                             break;
                         }
@@ -211,16 +221,19 @@ public class FubonTechnicalHistoryBackfillService {
                                     firstReason(job, reason);
                                     job.depthUnknown = true;
                                 }
+                                lastWindowCompletedNanos = ticker.getAsLong();
                                 symbolSchemaFailure = true;
                                 break;
                             }
                             throw new Unavailable(reason);
                         }
                         if (emptyWindows >= 2) {
+                            lastWindowCompletedNanos = ticker.getAsLong();
                             boundaryUnknown = true;
                             break;
                         }
                     }
+                    lastWindowCompletedNanos = ticker.getAsLong();
                     to = windowFrom.minusDays(1);
                 }
                 synchronized (lock) {
@@ -255,6 +268,43 @@ public class FubonTechnicalHistoryBackfillService {
 
     private static void firstReason(Job job, String reason) {
         if (job.reason == null) job.reason = reason;
+    }
+
+    private boolean limitsReached(Job job) {
+        boolean deadline = ticker.getAsLong() - job.startedNanos >= JOB_DEADLINE.toNanos();
+        if (!deadline && job.windows * TECHNICAL_PROFILES.size() < MAX_PROFILE_REQUESTS) return false;
+        synchronized (lock) {
+            job.deadlineExceeded = deadline;
+            job.depthUnknown = true;
+            // This global stop supersedes any earlier symbol-local schema failure.
+            job.reason = "HISTORY_DEPTH_UNKNOWN";
+        }
+        return true;
+    }
+
+    private boolean waitForNextWindow(Job job, Long lastWindowCompletedNanos) {
+        if (Thread.currentThread().isInterrupted()) throw new Unavailable("TECHNICAL_HISTORY_FAILED");
+        if (lastWindowCompletedNanos == null) return true;
+        while (true) {
+            if (limitsReached(job)) return false;
+            if (Thread.currentThread().isInterrupted()) throw new Unavailable("TECHNICAL_HISTORY_FAILED");
+            long nowNanos = ticker.getAsLong();
+            long remainingNanos = WINDOW_SPACING.toNanos() - (nowNanos - lastWindowCompletedNanos);
+            if (remainingNanos <= 0) return true;
+            long untilDeadlineNanos = JOB_DEADLINE.toNanos() - (nowNanos - job.startedNanos);
+            if (untilDeadlineNanos <= 0) {
+                limitsReached(job);
+                return false;
+            }
+            Duration sleepFor = Duration.ofNanos(Math.min(remainingNanos, untilDeadlineNanos));
+            try {
+                // Never hold the snapshot lock while waiting for the shared SDK gate.
+                sleeper.sleep(sleepFor);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new Unavailable("TECHNICAL_HISTORY_FAILED");
+            }
+        }
     }
 
     private void cleanup() {
@@ -321,14 +371,16 @@ public class FubonTechnicalHistoryBackfillService {
 
     private static final class Job {
         final UUID id; final List<String> symbols; final Instant createdAt; final LocalDate asOf;
+        final long startedNanos;
         volatile String status = "QUEUED", reason, currentSymbol, currentFrom, currentTo;
         volatile Instant completedAt;
         volatile int completedSymbols, windows, availableWindows, factRows;
         volatile int profileResults;
         volatile boolean depthUnknown, deadlineExceeded;
         final Map<String, CoverageState> coverage = new LinkedHashMap<>();
-        Job(UUID id, List<String> symbols, Instant createdAt, LocalDate asOf) {
+        Job(UUID id, List<String> symbols, Instant createdAt, LocalDate asOf, long startedNanos) {
             this.id = id; this.symbols = List.copyOf(symbols); this.createdAt = createdAt; this.asOf = asOf;
+            this.startedNanos = startedNanos;
             for (String symbol : symbols) for (TechnicalProfile profile : TECHNICAL_PROFILES) {
                 coverage.put(symbol + "|" + profile.profileId(), new CoverageState(symbol, profile.profileId()));
             }

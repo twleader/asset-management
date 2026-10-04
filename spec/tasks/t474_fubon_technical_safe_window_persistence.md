@@ -17,6 +17,7 @@
 - [ ] 474.5 實機 0050 首段的 MACD 回 `SCHEMA_INVALID` 時，先在 Python 嚴格 normalizer 補 Requirement 176 的固定階段代碼與最多 512 字元安全結構診斷；只記固定 profile id、預期欄位缺漏、未知欄位數、型別分類與筆數，不記未知欄位名稱、數值或完整 response。對外錯碼與 Java API log 固定格式不變。用同窗官方唯讀回應定位後，若能由官方文件及結構證據證實是相容 schema 差異，才作最小解析修正並加入回歸測試；不以推算值補出 MACD。
 - [ ] 474.6 Backfill 對單標的 profile `SCHEMA_INVALID` 保留該 window 已提交的其他 profile facts、將該 profile 標為 `FAILED`、未知範圍保持 `HISTORY_DEPTH_UNKNOWN`，停止該標的舊日期窗口後繼續其他標的。對 profile response 前 client 以 `TECHNICAL_SCHEMA_INVALID` 回報的整體 wire／identity 失敗，該標的全部 profile 標為 `FAILED`、當窗不入庫、保留先前窗口事實，也繼續其他標的。`completedSymbols` 計處理至終態的標的；無後續全域失敗時 job 最終 `PARTIAL` 並保留首個單標的失敗 reason。後續若遇 429／quota、transport、deadline、writer failure 則停止全 job，job reason 改為全域錯碼，先前 schema 原因留在 coverage。加入兩種 0050 schema 失敗後下一標的可入庫、失敗範圍與事實計數回歸測試。
 - [ ] 474.7 回補工作以同一鎖發布可觀察快照，確保 `windows`/`profileResults` 與終態 `status`/`completedAt` 在輪詢時成對一致；加入並發輪詢回歸測試及先 schema 後 429／transport 的三檔停止測試，確認 job reason 為全域錯碼、先前 schema 留在 coverage。前端將 `TECHNICAL_SCHEMA_INVALID` 文案改為「部分標的官方回應格式無法核實，該標的後續探查已略過；其餘標的照常處理。」或等義文字，不誤導為整個工作立即停止；全域錯碼則顯示對應停止文案。
+- [ ] 474.8 正式 job 驗收在第 4 窗遇到本地 60 次／60 秒共用 start gate。回補 runner 在首窗後每次新窗口前（包括跨標的與前標的 schema 失敗）於鎖外可中斷等待前窗完成後至少 60 秒；等待前後檢查 24 小時期限，逾期或中斷不發 SDK 請求。不得放寬共用 gate、重試本地 budget 或官方 429、突破 35 窗／檔與 17,850 profile request 上限。注入 sleeper 作聚焦測試，證明節流次數／跨標的／中斷與快照可輪詢；真實部署後再跑一輪，驗證第 4 窗後能繼續（若外部競用仍限流，誠實回報）。
 
 ## 驗證
 
