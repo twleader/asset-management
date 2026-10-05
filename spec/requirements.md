@@ -5872,3 +5872,18 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 官方 SMA20 與既有 MA20 是同一指標家族：相符時不另加分、不新增 factor、不提高 confidence、不重複出現在權重總和；衝突時只作單次保守否決，將最終三軌買進與減碼／出場候選降為持有者 `HOLD`、非持有者 `WATCH`，保留原 `candidateAction`、分數及明確 gate reason。無法比較時保留原最終動作，並顯示缺口；官方資料不得單獨觸發買或賣。既有 KD/W%R、BIAS/B10B20、布林/MA20 同源項仍只按既有家族計一次。此 final-action 語意變更必須將 `ACTION_POLICY_VERSION` 從 `EVIDENCE_GATE_V1` 升至 `EVIDENCE_GATE_V2`，通知首輪只重建 baseline，不把升版產生的動作變化寄為普通 transition。
 - [ ] 詳細資料新增 nullable `priceReference`，只在完成日布林 20/2 有有效同日 `0 < lower ≤ middle ≤ upper`、接受價格正數、最近 20 根完成日原始與還原序列日期和 close 逐筆一致、最終動作不是 `NO_TRADE` 時輸出：`buyLower=lower`、`buyUpper=middle`、`sellLower=middle`、`sellUpper=upper`。價格僅作小數兩位參考顯示：下界以 DOWN、上界以 UP 向外取整，保持排序；捨入後四個展示邊界仍須全部大於零，否則整個 child 為 null；不宣稱符合台股或美股委託 tick。此區間是完成日波動參考，不是預測報酬、停損或委託價格；當日即時價格不得重新推導布林。顯示資料日；`BUY_CANDIDATE`／`ADD_CANDIDATE`／`TRIAL_BUY` 對應 BUY，`REDUCE_CANDIDATE`／`EXIT_CANDIDATE` 對應 SELL，其餘動作含 `AVOID` 對應 NONE。缺值則整個 child 為 null，前端不顯示假區間。不得把它當第二個布林或 MA 因子修改評分。
 - [ ] 完整同步 backend DTO、BFF 嚴格 decoder、既有 9090 單股明細 OpenAPI/schema/example 與產生的兩份 Swagger Markdown、前端展開明細；`info.version` 從 1.18.0 升為 1.19.0，更新釘版契約測試及通知升版 baseline 測試；不新增路由、券商 I/O、資料寫入或下單功能。測試涵蓋相同／衝突／缺漏／還原價／盤中／不同來源日、三軌降級與零重複加權、參考區間邊界、嚴格 JSON 契約；以 Docker rebuild/recreate 驗證真實 9090 單股明細及前端，並以既有資料做唯讀核對。未做持出樣本回測前，不宣稱準確率提高。
+
+
+### Requirement 178／Task 477：雷達買進閘門放寬乖離與單日漲幅否決（使用者風險偏好，非實證調參）
+
+**User Story：**作為今日交易雷達使用者，我希望強勢多頭中的標的不再因為「乖離 ≥12%」或「單日漲幅 ≥5%」被一律否決買進，以免大盤逼近高點的數個月都沒有任何買進建議。
+
+**Acceptance Criteria：**
+
+- [ ] 正式（`candidate == null`）路徑的買進閘門否決改為：MA60 乖離 `≥ 15%`（原 12%）、完成日漲幅 `≥ 8%`（原 5%）。其餘 `buyGate` 條件（MA20／MA60 兩日確認、KD 過熱、換匯過貴、ETF 溢價、前日仍跌、基本面惡化、大盤 RISK_OFF／stale）、分數門檻（75／55／40／25）、`timingOf()` 的 `BIAS_HIGH=12` 與 OVERBOUGHT／EXTREME_OVERSOLD 狀態、完成日漲幅的 5% 風險文案與評分貢獻、賣出端各閘門一律不變。
+- [ ] 回測影響（誠實揭露）：`BacktestService` 的 V13 baseline 經 `evaluateBaseline → evaluateStock` 走正式 `candidate==null` 路徑，SWING 軌也永遠走該路徑，所以本次放寬後回測 baseline 與 swing 結果**會隨之改為 8／15**；`RuleParameters.v12Default()` 與 `v13BuyGateCandidate` 網格值維持 5／12 不動，但 `evaluateCandidate` 只接受 V13 參數、`v12Default()` 不會被實際評估，因此 `V13_BUYGATE_CHASE8_BIAS15` 與新 baseline 等價、`CHASE8`／`BIAS15` 的比較對象變成 8／15。這只影響離線診斷，不影響使用者畫面；日後若要重做 5／12 對照，須另開 Task 讓 `evaluateBaseline` 顯式帶參數。
+- [ ] `TradingRadarRuleEngine.RULE_VERSION` 由 `TW_RULES_V20` 升為 `TW_RULES_V21`，`FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION` 的硬編 `TW_RULES_V20|…` 同步升為 V21（既有 resolver／快取文件因版本不符失效並重建，屬預期）；`docs/openapi/docker-external-api.yaml` 的 ruleVersion 範例與描述、兩份 Swagger Markdown 鏡像、DTO Javadoc、前端 `TradingRadarView.vue` 與 BFF fixtures／測試的 V20 字串一併同步；分數、權重、門檻不變，只有買進／加碼候選的可觀察結果改變。通知沿用既有機制：`TradingRadarNotificationService` 以 `RULE_VERSION` 比對 setting，版本不符時只重建 baseline、不 enqueue；同步 `TradingRadarNotificationServiceTest` 的 V20 期望值為 V21（`PREVIOUS_RULE_VERSION` 現為 V17，不動）並斷言升版首輪不寄信。
+- [ ] 明文標註：本次為**使用者風險偏好決定，非 walk-forward 實證**。Task 446 的有界診斷（12 檔、27 筆進場事件）證據不足，不支持亦不否定此調整；不得宣稱準確率或報酬提升。放寬代表強勢標的在乖離 12%–15%、單日漲幅 5%–8% 之間可能被標為買進或加碼候選，追高與假突破風險較高，風險文案須保留；5%–8% 區間「完成日漲幅達 5% 以上，避免追高」風險文案可與買進／加碼候選並存，屬刻意揭露。
+- [ ] 不新增 API／路由／DB／券商 I/O；只呈現建議，不下單。測試涵蓋：乖離 13%、漲幅 6% 的樣本正式路徑可出買進／加碼候選；乖離 15%、漲幅 8% 邊界仍被否決；`EXTREME_OVERSOLD` 優先權不受影響；V13 buy-gate 5／12 候選（`v13BuyGateCandidate`）仍否決；規則版號與通知 baseline。以 Docker rebuild/recreate 驗證。
+- [ ] 放寬幅度的驗收上限：目標只是「每週有實質買賣建議」，不是增加訊號量。放寬前基準（2026-10-06 現行 `GET /api/public/trading-radar/today`，26 檔）最終動作為買進候選 1、減碼候選 1、其餘多為續抱／觀察／提高警戒。實作後在同一 stack 重取同一端點，買進／加碼候選數不得超過基準的 3 倍且不得超過雷達標的數的 25%；若超過，改為較窄門檻（乖離 14%、漲幅 6%）後重驗。賣出端本需求不放寬。結果與取樣時間、資料版本記入 Task 477 完成報告（單日快照，僅作量級檢查，非可重現基準）。
+- [ ] 賣出端明文不放寬（使用者要求「不賣在低點、也不賣在起漲點」）：減碼／出場分數門檻（40／25）、高檔獲利了結需 KD／MACD／量價至少兩類轉弱、`V13_SELL_BLOCKED`、`EXTREME_OVERSOLD` 不追殺（持有者回 `HOLD_CAUTION`）等保護全部維持原狀，本任務不得修改任何賣出分支；測試須斷言極端超賣樣本在新門檻下仍不輸出 `REDUCE_CANDIDATE`／`EXIT_CANDIDATE`。

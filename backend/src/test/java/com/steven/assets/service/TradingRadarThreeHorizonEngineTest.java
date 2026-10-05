@@ -390,10 +390,10 @@ class TradingRadarThreeHorizonEngineTest {
     }
 
     @Test
-    @DisplayName("356.8b 完成日漲幅達 5% 時三軌都不得追高買進")
+    @DisplayName("356.8b 完成日漲幅達 8%（Task 477 放寬後門檻）時三軌都不得追高買進")
     void chasedDailyMoveClosesTheBuyGateOnAllThreeTracks() {
         assertNoBuyOnAnyTrack(engine.evaluateStock(base()
-                .completedChangePercent("6").build()));
+                .completedChangePercent("9").build()));
     }
 
     @Test

@@ -19,7 +19,7 @@ function envelope(panel, rows = [stock(panel === 'us-stocks' ? '美股' : '台�
   const data = panel.endsWith('market') ? { market: market() }
     : panel.endsWith('stocks') ? { market: market(), stocks: rows, skippedNonTwStocks: 0 }
       : { publicInformation: [] }
-  return { panel, ruleVersion: 'TW_RULES_V20', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:00:00+08:00', data }
+  return { panel, ruleVersion: 'TW_RULES_V21', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:00:00+08:00', data }
 }
 
 test('五路同步起跑；慢區與失敗區不阻擋已完成區，retry 只請求該區', async () => {
@@ -68,7 +68,7 @@ test('single stock tuple 一次驗證後才更新 compact summary；拒絕不一
   const summary = stock('台股', '2330', 81)
   summary.price = 99
   const full = { ...summary, evidence: { full: true } }
-  const tuple = { ruleVersion: 'TW_RULES_V20', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:01:00+08:00', market: market(), summary, stock: full }
+  const tuple = { ruleVersion: 'TW_RULES_V21', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:01:00+08:00', market: market(), summary, stock: full }
   const applied = applyStockEvaluationTuple([current, stock('台股', '2308')], '台股', '2330', tuple)
   assert.equal(applied.rows[0].score, 81)
   assert.equal(applied.rows[0].price, 110)
@@ -132,7 +132,7 @@ function viewHarness() {
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); await nextTick() }
 function evaluation(marketName = '台股', code = '2330', score = 88) {
   const summary = { ...stock(marketName, code, score), fundamental: { applicable: true, coverage: 3 }, weeklyIndicators: { k: 50 } }
-  return { ruleVersion: 'TW_RULES_V20', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:01:00+08:00', market: market(), summary,
+  return { ruleVersion: 'TW_RULES_V21', actionPolicyVersion: 'EVIDENCE_GATE_V1', generatedAt: '2026-09-23T10:01:00+08:00', market: market(), summary,
     stock: { ...summary, fundamental: { ...summary.fundamental, reasons: ['完整證據'] }, weeklyIndicators: { k: 50, ma20: 123 }, evidence: { complete: true } } }
 }
 async function loadedView() {

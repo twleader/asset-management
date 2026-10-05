@@ -1987,7 +1987,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V20\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V21\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |

@@ -76,12 +76,23 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void chasedDailyMoveAndMidTierOverboughtBoundary_stillVetoesProductionBuyGate() {
-        var notHeld = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(false));
-        var held = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(true));
+        // Requirement 178／Task 477：正式路徑門檻放寬為 漲幅 8／乖離 15，邊界值仍否決。
+        var notHeld = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(false, "8", "15"));
+        var held = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(true, "8", "15"));
 
         assertTrue(notHeld.score() >= 75, "fixture 必須維持在買進門檻之上，否則本測試沒有驗證到否決邏輯");
         assertEquals(TradingRadarRuleEngine.Action.WATCH, notHeld.action());
         assertEquals(TradingRadarRuleEngine.Action.HOLD, held.action());
+    }
+
+    @Test
+    void relaxedProductionBuyGate_biasThirteenAndMoveSixCanProduceBuyOrAdd() {
+        var notHeld = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(false, "6", "13"));
+        var held = engine.evaluateStock(chasedAndMidTierOverboughtBoundaryStock(true, "6", "13"));
+
+        assertTrue(notHeld.score() >= 75);
+        assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, notHeld.action());
+        assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, held.action());
     }
 
     @Test
@@ -579,7 +590,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V20", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V21", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -1520,12 +1531,13 @@ class TradingRadarRuleEngineTest {
      * extendedIndicators，非 ma60BiasPercent；completedChangePercent 只用於 buyGate 判定），
      * 故 score 與 strongStock 相同、仍 ≥ 買進門檻 75，只有 buyGate 的兩個否決條件受影響。
      */
-    private TradingRadarRuleEngine.StockInput chasedAndMidTierOverboughtBoundaryStock(boolean held) {
+    private TradingRadarRuleEngine.StockInput chasedAndMidTierOverboughtBoundaryStock(
+            boolean held, String completedChange, String bias) {
         return new TradingRadarRuleEngine.StockInput(
                 held,
                 new BigDecimal("120"),
                 new BigDecimal("1"),
-                new BigDecimal("5"),
+                new BigDecimal(completedChange),
                 new TradingRadarRuleEngine.Indicators(
                         new BigDecimal("110"), new BigDecimal("100"), new BigDecimal("90"),
                         new BigDecimal("60"), new BigDecimal("40")),
@@ -1538,7 +1550,7 @@ class TradingRadarRuleEngineTest {
                 TradingRadarRuleEngine.MarketRegime.RISK_ON,
                 false,
                 null,
-                new BigDecimal("12"),
+                new BigDecimal(bias),
                 null,
                 null,
                 null,
