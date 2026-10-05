@@ -150,6 +150,10 @@ module SrppPolicyRegister
     manifest_jcs = jcs(manifest)
     validate_policy!(policy)
     version = validate_manifest!(manifest)
+    if version == 'ASSET_MGMT_SRPP_V2' &&
+       sha256(manifest_jcs) != '0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86'
+      raise Error, 'ASSET_MGMT_SRPP_V2 manifest does not match Task 476 golden digest'
+    end
     sql = 'INSERT INTO srpp_policy_registry (policy_bundle_sha256, formula_version, policy_document, ' \
           "formula_manifest) VALUES (#{sql_literal(bundle)}, #{sql_literal(version)}, #{sql_literal(policy_jcs)}, " \
           "#{sql_literal(manifest_jcs)}) ON CONFLICT (policy_bundle_sha256) DO NOTHING;"

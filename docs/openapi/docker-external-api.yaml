@@ -8747,7 +8747,8 @@ components:
                 const: TWD
                 description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
             description: 限定本欄 unit 為 TWD。
-          description: 本組年利息估計（新台幣），沿用既有存款利息公式（在途款與無利率列為 0），品質 ESTIMATE。
+          description: 本組年利息估計（新台幣）。V2 一般 TWD／USD 任一列 annualInterestRate=null 時，整組為 value=null、quality=UNAVAILABLE、reasonCodes=[DEPOSIT_INTEREST_RATE_UNKNOWN]、sourceIds=[]；明確零利率與 TRANSIT_TWD／TRANSIT_USD（含負在途且利率 null）可為 ESTIMATE 0。舊 V1 package 維持當時的 null→0 重播語意。
+          example: {value: null, unit: TWD, quality: UNAVAILABLE, reasonCodes: [DEPOSIT_INTEREST_RATE_UNKNOWN], sourceIds: []}
       required:
       - bankId
       - bankName
@@ -9008,7 +9009,7 @@ components:
     SrppCashIncomeData:
       type: object
       additionalProperties: false
-      description: 基礎收益：來源估計額與可支配現金分列。本版三項分類（股票／ETF 配息、基金配息、存款利息）為各自加總；sourceAccruedAnnualIncome 取快照 estimatedAnnualDividend，三項和只用於對帳；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+      description: 基礎收益：股票／ETF、基金、存款各自列示。V2 一般存款利率未知時 depositInterest 為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN，sourceAccruedAnnualIncome 即使快照值非 null 亦同；不做三項完整對帳。若快照 estimatedAnnualDividend=null，來源年收入保留 SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。股票與基金自身的品質不受存款缺值污染。再投入、可支配與稅後現金流仍 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED。
       properties:
         stockAndEtfDistributions:
           allOf:
@@ -9039,7 +9040,8 @@ components:
                 const: TWD
                 description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
             description: 限定本欄 unit 為 TWD。
-          description: 存款一年估計利息合計（新台幣，ESTIMATE）。
+          description: 存款一年估計利息合計（新台幣）。V2 任一一般 TWD／USD 存款利率 null 時為 value=null、quality=UNAVAILABLE、reasonCodes=[DEPOSIT_INTEREST_RATE_UNKNOWN]、sourceIds=[]；已知零利率與在途 null 利率仍可為 ESTIMATE 0。
+          example: {value: null, unit: TWD, quality: UNAVAILABLE, reasonCodes: [DEPOSIT_INTEREST_RATE_UNKNOWN], sourceIds: []}
         sourceAccruedAnnualIncome:
           allOf:
           - "$ref": "#/components/schemas/SrppMetric"
@@ -9049,7 +9051,7 @@ components:
                 const: TWD
                 description: 本欄單位常數 `TWD`：新台幣金額（已換算，不再乘匯率）。
             description: 限定本欄 unit 為 TWD。
-          description: 來源估計年收入（新台幣）：直接輸出快照 estimatedAnnualDividend（單一來源）；三項分類加總只用於容差對帳、不保證精確相等（不符時模組加 INCOME_RECONCILIATION_MISMATCH）；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING；快照值為 null 時 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。
+          description: 來源估計年收入（新台幣）：來源為快照 estimatedAnnualDividend；V2 一般存款利率未知且快照值非 null 時為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN，不能將來源把 null 折零的結果冒充完整估計，也不做分類和對帳。快照值為 null 時為 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING；僅在分類皆已知時檢查 INCOME_RECONCILIATION_MISMATCH。
         permanentTermInterestReinvested:
           allOf:
           - "$ref": "#/components/schemas/SrppMetric"
@@ -9126,7 +9128,7 @@ components:
             "$ref": "#/components/schemas/SrppId"
             description: 一筆缺配息估計的持有列識別字串。
           uniqueItems: true
-          description: estimatedDividend 為 null 的持有列識別，依字串序排序且不重複；非空時受影響加總改為 LOWER_BOUND。
+          description: 股票／基金 estimatedDividend 為 null 或 V2 一般存款 annualInterestRate 為 null 的來源列識別（DEPOSIT-<id>），依字串序排序且不重複；受影響股票／基金分類為 LOWER_BOUND，存款估息為 UNAVAILABLE。
         netCalculationStandard:
           anyOf:
           - type: string
@@ -9482,7 +9484,7 @@ components:
     SrppAssetsModule:
       type: object
       additionalProperties: false
-      description: 資產對帳與存款分組模組（calculationId 本版為 `ASSET_MGMT_ASSETS_RECON_V1`）：以凍結的 assets 來源做八項對帳並彙總存款分組；targetPriceComplete=false 時為 PARTIAL＋TARGET_PRICE_INCOMPLETE。
+      description: 資產對帳與存款分組模組（V1 calculationId `ASSET_MGMT_ASSETS_RECON_V1`；V2 為 `ASSET_MGMT_ASSETS_RECON_V2`）：八項金額對帳維持原語意；V2 一般存款利率未知時 PARTIAL＋DEPOSIT_INTEREST_RATE_UNKNOWN，已對帳的靜態金額欄仍可獨立採用；targetPriceComplete=false 時另有 TARGET_PRICE_INCOMPLETE。
       properties:
         status:
           type: string
@@ -9640,7 +9642,7 @@ components:
     SrppCashIncomeModule:
       type: object
       additionalProperties: false
-      description: 基礎收益加總模組（calculationId 本版為 `ASSET_MGMT_GROSS_INCOME_V1`）：只加總來源估計的股票／ETF 配息、基金配息與存款利息；稅後與可支配欄位本版一律 UNAVAILABLE，模組固定 PARTIAL。
+      description: 基礎收益模組（V1 calculationId `ASSET_MGMT_GROSS_INCOME_V1`；V2 為 `ASSET_MGMT_GROSS_INCOME_V2`）：V2 一般存款利率未知時 depositInterest 與非 null 的來源年收入為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN；稅後與可支配欄位仍 UNAVAILABLE，模組固定 PARTIAL。
       properties:
         status:
           type: string
@@ -9890,7 +9892,7 @@ components:
           description: 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。
         formulaVersion:
           type: string
-          description: 公式版本識別（本版唯一實作 ASSET_MGMT_SRPP_V1）。
+          description: 公式版本識別；舊固定包為 ASSET_MGMT_SRPP_V1，新發布固定包為 ASSET_MGMT_SRPP_V2。V2 manifest 的 JCS SHA-256 為 0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86。
           minLength: 1
         scope:
           type: string
@@ -10446,6 +10448,9 @@ components:
         application/problem+json:
           schema: {$ref: '#/components/schemas/SrppOrchestratedProblem'}
   examples:
+    SrppFormulaManifestV2:
+      summary: Task 476 固定公式 manifest；內容與 spec fixture 的 JCS 完全相同
+      value: {"calculations":{"allocation":{"assetKey":"ASSET_KEY_V1","calculationId":"ASSET_MGMT_TOTAL_EXPOSURE_V1","division":"MathContext(34,HALF_EVEN)"},"assets":{"calculationId":"ASSET_MGMT_ASSETS_RECON_V2","dataAsOf":"MIN_LIVE_STOCK_UPDATED_AT_V1","depositInterest":"SnapshotAggregateCalculator.depositEstimatedInterest","depositNullRatePolicy":"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2","inputs":"LatestAssetsDto.Response(snapshot,liveAssets,targetPriceComplete)","revisionProjection":"SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1","tolerance":"max(0.01,max(abs(detail),abs(reported))*0.0001)"},"cashIncome":{"calculationId":"ASSET_MGMT_GROSS_INCOME_V2","depositNullRatePolicy":"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2","netCalculation":"NOT_VERIFIED"},"completedTechnicals":{"calculationId":"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"},"funding":{"calculationId":"ASSET_MGMT_FUNDING_UNAVAILABLE_V1","status":"CALCULATOR_NOT_VERIFIED"}},"decimal":"canonical-string","formulaVersion":"ASSET_MGMT_SRPP_V2","hash":"RFC8785-JCS+SHA-256","offsetLessTimezone":"Asia/Taipei","schema":"SRPP_FORMULA_MANIFEST_V2","timezone":"Asia/Taipei"}
     LatestAssetsSynthetic:
       summary: 去識別化、非實際持倉的穩定合成範例
       value:

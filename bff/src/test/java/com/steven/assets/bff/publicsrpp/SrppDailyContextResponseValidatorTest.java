@@ -34,6 +34,31 @@ class SrppDailyContextResponseValidatorTest {
     }
 
     @Test
+    void v2UnknownRateRequiresConsistentGroupAndIncomeQuality() {
+        ObjectNode good = v2UnknownRate();
+        accept(latest(), good);
+        ObjectNode falseZero = good.deepCopy();
+        ObjectNode interest = (ObjectNode) falseZero.at("/context/modules/assets/data/depositGroups/0/estimatedAnnualInterest");
+        interest.put("value", "0").put("quality", "ESTIMATE");
+        interest.putArray("reasonCodes");
+        interest.putArray("sourceIds").add("assets");
+        reject(latest(), rehash(falseZero));
+        ObjectNode falseExact = good.deepCopy();
+        ObjectNode exactInterest = (ObjectNode) falseExact.at("/context/modules/assets/data/depositGroups/1/estimatedAnnualInterest");
+        exactInterest.put("quality", "EXACT");
+        reject(latest(), rehash(falseExact));
+        ObjectNode wrongDigest = good.deepCopy();
+        ((ObjectNode) wrongDigest.at("/context/policy")).put("formulaSetSha256", "a".repeat(64));
+        reject(latest(), rehash(wrongDigest));
+        ObjectNode wrongIncome = good.deepCopy();
+        ((ObjectNode) wrongIncome.at("/context/modules/cashIncome/data/sourceAccruedAnnualIncome"))
+                .put("value", "90000").put("quality", "ESTIMATE").putArray("reasonCodes");
+        ((ObjectNode) wrongIncome.at("/context/modules/cashIncome/data/sourceAccruedAnnualIncome"))
+                .putArray("sourceIds").add("assets");
+        reject(latest(), rehash(wrongIncome));
+    }
+
+    @Test
     void proposalEvidencesPassWithMatchingQuery() {
         for (String name : SrppTestFixtures.EVIDENCES) {
             JsonNode node = tree(name);
@@ -230,6 +255,38 @@ class SrppDailyContextResponseValidatorTest {
 
     private static ObjectNode assetsData(ObjectNode ctx) {
         return (ObjectNode) ctx.get("modules").get("assets").get("data");
+    }
+
+    private static ObjectNode v2UnknownRate() {
+        ObjectNode root = tree("summary-partial.json");
+        ObjectNode ctx = (ObjectNode) root.get("context");
+        ((ObjectNode) ctx.get("policy")).put("formulaVersion", "ASSET_MGMT_SRPP_V2")
+                .put("formulaSetSha256", "0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
+        ObjectNode modules = (ObjectNode) ctx.get("modules");
+        ((ObjectNode) modules.get("assets")).put("status", "PARTIAL")
+                .put("calculationId", "ASSET_MGMT_ASSETS_RECON_V2")
+                .putArray("reasonCodes").add("DEPOSIT_INTEREST_RATE_UNKNOWN");
+        ((ObjectNode) modules.get("allocation")).put("calculationId", "ASSET_MGMT_TOTAL_EXPOSURE_V1");
+        ((ObjectNode) modules.get("cashIncome")).put("calculationId", "ASSET_MGMT_GROSS_INCOME_V2")
+                .putArray("reasonCodes").add("DEPOSIT_INTEREST_RATE_UNKNOWN")
+                .add("INCOME_ROWS_MISSING").add("NET_CALCULATION_NOT_VERIFIED");
+        ((ObjectNode) modules.get("funding")).put("calculationId", "ASSET_MGMT_FUNDING_UNAVAILABLE_V1");
+        ((ObjectNode) modules.get("completedTechnicals")).put("calculationId", "ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1");
+        ObjectNode group = (ObjectNode) ctx.at("/modules/assets/data/depositGroups/0");
+        group.putArray("sourceRowIds").add("DEPOSIT-2");
+        unavailable((ObjectNode) group.get("estimatedAnnualInterest"));
+        ObjectNode cash = (ObjectNode) ctx.at("/modules/cashIncome/data");
+        cash.putArray("missingIncomeRowIds").add("DEPOSIT-2");
+        unavailable((ObjectNode) cash.get("depositInterest"));
+        unavailable((ObjectNode) cash.get("sourceAccruedAnnualIncome"));
+        return rehash(root);
+    }
+
+    private static void unavailable(ObjectNode metric) {
+        metric.putNull("value");
+        metric.put("quality", "UNAVAILABLE");
+        metric.putArray("reasonCodes").add("DEPOSIT_INTEREST_RATE_UNKNOWN");
+        metric.putArray("sourceIds");
     }
 
     private static JsonNode metric(ObjectNode ctx) {

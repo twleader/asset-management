@@ -2,6 +2,9 @@ package com.steven.assets.srpp;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -34,5 +37,17 @@ class SrppFormulaCatalogTest {
         copy.put("formulaVersion", "X");
         assertThat(SrppFormulaCatalog.formulaSetSha256()).isEqualTo(GOLDEN_FORMULA_SET_SHA256);
         assertThat(SrppFormulaCatalog.manifest().path("formulaVersion").asText()).isEqualTo("ASSET_MGMT_SRPP_V1");
+    }
+
+    @Test
+    void v2ManifestMatchesReviewedFixtureAndGoldenDigest() throws Exception {
+        String version = SrppFormulaCatalog.FORMULA_VERSION_V2;
+        Path path = Path.of("spec/fixtures/srpp_formula_manifest_v2.json");
+        if (!Files.exists(path)) path = Path.of("../spec/fixtures/srpp_formula_manifest_v2.json");
+        String fixture = Files.readString(path).trim();
+        assertThat(SrppFormulaCatalog.manifestJcs(version)).isEqualTo(fixture);
+        assertThat(SrppFormulaCatalog.formulaSetSha256(version))
+                .isEqualTo("0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
+        assertThat(SrppFormulaCatalog.formulaSetSha256()).isEqualTo(GOLDEN_FORMULA_SET_SHA256);
     }
 }

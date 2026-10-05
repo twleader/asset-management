@@ -79,4 +79,20 @@ class SrppPolicyRegistryServiceTest {
         when(repository.findById("0".repeat(64))).thenReturn(Optional.empty());
         assertThat(service.find("0".repeat(64))).isEmpty();
     }
+
+    @Test
+    void v2IsAcceptedOnlyWithExactV2ManifestAndV1RemainsSupported() {
+        String v2 = SrppFormulaCatalog.FORMULA_VERSION_V2;
+        String v2Hash = "2".repeat(64);
+        when(repository.findById(v2Hash)).thenReturn(Optional.of(
+                entry(v2Hash, v2, POLICY, SrppFormulaCatalog.MANIFEST_JSON_V2)));
+        assertThat(service.find(v2Hash).orElseThrow().formulaSetSha256())
+                .isEqualTo("0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
+        when(repository.findById(v2Hash)).thenReturn(Optional.of(entry(v2Hash, v2, POLICY, SrppFormulaCatalog.MANIFEST_JSON)));
+        assertThat(service.find(v2Hash)).isEmpty();
+        when(repository.findById(HASH)).thenReturn(Optional.of(
+                entry(HASH, SrppFormulaCatalog.FORMULA_VERSION, POLICY, SrppFormulaCatalog.MANIFEST_JSON)));
+        assertThat(service.find(HASH).orElseThrow().formulaSetSha256())
+                .isEqualTo(SrppFormulaCatalogTest.GOLDEN_FORMULA_SET_SHA256);
+    }
 }

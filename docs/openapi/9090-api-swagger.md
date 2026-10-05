@@ -2483,7 +2483,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 | `sourceRowIds` | 是 | `array of SrppId` | 否 | minItems: 1<br>items: SrppId<br>items 說明: 一筆存款列的識別字串。 | 構成本組的存款列識別（`DEPOSIT-<id>`），依字串序排序、不重複、至少一項。 |
 | `amountTwd` | 是 | `SrppDecimal` | 否 |  | 本組存款新台幣金額合計（canonical Decimal；應付在途款為負）。 |
 | `originalAmount` | 是 | `SrppDecimal | null` | 是 |  | 本組原幣金額合計；任一列原幣金額未知時為 null。 |
-| `estimatedAnnualInterest` | 是 | `schema` | 否 |  | 本組年利息估計（新台幣），沿用既有存款利息公式（在途款與無利率列為 0），品質 ESTIMATE。 |
+| `estimatedAnnualInterest` | 是 | `schema` | 否 |  | 本組年利息估計（新台幣）。V2 一般 TWD／USD 任一列 annualInterestRate=null 時，整組為 value=null、quality=UNAVAILABLE、reasonCodes=[DEPOSIT_INTEREST_RATE_UNKNOWN]、sourceIds=[]；明確零利率與 TRANSIT_TWD／TRANSIT_USD（含負在途且利率 null）可為 ESTIMATE 0。舊 V1 package 維持當時的 null→0 重播語意。 |
 
 ### `SrppAssetsData`
 
@@ -2532,14 +2532,14 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 
 ### `SrppCashIncomeData`
 
-基礎收益：來源估計額與可支配現金分列。本版三項分類（股票／ETF 配息、基金配息、存款利息）為各自加總；sourceAccruedAnnualIncome 取快照 estimatedAnnualDividend，三項和只用於對帳；再投入、可支配、四項稅費與稅後現金流一律 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED，不填 0、不套固定稅率。
+基礎收益：股票／ETF、基金、存款各自列示。V2 一般存款利率未知時 depositInterest 為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN，sourceAccruedAnnualIncome 即使快照值非 null 亦同；不做三項完整對帳。若快照 estimatedAnnualDividend=null，來源年收入保留 SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。股票與基金自身的品質不受存款缺值污染。再投入、可支配與稅後現金流仍 UNAVAILABLE＋NET_CALCULATION_NOT_VERIFIED。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
 | `stockAndEtfDistributions` | 是 | `schema` | 否 |  | 股票與 ETF 一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING）。 |
 | `fundDistributions` | 是 | `schema` | 否 |  | 基金一年預估配息合計（新台幣，ESTIMATE；有列缺配息時為 LOWER_BOUND）。 |
-| `depositInterest` | 是 | `schema` | 否 |  | 存款一年估計利息合計（新台幣，ESTIMATE）。 |
-| `sourceAccruedAnnualIncome` | 是 | `schema` | 否 |  | 來源估計年收入（新台幣）：直接輸出快照 estimatedAnnualDividend（單一來源）；三項分類加總只用於容差對帳、不保證精確相等（不符時模組加 INCOME_RECONCILIATION_MISMATCH）；有列缺配息時為 LOWER_BOUND＋INCOME_ROWS_MISSING；快照值為 null 時 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING。 |
+| `depositInterest` | 是 | `schema` | 否 |  | 存款一年估計利息合計（新台幣）。V2 任一一般 TWD／USD 存款利率 null 時為 value=null、quality=UNAVAILABLE、reasonCodes=[DEPOSIT_INTEREST_RATE_UNKNOWN]、sourceIds=[]；已知零利率與在途 null 利率仍可為 ESTIMATE 0。 |
+| `sourceAccruedAnnualIncome` | 是 | `schema` | 否 |  | 來源估計年收入（新台幣）：來源為快照 estimatedAnnualDividend；V2 一般存款利率未知且快照值非 null 時為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN，不能將來源把 null 折零的結果冒充完整估計，也不做分類和對帳。快照值為 null 時為 UNAVAILABLE＋SNAPSHOT_ESTIMATED_DIVIDEND_MISSING；僅在分類皆已知時檢查 INCOME_RECONCILIATION_MISMATCH。 |
 | `permanentTermInterestReinvested` | 是 | `schema` | 否 |  | 永久定存利息再投入金額；本版 UNAVAILABLE（NET_CALCULATION_NOT_VERIFIED）。 |
 | `spendableAnnualGross` | 是 | `schema` | 否 |  | 可支配年收入（稅前）；本版 UNAVAILABLE。 |
 | `taiwanIncomeTaxOrRefund` | 是 | `schema` | 否 |  | 台灣綜合所得稅應納或退稅額；本版 UNAVAILABLE。 |
@@ -2547,7 +2547,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 | `additionalBasicTax` | 是 | `schema` | 否 |  | 基本稅額（最低稅負制）；本版 UNAVAILABLE。 |
 | `supplementaryNhi` | 是 | `schema` | 否 |  | 二代健保補充保費；本版 UNAVAILABLE。 |
 | `afterAllTaxAnnualCashIncome` | 是 | `schema` | 否 |  | 全部稅費後的年現金收入；本版 UNAVAILABLE。 |
-| `missingIncomeRowIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一筆缺配息估計的持有列識別字串。 | estimatedDividend 為 null 的持有列識別，依字串序排序且不重複；非空時受影響加總改為 LOWER_BOUND。 |
+| `missingIncomeRowIds` | 是 | `array of SrppId` | 否 | items: SrppId<br>items 說明: 一筆缺配息估計的持有列識別字串。 | 股票／基金 estimatedDividend 為 null 或 V2 一般存款 annualInterestRate 為 null 的來源列識別（DEPOSIT-<id>），依字串序排序且不重複；受影響股票／基金分類為 LOWER_BOUND，存款估息為 UNAVAILABLE。 |
 | `netCalculationStandard` | 是 | `string | null` | 是 |  | 稅後計算所依據的標準識別；本版未驗證稅後計算，恆為 null。 |
 | `taxYear` | 是 | `integer` | 否 | minimum: 2000<br>maximum: 2200 | 收益所屬稅務年度＝交易日年份。 |
 
@@ -2626,7 +2626,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 
 ### `SrppAssetsModule`
 
-資產對帳與存款分組模組（calculationId 本版為 `ASSET_MGMT_ASSETS_RECON_V1`）：以凍結的 assets 來源做八項對帳並彙總存款分組；targetPriceComplete=false 時為 PARTIAL＋TARGET_PRICE_INCOMPLETE。
+資產對帳與存款分組模組（V1 calculationId `ASSET_MGMT_ASSETS_RECON_V1`；V2 為 `ASSET_MGMT_ASSETS_RECON_V2`）：八項金額對帳維持原語意；V2 一般存款利率未知時 PARTIAL＋DEPOSIT_INTEREST_RATE_UNKNOWN，已對帳的靜態金額欄仍可獨立採用；targetPriceComplete=false 時另有 TARGET_PRICE_INCOMPLETE。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
@@ -2650,7 +2650,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 
 ### `SrppCashIncomeModule`
 
-基礎收益加總模組（calculationId 本版為 `ASSET_MGMT_GROSS_INCOME_V1`）：只加總來源估計的股票／ETF 配息、基金配息與存款利息；稅後與可支配欄位本版一律 UNAVAILABLE，模組固定 PARTIAL。
+基礎收益模組（V1 calculationId `ASSET_MGMT_GROSS_INCOME_V1`；V2 為 `ASSET_MGMT_GROSS_INCOME_V2`）：V2 一般存款利率未知時 depositInterest 與非 null 的來源年收入為 UNAVAILABLE＋DEPOSIT_INTEREST_RATE_UNKNOWN；稅後與可支配欄位仍 UNAVAILABLE，模組固定 PARTIAL。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
@@ -2693,7 +2693,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 | `policyBundleSha256` | 是 | `SrppSha256` | 否 |  | 呼叫端指定且已登錄的規則包雜湊（registry 主鍵），必須等於 query 的 policyBundleSha256。 |
 | `calculationPolicySha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(政策文件)) 計算的政策內容雜湊。 |
 | `formulaSetSha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。 |
-| `formulaVersion` | 是 | `string` | 否 |  | 公式版本識別（本版唯一實作 ASSET_MGMT_SRPP_V1）。 |
+| `formulaVersion` | 是 | `string` | 否 |  | 公式版本識別；舊固定包為 ASSET_MGMT_SRPP_V1，新發布固定包為 ASSET_MGMT_SRPP_V2。V2 manifest 的 JCS SHA-256 為 0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86。 |
 | `scope` | 是 | `string` | 否 | enum: `LISTED_CALCULATIONS_ONLY` | 適用範圍，常數 `LISTED_CALCULATIONS_ONLY`：只涵蓋 manifest 明列的計算，不是完整投資政策或交易決策。 |
 
 ### `SrppContext`
