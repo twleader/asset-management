@@ -86,7 +86,9 @@ public class SrppDailyContextProducerScheduler {
         if (time.isBefore(FIRST_SLOT) || !time.isBefore(END)) return;
         String slot = slotFor(time);
 
-        List<SupportedPolicy> policies = registry.supportedPolicies();
+        List<SupportedPolicy> policies = registry.supportedPolicies().stream()
+                .filter(policy -> SrppFormulaCatalog.FORMULA_VERSION_V2.equals(policy.formulaVersion()))
+                .toList();
         if (policies.isEmpty()) return;
 
         Set<Long> active = users.findByStatus(AppUser.STATUS_ACTIVE).stream()

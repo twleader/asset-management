@@ -39,7 +39,7 @@ class SrppDailyContextProducerSchedulerTest {
     private final AppUserRepository users = mock(AppUserRepository.class);
     private final SrppSourceCapture capture = mock(SrppSourceCapture.class);
     private final SrppPackagePublisher publisher = mock(SrppPackagePublisher.class);
-    private final SupportedPolicy policy = SrppTestData.policy(Map.of());
+    private final SupportedPolicy policy = SrppTestData.policyV2(Map.of());
 
     private SrppDailyContextProducerScheduler at(LocalDate date, String time) {
         Clock clock = Clock.fixed(LocalDateTime.of(date, java.time.LocalTime.parse(time)).atZone(TW).toInstant(), TW);
@@ -116,6 +116,14 @@ class SrppDailyContextProducerSchedulerTest {
     void emptyRegistryDoesZeroCapture() {
         when(marketData.isTwTradingDayKnown(THURSDAY)).thenReturn(Optional.of(true));
         when(registry.supportedPolicies()).thenReturn(List.of());
+        at(THURSDAY, "10:00").produce();
+        verifyNoInteractions(snapshots, users, capture, publisher);
+    }
+
+    @Test
+    void legacyV1RegistryEntryIsReadableButNeverPublishedAgain() {
+        when(marketData.isTwTradingDayKnown(THURSDAY)).thenReturn(Optional.of(true));
+        when(registry.supportedPolicies()).thenReturn(List.of(SrppTestData.policy(Map.of())));
         at(THURSDAY, "10:00").produce();
         verifyNoInteractions(snapshots, users, capture, publisher);
     }

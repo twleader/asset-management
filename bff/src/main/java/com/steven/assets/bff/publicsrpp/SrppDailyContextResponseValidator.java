@@ -62,6 +62,9 @@ public final class SrppDailyContextResponseValidator {
     private static final String TWD = "TWD";
     private static final String RATIO = "RATIO";
     private static final String NATIVE_PRICE = "NATIVE_PRICE";
+    private static final String V2 = "ASSET_MGMT_SRPP_V2";
+    private static final String V2_DIGEST = "0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86";
+    private static final String RATE_UNKNOWN = "DEPOSIT_INTEREST_RATE_UNKNOWN";
 
     private SrppDailyContextResponseValidator() {}
 
@@ -191,6 +194,9 @@ public final class SrppDailyContextResponseValidator {
                     module(modules.get("cashIncome"), mp + ".cashIncome", this::cashIncomeData),
                     module(modules.get("funding"), mp + ".funding", this::fundingData),
                     module(modules.get("completedTechnicals"), mp + ".completedTechnicals", this::technicalsData));
+            if (V2.equals(ctx.get("policy").get("formulaVersion").asText())) {
+                validateV2(modules);
+            }
             String expectedCoverage = statuses.stream().allMatch("COMPLETE"::equals) ? "COMPLETE" : "PARTIAL";
             if (!expectedCoverage.equals(coverage)) fail(path + ".coverage 與模組狀態不一致");
             return generatedAt;
@@ -204,6 +210,75 @@ public final class SrppDailyContextResponseValidator {
             sha(node.get("formulaSetSha256"), path + ".formulaSetSha256");
             nonEmptyText(node.get("formulaVersion"), path + ".formulaVersion");
             constText(node, "scope", "LISTED_CALCULATIONS_ONLY", path);
+            if (V2.equals(node.get("formulaVersion").asText())
+                    && !V2_DIGEST.equals(node.get("formulaSetSha256").asText())) fail(path + " V2 digest 不符");
+        }
+
+        private void validateV2(JsonNode modules) {
+            if (!"ASSET_MGMT_ASSETS_RECON_V2".equals(modules.path("assets").path("calculationId").asText())
+                    || !"ASSET_MGMT_GROSS_INCOME_V2".equals(modules.path("cashIncome").path("calculationId").asText())
+                    || !"ASSET_MGMT_TOTAL_EXPOSURE_V1".equals(modules.path("allocation").path("calculationId").asText())
+                    || !"ASSET_MGMT_FUNDING_UNAVAILABLE_V1".equals(modules.path("funding").path("calculationId").asText())
+                    || !"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1".equals(modules.path("completedTechnicals").path("calculationId").asText())) {
+                fail("$.context.modules V2 calculationId 不符");
+            }
+            JsonNode assets = modules.path("assets");
+            JsonNode cash = modules.path("cashIncome");
+            boolean unknownGroup = false;
+            for (JsonNode group : assets.path("data").path("depositGroups")) {
+                JsonNode interest = group.path("estimatedAnnualInterest");
+                if ("UNAVAILABLE".equals(interest.path("quality").asText())) {
+                    if (!containsReason(interest.path("reasonCodes"), RATE_UNKNOWN)
+                            || interest.path("reasonCodes").size() != 1
+                            || !Set.of("TWD", "USD").contains(group.path("currency").asText())) {
+                        fail("V2 存款利息未知缺少原因碼");
+                    }
+                    unknownGroup = true;
+                    boolean rowMissing = false;
+                    for (JsonNode row : group.path("sourceRowIds")) {
+                        if (containsReason(cash.path("data").path("missingIncomeRowIds"), row.asText())) rowMissing = true;
+                    }
+                    if (!rowMissing) fail("V2 未知利率缺少存款 row ID");
+                } else if (!"ESTIMATE".equals(interest.path("quality").asText())
+                        || !interest.path("reasonCodes").isEmpty()
+                        || interest.path("sourceIds").size() != 1
+                        || !"assets".equals(interest.path("sourceIds").get(0).asText())) {
+                    fail("V2 已知存款利息品質須為 ESTIMATE 且引用 assets");
+                }
+            }
+            if (!unknownGroup && (containsReason(assets.path("reasonCodes"), RATE_UNKNOWN)
+                    || containsReason(cash.path("reasonCodes"), RATE_UNKNOWN)
+                    || unavailableFor(cash.path("data").path("depositInterest"), RATE_UNKNOWN))) {
+                fail("V2 缺值原因須對應未知利率存款分組");
+            }
+            if (unknownGroup) {
+                if (!"PARTIAL".equals(assets.path("status").asText())
+                        || !containsReason(assets.path("reasonCodes"), RATE_UNKNOWN)
+                        || !containsReason(cash.path("reasonCodes"), RATE_UNKNOWN)
+                        || !unavailableFor(cash.path("data").path("depositInterest"), RATE_UNKNOWN)) {
+                    fail("V2 未知利率模組品質不一致");
+                }
+                JsonNode accrued = cash.path("data").path("sourceAccruedAnnualIncome");
+                if (!unavailableFor(accrued, RATE_UNKNOWN)
+                        && !unavailableFor(accrued, "SNAPSHOT_ESTIMATED_DIVIDEND_MISSING")) {
+                    fail("V2 年收益不可由缺利率冒充完整估計");
+                }
+                if (containsReason(cash.path("reasonCodes"), "INCOME_RECONCILIATION_MISMATCH")) {
+                    fail("V2 未知利率不得做完整收益對帳");
+                }
+            }
+        }
+
+        private static boolean unavailableFor(JsonNode metric, String reason) {
+            return "UNAVAILABLE".equals(metric.path("quality").asText())
+                    && metric.path("value").isNull()
+                    && containsReason(metric.path("reasonCodes"), reason)
+                    && metric.path("sourceIds").isEmpty();
+        }
+
+        private static boolean containsReason(JsonNode array, String value) {
+            for (JsonNode item : array) if (value.equals(item.asText())) return true;
+            return false;
         }
 
         private void sources(JsonNode node, String path, Instant generatedAt) {

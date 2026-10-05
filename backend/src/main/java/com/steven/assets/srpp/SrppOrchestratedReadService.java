@@ -348,7 +348,9 @@ public class SrppOrchestratedReadService {
             }
             if (assetsBody == null || vector.isEmpty()) return null;
             Optional<SupportedPolicy> policy = policies.find(pkg.getPolicyBundleSha256());
-            if (policy.isEmpty()) return null;
+            if (policy.isEmpty()
+                    || !policy.get().formulaVersion().equals(context.path("policy").path("formulaVersion").asText())
+                    || !policy.get().formulaSetSha256().equals(context.path("policy").path("formulaSetSha256").asText())) return null;
             return new ValidatedContext(context, assetsBody, vector, policy.get().formulaSetSha256());
         } catch (RuntimeException invalid) {
             return null;

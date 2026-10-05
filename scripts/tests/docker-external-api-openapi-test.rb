@@ -4,6 +4,8 @@
 require 'set'
 require 'yaml'
 require 'date'
+require 'json'
+require 'digest'
 
 # 讀取 nginx.conf／SecurityConfig.java 等含中文註解的檔案時，不能依賴呼叫端 shell 的
 # locale（LANG/LC_ALL 未設定時 Ruby 預設 external encoding 為 US-ASCII，讀到中文字元
@@ -416,6 +418,15 @@ assert!(commodity.dig('responses', '503', 'content').keys == ['application/probl
         'commodity-prices 503 只可為 BFF transport ProblemDetail')
 
 schemas = document.dig('components', 'schemas')
+v2_fixture = File.read(File.join(ROOT, 'spec/fixtures/srpp_formula_manifest_v2.json')).strip
+assert!(Digest::SHA256.hexdigest(v2_fixture) == '0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86',
+        'Task 476 V2 manifest fixture digest 漂移')
+assert!(document.dig('components', 'examples', 'SrppFormulaManifestV2', 'value') == JSON.parse(v2_fixture),
+        'OpenAPI V2 manifest 例子必須與唯一 fixture 相同')
+unknown_interest = schemas.dig('SrppDepositGroup', 'properties', 'estimatedAnnualInterest', 'example')
+assert!(unknown_interest == {'value' => nil, 'unit' => 'TWD', 'quality' => 'UNAVAILABLE',
+                             'reasonCodes' => ['DEPOSIT_INTEREST_RATE_UNKNOWN'], 'sourceIds' => []},
+        'OpenAPI V2 未知利率合成例必須維持五欄 SrppMetric')
 
 completed = openapi_routes.fetch(['GET', '/api/public/srpp/completed-technicals'])
 assert!(completed.fetch('parameters').map { |parameter| parameter.fetch('name') } ==

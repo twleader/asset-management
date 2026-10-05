@@ -56,6 +56,7 @@ public final class SrppModuleCalculator {
     private static final List<String> ASSETS_ONLY = List.of("assets");
     private static final List<String> POLICY_ONLY = List.of("policy");
     private static final List<String> ASSETS_POLICY = List.of("assets", "policy");
+    private static final String DEPOSIT_RATE_UNKNOWN = "DEPOSIT_INTEREST_RATE_UNKNOWN";
 
     public static Result calculate(LatestAssetsDto.Response response, SupportedPolicy policy, LocalDate tradingDate) {
         try {
@@ -74,11 +75,12 @@ public final class SrppModuleCalculator {
         verifyIdentity(snapshot, live);
         verifyCurrencies(snapshot);
         Totals totals = totals(snapshot, live);
+        boolean v2 = SrppFormulaCatalog.FORMULA_VERSION_V2.equals(policy.formulaVersion());
 
         ObjectNode modules = F.objectNode();
-        modules.set("assets", assetsModule(response, snapshot, live, totals));
+        modules.set("assets", assetsModule(response, snapshot, live, totals, v2));
         modules.set("allocation", allocationModule(snapshot, live, policy));
-        modules.set("cashIncome", cashIncomeModule(snapshot, tradingDate));
+        modules.set("cashIncome", cashIncomeModule(snapshot, tradingDate, v2));
         modules.set("funding", unavailableModule(SrppFormulaCatalog.CALC_FUNDING));
         modules.set("completedTechnicals", unavailableModule(SrppFormulaCatalog.CALC_TECHNICALS));
         return modules;
@@ -178,7 +180,7 @@ public final class SrppModuleCalculator {
 
     private static ObjectNode assetsModule(LatestAssetsDto.Response response,
                                            AssetSnapshotDto.SnapshotDetailResponse snapshot,
-                                           StockPriceService.LiveAssetsResponse live, Totals totals) {
+                                           StockPriceService.LiveAssetsResponse live, Totals totals, boolean v2) {
         ObjectNode data = F.objectNode();
         data.set("snapshotTotalDeposit", exact(snapshot.totalDeposit(), "TWD", ASSETS_ONLY));
         data.set("snapshotStockValue", exact(snapshot.totalStockValue(), "TWD", ASSETS_ONLY));
@@ -193,11 +195,15 @@ public final class SrppModuleCalculator {
         rowCounts.put("funds", nullSafe(snapshot.funds()).size());
         data.set("rowCounts", rowCounts);
         data.set("checks", totals.checks());
-        data.set("depositGroups", depositGroups(snapshot));
+        data.set("depositGroups", depositGroups(snapshot, v2));
 
-        List<String> reasons = response.targetPriceComplete() ? List.of() : List.of("TARGET_PRICE_INCOMPLETE");
-        return module(response.targetPriceComplete() ? "COMPLETE" : "PARTIAL", reasons, ASSETS_ONLY,
-                SrppFormulaCatalog.CALC_ASSETS, data);
+        List<String> reasons = new ArrayList<>();
+        if (!response.targetPriceComplete()) reasons.add("TARGET_PRICE_INCOMPLETE");
+        if (v2 && nullSafe(snapshot.deposits()).stream().anyMatch(SrppModuleCalculator::unknownOrdinaryRate)) {
+            reasons.add(DEPOSIT_RATE_UNKNOWN);
+        }
+        return module(reasons.isEmpty() ? "COMPLETE" : "PARTIAL", reasons, ASSETS_ONLY,
+                v2 ? SrppFormulaCatalog.CALC_ASSETS_V2 : SrppFormulaCatalog.CALC_ASSETS, data);
     }
 
     private record GroupKey(String currency, String depositType, Long bankId) {}
@@ -208,7 +214,7 @@ public final class SrppModuleCalculator {
             .thenComparing(k -> k.bankId() == null ? null : String.valueOf(k.bankId()),
                     Comparator.nullsFirst(Comparator.<String>naturalOrder()));
 
-    private static ArrayNode depositGroups(AssetSnapshotDto.SnapshotDetailResponse snapshot) {
+    private static ArrayNode depositGroups(AssetSnapshotDto.SnapshotDetailResponse snapshot, boolean v2) {
         SortedMap<GroupKey, List<AssetSnapshotDto.DepositResponse>> groups = new TreeMap<>(GROUP_ORDER);
         for (AssetSnapshotDto.DepositResponse d : nullSafe(snapshot.deposits())) {
             groups.computeIfAbsent(new GroupKey(d.currency(), d.depositType(), d.bankId()), k -> new ArrayList<>()).add(d);
@@ -233,9 +239,13 @@ public final class SrppModuleCalculator {
             } else {
                 group.putNull("originalAmount");
             }
-            BigDecimal interest = rows.stream().map(SrppModuleCalculator::depositInterest)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            group.set("estimatedAnnualInterest", metric(interest, "TWD", "ESTIMATE", List.of(), ASSETS_ONLY));
+            if (v2 && rows.stream().anyMatch(SrppModuleCalculator::unknownOrdinaryRate)) {
+                group.set("estimatedAnnualInterest", unavailable("TWD", DEPOSIT_RATE_UNKNOWN));
+            } else {
+                BigDecimal interest = rows.stream().map(SrppModuleCalculator::depositInterest)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                group.set("estimatedAnnualInterest", metric(interest, "TWD", "ESTIMATE", List.of(), ASSETS_ONLY));
+            }
             out.add(group);
         });
         return out;
@@ -245,6 +255,11 @@ public final class SrppModuleCalculator {
     static BigDecimal depositInterest(AssetSnapshotDto.DepositResponse deposit) {
         return SnapshotAggregateCalculator.depositEstimatedInterest(
                 deposit.amount(), deposit.annualInterestRate(), deposit.currency());
+    }
+
+    private static boolean unknownOrdinaryRate(AssetSnapshotDto.DepositResponse deposit) {
+        return ("TWD".equals(deposit.currency()) || "USD".equals(deposit.currency()))
+                && deposit.annualInterestRate() == null;
     }
 
     // ───────────── allocation ─────────────
@@ -338,7 +353,8 @@ public final class SrppModuleCalculator {
 
     // ───────────── cashIncome ─────────────
 
-    private static ObjectNode cashIncomeModule(AssetSnapshotDto.SnapshotDetailResponse snapshot, LocalDate tradingDate) {
+    private static ObjectNode cashIncomeModule(AssetSnapshotDto.SnapshotDetailResponse snapshot, LocalDate tradingDate,
+                                               boolean v2) {
         List<String> missing = new ArrayList<>();
         BigDecimal stockIncome = BigDecimal.ZERO;
         boolean stockMissing = false;
@@ -360,20 +376,27 @@ public final class SrppModuleCalculator {
                 fundIncome = fundIncome.add(fund.estimatedDividend());
             }
         }
-        BigDecimal depositIncome = nullSafe(snapshot.deposits()).stream()
+        List<AssetSnapshotDto.DepositResponse> deposits = nullSafe(snapshot.deposits());
+        boolean depositUnknown = v2 && deposits.stream().anyMatch(SrppModuleCalculator::unknownOrdinaryRate);
+        if (depositUnknown) deposits.stream().filter(SrppModuleCalculator::unknownOrdinaryRate)
+                .map(d -> "DEPOSIT-" + d.id()).forEach(missing::add);
+        BigDecimal depositIncome = deposits.stream()
                 .map(SrppModuleCalculator::depositInterest).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal classifiedSum = stockIncome.add(fundIncome).add(depositIncome);
-        boolean anyMissing = stockMissing || fundMissing;
+        boolean anyMissing = stockMissing || fundMissing || depositUnknown;
 
         TreeSet<String> moduleReasons = new TreeSet<>();
         moduleReasons.add("NET_CALCULATION_NOT_VERIFIED");
         if (anyMissing) moduleReasons.add("INCOME_ROWS_MISSING");
+        if (depositUnknown) moduleReasons.add(DEPOSIT_RATE_UNKNOWN);
         // sourceAccruedAnnualIncome 單一來源：快照 estimatedAnnualDividend；三項分類和只用於對帳。
         BigDecimal reported = snapshot.estimatedAnnualDividend();
         ObjectNode sourceAccrued;
         if (reported == null) {
             moduleReasons.add("SNAPSHOT_ESTIMATED_DIVIDEND_MISSING");
             sourceAccrued = unavailable("TWD", "SNAPSHOT_ESTIMATED_DIVIDEND_MISSING");
+        } else if (depositUnknown) {
+            sourceAccrued = unavailable("TWD", DEPOSIT_RATE_UNKNOWN);
         } else {
             if (classifiedSum.subtract(reported).abs().compareTo(tolerance(classifiedSum, reported)) > 0) {
                 moduleReasons.add("INCOME_RECONCILIATION_MISMATCH");
@@ -384,7 +407,8 @@ public final class SrppModuleCalculator {
         ObjectNode data = F.objectNode();
         data.set("stockAndEtfDistributions", income(stockIncome, stockMissing));
         data.set("fundDistributions", income(fundIncome, fundMissing));
-        data.set("depositInterest", income(depositIncome, false));
+        data.set("depositInterest", depositUnknown ? unavailable("TWD", DEPOSIT_RATE_UNKNOWN)
+                : income(depositIncome, false));
         data.set("sourceAccruedAnnualIncome", sourceAccrued);
         for (String field : NET_UNAVAILABLE_FIELDS) {
             data.set(field, unavailable("TWD", "NET_CALCULATION_NOT_VERIFIED"));
@@ -392,7 +416,8 @@ public final class SrppModuleCalculator {
         data.set("missingIncomeRowIds", sortedIds(missing));
         data.putNull("netCalculationStandard");
         data.put("taxYear", tradingDate.getYear());
-        return module("PARTIAL", List.copyOf(moduleReasons), ASSETS_ONLY, SrppFormulaCatalog.CALC_CASH_INCOME, data);
+        return module("PARTIAL", List.copyOf(moduleReasons), ASSETS_ONLY,
+                v2 ? SrppFormulaCatalog.CALC_CASH_INCOME_V2 : SrppFormulaCatalog.CALC_CASH_INCOME, data);
     }
 
     private static ObjectNode income(BigDecimal value, boolean lowerBound) {

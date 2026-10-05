@@ -15,8 +15,8 @@ import java.util.regex.Pattern;
 /**
  * Requirement 163／Task 452.4：政策 registry 的伺服器端驗證。
  *
- * <p>每次使用前都驗證三項：{@code formula_version} 為本程式實作的版本、{@code formula_manifest} 以 JCS 比對
- * 等於程式內建 manifest、{@code policy_document} 通過 {@code SRPP_POLICY_DOCUMENT_V1} 結構驗證。未通過者視為
+ * <p>每次使用前都驗證三項：{@code formula_version} 為本程式支援的 V1 或 V2、{@code formula_manifest} 以 JCS 比對
+ * 等於該版程式內建 manifest、{@code policy_document} 通過 {@code SRPP_POLICY_DOCUMENT_V1} 結構驗證。未通過者視為
  * 不存在（WARN 只記一次，只含 hash 前 12 碼與原因碼）。呼叫端提供的 hash 只當查詢鍵，絕不 echo 冒充支援。
  */
 @Slf4j
@@ -49,13 +49,14 @@ public class SrppPolicyRegistryService {
     Optional<SupportedPolicy> validate(SrppPolicyRegistryEntry entry) {
         String hash = entry.getPolicyBundleSha256();
         if (hash == null || !HASH.matcher(hash).matches()) return reject(hash, "BUNDLE_HASH_INVALID");
-        if (!SrppFormulaCatalog.FORMULA_VERSION.equals(entry.getFormulaVersion())) {
+        String version = entry.getFormulaVersion();
+        if (!SrppFormulaCatalog.supported(version)) {
             return reject(hash, "FORMULA_VERSION_UNSUPPORTED");
         }
         JsonNode manifest;
         try {
             manifest = SrppJcs.parseStrict(entry.getFormulaManifest());
-            if (!SrppFormulaCatalog.manifestJcs().equals(SrppJcs.canonicalize(manifest))) {
+            if (!SrppFormulaCatalog.manifestJcs(version).equals(SrppJcs.canonicalize(manifest))) {
                 return reject(hash, "FORMULA_MANIFEST_MISMATCH");
             }
         } catch (IllegalArgumentException e) {
@@ -70,9 +71,9 @@ public class SrppPolicyRegistryService {
         if (entry.getRegisteredAt() == null) return reject(hash, "REGISTERED_AT_MISSING");
         return Optional.of(new SupportedPolicy(
                 hash,
-                SrppFormulaCatalog.FORMULA_VERSION,
+                version,
                 SrppJcs.hash(document.document()),
-                SrppFormulaCatalog.formulaSetSha256(),
+                SrppFormulaCatalog.formulaSetSha256(version),
                 document.document(),
                 manifest,
                 document.targets(),

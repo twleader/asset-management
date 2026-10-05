@@ -48,6 +48,19 @@ class SrppPolicyRegisterTest < Minitest::Test
     refute_match(/\n/, sql)
   end
 
+  def test_v2_fixture_produces_insert_only_sql_without_altering_v1_digest
+    fixture = File.read(File.expand_path('../../spec/fixtures/srpp_formula_manifest_v2.json', __dir__)).strip
+    sql, _, formula_hash = build(manifest: fixture)
+    assert_equal '0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86', formula_hash
+    assert_includes sql, "'ASSET_MGMT_SRPP_V2'"
+    assert_includes sql, "'#{fixture}'"
+    assert sql.end_with?('ON CONFLICT (policy_bundle_sha256) DO NOTHING;')
+    assert_equal FORMULA_SET_SHA256, build[2]
+    assert_raises(SrppPolicyRegister::Error) do
+      build(manifest: fixture.sub('ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2', 'UNKNOWN_ZERO_V2'))
+    end
+  end
+
   def test_jcs_sorts_by_utf16_code_units_and_escapes
     value = { "\u{FB01}" => 'a', "\u{1F600}" => "q\"\\\n\u0001", 'B' => [1, true, nil] }
     assert_equal "{\"B\":[1,true,null],\"\u{1F600}\":\"q\\\"\\\\\\n\\u0001\",\"\u{FB01}\":\"a\"}",

@@ -114,6 +114,14 @@ final class SrppTestData {
                 Instant.parse("2026-09-20T00:00:00Z"));
     }
 
+    static SupportedPolicy policyV2(Map<String, String> targets) {
+        SupportedPolicy old = policy(targets);
+        return new SupportedPolicy(old.bundleHash(), SrppFormulaCatalog.FORMULA_VERSION_V2,
+                old.calculationPolicySha256(), SrppFormulaCatalog.formulaSetSha256(SrppFormulaCatalog.FORMULA_VERSION_V2),
+                old.policyDocument(), SrppFormulaCatalog.manifest(SrppFormulaCatalog.FORMULA_VERSION_V2),
+                old.targets(), old.registeredAt());
+    }
+
     /** proposal 合成範例：存款 3,000,000（定存 2,000,000 年利率 1.5%、活存 1,000,000）與股票 2,000,000。 */
     static SrppTestData proposal() {
         return new SrppTestData()

@@ -16,6 +16,11 @@ final class SrppOrchestratedResponseValidator {
     private static final Pattern DECIMAL = Pattern.compile("^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$");
     private static final Set<String> CALCULATIONS = Set.of("ASSET_RECONCILIATION", "ALLOCATION_GAP", "CASH_INCOME",
             "FUNDING_CAPACITY", "COMPLETED_TECHNICALS", "SYMBOL_RULE_FACTS");
+    private static final String V1 = "ASSET_MGMT_SRPP_V1";
+    private static final String V2 = "ASSET_MGMT_SRPP_V2";
+    private static final String V1_DIGEST = "35cabe65dccf3479356958477661c1ac79686db229f703d8a2989ec77c8fb901";
+    private static final String V2_DIGEST = "0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86";
+    private static final String RATE_UNKNOWN = "DEPOSIT_INTEREST_RATE_UNKNOWN";
 
     private SrppOrchestratedResponseValidator() {}
 
@@ -36,7 +41,7 @@ final class SrppOrchestratedResponseValidator {
         fields(root, Set.of("schemaVersion", "contextId", "tradingDate", "slot", "policyBundleSha256",
                 "formulaSetSha256", "capturedAt", "sourceVector", "allowedStockCodes", "contextContentSha256"));
         common(root, query);
-        text(root, "formulaSetSha256");
+        formulaVersion(root);
         dateTime(root, "capturedAt");
         sources(root.get("sourceVector"), false);
         uniqueTexts(root.get("allowedStockCodes"), 500);
@@ -46,7 +51,7 @@ final class SrppOrchestratedResponseValidator {
         fields(root, Set.of("schemaVersion", "contextId", "tradingDate", "slot", "policyBundleSha256",
                 "formulaSetSha256", "sourceVector", "coverage", "calculations", "contextContentSha256"));
         common(root, query);
-        text(root, "formulaSetSha256");
+        String expectedVersion = formulaVersion(root);
         Set<String> sourceIds = sources(root.get("sourceVector"), false);
         JsonNode coverage = coverage(root.get("coverage"));
         JsonNode results = root.get("calculations");
@@ -60,12 +65,14 @@ final class SrppOrchestratedResponseValidator {
             if (!CALCULATIONS.contains(text(item, "calculationId"))
                     || !query.calculationIds().get(i).equals(text(item, "calculationId"))) fail();
             if (!Set.of("COMPLETE", "PARTIAL", "UNAVAILABLE").contains(text(item, "status"))) fail();
-            text(item, "formulaVersion"); sha(item, "formulaSetSha256");
+            if (!expectedVersion.equals(text(item, "formulaVersion"))
+                    || !text(root, "formulaSetSha256").equals(text(item, "formulaSetSha256"))) fail();
             if (!item.get("data").isObject()) fail();
             uniqueTexts(item.get("reasonCodes"), 100);
             if ("UNAVAILABLE".equals(text(item, "status")) && item.get("reasonCodes").isEmpty()) fail();
             uniqueTexts(item.get("sourceIds"), 100);
             requireKnownSources(item.get("sourceIds"), sourceIds);
+            if (V2.equals(expectedVersion)) validateV2Calculation(item);
             switch (text(item, "status")) {
                 case "COMPLETE" -> complete++;
                 case "PARTIAL" -> partial++;
@@ -73,6 +80,73 @@ final class SrppOrchestratedResponseValidator {
             }
         }
         requireCoverage(coverage, results.size(), complete, partial, unavailable);
+    }
+
+    private static String formulaVersion(JsonNode root) {
+        sha(root, "formulaSetSha256");
+        String digest = text(root, "formulaSetSha256");
+        if (V1_DIGEST.equals(digest)) return V1;
+        if (V2_DIGEST.equals(digest)) return V2;
+        fail();
+        return null;
+    }
+
+    private static void validateV2Calculation(JsonNode item) {
+        String id = text(item, "calculationId");
+        JsonNode data = item.get("data");
+        if ("ASSET_RECONCILIATION".equals(id)) {
+            fields(data, Set.of("snapshotTotalDeposit", "snapshotStockValue", "snapshotFundValue",
+                    "snapshotTotalAssets", "liveStockValue", "liveTotalAssets", "targetPriceComplete",
+                    "rowCounts", "checks", "depositGroups"));
+            boolean unknown = false;
+            JsonNode groups = data.get("depositGroups");
+            if (!groups.isArray()) fail();
+            for (JsonNode group : groups) {
+                JsonNode interest = group.path("estimatedAnnualInterest");
+                metric(interest);
+                if ("UNAVAILABLE".equals(interest.path("quality").asText())) {
+                    if (!unavailableFor(interest, RATE_UNKNOWN)
+                            || interest.path("reasonCodes").size() != 1
+                            || !Set.of("TWD", "USD").contains(group.path("currency").asText())) fail();
+                    unknown = true;
+                } else if (!"ESTIMATE".equals(interest.path("quality").asText())
+                        || !interest.path("reasonCodes").isEmpty()
+                        || interest.path("sourceIds").size() != 1
+                        || !"assets".equals(interest.path("sourceIds").get(0).asText())) fail();
+            }
+            if (unknown != has(item.get("reasonCodes"), RATE_UNKNOWN)) fail();
+            if (unknown && !"PARTIAL".equals(text(item, "status"))) fail();
+        } else if ("CASH_INCOME".equals(id)) {
+            JsonNode interest = data.path("depositInterest");
+            JsonNode accrued = data.path("sourceAccruedAnnualIncome");
+            metric(interest); metric(accrued);
+            boolean unknown = unavailableFor(interest, RATE_UNKNOWN);
+            if (unknown != has(item.get("reasonCodes"), RATE_UNKNOWN)) fail();
+            if (unknown) {
+                if (!"PARTIAL".equals(text(item, "status"))
+                        || !unavailableFor(accrued, RATE_UNKNOWN)
+                        && !unavailableFor(accrued, "SNAPSHOT_ESTIMATED_DIVIDEND_MISSING")
+                        || has(item.get("reasonCodes"), "INCOME_RECONCILIATION_MISMATCH")) fail();
+                JsonNode missing = data.path("missingIncomeRowIds");
+                if (!missing.isArray()) fail();
+                boolean depositId = false;
+                for (JsonNode row : missing) if (row.isTextual() && row.asText().startsWith("DEPOSIT-")) depositId = true;
+                if (!depositId) fail();
+            } else if ("UNAVAILABLE".equals(interest.path("quality").asText())) fail();
+        }
+    }
+
+    private static boolean unavailableFor(JsonNode metric, String reason) {
+        return "UNAVAILABLE".equals(metric.path("quality").asText())
+                && metric.path("value").isNull()
+                && metric.path("sourceIds").isEmpty()
+                && has(metric.path("reasonCodes"), reason);
+    }
+
+    private static boolean has(JsonNode array, String value) {
+        if (!array.isArray()) return false;
+        for (JsonNode item : array) if (value.equals(item.asText())) return true;
+        return false;
     }
 
     private static void marketFacts(SrppOrchestratedQuery query, JsonNode root) {
@@ -199,6 +273,9 @@ final class SrppOrchestratedResponseValidator {
         text(node, "unit");
         if (!Set.of("EXACT", "ESTIMATE", "UPPER_BOUND", "LOWER_BOUND", "UNAVAILABLE").contains(text(node, "quality"))) fail();
         uniqueTexts(node.get("reasonCodes"), 100); uniqueTexts(node.get("sourceIds"), 100);
+        if ("UNAVAILABLE".equals(text(node, "quality"))) {
+            if (!value.isNull() || node.get("reasonCodes").isEmpty() || !node.get("sourceIds").isEmpty()) fail();
+        } else if (value.isNull() || node.get("sourceIds").isEmpty()) fail();
     }
 
     private static void hash(JsonNode root) {
