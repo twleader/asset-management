@@ -921,9 +921,9 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V20")
+    @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V21")
     void ruleVersionIsV18() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V20");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V21");
     }
 
     @Test
@@ -936,7 +936,7 @@ class BacktestServiceTest {
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V20");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V21");
         assertThat(response.results()).isNotEmpty();
     }
 
@@ -952,7 +952,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V20");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V21");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();

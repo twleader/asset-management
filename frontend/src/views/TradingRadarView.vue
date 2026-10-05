@@ -44,7 +44,7 @@
         <div class="card-head">
           <div>
             <span class="section-title">{{ marketCardTab }}大盤風險</span>
-            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ currentMarketPanel?.ruleVersion || 'TW_RULES_V20' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="rule-tag">{{ currentMarketPanel?.ruleVersion || 'TW_RULES_V21' }}</el-tag>
           </div>
           <div v-if="currentMarketPanel" class="as-of-group">
             <span class="as-of">完成日 K：{{ currentMarket.asOfDate || '資料不足' }}</span>
@@ -1577,7 +1577,7 @@ const dirPickerPreview = computed(() => {
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
-const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V20' })
+const radar = ref({ market: {}, usMarket: {}, stocks: [], publicInformation: [], skippedNonTwStocks: 0, ruleVersion: 'TW_RULES_V21' })
 const notificationVisible = ref(false)
 const notificationLoading = ref(false)
 const notificationSaving = ref(false)

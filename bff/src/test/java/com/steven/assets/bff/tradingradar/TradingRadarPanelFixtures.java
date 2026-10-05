@@ -91,7 +91,7 @@ public final class TradingRadarPanelFixtures {
 
     private static ObjectNode envelope() {
         return json("""
-                {"ruleVersion":"TW_RULES_V20","actionPolicyVersion":"EVIDENCE_GATE_V1",
+                {"ruleVersion":"TW_RULES_V21","actionPolicyVersion":"EVIDENCE_GATE_V1",
                  "generatedAt":"2026-09-23T09:00:00+08:00"}
                 """);
     }

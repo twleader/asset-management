@@ -257,7 +257,7 @@ class TradingRadarOpenApiSchemaContractTest {
 
         assertThat(example).containsEntry("source", "FUBON_SDK")
                 .containsEntry("binding", "BOUND_CONTEXT")
-                .containsEntry("decisionInputVersion", "TW_RULES_V20|FUBON_OVERLAY_V1");
+                .containsEntry("decisionInputVersion", "TW_RULES_V21|FUBON_OVERLAY_V1");
         assertThat(map(example.get("intraday"))).containsEntry("status", "AVAILABLE");
         assertThat((List<?>) example.get("profiles"))
                 .extracting(profile -> map(profile).get("profileId"))

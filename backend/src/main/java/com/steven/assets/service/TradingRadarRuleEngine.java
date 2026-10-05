@@ -58,7 +58,7 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V20";
+    public static final String RULE_VERSION = "TW_RULES_V21";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -247,6 +247,9 @@ public class TradingRadarRuleEngine {
     private static final double BIAS_EXTREME_PCT_LOW = 2.0;
     /** 一般超買／超賣的季線乖離門檻（%）。 */
     private static final double BIAS_HIGH = 12.0;
+    /** Requirement 178／Task 477：正式路徑買進閘門放寬值（風險偏好，非實證）；回測網格不變。 */
+    static final int PRODUCTION_CHASED_MOVE_PCT = 8;
+    static final int PRODUCTION_BUYGATE_BIAS_PCT = 15;
     private static final double BIAS_LOW = -12.0;
 
     /**
@@ -2134,9 +2137,9 @@ public class TradingRadarRuleEngine {
         // BIAS_HIGH 具名常數在此處被引用而非重複寫一次 magic number 12；與 v12Default() 的
         // BigDecimal.valueOf(12) scale 不同（12.0 對 12）但數值相等，下游比較皆對 scale 不敏感。
         BigDecimal chasedDailyMoveThresholdPct = candidate == null
-                ? BigDecimal.valueOf(5) : candidate.chasedDailyMoveThresholdPct();
+                ? BigDecimal.valueOf(PRODUCTION_CHASED_MOVE_PCT) : candidate.chasedDailyMoveThresholdPct();
         BigDecimal buyGateOverboughtBiasPct = candidate == null
-                ? BigDecimal.valueOf(BIAS_HIGH) : candidate.buyGateOverboughtBiasPct();
+                ? BigDecimal.valueOf(PRODUCTION_BUYGATE_BIAS_PCT) : candidate.buyGateOverboughtBiasPct();
         Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds,
                 chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
         return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));

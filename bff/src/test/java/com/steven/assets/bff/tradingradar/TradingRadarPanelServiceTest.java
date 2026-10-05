@@ -42,7 +42,7 @@ class TradingRadarPanelServiceTest {
         Harness h = new Harness(request -> json(panel(name).toString()));
         TradingRadarPanelResponse result = h.panel(name).block();
         assertThat(result.panel()).isEqualTo(name);
-        assertThat(result.ruleVersion()).isEqualTo("TW_RULES_V20");
+        assertThat(result.ruleVersion()).isEqualTo("TW_RULES_V21");
         assertThat(result.actionPolicyVersion()).isEqualTo("EVIDENCE_GATE_V1");
         assertThat(result.generatedAt()).isEqualTo("2026-09-23T09:00:00+08:00");
         assertThat(result.data().toString()).isEqualTo(panel(name).get("data").toString());
