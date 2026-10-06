@@ -29,7 +29,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">基本資訊</span>
             <el-button size="small" type="primary" :loading="saving"
-              :disabled="formBlocked" @click="submit">存檔</el-button>
+              :disabled="!canSubmit" @click="submit">存檔</el-button>
           </div>
         </template>
         <!-- 基本欄位 -->
@@ -135,7 +135,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">💰 存款明細</span>
             <div style="display:flex;gap:8px">
-              <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
+              <el-button size="small" type="primary" :loading="saving" :disabled="!canSubmit" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.deposits" @click="copyPrevDeposits">複製前一版</el-button>
               <el-button size="small" :icon="Plus" @click="addDeposit(depositTab)">新增</el-button>
             </div>
@@ -510,7 +510,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">📈 股票</span>
             <div style="display:flex;gap:8px">
-              <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
+              <el-button size="small" type="primary" :loading="saving" :disabled="!canSubmit" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.stocks" @click="copyPrevStocks">複製前一版</el-button>
               <el-button size="small" @click="refreshAllPrices" :loading="refreshingAll">
                 {{ isEdit ? '載入歷史股價' : '更新' }}
@@ -621,7 +621,7 @@
                     </el-table>
                     <div style="display:flex;gap:8px;margin-top:8px">
                       <el-button size="small" :icon="Plus" @click="addBrokerRow(row, '台股')">新增券商持股</el-button>
-                      <el-button size="small" type="primary" @click="submit" :loading="saving">存檔</el-button>
+                      <el-button size="small" type="primary" @click="submit" :loading="saving" :disabled="!canSubmit">存檔</el-button>
                     </div>
                   </div>
                 </template>
@@ -916,7 +916,7 @@
                     </el-table>
                     <div style="display:flex;gap:8px;margin-top:8px">
                       <el-button size="small" :icon="Plus" @click="addBrokerRow(row, '美股')">新增券商持股</el-button>
-                      <el-button size="small" type="primary" @click="submit" :loading="saving">存檔</el-button>
+                      <el-button size="small" type="primary" @click="submit" :loading="saving" :disabled="!canSubmit">存檔</el-button>
                     </div>
                   </div>
                 </template>
@@ -1200,7 +1200,7 @@
                     </el-table>
                     <div style="display:flex;gap:8px;margin-top:8px">
                       <el-button size="small" :icon="Plus" @click="addBrokerRow(row, '英股')">新增券商持股</el-button>
-                      <el-button size="small" type="primary" @click="submit" :loading="saving">存檔</el-button>
+                      <el-button size="small" type="primary" @click="submit" :loading="saving" :disabled="!canSubmit">存檔</el-button>
                     </div>
                   </div>
                 </template>
@@ -1338,7 +1338,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between">
             <span class="section-title">📊 信託基金</span>
             <div style="display:flex;gap:8px">
-              <el-button size="small" type="primary" :loading="saving" @click="submit">存檔</el-button>
+              <el-button size="small" type="primary" :loading="saving" :disabled="!canSubmit" @click="submit">存檔</el-button>
               <el-button size="small" :loading="copyingPrev.funds" @click="copyPrevFunds">複製前一版</el-button>
               <el-button size="small" :loading="refreshingFundNav" @click="refreshFundNav">刷新最新淨值</el-button>
               <el-button size="small" :icon="Plus" @click="addFund">新增</el-button>
@@ -1454,7 +1454,7 @@
 
       <div style="text-align:center;margin-top:20px">
         <el-button @click="$router.back()">取消</el-button>
-        <el-button type="primary" @click="submit" :loading="saving" :disabled="formBlocked">
+        <el-button type="primary" @click="submit" :loading="saving" :disabled="!canSubmit">
           {{ isEdit ? '存檔' : '儲存快照' }}
         </el-button>
       </div>
@@ -2544,6 +2544,7 @@ const panelsReady = computed(() => !isEdit.value || (panelContext.value.ready &&
 const dateLoading = ref(false)
 const dateError = ref(null)
 const formBlocked = computed(() => saving.value || loading.value || canonicalReloadRequired.value || dateLoading.value || !!dateError.value || !panelsReady.value || Object.values(copyingPrev).some(Boolean))
+const canSubmit = computed(() => !saving.value && !loading.value && !formBlocked.value && !canonicalReloadRequired.value && loadedFormKey.value === routeKey())
 
 function applyPanelData(panel, envelope) {
   const data = envelope.data
@@ -2885,15 +2886,24 @@ watch(() => route.params.id, (newId, oldId) => {
 
 // ===== Submit =====
 const submit = async () => {
-  if (saving.value || loading.value || canonicalReloadRequired.value || formBlocked.value) return
+  // 已有寫入在途時安靜忽略，避免雙擊重送同一份 payload。
+  if (saving.value) return
+  if (!canSubmit.value) {
+    if (loading.value) {
+      ElMessage.warning('資料載入中，請等待完成後再儲存。')
+    } else if (canonicalReloadRequired.value) {
+      ElMessage.warning('資料已儲存，但最新內容尚未完整讀回。請先重新載入後再編輯。')
+    } else if (loadedFormKey.value !== routeKey()) {
+      ElMessage.error('頁面資料與目前網址不一致，請完整重新載入後再儲存。')
+    } else {
+      ElMessage.error('資料尚未完整載入，請先重試或完整重新載入後再儲存。')
+    }
+    return
+  }
   // 送出前比對「表單資料實際載入自哪個路由參數」與「目前路由參數」是否一致；
   // 不一致代表元件被重用但資料尚未（或載入中）換成當下頁面對應的快照，
   // 送出會把上一筆殘留資料存成錯誤的一筆，一律阻擋並要求重新整理頁面。
   const currentKey = String(route.params.id ?? 'new')
-  if (loadedFormKey.value !== currentKey) {
-    ElMessage.error('頁面資料尚未完成載入或與目前網址不一致，請重新整理頁面後再儲存，避免存成錯誤的快照。')
-    return
-  }
   const submitContext = readScope.capture()
   const operation = ++saveGeneration
   const isCurrentSave = () => operation === saveGeneration && !readScope.disposed && currentKey === routeKey()

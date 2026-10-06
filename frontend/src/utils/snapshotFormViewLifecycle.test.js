@@ -16,6 +16,9 @@ const compiled = script.content.replace(/^import[^\n]*\n/gm, '').replace('export
 const template = compileTemplate({ source: descriptor.template.content, filename: 'SnapshotFormView.vue',
   id: 'snapshot-form-test', compilerOptions: { bindingMetadata: script.bindings } })
 assert.deepEqual(template.errors, [])
+const saveButtonTags = [...descriptor.template.content.matchAll(/<el-button\b[^>]*@click="submit"[^>]*>/g)].map(match => match[0])
+assert.equal(saveButtonTags.length, 8)
+assert.ok(saveButtonTags.every(tag => tag.includes(':disabled="!canSubmit"')))
 const aliases = [...template.code.matchAll(/(\w+) as (_\w+)/g)].map(match => [match[2], vue[match[1]]])
 const render = new Function(...aliases.map(([name]) => name), template.code
   .replace(/^import[^\n]*\n/gm, '').replace('export function render', 'function render') + '\nreturn render')(...aliases.map(([, value]) => value))
@@ -128,11 +131,47 @@ test('failed required panel blocks save; retry preserves successful row identity
   const row = h.view.form.deposits[0]
   await h.view.submit()
   assert.equal(h.calls.some(call => call.name === 'update'), false)
+  assert.ok(h.messages.some(({ message }) => String(message).includes('完整重新載入')))
   delete h.handlers.stocksPanel
   await h.view.retryPanel('stocks')
   assert.equal(h.view.form.deposits[0], row)
   assert.equal(h.view.formBlocked.value, false)
   assert.deepEqual(h.calls.map(call => call.name), [...panels.map(panel => `${panel}Panel`), 'stocksPanel'])
+})
+
+test('incomplete loading, canonical lock, and route mismatch block writes with actionable messages', async t => {
+  const pending = Object.fromEntries(panels.map(panel => [panel, deferred()]))
+  const loading = harness(t, { handlers: Object.fromEntries(panels.map(panel => [`${panel}Panel`, () => pending[panel].promise])) })
+  const load = loading.view.loadFormData()
+  await flush()
+  await loading.view.submit()
+  assert.equal(loading.calls.some(call => call.name === 'update' || call.name === 'create'), false)
+  assert.ok(loading.messages.some(({ message }) => String(message).includes('資料載入中')))
+  panels.forEach(panel => pending[panel].resolve(envelope(panel)))
+  await load
+
+  const canonical = harness(t)
+  await canonical.view.loadFormData()
+  canonical.view.canonicalReloadRequired.value = true
+  await canonical.view.submit()
+  assert.equal(canonical.calls.some(call => call.name === 'update' || call.name === 'create'), false)
+  assert.ok(canonical.messages.some(({ message }) => String(message).includes('尚未完整讀回')))
+
+  const routeMismatch = harness(t)
+  await routeMismatch.view.loadFormData()
+  routeMismatch.view.loadedFormKey.value = 'other-snapshot'
+  await routeMismatch.view.submit()
+  assert.equal(routeMismatch.calls.some(call => call.name === 'update' || call.name === 'create'), false)
+  assert.ok(routeMismatch.messages.some(({ message }) => String(message).includes('完整重新載入')))
+})
+
+test('ready edit form keeps the existing single PUT save path', async t => {
+  const h = harness(t)
+  await h.view.loadFormData()
+  assert.equal(h.view.canSubmit.value, true)
+  await h.view.submit()
+  assert.equal(h.calls.filter(call => call.name === 'update').length, 1)
+  assert.equal(h.calls.some(call => call.name === 'create'), false)
 })
 
 test('mixed version or effective FX never enables editing or submit', async t => {
@@ -211,6 +250,7 @@ test('date failure stays locked until successful retry; passive quotes do not di
   assert.match(h.view.dateError.value.message, /no FX/)
   await h.view.submit()
   assert.equal(h.calls.some(c => c.name === 'update'), false)
+  assert.ok(h.messages.some(({ message }) => String(message).includes('資料尚未完整載入')))
   delete h.handlers.exchangeRate
   await h.view.reloadDateData()
   assert.equal(h.view.formBlocked.value, false)

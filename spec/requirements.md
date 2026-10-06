@@ -5089,6 +5089,15 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 此修復不新增 business endpoint、資料表、Liquibase changeset、9090 公開 API 或任何券商 I/O；不因修復而建立、修改或刪除使用者快照資料（Task 411 因另一個 bug 已產生的錯誤快照資料是本條的具名例外，見下方 Task 411 條款）。
 - [ ] 回歸驗證至少覆蓋 BFF 的 POST／PUT 方法、下游 URI、payload 與成功回應轉送，並驗證前端 production build 中快照表單 API 路徑為 `/api/bff/snapshot-form`。
 
+#### Requirement 136 補充／Task 478：快照表單被鎖定時不得出現可按但無反應的存檔按鈕
+
+**User Story:** 作為正在編輯資產快照的已登入使用者，我希望每一個可見的「存檔」按鈕都如實反映表單是否可寫入；資料尚未完整載入或讀回不完整時，不能按了卻沒有請求、沒有提示。
+
+- [ ] `SnapshotFormView` 內所有呼叫 `submit()` 的八個存檔按鈕（基本資訊、存款、股票、基金四個區塊標頭；台股／美股／英股三個展開券商列；頁尾）必須共用同一個 `canSubmit` 可提交條件；當 `loading`、`canonicalReloadRequired` 或既有 `formBlocked` 為真，或 `loadedFormKey` 與目前 `routeKey()` 不一致時一律 disabled，不能只停用頁尾按鈕而讓其他列仍呈現可按。
+- [ ] `submit()` 必須保留程式層防線：即使鍵盤、測試或日後元件改動直接呼叫它，在非可提交狀態也不得送出 `POST`／`PUT`。若不是正在進行中的既有存檔，必須顯示可行動的繁體中文提示，明確要求使用者等待資料載入完成或先重試失敗區塊；不得靜默 return，也不得把尚未送出的狀態誤報為存檔失敗或成功。
+- [ ] 此補充只調整前端互動狀態與訊息，不改現有 BFF／business API、payload、資料庫、快照資料、券商整合或 9090 公開路由；交易日期仍依既有可空契約處理，不能將畫面上的空白交易日期誤當成這項修復的根因或擅自改成必填。
+- [ ] 回歸測試必須以真實 `SnapshotFormView` setup 驗證：Panel 尚未 ready、canonical readback 被鎖定或 route／loaded form identity 不一致時，直接呼叫 `submit()` 零寫入並留下提示；八個存檔按鈕的模板均綁定同一 `canSubmit` disabled 條件。表單 ready 時既有 PUT/POST 行為不變。
+
 ---
 
 ### Requirement 138／Task 414：富邦 LIVE 十秒輪詢與庫存／成交同步不得再互斥
