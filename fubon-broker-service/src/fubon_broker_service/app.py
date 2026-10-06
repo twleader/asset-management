@@ -535,7 +535,7 @@ def create_app(
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         except BankBalanceError as exc:
             outcome_counters.increment(Outcome.RECONCILE_FAILED)
-            logger.warning("Fubon bank balance reconciliation rejected reason=%s", exc.reason)
+            logger.warning("Fubon bank balance reconciliation rejected reason=%s stage=%s", exc.reason, exc.stage)
             raise HTTPException(status_code=503, detail=redact_mapping({"reason": exc.reason})) from None
         outcome_counters.increment(Outcome.SUCCESS)
         return result
