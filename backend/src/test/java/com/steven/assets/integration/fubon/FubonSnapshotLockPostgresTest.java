@@ -164,7 +164,7 @@ class FubonSnapshotLockPostgresTest {
 
         manualFullUpdate(TODAY, "00865B", "1800", "87300", "87900", "買", TODAY.minusDays(9));
 
-        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("10");
+        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("10", TODAY.minusDays(90));
     }
 
     @Test
@@ -177,9 +177,11 @@ class FubonSnapshotLockPostgresTest {
             entityManager.clear();
             AssetSnapshot reloaded = snapshotRepository.findById(snapshotId).orElseThrow();
             StockHolding sourceFubon = holdingForBroker(reloaded, "fubon");
-            assertThat(sourceFubon.getShares()).isEqualByComparingTo("1");
-            assertThat(sourceFubon.getCurrentValue()).isEqualByComparingTo("10");
+            // Requirement 179：成本、股數、交易日期由手動儲存吸收；市值依股數等比重算；type 仍保留來源值。
+            assertThat(sourceFubon.getShares()).isEqualByComparingTo("999");
+            assertThat(sourceFubon.getCurrentValue()).isEqualByComparingTo("9990");
             assertThat(sourceFubon.getTransactionType()).isEqualTo("SYNC");
+            assertThat(sourceFubon.getTransactionDate()).isEqualTo(TODAY.minusDays(1));
             assertThat(sourceFubon.getInvestmentCost()).isEqualByComparingTo("77");
             assertTotalsMatchChildren(reloaded);
         });
@@ -241,10 +243,10 @@ class FubonSnapshotLockPostgresTest {
 
         manualFullUpdate(TODAY, "2330", "1", "1", "1", "STALE", TODAY.minusDays(1));
 
-        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("1");
+        assertSourceFubonVendorFieldsAndOtherPayloadUpdated("1", TODAY.minusDays(1));
     }
 
-    private void assertSourceFubonVendorFieldsAndOtherPayloadUpdated(String expectedCost) {
+    private void assertSourceFubonVendorFieldsAndOtherPayloadUpdated(String expectedCost, LocalDate expectedDate) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             entityManager.clear();
             AssetSnapshot reloaded = snapshotRepository.findById(snapshotId).orElseThrow();
@@ -255,7 +257,7 @@ class FubonSnapshotLockPostgresTest {
             assertThat(sourceFubon.getInvestmentCost()).isEqualByComparingTo(expectedCost);
             assertThat(sourceFubon.getCurrentValue()).isEqualByComparingTo("10");
             assertThat(sourceFubon.getTransactionType()).isEqualTo("SYNC");
-            assertThat(sourceFubon.getTransactionDate()).isEqualTo(TODAY.minusDays(90));
+            assertThat(sourceFubon.getTransactionDate()).isEqualTo(expectedDate);
             assertThat(updatedOther.getStockCode()).isEqualTo("0056");
             assertThat(updatedOther.getCurrentValue()).isEqualByComparingTo("80");
             assertTotalsMatchChildren(reloaded);
@@ -439,7 +441,7 @@ class FubonSnapshotLockPostgresTest {
     }
 
     private void fullUpdateForRace() {
-        manualFullUpdate(TODAY, "2330", "1", "1", "1", "STALE", TODAY.minusDays(1));
+        manualFullUpdate(TODAY, "2330", "3", "1", "1", "STALE", TODAY.minusDays(1));
     }
 
     private void assertFinalRaceState() {

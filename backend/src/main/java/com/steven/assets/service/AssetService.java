@@ -447,9 +447,26 @@ public class AssetService {
                     existing.getStockCode(), existing.getMarket());
             java.util.List<AssetSnapshotDto.StockRequest> exact = candidates.getOrDefault(identity, java.util.List.of());
             if (exact.size() != 1) continue;
-            BigDecimal cost = exact.getFirst().investmentCost();
+            AssetSnapshotDto.StockRequest request = exact.getFirst();
+            BigDecimal cost = request.investmentCost();
+            BigDecimal shares = request.shares();
             if (cost == null || cost.signum() < 0 || cost.scale() > 2 || cost.precision() > 20) continue;
+            if (shares == null || shares.signum() <= 0 || shares.scale() > 5 || shares.precision() > 15) continue;
+            // 驗證全過才一次寫入：成本、股數、交易日期是使用者手動紀錄（Requirement 179）。
+            BigDecimal oldShares = existing.getShares();
+            if (oldShares != null && oldShares.signum() > 0 && existing.getCurrentValue() != null
+                    && shares.compareTo(oldShares) != 0) {
+                BigDecimal value = existing.getCurrentValue().multiply(shares)
+                        .divide(oldShares, 2, java.math.RoundingMode.HALF_UP);
+                existing.setCurrentValue(value);
+                if (existing.getDividendRate() != null && existing.getDividendRate().signum() > 0) {
+                    existing.setEstimatedDividend(value.multiply(existing.getDividendRate())
+                            .setScale(0, java.math.RoundingMode.HALF_UP));
+                }
+            }
+            existing.setShares(shares);
             existing.setInvestmentCost(cost);
+            existing.setTransactionDate(request.transactionDate());
         }
     }
 

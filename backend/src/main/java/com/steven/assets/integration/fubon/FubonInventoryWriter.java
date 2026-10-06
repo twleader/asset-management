@@ -135,9 +135,11 @@ public class FubonInventoryWriter {
             BigDecimal dividendRate = null;
             BigDecimal estimatedDividend = null;
             Integer displayOrder = null;
+            java.time.LocalDate previousTransactionDate = null;
             if (old.size() == 1) {
                 StockHolding previous = old.getFirst();
                 investmentCost = previous.getInvestmentCost();
+                previousTransactionDate = previous.getTransactionDate();
                 displayOrder = previous.getDisplayOrder();
                 if (isPositiveRate(previous.getDividendRate())) {
                     dividendRate = previous.getDividendRate();
@@ -172,7 +174,7 @@ public class FubonInventoryWriter {
                     .currency("TWD")
                     .originalCurrencyValue(null)
                     .transactionType(null)
-                    .transactionDate(null)
+                    .transactionDate(previousTransactionDate)
                     .transactionExchangeRate(null)
                     .displayOrder(displayOrder)
                     .build();
