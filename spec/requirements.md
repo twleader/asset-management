@@ -5896,3 +5896,15 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 不新增 API／路由／DB／券商 I/O；只呈現建議，不下單。測試涵蓋：乖離 13%、漲幅 6% 的樣本正式路徑可出買進／加碼候選；乖離 15%、漲幅 8% 邊界仍被否決；`EXTREME_OVERSOLD` 優先權不受影響；V13 buy-gate 5／12 候選（`v13BuyGateCandidate`）仍否決；規則版號與通知 baseline。以 Docker rebuild/recreate 驗證。
 - [ ] 放寬幅度的驗收上限：目標只是「每週有實質買賣建議」，不是增加訊號量。放寬前基準（2026-10-06 現行 `GET /api/public/trading-radar/today`，26 檔）最終動作為買進候選 1、減碼候選 1、其餘多為續抱／觀察／提高警戒。實作後在同一 stack 重取同一端點，買進／加碼候選數不得超過基準的 3 倍且不得超過雷達標的數的 25%；若超過，改為較窄門檻（乖離 14%、漲幅 6%）後重驗。賣出端本需求不放寬。結果與取樣時間、資料版本記入 Task 477 完成報告（單日快照，僅作量級檢查，非可重現基準）。
 - [ ] 賣出端明文不放寬（使用者要求「不賣在低點、也不賣在起漲點」）：減碼／出場分數門檻（40／25）、高檔獲利了結需 KD／MACD／量價至少兩類轉弱、`V13_SELL_BLOCKED`、`EXTREME_OVERSOLD` 不追殺（持有者回 `HOLD_CAUTION`）等保護全部維持原狀，本任務不得修改任何賣出分支；測試須斷言極端超賣樣本在新門檻下仍不輸出 `REDUCE_CANDIDATE`／`EXIT_CANDIDATE`。
+
+### Requirement 179／Task 479：富邦來源列手動存檔須吸收股數、持股成本與交易日期，不得靜默丟棄
+
+**User Story：**作為快照表單使用者，我在今日最新快照的富邦台股列修改股數、持股成本（買入均價）與交易日期後按存檔，這三個欄位都必須真的寫入並在讀回後顯示，而不是顯示「更新成功」卻維持舊值。
+
+**Acceptance Criteria：**
+
+- [ ] 根因揭露（Task 479 前的現況）：`READY` + inventory sync + configured-admin 今日 owner-latest target 時，富邦台股列為 `SOURCE_OWNED`（Requirement 90／138）；`AssetService.applySourceOwnedManualCosts` 原本只吸收 `investmentCost`，request 內的 `shares`、`transactionDate` 被忽略，且 `FubonInventoryWriter` 重寫列時把 `transactionDate` 清成 null，API 卻回成功。
+- [ ] 完整 PUT 對 SOURCE_OWNED 富邦列，在 `(brokerId, stockCode, market)` 唯一候選且幣別為 TWD 時，吸收 `investmentCost`、`shares`、`transactionDate`，並**取代** Requirement 90／138 中「不得覆寫 shares／交易日期」的禁令；`currentValue`、`transactionType`、`transactionExchangeRate`、幣別、broker、code 仍不可由 payload 覆寫（本次刻意不吸收 type／匯率）。先驗證 `shares`（> 0、`numeric(15,5)`：scale ≤ 5、precision ≤ 15）與 `investmentCost`（≥ 0、scale ≤ 2、precision ≤ 20），全部通過才一次寫入三欄；任一不合法或候選非唯一時沿用既有語意：該列零 mutation（含日期不變），不 rollback 整個 PUT。`transactionDate=null` 代表使用者清除日期，照存。
+- [ ] 股數改變時，`currentValue` 依舊列隱含單價等比重算（舊股數 > 0 才重算，否則維持）；舊列 `dividendRate` 為正時 `estimatedDividend` 以新市值重算，之後呼叫既有 aggregate calculator。下一次成功同步會以券商股數、市值覆蓋。
+- [ ] `FubonInventoryWriter` 重寫列時保留前一列的 `transactionDate`（與既有保留 `investmentCost` 同規則）。`shares` 的權威仍是券商庫存：下一次成功同步會以券商股數覆蓋手動股數，這是刻意設計並明文揭露；手動股數僅在下次同步前有效。
+- [ ] 不新增 API／DTO 欄位／DB 欄位／UI 提示（保存成功後表單讀回的即為實際值，同步覆蓋股數屬既有來源擁有語意）；不呼叫券商下單；只讀券商。writer 僅在舊列唯一時保留 `transactionDate`。測試涵蓋三欄位持久化 DB readback、writer 保留交易日期、不合法欄位該列零 mutation（含日期不變）。
