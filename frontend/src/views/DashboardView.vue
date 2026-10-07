@@ -978,7 +978,7 @@ const assetClassPieOption = computed(() => {
     series: [
       // 內圈標籤 host：半徑放大且與內環同角度 → 各標籤落到對應扇形方向、靠近內環，朝外引線指向該扇形。
       //   扇形必須透明：host data 去掉每筆的 itemStyle.color，才不會被當成第三個實心環。
-      { type: 'pie', center: ['50%', '50%'], radius: ['0%', '30%'],
+      { type: 'pie', center: ['50%', '50%'], radius: ['0%', '38%'],
         silent: true, tooltip: { show: false }, emphasis: { disabled: true },
         avoidLabelOverlap: true, itemStyle: { color: 'transparent', borderColor: 'transparent', borderWidth: 0 },
         label: { show: true, position: 'outside', alignTo: 'none',
@@ -986,10 +986,10 @@ const assetClassPieOption = computed(() => {
         labelLine: { show: true, length: 6, length2: 10, lineStyle: { width: 1 } },
         data: inner.map(d => ({ name: d.name, value: d.value })) },
       // 內圈環（薄）：自身不出 label，標籤交給上面的 host
-      { ...base, name: '總覽', radius: ['41%', '53%'],
+      { ...base, name: '總覽', radius: ['46%', '62%'],
         label: { show: false }, labelLine: { show: false }, data: inner },
       // 外圈環（薄）：label 往外、引線朝外
-      { ...base, name: '細分', radius: ['53%', '65%'],
+      { ...base, name: '細分', radius: ['62%', '78%'],
         label: { position: 'outside', formatter: '{b}\n{d}%', fontSize: 11 },
         labelLine: { length: 12, length2: 10 }, labelLayout: { hideOverlap: true }, data: outer }
     ]
