@@ -24,12 +24,23 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 30 個業務、40 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 31 個業務、40 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(71);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(30);
+        assertThat(jobs()).hasSize(72);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(31);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(40);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test
+    void srpp日報收據清理必須顯示實際0317節拍() {
+        assertThat(jobs()).filteredOn(j -> "SRPP 日報寄送收據保留期清理".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.service()).isEqualTo("業務服務");
+                    assertThat(job.schedule()).isEqualTo("每日 03:17");
+                    assertThat(job.cron()).isEqualTo("0 17 3 * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                });
     }
 
     @Test

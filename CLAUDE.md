@@ -346,6 +346,8 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - 範例：`DashboardBffController`、`SnapshotFormBffController`、`AssetHistoryBffController`、`BankSettingsBffRoutes`（純 passthrough 也要有自己的 route）
 - **具名、限縮例外（Requirements 66–68／70／71／77／78／79／86／108–113／118／163／165／166–171／174／175；Tasks 317、325、327、328、329、336、337、338、347、372、373、375–378、383、452–454、456–460、467、472、473）**：Docker 外部 HTTP 只能從 non-root Nginx `api-gateway` 的 loopback `127.0.0.1:9090` 十九條 exact path/method（十八條唯讀 GET ＋唯一寫入 POST `/api/public/crawler-data/rescan`，見 Requirement 71）進入；BFF 與 external-materials-service 都不映射 host port。BFF 僅放行 exact `GET /api/quotes`、`GET /api/quotes/one`、`GET /api/public/market-index`、`GET /api/assets/latest`、`GET /api/public/exchange-rate/usd-twd`、`GET /api/public/market-analysis/today`、`GET /api/public/portfolio-advice/latest`、`GET /api/public/trading-radar/today`、`GET /api/public/trading-radar/stock`、`GET /api/public/transactions`、`GET /api/public/trading-calendar`、`GET /api/public/commodity-prices`、`GET /api/public/srpp/daily-context`、`GET /api/public/srpp/calculation-context`、`GET /api/public/srpp/calculations`、`GET /api/public/srpp/market-facts`、`GET /api/public/srpp/completed-technicals`、`GET /api/public/srpp/technical-series` 與上述 POST；禁止 `/api/**`／descendant wildcard 與同路徑其他 method。quotes 只用 no-tenant container client 讀 external-materials 原始 Redis 19 欄，再用無身份 business 唯讀 market endpoints 聚合 `marketData`；Requirement 165 起 `/one` 在 raw 204 時，19 欄改由同一 no-tenant business client 的唯讀 `/api/market-data/history/stock` 組成 `CLOSE_FALLBACK`（30 日內最近收盤，不寫任何快取、不呼叫 Fubon bridge）；同一 immutable child 可直接投影 batch-ready `quoteDetail`、`bidLevels`、`askLevels`、`dividendHistory`，不得新增 I/O、改用 generic buy/sell 或繞過富邦 pure-read snapshot，且不得查個人資料。交易雷達與交易紀錄（連同 `/api/assets/latest`、`/api/public/portfolio-advice/latest`）預設都由 configured-admin bootstrap 選 owner、清除 caller Reactor identity 並顯式傳遞 tenant headers；**Requirement 140 起，這五支個人資料端點額外接受 optional `email` query 參數依帳號選擇 owner（不帶時行為不變，仍是 configured-admin）——這是使用者知情接受「無驗證層、曝險範圍擴大到全部 active 帳號」的刻意設計，細節見 `spec/requirements.md`／`spec/design.md` Requirement 140，不得被誤判為需要修復的漏洞**；SRPP 共用計算結果（第十四條）`GET /api/public/srpp/daily-context`（Requirement 163）沿用同一 `email` owner selector（空白 email 回 400 `INVALID_REQUEST`；configured-admin 與 `byEmail` 兩種 lookup 皆 5 秒逾時，逾時一律 503 `OWNER_UNAVAILABLE`），只讀 business 背景 producer 已發布的不可變 package，GET 不觸發計算；規則包 registry 為空時一律回 409 `POLICY_UNSUPPORTED`。雷達 `today` 只回首頁 typed list、`stock` 只回該 request current-read 的 exact `(stockCode, market)` detail，交易紀錄只回已保存 ledger，三者都不得寫 snapshot／Redis／DB、觸發券商或交易。交易日曆與 commodity-prices 是 global no-tenant read；前者只回市場日曆／狀態，後者只由無身份 business client 一次讀既有已持久化 commodity live 聚合並輸出固定 WTI／BRENT／GOLD slots，兩者都不得 refresh、匯出、vendor I/O 或寫入。`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用的例外，經 business 端 30 秒全域 Redis 冷卻節流。Frontend 對十九路 exact／matrix 變體回 404，view 不得援引此例外。**Requirement 167／Task 458 限定一個純顯示例外：`RealizedGainView` 可對已載入且已依年度／市場篩選的明細列做暫時性客戶端排序；排序只改變可見列順序，不改變 BFF 回傳、資料語意或來源資料，也不得因此新增 API/BFF 端點。Requirement 166／Task 457 與 Requirement 168／Task 459 限定已載入交易／已實現損益明細的暫時性客戶端股票篩選，僅作用於目前年度／市場可見範圍，不改變 BFF 回傳或來源資料，也不得新增 API/BFF 端點。** Controller 仍只委派 service，BFF 不直查 DB／外部行情。USD/TWD 的台銀／兆豐／Yahoo 外部抓取、交易時段判定與每 2 秒 Redis producer 只能位於 `external-materials-service`；business/BFF 只做唯讀 cache/DB 與聚合。
 
+**Task 482 對前述 9090 manifest 的修訂（優先於本節較早的數字與「唯一 POST」敘述）：**精確集合為 23 個 method/path pairs（19 GET、4 POST）。新增的受服務憑證保護 pair 是 `POST /api/srpp/daily-report-mail` 與 `GET /api/srpp/daily-report-mail/{idempotencyKey}`；另外兩個 public-but-private-network exact POST 是 `POST /api/public/srpp/event-evidence/capture`、`POST /api/public/srpp/daily-decision/evaluate`。四個 POST 都不得 wildcard，且必須同步 gateway、BFF、frontend deny、Tailscale、OpenAPI 和 contract tests；它們只建立證據／報告建議或固定收件人寄信，絕不觸發券商交易。
+
 **2. 同義欄位、同一 business service API**
 
 不同頁面顯示「同樣意義的值」時，BFF 必須呼叫**同一支 business service API**取得，避免值在不同頁面不一致。
@@ -354,9 +356,9 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - 例：股價收盤值 → 一律從 `stock_price_history` 抓
 - 共用邏輯抽到 `bff/common/`（如 `SnapshotEnricher`），各 BFF controller 注入使用
 
-**3. Docker 外部 API 一律經 Nginx 9090 gateway（十八條唯讀 GET ＋一條寫入 POST）**
+**3. Docker 外部 API 一律經 Nginx 9090 gateway（十九條 GET ＋兩條精確 POST）**
 
-- Host 只綁 `127.0.0.1:9090`，精確放行 `GET /api/quotes`、`/api/quotes/one`、
+- Host 只綁 `127.0.0.1:9090`，精確放行既有十九條 GET、`POST /api/public/crawler-data/rescan`，以及 Task 480 的受服務憑證保護 `POST /api/srpp/daily-report-mail` 與其 `GET /api/srpp/daily-report-mail/{idempotencyKey}`；其餘同 path method 一律 405。既有 GET 詳列如下：`GET /api/quotes`、`/api/quotes/one`、
   `/api/public/market-index`、`/api/assets/latest`、`/api/public/exchange-rate/usd-twd`，
   第六條 `POST /api/public/crawler-data/rescan`（Requirement 71 / Task 329；唯一有外部
   抓取副作用的例外，免登入觸發 NewsPoller 重新搜尋，經 business 端 30 秒全域 Redis 冷卻節流），
@@ -433,7 +435,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（171 個 Requirements；最新編號為 178，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（174 個 Requirements；最新編號為 182，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |

@@ -105,6 +105,11 @@ public class SecurityConfig {
                         // Requirement 71：公開觸發重新搜尋，第六條 Nginx 9090 路由，唯一有寫入副作用的匿名端點；
                         // 30 秒全域冷卻在 business 端（CrawlerExportPathService.publicRescan()），BFF 層不重複防護。
                         .pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()
+                        // Task 480: permit only lets the dedicated bearer-token filter run; it is never anonymous.
+                        .pathMatchers(HttpMethod.POST, "/api/srpp/daily-report-mail").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/srpp/daily-report-mail/*").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/api/public/srpp/event-evidence/capture").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/api/public/srpp/daily-decision/evaluate").permitAll()
                         // 交易雷達「發布到 Blog」（Requirement 102 / Task 366）：比照既有 Google Drive
                         // 同步先例，限主要管理者（isConfiguredAdmin）。business 層另有獨立覆核，此為第一道防線。
                         .pathMatchers("/api/bff/trading-radar/blog-oauth/**")

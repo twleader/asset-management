@@ -53,9 +53,17 @@ spring:
             maxAge: 3600
       # 停用預設的 metrics-based circuit breaker，保持輕量
       default-filters: []
+  codec:
+    max-in-memory-size: ${SRPP_DAILY_REPORT_MAX_BODY:1MB}
 
 business-services:
   url: ${BUSINESS_SERVICES_URL:http://localhost:8081}
+
+srpp:
+  daily-report:
+    service-token: ${SRPP_DAILY_REPORT_SERVICE_TOKEN:}
+    internal-token: ${SRPP_DAILY_REPORT_INTERNAL_TOKEN:}
+    owner-email: ${SRPP_DAILY_REPORT_OWNER_EMAIL:tw.leader@gmail.com}
 
 management:
   endpoints:

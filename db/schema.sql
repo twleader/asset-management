@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：107 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：110 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -2232,6 +2232,72 @@ CREATE TABLE public.srpp_context_package (
 
 
 --
+-- Name: srpp_daily_report_mail; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_daily_report_mail (
+    idempotency_key character varying(200) NOT NULL,
+    request_sha256 character(64) NOT NULL,
+    state character varying(24) NOT NULL,
+    lease_id uuid,
+    lease_expires_at timestamp with time zone,
+    message_id character varying(998),
+    sent_at timestamp with time zone,
+    from_address character varying(320),
+    to_address character varying(320),
+    subject character varying(512),
+    html_sha256 character(64),
+    text_sha256 character(64),
+    created_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_daily_report_mail_state_check CHECK (((state)::text = ANY ((ARRAY['PROCESSING'::character varying, 'SUBMITTING'::character varying, 'SENT'::character varying, 'FAILED'::character varying, 'OUTCOME_UNKNOWN'::character varying])::text[])))
+);
+
+
+--
+-- Name: srpp_decision_run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_decision_run (
+    id uuid NOT NULL,
+    owner_email character varying(320) NOT NULL,
+    trading_date date NOT NULL,
+    slot character varying(5) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    status character varying(16) NOT NULL,
+    input_snapshot_sha256 character(64) NOT NULL,
+    decision_content_sha256 character(64),
+    content_jcs text,
+    created_at timestamp with time zone NOT NULL,
+    finalized_at timestamp with time zone,
+    CONSTRAINT srpp_decision_run_status_check CHECK (((status)::text = ANY ((ARRAY['CAPTURING'::character varying, 'FINAL'::character varying])::text[])))
+);
+
+
+--
+-- Name: srpp_event_evidence; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_event_evidence (
+    id uuid NOT NULL,
+    owner_email character varying(320) NOT NULL,
+    trading_date date NOT NULL,
+    slot character varying(5) NOT NULL,
+    analysis_profile character varying(24) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    status character varying(16) NOT NULL,
+    input_snapshot_sha256 character(64) NOT NULL,
+    content_sha256 character(64),
+    content_jcs text,
+    created_at timestamp with time zone NOT NULL,
+    finalized_at timestamp with time zone,
+    CONSTRAINT srpp_event_evidence_status_check CHECK (((status)::text = ANY ((ARRAY['CAPTURING'::character varying, 'FINAL'::character varying])::text[])))
+);
+
+
+--
 -- Name: srpp_owner_key; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4310,6 +4376,46 @@ ALTER TABLE ONLY public.srpp_context_package
 
 
 --
+-- Name: srpp_daily_report_mail srpp_daily_report_mail_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_daily_report_mail
+    ADD CONSTRAINT srpp_daily_report_mail_pkey PRIMARY KEY (idempotency_key);
+
+
+--
+-- Name: srpp_decision_run srpp_decision_run_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_run
+    ADD CONSTRAINT srpp_decision_run_identity_uq UNIQUE (owner_email, trading_date, slot);
+
+
+--
+-- Name: srpp_decision_run srpp_decision_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_run
+    ADD CONSTRAINT srpp_decision_run_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_event_evidence srpp_event_evidence_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_event_evidence
+    ADD CONSTRAINT srpp_event_evidence_identity_uq UNIQUE (owner_email, trading_date, slot, analysis_profile);
+
+
+--
+-- Name: srpp_event_evidence srpp_event_evidence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_event_evidence
+    ADD CONSTRAINT srpp_event_evidence_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: srpp_owner_key srpp_owner_key_owner_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5454,6 +5560,13 @@ CREATE INDEX idx_trn_state_setting ON public.trading_radar_notification_state US
 --
 
 CREATE INDEX idx_twse_institutional_decision ON public.twse_institutional_daily USING btree (trading_date DESC, observed_at DESC);
+
+
+--
+-- Name: srpp_daily_report_mail_state_sent_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX srpp_daily_report_mail_state_sent_at_idx ON public.srpp_daily_report_mail USING btree (state, sent_at);
 
 
 --

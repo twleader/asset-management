@@ -43,7 +43,11 @@ MANIFEST = {
   ['GET', '/api/public/srpp/calculations'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/market-facts'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504],
-  ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504]
+  ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
+  ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
+  ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
+  ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 502 503],
+  ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[200 201 400 409 415 502 503]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -65,7 +69,11 @@ OPERATION_IDS = {
   ['GET', '/api/public/srpp/calculations'] => 'getSrppCalculations',
   ['GET', '/api/public/srpp/market-facts'] => 'getSrppMarketFacts',
   ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals',
-  ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries'
+  ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries',
+  ['POST', '/api/srpp/daily-report-mail'] => 'sendSrppDailyReportMail',
+  ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => 'getSrppDailyReportMail',
+  ['POST', '/api/public/srpp/event-evidence/capture'] => 'captureSrppEventEvidence',
+  ['POST', '/api/public/srpp/daily-decision/evaluate'] => 'evaluateSrppDailyDecision'
 }.freeze
 
 def assert!(condition, message)
@@ -91,6 +99,20 @@ def nginx_routes
     assert!(guards.length == 1, "#{path}: exact location 必須只有一個 method guard")
     assert!(!routes.key?(path), "#{path}: api-gateway exact location 重複")
     routes[path] = guards.first
+  end
+  # This route has a validated path variable, therefore nginx needs a bounded regex rather than
+  # a literal location. Normalize only this known regex into the OpenAPI template path.
+  regex_index = lines.index { |line| line.match?(%r{location ~ "?\^/api/srpp/daily-report-mail/}) }
+  if regex_index
+    body = []
+    cursor = regex_index + 1
+    while cursor < lines.length && lines[cursor] !~ /^\s{8}\}\s*$/
+      body << lines[cursor]
+      cursor += 1
+    end
+    guards = body.map { |entry| entry[/if \(\$request_method != ([A-Z]+)\)/, 1] }.compact.uniq
+    assert!(guards == ['GET'], 'SRPP mail key route 必須只有 GET method guard')
+    routes['/api/srpp/daily-report-mail/{idempotencyKey}'] = 'GET'
   end
   routes
 end
@@ -183,7 +205,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.19.0', 'Task 475 後 OpenAPI info.version 必須為 1.19.0')
+assert!(document.dig('info', 'version') == '1.20.0', 'Task 482 後 OpenAPI info.version 必須為 1.20.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -224,14 +246,14 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '十九路 operationId 必須與 Requirement 175 manifest 完全一致')
+        '二十三路 operationId 必須與 9090 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與十九路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與二十三路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與十九路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與二十三路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -241,7 +263,7 @@ end
 # unevaluatedProperties 關閉的 allOf base，不能自行 additionalProperties:false，否則 Detailed 會
 # 在 shared 子 schema 就拒絕它的合法 Fubon additions。其餘固定 object 必須關閉
 # additionalProperties，真正的 map 則必須以 typed schema 描述 value。
-dynamic_objects = Set['ProblemDetail', 'SpringBasicError', 'SpringWebFluxBasicError']
+dynamic_objects = Set['ProblemDetail', 'SpringBasicError', 'SpringWebFluxBasicError', 'SrppDailyReportMailRequest']
 outer_closed_composition_bases = Set['LatestQuoteShared']
 document.dig('components', 'schemas').each do |name, schema|
   next unless schema.is_a?(Hash) && schema['type'] == 'object'
@@ -847,8 +869,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 142,
-        "全量 strict audit 預期 142 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 144,
+        "全量 strict audit 預期 144 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -885,6 +907,7 @@ frontend_nginx_app = File.read(FRONTEND_NGINX_APP)
 assert!(frontend_nginx.include?('include /etc/nginx/includes/frontend-app.conf;'),
         'frontend TLS server 必須 include 共用 application route 設定')
 MANIFEST.each_key do |(_method, path)|
+  next if path.include?('{idempotencyKey}')
   assert!(frontend_nginx_app.include?("location = #{path} { return 404; }"),
           "frontend 必須 exact deny 9090 route #{path}")
 end
@@ -899,4 +922,5 @@ end
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
 assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且兩份文件必須 byte-identical')
 
-puts 'PASS: 9090 gateway/OpenAPI 十九路 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
+puts 'PASS: 9090 gateway/OpenAPI 二十三條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'

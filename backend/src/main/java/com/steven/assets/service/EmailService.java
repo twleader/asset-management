@@ -4,6 +4,7 @@ import jakarta.activation.DataHandler;
 import jakarta.annotation.PostConstruct;
 import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
 import jakarta.mail.util.ByteArrayDataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -152,5 +153,34 @@ public class EmailService {
     /** 實際 SMTP 寄件人。public 供 dispatcher 取 ics 的 ORGANIZER —— 兩者必須逐字一致，Google 才會自動接受 REQUEST。 */
     public String resolveFrom() {
         return (configuredFrom != null && !configuredFrom.isBlank()) ? configuredFrom : mailUsername;
+    }
+
+    /**
+     * Task 480 的同步寄送介面。刻意不沿用既有 {@link #send}／{@link #sendHtml} 的 fail-soft
+     * 語意：呼叫端必須能把 SMTP 結果不明確地保存為 OUTCOME_UNKNOWN，絕不可把例外吞掉後重寄。
+     */
+    public String sendAlternativeOrThrow(String from, String recipient, String subject, String plain, String html) {
+        if (!isEnabled()) throw new IllegalStateException("MAIL_DISABLED");
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            message.setFrom(from);
+            message.setRecipients(jakarta.mail.Message.RecipientType.TO, recipient);
+            message.setSubject(subject, StandardCharsets.UTF_8.name());
+            MimeMultipart alternative = new MimeMultipart("alternative");
+            MimeBodyPart text = new MimeBodyPart();
+            text.setText(plain, StandardCharsets.UTF_8.name());
+            alternative.addBodyPart(text); // RFC 2046 preference order: plain before HTML.
+            MimeBodyPart rich = new MimeBodyPart();
+            rich.setContent(html, "text/html; charset=UTF-8");
+            alternative.addBodyPart(rich);
+            message.setContent(alternative);
+            message.saveChanges();
+            mailSender.send(message);
+            String[] ids = message.getHeader("Message-ID");
+            if (ids == null || ids.length != 1 || ids[0].isBlank()) throw new IllegalStateException("SMTP_MESSAGE_ID_MISSING");
+            return ids[0];
+        } catch (Exception e) {
+            throw new IllegalStateException("MAIL_SEND_FAILED", e);
+        }
     }
 }
