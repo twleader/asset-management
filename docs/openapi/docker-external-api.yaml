@@ -1,15 +1,16 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.19.0
+  version: 1.20.0
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十九條精確路徑：
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
     十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
-    ＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
+    ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
+    都只建立不可變收據或固定收件人郵件，絕不下單、刷新行情或呼叫券商。rescan
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    十九條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    二十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
@@ -1560,6 +1561,93 @@ paths:
             text/html: {schema: {$ref: '#/components/schemas/NginxErrorHtml'}}
         '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
       x-codex-route-policy: exact-read-only-get
+  /api/srpp/daily-report-mail:
+    post:
+      tags: [SRPP 日報]
+      operationId: sendSrppDailyReportMail
+      summary: 安全寄送一封已驗證的 SRPP 日報
+      description: 只接受服務 Bearer token；後端重算固定 HTML 與 plain 後比對 SHA-256，並只寄到設定的唯一收件人。請求大小上限為 1 MiB，成功結果可用 idempotencyKey 查詢。
+      security: [{SrppDailyReportBearer: []}]
+      requestBody:
+        required: true
+        description: 包含完整 facts 與 SRPP 端先算好的兩個雜湊的 JSON request；未知欄位可保留但不渲染。
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SrppDailyReportMailRequest'}
+            example: {idempotencyKey: 'Codex-20261007-0905:core', profile: core, expectedHtmlSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expectedTextSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', facts: {trading_date: '2026-10-07', slot: '09:05', consumer: Codex, generated_at: '2026-10-07T09:05:00+08:00', policy_bundle_sha256: 'abc', input_snapshot_sha256: 'def', decision_id: D1, conclusion: 已驗證, payload: {decision_id: D1, summary: [摘要], tables: []}}}
+      responses:
+        '200': {description: SMTP 已接受且已保存冪等快照。, content: {application/json: {schema: {$ref: '#/components/schemas/SrppDailyReportMailResponse'}, example: {status: SENT, messageId: '<example@localhost>', sentAt: '2026-10-07T01:05:00Z', from: 'tw.leader@gmail.com', to: ['shi.chihung@gmail.com'], subject: '[SRPP 每日持股市場交易建議-核心] (Codex) 2026-10-07 09:05', htmlSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', textSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', idempotentReplay: false}}}}
+        '400': {description: facts、key 或 JSON 驗證失敗。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '401': {description: 缺少或不符服務 Bearer token。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '409': {description: hash 不符、鍵衝突、處理中或 SMTP 結果不明。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '413': {description: 本文超過 1 MiB gateway 上限。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '502': {description: SMTP 或上游失敗。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '503': {description: SMTP 身分或固定收件人設定不完整。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+      x-codex-route-policy: service-token-post
+  /api/public/srpp/event-evidence/capture:
+    post:
+      tags: [SRPP 事件證據]
+      operationId: captureSrppEventEvidence
+      summary: 建立不可變的 SRPP 事件證據收據
+      description: 僅讀已保存的來源；不觸發 crawler、外部 HTTP、快取刷新、券商 SDK 或交易。body 僅允許 ownerEmail、tradingDate、slot、analysisProfile、policyBundleSha256、swaggerSha256。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [ownerEmail, tradingDate, slot, analysisProfile, policyBundleSha256, swaggerSha256]}
+            example: {ownerEmail: tw.leader@gmail.com, tradingDate: '2026-10-07', slot: '09:05', analysisProfile: TW_DAILY, policyBundleSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', swaggerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'}
+      responses:
+        '200': {description: 同一 identity 的不可變 FINAL replay。, content: {application/json: {schema: {type: object}, example: {status: FINAL, tradeAuthorization: false, placesOrders: false}}}}
+        '201': {description: 首次完成 immutable capture。, content: {application/json: {schema: {type: object}, example: {status: FINAL, tradeAuthorization: false, placesOrders: false}}}}
+        '400': {description: 請求欄位、日期、slot、profile 或 hash 不合法。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '409': {description: metadata 與既有收據不符或非交易日。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '415': {description: 僅接受 application/json。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '502': {description: 已保存的上游資料違反來源契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '503': {description: canonical context 尚未就緒。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+      x-codex-route-policy: exact-report-only-post
+  /api/public/srpp/daily-decision/evaluate:
+    post:
+      tags: [SRPP 決策收據]
+      operationId: evaluateSrppDailyDecision
+      summary: 建立 report-only 的不可變日報決策收據
+      description: 永遠回傳 tradeAuthorization=false 與 placesOrders=false。事件證據缺失或不可用是中性 SOURCE_UNAVAILABLE fallback，不是 L0 阻擋，也不讀 crawler 或 LLM 原文。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [ownerEmail, tradingDate, slot, policyBundleSha256, swaggerSha256]}
+            example: {ownerEmail: tw.leader@gmail.com, tradingDate: '2026-10-07', slot: '09:05', policyBundleSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', swaggerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'}
+      responses:
+        '200': {description: 同一 identity 的不可變 FINAL replay。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
+        '201': {description: 首次完成 immutable report receipt。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
+        '400': {description: 請求欄位、日期、slot 或 hash 不合法。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '409': {description: metadata、policy、Swagger 或交易日不符。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '415': {description: 僅接受 application/json。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '502': {description: 已保存來源資料違反契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '503': {description: L0 context 或 owner 尚未可用。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+      x-codex-route-policy: exact-report-only-post
+  /api/srpp/daily-report-mail/{idempotencyKey}:
+    get:
+      tags: [SRPP 日報]
+      operationId: getSrppDailyReportMail
+      summary: 查詢 SRPP 日報寄送的最終快照
+      description: 只接受相同服務 Bearer token。SENT 回保存的 SMTP 結果；處理中或 SMTP 結果不明以 409 回覆，絕不重寄。
+      security: [{SrppDailyReportBearer: []}]
+      parameters:
+        - name: idempotencyKey
+          in: path
+          required: true
+          description: 單一 URI segment，ASCII 英數開頭，後續最多 199 個英數、點、底線、冒號或連字號。
+          schema: {type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$', description: 冪等識別字串。}
+          example: Codex-20261007-0905:core
+      responses:
+        '200': {description: 已寄送的不可變 SMTP 快照。, content: {application/json: {schema: {$ref: '#/components/schemas/SrppDailyReportMailResponse'}, example: {status: SENT, messageId: '<example@localhost>', sentAt: '2026-10-07T01:05:00Z', from: 'tw.leader@gmail.com', to: ['shi.chihung@gmail.com'], subject: '[SRPP 每日持股市場交易建議-核心] (Codex) 2026-10-07 09:05', htmlSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', textSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', idempotentReplay: true}}}}
+        '400': {description: idempotencyKey 不符合 URI-safe contract。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '401': {description: 缺少或不符服務 Bearer token。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '404': {description: 找不到此 key 的持久化寄送紀錄。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '409': {description: 正在處理或既有 SMTP 結果不明，呼叫端不得自動重寄。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '502': {description: BFF 無法驗證 business 回應。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+      x-codex-route-policy: service-token-get
   /api/public/srpp/technical-series:
     get:
       tags: [SRPP 技術事實]
@@ -1632,7 +1720,39 @@ paths:
         '504': {$ref: '#/components/responses/NginxGatewayTimeout'}
       x-codex-route-policy: exact-read-only-get
 components:
+  securitySchemes:
+    SrppDailyReportBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque service token
+      description: 僅供 SRPP 排程使用的固定服務憑證，不代表瀏覽器登入或任何使用者帳號。
   schemas:
+    SrppDailyReportMailRequest:
+      type: object
+      required: [idempotencyKey, profile, expectedHtmlSha256, expectedTextSha256, facts]
+      additionalProperties: true
+      description: SRPP 日報來源資料；business 嚴格拒絕任何深度的重複 JSON member，並以 RFC 8785 JCS 計算冪等摘要。
+      properties:
+        idempotencyKey: {type: string, description: 呼叫端提供且可安全作 URL path segment 的冪等鍵。}
+        profile: {type: string, enum: [core, appendix], description: 報告種類；core 是核心、appendix 是附錄。}
+        expectedHtmlSha256: {type: string, pattern: '^[a-f0-9]{64}$', description: SRPP 已驗證 HTML 的小寫 SHA-256。}
+        expectedTextSha256: {type: string, pattern: '^[a-f0-9]{64}$', description: SRPP 已驗證 plain text 的小寫 SHA-256。}
+        facts: {type: object, additionalProperties: true, description: 完整 facts 物件；固定必填欄位與 table 結構由服務端逐項驗證。}
+    SrppDailyReportMailResponse:
+      type: object
+      required: [status, messageId, sentAt, from, to, subject, htmlSha256, textSha256, idempotentReplay]
+      additionalProperties: false
+      description: 已成功保存的 SMTP 結果快照；同一有效 request replay 時只回此資料、不重寄。
+      properties:
+        status: {type: string, enum: [SENT], description: 最終狀態，SENT 表示 SMTP 呼叫成功並持久化。}
+        messageId: {type: string, description: SMTP Message-ID，供郵件稽核與追查。}
+        sentAt: {type: string, format: date-time, description: 成功送交 SMTP 的 UTC 時間。}
+        from: {type: string, format: email, description: 已和 owner 及 MAIL_USERNAME 比對一致的寄件人。}
+        to: {type: array, description: 唯一設定白名單收件人的單元素陣列。, items: {type: string, format: email, description: 固定收件人的 email 位址。}}
+        subject: {type: string, description: 固定格式產生的郵件主旨。}
+        htmlSha256: {type: string, description: 實際寄出 HTML UTF-8 內容的 SHA-256。}
+        textSha256: {type: string, description: 實際寄出 plain UTF-8 內容的 SHA-256。}
+        idempotentReplay: {type: boolean, description: true 表示本次只回既有成功快照，false 表示本次確實完成 SMTP 寄送。}
     SrppTechnicalSeriesResponse:
       type: object
       description: 一檔已完成日技術摘要與至多 250 筆升冪逐日價量；無個人資產或交易指令。

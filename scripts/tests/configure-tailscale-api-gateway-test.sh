@@ -26,7 +26,7 @@ routes = [
     "/api/public/srpp/daily-context",
 ]
 if include_new:
-    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series"]
+    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series", "/api/public/srpp/event-evidence/capture", "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail"]
 handlers = {route: {"Proxy": "http://127.0.0.1:9090" + route} for route in routes}
 if include_foreign:
     handlers["/admin"] = {"Proxy": "http://127.0.0.1:9090/admin"}
@@ -52,7 +52,19 @@ elif [[ "$*" == 'status --json' ]]; then
   printf '%s\n' '{"BackendState":"Running","Self":{"Online":true,"DNSName":"mock-device.example.ts.net."}}'
 elif [[ "$*" == 'serve status --json' ]]; then
   if [[ -f "$MOCK_TAILSCALE_STATE" ]]; then
-    printf '%s\n' '{"TCP":{"9090":{"HTTPS":true}},"Web":{"mock-device.example.ts.net:9090":{"Handlers":{"/api/quotes":{"Proxy":"http://127.0.0.1:9090/api/quotes"},"/api/quotes/one":{"Proxy":"http://127.0.0.1:9090/api/quotes/one"},"/api/public/market-index":{"Proxy":"http://127.0.0.1:9090/api/public/market-index"},"/api/assets/latest":{"Proxy":"http://127.0.0.1:9090/api/assets/latest"},"/api/public/exchange-rate/usd-twd":{"Proxy":"http://127.0.0.1:9090/api/public/exchange-rate/usd-twd"},"/api/public/crawler-data/rescan":{"Proxy":"http://127.0.0.1:9090/api/public/crawler-data/rescan"},"/api/public/market-analysis/today":{"Proxy":"http://127.0.0.1:9090/api/public/market-analysis/today"},"/api/public/portfolio-advice/latest":{"Proxy":"http://127.0.0.1:9090/api/public/portfolio-advice/latest"},"/api/public/trading-radar/today":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/today"},"/api/public/trading-radar/stock":{"Proxy":"http://127.0.0.1:9090/api/public/trading-radar/stock"},"/api/public/transactions":{"Proxy":"http://127.0.0.1:9090/api/public/transactions"},"/api/public/trading-calendar":{"Proxy":"http://127.0.0.1:9090/api/public/trading-calendar"},"/api/public/commodity-prices":{"Proxy":"http://127.0.0.1:9090/api/public/commodity-prices"},"/api/public/srpp/daily-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/daily-context"},"/api/public/srpp/calculation-context":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/calculation-context"},"/api/public/srpp/calculations":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/calculations"},"/api/public/srpp/market-facts":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/market-facts"},"/api/public/srpp/completed-technicals":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/completed-technicals"},"/api/public/srpp/technical-series":{"Proxy":"http://127.0.0.1:9090/api/public/srpp/technical-series"}}}}}'
+    python3 - "$MOCK_TAILSCALE_LOG" <<'PY'
+import json, sys
+
+handlers = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+    parts = line.split()
+    for index, part in enumerate(parts):
+        if part.startswith("--set-path=") and index + 1 < len(parts):
+            path = part.split("=", 1)[1]
+            handlers[path] = {"Proxy": parts[index + 1]}
+print(json.dumps({"TCP": {"9090": {"HTTPS": True}},
+                  "Web": {"mock-device.example.ts.net:9090": {"Handlers": handlers}}}))
+PY
   elif [[ -n "${MOCK_TAILSCALE_INITIAL:-}" && -f "$MOCK_TAILSCALE_INITIAL" ]]; then
     cat "$MOCK_TAILSCALE_INITIAL"
   else
@@ -282,13 +294,16 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 19 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 22 ]]
   grep -Fq -- '--set-path=/api/public/srpp/daily-context http://127.0.0.1:9090/api/public/srpp/daily-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculation-context http://127.0.0.1:9090/api/public/srpp/calculation-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculations http://127.0.0.1:9090/api/public/srpp/calculations' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/market-facts http://127.0.0.1:9090/api/public/srpp/market-facts' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/completed-technicals http://127.0.0.1:9090/api/public/srpp/completed-technicals' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/technical-series http://127.0.0.1:9090/api/public/srpp/technical-series' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/event-evidence/capture http://127.0.0.1:9090/api/public/srpp/event-evidence/capture' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/daily-decision/evaluate http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/srpp/daily-report-mail http://127.0.0.1:9090/api/srpp/daily-report-mail' "$case_dir/tailscale.log"
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -306,7 +321,7 @@ run_existing_subset_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 19 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 22 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -344,4 +359,4 @@ run_success
 run_existing_subset_success
 run_foreign_handler_rejected
 
-printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 十九路與 preflight regression'
+printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十路與 preflight regression'

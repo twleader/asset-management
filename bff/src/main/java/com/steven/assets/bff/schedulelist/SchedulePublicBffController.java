@@ -66,7 +66,7 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（71 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
+    /** 全系統排程清單（72 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             // ===== business-services（30）=====
             new ScheduledJobDto(BUSINESS, "資產快照", "最新快照釘定當日",
@@ -162,6 +162,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "SRPP 共用計算結果", "SRPP package 保留期清理",
                     "刪除交易日早於保留天數（預設 7 天）的 SRPP package 與其凍結來源；不刪規則包 registry 與 owner key",
                     "每日 03:25", "0 25 3 * * *", TPE),
+            new ScheduledJobDto(BUSINESS, "SRPP 日報", "SRPP 日報寄送收據保留期清理",
+                    "只刪除已 SENT 且超過保留期的 SMTP 寄送收據；不寄信、不重送、不碰任何券商或交易資料",
+                    "每日 03:17", "0 17 3 * * *", TPE),
 
             // ===== external-materials-service（40）=====
             new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股即時推播訂閱更新",

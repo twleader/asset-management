@@ -1,6 +1,8 @@
 spring:
   application:
     name: asset-management
+  codec:
+    max-in-memory-size: ${SRPP_DAILY_REPORT_MAX_BODY:1MB}
 
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:assets}
@@ -125,6 +127,11 @@ srpp:
   producer-cron: ${SRPP_PRODUCER_CRON:0 */5 * * * *}
   retention-cron: ${SRPP_RETENTION_CRON:0 25 3 * * *}
   retention-days: ${SRPP_RETENTION_DAYS:7}
+  daily-report:
+    owner-email: ${SRPP_DAILY_REPORT_OWNER_EMAIL:tw.leader@gmail.com}
+    recipients: ${SRPP_DAILY_REPORT_RECIPIENTS:shi.chihung@gmail.com}
+    internal-token: ${SRPP_DAILY_REPORT_INTERNAL_TOKEN:}
+    retention-cron: ${SRPP_DAILY_REPORT_RETENTION_CRON:0 17 3 * * *}
 
 server:
   port: ${SERVER_PORT:8080}

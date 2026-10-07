@@ -1,0 +1,9 @@
+package com.steven.assets.bff.srppmail;
+
+import java.nio.charset.StandardCharsets; import java.security.MessageDigest; import org.springframework.beans.factory.annotation.Value; import org.springframework.core.Ordered; import org.springframework.core.annotation.Order; import org.springframework.http.*; import org.springframework.stereotype.Component; import org.springframework.web.server.*; import reactor.core.publisher.Mono;
+/** Service token is checked before controller; this route intentionally has no browser session identity. */
+@Component @Order(Ordered.HIGHEST_PRECEDENCE+20) public class SrppDailyReportServiceTokenWebFilter implements WebFilter {
+    public static final String BASE="/api/srpp/daily-report-mail"; @Value("${srpp.daily-report.service-token:}") private String token;
+    @Override public Mono<Void> filter(ServerWebExchange x, WebFilterChain chain){String path=x.getRequest().getPath().value();if(!path.equals(BASE)&&!path.matches(BASE+"/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}"))return chain.filter(x);String auth=x.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);if(token==null||token.isBlank()||auth==null||!auth.startsWith("Bearer ")||!same(token,auth.substring(7))) {x.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);x.getResponse().getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);return x.getResponse().writeWith(Mono.just(x.getResponse().bufferFactory().wrap("{\"code\":\"TOKEN_REQUIRED\"}".getBytes(StandardCharsets.UTF_8))));}return chain.filter(x);}
+    private static boolean same(String a,String b){try{return MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(a.getBytes(StandardCharsets.UTF_8)),MessageDigest.getInstance("SHA-256").digest(b.getBytes(StandardCharsets.UTF_8)));}catch(Exception e){return false;}}
+}

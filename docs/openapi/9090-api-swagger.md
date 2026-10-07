@@ -7,18 +7,19 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.19.0` |
-| 對外路徑 | 19 條：18 個 `GET`、1 個 `POST` |
+| 契約版本 | `1.20.0` |
+| 對外路徑 | 23 條：19 個 `GET`、4 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
-本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的十九條精確路徑：
+本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
 十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
-＋ 一條寫入 POST（`/api/public/crawler-data/rescan`，唯一有外部抓取副作用者，
+＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
+都只建立不可變收據或固定收件人郵件，絕不下單、刷新行情或呼叫券商。rescan
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-十九條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+二十三條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
 Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
@@ -67,7 +68,11 @@ OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降
 | 16 | `GET` | `/api/public/srpp/calculations` | `getSrppCalculations` | 以固定 context 執行指定計算 | 200 application/json: SrppCalculationsResponse |
 | 17 | `GET` | `/api/public/srpp/market-facts` | `getSrppMarketFacts` | 批次讀取 context 持股市場事實 | 200 application/json: SrppMarketFactsResponse |
 | 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
-| 19 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
+| 19 | `POST` | `/api/srpp/daily-report-mail` | `sendSrppDailyReportMail` | 安全寄送一封已驗證的 SRPP 日報 | 200 application/json: SrppDailyReportMailResponse |
+| 20 | `POST` | `/api/public/srpp/event-evidence/capture` | `captureSrppEventEvidence` | 建立不可變的 SRPP 事件證據收據 | 200 application/json: object<br>201 application/json: object |
+| 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 建立 report-only 的不可變日報決策收據 | 200 application/json: object<br>201 application/json: object |
+| 22 | `GET` | `/api/srpp/daily-report-mail/{idempotencyKey}` | `getSrppDailyReportMail` | 查詢 SRPP 日報寄送的最終快照 | 200 application/json: SrppDailyReportMailResponse |
+| 23 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
 
 ## 路由詳情
 
@@ -549,7 +554,76 @@ BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical D
 | `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游服務失敗或回應身分不符合請求；gateway upstream failure 可能為 HTML。 |
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
-### 19. `GET /api/public/srpp/technical-series`
+### 19. `POST /api/srpp/daily-report-mail`
+
+只接受服務 Bearer token；後端重算固定 HTML 與 plain 後比對 SHA-256，並只寄到設定的唯一收件人。請求大小上限為 1 MiB，成功結果可用 idempotencyKey 查詢。
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppDailyReportMailResponse | SMTP 已接受且已保存冪等快照。 |
+| `400` | application/problem+json: ProblemDetail | facts、key 或 JSON 驗證失敗。 |
+| `401` | application/problem+json: ProblemDetail | 缺少或不符服務 Bearer token。 |
+| `409` | application/problem+json: ProblemDetail | hash 不符、鍵衝突、處理中或 SMTP 結果不明。 |
+| `413` | application/problem+json: ProblemDetail | 本文超過 1 MiB gateway 上限。 |
+| `502` | application/problem+json: ProblemDetail | SMTP 或上游失敗。 |
+| `503` | application/problem+json: ProblemDetail | SMTP 身分或固定收件人設定不完整。 |
+
+### 20. `POST /api/public/srpp/event-evidence/capture`
+
+僅讀已保存的來源；不觸發 crawler、外部 HTTP、快取刷新、券商 SDK 或交易。body 僅允許 ownerEmail、tradingDate、slot、analysisProfile、policyBundleSha256、swaggerSha256。
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: object | 同一 identity 的不可變 FINAL replay。 |
+| `201` | application/json: object | 首次完成 immutable capture。 |
+| `400` | application/problem+json: ProblemDetail | 請求欄位、日期、slot、profile 或 hash 不合法。 |
+| `409` | application/problem+json: ProblemDetail | metadata 與既有收據不符或非交易日。 |
+| `415` | application/problem+json: ProblemDetail | 僅接受 application/json。 |
+| `502` | application/problem+json: ProblemDetail | 已保存的上游資料違反來源契約。 |
+| `503` | application/problem+json: ProblemDetail | canonical context 尚未就緒。 |
+
+### 21. `POST /api/public/srpp/daily-decision/evaluate`
+
+永遠回傳 tradeAuthorization=false 與 placesOrders=false。事件證據缺失或不可用是中性 SOURCE_UNAVAILABLE fallback，不是 L0 阻擋，也不讀 crawler 或 LLM 原文。
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: object | 同一 identity 的不可變 FINAL replay。 |
+| `201` | application/json: object | 首次完成 immutable report receipt。 |
+| `400` | application/problem+json: ProblemDetail | 請求欄位、日期、slot 或 hash 不合法。 |
+| `409` | application/problem+json: ProblemDetail | metadata、policy、Swagger 或交易日不符。 |
+| `415` | application/problem+json: ProblemDetail | 僅接受 application/json。 |
+| `502` | application/problem+json: ProblemDetail | 已保存來源資料違反契約。 |
+| `503` | application/problem+json: ProblemDetail | L0 context 或 owner 尚未可用。 |
+
+### 22. `GET /api/srpp/daily-report-mail/{idempotencyKey}`
+
+只接受相同服務 Bearer token。SENT 回保存的 SMTP 結果；處理中或 SMTP 結果不明以 409 回覆，絕不重寄。
+
+#### Query 參數
+
+| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- |
+| `idempotencyKey` | 是 | `string` | pattern: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`<br>example: `Codex-20261007-0905:core` | 單一 URI segment，ASCII 英數開頭，後續最多 199 個英數、點、底線、冒號或連字號。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppDailyReportMailResponse | 已寄送的不可變 SMTP 快照。 |
+| `400` | application/problem+json: ProblemDetail | idempotencyKey 不符合 URI-safe contract。 |
+| `401` | application/problem+json: ProblemDetail | 缺少或不符服務 Bearer token。 |
+| `404` | application/problem+json: ProblemDetail | 找不到此 key 的持久化寄送紀錄。 |
+| `409` | application/problem+json: ProblemDetail | 正在處理或既有 SMTP 結果不明，呼叫端不得自動重寄。 |
+| `502` | application/problem+json: ProblemDetail | BFF 無法驗證 business 回應。 |
+
+### 23. `GET /api/public/srpp/technical-series`
 
 只讀已保存完成日 OHLCV 與 active 權息事件，兩年有界資料一次還原後計算，
 輸出最後 21–250 筆中的實際可用日 K。每列 volume 是計算 OBV 使用的調整後量；
@@ -578,6 +652,34 @@ asOf 必須早於市場本地今日且該日 bar 精確存在才會有序列。
 | `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
 
 ## Schema 欄位
+
+### `SrppDailyReportMailRequest`
+
+SRPP 日報來源資料；business 嚴格拒絕任何深度的重複 JSON member，並以 RFC 8785 JCS 計算冪等摘要。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `idempotencyKey` | 是 | `string` | 否 |  | 呼叫端提供且可安全作 URL path segment 的冪等鍵。 |
+| `profile` | 是 | `string` | 否 | enum: `core`, `appendix` | 報告種類；core 是核心、appendix 是附錄。 |
+| `expectedHtmlSha256` | 是 | `string` | 否 | pattern: ^[a-f0-9]{64}$ | SRPP 已驗證 HTML 的小寫 SHA-256。 |
+| `expectedTextSha256` | 是 | `string` | 否 | pattern: ^[a-f0-9]{64}$ | SRPP 已驗證 plain text 的小寫 SHA-256。 |
+| `facts` | 是 | `object` | 否 |  | 完整 facts 物件；固定必填欄位與 table 結構由服務端逐項驗證。 |
+
+### `SrppDailyReportMailResponse`
+
+已成功保存的 SMTP 結果快照；同一有效 request replay 時只回此資料、不重寄。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `SENT` | 最終狀態，SENT 表示 SMTP 呼叫成功並持久化。 |
+| `messageId` | 是 | `string` | 否 |  | SMTP Message-ID，供郵件稽核與追查。 |
+| `sentAt` | 是 | `string (date-time)` | 否 |  | 成功送交 SMTP 的 UTC 時間。 |
+| `from` | 是 | `string (email)` | 否 |  | 已和 owner 及 MAIL_USERNAME 比對一致的寄件人。 |
+| `to` | 是 | `array of string (email)` | 否 | items: string (email)<br>items 說明: 固定收件人的 email 位址。 | 唯一設定白名單收件人的單元素陣列。 |
+| `subject` | 是 | `string` | 否 |  | 固定格式產生的郵件主旨。 |
+| `htmlSha256` | 是 | `string` | 否 |  | 實際寄出 HTML UTF-8 內容的 SHA-256。 |
+| `textSha256` | 是 | `string` | 否 |  | 實際寄出 plain UTF-8 內容的 SHA-256。 |
+| `idempotentReplay` | 是 | `boolean` | 否 |  | true 表示本次只回既有成功快照，false 表示本次確實完成 SMTP 寄送。 |
 
 ### `SrppTechnicalSeriesResponse`
 
