@@ -46,7 +46,7 @@ MANIFEST = {
   ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
   ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
-  ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 500 502 503],
+  ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 422 500 502 503],
   ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[200 201 400 409 415 500 502 503]
 }.transform_values(&:to_set).freeze
 
@@ -205,7 +205,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.21.0', 'Task 484 後 OpenAPI info.version 必須為 1.21.0')
+assert!(document.dig('info', 'version') == '1.22.0', 'Task 481 後 OpenAPI info.version 必須為 1.22.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -555,12 +555,66 @@ assert!(srpp_problem.fetch('required') == %w[type title status detail instance c
   capture_operation.fetch('responses').each do |status, response|
     next if status.start_with?('2')
 
+    # Task 481：事件證據的 422 EVIDENCE_REJECTED 另帶 errors[]／truncated，使用專用 schema；其餘維持七欄 problem。
+    expected = path.end_with?('/capture') && status == '422' ? 'SrppEvidenceRejectedProblem' : 'SrppCaptureProblem'
     assert!(response.fetch('content').keys == ['application/problem+json'] &&
             response.dig('content', 'application/problem+json', 'schema') ==
-              {'$ref' => '#/components/schemas/SrppCaptureProblem'},
-            "POST #{path} #{status} 必須是 SrppCaptureProblem")
+              {'$ref' => "#/components/schemas/#{expected}"},
+            "POST #{path} #{status} 必須是 #{expected}")
   end
 end
+# Task 481：capture 的 request／response 必須是完整、封閉的 schema（不得退回 {type: object}）。
+capture = openapi_routes.fetch(['POST', '/api/public/srpp/event-evidence/capture'])
+assert!(capture.dig('requestBody', 'content', 'application/json', 'schema') ==
+          {'$ref' => '#/components/schemas/SrppEventEvidenceCaptureRequest'},
+        'capture requestBody 必須引用 SrppEventEvidenceCaptureRequest')
+%w[200 201].each do |status|
+  assert!(capture.dig('responses', status, 'content', 'application/json', 'schema') ==
+            {'$ref' => '#/components/schemas/SrppEventEvidenceBundleResponse'},
+          "capture #{status} 必須引用 SrppEventEvidenceBundleResponse")
+end
+assert!(capture.dig('responses', '200', 'content', 'application/json', 'example', 'idempotentReplay') == true &&
+        capture.dig('responses', '201', 'content', 'application/json', 'example', 'created') == true,
+        'capture 200／201 example 必須分別是 replay 與首次建立')
+capture_request = schemas.fetch('SrppEventEvidenceCaptureRequest')
+assert!(capture_request.fetch('required') ==
+          %w[tradingDate slot consumer decisionId policyBundleSha256 swaggerSha256 categories] &&
+        capture_request.fetch('properties').keys ==
+          %w[ownerEmail tradingDate slot analysisProfile consumer decisionId policyBundleSha256 swaggerSha256 categories officialEvents] &&
+        capture_request.fetch('additionalProperties') == false,
+        'SrppEventEvidenceCaptureRequest 欄位集合或必填漂移')
+assert!(capture_request.dig('properties', 'slot', 'enum') == ['09:05', '11:40'] &&
+        capture_request.dig('properties', 'consumer', 'enum') == %w[Claude Codex] &&
+        capture_request.dig('properties', 'categories', 'maxItems') == 12 &&
+        capture_request.dig('properties', 'officialEvents', 'maxItems') == 100,
+        'SrppEventEvidenceCaptureRequest 列舉或數量上限漂移')
+assert!(schemas.dig('SrppEventEvidenceSource', 'oneOf').map { |variant| variant.fetch('$ref') } == %w[
+  #/components/schemas/SrppEventEvidenceNewsHeadlineSource
+  #/components/schemas/SrppEventEvidenceApiResponseSource
+  #/components/schemas/SrppEventEvidenceOfficialPageSource
+], 'sources 必須是三種 kind 的 oneOf')
+bundle_response = schemas.fetch('SrppEventEvidenceBundleResponse')
+bundle_keys = %w[schemaVersion eventBundleId status created idempotentReplay identity rubricSha256 riskAssessment
+                 officialEvents tradeAuthorization placesOrders eventBundleContentSha256]
+assert!(bundle_response.fetch('required') == bundle_keys && bundle_response.fetch('properties').keys == bundle_keys &&
+        bundle_response.dig('properties', 'tradeAuthorization', 'const') == false &&
+        bundle_response.dig('properties', 'placesOrders', 'const') == false &&
+        bundle_response.dig('properties', 'status', 'const') == 'FINAL',
+        'SrppEventEvidenceBundleResponse 欄位或安全常數漂移')
+assert!(bundle_response.dig('properties', 'rubricSha256', 'description')
+          .include?('3a780e748aa3dc8cc94053178c378069fc54b3c10a6d1a09bd32c9bc0628f378'),
+        'rubricSha256 必須揭露 SRPP_RISK_RUBRIC_V1 黃金值')
+rejected = schemas.fetch('SrppEvidenceRejectedProblem')
+assert!(rejected.fetch('properties').keys == %w[type title status detail instance code retryable errors truncated] &&
+        rejected.fetch('required') == %w[type title status detail instance code retryable errors] &&
+        rejected.dig('properties', 'code', 'const') == 'EVIDENCE_REJECTED' &&
+        rejected.dig('properties', 'status', 'const') == 422 &&
+        rejected.dig('properties', 'errors', 'maxItems') == 200,
+        'SrppEvidenceRejectedProblem 必須是七欄＋errors[]（最多 200）＋選填 truncated')
+assert!(schemas.dig('SrppEvidenceRejectedError', 'properties', 'code', 'enum') ==
+          %w[UNKNOWN_CATEGORY MISSING_CATEGORY DUPLICATE_CATEGORY SCORE_OUT_OF_RANGE CITATION_NOT_FOUND SNAPSHOT_STALE
+             SOURCE_NOT_ALLOWED SOURCE_PERIOD_INVALID SCORE_WITHOUT_EVIDENCE OFFICIAL_EVENT_INVALID],
+        'SrppEvidenceRejectedError.code 列舉漂移')
 capture_problem = schemas.fetch('SrppCaptureProblem')
 assert!(capture_problem.fetch('required') == %w[type title status detail instance code retryable] &&
         capture_problem.fetch('properties').keys == %w[type title status detail instance code retryable errors] &&
@@ -888,8 +942,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 145,
-        "全量 strict audit 預期 145 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 160,
+        "全量 strict audit 預期 160 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end

@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.21.0` |
+| 契約版本 | `1.22.0` |
 | 對外路徑 | 23 條：19 個 `GET`、4 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -69,7 +69,7 @@ OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降
 | 17 | `GET` | `/api/public/srpp/market-facts` | `getSrppMarketFacts` | 批次讀取 context 持股市場事實 | 200 application/json: SrppMarketFactsResponse |
 | 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
 | 19 | `POST` | `/api/srpp/daily-report-mail` | `sendSrppDailyReportMail` | 安全寄送一封已驗證的 SRPP 日報 | 200 application/json: SrppDailyReportMailResponse |
-| 20 | `POST` | `/api/public/srpp/event-evidence/capture` | `captureSrppEventEvidence` | 建立不可變的 SRPP 事件證據收據 | 200 application/json: object<br>201 application/json: object |
+| 20 | `POST` | `/api/public/srpp/event-evidence/capture` | `captureSrppEventEvidence` | 驗證排程 LLM 的六項風險判讀引用並建立不可變事件證據收據 | 200 application/json: SrppEventEvidenceBundleResponse<br>201 application/json: SrppEventEvidenceBundleResponse |
 | 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 建立 report-only 的不可變日報決策收據 | 200 application/json: object<br>201 application/json: object |
 | 22 | `GET` | `/api/srpp/daily-report-mail/{idempotencyKey}` | `getSrppDailyReportMail` | 查詢 SRPP 日報寄送的最終快照 | 200 application/json: SrppDailyReportMailResponse |
 | 23 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
@@ -572,20 +572,48 @@ BFF 對 business 2xx 回應逐欄 strict 驗證（未知欄位、非 canonical D
 
 ### 20. `POST /api/public/srpp/event-evidence/capture`
 
-僅讀已保存的來源；不觸發 crawler、外部 HTTP、快取刷新、券商 SDK 或交易。body 僅允許 ownerEmail、tradingDate、slot、analysisProfile、policyBundleSha256、swaggerSha256。
+Requirement 181／Task 481（變體 A）：判讀者是 SRPP 排程的 LLM（Claude 或 Codex 兩軌各自獨立），request 帶六項國際政經
+風險的判讀分數與引用；伺服器**不**呼叫任何 LLM、不抓取外部網站、不觸發 crawler、不刷新快取、不呼叫券商，只做確定性的事：
+驗證引用、依 `SrppRiskRubricV1` 機械計分、保存不可變收據並回傳。結果永遠 `tradeAuthorization:false`、`placesOrders:false`。
+
+BFF 處理順序固定：415（Content-Type）→ 400（空 body、無法嚴格解析、重複 member、不是 object、`ownerEmail` 存在但不是合法
+email 字串；這些在 owner 解析前確定且零 outbound）→ 依 `ownerEmail` 解析 owner（缺省 configured-admin；有值時該帳號須
+ACTIVE；5 秒逾時；失敗一律 503 `OWNER_UNAVAILABLE` 且不揭露帳號是否存在）→ 帶 owner 身分轉送原始 bytes 給 business（10 秒
+逾時）→ 驗證 business 回應（不符或逾時 502 `UPSTREAM_INVALID`）。
+
+business 驗證順序（第一個失敗即回應，任何失敗都不寫入、不佔用識別）：request 結構與型別 400 → owner 503 → `tradingDate`
+必須是伺服器 Asia/Taipei 今天（否則 400）且台股日曆為交易日（未知 503 `CALENDAR_UNAVAILABLE`、休市 409 `NON_TRADING_DAY`）
+→ 規則包已登錄（409 `POLICY_UNSUPPORTED`）→ 已發布 Swagger 身分（不可得 503 `CONTEXT_NOT_READY`、不同 409
+`SWAGGER_MISMATCH`）→ 以識別查詢既有 bundle（policy／swagger 不同 409 `BUNDLE_METADATA_MISMATCH`、正規化 request 雜湊不同
+409 `BUNDLE_CONTENT_CONFLICT`、相同則 200 回傳既有內容且**不重新查來源列**）→ 證據驗證（收集全部錯誤後一次 422
+`EVIDENCE_REJECTED`）→ 計分並保存（201）。
+
+識別＝owner＋`tradingDate`＋`slot`＋`analysisProfile`＋`consumer`＋`decisionId`；不同 consumer 或不同 decisionId（重跑）是
+各自獨立的 bundle，本 API 不強制一個時段只有一筆。正規化 request＝去除 `ownerEmail`、`analysisProfile` 缺省補 `TW_DAILY`、
+每類 `conflicting` 缺省補 false、`officialEvents` 缺省補 `[]`，所以缺省與明寫預設值的重送視為同一內容。並行送同一識別時
+以資料庫唯一鍵序列化，輸家在全新 transaction 重讀並回 200／409，不需要 202。
+
+引用驗證：`NEWS_HEADLINE` 以 `sha256(source|url|category)` 查 `news_headline.dedupe_key`，`fetched_at` 須不早於交易日往前
+3 個日曆日 00:00（Asia/Taipei）；一般 category 另比對正規化 title（NFKC、臺→台、空白折疊、trim）與截斷到秒的 publishedAt，
+固定 URL 且每輪就地覆寫的 category（預設 fx、us-market、kr-market、kr-intraday，可設定）只驗存在與新鮮度；通過者
+provenance `DB_VERIFIED`，只代表該列存在且在新鮮度視窗內，不代表與風險類別相關。`API_RESPONSE` 與 `OFFICIAL_PAGE` 只檢查
+允許清單與期間，伺服器不重抓外部網站，provenance 為 `ATTESTED`（呼叫端聲明，不是伺服器已驗證）。允許清單預設值只是初始值，
+上線前須由 Steven 確認。bundle 只保存引用指紋、來源種類、provenance、期間、分數與雜湊，不保存 request 原文、爬蟲內文、
+持股、現金或帳號。
 
 #### Responses
 
 | Status | Content／schema | 說明 |
 | --- | --- | --- |
-| `200` | application/json: object | 同一 identity 的不可變 FINAL replay。 |
-| `201` | application/json: object | 首次完成 immutable capture。 |
-| `400` | application/problem+json: SrppCaptureProblem | body 為空或全空白，或請求欄位、日期、slot、profile 或 hash 不合法，code 為 INVALID_REQUEST。 |
-| `409` | application/problem+json: SrppCaptureProblem | metadata 與既有收據不符或非交易日。 |
+| `200` | application/json: SrppEventEvidenceBundleResponse | 同一識別、同一正規化內容的重送：回傳既有不可變收據（本體與首次相同，只有 created=false、idempotentReplay=true），不重新查詢 news_headline。 |
+| `201` | application/json: SrppEventEvidenceBundleResponse | 首次建立不可變事件證據收據（created=true、idempotentReplay=false）；本體與之後的 200 replay 相同。 |
+| `400` | application/problem+json: SrppCaptureProblem | code 為 INVALID_REQUEST：body 為空或全空白、無法嚴格解析或含重複 member、不是 object、ownerEmail 格式錯誤（以上在 owner 解析前、零 outbound）；或欄位未知、缺必填、型別錯誤、長度或數量超過上限、列舉值不合法；或 tradingDate 不是伺服器 Asia/Taipei 今天。 |
+| `409` | application/problem+json: SrppCaptureProblem | code 為 NON_TRADING_DAY（今天不是台股交易日）、POLICY_UNSUPPORTED（policyBundleSha256 未登錄或未通過驗證）、SWAGGER_MISMATCH（swaggerSha256 與已發布 9090 Swagger 不同）、BUNDLE_METADATA_MISMATCH（同識別既有收據的規則包或 Swagger 雜湊不同）或 BUNDLE_CONTENT_CONFLICT（同識別既有收據的正規化 request 雜湊不同，不覆寫）；皆不可重試。 |
 | `415` | application/problem+json: SrppCaptureProblem | Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。 |
-| `500` | application/problem+json: SrppCaptureProblem | 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。 |
-| `502` | application/problem+json: SrppCaptureProblem | 已保存的上游資料違反來源契約。 |
-| `503` | application/problem+json: SrppCaptureProblem | canonical context 尚未就緒。 |
+| `422` | application/problem+json: SrppEvidenceRejectedProblem | code 為 EVIDENCE_REJECTED：證據驗證收集到的全部錯誤一次回報（類別缺少／重複／未知、分數超出上限、引用不存在或過期、來源不在允許清單或期間不合法、有分數卻無已驗證來源、officialEvents symbol 重複）；不寫入、不佔用識別，修正後可用同一識別重送。errors 依 (riskCategory 或 symbol, sourceIndex, code) 排序，最多 200 項，截斷時 truncated=true。 |
+| `500` | application/problem+json: SrppCaptureProblem | 未預期的伺服器錯誤，code 為 INTERNAL_ERROR（含資料庫外鍵違反等非識別衝突的例外）；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。 |
+| `502` | application/problem+json: SrppCaptureProblem | code 為 UPSTREAM_INVALID：BFF 呼叫 business 逾時（10 秒）、transport 失敗或 business 回應不符契約；或 business 讀到的既有收據違反保存契約。 |
+| `503` | application/problem+json: SrppCaptureProblem | code 為 OWNER_UNAVAILABLE（帳號查無、非 ACTIVE、查詢失敗或逾時；不揭露帳號是否存在）、CALENDAR_UNAVAILABLE（台股日曆暫時無法確認，可重試）或 CONTEXT_NOT_READY（伺服器沒有已發布 Swagger 身分，fail closed，可重試）。 |
 
 ### 21. `POST /api/public/srpp/daily-decision/evaluate`
 
@@ -2884,9 +2912,194 @@ RFC 9457 Problem Details：SRPP 事件證據（capture）與日報決策（evalu
 | `status` | 是 | `integer` | 否 | minimum: 400<br>maximum: 599 | 與 HTTP status 相同的整數狀態碼。 |
 | `detail` | 是 | `string` | 否 |  | 依 code 固定、經清理的繁體中文說明。 |
 | `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/event-evidence/capture`, `/api/public/srpp/daily-decision/evaluate` | 發生錯誤的公開請求路徑：`/api/public/srpp/event-evidence/capture` 或 `/api/public/srpp/daily-decision/evaluate`。 |
-| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `NON_TRADING_DAY`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR` | 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤。 |
+| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `NON_TRADING_DAY`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR`, `BUNDLE_METADATA_MISMATCH`, `BUNDLE_CONTENT_CONFLICT` | 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。 |
 | `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘為 false。 |
 | `errors` | 否 | `array of object` | 否 | items: object<br>items 說明: 單一逐項錯誤；code 必填，各端點可另附定位欄位。 | 選填的逐項錯誤清單；只有需要逐項說明的 code 才出現，其他 problem 不帶此欄。 |
+
+### `SrppEventEvidenceCaptureRequest`
+
+事件證據擷取 request（Requirement 181）：排程 LLM 對六項國際政經風險的判讀分數與引用。結構、型別、未知欄位與長度錯誤回 400；類別代碼、重複、分數範圍與引用內容錯誤屬證據驗證，回 422。結果欄位（score、assessed、evidenceStatus、totalScore、assessedCount、riskMode、tradeAuthorization）由伺服器產生，出現在 request 即 400。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerEmail` | 否 | `string (email)` | 否 | pattern: ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ | 選填；指定 owner 帳號（不分大小寫，最多 254 字元）。省略時用 configured-admin；有值時該帳號必須 ACTIVE，否則 503 OWNER_UNAVAILABLE。BFF 只用它解析 owner，business 不以它當 owner 識別，也不納入內容雜湊。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 必填；yyyy-MM-dd，必須等於伺服器 Asia/Taipei 今天且為台股交易日。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 必填；日報時段，只接受 09:05 或 11:40。 |
+| `analysisProfile` | 否 | `string` | 否 | enum: `TW_DAILY` | 選填；分析設定檔，缺省視為 TW_DAILY，有值只可 TW_DAILY；屬識別的一部分。 |
+| `consumer` | 是 | `string` | 否 | enum: `Claude`, `Codex` | 必填；判讀者軌道 Claude 或 Codex，兩軌各自獨立成 bundle。 |
+| `decisionId` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$ | 必填；即 SRPP report_facts.json 的 decision_id；重跑會有新 ID，因此是新的 bundle。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填；已登錄規則包的 64 位小寫 hex SHA-256，只當查詢鍵（未登錄回 409 POLICY_UNSUPPORTED）；計分使用 SrppRiskRubricV1 而非規則包內容。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填；呼叫端起跑時核對的 9090 Swagger Markdown 位元組 SHA-256，必須等於伺服器已發布身分（否則 409 SWAGGER_MISMATCH）。 |
+| `categories` | 是 | `array of SrppEventEvidenceCategoryClaim` | 否 | maxItems: 12<br>items: SrppEventEvidenceCategoryClaim<br>items 說明: 單一風險類別的判讀分數與引用來源。 | 必填；六項風險類別各恰好一筆（順序不拘）。超過 12 項回 400；缺少、重複或未知類別回 422。 |
+| `officialEvents` | 否 | `array of SrppEventEvidenceOfficialEventClaim` | 否 | maxItems: 100<br>items: SrppEventEvidenceOfficialEventClaim<br>items 說明: 單一標的的官方事件狀態與來源。 | 選填，缺省視為空陣列；D-092 逐標的官方事件揭露，永遠中性，不影響任何分數、結果或 gate。symbol 重複回 422 OFFICIAL_EVENT_INVALID。 |
+
+### `SrppEventEvidenceCategoryClaim`
+
+單一風險類別的判讀。有至少一筆通過驗證的來源才算已評；claimedScore 非 0 卻沒有通過驗證的來源、或 conflicting=true 時回 422 SCORE_WITHOUT_EVIDENCE。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `code` | 是 | `string` | 否 | enum: `fed`, `geopolitics`, `oil`, `taiwan_politics`, `us_taiwan_inflation`, `semiconductor_cycle_and_advanced_process` | 必填；風險類別代碼：fed（上限 2）、geopolitics（上限 3）、oil（上限 2）、taiwan_politics（上限 3）、us_taiwan_inflation（上限 2）、semiconductor_cycle_and_advanced_process（上限 3）。超過 64 字元回 400；其他代碼回 422 UNKNOWN_CATEGORY。 |
+| `claimedScore` | 是 | `integer (int32)` | 否 | minimum: 0<br>maximum: 3 | 必填；LLM 依 rubric 判讀的 JSON 整數分數，須在 0 至該類上限之間。不是整數或超出 Java int 範圍回 400；超出 0 至上限回 422 SCORE_OUT_OF_RANGE。 |
+| `conflicting` | 否 | `boolean` | 否 |  | 選填，缺省 false；LLM 判定來源互相矛盾或不可比時為 true，此時該類一律未評且 claimedScore 必須為 0。 |
+| `sources` | 是 | `array of SrppEventEvidenceSource` | 否 | maxItems: 20<br>items: SrppEventEvidenceSource<br>items 說明: 三種 kind 之一的引用來源。 | 必填，可為空陣列（＝無已驗證來源、未評）；最多 20 筆，依請求順序產生 sourceReceipts。任一來源未通過驗證即整包 422，並以 sourceIndex 指出位置。 |
+
+### `SrppEventEvidenceSource`
+
+引用來源，依 kind 恰為三者之一；其他 kind、缺必填或多餘欄位回 400。字串欄位不得空白。
+
+型別：`schema`。
+
+### `SrppEventEvidenceNewsHeadlineSource`
+
+引用 public_info_*.json 的一則條目（其單一上游為 news_headline）；source、url、category、title、publishedAt 直接複製 JSON 條目的值。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `NEWS_HEADLINE` | 固定 NEWS_HEADLINE。 |
+| `source` | 是 | `string` | 否 |  | 爬蟲來源代號（如 ltn、twse、bot-fx），參與 dedupe_key。 |
+| `url` | 是 | `string` | 否 |  | 原文或查詢頁連結，參與 dedupe_key；伺服器不連線。 |
+| `category` | 是 | `string` | 否 |  | news_headline 的爬蟲分類（如 news、fx、us-market），參與 dedupe_key，與風險類別代碼無關。 |
+| `title` | 是 | `string` | 否 |  | 條目標題；一般 category 以 NFKC、臺→台、空白折疊、trim 正規化後須與資料庫列相等，volatile category 不比對。 |
+| `publishedAt` | 是 | `string (date-time)` | 否 |  | ISO-8601 含 offset 的發布時間（JSON 條目為秒精度 +08:00）；一般 category 截斷到秒後須與資料庫列同一 instant。無法解析回 422 CITATION_NOT_FOUND。 |
+
+### `SrppEventEvidenceApiResponseSource`
+
+引用某支 9090 API 回應的觀察日；伺服器不重新呼叫該 API。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `API_RESPONSE` | 固定 API_RESPONSE。 |
+| `endpoint` | 是 | `string` | 否 |  | 9090 API 路徑；必須在設定的允許清單（預設 /api/public/commodity-prices、/api/public/market-index、/api/public/exchange-rate/usd-twd），否則 422 SOURCE_NOT_ALLOWED。 |
+| `observedDate` | 是 | `string (date)` | 否 |  | yyyy-MM-dd 觀察日；不得晚於 tradingDate，也不得早於其往前 31 天（可設定），否則或無法解析回 422 SOURCE_PERIOD_INVALID。 |
+
+### `SrppEventEvidenceOfficialPageSource`
+
+引用官方機構網頁的具名期間；伺服器不重抓該網頁。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `OFFICIAL_PAGE` | 固定 OFFICIAL_PAGE。 |
+| `url` | 是 | `string (uri)` | 否 |  | 必須 https，且 host 等於允許網域或其子網域（預設 federalreserve.gov、bls.gov、bea.gov、treasury.gov、dgbas.gov.tw、stat.gov.tw、cbc.gov.tw、twse.com.tw、tpex.org.tw），否則 422 SOURCE_NOT_ALLOWED。 |
+| `retrievedAt` | 是 | `string (date-time)` | 否 |  | ISO-8601 含 offset 的讀取時間；必須落在 tradingDate 當日（Asia/Taipei）且不晚於伺服器現在加 5 分鐘，否則 422 SOURCE_PERIOD_INVALID。 |
+| `period` | 是 | `string` | 否 | pattern: ^(?:19\|20)\d{2}(?:-(?:0[1-9]\|1[0-2])(?:-(?:0[1-9]\|[12]\d\|3[01]))?\|-Q[1-4])$ | 資料所屬期間，如 2026-09、2026-09-30 或 2026-Q3；是 SRPP RISK_SOURCE_PERIOD_RE 的嚴格子集（不接受斜線、年月字樣與單位數月份），不符回 422 SOURCE_PERIOD_INVALID。 |
+
+### `SrppEventEvidenceOfficialEventClaim`
+
+D-092 單一標的的官方事件揭露；只作揭露、永遠中性。VERIFIED_NO_EVENT 或 SOURCE_UNAVAILABLE 帶非空 sources、或 EVENT_FOUND 帶 OFFICIAL_PAGE 以外的來源，回 400。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | 是 | `string` | 否 | pattern: ^[0-9A-Z]{4,8}$ | 標的代號，4 至 8 個數字或大寫英文字母；同一 request 內重複回 422 OFFICIAL_EVENT_INVALID。 |
+| `status` | 是 | `string` | 否 | enum: `EVENT_FOUND`, `VERIFIED_NO_EVENT`, `SOURCE_UNAVAILABLE` | EVENT_FOUND 有官方事件、VERIFIED_NO_EVENT 已確認無事件、SOURCE_UNAVAILABLE 無法取得來源。EVENT_FOUND 沒有任何通過驗證的 OFFICIAL_PAGE 時，回應降級為 SOURCE_UNAVAILABLE（不使整包 422）。 |
+| `sources` | 是 | `array of SrppEventEvidenceOfficialPageSource` | 否 | maxItems: 3<br>items: SrppEventEvidenceOfficialPageSource<br>items 說明: 官方事件的官方頁面引用。 | 必填，可為空陣列；最多 3 筆且只可為 OFFICIAL_PAGE，僅 EVENT_FOUND 可帶來源。 |
+
+### `SrppEventEvidenceBundleResponse`
+
+不可變事件證據收據（首次 201、replay 200，本體相同，只有 created 與 idempotentReplay 不同）。本體以 RFC 8785 JCS 序列化；只含引用指紋、來源種類、provenance、期間、分數與雜湊，不含 request 原文、爬蟲內文、持股、現金或帳號。排程把六列分數、已評、總分、已評項數與風險模式直接取自本回應。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `integer` | 否 | enum: `1` | 回應結構版本，固定整數 1。 |
+| `eventBundleId` | 是 | `string (uuid)` | 否 |  | 此 bundle 的 UUID；同一識別的 replay 回傳同一值。 |
+| `status` | 是 | `string` | 否 | enum: `FINAL` | 固定 FINAL；收據建立後不可變。 |
+| `created` | 是 | `boolean` | 否 |  | true 表示本次請求建立了這筆收據（201），false 表示回傳既有收據（200）；不參與內容雜湊。 |
+| `idempotentReplay` | 是 | `boolean` | 否 |  | true 表示本次是同識別同內容的重送（200），false 表示首次建立（201）；不參與內容雜湊。 |
+| `identity` | 是 | `SrppEventEvidenceIdentity` | 否 |  | bundle 識別與 metadata（owner 已解析為內部 id，不在回應中）。 |
+| `rubricSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 計分 rubric 的 JCS SHA-256；SRPP_RISK_RUBRIC_V1 的值為 3a780e748aa3dc8cc94053178c378069fc54b3c10a6d1a09bd32c9bc0628f378，rubric 改版時以新值揭露。 |
+| `riskAssessment` | 是 | `SrppRiskAssessment` | 否 |  | 伺服器依 rubric 機械計算的六項風險結果。 |
+| `officialEvents` | 是 | `array of SrppOfficialEventReceipt` | 否 | maxItems: 100<br>items: SrppOfficialEventReceipt<br>items 說明: 單一標的的官方事件結果。 | 依 symbol 升冪排列的官方事件揭露；永遠中性，不影響 riskAssessment。 |
+| `tradeAuthorization` | 是 | `boolean` | 否 |  | 固定 false；本收據不授權任何交易。 |
+| `placesOrders` | 是 | `boolean` | 否 |  | 固定 false；本 API 不下單、不呼叫券商。 |
+| `eventBundleContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 去除 created、idempotentReplay 與本欄後的本體經 RFC 8785 JCS 的 UTF-8 SHA-256（小寫 hex）；SRPP 將它納入 INPUT_SNAPSHOT_SHA256。 |
+
+### `SrppEventEvidenceIdentity`
+
+bundle 識別（tradingDate、slot、analysisProfile、consumer、decisionId 加上內部 owner）與 metadata（policyBundleSha256、swaggerSha256）。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 台股交易日（Asia/Taipei）。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 日報時段 09:05 或 11:40。 |
+| `analysisProfile` | 是 | `string` | 否 | enum: `TW_DAILY` | 分析設定檔，目前固定 TW_DAILY。 |
+| `consumer` | 是 | `string` | 否 | enum: `Claude`, `Codex` | 判讀者軌道 Claude 或 Codex。 |
+| `decisionId` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$ | 呼叫端的 decision_id。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 建立時使用的已登錄規則包雜湊（metadata，不屬唯一識別；同識別不同值回 409 BUNDLE_METADATA_MISMATCH）。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 建立時的已發布 9090 Swagger 雜湊（metadata，不屬唯一識別）。 |
+
+### `SrppRiskAssessment`
+
+六項風險的機械計分結果（D-167／D-168／D-169）；數值全部是 JSON 整數，不使用浮點。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `categories` | 是 | `array of SrppRiskCategoryAssessment` | 否 | minItems: 6<br>maxItems: 6<br>items: SrppRiskCategoryAssessment<br>items 說明: 單一風險類別的計分結果。 | 固定依 fed、geopolitics、oil、taiwan_politics、us_taiwan_inflation、semiconductor_cycle_and_advanced_process 順序的六項結果。 |
+| `totalScore` | 是 | `integer` | 否 | minimum: 0<br>maximum: 15 | 六類 score 總和。 |
+| `assessedCount` | 是 | `integer` | 否 | minimum: 0<br>maximum: 6 | assessed=true 的類別數。 |
+| `riskMode` | 是 | `string` | 否 | enum: `NORMAL`, `CAUTIOUS`, `DEFENSIVE` | 任一類 score ≥ 3、或 totalScore ≥ 8、或 assessedCount < 4 為 DEFENSIVE（防禦）；否則 totalScore ≥ 5 為 CAUTIOUS（審慎）；其餘 NORMAL（正常）。 |
+
+### `SrppRiskCategoryAssessment`
+
+單一風險類別結果：無已驗證來源或 conflicting=true → 0 分未評；有已驗證來源且 claimedScore=0 → 0 分已評；有已驗證來源且 claimedScore≥1 → 該分數已評。已驗證來源含 DB_VERIFIED 與 ATTESTED。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `code` | 是 | `string` | 否 | enum: `fed`, `geopolitics`, `oil`, `taiwan_politics`, `us_taiwan_inflation`, `semiconductor_cycle_and_advanced_process` | 風險類別代碼 fed、geopolitics、oil、taiwan_politics、us_taiwan_inflation、semiconductor_cycle_and_advanced_process。 |
+| `score` | 是 | `integer` | 否 | minimum: 0<br>maximum: 3 | 計分結果（JSON 整數），不超過該類上限。 |
+| `assessed` | 是 | `boolean` | 否 |  | true 表示該類有已驗證來源且非 conflicting（已評）；false 表示未評。 |
+| `evidenceStatus` | 是 | `string` | 否 | enum: `EVIDENCE_INSUFFICIENT`, `VERIFIED_NO_RUBRIC_EVENT`, `RUBRIC_EVENT_FOUND` | EVIDENCE_INSUFFICIENT 無已驗證來源或來源矛盾；VERIFIED_NO_RUBRIC_EVENT 有來源但無 rubric 事件；RUBRIC_EVENT_FOUND 有來源且有 rubric 事件。 |
+| `sourceReceipts` | 是 | `array of SrppEvidenceSourceReceipt` | 否 | maxItems: 20<br>items: SrppEvidenceSourceReceipt<br>items 說明: 單一已驗證來源的收據。 | 依請求順序的來源收據（只含指紋、種類、provenance 與期間，不含標題或原文）。 |
+
+### `SrppEvidenceSourceReceipt`
+
+單一來源收據。NEWS_HEADLINE 另有 dedupeKey，API_RESPONSE 另有 endpoint，OFFICIAL_PAGE 另有 host；其他種類不出現該欄。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `NEWS_HEADLINE`, `API_RESPONSE`, `OFFICIAL_PAGE` | 來源種類 NEWS_HEADLINE、API_RESPONSE 或 OFFICIAL_PAGE。 |
+| `provenance` | 是 | `string` | 否 | enum: `DB_VERIFIED`, `ATTESTED` | DB_VERIFIED＝該 news_headline 列存在且在新鮮度視窗內（不代表與風險類別相關）；ATTESTED＝呼叫端聲明的具名來源與期間，伺服器只檢查允許清單與期間格式、未重抓，不得視為伺服器已驗證。 |
+| `period` | 是 | `string` | 否 |  | 來源期間：NEWS_HEADLINE 為資料庫列 published_at 截斷到秒的 yyyy-MM-ddTHH:mm:ss+08:00；API_RESPONSE 為 observedDate；OFFICIAL_PAGE 為 period。 |
+| `dedupeKey` | 否 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 僅 NEWS_HEADLINE；sha256(source\|url\|category) 的小寫 hex，即 news_headline.dedupe_key。 |
+| `endpoint` | 否 | `string` | 否 |  | 僅 API_RESPONSE；引用的 9090 API 路徑。 |
+| `host` | 否 | `string` | 否 |  | 僅 OFFICIAL_PAGE；引用網址的小寫 host。 |
+
+### `SrppOfficialEventReceipt`
+
+單一標的官方事件結果；永遠中性，不影響任何分數、結果或 gate。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | 是 | `string` | 否 | pattern: ^[0-9A-Z]{4,8}$ | 標的代號。 |
+| `status` | 是 | `string` | 否 | enum: `EVENT_FOUND`, `VERIFIED_NO_EVENT`, `SOURCE_UNAVAILABLE` | 結果狀態 EVENT_FOUND、VERIFIED_NO_EVENT 或 SOURCE_UNAVAILABLE；EVENT_FOUND 沒有通過驗證的官方頁面時降級為 SOURCE_UNAVAILABLE。 |
+| `sourceReceipts` | 是 | `array of SrppEvidenceSourceReceipt` | 否 | maxItems: 3<br>items: SrppEvidenceSourceReceipt<br>items 說明: 官方頁面的 ATTESTED 收據。 | 通過驗證的 OFFICIAL_PAGE 來源收據（依請求順序）；降級或非 EVENT_FOUND 時為空陣列。 |
+| `downgradeReason` | 否 | `string` | 否 | enum: `SOURCE_NOT_ALLOWED`, `SOURCE_PERIOD_INVALID`, `OFFICIAL_SOURCE_MISSING` | 只在 EVENT_FOUND 被降級時出現（否則整個欄位省略，不輸出 null）：OFFICIAL_SOURCE_MISSING 沒有任何來源；否則取第一筆來源的第一個失敗原因 SOURCE_NOT_ALLOWED（網域不允許或非 https）或 SOURCE_PERIOD_INVALID（retrievedAt 或 period 不合法）。 |
+
+### `SrppEvidenceRejectedProblem`
+
+RFC 9457 Problem Details：事件證據擷取的 422 EVIDENCE_REJECTED，七欄之外帶逐項 errors[]，截斷時另帶 truncated；一律 Cache-Control no-store，不寫入任何資料列。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `type` | 是 | `string` | 否 | enum: `about:blank` | problem 類型，常數 about:blank。 |
+| `title` | 是 | `string` | 否 |  | 固定英文標題 SRPP event evidence rejected。 |
+| `status` | 是 | `integer` | 否 | enum: `422` | HTTP 狀態碼 422。 |
+| `detail` | 是 | `string` | 否 |  | 固定、經清理的繁體中文說明。 |
+| `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/event-evidence/capture` | 發生錯誤的公開請求路徑 /api/public/srpp/event-evidence/capture。 |
+| `code` | 是 | `string` | 否 | enum: `EVIDENCE_REJECTED` | 固定 EVIDENCE_REJECTED。 |
+| `retryable` | 是 | `boolean` | 否 |  | 固定 false；必須修正 request 後再送（可用同一識別）。 |
+| `errors` | 是 | `array of SrppEvidenceRejectedError` | 否 | minItems: 1<br>maxItems: 200<br>items: SrppEvidenceRejectedError<br>items 說明: 單一證據錯誤。 | 逐項錯誤，依 (riskCategory 或 symbol, sourceIndex, code) 穩定排序（缺 sourceIndex 者在前），最多 200 項。 |
+| `truncated` | 否 | `boolean` | 否 | enum: `true` | 只在錯誤超過 200 項而截斷時出現，值為 true。 |
+
+### `SrppEvidenceRejectedError`
+
+單一證據錯誤；風險類別錯誤帶 riskCategory（來源層級另帶 sourceIndex），officialEvents 錯誤帶 symbol。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `code` | 是 | `string` | 否 | enum: `UNKNOWN_CATEGORY`, `MISSING_CATEGORY`, `DUPLICATE_CATEGORY`, `SCORE_OUT_OF_RANGE`, `CITATION_NOT_FOUND`, `SNAPSHOT_STALE`, `SOURCE_NOT_ALLOWED`, `SOURCE_PERIOD_INVALID`, `SCORE_WITHOUT_EVIDENCE`, `OFFICIAL_EVENT_INVALID` | UNKNOWN_CATEGORY 未知類別代碼；MISSING_CATEGORY 缺少類別；DUPLICATE_CATEGORY 類別重複；SCORE_OUT_OF_RANGE claimedScore 超出 0 至上限；CITATION_NOT_FOUND 新聞引用查無、title 或發布時間不符或 publishedAt 無法解析；SNAPSHOT_STALE 該列 fetched_at 早於交易日往前 3 個日曆日 00:00；SOURCE_NOT_ALLOWED endpoint 或網域不在允許清單（或非 https）；SOURCE_PERIOD_INVALID observedDate、retrievedAt 或 period 不合法；SCORE_WITHOUT_EVIDENCE claimedScore 非 0 卻無已驗證來源或 conflicting=true；OFFICIAL_EVENT_INVALID officialEvents 的 symbol 重複。 |
+| `riskCategory` | 否 | `string` | 否 |  | 六項風險類別代碼（UNKNOWN_CATEGORY 時為請求中的未知代碼）；與 NEWS_HEADLINE.category 爬蟲分類無關。 |
+| `symbol` | 否 | `string` | 否 | pattern: ^[0-9A-Z]{4,8}$ | officialEvents 錯誤的標的代號。 |
+| `sourceIndex` | 否 | `integer` | 否 | minimum: 0<br>maximum: 19 | 該類 sources 陣列中出錯來源的 0 起算位置；類別層級錯誤不帶此欄。 |
 
 ### `SrppOrchestratedProblem`
 

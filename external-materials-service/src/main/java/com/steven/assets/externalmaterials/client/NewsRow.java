@@ -20,6 +20,13 @@ import java.util.List;
  *                    使日期與交易日／{@code tradingDayCutoff} 一致（避免 UTC 使 TW 凌晨/整點資料的日期倒退一天）。
  * @param tags        來源提供的結構化相關實體標籤（目前僅 wantgoo {@code newsTags}），供個股過濾用（Task 178）。
  *                    {@code @JsonIgnore}：僅供過濾判定，不入 {@code news_headline}、不寫入 SRPP JSON。其他來源為空 list。
+ *
+ * <p><b>維護警語（Requirement 181／Task 481.4）</b>：business-services 的 SRPP 事件證據擷取對設定
+ * {@code srpp.event-evidence.volatile-categories}（環境變數 {@code SRPP_EVENT_EVIDENCE_VOLATILE_CATEGORIES}，預設
+ * {@code fx,us-market,kr-market,kr-intraday}）所列 category 只驗證列存在與 {@code fetched_at} 視窗，其餘 category
+ * 會比對 title 與截斷到秒的 {@code publishedAt}。此清單與本服務的 producer 沒有機械連結：新增「固定 URL 且每輪就地覆寫
+ * title／summary／publishedAt」的 producer（如 {@code MarketSnapshotFetchClient}、{@code KrIntradayFetchClient}）時，
+ * 必須同步更新該設定，否則其合法引用會被誤判為 {@code CITATION_NOT_FOUND}。
  */
 public record NewsRow(
         String title,

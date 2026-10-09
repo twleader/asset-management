@@ -694,7 +694,14 @@ public class NewsPoller {
         return d;
     }
 
-    /** 去重鍵：sha256(source|url|category)。TWSE URL 帶交易日 → 每日唯一；新聞 URL 每篇唯一。 */
+    /**
+     * 去重鍵：sha256(source|url|category)。TWSE URL 帶交易日 → 每日唯一；新聞 URL 每篇唯一。
+     *
+     * <p><b>必須同步的對應實作</b>：business-services 的 {@code EventEvidenceCaptureService#dedupeKey}（SRPP 事件證據
+     * 以此鍵查 {@code news_headline.dedupe_key}，Requirement 181／Task 481）。兩者分屬不同 Maven artifact 無法共用，
+     * 登錄為 {@code spec/steering/structure.md} §3.2 第 4 條具名例外之六；兩邊各以同一組三個黃金向量測試釘住
+     * （本模組 {@code NewsPollerDedupeKeyTest}、backend {@code NewsHeadlineDedupeKeyTest}），任一側改動公式必須同 commit 跟上。
+     */
     private static String dedupeKey(NewsRow r) {
         String seed = r.source() + "|" + r.url() + "|" + r.category();
         try {

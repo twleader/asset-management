@@ -3,9 +3,7 @@ package com.steven.assets.service.srpp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.model.SrppDecisionRun;
-import com.steven.assets.model.SrppEventEvidence;
 import com.steven.assets.repository.SrppDecisionRunRepository;
-import com.steven.assets.repository.SrppEventEvidenceRepository;
 import com.steven.assets.service.MarketDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,10 +37,12 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Task 483.5：{@link SrppCaptureService} 在 t481／t482 真正實作前必須 fail closed。
+ * Task 483.5：{@link SrppCaptureService#evaluate} 在 t482 真正實作前必須 fail closed。
  *
  * <p>純 JUnit＋Mockito，不啟動 Spring、不連資料庫。重點：嚴格驗證與錯誤碼不變；驗證通過後一律 503
- * {@code CONTEXT_NOT_READY}；兩個 repository 完全不被呼叫，也不 replay 既有的佔位列。
+ * {@code CONTEXT_NOT_READY}；repository 完全不被呼叫，也不 replay 既有的佔位列。
+ * Task 481 已把事件證據擷取移交 {@link EventEvidenceCaptureService}，原本針對 {@code captureEvent} 的案例隨之移除
+ * （新行為由 {@code EventEvidenceCaptureServiceTest} 涵蓋），針對 {@code evaluate} 的案例保留不動。
  */
 @ExtendWith(MockitoExtension.class)
 class SrppCaptureServiceFailClosedTest {
@@ -50,7 +50,6 @@ class SrppCaptureServiceFailClosedTest {
     private static final String HASH_A = "a".repeat(64);
     private static final String HASH_B = "b".repeat(64);
 
-    @Mock SrppEventEvidenceRepository events;
     @Mock SrppDecisionRunRepository decisions;
     @Mock MarketDataService marketData;
 
@@ -58,19 +57,11 @@ class SrppCaptureServiceFailClosedTest {
 
     @BeforeEach
     void setUp() {
-        service = new SrppCaptureService(events, decisions, marketData);
+        service = new SrppCaptureService(decisions, marketData);
     }
 
-    /** 兩個入口共用同一套 request 驗證，只差在是否帶 analysisProfile。 */
+    /** 決策入口（Task 481 起事件證據入口已移出本服務）。 */
     private enum Endpoint {
-        EVENT {
-            @Override ObjectNode validBody() {
-                ObjectNode n = baseBody();
-                n.put("analysisProfile", "TW_DAILY");
-                return n;
-            }
-            @Override void call(SrppCaptureService service, String raw) { service.captureEvent(raw); }
-        },
         DECISION {
             @Override ObjectNode validBody() { return baseBody(); }
             @Override void call(SrppCaptureService service, String raw) { service.evaluate(raw); }
@@ -116,13 +107,11 @@ class SrppCaptureServiceFailClosedTest {
 
         assertProblem(problem, HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY");
         verify(marketData).isTradingDayCachedOnly(eq("台股"), any(LocalDate.class));
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     @Test
     void failClosedMethodsAreNotTransactional() throws Exception {
-        assertThat(SrppCaptureService.class.getMethod("captureEvent", String.class).isAnnotationPresent(Transactional.class))
-                .as("captureEvent 不應再開 transaction").isFalse();
         assertThat(SrppCaptureService.class.getMethod("evaluate", String.class).isAnnotationPresent(Transactional.class))
                 .as("evaluate 不應再開 transaction").isFalse();
         assertThat(SrppCaptureService.class.isAnnotationPresent(Transactional.class))
@@ -156,9 +145,7 @@ class SrppCaptureServiceFailClosedTest {
             add(out, endpoint, "缺 policyBundleSha256", n -> n.remove("policyBundleSha256"));
             add(out, endpoint, "缺 swaggerSha256", n -> n.remove("swaggerSha256"));
         }
-        // event 專屬：analysisProfile 必填且只能是 TW_DAILY；decision 帶 analysisProfile 則是多餘欄位。
-        add(out, Endpoint.EVENT, "analysisProfile 不是 TW_DAILY", n -> n.put("analysisProfile", "TW_WEEKLY"));
-        add(out, Endpoint.EVENT, "缺 analysisProfile", n -> n.remove("analysisProfile"));
+        // decision 帶 analysisProfile 是多餘欄位。
         add(out, Endpoint.DECISION, "decision 多帶 analysisProfile", n -> n.put("analysisProfile", "TW_DAILY"));
         return out.build();
     }
@@ -176,7 +163,7 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, endpoint, JSON.writeValueAsString(body));
 
         assertProblem(problem, HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     static Stream<Arguments> malformedBodies() {
@@ -196,7 +183,7 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, endpoint, raw);
 
         assertProblem(problem, HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     @ParameterizedTest
@@ -205,7 +192,7 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, endpoint, null);
 
         assertProblem(problem, HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     // ---- (c) 交易日曆 ----
@@ -218,7 +205,7 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, endpoint, JSON.writeValueAsString(endpoint.validBody()));
 
         assertProblem(problem, HttpStatus.SERVICE_UNAVAILABLE, "CALENDAR_UNAVAILABLE");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     @ParameterizedTest
@@ -229,40 +216,10 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, endpoint, JSON.writeValueAsString(endpoint.validBody()));
 
         assertProblem(problem, HttpStatus.CONFLICT, "NON_TRADING_DAY");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     // ---- (d) 資料庫已有 FINAL 佔位列：仍然 503，不 replay ----
-
-    @Test
-    void existingFinalEventPlaceholderRowIsNotReplayed() throws Exception {
-        ObjectNode body = Endpoint.EVENT.validBody();
-        SrppEventEvidence placeholder = new SrppEventEvidence();
-        placeholder.id = UUID.randomUUID();
-        placeholder.ownerEmail = body.path("ownerEmail").asText();
-        placeholder.tradingDate = today();
-        placeholder.slot = body.path("slot").asText();
-        placeholder.analysisProfile = "TW_DAILY";
-        placeholder.policyBundleSha256 = HASH_A;
-        placeholder.swaggerSha256 = HASH_B;
-        placeholder.status = "FINAL";
-        placeholder.inputSnapshotSha256 = HASH_A;
-        placeholder.contentSha256 = HASH_A;
-        placeholder.contentJcs = "{\"officialEvents\":[],\"riskAssessment\":{\"status\":\"SOURCE_UNAVAILABLE\"}}";
-        placeholder.createdAt = Instant.now();
-        placeholder.finalizedAt = placeholder.createdAt;
-        when(marketData.isTradingDayCachedOnly(eq("台股"), any(LocalDate.class))).thenReturn(Optional.of(true));
-        // lenient：fail-closed 後本來就不該有人讀到這列，stubbing 沒被用到是預期結果。
-        lenient().when(events.findByOwnerEmailAndTradingDateAndSlotAndAnalysisProfile(any(), any(), any(), any()))
-                .thenReturn(Optional.of(placeholder));
-        lenient().when(events.findAll()).thenReturn(List.of(placeholder));
-        lenient().when(events.findById(any())).thenReturn(Optional.of(placeholder));
-
-        SrppCaptureProblem problem = callExpectingProblem(service, Endpoint.EVENT, JSON.writeValueAsString(body));
-
-        assertProblem(problem, HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY");
-        verifyNoInteractions(events, decisions);
-    }
 
     @Test
     void existingFinalDecisionPlaceholderRowIsNotReplayed() throws Exception {
@@ -288,7 +245,7 @@ class SrppCaptureServiceFailClosedTest {
         SrppCaptureProblem problem = callExpectingProblem(service, Endpoint.DECISION, JSON.writeValueAsString(body));
 
         assertProblem(problem, HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY");
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 
     @ParameterizedTest
@@ -303,6 +260,6 @@ class SrppCaptureServiceFailClosedTest {
 
             assertProblem(problem, HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY");
         }
-        verifyNoInteractions(events, decisions);
+        verifyNoInteractions(decisions);
     }
 }

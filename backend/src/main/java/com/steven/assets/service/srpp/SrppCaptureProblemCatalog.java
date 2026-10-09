@@ -7,7 +7,8 @@ import java.util.Map;
  * RFC 9457 problem 固定文案（每個 code 一組 HTTP status、英文 title、繁中 detail 與 retryable）。
  *
  * <p>不含帳號、SQL、URI 或例外訊息；{@code instance} 由 controller 依請求的公開路徑填入，不在本表固定。
- * retryable 僅 {@code CALENDAR_UNAVAILABLE} 與 {@code CONTEXT_NOT_READY} 為 true。t481、t482 各自新增自己的 code。
+ * retryable 僅 {@code CALENDAR_UNAVAILABLE} 與 {@code CONTEXT_NOT_READY} 為 true。t481、t482 各自新增自己的 code
+ * （t481：{@code EVIDENCE_REJECTED} 422、{@code BUNDLE_METADATA_MISMATCH} 409、{@code BUNDLE_CONTENT_CONFLICT} 409）。
  */
 public final class SrppCaptureProblemCatalog {
     private SrppCaptureProblemCatalog() {}
@@ -37,7 +38,14 @@ public final class SrppCaptureProblemCatalog {
             entry("UPSTREAM_INVALID", 502, "SRPP upstream response invalid",
                     "上游回應格式不合法。", false),
             entry("INTERNAL_ERROR", 500, "SRPP internal error",
-                    "伺服器發生未預期錯誤。", false));
+                    "伺服器發生未預期錯誤。", false),
+            // Task 481：事件證據擷取專用。
+            entry("EVIDENCE_REJECTED", 422, "SRPP event evidence rejected",
+                    "事件證據未通過驗證，請依 errors 逐項修正後再送。", false),
+            entry("BUNDLE_METADATA_MISMATCH", 409, "SRPP event evidence bundle metadata mismatch",
+                    "同一識別的既有事件證據收據使用不同的規則包或 Swagger 雜湊。", false),
+            entry("BUNDLE_CONTENT_CONFLICT", 409, "SRPP event evidence bundle content conflict",
+                    "同一識別的既有事件證據收據內容不同，不會覆寫。", false));
 
     private static Map.Entry<String, Problem> entry(String code, int status, String title, String detail,
                                                     boolean retryable) {

@@ -27,7 +27,8 @@ record SrppOrchestratedQuery(Route route, String email, String tradingDate, Stri
     }
     private static final Pattern SHA = Pattern.compile("^[0-9a-f]{64}$");
     private static final Pattern UUID = Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
-    private static final Pattern EMAIL = Pattern.compile("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
+    /** Task 481：事件證據 capture 的 {@code ownerEmail} 沿用同一 pattern（最大 254 字元另行檢查），故放寬為 package-private。 */
+    static final Pattern EMAIL = Pattern.compile("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$", Pattern.CASE_INSENSITIVE);
     private static final Pattern CODE = Pattern.compile("^[A-Za-z0-9.\\-]{1,12}$");
     private static final Set<String> IDS = Set.of("ASSET_RECONCILIATION", "ALLOCATION_GAP", "CASH_INCOME",
             "FUNDING_CAPACITY", "COMPLETED_TECHNICALS", "SYMBOL_RULE_FACTS");

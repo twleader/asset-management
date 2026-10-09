@@ -2276,24 +2276,25 @@ CREATE TABLE public.srpp_decision_run (
 
 
 --
--- Name: srpp_event_evidence; Type: TABLE; Schema: public; Owner: -
+-- Name: srpp_event_evidence_bundle; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.srpp_event_evidence (
+CREATE TABLE public.srpp_event_evidence_bundle (
     id uuid NOT NULL,
-    owner_email character varying(320) NOT NULL,
+    owner_user_id bigint NOT NULL,
     trading_date date NOT NULL,
     slot character varying(5) NOT NULL,
     analysis_profile character varying(24) NOT NULL,
+    consumer character varying(16) NOT NULL,
+    decision_id character varying(100) NOT NULL,
     policy_bundle_sha256 character(64) NOT NULL,
     swagger_sha256 character(64) NOT NULL,
-    status character varying(16) NOT NULL,
-    input_snapshot_sha256 character(64) NOT NULL,
-    content_sha256 character(64),
-    content_jcs text,
+    request_sha256 character(64) NOT NULL,
+    content_jcs text NOT NULL,
     created_at timestamp with time zone NOT NULL,
-    finalized_at timestamp with time zone,
-    CONSTRAINT srpp_event_evidence_status_check CHECK (((status)::text = ANY ((ARRAY['CAPTURING'::character varying, 'FINAL'::character varying])::text[])))
+    CONSTRAINT srpp_event_evidence_bundle_analysis_profile_check CHECK (((analysis_profile)::text = 'TW_DAILY'::text)),
+    CONSTRAINT srpp_event_evidence_bundle_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Claude'::character varying, 'Codex'::character varying])::text[]))),
+    CONSTRAINT srpp_event_evidence_bundle_slot_check CHECK (((slot)::text = ANY ((ARRAY['09:05'::character varying, '11:40'::character varying])::text[])))
 );
 
 
@@ -4400,19 +4401,19 @@ ALTER TABLE ONLY public.srpp_decision_run
 
 
 --
--- Name: srpp_event_evidence srpp_event_evidence_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: srpp_event_evidence_bundle srpp_event_evidence_bundle_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.srpp_event_evidence
-    ADD CONSTRAINT srpp_event_evidence_identity_uq UNIQUE (owner_email, trading_date, slot, analysis_profile);
+ALTER TABLE ONLY public.srpp_event_evidence_bundle
+    ADD CONSTRAINT srpp_event_evidence_bundle_identity_uq UNIQUE (owner_user_id, trading_date, slot, analysis_profile, consumer, decision_id);
 
 
 --
--- Name: srpp_event_evidence srpp_event_evidence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: srpp_event_evidence_bundle srpp_event_evidence_bundle_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.srpp_event_evidence
-    ADD CONSTRAINT srpp_event_evidence_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.srpp_event_evidence_bundle
+    ADD CONSTRAINT srpp_event_evidence_bundle_pkey PRIMARY KEY (id);
 
 
 --
@@ -5661,6 +5662,13 @@ CREATE TRIGGER trg_srpp_context_package_no_update BEFORE UPDATE ON public.srpp_c
 
 
 --
+-- Name: srpp_event_evidence_bundle trg_srpp_event_evidence_bundle_no_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_event_evidence_bundle_no_update BEFORE UPDATE ON public.srpp_event_evidence_bundle FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
 -- Name: srpp_owner_key trg_srpp_owner_key_no_update; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5991,6 +5999,22 @@ ALTER TABLE ONLY public.srpp_context_package
 
 ALTER TABLE ONLY public.srpp_context_package
     ADD CONSTRAINT srpp_context_package_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256) ON DELETE RESTRICT;
+
+
+--
+-- Name: srpp_event_evidence_bundle srpp_event_evidence_bundle_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_event_evidence_bundle
+    ADD CONSTRAINT srpp_event_evidence_bundle_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_event_evidence_bundle srpp_event_evidence_bundle_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_event_evidence_bundle
+    ADD CONSTRAINT srpp_event_evidence_bundle_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256) ON DELETE RESTRICT;
 
 
 --

@@ -19,7 +19,9 @@ class SrppCaptureProblemCatalogTest {
             "INVALID_REQUEST,400,false", "UNSUPPORTED_MEDIA_TYPE,415,false", "NON_TRADING_DAY,409,false",
             "POLICY_UNSUPPORTED,409,false", "SWAGGER_MISMATCH,409,false", "OWNER_UNAVAILABLE,503,false",
             "CALENDAR_UNAVAILABLE,503,true", "CONTEXT_NOT_READY,503,true", "UPSTREAM_INVALID,502,false",
-            "INTERNAL_ERROR,500,false"})
+            "INTERNAL_ERROR,500,false",
+            // Task 481：事件證據擷取新增的三個 code。
+            "EVIDENCE_REJECTED,422,false", "BUNDLE_METADATA_MISMATCH,409,false", "BUNDLE_CONTENT_CONFLICT,409,false"})
     void sharedCodesHaveFixedStatusTitleDetailAndRetryable(String code, int status, boolean retryable) {
         SrppCaptureProblemCatalog.Problem problem = SrppCaptureProblemCatalog.get(code);
 
@@ -54,6 +56,17 @@ class SrppCaptureProblemCatalogTest {
         assertThatThrownBy(() -> problem.errors.add(Map.of())).isInstanceOf(UnsupportedOperationException.class);
 
         assertThatThrownBy(() -> new SrppCaptureProblem(HttpStatus.CONFLICT, "INVALID_REQUEST"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(problem.truncated).isFalse();
+    }
+
+    @Test
+    void evidenceRejectedCarriesTruncatedFlag() {
+        SrppCaptureProblem problem = new SrppCaptureProblem(HttpStatus.UNPROCESSABLE_ENTITY, "EVIDENCE_REJECTED",
+                List.of(Map.of("code", "MISSING_CATEGORY")), true);
+        assertThat(problem.truncated).isTrue();
+        assertThat(problem.retryable).isFalse();
+        assertThatThrownBy(() -> new SrppCaptureProblem(HttpStatus.BAD_REQUEST, "EVIDENCE_REJECTED"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }
