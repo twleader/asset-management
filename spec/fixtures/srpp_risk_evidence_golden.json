@@ -1,0 +1,1040 @@
+{
+ "schema": "SRPP_RISK_EVIDENCE_GOLDEN_V1",
+ "cases": [
+  {
+   "caseId": "2026-09-24/Codex-1140-114256",
+   "tradingDate": "2026-09-24",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 4,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-09-29/Claude-1140-115334",
+   "tradingDate": "2026-09-29",
+   "slot": "11:40",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 4,
+    "assessedCount": 5,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-09-29/Codex-0905-090545",
+   "tradingDate": "2026-09-29",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 7,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-09-30/Claude-0905-091508",
+   "tradingDate": "2026-09-30",
+   "slot": "09:05",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 5,
+    "assessedCount": 5,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-09-30/Claude-1140-115328",
+   "tradingDate": "2026-09-30",
+   "slot": "11:40",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-09-30/Codex-1140-114218",
+   "tradingDate": "2026-09-30",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": null,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    }
+   },
+   "stated": {
+    "totalScore": 3,
+    "assessedCount": 4,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-10-01/Claude-0905-091509",
+   "tradingDate": "2026-10-01",
+   "slot": "09:05",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-01/Claude-1140-115331",
+   "tradingDate": "2026-10-01",
+   "slot": "11:40",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-01/Codex-0905-090709",
+   "tradingDate": "2026-10-01",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 7,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-01/Codex-114325",
+   "tradingDate": "2026-10-01",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 5,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-02/Claude-0905-091506",
+   "tradingDate": "2026-10-02",
+   "slot": "09:05",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 4,
+    "assessedCount": 6,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-10-02/Codex-0905-090822",
+   "tradingDate": "2026-10-02",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 7,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-02/Codex-1140-114354",
+   "tradingDate": "2026-10-02",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "geopolitics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 4,
+    "assessedCount": 5,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-10-05/Claude-1140-115332",
+   "tradingDate": "2026-10-05",
+   "slot": "11:40",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-05/Codex-0905-090758",
+   "tradingDate": "2026-10-05",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 7,
+    "assessedCount": 6,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-05/Codex-1140-114000",
+   "tradingDate": "2026-10-05",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": null,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 3,
+    "assessedCount": 5,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-10-06/Claude-0905-091502",
+   "tradingDate": "2026-10-06",
+   "slot": "09:05",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 6,
+    "assessedCount": 5,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-06/Claude-1140-115323",
+   "tradingDate": "2026-10-06",
+   "slot": "11:40",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 5,
+    "assessedCount": 5,
+    "riskMode": "CAUTIOUS"
+   }
+  },
+  {
+   "caseId": "2026-10-06/Codex-0905-090722",
+   "tradingDate": "2026-10-06",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "geopolitics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    }
+   },
+   "stated": {
+    "totalScore": 1,
+    "assessedCount": 1,
+    "riskMode": "DEFENSIVE"
+   }
+  },
+  {
+   "caseId": "2026-10-06/Codex-114350",
+   "tradingDate": "2026-10-06",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "geopolitics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "oil": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    }
+   },
+   "stated": {
+    "totalScore": 0,
+    "assessedCount": 0,
+    "riskMode": "DEFENSIVE"
+   }
+  },
+  {
+   "caseId": "2026-10-07/Claude-0905-091458",
+   "tradingDate": "2026-10-07",
+   "slot": "09:05",
+   "consumer": "Claude",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    },
+    "geopolitics": {
+     "score": 2,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 4,
+    "assessedCount": 5,
+    "riskMode": "NORMAL"
+   }
+  },
+  {
+   "caseId": "2026-10-07/Codex-0905-090654",
+   "tradingDate": "2026-10-07",
+   "slot": "09:05",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "geopolitics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    }
+   },
+   "stated": {
+    "totalScore": 1,
+    "assessedCount": 1,
+    "riskMode": "DEFENSIVE"
+   }
+  },
+  {
+   "caseId": "2026-10-07/Codex-1140-114328",
+   "tradingDate": "2026-10-07",
+   "slot": "11:40",
+   "consumer": "Codex",
+   "profile": "core",
+   "otherProfileIdentical": true,
+   "categories": {
+    "fed": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "geopolitics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "oil": {
+     "score": 1,
+     "assessed": true,
+     "evidenceStatus": "RUBRIC_EVENT_FOUND"
+    },
+    "taiwan_politics": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "us_taiwan_inflation": {
+     "score": 0,
+     "assessed": false,
+     "evidenceStatus": "EVIDENCE_INSUFFICIENT"
+    },
+    "semiconductor_cycle_and_advanced_process": {
+     "score": 0,
+     "assessed": true,
+     "evidenceStatus": "VERIFIED_NO_RUBRIC_EVENT"
+    }
+   },
+   "stated": {
+    "totalScore": 1,
+    "assessedCount": 2,
+    "riskMode": "DEFENSIVE"
+   }
+  }
+ ]
+}
