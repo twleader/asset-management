@@ -132,6 +132,18 @@ srpp:
     recipients: ${SRPP_DAILY_REPORT_RECIPIENTS:shi.chihung@gmail.com}
     internal-token: ${SRPP_DAILY_REPORT_INTERNAL_TOKEN:}
     retention-cron: ${SRPP_DAILY_REPORT_RETENTION_CRON:0 17 3 * * *}
+  # Requirement 181／Task 481：事件證據擷取的引用驗證設定（逗號分隔）。預設清單只是初始值，上線前須由 Steven 確認；
+  # 清單為空時對應來源一律 SOURCE_NOT_ALLOWED。
+  event-evidence:
+    # 固定 URL 且每輪就地覆寫 title／published_at 的 news_headline category：只驗存在與 fetched_at 視窗。
+    # external-materials-service 新增這類 producer 時必須同步更新（見 NewsRow Javadoc）。
+    volatile-categories: ${SRPP_EVENT_EVIDENCE_VOLATILE_CATEGORIES:fx,us-market,kr-market,kr-intraday}
+    # API_RESPONSE 來源允許的 9090 endpoint。
+    api-endpoints: ${SRPP_EVENT_EVIDENCE_API_ENDPOINTS:/api/public/commodity-prices,/api/public/market-index,/api/public/exchange-rate/usd-twd}
+    # API_RESPONSE.observedDate 最早可早於交易日幾天（沒有政策依據的初始值）。
+    api-observed-max-age-days: ${SRPP_EVENT_EVIDENCE_API_OBSERVED_MAX_AGE_DAYS:31}
+    # OFFICIAL_PAGE 允許的網域（含其子網域），必須 https。
+    official-domains: ${SRPP_EVENT_EVIDENCE_OFFICIAL_DOMAINS:federalreserve.gov,bls.gov,bea.gov,treasury.gov,dgbas.gov.tw,stat.gov.tw,cbc.gov.tw,twse.com.tw,tpex.org.tw}
 
 server:
   port: ${SERVER_PORT:8080}

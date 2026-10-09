@@ -58,6 +58,8 @@ class SrppCaptureControllerMediaTypeTest {
 
     @LocalServerPort private int port;
     @MockBean SrppCaptureRelay relay;
+    /** Task 481：event() 在 415／空 body 之後改交給 SrppEventEvidenceCapture（owner 解析與回應驗證）。 */
+    @MockBean SrppEventEvidenceCapture eventEvidence;
     @MockBean ApiErrorLogIngestClient ingest;
     private WebTestClient client;
 
@@ -97,7 +99,7 @@ class SrppCaptureControllerMediaTypeTest {
         EntityExchangeResult<byte[]> result = post(endpoint, contentType, body);
 
         assertSevenFieldProblem(result, endpoint, 415, "UNSUPPORTED_MEDIA_TYPE");
-        verifyNoInteractions(relay);
+        verifyNoInteractions(relay, eventEvidence);
         verify(ingest, never()).ingest(anyString(), anyString(), any(), any(), any(), anyInt(), any());
     }
 
@@ -115,15 +117,23 @@ class SrppCaptureControllerMediaTypeTest {
     void applicationJsonIgnoringCaseAndParametersIsRelayed(Endpoint endpoint, String contentType) {
         byte[] upstream = ("{\"type\":\"about:blank\",\"title\":\"from business\",\"status\":503,\"detail\":\"d\",\"instance\":\""
                 + endpoint.path + "\",\"code\":\"CONTEXT_NOT_READY\",\"retryable\":true}").getBytes(StandardCharsets.UTF_8);
-        when(relay.call(eq(endpoint.internal), eq(endpoint.path), any())).thenReturn(Mono.just(ResponseEntity
+        Mono<ResponseEntity<byte[]>> response = Mono.just(ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .header(HttpHeaders.CACHE_CONTROL, "no-store").body(upstream)));
+                .header(HttpHeaders.CACHE_CONTROL, "no-store").body(upstream));
+        when(relay.call(eq(endpoint.internal), eq(endpoint.path), any())).thenReturn(response);
+        when(eventEvidence.capture(any())).thenReturn(response);
 
         EntityExchangeResult<byte[]> result = post(endpoint, contentType, BODY);
 
         assertThat(result.getStatus().value()).isEqualTo(503);
         assertThat(result.getResponseBody()).isEqualTo(upstream);
-        verify(relay).call(eq(endpoint.internal), eq(endpoint.path), eq(BODY.getBytes(StandardCharsets.UTF_8)));
+        if (endpoint == Endpoint.EVENT) {
+            verify(eventEvidence).capture(eq(BODY.getBytes(StandardCharsets.UTF_8)));
+            verifyNoInteractions(relay);
+        } else {
+            verify(relay).call(eq(endpoint.internal), eq(endpoint.path), eq(BODY.getBytes(StandardCharsets.UTF_8)));
+            verifyNoInteractions(eventEvidence);
+        }
     }
 
     static Stream<Arguments> blankBodies() {
@@ -138,7 +148,7 @@ class SrppCaptureControllerMediaTypeTest {
         EntityExchangeResult<byte[]> result = post(endpoint, MediaType.APPLICATION_JSON_VALUE, body);
 
         assertSevenFieldProblem(result, endpoint, 400, "INVALID_REQUEST");
-        verifyNoInteractions(relay);
+        verifyNoInteractions(relay, eventEvidence);
     }
 
     static Stream<Endpoint> endpoints() { return Stream.of(Endpoint.values()); }
@@ -147,12 +157,37 @@ class SrppCaptureControllerMediaTypeTest {
     @MethodSource("endpoints")
     void unexpectedExceptionIs500WithoutLeakingMessageAndIsCaptured(Endpoint endpoint) throws Exception {
         when(relay.call(anyString(), anyString(), any())).thenThrow(new IllegalStateException(SECRET));
+        when(eventEvidence.capture(any())).thenThrow(new IllegalStateException(SECRET));
 
         EntityExchangeResult<byte[]> result = post(endpoint, MediaType.APPLICATION_JSON_VALUE, BODY);
 
         assertSevenFieldProblem(result, endpoint, 500, "INTERNAL_ERROR");
         assertThat(new String(result.getResponseBody(), StandardCharsets.UTF_8)).doesNotContain(SECRET).doesNotContain("IllegalStateException");
         verify(ingest, timeout(2000)).ingest(eq(endpoint.operationKey), eq(endpoint.operationName), any(), any(), any(), eq(500), isNull());
+    }
+
+    static Stream<Arguments> eventProblems() {
+        return Stream.of(
+                Arguments.of(SrppCaptureProblemCatalog.INVALID_REQUEST, 400, false),
+                Arguments.of(SrppCaptureProblemCatalog.OWNER_UNAVAILABLE, 503, true),
+                Arguments.of(SrppCaptureProblemCatalog.UPSTREAM_INVALID, 502, true));
+    }
+
+    @ParameterizedTest(name = "Task 481：event 的 {0} 由控制器本地 handler 輸出七欄 problem，5xx 才進 API 錯誤日誌")
+    @MethodSource("eventProblems")
+    void eventCaptureProblemsAreRenderedAsSevenFieldProblems(SrppCaptureProblemCatalog code, int status, boolean logged) throws Exception {
+        when(eventEvidence.capture(any())).thenReturn(Mono.error(new SrppCaptureProblemException(code, new IllegalStateException(SECRET))));
+
+        EntityExchangeResult<byte[]> result = post(Endpoint.EVENT, MediaType.APPLICATION_JSON_VALUE, BODY);
+
+        assertSevenFieldProblem(result, Endpoint.EVENT, status, code.name());
+        assertThat(new String(result.getResponseBody(), StandardCharsets.UTF_8)).doesNotContain(SECRET);
+        verifyNoInteractions(relay);
+        if (logged) {
+            verify(ingest, timeout(2000)).ingest(eq(Endpoint.EVENT.operationKey), eq(Endpoint.EVENT.operationName), any(), any(), any(), eq(status), isNull());
+        } else {
+            verify(ingest, never()).ingest(anyString(), anyString(), any(), any(), any(), anyInt(), any());
+        }
     }
 
     private EntityExchangeResult<byte[]> post(Endpoint endpoint, String contentType, String body) {

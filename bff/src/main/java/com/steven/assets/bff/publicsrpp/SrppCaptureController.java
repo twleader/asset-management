@@ -22,6 +22,9 @@ import static com.steven.assets.bff.apierrorlogs.PublicApiErrorCaptureWebFilter.
  * <p>Task 484.1／484.2：不以 {@code consumes} 宣告媒體型別（不符時例外在 handler mapping 階段拋出，帶 selector 的
  * advice 抓不到，會回 Spring 預設 415 本體）。入口自行檢查 Content-Type，參數解析階段的例外與未預期例外由
  * 控制器本地 {@code @ExceptionHandler} 統一輸出七欄 RFC 9457 problem，{@code instance} 為該請求的公開路徑。
+ *
+ * <p>Task 481.1：{@code event()} 在 415／空 body 之後交給 {@link SrppEventEvidenceCapture}（嚴格解析與 ownerEmail 400、
+ * owner 解析、帶 owner headers 轉送原始 bytes、回應驗證）；{@code decision()} 維持原樣轉送，由 t482 另定。
  */
 @RestController @RequiredArgsConstructor
 public class SrppCaptureController {
@@ -29,7 +32,8 @@ public class SrppCaptureController {
     public static final String DECISION = "/api/public/srpp/daily-decision/evaluate";
     private static final Logger log = LoggerFactory.getLogger(SrppCaptureController.class);
     private final SrppCaptureRelay relay;
-    @PostMapping(EVENT) public Mono<ResponseEntity<byte[]>> event(@RequestHeader(value=HttpHeaders.CONTENT_TYPE, required=false) String contentType, @RequestBody(required=false) Mono<byte[]> body){return relayChecked(contentType,body,"/internal/srpp/event-evidence/capture",EVENT);}
+    private final SrppEventEvidenceCapture eventEvidence;
+    @PostMapping(EVENT) public Mono<ResponseEntity<byte[]>> event(@RequestHeader(value=HttpHeaders.CONTENT_TYPE, required=false) String contentType, @RequestBody(required=false) Mono<byte[]> body){return eventChecked(contentType,body);}
     @PostMapping(DECISION) public Mono<ResponseEntity<byte[]>> decision(@RequestHeader(value=HttpHeaders.CONTENT_TYPE, required=false) String contentType, @RequestBody(required=false) Mono<byte[]> body){return relayChecked(contentType,body,"/internal/srpp/daily-decision/evaluate",DECISION);}
 
     /** Content-Type 先於 body 檢查：缺 Content-Type 且 body 為空仍是 415；通過後空白 body 才是 400。 */
@@ -37,6 +41,12 @@ public class SrppCaptureController {
         if (!isApplicationJson(contentType)) return Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.UNSUPPORTED_MEDIA_TYPE, instance));
         return (body == null ? Mono.<byte[]>empty() : body).defaultIfEmpty(new byte[0])
                 .flatMap(b -> blank(b) ? Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.INVALID_REQUEST, instance)) : relay.call(path, instance, b));
+    }
+    /** Task 481.1 第 1 步：同樣先 415、再空白 body 400；其餘步驟交給 {@link SrppEventEvidenceCapture}。 */
+    private Mono<ResponseEntity<byte[]>> eventChecked(String contentType, Mono<byte[]> body) {
+        if (!isApplicationJson(contentType)) return Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.UNSUPPORTED_MEDIA_TYPE, EVENT));
+        return (body == null ? Mono.<byte[]>empty() : body).defaultIfEmpty(new byte[0])
+                .flatMap(b -> blank(b) ? Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.INVALID_REQUEST, EVENT)) : eventEvidence.capture(b));
     }
     /** 只接受 type=application、subtype=json（不分大小寫、忽略參數）；{@code +json}、萬用字元、缺失與語法錯誤一律不接受。 */
     static boolean isApplicationJson(String contentType) {

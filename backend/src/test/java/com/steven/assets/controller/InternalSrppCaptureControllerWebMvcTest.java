@@ -3,6 +3,7 @@ package com.steven.assets.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.service.srpp.EventEvidenceCaptureService;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
 import com.steven.assets.service.srpp.SrppCaptureService;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,6 +46,7 @@ class InternalSrppCaptureControllerWebMvcTest {
 
     @Autowired MockMvc mvc;
     @MockBean SrppCaptureService service;
+    @MockBean EventEvidenceCaptureService eventEvidence;
     @MockBean CurrentUserContext currentUserContext;
 
     /** 兩個端點：internal 路徑、problem 的公開 instance。 */
@@ -80,7 +82,7 @@ class InternalSrppCaptureControllerWebMvcTest {
         MockHttpServletResponse response = mvc.perform(request).andReturn().getResponse();
 
         assertSevenFieldProblem(response, endpoint, 415, "UNSUPPORTED_MEDIA_TYPE");
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, eventEvidence);
     }
 
     static Stream<Arguments> acceptedContentTypes() {
@@ -96,9 +98,9 @@ class InternalSrppCaptureControllerWebMvcTest {
     @ParameterizedTest(name = "{0}：{1} 通過並把原始 body 交給 service")
     @MethodSource("acceptedContentTypes")
     void applicationJsonIgnoringCaseAndParametersReachesService(Endpoint endpoint, String contentType) throws Exception {
-        SrppCaptureService.Result created = new SrppCaptureService.Result(HttpStatus.CREATED, "{\"status\":\"FINAL\"}", false);
-        when(service.captureEvent(BODY)).thenReturn(created);
-        when(service.evaluate(BODY)).thenReturn(created);
+        when(eventEvidence.capture(BODY)).thenReturn(
+                new EventEvidenceCaptureService.Result(HttpStatus.CREATED, "{\"status\":\"FINAL\"}", "id", "hash"));
+        when(service.evaluate(BODY)).thenReturn(new SrppCaptureService.Result(HttpStatus.CREATED, "{\"status\":\"FINAL\"}", false));
 
         MockHttpServletResponse response = mvc.perform(post(endpoint.path)
                 .header(HttpHeaders.CONTENT_TYPE, contentType).content(BODY)).andReturn().getResponse();
@@ -106,7 +108,7 @@ class InternalSrppCaptureControllerWebMvcTest {
         assertThat(response.getStatus()).isEqualTo(201);
         assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
         assertThat(response.getContentAsString(StandardCharsets.UTF_8)).isEqualTo("{\"status\":\"FINAL\"}");
-        if (endpoint == Endpoint.EVENT) verify(service).captureEvent(BODY); else verify(service).evaluate(BODY);
+        if (endpoint == Endpoint.EVENT) verify(eventEvidence).capture(BODY); else verify(service).evaluate(BODY);
     }
 
     static Stream<Arguments> blankBodies() {
@@ -122,7 +124,7 @@ class InternalSrppCaptureControllerWebMvcTest {
                 .contentType(MediaType.APPLICATION_JSON).content(body)).andReturn().getResponse();
 
         assertSevenFieldProblem(response, endpoint, 400, "INVALID_REQUEST");
-        verifyNoInteractions(service);
+        verifyNoInteractions(service, eventEvidence);
     }
 
     static Stream<Endpoint> endpoints() { return Stream.of(Endpoint.values()); }
@@ -130,7 +132,7 @@ class InternalSrppCaptureControllerWebMvcTest {
     @ParameterizedTest(name = "{0}：service 丟任意 RuntimeException → 500 INTERNAL_ERROR 且不洩漏訊息")
     @MethodSource("endpoints")
     void unexpectedExceptionIs500WithoutLeakingMessage(Endpoint endpoint) throws Exception {
-        when(service.captureEvent(any())).thenThrow(new IllegalStateException(SECRET));
+        when(eventEvidence.capture(any())).thenThrow(new IllegalStateException(SECRET));
         when(service.evaluate(any())).thenThrow(new IllegalStateException(SECRET));
 
         MockHttpServletResponse response = mvc.perform(post(endpoint.path)
@@ -143,7 +145,7 @@ class InternalSrppCaptureControllerWebMvcTest {
     @ParameterizedTest(name = "{0}：t483 的 CONTEXT_NOT_READY 以七欄 problem 輸出")
     @MethodSource("endpoints")
     void serviceProblemIsRenderedAsSevenFieldProblem(Endpoint endpoint) throws Exception {
-        when(service.captureEvent(BODY)).thenThrow(new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY"));
+        when(eventEvidence.capture(BODY)).thenThrow(new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY"));
         when(service.evaluate(BODY)).thenThrow(new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY"));
 
         MockHttpServletResponse response = mvc.perform(post(endpoint.path)
@@ -151,6 +153,38 @@ class InternalSrppCaptureControllerWebMvcTest {
 
         JsonNode problem = assertSevenFieldProblem(response, endpoint, 503, "CONTEXT_NOT_READY");
         assertThat(problem.path("retryable").booleanValue()).isTrue();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "Task 481：422 EVIDENCE_REJECTED 帶 errors[]，truncated={0}")
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void evidenceRejectedCarriesErrorsAndOptionalTruncated(boolean truncated) throws Exception {
+        java.util.Map<String, Object> error = new java.util.LinkedHashMap<>();
+        error.put("code", "CITATION_NOT_FOUND");
+        error.put("riskCategory", "geopolitics");
+        error.put("sourceIndex", 0);
+        when(eventEvidence.capture(BODY)).thenThrow(new SrppCaptureProblem(HttpStatus.UNPROCESSABLE_ENTITY,
+                "EVIDENCE_REJECTED", List.of(error), truncated));
+
+        MockHttpServletResponse response = mvc.perform(post(Endpoint.EVENT.path)
+                .contentType(MediaType.APPLICATION_JSON).content(BODY)).andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(422);
+        assertThat(MediaType.parseMediaType(response.getContentType()).getSubtype()).isEqualTo("problem+json");
+        assertThat(response.getHeader(HttpHeaders.CACHE_CONTROL)).isEqualTo("no-store");
+        JsonNode problem = JSON.readTree(response.getContentAsString(StandardCharsets.UTF_8));
+        List<String> fields = new java.util.ArrayList<>();
+        problem.fieldNames().forEachRemaining(fields::add);
+        List<String> expected = new java.util.ArrayList<>(List.of("type", "title", "status", "detail", "instance", "code",
+                "retryable", "errors"));
+        if (truncated) expected.add("truncated");
+        assertThat(fields).isEqualTo(expected);
+        assertThat(problem.path("code").asText()).isEqualTo("EVIDENCE_REJECTED");
+        assertThat(problem.path("status").intValue()).isEqualTo(422);
+        assertThat(problem.path("retryable").booleanValue()).isFalse();
+        assertThat(problem.path("instance").asText()).isEqualTo(Endpoint.EVENT.instance);
+        assertThat(problem.path("errors").get(0).toString())
+                .isEqualTo("{\"code\":\"CITATION_NOT_FOUND\",\"riskCategory\":\"geopolitics\",\"sourceIndex\":0}");
+        if (truncated) assertThat(problem.path("truncated").booleanValue()).isTrue();
     }
 
     private static JsonNode assertSevenFieldProblem(MockHttpServletResponse response, Endpoint endpoint, int status,

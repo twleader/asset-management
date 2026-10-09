@@ -2,6 +2,7 @@ package com.steven.assets.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.service.srpp.EventEvidenceCaptureService;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
 import com.steven.assets.service.srpp.SrppCaptureService;
 import org.junit.jupiter.api.Test;
@@ -35,7 +36,8 @@ class InternalSrppCaptureControllerTest {
     private static final String BODY = "{\"ownerEmail\":\"owner@example.com\"}";
 
     private final SrppCaptureService service = mock(SrppCaptureService.class);
-    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new InternalSrppCaptureController(service)).build();
+    private final EventEvidenceCaptureService eventEvidence = mock(EventEvidenceCaptureService.class);
+    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new InternalSrppCaptureController(service, eventEvidence)).build();
 
     @ParameterizedTest(name = "{0} 在 CONTEXT_NOT_READY 時回 503 problem+json")
     @CsvSource({"event," + EVENT_PATH, "decision," + DECISION_PATH})
@@ -77,26 +79,25 @@ class InternalSrppCaptureControllerTest {
     @Test
     void controllerPassesRawBodyToServiceUnchanged() throws Exception {
         String raw = "{ \"ownerEmail\" : \"owner@example.com\" ,\n \"extra\": 1 }";
-        when(service.captureEvent(raw)).thenThrow(new SrppCaptureProblem(HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
+        when(eventEvidence.capture(raw)).thenThrow(new SrppCaptureProblem(HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
         when(service.evaluate(raw)).thenThrow(new SrppCaptureProblem(HttpStatus.BAD_REQUEST, "INVALID_REQUEST"));
 
         mvc.perform(post(EVENT_PATH).contentType(MediaType.APPLICATION_JSON).content(raw)).andReturn();
         mvc.perform(post(DECISION_PATH).contentType(MediaType.APPLICATION_JSON).content(raw)).andReturn();
 
-        verify(service).captureEvent(raw);
+        verify(eventEvidence).capture(raw);
         verify(service).evaluate(raw);
-        verifyNoMoreInteractions(service);
+        verifyNoMoreInteractions(service, eventEvidence);
     }
 
     @ParameterizedTest(name = "{0} 成功路徑回應處理維持不變")
     @CsvSource({"event," + EVENT_PATH, "decision," + DECISION_PATH})
     void successPathKeepsStatusJsonContentTypeAndNoStore(String endpoint, String path) throws Exception {
         String body = "{\"status\":\"FINAL\"}";
-        SrppCaptureService.Result created = new SrppCaptureService.Result(HttpStatus.CREATED, body, false);
         if ("event".equals(endpoint)) {
-            when(service.captureEvent(BODY)).thenReturn(created);
+            when(eventEvidence.capture(BODY)).thenReturn(new EventEvidenceCaptureService.Result(HttpStatus.CREATED, body, "id", "hash"));
         } else {
-            when(service.evaluate(BODY)).thenReturn(created);
+            when(service.evaluate(BODY)).thenReturn(new SrppCaptureService.Result(HttpStatus.CREATED, body, false));
         }
 
         MvcResult result = mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(BODY)).andReturn();
@@ -112,7 +113,7 @@ class InternalSrppCaptureControllerTest {
 
     private void stubThrow(String endpoint, SrppCaptureProblem problem) {
         if ("event".equals(endpoint)) {
-            when(service.captureEvent(BODY)).thenThrow(problem);
+            when(eventEvidence.capture(BODY)).thenThrow(problem);
         } else {
             when(service.evaluate(BODY)).thenThrow(problem);
         }
