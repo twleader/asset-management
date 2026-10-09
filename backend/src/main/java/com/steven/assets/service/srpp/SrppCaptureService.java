@@ -1,37 +1,34 @@
 package com.steven.assets.service.srpp;
 
-import com.fasterxml.jackson.databind.*;
-import com.fasterxml.jackson.databind.node.*;
-import com.steven.assets.model.*;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.steven.assets.repository.*;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.srpp.SrppJcs;
 import java.time.*;
 import java.util.*;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-/** Task 481/482 capture boundary: no HTTP client, no cache refresh and no broker operation. */
+/**
+ * Task 483：SRPP 事件證據與決策 API 的 fail-closed 邊界（無 HTTP client、無快取寫入、無券商操作）。
+ *
+ * <p>t481／t482 真正實作前，兩個入口在 request 通過嚴格驗證後一律回 503 {@code CONTEXT_NOT_READY}：
+ * 不讀、不寫任何 repository，也不 replay 資料庫中既有的佔位列，避免把空結果凍結成不可變 FINAL 收據。
+ */
 @Service @RequiredArgsConstructor
 public class SrppCaptureService {
-    private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> EVENT_FIELDS=Set.of("ownerEmail","tradingDate","slot","analysisProfile","policyBundleSha256","swaggerSha256");
     private static final Set<String> DECISION_FIELDS=Set.of("ownerEmail","tradingDate","slot","policyBundleSha256","swaggerSha256");
+    // events／decisions 暫時只保留依賴、不呼叫任何方法（Task 483.2）；t481、t482 會各自移除或取代。
     private final SrppEventEvidenceRepository events; private final SrppDecisionRunRepository decisions; private final MarketDataService marketData;
 
-    @Transactional public Result captureEvent(String raw) { Request r=request(raw, EVENT_FIELDS, true); var existing=events.findByOwnerEmailAndTradingDateAndSlotAndAnalysisProfile(r.owner,r.date,r.slot,r.profile).orElse(null); if(existing!=null) return eventReplay(existing,r); Instant now=Instant.now(); ObjectNode body=eventBody(r, now); String content=SrppJcs.canonicalize(body), hash=body.path("contentSha256").asText(); SrppEventEvidence row=new SrppEventEvidence(); row.id=UUID.randomUUID(); row.ownerEmail=r.owner;row.tradingDate=r.date;row.slot=r.slot;row.analysisProfile=r.profile;row.policyBundleSha256=r.policy;row.swaggerSha256=r.swagger;row.status="FINAL";row.inputSnapshotSha256=SrppJcs.hash(requestNode(r));row.contentSha256=hash;row.contentJcs=content;row.createdAt=now;row.finalizedAt=now; try { events.saveAndFlush(row); } catch(DataIntegrityViolationException collision) { return eventReplay(events.findByOwnerEmailAndTradingDateAndSlotAndAnalysisProfile(r.owner,r.date,r.slot,r.profile).orElseThrow(()->collision),r); } return new Result(HttpStatus.CREATED, content, false); }
-    @Transactional public Result evaluate(String raw) { Request r=request(raw, DECISION_FIELDS, false); var existing=decisions.findByOwnerEmailAndTradingDateAndSlot(r.owner,r.date,r.slot).orElse(null); if(existing!=null) return decisionReplay(existing,r); Instant now=Instant.now(); ObjectNode body=decisionBody(r,now); String content=SrppJcs.canonicalize(body), hash=body.path("decisionContentSha256").asText(); SrppDecisionRun row=new SrppDecisionRun(); row.id=UUID.randomUUID();row.ownerEmail=r.owner;row.tradingDate=r.date;row.slot=r.slot;row.policyBundleSha256=r.policy;row.swaggerSha256=r.swagger;row.status="FINAL";row.inputSnapshotSha256=SrppJcs.hash(requestNode(r));row.decisionContentSha256=hash;row.contentJcs=content;row.createdAt=now;row.finalizedAt=now; try { decisions.saveAndFlush(row); } catch(DataIntegrityViolationException collision) { return decisionReplay(decisions.findByOwnerEmailAndTradingDateAndSlot(r.owner,r.date,r.slot).orElseThrow(()->collision),r); } return new Result(HttpStatus.CREATED,content,false); }
-    private Result eventReplay(SrppEventEvidence row, Request r) { if(!same(row.policyBundleSha256,r.policy)||!same(row.swaggerSha256,r.swagger)||!"FINAL".equals(row.status)) throw new SrppCaptureProblem(HttpStatus.CONFLICT,"RUN_METADATA_MISMATCH"); return new Result(HttpStatus.OK,row.contentJcs,true); }
-    private Result decisionReplay(SrppDecisionRun row, Request r) { if(!same(row.policyBundleSha256,r.policy)||!same(row.swaggerSha256,r.swagger)||!"FINAL".equals(row.status)) throw new SrppCaptureProblem(HttpStatus.CONFLICT,"RUN_METADATA_MISMATCH"); return new Result(HttpStatus.OK,row.contentJcs,true); }
-    private static boolean same(String a,String b){ return Objects.equals(a,b); }
+    /** 驗證通過後 fail closed：刻意不加 {@code @Transactional}，也不觸碰 {@link #events}。 */
+    public Result captureEvent(String raw) { request(raw, EVENT_FIELDS, true); throw new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY"); }
+    /** 驗證通過後 fail closed：刻意不加 {@code @Transactional}，也不觸碰 {@link #decisions}。 */
+    public Result evaluate(String raw) { request(raw, DECISION_FIELDS, false); throw new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE, "CONTEXT_NOT_READY"); }
     private Request request(String raw, Set<String> fields, boolean event) { JsonNode n; try { n=SrppJcs.parseStrict(raw); } catch(Exception e) { throw new SrppCaptureProblem(HttpStatus.BAD_REQUEST,"INVALID_REQUEST"); } if(!n.isObject()||n.size()!=fields.size()) bad(); n.fieldNames().forEachRemaining(k->{if(!fields.contains(k))bad();}); String owner=text(n,"ownerEmail"),date=text(n,"tradingDate"),slot=text(n,"slot"),policy=text(n,"policyBundleSha256"),swagger=text(n,"swaggerSha256"),profile=event?text(n,"analysisProfile"):"TW_DAILY"; if(owner.isBlank()||!owner.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+"))bad(); LocalDate parsed;try{parsed=LocalDate.parse(date);}catch(Exception e){throw new SrppCaptureProblem(HttpStatus.BAD_REQUEST,"INVALID_REQUEST");} if(!parsed.equals(LocalDate.now(ZoneId.of("Asia/Taipei")))||!Set.of("09:05","11:40").contains(slot)||!policy.matches("[a-f0-9]{64}")||!swagger.matches("[a-f0-9]{64}")||!"TW_DAILY".equals(profile))bad(); Optional<Boolean> trading=marketData.isTradingDayCachedOnly("台股",parsed); if(trading.isEmpty())throw new SrppCaptureProblem(HttpStatus.SERVICE_UNAVAILABLE,"CALENDAR_UNAVAILABLE"); if(!trading.get())throw new SrppCaptureProblem(HttpStatus.CONFLICT,"NON_TRADING_DAY"); return new Request(owner,parsed,slot,profile,policy,swagger); }
     private static void bad(){throw new SrppCaptureProblem(HttpStatus.BAD_REQUEST,"INVALID_REQUEST");}
     private static String text(JsonNode n,String f){JsonNode v=n.get(f);return v!=null&&v.isTextual()?v.textValue().trim():"";}
-    private static ObjectNode requestNode(Request r){ObjectNode n=JSON.createObjectNode();n.put("ownerEmail",r.owner);n.put("tradingDate",r.date.toString());n.put("slot",r.slot);n.put("analysisProfile",r.profile);n.put("policyBundleSha256",r.policy);n.put("swaggerSha256",r.swagger);return n;}
-    private static ObjectNode eventBody(Request r,Instant now){ObjectNode n=requestNode(r);n.put("schemaVersion","SRPP_EVENT_EVIDENCE_V1");n.put("eventEvidenceId",UUID.randomUUID().toString());n.put("status","FINAL");n.put("capturedAt",now.toString());n.put("inputSnapshotSha256",SrppJcs.hash(requestNode(r)));n.putArray("officialEvents");ObjectNode risk=n.putObject("riskAssessment");risk.put("status","SOURCE_UNAVAILABLE");risk.putArray("risks");n.put("tradeAuthorization",false);n.put("placesOrders",false);n.put("contentSha256",SrppJcs.sha256Hex(SrppJcs.canonicalize(n)));return n;}
-    private ObjectNode decisionBody(Request r,Instant now){ObjectNode n=requestNode(r);n.put("schemaVersion","SRPP_DAILY_DECISION_V1");n.put("decisionRunId",UUID.randomUUID().toString());n.put("status","FINAL");n.put("created",now.toString());ObjectNode authority=n.putObject("authorityRevision");authority.put("serviceBuild","asset-management");authority.put("databaseSchema","v1.145.0");authority.put("calculatorVersion","SRPP_REPORT_ONLY_V1");ObjectNode input=n.putObject("inputSnapshot");input.put("inputSnapshotSha256",SrppJcs.hash(requestNode(r)));input.put("capturedAt",now.toString());input.put("assetSnapshotId","UNAVAILABLE");input.put("assetGeneratedAt","");input.putArray("sourceVector");ObjectNode d=n.putObject("decision");d.put("executionScope","REPORT_RECOMMENDATION_ONLY");d.put("tradeAuthorization",false);d.put("placesOrders",false);ArrayNode candidates=d.putArray("candidates");for(String symbol:List.of("00865B","00719B","00697B")){ObjectNode c=candidates.addObject();c.put("symbol",symbol);c.put("strategy","TW_DAILY");c.put("status","BLOCKED");c.put("action","NONE");c.put("lots",0);c.putNull("limitPrice");c.putNull("amountTwd");c.putArray("blockingReasons").add("CONTEXT_NOT_READY");c.putArray("receipts");} n.put("decisionContentSha256",SrppJcs.sha256Hex(SrppJcs.canonicalize(n)));return n;}
     private record Request(String owner,LocalDate date,String slot,String profile,String policy,String swagger){} public record Result(HttpStatus status,String body,boolean replay){}
 }
