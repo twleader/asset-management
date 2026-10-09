@@ -495,8 +495,8 @@ Docker 外部 API 的唯一本機入口為 `http://127.0.0.1:9090`，只有十�
 **不需額外密碼或 token**——這是刻意設計，不是遺漏；意味著任何能到達 9090 的人只要知道
 一個有效帳號的 email，就能讀到該帳號完整的個人資料，請務必只在信任的網路邊界內使用。`commodity-prices` 每次只讀既有已持久化 WTI、BRENT、GOLD spot，固定三個 slot；
 它不接受 query 或 GET body，也不會 refresh 或 request-time 外呼。`srpp/daily-context`（Requirement 163）沿用同一 `email` owner selector，只讀背景 producer 已發布的 SRPP 共用計算結果；規則包 registry 為空時一律回 409 `POLICY_UNSUPPORTED`。十四支 API 的完整 OpenAPI 3.1 契約在
-`docs/openapi/docker-external-api.yaml`；由該 YAML 產生、供人閱讀的標準文件同時位於
-`docs/openapi/9090-api-swagger.md` 與 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`（後者只在地端同步，雲端 session 不覆寫）；Swagger UI 與 YAML 本身並沒有掛在 9090。
+`docs/openapi/docker-external-api.yaml`；由該 YAML 產生、供人閱讀的標準文件共三份且位元組一致：
+`docs/openapi/9090-api-swagger.md`、隨 business-services 發布的 `backend/src/main/resources/srpp/9090-api-swagger.md`（其 SHA-256 即「已發布 Swagger 身分」，改 YAML 後須重建 `business-services`），以及 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`（後者只在地端同步，雲端 session 不覆寫）；Swagger UI 與 YAML 本身並沒有掛在 9090。
 
 ### 6.3 開啟系統並登入
 

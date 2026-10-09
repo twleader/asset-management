@@ -46,8 +46,8 @@ MANIFEST = {
   ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
   ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
-  ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 502 503],
-  ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[200 201 400 409 415 502 503]
+  ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 500 502 503],
+  ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[200 201 400 409 415 500 502 503]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -205,7 +205,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.20.0', 'Task 482 後 OpenAPI info.version 必須為 1.20.0')
+assert!(document.dig('info', 'version') == '1.21.0', 'Task 484 後 OpenAPI info.version 必須為 1.21.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -550,6 +550,25 @@ srpp_problem = schemas.fetch('SrppProblem')
 assert!(srpp_problem.fetch('required') == %w[type title status detail instance code retryable] &&
         srpp_problem.fetch('additionalProperties') == false,
         'SrppProblem 必須是固定七欄 RFC 9457 object')
+%w[/api/public/srpp/event-evidence/capture /api/public/srpp/daily-decision/evaluate].each do |path|
+  capture_operation = openapi_routes.fetch(['POST', path])
+  capture_operation.fetch('responses').each do |status, response|
+    next if status.start_with?('2')
+
+    assert!(response.fetch('content').keys == ['application/problem+json'] &&
+            response.dig('content', 'application/problem+json', 'schema') ==
+              {'$ref' => '#/components/schemas/SrppCaptureProblem'},
+            "POST #{path} #{status} 必須是 SrppCaptureProblem")
+  end
+end
+capture_problem = schemas.fetch('SrppCaptureProblem')
+assert!(capture_problem.fetch('required') == %w[type title status detail instance code retryable] &&
+        capture_problem.fetch('properties').keys == %w[type title status detail instance code retryable errors] &&
+        capture_problem.fetch('additionalProperties') == false,
+        'SrppCaptureProblem 必須是固定七欄 RFC 9457 object，errors[] 為選填')
+assert!(capture_problem.dig('properties', 'instance', 'enum') ==
+          %w[/api/public/srpp/event-evidence/capture /api/public/srpp/daily-decision/evaluate],
+        'SrppCaptureProblem.instance 必須是兩個 capture 公開路徑')
 srpp_text = File.read(OPENAPI)
 assert!(!srpp_text.include?('x-implementation-status') && !srpp_text.include?('尚未部署') &&
         !srpp_text.include?('尚未實作'), 'SRPP 契約不得保留 proposal 的提案／尚未部署字樣')
@@ -869,8 +888,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 144,
-        "全量 strict audit 預期 144 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 145,
+        "全量 strict audit 預期 145 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -920,7 +939,16 @@ bff_security = File.read(BFF_SECURITY)
 end
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
-assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且兩份文件必須 byte-identical')
+assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且三份文件必須 byte-identical')
+
+# Task 484.9：business-services 以 classpath resource 計算「已發布 Swagger 身分」，它必須與 docs 版本位元組一致；
+# SRPP 鏡像只在地端同步（雲端以 CLAUDE_CODE_REMOTE=true 辨識，該處沒有 SRPP 專案）。
+swagger_copies = [File.join(ROOT, 'docs/openapi/9090-api-swagger.md'),
+                  File.join(ROOT, 'backend/src/main/resources/srpp/9090-api-swagger.md')]
+swagger_copies << '/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md' unless ENV['CLAUDE_CODE_REMOTE'] == 'true'
+swagger_copies.each { |copy| assert!(File.file?(copy), "缺 9090 Swagger Markdown：#{copy}") }
+assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.length == 1,
+        "9090 Swagger Markdown 各份必須位元組一致：#{swagger_copies.join(', ')}")
 
 assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
 puts 'PASS: 9090 gateway/OpenAPI 二十三條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
