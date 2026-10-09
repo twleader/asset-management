@@ -27,7 +27,7 @@ class ApiErrorLogServiceTest {
         verifyNoInteractions(repository);
     }
 
-    @Test void catalog_has_all_36_fixed_source_key_name_url_and_order_values() {
+    @Test void catalog_has_all_40_fixed_source_key_name_url_and_order_values() {
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).containsExactlyElementsOf(expectedCatalog());
         assertThat(ApiErrorLogOperationCatalog.OPERATIONS).allSatisfy(operation ->
                 assertThat(operation.apiUrl()).isNotBlank());
@@ -38,8 +38,8 @@ class ApiErrorLogServiceTest {
         List<ApiErrorLogOperationCatalog.Operation> expected = expectedCatalog();
 
         assertThat(service.operations("ALL")).containsExactlyElementsOf(expected);
-        assertThat(service.operations(ApiErrorLogOperationCatalog.OPEN_API)).containsExactlyElementsOf(expected.subList(0, 19));
-        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(19, 36));
+        assertThat(service.operations(ApiErrorLogOperationCatalog.OPEN_API)).containsExactlyElementsOf(expected.subList(0, 23));
+        assertThat(service.operations(ApiErrorLogOperationCatalog.FUBON_API)).containsExactlyElementsOf(expected.subList(23, 40));
     }
 
     @Test void operations_json_has_exactly_five_fields_and_list_detail_do_not_expose_api_url() throws Exception {
@@ -102,6 +102,10 @@ class ApiErrorLogServiceTest {
                 operation("OPEN_API", "OPEN_SRPP_MARKET_FACTS", "SRPP 批次市場事實", "GET /api/public/srpp/market-facts", 170),
                 operation("OPEN_API", "OPEN_SRPP_COMPLETED_TECHNICALS", "SRPP 完成日技術事實", "GET /api/public/srpp/completed-technicals", 180),
                 operation("OPEN_API", "OPEN_SRPP_TECHNICAL_SERIES", "SRPP 逐日技術序列", "GET /api/public/srpp/technical-series", 190),
+                operation("OPEN_API", "OPEN_SRPP_DAILY_REPORT_MAIL", "SRPP 日報寄送", "POST /api/srpp/daily-report-mail", 200),
+                operation("OPEN_API", "OPEN_SRPP_DAILY_REPORT_MAIL_STATUS", "SRPP 日報寄送狀態", "GET /api/srpp/daily-report-mail/{idempotencyKey}", 210),
+                operation("OPEN_API", "OPEN_SRPP_EVENT_EVIDENCE", "SRPP 事件證據收據", "POST /api/public/srpp/event-evidence/capture", 220),
+                operation("OPEN_API", "OPEN_SRPP_DAILY_DECISION", "SRPP 日報決策收據", "POST /api/public/srpp/daily-decision/evaluate", 230),
                 operation("FUBON_API", "FUBON_PORTFOLIO_READ", "庫存與未實現損益", "POST /internal/portfolio/read", 10),
                 operation("FUBON_API", "FUBON_TW_QUOTES_INVENTORY", "庫存同步台股報價", "POST /internal/market-data/tw-quotes", 20),
                 operation("FUBON_API", "FUBON_FILLED_TRADES_READ", "已成交交易查詢", "POST /internal/trades/read", 30),

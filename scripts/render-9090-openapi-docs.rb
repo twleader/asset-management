@@ -1,20 +1,24 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Deterministic renderer for the two human-readable mirrors of the versioned 9090
-# OpenAPI contract.  The YAML is the only content source: do not hand-edit either
-# generated Markdown target.
+# Deterministic renderer for the three byte-identical Markdown copies of the versioned
+# 9090 OpenAPI contract (repo docs, business-services classpath resource, SRPP mirror).
+# The YAML is the only content source: do not hand-edit any generated Markdown target.
 
+require 'fileutils'
 require 'yaml'
 
 ROOT = File.expand_path('..', __dir__)
 OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
 REPO_TARGET = File.join(ROOT, 'docs/openapi/9090-api-swagger.md')
+# Task 484.9：business-services 隨 jar 發布的已發布 Swagger 身分來源（PublishedSwaggerIdentity 讀它算
+# SHA-256）；business 的 Docker build context 只有 ./backend，所以必須在 backend 內保留一份位元組一致的副本。
+BACKEND_RESOURCE_TARGET = File.join(ROOT, 'backend/src/main/resources/srpp/9090-api-swagger.md')
 SRPP_MIRROR_TARGET = '/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md'
 # SRPP 鏡像只在地端同步（寫入與 --check 皆然）；雲端（Claude Code on the web 等遠端環境，
-# 以 CLAUDE_CODE_REMOTE=true 辨識）沒有 SRPP 專案，一律略過，只維護本專案鏡像。
+# 以 CLAUDE_CODE_REMOTE=true 辨識）沒有 SRPP 專案，一律略過，只維護本專案內的兩份（docs 與 backend resource）。
 CLOUD_SESSION = ENV['CLAUDE_CODE_REMOTE'] == 'true'
-TARGETS = (CLOUD_SESSION ? [REPO_TARGET] : [REPO_TARGET, SRPP_MIRROR_TARGET]).freeze
+TARGETS = (CLOUD_SESSION ? [REPO_TARGET, BACKEND_RESOURCE_TARGET] : [REPO_TARGET, BACKEND_RESOURCE_TARGET, SRPP_MIRROR_TARGET]).freeze
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 WEAK_DESCRIPTION = /\A(?:`?[A-Za-z0-9_.-]+`?\s*)?(?:資料|欄位|物件|陣列|schema)\.?\z/i
 LEGACY_DESCRIPTION_FALLBACK = '型別、可空性與限制以本 OpenAPI schema 為準。'
@@ -185,7 +189,7 @@ def validate_document!(document)
   end
 
   reachable = reachable_schema_names(document)
-  assert!(reachable.length == 144, "預期 144 個 reachable component schema，實際為 #{reachable.length}")
+  assert!(reachable.length == 145, "預期 145 個 reachable component schema，實際為 #{reachable.length}")
   reachable.each do |name|
     validate_schema_node!(schemas.fetch(name), "components.schemas.#{name}")
   end
@@ -209,7 +213,7 @@ def render(document)
   lines = []
   lines << '# 9090 Port API Swagger'
   lines << ''
-  lines << '本文件由 `docs/openapi/docker-external-api.yaml` 自動產生；請勿手動修改。兩個 Markdown 位置必須位元組一致。'
+  lines << '本文件由 `docs/openapi/docker-external-api.yaml` 自動產生；請勿手動修改。三個 Markdown 位置必須位元組一致。'
   lines << ''
   lines << '## 概覽'
   lines << ''
@@ -327,6 +331,8 @@ elsif ARGV == ['--check']
     exit 1
   end
 else
+  # 只為 backend classpath resource 建立目錄；SRPP 鏡像的父目錄不存在時必須明確失敗，不得悄悄建立。
+  FileUtils.mkdir_p(File.dirname(BACKEND_RESOURCE_TARGET))
   TARGETS.each { |target| File.binwrite(target, rendered) }
   puts "rendered #{TARGETS.length} byte-identical 9090 OpenAPI Markdown mirrors"
   puts 'SKIP: 雲端環境（CLAUDE_CODE_REMOTE=true）不覆寫 SRPP 鏡像，地端才同步' if CLOUD_SESSION

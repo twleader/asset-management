@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.20.0
+  version: 1.21.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
     十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -1599,11 +1599,12 @@ paths:
       responses:
         '200': {description: 同一 identity 的不可變 FINAL replay。, content: {application/json: {schema: {type: object}, example: {status: FINAL, tradeAuthorization: false, placesOrders: false}}}}
         '201': {description: 首次完成 immutable capture。, content: {application/json: {schema: {type: object}, example: {status: FINAL, tradeAuthorization: false, placesOrders: false}}}}
-        '400': {description: 請求欄位、日期、slot、profile 或 hash 不合法。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '409': {description: metadata 與既有收據不符或非交易日。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '415': {description: 僅接受 application/json。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '502': {description: 已保存的上游資料違反來源契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '503': {description: canonical context 尚未就緒。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '400': {description: body 為空或全空白，或請求欄位、日期、slot、profile 或 hash 不合法，code 為 INVALID_REQUEST。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '409': {description: metadata 與既有收據不符或非交易日。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '415': {description: Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '500': {description: 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '502': {description: 已保存的上游資料違反來源契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '503': {description: canonical context 尚未就緒。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
       x-codex-route-policy: exact-report-only-post
   /api/public/srpp/daily-decision/evaluate:
     post:
@@ -1620,11 +1621,12 @@ paths:
       responses:
         '200': {description: 同一 identity 的不可變 FINAL replay。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
         '201': {description: 首次完成 immutable report receipt。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
-        '400': {description: 請求欄位、日期、slot 或 hash 不合法。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '409': {description: metadata、policy、Swagger 或交易日不符。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '415': {description: 僅接受 application/json。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '502': {description: 已保存來源資料違反契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
-        '503': {description: L0 context 或 owner 尚未可用。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/ProblemDetail'}}}}
+        '400': {description: body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '409': {description: metadata、policy、Swagger 或交易日不符。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '415': {description: Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '500': {description: 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '502': {description: 已保存來源資料違反契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '503': {description: L0 context 或 owner 尚未可用。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
       x-codex-route-policy: exact-report-only-post
   /api/srpp/daily-report-mail/{idempotencyKey}:
     get:
@@ -10292,6 +10294,70 @@ components:
         retryable:
           type: boolean
           description: 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘（含 OWNER_UNAVAILABLE）為 false。
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - instance
+      - code
+      - retryable
+    SrppCaptureProblem:
+      type: object
+      additionalProperties: false
+      description: RFC 9457 Problem Details：SRPP 事件證據（capture）與日報決策（evaluate）兩個 POST 的固定七欄錯誤格式（需要逐項錯誤的 code 另帶選填 errors）；文案由 BFF 與 business 的 capture 專用目錄依 code 固定輸出，不含帳號、SQL、內部 URL 或例外訊息，且一律 Cache-Control no-store。
+      properties:
+        type:
+          type: string
+          const: about:blank
+          description: problem 類型，常數 `about:blank`。
+        title:
+          type: string
+          description: 依 code 固定的英文標題。
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+          description: 與 HTTP status 相同的整數狀態碼。
+        detail:
+          type: string
+          description: 依 code 固定、經清理的繁體中文說明。
+        instance:
+          type: string
+          enum:
+          - /api/public/srpp/event-evidence/capture
+          - /api/public/srpp/daily-decision/evaluate
+          description: 發生錯誤的公開請求路徑：`/api/public/srpp/event-evidence/capture` 或 `/api/public/srpp/daily-decision/evaluate`。
+        code:
+          type: string
+          enum:
+          - INVALID_REQUEST
+          - UNSUPPORTED_MEDIA_TYPE
+          - NON_TRADING_DAY
+          - POLICY_UNSUPPORTED
+          - SWAGGER_MISMATCH
+          - OWNER_UNAVAILABLE
+          - CALENDAR_UNAVAILABLE
+          - CONTEXT_NOT_READY
+          - UPSTREAM_INVALID
+          - INTERNAL_ERROR
+          description: 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤。
+        retryable:
+          type: boolean
+          description: 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘為 false。
+        errors:
+          type: array
+          description: 選填的逐項錯誤清單；只有需要逐項說明的 code 才出現，其他 problem 不帶此欄。
+          items:
+            type: object
+            additionalProperties: true
+            required:
+            - code
+            description: 單一逐項錯誤；code 必填，各端點可另附定位欄位。
+            properties:
+              code:
+                type: string
+                description: 逐項錯誤碼，由各端點的契約定義。
       required:
       - type
       - title

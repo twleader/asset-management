@@ -26,8 +26,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 /**
  * Task 483.6：兩個 SRPP POST 端點把 {@link SrppCaptureProblem} 轉成 {@code application/problem+json}。
  *
- * <p>四欄 problem body 是暫時形狀（t481 會擴充為 RFC 9457 七欄），因此只斷言狀態碼、{@code code}、
- * {@code Content-Type} 與 {@code Cache-Control}，不斷言完整欄位集合。
+ * <p>本類只斷言狀態碼、{@code code}、{@code Content-Type} 與 {@code Cache-Control}；Task 484 的七欄 problem、
+ * Content-Type 與未預期例外由 {@link InternalSrppCaptureControllerWebMvcTest} 以 MVC 切片驗證。
  */
 class InternalSrppCaptureControllerTest {
     private static final String EVENT_PATH = "/internal/srpp/event-evidence/capture";
