@@ -69,7 +69,7 @@ public class PublicTradingRadarProjectionService {
                 stock.changePercent(), stock.quoteStatus(), stock.etfPremiumLivePct(),
                 stock.etfPremiumLiveNavAsOf(), stock.weeklyMa(), stock.monthlyMa(), stock.quarterlyMa(),
                 stock.annualMa(), stock.kValue(), stock.dValue(), stock.kdHeat(), stock.weeklyIndicators(),
-                stock.asOfDate());
+                stock.asOfDate(), stock.intradayCandleConfirmation());
     }
 
     /** 內部 endpoint 只需 status；public BFF 一律將 detail/content 消毒後再回外部。 */

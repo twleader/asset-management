@@ -105,7 +105,8 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
             }
         Map<String, Object> before = factCoverage(campaign.symbols());
         Map<FubonHistoricalBackfillReceiptStore.WindowKey, FubonHistoricalBackfillReceiptStore.Attempt> latestAttempts = receipts.latestAttempts(campaign.id());
-        List<FubonHistoricalBackfillPlanner.Window> windows = FubonHistoricalBackfillPlanner.windows(campaign.symbols(), campaign.from(), campaign.to());
+        List<FubonHistoricalBackfillPlanner.Window> windows = FubonHistoricalBackfillPlanner.windows(
+                campaign.symbols(), campaign.from(), campaign.to(), FubonMinuteRetentionFloor.today());
         String blocking = null;
         for (var window : windows) {
             var key = new FubonHistoricalBackfillReceiptStore.WindowKey(window.dataset(), window.symbol(), window.from(), window.to());
@@ -143,8 +144,8 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
         Map<String, Object> after = factCoverage(campaign.symbols());
         Map<String, Object> report = report(campaign, before, after, latestAttempts, blocking);
         boolean allPlannedWindowsResolved = allPlannedWindowsResolved(windows, latestAttempts);
-        boolean success = blocking == null && allPlannedWindowsResolved
-                && latestAttempts.values().stream().noneMatch(a -> Set.of("FAILED", "CONFLICT", "SCOPE_CHANGED", "STARTED").contains(a.status()));
+        // Expired minute-window receipts remain audit history and no longer block a retained-range resume.
+        boolean success = blocking == null && allPlannedWindowsResolved;
         String json;
         try { json = mapper.writeValueAsString(report); } catch (Exception e) { json = "{}"; success = false; }
         receipts.finishCampaign(campaign.id(), success ? "SUCCESS" : "PARTIAL", json);
@@ -195,7 +196,12 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
             return new FubonHistoricalBackfillReceiptStore.AttemptResult(read.candles().isEmpty() ? "NO_DATA" : "COMPLETE",
                     read.observedAt(), read.candles().size(), inserted, unchanged, 0, null);
         }
-        HistoricalIntradayCandlesRead read = client.historicalIntradayCandles(w.symbol(), w.from(), w.to());
+        // Recheck at dispatch, including delayed old campaign/resume windows.
+        LocalDate retentionFloor = FubonMinuteRetentionFloor.today();
+        if (w.to().isBefore(retentionFloor)) return new FubonHistoricalBackfillReceiptStore.AttemptResult(
+                "NO_DATA", Instant.now(), 0, 0, 0, 0, "RETENTION_EXPIRED");
+        LocalDate retainedFrom = w.from().isBefore(retentionFloor) ? retentionFloor : w.from();
+        HistoricalIntradayCandlesRead read = client.historicalIntradayCandles(w.symbol(), retainedFrom, w.to());
         if ("NO_DATA".equals(read.status())) return new FubonHistoricalBackfillReceiptStore.AttemptResult("NO_DATA", read.observedAt(), 0, 0, 0, 0, null);
         var persisted = minuteFacts.persistHistoricalCandles(read);
         if (persisted.status() == FubonMarketDataHistoryStore.Status.FAILED) throw new Unavailable("MINUTE_PERSISTENCE_FAILED", true);

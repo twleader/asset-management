@@ -140,7 +140,57 @@ public final class TradingRadarDto {
             BigDecimal dValue,
             String kdHeat,
             ListWeeklyIndicators weeklyIndicators,
-            String dailyCandleAsOfDate) {}
+            String dailyCandleAsOfDate,
+            IntradayCandleConfirmation intradayCandleConfirmation) {
+        /** Previous wire shape: historical snapshots retain null confirmation. */
+        public ListStock(
+                String stockCode,
+                String stockName,
+                String market,
+                String assetClass,
+                boolean distributionAdjusted,
+                boolean held,
+                BigDecimal fxPercentile,
+                String underlyingCurrency,
+                ListFundamental fundamental,
+                String shortAction,
+                String shortActionLabel,
+                Integer shortScore,
+                String swingAction,
+                String swingActionLabel,
+                Integer swingScore,
+                String action,
+                String actionLabel,
+                Integer score,
+                boolean horizonConflict,
+                String timingState,
+                String timingLabel,
+                String counterTrendState,
+                String counterTrendLabel,
+                BigDecimal price,
+                BigDecimal changePercent,
+                String quoteStatus,
+                String priceUpdatedAt,
+                BigDecimal etfPremiumLivePct,
+                String etfPremiumLiveNavAsOf,
+                BigDecimal weeklyMa,
+                BigDecimal monthlyMa,
+                BigDecimal quarterlyMa,
+                BigDecimal annualMa,
+                BigDecimal kValue,
+                BigDecimal dValue,
+                String kdHeat,
+                ListWeeklyIndicators weeklyIndicators,
+                String dailyCandleAsOfDate) {
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    fxPercentile, underlyingCurrency, fundamental, shortAction, shortActionLabel, shortScore,
+                    swingAction, swingActionLabel, swingScore, action, actionLabel, score,
+                    horizonConflict, timingState, timingLabel, counterTrendState, counterTrendLabel, price,
+                    changePercent, quoteStatus, priceUpdatedAt, etfPremiumLivePct, etfPremiumLiveNavAsOf, weeklyMa,
+                    monthlyMa, quarterlyMa, annualMa, kValue, dValue, kdHeat,
+                    weeklyIndicators, dailyCandleAsOfDate, null);
+        }
+    }
 
     /**
      * 公開財經資訊原文；主頁市場清單使用台灣／美國近 72 小時，個股基本面證據使用台灣近 120 日。
@@ -956,7 +1006,22 @@ public final class TradingRadarDto {
             BigDecimal middleBand, BigDecimal upperBand, BigDecimal lowerBand,
             BigDecimal percentB, BigDecimal bandWidthPercent) {}
 
-    /** Persisted Fubon raw SMA20 comparison; it is provenance or a conservative veto, never a second score. */
+    /** Local aggregation receipt: minute and five-minute times are completed endpoints. */
+    public record IntradayCandleConfirmation(String status, String reason, String sourceDate,
+            String observedAt, String lastCompletedAt, String fiveMinuteAt, String oneMinuteAt,
+            String aggregationSource) {
+        public static IntradayCandleConfirmation from(
+                com.steven.assets.service.RadarIntradayCandlePolicy.Confirmation value) {
+            return value == null ? null : new IntradayCandleConfirmation(value.status(), value.reason(),
+                    value.sourceDate() == null ? null : value.sourceDate().toString(),
+                    value.observedAt() == null ? null : value.observedAt().toString(),
+                    value.lastCompletedAt() == null ? null : value.lastCompletedAt().toString(),
+                    value.fiveMinuteAt() == null ? null : value.fiveMinuteAt().toString(),
+                    value.oneMinuteAt() == null ? null : value.oneMinuteAt().toString(), value.aggregationSource());
+        }
+    }
+
+    /** Persisted raw SMA20 comparison: provenance or a conservative veto, never a second score. */
     public record OfficialSma20Verification(String status, String sourceDate, String reason,
                                             BigDecimal officialValue, BigDecimal localValue,
                                             BigDecimal difference, boolean gateApplied) {}
@@ -1088,8 +1153,103 @@ public final class TradingRadarDto {
             /** Local completed adjusted BB20/2; old snapshots retain null. */
             Bollinger bollinger,
             OfficialSma20Verification officialSma20Verification,
-            PriceReference priceReference
+            PriceReference priceReference,
+            IntradayCandleConfirmation intradayCandleConfirmation
     ) {
+        /** Previous wire shape: historical snapshots retain null confirmation. */
+        public StockDecision(
+                String stockCode,
+                String stockName,
+                String market,
+                String assetClass,
+                boolean distributionAdjusted,
+                boolean held,
+                String action,
+                String actionLabel,
+                Integer score,
+                String counterTrendState,
+                String counterTrendLabel,
+                List<String> counterTrendReasons,
+                List<String> counterTrendRisks,
+                boolean dataComplete,
+                BigDecimal price,
+                BigDecimal changePercent,
+                String quoteStatus,
+                String priceUpdatedAt,
+                String asOfDate,
+                BigDecimal monthlyMa,
+                BigDecimal quarterlyMa,
+                BigDecimal annualMa,
+                BigDecimal kValue,
+                BigDecimal dValue,
+                String monthlyConfirmation,
+                String quarterlyConfirmation,
+                String annualConfirmation,
+                BigDecimal fxPercentile,
+                String underlyingCurrency,
+                List<String> reasons,
+                List<String> risks,
+                String kdHeat,
+                String timingState,
+                String timingLabel,
+                BigDecimal ma60BiasPercent,
+                BigDecimal week52Position,
+                BigDecimal weeklyMa,
+                BigDecimal etfPremiumPct,
+                BigDecimal etfPremiumPercentile,
+                ExtendedIndicators extendedIndicators,
+                String shortAction,
+                String shortActionLabel,
+                Integer shortScore,
+                List<String> shortReasons,
+                List<String> shortRisks,
+                boolean horizonConflict,
+                BigDecimal volumeRatio,
+                String fxAsOfDate,
+                boolean profitTakingConfirmed,
+                FundamentalSnapshot fundamental,
+                RadarEvidence evidence,
+                Integer shortDownsideRisk,
+                Integer mediumDownsideRisk,
+                Integer shortEvidenceConfidence,
+                Integer mediumEvidenceConfidence,
+                Double shortRiskCoverage,
+                Double mediumRiskCoverage,
+                String candidateAction,
+                String shortCandidateAction,
+                List<String> actionGateReasons,
+                BigDecimal etfPremiumLivePct,
+                String etfPremiumLiveNavAsOf,
+                String swingAction,
+                String swingActionLabel,
+                Integer swingScore,
+                List<String> swingReasons,
+                List<String> swingRisks,
+                Integer swingDownsideRisk,
+                Integer swingEvidenceConfidence,
+                Double swingRiskCoverage,
+                String swingCandidateAction,
+                DailyCandle dailyCandle,
+                WeeklyIndicators weeklyIndicators,
+                TechnicalResolution technicalResolution,
+                Bollinger bollinger,
+                OfficialSma20Verification officialSma20Verification,
+                PriceReference priceReference) {
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons,
+                    counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt,
+                    asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue,
+                    monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons,
+                    risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position,
+                    weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel,
+                    shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate,
+                    profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence,
+                    mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons,
+                    etfPremiumLivePct, etfPremiumLiveNavAsOf, swingAction, swingActionLabel, swingScore, swingReasons,
+                    swingRisks, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction, dailyCandle,
+                    weeklyIndicators, technicalResolution, bollinger, officialSma20Verification, priceReference, null);
+        }
+
         /** Previous canonical shape retained for snapshots and existing callers. */
         public StockDecision(
                 String stockCode, String stockName, String market, String assetClass,
@@ -1234,7 +1394,19 @@ public final class TradingRadarDto {
 
             TechnicalResolution technicalResolution
 ) {
-            this(stockCode, stockName, market, assetClass, distributionAdjusted, held, action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons, counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt, asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue, monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons, risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position, weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel, shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate, profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence, mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons, etfPremiumLivePct, etfPremiumLiveNavAsOf, swingAction, swingActionLabel, swingScore, swingReasons, swingRisks, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction, dailyCandle, weeklyIndicators, technicalResolution, null);
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    action, actionLabel, score, counterTrendState, counterTrendLabel, counterTrendReasons,
+                    counterTrendRisks, dataComplete, price, changePercent, quoteStatus, priceUpdatedAt,
+                    asOfDate, monthlyMa, quarterlyMa, annualMa, kValue, dValue,
+                    monthlyConfirmation, quarterlyConfirmation, annualConfirmation, fxPercentile, underlyingCurrency, reasons,
+                    risks, kdHeat, timingState, timingLabel, ma60BiasPercent, week52Position,
+                    weeklyMa, etfPremiumPct, etfPremiumPercentile, extendedIndicators, shortAction, shortActionLabel,
+                    shortScore, shortReasons, shortRisks, horizonConflict, volumeRatio, fxAsOfDate,
+                    profitTakingConfirmed, fundamental, evidence, shortDownsideRisk, mediumDownsideRisk, shortEvidenceConfidence,
+                    mediumEvidenceConfidence, shortRiskCoverage, mediumRiskCoverage, candidateAction, shortCandidateAction, actionGateReasons,
+                    etfPremiumLivePct, etfPremiumLiveNavAsOf, swingAction, swingActionLabel, swingScore, swingReasons,
+                    swingRisks, swingDownsideRisk, swingEvidenceConfidence, swingRiskCoverage, swingCandidateAction, dailyCandle,
+                    weeklyIndicators, technicalResolution, null);
         }
 
         /**

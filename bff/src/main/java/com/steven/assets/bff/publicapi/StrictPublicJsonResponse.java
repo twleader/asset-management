@@ -266,7 +266,7 @@ public final class StrictPublicJsonResponse {
                 "swingActionLabel", "swingScore", "action", "actionLabel", "score", "horizonConflict", "timingState",
                 "timingLabel", "counterTrendState", "counterTrendLabel", "price", "changePercent", "quoteStatus",
                 "etfPremiumLivePct", "etfPremiumLiveNavAsOf", "weeklyMa", "monthlyMa", "quarterlyMa", "annualMa",
-                "kValue", "dValue", "kdHeat", "weeklyIndicators", "asOfDate");
+                "kValue", "dValue", "kdHeat", "weeklyIndicators", "asOfDate", "intradayCandleConfirmation");
         nullableTexts(value, "stockCode", "stockName", "market", "assetClass", "underlyingCurrency", "shortAction",
                 "shortActionLabel", "swingAction", "swingActionLabel", "action", "actionLabel", "timingState",
                 "timingLabel", "counterTrendState", "counterTrendLabel", "quoteStatus", "etfPremiumLiveNavAsOf", "kdHeat", "asOfDate");
@@ -276,6 +276,7 @@ public final class StrictPublicJsonResponse {
         booleans(value, "distributionAdjusted", "held", "horizonConflict");
         nullableObject(field(value, "fundamental"), StrictPublicJsonResponse::tradingRadarListFundamental);
         nullableObject(field(value, "weeklyIndicators"), StrictPublicJsonResponse::weeklyIndicators);
+        com.steven.assets.bff.common.IntradayCandleConfirmationValidator.validate(field(value, "intradayCandleConfirmation"));
     }
 
     private static void tradingRadarListFundamental(JsonNode value) {
@@ -347,7 +348,7 @@ public final class StrictPublicJsonResponse {
                 "shortCandidateAction", "actionGateReasons", "etfPremiumLivePct", "etfPremiumLiveNavAsOf", "swingAction",
                 "swingActionLabel", "swingScore", "swingReasons", "swingRisks", "swingDownsideRisk", "swingEvidenceConfidence",
                 "swingRiskCoverage", "swingCandidateAction", "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
-                "officialSma20Verification", "priceReference");
+                "officialSma20Verification", "priceReference", "intradayCandleConfirmation");
         nullableTexts(value, "stockCode", "stockName", "market", "assetClass", "action", "actionLabel", "counterTrendState",
                 "counterTrendLabel", "quoteStatus", "priceUpdatedAt", "asOfDate", "monthlyConfirmation", "quarterlyConfirmation",
                 "annualConfirmation", "underlyingCurrency", "kdHeat", "timingState", "timingLabel", "shortAction",
@@ -370,6 +371,7 @@ public final class StrictPublicJsonResponse {
         nullableObject(field(value, "bollinger"), StrictPublicJsonResponse::bollinger);
         nullableObject(field(value, "officialSma20Verification"), StrictPublicJsonResponse::officialSma20Verification);
         nullableObject(field(value, "priceReference"), StrictPublicJsonResponse::priceReference);
+        com.steven.assets.bff.common.IntradayCandleConfirmationValidator.validate(field(value, "intradayCandleConfirmation"));
     }
 
     private static void officialSma20Verification(JsonNode value) {

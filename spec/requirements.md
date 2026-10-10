@@ -5948,3 +5948,34 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 ### Requirement 184／Task 484：SRPP 9090 POST 端點共用基礎
 
 `POST /api/public/srpp/event-evidence/capture` 與 `POST /api/public/srpp/daily-decision/evaluate` 共用的契約基礎設施，先於各自的業務實作完成，且不新增路徑（9090 manifest 維持 23 個 method/path pairs）：(1) 兩層（BFF 與 business）的 controller 移除 `consumes`，改由入口自行檢查 `Content-Type`（type `application`、subtype `json`，不分大小寫，參數忽略，不接受 `+json` 與萬用字元），缺失或不符回 `415 UNSUPPORTED_MEDIA_TYPE`（problem+json）；空 body 回 400；語法不合法的 Content-Type 在參數解析階段拋出的例外（MVC `HttpMediaTypeNotSupportedException`、WebFlux `UnsupportedMediaTypeStatusException`）由控制器本地 handler 映射為同一個 415；控制器本地 `@ExceptionHandler(Exception.class)` 回 500 `INTERNAL_ERROR`（problem 本體不含例外訊息，伺服器端 log 記錄例外類別與 stack trace，BFF 進 API 錯誤日誌）。(2) 兩個端點的 problem 統一為 RFC 9457 七欄（`type`、`title`、`status`、`detail`、`instance`、`code`、`retryable`，`instance` 為請求路徑），由 capture 專用 problem 目錄產生，`SrppCaptureProblem` 保留兩參數建構子。(3) BFF 新增 package-private `SrppOwnerResolver`，邏輯等同既有 `PublicSrppOrchestratedService.owner`，供 Task 481、482 使用，不改動既有 GET 服務。(4) business 新增共用 bean `PublishedSwaggerIdentity`：已發布 Swagger 身分是隨 business-services 發布的 `srpp/9090-api-swagger.md` 位元組的 SHA-256，該檔由 `scripts/render-9090-openapi-docs.rb` 與 docs 內兩份位元組一致地產生（共三份，`--check` 與 OpenAPI 契約測試一併檢查），`info.version` 因契約改變而升為 `1.21.0`。(5) API 錯誤日誌目錄對齊：backend `ApiErrorLogOperationCatalog` 補 `OPEN_SRPP_DAILY_REPORT_MAIL`、`OPEN_SRPP_DAILY_REPORT_MAIL_STATUS`、`OPEN_SRPP_EVENT_EVIDENCE`、`OPEN_SRPP_DAILY_DECISION` 四個 operation（以 insert-only changeset 補種子），BFF 四個與 backend 標籤不一致的既有 key 改為與 backend 逐字相同，並以平價測試鎖定 BFF 每一組 (key, 標籤) 都存在於 backend。
+
+
+### Requirement 185／Task 487：盤中分鐘 K 確認與一年保留
+
+**User Story：**使用者要求把富邦盤中 K 線納入今日交易雷達判斷，並將分鐘資料固定保留一個曆年。先以已完成 5 分 K 做短線買進確認、1 分 K 做輔助；不宣稱未證實的準確率／報酬改善。這是明確授權的保守規則變更，取代 Task461「盤中指標僅顯示」之中新增分鐘 K 確認的限制；原有盤中 KD/MACD/布林 child 仍僅顯示。
+
+- [ ] **唯一分鐘事實與完成截止。** 僅使用既有富邦 normalized 1m OHLCV，背景producer每分鐘、每輪最多5檔、30碼 fair cursor；共用SDK配額與ready/feature/台股交易日/09:00≤time<13:30 gates。以SDK呼叫前 requestStartedAt 排除當前／尾棒，僅接納 candleAt+60秒≤requestStartedAt−60秒、且不是response最後一棒；已知13:30拍賣棒不進普通5m聚合。不得以returned observedAt或AVAILABLE代替完成證據。同步修復Python normalized adapter與Java parser：當日average僅驗正值；wire最多271根，允許13:30但仍排除其判斷用途。每個成功capture的completed facts与latest capture metadata同一transaction；同鍵異hash不覆寫、整批rollback並保存CONFLICT receipt，最新失敗不可沿用舊AVAILABLE。
+- [ ] **純讀邊界。** external新container-only GET `/internal/market-data/intraday-candles/batch-read`，business透過port與內部client批讀，不直連broker／vendor、不刷新／寫cache／DB，公共9090不新增路徑。每請求最多30碼，每碼最多30根同日完成分鐘；root及per-code exact wire與失敗語義按本任務契約。未知日曆、missing／expired／conflict fail closed。
+- [ ] **短線確認。** 交易日盤中台股才適用；以09:00對齊兩個相鄰完整5m區間，各必須有5根exact consecutive已完成1m。request capture及latest minute end≤420秒且≤決策時間。5m OHLCV為本地從富邦分鐘事實聚合、非富邦官方5m技術指標。latest5.close>latest5.open且>prior5.close、latest5.volume≥prior5.volume且prior5.volume>0，latest1.close≥previous1.close才CONFIRMED；兩latest minute固定取lastCompletedAt−60秒起點與其緊鄰前一分鐘，缺棒直接UNAVAILABLE。僅將SHORT BUY_CANDIDATE／ADD_CANDIDATE／TRIAL_BUY在未確認或資料缺失時降為未持有WATCH／已持有HOLD，保留原候選、原始分數及原證據閘門；不生成SELL，不改MEDIUM/SWING。US或明確非session為NOT_APPLICABLE；未知日曆不是N/A。開盤尚不足兩個完整5m時為UNAVAILABLE/INSUFFICIENT_COMPLETED_BARS。full/list/export/notification由同一DecisionCore套用，SMA只可再降級。規則版本升TW_RULES_V22，notification版本重建baseline不發首次transition郵件。
+- [ ] **可見證據。** full與compact list同一nullable typed `intradayCandleConfirmation` metadata，status=CONFIRMED|WAIT|UNAVAILABLE|NOT_APPLICABLE、reason、sourceDate、observedAt、lastCompletedAt、fiveMinuteAt、oneMinuteAt、aggregationSource（LOCAL_AGGREGATED_FUBON_1M或null）；不複製即時價。SHORT reasons/risks揭露確認／等待與來源時間，其他horizon不複製其風險。同步BFF strict schema、OpenAPI、三份Swagger鏡像與contract tests。
+- [ ] **固定一年與回灌防線。** TaipeiToday.minusYears(1)為inclusive retention floor；只刪 `fubon_intraday_candle.source_date<floor` 與過期capture metadata，不刪日K、技術歷史、campaign稽核收據、帳務或雲端備份。啟動及每日00:10進行單表bounded批次清理（每transaction≤10000 rows、statement≤10秒、每次≤120秒）；未完成須留下可重試狀態並由後續排程續作，讀取永遠排除expired。所有minute write paths在transaction重新算floor、跳過expired；backfill planner/resume同樣限制minute但daily十年保持原設定。同步排程登錄表。首次部署須完成既有過期資料清理並回讀驗證；常規VACUUM可回收重用空間，不跑VACUUM FULL，不變更舊backup objects。
+- [ ] **驗證與效益證據。** 精確單元/集成測試完整棒、缺分鐘、未完成／未來／昨日／stale／conflict、五分對齊、零量與三軌action保守性、所有projection同源、日曆unknown與閏年retention。固定輸入A/B重播同一純policy，記錄改變候選、等待、漏失與已知來源限制；若使用回補分鐘而無當時capture證據，明示為回顧source replay，不冒充point-in-time績效回測。沒有扣費／滑價且獨立歷史期的證據時不得宣稱更準。測試、獨立architecture review、Docker rebuilt/recreated實際API與DB驗收後no-ff落main。
+
+**時間一致性補充：**每筆minute fact必須首次observed_at≤capture.capturedAt≤asOf，重觀察不可刷新首次時間；receipt與facts同一DB一致快照。5m由lastCompletedAt向下對齊09:00格點，只驗最近完整桶及前桶，缺棒不得向前搜尋；1m固定lastCompletedAt−60秒起點及前一分鐘。fiveMinuteAt/oneMinuteAt均為區間終點。加入晚回補早期棒、讀取間capture提交、缺最新桶與缺前一分鐘測試。
+
+**排程驗收紀錄（Task487）：**新增分鐘同步、每日保留期清理與未完成清理重試後，`SchedulePublicBffController.JOBS` 共 75 筆（business 31、external 43、BFF 1），數量與個別 cron 由 `SchedulePublicBffControllerTest` 核對通過；本數字取代前段較早 Task 的歷史計數。
+
+
+### Requirement 186／Task 488：完成 SRPP 決策引擎與盤中 K 線整合
+
+**User Story：**使用者要求一併完成 daily-decision/evaluate 真正決策引擎；API 修改後重產 SRPP/docs Swagger，核對規則包 hash，完成兩個 repo 合併推送。
+
+- [ ] 依 Task488 完整自足契約落實 Task482 的 D-130/D-195 report-only 真計算，三個STRATEGIC_FUBON候選與一個EMERGENCY_CATHAY00865B；正張數必有完整verified來源和必要gate，缺pending/subaccount如實逐檔BLOCKED，仍捕捉與計算其他各獨立來源gate，不固定假FINAL。
+- [ ] 使用受版本控制的完整原始SRPP model_inputs與manifest，驗raw hashes、bundle重算與版本，typed政策只由驗證後原文解析；canonical owner資產、即時價、完成日K、現金分配、cache FX、同一persisted book、exact radar及ledger pure read，所有來源凍結含payload/hash/time/identity。calendar first、L0失敗無FINAL。
+- [ ] Task487 batch分鐘來源僅一份共享純policy，MEDIUM留NOT_APPLICABLE/HORIZON_NOT_APPLICABLE收據；依D168不能以SHORT等待止跌減少D130債券建議張數。具名限縮Requirement114例外允許report-only固定張數五檔深度/限價證據，不當權威估值/警報/下單來源。
+- [ ] frozen input純calculator實算D195排序、additive分配還原、target/bondcap、fee-inclusive共同cash、策略日2週6、獨立緊急容量、跨slot reservation/fill穩定link去重，無link保守另扣，D175只09:05例外；不足來源零張/null限價且收據一致，永遠tradeAuthorization:false/placesOrders:false。
+- [ ] FINAL insert-once immutable；分離持久claim/30秒lease/generation fencing，相同identity新FINAL201/replay200/capturing202 UUID一致，不同metadata409，跨slot owner/date序列化，restart replay不讀新事實。
+- [ ] BFF strict request、optional owner resolver/explicit headers/10秒deadline，完整閉合response與identity/hash/receipt/status/lots语義驗證；OpenAPI YAML正本23pairs不新增，三份Swagger字節一致。D166 Swagger獨立fingerprint，不誤改bundle；若受hash政策真變更，重build manifest並驗證Codex/Claude及runtime。
+- [ ] 純計算ACTIONABLE與反例、20交易日權威fieldgolden、PostgreSQL20-way/lease/immutable/restart/crossslot、BFF語義與現有event回歸、Docker實際serve、schema重產、雙repo commit→no-ffmerge→push。Task482原Gmailaudit若未完成須如實保留待驗收，不偽稱。
+
+**Task488一致性補充：**strict request/owner/calendar→existing FINAL/claim identity/metadata/hash replay→僅新capture驗當前policy/Swagger。D195僅排序第一名配置策略張數，次名零張，不轉分剩餘；suitability用未取整Decimal，ranking與emergency兩張門檻用百分比四位HALF_EVEN，保持正式calculator邊界。

@@ -28,7 +28,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers(disabledWithoutDocker = true)
 class SessionReferencePriceStoreRedisIntegrationTest {
 
-    private static final Instant NOW = Instant.parse("2026-09-01T01:00:00Z");
+    // Redis PEXPIREAT uses its wall clock: freeze Java relative to the actual test start.
+    private static final Instant NOW = Instant.now();
     private static final LocalDate DAY = LocalDate.of(2026, 8, 18);
 
     @Container

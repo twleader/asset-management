@@ -36,6 +36,7 @@ class TradingRadarOpenApiSchemaContractTest {
             new Binding(TradingRadarDto.StockDecision.class, "StockDecision"),
             new Binding(TradingRadarDto.Bollinger.class, "Bollinger"),
             new Binding(TradingRadarDto.OfficialSma20Verification.class, "OfficialSma20Verification"),
+            new Binding(TradingRadarDto.IntradayCandleConfirmation.class, "IntradayCandleConfirmation"),
             new Binding(TradingRadarDto.PriceReference.class, "RadarPriceReference"),
             new Binding(TradingRadarDto.TechnicalResolution.class, "TechnicalResolution"),
             new Binding(TradingRadarDto.IntradayTechnicalResolution.class, "IntradayTechnicalResolution"),
@@ -69,6 +70,8 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("TradingRadarResponse", set()),
             Map.entry("Bollinger", set("asOfDate", "middleBand", "upperBand", "lowerBand", "percentB", "bandWidthPercent")),
             Map.entry("OfficialSma20Verification", set("sourceDate", "reason", "officialValue", "localValue", "difference")),
+            Map.entry("IntradayCandleConfirmation", set("sourceDate", "observedAt", "lastCompletedAt",
+                    "fiveMinuteAt", "oneMinuteAt", "aggregationSource")),
             Map.entry("RadarPriceReference", set()),
             Map.entry("DailyCandle", set(
                     "open", "high", "low", "close", "closePosition", "bodyDirection",
@@ -102,7 +105,7 @@ class TradingRadarOpenApiSchemaContractTest {
                     "swingAction", "swingActionLabel", "swingScore", "swingDownsideRisk",
                     "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
                     "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
-                    "officialSma20Verification", "priceReference")),
+                    "officialSma20Verification", "priceReference", "intradayCandleConfirmation")),
             Map.entry("TechnicalResolution", set(
                     "decisionInputVersion", "source", "binding", "contextFingerprint", "captureId",
                     "oldestObservedAt", "freshUntil", "ageSeconds", "intraday")),
@@ -167,6 +170,8 @@ class TradingRadarOpenApiSchemaContractTest {
             Map.entry("TradingRadarResponse", formats("generatedAt", "date-time")),
             Map.entry("Bollinger", formats("asOfDate", "date")),
             Map.entry("OfficialSma20Verification", formats("sourceDate", "date")),
+            Map.entry("IntradayCandleConfirmation", formats("sourceDate", "date", "observedAt", "date-time",
+                    "lastCompletedAt", "date-time", "fiveMinuteAt", "date-time", "oneMinuteAt", "date-time")),
             Map.entry("RadarPriceReference", formats("asOfDate", "date")),
             Map.entry("MarketSummary", formats(
                     "asOfDate", "date", "marketVolumeAsOfDate", "date", "usTechAsOfDate", "date")),
@@ -257,7 +262,7 @@ class TradingRadarOpenApiSchemaContractTest {
 
         assertThat(example).containsEntry("source", "FUBON_SDK")
                 .containsEntry("binding", "BOUND_CONTEXT")
-                .containsEntry("decisionInputVersion", "TW_RULES_V21|FUBON_OVERLAY_V1");
+                .containsEntry("decisionInputVersion", "TW_RULES_V22|FUBON_OVERLAY_V1");
         assertThat(map(example.get("intraday"))).containsEntry("status", "AVAILABLE");
         assertThat((List<?>) example.get("profiles"))
                 .extracting(profile -> map(profile).get("profileId"))

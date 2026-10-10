@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：110 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：112 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -1422,6 +1422,28 @@ CREATE TABLE public.fubon_intraday_candle (
 
 
 --
+-- Name: fubon_intraday_candle_capture; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_intraday_candle_capture (
+    stock_code character varying(20) NOT NULL,
+    market character varying(20) NOT NULL,
+    provider character varying(32) NOT NULL,
+    source_date date NOT NULL,
+    request_started_at timestamp with time zone NOT NULL,
+    captured_at timestamp with time zone NOT NULL,
+    latest_completed_at timestamp with time zone,
+    status character varying(20) NOT NULL,
+    reason character varying(80),
+    CONSTRAINT ck_fubon_intraday_capture_available CHECK ((((status)::text <> 'AVAILABLE'::text) OR ((latest_completed_at IS NOT NULL) AND (reason IS NULL) AND (latest_completed_at <= (request_started_at - '00:01:00'::interval))))),
+    CONSTRAINT ck_fubon_intraday_capture_identity CHECK ((((market)::text = '台股'::text) AND ((provider)::text = 'FUBON_SDK'::text))),
+    CONSTRAINT ck_fubon_intraday_capture_observation CHECK ((captured_at >= request_started_at)),
+    CONSTRAINT ck_fubon_intraday_capture_source_day CHECK ((((request_started_at AT TIME ZONE 'Asia/Taipei'::text))::date = source_date)),
+    CONSTRAINT ck_fubon_intraday_capture_status CHECK (((status)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'UNAVAILABLE'::character varying, 'CONFLICT'::character varying])::text[])))
+);
+
+
+--
 -- Name: fubon_stock_basic_info; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2255,23 +2277,48 @@ CREATE TABLE public.srpp_daily_report_mail (
 
 
 --
+-- Name: srpp_decision_capture_claim; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_decision_capture_claim (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    trading_date date NOT NULL,
+    slot character varying(5) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    generation uuid NOT NULL,
+    claimed_at timestamp with time zone NOT NULL,
+    lease_until timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_decision_capture_claim_check CHECK ((lease_until > claimed_at)),
+    CONSTRAINT srpp_decision_capture_claim_slot_check CHECK (((slot)::text = ANY ((ARRAY['09:05'::character varying, '11:40'::character varying])::text[]))),
+    CONSTRAINT srpp_decision_capture_claim_swagger_sha256_check CHECK ((swagger_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
 -- Name: srpp_decision_run; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.srpp_decision_run (
     id uuid NOT NULL,
-    owner_email character varying(320) NOT NULL,
+    owner_user_id bigint NOT NULL,
     trading_date date NOT NULL,
     slot character varying(5) NOT NULL,
     policy_bundle_sha256 character(64) NOT NULL,
     swagger_sha256 character(64) NOT NULL,
     status character varying(16) NOT NULL,
+    input_jcs text NOT NULL,
     input_snapshot_sha256 character(64) NOT NULL,
-    decision_content_sha256 character(64),
-    content_jcs text,
+    content_jcs text NOT NULL,
+    decision_content_sha256 character(64) NOT NULL,
     created_at timestamp with time zone NOT NULL,
-    finalized_at timestamp with time zone,
-    CONSTRAINT srpp_decision_run_status_check CHECK (((status)::text = ANY ((ARRAY['CAPTURING'::character varying, 'FINAL'::character varying])::text[])))
+    finalized_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_decision_run_decision_content_sha256_check CHECK ((decision_content_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_decision_run_input_snapshot_sha256_check CHECK ((input_snapshot_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_decision_run_slot_check CHECK (((slot)::text = ANY ((ARRAY['09:05'::character varying, '11:40'::character varying])::text[]))),
+    CONSTRAINT srpp_decision_run_status_check CHECK (((status)::text = 'FINAL'::text)),
+    CONSTRAINT srpp_decision_run_swagger_sha256_check CHECK ((swagger_sha256 ~ '^[0-9a-f]{64}$'::text))
 );
 
 
@@ -4289,6 +4336,14 @@ ALTER TABLE ONLY public.fubon_intraday_candle
 
 
 --
+-- Name: fubon_intraday_candle_capture pk_fubon_intraday_candle_capture; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_intraday_candle_capture
+    ADD CONSTRAINT pk_fubon_intraday_candle_capture PRIMARY KEY (stock_code, market, provider);
+
+
+--
 -- Name: fubon_stock_basic_info pk_fubon_stock_basic_info; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4385,11 +4440,27 @@ ALTER TABLE ONLY public.srpp_daily_report_mail
 
 
 --
+-- Name: srpp_decision_capture_claim srpp_decision_capture_claim_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_capture_claim
+    ADD CONSTRAINT srpp_decision_capture_claim_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_decision_capture_claim srpp_decision_claim_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_capture_claim
+    ADD CONSTRAINT srpp_decision_claim_identity_uq UNIQUE (owner_user_id, trading_date, slot);
+
+
+--
 -- Name: srpp_decision_run srpp_decision_run_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.srpp_decision_run
-    ADD CONSTRAINT srpp_decision_run_identity_uq UNIQUE (owner_email, trading_date, slot);
+    ADD CONSTRAINT srpp_decision_run_identity_uq UNIQUE (owner_user_id, trading_date, slot);
 
 
 --
@@ -5242,6 +5313,20 @@ CREATE INDEX idx_fubon_intraday_candle_date ON public.fubon_intraday_candle USIN
 
 
 --
+-- Name: idx_fubon_intraday_candle_retention_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fubon_intraday_candle_retention_date ON public.fubon_intraday_candle USING btree (source_date);
+
+
+--
+-- Name: idx_fubon_intraday_capture_retention_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fubon_intraday_capture_retention_date ON public.fubon_intraday_candle_capture USING btree (source_date);
+
+
+--
 -- Name: idx_fubon_technical_capture_member_lookup; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5421,6 +5506,13 @@ CREATE INDEX idx_srpp_context_package_latest ON public.srpp_context_package USIN
 --
 
 CREATE INDEX idx_srpp_context_package_trading_date ON public.srpp_context_package USING btree (trading_date);
+
+
+--
+-- Name: idx_srpp_decision_run_owner_week; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_srpp_decision_run_owner_week ON public.srpp_decision_run USING btree (owner_user_id, trading_date, slot);
 
 
 --
@@ -5659,6 +5751,13 @@ CREATE TRIGGER trg_srpp_context_evidence_no_update BEFORE UPDATE ON public.srpp_
 --
 
 CREATE TRIGGER trg_srpp_context_package_no_update BEFORE UPDATE ON public.srpp_context_package FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_decision_run trg_srpp_decision_run_no_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_decision_run_no_update BEFORE UPDATE ON public.srpp_decision_run FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
 
 
 --
@@ -5999,6 +6098,38 @@ ALTER TABLE ONLY public.srpp_context_package
 
 ALTER TABLE ONLY public.srpp_context_package
     ADD CONSTRAINT srpp_context_package_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256) ON DELETE RESTRICT;
+
+
+--
+-- Name: srpp_decision_capture_claim srpp_decision_capture_claim_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_capture_claim
+    ADD CONSTRAINT srpp_decision_capture_claim_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_decision_capture_claim srpp_decision_capture_claim_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_capture_claim
+    ADD CONSTRAINT srpp_decision_capture_claim_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256);
+
+
+--
+-- Name: srpp_decision_run srpp_decision_run_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_run
+    ADD CONSTRAINT srpp_decision_run_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_decision_run srpp_decision_run_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_decision_run
+    ADD CONSTRAINT srpp_decision_run_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256);
 
 
 --

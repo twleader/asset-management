@@ -475,4 +475,9 @@ databaseChangeLog:
       relativeToChangelogFile: false
   - include:
       file: db/changelog/changes/v1.147.0-srpp-event-evidence-bundle.sql
+  - include:
+      file: db/changelog/changes/v1.148.0-fubon-intraday-candle-capture.sql
       relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/changes/v1.149.0-srpp-decision-engine.sql

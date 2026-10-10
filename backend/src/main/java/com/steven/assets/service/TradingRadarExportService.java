@@ -245,6 +245,8 @@ public class TradingRadarExportService {
         // 既有「下一配息日」欄（EVIDENCE_HEADERS）保留為 anchorDate，不動既有欄位索引。
         headers.addAll(DIVIDEND_FOUR_DATES_HEADERS);
         headers.addAll(BOLLINGER_HEADERS);
+        headers.addAll(List.of("盤中K確認", "盤中K原因", "盤中K來源日", "盤中K取得時間",
+                "盤中K最新完成時間", "盤中5分完成時間", "盤中1分完成時間", "盤中K聚合來源"));
 
         List<List<Object>> rows = new ArrayList<>();
         for (JsonNode s : snapshots) {
@@ -304,6 +306,10 @@ public class TradingRadarExportService {
                 row.addAll(weeklyCandleCells(d));
                 row.addAll(dividendFourDatesCells(evidence));
                 row.addAll(bollingerCells(d));
+                JsonNode intraday = d.path("intradayCandleConfirmation");
+                for (String field : List.of("status", "reason", "sourceDate", "observedAt", "lastCompletedAt",
+                        "fiveMinuteAt", "oneMinuteAt", "aggregationSource"))
+                    row.add(nullableText(intraday, field));
                 rows.add(row);
             }
         }
@@ -345,7 +351,8 @@ public class TradingRadarExportService {
         formats.addAll(LIVE_PREMIUM_FORMATS); // Task 320：與 headers／rows 同位置（尾端）
         formats.addAll(WEEKLY_CANDLE_FORMATS); // Task 356.12a：與 headers／rows 同位置（真正最末）
         formats.addAll(DIVIDEND_FOUR_DATES_FORMATS);
-        formats.addAll(BOLLINGER_FORMATS); // Completed local BB columns stay at the true end.
+        formats.addAll(BOLLINGER_FORMATS);
+        for (int i = 0; i < 8; i++) formats.add(ExportDoc.Format.TEXT);
         return new ExportDoc.Sheet("個股決策",
                 List.of(new ExportDoc.Table(null, null, headers, true, false, false, formats, rows)),
                 headers.size());

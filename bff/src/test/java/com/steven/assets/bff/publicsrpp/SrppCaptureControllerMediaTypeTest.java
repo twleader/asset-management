@@ -58,6 +58,7 @@ class SrppCaptureControllerMediaTypeTest {
 
     @LocalServerPort private int port;
     @MockBean SrppCaptureRelay relay;
+    @MockBean SrppDailyDecisionCapture dailyDecision;
     /** Task 481：event() 在 415／空 body 之後改交給 SrppEventEvidenceCapture（owner 解析與回應驗證）。 */
     @MockBean SrppEventEvidenceCapture eventEvidence;
     @MockBean ApiErrorLogIngestClient ingest;
@@ -99,7 +100,7 @@ class SrppCaptureControllerMediaTypeTest {
         EntityExchangeResult<byte[]> result = post(endpoint, contentType, body);
 
         assertSevenFieldProblem(result, endpoint, 415, "UNSUPPORTED_MEDIA_TYPE");
-        verifyNoInteractions(relay, eventEvidence);
+        verifyNoInteractions(relay, eventEvidence, dailyDecision);
         verify(ingest, never()).ingest(anyString(), anyString(), any(), any(), any(), anyInt(), any());
     }
 
@@ -122,6 +123,7 @@ class SrppCaptureControllerMediaTypeTest {
                 .header(HttpHeaders.CACHE_CONTROL, "no-store").body(upstream));
         when(relay.call(eq(endpoint.internal), eq(endpoint.path), any())).thenReturn(response);
         when(eventEvidence.capture(any())).thenReturn(response);
+        when(dailyDecision.capture(any())).thenReturn(response);
 
         EntityExchangeResult<byte[]> result = post(endpoint, contentType, BODY);
 
@@ -131,7 +133,8 @@ class SrppCaptureControllerMediaTypeTest {
             verify(eventEvidence).capture(eq(BODY.getBytes(StandardCharsets.UTF_8)));
             verifyNoInteractions(relay);
         } else {
-            verify(relay).call(eq(endpoint.internal), eq(endpoint.path), eq(BODY.getBytes(StandardCharsets.UTF_8)));
+            verify(dailyDecision).capture(eq(BODY.getBytes(StandardCharsets.UTF_8)));
+            verifyNoInteractions(relay);
             verifyNoInteractions(eventEvidence);
         }
     }
@@ -148,7 +151,7 @@ class SrppCaptureControllerMediaTypeTest {
         EntityExchangeResult<byte[]> result = post(endpoint, MediaType.APPLICATION_JSON_VALUE, body);
 
         assertSevenFieldProblem(result, endpoint, 400, "INVALID_REQUEST");
-        verifyNoInteractions(relay, eventEvidence);
+        verifyNoInteractions(relay, eventEvidence, dailyDecision);
     }
 
     static Stream<Endpoint> endpoints() { return Stream.of(Endpoint.values()); }
@@ -158,6 +161,7 @@ class SrppCaptureControllerMediaTypeTest {
     void unexpectedExceptionIs500WithoutLeakingMessageAndIsCaptured(Endpoint endpoint) throws Exception {
         when(relay.call(anyString(), anyString(), any())).thenThrow(new IllegalStateException(SECRET));
         when(eventEvidence.capture(any())).thenThrow(new IllegalStateException(SECRET));
+        when(dailyDecision.capture(any())).thenThrow(new IllegalStateException(SECRET));
 
         EntityExchangeResult<byte[]> result = post(endpoint, MediaType.APPLICATION_JSON_VALUE, BODY);
 

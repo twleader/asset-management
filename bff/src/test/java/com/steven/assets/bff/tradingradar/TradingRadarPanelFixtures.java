@@ -85,13 +85,13 @@ public final class TradingRadarPanelFixtures {
                  "priceUpdatedAt":"2026-09-23T09:00:00+08:00","etfPremiumLivePct":null,"etfPremiumLiveNavAsOf":null,
                  "weeklyMa":101.1,"monthlyMa":100.1,"quarterlyMa":98.1,"annualMa":91.1,"kValue":50.1,"dValue":49.2,
                  "kdHeat":"NORMAL","weeklyIndicators":{"k":50.1,"d":49.2,"changePercent":1.2},
-                 "dailyCandleAsOfDate":"2026-09-22"}
+                 "dailyCandleAsOfDate":"2026-09-22","intradayCandleConfirmation":null}
                 """.formatted(code, market));
     }
 
     private static ObjectNode envelope() {
         return json("""
-                {"ruleVersion":"TW_RULES_V21","actionPolicyVersion":"EVIDENCE_GATE_V1",
+                {"ruleVersion":"TW_RULES_V22","actionPolicyVersion":"EVIDENCE_GATE_V1",
                  "generatedAt":"2026-09-23T09:00:00+08:00"}
                 """);
     }

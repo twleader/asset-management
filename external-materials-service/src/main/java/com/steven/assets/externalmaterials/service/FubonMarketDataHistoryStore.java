@@ -238,6 +238,7 @@ public class FubonMarketDataHistoryStore {
 
     private CandlesResult persistHistoricalCandlesInTransaction(HistoricalIntradayCandlesRead read) {
         int written = 0, unchanged = 0, conflicts = 0;
+        LocalDate retentionFloor = FubonMinuteRetentionFloor.today();
         Instant previous = null;
         for (IntradayCandle candle : read.candles()) {
             LocalDate sourceDate = candle.candleAt().atZone(MarketClock.TW_ZONE).toLocalDate();
@@ -245,6 +246,7 @@ public class FubonMarketDataHistoryStore {
                     || previous != null && !candle.candleAt().isAfter(previous) || !validMinuteCandle(candle))
                 throw new IllegalArgumentException("INVALID_HISTORICAL_MINUTE");
             previous = candle.candleAt();
+            if (sourceDate.isBefore(retentionFloor)) continue;
             String hash = FubonCanonicalHash.candle(historicalCandleCanonicalDocument(read, candle, sourceDate));
             int inserted = jdbc.update("""
                     INSERT INTO fubon_intraday_candle
@@ -276,6 +278,8 @@ public class FubonMarketDataHistoryStore {
 
     private CandlesResult persistCandlesInTransaction(IntradayCandlesRead read) {
         int written = 0, unchanged = 0, conflicts = 0;
+        LocalDate retentionFloor = FubonMinuteRetentionFloor.today();
+        if (read.sourceDate().isBefore(retentionFloor)) return new CandlesResult(Status.UNCHANGED, 0, 0, 0);
         for (IntradayCandle candle : read.candles()) {
             String hash = FubonCanonicalHash.candle(candleCanonicalDocument(read, candle));
             int inserted = jdbc.update("""
@@ -317,7 +321,7 @@ public class FubonMarketDataHistoryStore {
         result.put("matchingInterval", value.matchingInterval()); result.put("boardLot", value.boardLot()); result.put("currency", value.currency());
         return result;
     }
-    private static Map<String, Object> candleCanonicalDocument(IntradayCandlesRead read, IntradayCandle value) {
+    static Map<String, Object> candleCanonicalDocument(IntradayCandlesRead read, IntradayCandle value) {
         Map<String, Object> candle = new TreeMap<>();
         candle.put("candleAt", value.candleAt().toString()); candle.put("open", FubonCanonicalHash.decimal(value.open()));
         candle.put("high", FubonCanonicalHash.decimal(value.high())); candle.put("low", FubonCanonicalHash.decimal(value.low()));

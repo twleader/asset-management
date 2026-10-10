@@ -441,7 +441,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（177 個 Requirements；最新編號為 184，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（179 個 Requirements；最新編號為 186，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -454,3 +454,12 @@ cd frontend
 | `scripts/spec-check.sh` | spec 變更的機械前置檢查（撞號／重號／changeset／計數漂移） |
 | `scripts/tests/schema-sql-drift-test.sh` | `db/schema.sql` 與運行中 DB 的逐位元同步檢查（Task 367 起；由 spec-check B10 呼叫，亦可單獨執行） |
 | `/spec-review` | 實作前的獨立對抗式審查（產出 findings，不打分數；critical／major 修完即可開工） |
+
+
+### Requirement 185／Task 487 分鐘 K 確認例外
+
+使用者已要求以已完成富邦1m事實本地聚合5m、對SHORT買進候選施保守確認；其data/retention/metadata契約以新Task487為準。既有Task461盤中KD/MACD/布林仍display-only；不得借此替代官方技術歷史、修改MEDIUM/SWING或下單。分鐘source_date只保留台北當日往回一個曆年，過期清理與防回灌均已獲本次使用者明確授權。
+
+### Requirement 186／Task 488 report-only五檔例外
+
+Task488受正式已驗證SRPP政策的report-only calculator可純讀同一canonical persisted book作固定張數深度與限價；這是Requirement114的具名限縮例外，book不得當權威即時價、估值、警報或券商下單依據。SRPP D168維持MEDIUM購債不受SHORT分鐘WAIT影響。

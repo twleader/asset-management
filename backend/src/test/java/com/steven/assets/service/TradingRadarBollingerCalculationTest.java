@@ -102,9 +102,11 @@ class TradingRadarBollingerCalculationTest {
         ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("bollinger");
         ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("officialSma20Verification");
         ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("priceReference");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)node).remove("intradayCandleConfirmation");
         assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).bollinger()).isNull();
         assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).officialSma20Verification()).isNull();
         assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).priceReference()).isNull();
+        assertThat(mapper.treeToValue(node, TradingRadarDto.StockDecision.class).intradayCandleConfirmation()).isNull();
     }
 
     @Test

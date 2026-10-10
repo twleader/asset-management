@@ -33,6 +33,7 @@ public class SrppCaptureController {
     private static final Logger log = LoggerFactory.getLogger(SrppCaptureController.class);
     private final SrppCaptureRelay relay;
     private final SrppEventEvidenceCapture eventEvidence;
+    private final SrppDailyDecisionCapture dailyDecision;
     @PostMapping(EVENT) public Mono<ResponseEntity<byte[]>> event(@RequestHeader(value=HttpHeaders.CONTENT_TYPE, required=false) String contentType, @RequestBody(required=false) Mono<byte[]> body){return eventChecked(contentType,body);}
     @PostMapping(DECISION) public Mono<ResponseEntity<byte[]>> decision(@RequestHeader(value=HttpHeaders.CONTENT_TYPE, required=false) String contentType, @RequestBody(required=false) Mono<byte[]> body){return relayChecked(contentType,body,"/internal/srpp/daily-decision/evaluate",DECISION);}
 
@@ -40,7 +41,7 @@ public class SrppCaptureController {
     private Mono<ResponseEntity<byte[]>> relayChecked(String contentType, Mono<byte[]> body, String path, String instance) {
         if (!isApplicationJson(contentType)) return Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.UNSUPPORTED_MEDIA_TYPE, instance));
         return (body == null ? Mono.<byte[]>empty() : body).defaultIfEmpty(new byte[0])
-                .flatMap(b -> blank(b) ? Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.INVALID_REQUEST, instance)) : relay.call(path, instance, b));
+                .flatMap(b -> blank(b) ? Mono.just(SrppCaptureRelay.problem(SrppCaptureProblemCatalog.INVALID_REQUEST, instance)) : dailyDecision.capture(b));
     }
     /** Task 481.1 第 1 步：同樣先 415、再空白 body 400；其餘步驟交給 {@link SrppEventEvidenceCapture}。 */
     private Mono<ResponseEntity<byte[]>> eventChecked(String contentType, Mono<byte[]> body) {

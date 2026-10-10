@@ -47,7 +47,7 @@ class TradingRadarBollingerStrictContractTest {
         ObjectNode body = detail(); bands(body);
         JsonNode decoded = decode(body, StrictPublicJsonResponse.Contract.TRADING_RADAR_STOCK_DETAIL);
         assertThat(decoded.at("/stock/bollinger/upperBand").decimalValue()).isEqualByComparingTo("110.5");
-        assertThat(decoded.get("stock").size()).isEqualTo(77);
+        assertThat(decoded.get("stock").size()).isEqualTo(78);
     }
     @ParameterizedTest @ValueSource(strings = {"asOfDate", "middleBand", "upperBand", "lowerBand", "percentB", "bandWidthPercent"})
     void documentedNullableValuesRemainAccepted(String key) throws Exception {

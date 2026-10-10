@@ -11,12 +11,17 @@ public final class FubonHistoricalBackfillPlanner {
     public record Window(String dataset, String symbol, LocalDate from, LocalDate to) {}
 
     public static List<Window> windows(List<String> sortedSymbols, LocalDate from, LocalDate to) {
+        return windows(sortedSymbols, from, to, FubonMinuteRetentionFloor.today());
+    }
+
+    public static List<Window> windows(List<String> sortedSymbols, LocalDate from, LocalDate to, LocalDate retentionFloor) {
         if (sortedSymbols == null || sortedSymbols.isEmpty() || from == null || to == null || from.isAfter(to)
                 || from.plusYears(10).isBefore(to)) throw new IllegalArgumentException("INVALID_BACKFILL_RANGE");
         List<Window> result = new ArrayList<>();
         for (String symbol : sortedSymbols) {
             append(result, "DAILY_CANDLE", symbol, from, to, 365);
             LocalDate minuteFrom = from.isAfter(MINUTE_API_START) ? from : MINUTE_API_START;
+            if (minuteFrom.isBefore(retentionFloor)) minuteFrom = retentionFloor;
             if (!minuteFrom.isAfter(to)) append(result, "INTRADAY_CANDLE_1M", symbol, minuteFrom, to, 31);
         }
         return List.copyOf(result);
