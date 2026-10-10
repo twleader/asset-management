@@ -47,7 +47,7 @@ MANIFEST = {
   ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
   ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 422 500 502 503],
-  ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[400 409 415 500 502 503]
+  ['POST', '/api/public/srpp/daily-decision/evaluate'] => %w[200 201 202 400 409 415 500 502 503]
 }.transform_values(&:to_set).freeze
 
 OPERATION_IDS = {
@@ -205,7 +205,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.23.0', 'Task 485 後 OpenAPI info.version 必須為 1.23.0')
+assert!(document.dig('info', 'version') == '1.24.0', 'Task 488 後 OpenAPI info.version 必須為 1.24.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -571,7 +571,7 @@ assert!(decision.dig('requestBody', 'content', 'application/json', 'schema') ==
 decision_request = schemas.fetch('SrppDailyDecisionRequest')
 decision_fields = %w[ownerEmail tradingDate slot policyBundleSha256 swaggerSha256]
 assert!(decision_request.fetch('additionalProperties') == false &&
-        decision_request.fetch('required') == decision_fields &&
+        decision_request.fetch('required') == decision_fields.reject { |f| f == 'ownerEmail' } &&
         decision_request.fetch('properties').keys == decision_fields,
         'decision 佔位請求必須是五欄封閉且全部必填')
 assert!(decision_request.fetch('properties').values.all? { |schema| schema['type'] == 'string' } &&
@@ -592,9 +592,7 @@ assert!(decision_example.keys.to_set == decision_fields.to_set &&
         %w[policyBundleSha256 swaggerSha256].all? { |name|
           Regexp.new(decision_request.dig('properties', name, 'pattern')).match?(decision_example.fetch(name)) },
         'decision example 必須符合五欄 schema')
-assert!(decision.fetch('responses').keys.none? { |status| status.start_with?('2') } &&
-        decision.fetch('description').include?('503 CONTEXT_NOT_READY'),
-        '尚未實作 decision 不可宣告成功或 FINAL 收據')
+assert!(%w[200 201 202].all? { |status| decision.fetch('responses').key?(status) }, 'Task488 必須宣告真實FINAL與CAPTURING回應')
 # Task 481：capture 的 request／response 必須是完整、封閉的 schema（不得退回 {type: object}）。
 capture = openapi_routes.fetch(['POST', '/api/public/srpp/event-evidence/capture'])
 assert!(capture.dig('requestBody', 'content', 'application/json', 'schema') ==
@@ -659,8 +657,8 @@ srpp_text = File.read(OPENAPI)
 assert!(!srpp_text.include?('x-implementation-status') && !srpp_text.include?('尚未部署'),
         'SRPP 已發布契約不得保留 proposal 擴充欄位或尚未部署字樣')
 assert!(!capture.fetch('description').include?('尚未實作') &&
-        decision.fetch('description').include?('Task 482 尚未實作'),
-        'capture 已實作、decision 佔位尚未實作的狀態必須如實區分')
+        !decision.fetch('description').include?('尚未實作'),
+        'capture與decision真實實作狀態必須如實描述')
 
 deposit_snapshot = schemas.fetch('DepositSnapshot')
 deposit_keys = %w[id bankId bankDisplayName depositType depositDisplayName amount originalAmount currency
@@ -977,8 +975,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 161,
-        "全量 strict audit 預期 161 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 171,
+        "全量 strict audit 預期 171 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1041,3 +1039,19 @@ assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.l
 
 assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
 puts 'PASS: 9090 gateway/OpenAPI 二十三條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+
+# Task487/488: closed intraday metadata and immutable SRPP receipt schemas.
+%w[StockDecision TradingRadarListStock].each do |name|
+  schema = schemas.fetch(name)
+  assert!(schema.fetch('required').include?('intradayCandleConfirmation'), "#{name} requires intraday metadata")
+  variants = schema.dig('properties', 'intradayCandleConfirmation', 'anyOf')
+  assert!(variants.any? { |v| v['$ref'] == '#/components/schemas/IntradayCandleConfirmation' } && variants.any? { |v| v['type'] == 'null' }, 'intraday metadata must be nullable typed reference')
+end
+confirmation = schemas.fetch('IntradayCandleConfirmation')
+assert!(confirmation.fetch('required') == %w[status reason sourceDate observedAt lastCompletedAt fiveMinuteAt oneMinuteAt aggregationSource] && confirmation.fetch('additionalProperties') == false, 'intraday exact eight fields')
+assert!(confirmation.dig('properties', 'status', 'enum') == %w[CONFIRMED WAIT UNAVAILABLE NOT_APPLICABLE], 'intraday status closed enum')
+assert!(confirmation.dig('properties', 'aggregationSource', 'enum') == ['LOCAL_AGGREGATED_FUBON_1M', nil], 'intraday source closed enum')
+%w[observedAt lastCompletedAt fiveMinuteAt oneMinuteAt].each { |f| assert!(confirmation.dig('properties', f, 'format') == 'date-time', 'intraday UTC end instant format') }
+%w[200 201].each { |status| assert!(decision.dig('responses', status, 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionResponse', 'FINAL typed response') }
+assert!(decision.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionCapturing', 'CAPTURING typed response')
+assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?('RUN_METADATA_MISMATCH'), 'metadata mismatch registered')

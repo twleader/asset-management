@@ -64,7 +64,56 @@ public final class PublicTradingRadarDto {
             BigDecimal dValue,
             String kdHeat,
             TradingRadarDto.WeeklyIndicators weeklyIndicators,
-            String asOfDate) {}
+            String asOfDate,
+            TradingRadarDto.IntradayCandleConfirmation intradayCandleConfirmation) {
+        /** Previous wire shape: historical snapshots retain null confirmation. */
+        public TradingRadarListStock(
+                String stockCode,
+                String stockName,
+                String market,
+                String assetClass,
+                boolean distributionAdjusted,
+                boolean held,
+                BigDecimal fxPercentile,
+                String underlyingCurrency,
+                TradingRadarListFundamental fundamental,
+                String shortAction,
+                String shortActionLabel,
+                Integer shortScore,
+                String swingAction,
+                String swingActionLabel,
+                Integer swingScore,
+                String action,
+                String actionLabel,
+                Integer score,
+                boolean horizonConflict,
+                String timingState,
+                String timingLabel,
+                String counterTrendState,
+                String counterTrendLabel,
+                BigDecimal price,
+                BigDecimal changePercent,
+                String quoteStatus,
+                BigDecimal etfPremiumLivePct,
+                String etfPremiumLiveNavAsOf,
+                BigDecimal weeklyMa,
+                BigDecimal monthlyMa,
+                BigDecimal quarterlyMa,
+                BigDecimal annualMa,
+                BigDecimal kValue,
+                BigDecimal dValue,
+                String kdHeat,
+                TradingRadarDto.WeeklyIndicators weeklyIndicators,
+                String asOfDate) {
+            this(stockCode, stockName, market, assetClass, distributionAdjusted, held,
+                    fxPercentile, underlyingCurrency, fundamental, shortAction, shortActionLabel, shortScore,
+                    swingAction, swingActionLabel, swingScore, action, actionLabel, score,
+                    horizonConflict, timingState, timingLabel, counterTrendState, counterTrendLabel, price,
+                    changePercent, quoteStatus, etfPremiumLivePct, etfPremiumLiveNavAsOf, weeklyMa, monthlyMa,
+                    quarterlyMa, annualMa, kValue, dValue, kdHeat, weeklyIndicators,
+                    asOfDate, null);
+        }
+    }
 
     /** 首頁只需要基本面可用性與產業摘要，避免把來源／證據 tree 放進第一屏。 */
     public record TradingRadarListFundamental(

@@ -24,11 +24,11 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 31 個業務、40 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 31 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(72);
+        assertThat(jobs()).hasSize(75);
         assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(31);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(40);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(43);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
     }
 

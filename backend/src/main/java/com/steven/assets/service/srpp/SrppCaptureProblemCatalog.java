@@ -19,6 +19,7 @@ public final class SrppCaptureProblemCatalog {
     public record Problem(String code, int status, String title, String detail, boolean retryable) {}
 
     private static final Map<String, Problem> PROBLEMS = Map.ofEntries(
+            entry("RUN_METADATA_MISMATCH",409,"SRPP decision run metadata mismatch","同一決策識別已使用不同的規則包或 Swagger 雜湊，不會覆寫。",false),
             entry("INVALID_REQUEST", 400, "Invalid SRPP capture request",
                     "請求本文不合法，請確認欄位、格式與內容後再試。", false),
             entry("UNSUPPORTED_MEDIA_TYPE", 415, "Unsupported SRPP capture media type",

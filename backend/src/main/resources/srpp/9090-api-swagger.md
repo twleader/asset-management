@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.23.0` |
+| 契約版本 | `1.24.0` |
 | 對外路徑 | 23 條：19 個 `GET`、4 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -70,7 +70,7 @@ OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降
 | 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
 | 19 | `POST` | `/api/srpp/daily-report-mail` | `sendSrppDailyReportMail` | 安全寄送一封已驗證的 SRPP 日報 | 200 application/json: SrppDailyReportMailResponse |
 | 20 | `POST` | `/api/public/srpp/event-evidence/capture` | `captureSrppEventEvidence` | 驗證排程 LLM 的六項風險判讀引用並建立不可變事件證據收據 | 200 application/json: SrppEventEvidenceBundleResponse<br>201 application/json: SrppEventEvidenceBundleResponse |
-| 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 驗證日報決策請求（佔位停用） |  |
+| 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 擷取不可變D130/D195日報決策 | 200 application/json: SrppDailyDecisionResponse<br>201 application/json: SrppDailyDecisionResponse<br>202 application/json: SrppDailyDecisionCapturing |
 | 22 | `GET` | `/api/srpp/daily-report-mail/{idempotencyKey}` | `getSrppDailyReportMail` | 查詢 SRPP 日報寄送的最終快照 | 200 application/json: SrppDailyReportMailResponse |
 | 23 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
 
@@ -617,18 +617,21 @@ provenance `DB_VERIFIED`，只代表該列存在且在新鮮度視窗內，不�
 
 ### 21. `POST /api/public/srpp/daily-decision/evaluate`
 
-Task 482 尚未實作；目前僅驗證五個必填欄位與快取台股日曆，通過後一律回 503 CONTEXT_NOT_READY。不讀寫決策 repository，不 replay 佔位列，不建立 FINAL 收據，不讀 crawler 或 LLM，不授權或執行交易。未來不可變決策與成功回應另依 Task 482 實作及驗收。
+嚴格請求、ACTIVE owner與交易日曆先驗證，再replay既有同slot；僅新擷取核對policy/Swagger、凍結單一canonical資產和所有來源並純計算正式D130/D195。盤中K保留receipt但MEDIUM為NOT_APPLICABLE SHORT_ONLY，不減中期張數。真實pending/subaccount尚未發布時逐leg BLOCKED；無broker寫入、重抓crawler、LLM或下單。
 
 #### Responses
 
 | Status | Content／schema | 說明 |
 | --- | --- | --- |
+| `200` | application/json: SrppDailyDecisionResponse | 同identity和metadata的不可變FINAL replay。 |
+| `201` | application/json: SrppDailyDecisionResponse | 新擷取並凍結計算的FINAL；created為true。 |
+| `202` | application/json: SrppDailyDecisionCapturing | 有效lease正在擷取或較早slot尚在處理，不建立FINAL。 |
 | `400` | application/problem+json: SrppCaptureProblem | body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。 |
-| `409` | application/problem+json: SrppCaptureProblem | 快取台股日曆確認當日非交易日，code 為 NON_TRADING_DAY；目前不查 policy／Swagger registry。 |
+| `409` | application/problem+json: SrppCaptureProblem | NON_TRADING_DAY非交易日、POLICY_UNSUPPORTED未支持政策、SWAGGER_MISMATCH新擷取Swagger不符或RUN_METADATA_MISMATCH既有slot metadata不同；均不覆寫。 |
 | `415` | application/problem+json: SrppCaptureProblem | Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。 |
 | `500` | application/problem+json: SrppCaptureProblem | 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。 |
 | `502` | application/problem+json: SrppCaptureProblem | BFF 呼叫 business 的 transport 失敗或逾時，code 為 UPSTREAM_INVALID。 |
-| `503` | application/problem+json: SrppCaptureProblem | 有效請求一律為 CONTEXT_NOT_READY（決策引擎尚未實作）；快取台股日曆不可確認時為 CALENDAR_UNAVAILABLE。 |
+| `503` | application/problem+json: SrppCaptureProblem | OWNER_UNAVAILABLE owner不可用、CALENDAR_UNAVAILABLE交易日曆未確認或CONTEXT_NOT_READY資產／Swagger未就緒或lease到期；不建立假FINAL。 |
 
 ### 22. `GET /api/srpp/daily-report-mail/{idempotencyKey}`
 
@@ -1675,6 +1678,7 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
+| `intradayCandleConfirmation` | 是 | `IntradayCandleConfirmation | null` | 是 |  | 台股短期已完成盤中K確認；null表示舊快照尚未提供。 |
 | `stockCode` | 是 | `string | null` | 是 |  | 標的代號；與 detail selector 的 stockCode 配對。 |
 | `stockName` | 是 | `string | null` | 是 |  | 標的名稱。 |
 | `market` | 是 | `string | null` | 是 |  | 市場字串；與 detail selector 的 market 配對。 |
@@ -1991,6 +1995,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
+| `intradayCandleConfirmation` | 是 | `IntradayCandleConfirmation | null` | 是 |  | 台股短期已完成盤中K確認；null表示舊快照尚未提供。 |
 | `stockCode` | 是 | `string | null` | 是 |  | 交易所或來源使用的標的代號。 |
 | `stockName` | 是 | `string | null` | 是 |  | 供畫面與批次辨識的標的名稱。 |
 | `market` | 是 | `string | null` | 是 |  | DB 驅動的市場字串。 |
@@ -2117,7 +2122,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V21\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V22\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |
@@ -2910,21 +2915,21 @@ RFC 9457 Problem Details：SRPP 事件證據（capture）與日報決策（evalu
 | `status` | 是 | `integer` | 否 | minimum: 400<br>maximum: 599 | 與 HTTP status 相同的整數狀態碼。 |
 | `detail` | 是 | `string` | 否 |  | 依 code 固定、經清理的繁體中文說明。 |
 | `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/event-evidence/capture`, `/api/public/srpp/daily-decision/evaluate` | 發生錯誤的公開請求路徑：`/api/public/srpp/event-evidence/capture` 或 `/api/public/srpp/daily-decision/evaluate`。 |
-| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `NON_TRADING_DAY`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR`, `BUNDLE_METADATA_MISMATCH`, `BUNDLE_CONTENT_CONFLICT` | 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。 |
+| `code` | 是 | `string` | 否 | enum: `RUN_METADATA_MISMATCH`, `INVALID_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `NON_TRADING_DAY`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR`, `BUNDLE_METADATA_MISMATCH`, `BUNDLE_CONTENT_CONFLICT` | 穩定錯誤碼：`RUN_METADATA_MISMATCH`（409，僅決策）同slot建立metadata不同；`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。 |
 | `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘為 false。 |
 | `errors` | 否 | `array of object` | 否 | items: object<br>items 說明: 單一逐項錯誤；code 必填，各端點可另附定位欄位。 | 選填的逐項錯誤清單；只有需要逐項說明的 code 才出現，其他 problem 不帶此欄。 |
 
 ### `SrppDailyDecisionRequest`
 
-目前停用的決策佔位端點之五欄請求；驗證通過後仍回 503 CONTEXT_NOT_READY，不產生決策收據。欄位字串由服務端 trim；未知欄位或非字串是 400 INVALID_REQUEST。
+只接受識別与metadata，禁止caller提交候選、張數、價格或來源。省略ownerEmail解析configured-admin，slot須不晚於台北現在。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `ownerEmail` | 是 | `string (email)` | 否 |  | 必填 owner email；目前僅檢查字串格式，不解析使用者身分。Task 482 實作時才改為選填並解析 ACTIVE owner。 |
-| `tradingDate` | 是 | `string (date)` | 否 |  | 必填 ISO 日期，須為服務端 Asia/Taipei 今天；快取台股日曆必須確認為交易日。 |
-| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 必填日報時段，只接受 09:05 或 11:40。 |
-| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未查詢政策登錄表。 |
-| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未比對已發布 Swagger 身分。 |
+| `ownerEmail` | 否 | `string (email)` | 否 | pattern: ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ | 選填ACTIVE owner email，省略configured-admin。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 必須為台北今天且台股交易日。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 09:05或11:40且必須已到該時段。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 新擷取必須命中完整核對政策；replay綁定舊metadata。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 新擷取必須核對已發布Swagger，replay綁定舊metadata。 |
 
 ### `SrppEventEvidenceCaptureRequest`
 
@@ -3242,3 +3247,139 @@ RFC 9457 Problem Details：三條 SRPP 按需唯讀路由使用的固定錯誤�
 | `symbols` | 是 | `array of SrppSymbolMarketFact` | 否 | minItems: 1<br>maxItems: 100<br>items: SrppSymbolMarketFact<br>items 說明: 一個逐標的市場事實列。 | 每一要求標的均有一列，單列缺漏不會使其他列失敗。 |
 | `coverage` | 是 | `object` | 否 |  | 每個 query 要求標的的整批狀態及互斥 status 計數。 |
 | `contextContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。 |
+
+### `IntradayCandleConfirmation`
+
+已完成的富邦1m盤中K確認；SHORT_ONLY，MEDIUM不影響D130張數。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `CONFIRMED`, `WAIT`, `UNAVAILABLE`, `NOT_APPLICABLE` | CONFIRMED保留既有SHORT買進候選，不恢復已被evidence否決的動作；WAIT等待；UNAVAILABLE來源不足；NOT_APPLICABLE非台股短期。 |
+| `reason` | 是 | `string` | 否 |  | 非空的機械確認原因。 |
+| `sourceDate` | 是 | `string | null (date)` | 是 |  | 來源台北交易日期；null表示無可確認日期。 |
+| `observedAt` | 是 | `string | null (date-time)` | 是 |  | 富邦擷取完成UTC時間；null表示不適用或未取得。 |
+| `lastCompletedAt` | 是 | `string | null (date-time)` | 是 |  | 最後完整1m棒的結束UTC時間；null表示不適用或未取得。 |
+| `fiveMinuteAt` | 是 | `string | null (date-time)` | 是 |  | 最新完整5m桶的結束UTC時間；null表示證據不足。 |
+| `oneMinuteAt` | 是 | `string | null (date-time)` | 是 |  | 用於確認方向的完整1m棒結束UTC時間；null表示證據不足。 |
+| `aggregationSource` | 是 | `string | null` | 是 | enum: `LOCAL_AGGREGATED_FUBON_1M`, null | LOCAL_AGGREGATED_FUBON_1M由本地富邦1m聚合；null表示無聚合。 |
+
+### `SrppDecisionIdentity`
+
+不可變決策識別owner/date/slot；policy與Swagger為建立時metadata。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerUserId` | 是 | `integer` | 否 | minimum: 1 | 解析出的ACTIVE資料擁有者ID。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 台北當日台股交易日。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 09:05或11:40日報觀察時段。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 經完整政策位元組核對的規則包SHA256。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 已發布SwaggerMarkdown獨立SHA256；D166不納入政策bundle。 |
+
+### `SrppDecisionAuthorityRevision`
+
+固定的計算器、資料庫與作者政策檔案版本。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `serviceBuild` | 是 | `string` | 否 |  | 部署服務Git或image版本。 |
+| `databaseSchema` | 是 | `string` | 否 |  | 本引擎資料庫版本v1.149.0。 |
+| `calculatorVersion` | 是 | `string` | 否 |  | 正式D130/D195純計算器版本。 |
+| `modelInputsSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 凍結model_inputs完整原始位元組SHA256。 |
+| `policyManifestSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 凍結policy_manifest完整原始位元組SHA256。 |
+
+### `SrppDecisionSourceReceipt`
+
+單一來源凍結內容與來源可用性；未取得來源明確披露。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `string` | 否 |  | inputBundleJcs.sources對應鍵。 |
+| `revision` | 是 | `string` | 否 |  | 來源snapshot/時間/版本識別。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 |  | 凍結frameUTC時間。 |
+| `sha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 對應sources payload的JCS SHA256。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `NONE` | COMPLETE完整；PARTIAL部分；NONE未取得。 |
+| `validation` | 是 | `string` | 否 | enum: `VERIFIED`, `UNAVAILABLE`, `AVAILABLE`, `STALE`, `CONFLICT` | VERIFIED已核對；UNAVAILABLE未取得；AVAILABLE分鐘可用；STALE分鐘過期；CONFLICT分鐘矛盾。 |
+
+### `SrppDecisionInputSnapshot`
+
+完全凍結的L0/L1/L2/政策/來源內容與雜湊；同slot replay不重讀來源。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `inputSnapshotSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | inputBundleJcs UTF8位元組SHA256。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 |  | 最後來源讀取完成後觀察的UTC frame；分鐘採此asOf。 |
+| `assetSnapshotId` | 是 | `integer` | 否 | minimum: 1 | 單一canonical最新資產snapshot ID。 |
+| `assetGeneratedAt` | 是 | `string (date-time)` | 否 |  | 同份最新資產回覆的generatedAtUTC時間。 |
+| `sourceVector` | 是 | `object` | 否 |  | 來源ID到完整來源收據的映射。 |
+| `inputBundleJcs` | 是 | `string` | 否 |  | 完整凍結輸入的canonical JCS文字；金額與比例皆為Decimal字串。 |
+
+### `SrppDecisionGateReceipt`
+
+獨立gate回執；只驗證正式政策與凍結輸入，缺來源不推論為空。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ruleId` | 是 | `string` | 否 |  | 正式規則或gate識別。 |
+| `calculatorVersion` | 是 | `string` | 否 |  | 計算此gate的純計算器版本。 |
+| `inputRefs` | 是 | `array of string` | 否 | items: string<br>items 說明: sourceVector來源鍵。 | 此gate實際引用的來源ID。 |
+| `status` | 是 | `string` | 否 | enum: `PASS`, `BLOCK`, `UNAVAILABLE`, `NOT_APPLICABLE` | PASS通過；BLOCK不符合政策；UNAVAILABLE來源未確認；NOT_APPLICABLE不適用。 |
+| `reason` | 是 | `string` | 否 |  | 非空且固定的機械原因。 |
+| `values` | 是 | `object` | 否 |  | 計算值與原始精度的Decimal字串。 |
+
+### `SrppDecisionCandidate`
+
+單一正式報告建議；D195 ranked[0]唯一策略標的與00865B獨立緊急leg。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | 是 | `string` | 否 | enum: `00865B`, `00719B`, `00697B` | 00865B短債、00719B短債或00697B中債。 |
+| `strategy` | 是 | `string` | 否 | enum: `STRATEGIC_FUBON`, `EMERGENCY_CATHAY` | STRATEGIC_FUBON富邦策略leg；EMERGENCY_CATHAY國泰00865B緊急leg。 |
+| `status` | 是 | `string` | 否 | enum: `ACTIONABLE_FOR_REPORT`, `BLOCKED` | ACTIONABLE_FOR_REPORT是有完整證據的報告買進建議；BLOCKED不可形成買進。 |
+| `action` | 是 | `string` | 否 | enum: `BUY`, `NONE` | BUY買進報告建議；NONE無建議。 |
+| `lots` | 是 | `integer` | 否 | minimum: 0<br>maximum: 2 | 實際可報告整張數；BLOCKED必為0。 |
+| `limitPrice` | 是 | `string | null` | 是 |  | ETF tick floor後限價Decimal；BLOCKED為null。 |
+| `amountTwd` | 是 | `string | null` | 是 |  | 限價乘1000股乘張數Decimal；BLOCKED為null。 |
+| `blockingReasons` | 是 | `array of string` | 否 | items: string<br>items 說明: 不可用gate原因。 | 唯一且排序的阻擋原因；有張數時必為空。 |
+| `receipts` | 是 | `array of SrppDecisionGateReceipt` | 否 | items: SrppDecisionGateReceipt<br>items 說明: 單一gate回執。 | 所有適用gate的獨立結果，包含盤中K NOT_APPLICABLE SHORT_ONLY。 |
+
+### `SrppDailyDecision`
+
+D130/D195報告用結果；無下單權限，事件證據仍由每個consumer分別處理。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `executionScope` | 是 | `string` | 否 | enum: `REPORT_RECOMMENDATION_ONLY` | REPORT_RECOMMENDATION_ONLY僅供報告。 |
+| `tradeAuthorization` | 是 | `boolean` | 否 |  | 固定false，不授權交易。 |
+| `placesOrders` | 是 | `boolean` | 否 |  | 固定false，不執行交易。 |
+| `eventEvidenceIntegrationStatus` | 是 | `string` | 否 | enum: `NOT_BOUND` | NOT_BOUND：本端點未整合consumer事件判讀。 |
+| `eventEvidenceReason` | 是 | `string` | 否 | enum: `PER_CONSUMER_EVIDENCE` | PER_CONSUMER_EVIDENCE：各consumer保留獨立證據。 |
+| `ranking` | 是 | `array of string` | 否 | maxItems: 3<br>items: string<br>items 說明: 00865B、00719B、00697B策略價格順位。 | D195適合且hardgate通過標的順位；僅首位可配置張數。 |
+| `candidates` | 是 | `array of SrppDecisionCandidate` | 否 | minItems: 4<br>maxItems: 4<br>items: SrppDecisionCandidate<br>items 說明: 單一報告候選。 | 固定3策略leg加00865B緊急leg；未發布pending/subaccount來源時逐leg誠實BLOCKED。 |
+
+### `SrppDailyDecisionResponse`
+
+FINAL不可變結果；同owner/date/slot相同metadata replay原内容，不重抓來源。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `integer` | 否 | enum: `1` | 固定1。 |
+| `decisionRunId` | 是 | `string (uuid)` | 否 |  | 不可變decision run UUID。 |
+| `status` | 是 | `string` | 否 | enum: `FINAL` | FINAL表示完整凍結、真實計算與保存完成。 |
+| `created` | 是 | `boolean` | 否 |  | 201為true、200 replay為false；不屬content hash。 |
+| `authorityRevision` | 是 | `SrppDecisionAuthorityRevision` | 否 |  | 部署與完整作者政策位元組身分。 |
+| `identity` | 是 | `SrppDecisionIdentity` | 否 |  | owner/date/slot不可變識別。 |
+| `inputSnapshot` | 是 | `SrppDecisionInputSnapshot` | 否 |  | 完整凍結輸入與來源回執。 |
+| `decision` | 是 | `SrppDailyDecision` | 否 |  | 正式政策結果與獨立gate。 |
+| `decisionContentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 移除created與此hash後完整response的JCS SHA256。 |
+
+### `SrppDailyDecisionCapturing`
+
+CAPTURING不是FINAL；有generation fencing与30秒lease，Retry-After=2。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `integer` | 否 | enum: `1` | 固定1。 |
+| `decisionRunId` | 是 | `string (uuid)` | 否 |  | 同slot最終run沿用此claim UUID。 |
+| `status` | 是 | `string` | 否 | enum: `CAPTURING` | CAPTURING代表擷取或較早slot尚在處理。 |
+| `code` | 是 | `string` | 否 | enum: `DECISION_CAPTURE_IN_PROGRESS` | DECISION_CAPTURE_IN_PROGRESS：稍後以同identity重試。 |
+| `identity` | 是 | `SrppDecisionIdentity` | 否 |  | 已取得lease的owner/date/slot與固定metadata。 |

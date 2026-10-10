@@ -58,7 +58,9 @@ public class TradingRadarRuleEngine {
      * 另外，極端時機（EXTREME_OVERBOUGHT／EXTREME_OVERSOLD）新增季線乖離自身分位替代路徑，
      * 使低波動標的的保護不再形同虛設（Task 299）。</p>
      */
-    public static final String RULE_VERSION = "TW_RULES_V21";
+    // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
+    // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
+    public static final String RULE_VERSION = "TW_RULES_V22";
 
     /**
      * 三軌持有期（Task 356.1a）。

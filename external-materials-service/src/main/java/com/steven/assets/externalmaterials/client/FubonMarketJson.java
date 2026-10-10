@@ -294,7 +294,7 @@ public final class FubonMarketJson {
         if (integer(root.get("timeframe")) != 1) throw invalid();
         String status = text(root.get("status")), reason = nullableText(root.get("reason"));
         JsonNode source = root.get("candles");
-        if (!source.isArray() || source.size() > 270) throw invalid();
+        if (!source.isArray() || source.size() > 271) throw invalid();
         if ("NO_DATA".equals(status)) {
             if (!"NO_DATA".equals(reason) || !source.isEmpty()) throw invalid();
             return new IntradayCandlesRead(symbol, queryDate, zObservation(root.get("observedAt"), queryDate, now), text(root.get("exchange")),
@@ -306,16 +306,21 @@ public final class FubonMarketJson {
         for (JsonNode candle : source) {
             fields(candle, Set.of("candleAt", "open", "high", "low", "close", "volume", "average"));
             Instant candleAt = zInstant(candle.get("candleAt"));
-            if (candleAt.getNano() != 0 || !candleAt.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)
-                    || !inSession(candleAt) || previous != null && !candleAt.isAfter(previous)) throw invalid();
+            var localCandle = candleAt.atZone(MarketClock.TW_ZONE);
+            if (candleAt.getNano() != 0 || candleAt.getEpochSecond() % 60 != 0
+                    || !localCandle.toLocalDate().equals(queryDate)
+                    || localCandle.toLocalTime().isBefore(java.time.LocalTime.of(9, 0))
+                    || localCandle.toLocalTime().isAfter(java.time.LocalTime.of(13, 30))
+                    || previous != null && !candleAt.isAfter(previous)) throw invalid();
             previous = candleAt;
             BigDecimal open = decimal(canonicalDecimalText(candle.get("open"), 20, 10, true), 20, 10, true);
             BigDecimal high = decimal(canonicalDecimalText(candle.get("high"), 20, 10, true), 20, 10, true);
             BigDecimal low = decimal(canonicalDecimalText(candle.get("low"), 20, 10, true), 20, 10, true);
             BigDecimal close = decimal(canonicalDecimalText(candle.get("close"), 20, 10, true), 20, 10, true);
             BigDecimal average = decimal(canonicalDecimalText(candle.get("average"), 20, 10, true), 20, 10, true);
-            if (high.compareTo(open) < 0 || high.compareTo(close) < 0 || open.compareTo(low) < 0 || close.compareTo(low) < 0
-                    || average.compareTo(low) < 0 || average.compareTo(high) > 0) throw invalid();
+            // Provider average is cumulative session average, not this candle's typical price.
+            if (high.compareTo(open) < 0 || high.compareTo(close) < 0 || open.compareTo(low) < 0 || close.compareTo(low) < 0)
+                throw invalid();
             String volume = text(candle.get("volume"));
             if (!volume.matches("0|[1-9][0-9]*")) throw invalid();
             long value;

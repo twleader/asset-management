@@ -1,0 +1,1247 @@
+{
+  "source": "SRPP/scripts/execution_policy.py bond_price_selection, frozen synthetic same-input fixtures; not market returns",
+  "sourceSha256": "9b3ad1bac647318cd144706dbbe9a026dff8fb03ed15e55b287bb811a2ec7c95",
+  "policyBundleSha256": "919c7b79d79b62442063dac64f2aea14809d25ff75f7328147505013db70095f",
+  "sessions": [
+    {
+      "date": "2026-09-09",
+      "sessions": [
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08"
+      ],
+      "prices": {
+        "00865B": "9.96",
+        "00719B": "9.95",
+        "00697B": "9.94"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        }
+      }
+    },
+    {
+      "date": "2026-09-10",
+      "sessions": [
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09"
+      ],
+      "prices": {
+        "00865B": "9.95",
+        "00719B": "9.94",
+        "00697B": "9.93"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        }
+      }
+    },
+    {
+      "date": "2026-09-11",
+      "sessions": [
+        "2026-08-14",
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10"
+      ],
+      "prices": {
+        "00865B": "9.94",
+        "00719B": "9.93",
+        "00697B": "9.92"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        }
+      }
+    },
+    {
+      "date": "2026-09-14",
+      "sessions": [
+        "2026-08-17",
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11"
+      ],
+      "prices": {
+        "00865B": "9.93",
+        "00719B": "9.92",
+        "00697B": "9.91"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        }
+      }
+    },
+    {
+      "date": "2026-09-15",
+      "sessions": [
+        "2026-08-18",
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14"
+      ],
+      "prices": {
+        "00865B": "9.92",
+        "00719B": "9.91",
+        "00697B": "9.9"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        }
+      }
+    },
+    {
+      "date": "2026-09-16",
+      "sessions": [
+        "2026-08-19",
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15"
+      ],
+      "prices": {
+        "00865B": "9.91",
+        "00719B": "9.9",
+        "00697B": "9.96"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00719B",
+        "00865B",
+        "00697B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        }
+      }
+    },
+    {
+      "date": "2026-09-17",
+      "sessions": [
+        "2026-08-20",
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16"
+      ],
+      "prices": {
+        "00865B": "9.9",
+        "00719B": "9.96",
+        "00697B": "9.95"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00865B",
+        "00697B",
+        "00719B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 2,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        }
+      }
+    },
+    {
+      "date": "2026-09-18",
+      "sessions": [
+        "2026-08-21",
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17"
+      ],
+      "prices": {
+        "00865B": "9.96",
+        "00719B": "9.95",
+        "00697B": "9.94"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        }
+      }
+    },
+    {
+      "date": "2026-09-21",
+      "sessions": [
+        "2026-08-24",
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18"
+      ],
+      "prices": {
+        "00865B": "9.95",
+        "00719B": "9.94",
+        "00697B": "9.93"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        }
+      }
+    },
+    {
+      "date": "2026-09-22",
+      "sessions": [
+        "2026-08-25",
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21"
+      ],
+      "prices": {
+        "00865B": "9.94",
+        "00719B": "9.93",
+        "00697B": "9.92"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        }
+      }
+    },
+    {
+      "date": "2026-09-23",
+      "sessions": [
+        "2026-08-26",
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22"
+      ],
+      "prices": {
+        "00865B": "9.93",
+        "00719B": "9.92",
+        "00697B": "9.91"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        }
+      }
+    },
+    {
+      "date": "2026-09-24",
+      "sessions": [
+        "2026-08-27",
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23"
+      ],
+      "prices": {
+        "00865B": "9.92",
+        "00719B": "9.91",
+        "00697B": "9.9"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        }
+      }
+    },
+    {
+      "date": "2026-09-29",
+      "sessions": [
+        "2026-08-28",
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24"
+      ],
+      "prices": {
+        "00865B": "9.91",
+        "00719B": "9.9",
+        "00697B": "9.96"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00719B",
+        "00865B",
+        "00697B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        }
+      }
+    },
+    {
+      "date": "2026-09-30",
+      "sessions": [
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29"
+      ],
+      "prices": {
+        "00865B": "9.9",
+        "00719B": "9.96",
+        "00697B": "9.95"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00865B",
+        "00697B",
+        "00719B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 2,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        }
+      }
+    },
+    {
+      "date": "2026-10-01",
+      "sessions": [
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30"
+      ],
+      "prices": {
+        "00865B": "9.96",
+        "00719B": "9.95",
+        "00697B": "9.94"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        }
+      }
+    },
+    {
+      "date": "2026-10-02",
+      "sessions": [
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01"
+      ],
+      "prices": {
+        "00865B": "9.95",
+        "00719B": "9.94",
+        "00697B": "9.93"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.5"
+        }
+      }
+    },
+    {
+      "date": "2026-10-05",
+      "sessions": [
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02"
+      ],
+      "prices": {
+        "00865B": "9.94",
+        "00719B": "9.93",
+        "00697B": "9.92"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.6"
+        }
+      }
+    },
+    {
+      "date": "2026-10-06",
+      "sessions": [
+        "2026-09-04",
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-05"
+      ],
+      "prices": {
+        "00865B": "9.93",
+        "00719B": "9.92",
+        "00697B": "9.91"
+      },
+      "premiums": {
+        "00865B": "0.1",
+        "00719B": "0.0",
+        "00697B": "0.05"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.7"
+        }
+      }
+    },
+    {
+      "date": "2026-10-07",
+      "sessions": [
+        "2026-09-07",
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-05",
+        "2026-10-06"
+      ],
+      "prices": {
+        "00865B": "9.92",
+        "00719B": "9.91",
+        "00697B": "9.9"
+      },
+      "premiums": {
+        "00865B": "0.0",
+        "00719B": "0.05",
+        "00697B": "0.1"
+      },
+      "expectedRanking": [
+        "00697B",
+        "00719B",
+        "00865B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.8"
+        }
+      }
+    },
+    {
+      "date": "2026-10-08",
+      "sessions": [
+        "2026-09-08",
+        "2026-09-09",
+        "2026-09-10",
+        "2026-09-11",
+        "2026-09-14",
+        "2026-09-15",
+        "2026-09-16",
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24",
+        "2026-09-29",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-10-05",
+        "2026-10-06",
+        "2026-10-07"
+      ],
+      "prices": {
+        "00865B": "9.91",
+        "00719B": "9.9",
+        "00697B": "9.96"
+      },
+      "premiums": {
+        "00865B": "0.05",
+        "00719B": "0.1",
+        "00697B": "0.0"
+      },
+      "expectedRanking": [
+        "00719B",
+        "00865B",
+        "00697B"
+      ],
+      "expectedStrategicLots": 2,
+      "expectedEmergencyLots": 1,
+      "expectedQuality": {
+        "00697B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.4"
+        },
+        "00719B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-1.0"
+        },
+        "00865B": {
+          "suitable": true,
+          "reason": "DRAWDOWN_AND_PREMIUM_SUITABLE",
+          "referenceHigh": "10.0",
+          "drawdownPercent": "-0.9"
+        }
+      }
+    }
+  ]
+}

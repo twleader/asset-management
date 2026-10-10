@@ -28,6 +28,7 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
             "/internal/dividend/fubon-sync", "POST",
             "/internal/technical-indicators/fubon-sync", "POST",
             "/internal/technical-indicators/fubon-cache", "GET",
+            "/internal/market-data/intraday-candles/batch-read", "GET",
             "/internal/technical-indicators/history-backfill-jobs", "POST",
             "/internal/technical-indicators/history-backfill-jobs/{jobId}", "GET");
     private final Supplier<FubonMarketConfigState> config;
@@ -50,7 +51,8 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
     }
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                                FilterChain chain) throws ServletException, IOException {
-        String route = ROUTES.keySet().stream().filter(pattern -> matches(pattern, request.getRequestURI()))
+        String route = ROUTES.keySet().stream().filter(pattern -> pattern.contains("/{jobId}")
+                        ? matches(pattern, request.getRequestURI()) : pattern.equals(request.getRequestURI()))
                 .findFirst().orElse(null);
         if (route == null || !request.getMethod().equals(ROUTES.get(route))) { reject(response, 404, "NOT_FOUND"); return; }
         FubonMarketConfigState state = config.get();
@@ -68,6 +70,7 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
         if (request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null
                 || request.getInputStream().read() != -1) { reject(response, 400, "INVALID_REQUEST"); return; }
         Set<String> allowed = switch (route) {
+            case "/internal/market-data/intraday-candles/batch-read" -> Set.of("stockCodes", "tradingDate", "asOf");
             case "/internal/technical-indicators/fubon-cache" -> Set.of("symbol");
             case "/internal/technical-indicators/history-backfill-jobs", "/internal/technical-indicators/history-backfill-jobs/{jobId}" -> Set.of();
             default -> Set.of("dryRun");
@@ -89,7 +92,7 @@ public class FubonScheduledMarketTokenFilter extends OncePerRequestFilter {
     private static boolean matches(String pattern, String path) {
         if (path == null) return false;
         int marker = pattern.indexOf("/{jobId}");
-        if (marker < 0) return pattern.equals(path);
+        if (marker < 0) return pattern.equals(path) || path.startsWith(pattern + ";") || path.equals(pattern + "/");
         String prefix = pattern.substring(0, marker + 1);
         return path.startsWith(prefix) && path.length() > prefix.length()
                 && path.indexOf('/', prefix.length()) < 0;

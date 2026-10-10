@@ -58,7 +58,7 @@ class TradingRadarLivePremiumRuleIsolationTest {
                 componentNames(com.steven.assets.dto.TradingRadarDto.StockDecision.class);
 
         // Task 475 在既有 75 欄末尾附加官方核對與價格參考，前面索引不變。
-        assertThat(components).hasSize(77);
+        assertThat(components).hasSize(78);
         // Task 320 的兩欄仍緊接 actionGateReasons，且相對順序未變——
         // 中間插入會讓既有 positional 呼叫端一起位移。
         assertThat(components.subList(59, 62))
@@ -71,6 +71,6 @@ class TradingRadarLivePremiumRuleIsolationTest {
                         "swingReasons", "swingRisks", "swingDownsideRisk",
                         "swingEvidenceConfidence", "swingRiskCoverage", "swingCandidateAction",
                         "dailyCandle", "weeklyIndicators", "technicalResolution", "bollinger",
-                        "officialSma20Verification", "priceReference");
+                        "officialSma20Verification", "priceReference", "intradayCandleConfirmation");
     }
 }

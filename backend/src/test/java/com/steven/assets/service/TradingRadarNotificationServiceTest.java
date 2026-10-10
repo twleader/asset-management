@@ -254,7 +254,7 @@ class TradingRadarNotificationServiceTest {
         service.queueEvaluation(STOCK_CODE, MARKET);
         service.flushEvaluations();
 
-        assertEquals("TW_RULES_V21", setting.getRuleVersion());
+        assertEquals("TW_RULES_V22", setting.getRuleVersion());
         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
         assertEquals(originalOwner, setting.getOwnerUserId());
         assertEquals(originalActive, setting.getActive());
@@ -263,6 +263,19 @@ class TradingRadarNotificationServiceTest {
         verify(dispatcher, never()).enqueue(any(), any(), any());
         verify(stateRepo, never()).findBySettingId(any());
         verify(stateRepo, never()).save(any());
+        verify(settingRepo).save(setting);
+    }
+
+    @Test void task487V21ToV22RebuildsBaselineWithoutFirstTransitionEmail() {
+        setting.setRuleVersion("TW_RULES_V21");
+        setting.setLastAction("BUY_CANDIDATE");
+        service.queueEvaluation(STOCK_CODE, MARKET);
+        service.flushEvaluations();
+        assertEquals("TW_RULES_V22", setting.getRuleVersion());
+        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+        assertTrue(setting.getInitialized());
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+        verify(stateRepo, never()).findBySettingId(any());
         verify(settingRepo).save(setting);
     }
 

@@ -40,6 +40,28 @@ CHECKS=0
 block() { echo "BLOCK │ $*"; BLOCKS=$((BLOCKS + 1)); }
 check() { echo "CHECK │ $*"; CHECKS=$((CHECKS + 1)); }
 
+# BEGIN migration-create-reentrancy-check
+check_migration_create_reentrancy() {
+  local file="$1"
+  # Task 488 replaces the zero-row Task 482 placeholder once. The PostgreSQL
+  # regression proves a nonempty table halts before DROP. This is deliberately
+  # non-reentrant, never a general exception for DROP/CREATE or DO blocks.
+  if [ "$file" = "backend/src/main/resources/db/changelog/changes/v1.149.0-srpp-decision-engine.sql" ]; then
+    local digest
+    digest=$(ruby -rdigest -e 'puts Digest::SHA256.file(ARGV.fetch(0)).hexdigest' "$file")
+    if [ "$digest" = "dc346a635aa8b588ab6b6540a349c24ba2fa852da3693863ede18d64a9a216e4" ]; then
+      check "$file 為 Task 488 具名一次性零資料 guarded replacement：non-reentrant；禁止改號或修改已執行 bytes，正常重啟由 Liquibase changeset 記錄避免重跑"
+    else
+      block "$file 與 Task 488 已審核一次性 replacement bytes 不符 —— 禁止修改已執行 migration／改號重跑"
+    fi
+    return
+  fi
+  if grep -qiE 'CREATE (TABLE|INDEX|UNIQUE INDEX)' "$file" && ! grep -qiE 'IF NOT EXISTS' "$file"; then
+    block "$file 有 CREATE 但無 IF NOT EXISTS —— 非冪等，改號重跑會炸 already exists"
+  fi
+}
+# END migration-create-reentrancy-check
+
 # 未追蹤（新增但尚未 git add）的檔案必須一起算。這是本檢查最容易出錯的地方：
 # 新的自足任務檔與新的 Liquibase changeset「本質上都是新檔案」，執行這支腳本的時點
 # （實作前審查）又必然早於 commit，若只看 git diff 就會對最該擋的情境靜默放行。
@@ -153,9 +175,7 @@ if [ -n "$NEW_SQL" ]; then
     fi
     # B3 冪等性
     if [ -f "$f" ]; then
-      if grep -qiE 'CREATE (TABLE|INDEX|UNIQUE INDEX)' "$f" && ! grep -qiE 'IF NOT EXISTS' "$f"; then
-        block "$f 有 CREATE 但無 IF NOT EXISTS —— 非冪等，改號重跑會炸 already exists"
-      fi
+      check_migration_create_reentrancy "$f"
       if grep -qiE '^\s*INSERT INTO' "$f" && ! grep -qiE 'ON CONFLICT|NOT EXISTS' "$f"; then
         block "$f 有 INSERT 但無 ON CONFLICT / NOT EXISTS 守門 —— 非冪等"
       fi

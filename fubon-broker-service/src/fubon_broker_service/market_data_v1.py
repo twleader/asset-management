@@ -141,7 +141,7 @@ class MarketDataV1Service:
                 raise ValueError("SCHEMA_INVALID")
             identity = _root_identity(source, symbol, query_date, include_name=False)
             rows = source.get("data")
-            if not isinstance(rows, list) or len(rows) > 270:
+            if not isinstance(rows, list) or len(rows) > 271:
                 raise ValueError("SCHEMA_INVALID")
             candles = [self._candle(row, query_date) for row in rows]
             if [row["candleAt"] for row in candles] != sorted(row["candleAt"] for row in candles):
@@ -314,7 +314,7 @@ class MarketDataV1Service:
             raise ValueError("SCHEMA_INVALID")
         parsed = parsed.astimezone(UTC)
         local = parsed.astimezone(TAIPEI)
-        if local.date().isoformat() != query_date or not (wall_time(9, 0) <= local.time() < wall_time(13, 30)):
+        if local.date().isoformat() != query_date or not (wall_time(9, 0) <= local.time() <= wall_time(13, 30)):
             raise ValueError("SCHEMA_INVALID")
         open_ = canonical_number(row.get("open"), precision=20, scale=10, positive=True)
         high = canonical_number(row.get("high"), precision=20, scale=10, positive=True)

@@ -44,7 +44,7 @@ class TradingRadarPanelServiceTest {
         });
         assertThat(tw.data().skippedNonTwStocks()).isEqualTo(1);
         assertThat(us.data().skippedNonTwStocks()).isEqualTo(1);
-        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V21");
+        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V22");
         assertThat(tw.generatedAt()).isEqualTo("2026-09-23T16:00+08:00");
         assertThat(tw.actionPolicyVersion()).isEqualTo(baseline.actionPolicyVersion());
     }
@@ -192,6 +192,52 @@ class TradingRadarPanelServiceTest {
         verify(f.technicalCache, never()).writePair(any());
         verify(f.technicalCache, never()).writeMarketLocal(any());
         verify(f.technicalCache, never()).readMarketLocal(anyString(), anyString());
+    }
+
+    @Test void oneFrozenMinuteBatchFeedsCompactAndFullReceiptWithoutPerStockReload() {
+        Fixture f = new Fixture();
+        Instant now = Instant.parse("2026-09-23T01:14:00Z");
+        Instant open = Instant.parse("2026-09-23T01:00:00Z");
+        List<RadarIntradayCandlePort.Candle> bars = new ArrayList<>();
+        for (int i = 0; i < 12; i++) {
+            BigDecimal value = BigDecimal.valueOf(100 + i);
+            bars.add(new RadarIntradayCandlePort.Candle(open.plusSeconds(60L*i), value,
+                    value.add(new BigDecimal("2")), value.subtract(BigDecimal.ONE), value.add(BigDecimal.ONE), 100));
+        }
+        var cap = new RadarIntradayCandlePort.Capture("2330", "台股", "FUBON_SDK", "AVAILABLE", null,
+                TW_DATE, now.minusSeconds(10), now.minusSeconds(1), open.plusSeconds(720), bars);
+        RadarIntradayCandlePort port = mock(RadarIntradayCandlePort.class);
+        when(port.read(anyList(), eq(TW_DATE), eq(now))).thenReturn(Map.of("2330", cap));
+        f.service.setIntradayCandles(port);
+        var result = f.service.getStockEvaluation("2330", "台股", now);
+        assertThat(result.summary().intradayCandleConfirmation()).isNotNull();
+        assertThat(result.summary().intradayCandleConfirmation()).isEqualTo(result.stock().intradayCandleConfirmation());
+        assertThat(result.stock().intradayCandleConfirmation().status()).isEqualTo("CONFIRMED");
+        verify(port).read(List.of("2330"), TW_DATE, now);
+        verifyNoMoreInteractions(port);
+        verify(f.engine).evaluateStock(any());
+        assertThat(result.stock().shortReasons()).anyMatch(reason -> reason.contains("盤中價量已確認"));
+        assertThat(result.stock().reasons()).noneMatch(reason -> reason.contains("盤中價量"));
+    }
+
+    @Test void compactPreloadsOneBatchAndUnknownCalendarNeverReadsMinutesOrPretendsNotApplicable() {
+        Fixture f = new Fixture();
+        Instant now = Instant.parse("2026-09-23T01:14:00Z");
+        RadarIntradayCandlePort port = mock(RadarIntradayCandlePort.class);
+        when(port.read(anyList(), eq(TW_DATE), eq(now))).thenReturn(Map.of());
+        f.service.setIntradayCandles(port);
+        var panel = f.service.getStocksPanel("台股", now);
+        assertThat(panel.data().stocks()).allSatisfy(row ->
+                assertThat(row.intradayCandleConfirmation().status()).isEqualTo("UNAVAILABLE"));
+        verify(port).read(List.of("2330", "SAME"), TW_DATE, now);
+        verifyNoMoreInteractions(port);
+        clearInvocations(port);
+        doReturn(Optional.empty()).when(f.calendar).isTwTradingDayCachedOnly(any());
+        doReturn(Optional.empty()).when(f.calendar).isTradingDayCachedOnly(eq("台股"), any());
+        var unknown = f.service.getStockEvaluation("2330", "台股", now);
+        assertThat(unknown.stock().intradayCandleConfirmation().status()).isEqualTo("UNAVAILABLE");
+        assertThat(unknown.stock().intradayCandleConfirmation().reason()).isEqualTo("MARKET_CALENDAR_UNAVAILABLE");
+        verifyNoInteractions(port);
     }
 
     private static final class Fixture {

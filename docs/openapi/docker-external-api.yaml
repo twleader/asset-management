@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.23.0
+  version: 1.24.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
     十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -727,7 +727,7 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V21
+                    ruleVersion: TW_RULES_V22
                     actionPolicyVersion: EVIDENCE_GATE_V2
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:
@@ -819,7 +819,7 @@ paths:
               schema: {$ref: '#/components/schemas/TradingRadarStockDetailResponse'}
               examples:
                 synthetic:
-                  value: {ruleVersion: TW_RULES_V21, actionPolicyVersion: EVIDENCE_GATE_V2, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null, officialSma20Verification: null, priceReference: null}}
+                  value: {ruleVersion: TW_RULES_V22, actionPolicyVersion: EVIDENCE_GATE_V2, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null, officialSma20Verification: null, priceReference: null, intradayCandleConfirmation: null}}
         '400':
           description: >-
             email 格式不合法時優先回 email detail；否則缺少、重複或格式不合法的 stockCode／market 維持 selector detail。
@@ -1713,25 +1713,1817 @@ paths:
         '502': {description: code 為 UPSTREAM_INVALID：BFF 呼叫 business 逾時（10 秒）、transport 失敗或 business 回應不符契約；或 business 讀到的既有收據違反保存契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
         '503': {description: code 為 OWNER_UNAVAILABLE（帳號查無、非 ACTIVE、查詢失敗或逾時；不揭露帳號是否存在）、CALENDAR_UNAVAILABLE（台股日曆暫時無法確認，可重試）或 CONTEXT_NOT_READY（伺服器沒有已發布 Swagger 身分，fail closed，可重試）。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
       x-codex-route-policy: exact-report-only-post
-  /api/public/srpp/daily-decision/evaluate:
+  "/api/public/srpp/daily-decision/evaluate":
     post:
-      tags: [SRPP 決策收據]
+      tags:
+      - SRPP 決策收據
       operationId: evaluateSrppDailyDecision
-      summary: 驗證日報決策請求（佔位停用）
-      description: Task 482 尚未實作；目前僅驗證五個必填欄位與快取台股日曆，通過後一律回 503 CONTEXT_NOT_READY。不讀寫決策 repository，不 replay 佔位列，不建立 FINAL 收據，不讀 crawler 或 LLM，不授權或執行交易。未來不可變決策與成功回應另依 Task 482 實作及驗收。
+      summary: 擷取不可變D130/D195日報決策
+      description: 嚴格請求、ACTIVE owner與交易日曆先驗證，再replay既有同slot；僅新擷取核對policy/Swagger、凍結單一canonical資產和所有來源並純計算正式D130/D195。盤中K保留receipt但MEDIUM為NOT_APPLICABLE
+        SHORT_ONLY，不減中期張數。真實pending/subaccount尚未發布時逐leg BLOCKED；無broker寫入、重抓crawler、LLM或下單。
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/SrppDailyDecisionRequest'}
-            example: {ownerEmail: tw.leader@gmail.com, tradingDate: '2026-10-07', slot: '09:05', policyBundleSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', swaggerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'}
+            schema:
+              "$ref": "#/components/schemas/SrppDailyDecisionRequest"
+            example:
+              ownerEmail: tw.leader@gmail.com
+              tradingDate: '2026-10-07'
+              slot: '09:05'
+              policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+              swaggerSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       responses:
-        '400': {description: body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '409': {description: 快取台股日曆確認當日非交易日，code 為 NON_TRADING_DAY；目前不查 policy／Swagger registry。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '415': {description: Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '500': {description: 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '502': {description: BFF 呼叫 business 的 transport 失敗或逾時，code 為 UPSTREAM_INVALID。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '503': {description: 有效請求一律為 CONTEXT_NOT_READY（決策引擎尚未實作）；快取台股日曆不可確認時為 CALENDAR_UNAVAILABLE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '200':
+          description: 同identity和metadata的不可變FINAL replay。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SrppDailyDecisionResponse"
+              example:
+                authorityRevision:
+                  calculatorVersion: SRPP_D130_D195_V1
+                  databaseSchema: v1.149.0
+                  modelInputsSha256: f1127b316416059f01cd35a269a95efcb4b20c9b1cb66e5c5bdf7063d7a5f2e9
+                  policyManifestSha256: 6926cb54a6f3b33b64ed651e9a6103c956fe57e06143ee2ef920e05e984d5a48
+                  serviceBuild: fixture-build
+                created: false
+                decision:
+                  candidates:
+                  - action: BUY
+                    amountTwd: '19620'
+                    blockingReasons: []
+                    limitPrice: '9.81'
+                    lots: 2
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00865B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - subaccounts
+                      reason: VERIFIED
+                      ruleId: SUBACCOUNTS
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00865B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00865B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      - daily:00865B
+                      - dividends:00865B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-2"
+                        rawDrawdown: "-0.02"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00865B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - book:00865B
+                      - ledger
+                      - reservations
+                      - policy
+                      reason: DAILY_WEEKLY_TARGET_FUNDS_DEPTH_MIN
+                      ruleId: D-130_CAPACITY
+                      status: PASS
+                      values:
+                        lots: '2'
+                    status: ACTIONABLE_FOR_REPORT
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00865B'
+                  - action: NONE
+                    amountTwd:
+                    blockingReasons:
+                    - NOT_SELECTED
+                    limitPrice:
+                    lots: 0
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00719B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00719B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00719B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00719B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00719B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00719B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00719B
+                      - daily:00719B
+                      - dividends:00719B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-1.5"
+                        rawDrawdown: "-0.015"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00719B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - policy
+                      - quote:00719B
+                      reason: NOT_SELECTED
+                      ruleId: D-195_SELECTION
+                      status: BLOCK
+                      values: {}
+                    status: BLOCKED
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00719B'
+                  - action: NONE
+                    amountTwd:
+                    blockingReasons:
+                    - NOT_SELECTED
+                    limitPrice:
+                    lots: 0
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00697B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00697B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00697B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00697B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00697B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00697B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00697B
+                      - daily:00697B
+                      - dividends:00697B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-1"
+                        rawDrawdown: "-0.01"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00697B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - policy
+                      - quote:00697B
+                      reason: NOT_SELECTED
+                      ruleId: D-195_SELECTION
+                      status: BLOCK
+                      values: {}
+                    status: BLOCKED
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00697B'
+                  - action: BUY
+                    amountTwd: '19620'
+                    blockingReasons: []
+                    limitPrice: '9.81'
+                    lots: 2
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00865B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - subaccounts
+                      reason: VERIFIED
+                      ruleId: SUBACCOUNTS
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00865B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00865B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      - daily:00865B
+                      - dividends:00865B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-2"
+                        rawDrawdown: "-0.02"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00865B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - subaccounts
+                      - reservations
+                      - policy
+                      - book:00865B
+                      reason: EMERGENCY_SEPARATE_QUOTA_SHARED_FUNDS
+                      ruleId: EMERGENCY_CAPACITY
+                      status: PASS
+                      values:
+                        lots: '2'
+                    status: ACTIONABLE_FOR_REPORT
+                    strategy: EMERGENCY_CATHAY
+                    symbol: '00865B'
+                  eventEvidenceIntegrationStatus: NOT_BOUND
+                  eventEvidenceReason: PER_CONSUMER_EVIDENCE
+                  executionScope: REPORT_RECOMMENDATION_ONLY
+                  placesOrders: false
+                  ranking:
+                  - '00865B'
+                  - '00719B'
+                  - '00697B'
+                  tradeAuthorization: false
+                decisionContentSha256: d65abe8748f5f90be50b6dba15814160b471202305f4d288f784d0207f862a58
+                decisionRunId: 63e84ef9-900c-4114-ade4-6746a69598c0
+                identity:
+                  ownerUserId: 7
+                  policyBundleSha256: 919c7b79d79b62442063dac64f2aea14809d25ff75f7328147505013db70095f
+                  slot: '09:05'
+                  swaggerSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  tradingDate: '2026-10-08'
+                inputSnapshot:
+                  assetGeneratedAt: '2026-10-08T01:05:00Z'
+                  assetSnapshotId: 9
+                  capturedAt: '2026-10-08T01:05:00Z'
+                  inputBundleJcs: '{"capturedAt":"2026-10-08T01:05:00Z","ownerUserId":7,"schemaVersion":1,"slot":"09:05","sources":{"assets":{"fixture":"verified-positive-source"},"bear-window":{"fixture":"verified-positive-source"},"book:00697B":{"fixture":"verified-positive-source"},"book:00719B":{"fixture":"verified-positive-source"},"book:00865B":{"fixture":"verified-positive-source"},"calendar":{"fixture":"verified-positive-source"},"classifications":{"fixture":"verified-positive-source"},"daily:00697B":{"fixture":"verified-positive-source"},"daily:00719B":{"fixture":"verified-positive-source"},"daily:00865B":{"fixture":"verified-positive-source"},"dividends:00697B":{"fixture":"verified-positive-source"},"dividends:00719B":{"fixture":"verified-positive-source"},"dividends:00865B":{"fixture":"verified-positive-source"},"fx":{"fixture":"verified-positive-source"},"ledger":{"fixture":"verified-positive-source"},"minute:00697B":{"fixture":"verified-positive-source"},"minute:00719B":{"fixture":"verified-positive-source"},"minute:00865B":{"fixture":"verified-positive-source"},"pending:00697B":{"fixture":"verified-positive-source"},"pending:00719B":{"fixture":"verified-positive-source"},"pending:00865B":{"fixture":"verified-positive-source"},"policy":{"fixture":"verified-positive-source"},"quote:00697B":{"fixture":"verified-positive-source"},"quote:00719B":{"fixture":"verified-positive-source"},"quote:00865B":{"fixture":"verified-positive-source"},"radar:00697B":{"fixture":"verified-positive-source"},"radar:00719B":{"fixture":"verified-positive-source"},"radar:00865B":{"fixture":"verified-positive-source"},"reservations":{"fixture":"verified-positive-source"},"subaccounts":{"fixture":"verified-positive-source"},"swagger":{"fixture":"verified-positive-source"},"tradability:00697B":{"fixture":"verified-positive-source"},"tradability:00719B":{"fixture":"verified-positive-source"},"tradability:00865B":{"fixture":"verified-positive-source"}},"tradingDate":"2026-10-08"}'
+                  inputSnapshotSha256: 3fafacfe2aeacaec6dd14d08509cc0b84172adfa1a55346e6273bf2e50280919
+                  sourceVector:
+                    assets:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: assets
+                      validation: VERIFIED
+                    bear-window:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: bear-window
+                      validation: VERIFIED
+                    book:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00697B
+                      validation: VERIFIED
+                    book:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00719B
+                      validation: VERIFIED
+                    book:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00865B
+                      validation: VERIFIED
+                    calendar:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: calendar
+                      validation: VERIFIED
+                    classifications:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: classifications
+                      validation: VERIFIED
+                    daily:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00697B
+                      validation: VERIFIED
+                    daily:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00719B
+                      validation: VERIFIED
+                    daily:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00865B
+                      validation: VERIFIED
+                    dividends:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00697B
+                      validation: VERIFIED
+                    dividends:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00719B
+                      validation: VERIFIED
+                    dividends:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00865B
+                      validation: VERIFIED
+                    fx:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: fx
+                      validation: VERIFIED
+                    ledger:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: ledger
+                      validation: VERIFIED
+                    minute:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00697B
+                      validation: VERIFIED
+                    minute:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00719B
+                      validation: VERIFIED
+                    minute:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00865B
+                      validation: VERIFIED
+                    pending:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00697B
+                      validation: VERIFIED
+                    pending:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00719B
+                      validation: VERIFIED
+                    pending:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00865B
+                      validation: VERIFIED
+                    policy:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: policy
+                      validation: VERIFIED
+                    quote:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00697B
+                      validation: VERIFIED
+                    quote:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00719B
+                      validation: VERIFIED
+                    quote:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00865B
+                      validation: VERIFIED
+                    radar:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00697B
+                      validation: VERIFIED
+                    radar:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00719B
+                      validation: VERIFIED
+                    radar:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00865B
+                      validation: VERIFIED
+                    reservations:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: reservations
+                      validation: VERIFIED
+                    subaccounts:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: subaccounts
+                      validation: VERIFIED
+                    swagger:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: swagger
+                      validation: VERIFIED
+                    tradability:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00697B
+                      validation: VERIFIED
+                    tradability:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00719B
+                      validation: VERIFIED
+                    tradability:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00865B
+                      validation: VERIFIED
+                schemaVersion: 1
+                status: FINAL
+        '201':
+          description: 新擷取並凍結計算的FINAL；created為true。
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SrppDailyDecisionResponse"
+              example:
+                authorityRevision:
+                  calculatorVersion: SRPP_D130_D195_V1
+                  databaseSchema: v1.149.0
+                  modelInputsSha256: f1127b316416059f01cd35a269a95efcb4b20c9b1cb66e5c5bdf7063d7a5f2e9
+                  policyManifestSha256: 6926cb54a6f3b33b64ed651e9a6103c956fe57e06143ee2ef920e05e984d5a48
+                  serviceBuild: fixture-build
+                created: true
+                decision:
+                  candidates:
+                  - action: BUY
+                    amountTwd: '19620'
+                    blockingReasons: []
+                    limitPrice: '9.81'
+                    lots: 2
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00865B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - subaccounts
+                      reason: VERIFIED
+                      ruleId: SUBACCOUNTS
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00865B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00865B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      - daily:00865B
+                      - dividends:00865B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-2"
+                        rawDrawdown: "-0.02"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00865B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - book:00865B
+                      - ledger
+                      - reservations
+                      - policy
+                      reason: DAILY_WEEKLY_TARGET_FUNDS_DEPTH_MIN
+                      ruleId: D-130_CAPACITY
+                      status: PASS
+                      values:
+                        lots: '2'
+                    status: ACTIONABLE_FOR_REPORT
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00865B'
+                  - action: NONE
+                    amountTwd:
+                    blockingReasons:
+                    - NOT_SELECTED
+                    limitPrice:
+                    lots: 0
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00719B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00719B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00719B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00719B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00719B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00719B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00719B
+                      - daily:00719B
+                      - dividends:00719B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-1.5"
+                        rawDrawdown: "-0.015"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00719B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - policy
+                      - quote:00719B
+                      reason: NOT_SELECTED
+                      ruleId: D-195_SELECTION
+                      status: BLOCK
+                      values: {}
+                    status: BLOCKED
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00719B'
+                  - action: NONE
+                    amountTwd:
+                    blockingReasons:
+                    - NOT_SELECTED
+                    limitPrice:
+                    lots: 0
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00697B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00697B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00697B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00697B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00697B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00697B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00697B
+                      - daily:00697B
+                      - dividends:00697B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-1"
+                        rawDrawdown: "-0.01"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: BELOW_INDIVIDUAL_TARGET
+                      ruleId: TARGET
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00697B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - policy
+                      - quote:00697B
+                      reason: NOT_SELECTED
+                      ruleId: D-195_SELECTION
+                      status: BLOCK
+                      values: {}
+                    status: BLOCKED
+                    strategy: STRATEGIC_FUBON
+                    symbol: '00697B'
+                  - action: BUY
+                    amountTwd: '19620'
+                    blockingReasons: []
+                    limitPrice: '9.81'
+                    lots: 2
+                    receipts:
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      reason: VERIFIED
+                      ruleId: POSITION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - pending:00865B
+                      reason: VERIFIED
+                      ruleId: PENDING
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - subaccounts
+                      reason: VERIFIED
+                      ruleId: SUBACCOUNTS
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: VERIFIED
+                      ruleId: RADAR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - radar:00865B
+                      reason: RADAR_NON_OPPOSITE
+                      ruleId: RADAR_DIRECTION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - classifications
+                      reason: VERIFIED
+                      ruleId: VALUATION
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - tradability:00865B
+                      reason: VERIFIED
+                      ruleId: TRADABILITY
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      reason: VERIFIED
+                      ruleId: FX
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - fx
+                      - policy
+                      reason: USD_TWD_WITHIN_CAP
+                      ruleId: FX_CAP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - bear-window
+                      reason: RESERVED_BEAR_WINDOW_SOURCE_UNAVAILABLE
+                      ruleId: BEAR_WINDOW
+                      status: UNAVAILABLE
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - ledger
+                      - reservations
+                      reason: FILLS_AND_RESERVATIONS_RECONCILED
+                      ruleId: DEDUP
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      reason: EARLY_TRADED_PRICE_NO_AGE_LIMIT
+                      ruleId: QUOTE
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - book:00865B
+                      reason: OPPOSITE_BOOK_VERIFIED
+                      ruleId: BOOK
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - quote:00865B
+                      - daily:00865B
+                      - dividends:00865B
+                      - calendar
+                      - policy
+                      reason: DRAWDOWN_AND_PREMIUM_SUITABLE
+                      ruleId: D-195
+                      status: PASS
+                      values:
+                        drawdownPercent: "-2"
+                        rawDrawdown: "-0.02"
+                        referenceHigh: '10'
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - policy
+                      reason: TERM_DEPOSIT_FLOOR_VERIFIED
+                      ruleId: FUNDS_FLOOR
+                      status: PASS
+                      values: {}
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - minute:00865B
+                      reason: HORIZON_NOT_APPLICABLE
+                      ruleId: INTRADAY
+                      status: NOT_APPLICABLE
+                      values:
+                        scope: SHORT_ONLY
+                    - calculatorVersion: SRPP_D130_D195_V1
+                      inputRefs:
+                      - assets
+                      - subaccounts
+                      - reservations
+                      - policy
+                      - book:00865B
+                      reason: EMERGENCY_SEPARATE_QUOTA_SHARED_FUNDS
+                      ruleId: EMERGENCY_CAPACITY
+                      status: PASS
+                      values:
+                        lots: '2'
+                    status: ACTIONABLE_FOR_REPORT
+                    strategy: EMERGENCY_CATHAY
+                    symbol: '00865B'
+                  eventEvidenceIntegrationStatus: NOT_BOUND
+                  eventEvidenceReason: PER_CONSUMER_EVIDENCE
+                  executionScope: REPORT_RECOMMENDATION_ONLY
+                  placesOrders: false
+                  ranking:
+                  - '00865B'
+                  - '00719B'
+                  - '00697B'
+                  tradeAuthorization: false
+                decisionContentSha256: d65abe8748f5f90be50b6dba15814160b471202305f4d288f784d0207f862a58
+                decisionRunId: 63e84ef9-900c-4114-ade4-6746a69598c0
+                identity:
+                  ownerUserId: 7
+                  policyBundleSha256: 919c7b79d79b62442063dac64f2aea14809d25ff75f7328147505013db70095f
+                  slot: '09:05'
+                  swaggerSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  tradingDate: '2026-10-08'
+                inputSnapshot:
+                  assetGeneratedAt: '2026-10-08T01:05:00Z'
+                  assetSnapshotId: 9
+                  capturedAt: '2026-10-08T01:05:00Z'
+                  inputBundleJcs: '{"capturedAt":"2026-10-08T01:05:00Z","ownerUserId":7,"schemaVersion":1,"slot":"09:05","sources":{"assets":{"fixture":"verified-positive-source"},"bear-window":{"fixture":"verified-positive-source"},"book:00697B":{"fixture":"verified-positive-source"},"book:00719B":{"fixture":"verified-positive-source"},"book:00865B":{"fixture":"verified-positive-source"},"calendar":{"fixture":"verified-positive-source"},"classifications":{"fixture":"verified-positive-source"},"daily:00697B":{"fixture":"verified-positive-source"},"daily:00719B":{"fixture":"verified-positive-source"},"daily:00865B":{"fixture":"verified-positive-source"},"dividends:00697B":{"fixture":"verified-positive-source"},"dividends:00719B":{"fixture":"verified-positive-source"},"dividends:00865B":{"fixture":"verified-positive-source"},"fx":{"fixture":"verified-positive-source"},"ledger":{"fixture":"verified-positive-source"},"minute:00697B":{"fixture":"verified-positive-source"},"minute:00719B":{"fixture":"verified-positive-source"},"minute:00865B":{"fixture":"verified-positive-source"},"pending:00697B":{"fixture":"verified-positive-source"},"pending:00719B":{"fixture":"verified-positive-source"},"pending:00865B":{"fixture":"verified-positive-source"},"policy":{"fixture":"verified-positive-source"},"quote:00697B":{"fixture":"verified-positive-source"},"quote:00719B":{"fixture":"verified-positive-source"},"quote:00865B":{"fixture":"verified-positive-source"},"radar:00697B":{"fixture":"verified-positive-source"},"radar:00719B":{"fixture":"verified-positive-source"},"radar:00865B":{"fixture":"verified-positive-source"},"reservations":{"fixture":"verified-positive-source"},"subaccounts":{"fixture":"verified-positive-source"},"swagger":{"fixture":"verified-positive-source"},"tradability:00697B":{"fixture":"verified-positive-source"},"tradability:00719B":{"fixture":"verified-positive-source"},"tradability:00865B":{"fixture":"verified-positive-source"}},"tradingDate":"2026-10-08"}'
+                  inputSnapshotSha256: 3fafacfe2aeacaec6dd14d08509cc0b84172adfa1a55346e6273bf2e50280919
+                  sourceVector:
+                    assets:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: assets
+                      validation: VERIFIED
+                    bear-window:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: bear-window
+                      validation: VERIFIED
+                    book:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00697B
+                      validation: VERIFIED
+                    book:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00719B
+                      validation: VERIFIED
+                    book:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: book:00865B
+                      validation: VERIFIED
+                    calendar:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: calendar
+                      validation: VERIFIED
+                    classifications:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: classifications
+                      validation: VERIFIED
+                    daily:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00697B
+                      validation: VERIFIED
+                    daily:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00719B
+                      validation: VERIFIED
+                    daily:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: daily:00865B
+                      validation: VERIFIED
+                    dividends:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00697B
+                      validation: VERIFIED
+                    dividends:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00719B
+                      validation: VERIFIED
+                    dividends:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: dividends:00865B
+                      validation: VERIFIED
+                    fx:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: fx
+                      validation: VERIFIED
+                    ledger:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: ledger
+                      validation: VERIFIED
+                    minute:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00697B
+                      validation: VERIFIED
+                    minute:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00719B
+                      validation: VERIFIED
+                    minute:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: minute:00865B
+                      validation: VERIFIED
+                    pending:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00697B
+                      validation: VERIFIED
+                    pending:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00719B
+                      validation: VERIFIED
+                    pending:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: pending:00865B
+                      validation: VERIFIED
+                    policy:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: policy
+                      validation: VERIFIED
+                    quote:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00697B
+                      validation: VERIFIED
+                    quote:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00719B
+                      validation: VERIFIED
+                    quote:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: quote:00865B
+                      validation: VERIFIED
+                    radar:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00697B
+                      validation: VERIFIED
+                    radar:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00719B
+                      validation: VERIFIED
+                    radar:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: radar:00865B
+                      validation: VERIFIED
+                    reservations:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: reservations
+                      validation: VERIFIED
+                    subaccounts:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: subaccounts
+                      validation: VERIFIED
+                    swagger:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: swagger
+                      validation: VERIFIED
+                    tradability:00697B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00697B
+                      validation: VERIFIED
+                    tradability:00719B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00719B
+                      validation: VERIFIED
+                    tradability:00865B:
+                      capturedAt: '2026-10-08T01:05:00Z'
+                      coverage: COMPLETE
+                      revision: fixture-v1
+                      sha256: 30c0fa7d8ecc4502de548a32b897510bf8c2b4986fed0cbf2273fcdfd3f2d0cb
+                      sourceId: tradability:00865B
+                      validation: VERIFIED
+                schemaVersion: 1
+                status: FINAL
+        '202':
+          description: 有效lease正在擷取或較早slot尚在處理，不建立FINAL。
+          headers:
+            Retry-After:
+              description: 固定2秒後重試同identity。
+              schema:
+                type: string
+                const: '2'
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SrppDailyDecisionCapturing"
+              example:
+                schemaVersion: 1
+                decisionRunId: 63e84ef9-900c-4114-ade4-6746a69598c0
+                status: CAPTURING
+                code: DECISION_CAPTURE_IN_PROGRESS
+                identity:
+                  ownerUserId: 7
+                  policyBundleSha256: 919c7b79d79b62442063dac64f2aea14809d25ff75f7328147505013db70095f
+                  slot: '09:05'
+                  swaggerSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                  tradingDate: '2026-10-08'
+        '400':
+          description: body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
+        '409':
+          description: NON_TRADING_DAY非交易日、POLICY_UNSUPPORTED未支持政策、SWAGGER_MISMATCH新擷取Swagger不符或RUN_METADATA_MISMATCH既有slot
+            metadata不同；均不覆寫。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
+        '415':
+          description: Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如
+            charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
+        '500':
+          description: 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部
+            URL 或帳號。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
+        '502':
+          description: BFF 呼叫 business 的 transport 失敗或逾時，code 為 UPSTREAM_INVALID。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
+        '503':
+          description: OWNER_UNAVAILABLE owner不可用、CALENDAR_UNAVAILABLE交易日曆未確認或CONTEXT_NOT_READY資產／Swagger未就緒或lease到期；不建立假FINAL。
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppCaptureProblem"
       x-codex-route-policy: exact-report-only-post
   /api/srpp/daily-report-mail/{idempotencyKey}:
     get:
@@ -5197,6 +6989,7 @@ components:
       type: object
       description: 交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。
       required:
+      - intradayCandleConfirmation
       - stockCode
       - stockName
       - market
@@ -5235,6 +7028,11 @@ components:
       - weeklyIndicators
       - asOfDate
       properties:
+        intradayCandleConfirmation:
+          description: 台股短期已完成盤中K確認；null表示舊快照尚未提供。
+          anyOf:
+          - {$ref: '#/components/schemas/IntradayCandleConfirmation', description: 當前短期盤中K確認回執。}
+          - {type: 'null', description: 舊快照未提供盤中K確認。}
         stockCode:
           type:
           - string
@@ -6406,6 +8204,7 @@ components:
       description: "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以
         null 表示，不以 0 冒充。"
       required:
+      - intradayCandleConfirmation
       - stockCode
       - stockName
       - market
@@ -6484,6 +8283,11 @@ components:
       - officialSma20Verification
       - priceReference
       properties:
+        intradayCandleConfirmation:
+          description: 台股短期已完成盤中K確認；null表示舊快照尚未提供。
+          anyOf:
+          - {$ref: '#/components/schemas/IntradayCandleConfirmation', description: 當前短期盤中K確認回執。}
+          - {type: 'null', description: 舊快照未提供盤中K確認。}
         stockCode:
           type:
           - string
@@ -6982,7 +8786,7 @@ components:
           type:
           - string
           - 'null'
-          description: 固定為 TW_RULES_V21|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。
+          description: 固定為 TW_RULES_V22|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。
         source:
           type:
           - string
@@ -7044,7 +8848,7 @@ components:
           description: 唯讀盤中技術明細，完全獨立於雷達評分與動作。
       additionalProperties: false
       example:
-        decisionInputVersion: TW_RULES_V21|FUBON_OVERLAY_V1
+        decisionInputVersion: TW_RULES_V22|FUBON_OVERLAY_V1
         source: FUBON_SDK
         binding: BOUND_CONTEXT
         contextFingerprint: 6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4
@@ -10436,6 +12240,7 @@ components:
         code:
           type: string
           enum:
+          - RUN_METADATA_MISMATCH
           - INVALID_REQUEST
           - UNSUPPORTED_MEDIA_TYPE
           - NON_TRADING_DAY
@@ -10448,7 +12253,7 @@ components:
           - INTERNAL_ERROR
           - BUNDLE_METADATA_MISMATCH
           - BUNDLE_CONTENT_CONFLICT
-          description: 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。
+          description: 穩定錯誤碼：`RUN_METADATA_MISMATCH`（409，僅決策）同slot建立metadata不同；`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。
         retryable:
           type: boolean
           description: 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘為 false。
@@ -10476,14 +12281,37 @@ components:
     SrppDailyDecisionRequest:
       type: object
       additionalProperties: false
-      description: 目前停用的決策佔位端點之五欄請求；驗證通過後仍回 503 CONTEXT_NOT_READY，不產生決策收據。欄位字串由服務端 trim；未知欄位或非字串是 400 INVALID_REQUEST。
-      required: [ownerEmail, tradingDate, slot, policyBundleSha256, swaggerSha256]
+      description: 只接受識別与metadata，禁止caller提交候選、張數、價格或來源。省略ownerEmail解析configured-admin，slot須不晚於台北現在。
+      required:
+      - tradingDate
+      - slot
+      - policyBundleSha256
+      - swaggerSha256
       properties:
-        ownerEmail: {type: string, format: email, description: 必填 owner email；目前僅檢查字串格式，不解析使用者身分。Task 482 實作時才改為選填並解析 ACTIVE owner。}
-        tradingDate: {type: string, format: date, description: 必填 ISO 日期，須為服務端 Asia/Taipei 今天；快取台股日曆必須確認為交易日。}
-        slot: {type: string, enum: ['09:05', '11:40'], description: '必填日報時段，只接受 09:05 或 11:40。'}
-        policyBundleSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未查詢政策登錄表。}
-        swaggerSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未比對已發布 Swagger 身分。}
+        ownerEmail:
+          type: string
+          description: 選填ACTIVE owner email，省略configured-admin。
+          format: email
+          maxLength: 254
+          pattern: "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        tradingDate:
+          type: string
+          description: 必須為台北今天且台股交易日。
+          format: date
+        slot:
+          type: string
+          description: '09:05或11:40且必須已到該時段。'
+          enum:
+          - '09:05'
+          - '11:40'
+        policyBundleSha256:
+          type: string
+          description: 新擷取必須命中完整核對政策；replay綁定舊metadata。
+          pattern: "^[0-9a-f]{64}$"
+        swaggerSha256:
+          type: string
+          description: 新擷取必須核對已發布Swagger，replay綁定舊metadata。
+          pattern: "^[0-9a-f]{64}$"
     SrppEventEvidenceCaptureRequest:
       type: object
       additionalProperties: false
@@ -10939,6 +12767,450 @@ components:
           required: [status, requestedCount, successCount, partialCount, unavailableCount]
         contextContentSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: "移除此欄後對其餘回應套用 RFC 8785 JCS 與 SHA-256 的結果。"}
       required: [schemaVersion, contextId, marketCaptureId, tradingDate, slot, policyBundleSha256, sourceVector, symbols, coverage, contextContentSha256]
+    IntradayCandleConfirmation:
+      type: object
+      additionalProperties: false
+      description: 已完成的富邦1m盤中K確認；SHORT_ONLY，MEDIUM不影響D130張數。
+      required:
+      - status
+      - reason
+      - sourceDate
+      - observedAt
+      - lastCompletedAt
+      - fiveMinuteAt
+      - oneMinuteAt
+      - aggregationSource
+      properties:
+        status:
+          type: string
+          description: CONFIRMED保留既有SHORT買進候選，不恢復已被evidence否決的動作；WAIT等待；UNAVAILABLE來源不足；NOT_APPLICABLE非台股短期。
+          enum:
+          - CONFIRMED
+          - WAIT
+          - UNAVAILABLE
+          - NOT_APPLICABLE
+        reason:
+          type: string
+          description: 非空的機械確認原因。
+          minLength: 1
+        sourceDate:
+          type:
+          - string
+          - 'null'
+          description: 來源台北交易日期；null表示無可確認日期。
+          format: date
+        observedAt:
+          type:
+          - string
+          - 'null'
+          description: 富邦擷取完成UTC時間；null表示不適用或未取得。
+          format: date-time
+        lastCompletedAt:
+          type:
+          - string
+          - 'null'
+          description: 最後完整1m棒的結束UTC時間；null表示不適用或未取得。
+          format: date-time
+        fiveMinuteAt:
+          type:
+          - string
+          - 'null'
+          description: 最新完整5m桶的結束UTC時間；null表示證據不足。
+          format: date-time
+        oneMinuteAt:
+          type:
+          - string
+          - 'null'
+          description: 用於確認方向的完整1m棒結束UTC時間；null表示證據不足。
+          format: date-time
+        aggregationSource:
+          type:
+          - string
+          - 'null'
+          description: LOCAL_AGGREGATED_FUBON_1M由本地富邦1m聚合；null表示無聚合。
+          enum:
+          - LOCAL_AGGREGATED_FUBON_1M
+          - null
+    SrppDecisionIdentity:
+      type: object
+      additionalProperties: false
+      description: 不可變決策識別owner/date/slot；policy與Swagger為建立時metadata。
+      required:
+      - ownerUserId
+      - tradingDate
+      - slot
+      - policyBundleSha256
+      - swaggerSha256
+      properties:
+        ownerUserId:
+          type: integer
+          description: 解析出的ACTIVE資料擁有者ID。
+          minimum: 1
+        tradingDate:
+          type: string
+          description: 台北當日台股交易日。
+          format: date
+        slot:
+          type: string
+          description: '09:05或11:40日報觀察時段。'
+          enum:
+          - '09:05'
+          - '11:40'
+        policyBundleSha256:
+          type: string
+          description: 經完整政策位元組核對的規則包SHA256。
+          pattern: "^[0-9a-f]{64}$"
+        swaggerSha256:
+          type: string
+          description: 已發布SwaggerMarkdown獨立SHA256；D166不納入政策bundle。
+          pattern: "^[0-9a-f]{64}$"
+    SrppDecisionAuthorityRevision:
+      type: object
+      additionalProperties: false
+      description: 固定的計算器、資料庫與作者政策檔案版本。
+      required:
+      - serviceBuild
+      - databaseSchema
+      - calculatorVersion
+      - modelInputsSha256
+      - policyManifestSha256
+      properties:
+        serviceBuild:
+          type: string
+          description: 部署服務Git或image版本。
+        databaseSchema:
+          type: string
+          description: 本引擎資料庫版本v1.149.0。
+        calculatorVersion:
+          type: string
+          description: 正式D130/D195純計算器版本。
+        modelInputsSha256:
+          type: string
+          description: 凍結model_inputs完整原始位元組SHA256。
+          pattern: "^[0-9a-f]{64}$"
+        policyManifestSha256:
+          type: string
+          description: 凍結policy_manifest完整原始位元組SHA256。
+          pattern: "^[0-9a-f]{64}$"
+    SrppDecisionSourceReceipt:
+      type: object
+      additionalProperties: false
+      description: 單一來源凍結內容與來源可用性；未取得來源明確披露。
+      required:
+      - sourceId
+      - revision
+      - capturedAt
+      - sha256
+      - coverage
+      - validation
+      properties:
+        sourceId:
+          type: string
+          description: inputBundleJcs.sources對應鍵。
+        revision:
+          type: string
+          description: 來源snapshot/時間/版本識別。
+        capturedAt:
+          type: string
+          description: 凍結frameUTC時間。
+          format: date-time
+        sha256:
+          type: string
+          description: 對應sources payload的JCS SHA256。
+          pattern: "^[0-9a-f]{64}$"
+        coverage:
+          type: string
+          description: COMPLETE完整；PARTIAL部分；NONE未取得。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - NONE
+        validation:
+          type: string
+          description: VERIFIED已核對；UNAVAILABLE未取得；AVAILABLE分鐘可用；STALE分鐘過期；CONFLICT分鐘矛盾。
+          enum: [VERIFIED, UNAVAILABLE, AVAILABLE, STALE, CONFLICT]
+    SrppDecisionInputSnapshot:
+      type: object
+      additionalProperties: false
+      description: 完全凍結的L0/L1/L2/政策/來源內容與雜湊；同slot replay不重讀來源。
+      required:
+      - inputSnapshotSha256
+      - capturedAt
+      - assetSnapshotId
+      - assetGeneratedAt
+      - sourceVector
+      - inputBundleJcs
+      properties:
+        inputSnapshotSha256:
+          type: string
+          description: inputBundleJcs UTF8位元組SHA256。
+          pattern: "^[0-9a-f]{64}$"
+        capturedAt:
+          type: string
+          description: 最後來源讀取完成後觀察的UTC frame；分鐘採此asOf。
+          format: date-time
+        assetSnapshotId:
+          type: integer
+          description: 單一canonical最新資產snapshot ID。
+          minimum: 1
+        assetGeneratedAt:
+          type: string
+          description: 同份最新資產回覆的generatedAtUTC時間。
+          format: date-time
+        sourceVector:
+          type: object
+          description: 來源ID到完整來源收據的映射。
+          additionalProperties:
+            "$ref": "#/components/schemas/SrppDecisionSourceReceipt"
+            description: 單一來源收據。
+        inputBundleJcs:
+          type: string
+          description: 完整凍結輸入的canonical JCS文字；金額與比例皆為Decimal字串。
+    SrppDecisionGateReceipt:
+      type: object
+      additionalProperties: false
+      description: 獨立gate回執；只驗證正式政策與凍結輸入，缺來源不推論為空。
+      required:
+      - ruleId
+      - calculatorVersion
+      - inputRefs
+      - status
+      - reason
+      - values
+      properties:
+        ruleId:
+          type: string
+          description: 正式規則或gate識別。
+        calculatorVersion:
+          type: string
+          description: 計算此gate的純計算器版本。
+        inputRefs:
+          type: array
+          description: 此gate實際引用的來源ID。
+          items:
+            type: string
+            description: sourceVector來源鍵。
+        status:
+          type: string
+          description: PASS通過；BLOCK不符合政策；UNAVAILABLE來源未確認；NOT_APPLICABLE不適用。
+          enum:
+          - PASS
+          - BLOCK
+          - UNAVAILABLE
+          - NOT_APPLICABLE
+        reason:
+          type: string
+          description: 非空且固定的機械原因。
+          minLength: 1
+        values:
+          type: object
+          description: 計算值與原始精度的Decimal字串。
+          additionalProperties:
+            type: string
+            description: 機械值的精确文字。
+    SrppDecisionCandidate:
+      type: object
+      additionalProperties: false
+      description: 單一正式報告建議；D195 ranked[0]唯一策略標的與00865B獨立緊急leg。
+      required:
+      - symbol
+      - strategy
+      - status
+      - action
+      - lots
+      - limitPrice
+      - amountTwd
+      - blockingReasons
+      - receipts
+      properties:
+        symbol:
+          type: string
+          description: '00865B短債、00719B短債或00697B中債。'
+          enum:
+          - '00865B'
+          - '00719B'
+          - '00697B'
+        strategy:
+          type: string
+          description: STRATEGIC_FUBON富邦策略leg；EMERGENCY_CATHAY國泰00865B緊急leg。
+          enum:
+          - STRATEGIC_FUBON
+          - EMERGENCY_CATHAY
+        status:
+          type: string
+          description: ACTIONABLE_FOR_REPORT是有完整證據的報告買進建議；BLOCKED不可形成買進。
+          enum:
+          - ACTIONABLE_FOR_REPORT
+          - BLOCKED
+        action:
+          type: string
+          description: BUY買進報告建議；NONE無建議。
+          enum:
+          - BUY
+          - NONE
+        lots:
+          type: integer
+          description: 實際可報告整張數；BLOCKED必為0。
+          minimum: 0
+          maximum: 2
+        limitPrice:
+          type:
+          - string
+          - 'null'
+          description: ETF tick floor後限價Decimal；BLOCKED為null。
+        amountTwd:
+          type:
+          - string
+          - 'null'
+          description: 限價乘1000股乘張數Decimal；BLOCKED為null。
+        blockingReasons:
+          type: array
+          description: 唯一且排序的阻擋原因；有張數時必為空。
+          items:
+            type: string
+            description: 不可用gate原因。
+          uniqueItems: true
+        receipts:
+          type: array
+          description: 所有適用gate的獨立結果，包含盤中K NOT_APPLICABLE SHORT_ONLY。
+          items:
+            "$ref": "#/components/schemas/SrppDecisionGateReceipt"
+            description: 單一gate回執。
+    SrppDailyDecision:
+      type: object
+      additionalProperties: false
+      description: D130/D195報告用結果；無下單權限，事件證據仍由每個consumer分別處理。
+      required:
+      - executionScope
+      - tradeAuthorization
+      - placesOrders
+      - eventEvidenceIntegrationStatus
+      - eventEvidenceReason
+      - ranking
+      - candidates
+      properties:
+        executionScope:
+          type: string
+          description: REPORT_RECOMMENDATION_ONLY僅供報告。
+          enum:
+          - REPORT_RECOMMENDATION_ONLY
+        tradeAuthorization:
+          type: boolean
+          description: 固定false，不授權交易。
+          const: false
+        placesOrders:
+          type: boolean
+          description: 固定false，不執行交易。
+          const: false
+        eventEvidenceIntegrationStatus:
+          type: string
+          description: NOT_BOUND：本端點未整合consumer事件判讀。
+          enum:
+          - NOT_BOUND
+        eventEvidenceReason:
+          type: string
+          description: PER_CONSUMER_EVIDENCE：各consumer保留獨立證據。
+          enum:
+          - PER_CONSUMER_EVIDENCE
+        ranking:
+          type: array
+          description: D195適合且hardgate通過標的順位；僅首位可配置張數。
+          items:
+            type: string
+            description: '00865B、00719B、00697B策略價格順位。'
+            enum:
+            - '00865B'
+            - '00719B'
+            - '00697B'
+          uniqueItems: true
+          maxItems: 3
+        candidates:
+          type: array
+          description: 固定3策略leg加00865B緊急leg；未發布pending/subaccount來源時逐leg誠實BLOCKED。
+          items:
+            "$ref": "#/components/schemas/SrppDecisionCandidate"
+            description: 單一報告候選。
+          minItems: 4
+          maxItems: 4
+    SrppDailyDecisionResponse:
+      type: object
+      additionalProperties: false
+      description: FINAL不可變結果；同owner/date/slot相同metadata replay原内容，不重抓來源。
+      required:
+      - schemaVersion
+      - decisionRunId
+      - status
+      - created
+      - authorityRevision
+      - identity
+      - inputSnapshot
+      - decision
+      - decisionContentSha256
+      properties:
+        schemaVersion:
+          type: integer
+          description: 固定1。
+          const: 1
+        decisionRunId:
+          type: string
+          description: 不可變decision run UUID。
+          format: uuid
+        status:
+          type: string
+          description: FINAL表示完整凍結、真實計算與保存完成。
+          enum:
+          - FINAL
+        created:
+          type: boolean
+          description: 201為true、200 replay為false；不屬content hash。
+        authorityRevision:
+          "$ref": "#/components/schemas/SrppDecisionAuthorityRevision"
+          description: 部署與完整作者政策位元組身分。
+        identity:
+          "$ref": "#/components/schemas/SrppDecisionIdentity"
+          description: owner/date/slot不可變識別。
+        inputSnapshot:
+          "$ref": "#/components/schemas/SrppDecisionInputSnapshot"
+          description: 完整凍結輸入與來源回執。
+        decision:
+          "$ref": "#/components/schemas/SrppDailyDecision"
+          description: 正式政策結果與獨立gate。
+        decisionContentSha256:
+          type: string
+          description: 移除created與此hash後完整response的JCS SHA256。
+          pattern: "^[0-9a-f]{64}$"
+    SrppDailyDecisionCapturing:
+      type: object
+      additionalProperties: false
+      description: CAPTURING不是FINAL；有generation fencing与30秒lease，Retry-After=2。
+      required:
+      - schemaVersion
+      - decisionRunId
+      - status
+      - code
+      - identity
+      properties:
+        schemaVersion:
+          type: integer
+          description: 固定1。
+          const: 1
+        decisionRunId:
+          type: string
+          description: 同slot最終run沿用此claim UUID。
+          format: uuid
+        status:
+          type: string
+          description: CAPTURING代表擷取或較早slot尚在處理。
+          enum:
+          - CAPTURING
+        code:
+          type: string
+          description: DECISION_CAPTURE_IN_PROGRESS：稍後以同identity重試。
+          enum:
+          - DECISION_CAPTURE_IN_PROGRESS
+        identity:
+          "$ref": "#/components/schemas/SrppDecisionIdentity"
+          description: 已取得lease的owner/date/slot與固定metadata。
   responses:
     NginxBadGateway:
       description: HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。

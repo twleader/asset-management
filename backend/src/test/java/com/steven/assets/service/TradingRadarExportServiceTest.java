@@ -120,7 +120,7 @@ class TradingRadarExportServiceTest {
         try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(data))) {
             Sheet stock = wb.getSheet("個股決策");
             org.apache.poi.ss.usermodel.Row header = stock.getRow(0);
-            int lastCol = header.getLastCellNum() - 1 - 9; // V19 BB columns append after established four-date columns.
+            int lastCol = header.getLastCellNum() - 1 - 9 - 8; // V19 BB columns append after established four-date columns.
             // 四個新欄一律緊鄰在整張表最末四格。
             assertThat(header.getCell(lastCol - 3).getStringCellValue()).isEqualTo("下一除息日");
             assertThat(header.getCell(lastCol - 2).getStringCellValue()).isEqualTo("下一除權日");
@@ -150,12 +150,38 @@ class TradingRadarExportServiceTest {
         byte[] bytes = excelDocRenderer.render(service.manualDoc("2026-09-14T00:00:00", "2026-09-15T23:59:59").doc());
         try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
             Sheet sheet = workbook.getSheet("個股決策");
-            int start = sheet.getRow(0).getLastCellNum() - 9;
+            int start = sheet.getRow(0).getLastCellNum() - 9 - 8;
             assertThat(sheet.getRow(0).getCell(start).getStringCellValue()).isEqualTo("布林完成日K");
             assertThat(sheet.getRow(1).getCell(start).getStringCellValue()).isEqualTo("2026-09-14");
             assertThat(sheet.getRow(1).getCell(start + 6).getNumericCellValue()).isEqualTo(.8);
             assertThat(sheet.getRow(1).getCell(start + 8).getStringCellValue()).contains("本機完成權息還原K", "非單獨買賣訊號");
             assertThat(sheet.getRow(2).getCell(start + 6).getCellType()).isEqualTo(CellType.BLANK);
+        }
+    }
+
+    @Test
+    void intradayReceiptAppendsEightColumnsAndOldSnapshotsRemainBlank() throws Exception {
+        when(currentUserContext.getEffectiveUserId()).thenReturn(1L);
+        JsonNode current = snap("2026-10-08T09:14:00+08:00", "NEUTRAL", 1);
+        var stock = (com.fasterxml.jackson.databind.node.ObjectNode) current.path("stocks").get(0);
+        stock.set("intradayCandleConfirmation", mapper.readTree("""
+                {"status":"WAIT","reason":"ONE_MINUTE_WEAKENING","sourceDate":"2026-10-08",
+                 "observedAt":"2026-10-08T01:13:59Z","lastCompletedAt":"2026-10-08T01:12:00Z",
+                 "fiveMinuteAt":"2026-10-08T01:10:00Z","oneMinuteAt":"2026-10-08T01:12:00Z",
+                 "aggregationSource":"LOCAL_AGGREGATED_FUBON_1M"}
+                """));
+        JsonNode old = snap("2026-10-07T09:00:00+08:00", "NEUTRAL", 1);
+        when(store.range(eq(1L), anyLong(), anyLong())).thenReturn(
+                new TradingRadarSnapshotStore.SnapshotRange(List.of(current, old), 2, 0));
+        byte[] bytes = excelDocRenderer.render(service.manualDoc("2026-10-07T00:00:00", "2026-10-08T23:59:59").doc());
+        try (Workbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            Sheet sheet = workbook.getSheet("個股決策");
+            int start = sheet.getRow(0).getLastCellNum() - 8;
+            assertThat(sheet.getRow(0).getCell(start).getStringCellValue()).isEqualTo("盤中K確認");
+            assertThat(sheet.getRow(1).getCell(start).getStringCellValue()).isEqualTo("WAIT");
+            assertThat(sheet.getRow(1).getCell(start + 5).getStringCellValue()).isEqualTo("2026-10-08T01:10:00Z");
+            assertThat(sheet.getRow(1).getCell(start + 7).getStringCellValue()).isEqualTo("LOCAL_AGGREGATED_FUBON_1M");
+            for (int i = 0; i < 8; i++) assertThat(sheet.getRow(2).getCell(start + i).getCellType()).isEqualTo(CellType.BLANK);
         }
     }
 

@@ -1,0 +1,195 @@
+{
+  "fixtureId": "radar-intraday-conservative-confirmation-v1",
+  "evidenceKind": "SYNTHETIC_FIXED_INPUT",
+  "sourceTimeEvidence": "SYNTHETIC_CAPTURE_NOT_REAL_POINT_IN_TIME",
+  "decisionInstant": "2026-10-08T01:14:00Z",
+  "sourceDate": "2026-10-08",
+  "fees": "NOT_EVALUATED",
+  "slippage": "NOT_EVALUATED",
+  "independentHoldout": "NOT_EVALUATED",
+  "missedProfitableOpportunities": "NOT_EVALUATED",
+  "profitability": "NOT_EVALUATED",
+  "scenarios": [
+    {
+      "name": "confirmed_buy",
+      "held": false,
+      "patch": "NONE",
+      "expectedStatus": "CONFIRMED",
+      "expectedShortAction": "BUY_CANDIDATE",
+      "beforeShortAction": "BUY_CANDIDATE",
+      "candidateShortAction": "BUY_CANDIDATE"
+    },
+    {
+      "name": "missing_latest_five",
+      "held": false,
+      "patch": "MISSING_MINUTE_7",
+      "expectedStatus": "UNAVAILABLE",
+      "expectedShortAction": "WATCH",
+      "beforeShortAction": "BUY_CANDIDATE",
+      "candidateShortAction": "BUY_CANDIDATE"
+    },
+    {
+      "name": "weak_latest_one",
+      "held": true,
+      "patch": "WEAK_MINUTE_11",
+      "expectedStatus": "WAIT",
+      "expectedShortAction": "HOLD",
+      "beforeShortAction": "ADD_CANDIDATE",
+      "candidateShortAction": "ADD_CANDIDATE"
+    },
+    {
+      "name": "zero_prior_volume",
+      "held": false,
+      "patch": "ZERO_PRIOR_VOLUME",
+      "expectedStatus": "WAIT",
+      "expectedShortAction": "WATCH",
+      "beforeShortAction": "TRIAL_BUY",
+      "candidateShortAction": "TRIAL_BUY"
+    },
+    {
+      "name": "missing_capture",
+      "held": true,
+      "patch": "MISSING_CAPTURE",
+      "expectedStatus": "UNAVAILABLE",
+      "expectedShortAction": "HOLD",
+      "beforeShortAction": "BUY_CANDIDATE",
+      "candidateShortAction": "BUY_CANDIDATE"
+    },
+    {
+      "name": "calendar_unknown",
+      "held": false,
+      "patch": "UNKNOWN_CALENDAR",
+      "expectedStatus": "UNAVAILABLE",
+      "expectedShortAction": "WATCH",
+      "beforeShortAction": "BUY_CANDIDATE",
+      "candidateShortAction": "BUY_CANDIDATE"
+    },
+    {
+      "name": "existing_evidence_veto",
+      "held": false,
+      "patch": "NONE",
+      "expectedStatus": "CONFIRMED",
+      "expectedShortAction": "WATCH",
+      "beforeShortAction": "WATCH",
+      "candidateShortAction": "BUY_CANDIDATE"
+    },
+    {
+      "name": "sell_unchanged",
+      "held": true,
+      "patch": "MISSING_CAPTURE",
+      "expectedStatus": "UNAVAILABLE",
+      "expectedShortAction": "EXIT_CANDIDATE",
+      "beforeShortAction": "EXIT_CANDIDATE",
+      "candidateShortAction": "EXIT_CANDIDATE"
+    }
+  ],
+  "capture": {
+    "stockCode": "2330",
+    "market": "台股",
+    "provider": "FUBON_SDK",
+    "status": "AVAILABLE",
+    "reason": null,
+    "sourceDate": "2026-10-08",
+    "requestStartedAt": "2026-10-08T01:13:50Z",
+    "capturedAt": "2026-10-08T01:13:59Z",
+    "lastCompletedAt": "2026-10-08T01:12:00Z",
+    "candles": [
+      {
+        "candleAt": "2026-10-08T01:00:00Z",
+        "open": "100",
+        "high": "102",
+        "low": "99",
+        "close": "101",
+        "volume": 100
+      },
+      {
+        "candleAt": "2026-10-08T01:01:00Z",
+        "open": "101",
+        "high": "103",
+        "low": "100",
+        "close": "102",
+        "volume": 100
+      },
+      {
+        "candleAt": "2026-10-08T01:02:00Z",
+        "open": "102",
+        "high": "104",
+        "low": "101",
+        "close": "103",
+        "volume": 100
+      },
+      {
+        "candleAt": "2026-10-08T01:03:00Z",
+        "open": "103",
+        "high": "105",
+        "low": "102",
+        "close": "104",
+        "volume": 100
+      },
+      {
+        "candleAt": "2026-10-08T01:04:00Z",
+        "open": "104",
+        "high": "106",
+        "low": "103",
+        "close": "105",
+        "volume": 100
+      },
+      {
+        "candleAt": "2026-10-08T01:05:00Z",
+        "open": "105",
+        "high": "107",
+        "low": "104",
+        "close": "106",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:06:00Z",
+        "open": "106",
+        "high": "108",
+        "low": "105",
+        "close": "107",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:07:00Z",
+        "open": "107",
+        "high": "109",
+        "low": "106",
+        "close": "108",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:08:00Z",
+        "open": "108",
+        "high": "110",
+        "low": "107",
+        "close": "109",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:09:00Z",
+        "open": "109",
+        "high": "111",
+        "low": "108",
+        "close": "110",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:10:00Z",
+        "open": "110",
+        "high": "112",
+        "low": "109",
+        "close": "111",
+        "volume": 110
+      },
+      {
+        "candleAt": "2026-10-08T01:11:00Z",
+        "open": "111",
+        "high": "113",
+        "low": "110",
+        "close": "112",
+        "volume": 110
+      }
+    ]
+  }
+}

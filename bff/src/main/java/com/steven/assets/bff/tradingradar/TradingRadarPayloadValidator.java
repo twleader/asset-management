@@ -87,6 +87,7 @@ final class TradingRadarPayloadValidator {
         JsonNode full = object(root, "stock", false);
         stock(summary, expectedMarket, code, true);
         stock(full, expectedMarket, code, false);
+        if (!summary.get("intradayCandleConfirmation").equals(full.get("intradayCandleConfirmation"))) throw invalid();
         for (String field : ACTION_FIELDS) {
             if (!summary.get(field).equals(full.get(field))) throw invalid();
         }
@@ -233,6 +234,10 @@ final class TradingRadarPayloadValidator {
                 "counterTrendLabel", "quoteStatus", "priceUpdatedAt", "etfPremiumLiveNavAsOf", "kdHeat")) {
             text(value, key, true);
         }
+        try {
+            com.steven.assets.bff.common.IntradayCandleConfirmationValidator.validate(
+                    required(value, "intradayCandleConfirmation"));
+        } catch (RuntimeException malformed) { throw invalid(); }
         JsonNode fundamental = object(value, "fundamental", true);
         if (fundamental != null) {
             bool(fundamental, "applicable");

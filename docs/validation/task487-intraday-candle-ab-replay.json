@@ -1,0 +1,79 @@
+{
+  "fixtureId" : "radar-intraday-conservative-confirmation-v1",
+  "inputSha256" : "1224c40bd28577ff4a76859c807fc55155c5633b8c97e61a4f74e192cc4f1332",
+  "evidenceKind" : "SYNTHETIC_FIXED_INPUT",
+  "sourceTimeEvidence" : "SYNTHETIC_CAPTURE_NOT_REAL_POINT_IN_TIME",
+  "fees" : "NOT_EVALUATED",
+  "slippage" : "NOT_EVALUATED",
+  "independentHoldout" : "NOT_EVALUATED",
+  "missedProfitableOpportunities" : "NOT_EVALUATED",
+  "profitability" : "NOT_EVALUATED",
+  "comparisons" : [ {
+    "scenario" : "confirmed_buy",
+    "before" : "BUY_CANDIDATE",
+    "after" : "BUY_CANDIDATE",
+    "candidateBefore" : "BUY_CANDIDATE",
+    "candidateAfter" : "BUY_CANDIDATE",
+    "confirmation" : "CONFIRMED",
+    "reason" : "COMPLETED_PRICE_VOLUME_CONFIRMED"
+  }, {
+    "scenario" : "missing_latest_five",
+    "before" : "BUY_CANDIDATE",
+    "after" : "WATCH",
+    "candidateBefore" : "BUY_CANDIDATE",
+    "candidateAfter" : "BUY_CANDIDATE",
+    "confirmation" : "UNAVAILABLE",
+    "reason" : "MISSING_CONSECUTIVE_COMPLETED_BARS"
+  }, {
+    "scenario" : "weak_latest_one",
+    "before" : "ADD_CANDIDATE",
+    "after" : "HOLD",
+    "candidateBefore" : "ADD_CANDIDATE",
+    "candidateAfter" : "ADD_CANDIDATE",
+    "confirmation" : "WAIT",
+    "reason" : "ONE_MINUTE_WEAKENING"
+  }, {
+    "scenario" : "zero_prior_volume",
+    "before" : "TRIAL_BUY",
+    "after" : "WATCH",
+    "candidateBefore" : "TRIAL_BUY",
+    "candidateAfter" : "TRIAL_BUY",
+    "confirmation" : "WAIT",
+    "reason" : "PRIOR_FIVE_MINUTE_ZERO_VOLUME"
+  }, {
+    "scenario" : "missing_capture",
+    "before" : "BUY_CANDIDATE",
+    "after" : "HOLD",
+    "candidateBefore" : "BUY_CANDIDATE",
+    "candidateAfter" : "BUY_CANDIDATE",
+    "confirmation" : "UNAVAILABLE",
+    "reason" : "CAPTURE_MISSING"
+  }, {
+    "scenario" : "calendar_unknown",
+    "before" : "BUY_CANDIDATE",
+    "after" : "WATCH",
+    "candidateBefore" : "BUY_CANDIDATE",
+    "candidateAfter" : "BUY_CANDIDATE",
+    "confirmation" : "UNAVAILABLE",
+    "reason" : "MARKET_CALENDAR_UNAVAILABLE"
+  }, {
+    "scenario" : "existing_evidence_veto",
+    "before" : "WATCH",
+    "after" : "WATCH",
+    "candidateBefore" : "BUY_CANDIDATE",
+    "candidateAfter" : "BUY_CANDIDATE",
+    "confirmation" : "CONFIRMED",
+    "reason" : "COMPLETED_PRICE_VOLUME_CONFIRMED"
+  }, {
+    "scenario" : "sell_unchanged",
+    "before" : "EXIT_CANDIDATE",
+    "after" : "EXIT_CANDIDATE",
+    "candidateBefore" : "EXIT_CANDIDATE",
+    "candidateAfter" : "EXIT_CANDIDATE",
+    "confirmation" : "UNAVAILABLE",
+    "reason" : "CAPTURE_MISSING"
+  } ],
+  "changedShortActions" : 5,
+  "unchangedMediumAndSwing" : true,
+  "accuracyImprovementProven" : false
+}

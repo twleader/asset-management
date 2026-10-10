@@ -26,7 +26,7 @@ public class InternalSrppCaptureController {
  private final EventEvidenceCaptureService eventEvidence;
  @PostMapping(value="/event-evidence/capture",produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<String> event(@RequestHeader(value=HttpHeaders.CONTENT_TYPE,required=false) String contentType,@RequestBody(required=false) String raw){accept(contentType,raw);EventEvidenceCaptureService.Result r=eventEvidence.capture(raw);return json(r.status(),r.body());}
  @PostMapping(value="/daily-decision/evaluate",produces=MediaType.APPLICATION_JSON_VALUE) public ResponseEntity<String> decision(@RequestHeader(value=HttpHeaders.CONTENT_TYPE,required=false) String contentType,@RequestBody(required=false) String raw){accept(contentType,raw);return response(service.evaluate(raw));}
- private static ResponseEntity<String> response(SrppCaptureService.Result r){return json(r.status(),r.body());}
+ private static ResponseEntity<String> response(SrppCaptureService.Result r){if(r.status()==HttpStatus.ACCEPTED)return ResponseEntity.status(r.status()).header(HttpHeaders.CACHE_CONTROL,"no-store").header(HttpHeaders.RETRY_AFTER,"2").contentType(MediaType.APPLICATION_JSON).body(r.body());return json(r.status(),r.body());}
  private static ResponseEntity<String> json(HttpStatus status,String body){return ResponseEntity.status(status).header(HttpHeaders.CACHE_CONTROL,"no-store").contentType(MediaType.APPLICATION_JSON).body(body);}
 
  /** 只接受 type=application、subtype=json（不分大小寫、忽略參數）；{@code +json}、萬用字元與缺失一律 415，空 body 400。 */

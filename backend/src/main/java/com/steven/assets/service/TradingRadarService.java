@@ -128,6 +128,8 @@ public class TradingRadarService {
     private TradingRadarListBatchPreloader listBatchPreloader;
     /** Persisted official facts are a read-only final-action check; legacy adapters may omit it. */
     private RadarTechnicalFactPort officialSma20Facts;
+    /** Production injection is required; old unit/snapshot adapters retain null receipt. */
+    private RadarIntradayCandlePort intradayCandles;
     /** Compatibility constructors are used by legacy unit adapters; Spring production wiring is strict. */
     private final boolean strictCalendarMode;
 
@@ -409,6 +411,29 @@ public class TradingRadarService {
         this.officialSma20Facts = officialSma20Facts;
     }
 
+    @Autowired
+    void setIntradayCandles(RadarIntradayCandlePort intradayCandles) {
+        this.intradayCandles = intradayCandles;
+    }
+
+    private Map<String, RadarIntradayCandlePort.Capture> intradayFor(
+            Collection<Target> targets, Instant asOf, DecisionClock clock) {
+        if (intradayCandles == null || asOf == null || clock == null || clock.sessions() == null
+                || !clock.sessions().currentSessionTrading()) return Map.of();
+        var local = asOf.atZone(TAIPEI);
+        if (local.toLocalTime().isBefore(java.time.LocalTime.of(9, 0))
+                || !local.toLocalTime().isBefore(java.time.LocalTime.of(13, 30))) return Map.of();
+        List<String> codes = targets.stream().filter(target -> TW_MARKET.equals(target.market())
+                        && !isTaiwanMarketIndex(target.code(), target.market()))
+                .map(Target::code).distinct().sorted().toList();
+        if (codes.isEmpty()) return Map.of();
+        try {
+            Map<String, RadarIntradayCandlePort.Capture> result = intradayCandles.read(codes,
+                    local.toLocalDate(), asOf);
+            return result == null ? Map.of() : Map.copyOf(result);
+        } catch (RuntimeException unavailable) { return Map.of(); }
+    }
+
     /**
      * Shared rule-evaluation result.  It is deliberately an internal calculation object, not an
      * HTTP detail DTO: list callers project only table scalars while full/detail callers create a
@@ -454,7 +479,8 @@ public class TradingRadarService {
             List<String> shortRisks,
             List<String> swingReasons,
             List<String> swingRisks,
-            String failureMessage) {
+            String failureMessage,
+            RadarIntradayCandlePolicy.Confirmation intradayConfirmation) {
         static DecisionCore failed(Target target, String name, String assetClass,
                                    TradingRadarDto.SettingsClassification settingsClassification,
                                    String message) {
@@ -462,7 +488,7 @@ public class TradingRadarService {
                     null, null, null, null, null, null, null, null, null, null, null,
                     null, null, "CLOSE_PENDING", null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null,
-                    List.of(), List.of(message), List.of(), List.of(message), List.of(), List.of(message), message);
+                    List.of(), List.of(message), List.of(), List.of(message), List.of(), List.of(message), message, null);
         }
     }
 
@@ -612,7 +638,8 @@ public class TradingRadarService {
     }
 
     private record CompactInputs(Map<String, DecisionClock> clocks, RadarTechnicalResolver.Batch technical,
-                                 TradingRadarListBatchPreloader.Context entries) {}
+                                 TradingRadarListBatchPreloader.Context entries,
+                                 Map<String, RadarIntradayCandlePort.Capture> intraday) {}
 
     private CompactInputs compactInputs(List<Target> eligibleTargets, Instant decisionInstant) {
         Map<String, DecisionClock> decisionClocks = resolveListDecisionClocks(decisionInstant);
@@ -628,7 +655,8 @@ public class TradingRadarService {
                 decisionClocks);
         TradingRadarListBatchPreloader.Context listInputs = preloadListInputs(eligibleTargets, decisionInstant,
                 futureSessionsByMarket, expectedMarketSessions, premiumTargetDates);
-        return new CompactInputs(decisionClocks, technicalBatch, listInputs);
+        return new CompactInputs(decisionClocks, technicalBatch, listInputs,
+                intradayFor(eligibleTargets, decisionInstant, decisionClocks.get(TW_MARKET)));
     }
 
     private List<TradingRadarDto.ListStock> assembleListStocks(List<Target> eligibleTargets, Instant decisionInstant,
@@ -642,7 +670,8 @@ public class TradingRadarService {
                         marketSummaryFor(target.market(), twMarket, usMarket), decisionInstant, fxCache,
                         inputs.clocks().getOrDefault(target.market(), new DecisionClock(null, false)),
                         inputs.clocks().getOrDefault(US_MARKET, new DecisionClock(null, false)), inputs.technical(),
-                        false, inputs.entries().entry(target.code(), target.market()))))
+                        false, inputs.entries().entry(target.code(), target.market()),
+                        inputs.intraday().get(target.code()))))
                 .toList();
         Map<String, RadarTechnicalFactPort.OfficialSma20> official = officialSma20For(cores);
         return cores.stream()
@@ -708,7 +737,7 @@ public class TradingRadarService {
             core = buildDecisionCore(target, ownMarket.regime(), ownMarket.stale(), ownMarket.summary(), instant,
                     new java.util.HashMap<>(), inputs.clocks().get(target.market()),
                     inputs.clocks().get(US_MARKET), inputs.technical(), true,
-                    inputs.entries().entry(target.code(), target.market()));
+                    inputs.entries().entry(target.code(), target.market()), inputs.intraday().get(target.code()));
         } catch (RuntimeException unavailable) {
             logListBatchUnavailable("single-stock-evaluation", unavailable);
             core = DecisionCore.failed(target, target.code(), "UNKNOWN", null, "讀取個股資料失敗，該檔今日不交易。");
@@ -917,6 +946,8 @@ public class TradingRadarService {
         // Task 303：同一次 assemble() 內同幣別的 FxContext 只解析一次（20 檔美股原本各自重查 5 年
         // 匯率）。stream 目前循序執行，但用 ConcurrentHashMap 防未來並行化踩雷。
         Map<String, TradingRadarMarketContextService.FxContext> fxCache = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<String, RadarIntradayCandlePort.Capture> intraday = intradayFor(
+                targets.values(), decisionInstant, decisionClocks.get(TW_MARKET));
         List<DecisionCore> cores = targets.values().stream()
                 .filter(t -> (TW_MARKET.equals(t.market()) || US_MARKET.equals(t.market()))
                         && !isTaiwanMarketIndex(t.code(), t.market()))
@@ -925,7 +956,7 @@ public class TradingRadarService {
                         marketSummaryFor(t.market(), twMarket, usMarket), decisionInstant, fxCache,
                         decisionClocks.getOrDefault(t.market(), new DecisionClock(null, false)),
                         decisionClocks.getOrDefault(US_MARKET, new DecisionClock(null, false)), technicalBatch,
-                        true))
+                        true, null, intraday.get(t.code())))
                 .toList();
         Map<String, RadarTechnicalFactPort.OfficialSma20> official = officialSma20For(cores);
         List<TradingRadarDto.StockDecision> decisions = cores.stream()
@@ -1329,7 +1360,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V21（台股最近完成交易日收盤基準）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V22（完成收盤基準與短線盤中K確認）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1453,6 +1484,17 @@ public class TradingRadarService {
             RadarTechnicalResolver.Batch technicalBatch,
             boolean includeFullDetail,
             TradingRadarListBatchPreloader.Entry listEntry) {
+        return buildDecisionCore(target, marketRegime, marketStale, marketSummary, decisionInstant, fxCache,
+                decisionClock, usDecisionClock, technicalBatch, includeFullDetail, listEntry,
+                intradayFor(List.of(target), decisionInstant, decisionClock).get(target.code()));
+    }
+
+    /** One frozen minute batch is supplied by compact/full callers; no per-stock fallback. */
+    private DecisionCore buildDecisionCore(Target target, TradingRadarRuleEngine.MarketRegime marketRegime,
+            boolean marketStale, TradingRadarDto.MarketSummary marketSummary, Instant decisionInstant,
+            Map<String, TradingRadarMarketContextService.FxContext> fxCache, DecisionClock decisionClock,
+            DecisionClock usDecisionClock, RadarTechnicalResolver.Batch technicalBatch, boolean includeFullDetail,
+            TradingRadarListBatchPreloader.Entry listEntry, RadarIntradayCandlePort.Capture intradayCapture) {
         // The compact route has no legal single-target fallback.  A failed or
         // incomplete batch context is represented as one fail-soft row rather
         // than reopening repositories/Redis while evaluating this target.
@@ -1688,7 +1730,7 @@ public class TradingRadarService {
                             decisionClock != null && decisionClock.authoritative()
                                     ? sessionDate(decisionClock)
                                     : marketSummary == null ? null : parseLocalDate(marketSummary.asOfDate()));
-            // V12 score/candidate/parameters and RULE_VERSION stay bit-identical.  Only the final
+            // V12 score/candidate/parameters stay unchanged. TW_RULES_V22 adds only the final
             // action passes through the deterministic safety policy, at this single construction
             // point shared by page, snapshot/export and evaluateForNotification.
             // Task 356.9b：gate 擴為三軌；既有兩軌的 gate 行為逐位不變，swing 軌套用同一組
@@ -1696,6 +1738,11 @@ public class TradingRadarService {
             TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
                     result.action(), result.shortAction(), result.swingAction(),
                     target.held(), profile, evidence);
+            RadarIntradayCandlePolicy.Confirmation intradayConfirmation = intradayCandles == null ? null
+                    : RadarIntradayCandlePolicy.evaluate(target.market(), TradingRadarRuleEngine.Horizon.SHORT,
+                            decisionInstant, decisionClock == null || decisionClock.sessions() == null ? null
+                                    : decisionClock.sessions().currentSessionTrading(), intradayCapture);
+            gated = RadarIntradayCandlePolicy.apply(gated, intradayConfirmation, target.held());
 
             List<String> reasons = List.of();
             List<String> risks = List.of();
@@ -1722,6 +1769,8 @@ public class TradingRadarService {
                     shortReasons.add("MA／KD、擴充指標與相對量已使用同一份還原權息／分割序列。 ");
                 }
                 shortReasons.addAll(result.shortReasons());
+                if (intradayConfirmation != null && "CONFIRMED".equals(intradayConfirmation.status()))
+                    shortReasons.add(RadarIntradayCandlePolicy.disclosure(intradayConfirmation));
                 shortRisks = new ArrayList<>(result.shortRisks());
                 shortRisks.addAll(gated.shortDiagnostics());
                 swingReasons = new ArrayList<>();
@@ -1752,7 +1801,7 @@ public class TradingRadarService {
                     ma60Bias, week52Pos, etfPremiumPct, etfPremiumPercentile,
                     etfPremiumLivePct, etfPremiumLiveNavAsOf, List.copyOf(reasons), List.copyOf(risks),
                     List.copyOf(shortReasons), List.copyOf(shortRisks), List.copyOf(swingReasons),
-                    List.copyOf(swingRisks), null);
+                    List.copyOf(swingRisks), null, intradayConfirmation);
         } catch (Exception e) {
             if (includeFullDetail) {
                 log.warn("今日交易雷達：{} {} 組裝失敗", target.market(), target.code(), e);
@@ -1823,7 +1872,8 @@ public class TradingRadarService {
                 toWeeklyDto(core.resolvedTechnical().weekly(), core.technical().weeklyBarsDesc(),
                         core.resolvedTechnical().weeklyIndicators()), core.resolvedTechnical().resolution(),
                 toBollingerDto(core.technical().bollinger()),
-                projected.verification(), projected.priceReference());
+                projected.verification(), projected.priceReference(),
+                TradingRadarDto.IntradayCandleConfirmation.from(core.intradayConfirmation()));
     }
 
     private static List<String> appendDiagnostics(List<String> original, List<String> diagnostics) {
@@ -1915,7 +1965,7 @@ public class TradingRadarService {
                 core.etfPremiumLivePct(), core.etfPremiumLiveNavAsOf(), core.indicators().weeklyMa(),
                 core.indicators().monthlyMa(), core.indicators().quarterlyMa(), core.indicators().annualMa(),
                 core.indicators().k(), core.indicators().d(), core.result().kdHeat().name(), listWeekly,
-                dailyCandleAsOfDate);
+                dailyCandleAsOfDate, TradingRadarDto.IntradayCandleConfirmation.from(core.intradayConfirmation()));
     }
 
     private static TradingRadarDto.ListStock unavailableListStock(Target target, String name, String assetClass) {

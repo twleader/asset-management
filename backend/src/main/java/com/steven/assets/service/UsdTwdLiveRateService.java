@@ -147,7 +147,7 @@ public class UsdTwdLiveRateService {
                 "HISTORY", null, null, liveStatus, quoteStatus);
     }
 
-    private static boolean isFresh(Instant value, Instant now) {
+    public static boolean isFresh(Instant value, Instant now) {
         Duration age = Duration.between(value, now);
         return age.compareTo(Duration.ofSeconds(6)) <= 0
                 && age.compareTo(Duration.ofSeconds(-120)) >= 0;
