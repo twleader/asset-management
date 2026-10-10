@@ -840,6 +840,7 @@ src/
   - `0 30 15 * * MON-FRI` Asia/Taipei：台股交易日 15:30（收盤後 2h）→ 上傳 `<yyyy-MM-dd>/asset_daily_tw_*.dump`（日期為台北備份日；DB folder 仍是 `daily`）
   - `0 0 7 * * TUE-SAT` Asia/Taipei：前一日為美股交易日時，台北 07:00 → 上傳 `<yyyy-MM-dd>/asset_daily_us_*.dump`（日期取台北執行日；DB folder 仍是 `daily`）
   - `0 0 5 * * SUN` Asia/Taipei：每周日 05:00 → 上傳 `<yyyy-MM-dd>/asset_weekly_*.dump`（DB folder 仍是 `weekly`）
+  - Task 486 同日開機自癒：`ApplicationReadyEvent` 捕捉 Taipei candidate instant；只有嚴格晚於 15:30 才以 `AtomicBoolean` 一次提交背景工作，listener 本身不等待 backup。台股 cron 與背景工作共用一個已持有 `operationLock` 的 daily TW 入口：該入口以 `backup_record` 的 `daily`／`asset_daily_tw_YYYYMMDD_` exact prefix 去重，故先完成的一方會讓另一方跳過。背景工作取得鎖後、以及實際命名／dump 前，均以可測的 Taipei 時鐘確認日期仍是 candidate 日期；任一處跨日、15:30（含）前、休市、停用或已有 exact row 均零 I/O，只記安全日誌，不得以舊日期命名或補造歷史 snapshot。它不是新 cron 或輪詢，既有三條 `@Scheduled` 與排程清單不變；背景啟動／工作失敗只記安全 warning，不阻斷應用程式就緒。
   - 輪替策略：`daily/` 保留 50 份、`weekly/` 保留 5 份、`manual/` 保留 5 份（自救點不計入）
   - 輪替觸發點：(a) 每次排程／手動備份成功上傳後對該資料夾跑一次；(b) `updateSetting()` 儲存後對三個資料夾各跑一次（讓使用者調降保留代數時立即套用，不需等到下一次排程）。rotate 失敗以 `try/catch` 包住只記 log，不讓設定儲存 API 失敗
   - 交易日判定委派至 `MarketDataService.getTwHolidays(year)` / `getUsHolidays(year)`，並排除週末
