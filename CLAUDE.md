@@ -185,6 +185,7 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 這類工作一律固定用這組較低規格」。與最上方「禁止因成本考量而降階」不衝突：那條
 規則管的是任意、未宣告的降級，這裡是全專案唯一、白紙黑字寫明的降規格標準，套用
 時不得再各自加碼或減碼。
+Codex `/run-stack` 的 Terra 不可用時，依下述明定例外繼承主 agent，不受固定模型要求阻擋。
 
 **例外一：skill 可在自己的定義檔裡指定特定模型。** skill 自行宣告的模型／effort
 **優先於**上述繼承規則——那是 skill 作者針對該工作負載的刻意選擇，不算降級。
@@ -194,6 +195,11 @@ bash .claude/hooks/spec-review-pass.sh --status # 查目前狀態
 目前只有 `/run-stack` 用到這個例外，宣告位置：
 - Claude Code：`.claude/skills/run-stack/SKILL.md` frontmatter `model:` ／ `effort:`
 - Codex：`.agents/skills/run-stack/SKILL.md` 內文（frontmatter 不支援）
+
+**Codex `/run-stack` 的模型備援（使用者指定）：** 派工工具可選 `gpt-5.6-terra`
+時使用 Terra／high；不可用或工具無法選取時，不指定模型及 effort，只繼承主 agent
+的模型及 effort。不得改選其他模型，也不得僅因此停止或再次要求確認。應回報實際採用的
+選擇；介面模型清單與派工工具可選清單須分開判讀。
 
 > **兩邊的強制力不同，別當成同一回事。** Claude Code 的 skill frontmatter 由 harness
 > 直接套用（parser 會驗 `effort`，合法值 `low｜medium｜high｜xhigh｜max`）；Codex 的
@@ -221,7 +227,7 @@ subagent 驗收不過，仍應改進 prompt 後重新派工，不得由主 agent
 帶入該 skill 的完整流程與本次變更脈絡（改了哪個 service、預期驗證點），subagent 執行完
 回報結果（stack 是否 serve、merge commit SHA），由主 agent 向使用者彙整。模型則看該
 skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent；`/run-stack` 有宣告
-→ 用它宣告的那組。
+→ 用它宣告的那組；Codex 的 Terra 不可用時依上方備援規則繼承主 agent。
 
 > **派工工具設不了 effort 時，直接叫 skill、不要硬派。** 部分執行環境的 Agent 工具只有
 > `model` 參數、沒有 effort，這時派出去的 subagent 拿不到 skill 宣告的 effort。與其派一個

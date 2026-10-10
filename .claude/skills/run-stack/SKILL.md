@@ -9,6 +9,11 @@ effort: high
 
 This project is **never** "done" until the change is built into the image and the container is recreated. There is no `npm run dev` / `mvn spring-boot:run` workflow — everything runs via Docker Compose.
 
+> Codex 的模型規則以 `.agents/skills/run-stack/SKILL.md` 為準：派工工具可選
+> `gpt-5.6-terra` 時使用 Terra／high；不可用或工具無法選取時，只繼承主 agent 的
+> 模型及 effort，不改選其他模型、不因此停止或再次詢問。介面模型清單與派工工具清單
+> 須分開判讀。本檔的 `sonnet 5`／`high` frontmatter 適用 Claude Code。
+
 ## Stack shape (7 application services + 2 datastores)
 
 `docker-compose.yml` at repo root is the current service inventory:
