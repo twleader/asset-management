@@ -1,12 +1,12 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.22.0
+  version: 1.23.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
     十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
     ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
-    都只建立不可變收據或固定收件人郵件，絕不下單、刷新行情或呼叫券商。rescan
+    中日報與事件證據可建立不可變收據或固定收件人郵件；決策端點目前尚未實作，通過驗證後回 503 CONTEXT_NOT_READY，不產生 FINAL。各端點絕不下單、刷新行情或呼叫券商。rescan
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
@@ -1717,23 +1717,21 @@ paths:
     post:
       tags: [SRPP 決策收據]
       operationId: evaluateSrppDailyDecision
-      summary: 建立 report-only 的不可變日報決策收據
-      description: 永遠回傳 tradeAuthorization=false 與 placesOrders=false。事件證據缺失或不可用是中性 SOURCE_UNAVAILABLE fallback，不是 L0 阻擋，也不讀 crawler 或 LLM 原文。
+      summary: 驗證日報決策請求（佔位停用）
+      description: Task 482 尚未實作；目前僅驗證五個必填欄位與快取台股日曆，通過後一律回 503 CONTEXT_NOT_READY。不讀寫決策 repository，不 replay 佔位列，不建立 FINAL 收據，不讀 crawler 或 LLM，不授權或執行交易。未來不可變決策與成功回應另依 Task 482 實作及驗收。
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, additionalProperties: false, required: [ownerEmail, tradingDate, slot, policyBundleSha256, swaggerSha256]}
+            schema: {$ref: '#/components/schemas/SrppDailyDecisionRequest'}
             example: {ownerEmail: tw.leader@gmail.com, tradingDate: '2026-10-07', slot: '09:05', policyBundleSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', swaggerSha256: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'}
       responses:
-        '200': {description: 同一 identity 的不可變 FINAL replay。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
-        '201': {description: 首次完成 immutable report receipt。, content: {application/json: {schema: {type: object}, example: {status: FINAL, decision: {executionScope: REPORT_RECOMMENDATION_ONLY, tradeAuthorization: false, placesOrders: false, candidates: []}}}}}
         '400': {description: body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '409': {description: metadata、policy、Swagger 或交易日不符。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '409': {description: 快取台股日曆確認當日非交易日，code 為 NON_TRADING_DAY；目前不查 policy／Swagger registry。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
         '415': {description: Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
         '500': {description: 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '502': {description: 已保存來源資料違反契約。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
-        '503': {description: L0 context 或 owner 尚未可用。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '502': {description: BFF 呼叫 business 的 transport 失敗或逾時，code 為 UPSTREAM_INVALID。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
+        '503': {description: 有效請求一律為 CONTEXT_NOT_READY（決策引擎尚未實作）；快取台股日曆不可確認時為 CALENDAR_UNAVAILABLE。, content: {application/problem+json: {schema: {$ref: '#/components/schemas/SrppCaptureProblem'}}}}
       x-codex-route-policy: exact-report-only-post
   /api/srpp/daily-report-mail/{idempotencyKey}:
     get:
@@ -10475,6 +10473,17 @@ components:
       - instance
       - code
       - retryable
+    SrppDailyDecisionRequest:
+      type: object
+      additionalProperties: false
+      description: 目前停用的決策佔位端點之五欄請求；驗證通過後仍回 503 CONTEXT_NOT_READY，不產生決策收據。欄位字串由服務端 trim；未知欄位或非字串是 400 INVALID_REQUEST。
+      required: [ownerEmail, tradingDate, slot, policyBundleSha256, swaggerSha256]
+      properties:
+        ownerEmail: {type: string, format: email, description: 必填 owner email；目前僅檢查字串格式，不解析使用者身分。Task 482 實作時才改為選填並解析 ACTIVE owner。}
+        tradingDate: {type: string, format: date, description: 必填 ISO 日期，須為服務端 Asia/Taipei 今天；快取台股日曆必須確認為交易日。}
+        slot: {type: string, enum: ['09:05', '11:40'], description: '必填日報時段，只接受 09:05 或 11:40。'}
+        policyBundleSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未查詢政策登錄表。}
+        swaggerSha256: {type: string, pattern: '^[0-9a-f]{64}$', description: 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未比對已發布 Swagger 身分。}
     SrppEventEvidenceCaptureRequest:
       type: object
       additionalProperties: false

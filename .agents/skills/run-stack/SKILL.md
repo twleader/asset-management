@@ -7,20 +7,26 @@ description: Launch and drive the asset-management Docker Compose stack — star
 
 This project is **never** "done" until the change is built into the image and the container is recreated. There is no `npm run dev` / `mvn spring-boot:run` workflow — everything runs via Docker Compose.
 
-## Model — run this skill on `gpt-5.6-terra` / effort `high`
+## Model — prefer `gpt-5.6-terra` / effort `high`; otherwise inherit the main agent
 
-Per AGENTS.md → CLAUDE.md, this skill pins its own model instead of inheriting the main
-agent's. Dispatch the work with `spawn_agent`, passing `model: "gpt-5.6-terra"` and reasoning
-effort `high`, then report the result back up. Do not run the steps below inline on the main
-agent's model, and do not substitute a different model — if `gpt-5.6-terra` is unavailable,
-stop and say so rather than silently falling back.
+Per AGENTS.md → CLAUDE.md, prefer `gpt-5.6-terra` with reasoning effort `high` when the
+current delegation tool accepts that model. Dispatch with `spawn_agent`, passing
+`model: "gpt-5.6-terra"` and reasoning effort `high`, then report the result back up.
+
+If Terra is unavailable or cannot be selected through the current delegation tool,
+dispatch without model or reasoning-effort overrides so the subagent inherits the main
+agent's model and effort. Use only that inherited model as the fallback; do not select
+another model, stop the skill, or ask for confirmation solely because Terra is unavailable.
+State which selection was used. Distinguish the app's model picker from the delegation
+tool's accepted models: absence from the latter does not mean Terra is absent from the app.
 
 > Codex's skill loader has **no `model` frontmatter field** (it only reads `name`,
 > `description`, `metadata`, `interface`, `dependencies`, `policy`, `agents`, `assets`), so
 > this instruction is the only place the pin can live. The Claude Code copy of this skill at
 > `.claude/skills/run-stack/SKILL.md` uses `model:` / `effort:` frontmatter instead, and pins
 > `sonnet 5` / `high` — the two harnesses use different model identifiers by necessity (Codex
-> has no Sonnet), but the effort level matches. Keep both in sync when either changes.
+> has no Sonnet). Keep the Codex Terra/inherit-main fallback note in that copy and CLAUDE.md
+> in sync; the Claude Code frontmatter remains specific to its own harness.
 
 ## Stack shape (7 application services + 2 datastores)
 

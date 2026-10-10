@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.22.0` |
+| 契約版本 | `1.23.0` |
 | 對外路徑 | 23 條：19 個 `GET`、4 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -15,7 +15,7 @@
 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十三條精確 method/path pairs：
 十八條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
 ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
-都只建立不可變收據或固定收件人郵件，絕不下單、刷新行情或呼叫券商。rescan
+中日報與事件證據可建立不可變收據或固定收件人郵件；決策端點目前尚未實作，通過驗證後回 503 CONTEXT_NOT_READY，不產生 FINAL。各端點絕不下單、刷新行情或呼叫券商。rescan
 經 business 端 30 秒全域 Redis 冷卻節流）。
 
 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
@@ -70,7 +70,7 @@ OHLCV，以指定已完成日期計算市場技術事實。短歷史逐指標降
 | 18 | `GET` | `/api/public/srpp/completed-technicals` | `getSrppCompletedTechnicals` | 批次計算已完成日 K 的 SRPP 技術事實 | 200 application/json: SrppCompletedTechnicalsResponse |
 | 19 | `POST` | `/api/srpp/daily-report-mail` | `sendSrppDailyReportMail` | 安全寄送一封已驗證的 SRPP 日報 | 200 application/json: SrppDailyReportMailResponse |
 | 20 | `POST` | `/api/public/srpp/event-evidence/capture` | `captureSrppEventEvidence` | 驗證排程 LLM 的六項風險判讀引用並建立不可變事件證據收據 | 200 application/json: SrppEventEvidenceBundleResponse<br>201 application/json: SrppEventEvidenceBundleResponse |
-| 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 建立 report-only 的不可變日報決策收據 | 200 application/json: object<br>201 application/json: object |
+| 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 驗證日報決策請求（佔位停用） |  |
 | 22 | `GET` | `/api/srpp/daily-report-mail/{idempotencyKey}` | `getSrppDailyReportMail` | 查詢 SRPP 日報寄送的最終快照 | 200 application/json: SrppDailyReportMailResponse |
 | 23 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
 
@@ -617,20 +617,18 @@ provenance `DB_VERIFIED`，只代表該列存在且在新鮮度視窗內，不�
 
 ### 21. `POST /api/public/srpp/daily-decision/evaluate`
 
-永遠回傳 tradeAuthorization=false 與 placesOrders=false。事件證據缺失或不可用是中性 SOURCE_UNAVAILABLE fallback，不是 L0 阻擋，也不讀 crawler 或 LLM 原文。
+Task 482 尚未實作；目前僅驗證五個必填欄位與快取台股日曆，通過後一律回 503 CONTEXT_NOT_READY。不讀寫決策 repository，不 replay 佔位列，不建立 FINAL 收據，不讀 crawler 或 LLM，不授權或執行交易。未來不可變決策與成功回應另依 Task 482 實作及驗收。
 
 #### Responses
 
 | Status | Content／schema | 說明 |
 | --- | --- | --- |
-| `200` | application/json: object | 同一 identity 的不可變 FINAL replay。 |
-| `201` | application/json: object | 首次完成 immutable report receipt。 |
 | `400` | application/problem+json: SrppCaptureProblem | body 為空或全空白，或請求欄位、日期、slot 或 hash 不合法，code 為 INVALID_REQUEST。 |
-| `409` | application/problem+json: SrppCaptureProblem | metadata、policy、Swagger 或交易日不符。 |
+| `409` | application/problem+json: SrppCaptureProblem | 快取台股日曆確認當日非交易日，code 為 NON_TRADING_DAY；目前不查 policy／Swagger registry。 |
 | `415` | application/problem+json: SrppCaptureProblem | Content-Type 缺失、語法錯誤或不是 application/json（type 與 subtype 不分大小寫、參數如 charset 忽略；不接受 +json 變體與萬用字元）；即使 body 為空也先回 415，code 為 UNSUPPORTED_MEDIA_TYPE。 |
 | `500` | application/problem+json: SrppCaptureProblem | 未預期的伺服器錯誤，code 為 INTERNAL_ERROR；本體只含固定文案，不含例外訊息、stack trace、SQL、內部 URL 或帳號。 |
-| `502` | application/problem+json: SrppCaptureProblem | 已保存來源資料違反契約。 |
-| `503` | application/problem+json: SrppCaptureProblem | L0 context 或 owner 尚未可用。 |
+| `502` | application/problem+json: SrppCaptureProblem | BFF 呼叫 business 的 transport 失敗或逾時，code 為 UPSTREAM_INVALID。 |
+| `503` | application/problem+json: SrppCaptureProblem | 有效請求一律為 CONTEXT_NOT_READY（決策引擎尚未實作）；快取台股日曆不可確認時為 CALENDAR_UNAVAILABLE。 |
 
 ### 22. `GET /api/srpp/daily-report-mail/{idempotencyKey}`
 
@@ -2915,6 +2913,18 @@ RFC 9457 Problem Details：SRPP 事件證據（capture）與日報決策（evalu
 | `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `NON_TRADING_DAY`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR`, `BUNDLE_METADATA_MISMATCH`, `BUNDLE_CONTENT_CONFLICT` | 穩定錯誤碼：`INVALID_REQUEST`（400）body 為空或請求不合法；`UNSUPPORTED_MEDIA_TYPE`（415）Content-Type 不是 application/json；`NON_TRADING_DAY`（409）非台股交易日；`POLICY_UNSUPPORTED`（409）規則包未登錄或未通過驗證；`SWAGGER_MISMATCH`（409）swaggerSha256 與已發布 Swagger 不一致；`OWNER_UNAVAILABLE`（503）帳號查無、停用或查詢失敗；`CALENDAR_UNAVAILABLE`（503，可重試）交易日曆無法確認；`CONTEXT_NOT_READY`（503，可重試）計算脈絡尚未就緒；`UPSTREAM_INVALID`（502）上游回應不合法；`INTERNAL_ERROR`（500）未預期錯誤；`BUNDLE_METADATA_MISMATCH`（409，僅事件證據）同識別既有收據的規則包或 Swagger 雜湊不同；`BUNDLE_CONTENT_CONFLICT`（409，僅事件證據）同識別既有收據內容不同。事件證據的 422 `EVIDENCE_REJECTED` 使用專用的 `SrppEvidenceRejectedProblem`。 |
 | `retryable` | 是 | `boolean` | 否 |  | 同一請求稍後重試是否可能成功；僅 CALENDAR_UNAVAILABLE 與 CONTEXT_NOT_READY 為 true，其餘為 false。 |
 | `errors` | 否 | `array of object` | 否 | items: object<br>items 說明: 單一逐項錯誤；code 必填，各端點可另附定位欄位。 | 選填的逐項錯誤清單；只有需要逐項說明的 code 才出現，其他 problem 不帶此欄。 |
+
+### `SrppDailyDecisionRequest`
+
+目前停用的決策佔位端點之五欄請求；驗證通過後仍回 503 CONTEXT_NOT_READY，不產生決策收據。欄位字串由服務端 trim；未知欄位或非字串是 400 INVALID_REQUEST。
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerEmail` | 是 | `string (email)` | 否 |  | 必填 owner email；目前僅檢查字串格式，不解析使用者身分。Task 482 實作時才改為選填並解析 ACTIVE owner。 |
+| `tradingDate` | 是 | `string (date)` | 否 |  | 必填 ISO 日期，須為服務端 Asia/Taipei 今天；快取台股日曆必須確認為交易日。 |
+| `slot` | 是 | `string` | 否 | enum: `09:05`, `11:40` | 必填日報時段，只接受 09:05 或 11:40。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未查詢政策登錄表。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 必填 64 位小寫 hex SHA-256；佔位端點僅驗格式，尚未比對已發布 Swagger 身分。 |
 
 ### `SrppEventEvidenceCaptureRequest`
 
