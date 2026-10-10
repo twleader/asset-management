@@ -21,7 +21,10 @@ import org.springframework.transaction.support.TransactionOperations;
 
 import java.nio.file.Files;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Optional;
@@ -36,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -89,6 +93,211 @@ class BackupServiceTest {
             Files.write(output, new byte[]{1, 2, 3, 4});
             return null;
         }).when(databaseProcess).dump(any());
+    }
+
+    @Test
+    void startupRecoveryListenerReturnsWhileDailyDumpIsBlockedAndDuplicateReadyEventStartsOneTask() throws Exception {
+        AtomicReference<ZonedDateTime> now = new AtomicReference<>(taipei(2026, 10, 8, 15, 30, 1));
+        CountDownLatch dumpEntered = new CountDownLatch(1);
+        CountDownLatch releaseDump = new CountDownLatch(1);
+        CountDownLatch backgroundDone = new CountDownLatch(1);
+        AtomicInteger starts = new AtomicInteger();
+        service = controlledService(now::get, task -> {
+            starts.incrementAndGet();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    task.run();
+                } finally {
+                    backgroundDone.countDown();
+                }
+            });
+        });
+        when(marketDataService.isTwTradingDay(now.get().toLocalDate())).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+        doAnswer(invocation -> {
+            dumpEntered.countDown();
+            if (!releaseDump.await(5, TimeUnit.SECONDS)) throw new AssertionError("dump stalled");
+            Files.write(invocation.getArgument(0), new byte[]{1, 2, 3, 4});
+            return null;
+        }).when(databaseProcess).dump(any());
+
+        Thread listener = Thread.ofVirtual().start(service::recoverTwDailyOnApplicationReady);
+        listener.join(1_000);
+
+        assertThat(listener.isAlive()).as("ApplicationReady listener must not await backup work").isFalse();
+        assertThat(dumpEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        service.recoverTwDailyOnApplicationReady();
+        assertThat(starts).hasValue(1);
+        releaseDump.countDown();
+        assertThat(backgroundDone.await(5, TimeUnit.SECONDS)).isTrue();
+        verify(databaseProcess).dump(any());
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void startupRecoveryAtOrBefore1530DoesNotSubmitBackgroundTask() {
+        for (ZonedDateTime candidate : List.of(
+                taipei(2026, 10, 8, 15, 29, 59), taipei(2026, 10, 8, 15, 30, 0))) {
+            AtomicInteger starts = new AtomicInteger();
+            BackupService candidateService = controlledService(() -> candidate, task -> starts.incrementAndGet());
+
+            candidateService.recoverTwDailyOnApplicationReady();
+
+            assertThat(starts).hasValue(0);
+        }
+        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void startupRecoveryBackgroundStarterFailureIsSafeAndDoesNotExposeException(CapturedOutput output) {
+        String sentinel = "STARTER_SECRET_SENTINEL";
+        service = controlledService(() -> taipei(2026, 10, 8, 15, 30, 1),
+                task -> { throw new IllegalStateException(sentinel); });
+
+        service.recoverTwDailyOnApplicationReady();
+
+        assertThat(output.getOut())
+                .contains("TW daily startup recovery outcome=FAILED reason=THREAD_START_FAILED")
+                .doesNotContain(sentinel);
+        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void submittedStartupRecoveryFailureIsIsolatedAndDoesNotExposeException(CapturedOutput output) {
+        String sentinel = "TASK_BODY_SECRET_SENTINEL";
+        AtomicInteger clockReads = new AtomicInteger();
+        AtomicReference<Runnable> submitted = new AtomicReference<>();
+        service = controlledService(() -> {
+            if (clockReads.getAndIncrement() == 0) return taipei(2026, 10, 8, 15, 30, 1);
+            throw new IllegalStateException(sentinel);
+        }, submitted::set);
+
+        service.recoverTwDailyOnApplicationReady();
+        submitted.get().run();
+
+        assertThat(output.getOut())
+                .contains("TW daily startup recovery outcome=FAILED reason=UNEXPECTED_FAILURE")
+                .doesNotContain(sentinel);
+        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void startupRecoverySkipsDisabledHolidayAndExistingExactTwDailyRowWithoutDump() {
+        LocalDate date = LocalDate.of(2026, 10, 8);
+        AtomicReference<ZonedDateTime> now = new AtomicReference<>(taipei(2026, 10, 8, 15, 30, 1));
+
+        setting.setBackupEnabled(false);
+        service = controlledService(now::get, Runnable::run);
+        service.recoverTwDailyOnStartup(date);
+        verifyNoInteractions(databaseProcess, marketDataService, recordRepo);
+
+        setting.setBackupEnabled(true);
+        service = controlledService(now::get, Runnable::run);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(false);
+        service.recoverTwDailyOnStartup(date);
+        verify(marketDataService).isTwTradingDay(date);
+        verifyNoInteractions(databaseProcess, recordRepo);
+
+        service = controlledService(now::get, Runnable::run);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(true);
+        service.recoverTwDailyOnStartup(date);
+        verify(recordRepo).existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_");
+        verifyNoInteractions(databaseProcess);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void successfulStartupRecoveryCreatesOneTwDailyBackupAndCronThenSkipsDurableRow() {
+        LocalDate date = LocalDate.of(2026, 10, 8);
+        AtomicReference<Runnable> submitted = new AtomicReference<>();
+        service = controlledService(() -> taipei(2026, 10, 8, 15, 30, 1), submitted::set);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false, true);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+
+        service.recoverTwDailyOnApplicationReady();
+        submitted.get().run();
+        service.scheduledDailyTwBackup();
+
+        verify(databaseProcess, org.mockito.Mockito.times(1)).dump(any());
+        verify(upload).upload(any(), org.mockito.ArgumentMatchers.eq("daily"));
+        verify(recordRepo, org.mockito.Mockito.times(2))
+                .existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_");
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void nonTwDailyRowsDoNotSuppressSameDayTwDailyRecovery() {
+        LocalDate date = LocalDate.of(2026, 10, 8);
+        BackupRecord us = record(1, "asset_daily_us_20261008_070000_fixture.dump");
+        us.setFolder("daily");
+        BackupRecord manual = record(2, "asset_manual_20261008_153001_fixture.dump");
+        BackupRecord weekly = record(3, "asset_weekly_20261008_153001_fixture.dump");
+        when(recordRepo.findAll()).thenReturn(List.of(us, manual, weekly));
+        service = controlledService(() -> taipei(2026, 10, 8, 15, 30, 1), Runnable::run);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+
+        service.recoverTwDailyOnStartup(date);
+
+        verify(databaseProcess).dump(any());
+        verify(upload).upload(any(), org.mockito.ArgumentMatchers.eq("daily"));
+        verify(recordRepo).existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_");
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void startupRecoveryCrossingDateBeforeLockDoesNoMutation() {
+        LocalDate candidateDate = LocalDate.of(2026, 10, 8);
+        AtomicInteger reads = new AtomicInteger();
+        AtomicReference<Runnable> submitted = new AtomicReference<>();
+        service = controlledService(() -> reads.getAndIncrement() == 0
+                ? taipei(2026, 10, 8, 15, 30, 1)
+                : taipei(2026, 10, 9, 0, 0, 0), submitted::set);
+
+        service.recoverTwDailyOnApplicationReady();
+        submitted.get().run();
+
+        verifyNoInteractions(databaseProcess, settingRepo, recordRepo, marketDataService);
+        assertThat(remoteClient.remaining()).isZero();
+        assertThat(candidateDate).isEqualTo(LocalDate.of(2026, 10, 8));
+    }
+
+    @Test
+    void startupRecoveryCrossingDateImmediatelyBeforeFilenameDoesNoMutation() {
+        LocalDate candidateDate = LocalDate.of(2026, 10, 8);
+        AtomicInteger reads = new AtomicInteger();
+        AtomicReference<Runnable> submitted = new AtomicReference<>();
+        service = controlledService(() -> switch (reads.getAndIncrement()) {
+            case 0, 1 -> taipei(2026, 10, 8, 15, 30, 1);
+            default -> taipei(2026, 10, 9, 0, 0, 0);
+        }, submitted::set);
+        when(marketDataService.isTwTradingDay(candidateDate)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false);
+
+        service.recoverTwDailyOnApplicationReady();
+        submitted.get().run();
+
+        verify(databaseProcess, never()).dump(any());
+        verify(recordRepo, never()).saveAndFlush(any(BackupRecord.class));
+        assertThat(remoteClient.remaining()).isZero();
     }
 
     @Test
@@ -1021,6 +1230,17 @@ class BackupServiceTest {
         assertThatThrownBy(service::syncFromRemote)
                 .isInstanceOf(BackupIndexCommitUncertainException.class);
         verify(recordRepo, never()).delete(missing);
+    }
+
+    private BackupService controlledService(Supplier<ZonedDateTime> taipeiNow,
+                                            Consumer<Runnable> backgroundStarter) {
+        return new BackupService(marketDataService, settingRepo, recordRepo, remoteClient, databaseProcess,
+                tempDir.resolve("controlled-pending"), TransactionOperations.withoutTransaction(),
+                taipeiNow, backgroundStarter);
+    }
+
+    private static ZonedDateTime taipei(int year, int month, int day, int hour, int minute, int second) {
+        return ZonedDateTime.of(year, month, day, hour, minute, second, 0, ZoneId.of("Asia/Taipei"));
     }
 
     private static BackupRecord record(long id, String filename) {

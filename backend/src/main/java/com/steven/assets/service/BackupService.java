@@ -11,6 +11,8 @@ import com.steven.assets.repository.BackupRecordRepository;
 import com.steven.assets.repository.BackupSettingRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Session;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -30,6 +32,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -39,6 +42,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 @Service
 @Slf4j
@@ -55,7 +60,9 @@ public class BackupService {
     private static final String AUTO_PRE_RESTORE_PREFIX = "asset_auto-pre-restore_";
     private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
     private static final ZoneId DISPLAY_ZONE = ZoneId.of("Asia/Taipei");
+    private static final LocalTime TW_DAILY_RECOVERY_AFTER = LocalTime.of(15, 30);
     private static final Path DEFAULT_PENDING_DIR = Path.of("/home/steven/.asset-backup-pending");
+    static final String TW_DAILY_STARTUP_THREAD_NAME = "backup-tw-daily-startup-recovery";
 
     private final MarketDataService marketDataService;
     private final BackupSettingRepository settingRepo;
@@ -65,12 +72,15 @@ public class BackupService {
     private final ObjectMapper mapper;
     private final Path pendingDir;
     private final TransactionOperations indexTransaction;
+    private final Supplier<ZonedDateTime> taipeiNow;
+    private final Consumer<Runnable> backgroundStarter;
     private PlatformTransactionManager transactionManager;
     @PersistenceContext
     private EntityManager entityManager;
     /** Lock order: operationLock, then remoteLock. Restore rescue reenters operationLock. */
     private final ReentrantLock operationLock = new ReentrantLock(true);
     private final AtomicBoolean destructiveWorkQuarantined = new AtomicBoolean();
+    private final AtomicBoolean twDailyStartupSubmitted = new AtomicBoolean();
 
     @Autowired
     public BackupService(
@@ -104,6 +114,21 @@ public class BackupService {
             BackupDatabaseProcess databaseProcess,
             Path pendingDir,
             TransactionOperations indexTransaction) {
+        this(marketDataService, settingRepo, recordRepo, remoteClient, databaseProcess, pendingDir,
+                indexTransaction, () -> ZonedDateTime.now(DISPLAY_ZONE),
+                task -> Thread.ofVirtual().name(TW_DAILY_STARTUP_THREAD_NAME).start(task));
+    }
+
+    BackupService(
+            MarketDataService marketDataService,
+            BackupSettingRepository settingRepo,
+            BackupRecordRepository recordRepo,
+            BackupRemoteClient remoteClient,
+            BackupDatabaseProcess databaseProcess,
+            Path pendingDir,
+            TransactionOperations indexTransaction,
+            Supplier<ZonedDateTime> taipeiNow,
+            Consumer<Runnable> backgroundStarter) {
         this.marketDataService = marketDataService;
         this.settingRepo = settingRepo;
         this.recordRepo = recordRepo;
@@ -111,7 +136,13 @@ public class BackupService {
         this.databaseProcess = databaseProcess;
         this.pendingDir = pendingDir;
         this.indexTransaction = indexTransaction;
+        this.taipeiNow = taipeiNow;
+        this.backgroundStarter = backgroundStarter;
         this.mapper = new ObjectMapper();
+    }
+
+    private ZonedDateTime currentTaipei() {
+        return taipeiNow.get().withZoneSameInstant(DISPLAY_ZONE);
     }
 
     private <T> T executeIndexTransaction(TransactionCallback<T> work) {
@@ -326,18 +357,33 @@ public class BackupService {
 
     /** dump → verified remote upload → durable backup_record；rotation 由呼叫端在成功後另行處理。 */
     private BackupDto.CreateResponse doBackup(String folder, String prefix, boolean autoPreRestore) {
+        return doBackup(folder, prefix, autoPreRestore, null);
+    }
+
+    /**
+     * expectedTaipeiDate prevents a queued daily workflow from naming a new-day dump as if it
+     * belonged to the startup candidate. A null value preserves manual, US daily and weekly flows.
+     */
+    private BackupDto.CreateResponse doBackup(String folder, String prefix, boolean autoPreRestore,
+                                               LocalDate expectedTaipeiDate) {
         return BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
             BackupWorkflowDeadline.lockWithinDeadline(operationLock);
             try {
-                return doBackupExclusive(folder, prefix, autoPreRestore);
+                return doBackupExclusive(folder, prefix, autoPreRestore, expectedTaipeiDate);
             } finally {
                 operationLock.unlock();
             }
         });
     }
 
-    private BackupDto.CreateResponse doBackupExclusive(String folder, String prefix, boolean autoPreRestore) {
-        LocalDateTime now = LocalDateTime.now(DISPLAY_ZONE);
+    private BackupDto.CreateResponse doBackupExclusive(String folder, String prefix, boolean autoPreRestore,
+                                                        LocalDate expectedTaipeiDate) {
+        ZonedDateTime current = currentTaipei();
+        if (expectedTaipeiDate != null && !current.toLocalDate().equals(expectedTaipeiDate)) {
+            log.info("Skip TW daily backup: 台北日期已跨日，未重建歷史 snapshot");
+            return null;
+        }
+        LocalDateTime now = current.toLocalDateTime();
         Path dumpFile = createPrivateDumpFile(prefix + now.format(TS_FMT) + "_");
         String filename = dumpFile.getFileName().toString();
         boolean preserveSource = false;
@@ -438,14 +484,44 @@ public class BackupService {
 
     // ===== 自動排程（Task 388：cron 與 zone 逐字維持不變） =====
 
-    /** 台股交易日 15:30（收盤後 2 小時）→ daily/asset_daily_tw_*.dump */
-    @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
-    public void scheduledDailyTwBackup() {
+    /**
+     * Same-day only gap fill. ApplicationReady is deliberately non-blocking: the backup workflow
+     * remains behind the existing admission lock and every failure is isolated from readiness.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverTwDailyOnApplicationReady() {
+        ZonedDateTime candidate = currentTaipei();
+        if (!candidate.toLocalTime().isAfter(TW_DAILY_RECOVERY_AFTER)) return;
+        if (!twDailyStartupSubmitted.compareAndSet(false, true)) return;
+        try {
+            backgroundStarter.accept(() -> {
+                try {
+                    recoverTwDailyOnStartup(candidate.toLocalDate());
+                } catch (RuntimeException ignored) {
+                    log.warn("TW daily startup recovery outcome=FAILED reason=UNEXPECTED_FAILURE");
+                }
+            });
+        } catch (RuntimeException ignored) {
+            log.warn("TW daily startup recovery outcome=FAILED reason=THREAD_START_FAILED");
+        }
+    }
+
+    /** Visible to deterministic tests: candidate date is captured by the ready listener. */
+    void recoverTwDailyOnStartup(LocalDate candidateDate) {
         BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
             BackupWorkflowDeadline.lockWithinDeadline(operationLock);
             try {
+                ZonedDateTime current = currentTaipei();
+                if (!current.toLocalDate().equals(candidateDate)) {
+                    log.info("Skip TW daily startup recovery: 台北日期已跨日，未重建歷史 snapshot");
+                    return null;
+                }
+                if (!current.toLocalTime().isAfter(TW_DAILY_RECOVERY_AFTER)) {
+                    log.info("Skip TW daily startup recovery: 尚未晚於 15:30");
+                    return null;
+                }
                 requireNoUncertainCommit();
-                scheduledDailyTwWithinDeadline();
+                scheduledDailyTwWithinDeadline(candidateDate);
             } finally {
                 operationLock.unlock();
             }
@@ -453,17 +529,37 @@ public class BackupService {
         });
     }
 
-    private void scheduledDailyTwWithinDeadline() {
+    /** 台股交易日 15:30（收盤後 2 小時）→ daily/asset_daily_tw_*.dump */
+    @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
+    public void scheduledDailyTwBackup() {
+        BackupWorkflowDeadline.within(Duration.ofSeconds(900), () -> {
+            BackupWorkflowDeadline.lockWithinDeadline(operationLock);
+            try {
+                requireNoUncertainCommit();
+                scheduledDailyTwWithinDeadline(currentTaipei().toLocalDate());
+            } finally {
+                operationLock.unlock();
+            }
+            return null;
+        });
+    }
+
+    /** Both cron and startup recovery call this only while operationLock is held. */
+    private void scheduledDailyTwWithinDeadline(LocalDate today) {
         if (!Boolean.TRUE.equals(getSetting().getBackupEnabled())) {
             log.info("Skip TW daily backup: 備份開關已關閉");
             return;
         }
-        LocalDate today = LocalDate.now(DISPLAY_ZONE);
         if (!marketDataService.isTwTradingDay(today)) {
             log.info("Skip TW daily backup: {} 非台股交易日", today);
             return;
         }
-        if (runScheduledBackup("daily", DAILY_TW_PREFIX, "台股每日備份")) {
+        String filenamePrefix = DAILY_TW_PREFIX + today.format(DateTimeFormatter.BASIC_ISO_DATE) + "_";
+        if (recordRepo.existsByFolderAndFilenameStartingWith("daily", filenamePrefix)) {
+            log.info("Skip TW daily backup: {} 已有 durable backup_record", today);
+            return;
+        }
+        if (runScheduledBackup("daily", DAILY_TW_PREFIX, "台股每日備份", today)) {
             rotateUsingCurrentSettingQuietly("daily", "台股每日備份完成後");
         }
     }
@@ -524,9 +620,12 @@ public class BackupService {
     }
 
     private boolean runScheduledBackup(String folder, String prefix, String label) {
+        return runScheduledBackup(folder, prefix, label, null);
+    }
+
+    private boolean runScheduledBackup(String folder, String prefix, String label, LocalDate expectedTaipeiDate) {
         try {
-            doBackup(folder, prefix, false);
-            return true;
+            return doBackup(folder, prefix, false, expectedTaipeiDate) != null;
         } catch (BackupRemoteUnavailableException exception) {
             log.error("{}失敗: {}", label, exception.getMessage());
             return false;

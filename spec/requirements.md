@@ -437,6 +437,17 @@
 - [ ] **端到端 HTTP 期限與 UI**：前端 create 逾時 960 秒，restore／sync／retention 逾時 1,530 秒；Nginx 備份路由 read timeout 1,560 秒，覆蓋 frontend → BFF → backend 實際路徑，維持 server deadline < 前端 timeout < 代理 timeout。create 未結束前停用按鈕。列表在「檔名」前新增「路徑」欄：`ACTIVE_DATED` 依 filename 台北日期顯示 `asset-management-backup/<yyyy-MM-dd>/`；`LEGACY_UNMIGRATED` 顯示「舊備份（未搬移）」且還原操作停用。DB row 仍不單獨證明 Drive 物件存在。
 - [ ] **不變契約與驗收**：API path／DTO、既有 `folder` 類型、`backup_setting`／`backup_record` schema、三條 cron／時區、台美市場交易日判定、active DATE row 的 retention 代數與逐筆刪除順序不變；不繞過交易日閘門，`GDriveOutput` 不變。離線測試涵蓋 root ID gate、crypt ID-pinned backing、`directory_name_encryption=false`、日期／類型解析、最近五個台灣工作日 exact set，以及先前 16-row 快照 **六筆 DATE／十筆 frozen legacy** 加 10/2 manual 第七筆 DATE；正式切換前仍須重讀當下 exact DB；legacy 的列表提示、restore 409／零 `pg_restore`、sync 零刪 row、rotate 不納入或計數須測；並測 `manual` 的 `asset_manual_` 與 `asset_auto-pre-restore_` 在 create／sync／restore 均可正確分類，以及動態錨與 COMMIT ACK 結果未定。原六筆 copy 的目標 ID／parent／size 與舊 raw path 刪除結果分開核對；10/2 manual raw move 已唯讀讀回同一 provider ID `12hnMVCbaSR6u-JWrMjk0iu48YMbrNYAk` 的新 parent／加密名稱／raw ciphertext Size 209133690，舊 exact raw path 查無；DB row plaintext `size_bytes=209082602` 另列，不以兩個 size 相等作驗收。不以逐檔解密或還原作遷移閘門，不斷言六筆來源已進垃圾桶；其餘舊檔與先前盤點的 33 筆未索引檔不搬。新手動備份部署後分別驗 HTTP、日誌、DB durable row 及 active ID 下日期目錄 exact 加密物件唯讀讀回。
 
+**Requirement 15 修訂（Task 486）——台股每日備份限當日開機自癒：**
+
+> 2026-10-08 是台股交易日，但 `business-services` 的現存容器直到 2026-10-09 12:49（Asia/Taipei）才啟動；因此 10/8 15:30 的 cron 沒有存活程序可執行。資料庫與 active Drive `2026-10-08/` 目錄都只讀到當日 07:00 的美股 daily 檔，沒有台股檔或未索引 orphan。10/9 是國定休市，日誌顯示既有台股排程正確略過。根因不是交易日判定、remote gate 或 upload 失敗，而是精準 cron 在服務離線時不會回補。
+
+- [ ] **同日且一次的開機補救**：`ApplicationReadyEvent` listener 先捕捉 Asia/Taipei candidate instant；僅當該本地時間**嚴格晚於** 15:30 才以一次性 `AtomicBoolean` admission 將工作交給可替換的背景啟動器，listener 本身不得等待 dump／rclone／DB commit。重複 ready event 至多提交一個工作；背景啟動器拋錯或工作失敗只記安全 warning，皆不阻斷應用程式就緒。不得新增輪詢或第四條 `@Scheduled`，既有三條 cron、時區與 `SchedulePublicBffController.JOBS` 三筆登錄不變。
+- [ ] **共用 durable 去重與跨日守門，不得補造歷史**：正點 cron 與開機補救必須在同一個已取得既有 `operationLock` 的台股 daily 共用入口，依 `backup_record` 的 exact `folder=daily`、`asset_daily_tw_YYYYMMDD_` 當日 filename 前綴判斷。已有該日台股 daily durable row 時兩者都跳過；同日的美股／手動／weekly 列不得充當它。開機補救取得鎖後，必須以可由單元測試控制的 Taipei 時鐘重驗「現在日期仍等於 candidate 日期」，且停用／非交易日／相同 prefix row 均為零 dump／rclone／index mutation。若候選日已跨到下一個台北日（不論交易日、週末或假日），只記可讀的「無法重建歷史時點」日誌，不得建立標成前一天的 `asset_daily_tw_*`、不得執行 sync／restore／補造過去快照。
+- [ ] **命名時點與執行語意不擴張**：開機補救實際開始 `pg_dump` 前，命名／index workflow 必須再以同一可控制 Taipei 時鐘驗證它仍在 candidate 日期；若已跨日則零 remote／DB mutation，不得用過期 candidate 組檔名。符合所有守門條件時，必須重用台股 cron 相同的 900 秒 workflow deadline、remote identity gate、`pg_dump → verified upload → durable backup_record` 邊界、rotation 與安全錯誤處理；自癒不繞過任何 gate、不改遠端資料、不盲目重試不確定結果。鎖內共同判斷與相同 workflow 是避免「自癒先完成、cron 隨後又寫第二份」的唯一去重機制。
+- [ ] **驗收**：單元測試至少覆蓋：(a) listener 在背景 dump 被阻塞時立即返回、重複 ready event 僅提交一次、背景啟動失敗不拋出；(b) 15:30（含）前、非交易日／停用、已有 exact 台股 daily row 時零備份；(c) 同日 15:30 後且無 exact 台股 row 時恰跑一次，並驗自癒先完成後 cron 只跳過；(d) 美股／手動／weekly row 不會誤判完成；(e) 取得鎖或進入命名 workflow 時已跨日則零 dump、rclone、index mutation，絕不補造前日檔。實際部署只驗服務健康、既有安全 read endpoint 與程式產物；不得為驗收新增手動 backup、sync、restore 或任何 Drive 寫入。
+
+- [ ] **背景工作失敗驗收補充**：已提交背景 task 的內部失敗必須被安全隔離、不可外拋，且 warning 不得包含植入的敏感字串；此測試與背景啟動器拋錯測試分別覆蓋。
+
 ---
 
 ### Requirement 16: 到價警示（Stock Alerts）
