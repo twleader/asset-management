@@ -33,6 +33,95 @@ class AiFlowRepositoryPostgresTest {
     }
     AiFlowService service(long owner){return new AiFlowService(repository,new AiFlowOwnerPort(){public long configuredOwner(){return owner;}public long readOwner(){return owner;}},new AiFlowCredentialService("c","h","r"),manager,Clock.systemUTC());}
     AppendResult append(List<Event> events){return service.ingest(List.of("r"),"application/json",raw(events).toString());}
+    @Test void usCheckMigrationIsReplayablePreservesTwHistoryAndFiltersAllFourSlots() throws Exception {
+        append(complete());
+        var twRuns = jdbc.queryForList("SELECT * FROM ai_flow_run ORDER BY owner_user_id,run_id");
+        var twEvents = jdbc.queryForList("SELECT * FROM ai_flow_event ORDER BY owner_user_id,run_id,event_id");
+        String structure = "SELECT 'constraint' AS kind,conname AS name,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid IN ('ai_flow_run'::regclass,'ai_flow_event'::regclass) AND conname<>'ai_flow_run_report_slot_check' UNION ALL SELECT 'index',indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename IN ('ai_flow_run','ai_flow_event') UNION ALL SELECT 'trigger',tgname,pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid IN ('ai_flow_run'::regclass,'ai_flow_event'::regclass) AND NOT tgisinternal ORDER BY kind,name";
+        var oldStructure = jdbc.queryForList(structure);
+        String usMigration = new ClassPathResource("db/changelog/changes/v1.154.0-ai-flow-us-report-slot.sql")
+                .getContentAsString(StandardCharsets.UTF_8);
+        jdbc.execute(migration); jdbc.execute(usMigration); jdbc.execute(usMigration);
+        assertThat(jdbc.queryForList(structure)).isEqualTo(oldStructure);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_run ORDER BY owner_user_id,run_id")).isEqualTo(twRuns);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_event ORDER BY owner_user_id,run_id,event_id")).isEqualTo(twEvents);
+        String check = jdbc.queryForObject("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='ai_flow_run'::regclass AND conname='ai_flow_run_report_slot_check'", String.class);
+        assertThat(check).contains("09:05", "12:00", "11:40", "22:00");
+
+        ObjectNode noon = marketBatch(100, "Codex", "12:00", DATE);
+        ObjectNode historicalNoon = marketBatch(101, "Codex", "11:40", DATE);
+        ObjectNode us = marketBatch(102, "Codex", "22:00", DATE);
+        for (ObjectNode batch : List.of(noon, historicalNoon, us))
+            assertThat(service.ingest(List.of("r"), "application/json", batch.toString()).ack().inserted()).isEqualTo(6);
+        service(8).ingest(List.of("r"), "application/json", us.toString());
+        service.ingest(List.of("r"), "application/json", marketBatch(103, "Claude", "12:00", DATE).toString());
+        service.ingest(List.of("r"), "application/json", marketBatch(104, "Codex", "22:00", DATE.minusDays(1)).toString());
+
+        Map<String, List<String>> slots = new LinkedHashMap<>();
+        for (String period : List.of("ALL", "MORNING", "NOON", "US")) {
+            var selected = query(DATE.toString()); selected.add("period", period);
+            var list = service.list(selected);
+            assertThat(list.period()).isEqualTo(period);
+            assertThat(list.runs()).allSatisfy(run -> {
+                assertThat(run.ownerUserId()).isEqualTo(7);
+                assertThat(run.reportDate()).isEqualTo(DATE);
+                assertThat(run.consumer()).isEqualTo("Codex");
+            });
+            slots.put(period, list.runs().stream().map(RunView::reportSlot).toList());
+        }
+        assertThat(slots.get("ALL")).containsExactly("09:05", "11:40", "12:00", "22:00");
+        assertThat(slots.get("MORNING")).containsExactly("09:05");
+        assertThat(slots.get("NOON")).containsExactly("11:40", "12:00");
+        assertThat(slots.get("US")).containsExactly("22:00");
+        Set<String> partition = new HashSet<>(slots.get("MORNING")); partition.addAll(slots.get("NOON")); partition.addAll(slots.get("US"));
+        assertThat(partition).containsExactlyInAnyOrderElementsOf(slots.get("ALL"));
+        assertThat(Collections.disjoint(slots.get("NOON"), slots.get("US"))).isTrue();
+        var claudeUs = query(DATE.toString()); claudeUs.set("consumer", "Claude"); claudeUs.set("period", "US");
+        assertThat(service.list(claudeUs).runs()).isEmpty();
+
+        var replay = service.ingest(List.of("r"), "application/json", us.toString());
+        assertThat(replay.status()).isEqualTo(200); assertThat(replay.ack().replayed()).isEqualTo(6);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_run WHERE owner_user_id=7 AND run_id=?", RUN)).isEqualTo(twRuns);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_event WHERE owner_user_id=7 AND run_id=? ORDER BY event_id", RUN)).isEqualTo(twEvents);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO ai_flow_run SELECT owner_user_id,gen_random_uuid(),consumer,report_date,'23:00',source_kind,source_run_id||'-bad',metadata_json,metadata_sha256,received_at FROM ai_flow_run LIMIT 1"))
+                .isInstanceOf(RuntimeException.class);
+    }
+    @Test void usMigrationKeepsAtomicReplayImmutabilityAndRetentionGuards() throws Exception {
+        jdbc.execute(new ClassPathResource("db/changelog/changes/v1.154.0-ai-flow-us-report-slot.sql")
+                .getContentAsString(StandardCharsets.UTF_8));
+        ObjectNode us = marketBatch(102, "Codex", "22:00", DATE);
+        service.ingest(List.of("r"), "application/json", us.toString());
+        var oldRuns = jdbc.queryForList("SELECT * FROM ai_flow_run");
+        var oldEvents = jdbc.queryForList("SELECT * FROM ai_flow_event ORDER BY event_id");
+        ObjectNode conflict = us.deepCopy();
+        ((ObjectNode) conflict.path("events").get(0)).put("title", "衝突內容");
+        ((com.fasterxml.jackson.databind.node.ArrayNode) conflict.path("events")).insert(0,
+                JSON.valueToTree(event(7, "extra", "OBSERVATION", null, List.of(), null)));
+        assertThatThrownBy(() -> service.ingest(List.of("r"), "application/json", conflict.toString()))
+                .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("EVENT_CONFLICT"));
+        for (String sql : List.of("UPDATE ai_flow_run SET report_slot='12:00'", "UPDATE ai_flow_event SET sequence=sequence", "DELETE FROM ai_flow_run", "DELETE FROM ai_flow_event"))
+            assertThatThrownBy(() -> jdbc.update(sql)).isInstanceOf(RuntimeException.class);
+        for (LocalDate date : List.of(DATE.minusDays(90), DATE.plusDays(1))) {
+            ObjectNode invalid = marketBatch(103, "Codex", "22:00", date);
+            assertThatThrownBy(() -> service.ingest(List.of("r"), "application/json", invalid.toString())).isInstanceOf(AiFlowProblem.class);
+            assertThatThrownBy(() -> jdbc.update("INSERT INTO ai_flow_run SELECT owner_user_id,gen_random_uuid(),consumer,?,report_slot,source_kind,source_run_id||'-date',metadata_json,metadata_sha256,received_at FROM ai_flow_run LIMIT 1", date))
+                    .isInstanceOf(RuntimeException.class);
+        }
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_run")).isEqualTo(oldRuns);
+        assertThat(jdbc.queryForList("SELECT * FROM ai_flow_event ORDER BY event_id")).isEqualTo(oldEvents);
+        var replay = service.ingest(List.of("r"), "application/json", us.toString());
+        assertThat(replay.status()).isEqualTo(200); assertThat(replay.ack().inserted()).isZero(); assertThat(replay.ack().replayed()).isEqualTo(6);
+    }
+    private ObjectNode marketBatch(int runNumber, String consumer, String slot, LocalDate date) {
+        ObjectNode batch = raw(complete());
+        ((ObjectNode) batch.path("run")).put("runId", id(runNumber)).put("consumer", consumer)
+                .put("reportDate", date.toString()).put("reportSlot", slot).put("sourceRunId", "source-" + runNumber)
+                .put("sourceKind", consumer.equals("Codex") ? "CODEX_ROLLOUT" : "CLAUDE_ARTIFACT")
+                .put("automationId", slot.equals("22:00") ? "22-00" : consumer.equals("Codex")
+                        ? (slot.equals("09:05") ? "codex-srpp-09-30" : "codex-srpp")
+                        : (slot.equals("09:05") ? "srpp-0905-claude" : "srpp-1150-claude"));
+        return batch;
+    }
     @Test void legacyOffsetSnapshotsReadAsInstantsAndOriginalReplayNeverChangesStoredHashes(){
         ObjectNode legacy=raw(complete());((ObjectNode)legacy.path("run")).put("startedAt",AT);
         for(var event:legacy.path("events"))if(!event.path("occurredAt").isNull())

@@ -278,7 +278,7 @@ CREATE TABLE public.ai_flow_run (
     CONSTRAINT ai_flow_run_check CHECK ((((source_kind)::text = 'SCHEDULE_EVENTS'::text) OR (((source_kind)::text = 'CODEX_ROLLOUT'::text) AND ((consumer)::text = 'Codex'::text)) OR (((source_kind)::text = 'CLAUDE_ARTIFACT'::text) AND ((consumer)::text = 'Claude'::text)))),
     CONSTRAINT ai_flow_run_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Codex'::character varying, 'Claude'::character varying])::text[]))),
     CONSTRAINT ai_flow_run_metadata_sha256_check CHECK ((metadata_sha256 ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT ai_flow_run_report_slot_check CHECK (((report_slot)::text = ANY ((ARRAY['09:05'::character varying, '12:00'::character varying, '11:40'::character varying])::text[]))),
+    CONSTRAINT ai_flow_run_report_slot_check CHECK (((report_slot)::text = ANY ((ARRAY['09:05'::character varying, '12:00'::character varying, '11:40'::character varying, '22:00'::character varying])::text[]))),
     CONSTRAINT ai_flow_run_source_kind_check CHECK (((source_kind)::text = ANY ((ARRAY['CODEX_ROLLOUT'::character varying, 'CLAUDE_ARTIFACT'::character varying, 'SCHEDULE_EVENTS'::character varying])::text[])))
 );
 

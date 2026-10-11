@@ -1,6 +1,6 @@
 # AI 判斷流程觀測補充 API
 
-版本：1.0.0；來源 SHA256：`22e76a0e4e958d935d8eaf07fc40b9b10d6c4639e10bdb9eb1fe37174fcc0913`
+版本：1.1.0；來源 SHA256：`8981ccde9a7f3b4b147e5081e04ba0d90fd0454f520708d7963ca96740150b5f`
 
 獨立於原金融OpenAPI與PublishedSwaggerIdentity；只保存觀測事件，不調度LLM或執行金融操作。原24金融routes+本1觀測route=25 method/path pairs。流程只保留90個台北日期，正常DB backup保留schema但排除本功能兩表data。現有SRPP規則與排程不需改動；被動host collector非同步收集。
 
@@ -99,17 +99,17 @@
 
 ## AiFlowRunMetadata
 
-run immutable identity；server owner不能由producer指定；同source identity不可另建run。
+run immutable identity；server owner不能由producer指定；同source identity不可另建run。22:00美股時段與Codex／22-00雙向綁定；台股三時段保留既有身份相容範圍。
 
 | 欄位 | 型別／限制 | 必填 | 用途 |
 | --- | --- | --- | --- |
 | runId | "string" {"format":"uuid"} | 是 | 真source identity導出的穩定UUID。 |
 | consumer | "string" {"enum":["Codex","Claude"]} | 是 | 排程軌別，token授權綁定。 固定值：Codex／Claude。 |
 | reportDate | "string" {"format":"date"} | 是 | 原排程台北日期，不以接收或完成日期替代；保留今天及前89日期。 |
-| reportSlot | "string" {"enum":["09:05","12:00","11:40"]} | 是 | 早盤/午盤及保留原11:40歷史時點。 固定值：09:05／12:00／11:40。 |
+| reportSlot | "string" {"enum":["09:05","12:00","11:40","22:00"]} | 是 | 台股早盤／午盤、原11:40歷史時點與美股22:00排程時段；提前、補跑或跨午夜仍保留plannedslot。 固定值：09:05／12:00／11:40／22:00。 |
 | sourceKind | "string" {"enum":["CODEX_ROLLOUT","CLAUDE_ARTIFACT","SCHEDULE_EVENTS"]} | 是 | schedule token只能SCHEDULE_EVENTS；collector只能與consumer一致的CODEX_ROLLOUT/CLAUDE_ARTIFACT。 固定值：CODEX_ROLLOUT／CLAUDE_ARTIFACT／SCHEDULE_EVENTS。 |
 | sourceRunId | "string" {"maxLength":200} | 是 | exact thread_id+turn_id或有明確身份artifact的opaque ID；不得mtime拼接。 |
-| automationId | "string" {"enum":["codex-srpp-09-30","codex-srpp","srpp-0905-claude","srpp-1150-claude"]} | 是 | 已知排程exact ID；Codex為codex-srpp-09-30/codex-srpp，Claude為srpp-0905-claude/srpp-1150-claude。 固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude。 |
+| automationId | "string" {"enum":["codex-srpp-09-30","codex-srpp","srpp-0905-claude","srpp-1150-claude","22-00"]} | 是 | 已知排程exact ID；Codex台股為codex-srpp-09-30/codex-srpp、美股為22-00，Claude台股為srpp-0905-claude/srpp-1150-claude；未查證Claude美股來源不猜ID。 固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude／22-00。 |
 | startedAt | ["string", "null"] {"format":"date-time"} | 是 | 真實公開開始時間；缺來源為null。 |
 | workflowVersion | "string" {"maxLength":100} | 是 | 觀測協定版本，不替代投資政策版本。 |
 

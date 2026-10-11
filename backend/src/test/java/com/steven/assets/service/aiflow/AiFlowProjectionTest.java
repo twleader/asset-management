@@ -1,6 +1,8 @@
 package com.steven.assets.service.aiflow;
 
 import com.steven.assets.dto.aiflow.AiFlowDtos.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.steven.assets.repository.aiflow.AiFlowRepository.StoredRun;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -11,6 +13,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiFlowProjectionTest {
+    @Test void allFourPlannedSlotsHaveExplicitLabelsAndPreserveObservedDurations() {
+        for (var expected : Map.of("09:05", "台股早盤09:05", "12:00", "台股午盤12:00",
+                "11:40", "台股午盤11:40（歷史）", "22:00", "美股22:00").entrySet()) {
+            ObjectNode input = raw(complete());
+            ((ObjectNode) input.path("run")).put("reportSlot", expected.getKey()).put("automationId",
+                    expected.getKey().equals("22:00") ? "22-00" : expected.getKey().equals("09:05") ? "codex-srpp-09-30" : "codex-srpp");
+            var validated = AiFlowProtocol.parse(input.toString()); var metadata = validated.batch().run();
+            var stored = new StoredRun(7, RUN, metadata.consumer(), DATE, metadata.reportSlot(), metadata.sourceKind(),
+                    metadata.sourceRunId(), validated.metadataJson(), validated.metadataHash());
+            var detail = AiFlowProjection.detail(stored, complete());
+            assertThat(detail.run().slotLabel()).isEqualTo(expected.getValue());
+            assertThat(detail.run().reportSlot()).isEqualTo(expected.getKey());
+            assertThat(detail.run().startedAt()).isEqualTo(instant(AT));
+            assertThat(detail.run().durationMillis()).isEqualTo(6000);
+            assertThat(detail.slowSteps().getFirst().durationMillis()).isEqualTo(3000);
+            assertThat(detail.run().verifiedReportOutcome()).isEqualTo("UNCONFIRMED");
+        }
+    }
     @Test void actualInstantsDriveDurationAndTaipeiLabelRegardlessOfSourceOffset() {
         List<Event> events=new ArrayList<>(complete());
         String western=OffsetDateTime.parse(DATE+"T09:05:04+08:00").withOffsetSameInstant(ZoneOffset.ofHours(-5)).toString();

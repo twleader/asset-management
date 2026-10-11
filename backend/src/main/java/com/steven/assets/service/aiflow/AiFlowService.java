@@ -130,7 +130,7 @@ public class AiFlowService {
         if (!query.containsKey("date") || !query.containsKey("consumer")) throw new AiFlowProblem("INVALID_REQUEST");
         String consumer = query.getFirst("consumer"); if (!Set.of("Codex", "Claude").contains(consumer)) throw new AiFlowProblem("INVALID_REQUEST");
         String period = query.containsKey("period") ? query.getFirst("period") : "ALL";
-        if (!Set.of("ALL", "MORNING", "NOON").contains(period)) throw new AiFlowProblem("INVALID_REQUEST");
+        if (!Set.of("ALL", "MORNING", "NOON", "US").contains(period)) throw new AiFlowProblem("INVALID_REQUEST");
         return new Parsed(AiFlowProtocol.date(query.getFirst("date")), consumer, period);
     }
     public LocalDate earliest() { return LocalDate.now(clock.withZone(TAIPEI)).minusDays(89); }

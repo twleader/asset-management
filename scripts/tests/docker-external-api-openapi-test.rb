@@ -1099,9 +1099,10 @@ assert!(confirmation.dig('properties', 'aggregationSource', 'enum') == ['LOCAL_A
 assert!(decision.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionCapturing', 'CAPTURING typed response')
 assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?('RUN_METADATA_MISMATCH'), 'metadata mismatch registered')
 
-# Task 492：獨立契約分別解析 refs，不能 merge components 或修改原金融身份。
+# Tasks 492／494：獨立契約分別解析 refs，不能 merge components 或修改原金融身份。
 observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
-assert!(observation.dig('info', 'version') == '1.0.0', '觀測契約版本固定1.0.0')
+assert!(observation.fetch('openapi') == '3.1.0', '觀測契約使用 OpenAPI 3.1 的 JSON Schema 條件')
+assert!(observation.dig('info', 'version') == '1.1.0', 'Task494 觀測契約版本固定1.1.0')
 assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測 paths 只能唯一exact route')
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
@@ -1112,6 +1113,55 @@ observation.dig('components', 'schemas').each do |name, schema|
   assert!(schema.fetch('additionalProperties') == false, "#{name}: 觀測DTO必須閉合")
   assert_schema_descriptions!(schema, "observation.#{name}")
 end
+
+# 此 matcher 只驗本次 identity 條件所使用的 JSON Schema keywords，不冒充完整 schema engine。
+# 從實際 YAML 讀 oneOf/const/enum/required/closure，正反例必須經條件運算；不能只比對描述。
+def observer_identity_condition_matches?(schema, value)
+  assert!((schema.keys - %w[description type additionalProperties required properties enum const oneOf]).empty?,
+          'identity condition 新增 keyword 時，必須同步擴充這個有界測試 matcher')
+  return false if schema.key?('const') && value != schema['const']
+  return false if schema.key?('enum') && !schema.fetch('enum').include?(value)
+  if schema['type'] == 'object' || schema.key?('properties') || schema.key?('required')
+    return false unless value.is_a?(Hash)
+    return false unless Array(schema['required']).all? { |key| value.key?(key) }
+    properties = schema.fetch('properties', {})
+    return false if schema['additionalProperties'] == false && !(value.keys - properties.keys).empty?
+    return false unless properties.all? { |key, condition| !value.key?(key) || observer_identity_condition_matches?(condition, value[key]) }
+  elsif schema['type'] == 'string'
+    return false unless value.is_a?(String)
+  end
+  return false if schema.key?('oneOf') && schema.fetch('oneOf').count { |branch| observer_identity_condition_matches?(branch, value) } != 1
+  true
+end
+
+run_schema = observation.dig('components', 'schemas', 'AiFlowRunMetadata')
+assert!(run_schema.fetch('oneOf').size == 2, '台股相容與美股exact identity 必須是互斥的兩個分支')
+assert!(run_schema.dig('properties', 'reportSlot', 'enum') == ['09:05', '12:00', '11:40', '22:00'], '四個reportSlot必須閉合')
+assert!(run_schema.dig('properties', 'automationId', 'enum') == %w[codex-srpp-09-30 codex-srpp srpp-0905-claude srpp-1150-claude 22-00], '只新增已查證的exact美股ID')
+identity_schema = {
+  'type' => run_schema.fetch('type'),
+  'additionalProperties' => run_schema.fetch('additionalProperties'),
+  'required' => run_schema.fetch('required') & %w[consumer reportSlot automationId],
+  'properties' => %w[consumer reportSlot automationId].to_h { |key|
+    field = run_schema.fetch('properties').fetch(key)
+    [key, field.select { |name, _| %w[type enum const].include?(name) }]
+  },
+  'oneOf' => run_schema.fetch('oneOf')
+}
+assert!(identity_schema.fetch('required') == %w[consumer reportSlot automationId], '三個identity欄位必須從原schema維持必填')
+%w[Codex Claude].product(['09:05', '12:00', '11:40'], %w[codex-srpp-09-30 codex-srpp srpp-0905-claude srpp-1150-claude]).each do |consumer, slot, automation|
+  assert!(observer_identity_condition_matches?(identity_schema, { 'consumer' => consumer, 'reportSlot' => slot, 'automationId' => automation }), '不得新增舊台股schema配對限制')
+end
+us_identity = { 'consumer' => 'Codex', 'reportSlot' => '22:00', 'automationId' => '22-00' }
+assert!(observer_identity_condition_matches?(identity_schema, us_identity), '合法每日美股identity必須被schema接受')
+invalid_identities = [us_identity.merge('consumer' => 'Claude')]
+['09:05', '12:00', '11:40'].each { |slot| invalid_identities << us_identity.merge('reportSlot' => slot) }
+%w[codex-srpp-09-30 codex-srpp srpp-0905-claude srpp-1150-claude 22-00-2 srpp-codex].each { |id| invalid_identities << us_identity.merge('automationId' => id) }
+%w[consumer reportSlot automationId].each { |field| invalid_identities << us_identity.reject { |key, _| key == field } }
+invalid_identities << us_identity.merge('reportSlot' => 'US')
+invalid_identities << us_identity.merge('consumer' => 'Other')
+invalid_identities << us_identity.merge('ownerUserId' => 7)
+invalid_identities.each { |identity| assert!(!observer_identity_condition_matches?(identity_schema, identity), '美股雙向binding／closed identity負例必須被schema拒絕') }
 assert!(observer_op.dig('responses').keys.to_set == %w[200 201 400 401 403 405 409 410 413 415 500 502 503 504].to_set, '完整觀測response status')
 assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測token security')
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
@@ -1120,4 +1170,4 @@ assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.incl
 assert!(Digest::SHA256.file(OPENAPI).hexdigest == 'cf280631526b057887696df03ad5804313fa53668dca4bd210b2c3bb1918adeb', '原金融YAMLbytes不可變')
 swagger_copies.each { |copy| assert!(Digest::SHA256.file(copy).hexdigest == '1338bc9a6437e1b8c78ef0d40f7fc66ef9a124c9c5618909bcd81779990d14b4', '原金融Swaggerbytes不可變') }
 assert!(system('ruby', File.join(ROOT, 'scripts/render-ai-flow-openapi-docs.rb'), '--check'), '獨立觀測renderer parity')
-puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/固定金融身份'
+puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/US雙向identity條件/固定金融身份'
