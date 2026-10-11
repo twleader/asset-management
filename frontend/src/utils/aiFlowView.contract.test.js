@@ -37,7 +37,11 @@ test('日期窗用台北日，90 天含今天；未知耗時保留為未記錄',
   assert.equal(displayUnknown(''), '未記錄')
   assert.equal(displayUnknown(0), '0')
   assert.equal(displayDurationMillis(null), '未記錄')
-  assert.equal(displayDurationMillis(0), '0 毫秒')
+  assert.equal(displayDurationMillis(0), '0 分 0 秒 0 毫秒')
+  assert.equal(displayDurationMillis(999), '0 分 0 秒 999 毫秒')
+  assert.equal(displayDurationMillis(60000), '1 分 0 秒 0 毫秒')
+  assert.equal(displayDurationMillis(128191), '2 分 8 秒 191 毫秒')
+  assert.equal(displayDurationMillis(258301), '4 分 18 秒 301 毫秒')
 })
 
 test('filter generation 清空舊資料並拒絕過期清單回應', async () => {
