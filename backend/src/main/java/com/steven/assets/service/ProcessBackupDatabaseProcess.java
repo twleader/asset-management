@@ -50,7 +50,9 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
                 "--format=custom",
                 "--compress=9",
                 "--no-owner",
-                "--no-acl"
+                "--no-acl",
+                "--exclude-table-data=public.ai_flow_run",
+                "--exclude-table-data=public.ai_flow_event"
         ), outputFile, "pg_dump");
     }
 

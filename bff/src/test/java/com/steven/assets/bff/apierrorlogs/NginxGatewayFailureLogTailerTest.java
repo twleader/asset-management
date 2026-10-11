@@ -153,6 +153,13 @@ class NginxGatewayFailureLogTailerTest {
         verifyNoInteractions(ingest);
     }
 
+    @Test void observation_gateway_failure_keeps_log_but_never_ingests(@TempDir Path dir) throws Exception {
+        String line=MARKET_INDEX_CONNECTION_REFUSED_LINE.replace("GET /api/public/market-index", "POST /api/srpp/ai-flow/events");
+        var ingest=mock(ApiErrorLogIngestClient.class);
+        tailer(writeLog(dir,line),ingest).tail();
+        verifyNoInteractions(ingest);
+    }
+
     private static Path writeLog(Path dir, String... lines) throws IOException {
         Path log = dir.resolve("error.log");
         Files.writeString(log, String.join("\n", lines) + "\n", StandardCharsets.UTF_8);

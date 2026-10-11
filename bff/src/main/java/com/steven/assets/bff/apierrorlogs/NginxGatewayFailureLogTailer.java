@@ -125,7 +125,7 @@ public class NginxGatewayFailureLogTailer {
         String path = secondSpace < 0 ? rest : rest.substring(0, secondSpace);
         int query = path.indexOf('?');
         if (query >= 0) path = path.substring(0, query);
-        if (OpenApiRouteCatalog.isReadOnlyReport(method, path)) return null;
+        if (OpenApiRouteCatalog.isReadOnlyReport(method, path) || OpenApiRouteCatalog.isObservationIngress(method, path)) return null;
         OpenApiRouteCatalog.Operation op = OpenApiRouteCatalog.ROUTES.get(method + " " + path);
         return op == null ? null : new MatchedRoute(op);
     }

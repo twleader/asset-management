@@ -252,8 +252,9 @@ assert!(openapi_routes.transform_values { |operation| operation.fetch('operation
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
-assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與二十四路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+observation_pair = ["POST", "/api/srpp/ai-flow/events"]
+assert!(gateway_set == MANIFEST.keys.to_set | Set[observation_pair],
+        "api-gateway allowlist 與原金融24+觀測1 union manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
         "OpenAPI paths 與二十四路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
@@ -1097,3 +1098,26 @@ assert!(confirmation.dig('properties', 'aggregationSource', 'enum') == ['LOCAL_A
 %w[200 201].each { |status| assert!(decision.dig('responses', status, 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionResponse', 'FINAL typed response') }
 assert!(decision.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionCapturing', 'CAPTURING typed response')
 assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?('RUN_METADATA_MISMATCH'), 'metadata mismatch registered')
+
+# Task 492：獨立契約分別解析 refs，不能 merge components 或修改原金融身份。
+observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
+assert!(observation.dig('info', 'version') == '1.0.0', '觀測契約版本固定1.0.0')
+assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測 paths 只能唯一exact route')
+observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
+assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
+assert!(!operation_ids.include?(observer_op.fetch('operationId')), '跨文件operationId不可重複')
+assert!(gateway_set.size == 25 && gateway_set.count { |method, _| method == 'GET' } == 20 && gateway_set.count { |method, _| method == 'POST' } == 5, 'union必須25 pairs /20GET/5POST')
+walk(observation) { |node| resolve_ref(observation, node['$ref']) if node.is_a?(Hash) && node.key?('$ref') }
+observation.dig('components', 'schemas').each do |name, schema|
+  assert!(schema.fetch('additionalProperties') == false, "#{name}: 觀測DTO必須閉合")
+  assert_schema_descriptions!(schema, "observation.#{name}")
+end
+assert!(observer_op.dig('responses').keys.to_set == %w[200 201 400 401 403 405 409 410 413 415 500 502 503 504].to_set, '完整觀測response status')
+assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測token security')
+assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
+assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
+assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
+assert!(Digest::SHA256.file(OPENAPI).hexdigest == 'cf280631526b057887696df03ad5804313fa53668dca4bd210b2c3bb1918adeb', '原金融YAMLbytes不可變')
+swagger_copies.each { |copy| assert!(Digest::SHA256.file(copy).hexdigest == '1338bc9a6437e1b8c78ef0d40f7fc66ef9a124c9c5618909bcd81779990d14b4', '原金融Swaggerbytes不可變') }
+assert!(system('ruby', File.join(ROOT, 'scripts/render-ai-flow-openapi-docs.rb'), '--check'), '獨立觀測renderer parity')
+puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/固定金融身份'

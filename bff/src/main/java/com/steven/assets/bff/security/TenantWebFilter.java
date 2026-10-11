@@ -70,6 +70,9 @@ public class TenantWebFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        if ("/api/srpp/ai-flow/events".equals(exchange.getRequest().getPath().value())) {
+            return chain.filter(stripForgedHeaders(exchange)).contextWrite(ctx -> ctx.delete(AuthConstants.CTX_IDENTITY));
+        }
         return ReactiveSecurityContextHolder.getContext()
                 .map(ctx -> ctx.getAuthentication())
                 .filter(auth -> auth != null && auth.isAuthenticated()

@@ -451,7 +451,16 @@ export const bffApi = {
 
   // OpenApi（公開資訊 → 開放 API 文件）
   openApi: {
-    contract: () => api.get('/bff/open-api/contract', { responseType: 'text', skipErrorToast: true })
+    contract: ({ signal } = {}) => api.get('/bff/open-api/contract', { responseType: 'text', signal, skipErrorToast: true }),
+    observationContract: ({ signal } = {}) => api.get('/bff/open-api/observation-contract', { responseType: 'text', signal, skipErrorToast: true })
+  },
+
+  // AI Flow（系統資訊 → AI 判斷流程）：唯讀查詢專屬 BFF namespace。
+  aiFlow: {
+    runs: ({ date, consumer, period = 'ALL', signal } = {}) =>
+      api.get('/bff/ai-flow/runs', { params: { date, consumer, period }, signal, skipErrorToast: true }),
+    detail: (runId, { date, consumer, signal } = {}) =>
+      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId), { params: { date, consumer }, signal, skipErrorToast: true })
   },
 
   // FubonApi（系統資訊 → 富邦證 API，Requirement 121）

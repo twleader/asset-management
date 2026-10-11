@@ -7,9 +7,15 @@
             <h2>開放 API</h2>
             <p>目前 port 9090 對外契約的唯讀文件檢視。</p>
           </div>
-          <el-button :icon="Document" :disabled="!contract" @click="drawerVisible = true">
-            查看完整 YAML
-          </el-button>
+          <div class="header-actions">
+            <el-select v-model="documentKind" aria-label="選擇 OpenAPI 文件" class="document-selector" :clearable="false">
+              <el-option label="金融 API 契約" value="financial" />
+              <el-option label="AI 流程觀測契約" value="observation" />
+            </el-select>
+            <el-button :icon="Document" :disabled="!state.contract" @click="drawerVisible = true">
+              查看完整 YAML
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -20,45 +26,54 @@
         title="此頁僅供瀏覽文件，不會呼叫或測試任何 API。實際 API 僅供 Docker loopback 與受授權的 Tailscale 私有網路使用。"
       />
       <el-alert
+        v-if="documentKind === 'financial'"
         class="side-effect-notice"
         type="warning"
         :closable="false"
         show-icon
         title="請留意：契約中的 crawler rescan POST 會觸發外部資料抓取；本頁不提供執行功能。"
       />
+      <el-alert
+        v-else
+        class="side-effect-notice"
+        type="info"
+        :closable="false"
+        show-icon
+        title="此為 AI 流程觀測補充契約；本頁只瀏覽文件，不會送出觀測事件或呼叫契約中的 API。"
+      />
 
-      <div v-if="loading" class="loading-state">
+      <div v-if="state.loading" class="loading-state">
         <el-skeleton :rows="6" animated />
       </div>
-      <el-alert v-else-if="loadError" type="error" :closable="false" show-icon :title="loadError" />
+      <el-alert v-else-if="state.error" type="error" :closable="false" show-icon :title="state.error" />
 
-      <template v-else-if="contract">
+      <template v-else-if="state.contract">
         <div class="contract-overview">
           <div>
             <span class="overview-label">文件</span>
-            <strong>{{ contract.title }}</strong>
+            <strong>{{ state.contract.title }}</strong>
           </div>
           <div>
             <span class="overview-label">版本</span>
-            <el-tag effect="plain">{{ contract.version }}</el-tag>
+            <el-tag effect="plain">{{ state.contract.version }}</el-tag>
           </div>
           <div>
             <span class="overview-label">OpenAPI</span>
-            <el-tag type="info" effect="plain">{{ contract.openapi }}</el-tag>
+            <el-tag type="info" effect="plain">{{ state.contract.openapi }}</el-tag>
           </div>
           <div>
             <span class="overview-label">Operations</span>
-            <strong>{{ contract.operations.length }}</strong>
+            <strong>{{ state.contract.operations.length }}</strong>
           </div>
         </div>
 
         <div class="servers">
           <span class="overview-label">契約 server</span>
-          <code v-for="serverUrl in contract.serverUrls" :key="serverUrl">{{ serverUrl }}</code>
+          <code v-for="serverUrl in state.contract.serverUrls" :key="serverUrl">{{ serverUrl }}</code>
         </div>
 
-        <el-collapse v-model="activeOperation" accordion class="operation-list">
-          <el-collapse-item v-for="operation in contract.operations" :key="operation.id" :name="operation.id">
+        <el-collapse v-model="state.activeOperation" accordion class="operation-list">
+          <el-collapse-item v-for="operation in state.contract.operations" :key="operation.id" :name="operation.id">
             <template #title>
               <div class="operation-title">
                 <el-tag :type="methodTagType(operation.method)" effect="dark" size="small">
@@ -79,21 +94,20 @@
     </el-card>
 
     <el-drawer v-model="drawerVisible" title="完整 OpenAPI YAML" size="min(860px, 92vw)">
-      <pre v-if="contract" class="full-contract">{{ contract.rawYaml }}</pre>
+      <pre v-if="state.contract" class="full-contract">{{ state.contract.rawYaml }}</pre>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { Document } from '@element-plus/icons-vue'
 import { bffApi } from '@/api'
 import { OpenApiContractParseError, parseOpenApiContract } from '@/utils/openApiContract'
+import { createOpenApiContractLoader } from '@/utils/openApiContractLoader'
 
-const loading = ref(true)
-const loadError = ref('')
-const contract = ref(null)
-const activeOperation = ref('')
+const documentKind = ref('financial')
+const state = reactive({ loading: true, error: '', contract: null, activeOperation: '' })
 const drawerVisible = ref(false)
 
 const methodTagTypes = {
@@ -108,29 +122,30 @@ function methodTagType(method) {
   return methodTagTypes[method] || 'info'
 }
 
-async function loadContract() {
-  loading.value = true
-  loadError.value = ''
-  contract.value = null
-  activeOperation.value = ''
-  try {
-    contract.value = parseOpenApiContract(await bffApi.openApi.contract())
-  } catch (error) {
-    contract.value = null
-    loadError.value = error instanceof OpenApiContractParseError
-      ? error.message
-      : '目前無法載入 API 文件，請稍後再試。'
-  } finally {
-    loading.value = false
-  }
-}
+const contractLoader = createOpenApiContractLoader({
+  requests: {
+    financial: signal => bffApi.openApi.contract({ signal }),
+    observation: signal => bffApi.openApi.observationContract({ signal })
+  },
+  parse: parseOpenApiContract,
+  errorMessage: error => error instanceof OpenApiContractParseError
+    ? error.message
+    : '目前無法載入 API 文件，請稍後再試。'
+})
 
-onMounted(loadContract)
+watch(documentKind, kind => {
+  drawerVisible.value = false
+  void contractLoader.load(kind, state)
+}, { immediate: true, flush: 'sync' })
+
+onBeforeUnmount(() => contractLoader.clear(state))
 </script>
 
 <style scoped>
 .open-api-view { max-width: 1280px; margin: 0 auto; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.document-selector { width: 220px; }
 .page-header h2 { font-size: 20px; color: #1e293b; }
 .page-header p { margin-top: 4px; color: #64748b; font-size: 14px; }
 .side-effect-notice { margin-top: 12px; }
@@ -150,6 +165,8 @@ onMounted(loadContract)
 .full-contract { min-height: 100%; }
 @media (max-width: 640px) {
   .page-header { align-items: flex-start; flex-direction: column; }
+  .header-actions { width: 100%; align-items: flex-start; flex-direction: column; }
+  .document-selector { width: 100%; }
   .contract-overview { gap: 12px 20px; }
   .operation-title { gap: 7px; }
   .operation-title span { display: none; }

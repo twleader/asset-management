@@ -12836,3 +12836,19 @@ Spring Boot 4 starter 拆分採 MVC／AspectJ／Liquibase 及對應測試 starte
 JSON 過渡維持 com.fasterxml.jackson（Jackson 2）及官方 spring-boot-jackson2；排除 HTTP main/test starters 引入的 Jackson 3 自動配置，並設定 spring.http.converters.preferred-json-mapper=jackson2／spring.http.codecs.preferred-json-mapper=jackson2。裸 WebClient builders、自訂 ExchangeStrategies 和測試 bindToController 不能僅依賴 Boot preference，需驗實際 codecs。加入實際 MVC／WebFlux HTTP round-trip，覆蓋精確 decimal、ISO日期、null、unknown／duplicate欄位及既有 receipt contract。
 
 容器使用 Java25 Maven/JRE image，保留非 root、TZ=Asia/Taipei、UTF-8 locale、memory／GC args與服務 profiles。backend 保留 PostgreSQL16 client、rclone、中文字型與AWT，external 保留curl/rclone與檔名編碼。部署前比對 worktree/main 的有效設定且不輸出 secrets；先驗收 feature，再 no-ff landing，落地後從 main 重新 build/recreate 並驗最終 runtime。
+
+## Requirement 190／Task 492：AI 判斷流程觀測
+
+本功能保留LLM原決策與調度，以公開事件建立可查詢流程；不導入Flowable。ADMIN Vue頁/ai-flow僅讀/api/bff/ai-flow/runs與detail，專屬BFF做typed identity validation並委派同源business /api/ai-flow/runs。consumer為必要filter，report_date按台北日期且多attempt分開；unknown/null、partial/self-reported及獨立verification分開。業務服務將事件pair導出節點、依賴/分支/接續、呈現位置、總與步驟耗時；前端只渲染ECharts，tooltip richText與文字插值防止輸入變成HTML。
+
+POST /api/srpp/ai-flow/events只寫public.ai_flow_run及public.ai_flow_event，三個獨立producer grants由專用header決定consumer/sourceKind；BFF先於error-capture拒絕未授權/缺配置且零旁路I/O，business再核對。同run metadata及event JCS/hash不可變歷史snapshot屬具名denormalization例外，SQL只保留索引identity metadata，不存可導出的status/duration/layout。parent只同run已存在或同batch；DAG原子append、同payload replay、異payload409。credential不能選owner；configured-admin查owner後顯式傳遞，browser ADMIN與producerauth分開。
+
+host collector為獨立Background/LowPriorityIO程序，60秒tick，讀取預算25runs/64MiB總量/32MiB單run/5秒。Codex來源由automation_runs.thread_id經threads.rollout_path到公開JSONL，run identity使用thread+task_started.turn_id；公開phase=final_answer與task_complete僅導出ENDED。Claude exact IDs已遠端，本機舊lastRunAt不證現在遠端執行；artifacts僅explicit identity/self-reported，無raw來源據實揭露。collector不讀金融API/Gmail、不改appSQLite/SRPP/投資排程。localspool atomic enqueue和獨立sender分離，sendertimeout2秒、每輪有界失敗重試，ack僅durableDB後才有效；現日報完全不新增記錄呼叫。
+
+90天以台北當日-89 cutoff與run.report_date為準，DBguard拒expired insert、所有update及未expireddelete，eventcascade只能在合法expiredrun刪除時進行；查詢即排除expired，detail/POST/replay410，未來日期400。startup與台北00:00每批 bounded purge並同步排程catalog，host自有spool/cache同界限。backup pg_dump僅exclude-table-data這兩新表，schema與金融data維持，collector --replay可補錄仍在窗口的原observations；不改原archive/金融backup。
+
+本次依使用者「不要動SRPP」新增限縮契約例外：原金融docker-external-api.yaml/原三份Markdown字節及PublishedSwaggerIdentity不改，另ai-flow-observation-api.yaml及9090-ai-flow-observation.md獨立1.0.0/renderer。gateway、catalog、frontenddeny及Tailscale驗兩契約paths disjoint union=25pairs（20GET5POST/24handlers）。每份local $ref獨立解析、全域operationId唯一，不能merge components汙染identity。BFF打包第二YAML、OpenApiView專屬observation-contract只讀呈現，不提供執行按鈕。補齊原report-calculations backend operationcatalog對已有v1.150種子的code映射，不改歷史SQL或金融API行為。詳盡閉合互通schema與凍結例子已複寫於自足t492；任何原SRPP主動回報接入均另日進行。
+
+Task492審查修訂：detail必要query為date及consumer，先驗90日窗口（過期410，即使已purge），再查同owner/consumer/date並核對run.reportDate；窗口內不存在404，不保存過期tombstone。增量coverage採同exact sourceRunId的append-only TRACE_COVERAGE評估（版本、sourceSize/cursor與prefix hash），依最新有效範圍評估並核對真start/terminal/final/call配對；新完整評估可解除已補齊暫時缺口，歷史partial仍保留，當下不可讀childtrace仍partial。backend執行purge，BFF僅同步排程展示登錄。詳細閉合規格凍結於本次自足Task492，不修改原SRPP檔案。
+
+Task492來源一致性修訂：來源截短、已掃描前綴改寫或同cursor/size不同prefixHash，用具名SOURCE_TRACE_CHANGED評估或衝突檢查永久優先PARTIAL_OBSERVED，原事件不可變，任何TRACE_COMPLETE均不可遮蓋；一般暫時尾端未補齊才允許一致的後續完整評估解除。隔離測試覆蓋截短、改寫及同範圍不同hash三項。

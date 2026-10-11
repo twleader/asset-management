@@ -40,6 +40,8 @@ docker exec "$CONTAINER" pg_dump \
   --no-acl \
   --clean \
   --if-exists \
+  --exclude-table-data=public.ai_flow_run \
+  --exclude-table-data=public.ai_flow_event \
   > "$TEMP_DUMP"
 
 # 只有完整匯出成功才取代上一份 dump，避免失敗時留下空檔或半成品。

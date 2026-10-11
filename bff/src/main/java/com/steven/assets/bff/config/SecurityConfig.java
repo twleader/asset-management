@@ -107,6 +107,7 @@ public class SecurityConfig {
                         // 30 秒全域冷卻在 business 端（CrawlerExportPathService.publicRescan()），BFF 層不重複防護。
                         .pathMatchers(HttpMethod.POST, "/api/public/crawler-data/rescan").permitAll()
                         // Task 480: permit only lets the dedicated bearer-token filter run; it is never anonymous.
+                        .pathMatchers(HttpMethod.POST, "/api/srpp/ai-flow/events").permitAll()
                         .pathMatchers(HttpMethod.POST, "/api/srpp/daily-report-mail").permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/srpp/daily-report-mail/*").permitAll()
                         .pathMatchers(HttpMethod.POST, "/api/public/srpp/event-evidence/capture").permitAll()
@@ -121,6 +122,7 @@ public class SecurityConfig {
                             .hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
                         .pathMatchers(HttpMethod.POST, "/api/bff/trading-radar/blog-publish")
                             .hasAuthority(AuthConstants.AUTHORITY_CONFIGURED_ADMIN)
+                        .pathMatchers("/api/bff/ai-flow/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/backup-restore/**").hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers("/api/bff/api-error-logs", "/api/bff/api-error-logs/**")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
