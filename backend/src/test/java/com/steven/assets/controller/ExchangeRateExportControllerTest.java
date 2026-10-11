@@ -5,8 +5,8 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.ExchangeRateExportScheduleService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -25,8 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ExchangeRateExportController.class)
 class ExchangeRateExportControllerTest {
     @Autowired MockMvc mvc;
-    @MockBean ExchangeRateExportScheduleService service;
-    @MockBean CurrentUserContext currentUserContext;
+    @MockitoBean ExchangeRateExportScheduleService service;
+    @MockitoBean CurrentUserContext currentUserContext;
 
     private static ExchangeRateExportDto.SettingResponse response() {
         return ExchangeRateExportDto.SettingResponse.builder().enabled(true).outputSubpath("input").rangeMonths(60)

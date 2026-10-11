@@ -67,7 +67,7 @@ class PublicTradingCalendarServiceTest {
         assertThat(relay.body().path("year").asInt()).isEqualTo(2026);
         assertThat(captured.get().url().getPath()).isEqualTo("/internal/public-market-data/trading-calendar");
         assertThat(captured.get().url().getQuery()).isEqualTo("year=2026");
-        assertThat(captured.get().headers()).doesNotContainKeys(
+        assertThat(captured.get().headers().asMultiValueMap()).doesNotContainKeys(
                 AuthConstants.HDR_USER_ID, AuthConstants.HDR_USER_ROLE, AuthConstants.HDR_USER_STATUS);
     }
 

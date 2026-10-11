@@ -19,6 +19,7 @@ class StockAnalysisIntradaySessionRouteTest {
     @Test
     void intradaySessionUsesOneExactPassthroughRouteAndPreservesObjectWireShape() throws Exception {
         try (GenericApplicationContext context = new GenericApplicationContext()) {
+            context.registerBean(org.springframework.boot.webflux.autoconfigure.WebFluxProperties.class);
             context.registerBean(PathRoutePredicateFactory.class);
             context.registerBean(RewritePathGatewayFilterFactory.class);
             context.refresh();

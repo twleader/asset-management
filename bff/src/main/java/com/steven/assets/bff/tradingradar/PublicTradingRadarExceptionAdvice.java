@@ -82,6 +82,7 @@ public class PublicTradingRadarExceptionAdvice {
     private static ResponseEntity<ProblemDetail> problem(
             HttpStatus status, String title, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle(title);
         return ResponseEntity.status(status).body(problem);
     }

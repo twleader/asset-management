@@ -16,6 +16,7 @@ public class PublicMarketIndexExceptionAdvice {
     public ResponseEntity<ProblemDetail> handleInvalidRequest(PublicMarketIndexRequestException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Invalid market index request");
         return ResponseEntity.badRequest().body(problem);
     }
@@ -24,6 +25,7 @@ public class PublicMarketIndexExceptionAdvice {
     public ResponseEntity<ProblemDetail> handleMalformedPayload(MalformedMarketIndexPayloadException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Malformed market index payload");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);
     }

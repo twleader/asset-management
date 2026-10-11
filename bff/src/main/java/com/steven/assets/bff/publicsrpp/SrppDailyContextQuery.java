@@ -46,7 +46,7 @@ public record SrppDailyContextQuery(
 
     /** 解析並驗證；失敗一律 {@code INVALID_REQUEST}。 */
     public static SrppDailyContextQuery parse(MultiValueMap<String, String> params, HttpHeaders headers) {
-        if (headers != null && (headers.getContentLength() > 0 || headers.containsKey(HttpHeaders.TRANSFER_ENCODING))) {
+        if (headers != null && (headers.getContentLength() > 0 || headers.containsHeader(HttpHeaders.TRANSFER_ENCODING))) {
             throw invalid();
         }
         if (params == null) {

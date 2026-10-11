@@ -33,7 +33,7 @@ class PublicTradingRadarControllerTest {
         assertThat(response).isNotNull();
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
-        assertThat(response.getHeaders()).doesNotContainKey(HttpHeaders.LOCATION);
+        assertThat(response.getHeaders().asMultiValueMap()).doesNotContainKey(HttpHeaders.LOCATION);
         assertThat(response.getBody()).isEqualTo(payload);
         verify(service).today(null);
         verifyNoMoreInteractions(service);

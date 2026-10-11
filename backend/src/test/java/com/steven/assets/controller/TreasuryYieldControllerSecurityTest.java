@@ -6,8 +6,8 @@ import com.steven.assets.service.TreasuryYieldService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
@@ -22,8 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class TreasuryYieldControllerSecurityTest {
 
     @Autowired MockMvc mvc;
-    @MockBean TreasuryYieldService service;
-    @MockBean CurrentUserContext currentUser;
+    @MockitoBean TreasuryYieldService service;
+    @MockitoBean CurrentUserContext currentUser;
 
     @BeforeEach
     void resetContext() {

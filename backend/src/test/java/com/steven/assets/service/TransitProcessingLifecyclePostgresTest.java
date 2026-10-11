@@ -16,11 +16,11 @@ import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
@@ -76,13 +76,13 @@ class TransitProcessingLifecyclePostgresTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
-    @MockBean MarketDataService marketDataService;
-    @MockBean StockMasterService stockMasterService;
-    @MockBean FundNavService fundNavService;
-    @MockBean FundDividendService fundDividendService;
-    @MockBean AssetClassifier assetClassifier;
-    @MockBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
-    @MockBean InstitutionService institutionService;
+    @MockitoBean MarketDataService marketDataService;
+    @MockitoBean StockMasterService stockMasterService;
+    @MockitoBean FundNavService fundNavService;
+    @MockitoBean FundDividendService fundDividendService;
+    @MockitoBean AssetClassifier assetClassifier;
+    @MockitoBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
+    @MockitoBean InstitutionService institutionService;
 
     @Autowired AssetService assets;
     @Autowired ExcelImportService excel;

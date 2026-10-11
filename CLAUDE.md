@@ -238,7 +238,7 @@ skill 有沒有自己宣告：`/commit-merge-push` 沒宣告 → 繼承主 agent
 ## 技術棧
 
 ### Backend
-- Java 21 + Spring Boot 3.4.4（CLAUDE.md 原標「Java 25」為未來目標；pom.xml 與 Dockerfile 目前實際為 21）
+- Java 25 LTS + Spring Boot 4.1.1（Task 491 指定 stable line；Boot 4.1.x 不宣稱官方 LTS）
 - Spring Data JPA（H2 開發 / PostgreSQL 生產）
 - Apache POI（Excel 匯入）
 - Lombok
@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（181 個 Requirements；最新編號為 188，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（182 個 Requirements；最新編號為 189，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |

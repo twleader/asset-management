@@ -39,11 +39,13 @@ public class PublicPortfolioAdviceExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Portfolio advice unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
     public ResponseEntity<ProblemDetail> unavailable(PublicPortfolioAdviceUnavailableException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Portfolio advice unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }
@@ -53,11 +55,13 @@ public class PublicPortfolioAdviceExceptionAdvice {
     public ResponseEntity<ProblemDetail> invalidRequest(PublicPortfolioAdviceRequestException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Invalid portfolio advice request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
     public ResponseEntity<ProblemDetail> invalidRequest(PublicPortfolioAdviceRequestException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Invalid portfolio advice request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
     }
@@ -68,6 +72,7 @@ public class PublicPortfolioAdviceExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "資產配置建議暫時無法取得，請稍後再試");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Portfolio advice downstream failure");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);
     }
@@ -78,6 +83,7 @@ public class PublicPortfolioAdviceExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, "資產配置建議服務暫時無法連線");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Portfolio advice service unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }

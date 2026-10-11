@@ -49,9 +49,9 @@ class PublicMarketAnalysisServiceTest {
         assertThat(requests.get(0).url().getPath()).isEqualTo("/api/market-analysis/today");
         assertThat(requests.get(0).method().name()).isEqualTo("GET");
         // 全域參考資料：服務層不自行帶入任何身分 header（沒有 owner 概念可解析）
-        assertThat(requests.get(0).headers().containsKey(AuthConstants.HDR_USER_ID)).isFalse();
-        assertThat(requests.get(0).headers().containsKey(AuthConstants.HDR_USER_ROLE)).isFalse();
-        assertThat(requests.get(0).headers().containsKey(AuthConstants.HDR_USER_STATUS)).isFalse();
+        assertThat(requests.get(0).headers().containsHeader(AuthConstants.HDR_USER_ID)).isFalse();
+        assertThat(requests.get(0).headers().containsHeader(AuthConstants.HDR_USER_ROLE)).isFalse();
+        assertThat(requests.get(0).headers().containsHeader(AuthConstants.HDR_USER_STATUS)).isFalse();
         assertThat(body).containsEntry("status", "OK").containsEntry("analysisDate", "2026-08-16");
     }
 

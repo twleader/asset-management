@@ -45,6 +45,7 @@ public class PublicCrawlerRescanExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "重新搜尋觸發暫時失敗，請稍後再試");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Crawler rescan downstream failure");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);
     }
@@ -54,6 +55,7 @@ public class PublicCrawlerRescanExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, "重新搜尋服務暫時無法連線");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Crawler rescan service unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }

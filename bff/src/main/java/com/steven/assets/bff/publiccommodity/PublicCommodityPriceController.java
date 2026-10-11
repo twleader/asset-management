@@ -35,7 +35,7 @@ public class PublicCommodityPriceController {
     private static void validateRequest(MultiValueMap<String, String> queryParameters, HttpHeaders headers) {
         if (queryParameters == null || !queryParameters.isEmpty()
                 || headers.getContentLength() > 0
-                || headers.containsKey(HttpHeaders.TRANSFER_ENCODING)) {
+                || headers.containsHeader(HttpHeaders.TRANSFER_ENCODING)) {
             throw new PublicCommodityPriceRequestException();
         }
     }

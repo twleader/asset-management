@@ -10,9 +10,9 @@
 |------|------|------|------|------|
 | **Frontend** | Vue 3 + Vite 5 + Element Plus + Nginx | 80 | ✅ | SPA；十九條 external-only API 明確回 404 |
 | **API Gateway** | Nginx Alpine（non-root） | 9090 | ✅（僅 `127.0.0.1`） | Docker 外部十九條 exact route（十八 GET ＋ 一 POST）唯一入口；每條須有完整 OpenAPI 3 契約 |
-| **BFF** | Spring Boot 3.4.4 + Spring Cloud Gateway | 8080 | ❌ 僅內網 | 前端應用 API 入口；一頁面一 controller |
-| **Business Services（backend）** | Spring Boot 3.4.4 + Spring Data JPA | 8080 | ❌ 僅內網 | 領域邏輯、JPA 持久化 |
-| **External Materials Service** | Spring Boot 3.4.4 + WebFlux | 8080 | ❌ 僅內網 | 抓股價／NAV／配息／匯率，寫 Redis & DB |
+| **BFF** | Spring Boot 4.1.1 + Spring Cloud Gateway | 8080 | ❌ 僅內網 | 前端應用 API 入口；一頁面一 controller |
+| **Business Services（backend）** | Spring Boot 4.1.1 + Spring Data JPA | 8080 | ❌ 僅內網 | 領域邏輯、JPA 持久化 |
+| **External Materials Service** | Spring Boot 4.1.1 + WebFlux | 8080 | ❌ 僅內網 | 抓股價／NAV／配息／匯率，寫 Redis & DB |
 | **PostgreSQL** | postgres:16-alpine | 5432 | ✅（debug） | 主資料庫 |
 | **Redis** | redis:7-alpine（AOF + LRU 256MB） | 6379 | ❌ | Live 行情 cache + Pub/Sub channel |
 
@@ -40,24 +40,24 @@ external-materials-service ──銀行交易時段每 2 秒──► redis:6379
 
 ### 2.1 執行環境
 
-- **Java：21**（pom 設定 `<java.version>21</java.version>`；CLAUDE.md 提到「Java 25」為未來計畫，目前實際為 21）
-- **Spring Boot：3.4.4**（JDK 21 相容）
+- **Java：25 LTS**（三個 JVM 模組 compiler/release 與容器 build/runtime 均為 25；Task 491）
+- **Spring Boot：4.1.1**（指定 stable line；不宣稱官方 LTS）
 - **Maven：3.9.11**（路徑 `/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn`）
 
 ### 2.2 主要依賴（business-services + bff + external-materials-service 通用）
 
 | 依賴 | 用途 |
 |------|------|
-| `spring-boot-starter-web` | MVC controller |
+| `spring-boot-starter-webmvc` | MVC controller |
 | `spring-boot-starter-data-jpa` | ORM |
 | `spring-boot-starter-validation` | DTO 驗證 |
 | `spring-boot-starter-data-redis` | Lettuce 連線、Pub/Sub |
 | `spring-boot-starter-webflux` | WebClient（外部 API）、SSE |
-| `spring-cloud-starter-gateway`（僅 BFF） | 路由 |
+| `spring-cloud-starter-gateway-server-webflux`（僅 BFF，Cloud 2025.1.3） | 路由 |
 | `postgresql` | JDBC driver（runtime） |
-| `liquibase-core` | DB schema migration |
+| `spring-boot-starter-liquibase` | DB schema migration |
 | `poi-ooxml` 5.3.0 | Excel `.xlsx` 匯出 |
-| `lombok` 1.18.38 | `@Data` / `@Builder` 等 |
+| `lombok`（Boot BOM 管理） | `@Data` / `@Builder` 等 |
 
 ### 2.3 DB 慣例
 

@@ -1,5 +1,6 @@
 package com.steven.assets.bff.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.bff.security.AuthConstants;
 import com.steven.assets.bff.security.TenantIdentity;
 import org.springframework.beans.factory.ObjectProvider;
@@ -10,6 +11,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.http.client.ReactorResourceFactory;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.codec.ClientCodecConfigurer;
+import org.springframework.http.codec.json.Jackson2JsonDecoder;
+import org.springframework.http.codec.json.Jackson2JsonEncoder;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
@@ -19,6 +22,12 @@ import reactor.netty.http.client.HttpClient;
 
 @Configuration
 public class WebClientConfig {
+
+    private final ObjectMapper json;
+
+    public WebClientConfig(ObjectMapper json) {
+        this.json = json;
+    }
 
     @Value("${business-services.url}")
     private String businessServicesUrl;
@@ -31,8 +40,7 @@ public class WebClientConfig {
     public WebClient businessServicesClient(WebClient.Builder builder,
                                             ObjectProvider<ReactorResourceFactory> resourceFactory) {
         ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs((ClientCodecConfigurer cfg) ->
-                        cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .codecs(this::configureCodecs)
                 .build();
         return builder.clone()
                 // DNS 快取上限（Task 208，理由見 DnsCacheConfig）：gateway 那條由 HttpClientCustomizer 套，
@@ -74,8 +82,7 @@ public class WebClientConfig {
                                          String baseUrl,
                                          String clientName) {
         ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs((ClientCodecConfigurer cfg) ->
-                        cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .codecs(this::configureCodecs)
                 .build();
         // clone 是安全邊界的一部分：不可因其他 bean 在 shared Builder 掛 filter，讓公開 client
         // 意外帶上 tenantHeaderFilter。
@@ -85,6 +92,13 @@ public class WebClientConfig {
                 .baseUrl(baseUrl)
                 .exchangeStrategies(strategies)
                 .build();
+    }
+
+    /** Custom strategies bypass Boot's codec customization, so retain Jackson 2 explicitly here. */
+    private void configureCodecs(ClientCodecConfigurer cfg) {
+        cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024);
+        cfg.defaultCodecs().jackson2JsonDecoder(new Jackson2JsonDecoder(json));
+        cfg.defaultCodecs().jackson2JsonEncoder(new Jackson2JsonEncoder(json));
     }
 
     /**

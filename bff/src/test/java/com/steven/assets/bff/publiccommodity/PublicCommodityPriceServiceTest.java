@@ -61,7 +61,7 @@ class PublicCommodityPriceServiceTest {
         assertThat(calls).hasValue(1);
         assertThat(captured.get().method()).isEqualTo(HttpMethod.GET);
         assertThat(captured.get().url()).isEqualTo(URI.create("http://business/api/market-data/commodity/live"));
-        assertThat(captured.get().headers()).doesNotContainKeys(
+        assertThat(captured.get().headers().asMultiValueMap()).doesNotContainKeys(
                 AuthConstants.HDR_USER_ID, AuthConstants.HDR_USER_ROLE, AuthConstants.HDR_USER_STATUS);
         assertThat(response.marketOpen()).isFalse();
         assertThat(response.quotes().wti().commodityCode()).isEqualTo("WTI");

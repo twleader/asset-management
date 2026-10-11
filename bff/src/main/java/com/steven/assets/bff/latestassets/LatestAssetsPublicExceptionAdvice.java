@@ -16,11 +16,13 @@ public class LatestAssetsPublicExceptionAdvice {
     public ResponseEntity<ProblemDetail> unavailable(LatestAssetsUnavailableException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        p.setType(java.net.URI.create("about:blank"));
         p.setTitle("Latest assets unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(p);
     }
     public ResponseEntity<ProblemDetail> unavailable(LatestAssetsUnavailableException ex) {
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+        p.setType(java.net.URI.create("about:blank"));
         p.setTitle("Latest assets unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(p);
     }
@@ -30,11 +32,13 @@ public class LatestAssetsPublicExceptionAdvice {
     public ResponseEntity<ProblemDetail> invalidRequest(LatestAssetsRequestException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        p.setType(java.net.URI.create("about:blank"));
         p.setTitle("Invalid latest assets request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(p);
     }
     public ResponseEntity<ProblemDetail> invalidRequest(LatestAssetsRequestException ex) {
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "email 格式不合法");
+        p.setType(java.net.URI.create("about:blank"));
         p.setTitle("Invalid latest assets request");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(p);
     }
@@ -43,6 +47,7 @@ public class LatestAssetsPublicExceptionAdvice {
     public ResponseEntity<ProblemDetail> malformedPayload(LatestAssetsPayloadException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
         ProblemDetail p = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, ex.getMessage());
+        p.setType(java.net.URI.create("about:blank"));
         p.setTitle("Invalid latest assets payload");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(p);
     }

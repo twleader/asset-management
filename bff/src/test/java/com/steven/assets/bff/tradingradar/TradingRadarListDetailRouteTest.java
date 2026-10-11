@@ -18,6 +18,7 @@ class TradingRadarListDetailRouteTest {
     @Test
     void list與stock使用同一頁ownerForwardingRewrite而非publicRoute() {
         try (GenericApplicationContext context = new GenericApplicationContext()) {
+            context.registerBean(org.springframework.boot.webflux.autoconfigure.WebFluxProperties.class);
             context.registerBean(PathRoutePredicateFactory.class);
             context.registerBean(RewritePathGatewayFilterFactory.class);
             context.refresh();

@@ -6,8 +6,8 @@ import com.steven.assets.service.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -22,15 +22,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(MarketDataController.class)
 class MarketDataQuoteDetailContractTest {
     @Autowired MockMvc mvc;
-    @MockBean MarketDataService market;
-    @MockBean StockPriceService stockPriceService;
-    @MockBean HistoricalDataService historicalDataService;
-    @MockBean PriceStreamService priceStreamService;
-    @MockBean DividendHistoryService dividendHistoryService;
-    @MockBean ExcelExportService excelExportService;
-    @MockBean TechnicalIndicatorService technicalIndicatorService;
-    @MockBean CommodityLiveQuoteService commodityLiveQuoteService;
-    @MockBean CurrentUserContext currentUserContext;
+    @MockitoBean MarketDataService market;
+    @MockitoBean StockPriceService stockPriceService;
+    @MockitoBean HistoricalDataService historicalDataService;
+    @MockitoBean PriceStreamService priceStreamService;
+    @MockitoBean DividendHistoryService dividendHistoryService;
+    @MockitoBean ExcelExportService excelExportService;
+    @MockitoBean TechnicalIndicatorService technicalIndicatorService;
+    @MockitoBean CommodityLiveQuoteService commodityLiveQuoteService;
+    @MockitoBean CurrentUserContext currentUserContext;
 
     @Test
     void controller實際代理並保留totals和InstantJson() throws Exception {

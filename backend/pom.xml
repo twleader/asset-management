@@ -7,8 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <!-- Spring Boot 4.0 (JDK 25 ready) - 目前使用 3.4.x 相容 JDK 21 -->
-        <version>3.4.4</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -19,23 +18,22 @@
     <description>Personal Asset Management System</description>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>25</java.version>
         <!--
           Task 252：測試 JVM 的額外參數。surefire 的 argLine 只能有一個值，命令列直接下
           -DargLine=... 會**覆蓋**掉時區設定；故把可變的部分抽成本 property 供疊加。
-          例（本機 JDK 為 25 時跑 Mockito 需要）：
-            mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true
+          Boot 4.1 管理的 Mockito／Byte Buddy 已原生支援 Java 25，不需實驗旗標。
         -->
         <extraArgLine></extraArgLine>
         <!--
-          Spring Boot 3.4.4 管理的 testcontainers.version 預設 1.20.6，其內建 docker-java
+          升級前 Spring Boot 3.4.4 管理的 testcontainers.version 預設 1.20.6，其內建 docker-java
           對 Docker Engine 送出的探測請求版本低於本機 Docker Desktop 目前回報的 MinAPIVersion
           （已實測為 1.40，本機 Engine 29.7.2）。低於下限的請求 Docker Desktop 不會回正常錯誤，
           而是回一個欄位全空、只帶 com.docker.desktop.address 提示的 200/400 混合假回應，
           導致 DockerClientProviderStrategy 三種策略全部誤判為「找不到有效 Docker 環境」
           （症狀：curl 打同一個 socket 正常，Testcontainers 卻找不到 Docker）。
           升級到 1.21.4（同大版號最新，未跨到有破壞性變更的 2.x）已實測修復，不需改動任何
-          程式碼或 ~/.testcontainers.properties。
+          程式碼或 ~/.testcontainers.properties。Task 491 延續此已驗證的 1.x pin，避免同時遷移 2.x。
         -->
         <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
@@ -44,7 +42,18 @@
         <!-- Spring Boot -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Task 491：保留 SRPP JCS／decimal 與既有 HTTP wire 的 Jackson 2 契約。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -53,7 +62,7 @@
         <!-- 多租戶 owner 過濾切面（Requirement 28） -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -66,6 +75,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -79,8 +94,8 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
-            <groupId>org.liquibase</groupId>
-            <artifactId>liquibase-core</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-liquibase</artifactId>
         </dependency>
 
         <!-- Excel -->
@@ -108,7 +123,6 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.38</version>
             <optional>true</optional>
         </dependency>
 
@@ -116,6 +130,26 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson-test</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -140,7 +174,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.38</version>
+                            <version>${lombok.version}</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
@@ -161,8 +195,7 @@
                 <!--
                   Requirement 53 / Task 252：測試 JVM 的時區必須與正式環境（容器 TZ=Asia/Taipei）一致，
                   否則會出現「本機測試過、容器行為不同」的時區問題。
-                  額外參數走 ${extraArgLine} 疊加，**不要**在命令列直接下 -DargLine=...（那會覆蓋掉時區）：
-                    mvn test -DextraArgLine=-Dnet.bytebuddy.experimental=true
+                  額外參數走 ${extraArgLine} 疊加，不在命令列覆蓋 argLine 的時區設定。
                 -->
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>

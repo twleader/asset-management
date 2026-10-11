@@ -85,7 +85,7 @@ class PublicQuoteCloseFallbackTest {
         assertThat(fallbackHistoryCalls()).singleElement().satisfies(request -> {
             String query = request.url().getRawQuery();
             assertThat(query).contains("code=2330", FALLBACK_START, "end=2026-08-24");
-            assertThat(request.headers()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status");
+            assertThat(request.headers().asMultiValueMap()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status");
         });
     }
 

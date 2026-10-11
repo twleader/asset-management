@@ -17,6 +17,7 @@ public class PublicUsdTwdExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "USD/TWD 匯率資料暫時不存在");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("USD/TWD data not found");
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
     }
@@ -26,6 +27,7 @@ public class PublicUsdTwdExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "USD/TWD 下游資料暫時不可用");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("USD/TWD downstream data unavailable");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);
     }

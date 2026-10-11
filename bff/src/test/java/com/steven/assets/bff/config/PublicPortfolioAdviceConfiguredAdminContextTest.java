@@ -230,9 +230,9 @@ class PublicPortfolioAdviceConfiguredAdminContextTest {
         ClientRequest bootstrap = calls.stream()
                 .filter(r -> "/internal/users/configured-admin".equals(r.url().getPath()))
                 .findFirst().orElseThrow();
-        assertThat(bootstrap.headers().containsKey(AuthConstants.HDR_USER_ID)).isFalse();
-        assertThat(bootstrap.headers().containsKey(AuthConstants.HDR_USER_ROLE)).isFalse();
-        assertThat(bootstrap.headers().containsKey(AuthConstants.HDR_USER_STATUS)).isFalse();
+        assertThat(bootstrap.headers().containsHeader(AuthConstants.HDR_USER_ID)).isFalse();
+        assertThat(bootstrap.headers().containsHeader(AuthConstants.HDR_USER_ROLE)).isFalse();
+        assertThat(bootstrap.headers().containsHeader(AuthConstants.HDR_USER_STATUS)).isFalse();
 
         ClientRequest advice = calls.stream()
                 .filter(r -> "/api/portfolio-advice/latest".equals(r.url().getPath()))
@@ -307,9 +307,9 @@ class PublicPortfolioAdviceConfiguredAdminContextTest {
     }
 
     private static void assertNoTenantHeaders(ClientRequest request) {
-        assertThat(request.headers().containsKey(AuthConstants.HDR_USER_ID)).isFalse();
-        assertThat(request.headers().containsKey(AuthConstants.HDR_USER_ROLE)).isFalse();
-        assertThat(request.headers().containsKey(AuthConstants.HDR_USER_STATUS)).isFalse();
+        assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_ID)).isFalse();
+        assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_ROLE)).isFalse();
+        assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_STATUS)).isFalse();
     }
 
     private static String unavailableContract(PublicPortfolioAdviceExceptionAdvice advice, Throwable error) {
