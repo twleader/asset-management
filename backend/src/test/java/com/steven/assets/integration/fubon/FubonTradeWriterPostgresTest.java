@@ -27,11 +27,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
@@ -92,11 +92,11 @@ class FubonTradeWriterPostgresTest {
         properties.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
-    @MockBean FubonConfigState config;
-    @MockBean FubonBrokerClient client;
-    @MockBean MarketDataService marketData;
-    @MockBean StockMasterService stockMaster;
-    @SpyBean FubonTradeWriter writer;
+    @MockitoBean FubonConfigState config;
+    @MockitoBean FubonBrokerClient client;
+    @MockitoBean MarketDataService marketData;
+    @MockitoBean StockMasterService stockMaster;
+    @MockitoSpyBean FubonTradeWriter writer;
     @Autowired FubonTradeSyncService service;
     @Autowired FubonTradeOutcomeCounters counters;
     @Autowired AssetTransactionRepository ledger;

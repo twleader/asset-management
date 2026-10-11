@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.4</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
 
@@ -18,8 +18,8 @@
     <description>外部資料抓取微服務（盤中股價、盤後收盤、股利歷史等對外 API 統一這裡抓）</description>
 
     <properties>
-        <java.version>21</java.version>
-        <!-- Task 252：測試 JVM 額外參數（見 surefire 設定）。例：-DextraArgLine=-Dnet.bytebuddy.experimental=true -->
+        <java.version>25</java.version>
+        <!-- 測試 JVM 額外參數（見 surefire 設定）；JDK 25 不需 experimental 相容旗標。 -->
         <extraArgLine></extraArgLine>
         <!-- Testcontainers 只用於 test scope；與 backend 對齊 1.21.4，支援 Docker Engine API minimum 1.40。 -->
         <testcontainers.version>1.21.4</testcontainers.version>
@@ -28,7 +28,18 @@
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Task 491: keep the existing Jackson 2 HTTP wire contract during Boot 4 migration. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-jackson2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -48,7 +59,6 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.38</version>
             <optional>true</optional>
         </dependency>
 
@@ -56,6 +66,17 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-starter-jackson</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
@@ -106,7 +127,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.38</version>
+                            <version>${lombok.version}</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>

@@ -19,12 +19,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.context.annotation.Import;
@@ -80,11 +80,11 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
         properties.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
-    @MockBean FubonConfigState configState;
-    @MockBean FubonBrokerClient brokerClient;
-    @MockBean MarketDataService marketData;
-    @MockBean StockMasterService stockMaster;
-    @SpyBean AssetSnapshotMutationLock mutationLock;
+    @MockitoBean FubonConfigState configState;
+    @MockitoBean FubonBrokerClient brokerClient;
+    @MockitoBean MarketDataService marketData;
+    @MockitoBean StockMasterService stockMaster;
+    @MockitoSpyBean AssetSnapshotMutationLock mutationLock;
     @Autowired AssetSnapshotRepository snapshots;
     @Autowired AppUserRepository users;
     @Autowired BankRepository banks;
@@ -94,7 +94,7 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
     @Autowired FubonBankBalanceWriter bankWriter;
     @Autowired FubonInventorySyncService inventoryService;
     @Autowired FubonInventoryWriter inventoryWriter;
-    @SpyBean SnapshotAggregateCalculator calculator;
+    @MockitoSpyBean SnapshotAggregateCalculator calculator;
     @Autowired CurrentUserFilter currentUserFilter;
     @Autowired PlatformTransactionManager transactions;
     @Autowired EntityManager em;

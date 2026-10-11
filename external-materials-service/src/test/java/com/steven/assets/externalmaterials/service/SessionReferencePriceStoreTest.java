@@ -77,7 +77,8 @@ class SessionReferencePriceStoreTest {
         verify(redis).execute(any(RedisScript.class), anyList(), anyString(), anyString(), anyString());
         verify(values, never()).set(anyString(), anyString());
         verify(redis, never()).expireAt(anyString(), any(Instant.class));
-        verify(redis, never()).expire(anyString(), any());
+        verify(redis, never()).expire(anyString(), any(java.time.Duration.class));
+        verify(redis, never()).expire(anyString(), any(org.springframework.data.redis.core.types.Expiration.class));
     }
 
     @Test

@@ -1,8 +1,12 @@
 spring:
   application:
     name: asset-management
-  codec:
-    max-in-memory-size: ${SRPP_DAILY_REPORT_MAX_BODY:1MB}
+  http:
+    converters:
+      preferred-json-mapper: jackson2
+    codecs:
+      preferred-json-mapper: jackson2
+      max-in-memory-size: ${SRPP_DAILY_REPORT_MAX_BODY:1MB}
 
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:assets}

@@ -31,7 +31,7 @@ class PublicQuoteWebClientConfigTest {
             return Mono.just(ClientResponse.create(HttpStatus.OK).body("{}").build());
         });
         ObjectProvider<ReactorResourceFactory> resources = mock(ObjectProvider.class);
-        WebClientConfig config = new WebClientConfig();
+        WebClientConfig config = new WebClientConfig(new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
         ReflectionTestUtils.setField(config, "businessServicesUrl", "http://business.invalid");
         ReflectionTestUtils.setField(config, "externalMaterialsUrl", "http://external.invalid");
 
@@ -45,9 +45,9 @@ class PublicQuoteWebClientConfigTest {
                 .contextWrite(tenant).block();
 
         assertThat(calls).hasSize(2).allSatisfy(request -> {
-            assertThat(request.headers().containsKey(AuthConstants.HDR_USER_ID)).isFalse();
-            assertThat(request.headers().containsKey(AuthConstants.HDR_USER_ROLE)).isFalse();
-            assertThat(request.headers().containsKey(AuthConstants.HDR_USER_STATUS)).isFalse();
+            assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_ID)).isFalse();
+            assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_ROLE)).isFalse();
+            assertThat(request.headers().containsHeader(AuthConstants.HDR_USER_STATUS)).isFalse();
         });
         assertThat(calls).extracting(request -> request.url().getHost())
                 .containsExactly("external.invalid", "business.invalid");

@@ -122,7 +122,7 @@ class PublicSrppDailyContextConfiguredAdminContextTest {
                 .block();
 
         assertThat(paths()).containsExactly("/internal/users/by-email", "/internal/public-srpp/daily-context");
-        assertThat(calls.get(0).headers().containsKey(AuthConstants.HDR_USER_ID)).isFalse();
+        assertThat(calls.get(0).headers().containsHeader(AuthConstants.HDR_USER_ID)).isFalse();
         ClientRequest business = businessCall();
         assertThat(business.headers().getFirst(AuthConstants.HDR_USER_ID)).isEqualTo("2");
         assertThat(business.headers().getFirst(AuthConstants.HDR_USER_ROLE)).isEqualTo("USER");

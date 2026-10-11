@@ -7,8 +7,8 @@ import com.steven.assets.service.PublicMarketDataReadOnlyService;
 import com.steven.assets.service.PublicTradingCalendarService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -25,10 +25,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class InternalPublicMarketDataControllerTest {
 
     @Autowired MockMvc mvc;
-    @MockBean DividendHistoryService dividendHistoryService;
-    @MockBean PublicMarketDataReadOnlyService readOnlyService;
-    @MockBean PublicTradingCalendarService calendarService;
-    @MockBean CurrentUserContext currentUserContext;
+    @MockitoBean DividendHistoryService dividendHistoryService;
+    @MockitoBean PublicMarketDataReadOnlyService readOnlyService;
+    @MockitoBean PublicTradingCalendarService calendarService;
+    @MockitoBean CurrentUserContext currentUserContext;
 
     @Test
     void dividendReadonlyResultKeepsTheFullEnvelopeAndNeverUsesColdSyncMethod() throws Exception {

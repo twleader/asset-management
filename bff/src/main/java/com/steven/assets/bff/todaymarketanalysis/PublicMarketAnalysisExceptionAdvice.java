@@ -36,6 +36,7 @@ public class PublicMarketAnalysisExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.BAD_GATEWAY, "今日股市分析暫時無法取得，請稍後再試");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Market analysis downstream failure");
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(problem);
     }
@@ -46,6 +47,7 @@ public class PublicMarketAnalysisExceptionAdvice {
         capture(exchange, ex);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.SERVICE_UNAVAILABLE, "今日股市分析服務暫時無法連線");
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Market analysis service unavailable");
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem);
     }

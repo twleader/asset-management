@@ -33,12 +33,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernatePropertiesCustomizer;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -104,16 +104,16 @@ class FubonAccountingProjectionPostgresTest {
         properties.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
-    @MockBean FubonConfigState configState;
-    @MockBean FubonBrokerClient brokerClient;
-    @MockBean StockMasterService stockNames;
-    @MockBean MarketDataService marketDataService;
-    @MockBean FundNavService fundNavService;
-    @MockBean FundDividendService fundDividendService;
-    @MockBean AssetClassifier assetClassifier;
-    @MockBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
-    @MockBean com.steven.assets.security.TenantGuard tenantGuard;
-    @SpyBean SnapshotAggregateCalculator aggregates;
+    @MockitoBean FubonConfigState configState;
+    @MockitoBean FubonBrokerClient brokerClient;
+    @MockitoBean StockMasterService stockNames;
+    @MockitoBean MarketDataService marketDataService;
+    @MockitoBean FundNavService fundNavService;
+    @MockitoBean FundDividendService fundDividendService;
+    @MockitoBean AssetClassifier assetClassifier;
+    @MockitoBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
+    @MockitoBean com.steven.assets.security.TenantGuard tenantGuard;
+    @MockitoSpyBean SnapshotAggregateCalculator aggregates;
 
     @Autowired AssetSnapshotRepository snapshots;
     @Autowired AssetService assetService;

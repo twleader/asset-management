@@ -32,6 +32,7 @@ public class PublicQuoteMarketDataExceptionAdvice {
 
     private ResponseEntity<ProblemDetail> problem(HttpStatus status, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setType(java.net.URI.create("about:blank"));
         problem.setTitle("Public quote data unavailable");
         return ResponseEntity.status(status).body(problem);
     }

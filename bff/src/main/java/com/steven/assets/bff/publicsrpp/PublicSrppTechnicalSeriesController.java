@@ -45,7 +45,7 @@ public class PublicSrppTechnicalSeriesController {
         if (!ALL_QUERY.containsAll(query.keySet()) || !query.keySet().containsAll(REQUIRED_QUERY)
                 || query.values().stream().anyMatch(values -> values.size() != 1)
                 || request.getHeaders().getContentLength() > 0
-                || request.getHeaders().containsKey(HttpHeaders.TRANSFER_ENCODING)) throw badRequest();
+                || request.getHeaders().containsHeader(HttpHeaders.TRANSFER_ENCODING)) throw badRequest();
         String market = query.getFirst("market");
         String code = query.getFirst("stockCode");
         String rawDate = query.getFirst("asOf");

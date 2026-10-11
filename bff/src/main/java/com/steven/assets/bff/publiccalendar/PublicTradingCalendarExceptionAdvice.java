@@ -49,6 +49,7 @@ public class PublicTradingCalendarExceptionAdvice {
 
     private static ResponseEntity<ProblemDetail> problem(HttpStatus status, String title, String detail) {
         ProblemDetail body = ProblemDetail.forStatusAndDetail(status, detail);
+        body.setType(java.net.URI.create("about:blank"));
         body.setTitle(title);
         return ResponseEntity.status(status).body(body);
     }

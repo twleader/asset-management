@@ -46,7 +46,7 @@ public class PublicSrppCompletedTechnicalController {
     public Mono<ResponseEntity<JsonNode>> read(ServerHttpRequest request) {
         var query = request.getQueryParams();
         if (!query.keySet().equals(KEYS) || request.getHeaders().getContentLength() > 0
-                || request.getHeaders().containsKey(HttpHeaders.TRANSFER_ENCODING)
+                || request.getHeaders().containsHeader(HttpHeaders.TRANSFER_ENCODING)
                 || query.values().stream().anyMatch(values -> values.size() != 1))
             throw badRequest();
         String market = query.getFirst("market");

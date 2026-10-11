@@ -35,7 +35,7 @@ record SrppOrchestratedQuery(Route route, String email, String tradingDate, Stri
 
     static SrppOrchestratedQuery parse(Route route, MultiValueMap<String, String> params, HttpHeaders headers) {
         if (route == null || params == null || headers != null
-                && (headers.getContentLength() > 0 || headers.containsKey(HttpHeaders.TRANSFER_ENCODING))) throw invalid();
+                && (headers.getContentLength() > 0 || headers.containsHeader(HttpHeaders.TRANSFER_ENCODING))) throw invalid();
         Set<String> allowed = switch (route) {
             case CONTEXT -> Set.of("tradingDate", "slot", "policyBundleSha256", "email");
             case CALCULATIONS -> Set.of("contextId", "calculationIds", "stockCodes", "email");

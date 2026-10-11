@@ -117,14 +117,14 @@ class PublicQuoteMarketDataServiceTest {
         assertThat(rawRequests).extracting(request -> request.url().getPath())
                 .containsExactlyInAnyOrder("/api/quotes/one", "/internal/fubon-live-response");
         assertThat(rawRequests).allSatisfy(request -> {
-            assertThat(request.headers()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status");
+            assertThat(request.headers().asMultiValueMap()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status");
         });
         assertThat(marketRequests).extracting(request -> request.url().getPath()).containsExactlyInAnyOrder(
                 "/api/market-data/history/stock", "/api/market-data/indicators/series",
                 "/internal/public-market-data/intraday-ticks-readonly", "/api/market-data/quote-detail",
                 "/api/market-data/etf-holdings", "/internal/public-market-data/dividends-readonly-result");
         assertThat(marketRequests).allSatisfy(request ->
-                assertThat(request.headers()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status"));
+                assertThat(request.headers().asMultiValueMap()).doesNotContainKeys("X-User-Id", "X-User-Role", "X-User-Status"));
     }
 
     @Test

@@ -6,12 +6,14 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.srpp.EventEvidenceCaptureService;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
 import com.steven.assets.service.srpp.SrppCaptureService;
+import com.steven.assets.service.srpp.decision.DecisionRequest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -45,9 +47,9 @@ class InternalSrppCaptureControllerWebMvcTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @Autowired MockMvc mvc;
-    @MockBean SrppCaptureService service;
-    @MockBean EventEvidenceCaptureService eventEvidence;
-    @MockBean CurrentUserContext currentUserContext;
+    @MockitoBean SrppCaptureService service;
+    @MockitoBean EventEvidenceCaptureService eventEvidence;
+    @MockitoBean CurrentUserContext currentUserContext;
 
     /** 兩個端點：internal 路徑、problem 的公開 instance。 */
     enum Endpoint {
@@ -115,6 +117,24 @@ class InternalSrppCaptureControllerWebMvcTest {
         Stream.Builder<Arguments> out = Stream.builder();
         for (Endpoint endpoint : Endpoint.values()) for (String body : List.of("", "   ", "\n\t ")) out.add(Arguments.of(endpoint, body));
         return out.build();
+    }
+
+    @Test
+    void duplicateKeysReachStrictRequestParserUnmodifiedAndReturn400() throws Exception {
+        when(service.evaluate(any())).thenAnswer(invocation -> {
+            DecisionRequest.parse(invocation.getArgument(0, String.class));
+            return new SrppCaptureService.Result(HttpStatus.CREATED, "{}", false);
+        });
+        String duplicate = "{\"tradingDate\":\"2026-10-11\",\"slot\":\"09:05\","
+                + "\"policyBundleSha256\":\"" + "a".repeat(64) + "\","
+                + "\"swaggerSha256\":\"" + "b".repeat(64) + "\",\"slot\":\"11:40\"}";
+
+        MockHttpServletResponse response = mvc.perform(post(Endpoint.DECISION.path)
+                .contentType(MediaType.APPLICATION_JSON).content(duplicate)).andReturn().getResponse();
+
+        assertSevenFieldProblem(response, Endpoint.DECISION, 400, "INVALID_REQUEST");
+        verify(service).evaluate(duplicate);
+        verifyNoInteractions(eventEvidence);
     }
 
     @ParameterizedTest(name = "{0}：空白 body [{1}] → 400")

@@ -2377,7 +2377,7 @@ StockAlertService.evaluateGroup()     # 複合 AND 群組（Task 253）
   - **X 軸開盤→收盤**：以 `MarketZones.openTime/closeTime`（單一事實來源）之當日分鐘數為**數值 X**、`setXAxisMin/Max` 鎖定開收盤，`setCustomXAxisTickLabelsFormatter` 轉 `HH:mm`；故軸固定延伸到收盤而非最後一筆 tick。稀疏 tick 以 `TreeMap<分鐘,價>`「每分鐘最後成交」落點連續線（XChart 無 `connectNulls`，故只畫真實 tick 點、不鋪 null 網格）。Y 軸涵蓋分時區間 + 昨收（各 +10% padding），基準線不落框外
   - 失敗（無 tick / 繪圖例外）回 empty → 僅略過此圖。CJK 字型與年圖共用同一 `CJK_FONT`。另有預覽端點 `GET /api/watch-stocks/intraday.png`（比照 `chart.png`，無 tick 回 204）
 - `AlertNotificationDispatcher.buildDigest`：數值入圖後文字精簡——保留「標題 + 觸發時間 + **觸發股價**」，移除月/季/年線/KD 文字列（圖內已有）。`<img width:900px>`
-- **字型依賴**：runtime image 為 `eclipse-temurin:21-jre-alpine`（slim、無 CJK 字型）→ backend `Dockerfile` apk 裝 `fontconfig ttf-dejavu font-noto-cjk freetype` 並 `fc-cache -f`，ENTRYPOINT 加 `-Djava.awt.headless=true`。`AlertChartRenderer.loadCjkFont` 用 **`Font.createFonts`（複數）挑 TC face**（`.ttc` 的 face 0 為 JP 變體，`createFont` 單數會選到日系字形）；找不到則 fallback SANS_SERIF
+- **字型依賴**：Task 491 runtime image 目標為 `eclipse-temurin:25-jre-alpine`（slim、無 CJK 字型）→ backend `Dockerfile` apk 裝 `fontconfig ttf-dejavu font-noto-cjk freetype` 並 `fc-cache -f`，ENTRYPOINT 加 `-Djava.awt.headless=true`。`AlertChartRenderer.loadCjkFont` 用 **`Font.createFonts`（複數）挑 TC face**（`.ttc` 的 face 0 為 JP 變體，`createFont` 單數會選到日系字形）；找不到則 fallback SANS_SERIF
 - 預覽 / 驗證端點：`GET /api/watch-stocks/chart.png?code=&market=`（BFF passthrough `/api/bff/watch-stock/chart.png`）回同一張 PNG，資料不足回 204
 
 **設定面**：
@@ -2640,7 +2640,7 @@ location / {
 
 ### Multi-Stage Docker Builds
 
-**Backend / BFF / External Materials Service**: `maven:3.9-eclipse-temurin-21` → `eclipse-temurin:21-jre-alpine`
+**Backend / BFF / External Materials Service**: `maven:3.9-eclipse-temurin-25` → `eclipse-temurin:25-jre-alpine`
 **Frontend**: `node:18-alpine` (build) → `nginx:alpine` (serve)
 
 ### BFF 上游 DNS 解析策略（Task 208）
@@ -3722,7 +3722,7 @@ POST /api/bff/crawler-data/export/fetch-and-run-now     → POST /api/crawler-ex
 - **為何不做健康檢查頁／端點**：啟用時的自檢結果只走當次回應的 `gdriveSelfCheckWarning`（不入庫、不碰 `gdrive_last_run_at`／`gdrive_last_status`）、啟動時的只進 `docker logs`；做成第十個管理頁只會多一處要維護，而資訊在當次提示與 log 裡已完整。
 - **`scope = drive` 的權衡**：新 remote 取得使用者 Drive 的完整讀寫權，這是能寫進**使用者手動建立**的既有目錄所必要的。程式端自我約束為只用 `lsjson --dirs-only`（列目錄）與 `copyto`（寫指定子路徑）兩種操作，**不實作任何刪除既有 Drive 檔案的程式路徑**，把完整權限的實際使用面縮到最小。
 - **ext 容器部署前提**：實際上傳者是 `external-materials-service`（目前僅裝 `curl`），需於其 Dockerfile 加裝 `rclone`，並唯讀掛入 `~/.config/rclone` **目錄**（單一共用 config，三個 section 共存；掛目錄而非單檔的理由見上方 Task 247 條）＋設 `RCLONE_CONFIG`；**須沿用 `BackupService` 既有的「啟動時複製到可寫路徑」作法**（唯讀掛載會使 rclone 自動續期 OAuth token 時寫回失敗而 exit non-zero），否則 token 過期後上傳會開始整批失敗。ext 以非 root `appuser` 執行，副本須落在 `/tmp`。
-- **中文目錄名編碼：現況已正確，不加 JVM 參數**。若 `sun.jnu.encoding` 退化成 ASCII，`ProcessBuilder` 傳出的中文路徑會變 `?` 並靜默寫錯目錄；但實測 ext 容器現為 UTF-8（base image `eclipse-temurin:21-jre-alpine` 自帶 `LANG=en_US.UTF-8`），且命令列 `-Dsun.jnu.encoding=UTF-8` 對該屬性**無效**（JDK 由 platform locale 決定）。約束改為「不得設 `LANG=C`／清除 base image locale／換成不帶 UTF-8 locale 的 base image」，並以驗證步驟回歸守門。
+- **中文目錄名編碼：現況已正確，不加 JVM 參數**。若 `sun.jnu.encoding` 退化成 ASCII，`ProcessBuilder` 傳出的中文路徑會變 `?` 並靜默寫錯目錄；但實測 ext 容器現為 UTF-8（歷史 base image `eclipse-temurin:21-jre-alpine` 自帶 `LANG=en_US.UTF-8`），且命令列 `-Dsun.jnu.encoding=UTF-8` 對該屬性**無效**（JDK 由 platform locale 決定）。約束改為「不得設 `LANG=C`／清除 base image locale／換成不帶 UTF-8 locale 的 base image」，並以驗證步驟回歸守門。Task 491 的 Java 25 image 升級後須重新驗證 locale、sun.jnu.encoding 與中文 ProcessBuilder 路徑，舊實測不代表新 runtime 已驗收。
 - **不為兩處 rclone 呼叫建共用 module**：`backend`／`bff`／`external-materials-service` 為三個獨立 Maven 專案、無父 pom。ext 端 rclone 呼叫為薄封裝（`ProcessBuilder`＋逾時＋exit code 檢查），刻意與 `BackupService.execProcess` 各自實作——為兩處數十行程式碼引入跨服務 module 會使三個服務的建置相互耦合，成本高於重複本身。**注意這條只適用於跨服務**：Requirement 51 把 Drive 輸出推廣到 backend 內的八個匯出 service 時，必須抽**同一個 backend 內的共用元件**（`GdriveOutputSupport`），八份複製是明確的錯誤。
 
 **推廣至其餘八個匯出頁（Requirement 51 / Task 242–244）** —— 同一套「本機照寫＋Drive 附加副本」模型，套用於歷年資產（R34）／交易日曆（R37）／已實現損益（R39）／**油價金價（R41）**／**台幣兌美元匯率（R42）**／GDP-TWSE（R45）／交易雷達（R48）／交易紀錄（R49）。
@@ -12823,3 +12823,16 @@ HTTP problems:400 INVALID_REQUEST；404 CALCULATION_NOT_FOUND；409 NON_TRADING_
 既有 30 天 retention 的 cron-only 觸發無法補上服務在 03:15 之後重啟前已存在的到期 row；實際驗收也證明 Nginx tailer 的 whole-file replay 會在 cleanup 成功後重寫同一批歷史 line。因此 retention 必須同時處理既有資料與寫入邊界。保留 `ApiErrorLogRetentionScheduler` 的 `Asia/Taipei` 每日 03:15 cron 與 repository DB-time 嚴格截止；新增獨立薄元件 `ApiErrorLogRetentionStartupRunner`，實作 Spring Boot `ApplicationRunner`，並在 `run` 注入後呼叫 managed scheduler bean 的 `deleteExpired()` 恰好一次。這個跨 bean 呼叫保留 scheduler 的 `@Transactional` proxy，不能在 scheduler 本身自呼叫；選擇 Boot runner 是為了讓啟動任務進入 `SpringApplication.run` 的明確 runner 階段，而不是依賴事件 listener 的註冊。scheduler 回傳 `OptionalInt` outcome：repository 成功時（包括 0 row）是有值的刪除筆數，scheduler 內部捕捉的 repository failure 為 empty 且保留最小 warning；runner 只對有值 outcome 寫出精確 `API error log startup retention completed deleted=<non-negative integer>` info log，沒有 row content。runner 在這個 proxy 呼叫外捕捉 `RuntimeException`：這保護 transaction interceptor 在進入／提交 method 時可能拋出的例外，只記 exception class 的 warning，啟動繼續而由下次 cron／下次啟動重試。兩者共用同一個 delete；零列刪除是正常冪等情況。
 
 新的 v1.152.0 Liquibase formatted-SQL changeset 以唯一 author/id 和 `splitStatements:false` 包住 `CREATE OR REPLACE` 的 PL/pgSQL function，避免 function body 分號被錯誤切段；它更新 `guard_api_error_log_retention`，使 `INSERT` 時 `NEW.occurred_at < transaction_timestamp() - interval '30 days'` 被拒絕、`UPDATE` 照舊拒絕，`DELETE` 僅允許嚴格過期的 `OLD` row；同 changeset drop/recreate 原 trigger 為 `BEFORE INSERT OR UPDATE OR DELETE`。這是資料庫時間的唯一寫入權威，因此在清理 delete 與 BFF ingress 交錯時，過期 row 也不能再被寫回；無 schema table/column、route 或手動操作介面增加。`NginxGatewayFailureLogTailer` 仍 whole-file replay，其三依賴 Spring production constructor 以 `@Autowired` 明確選定、呼叫 `Clock.systemUTC()` 的 package-visible constructor；後者供 fixed-Clock test 使用，避免要求 BFF 現有 context 沒有的 Clock bean 或因兩個 constructor 而無法啟動。它在嚴格過期預篩後才呼叫既有 ingest client：這只避免每 15 秒送出必遭拒絕的 historic line，exact cutoff 保持送出，並不取代 DB guard。Testcontainers migration test 以 production upgrade 順序驗證：套 v1.123 guard 後建立 legacy backlog，再套 v1.152；同一 DB transaction insert exact cutoff 並 delete legacy row，另用三個獨立 transaction 斷言過期 insert、任一 update、未到期 delete 都被 trigger reject，因 PostgreSQL 例外後 transaction 已不可重用。BFF test 用 fixed Clock 鎖住預篩。依序 rebuild/recreate BFF（停止舊 tailer replay）、business-services（套 migration 並 cleanup）、frontend，最後以 runner info log 與 read-only SQL `count=0` 驗收，並重產 `db/schema.sql`。
+
+
+## Requirement 189／Task 491：Boot 4.1.1／Java 25 相容性遷移
+
+三個獨立 Maven module 統一 Boot 4.1.1、Java release 25，BFF 使用 Spring Cloud 2025.1.3。此任務僅遷移 runtime/framework，不新增 Flowable 或改變 SRPP 決策、公式、排程、API、DB schema。Boot 4.1.x 是指定的 stable line；LTS 描述只適用 Java 25。
+
+Liquibase 5.0.3 的 formatted SQL header logicalFilePath 解析與 4.29.2 不同：既有實體 `v1.56.0-trading-calendar-export-schedule.sql` 的歷史身分仍為 `db/changelog/changes/v1.55.0-trading-calendar-export-schedule.sql`。master 僅在此 include 加上既有 logicalFilePath，讓正常遷移啟動辨識原執行身分；不是新增 changeset，不改 SQL、checksum、schema dump 或正式歷史表。測試以 metadata-only fixture 比較 master 的完整 187 個身分/checksum，再以隔離 PostgreSQL 的正常 SpringLiquibase 啟動驗零新增；負向 master 缺少此 include 屬性時，必須因重跑 calendar 建表失敗。歷史表 fixture 僅用 id/author/filename/checksum 與測試自訂執行順序／時間，排除正式金融資料、帳戶與執行日期。
+
+Spring Boot 4 starter 拆分採 MVC／AspectJ／Liquibase 及對應測試 starter，Gateway 改 server-webflux starter/properties。移除舊 Lombok 1.18.38 override，processor 與 BOM 對齊；既有 Testcontainers 1.21.4 與其 artifact IDs 保留，避免附帶跨大版遷移。MockBean/SpyBean 改 Spring Framework MockitoBean/MockitoSpyBean；Hibernate 7 的 tenant filter、JPQL、JSONB、rollback 与不可變收據須以現有及必要新增相容測試確認。
+
+JSON 過渡維持 com.fasterxml.jackson（Jackson 2）及官方 spring-boot-jackson2；排除 HTTP main/test starters 引入的 Jackson 3 自動配置，並設定 spring.http.converters.preferred-json-mapper=jackson2／spring.http.codecs.preferred-json-mapper=jackson2。裸 WebClient builders、自訂 ExchangeStrategies 和測試 bindToController 不能僅依賴 Boot preference，需驗實際 codecs。加入實際 MVC／WebFlux HTTP round-trip，覆蓋精確 decimal、ISO日期、null、unknown／duplicate欄位及既有 receipt contract。
+
+容器使用 Java25 Maven/JRE image，保留非 root、TZ=Asia/Taipei、UTF-8 locale、memory／GC args與服務 profiles。backend 保留 PostgreSQL16 client、rclone、中文字型與AWT，external 保留curl/rclone與檔名編碼。部署前比對 worktree/main 的有效設定且不輸出 secrets；先驗收 feature，再 no-ff landing，落地後從 main 重新 build/recreate 並驗最終 runtime。

@@ -21,6 +21,7 @@ class StockAnalysisEtfHoldingsRouteRemovedTest {
     @Test
     void etfHoldingsRoute已移除且剩餘五條route維持精確路徑() {
         try (GenericApplicationContext context = new GenericApplicationContext()) {
+            context.registerBean(org.springframework.boot.webflux.autoconfigure.WebFluxProperties.class);
             context.registerBean(PathRoutePredicateFactory.class);
             context.registerBean(RewritePathGatewayFilterFactory.class);
             context.refresh();

@@ -21,7 +21,7 @@ record SrppReportQuery(String email, String consumer, String tradingDate, String
     }
     static SrppReportQuery parse(MultiValueMap<String,String> params, HttpHeaders headers, Clock clock) {
         if (params == null || headers != null && (headers.getContentLength() > 0
-                || headers.containsKey(HttpHeaders.TRANSFER_ENCODING))) throw invalid();
+                || headers.containsHeader(HttpHeaders.TRANSFER_ENCODING))) throw invalid();
         params.forEach((key, values) -> {
             if (!KEYS.contains(key) || values == null || values.size() != 1 || values.get(0) == null
                     || values.get(0).isEmpty() || !values.get(0).equals(values.get(0).strip())) throw invalid();

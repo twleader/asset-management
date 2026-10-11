@@ -8,7 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DefaultDataBufferFactory;
@@ -57,11 +57,11 @@ class SrppCaptureControllerMediaTypeTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @LocalServerPort private int port;
-    @MockBean SrppCaptureRelay relay;
-    @MockBean SrppDailyDecisionCapture dailyDecision;
+    @MockitoBean SrppCaptureRelay relay;
+    @MockitoBean SrppDailyDecisionCapture dailyDecision;
     /** Task 481：event() 在 415／空 body 之後改交給 SrppEventEvidenceCapture（owner 解析與回應驗證）。 */
-    @MockBean SrppEventEvidenceCapture eventEvidence;
-    @MockBean ApiErrorLogIngestClient ingest;
+    @MockitoBean SrppEventEvidenceCapture eventEvidence;
+    @MockitoBean ApiErrorLogIngestClient ingest;
     private WebTestClient client;
 
     /** 兩個公開端點：路徑、relay 的 internal 路徑、API 錯誤日誌的 operation。 */

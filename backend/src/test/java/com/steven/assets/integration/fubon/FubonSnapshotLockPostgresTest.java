@@ -23,9 +23,9 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -100,15 +100,15 @@ class FubonSnapshotLockPostgresTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
-    @MockBean MarketDataService marketDataService;
-    @MockBean FundNavService fundNavService;
-    @MockBean FundDividendService fundDividendService;
-    @MockBean AssetClassifier assetClassifier;
-    @MockBean StockMasterService stockMasterService;
-    @MockBean com.steven.assets.security.TenantGuard tenantGuard;
-    @MockBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
-    @MockBean FubonConfigState configState;
-    @MockBean UserAdminService userAdminService;
+    @MockitoBean MarketDataService marketDataService;
+    @MockitoBean FundNavService fundNavService;
+    @MockitoBean FundDividendService fundDividendService;
+    @MockitoBean AssetClassifier assetClassifier;
+    @MockitoBean StockMasterService stockMasterService;
+    @MockitoBean com.steven.assets.security.TenantGuard tenantGuard;
+    @MockitoBean SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
+    @MockitoBean FubonConfigState configState;
+    @MockitoBean UserAdminService userAdminService;
 
     @Autowired AssetSnapshotRepository snapshotRepository;
     @Autowired AppUserRepository appUserRepository;

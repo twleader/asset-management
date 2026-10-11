@@ -5,8 +5,8 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.RealizedGainExportScheduleService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -34,11 +34,11 @@ class RealizedGainExportControllerTest {
 
     @Autowired MockMvc mvc;
 
-    @MockBean RealizedGainExportScheduleService service;
+    @MockitoBean RealizedGainExportScheduleService service;
     // WebConfig 屬 WebMvcConfigurer，會被 @WebMvcTest slice 載入 → 連帶需要 AdminGateInterceptor →
     // CurrentUserContext（@RequestScope，slice 不提供）。補上 mock 讓 context 能載入；本測試路徑
     // (/api/realized-gains/export/*) 不在攔截器 path patterns 內，故此 mock 不會被實際觸發。
-    @MockBean CurrentUserContext currentUserContext;
+    @MockitoBean CurrentUserContext currentUserContext;
 
     @Test
     void getSchedule_回傳200且times陣列完整序列化() throws Exception {
