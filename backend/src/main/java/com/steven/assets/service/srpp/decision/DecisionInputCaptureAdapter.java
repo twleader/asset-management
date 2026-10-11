@@ -42,7 +42,7 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         Map<String,QuoteDetailDto.Response> books=new TreeMap<>();Map<String,TradingRadarDto.StockDetailResponse> details=new TreeMap<>();Map<String,List<StockDividendHistory>> ds=new TreeMap<>();
         for(String c:p.symbols()){
             try{books.put(c,market.getQuoteDetail(c,"台股"));}catch(RuntimeException ignored){books.put(c,null);}
-            try{details.put(c,radar.getStockDetail(c,"台股"));}catch(RuntimeException ignored){details.put(c,null);}
+            try{details.put(c,radar.getStockDetailForOwner(ownerId,c,"台股"));}catch(RuntimeException ignored){details.put(c,null);}
             ds.put(c,dividends.findByStockSinceYear(c,"台股",date.getYear()-1));
         }
         UsdTwdLiveRateService.LiveRate rate=null;try{rate=fx.getLiveRate();}catch(RuntimeException ignored){}
@@ -53,8 +53,14 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         try{captures=minutes.read(p.symbols(),date,asOf);if(captures==null)captures=Map.of();}catch(RuntimeException ignored){captures=Map.of();}
         ObjectNode input=JsonNodeFactory.instance.objectNode(),vector=JsonNodeFactory.instance.objectNode();
         input.put("schemaVersion",1);input.put("ownerUserId",ownerId);input.put("tradingDate",date.toString());input.put("slot",request.slot());input.put("capturedAt",asOf.toString());ObjectNode sources=input.putObject("sources");
-        ObjectNode classSource=JsonNodeFactory.instance.objectNode();classSource.set("stockMasterRows",json(stockMasters));classSource.set("fundOverrideRows",json(fundClassRows));classSource.set("resolvedStockClasses",json(classifications));classSource.put("classifierVersion","ASSET_CLASSIFIER_CURRENT_SOURCE");
-        source(sources,vector,"classifications",classSource,"canonical-master-overrides",asOf,"COMPLETE","VERIFIED");
+        ObjectNode classSource=JsonNodeFactory.instance.objectNode();classSource.set("stockMasterRows",json(stockMasters));classSource.set("fundOverrideRows",json(fundClassRows));classSource.set("resolvedStockClasses",json(classifications));classSource.put("classifierVersion","CANONICAL_FUND_OVERRIDE_ONLY_V1");
+        ObjectNode resolvedFunds=classSource.putObject("resolvedFundClasses");ArrayNode classificationMissing=classSource.putArray("missing");
+        for(var fund:a.snapshot().funds()){
+            String explicit=fundClasses.get(fund.fundName());
+            if(explicit!=null&&Set.of("BOND","STOCK").contains(explicit.trim().toUpperCase(Locale.ROOT)))resolvedFunds.put(fund.fundName(),explicit.trim().toUpperCase(Locale.ROOT));
+            else classificationMissing.add("FUND_CLASSIFICATION_UNAVAILABLE:"+fund.fundName());
+        }
+        source(sources,vector,"classifications",classSource,"canonical-master-overrides",asOf,classificationMissing.isEmpty()?"COMPLETE":"PARTIAL",classificationMissing.isEmpty()?"VERIFIED":"UNAVAILABLE");
         source(sources,vector,"assets",json(a),"snapshot-"+a.snapshot().id(),asOf,"COMPLETE","VERIFIED");
         ObjectNode calendar=JsonNodeFactory.instance.objectNode();calendar.put("tradingDate",date.toString());calendar.put("tw",true);calendar.set("weekCalendar",weekCalendar);ArrayNode sessionRows=calendar.putArray("completedSessions");sessions.forEach(d->sessionRows.add(d.toString()));
         source(sources,vector,"calendar",calendar,"calendar-"+date,asOf,sessions.size()==p.lookback()&&weekVerified?"COMPLETE":"PARTIAL",sessions.size()==p.lookback()&&weekVerified?"VERIFIED":"UNAVAILABLE");
@@ -71,12 +77,15 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         Map<String,BigDecimal> values=new TreeMap<>();BigDecimal bond=BigDecimal.ZERO;Map<Long,AssetSnapshotDto.StockResponse> holding=new HashMap<>();a.snapshot().stocks().forEach(s->holding.put(s.id(),s));
         boolean valuation=true;
         for(StockPriceService.LiveStockItem live:a.liveAssets().stocks()){
-            values.merge(live.stockCode(),live.liveValue(),BigDecimal::add);
+            values.merge(live.market()+":"+live.stockCode(),live.liveValue(),BigDecimal::add);
             if("BOND".equals(classifications.get(live.stockCode()+":"+live.market())))bond=bond.add(live.liveValue());
             else if(classifications.get(live.stockCode()+":"+live.market())==null)valuation=false;
             if(!"TARGET_SESSION_PRICE".equals(live.valuationSource()))valuation=false;
         }
-        for(var f:a.snapshot().funds())if("BOND".equals(AssetClassifier.defaultClassifier().classifyFund(f.fundName(),fundClasses.get(f.fundName()))))bond=bond.add(f.currentValue());
+        for(var f:a.snapshot().funds()){
+            if(!resolvedFunds.has(f.fundName()))valuation=false;
+            else if("BOND".equals(resolvedFunds.path(f.fundName()).asText()))bond=bond.add(f.currentValue());
+        }
         BigDecimal term=BigDecimal.ZERO,total=BigDecimal.ZERO;
         for(var d:a.snapshot().deposits())if("TWD".equals(d.currency())){
             if(d.amount().signum()<0||!"TRANSIT_TWD".equals(d.depositType()))total=total.add(d.amount());
@@ -99,7 +108,7 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
             Evidence position="00865B".equals(c)?subaccounts:new Evidence("PASS","CANONICAL_POSITION_OR_VERIFIED_SNAPSHOT_ZERO");
             Evidence tradability=new Evidence("UNAVAILABLE","TRADABILITY_SOURCE_UNAVAILABLE");
             var capture=captures.get(c);var confirmation=RadarIntradayCandlePolicy.evaluate("台股",TradingRadarRuleEngine.Horizon.MEDIUM,asOf,true,capture);
-            symbols.put(c,new Symbol(c,quote,book,closes,distributions,distributionVerified,values.getOrDefault(c,BigDecimal.ZERO),position,pending,rad,new Evidence(valuation?"PASS":"UNAVAILABLE",valuation?"QUALIFIED_ASSET_VALUATIONS":"CAPACITY_VALUATION_UNVERIFIED"),tradability,exact?detail.stock().action():null,exact?detail.stock().candidateAction():null,new Evidence(confirmation.status(),confirmation.reason())));
+            symbols.put(c,new Symbol(c,quote,book,closes,distributions,distributionVerified,values.getOrDefault("台股:"+c,BigDecimal.ZERO),position,pending,rad,new Evidence(valuation?"PASS":"UNAVAILABLE",valuation?"QUALIFIED_ASSET_VALUATIONS":"CAPACITY_VALUATION_UNVERIFIED"),tradability,exact?detail.stock().action():null,exact?detail.stock().candidateAction():null,new Evidence(confirmation.status(),confirmation.reason())));
             ObjectNode quoteSource=JsonNodeFactory.instance.objectNode();quoteSource.set("rawQuote",json(q));quoteSource.set("rawNav",json(nav));quoteSource.put("rawVolumeUnit","SHARES");quoteSource.put("normalizedVolumeUnit","LOTS");quoteSource.set("normalized",json(quote));
             source(sources,vector,"quote:"+c,quoteSource,q==null?"missing":Objects.toString(q.updatedAt(),"missing-time"),asOf,quote==null?"NONE":"COMPLETE",quote!=null&&DailyDecisionCalculator.quoteQualified(p,validationFrame(date,request.slot(),asOf),quote)?"VERIFIED":"UNAVAILABLE");
             source(sources,vector,"book:"+c,json(b),b==null?"missing":Objects.toString(b.sourceTime(),"missing-time"),asOf,b==null?"NONE":"COMPLETE",DailyDecisionCalculator.bookQualified(p,validationFrame(date,request.slot(),asOf),book)?"VERIFIED":"UNAVAILABLE");

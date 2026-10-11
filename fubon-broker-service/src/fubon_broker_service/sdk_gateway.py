@@ -68,6 +68,12 @@ class AccountingPair:
 
 
 @dataclass(frozen=True)
+class OrderPortfolioRead:
+    orders: AccountingRead = field(repr=False)
+    portfolio: AccountingPair = field(repr=False)
+
+
+@dataclass(frozen=True)
 class StockPushConnection:
     client: object = field(repr=False)
     generation: int
@@ -244,6 +250,38 @@ class SdkGateway:
                         continue
                     raise SdkCallError("ACCOUNTING_TRANSPORT_FAILED") from None
             raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+        finally:
+            self._accounting_lock.release()
+
+    def read_order_portfolio(self, *, deadline: float | None = None) -> OrderPortfolioRead:
+        """One bounded session/account observation; only official read methods are reachable."""
+        deadline = self._reader_deadline(deadline)
+        self._acquire_lock(self._accounting_lock, deadline, "ORDER_RESULTS_TIMEOUT")
+        try:
+            self._acquire_lock(self._session_lock, deadline, "ORDER_RESULTS_TIMEOUT")
+            try:
+                config = self._require_config()
+                account = self._ensure_session(config, deadline=deadline, timeout_reason="ORDER_RESULTS_TIMEOUT")
+                self._wait_for_accounting_budget(deadline=deadline, timeout_reason="ORDER_RESULTS_TIMEOUT")
+                method = raw_field(raw_field(self._sdk, "stock"), "get_order_results")
+                if not callable(method):
+                    raise SdkCallError("ORDER_RESULTS_UNAVAILABLE", misconfigured=True)
+                orders = self._run_bounded(lambda: method(account.raw), self.ACCOUNT_CALL_TIMEOUT_SECONDS,
+                                           "ORDER_RESULTS_TIMEOUT", deadline=deadline)
+                if self._response_auth_invalid(orders):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                inventories = self._accounting_call("inventories", account.raw, deadline=deadline, timeout_reason="ORDER_RESULTS_TIMEOUT")
+                unrealized = self._accounting_call("unrealized_gains_and_loses", account.raw, deadline=deadline, timeout_reason="ORDER_RESULTS_TIMEOUT")
+                if self._response_auth_invalid(inventories) or self._response_auth_invalid(unrealized):
+                    raise SdkCallError("AUTH_SESSION_INVALID", auth_invalid=True)
+                token = config.internal_service_token or ""
+                return OrderPortfolioRead(AccountingRead(orders, account, token), AccountingPair(inventories, unrealized, account, token))
+            finally:
+                self._session_lock.release()
+        except SdkCallError:
+            raise
+        except Exception:
+            raise SdkCallError("ORDER_RESULTS_TRANSPORT_FAILED") from None
         finally:
             self._accounting_lock.release()
 

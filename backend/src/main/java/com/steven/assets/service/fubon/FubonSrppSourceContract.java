@@ -1,0 +1,34 @@
+package com.steven.assets.service.fubon;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.steven.assets.srpp.SrppJcs;
+import java.time.*;
+import java.util.*;
+/** Pure validation of one sanitized official observation; no vendor or storage dependency. */
+public final class FubonSrppSourceContract {
+    private FubonSrppSourceContract(){}
+    private static final ZoneId TAIPEI=ZoneId.of("Asia/Taipei");
+    public static void validate(ObjectNode payload,LocalDate date,Instant now){
+        if(payload.path("schemaVersion").asInt()!=1||!"fubon".equals(payload.path("broker").asText())||!payload.path("complete").isBoolean()||!payload.path("complete").booleanValue()||!date.toString().equals(payload.path("queryDate").asText())||!payload.path("accountFingerprint").asText().matches("[0-9a-f]{24}")||!payload.path("revision").asText().matches("[0-9a-f]{64}")||!payload.path("orders").isArray()||!payload.path("portfolio").isObject())throw new IllegalArgumentException("SOURCE_INVALID");
+        Instant captured=Instant.parse(payload.path("capturedAt").asText());if(captured.isAfter(now)||Duration.between(captured,now).compareTo(Duration.ofSeconds(120))>0||!captured.atZone(TAIPEI).toLocalDate().equals(date))throw new IllegalArgumentException("SOURCE_STALE");
+        ObjectNode without=payload.deepCopy();without.remove("revision");if(!SrppJcs.hash(without).equals(payload.path("revision").asText()))throw new IllegalArgumentException("SOURCE_HASH_INVALID");
+        if(!date.toString().equals(payload.path("portfolio").path("queryDate").asText())||!payload.path("accountFingerprint").equals(payload.path("portfolio").path("accountFingerprint"))||!payload.path("portfolio").path("positions").isArray())throw new IllegalArgumentException("ACCOUNT_INVALID");
+        Set<String> top=Set.of("schemaVersion","broker","queryDate","accountFingerprint","capturedAt","complete","verifiedZero","activeCount","orders","portfolio","revision");payload.fieldNames().forEachRemaining(k->{if(!top.contains(k))throw new IllegalArgumentException("UNKNOWN_SOURCE_FIELD");});
+        Set<String> positions=new HashSet<>();for(var p:payload.path("portfolio").path("positions")){
+            if(!p.isObject()||!p.path("stockCode").asText().matches("[0-9A-Z]{2,10}")||!positions.add(p.path("stockCode").asText())||!p.path("shares").isIntegralNumber()||p.path("shares").longValue()<=0||p.path("shares").longValue()>9007199254740991L||!decimal(p.path("costPrice")))throw new IllegalArgumentException("POSITION_INVALID");
+        }
+        if(!payload.path("portfolio").path("emptyConfirmed").isBoolean()||payload.path("portfolio").path("emptyConfirmed").asBoolean()!=positions.isEmpty())throw new IllegalArgumentException("POSITION_COVERAGE_INVALID");
+        long active=0;Set<String> orders=new HashSet<>();for(var row:payload.path("orders")){
+            if(!row.isObject()||!payload.path("accountFingerprint").equals(row.path("accountFingerprint"))||!date.toString().equals(row.path("date").asText())||!orders.add(row.path("order_no").asText())||!row.path("active").isBoolean()||!row.path("quantity").isIntegralNumber()||!row.path("after_qty").isIntegralNumber()||!row.path("filled_qty").isIntegralNumber()||row.path("quantity").longValue()<1||row.path("after_qty").longValue()>row.path("quantity").longValue()||row.path("filled_qty").longValue()<0||row.path("filled_qty").longValue()>row.path("after_qty").longValue())throw new IllegalArgumentException("ORDER_INVALID");
+            if(!row.path("stock_no").asText().matches("[0-9A-Z]{2,10}")||!row.path("order_no").asText().matches("[A-Za-z0-9]{1,32}")||!row.path("seq_no").asText().matches("[A-Za-z0-9]{1,32}")||!Set.of("TAIEX","TAISDAQ").contains(row.path("market").asText())||!Set.of("Common","IntradayOdd","Odd").contains(row.path("market_type").asText())||!Set.of("Buy","Sell").contains(row.path("buy_sell").asText())||!"Stock".equals(row.path("order_type").asText())||!"Limit".equals(row.path("price_type").asText())||(!row.path("after_price_type").isNull()&&!"Limit".equals(row.path("after_price_type").asText()))||!Set.of("ROD","FOK","IOC").contains(row.path("time_in_force").asText())||!row.path("is_pre_order").isBoolean()||row.path("is_pre_order").asBoolean()||!row.path("asset_type").isIntegralNumber()||row.path("asset_type").intValue()!=0||!decimal(row.path("price"))||!decimal(row.path("after_price"))||!row.path("filled_money").isIntegralNumber()||row.path("filled_money").longValue()<0||row.path("filled_money").longValue()>9007199254740991L||!row.path("status").isIntegralNumber()||!row.path("remainingQty").isIntegralNumber()||row.path("after_qty").longValue()<0||row.path("quantity").longValue()>9007199254740991L||!row.path("recommendationLegId").isNull()||!row.path("fillIds").isArray()||!row.path("fillIds").isEmpty()||!row.path("last_time").asText().matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{3})?"))throw new IllegalArgumentException("ORDER_TYPE_INVALID");
+            Set<String> fields=Set.of("date","accountFingerprint","seq_no","order_no","asset_type","market","market_type","stock_no","buy_sell","price_type","price","quantity","time_in_force","order_type","is_pre_order","status","after_price_type","after_price","unit","after_qty","filled_qty","filled_money","last_time","active","remainingQty","recommendationLegId","fillIds");row.fieldNames().forEachRemaining(k->{if(!fields.contains(k))throw new IllegalArgumentException("UNKNOWN_ORDER_FIELD");});
+            int s=row.path("status").asInt(-1);if(!Set.of(0,10,30,40,50,90).contains(s))throw new IllegalArgumentException("ORDER_STATUS_INVALID");
+            if(row.path("unit").asInt(-1)!=("Common".equals(row.path("market_type").asText())?1000:1)||(s==30&&row.path("filled_qty").longValue()!=0)||(s==40&&row.path("filled_qty").longValue()==0)||(s==50&&row.path("after_qty").longValue()!=row.path("filled_qty").longValue()))throw new IllegalArgumentException("ORDER_STATUS_QUANTITY_INVALID");
+            boolean expected=Set.of(0,10).contains(s)&&row.path("after_qty").longValue()>row.path("filled_qty").longValue();if(row.path("active").asBoolean()!=expected||row.path("remainingQty").asLong(-1)!=(expected?row.path("after_qty").longValue()-row.path("filled_qty").longValue():0))throw new IllegalArgumentException("ORDER_REMAINING_INVALID");if(expected)active++;
+        }
+        if(!payload.path("activeCount").isIntegralNumber()||payload.path("activeCount").longValue()!=active||!payload.path("verifiedZero").isBoolean()||payload.path("verifiedZero").asBoolean()!=(active==0))throw new IllegalArgumentException("ORDER_COVERAGE_INVALID");
+    }
+    private static boolean decimal(com.fasterxml.jackson.databind.JsonNode node){
+        if(!node.isTextual()||!node.asText().matches("(?:0|[1-9][0-9]*)(?:\\.[0-9]*[1-9])?"))return false;
+        try{return new java.math.BigDecimal(node.asText()).signum()>0;}catch(NumberFormatException invalid){return false;}
+    }
+}

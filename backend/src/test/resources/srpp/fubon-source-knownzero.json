@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "broker": "fubon",
+  "queryDate": "2026-08-21",
+  "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+  "capturedAt": "2026-08-21T10:00:00+08:00",
+  "complete": true,
+  "verifiedZero": true,
+  "activeCount": 0,
+  "orders": [],
+  "portfolio": {
+    "batchId": "052d18ec48dcb0a1c9a17c3c",
+    "queryDate": "2026-08-21",
+    "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+    "emptyConfirmed": true,
+    "positions": [],
+    "reason": "EMPTY_CONFIRMED"
+  },
+  "revision": "29a584b582072b7daf90da700ba76b8b9e2ed0b52c6f852a105a3505d7f8359c"
+}

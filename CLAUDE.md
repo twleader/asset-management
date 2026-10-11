@@ -354,6 +354,10 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 
 **Task 482 對前述 9090 manifest 的修訂（優先於本節較早的數字與「唯一 POST」敘述）：**精確集合為 23 個 method/path pairs（19 GET、4 POST）。新增的受服務憑證保護 pair 是 `POST /api/srpp/daily-report-mail` 與 `GET /api/srpp/daily-report-mail/{idempotencyKey}`；另外兩個 public-but-private-network exact POST 是 `POST /api/public/srpp/event-evidence/capture`、`POST /api/public/srpp/daily-decision/evaluate`。四個 POST 都不得 wildcard，且必須同步 gateway、BFF、frontend deny、Tailscale、OpenAPI 和 contract tests；它們只建立證據／報告建議或固定收件人寄信，絕不觸發券商交易。
 
+**Task 489 對 9090 manifest 的修訂（優先於前述數字）：** 精確集合為24個 method/path pairs（20 GET、4 POST）；唯一新增 exact `GET /api/public/srpp/report-calculations`，延續loopback／獲準Tailscale邊界、ACTIVE owner email selector及configured-admin預設。GET只讀背景producer已保存不可變包，禁止計算／worker／vendor I/O／寫入／通知／交易；consumer隔離與十二模組採用品質詳Requirement187。同一變更同步gateway、BFF、frontend exact404、Tailscale、OpenAPI和三份Swagger。
+
+**Task 489 純讀日誌例外：** 只限 exact `GET /api/public/srpp/report-calculations`，成功與失敗回應均不得經 BFF advice、WebFilter 或 gateway failure tailer 觸發 API error ingestion 寫入。路徑仍保留 route catalog 身分與既有 Nginx／應用程式日誌；其他 method/path 維持原日誌收集規則。
+
 **2. 同義欄位、同一 business service API**
 
 不同頁面顯示「同樣意義的值」時，BFF 必須呼叫**同一支 business service API**取得，避免值在不同頁面不一致。
@@ -441,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（179 個 Requirements；最新編號為 186，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（180 個 Requirements；最新編號為 187，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |

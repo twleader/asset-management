@@ -3,14 +3,20 @@ package com.steven.assets.bff.apierrorlogs;
 import java.util.Map;
 
 /**
- * Exact 14-route allowlist shared by {@link PublicApiErrorCaptureWebFilter} (in-process 4xx/5xx
+ * Exact 24-route allowlist shared by {@link PublicApiErrorCaptureWebFilter} (in-process 4xx/5xx
  * capture) and {@link NginxGatewayFailureLogTailer} (Nginx-side connection-failure capture). Both
- * producers must agree on exactly the same route set and operation identity; keeping a single
+ * producers must agree on exactly the same route set and operation identity; Task 489 report-calculations is catalogued for route identity but excluded from
+ * persistence on both capture paths to preserve its literal read-only contract. Keeping a single
  * shared copy means a future route addition/removal only needs to change one place.
  */
 public final class OpenApiRouteCatalog {
     private OpenApiRouteCatalog() {}
     public record Operation(String key, String name) {}
+    /** Task 489: even rejected report GETs perform no error-log ingest/write. */
+    public static boolean isReadOnlyReport(String method, String path) {
+        return "GET".equals(method) && "/api/public/srpp/report-calculations".equals(path);
+    }
     public static final Map<String, Operation> ROUTES = Map.ofEntries(
+      Map.entry("GET /api/public/srpp/report-calculations",new Operation("OPEN_SRPP_REPORT_CALCULATIONS","SRPP 不可變報告計算包")),
       Map.entry("GET /api/quotes",new Operation("OPEN_QUOTES_LIST","即時報價清單")),Map.entry("GET /api/quotes/one",new Operation("OPEN_QUOTES_ONE","單一即時報價")),Map.entry("GET /api/public/market-index",new Operation("OPEN_MARKET_INDEX","大盤指數")),Map.entry("GET /api/assets/latest",new Operation("OPEN_LATEST_ASSETS","最新資產")),Map.entry("GET /api/public/exchange-rate/usd-twd",new Operation("OPEN_USD_TWD","美元兌台幣")),Map.entry("GET /api/public/market-analysis/today",new Operation("OPEN_MARKET_ANALYSIS_TODAY","今日市場分析")),Map.entry("GET /api/public/portfolio-advice/latest",new Operation("OPEN_PORTFOLIO_ADVICE_LATEST","最新資產配置建議")),Map.entry("GET /api/public/trading-radar/today",new Operation("OPEN_TRADING_RADAR_TODAY","今日交易雷達")),Map.entry("GET /api/public/trading-radar/stock",new Operation("OPEN_TRADING_RADAR_STOCK","單一標的交易雷達")),Map.entry("GET /api/public/transactions",new Operation("OPEN_TRANSACTIONS","公開交易紀錄")),Map.entry("GET /api/public/trading-calendar",new Operation("OPEN_TRADING_CALENDAR","交易日曆")),Map.entry("GET /api/public/commodity-prices",new Operation("OPEN_COMMODITY_PRICES","油價金價")),Map.entry("GET /api/public/srpp/daily-context",new Operation("OPEN_SRPP_DAILY_CONTEXT","SRPP 共用計算結果")),Map.entry("GET /api/public/srpp/calculation-context",new Operation("OPEN_SRPP_CALCULATION_CONTEXT","SRPP 計算脈絡")),Map.entry("GET /api/public/srpp/calculations",new Operation("OPEN_SRPP_CALCULATIONS","SRPP 按需計算")),Map.entry("GET /api/public/srpp/market-facts",new Operation("OPEN_SRPP_MARKET_FACTS","SRPP 批次市場事實")),Map.entry("GET /api/public/srpp/completed-technicals",new Operation("OPEN_SRPP_COMPLETED_TECHNICALS","SRPP 完成日技術事實")),Map.entry("GET /api/public/srpp/technical-series",new Operation("OPEN_SRPP_TECHNICAL_SERIES","SRPP 逐日技術序列")),Map.entry("POST /api/public/crawler-data/rescan",new Operation("OPEN_CRAWLER_RESCAN","公開爬蟲重新掃描")),Map.entry("POST /api/srpp/daily-report-mail",new Operation("OPEN_SRPP_DAILY_REPORT_MAIL","SRPP 日報寄送")),Map.entry("GET /api/srpp/daily-report-mail/{idempotencyKey}",new Operation("OPEN_SRPP_DAILY_REPORT_MAIL_STATUS","SRPP 日報寄送狀態")),Map.entry("POST /api/public/srpp/event-evidence/capture",new Operation("OPEN_SRPP_EVENT_EVIDENCE","SRPP 事件證據收據")),Map.entry("POST /api/public/srpp/daily-decision/evaluate",new Operation("OPEN_SRPP_DAILY_DECISION","SRPP 日報決策收據")));
 }

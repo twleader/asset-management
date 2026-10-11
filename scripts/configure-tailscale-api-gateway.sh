@@ -22,6 +22,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/srpp/market-facts'
   '/api/public/srpp/completed-technicals'
   '/api/public/srpp/technical-series'
+  '/api/public/srpp/report-calculations'
   '/api/public/srpp/event-evidence/capture'
   '/api/public/srpp/daily-decision/evaluate'
   # Serve uses this path prefix only for the documented idempotency-key child segment; gateway rejects all other children.
@@ -205,6 +206,7 @@ expected = {
     "/api/public/srpp/calculations": "http://127.0.0.1:9090/api/public/srpp/calculations",
     "/api/public/srpp/market-facts": "http://127.0.0.1:9090/api/public/srpp/market-facts",
     "/api/public/srpp/completed-technicals": "http://127.0.0.1:9090/api/public/srpp/completed-technicals",
+    "/api/public/srpp/report-calculations": "http://127.0.0.1:9090/api/public/srpp/report-calculations",
     "/api/public/srpp/technical-series": "http://127.0.0.1:9090/api/public/srpp/technical-series",
     "/api/public/srpp/event-evidence/capture": "http://127.0.0.1:9090/api/public/srpp/event-evidence/capture",
     "/api/public/srpp/daily-decision/evaluate": "http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate",
@@ -219,7 +221,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode == "exact" and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的二十三條 path handler")
+    raise SystemExit("必須精確只有本任務管理的二十三條 path handler（對應二十四個 method/path pairs）")
 if mode in {"allow-empty", "subset"} and not handler_paths.issubset(expected):
     raise SystemExit("Serve config 含非本任務 path handler")
 for path in handler_paths:
@@ -560,6 +562,11 @@ technicals_probe_headers="$work_dir/srpp-completed-technicals-query.headers"
 get_400_json "$LOCAL_BASE/api/public/srpp/completed-technicals?unexpected=1" \
   "$technicals_probe_json" '本機 SRPP 完成日技術事實 query gate' "$technicals_probe_headers"
 
+report_probe_json="$work_dir/srpp-report-calculations-query.json"
+report_probe_headers="$work_dir/srpp-report-calculations-query.headers"
+get_400_json "$LOCAL_BASE/api/public/srpp/report-calculations?unexpected=1" \
+  "$report_probe_json" '本機 SRPP 不可變報告計算包 query gate' "$report_probe_headers"
+
 series_probe_json="$work_dir/srpp-technical-series-query.json"
 series_probe_headers="$work_dir/srpp-technical-series-query.headers"
 get_400_json "$LOCAL_BASE/api/public/srpp/technical-series?unexpected=1" \
@@ -593,7 +600,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十三條 exact handler。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十三條 path handler（對應二十四個 method/path pairs）。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

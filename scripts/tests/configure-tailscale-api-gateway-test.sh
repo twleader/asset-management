@@ -26,7 +26,7 @@ routes = [
     "/api/public/srpp/daily-context",
 ]
 if include_new:
-    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series", "/api/public/srpp/event-evidence/capture", "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail"]
+    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series", "/api/public/srpp/report-calculations", "/api/public/srpp/event-evidence/capture", "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail"]
 handlers = {route: {"Proxy": "http://127.0.0.1:9090" + route} for route in routes}
 if include_foreign:
     handlers["/admin"] = {"Proxy": "http://127.0.0.1:9090/admin"}
@@ -205,6 +205,10 @@ PY
     endpoint=completed-technicals-invalid
     body='{"type":"about:blank","title":"Bad Request","status":400,"detail":"INVALID_TECHNICAL_FACTS_REQUEST","instance":"/api/public/srpp/completed-technicals"}'
     ;;
+  *'/api/public/srpp/report-calculations?'*)
+    endpoint=report-calculations-invalid
+    body='{"type":"about:blank","title":"Invalid SRPP request","status":400,"detail":"查詢參數不合法。","instance":"/api/public/srpp/report-calculations","code":"INVALID_REQUEST","retryable":false}'
+    ;;
   *'/api/public/srpp/technical-series?'*)
     endpoint=technical-series-invalid
     body='{"type":"about:blank","title":"Bad Request","status":400,"detail":"INVALID_TECHNICAL_SERIES_REQUEST","instance":"/api/public/srpp/technical-series"}'
@@ -222,7 +226,7 @@ if [[ "$endpoint" == rescan ]]; then
   exit 0
 fi
 
-if [[ "$endpoint" == trading-radar-stock-error || "$endpoint" == completed-technicals-invalid || "$endpoint" == technical-series-invalid ]]; then
+if [[ "$endpoint" == trading-radar-stock-error || "$endpoint" == completed-technicals-invalid || "$endpoint" == technical-series-invalid || "$endpoint" == report-calculations-invalid ]]; then
   printf '%s' "$body" >"$output_file"
   printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\n\r\n' >"$headers_file"
   printf '400'
@@ -300,6 +304,7 @@ run_success() {
   grep -Fq -- '--set-path=/api/public/srpp/calculations http://127.0.0.1:9090/api/public/srpp/calculations' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/market-facts http://127.0.0.1:9090/api/public/srpp/market-facts' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/completed-technicals http://127.0.0.1:9090/api/public/srpp/completed-technicals' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/report-calculations http://127.0.0.1:9090/api/public/srpp/report-calculations' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/technical-series http://127.0.0.1:9090/api/public/srpp/technical-series' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/event-evidence/capture http://127.0.0.1:9090/api/public/srpp/event-evidence/capture' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/daily-decision/evaluate http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate' "$case_dir/tailscale.log"
@@ -359,4 +364,4 @@ run_success
 run_existing_subset_success
 run_foreign_handler_rejected
 
-printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十路與 preflight regression'
+printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十三個 Serve path handlers（二十四個 API pairs）與 preflight regression'

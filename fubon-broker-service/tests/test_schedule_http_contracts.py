@@ -40,6 +40,7 @@ ACCOUNTING = ["/internal/bank-balance/read", "/internal/settlement/read", "/inte
 PROTECTED = [
     ("GET", "/internal/config", None),
     ("POST", "/internal/portfolio/read", {"dryRun": True}),
+    ("POST", "/internal/orders/read", None),
     ("POST", "/internal/market-data/tw-quotes", {"codes": ["2330"], "purpose": "LIVE"}),
     ("POST", "/internal/market-data/etf-holdings", {"codes": ["0050"]}),
     ("POST", "/internal/trades/read", {"startDate": "2026-08-21", "endDate": "2026-08-21"}),
@@ -141,7 +142,7 @@ def test_exact_twenty_routes_and_http_methods_have_no_alias_or_write_surface(tmp
     expected = {(path, (method,)) for method, path, _body in PROTECTED} | {
         (BASIC, ("POST",)), (CANDLES, ("POST",)), (VOLUMES, ("POST",)),
         (HISTORICAL_CANDLES, ("POST",)), (HISTORICAL_INTRADAY, ("POST",)), ("/internal/health", ("GET",))}
-    assert actual == expected and len(actual) == 20
+    assert actual == expected and len(actual) == 21
     with client:
         for method, path, _body in [*PROTECTED, ("POST", BASIC, {"symbol": "2330"}),
                                     ("POST", CANDLES, {"symbol": "2330"}), ("POST", VOLUMES, {"symbol": "2330"}),

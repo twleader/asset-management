@@ -5979,3 +5979,18 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 純計算ACTIONABLE與反例、20交易日權威fieldgolden、PostgreSQL20-way/lease/immutable/restart/crossslot、BFF語義與現有event回歸、Docker實際serve、schema重產、雙repo commit→no-ffmerge→push。Task482原Gmailaudit若未完成須如實保留待驗收，不偽稱。
 
 **Task488一致性補充：**strict request/owner/calendar→existing FINAL/claim identity/metadata/hash replay→僅新capture驗當前policy/Swagger。D195僅排序第一名配置策略張數，次名零張，不轉分剩餘；suitability用未取整Decimal，ranking與emergency兩張門檻用百分比四位HALF_EVEN，保持正式calculator邊界。
+
+### Requirement 187／Task 489：D-201 GET-only 不可變完整報告計算包
+
+**User Story:** 作為 SRPP 的 Codex／Claude 消費者，我希望以純讀 GET 取得背景計算並發布的同來源報告數值與完整收據，避免重算、混合不同 capture 或借用另一軌狀態。
+
+**Acceptance Criteria:**
+
+- [ ] 新增唯一 exact `GET /api/public/srpp/report-calculations`，optional email／calculationRunId，required consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256。consumer 限 Codex／Claude，日期為 Taipei 今天，reportSlot 為 09:05／12:00 且時間不早於 slot；拒未知、重複欄位與 caller facts。GET 僅 read 已發布 immutable package，冷啟動 503 CONTEXT_NOT_READY，不觸發計算、broker、行情外呼、DB/Redis 寫入或通知。
+- [ ] registry 與 decision authority 登錄 D-201 完整 model／manifest bytes、驗作者 hash／版本／目標及公式覆蓋；不修改歷史 receipt。新 package 的政策／Swagger／owner／calendar 全域失敗不得產生假 FINAL。
+- [ ] 背景 producer 凍結完整 assets、逐 holding valuation identity、政策／目標、來源 revision 與原始 payload、reservation 和 consumer state_before；共享來源基底只算一次，consumer package 隔離。原子保存後才可供 latest，來源改變新 ID，舊 ID 不改，同輸入同 ID。capture 時間、傳輸 generatedAt 不得冒充來源 revision，不能讓 polling 單獨造成重算。
+- [ ] 恰好十二模組 ASSET_RECONCILIATION、ALLOCATION_GAP、FUNDING_CAPACITY、CASH_INCOME、PAYROLL_CASHFLOW、BOND_D130_D195、DIVIDEND_TOPUP、CORE_SELL_GUARD、STRATEGIC_BUY_GATES、GLOBAL_EQUITY_PACE、ROTATION_AND_REGIME_CAPACITY、SHORT_TERM_AND_US_TACTICAL，各有 status/formulaVersion/scope/data/missing/reasonCodes/inputRefs/receipts。COMPLETE 必須完整 verified；缺值 PARTIAL／UNAVAILABLE；不適用 NOT_EVALUATED；政策阻擋結果不可用 fallback 解封。未完成 scope 據實揭露，不冒稱已全部計算外移。
+- [ ] 債券重用 Task488 pure calculator，完整官方掛單／雙券商子帳不足仍 BLOCKED；其他策略使用 D201 正式公式及共同 frozen evidence，按同輸入差分後才啟用。未知利率、未驗稅制、consumer state、掛單、待交割、推薦→order→fill 連結不可補零／推造。緊急利息續存、00865B 無息、SGOV 可支配、所得稅／AMT／外國稅／NHI／2028-05 淨结算分別揭露；不能把預估配息當已核准稅後所得。
+- [ ] schemaVersion=1/status=FINAL；owner/consumer/date/reportSlot/policy/swagger 全 identity；authority hashes，sharedCalculationId；inputSnapshot 包含完整 inputBundleJcs/hash/sourceVector 與 valuationCaptureId；contentSha256 是移除自身後的 JCS hash。全部 Decimal canonical string，安全 integer 計數，coverage 恰好加總十二模組，executionScope=REPORT_RECOMMENDATION_ONLY、tradeAuthorization=false、placesOrders=false。
+- [ ] BFF 驗 identity、schema、hash、來源 refs、coverage、數值／leg 不變量；無效 upstream 502 UPSTREAM_INVALID。兩 owner、consumer、slot 隔離；未知／跨 owner run ID 統一404，same owner 錯 metadata409。RFC9457 problems 精確 code/retryable，僅 calendar/context 暫缺可重試。
+- [ ] 同步 Nginx/BFF/security/catalog/Tailscale/frontend exact404/OpenAPI 及三份 Swagger；原23 pairs增為24 (20 GET/4 POST)。原 GET V1/V2／歷史 decision hash不改。單元、真PG原子發布／immutable/read-only、BFF adversarial及同來源SRPP golden測試，重建/recreate驗收後收尾。休市拒絕探測不可聲稱真交易日成功。

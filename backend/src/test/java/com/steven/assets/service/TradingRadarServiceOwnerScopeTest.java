@@ -360,6 +360,20 @@ class TradingRadarServiceOwnerScopeTest {
                 new Object[]{"0000", "台股"}));
     }
 
+    @Test
+    void explicitOwnerDetailKeepsTwoOwnersHeldAndWatchFlagsSeparateWithoutRequestContext() {
+        stubCommon();
+        when(snapshotRepo.findLatestWithStocksByOwnerUserId(7L)).thenReturn(Optional.of(AssetSnapshot.builder().stocks(List.of(StockHolding.builder().stockCode("2330").market("台股").shares(BigDecimal.ONE).build())).build()));
+        when(snapshotRepo.findLatestWithStocksByOwnerUserId(8L)).thenReturn(Optional.of(AssetSnapshot.builder().stocks(List.of(StockHolding.builder().stockCode("2317").market("台股").shares(BigDecimal.ONE).build())).build()));
+        when(alertRepo.findDistinctStockCodeMarketByOwnerUserId(8L)).thenReturn(java.util.Collections.singletonList(new Object[]{"2330","台股"}));
+        TradingRadarService service=newService();
+        assertThat(service.getStockDetailForOwner(7L,"2330","台股").stock().held()).isTrue();
+        assertThat(service.getStockDetailForOwner(8L,"2330","台股").stock().held()).isFalse();
+        assertThat(service.getStockDetailForOwner(8L,"2317","台股").stock().held()).isTrue();
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->service.getStockDetailForOwner(7L,"2317","台股")).isInstanceOf(IllegalArgumentException.class);
+        org.mockito.Mockito.verifyNoInteractions(currentUserContext);verify(snapshotRepo,never()).findLatestWithStocks();verify(alertRepo,never()).findDistinctStockCodeMarket();
+    }
+
     private final class ProjectionFailingTradingRadarService extends TradingRadarService {
         private ProjectionFailingTradingRadarService() {
             super(
