@@ -5,13 +5,28 @@ import com.steven.assets.model.AppUser;
 import com.steven.assets.security.AdminRequiredException;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.UnauthenticatedException;
+import com.steven.assets.controller.GlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 class ApiErrorLogServiceTest {
     @Test void business_read_model_rejects_missing_user_and_non_admin_before_repository_access() {
@@ -19,12 +34,110 @@ class ApiErrorLogServiceTest {
         CurrentUserContext currentUser = new CurrentUserContext();
         ApiErrorLogService service = new ApiErrorLogService(repository, currentUser);
 
-        assertThatThrownBy(() -> service.list("ALL", null, "NEWEST")).isInstanceOf(UnauthenticatedException.class);
+        assertThatThrownBy(() -> service.list("ALL", null, "NEWEST", 0)).isInstanceOf(UnauthenticatedException.class);
         currentUser.setEffectiveUserId(7L);
         currentUser.setRole(AppUser.ROLE_USER);
+        assertThatThrownBy(() -> service.list("ALL", null, "NEWEST", 0)).isInstanceOf(AdminRequiredException.class);
         assertThatThrownBy(() -> service.operations("ALL")).isInstanceOf(AdminRequiredException.class);
+        assertThatThrownBy(() -> service.detail(1L)).isInstanceOf(AdminRequiredException.class);
 
         verifyNoInteractions(repository);
+    }
+
+    @Test void list_uses_fixed_100_row_pages_and_preserves_metadata_and_full_headers() {
+        ApiErrorLogRepository repository = mock(ApiErrorLogRepository.class);
+        ApiErrorLogService service = adminService(repository);
+        Instant occurredAt = Instant.parse("2026-10-11T01:00:00Z");
+        String header = "完整錯誤標題".repeat(300);
+        List<ApiErrorLog> rows = IntStream.range(0, 5).mapToObj(i ->
+                new ApiErrorLog("FUBON_API", "FUBON_PORTFOLIO_READ", "庫存與未實現損益", header,
+                        "private trace", occurredAt, null, "private dedupe")).toList();
+        when(repository.oldest("FUBON_API", "FUBON_PORTFOLIO_READ", PageRequest.of(2, 100)))
+                .thenReturn(new PageImpl<>(rows, PageRequest.of(2, 100), 205));
+
+        var result = service.list("FUBON_API", "FUBON_PORTFOLIO_READ", "OLDEST", 2);
+
+        assertThat(result.items()).hasSize(5).allSatisfy(item -> {
+            assertThat(item.messageHeader()).isEqualTo(header);
+            assertThat(item.httpStatus()).isNull();
+            assertThat(item.occurredAt()).isEqualTo(occurredAt);
+        });
+        assertThat(result.totalElements()).isEqualTo(205);
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.pageSize()).isEqualTo(100);
+        assertThat(result.totalPages()).isEqualTo(3);
+        assertThatThrownBy(() -> result.items().clear()).isInstanceOf(UnsupportedOperationException.class);
+        verify(repository).oldest("FUBON_API", "FUBON_PORTFOLIO_READ", PageRequest.of(2, 100));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test void list_returns_empty_and_out_of_range_pages_with_their_original_totals() {
+        ApiErrorLogRepository repository = mock(ApiErrorLogRepository.class);
+        ApiErrorLogService service = adminService(repository);
+        when(repository.newest("ALL", null, PageRequest.of(0, 100))).thenReturn(Page.empty(PageRequest.of(0, 100)));
+        when(repository.newest("ALL", null, PageRequest.of(4, 100)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(4, 100), 205));
+
+        assertThat(service.list("ALL", null, "NEWEST", 0))
+                .isEqualTo(new ApiErrorLogService.PageResult(List.of(), 0, 0, 100, 0));
+        assertThat(service.list("ALL", null, "NEWEST", 4))
+                .isEqualTo(new ApiErrorLogService.PageResult(List.of(), 205, 4, 100, 3));
+    }
+
+    @Test void invalid_page_source_sort_and_operation_are_rejected_before_repository_access() {
+        ApiErrorLogRepository repository = mock(ApiErrorLogRepository.class);
+        ApiErrorLogService service = adminService(repository);
+
+        assertThatThrownBy(() -> service.list("ALL", null, "NEWEST", -1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.list("UNKNOWN", null, "NEWEST", 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.list("ALL", null, "UNKNOWN", 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.list("ALL", "ALL", "NEWEST", 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.list("OPEN_API", "FUBON_PORTFOLIO_READ", "NEWEST", 0)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(repository);
+    }
+
+    @Test void controller_defaults_to_page_zero_and_returns_400_for_malformed_or_negative_page() throws Exception {
+        ApiErrorLogRepository repository = mock(ApiErrorLogRepository.class);
+        when(repository.newest("ALL", null, PageRequest.of(0, 100))).thenReturn(Page.empty(PageRequest.of(0, 100)));
+        MockMvc client = MockMvcBuilders.standaloneSetup(new ApiErrorLogController(adminService(repository)))
+                .setControllerAdvice(new GlobalExceptionHandler()).build();
+
+        client.perform(get("/api/api-error-logs")).andExpect(status().isOk());
+        for (String invalidPage : List.of("not-an-integer", "2147483648")) {
+            String body = client.perform(get("/api/api-error-logs").param("page", invalidPage))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("Invalid request parameter"))
+                    .andReturn().getResponse().getContentAsString();
+            assertThat(body).doesNotContain(invalidPage, "NumberFormatException", "java.lang.Integer", "Failed to convert");
+        }
+        client.perform(get("/api/api-error-logs").param("page", "-1")).andExpect(status().isBadRequest());
+        verify(repository).newest("ALL", null, PageRequest.of(0, 100));
+        verifyNoMoreInteractions(repository);
+    }
+
+    @Test void global_advice_handles_typed_query_and_path_conversion_without_exposing_rejected_values() throws Exception {
+        MockMvc client = MockMvcBuilders.standaloneSetup(new ParameterConversionStub())
+                .setControllerAdvice(new GlobalExceptionHandler()).build();
+
+        for (String invalidValue : List.of("REJECTED_VALUE_SENTINEL", "9223372036854775808")) {
+            for (var request : List.of(
+                    get("/parameter-conversion-stub/query").param("value", invalidValue),
+                    get("/parameter-conversion-stub/path/{value}", invalidValue))) {
+                String body = client.perform(request).andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.detail").value("Invalid request parameter"))
+                        .andExpect(jsonPath("$.instance").value("about:blank"))
+                        .andReturn().getResponse().getContentAsString();
+                assertThat(body).doesNotContain(invalidValue, "NumberFormatException", "java.lang.Long", "Failed to convert");
+            }
+        }
+    }
+
+    @RestController
+    static class ParameterConversionStub {
+        @GetMapping("/parameter-conversion-stub/query")
+        public Long query(@RequestParam("value") Long value) { return value; }
+        @GetMapping("/parameter-conversion-stub/path/{value}")
+        public Long path(@PathVariable("value") Long value) { return value; }
     }
 
     @Test void catalog_has_all_42_fixed_source_key_name_url_and_order_values() {
@@ -54,6 +167,9 @@ class ApiErrorLogServiceTest {
         var detail = json.readTree(json.writeValueAsString(new ApiErrorLogService.Detail(1L, "OPEN_API",
                 "OPEN_QUOTES_LIST", "即時報價清單", "failure", "trace", null, null)));
         assertThat(list.has("apiUrl")).isFalse();
+        assertThat(list.has("stackTrace")).isFalse();
+        assertThat(list.has("dedupeKey")).isFalse();
+        assertThat(list.size()).isEqualTo(7);
         assertThat(detail.has("apiUrl")).isFalse();
     }
 
@@ -75,10 +191,14 @@ class ApiErrorLogServiceTest {
     }
 
     private static ApiErrorLogService adminService() {
+        return adminService(mock(ApiErrorLogRepository.class));
+    }
+
+    private static ApiErrorLogService adminService(ApiErrorLogRepository repository) {
         CurrentUserContext currentUser = new CurrentUserContext();
         currentUser.setEffectiveUserId(7L);
         currentUser.setRole(AppUser.ROLE_ADMIN);
-        return new ApiErrorLogService(mock(ApiErrorLogRepository.class), currentUser);
+        return new ApiErrorLogService(repository, currentUser);
     }
 
     private static List<ApiErrorLogOperationCatalog.Operation> expectedCatalog() {
