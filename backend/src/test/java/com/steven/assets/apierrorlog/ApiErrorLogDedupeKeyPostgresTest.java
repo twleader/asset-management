@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -16,10 +18,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Real PostgreSQL evidence (Requirement 143 / Task 421, spec item 421.7) that
@@ -62,11 +67,14 @@ class ApiErrorLogDedupeKeyPostgresTest {
 
     @Autowired ApiErrorLogRepository repository;
     @Autowired EntityManager entityManager;
+    @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void seed() {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            entityManager.createNativeQuery("DROP TRIGGER IF EXISTS api_error_log_retention_guard ON api_error_log")
+                    .executeUpdate();
             entityManager.createNativeQuery(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_api_error_log_dedupe_key "
                             + "ON api_error_log (dedupe_key) WHERE dedupe_key IS NOT NULL").executeUpdate();
@@ -105,6 +113,66 @@ class ApiErrorLogDedupeKeyPostgresTest {
         repository.saveAndFlush(row("OPEN_QUOTES_LIST", occurredAt, 400, null));
 
         assertThat(repository.findAll()).hasSize(2);
+    }
+
+    @Test
+    void retentionGuardUpgradeDeletesLegacyBacklogAndRejectsStaleWrites() throws IOException {
+        jdbc.execute(changeset("v1.123.0-api-error-log.sql"));
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.createNativeQuery("""
+                        INSERT INTO api_error_log
+                            (source, operation_key, api_name, message_header, stack_trace, occurred_at, http_status, dedupe_key)
+                        VALUES
+                            ('OPEN_API', 'OPEN_MARKET_INDEX', 'legacy', 'header', 'trace',
+                             current_timestamp - interval '31 days', 400, NULL)
+                        """).executeUpdate());
+
+        jdbc.execute(changeset("v1.152.0-api-error-log-retention-insert-guard.sql"));
+
+        int deleted = new TransactionTemplate(transactionManager).execute(status -> {
+            entityManager.createNativeQuery("""
+                    INSERT INTO api_error_log
+                        (source, operation_key, api_name, message_header, stack_trace, occurred_at, http_status, dedupe_key)
+                    VALUES ('OPEN_API', 'OPEN_MARKET_INDEX', 'cutoff', 'header', 'trace',
+                            current_timestamp - interval '30 days', 400, NULL)
+                    """).executeUpdate();
+            return repository.deleteExpired();
+        });
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(repository.findAll()).extracting(ApiErrorLog::getApiName).containsExactly("cutoff");
+
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.createNativeQuery("""
+                        INSERT INTO api_error_log
+                            (source, operation_key, api_name, message_header, stack_trace, occurred_at, http_status, dedupe_key)
+                        VALUES
+                            ('OPEN_API', 'OPEN_MARKET_INDEX', 'stale', 'header', 'trace',
+                             current_timestamp - interval '30 days' - interval '1 microsecond', 400, NULL)
+                        """).executeUpdate()))
+                .isInstanceOf(RuntimeException.class);
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.createNativeQuery("UPDATE api_error_log SET message_header = 'changed' WHERE api_name = 'cutoff'")
+                        .executeUpdate()))
+                .isInstanceOf(RuntimeException.class);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.createNativeQuery("""
+                        INSERT INTO api_error_log
+                            (source, operation_key, api_name, message_header, stack_trace, occurred_at, http_status, dedupe_key)
+                        VALUES ('OPEN_API', 'OPEN_MARKET_INDEX', 'protected', 'header', 'trace',
+                                current_timestamp, 400, NULL)
+                        """).executeUpdate());
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                entityManager.createNativeQuery("DELETE FROM api_error_log WHERE api_name = 'protected'").executeUpdate()))
+                .isInstanceOf(RuntimeException.class);
+
+        assertThat(repository.findAll()).extracting(ApiErrorLog::getApiName)
+                .containsExactlyInAnyOrder("cutoff", "protected");
+    }
+
+    private static String changeset(String filename) throws IOException {
+        return new ClassPathResource("db/changelog/changes/" + filename).getContentAsString(StandardCharsets.UTF_8);
     }
 
     private static ApiErrorLog row(String operationKey, Instant occurredAt, Integer httpStatus, String dedupeKey) {

@@ -1,6 +1,8 @@
 package com.steven.assets.apierrorlog;
 
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 class ApiErrorLogRetentionSchedulerTest {
@@ -8,8 +10,9 @@ class ApiErrorLogRetentionSchedulerTest {
         ApiErrorLogRepository repository = mock(ApiErrorLogRepository.class);
         doThrow(new IllegalStateException("database unavailable")).when(repository).deleteExpired();
 
-        new ApiErrorLogRetentionScheduler(repository).deleteExpired();
+        var result = new ApiErrorLogRetentionScheduler(repository).deleteExpired();
 
+        assertThat(result).isEmpty();
         verify(repository).deleteExpired();
     }
 }

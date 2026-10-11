@@ -1,6 +1,7 @@
 package com.steven.assets.bff.apierrorlogs;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -34,18 +37,30 @@ import java.util.List;
 public class NginxGatewayFailureLogTailer {
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
     private static final String REQUEST_MARKER = "request: \"";
+    private static final Duration RETENTION = Duration.ofDays(30);
 
     private final Path errorLogPath;
     private final ApiErrorLogIngestClient ingest;
     private final ApiErrorLogDiagnosticRenderer renderer;
+    private final Clock clock;
 
+    @Autowired
     public NginxGatewayFailureLogTailer(
             @Value("${api-error-log.nginx-error-log-path:/var/log/nginx-shared/error.log}") String errorLogPath,
             ApiErrorLogIngestClient ingest,
             ApiErrorLogDiagnosticRenderer renderer) {
+        this(errorLogPath, ingest, renderer, Clock.systemUTC());
+    }
+
+    NginxGatewayFailureLogTailer(
+            String errorLogPath,
+            ApiErrorLogIngestClient ingest,
+            ApiErrorLogDiagnosticRenderer renderer,
+            Clock clock) {
         this.errorLogPath = Path.of(errorLogPath);
         this.ingest = ingest;
         this.renderer = renderer;
+        this.clock = clock;
     }
 
     @Scheduled(fixedDelayString = "${api-error-log.nginx-tail-interval-ms:15000}")
@@ -70,6 +85,7 @@ public class NginxGatewayFailureLogTailer {
 
         Instant occurredAt = parseTimestamp(line);
         if (occurredAt == null) return;
+        if (occurredAt.isBefore(clock.instant().minus(RETENTION))) return;
 
         MatchedRoute route = matchRoute(line);
         if (route == null) return;
