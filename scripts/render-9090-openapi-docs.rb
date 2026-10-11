@@ -7,9 +7,11 @@
 
 require 'fileutils'
 require 'yaml'
+require 'json'
 
 ROOT = File.expand_path('..', __dir__)
 OPENAPI = File.join(ROOT, 'docs/openapi/docker-external-api.yaml')
+OBSERVATION_OPENAPI = File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')
 REPO_TARGET = File.join(ROOT, 'docs/openapi/9090-api-swagger.md')
 # Task 484.9：business-services 隨 jar 發布的已發布 Swagger 身分來源（PublishedSwaggerIdentity 讀它算
 # SHA-256）；business 的 Docker build context 只有 ./backend，所以必須在 backend 內保留一份位元組一致的副本。
@@ -156,7 +158,7 @@ def validate_schema_node!(node, path, kind: 'schema')
   end
 end
 
-def validate_document!(document)
+def validate_document!(document, expected_schemas: 219)
   assert!(document.fetch('openapi').to_s.start_with?('3.'), 'OpenAPI 必須為 3.x')
   assert!(document['security'] == [], 'global security 必須明確為空陣列')
   schemas = document.dig('components', 'schemas')
@@ -189,12 +191,41 @@ def validate_document!(document)
   end
 
   reachable = reachable_schema_names(document)
-  assert!(reachable.length == 219, "預期 219 個 reachable component schema，實際為 #{reachable.length}")
+  assert!(reachable.length == expected_schemas, "預期 #{expected_schemas} 個 reachable component schema，實際為 #{reachable.length}")
   reachable.each do |name|
     validate_schema_node!(schemas.fetch(name), "components.schemas.#{name}")
   end
 
   walk(document) { |node| resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node['$ref'] }
+end
+
+# Resolve every source within its own namespace before combining it; a collision is never overwritten.
+def unified_document(financial, observation)
+  [financial, observation].each do |source|
+    walk(source) { |node| resolve_ref(source, node['$ref']) if node.is_a?(Hash) && node['$ref'] }
+  end
+  result = Marshal.load(Marshal.dump(financial))
+  overlaps = financial.fetch('paths').keys & observation.fetch('paths').keys
+  assert!(overlaps.empty?, "path collision: #{overlaps.join(', ')}")
+  ids = [financial, observation].flat_map do |source|
+    source.fetch('paths').values.flat_map do |item|
+      item.map { |method, operation| operation['operationId'] if HTTP_METHODS.include?(method) }.compact
+    end
+  end
+  assert!(ids.uniq.length == ids.length, 'operationId collision')
+  observation.fetch('components', {}).each do |kind, members|
+    existing = result['components'][kind] ||= {}
+    duplicate = existing.keys & members.keys
+    assert!(duplicate.empty?, "component collision: #{kind}/#{duplicate.join(', ')}")
+    existing.merge!(members)
+  end
+  result['paths'].merge!(observation.fetch('paths'))
+  result['x-observation-version'] = observation.dig('info', 'version')
+  result
+end
+
+def json_block(value)
+  ['```json', JSON.pretty_generate(value), '```', '']
 end
 
 def render(document)
@@ -213,7 +244,7 @@ def render(document)
   lines = []
   lines << '# 9090 Port API Swagger'
   lines << ''
-  lines << '本文件由 `docs/openapi/docker-external-api.yaml` 自動產生；請勿手動修改。三個 Markdown 位置必須位元組一致。'
+  lines << '本文件由 `docs/openapi/docker-external-api.yaml` 與 `docs/openapi/ai-flow-observation-api.yaml` 自動產生；請勿手動修改。三個 Markdown 位置必須位元組一致。'
   lines << ''
   lines << '## 概覽'
   lines << ''
@@ -221,12 +252,28 @@ def render(document)
   lines << '| --- | --- |'
   lines << "| OpenAPI | `#{document['openapi']}` |"
   lines << "| 契約版本 | `#{document.dig('info', 'version')}` |"
+  lines << "| AI 流程觀測契約版本 | `#{document['x-observation-version']}` |"
   lines << "| 對外路徑 | #{operations.length} 條：#{get_count} 個 `GET`、#{post_count} 個 `POST` |"
   lines << "| Servers | #{document.fetch('servers').map { |server| "`#{server['url']}`" }.join('、')} |"
   lines << '| 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |'
   lines << ''
-  lines << document.dig('info', 'description').to_s.strip
+  lines << '此統一文件涵蓋全部 9090 API；PublishedSwaggerIdentity 為完整文件 bytes 的 SHA-256。兩份 YAML 分別保留金融及觀測協定版本，歷史 receipts 維持原身分。'
   lines << ''
+  lines << '### 金融來源說明'
+  lines << ''
+  lines << '以下引用原金融 YAML 的 24 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 25 個 API，操作層憑證以各路由的授權章節為準。'
+  lines << ''
+  lines.concat(document.dig('info', 'description').to_s.strip.split("\n").map { |line| "> #{line}".rstrip })
+  lines << ''
+  lines << '## 服務憑證'
+  lines << ''
+  document.dig('components', 'securitySchemes').to_h.each do |name, scheme|
+    lines << "### `#{name}`"
+    lines << ''
+    lines << scheme.fetch('description', '').to_s
+    lines << ''
+    lines.concat(json_block(scheme))
+  end
   lines << '## 路由總覽'
   lines << ''
   lines << '| # | Method | Path | operationId | 摘要 | 成功回應 |'
@@ -244,19 +291,30 @@ def render(document)
     lines << ''
     lines << operation['description'].to_s.strip
     lines << ''
+    lines << '#### 授權'
+    lines << ''
+    lines.concat(json_block(operation.fetch('security', document.fetch('security'))))
+    if operation['requestBody']
+      body = operation['requestBody']['$ref'] ? resolve_ref(document, operation['requestBody']['$ref']) : operation['requestBody']
+      lines << '#### Request body'
+      lines << ''
+      lines << "必填：#{body['required'] ? '是' : '否'}。#{body['description']}"
+      lines << ''
+      lines.concat(json_block(body))
+    end
     parameters = operation.fetch('parameters', [])
     unless parameters.empty?
-      lines << '#### Query 參數'
+      lines << '#### 參數'
       lines << ''
-      lines << '| 名稱 | 必填 | 型別 | 限制／範例 | 說明 |'
-      lines << '| --- | --- | --- | --- | --- |'
+      lines << '| 名稱 | 位置 | 必填 | 型別 | 限制／範例 | 說明 |'
+      lines << '| --- | --- | --- | --- | --- | --- |'
       parameters.each do |parameter|
         schema = parameter.fetch('schema')
         limits = []
         limits << "enum: #{enum_label(schema)}" unless enum_label(schema).empty?
         limits << "pattern: `#{schema['pattern']}`" if schema['pattern']
         limits << "example: `#{parameter['example']}`"
-        lines << "| `#{parameter['name']}` | #{parameter['required'] ? '是' : '否'} | `#{type_label(schema)}` | #{markdown(limits.join('<br>'))} | #{markdown(parameter['description'])} |"
+        lines << "| `#{parameter['name']}` | `#{parameter['in']}` | #{parameter['required'] ? '是' : '否'} | `#{type_label(schema)}` | #{markdown(limits.join('<br>'))} | #{markdown(parameter['description'])} |"
       end
       lines << ''
     end
@@ -269,6 +327,10 @@ def render(document)
       lines << "| `#{status}` | #{markdown(response_schema_label(response))} | #{markdown(response['description'])} |"
     end
     lines << ''
+    lines << '完整回應契約（包含 headers、media types 與 examples）：'
+    lines << ''
+    responses = operation.fetch('responses').transform_values { |raw| raw['$ref'] ? resolve_ref(document, raw['$ref']) : raw }
+    lines.concat(json_block(responses))
   end
   lines << '## Schema 欄位'
   lines << ''
@@ -279,6 +341,9 @@ def render(document)
     lines << ''
     lines << description_for(name, schema)
     lines << ''
+    lines << '完整 schema（含閉合、required、oneOf／條件與巢狀限制）：'
+    lines << ''
+    lines.concat(json_block(schema))
     if schema['properties']
       required = Array(schema['required'])
       lines << '| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |'
@@ -286,7 +351,7 @@ def render(document)
       schema['properties'].each do |property, definition|
         restrictions = []
         restrictions << "enum: #{enum_label(definition)}" unless enum_label(definition).empty?
-        %w[pattern minimum maximum minItems maxItems exclusiveMinimum].each do |key|
+        %w[format pattern minimum maximum minItems maxItems minLength maxLength multipleOf uniqueItems exclusiveMinimum exclusiveMaximum].each do |key|
           restrictions << "#{key}: #{definition[key]}" if definition.key?(key)
         end
         if definition['type'] == 'array'
@@ -310,6 +375,7 @@ def render(document)
   lines.join("\n").rstrip + "\n"
 end
 
+if __FILE__ == $PROGRAM_NAME
 unless ARGV.empty? || ARGV == ['--check'] || ARGV == ['--stdout']
   warn 'usage: ruby scripts/render-9090-openapi-docs.rb [--check|--stdout]'
   exit 2
@@ -317,6 +383,9 @@ end
 
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 validate_document!(document)
+observation = YAML.safe_load(File.read(OBSERVATION_OPENAPI), aliases: false)
+document = unified_document(document, observation)
+validate_document!(document, expected_schemas: 226)
 rendered = render(document)
 
 if ARGV == ['--stdout']
@@ -336,4 +405,5 @@ else
   TARGETS.each { |target| File.binwrite(target, rendered) }
   puts "rendered #{TARGETS.length} byte-identical 9090 OpenAPI Markdown mirrors"
   puts 'SKIP: 雲端環境（CLAUDE_CODE_REMOTE=true）不覆寫 SRPP 鏡像，地端才同步' if CLOUD_SESSION
+end
 end

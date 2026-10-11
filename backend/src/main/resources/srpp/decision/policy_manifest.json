@@ -7,12 +7,12 @@
     "CHANGELOG.md": "f971320b38a98072a0452ee54c90824ebe6554065d355475faa9ce63e5a9dead",
     "README.md": "727d28aa3674a16fba947db4445b2c33de3ab29e1255f88cb7a7a3ec6df47c7d",
     "assumptions/bond_forward_yields.json": "1103936e3b72361ea5080b662560141cf7377ea69a7a13d814e10ad5454b8fce",
-    "assumptions/daily_runtime_contract.json": "9b6fb58aeefade1c15888fdcd41c83ed26615a8c974dc08e874bfb429f934d18",
+    "assumptions/daily_runtime_contract.json": "902944b884ae9f8c99222b8d6d097e0d2fc32cefc0655a71248e17bb93b41788",
     "assumptions/financial.md": "bb8022ee88fdbf272568027d605297d7d2ce3f572750a728f7ec3cb3ffa1968c",
     "assumptions/market.md": "e4cce495b1c3cb7567377a3945a5296d7fe12b1efeff9b620fe53ab6e2821260",
     "assumptions/model_inputs.json": "c416ccacfde1a6e5701ccd787c74fddc2c4c5a95ea0f9bddc6cc5618a7dd91a1",
     "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
-    "assumptions/srpp_report_calculations_schema.json": "58b4776bbf06ab839bac5adea4e8d1004b2f61614add6bf8e448a0f13f2cd23f",
+    "assumptions/srpp_report_calculations_schema.json": "4af2e275a974b6d53d206e69d55f4d228a3c5dda0f21cd45596c317e96526167",
     "assumptions/tax.md": "5b658457f1f8fe469c445eb127d58862fb9001f6a1bec243a9a742456a7cc1e2",
     "cashflow/withdrawal_policy.md": "19d3e8a9bd337aff4345f625723548fbf1ab906ac240bcf09776bfd1a1c1bd50",
     "charity/CHARITABLE_LEGACY_POLICY.md": "fa6da0058cfaa2e6957b01ee157c4054d2940ae7ab7403fedfd9fe2c0f6f8d1b",
@@ -131,5 +131,5 @@
     "scripts/verify_srpp_report_calculations.py": "b15b3a0eb036c68b3734935e53b3bf21932b1087c69302a25decae67d4afc79b",
     "scripts/verify_technical_series.py": "a029382844c195acbcf49a849a9e3113f9b715b17cb5234002b9a5c9c5918c93"
   },
-  "POLICY_BUNDLE_SHA256": "02b882744ec4fa269fc05d677b89124b81311da112a3ec0a4d1de98994c48398"
+  "POLICY_BUNDLE_SHA256": "bb6f19084c6c9720e3571ac9ad1cd5ef68245759d231a26a2981d4033988db5c"
 }

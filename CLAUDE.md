@@ -475,3 +475,9 @@ Task488受正式已驗證SRPP政策的report-only calculator可純讀同一canon
 AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份僅排除這兩新表的data，schema與其他金融data保留。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
 
 Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。
+
+### Requirement 190／Task 495 統一文件發布修訂
+
+使用者已明確授權將所有 9090 API 產生於 SRPP/docs 同一 Swagger，本輪取代 Tasks492／494 的「不修改 SRPP 文件／金融 Markdown bytes」限制。兩份 YAML 原路由／schema／版本維持，render-9090-openapi-docs.rb 讀兩份來源、驗獨立 refs 與 path／operationId／component 無碰撞後產生 25 pairs 統一 Markdown；repo docs、backend resource、地端 SRPP mirror 位元組一致。PublishedSwaggerIdentity 採統一文件 hash，因此重建 business-services；歷史 immutable receipts 不變，SRPP manifest不納Swagger文件但含consumer schema；只可在逐來源驗舊manifest一致後，更新schema文件身分metadata，原工具重產manifest並同步backend authority與冪等registry；schema驗證規則／模型／公式不變，其他來源漂移不得混納。
+
+Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 consumer schema。更新schema後，先以既有 daily_runtime_contract.make_contract/canonical 重產，驗僅 source_sha256[assumptions/srpp_report_calculations_schema.json] 變化、所有語義欄位原樣，再重產policy manifest（只允許schema及runtime contract兩個source hashes變化）。metadata同步工具須fail closed於其他漂移，失敗rollback三個SRPP檔及backend artifact；--check零寫入。

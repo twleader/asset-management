@@ -1099,7 +1099,7 @@ assert!(confirmation.dig('properties', 'aggregationSource', 'enum') == ['LOCAL_A
 assert!(decision.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionCapturing', 'CAPTURING typed response')
 assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?('RUN_METADATA_MISMATCH'), 'metadata mismatch registered')
 
-# Tasks 492／494：獨立契約分別解析 refs，不能 merge components 或修改原金融身份。
+# Tasks 492／494／495：機器契約仍獨立解析 refs，Markdown 統一發布。
 observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
 assert!(observation.fetch('openapi') == '3.1.0', '觀測契約使用 OpenAPI 3.1 的 JSON Schema 條件')
 assert!(observation.dig('info', 'version') == '1.1.0', 'Task494 觀測契約版本固定1.1.0')
@@ -1168,6 +1168,8 @@ assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
 assert!(Digest::SHA256.file(OPENAPI).hexdigest == 'cf280631526b057887696df03ad5804313fa53668dca4bd210b2c3bb1918adeb', '原金融YAMLbytes不可變')
-swagger_copies.each { |copy| assert!(Digest::SHA256.file(copy).hexdigest == '1338bc9a6437e1b8c78ef0d40f7fc66ef9a124c9c5618909bcd81779990d14b4', '原金融Swaggerbytes不可變') }
+unified_markdown = File.read(swagger_copies.first)
+assert!(unified_markdown.include?('| 對外路徑 | 25 條：20 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整25pairs')
+assert!(unified_markdown.include?('### 25. `POST /api/srpp/ai-flow/events`') && unified_markdown.include?('X-AI-Flow-Token') && unified_markdown.include?('AiFlowEventBatch'), '統一 Swagger 包含觀測輸入及授權')
 assert!(system('ruby', File.join(ROOT, 'scripts/render-ai-flow-openapi-docs.rb'), '--check'), '獨立觀測renderer parity')
-puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/US雙向identity條件/固定金融身份'
+puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/US雙向identity條件/統一文件發布身份'
