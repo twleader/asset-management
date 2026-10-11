@@ -6044,3 +6044,16 @@ Task492來源一致性修訂：來源截短、已掃描前綴改寫或同cursor/
 Task494分類修訂（優先於Task492的三台股slot描述）：MORNING只09:05，NOON只12:00及歷史11:40，US只新增planned reportSlot 22:00，ALL為四slot全集。美股僅接受已唯讀查證的Codex automationId `22-00`；三層都驗22:00↔(Codex,22-00)雙向binding。保留backend原台股slot-ID嚴配及BFF/collector原台股consumer-ID集合，不借此收緊舊TW producer。新slot不得重寫舊metadata/JCS/hash/UUID或以actualstartedAt、mtime、DST猜分類；reportDate仍取automation.created_at台北日期。collector只依exact allowlist加第三來源並同步parameterized SQL placeholders，排除22-00-2守門員與srpp-codex週日展望；既有90日被動非同步及LLM零回報call不變。Claude美股未有verified local source binding時可合法empty，不能宣稱remote未執行或捏造run。projection四slot分別標台股早盤09:05、台股午盤12:00、台股午盤11:40（歷史）、美股22:00。DB僅擴既有report_slot CHECK，原195 migration identities/checksums不改；實際pg_dump重產schema。金融YAML與三份Markdown完整bytes／identity不改；觀測OpenAPI3.1.0升info1.1.0並閉合雙向身份條件，route/security邊界無新增。人工一次性production驗收只用真10/8US來源，正式observer重啟後依既有90日窗口接續真歷史/每日來源，只重啟自身job而保留plist/token及原7排程。
 
 Task494來源探索修訂：正式day=None背景來源探索採本功能state內有界fair keyset／paging cursor，依exact三ID與90台北日窗口、created_at DESC及thread_id穩定排序遍歷並wrap；cursor只越過本輪實際處理候選，讀取預算提前耗盡不得跳過未掃描來源。重啟及新增run後仍能跨輪涵蓋後續頁；dry-run不寫cursor，明確--date的一次性驗收維持原date-scoped選取。此cursor是可清理的observer探索cache，不寫appSQLite或run/event metadata，也不宣稱全部90日已完成匯入。保留25run/64MiB總/32MiB單run/5秒，不提高預算。
+
+**Task 495：統一 9090 Swagger 與 SRPP 文件同步（Requirement 190 的本輪修訂）**
+
+**User Story：**作為 SRPP 消費者，我希望單一 Swagger 文件包含所有 9090 API，避免遺漏 AI 流程事件紀錄介面。
+
+**Acceptance Criteria：**
+
+- [ ] 本次使用者已授權同步 SRPP/docs，取代 Tasks 492／494 的「本次不修改 SRPP 文件／保持金融 Markdown bytes」限制；保留兩個 YAML 的原路由／schema／版本／bytes，renderer 以兩份完整、獨立驗 refs 的來源產生單一文件，拒 path、operationId 或 component 同名碰撞，不改 API 授權或執行行為。
+- [ ] 單一文件的路由總覽涵蓋精確 25 method/path pairs（20 GET、5 POST），包含 POST /api/srpp/ai-flow/events；每條的用途、security、requestBody、參數位置、成功／失敗 schema、回應 header 與範例，以及可達 schema 的欄位、必填、nullable、閉合、限制及 oneOf 條件均可查。保留金融契約版本表 1.25.0 並明示觀測版本 1.1.0。
+- [ ] docs/openapi/9090-api-swagger.md、backend/src/main/resources/srpp/9090-api-swagger.md 與地端 /Users/steven/Project/SRPP/docs/9090 Port API Swagger.md 必須 byte-identical；--stdout／--check 不寫入，--check 對任一 stale mirror 失敗；原雲端略過 SRPP 規則保持。單獨觀測文件可保留，但不能是唯一觀測契約說明。
+- [ ] PublishedSwaggerIdentity 自然採新 unified bytes SHA；重建／recreate business-services 驗 jar resource hash 與三份文件一致。歷史 capture／decision／report receipt 不改，舊 Swagger hash 繼續 fail closed；不藉驗收建立金融 capture、寄信或交易。SRPP policy manifest 排除 Swagger 文件但包含 consumer schema；先證明所有政策來源與既有 manifest hashes 一致，僅更新 consumer schema 的 x-swagger-sha256，schema 的所有驗證條件／公式／模型原 bytes 不改。只為該必要契約 metadata 以原工具重產 manifest、同步 backend authority artifact 及冪等 registry 登錄；若有其他政策漂移立即拒絕維護，不混納他人變更。驗 policy_bundle check，保留歷史 receipts。
+
+Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 consumer schema。更新schema後，先以既有 daily_runtime_contract.make_contract/canonical 重產，驗僅 source_sha256[assumptions/srpp_report_calculations_schema.json] 變化、所有語義欄位原樣，再重產policy manifest（只允許schema及runtime contract兩個source hashes變化）。metadata同步工具須fail closed於其他漂移，失敗rollback三個SRPP檔及backend artifact；--check零寫入。

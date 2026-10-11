@@ -12878,3 +12878,11 @@ RunMetadata既有reportSlot varchar(5)新增22:00，schemaVersion仍1，不增�
 維持hostobserver60秒、25run、64MiB總／32MiB每run／5秒讀取及獨立sender2秒／5秒／3批有界設定、90台北日期與低優先度。人工一次性真來源驗收僅10/8CodexUS sourceRunId 01a11bd0-ab56-7801-98f8-2208c2f466a7:01a11bd0-ad08-7c13-99a1-bd489ee16a4d、stable runUUID41f376ef-91ae-5e98-9bba-4ce01d55ae45；正常job按原90日窗口被動接續真歷史/每日US，不假run、不重跑日報/金融/Gmail。驗收後feature no-ffmainpush、mainbackend/BFF/frontend重建，只重啟observer載入新mapping且保留mainpath/plist/token/原7jobs，SRPP檔案／規則／排程本輪完全不改。
 
 Task494來源探索修訂：正式day=None背景來源探索採本功能state內有界fair keyset／paging cursor，依exact三ID與90台北日窗口、created_at DESC及thread_id穩定排序遍歷並wrap；cursor只越過本輪實際處理候選，讀取預算提前耗盡不得跳過未掃描來源。重啟及新增run後仍能跨輪涵蓋後續頁；dry-run不寫cursor，明確--date的一次性驗收維持原date-scoped選取。此cursor是可清理的observer探索cache，不寫appSQLite或run/event metadata，也不宣稱全部90日已完成匯入。保留25run/64MiB總/32MiB單run/5秒，不提高預算。 隔離測試使用超過25個混合TW/US候選，驗跨輪後續頁／wrap、預算提前耗盡保留未處理候選、restart及新增來源公平性，既有TW canonical JSON與身份不變。
+
+## Requirement 190／Task 495：統一 Swagger 文件發布
+
+使用者本輪明確授權 SRPP/docs 統一 API 文件，優先取代 Tasks492／494 只在本輪禁止改 SRPP／金融 Markdown bytes 的限制。金融與觀測 YAML 仍分別保存機器契約原 bytes；renderer 先獨立驗 local refs，再合併 disjoint paths／operationId 與 components（碰撞立即失敗），按來源宣告順序產生單一 25 pairs 的路由總覽、完整請求／授權／回應與 schema。金融 1.25.0、觀測 1.1.0 分開標明，不假造新金融協定版本；原 BFF 分別提供 YAML 的行為保留。
+
+統一 Markdown 同步 repository、backend classpath resource 及地端 SRPP mirror；--check 讀取兩來源並驗全部 bytes，--stdout 零寫入，雲端只處理 repository／backend 兩份。PublishedSwaggerIdentity 原 bean 不需改，必須重建 business-services 的 resource 並驗實際 jar SHA；歷史 immutable receipt 不改，新 request 必須用新文件 hash。SRPP manifest 排除 Swagger 文件但納 consumer schema。先逐來源證明既有 manifest 完整吻合，再只更新 schema x-swagger-sha256（所有驗證keywords與模型／公式保持），用原工具重產 metadata manifest並同步backend decision/policy_manifest.json和冪等registry登錄；任何其他來源漂移都拒絕，不混入他人改動。驗 policy_bundle check，歷史receipt不改。所有 runtime smoke 只读，不呼叫 POST capture/evaluate/mail/events，路由／DB／投資決策邏輯保持。
+
+Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 consumer schema。更新schema後，先以既有 daily_runtime_contract.make_contract/canonical 重產，驗僅 source_sha256[assumptions/srpp_report_calculations_schema.json] 變化、所有語義欄位原樣，再重產policy manifest（只允許schema及runtime contract兩個source hashes變化）。metadata同步工具須fail closed於其他漂移，失敗rollback三個SRPP檔及backend artifact；--check零寫入。
