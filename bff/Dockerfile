@@ -6,6 +6,7 @@ COPY pom.xml .
 RUN mvn dependency:go-offline -q
 
 COPY --from=openapi-contract docker-external-api.yaml /docs/openapi/docker-external-api.yaml
+COPY --from=openapi-contract ai-flow-observation-api.yaml /docs/openapi/ai-flow-observation-api.yaml
 COPY src ./src
 RUN mvn package -DskipTests -q
 

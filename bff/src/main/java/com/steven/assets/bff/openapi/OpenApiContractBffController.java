@@ -23,6 +23,11 @@ public class OpenApiContractBffController {
         this.contractService = contractService;
     }
 
+    @GetMapping(value = "/observation-contract", produces = "application/yaml;charset=UTF-8")
+    public ResponseEntity<String> observationContract() {
+        return ResponseEntity.ok().contentType(YAML_UTF8).body(contractService.readObservationContract());
+    }
+
     @GetMapping(value = "/contract", produces = "application/yaml;charset=UTF-8")
     public ResponseEntity<String> contract() {
         return ResponseEntity.ok()

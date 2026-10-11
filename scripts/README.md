@@ -5,10 +5,12 @@
 | `db-export.sh` / `db-import.sh` | PostgreSQL 安全匯出／清空現有 volume 後還原 |
 | `git-hooks/commit-msg` | SDD 同步檢查——只驗「`spec/` 有無變更」（見 CLAUDE.md）。用 commit-msg 而非 pre-commit，是因為只有這個階段讀得到本次 commit 訊息，`[skip-spec]` 才判斷得準 |
 | `spec-check.sh` | spec 變更的機械前置檢查：編號撞號／重號、Liquibase changeset 版號碰撞與冪等性、宣稱的測試類是否存在、文件計數漂移、spec 是否拿 `db/changelog/*.sql` 當 DB 現況基準線，並執行 9090 gateway/OpenAPI 防漂移契約與 `db/schema.sql` 防漂移契約（B10）。實作前搭配 `/spec-review` 使用 |
-| `configure-tailscale-api-gateway.sh` | 十七路本機 API 的 status／Content-Type／payload preflight、Serve 所有權與 TOCTOU 檢查通過後，才設定十七條 path-scoped Tailscale HTTPS handler（十六 GET、唯一 POST）；commodity batch 另驗固定 WTI／BRENT／GOLD slots 與 query／GET-body 400 gate；SRPP daily-context 以全零規則包探測 409 `POLICY_UNSUPPORTED` |
-| `tests/configure-tailscale-api-gateway-test.sh` | 以假的 curl／Tailscale CLI 驗證所有 public GET（含 quotes、雷達 list/detail、交易紀錄、交易日曆、commodity batch）的 `200 text/plain` 在 reset 前 fail closed，並驗 commodity request gate、SRPP 409 探測與正常路徑只設定十七條 handler |
+| `configure-tailscale-api-gateway.sh` | 完整模式保留既有金融preflight後設定24 Serve handlers（25 API pairs）；`--observation-only`只追加AI exact path，驗managed config、race、匿名401/405/404及TLS，不reset、不呼叫金融API |
+| `tests/configure-tailscale-api-gateway-test.sh` | 隔離curl／Tailscale mocks驗完整route集合及觀測only模式首次追加、冪等、foreign/race拒絕、原設定完整保留；不呼叫正式API |
+| `render-ai-flow-openapi-docs.rb` | 僅產生asset-management獨立AI觀測Markdown；`--check`驗閉合observer契約，完全不寫金融Swagger/SRPP |
+| `configure-tailscale-ai-flow.py` | `--observation-only`入口的有界安全實作，只追加一条managed exact path，無reset/金融probe |
 | `render-9090-openapi-docs.rb` | 只讀 `docs/openapi/docker-external-api.yaml`，決定性產生 worktree `docs/openapi/`、business classpath resource `backend/src/main/resources/srpp/` 與 SRPP 的三份位元組一致 9090 Swagger Markdown（雲端 session 不處理 SRPP 鏡像）；`--check` 只驗證是否已同步 |
-| `tests/docker-external-api-openapi-test.rb` | 只用 Ruby stdlib YAML 驗證 9090 Nginx exact path+method 與 OpenAPI 十七路雙向相等、response status manifest、parameters、schemas、examples、完整 attribute descriptions 與 local refs；可直接執行 `ruby scripts/tests/docker-external-api-openapi-test.rb` |
+| `tests/docker-external-api-openapi-test.rb` | 只用 Ruby stdlib YAML 驗證 9090 Nginx exact path+method 與 原金融24＋觀測1獨立OpenAPI union25雙向相等、response status manifest、parameters、schemas、examples、完整 attribute descriptions 與 local refs；可直接執行 `ruby scripts/tests/docker-external-api-openapi-test.rb` |
 | `tests/api-error-log-operation-parity-test.rb` | 以 regex 解析 BFF `OpenApiRouteCatalog` 與 backend `ApiErrorLogOperationCatalog`／`api_error_log_operation` 種子 changeset，斷言 BFF 每一組 (operation_key, 標籤) 都逐字存在於 backend（Task 484）；可直接執行 `ruby scripts/tests/api-error-log-operation-parity-test.rb` |
 | `tests/schema-sql-drift-test.sh` | 驗證 `db/schema.sql`（去除專案檔頭後）逐位元等於此刻 `asset-postgres` 的 `pg_dump --schema-only` 輸出，並離線檢查檔頭「產生當下表數：N 張」宣告；離開碼三態 `0` 同步／`1` 已證實漂移／`2` 無法查證（docker 不可用或容器未運行），由 `spec-check.sh` 的 B10 依離開碼與本次是否碰到 schema／changelog 分流 BLOCK 或 CHECK。容器名可用 `SCHEMA_DRIFT_CONTAINER` 覆寫 |
 

@@ -15,8 +15,16 @@ public class OpenApiContractService {
 
     private static final ClassPathResource CONTRACT = new ClassPathResource("docker-external-api.yaml");
 
+    public String readObservationContract() {
+        return read(new ClassPathResource("ai-flow-observation-api.yaml"));
+    }
+
     public String readContract() {
-        try (InputStream input = CONTRACT.getInputStream()) {
+        return read(CONTRACT);
+    }
+
+    private String read(ClassPathResource resource) {
+        try (InputStream input = resource.getInputStream()) {
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException exception) {
             throw new IllegalStateException("OpenAPI contract is unavailable", exception);

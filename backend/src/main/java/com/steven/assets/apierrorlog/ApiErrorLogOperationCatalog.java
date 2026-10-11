@@ -25,6 +25,8 @@ public final class ApiErrorLogOperationCatalog {
             new Operation(OPEN_API,"OPEN_SRPP_DAILY_REPORT_MAIL_STATUS","SRPP 日報寄送狀態","GET /api/srpp/daily-report-mail/{idempotencyKey}",210),
             new Operation(OPEN_API,"OPEN_SRPP_EVENT_EVIDENCE","SRPP 事件證據收據","POST /api/public/srpp/event-evidence/capture",220),
             new Operation(OPEN_API,"OPEN_SRPP_DAILY_DECISION","SRPP 日報決策收據","POST /api/public/srpp/daily-decision/evaluate",230),
+            new Operation(OPEN_API,"OPEN_SRPP_REPORT_CALCULATIONS","SRPP 不可變報告計算包","GET /api/public/srpp/report-calculations",240),
+            new Operation(OPEN_API,"OPEN_SRPP_AI_FLOW_EVENTS","AI 判斷流程紀錄","POST /api/srpp/ai-flow/events",250),
             new Operation(FUBON_API,"FUBON_PORTFOLIO_READ","庫存與未實現損益","POST /internal/portfolio/read",10), new Operation(FUBON_API,"FUBON_TW_QUOTES_INVENTORY","庫存同步台股報價","POST /internal/market-data/tw-quotes",20),
             new Operation(FUBON_API,"FUBON_FILLED_TRADES_READ","已成交交易查詢","POST /internal/trades/read",30), new Operation(FUBON_API,"FUBON_ETF_HOLDINGS_READ","ETF 成分股查詢","POST /internal/market-data/etf-holdings",40),
             new Operation(FUBON_API,"FUBON_BANK_BALANCE_READ","交割銀行餘額","POST /internal/bank-balance/read",50), new Operation(FUBON_API,"FUBON_SETTLEMENT_READ","交割款查詢","POST /internal/settlement/read",60),

@@ -10,7 +10,7 @@ import java.util.List;
  * ScheduleListView 專屬 BFF（「公開資訊」分組，Requirement 36）。
  *
  * <p>回傳系統所有自動排程的**人工維護靜態清單**。排程分屬三個服務：
- * {@code business-services}（33 個）、{@code external-materials-service}（43 個）與
+ * {@code business-services}（34 個）、{@code external-materials-service}（43 個）與
  * {@code bff}（1 個；Requirement 143／Task 421 新增的 {@code NginxGatewayFailureLogTailer}，
  * 是 bff 服務有史以來第一個 {@code @Scheduled} 元件）。
  * 此頁為唯讀資訊展示，故不做跨服務反射探索、不入 DB、不設管理端點。
@@ -133,6 +133,9 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(BUSINESS, "資料備份", "每週備份",
                     "每週日備份資料庫至 weekly/",
                     "每週日 05:00", "0 0 5 * * SUN", TPE),
+            new ScheduledJobDto(BUSINESS, "資料清理", "AI 判斷流程90天紀錄清理",
+                    "按台北報告日期保留今天及前89天；啟動時與每日午夜分批清除過期流程，每輪最多20批、每批500次執行。主機背景收集器獨立於投資排程",
+                    "每日 00:00（另於啟動時補清）", "0 0 0 * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料清理", "歷史資料清理",
                     "刪除 10 年前的股價與匯率歷史",
                     "交易日 17:30", "0 30 17 * * MON-FRI", TPE),

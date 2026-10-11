@@ -1,0 +1,172 @@
+# AI 判斷流程觀測補充 API
+
+版本：1.0.0；來源 SHA256：`22e76a0e4e958d935d8eaf07fc40b9b10d6c4639e10bdb9eb1fe37174fcc0913`
+
+獨立於原金融OpenAPI與PublishedSwaggerIdentity；只保存觀測事件，不調度LLM或執行金融操作。原24金融routes+本1觀測route=25 method/path pairs。流程只保留90個台北日期，正常DB backup保留schema但排除本功能兩表data。現有SRPP規則與排程不需改動；被動host collector非同步收集。
+
+## POST /api/srpp/ai-flow/events
+
+記錄雙軌AI公開執行事件
+
+唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。授權在owner/DB/error-ingest I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME都禁止；摘要採allowlist。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
+
+成功／失敗回應：
+
+| HTTP | 用途 |
+| --- | --- |
+| 200 | 純冪等重播，所有內容已durable保存。 |
+| 201 | 新增或混合事件已全batch原子提交。 |
+| 400 | 無效schema/query/graph（含任何深度duplicate/unknown）或未來日期。 |
+| 401 | 缺/錯/空/多值X-AI-Flow-Token；owner/DB/upstream/error-ingest零I/O。 |
+| 403 | token consumer/source grant不符。 |
+| 405 | exact path只允POST，Allow: POST。 |
+| 409 | RUN_METADATA_MISMATCH/EVENT_CONFLICT/MISSING_PARENT。 |
+| 410 | RETENTION_EXPIRED，過期首次/重播皆零寫入。 |
+| 413 | JSON body超過256KiB。 |
+| 415 | Content-Type非application/json。 |
+| 500 | 未預期服務失敗，sanitized INTERNAL_ERROR。 |
+| 502 | 下游回應無效或服務連線失敗。 |
+| 503 | 三token/configured-admin未ready，CONFIGURATION_UNAVAILABLE/OWNER_UNAVAILABLE。 |
+| 504 | 有界下游逾時，UPSTREAM_TIMEOUT。 |
+
+輸入範例（只供隔離測試，不可回填為真執行）：
+
+```json
+{
+  "schemaVersion": 1,
+  "run": {
+    "runId": "5bd55e21-7e39-5fa7-8c35-d2b2664e54e1",
+    "consumer": "Codex",
+    "reportDate": "2026-10-08",
+    "reportSlot": "09:05",
+    "sourceKind": "CODEX_ROLLOUT",
+    "sourceRunId": "app-run-opaque-id",
+    "automationId": "codex-srpp-09-30",
+    "startedAt": "2026-10-08T09:05:00+08:00",
+    "workflowVersion": "AI_FLOW_V1"
+  },
+  "events": [
+    {
+      "eventId": "6d6d7f46-c4c2-5520-8895-3f164c4f6d0e",
+      "sequence": 0,
+      "stepId": "calendar-gate",
+      "eventKind": "START",
+      "status": "RUNNING",
+      "occurredAt": "2026-10-08T09:05:02+08:00",
+      "title": "確認交易日",
+      "summary": "讀取本機交易日曆",
+      "operation": {
+        "method": "LOCAL",
+        "path": "calendar"
+      },
+      "reasonCode": null,
+      "attemptNo": 1,
+      "parentEventIds": [
+
+      ],
+      "relation": null,
+      "evidenceRefs": [
+
+      ],
+      "reportedOutcome": null
+    }
+  ]
+}
+```
+
+## 憑證
+
+與金融、mail、broker token完全分離的觀測憑證；不得print/log/存入event。
+
+## AiFlowOperation
+
+公開操作分類；HTTP僅canonical path，LOCAL/TOOL僅六個allowlist分類，不保存原指令或秘密。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| method | "string" {"enum":["GET","POST","PUT","PATCH","DELETE","LOCAL","TOOL"]} | 是 | 觀測操作協定碼。 固定值：GET／POST／PUT／PATCH／DELETE／LOCAL／TOOL。 |
+| path | "string" {"maxLength":500} | 是 | HTTP 不含host/query/fragment；LOCAL/TOOL限calendar、policy、validation、render、artifact、tool。 |
+
+## AiFlowEvidence
+
+不可變公開證據參照；不是證據rawcontent或金融完成認證。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| role | "string" {"enum":["CALENDAR","POLICY","API_RECEIPT","VALIDATOR","RESULT","TIMING","DRAFT_RECEIPT","MIME_RECEIPT","APP_TERMINAL","TRACE_COVERAGE"]} | 是 | 證據用途協定碼；TRACE_COVERAGE只表示紀錄完整度。 固定值：CALENDAR／POLICY／API_RECEIPT／VALIDATOR／RESULT／TIMING／DRAFT_RECEIPT／MIME_RECEIPT／APP_TERMINAL／TRACE_COVERAGE。 |
+| id | "string" {"maxLength":200} | 是 | 無URL/檔案路徑opaque identity；coverage精確TRACE_V1:cursorBytes:sourceSizeBytes。 |
+| hash | ["string", "null"] {"pattern":"^[0-9a-f]{64}$"} | 是 | 來源SHA256；未知為null，禁止捏造。 |
+
+## AiFlowRunMetadata
+
+run immutable identity；server owner不能由producer指定；同source identity不可另建run。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| runId | "string" {"format":"uuid"} | 是 | 真source identity導出的穩定UUID。 |
+| consumer | "string" {"enum":["Codex","Claude"]} | 是 | 排程軌別，token授權綁定。 固定值：Codex／Claude。 |
+| reportDate | "string" {"format":"date"} | 是 | 原排程台北日期，不以接收或完成日期替代；保留今天及前89日期。 |
+| reportSlot | "string" {"enum":["09:05","12:00","11:40"]} | 是 | 早盤/午盤及保留原11:40歷史時點。 固定值：09:05／12:00／11:40。 |
+| sourceKind | "string" {"enum":["CODEX_ROLLOUT","CLAUDE_ARTIFACT","SCHEDULE_EVENTS"]} | 是 | schedule token只能SCHEDULE_EVENTS；collector只能與consumer一致的CODEX_ROLLOUT/CLAUDE_ARTIFACT。 固定值：CODEX_ROLLOUT／CLAUDE_ARTIFACT／SCHEDULE_EVENTS。 |
+| sourceRunId | "string" {"maxLength":200} | 是 | exact thread_id+turn_id或有明確身份artifact的opaque ID；不得mtime拼接。 |
+| automationId | "string" {"enum":["codex-srpp-09-30","codex-srpp","srpp-0905-claude","srpp-1150-claude"]} | 是 | 已知排程exact ID；Codex為codex-srpp-09-30/codex-srpp，Claude為srpp-0905-claude/srpp-1150-claude。 固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude。 |
+| startedAt | ["string", "null"] {"format":"date-time"} | 是 | 真實公開開始時間；缺來源為null。 |
+| workflowVersion | "string" {"maxLength":100} | 是 | 觀測協定版本，不替代投資政策版本。 |
+
+## AiFlowEvent
+
+不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；nullable key除reportedOutcome均必填。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| eventId | "string" {"format":"uuid"} | 是 | 按真source event identity/kind導出的穩定UUID。 |
+| sequence | "integer" {"minimum":0} | 是 | 真來源行序；完整度assessment使用cursorBytes，可同序號不同ID。 |
+| stepId | "string" {"maxLength":100} | 是 | 同一觀測操作/attempt的opaque ID。 |
+| eventKind | "string" {"enum":["START","END","OBSERVATION","TERMINAL"]} | 是 | 事件生命週期協定碼。 固定值：START／END／OBSERVATION／TERMINAL。 |
+| status | "string" {"enum":["RUNNING","SUCCEEDED","FAILED","STOPPED","SKIPPED","UNKNOWN"]} | 是 | 公開觀測到的操作狀態，UNKNOWN表示不可證實。 固定值：RUNNING／SUCCEEDED／FAILED／STOPPED／SKIPPED／UNKNOWN。 |
+| occurredAt | ["string", "null"] {"format":"date-time"} | 是 | 公開來源ISO offset時間；未知null，不猜mtime。 |
+| title | "string" {"maxLength":100} | 是 | 公開動作標題，不可包含私人思考或秘密。 |
+| summary | "string" {"maxLength":500} | 是 | allowlist公開操作摘要，不收原command/env/header/完整API/MIME/帳號/持股/金額。 |
+| operation | #/components/schemas/AiFlowOperation  | 是 | 公開操作協定。 |
+| reasonCode | ["string", "null"] {"maxLength":100} | 是 | 公開停止/失敗或完整度原因碼；未知為null。 |
+| attemptNo | "integer" {"minimum":1} | 是 | 同一step重試的正整數，不覆写上一attempt。 |
+| parentEventIds | "array" {"items":{"type":"string","format":"uuid","description":"每一筆為同run的穩定事件UUID。"},"maxItems":16,"uniqueItems":true} | 是 | 同run已保存或本batch存在的父事件；禁止self/cycle。 |
+| relation | ["string", "null"] {"enum":["CALL_RESULT","DEPENDS_ON","BRANCH","NEXT_OBSERVED",null]} | 是 | 真因果關係或僅接續紀錄；NEXT_OBSERVED只代表時間先後。 固定值：CALL_RESULT／DEPENDS_ON／BRANCH／NEXT_OBSERVED／null。 |
+| evidenceRefs | "array" {"items":{"$ref":"#/components/schemas/AiFlowEvidence","description":"每一筆沿用對應的完整typed schema。"},"minItems":0,"maxItems":10} | 是 | 最多十個公開證據參照。 |
+| reportedOutcome | ["string", "null"] {"enum":["COMPLETED","PARTIAL","INCOMPLETE","STOPPED_L0","STOPPED_CONTRACT","SKIPPED_NON_TRADING_DAY",null]} | 否 | AI自報結果；不是獨立validator/MIME完成認證，可省略或null。 固定值：COMPLETED／PARTIAL／INCOMPLETE／STOPPED_L0／STOPPED_CONTRACT／SKIPPED_NON_TRADING_DAY／null。 |
+
+## AiFlowEventBatch
+
+只記錄已發生公開流程，不控制排程、不呼叫金融API，不影響現有LLM critical path。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| schemaVersion | "integer" {"const":1} | 是 | 此觀測協定版本固定1。 固定值：1。 |
+| run | #/components/schemas/AiFlowRunMetadata  | 是 | 不可變run身份。 |
+| events | "array" {"items":{"$ref":"#/components/schemas/AiFlowEvent","description":"每一筆沿用對應的完整typed schema。"},"minItems":1,"maxItems":100} | 是 | 同run事件batch；eventId唯一；全batch原子提交後才ack。 |
+
+## AiFlowAck
+
+只在持久化transaction提交後回覆；純重播200，新或混合201；各count加總等於batch唯一事件數。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| runId | "string" {"format":"uuid"} | 是 | 已提交run UUID。 |
+| inserted | "integer" {"minimum":0} | 是 | 本次新增事件數。 |
+| replayed | "integer" {"minimum":0} | 是 | 內容完全相同的既有事件數。 |
+| eventIds | "array" {"items":{"type":"string","format":"uuid","description":"每一筆為同run的穩定事件UUID。"},"minItems":1,"maxItems":100,"uniqueItems":true} | 是 | 恰好此次batch所有UUID，不是排隊假ack。 |
+
+## AiFlowProblem
+
+完整sanitized application/problem+json；不包含憑證、owner或raw payload。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| type | "string" {"const":"about:blank"} | 是 | RFC9457一般problem類型。 固定值：about:blank。 |
+| title | "string"  | 是 | 可公開的問題標題。 |
+| status | "integer" {"minimum":100} | 是 | 與實際HTTP status一致。 |
+| detail | "string"  | 是 | sanitized問題說明。 |
+| instance | "string"  | 是 | 發生問題的canonical API path。 |
+| code | "string" {"enum":["INVALID_REQUEST","INVALID_GRAPH","TOKEN_REQUIRED","FORBIDDEN","NOT_FOUND","METHOD_NOT_ALLOWED","EVENT_CONFLICT","RUN_METADATA_MISMATCH","MISSING_PARENT","RETENTION_EXPIRED","PAYLOAD_TOO_LARGE","UNSUPPORTED_MEDIA_TYPE","INTERNAL_ERROR","UPSTREAM_INVALID","CONFIGURATION_UNAVAILABLE","OWNER_UNAVAILABLE","UPSTREAM_TIMEOUT"]} | 是 | 固定觀測協定錯誤碼。 固定值：INVALID_REQUEST／INVALID_GRAPH／TOKEN_REQUIRED／FORBIDDEN／NOT_FOUND／METHOD_NOT_ALLOWED／EVENT_CONFLICT／RUN_METADATA_MISMATCH／MISSING_PARENT／RETENTION_EXPIRED／PAYLOAD_TOO_LARGE／UNSUPPORTED_MEDIA_TYPE／INTERNAL_ERROR／UPSTREAM_INVALID／CONFIGURATION_UNAVAILABLE／OWNER_UNAVAILABLE／UPSTREAM_TIMEOUT。 |
+| retryable | "boolean"  | 是 | 是否屬服務暫時未就緒或逾時，可由獨立背景sender有界重試。 |
+

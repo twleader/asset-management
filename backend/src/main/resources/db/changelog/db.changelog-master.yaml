@@ -491,3 +491,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.152.0-api-error-log-retention-insert-guard.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.153.0-ai-flow-event-log.sql
+      relativeToChangelogFile: false

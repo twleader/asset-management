@@ -93,6 +93,17 @@ class PublicApiErrorCaptureWebFilterTest {
         verifyNoInteractions(ingest);
     }
 
+    @Test void all_observation_ingress_outcomes_skip_error_ingestion() {
+        ApiErrorLogIngestClient ingest=mock(ApiErrorLogIngestClient.class);
+        var filter=new PublicApiErrorCaptureWebFilter(ingest,new ApiErrorLogDiagnosticRenderer(""),Clock.fixed(NOW,ZoneOffset.UTC));
+        for(HttpStatus status:java.util.List.of(HttpStatus.CREATED,HttpStatus.BAD_REQUEST,HttpStatus.UNAUTHORIZED,HttpStatus.SERVICE_UNAVAILABLE,HttpStatus.GATEWAY_TIMEOUT)) {
+            var exchange=MockServerWebExchange.from(MockServerHttpRequest.post("/api/srpp/ai-flow/events"));
+            PublicApiErrorCaptureWebFilter.capture(exchange,new RuntimeException("observation failure"));
+            filter.filter(exchange,x->{x.getResponse().setStatusCode(status);return Mono.empty();}).block();
+        }
+        verifyNoInteractions(ingest);
+    }
+
     private static void assertNoRecord(PublicApiErrorCaptureWebFilter filter, String path, HttpStatus status, boolean capture) {
         MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path).build());
         if (capture) PublicApiErrorCaptureWebFilter.capture(exchange, new IllegalArgumentException("caller input"));

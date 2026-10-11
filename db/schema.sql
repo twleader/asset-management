@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：115 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：117 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -68,6 +68,51 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
+
+--
+-- Name: guard_ai_flow_event(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_ai_flow_event() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE source_date date; today date := (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date;
+BEGIN
+    IF TG_OP='UPDATE' THEN RAISE EXCEPTION 'AI_FLOW_IMMUTABLE'; END IF;
+    IF TG_OP='DELETE' THEN
+        
+        IF pg_trigger_depth()>1 AND NOT EXISTS(SELECT 1 FROM public.ai_flow_run WHERE owner_user_id=OLD.owner_user_id AND run_id=OLD.run_id) THEN RETURN OLD; END IF;
+        RAISE EXCEPTION 'AI_FLOW_EVENT_DELETE_REQUIRES_EXPIRED_RUN';
+    END IF;
+    SELECT report_date INTO source_date FROM public.ai_flow_run WHERE owner_user_id=NEW.owner_user_id AND run_id=NEW.run_id FOR KEY SHARE;
+    IF source_date IS NULL THEN RAISE EXCEPTION 'AI_FLOW_PARENT_NOT_FOUND'; END IF;
+    IF source_date < today - 89 THEN RAISE EXCEPTION 'AI_FLOW_RETENTION_EXPIRED'; END IF;
+    IF source_date > today THEN RAISE EXCEPTION 'AI_FLOW_FUTURE_DATE'; END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: guard_ai_flow_run(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_ai_flow_run() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE today date := (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date;
+BEGIN
+    IF TG_OP='INSERT' THEN
+        IF NEW.report_date < today - 89 THEN RAISE EXCEPTION 'AI_FLOW_RETENTION_EXPIRED'; END IF;
+        IF NEW.report_date > today THEN RAISE EXCEPTION 'AI_FLOW_FUTURE_DATE'; END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP='UPDATE' THEN RAISE EXCEPTION 'AI_FLOW_IMMUTABLE'; END IF;
+    IF OLD.report_date >= today - 89 THEN RAISE EXCEPTION 'AI_FLOW_WITHIN_RETENTION'; END IF;
+    RETURN OLD;
+END;
+$$;
+
 
 --
 -- Name: guard_api_error_log_retention(); Type: FUNCTION; Schema: public; Owner: -
@@ -197,6 +242,46 @@ $$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: ai_flow_event; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ai_flow_event (
+    owner_user_id bigint NOT NULL,
+    run_id uuid NOT NULL,
+    event_id uuid NOT NULL,
+    sequence integer NOT NULL,
+    payload_json text NOT NULL,
+    payload_sha256 character(64) NOT NULL,
+    received_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ai_flow_event_payload_sha256_check CHECK ((payload_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ai_flow_event_sequence_check CHECK ((sequence >= 0))
+);
+
+
+--
+-- Name: ai_flow_run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ai_flow_run (
+    owner_user_id bigint NOT NULL,
+    run_id uuid NOT NULL,
+    consumer character varying(6) NOT NULL,
+    report_date date NOT NULL,
+    report_slot character varying(5) NOT NULL,
+    source_kind character varying(20) NOT NULL,
+    source_run_id character varying(200) NOT NULL,
+    metadata_json text NOT NULL,
+    metadata_sha256 character(64) NOT NULL,
+    received_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ai_flow_run_check CHECK ((((source_kind)::text = 'SCHEDULE_EVENTS'::text) OR (((source_kind)::text = 'CODEX_ROLLOUT'::text) AND ((consumer)::text = 'Codex'::text)) OR (((source_kind)::text = 'CLAUDE_ARTIFACT'::text) AND ((consumer)::text = 'Claude'::text)))),
+    CONSTRAINT ai_flow_run_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Codex'::character varying, 'Claude'::character varying])::text[]))),
+    CONSTRAINT ai_flow_run_metadata_sha256_check CHECK ((metadata_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ai_flow_run_report_slot_check CHECK (((report_slot)::text = ANY ((ARRAY['09:05'::character varying, '12:00'::character varying, '11:40'::character varying])::text[]))),
+    CONSTRAINT ai_flow_run_source_kind_check CHECK (((source_kind)::text = ANY ((ARRAY['CODEX_ROLLOUT'::character varying, 'CLAUDE_ARTIFACT'::character varying, 'SCHEDULE_EVENTS'::character varying])::text[])))
+);
+
 
 --
 -- Name: api_error_log; Type: TABLE; Schema: public; Owner: -
@@ -3954,6 +4039,30 @@ ALTER TABLE ONLY public.trading_radar_export_time ALTER COLUMN id SET DEFAULT ne
 
 
 --
+-- Name: ai_flow_event ai_flow_event_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_flow_event
+    ADD CONSTRAINT ai_flow_event_pkey PRIMARY KEY (owner_user_id, run_id, event_id);
+
+
+--
+-- Name: ai_flow_run ai_flow_run_owner_user_id_consumer_source_kind_source_run_i_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_flow_run
+    ADD CONSTRAINT ai_flow_run_owner_user_id_consumer_source_kind_source_run_i_key UNIQUE (owner_user_id, consumer, source_kind, source_run_id);
+
+
+--
+-- Name: ai_flow_run ai_flow_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_flow_run
+    ADD CONSTRAINT ai_flow_run_pkey PRIMARY KEY (owner_user_id, run_id);
+
+
+--
 -- Name: api_error_log_operation api_error_log_operation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5354,6 +5463,20 @@ ALTER TABLE ONLY public.us_index_daily_history
 
 
 --
+-- Name: idx_ai_flow_event_query; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ai_flow_event_query ON public.ai_flow_event USING btree (owner_user_id, run_id, sequence, event_id);
+
+
+--
+-- Name: idx_ai_flow_run_query; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ai_flow_run_query ON public.ai_flow_run USING btree (owner_user_id, report_date, consumer, report_slot, run_id);
+
+
+--
 -- Name: idx_api_error_log_source_name_time; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5921,6 +6044,20 @@ CREATE UNIQUE INDEX ux_asset_transaction_owner_broker_filled_no ON public.asset_
 
 
 --
+-- Name: ai_flow_event ai_flow_event_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER ai_flow_event_guard BEFORE INSERT OR DELETE OR UPDATE ON public.ai_flow_event FOR EACH ROW EXECUTE FUNCTION public.guard_ai_flow_event();
+
+
+--
+-- Name: ai_flow_run ai_flow_run_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER ai_flow_run_guard BEFORE INSERT OR DELETE OR UPDATE ON public.ai_flow_run FOR EACH ROW EXECUTE FUNCTION public.guard_ai_flow_run();
+
+
+--
 -- Name: api_error_log_operation api_error_log_operation_immutable; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -6030,6 +6167,22 @@ CREATE TRIGGER trg_srpp_report_package_no_update BEFORE DELETE OR UPDATE ON publ
 --
 
 CREATE TRIGGER trg_stock_technical_indicator_immutable BEFORE DELETE OR UPDATE ON public.stock_technical_indicator FOR EACH ROW EXECUTE FUNCTION public.reject_fubon_technical_history_mutation();
+
+
+--
+-- Name: ai_flow_event ai_flow_event_owner_user_id_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_flow_event
+    ADD CONSTRAINT ai_flow_event_owner_user_id_run_id_fkey FOREIGN KEY (owner_user_id, run_id) REFERENCES public.ai_flow_run(owner_user_id, run_id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_flow_run ai_flow_run_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ai_flow_run
+    ADD CONSTRAINT ai_flow_run_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
 
 
 --

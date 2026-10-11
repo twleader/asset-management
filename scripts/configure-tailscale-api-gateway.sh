@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ "${1:-}" == "--observation-only" && "$#" == 1 ]]; then
+  exec python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/configure-tailscale-ai-flow.py"
+fi
+[[ "$#" == 0 ]] || { printf 'Usage: %s [--observation-only]\n' "$0" >&2; exit 2; }
+
 readonly LOCAL_BASE='http://127.0.0.1:9090'
 readonly -a SERVE_PATHS=(
   '/api/quotes'
@@ -26,6 +31,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/srpp/event-evidence/capture'
   '/api/public/srpp/daily-decision/evaluate'
   # Serve uses this path prefix only for the documented idempotency-key child segment; gateway rejects all other children.
+  '/api/srpp/ai-flow/events'
   '/api/srpp/daily-report-mail'
 )
 
@@ -210,6 +216,7 @@ expected = {
     "/api/public/srpp/technical-series": "http://127.0.0.1:9090/api/public/srpp/technical-series",
     "/api/public/srpp/event-evidence/capture": "http://127.0.0.1:9090/api/public/srpp/event-evidence/capture",
     "/api/public/srpp/daily-decision/evaluate": "http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate",
+    "/api/srpp/ai-flow/events": "http://127.0.0.1:9090/api/srpp/ai-flow/events",
     "/api/srpp/daily-report-mail": "http://127.0.0.1:9090/api/srpp/daily-report-mail",
 }
 web = data.get("Web")
@@ -221,7 +228,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode == "exact" and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的二十三條 path handler（對應二十四個 method/path pairs）")
+    raise SystemExit("必須精確只有本任務管理的二十四條 path handler（對應二十五個 method/path pairs）")
 if mode in {"allow-empty", "subset"} and not handler_paths.issubset(expected):
     raise SystemExit("Serve config 含非本任務 path handler")
 for path in handler_paths:
@@ -572,6 +579,9 @@ series_probe_headers="$work_dir/srpp-technical-series-query.headers"
 get_400_json "$LOCAL_BASE/api/public/srpp/technical-series?unexpected=1" \
   "$series_probe_json" '本機 SRPP 逐日技術序列 query gate' "$series_probe_headers"
 
+ai_flow_status="$(curl -sS -X POST -H 'Content-Type: application/json' --data '{}' -o "$work_dir/ai-flow.json" -w '%{http_code}' "$LOCAL_BASE/api/srpp/ai-flow/events")" || die 'AI 觀測 gate transport 失敗。'
+[[ "$ai_flow_status" == 401 ]] || die 'AI 觀測匿名 POST 須回401。'
+
 printf '現有 Serve 設定所有權與本機 19 路 gateway 設定檢查 通過，開始更新 path-scoped Serve…\n'
 
 # Preflight 可能耗時；reset 前重新讀取並比較解析後 JSON，避免期間有人新增 handler
@@ -600,7 +610,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十三條 path handler（對應二十四個 method/path pairs）。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十四條 path handler（對應二十五個 method/path pairs）。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

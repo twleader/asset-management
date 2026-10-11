@@ -94,7 +94,7 @@ url=''
 request_body=''
 while (($#)); do
   case "$1" in
-    -o|-D|-w|--data-urlencode|--data-binary)
+    -o|-D|-w|--data-urlencode|--data-binary|--data)
       option=$1
       value=${2:?}
       case "$option" in
@@ -122,6 +122,11 @@ while (($#)); do
 done
 
 case "$url" in
+  */api/srpp/ai-flow/events)
+    printf '{"code":"TOKEN_REQUIRED","status":401}' >"$output_file"
+    printf '401'
+    exit 0
+    ;;
   */api/quotes)
     endpoint=quotes
     body='[{"stockCode":"2330","stockName":"範例","market":"台股","price":1,"previousClose":null,"priceChange":null,"changePercent":null,"buyPrice":null,"sellPrice":null,"openPrice":null,"highPrice":null,"lowPrice":null,"volume":null,"tradingDate":"2026-08-24","updatedAt":null,"closed":false,"source":"TEST","quoteStatus":"LIVE","premiumDiscountPct":null,"marketData":{"chart":{"status":"NO_DATA","intraday":{"status":"NO_DATA","ticks":[]}},"quoteDetail":{},"etfConstituents":{},"dividends":{}},"quoteDetail":{},"bidLevels":[],"askLevels":[],"dividendHistory":{}}]'
@@ -298,7 +303,7 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 22 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 24 ]]
   grep -Fq -- '--set-path=/api/public/srpp/daily-context http://127.0.0.1:9090/api/public/srpp/daily-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculation-context http://127.0.0.1:9090/api/public/srpp/calculation-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculations http://127.0.0.1:9090/api/public/srpp/calculations' "$case_dir/tailscale.log"
@@ -326,7 +331,7 @@ run_existing_subset_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 22 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 24 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -364,4 +369,6 @@ run_success
 run_existing_subset_success
 run_foreign_handler_rejected
 
-printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十三個 Serve path handlers（二十四個 API pairs）與 preflight regression'
+printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十四個 Serve path handlers（二十五個 API pairs）與 preflight regression'
+
+python3 "$REPO_ROOT/scripts/tests/test_tailscale_ai_flow.py"

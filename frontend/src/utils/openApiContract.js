@@ -1,6 +1,6 @@
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'])
 const TOP_LEVEL_KEY = /^([A-Za-z][A-Za-z0-9_-]*):/
-const PATH_LINE = /^  (\/[^\s:]+):\s*$/
+const PATH_LINE = /^  (?:"([^"]+)"|'([^']+)'|(\/[^\s:]+)):\s*$/
 const METHOD_LINE = /^    (get|post|put|patch|delete|head|options|trace):\s*$/
 
 export class OpenApiContractParseError extends Error {
@@ -35,7 +35,7 @@ function sectionEnd(sections, start, lineCount) {
 function parseServers(lines, start, end) {
   const urls = []
   for (let index = start + 1; index < end; index += 1) {
-    const match = lines[index].match(/^  - url:\s*(.+?)\s*$/)
+    const match = lines[index].match(/^\s*- url:\s*(.+?)\s*$/)
     if (match) urls.push(match[1].replace(/^['"]|['"]$/g, ''))
   }
   return urls
@@ -90,7 +90,7 @@ export function parseOpenApiContract(source) {
   for (let index = pathsStart + 1; index < pathsEnd; index += 1) {
     const pathMatch = lines[index].match(PATH_LINE)
     if (!pathMatch) continue
-    pathEntries.push({ path: pathMatch[1], start: index })
+    pathEntries.push({ path: pathMatch[1] || pathMatch[2] || pathMatch[3], start: index })
   }
   if (!pathEntries.length) {
     throw new OpenApiContractParseError('文件沒有可辨識的 API 路徑。')

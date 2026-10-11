@@ -105,6 +105,12 @@ const router = createRouter({
       meta: { title: 'API logs 查詢', icon: 'Document', requiresAdmin: true }
     },
     {
+      path: '/ai-flow',
+      name: 'AiFlow',
+      component: () => import('@/views/AiFlowView.vue'),
+      meta: { title: 'AI 判斷流程', icon: 'Share', requiresAdmin: true }
+    },
+    {
       path: '/gdp-twse',
       name: 'GdpTwse',
       component: () => import('@/views/GdpTwseView.vue'),

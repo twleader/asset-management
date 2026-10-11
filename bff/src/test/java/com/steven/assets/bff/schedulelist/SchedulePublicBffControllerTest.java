@@ -24,12 +24,23 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 33 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 34 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(77);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(33);
+        assertThat(jobs()).hasSize(78);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(34);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(43);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test
+    void aiFlowRetentionIsTechnicalBackendCleanupAndNotInvestmentControl() {
+        assertThat(jobs()).filteredOn(j -> "AI 判斷流程90天紀錄清理".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.service()).isEqualTo("業務服務");
+            assertThat(job.category()).isEqualTo("資料清理");
+            assertThat(job.cron()).isEqualTo("0 0 0 * * *");
+            assertThat(job.zone()).isEqualTo("Asia/Taipei");
+            assertThat(job.description()).contains("前89天", "20批", "500", "獨立於投資排程");
+        });
     }
 
     @Test
