@@ -3,6 +3,7 @@ import contextlib
 import datetime as dt
 import importlib.util
 import io
+import hashlib
 import json
 import os
 import pathlib
@@ -367,6 +368,246 @@ class SourceTests(Fixture):
         with self.path.open("ab") as stream:
             stream.write(b'{"type":"response_item","type":"private"}\n')
         self.assertEqual("TRACE_PARTIAL", self.envelope()["events"][-1]["reasonCode"])
+
+
+class MarketSessionDiscoveryTests(Fixture):
+    def seed_sources(self, count=63):
+        root = self.home / ".codex"
+        (root / "sqlite").mkdir(exist_ok=True)
+        with sqlite3.connect(root / "sqlite/codex-dev.db") as app, sqlite3.connect(root / "state_5.sqlite") as threads:
+            app.execute("CREATE TABLE automation_runs(thread_id TEXT PRIMARY KEY,automation_id TEXT,created_at INTEGER)")
+            threads.execute("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT)")
+            base = int(dt.datetime(2026, 10, 8, 22, tzinfo=c.TAIPEI).timestamp() * 1000)
+            records = []
+            for number in range(count):
+                thread = f"test-thread-{number:05d}"
+                path = self.sessions / (thread + ".jsonl")
+                values = source_rows()
+                values[0]["payload"]["id"] = thread
+                path.write_bytes(encode_rows(values))
+                automation = tuple(c.CODEX_TASKS)[number % 3]
+                # 相同created_at的兩筆由thread_id穩定排序，不能用timestamp-only游標。
+                stamp = base - (number // 2) * 60_000
+                app.execute("INSERT INTO automation_runs VALUES(?,?,?)", (thread, automation, stamp))
+                threads.execute("INSERT INTO threads VALUES(?,?)", (thread, str(path)))
+                records.append((thread, automation, stamp, path))
+        return records
+
+    def collect_threads(self, collector=None, budget=None):
+        collector = collector or self.collector
+        seen = []
+        original = collector.scan_codex
+        def scan(record, limit):
+            seen.append(record["thread"])
+            return original(record, limit)
+        with mock.patch.object(collector, "scan_codex", side_effect=scan), mock.patch.object(s, "post") as post:
+            result = collector.collect(consumer="Codex", budget=budget)
+            post.assert_not_called()
+        self.assertLessEqual(len(result["runs"]), 25)
+        self.assertLessEqual(result["readBytes"], 64 * 1024 * 1024)
+        return seen, result
+
+    def test_three_exact_source_ids_dynamic_placeholders_and_exclusion(self):
+        sources = self.seed_sources(3)
+        with sqlite3.connect(self.home / ".codex/sqlite/codex-dev.db") as db:
+            for number, automation in enumerate(("22-00-2", "srpp-codex", "unknown-us-tool")):
+                db.execute("INSERT INTO automation_runs VALUES(?,?,?)", (f"excluded-{number}", automation, sources[0][2]))
+            for thread, date in (("expired", TODAY - dt.timedelta(days=90)), ("future", TODAY + dt.timedelta(days=1))):
+                stamp = int(dt.datetime.combine(date, dt.time(), c.TAIPEI).timestamp() * 1000)
+                db.execute("INSERT INTO automation_runs VALUES(?,?,?)", (thread, "22-00", stamp))
+        records = self.collector.codex_runs(None)
+        self.assertEqual({"codex-srpp-09-30", "codex-srpp", "22-00"}, {record["automation"] for record in records})
+        self.assertEqual({"09:05", "12:00", "22:00"}, {record["slot"] for record in records})
+        self.assertEqual(3, len(records))
+        self.assertEqual(records, self.collector.codex_runs(None))
+        self.assertFalse((self.store.root / "sources/codex-discovery.json").exists())
+
+    def test_background_more_than_25_mixed_sources_fair_pages_and_wrap(self):
+        sources = self.seed_sources()
+        expected = [record[0] for record in sources]
+        observed = []
+        app_path = self.home / ".codex/sqlite/codex-dev.db"
+        app_hash = hashlib.sha256(app_path.read_bytes()).hexdigest()
+        for expected_page in (expected[:25], expected[25:50], expected[50:]):
+            seen, _ = self.collect_threads()
+            self.assertEqual(expected_page, seen)
+            observed.extend(seen)
+        self.assertEqual(set(expected), set(observed))
+        self.assertEqual(expected[:25], self.collect_threads()[0])
+        self.assertEqual(app_hash, hashlib.sha256(app_path.read_bytes()).hexdigest())
+        cursor = self.store.load("codex-discovery")
+        self.assertEqual(TODAY.isoformat(), cursor["reportDate"])
+        self.assertEqual(expected[24], cursor["threadId"])
+
+    def test_budget_midpage_advances_only_actually_scanned_candidates(self):
+        sources = self.seed_sources()
+        allowance = sum(record[3].stat().st_size for record in sources[:2])
+        seen, _ = self.collect_threads(budget=c.ReadBudget(remaining=allowance))
+        self.assertEqual([record[0] for record in sources[:2]], seen)
+        self.assertEqual(sources[1][0], self.store.load("codex-discovery")["threadId"])
+        self.assertEqual(sources[2][0], self.collector.codex_runs(None)[0]["thread"])
+        rest = []
+        for _ in range(3):
+            rest.extend(self.collect_threads()[0])
+        self.assertTrue({record[0] for record in sources[2:]}.issubset(rest))
+
+    def test_exhausted_budget_before_first_candidate_never_advances_cursor(self):
+        self.seed_sources()
+        self.assertEqual([], self.collect_threads(budget=c.ReadBudget(seconds=0))[0])
+        self.assertFalse((self.store.root / "sources/codex-discovery.json").exists())
+
+    def test_restart_and_new_latest_source_are_eventually_discovered(self):
+        sources = self.seed_sources()
+        self.assertEqual([record[0] for record in sources[:25]], self.collect_threads()[0])
+        newest_thread = "newest-us-run"
+        newest_path = self.sessions / "newest-us.jsonl"
+        values = source_rows()
+        values[0]["payload"]["id"] = newest_thread
+        newest_path.write_bytes(encode_rows(values))
+        with sqlite3.connect(self.home / ".codex/sqlite/codex-dev.db") as app, sqlite3.connect(self.home / ".codex/state_5.sqlite") as threads:
+            app.execute("INSERT INTO automation_runs VALUES(?,?,?)", (newest_thread, "22-00", sources[0][2] + 60_000))
+            threads.execute("INSERT INTO threads VALUES(?,?)", (newest_thread, str(newest_path)))
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        seen = []
+        for _ in range(3):
+            seen.extend(self.collect_threads()[0])
+        self.assertEqual(sources[25][0], seen[0])
+        self.assertIn(newest_thread, seen)
+        self.assertTrue({record[0] for record in sources[25:]}.issubset(seen))
+
+    def test_explicit_date_selection_is_deterministic_and_does_not_mutate_discovery(self):
+        sources = self.seed_sources()
+        self.collect_threads()
+        cursor_path = self.store.root / "sources/codex-discovery.json"
+        cursor = cursor_path.read_bytes()
+        day = dt.date(2026, 10, 8)
+        first = self.collector.codex_runs(day)
+        self.assertEqual([record[0] for record in sources[:25]], [record["thread"] for record in first])
+        self.assertEqual(first, self.collector.codex_runs(day))
+        self.collector.collect(day=day, consumer="Codex")
+        self.assertEqual(cursor, cursor_path.read_bytes())
+
+    def test_dry_run_has_zero_discovery_cursor_and_filesystem_writes(self):
+        self.seed_sources()
+        state = self.home / "dry-state-must-not-exist"
+        store = c.Store(state, TODAY, dry_run=True)
+        collector = c.Collector(self.home, store)
+        try:
+            with mock.patch.object(store, "save", wraps=store.save) as save, mock.patch.object(c, "atomic_bytes") as writer:
+                self.assertEqual(25, len(self.collect_threads(collector)[0]))
+                self.assertFalse(any(call.args[0] == "codex-discovery" for call in save.call_args_list))
+                writer.assert_not_called()
+            self.assertFalse(state.exists())
+        finally:
+            store.close()
+
+    def test_discovery_cache_uses_own_retention_and_crash_cleanup_scope(self):
+        self.seed_sources(3)
+        self.collect_threads()
+        cursor_path = self.store.root / "sources/codex-discovery.json"
+        self.assertTrue(cursor_path.exists())
+        self.store.today = TODAY + dt.timedelta(days=90)
+        self.store.purge()
+        self.assertFalse(cursor_path.exists())
+        self.assertTrue(c.managed_state_name("sources", "codex-discovery.json"))
+        self.assertFalse(c.managed_state_name("sources", "app-discovery.json"))
+
+    def test_us_early_manual_run_and_cross_midnight_turn_keep_planned_slot_original_date(self):
+        self.record.update(automation="22-00", slot="22:00")
+        values = []
+        for turn, started in ((TURN, "2026-10-08T13:57:00+00:00"), (TURN2, "2026-10-08T16:05:00+00:00")):
+            start = dt.datetime.fromisoformat(started)
+            for index, value in enumerate(source_rows(turn)):
+                value["timestamp"] = (start + dt.timedelta(seconds=index)).isoformat()
+                value["payload"].pop("started_at", None)
+                value["payload"].pop("completed_at", None)
+                values.append(value)
+        self.path.write_bytes(encode_rows(values))
+        envelopes = self.scan()
+        self.assertEqual(2, len(envelopes))
+        self.assertEqual({"22:00"}, {value["run"]["reportSlot"] for value in envelopes})
+        self.assertEqual({"2026-10-08"}, {value["run"]["reportDate"] for value in envelopes})
+        self.assertEqual({"2026-10-08", "2026-10-09"}, {value["run"]["startedAt"][:10] for value in envelopes})
+        self.assertEqual(2, len({value["run"]["runId"] for value in envelopes}))
+        for value in envelopes:
+            c.validate_envelope(value, TODAY)
+            self.assertEqual("TRACE_COMPLETE", value["events"][-1]["reasonCode"])
+
+    def test_us_missing_source_is_unavailable_without_fake_terminal(self):
+        self.record.update(automation="22-00", slot="22:00", path=None)
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        self.assertEqual("22:00", value["run"]["reportSlot"])
+        self.assertEqual("RAW_TRACE_UNAVAILABLE", value["events"][0]["reasonCode"])
+        self.assertFalse(any(item["eventKind"] in {"START", "END", "TERMINAL"} for item in value["events"]))
+
+    def test_unverified_claude_us_metadata_and_artifact_do_not_create_runs(self):
+        value = {"scheduledTaskId": "unverified-us-claude", "cliSessionId": TURN, "createdAt": 1791468000000, "reportSlot": "22:00"}
+        self.assertEqual((None, None), self.collector.claude_metadata_envelope(value))
+        root = self.home / "Project/SRPP/data/output/daily_runs/2026-10-08/unverified-us"
+        root.mkdir(parents=True)
+        (root / "result.json").write_bytes(c.canonical({"consumer": "Claude", "reportDate": "2026-10-08", "reportSlot": "22:00"}))
+        self.assertEqual([], self.collector.claude_artifacts(dt.date(2026, 10, 8), c.ReadBudget()))
+        self.assertEqual(1, self.collector.errors["CLAUDE_ARTIFACT_SLOT_UNAVAILABLE"])
+
+    def test_us_exact_binding_accepts_both_codex_source_kinds_without_adding_fields(self):
+        for source in ("CODEX_ROLLOUT", "SCHEDULE_EVENTS"):
+            value = self.envelope()
+            value["run"].update(automationId="22-00", reportSlot="22:00", sourceKind=source)
+            c.validate_envelope(value, TODAY)
+            self.assertEqual(c.RUN_KEYS, set(value["run"]))
+            self.assertGreater(self.store.enqueue(value), 0)
+
+    def test_us_binding_wrong_consumer_id_or_slot_reject_before_state_and_spool(self):
+        cases = [("Codex", "22-00", slot) for slot in ("09:05", "12:00", "11:40")]
+        cases += [("Codex", task, "22:00") for task in ("codex-srpp-09-30", "codex-srpp", "22-00-2", "srpp-codex", "unknown-us-tool")]
+        cases += [("Claude", task, "22:00") for task in ("22-00", "srpp-0905-claude", "srpp-1150-claude", "unverified-us-claude")]
+        for consumer, task, slot in cases:
+            with self.subTest(consumer=consumer, automation=task, slot=slot):
+                value = self.envelope()
+                value["run"].update(consumer=consumer, automationId=task, reportSlot=slot,
+                                    sourceKind="CODEX_ROLLOUT" if consumer == "Codex" else "CLAUDE_ARTIFACT")
+                input_file = self.home / "invalid-us-envelope.json"
+                input_file.write_bytes(c.canonical(value))
+                state_directory = self.home / "invalid-us-no-state"
+                with mock.patch.object(c, "Store") as store_factory, mock.patch.object(c, "atomic_bytes") as writer, mock.patch.object(c.dt, "datetime", wraps=dt.datetime) as clock, contextlib.redirect_stdout(io.StringIO()):
+                    clock.now.return_value = dt.datetime(2026, 10, 11, 9, tzinfo=c.TAIPEI)
+                    self.assertEqual(1, c.cli(["--enqueue-json", str(input_file), "--state-dir", str(state_directory)]))
+                    store_factory.assert_not_called()
+                    writer.assert_not_called()
+                self.assertFalse(state_directory.exists())
+                with mock.patch.object(c, "atomic_bytes") as writer, mock.patch.object(self.store, "save") as save:
+                    with self.assertRaises(c.ObservationError):
+                        self.store.enqueue(value)
+                    writer.assert_not_called()
+                    save.assert_not_called()
+        self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
+
+    def test_existing_tw_consumer_id_allowed_sets_do_not_become_strict_slot_pairs(self):
+        for consumer, tasks, source in (("Codex", ("codex-srpp-09-30", "codex-srpp"), "CODEX_ROLLOUT"),
+                                        ("Claude", tuple(c.CLAUDE_TASKS), "CLAUDE_ARTIFACT")):
+            for task in tasks:
+                for slot in ("09:05", "12:00", "11:40"):
+                    with self.subTest(consumer=consumer, automation=task, slot=slot):
+                        value = self.envelope()
+                        value["run"].update(consumer=consumer, automationId=task, reportSlot=slot, sourceKind=source)
+                        c.validate_envelope(value, TODAY)
+
+    def test_existing_tw_full_canonical_envelopes_and_uuid_are_unchanged(self):
+        expected = {
+            "09:05": "9a38338f28f894b9c54b7057908577290b861eaf9cb1c19364aff954af4688f9",
+            "12:00": "7005442136644a2d14f9a03a1acb69946be6c962a588f72fa78b1d5808fe7fa1",
+            "11:40": "e7b34cd5b2ca5b85c3b3114e3020edc254caa8a2d4c197f99fcf6113a0b06d8d",
+        }
+        for slot, digest in expected.items():
+            store = c.Store(self.home / "legacy-no-write", TODAY, dry_run=True)
+            record = dict(self.record, slot=slot, automation="codex-srpp-09-30" if slot == "09:05" else "codex-srpp")
+            value = c.Collector(self.home, store).scan_codex(record, c.ReadBudget())[0]
+            self.assertEqual(digest, hashlib.sha256(c.canonical(value)).hexdigest())
+            self.assertEqual("66a62e80-7ba1-54e1-9e9f-b0c22f2ebe55", value["run"]["runId"])
+            self.assertNotIn("period", value["run"])
 
 
 class SpoolSenderTests(Fixture):

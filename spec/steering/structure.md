@@ -653,10 +653,12 @@ raw payload 的敏感 key-value 做 replacement，不能仰賴 Python adapter �
 不得碰其他 business table、不得反向 HTTP 呼叫 business-services。此例外不適用於任何其他 service、table、
 資料用途或 broker callback。
 
-### Requirement 190／Task 492 AI 判斷流程觀測例外
+### Requirement 190／Tasks 492、494 AI 判斷流程觀測例外
 
-使用者明確要求今日不修改 SRPP 專案、規則、validator、prompt、排程或遠端 skill；本次保留原金融 OpenAPI `docs/openapi/docker-external-api.yaml` 與三份金融 Swagger 的完整 bytes／PublishedSwaggerIdentity，金融 renderer 僅以 `--check` 驗證。唯一新增 exact `POST /api/srpp/ai-flow/events` 由獨立 `docs/openapi/ai-flow-observation-api.yaml`（1.0.0）及 `docs/openapi/9090-ai-flow-observation.md` 提供完整閉合契約，獨立 renderer 只寫 asset-management；不偽設雲端環境、不覆寫 SRPP。兩份 YAML 分別解析 local refs，paths 不相交且 operationId 全域唯一；原金融24＋觀測1的 union 是 gateway／catalog 唯一精確集合25 method/path pairs（20 GET、5 POST），Tailscale24 handlers。此限縮例外優先於本文件較早的單一 YAML／三份重產要求；所有金融路由與 schema 仍依原契約。
+使用者明確要求今日不修改 SRPP 專案、規則、validator、prompt、排程或遠端 skill；本次保留原金融 OpenAPI `docs/openapi/docker-external-api.yaml` 與三份金融 Swagger 的完整 bytes／PublishedSwaggerIdentity，金融 renderer 僅以 `--check` 驗證。唯一新增 exact `POST /api/srpp/ai-flow/events` 由獨立 `docs/openapi/ai-flow-observation-api.yaml`（Task492 1.0.0；Task494 1.1.0）及 `docs/openapi/9090-ai-flow-observation.md` 提供完整閉合契約，獨立 renderer 只寫 asset-management；不偽設雲端環境、不覆寫 SRPP。兩份 YAML 分別解析 local refs，paths 不相交且 operationId 全域唯一；原金融24＋觀測1的 union 是 gateway／catalog 唯一精確集合25 method/path pairs（20 GET、5 POST），Tailscale24 handlers。此限縮例外優先於本文件較早的單一 YAML／三份重產要求；所有金融路由與 schema 仍依原契約。
 
-AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份僅排除這兩新表的data，schema與其他金融data保留。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
+AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份僅排除這兩新表的data，schema與其他金融data保留。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
 
 ADMIN 前端 `/ai-flow` 對應 AiFlowView，API均由自己的 BFF 讀同源業務流程記錄；只呈現實際公開動作、真實配對耗時與來源缺口。
+
+Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。

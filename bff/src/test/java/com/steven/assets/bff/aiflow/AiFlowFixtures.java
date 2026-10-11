@@ -8,6 +8,15 @@ final class AiFlowFixtures {
  static AiFlowDtos.Batch batch(){return new AiFlowDtos.Batch(1,new AiFlowDtos.RunMetadata(ID,"Codex",DATE,"09:05","CODEX_ROLLOUT","thread:turn","codex-srpp-09-30",START,"AI_FLOW_V1"),List.of(new AiFlowDtos.Event(EVENT,0,"calendar","START","RUNNING",START,"確認交易日","讀取日曆",new AiFlowDtos.Operation("LOCAL","calendar"),null,1,List.of(),null,List.of(),null)));}
  static AiFlowDtos.RunView run(long owner){return new AiFlowDtos.RunView(ID,owner,"Codex",DATE,"09:05","CODEX_ROLLOUT","thread:turn","codex-srpp-09-30",START,"AI_FLOW_V1","STARTED",null,"UNCONFIRMED","PARTIAL_OBSERVED",1,null,null,null,"早盤09:05","部分紀錄","執行已開始",null);}
  static AiFlowDtos.RunList list(long owner){return new AiFlowDtos.RunList(DATE,"Codex","ALL","Asia/Taipei",90,LocalDate.parse("2026-07-14"),List.of(run(owner)));}
+ static AiFlowDtos.RunView run(long owner,String consumer,String slot,String automation){
+  String id=java.util.UUID.nameUUIDFromBytes((consumer+slot+automation).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+  return new AiFlowDtos.RunView(id,owner,consumer,DATE,slot,consumer.equals("Codex")?"CODEX_ROLLOUT":"CLAUDE_ARTIFACT","thread:"+id,automation,START,"AI_FLOW_V1","STARTED",null,"UNCONFIRMED","PARTIAL_OBSERVED",1,null,null,null,slot.equals("22:00")?"美股22:00":"台股"+slot,"部分紀錄","執行已開始",null);
+ }
+ static AiFlowDtos.RunList list(String consumer,String period,List<AiFlowDtos.RunView> runs){return new AiFlowDtos.RunList(DATE,consumer,period,"Asia/Taipei",90,LocalDate.parse("2026-07-14"),runs);}
+ static AiFlowDtos.Batch batch(String consumer,String slot,String automation){
+  var r=run(7,consumer,slot,automation);
+  return new AiFlowDtos.Batch(1,new AiFlowDtos.RunMetadata(r.runId(),r.consumer(),r.reportDate(),r.reportSlot(),r.sourceKind(),r.sourceRunId(),r.automationId(),r.startedAt(),r.workflowVersion()),batch().events());
+ }
  static byte[] historicalBatch(){return """
   {
     "schemaVersion": 1,

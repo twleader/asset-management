@@ -50,21 +50,8 @@ public final class AiFlowProtocol {
             JsonNode root = SrppJcs.parseStrict(raw);
             exact(root, Set.of("schemaVersion", "run", "events"), Set.of());
             if (integer(root.get("schemaVersion"), 1, 1) != 1) invalid();
-            JsonNode run = root.get("run"); exact(run, RUN_FIELDS, Set.of());
-            uuid(text(run, "runId", 36));
-            String consumer = choice(run, "consumer", Set.of("Codex", "Claude"));
-            date(text(run, "reportDate", 10));
-            String slot = choice(run, "reportSlot", Set.of("09:05", "12:00", "11:40"));
-            String source = choice(run, "sourceKind", Set.of("CODEX_ROLLOUT", "CLAUDE_ARTIFACT", "SCHEDULE_EVENTS"));
-            if ((source.equals("CODEX_ROLLOUT") && !consumer.equals("Codex"))
-                    || (source.equals("CLAUDE_ARTIFACT") && !consumer.equals("Claude"))) invalid();
-            opaque(text(run, "sourceRunId", 200));
-            String automation = text(run, "automationId", 100);
-            String expected = consumer.equals("Codex") ? (slot.equals("09:05") ? "codex-srpp-09-30" : "codex-srpp")
-                    : (slot.equals("09:05") ? "srpp-0905-claude" : "srpp-1150-claude");
-            if (!expected.equals(automation)) invalid();
-            isoNullable(run.get("startedAt"));
-            opaque(text(run, "workflowVersion", 100));
+            JsonNode run = root.get("run");
+            String source = validateRun(run);
             JsonNode events = root.get("events");
             if (!events.isArray() || events.isEmpty() || events.size() > 100) invalid();
             Set<String> eventIds = new HashSet<>();
@@ -119,8 +106,37 @@ public final class AiFlowProtocol {
         catch (Exception ignored) { throw new AiFlowProblem("INVALID_REQUEST"); }
     }
     public static Run readRun(String canonical) {
-        try { return JSON.treeToValue(SrppJcs.parseStrict(canonical).get("run"), Run.class); }
+        try {
+            JsonNode metadata = SrppJcs.parseStrict(canonical);
+            exact(metadata, Set.of("schemaVersion", "run"), Set.of());
+            integer(metadata.get("schemaVersion"), 1, 1);
+            JsonNode run = metadata.get("run");
+            validateRun(run);
+            return JSON.treeToValue(run, Run.class);
+        }
         catch (Exception ignored) { throw new AiFlowProblem("UPSTREAM_INVALID"); }
+    }
+    private static String validateRun(JsonNode run) {
+        exact(run, RUN_FIELDS, Set.of());
+        uuid(text(run, "runId", 36));
+        String consumer = choice(run, "consumer", Set.of("Codex", "Claude"));
+        date(text(run, "reportDate", 10));
+        String slot = choice(run, "reportSlot", Set.of("09:05", "12:00", "11:40", "22:00"));
+        String source = choice(run, "sourceKind", Set.of("CODEX_ROLLOUT", "CLAUDE_ARTIFACT", "SCHEDULE_EVENTS"));
+        if ((source.equals("CODEX_ROLLOUT") && !consumer.equals("Codex"))
+                || (source.equals("CLAUDE_ARTIFACT") && !consumer.equals("Claude"))) invalid();
+        opaque(text(run, "sourceRunId", 200));
+        String automation = text(run, "automationId", 100);
+        if (slot.equals("22:00")) {
+            if (!consumer.equals("Codex") || !automation.equals("22-00")) invalid();
+        } else {
+            String expected = consumer.equals("Codex") ? (slot.equals("09:05") ? "codex-srpp-09-30" : "codex-srpp")
+                    : (slot.equals("09:05") ? "srpp-0905-claude" : "srpp-1150-claude");
+            if (!expected.equals(automation)) invalid();
+        }
+        isoNullable(run.get("startedAt"));
+        opaque(text(run, "workflowVersion", 100));
+        return source;
     }
     public static Event readEvent(String canonical) {
         try { return JSON.treeToValue(SrppJcs.parseStrict(canonical), Event.class); }

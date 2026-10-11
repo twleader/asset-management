@@ -1,5 +1,6 @@
 package com.steven.assets.bff.aiflow;
 import com.steven.assets.bff.security.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.*;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -30,6 +31,15 @@ class AiFlowBffServiceTest {
   assertThatThrownBy(()->s.record(MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).build(),AiFlowFixtures.bytes(AiFlowFixtures.batch())).block()).isInstanceOf(AiFlowProblem.class);
   verifyNoInteractions(users);
  }
+ @Test void invalid_periods_and_us_producer_bindings_reject_before_owner_or_upstream_IO(){
+  var s=service(r->Mono.error(new AssertionError("no upstream")));
+  for(String query:List.of("period=","period=EVENING","period=US&period=US"))
+   assertThatThrownBy(()->s.list(MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer=Codex&"+query).build()).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("INVALID_REQUEST");
+  var request=MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).header(AiFlowCredentials.HEADER,"collector").contentType(MediaType.APPLICATION_JSON).build();
+  for(var batch:List.of(AiFlowFixtures.batch("Codex","09:05","22-00"),AiFlowFixtures.batch("Codex","22:00","codex-srpp"),AiFlowFixtures.batch("Claude","22:00","22-00"),AiFlowFixtures.batch("Codex","22:00","22-00-2"),AiFlowFixtures.batch("Codex","22:00","srpp-codex")))
+   assertThatThrownBy(()->s.record(request,AiFlowFixtures.bytes(batch)).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("INVALID_REQUEST");
+  verifyNoInteractions(users);
+ }
  @Test void explicit_configured_owner_headers_replace_caller_identity_and_typed_reply_validates(){
   when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));AtomicReference<ClientRequest> sent=new AtomicReference<>();
   var s=service(r->{sent.set(r);return Mono.just(response(200,AiFlowFixtures.list(7)));});
@@ -41,6 +51,40 @@ class AiFlowBffServiceTest {
   when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
   var s=service(r->Mono.just(response(200,AiFlowFixtures.list(8))));
   assertThatThrownBy(()->s.list(MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer=Codex").build()).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+ }
+ @Test void us_query_is_forwarded_and_claude_us_empty_is_valid(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  for(String consumer:List.of("Codex","Claude")) {
+   var expected=AiFlowFixtures.list(consumer,"US",consumer.equals("Codex")?List.of(AiFlowFixtures.run(7,"Codex","22:00","22-00")):List.of());
+   AtomicReference<ClientRequest> sent=new AtomicReference<>();
+   var s=service(r->{sent.set(r);return Mono.just(response(200,expected));});
+   assertThat(s.list(MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer="+consumer+"&period=US").build()).block()).isEqualTo(expected);
+   assertThat(sent.get().url().toString()).isEqualTo("/api/ai-flow/runs?date=2026-10-08&consumer="+consumer+"&period=US");
+   assertThat(sent.get().headers().getFirst(AuthConstants.HDR_USER_ID)).isEqualTo("7");
+  }
+ }
+ @Test void downstream_period_date_owner_consumer_or_us_metadata_mismatch_is502()throws Exception {
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  var valid=AiFlowFixtures.list("Codex","US",List.of(AiFlowFixtures.run(7,"Codex","22:00","22-00")));
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer=Codex&period=US").build();
+  List<java.util.function.Consumer<ObjectNode>> mutations=List.of(
+   n->n.put("period","ALL"),n->n.put("date","2026-10-07"),n->n.put("consumer","Claude"),
+   n->((ObjectNode)n.path("runs").get(0)).put("ownerUserId",8),
+   n->((ObjectNode)n.path("runs").get(0)).put("reportDate","2026-10-07"),
+   n->{var run=(ObjectNode)n.path("runs").get(0);run.put("consumer","Claude");run.put("sourceKind","CLAUDE_ARTIFACT");},
+   n->{var run=(ObjectNode)n.path("runs").get(0);run.put("reportSlot","12:00");run.put("automationId","codex-srpp");},
+   n->((ObjectNode)n.path("runs").get(0)).put("reportSlot","09:05"),
+   n->((ObjectNode)n.path("runs").get(0)).put("automationId","codex-srpp"),
+   n->((ObjectNode)n.path("runs").get(0)).put("automationId","22-00-2"),
+   n->((ObjectNode)n.path("runs").get(0)).put("automationId","srpp-codex"));
+  for(var mutate:mutations) {
+   ObjectNode node=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(valid));mutate.accept(node);
+   var s=service(r->Mono.just(response(200,node)));
+   assertThatThrownBy(()->s.list(request).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+  }
+  var usInNoon=AiFlowFixtures.list("Codex","NOON",valid.runs());
+  var s=service(r->Mono.just(response(200,usInNoon)));
+  assertThatThrownBy(()->s.list(MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer=Codex&period=NOON").build()).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
  }
  @Test void detail_expired_date_is410_before_owner_even_after_purge(){
   var s=service(r->Mono.error(new AssertionError()));
@@ -75,6 +119,29 @@ class AiFlowBffServiceTest {
   assertThat(forwarded.get()).containsExactly(original);
   assertThat(new String(forwarded.get(),java.nio.charset.StandardCharsets.UTF_8)).contains("2026-10-08T09:05:00+08:00","\n");
  }
+ @Test void us_ingress_forwards_original_bytes_and_offset_for_durable_ack(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  byte[] original=new String(AiFlowFixtures.historicalBatch(),java.nio.charset.StandardCharsets.UTF_8)
+   .replace("\"reportSlot\": \"09:05\"","\"reportSlot\": \"22:00\"")
+   .replace("\"automationId\": \"codex-srpp-09-30\"","\"automationId\": \"22-00\"")
+   .replace("2026-10-08T09:05:00+08:00","2026-10-08T21:57:00+08:00").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+  AtomicReference<byte[]> forwarded=new AtomicReference<>();
+  var s=service(request->{
+   var output=new MockClientHttpRequest(request.method(),request.url());
+   return request.body().insert(output,new BodyInserter.Context(){
+    public List<HttpMessageWriter<?>> messageWriters(){return ExchangeStrategies.withDefaults().messageWriters();}
+    public Optional<ServerHttpRequest> serverRequest(){return Optional.empty();}
+    public Map<String,Object> hints(){return Map.of();}
+   }).then(Mono.defer(()->DataBufferUtils.join(output.getBody()))).map(buffer->{
+    byte[] bytes=new byte[buffer.readableByteCount()];buffer.read(bytes);DataBufferUtils.release(buffer);forwarded.set(bytes);
+    return response(201,new AiFlowDtos.Ack(AiFlowFixtures.ID,1,0,List.of(AiFlowFixtures.EVENT)));
+   });
+  });
+  var request=MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).header(AiFlowCredentials.HEADER,"collector").contentType(MediaType.APPLICATION_JSON).build();
+  assertThat(s.record(request,original).block().status()).isEqualTo(201);
+  assertThat(forwarded.get()).containsExactly(original);
+  assertThat(new String(forwarded.get(),java.nio.charset.StandardCharsets.UTF_8)).contains("2026-10-08T21:57:00+08:00","\n");
+ }
  @Test void detail_http_path_validation_accepts_templates_and_rejects_invalid_downstream_projection_as502(){
   when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
   var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"?date=2026-10-08&consumer=Codex").build();
@@ -84,5 +151,19 @@ class AiFlowBffServiceTest {
   var invalid=new AiFlowDtos.Operation("GET","/assets/latest");
   var bad=service(r->Mono.just(response(200,AiFlowOperationContractTest.projection(invalid,valid))));
   assertThatThrownBy(()->bad.detail(AiFlowFixtures.ID,request).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+ }
+ @Test void detail_accepts_us_metadata_and_rejects_wrong_us_binding_as502()throws Exception {
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"?date=2026-10-08&consumer=Codex").build();
+  var operation=new AiFlowDtos.Operation("GET","/api/assets/{id}");
+  ObjectNode detail=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowOperationContractTest.projection(operation,operation)));
+  var run=(ObjectNode)detail.path("run");run.put("reportSlot","22:00");run.put("automationId","22-00");run.put("slotLabel","美股22:00");
+  var okay=service(r->Mono.just(response(200,detail)));
+  assertThat(okay.detail(AiFlowFixtures.ID,request).block().run().reportSlot()).isEqualTo("22:00");
+  for(String id:List.of("codex-srpp","22-00-2","srpp-codex")) {
+   ObjectNode invalid=detail.deepCopy();((ObjectNode)invalid.path("run")).put("automationId",id);
+   var bad=service(r->Mono.just(response(200,invalid)));
+   assertThatThrownBy(()->bad.detail(AiFlowFixtures.ID,request).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+  }
  }
 }

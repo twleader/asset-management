@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 
 TAIPEI = dt.timezone(dt.timedelta(hours=8), "Asia/Taipei")
 NAMESPACE = uuid.UUID("a265309b-6621-5199-8706-e8a608e4b491")
-CODEX_TASKS = {"codex-srpp-09-30": "09:05", "codex-srpp": "12:00"}
+CODEX_TASKS = {"codex-srpp-09-30": "09:05", "codex-srpp": "12:00", "22-00": "22:00"}
 CLAUDE_TASKS = {"srpp-0905-claude": "09:05", "srpp-1150-claude": None}
 OUTCOMES = {"COMPLETED", "PARTIAL", "INCOMPLETE", "STOPPED_L0", "STOPPED_CONTRACT", "SKIPPED_NON_TRADING_DAY"}
 ROLES = {"CALENDAR", "POLICY", "API_RECEIPT", "VALIDATOR", "RESULT", "TIMING", "DRAFT_RECEIPT", "MIME_RECEIPT", "APP_TERMINAL", "TRACE_COVERAGE"}
@@ -498,7 +498,7 @@ class Store:
 def managed_state_name(section: str, name: str) -> bool:
     uuid_pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
     patterns = {
-        "sources": r"(?:codex-[0-9a-f]{64}|claude-meta-[0-9a-f]{64}|claude-discovery|emission-cursor)\.json",
+        "sources": r"(?:codex-[0-9a-f]{64}|claude-meta-[0-9a-f]{64}|codex-discovery|claude-discovery|emission-cursor)\.json",
         "pending": uuid_pattern + r"-[0-9]{10}-[0-9a-f]{64}\.json",
         "acks": uuid_pattern + r"\.json",
         "receipts": r"(?:collector|sender)-receipt\.json",
@@ -600,7 +600,7 @@ def validate_envelope(value: dict, today: dt.date):
     run = value["run"]
     if not isinstance(run, dict) or set(run) != RUN_KEYS:
         fail()
-    if not isinstance(run["consumer"], str) or not isinstance(run["reportSlot"], str) or run["consumer"] not in {"Codex", "Claude"} or run["reportSlot"] not in {"09:05", "12:00", "11:40"}:
+    if not isinstance(run["consumer"], str) or not isinstance(run["reportSlot"], str) or run["consumer"] not in {"Codex", "Claude"} or run["reportSlot"] not in {"09:05", "12:00", "11:40", "22:00"}:
         fail()
     if not isinstance(run["sourceKind"], str) or run["sourceKind"] not in {"CODEX_ROLLOUT", "CLAUDE_ARTIFACT", "SCHEDULE_EVENTS"}:
         fail()
@@ -608,6 +608,9 @@ def validate_envelope(value: dict, today: dt.date):
         fail()
     expected = CODEX_TASKS if run["consumer"] == "Codex" else CLAUDE_TASKS
     if not isinstance(run["automationId"], str) or run["automationId"] not in expected or not isinstance(run["sourceRunId"], str) or not OPAQUE.fullmatch(run["sourceRunId"]):
+        fail()
+    # 新US時段採雙向exact binding；既有TW consumer-ID集合不收緊。
+    if (run["reportSlot"] == "22:00") != (run["consumer"] == "Codex" and run["automationId"] == "22-00"):
         fail()
     if not isinstance(run["workflowVersion"], str) or not 1 <= len(run["workflowVersion"]) <= 100:
         fail()
@@ -700,8 +703,23 @@ class Collector:
         start = int(dt.datetime.combine(lo, dt.time(), TAIPEI).timestamp() * 1000)
         end = int(dt.datetime.combine(hi, dt.time(), TAIPEI).timestamp() * 1000)
         try:
+            # 明確日期只讀既有date-scoped排序；背景從自己cache最後實掃key續頁。
+            discovery = self.store.load("codex-discovery") if day is None else {}
+            after_created, after_thread = discovery.get("createdAt"), discovery.get("threadId")
+            has_cursor = type(after_created) is int and start <= after_created < end and isinstance(after_thread, str) and OPAQUE.fullmatch(after_thread)
+            placeholders = ",".join("?" for _ in CODEX_TASKS)
+            select = f"SELECT thread_id, automation_id, created_at FROM automation_runs WHERE automation_id IN ({placeholders}) AND created_at >= ? AND created_at < ?"
+            suffix = " ORDER BY created_at DESC, thread_id LIMIT ?"
             with readonly_db(root / "sqlite/codex-dev.db", root, "automation_runs", {"thread_id", "automation_id", "created_at"}) as app:
-                records = app.execute("SELECT thread_id, automation_id, created_at FROM automation_runs WHERE automation_id IN (?,?) AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, thread_id LIMIT ?", (*CODEX_TASKS, start, end, max_runs)).fetchall()
+                parameters = (*CODEX_TASKS, start, end)
+                if has_cursor:
+                    records = app.execute(select + " AND (created_at < ? OR (created_at = ? AND thread_id > ?))" + suffix,
+                                          (*parameters, after_created, after_created, after_thread, max_runs)).fetchall()
+                    if not records:
+                        # 一輪最多一頁，不一次載入90日歷史；走到底後於下一頁wrap。
+                        records = app.execute(select + suffix, (*parameters, max_runs)).fetchall()
+                else:
+                    records = app.execute(select + suffix, (*parameters, max_runs)).fetchall()
             with readonly_db(root / "state_5.sqlite", root, "threads", {"id", "rollout_path"}) as threads:
                 result = []
                 for thread, automation, created in records:
@@ -710,12 +728,20 @@ class Collector:
                         continue
                     match = threads.execute("SELECT rollout_path FROM threads WHERE id=?", (thread,)).fetchone()
                     actual_day = epoch_ms(created).date().isoformat()
-                    result.append({"thread": thread, "automation": automation, "day": actual_day,
-                                   "slot": CODEX_TASKS[automation], "path": match[0] if match else None})
+                    record = {"thread": thread, "automation": automation, "day": actual_day,
+                              "slot": CODEX_TASKS[automation], "path": match[0] if match else None}
+                    if day is None:
+                        record["discoveryCreatedAt"] = created
+                    result.append(record)
                 return result
         except (sqlite3.Error, OSError, ObservationError) as exc:
             self.note_error(str(exc) if isinstance(exc, ObservationError) else "CODEX_SOURCE_UNAVAILABLE")
             return []
+
+    def advance_codex_discovery(self, record: dict):
+        if not self.store.dry_run and "discoveryCreatedAt" in record:
+            self.store.save("codex-discovery", {"reportDate": self.store.today.isoformat(),
+                                               "createdAt": record["discoveryCreatedAt"], "threadId": record["thread"]})
 
     def scan_codex(self, record: dict, budget: ReadBudget) -> list[dict]:
         name = "codex-" + hashlib.sha256(record["thread"].encode()).hexdigest()
@@ -980,6 +1006,7 @@ class Collector:
                 if not budget.available():
                     break
                 envelopes.extend(self.scan_codex(record, budget))
+                self.advance_codex_discovery(record)
         if consumer in (None, "Claude") and budget.available():
             envelopes.extend(self.claude_artifacts(day, budget))
             if budget.available():

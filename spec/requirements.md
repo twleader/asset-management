@@ -6023,20 +6023,24 @@ Task 493 的 business 參數型別轉換錯誤由既有 `GlobalExceptionHandler`
 - [ ] 保留 tenant filters、OAuth2/select_account、configured-admin bootstrap、internal token、exact 9090 allowlist、CORS、forwarded headers、1 MiB payload 上限與所有唯讀／禁下單規則。原有 application properties 需遷移到 Boot 4／Gateway 新名稱，不能靜默失效。
 - [ ] 三模組在 JDK 25 各自目錄 clean test package；真 PostgreSQL/Testcontainers 驗證必須實跑。執行相關 contract/spec/schema checks；重建並 recreate 三個 JVM 容器，驗 Java/Boot、健康、JSON wire、非 root、時區／UTF-8、TLS/OAuth設定與 backend字型／pg_dump／rclone及ext工具。只用唯讀 smoke，不建立金融指令、寄信或刷新行情。
 
-### Requirement 190／Task 492：系統資訊 AI 判斷流程與非同步觀測
+### Requirement 190／Tasks 492、494：系統資訊 AI 判斷流程與非同步觀測
 
-**User Story：**作為管理者，我希望按日期、Claude/Codex及早午盤分別查看實際AI執行流程、每輪與步驟耗時，以瞭解實際分支、等待、停止及缺少紀錄的地方；紀錄只保留90天，且不增加現行日報執行等待。
+**User Story：**作為管理者，我希望按日期、Claude/Codex及台股早盤、台股午盤、美股或全部時段分別查看實際AI執行流程、每輪與步驟耗時，以瞭解實際分支、等待、停止及缺少紀錄的地方；紀錄只保留90天，且不增加現行日報執行等待。
 
 **Acceptance Criteria：**
 
-- [ ] 系統資訊新增ADMIN專屬「AI 判斷流程」/ai-flow，日期、consumer、早盤/午盤/全部查詢；歷史11:40保持原標籤，不與12:00合併。每次嘗試獨立展示，缺資料不等於沒執行。瀏覽器只經該頁專屬BFF，業務同源owner-scoped純讀。
+- [ ] 系統資訊新增ADMIN專屬「AI 判斷流程」/ai-flow，日期、consumer及依序全部時段=ALL（預設）、台股早盤=MORNING、台股午盤=NOON、美股=US查詢；歷史11:40保持歷史標籤，不與12:00合併。每次嘗試獨立展示，缺資料不等於沒執行。瀏覽器只經該頁專屬BFF，業務同源owner-scoped純讀。
 - [ ] 事件只記實際公開動作、工具結果與公開判斷摘要，ECharts流程圖顯示實際依賴/分支/接續、節點明細、縮放與時間軸；沒有預設理想流程。總耗時、慢步驟來自實測配對，未知為null；不推測LLM私人思考。task_complete/final只證執行結束，self-reported COMPLETED不證金融/草稿/MIME驗證完成。
 - [ ] 新exact POST /api/srpp/ai-flow/events，256KiB、1..100事件的嚴格閉合JSON、專用雙軌/收集器token、先授權且清除caller owner identity，原子append-only持久化與穩定UUID冪等/衝突/graph驗證。不得改金融包、reservation、order/fill或交易。ADMIN查詢與producer服務憑證邊界分離；未授權與配置缺失包括error-ingest旁路皆零owner/DB互動。
 - [ ] 背景hostcollector只讀exact app-run/turn公開trace與可辨識的本機artifact，獨立低優先度、有界掃描/上傳；既有LLM日報不新增逐步回報呼叫或HTTP等待。producer CLI預設只enqueue本機spool，背景worker有界傳輸、失败pending且穩定IDs重試；不重跑金融API、不改報告deadline。Claude遠端來源不可讀則明示RAW_TRACE_UNAVAILABLE/partial，詳細排程接入依使用者指令另日進行。
 - [ ] 保留今天及前89個台北日期，以run.report_date為權威；過期read/POST含replay均410或排除，未來日期400，DB insert/update/delete guards、startup及00:00 bounded purge、防回灌與本功能spool/cache清理都實作。一般DB備份僅排除兩張新AI表的data以免長期留存，schema/金融data/既有備份維持；不刪既有app/SRPP原資料。
-- [ ] 本次不修改SRPP任何檔案/規則/validator/prompt/排程。保留原24金融route/schema與原金融OpenAPI/三份Swagger bytes/hash；僅新增獨立AI觀測契約1.0.0，兩契約不相交且union恰為25pairs（20GET+5POST），Tailscale24handlers；同步exact安全/frontend deny/catalog/operationseed及文件頁，金融PublishedSwaggerIdentity不改。此為使用者最新範圍的具名限縮例外，不偽稱雲端跳過檢查。
+- [ ] 本次不修改SRPP任何檔案/規則/validator/prompt/排程。保留原24金融route/schema與原金融OpenAPI/三份Swagger bytes/hash；獨立AI觀測契約由Task492的1.0.0按Task494升1.1.0，兩契約不相交且union恰為25pairs（20GET+5POST），Tailscale24handlers；同步exact安全/frontend deny/catalog/operationseed及文件頁，金融PublishedSwaggerIdentity不改。此為使用者最新範圍的具名限縮例外，不偽稱雲端跳過檢查。
 - [ ] Java25 backend/BFF、frontend build/test、Python來源/async/失敗/重播、真PG隔離/immutable/atomic/retention及兩契約union/schema檢查通過；重建/recreate實際容器、用既有實際日期雙軌資料/API/ADMIN UI驗收與正式main hostcollector啟用讀回。只讀/真觀測，production不寫假run或手動日報。先run-stack，再commit-merge-push，再main部署驗證。
 
 Task492審查修訂：detail必要query為date及consumer，先驗90日窗口（過期410，即使已purge），再查同owner/consumer/date並核對run.reportDate；窗口內不存在404，不保存過期tombstone。增量coverage採同exact sourceRunId的append-only TRACE_COVERAGE評估（版本、sourceSize/cursor與prefix hash），依最新有效範圍評估並核對真start/terminal/final/call配對；新完整評估可解除已補齊暫時缺口，歷史partial仍保留，當下不可讀childtrace仍partial。backend執行purge，BFF僅同步排程展示登錄。詳細閉合規格凍結於本次自足Task492，不修改原SRPP檔案。
 
 Task492來源一致性修訂：來源截短、已掃描前綴改寫或同cursor/size不同prefixHash，用具名SOURCE_TRACE_CHANGED評估或衝突檢查永久優先PARTIAL_OBSERVED，原事件不可變，任何TRACE_COMPLETE均不可遮蓋；一般暫時尾端未補齊才允許一致的後續完整評估解除。隔離測試覆蓋截短、改寫及同範圍不同hash三項。
+
+Task494分類修訂（優先於Task492的三台股slot描述）：MORNING只09:05，NOON只12:00及歷史11:40，US只新增planned reportSlot 22:00，ALL為四slot全集。美股僅接受已唯讀查證的Codex automationId `22-00`；三層都驗22:00↔(Codex,22-00)雙向binding。保留backend原台股slot-ID嚴配及BFF/collector原台股consumer-ID集合，不借此收緊舊TW producer。新slot不得重寫舊metadata/JCS/hash/UUID或以actualstartedAt、mtime、DST猜分類；reportDate仍取automation.created_at台北日期。collector只依exact allowlist加第三來源並同步parameterized SQL placeholders，排除22-00-2守門員與srpp-codex週日展望；既有90日被動非同步及LLM零回報call不變。Claude美股未有verified local source binding時可合法empty，不能宣稱remote未執行或捏造run。projection四slot分別標台股早盤09:05、台股午盤12:00、台股午盤11:40（歷史）、美股22:00。DB僅擴既有report_slot CHECK，原195 migration identities/checksums不改；實際pg_dump重產schema。金融YAML與三份Markdown完整bytes／identity不改；觀測OpenAPI3.1.0升info1.1.0並閉合雙向身份條件，route/security邊界無新增。人工一次性production驗收只用真10/8US來源，正式observer重啟後依既有90日窗口接續真歷史/每日來源，只重啟自身job而保留plist/token及原7排程。
+
+Task494來源探索修訂：正式day=None背景來源探索採本功能state內有界fair keyset／paging cursor，依exact三ID與90台北日窗口、created_at DESC及thread_id穩定排序遍歷並wrap；cursor只越過本輪實際處理候選，讀取預算提前耗盡不得跳過未掃描來源。重啟及新增run後仍能跨輪涵蓋後續頁；dry-run不寫cursor，明確--date的一次性驗收維持原date-scoped選取。此cursor是可清理的observer探索cache，不寫appSQLite或run/event metadata，也不宣稱全部90日已完成匯入。保留25run/64MiB總/32MiB單run/5秒，不提高預算。

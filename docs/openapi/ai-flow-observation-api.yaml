@@ -2,7 +2,7 @@
 openapi: 3.1.0
 info:
   title: AI 判斷流程觀測補充 API
-  version: 1.0.0
+  version: 1.1.0
   description: 獨立於原金融OpenAPI與PublishedSwaggerIdentity；只保存觀測事件，不調度LLM或執行金融操作。原24金融routes+本1觀測route=25
     method/path pairs。流程只保留90個台北日期，正常DB backup保留schema但排除本功能兩表data。現有SRPP規則與排程不需改動；被動host
     collector非同步收集。
@@ -229,7 +229,7 @@ components:
     AiFlowRunMetadata:
       type: object
       additionalProperties: false
-      description: run immutable identity；server owner不能由producer指定；同source identity不可另建run。
+      description: run immutable identity；server owner不能由producer指定；同source identity不可另建run。22:00美股時段與Codex／22-00雙向綁定；台股三時段保留既有身份相容範圍。
       required:
       - runId
       - consumer
@@ -240,6 +240,26 @@ components:
       - automationId
       - startedAt
       - workflowVersion
+      oneOf:
+      - description: 台股早盤／午盤及11:40歷史時段只使用原四個排程ID，不借此變更既有台股配對條件。
+        properties:
+          reportSlot:
+            description: 台股時段閉合集合。 固定值：09:05／12:00／11:40。
+            enum: ['09:05', '12:00', '11:40']
+          automationId:
+            description: 台股原排程ID閉合集合。 固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude。
+            enum: [codex-srpp-09-30, codex-srpp, srpp-0905-claude, srpp-1150-claude]
+      - description: 唯一已查證每日美股身分是Codex／22-00，且其排程時段固定22:00；不冒充實際開始時間。
+        properties:
+          consumer:
+            description: 已查證美股軌別。 固定值：Codex。
+            const: Codex
+          reportSlot:
+            description: 已查證美股排程報告時段。 固定值：22:00。
+            const: '22:00'
+          automationId:
+            description: 已查證每日美股exact排程ID。 固定值：22-00。
+            const: '22-00'
       properties:
         runId:
           type: string
@@ -257,11 +277,12 @@ components:
           format: date
         reportSlot:
           type: string
-          description: 早盤/午盤及保留原11:40歷史時點。 固定值：09:05／12:00／11:40。
+          description: 台股早盤／午盤、原11:40歷史時點與美股22:00排程時段；提前、補跑或跨午夜仍保留plannedslot。 固定值：09:05／12:00／11:40／22:00。
           enum:
           - '09:05'
           - '12:00'
           - '11:40'
+          - '22:00'
         sourceKind:
           type: string
           description: schedule token只能SCHEDULE_EVENTS；collector只能與consumer一致的CODEX_ROLLOUT/CLAUDE_ARTIFACT。
@@ -276,13 +297,14 @@ components:
           maxLength: 200
         automationId:
           type: string
-          description: 已知排程exact ID；Codex為codex-srpp-09-30/codex-srpp，Claude為srpp-0905-claude/srpp-1150-claude。
-            固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude。
+          description: 已知排程exact ID；Codex台股為codex-srpp-09-30/codex-srpp、美股為22-00，Claude台股為srpp-0905-claude/srpp-1150-claude；未查證Claude美股來源不猜ID。
+            固定值：codex-srpp-09-30／codex-srpp／srpp-0905-claude／srpp-1150-claude／22-00。
           enum:
           - codex-srpp-09-30
           - codex-srpp
           - srpp-0905-claude
           - srpp-1150-claude
+          - '22-00'
         startedAt:
           type:
           - string

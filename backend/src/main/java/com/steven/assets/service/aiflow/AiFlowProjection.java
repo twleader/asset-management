@@ -163,7 +163,13 @@ public final class AiFlowProjection {
     private static String relationLabel(String relation) {
         return switch (relation) { case "CALL_RESULT" -> "呼叫結果"; case "DEPENDS_ON" -> "依賴"; case "BRANCH" -> "分支"; default -> "接續紀錄"; };
     }
-    private static String slotLabel(String slot) { return switch (slot) { case "09:05" -> "早盤09:05"; case "11:40" -> "午盤11:40（歷史）"; default -> "午盤12:00"; }; }
+    private static String slotLabel(String slot) { return switch (slot) {
+        case "09:05" -> "台股早盤09:05";
+        case "12:00" -> "台股午盤12:00";
+        case "11:40" -> "台股午盤11:40（歷史）";
+        case "22:00" -> "美股22:00";
+        default -> throw new AiFlowProblem("UPSTREAM_INVALID");
+    }; }
     private static String coverageLabel(String coverage) {
         return switch (coverage) { case "FULL_OBSERVED" -> "已完整觀測"; case "PARTIAL_OBSERVED" -> "部分觀測"; case "SELF_REPORTED" -> "來源自報"; case "RAW_TRACE_UNAVAILABLE" -> "詳細流程來源不可讀"; default -> "尚未連結實際執行"; };
     }

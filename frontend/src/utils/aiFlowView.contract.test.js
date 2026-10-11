@@ -44,6 +44,35 @@ test('日期窗用台北日，90 天含今天；未知耗時保留為未記錄',
   assert.equal(displayDurationMillis(258301), '4 分 18 秒 301 毫秒')
 })
 
+test('時段選項保留全部並依協定順序呈現，US 會原樣送進專屬 BFF 查詢', async () => {
+  const view = readFileSync(new URL('../views/AiFlowView.vue', import.meta.url), 'utf8')
+  const periodSelect = view.match(/<el-select v-model="period"[\s\S]*?<\/el-select>/)?.[0]
+  assert.ok(periodSelect)
+  const options = [...periodSelect.matchAll(/<el-option label="([^"]+)" value="([^"]+)"\s*\/>/g)]
+    .map(([, label, value]) => ({ label, value }))
+  assert.deepEqual(options, [
+    { label: '全部時段', value: 'ALL' },
+    { label: '台股早盤', value: 'MORNING' },
+    { label: '台股午盤', value: 'NOON' },
+    { label: '美股', value: 'US' }
+  ])
+  assert.match(view, /const period = ref\('ALL'\)/)
+  assert.match(view, /bffApi\.aiFlow\.runs\(\{ date, consumer: selectedConsumer, period: selectedPeriod, signal \}\)/)
+
+  const requests = []
+  const loader = createAiFlowViewLoader({
+    listRuns: async request => {
+      requests.push(request)
+      return { runs: [{ runId: 'us-run' }] }
+    },
+    getRun: async () => ({})
+  })
+  const state = createAiFlowViewState()
+  await loader.query(state, { date: '2026-10-08', consumer: 'Codex', period: 'US' })
+  assert.equal(requests[0].period, 'US')
+  assert.deepEqual(state.runs.map(run => run.runId), ['us-run'])
+})
+
 test('filter generation 清空舊資料並拒絕過期清單回應', async () => {
   const pending = []
   const loader = createAiFlowViewLoader({
@@ -65,8 +94,9 @@ test('filter generation 清空舊資料並拒絕過期清單回應', async () =>
   assert.equal(state.selectedRunId, '')
   const firstSignal = pending[0].request.signal
 
-  const second = loader.query(state, { date: '2026-10-09', consumer: 'Claude', period: 'NOON' })
+  const second = loader.query(state, { date: '2026-10-09', consumer: 'Claude', period: 'US' })
   assert.equal(firstSignal.aborted, true)
+  assert.equal(pending[1].request.period, 'US')
   assert.deepEqual(state.runs, [])
   assert.equal(state.detail, null)
 

@@ -29,8 +29,8 @@ public class JdbcAiFlowRepository implements AiFlowRepository {
                 JdbcAiFlowRepository::run, owner, consumer, sourceKind, sourceRunId).stream().findFirst();
     }
     @Override public List<StoredRun> list(long owner, LocalDate date, String consumer, String period) {
-        return jdbc.query("SELECT " + COLUMNS + " FROM ai_flow_run WHERE owner_user_id=? AND report_date=? AND consumer=? AND report_date >= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date - 89 AND report_date <= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date AND (?='ALL' OR (?='MORNING' AND report_slot='09:05') OR (?='NOON' AND report_slot IN ('12:00','11:40'))) ORDER BY report_slot,run_id",
-                JdbcAiFlowRepository::run, owner, date, consumer, period, period, period);
+        return jdbc.query("SELECT " + COLUMNS + " FROM ai_flow_run WHERE owner_user_id=? AND report_date=? AND consumer=? AND report_date >= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date - 89 AND report_date <= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date AND (?='ALL' OR (?='MORNING' AND report_slot='09:05') OR (?='NOON' AND report_slot IN ('12:00','11:40')) OR (?='US' AND report_slot='22:00')) ORDER BY report_slot,run_id",
+                JdbcAiFlowRepository::run, owner, date, consumer, period, period, period, period);
     }
     @Override public LocalDate databaseDate() {
         return jdbc.queryForObject("SELECT (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date", LocalDate.class);

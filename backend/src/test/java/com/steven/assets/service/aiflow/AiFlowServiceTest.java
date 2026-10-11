@@ -45,6 +45,30 @@ class AiFlowServiceTest {
         var missing=new LinkedMultiValueMap<String,String>();missing.add("consumer","Codex");assertThatThrownBy(()->service.detail(RUN.toString(),missing)).isInstanceOf(AiFlowProblem.class);
         verifyNoInteractions(owner,repository,manager);
     }
+    @Test void fourPeriodsEchoSelectedQueryAndDefaultToAll() {
+        when(repository.list(anyLong(), any(), anyString(), anyString())).thenReturn(List.of());
+        for (String period : List.of("ALL", "MORNING", "NOON", "US")) {
+            var selected = query(DATE.toString()); selected.add("period", period);
+            assertThat(service.list(selected).period()).isEqualTo(period);
+            verify(repository).list(7, DATE, "Codex", period);
+        }
+        assertThat(service.list(query(DATE.toString())).period()).isEqualTo("ALL");
+        var claudeUs = query(DATE.toString()); claudeUs.set("consumer", "Claude"); claudeUs.set("period", "US");
+        assertThat(service.list(claudeUs).runs()).isEmpty();
+        verify(repository).list(7, DATE, "Claude", "US");
+    }
+    @Test void malformedOrDuplicatePeriodsRejectBeforeOwnerAndDatabaseIo() {
+        for (String period : List.of("", " ", "us", "22:00", "EVENING")) {
+            var invalid = query(DATE.toString()); invalid.add("period", period);
+            assertThatThrownBy(() -> service.list(invalid)).isInstanceOfSatisfying(AiFlowProblem.class,
+                    problem -> assertThat(problem.code()).isEqualTo("INVALID_REQUEST"));
+        }
+        for (String period : List.of("ALL", "MORNING", "NOON", "US")) {
+            var duplicate = query(DATE.toString()); duplicate.add("period", period); duplicate.add("period", period);
+            assertThatThrownBy(() -> service.list(duplicate)).isInstanceOf(AiFlowProblem.class);
+        }
+        verifyNoInteractions(owner, repository, manager);
+    }
     @Test void windowIncludesTodayAnd89DaysAndTaipeiMidnightBoundary(){
         when(repository.list(anyLong(),any(),anyString(),anyString())).thenReturn(List.of());
         assertThat(service.list(query(DATE.toString())).earliestDate()).isEqualTo(DATE.minusDays(89));

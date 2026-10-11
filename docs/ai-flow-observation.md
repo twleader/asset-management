@@ -1,6 +1,6 @@
 # AI 判斷流程
 
-「系統資訊 → AI 判斷流程」按台北日期、Codex／Claude及早午盤查詢已記錄的公開執行歷程。流程圖、時間軸與工具耗時來自實際事件；執行結束、自報結果、紀錄完整度與報告驗證分開顯示。沒有紀錄表示尚無已記錄執行，不能推定排程未跑。
+「系統資訊 → AI 判斷流程」按台北日期、Codex／Claude及「全部時段、台股早盤、台股午盤、美股」查詢已記錄的公開執行歷程，預設全部時段。流程圖、時間軸與工具耗時來自實際事件；執行結束、自報結果、紀錄完整度與報告驗證分開顯示。沒有紀錄表示尚無已記錄執行，不能推定排程未跑。
 
 今天只部署 asset-management 的觀測功能。SRPP 的規則、排程、validator、prompt、遠端 skill 與原金融 Swagger 都維持既有檔案。觀測使用獨立契約 [AI 觀測 API](openapi/9090-ai-flow-observation.md)，不改金融 PublishedSwaggerIdentity。
 
@@ -8,9 +8,15 @@
 
 `scripts/collect-srpp-ai-flow.py` 唯讀連接 Codex app 的 automation_runs → thread → 公開 JSONL。一次流程用真 thread_id＋turn_id，工具用同一 turn 的 call_id 配對；最終回覆讀 phase=final_answer，也支援已知舊 final channel。私人 reasoning、系統指令、shell指令、token、完整API/MIME內容及金融金額都不保存；公開進度只投影固定操作摘要。
 
+Codex只接受三個已查證的exact排程ID：`codex-srpp-09-30`→台股早盤09:05、`codex-srpp`→台股午盤12:00、`22-00`→美股22:00；不納入`22-00-2`守門員、`srpp-codex`週日展望或名稱相似的工具。時段是planned reportSlot，提前、手動補跑或跨午夜仍保留原排程時段，actual startedAt另取公開START。reportDate始終取automation.created_at的台北日期，同thread後續turn保持該日期，不換算成美國交易日期或依DST重標。查詢period=ALL涵蓋四個slot，MORNING只09:05、NOON含12:00與歷史11:40、US只22:00；不重寫舊台股JSON、UUID或歷史11:40。新增22:00只允許Codex＋22-00，台股既有producer相容範圍保留。
+
 Claude 只收集本機明確 scheduledTaskId／cliSessionId metadata，以及具有 consumer、日期、slot 的結果文件。沒有可讀 raw trace 就顯示「詳細紀錄不可讀」。獨立 artifact 無 exact app link 顯示「無法連結執行」，自報 COMPLETED 也不等於報告已驗證。metadata未明示午盤slot時不以 task 名字猜成12:00或11:40。相近時間、檔名及相鄰timing文件都不用於拼接身份。
 
+Claude每日美股的exact ID與可讀來源尚未查證（`CLAUDE_US_SOURCE_UNVERIFIED`），選美股可合法回傳空紀錄，不建立虛構run、artifact或terminal；這也不代表遠端沒有排程。本次不改Claude遠端排程或接入方式。
+
 既有早午盤 LLM 排程不新增任何回報工具呼叫或等待。collector只在自己0700目錄寫入清洗後事件、prefix hash與游標；每輪讀取預算25個run／64MiB／每來源32MiB／5秒。尾端半行保留至下一輪，真正已掃前綴改寫或截短永久標為部分紀錄。大型prefix的重驗可跨多輪續讀，不以未完成重驗覆蓋既有完整度判定。已讀完來源與Claude metadata以inode／size／mtime／ctime完整性cache避免重複讀取；這些時間不參與run身份、日期或app／artifact聯結。
+
+沒有指定日期的背景輪巡，在本功能自己的`codex-discovery.json`保存最後實際掃描的created_at／thread_id key；SQLite以三個exact ID、90台北日及穩定created_at倒序／thread_id順序參數化讀取，每輪只取有界一頁。讀取預算先耗盡時不越過尚未掃描的候選；走到底後wrap回最新來源，重啟仍可續頁、新run會在後續遍歷被看見。游標僅是可清理的探索cache，不寫appSQLite或run/event metadata，不能把一次成功輪巡說成90日歷史全部已匯入。dry-run不寫探索游標，明確`--date`的一次性查證仍採固定日期選取。原60秒輪巡、讀取上限、非阻塞本機atomic lock及90日期限保持。
 
 enqueue 原子寫入0600 spool後就退出，完全不HTTP。另一個 `scripts/send-srpp-ai-flow.py` process每輪最多3批，每批100事件、256KiB以內，單次網路timeout2秒、單輪5秒預算；失敗保留同一UUID/內容，下一輪重送。HTTP redirect不追蹤；ACK必須持久化後具有相同runId、全部eventIds與正確inserted/replayed計數，才刪pending。401、503、網路或磁碟故障只會留下紀錄缺口，不重跑金融流程。
 

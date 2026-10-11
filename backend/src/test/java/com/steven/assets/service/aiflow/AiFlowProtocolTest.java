@@ -12,6 +12,46 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class AiFlowProtocolTest {
+    @Test void closedMarketSessionBindingsPreserveTwSnapshotsAndRejectEveryUsMismatch() {
+        for (String consumer : List.of("Codex", "Claude")) {
+            for (String slot : List.of("09:05", "12:00", "11:40", "22:00", "US", "23:00")) {
+                for (String automation : List.of("codex-srpp-09-30", "codex-srpp", "srpp-0905-claude",
+                        "srpp-1150-claude", "22-00", "22-00-2", "srpp-codex")) {
+                    ObjectNode input = raw(complete());
+                    ((ObjectNode) input.path("run")).put("consumer", consumer).put("reportSlot", slot)
+                            .put("automationId", automation).put("sourceKind", consumer.equals("Codex") ? "CODEX_ROLLOUT" : "CLAUDE_ARTIFACT");
+                    boolean valid = slot.equals("22:00") ? consumer.equals("Codex") && automation.equals("22-00")
+                            : List.of("09:05", "12:00", "11:40").contains(slot)
+                            && automation.equals(consumer.equals("Codex") ? (slot.equals("09:05") ? "codex-srpp-09-30" : "codex-srpp")
+                                    : (slot.equals("09:05") ? "srpp-0905-claude" : "srpp-1150-claude"));
+                    String metadata = SrppJcs.canonicalize(JSON.createObjectNode().put("schemaVersion", 1).set("run", input.path("run")));
+                    if (valid) {
+                        var parsed = AiFlowProtocol.parse(input.toString());
+                        assertThat(parsed.metadataJson()).isEqualTo(metadata);
+                        assertThat(parsed.metadataHash()).isEqualTo(SrppJcs.sha256Hex(metadata));
+                        assertThat(AiFlowProtocol.readRun(metadata)).isEqualTo(parsed.batch().run());
+                    } else {
+                        assertCode(input.toString(), "INVALID_REQUEST");
+                        assertThatThrownBy(() -> AiFlowProtocol.readRun(metadata)).isInstanceOfSatisfying(AiFlowProblem.class,
+                                problem -> assertThat(problem.code()).isEqualTo("UPSTREAM_INVALID"));
+                    }
+                }
+            }
+        }
+    }
+    @Test void usPlannedSlotAndReportDateDoNotDependOnActualStartClock() {
+        for (String source : List.of("CODEX_ROLLOUT", "SCHEDULE_EVENTS")) {
+            ObjectNode input = raw(source.equals("SCHEDULE_EVENTS") ? complete().subList(0, 5) : complete());
+            String afterMidnight = DATE.plusDays(1) + "T01:05:00+08:00";
+            ((ObjectNode) input.path("run")).put("reportSlot", "22:00").put("automationId", "22-00")
+                    .put("sourceKind", source).put("startedAt", afterMidnight);
+            var parsed = AiFlowProtocol.parse(input.toString());
+            assertThat(parsed.batch().run().reportDate()).isEqualTo(DATE);
+            assertThat(parsed.batch().run().reportSlot()).isEqualTo("22:00");
+            assertThat(parsed.batch().run().startedAt()).isEqualTo(instant(afterMidnight));
+            assertThat(parsed.metadataJson()).contains(afterMidnight);
+        }
+    }
     @Test void canonicalHttpPathsHonor500CharacterBoundaryWithoutChangingSnapshot() {
         for(String path:List.of("/api/"+"a".repeat(296),"/api/"+"a".repeat(495),"/api/widgets/{id}")) {
             ObjectNode input=raw(complete());ObjectNode operation=(ObjectNode)input.path("events").get(0).path("operation");

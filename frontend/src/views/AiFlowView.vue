@@ -41,8 +41,9 @@
           <span>時段</span>
           <el-select v-model="period" aria-label="時段" :clearable="false">
             <el-option label="全部時段" value="ALL" />
-            <el-option label="早盤" value="MORNING" />
-            <el-option label="午盤" value="NOON" />
+            <el-option label="台股早盤" value="MORNING" />
+            <el-option label="台股午盤" value="NOON" />
+            <el-option label="美股" value="US" />
           </el-select>
         </label>
       </div>

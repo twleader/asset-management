@@ -39,7 +39,7 @@ final class AiFlowProtocol {
             String consumer=values.getFirst("consumer"),period=values.getFirst("period");
             window(date,clock); member(consumer,Set.of("Codex","Claude"));
             if(period==null) period="ALL";
-            member(period,Set.of("ALL","MORNING","NOON"));
+            member(period,Set.of("ALL","MORNING","NOON","US"));
             return new Query(date,consumer,period);
         }
     }
@@ -102,13 +102,17 @@ final class AiFlowProtocol {
     }
     private static void metadata(AiFlowDtos.RunMetadata r,Clock clock) {
         uuid(r.runId()); window(r.reportDate(),clock); member(r.consumer(),Set.of("Codex","Claude"));
-        member(r.reportSlot(),Set.of("09:05","12:00","11:40"));
+        member(r.reportSlot(),Set.of("09:05","12:00","11:40","22:00"));
         member(r.sourceKind(),Set.of("CODEX_ROLLOUT","CLAUDE_ARTIFACT","SCHEDULE_EVENTS"));
         if(r.sourceKind().equals("CODEX_ROLLOUT") && !r.consumer().equals("Codex") || r.sourceKind().equals("CLAUDE_ARTIFACT") && !r.consumer().equals("Claude")) throw AiFlowProblem.invalid();
         opaque(r.sourceRunId(),200); text(r.workflowVersion(),100); instant(r.startedAt(),true);
-        automation(r.consumer(),r.automationId());
+        automation(r.consumer(),r.reportSlot(),r.automationId());
     }
-    private static void automation(String consumer,String id) {
+    private static void automation(String consumer,String slot,String id) {
+        if(slot.equals("22:00") || "22-00".equals(id)) {
+            if(!slot.equals("22:00") || !consumer.equals("Codex") || !"22-00".equals(id)) throw AiFlowProblem.invalid();
+            return;
+        }
         member(id,consumer.equals("Codex")?Set.of("codex-srpp-09-30","codex-srpp"):Set.of("srpp-0905-claude","srpp-1150-claude"));
     }
     static void event(AiFlowDtos.Event e) {
@@ -138,7 +142,13 @@ final class AiFlowProtocol {
             && list.earliestDate().equals(LocalDate.now(clock.withZone(ZoneId.of("Asia/Taipei"))).minusDays(89)));
         Set<String> ids=new HashSet<>();
         for(var r:list.runs()) { run(r,query,owner,clock); require(ids.add(r.runId()));
-            require(query.period().equals("ALL") || query.period().equals("MORNING") && r.reportSlot().equals("09:05") || query.period().equals("NOON") && !r.reportSlot().equals("09:05")); }
+            require(switch(query.period()) {
+                case "ALL" -> true;
+                case "MORNING" -> r.reportSlot().equals("09:05");
+                case "NOON" -> Set.of("12:00","11:40").contains(r.reportSlot());
+                case "US" -> r.reportSlot().equals("22:00");
+                default -> false;
+            }); }
     }
     static void detail(AiFlowDtos.Detail d,Query q,long owner,String id,Clock clock) {
         run(d.run(),q,owner,clock); require(d.run().runId().equals(id)); require(d.run().eventCount()==d.nodes().size());
