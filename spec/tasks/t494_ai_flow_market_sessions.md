@@ -52,7 +52,7 @@ python3 scripts/collect-srpp-ai-flow.py --once --date 2026-10-08 --consumer Code
 
 完成於2026-10-11；494.1–494.11已實作並驗收。功能feature `b3b87956a2d0801e330f0ae696e14c7b4698149c`、main no-ff `5cdcada229389bf3bfb8a58366ec6b2ccd8032ed` 均已正常hooks提交及推送；先feature run-stack及真管理者瀏覽器驗收，再從正式main重建並驗收三個服務與既有背景observer。此處只回填任務完成事實，不改Requirements、設計、協定或產品程式，也不宣稱完成報告重新經過獨立spec審查。
 
-四種時段依序為「全部時段、台股早盤、台股午盤、美股」，預設ALL；ALL/MORNING/NOON/US查詢集合守恆且互斥，NOON只12:00與歷史11:40，US只22:00。2026-10-08 Codex為3筆真run，分別45／57／129事件；Claude全部3筆、早盤2筆、歷史午盤1筆，美股合法空集合。producer／BFF／collector對新增美股只接受Codex＋exact automation `22-00`雙向binding，watchdog `22-00-2`與weekly `srpp-codex`不納入。切換日期／consumer／period撤下舊圖，全部既有台股metadata、JCS、UUID、hash與毫秒數值保留。
+四種時段依序為「全部時段、台股早盤、台股午盤、美股」，預設ALL；ALL為MORNING、NOON、US三集合的聯集；三個子集合彼此互斥。NOON只12:00與歷史11:40，US只22:00。2026-10-08 Codex為3筆真run，分別45／57／129事件；Claude全部3筆、早盤2筆、歷史午盤1筆，美股合法空集合。producer／BFF／collector對新增美股只接受Codex＋exact automation `22-00`雙向binding，watchdog `22-00-2`與weekly `srpp-codex`不納入。切換日期／consumer／period撤下舊圖，全部既有台股metadata、JCS、UUID、hash與毫秒數值保留。
 
 真美股run `41f376ef-91ae-5e98-9bba-4ce01d55ae45` 來自2026-10-08原生app automation `22-00`及exact thread/turn，reportDate仍台北source日期、slot22:00不冒充actual開始時刻。129事件首次以2批持久化ACK，inserted129／pending0，sender wall 255.212ms；所有ACK event IDs、canonical payload hash與真source metadata核對相符。保存的真detail JSON與畫面驗收129節點、127條edge、59個已配對步驟，START→TERMINAL 544310ms顯示「9 分 4 秒 310 毫秒」；原台股午盤258301ms仍「4 分 18 秒 301 毫秒」。正式main SVG高度12960px、1個SVG；feature縮放125%、長圖捲動與節點操作保持，正式main再次驗四選項／預設全部／美股圖與耗時。圖只呈現公開觀測事件，不推定私有思考或特定金融API獨立耗時。
 
