@@ -1357,8 +1357,9 @@
         "09:05": "09:05",
         "12:00": "11:40"
       },
-      "api_slot_mapping_reason": "D-199 changes report start/subject to 12:00. The published 9090 API retains 11:40 as its midday business identifier; request and validate that identifier explicitly without relaxing same-run identity, source or freshness checks.",
+      "api_slot_mapping_reason": "Only legacy context/calculations/market-facts/daily-decision use 12:00 -> 11:40. Task489 report-calculations uses actual reportSlot=09:05 or 12:00 and must not inherit the legacy mapping.",
       "read_only_routes": [
+        "/api/public/srpp/report-calculations",
         "/api/public/srpp/calculation-context",
         "/api/public/srpp/calculations",
         "/api/public/srpp/market-facts"
@@ -1387,7 +1388,32 @@
       ],
       "daily_decision_scope": [
         "D130_D195_TW_BONDS"
-      ]
+      ],
+      "llm_judgment_required": true,
+      "api_result_is_final_recommendation": false,
+      "published_read_candidates": {
+        "/api/public/srpp/report-calculations": {
+          "publication_status": "PUBLISHED_SWAGGER_1_25_0",
+          "daily_adoption_status": "ENABLED_TRIAL_RUNTIME_PENDING",
+          "enabled_for_daily": true,
+          "report_slots": [
+            "09:05",
+            "12:00"
+          ],
+          "uses_legacy_api_slot_mapping": false,
+          "calculator_version": "SRPP_REPORT_CALCULATIONS_V1",
+          "consumer_verifier": "scripts/verify_srpp_report_calculations.py",
+          "prerequisites": [
+            "CURRENT_POLICY_REGISTRATION",
+            "INDEPENDENT_CONSUMER_VERIFIER"
+          ],
+          "observations_pending": [
+            "SCOPED_SAME_INPUT_GOLDEN_PARITY",
+            "TRADING_DAY_RUNTIME_ACCEPTANCE"
+          ],
+          "fallback_reason": "REPORT_CALCULATION_SCOPE_UNAVAILABLE"
+        }
+      }
     },
     "schedule_runtime_policy": {
       "core_draft_and_readback_by_minute": 40,

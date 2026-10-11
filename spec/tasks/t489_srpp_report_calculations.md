@@ -181,3 +181,20 @@ Docker驗收使用run-stack，未merge feature先比對main的.env（不輸出se
 - 富邦官方唯讀委託背景來源、token／calendar／window／owner gate、immutable snapshot、最新失敗不可回退、部分成交／取消／verified zero 均實作並測試。今日未手動呼叫 SDK；正式無 token probe 回 401。國泰官方子帳來源仍缺，00865B combined gate 保持 UNVERIFIED；無 exact 建議→委託→成交連結保守保留 reservation。正式薪資時程、稅制通知、ordinary deposit 利率、consumer state 等未提供的 canonical 欄位逐欄 PARTIAL／UNAVAILABLE，未以 0 或虛構來源補齊。
 - 兩個 migration 生效，schema 由運行 PostgreSQL 重產為 115 張表，保留完整標準檔頭，full-byte schema drift PASS；spec-check BLOCK=0／CHECK=0、renderer／OpenAPI／Tailscale contracts、git diff --check PASS。獨立 spec 與架構審查已修正全部 critical／major findings。
 - 沒有自動將新 GET 接入 SRPP 排程 allowlist，也沒有產生日報、寄信、下單或變更 Codex automation。後續 SRPP 採用須另有完整讀回與採用收據。
+
+## 2026-10-11 正式採用規則同步
+
+使用者另行明確授權先將十二模組 `GET /api/public/srpp/report-calculations` 接入 SRPP，於 2026-10-12 交易日實測；今日無交易日正例不再阻擋消費端採用。前段「沒有自動接入」與 bundle 身分只記錄初次 API 交付，不能代表本次採用仍未授權，也不能視為目前規則身分。
+
+本次資產系統工作限於既有 Requirement 187／Task 489 的正式 authority 同步，API、公式、schema 與十二模組品質契約保持不變。以 SRPP 最終經 `policy_bundle.py check --purpose daily --consumer Codex` 驗證的原始 `assumptions/model_inputs.json` 與 `assumptions/policy_manifest.json` 完整位元組為來源，逐位元組同步至 backend 的 `srpp/decision` resources。D-201／policy 2.49.0／model 3.22.0 仍須吻合；正式 target mapping 不得被此採用設定變更。
+
+驗收與收尾步驟：
+
+1. 動手前掃各 worktree 的同路徑 dirty／尚未落地提交，保留其他 session 變更；在獨立 feature 分支先完成本補充的機械與獨立規格審查，再同步資源。
+2. 使用 `scripts/srpp-report-policy-register.rb` 驗 manifest 去自身 JCS bundle hash、原始 model hash、版本與原始 targets。既有 policy document／formula manifest 不變；SQL 只以新 bundle `INSERT ... ON CONFLICT DO NOTHING` 登錄，完整讀回新行並比對全部欄位，保留舊行，不 UPDATE／DELETE。
+3. 跑相關既有正式 authority／report 測試、spec-check、Swagger parity 與完整 diff 架構審查。未改公式，不宣稱新增公式驗收。
+4. 使用既有 main 的部署設定與 secrets 掛載進行 feature 驗收，僅重建及重建容器 `business-services`，比較有效設定時不印 secret。BFF 保持運行，依 run-stack 的健康及有界 safe GET 恢復規則驗證；不得例行重啟 BFF。
+5. 核對運行 JAR 的 model／manifest 完整 bytes 與當前 Swagger identity。今日 Codex／Claude GET 的 `409 NON_TRADING_DAY` 只算日曆邊界，不能宣稱交易日十二模組成功；不改日曆、不植入正式合成 package，不觸發計算、refresh、券商手動同步、寄信或交易。
+6. 驗收過後依 commit-merge-push 以 feature commit／main no-ff merge／push 收尾，再從同步的 main 重建同一服務並讀回身分。2026-10-12 的真交易日 package／兩 consumer shared base 與個別 hash／各模組品質由已接入 SRPP 消費端實測核對；PARTIAL／UNAVAILABLE／NOT_EVALUATED 與既有 BLOCKED 不得被本次採用解除。
+
+本節為已獲授權的執行計畫；實際新 bundle、resource SHA、測試、registry 與 deployed JAR 身分應在完成時另行記錄，計畫文字不當作完成證據。
