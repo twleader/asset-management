@@ -785,13 +785,24 @@ public class TradingRadarService {
     /** Lazy detail read for exactly one current-user target; it never assembles every target first. */
     @Transactional(readOnly = true)
     public TradingRadarDto.StockDetailResponse getStockDetail(String rawStockCode, String rawMarket) {
+        return getStockDetail(rawStockCode, rawMarket, null);
+    }
+
+    /** Explicit tenant source for background SRPP capture; never depends on request-scoped identity. */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.StockDetailResponse getStockDetailForOwner(long ownerId, String rawStockCode, String rawMarket) {
+        if (ownerId <= 0) throw new IllegalArgumentException("ownerId");
+        return getStockDetail(rawStockCode, rawMarket, ownerId);
+    }
+
+    private TradingRadarDto.StockDetailResponse getStockDetail(String rawStockCode, String rawMarket, Long ownerId) {
         String stockCode = normalizeSelector(rawStockCode, STOCK_CODE_SELECTOR, "股票代號格式不合法");
         String market = normalizeSelector(rawMarket, MARKET_SELECTOR, "市場別格式不合法");
         Instant decisionInstant = Instant.now();
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skipped = new HashSet<>();
-        loadLatestHoldings(targets, skipped, null);
-        loadWatchList(targets, skipped, null);
+        loadLatestHoldings(targets, skipped, ownerId);
+        loadWatchList(targets, skipped, ownerId);
         Target target = targets.get(stockCode + '\0' + market);
         if (target == null || !isSupportedTarget(target)) {
             throw new IllegalArgumentException("找不到可分析標的");

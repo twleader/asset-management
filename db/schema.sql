@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：112 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：115 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -146,6 +146,17 @@ CREATE FUNCTION public.reject_api_error_log_operation_mutation() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN RAISE EXCEPTION 'api_error_log_operation is immutable'; END;
+$$;
+
+
+--
+-- Name: reject_fubon_srpp_snapshot_mutation(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.reject_fubon_srpp_snapshot_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN RAISE EXCEPTION 'fubon_srpp_source_snapshot is immutable'; END;
 $$;
 
 
@@ -1444,6 +1455,46 @@ CREATE TABLE public.fubon_intraday_candle_capture (
 
 
 --
+-- Name: fubon_srpp_source_snapshot; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_srpp_source_snapshot (
+    sequence_id bigint NOT NULL,
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    trading_date date NOT NULL,
+    account_fingerprint character varying(24),
+    captured_at timestamp with time zone NOT NULL,
+    status character varying(16) NOT NULL,
+    revision character(64) NOT NULL,
+    payload_jcs text NOT NULL,
+    CONSTRAINT fubon_srpp_source_snapshot_check CHECK ((((status)::text <> 'VERIFIED'::text) OR ((account_fingerprint IS NOT NULL) AND ((account_fingerprint)::text ~ '^[a-f0-9]{24}$'::text)))),
+    CONSTRAINT fubon_srpp_source_snapshot_owner_user_id_check CHECK (((owner_user_id >= 1) AND (owner_user_id <= '9007199254740991'::bigint))),
+    CONSTRAINT fubon_srpp_source_snapshot_revision_check CHECK ((revision ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT fubon_srpp_source_snapshot_status_check CHECK (((status)::text = ANY ((ARRAY['VERIFIED'::character varying, 'UNAVAILABLE'::character varying])::text[])))
+);
+
+
+--
+-- Name: fubon_srpp_source_snapshot_sequence_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.fubon_srpp_source_snapshot_sequence_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: fubon_srpp_source_snapshot_sequence_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.fubon_srpp_source_snapshot_sequence_id_seq OWNED BY public.fubon_srpp_source_snapshot.sequence_id;
+
+
+--
 -- Name: fubon_stock_basic_info; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2367,6 +2418,78 @@ CREATE TABLE public.srpp_policy_registry (
     formula_manifest text NOT NULL,
     registered_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT srpp_policy_registry_policy_bundle_sha256_check CHECK (((policy_bundle_sha256 ~ '^[0-9a-f]{64}$'::text) AND ((policy_bundle_sha256)::text <> repeat('0'::text, 64))))
+);
+
+
+--
+-- Name: srpp_report_calculation_base; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_report_calculation_base (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    trading_date date NOT NULL,
+    report_slot character varying(5) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    calculator_version character varying(96) NOT NULL,
+    source_fingerprint_sha256 character(64) NOT NULL,
+    captured_at timestamp with time zone NOT NULL,
+    asset_generated_at timestamp with time zone NOT NULL,
+    asset_snapshot_id bigint NOT NULL,
+    valuation_capture_id uuid NOT NULL,
+    input_jcs text NOT NULL,
+    source_vector_jcs text NOT NULL,
+    shared_modules_jcs text NOT NULL,
+    shared_content_sha256 character(64) NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_report_calculation_base_asset_snapshot_id_check CHECK (((asset_snapshot_id >= 1) AND (asset_snapshot_id <= '9007199254740991'::bigint))),
+    CONSTRAINT srpp_report_calculation_base_calculator_version_check CHECK (((length((calculator_version)::text) >= 1) AND (length((calculator_version)::text) <= 96))),
+    CONSTRAINT srpp_report_calculation_base_check CHECK ((asset_generated_at <= captured_at)),
+    CONSTRAINT srpp_report_calculation_base_check1 CHECK ((created_at >= captured_at)),
+    CONSTRAINT srpp_report_calculation_base_input_jcs_check CHECK ((length(input_jcs) > 2)),
+    CONSTRAINT srpp_report_calculation_base_owner_user_id_check CHECK (((owner_user_id >= 1) AND (owner_user_id <= '9007199254740991'::bigint))),
+    CONSTRAINT srpp_report_calculation_base_policy_bundle_sha256_check CHECK ((policy_bundle_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_base_report_slot_check CHECK (((report_slot)::text = ANY ((ARRAY['09:05'::character varying, '12:00'::character varying])::text[]))),
+    CONSTRAINT srpp_report_calculation_base_shared_content_sha256_check CHECK ((shared_content_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_base_shared_modules_jcs_check CHECK ((length(shared_modules_jcs) > 2)),
+    CONSTRAINT srpp_report_calculation_base_source_fingerprint_sha256_check CHECK ((source_fingerprint_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_base_source_vector_jcs_check CHECK ((length(source_vector_jcs) > 2)),
+    CONSTRAINT srpp_report_calculation_base_swagger_sha256_check CHECK ((swagger_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: srpp_report_calculation_package; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_report_calculation_package (
+    id uuid NOT NULL,
+    shared_calculation_id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    consumer character varying(16) NOT NULL,
+    trading_date date NOT NULL,
+    report_slot character varying(5) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    calculator_version character varying(96) NOT NULL,
+    consumer_state_sha256 character(64) NOT NULL,
+    status character varying(16) NOT NULL,
+    input_snapshot_sha256 character(64) NOT NULL,
+    content_jcs text NOT NULL,
+    content_sha256 character(64) NOT NULL,
+    published_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_report_calculation_package_calculator_version_check CHECK (((length((calculator_version)::text) >= 1) AND (length((calculator_version)::text) <= 96))),
+    CONSTRAINT srpp_report_calculation_package_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Codex'::character varying, 'Claude'::character varying])::text[]))),
+    CONSTRAINT srpp_report_calculation_package_consumer_state_sha256_check CHECK ((consumer_state_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_package_content_jcs_check CHECK ((length(content_jcs) > 2)),
+    CONSTRAINT srpp_report_calculation_package_content_sha256_check CHECK ((content_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_package_input_snapshot_sha256_check CHECK ((input_snapshot_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_package_owner_user_id_check CHECK (((owner_user_id >= 1) AND (owner_user_id <= '9007199254740991'::bigint))),
+    CONSTRAINT srpp_report_calculation_package_policy_bundle_sha256_check CHECK ((policy_bundle_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_report_calculation_package_report_slot_check CHECK (((report_slot)::text = ANY ((ARRAY['09:05'::character varying, '12:00'::character varying])::text[]))),
+    CONSTRAINT srpp_report_calculation_package_status_check CHECK (((status)::text = 'FINAL'::text)),
+    CONSTRAINT srpp_report_calculation_package_swagger_sha256_check CHECK ((swagger_sha256 ~ '^[0-9a-f]{64}$'::text))
 );
 
 
@@ -3655,6 +3778,13 @@ ALTER TABLE ONLY public.fubon_historical_backfill_window_attempt ALTER COLUMN at
 
 
 --
+-- Name: fubon_srpp_source_snapshot sequence_id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_srpp_source_snapshot ALTER COLUMN sequence_id SET DEFAULT nextval('public.fubon_srpp_source_snapshot_sequence_id_seq'::regclass);
+
+
+--
 -- Name: index_export_schedule id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -4128,6 +4258,22 @@ ALTER TABLE ONLY public.fubon_historical_daily_candle
 
 
 --
+-- Name: fubon_srpp_source_snapshot fubon_srpp_source_snapshot_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_srpp_source_snapshot
+    ADD CONSTRAINT fubon_srpp_source_snapshot_id_key UNIQUE (id);
+
+
+--
+-- Name: fubon_srpp_source_snapshot fubon_srpp_source_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_srpp_source_snapshot
+    ADD CONSTRAINT fubon_srpp_source_snapshot_pkey PRIMARY KEY (sequence_id);
+
+
+--
 -- Name: fubon_taiex_index_latest fubon_taiex_index_latest_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4509,6 +4655,54 @@ ALTER TABLE ONLY public.srpp_owner_key
 
 ALTER TABLE ONLY public.srpp_policy_registry
     ADD CONSTRAINT srpp_policy_registry_pkey PRIMARY KEY (policy_bundle_sha256);
+
+
+--
+-- Name: srpp_report_calculation_base srpp_report_base_source_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_base
+    ADD CONSTRAINT srpp_report_base_source_uq UNIQUE (owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version, source_fingerprint_sha256);
+
+
+--
+-- Name: srpp_report_calculation_base srpp_report_base_tenant_identity_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_base
+    ADD CONSTRAINT srpp_report_base_tenant_identity_uq UNIQUE (id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version);
+
+
+--
+-- Name: srpp_report_calculation_base srpp_report_calculation_base_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_base
+    ADD CONSTRAINT srpp_report_calculation_base_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_calculation_package_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_calculation_package_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_package_input_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_package_input_uq UNIQUE (owner_user_id, consumer, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, input_snapshot_sha256, calculator_version);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_package_state_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_package_state_uq UNIQUE (shared_calculation_id, consumer, consumer_state_sha256);
 
 
 --
@@ -5327,6 +5521,13 @@ CREATE INDEX idx_fubon_intraday_capture_retention_date ON public.fubon_intraday_
 
 
 --
+-- Name: idx_fubon_srpp_snapshot_owner_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_fubon_srpp_snapshot_owner_date ON public.fubon_srpp_source_snapshot USING btree (owner_user_id, trading_date, sequence_id DESC);
+
+
+--
 -- Name: idx_fubon_technical_capture_member_lookup; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5513,6 +5714,20 @@ CREATE INDEX idx_srpp_context_package_trading_date ON public.srpp_context_packag
 --
 
 CREATE INDEX idx_srpp_decision_run_owner_week ON public.srpp_decision_run USING btree (owner_user_id, trading_date, slot);
+
+
+--
+-- Name: idx_srpp_report_base_owner_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_srpp_report_base_owner_date ON public.srpp_report_calculation_base USING btree (owner_user_id, trading_date, report_slot, created_at DESC);
+
+
+--
+-- Name: idx_srpp_report_package_latest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_srpp_report_package_latest ON public.srpp_report_calculation_package USING btree (owner_user_id, consumer, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version, published_at DESC, id DESC);
 
 
 --
@@ -5712,6 +5927,13 @@ CREATE TRIGGER api_error_log_retention_guard BEFORE DELETE OR UPDATE ON public.a
 
 
 --
+-- Name: fubon_srpp_source_snapshot fubon_srpp_snapshot_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER fubon_srpp_snapshot_immutable BEFORE DELETE OR UPDATE ON public.fubon_srpp_source_snapshot FOR EACH ROW EXECUTE FUNCTION public.reject_fubon_srpp_snapshot_mutation();
+
+
+--
 -- Name: fubon_historical_backfill_window_attempt trg_fubon_historical_backfill_attempt_immutable; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -5779,6 +6001,20 @@ CREATE TRIGGER trg_srpp_owner_key_no_update BEFORE UPDATE ON public.srpp_owner_k
 --
 
 CREATE TRIGGER trg_srpp_policy_registry_no_update BEFORE UPDATE ON public.srpp_policy_registry FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_report_calculation_base trg_srpp_report_base_no_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_report_base_no_update BEFORE DELETE OR UPDATE ON public.srpp_report_calculation_base FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_report_calculation_package trg_srpp_report_package_no_update; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_report_package_no_update BEFORE DELETE OR UPDATE ON public.srpp_report_calculation_package FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
 
 
 --
@@ -6045,6 +6281,14 @@ ALTER TABLE ONLY public.fund_holding
 
 
 --
+-- Name: fubon_srpp_source_snapshot fubon_srpp_source_snapshot_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_srpp_source_snapshot
+    ADD CONSTRAINT fubon_srpp_source_snapshot_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
 -- Name: fund_master fund_master_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6154,6 +6398,46 @@ ALTER TABLE ONLY public.srpp_event_evidence_bundle
 
 ALTER TABLE ONLY public.srpp_owner_key
     ADD CONSTRAINT srpp_owner_key_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_report_calculation_base srpp_report_calculation_base_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_base
+    ADD CONSTRAINT srpp_report_calculation_base_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_report_calculation_base srpp_report_calculation_base_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_base
+    ADD CONSTRAINT srpp_report_calculation_base_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_calculation_package_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_calculation_package_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_calculation_package_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_calculation_package_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256);
+
+
+--
+-- Name: srpp_report_calculation_package srpp_report_package_base_identity_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_report_calculation_package
+    ADD CONSTRAINT srpp_report_package_base_identity_fk FOREIGN KEY (shared_calculation_id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version) REFERENCES public.srpp_report_calculation_base(id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version);
 
 
 --

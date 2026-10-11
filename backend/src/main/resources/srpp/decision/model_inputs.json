@@ -1,6 +1,6 @@
 {
   "model_version": "3.22.0",
-  "policy_version": "2.48.0",
+  "policy_version": "2.49.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -633,7 +633,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes for anything already reconciled; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-200",
+      "decision": "D-201",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -812,7 +812,7 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-200",
+      "decision": "D-201",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
@@ -879,7 +879,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-200",
+    "decision": "D-201",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -912,7 +912,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-200",
+      "decision": "D-201",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1268,7 +1268,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-200",
+      "decision": "D-201",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1319,7 +1319,7 @@
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-200",
+        "decision": "D-201",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1347,7 +1347,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-200",
+      "decision": "D-201",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1374,9 +1374,20 @@
         "SYMBOL_RULE_FACTS"
       ],
       "source_of_truth": "/api/assets/latest",
-      "fallback": "Verify optional calculation responses field by field against same-run direct L0 assets. Static snapshot fields may be cross-checked exactly; frozen live valuations without a shared market capture identity never replace later direct live prices. Unknown non-transit deposit rates remain unavailable, not known zero. Fall back only for affected purposes without extending draft deadlines.",
+      "fallback": "Only after an API purpose is unsupported, unavailable, partial for required fields, rejected by deterministic verification, stale for final use, or not callable by the available transport. Record the endpoint, status, reason, calculator and source identities. A verified BLOCKED result is never an API failure and must not be bypassed. LLM must not calculate lots, limits, funding, taxes or risk totals.",
       "final_decision_owner": "LLM",
-      "trade_authorized": false
+      "trade_authorized": false,
+      "calculation_owner": "ASSET_MANAGEMENT_9090",
+      "llm_role": "SELECT_APIS_VALIDATE_EVIDENCE_INTERPRET_AND_REPORT",
+      "api_first_required": true,
+      "local_duplicate_calculation_after_verified_api": false,
+      "llm_may_invent_numeric_results": false,
+      "receipt_post_routes": [
+        "/api/public/srpp/daily-decision/evaluate"
+      ],
+      "daily_decision_scope": [
+        "D130_D195_TW_BONDS"
+      ]
     },
     "schedule_runtime_policy": {
       "core_draft_and_readback_by_minute": 40,
@@ -1493,7 +1504,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-200",
+      "current_entry_rule_decision": "D-201",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1630,7 +1641,7 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-200",
+      "decision": "D-201",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
@@ -1858,7 +1869,7 @@
       "extended_by": "D-189"
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-200",
+      "decision": "D-201",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
@@ -1885,7 +1896,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B 6.333333% target. If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-200",
+        "decision": "D-201",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2001,7 +2012,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-200",
+  "decision": "D-201",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2022,7 +2033,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-200",
+    "decision": "D-201",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,

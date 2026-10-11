@@ -1,0 +1,3761 @@
+{
+  "source": "Original SRPP frozen same-input pure functions, no network IO",
+  "originalCalculatorHashes": {
+    "current_cash_income.py": "31ea64a44d0c86a2b4157bf656f8358bd57cc91f65d4048300d106d2830694aa",
+    "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
+    "budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268"
+  },
+  "rules": {
+    "taxYear": 2026,
+    "status": "OFFICIAL",
+    "brackets": [
+      {
+        "upper": "610000",
+        "rate": "0.05"
+      },
+      {
+        "upper": "1380000",
+        "rate": "0.12"
+      },
+      {
+        "upper": "2770000",
+        "rate": "0.20"
+      },
+      {
+        "upper": "5190000",
+        "rate": "0.30"
+      },
+      {
+        "upper": null,
+        "rate": "0.40"
+      }
+    ],
+    "exemption": "101000",
+    "exemptionAge70": "151500",
+    "standardDeduction": "136000",
+    "salaryDeductionCap": "227000",
+    "savingsDeductionCap": "270000",
+    "dividendCreditRate": "0.085",
+    "dividendCreditCap": "80000",
+    "separateDividendRate": "0.28",
+    "overseasInclusionThreshold": "1000000",
+    "basicIncomeThreshold": "7500000",
+    "basicTaxRate": "0.20",
+    "nhiThreshold": "20000",
+    "nhiCap": "10000000",
+    "nhiRate": "0.0211"
+  },
+  "cases": [
+    {
+      "kind": "tax",
+      "name": "refundable800k",
+      "inputs": {
+        "domesticDividend": "800000",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "0",
+        "overseasIncome": "0",
+        "creditableForeignTax": "0",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "563000",
+          "progressive_tax_before_credit": "28150",
+          "dividend_credit": "68000",
+          "ordinary_tax_after_credit": "-39850",
+          "overseas_income_included": "0",
+          "basic_income": "563000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "-39850"
+        },
+        "combined": {
+          "ordinary_net_income": "563000",
+          "progressive_tax_before_credit": "28150",
+          "dividend_credit": "68000",
+          "ordinary_tax_after_credit": "-39850",
+          "overseas_income_included": "0",
+          "basic_income": "563000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "-39850"
+        },
+        "separate": {
+          "ordinary_net_income": "0",
+          "progressive_tax": "0",
+          "separate_dividend_tax": "224000",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "224000",
+          "overseas_income_included": "0",
+          "basic_income": "800000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "224000",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "224000"
+        },
+        "inputs": {
+          "domestic_dividend": "800000",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "0",
+          "overseas_income": "0",
+          "creditable_foreign_tax": "0",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "0",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "separate_high_income",
+      "inputs": {
+        "domesticDividend": "5000000",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "9000000",
+        "overseasIncome": "0",
+        "creditableForeignTax": "0",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "SEPARATE_28_PERCENT",
+        "selected": {
+          "ordinary_net_income": "8536000",
+          "progressive_tax": "2465300",
+          "separate_dividend_tax": "1400000",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "3865300",
+          "overseas_income_included": "0",
+          "basic_income": "13536000",
+          "basic_tax": "1207200",
+          "ordinary_tax_for_comparison": "3865300",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "3865300"
+        },
+        "combined": {
+          "ordinary_net_income": "13536000",
+          "progressive_tax_before_credit": "4465300",
+          "dividend_credit": "80000",
+          "ordinary_tax_after_credit": "4385300",
+          "overseas_income_included": "0",
+          "basic_income": "13536000",
+          "basic_tax": "1207200",
+          "ordinary_tax_for_comparison": "4385300",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "4385300"
+        },
+        "separate": {
+          "ordinary_net_income": "8536000",
+          "progressive_tax": "2465300",
+          "separate_dividend_tax": "1400000",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "3865300",
+          "overseas_income_included": "0",
+          "basic_income": "13536000",
+          "basic_tax": "1207200",
+          "ordinary_tax_for_comparison": "3865300",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "3865300"
+        },
+        "inputs": {
+          "domestic_dividend": "5000000",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "9000000",
+          "overseas_income": "0",
+          "creditable_foreign_tax": "0",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "227000",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "overseas_below_threshold",
+      "inputs": {
+        "domesticDividend": "400000",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "0",
+        "overseasIncome": "999999",
+        "creditableForeignTax": "0",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "163000",
+          "progressive_tax_before_credit": "8150",
+          "dividend_credit": "34000",
+          "ordinary_tax_after_credit": "-25850",
+          "overseas_income_included": "0",
+          "basic_income": "163000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "-25850"
+        },
+        "combined": {
+          "ordinary_net_income": "163000",
+          "progressive_tax_before_credit": "8150",
+          "dividend_credit": "34000",
+          "ordinary_tax_after_credit": "-25850",
+          "overseas_income_included": "0",
+          "basic_income": "163000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "-25850"
+        },
+        "separate": {
+          "ordinary_net_income": "0",
+          "progressive_tax": "0",
+          "separate_dividend_tax": "112000",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "112000",
+          "overseas_income_included": "0",
+          "basic_income": "400000",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "112000",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "112000"
+        },
+        "inputs": {
+          "domestic_dividend": "400000",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "0",
+          "overseas_income": "999999",
+          "creditable_foreign_tax": "0",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "0",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "amt_foreign_credit",
+      "inputs": {
+        "domesticDividend": "800000",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "1348500",
+        "overseasIncome": "20000000",
+        "creditableForeignTax": "300000",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "1684500",
+          "progressive_tax_before_credit": "183800",
+          "dividend_credit": "68000",
+          "ordinary_tax_after_credit": "115800",
+          "overseas_income_included": "20000000",
+          "basic_income": "21684500",
+          "basic_tax": "2836900",
+          "ordinary_tax_for_comparison": "115800",
+          "difference_before_foreign_tax_credit": "2721100",
+          "foreign_tax_credit_limit": "2721100",
+          "foreign_tax_credit": "300000",
+          "additional_basic_tax": "2421100",
+          "taiwan_tax_after_amt_and_credit": "2536900"
+        },
+        "combined": {
+          "ordinary_net_income": "1684500",
+          "progressive_tax_before_credit": "183800",
+          "dividend_credit": "68000",
+          "ordinary_tax_after_credit": "115800",
+          "overseas_income_included": "20000000",
+          "basic_income": "21684500",
+          "basic_tax": "2836900",
+          "ordinary_tax_for_comparison": "115800",
+          "difference_before_foreign_tax_credit": "2721100",
+          "foreign_tax_credit_limit": "2721100",
+          "foreign_tax_credit": "300000",
+          "additional_basic_tax": "2421100",
+          "taiwan_tax_after_amt_and_credit": "2536900"
+        },
+        "separate": {
+          "ordinary_net_income": "884500",
+          "progressive_tax": "63440",
+          "separate_dividend_tax": "224000",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "287440",
+          "overseas_income_included": "20000000",
+          "basic_income": "21684500",
+          "basic_tax": "2836900",
+          "ordinary_tax_for_comparison": "287440",
+          "difference_before_foreign_tax_credit": "2549460",
+          "foreign_tax_credit_limit": "2549460",
+          "foreign_tax_credit": "300000",
+          "additional_basic_tax": "2249460",
+          "taiwan_tax_after_amt_and_credit": "2536900"
+        },
+        "inputs": {
+          "domestic_dividend": "800000",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "1348500",
+          "overseas_income": "20000000",
+          "creditable_foreign_tax": "300000",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "227000",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "foreign_credit_capped",
+      "inputs": {
+        "domesticDividend": "0",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "0",
+        "overseasIncome": "12000000",
+        "creditableForeignTax": "9000000",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "0",
+          "progressive_tax_before_credit": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "12000000",
+          "basic_income": "12000000",
+          "basic_tax": "900000",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "900000",
+          "foreign_tax_credit_limit": "900000",
+          "foreign_tax_credit": "900000",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "combined": {
+          "ordinary_net_income": "0",
+          "progressive_tax_before_credit": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "12000000",
+          "basic_income": "12000000",
+          "basic_tax": "900000",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "900000",
+          "foreign_tax_credit_limit": "900000",
+          "foreign_tax_credit": "900000",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "separate": {
+          "ordinary_net_income": "0",
+          "progressive_tax": "0",
+          "separate_dividend_tax": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "12000000",
+          "basic_income": "12000000",
+          "basic_tax": "900000",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "900000",
+          "foreign_tax_credit_limit": "900000",
+          "foreign_tax_credit": "900000",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "inputs": {
+          "domestic_dividend": "0",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "0",
+          "overseas_income": "12000000",
+          "creditable_foreign_tax": "9000000",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "0",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "age70_interest_deductions",
+      "inputs": {
+        "domesticDividend": "0",
+        "domesticInterest": "600000",
+        "savingsInterest": "500000",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "100000",
+        "overseasIncome": "0",
+        "creditableForeignTax": "0",
+        "age70OrOlder": true
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "42500",
+          "progressive_tax_before_credit": "2125",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "2125",
+          "overseas_income_included": "0",
+          "basic_income": "42500",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "2125",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "2125"
+        },
+        "combined": {
+          "ordinary_net_income": "42500",
+          "progressive_tax_before_credit": "2125",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "2125",
+          "overseas_income_included": "0",
+          "basic_income": "42500",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "2125",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "2125"
+        },
+        "separate": {
+          "ordinary_net_income": "42500",
+          "progressive_tax": "2125",
+          "separate_dividend_tax": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "2125",
+          "overseas_income_included": "0",
+          "basic_income": "42500",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "2125",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "2125"
+        },
+        "inputs": {
+          "domestic_dividend": "0",
+          "domestic_interest": "600000",
+          "savings_interest": "500000",
+          "other_domestic_income": "0",
+          "salary_income": "100000",
+          "overseas_income": "0",
+          "creditable_foreign_tax": "0",
+          "personal_exemption": "151500",
+          "standard_deduction": "136000",
+          "savings_deduction": "270000",
+          "salary_deduction": "100000",
+          "age_70_or_older": true
+        }
+      }
+    },
+    {
+      "kind": "tax",
+      "name": "known_zero",
+      "inputs": {
+        "domesticDividend": "0",
+        "domesticInterest": "0",
+        "savingsInterest": "0",
+        "otherDomesticIncome": "0",
+        "salaryIncome": "0",
+        "overseasIncome": "0",
+        "creditableForeignTax": "0",
+        "age70OrOlder": false
+      },
+      "expected": {
+        "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+        "selected": {
+          "ordinary_net_income": "0",
+          "progressive_tax_before_credit": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "0",
+          "basic_income": "0",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "combined": {
+          "ordinary_net_income": "0",
+          "progressive_tax_before_credit": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "0",
+          "basic_income": "0",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "separate": {
+          "ordinary_net_income": "0",
+          "progressive_tax": "0",
+          "separate_dividend_tax": "0",
+          "dividend_credit": "0",
+          "ordinary_tax_after_credit": "0",
+          "overseas_income_included": "0",
+          "basic_income": "0",
+          "basic_tax": "0",
+          "ordinary_tax_for_comparison": "0",
+          "difference_before_foreign_tax_credit": "0",
+          "foreign_tax_credit_limit": "0",
+          "foreign_tax_credit": "0",
+          "additional_basic_tax": "0",
+          "taiwan_tax_after_amt_and_credit": "0"
+        },
+        "inputs": {
+          "domestic_dividend": "0",
+          "domestic_interest": "0",
+          "savings_interest": "0",
+          "other_domestic_income": "0",
+          "salary_income": "0",
+          "overseas_income": "0",
+          "creditable_foreign_tax": "0",
+          "personal_exemption": "101000",
+          "standard_deduction": "136000",
+          "savings_deduction": "0",
+          "salary_deduction": "0",
+          "age_70_or_older": false
+        }
+      }
+    },
+    {
+      "kind": "nhi",
+      "name": "threshold_aggregated_brokers",
+      "annual": "30000",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "1",
+          "nhiChargeableShare": "1"
+        }
+      ],
+      "expected": "30000"
+    },
+    {
+      "kind": "nhi",
+      "name": "below_threshold",
+      "annual": "19999.99",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "1",
+          "nhiChargeableShare": "1"
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "kind": "nhi",
+      "name": "at_threshold",
+      "annual": "20000",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "1",
+          "nhiChargeableShare": "1"
+        }
+      ],
+      "expected": "20000"
+    },
+    {
+      "kind": "nhi",
+      "name": "distinct_monthly_payments",
+      "annual": "120000",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "0.25",
+          "nhiChargeableShare": "1"
+        },
+        {
+          "paymentEventId": "e1",
+          "grossEventFraction": "0.25",
+          "nhiChargeableShare": "1"
+        },
+        {
+          "paymentEventId": "e2",
+          "grossEventFraction": "0.25",
+          "nhiChargeableShare": "1"
+        },
+        {
+          "paymentEventId": "e3",
+          "grossEventFraction": "0.25",
+          "nhiChargeableShare": "1"
+        }
+      ],
+      "expected": "120000.00"
+    },
+    {
+      "kind": "nhi",
+      "name": "nhi_cap",
+      "annual": "20000000",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "1",
+          "nhiChargeableShare": "1"
+        }
+      ],
+      "expected": "10000000"
+    },
+    {
+      "kind": "nhi",
+      "name": "capital_components_excluded",
+      "annual": "100000",
+      "events": [
+        {
+          "paymentEventId": "e0",
+          "grossEventFraction": "1",
+          "nhiChargeableShare": "0.1"
+        }
+      ],
+      "expected": "0"
+    },
+    {
+      "kind": "payroll",
+      "name": "canonical",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-08-27",
+        "retirement_date": "2027-06-30",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "233f4c5c71ebc7f8536fe72a9e64d3947e3d1c78404aabdc278e392d95e6a414",
+        "as_of_date": "2026-08-27",
+        "retirement_date": "2027-06-30",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 10,
+        "ledger": [
+          {
+            "pay_date": "2026-09-15",
+            "year_rule_status": "official_115_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 63500,
+            "bonus_events": [
+              {
+                "name": "中秋獎金",
+                "months": "0.5",
+                "amount": 63500,
+                "festival_date": "2026-09-25",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 190500,
+            "labor_and_employment_insurance": 1145,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 19050,
+            "supplemental_nhi_high_bonus": 1340,
+            "total_payroll_deductions": 31480,
+            "net_cash_after_payroll": 159020,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 20390,
+            "investable_surplus": 112743
+          },
+          {
+            "pay_date": "2026-10-15",
+            "year_rule_status": "official_115_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1145,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23790,
+            "net_cash_after_payroll": 103210,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49244
+          },
+          {
+            "pay_date": "2026-11-15",
+            "year_rule_status": "official_115_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1145,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23790,
+            "net_cash_after_payroll": 103210,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49243
+          },
+          {
+            "pay_date": "2026-12-15",
+            "year_rule_status": "official_115_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1145,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23790,
+            "net_cash_after_payroll": 103210,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49243
+          },
+          {
+            "pay_date": "2027-01-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23836,
+            "net_cash_after_payroll": 103164,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49198
+          },
+          {
+            "pay_date": "2027-02-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 127000,
+            "bonus_events": [
+              {
+                "name": "春節獎金",
+                "months": "1.0",
+                "amount": 127000,
+                "festival_date": "2027-02-06",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 254000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 25400,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 36536,
+            "net_cash_after_payroll": 217464,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 25400,
+            "investable_surplus": 176197
+          },
+          {
+            "pay_date": "2027-03-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 387000,
+            "bonus_events": [
+              {
+                "name": "績效獎金",
+                "months": "3.0",
+                "amount": 387000,
+                "festival_date": null,
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 516000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 51600,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 62736,
+            "net_cash_after_payroll": 453264,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 51600,
+            "investable_surplus": 438197
+          },
+          {
+            "pay_date": "2027-04-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 129000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12900,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 24036,
+            "net_cash_after_payroll": 104964,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 12900,
+            "investable_surplus": 51198
+          },
+          {
+            "pay_date": "2027-05-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 129000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12900,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 24036,
+            "net_cash_after_payroll": 104964,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12900,
+            "investable_surplus": 51197
+          },
+          {
+            "pay_date": "2027-06-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 64500,
+            "bonus_events": [
+              {
+                "name": "端午獎金",
+                "months": "0.5",
+                "amount": 64500,
+                "festival_date": "2027-06-09",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 193500,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 19350,
+            "supplemental_nhi_high_bonus": 1091,
+            "total_payroll_deductions": 31577,
+            "net_cash_after_payroll": 161923,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 20441,
+            "investable_surplus": 115697
+          }
+        ],
+        "totals": {
+          "regular_salary": 1278000,
+          "bonus": 642000,
+          "gross_pay": 1920000,
+          "labor_and_employment_insurance": 11726,
+          "health_insurance": 20430,
+          "voluntary_labor_pension": 79020,
+          "income_tax_withholding": 192000,
+          "supplemental_nhi_high_bonus": 2431,
+          "total_payroll_deductions": 305607,
+          "net_cash_after_payroll": 1614393,
+          "planned_living_and_capex_cost": 666667,
+          "tax_included_in_living_budget": 194431,
+          "investable_surplus": 1142157
+        },
+        "calendar_year_totals": {
+          "2026": {
+            "regular_salary": 508000,
+            "bonus": 63500,
+            "gross_pay": 571500,
+            "labor_and_employment_insurance": 4580,
+            "health_insurance": 8172,
+            "voluntary_labor_pension": 31608,
+            "income_tax_withholding": 57150,
+            "supplemental_nhi_high_bonus": 1340,
+            "total_payroll_deductions": 102850,
+            "net_cash_after_payroll": 468650,
+            "planned_living_and_capex_cost": 266667,
+            "tax_included_in_living_budget": 58490,
+            "investable_surplus": 260473
+          },
+          "2027": {
+            "regular_salary": 770000,
+            "bonus": 578500,
+            "gross_pay": 1348500,
+            "labor_and_employment_insurance": 7146,
+            "health_insurance": 12258,
+            "voluntary_labor_pension": 47412,
+            "income_tax_withholding": 134850,
+            "supplemental_nhi_high_bonus": 1091,
+            "total_payroll_deductions": 202757,
+            "net_cash_after_payroll": 1145743,
+            "planned_living_and_capex_cost": 400000,
+            "tax_included_in_living_budget": 135941,
+            "investable_surplus": 881684
+          }
+        },
+        "calculation_hash": "3a53085499036e700359191fe16ca19da9f11e653272d83e6b7a3c9666f90084"
+      }
+    },
+    {
+      "kind": "payroll",
+      "name": "partial_month_after_payday",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-04-15",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "7a4057308d0edc17db6f7d7bc2328a334f40219d0041d66c4c1c5ca8aa003e36",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-04-15",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 4,
+        "ledger": [
+          {
+            "pay_date": "2027-01-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23836,
+            "net_cash_after_payroll": 103164,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49197
+          },
+          {
+            "pay_date": "2027-02-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 127000,
+            "bonus_events": [
+              {
+                "name": "春節獎金",
+                "months": "1.0",
+                "amount": 127000,
+                "festival_date": "2027-02-06",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 254000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 25400,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 36536,
+            "net_cash_after_payroll": 217464,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 25400,
+            "investable_surplus": 176198
+          },
+          {
+            "pay_date": "2027-03-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 387000,
+            "bonus_events": [
+              {
+                "name": "績效獎金",
+                "months": "3.0",
+                "amount": 387000,
+                "festival_date": null,
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 516000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 51600,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 62736,
+            "net_cash_after_payroll": 453264,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 51600,
+            "investable_surplus": 438197
+          },
+          {
+            "pay_date": "2027-04-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "0.5",
+            "insurance_month_fraction": "0.5",
+            "payment_after_retirement": false,
+            "regular_salary": 64500,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 64500,
+            "labor_and_employment_insurance": 595,
+            "health_insurance": 0,
+            "voluntary_labor_pension": 3951,
+            "income_tax_withholding": 6450,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 10996,
+            "net_cash_after_payroll": 53504,
+            "planned_living_and_capex_cost": 33333,
+            "tax_included_in_living_budget": 6450,
+            "investable_surplus": 26621
+          }
+        ],
+        "totals": {
+          "regular_salary": 447500,
+          "bonus": 514000,
+          "gross_pay": 961500,
+          "labor_and_employment_insurance": 4168,
+          "health_insurance": 6129,
+          "voluntary_labor_pension": 27657,
+          "income_tax_withholding": 96150,
+          "supplemental_nhi_high_bonus": 0,
+          "total_payroll_deductions": 134104,
+          "net_cash_after_payroll": 827396,
+          "planned_living_and_capex_cost": 233333,
+          "tax_included_in_living_budget": 96150,
+          "investable_surplus": 690213
+        },
+        "calendar_year_totals": {
+          "2027": {
+            "regular_salary": 447500,
+            "bonus": 514000,
+            "gross_pay": 961500,
+            "labor_and_employment_insurance": 4168,
+            "health_insurance": 6129,
+            "voluntary_labor_pension": 27657,
+            "income_tax_withholding": 96150,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 134104,
+            "net_cash_after_payroll": 827396,
+            "planned_living_and_capex_cost": 233333,
+            "tax_included_in_living_budget": 96150,
+            "investable_surplus": 690213
+          }
+        },
+        "calculation_hash": "857864579c8bb15ccf599a499b5bbead4c27b927cf4af72036c557e594a24373"
+      }
+    },
+    {
+      "kind": "payroll",
+      "name": "partial_month_before_payday",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-04-07",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "9e624d24e925371e93388398c51aaafa46c24e8406c8d6966c1d3745ba421c8c",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-04-07",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 4,
+        "ledger": [
+          {
+            "pay_date": "2027-01-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23836,
+            "net_cash_after_payroll": 103164,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49197
+          },
+          {
+            "pay_date": "2027-02-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 127000,
+            "bonus_events": [
+              {
+                "name": "春節獎金",
+                "months": "1.0",
+                "amount": 127000,
+                "festival_date": "2027-02-06",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 254000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 25400,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 36536,
+            "net_cash_after_payroll": 217464,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 25400,
+            "investable_surplus": 176198
+          },
+          {
+            "pay_date": "2027-03-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 387000,
+            "bonus_events": [
+              {
+                "name": "績效獎金",
+                "months": "3.0",
+                "amount": 387000,
+                "festival_date": null,
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 516000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 51600,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 62736,
+            "net_cash_after_payroll": 453264,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 51600,
+            "investable_surplus": 438197
+          },
+          {
+            "pay_date": "2027-04-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "0.23333333333333334",
+            "insurance_month_fraction": "0.23333333333333334",
+            "payment_after_retirement": true,
+            "regular_salary": 30100,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 30100,
+            "labor_and_employment_insurance": 278,
+            "health_insurance": 0,
+            "voluntary_labor_pension": 1844,
+            "income_tax_withholding": 3010,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 5132,
+            "net_cash_after_payroll": 24968,
+            "planned_living_and_capex_cost": 15556,
+            "tax_included_in_living_budget": 3010,
+            "investable_surplus": 12422
+          }
+        ],
+        "totals": {
+          "regular_salary": 413100,
+          "bonus": 514000,
+          "gross_pay": 927100,
+          "labor_and_employment_insurance": 3851,
+          "health_insurance": 6129,
+          "voluntary_labor_pension": 25550,
+          "income_tax_withholding": 92710,
+          "supplemental_nhi_high_bonus": 0,
+          "total_payroll_deductions": 128240,
+          "net_cash_after_payroll": 798860,
+          "planned_living_and_capex_cost": 215556,
+          "tax_included_in_living_budget": 92710,
+          "investable_surplus": 676014
+        },
+        "calendar_year_totals": {
+          "2027": {
+            "regular_salary": 413100,
+            "bonus": 514000,
+            "gross_pay": 927100,
+            "labor_and_employment_insurance": 3851,
+            "health_insurance": 6129,
+            "voluntary_labor_pension": 25550,
+            "income_tax_withholding": 92710,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 128240,
+            "net_cash_after_payroll": 798860,
+            "planned_living_and_capex_cost": 215556,
+            "tax_included_in_living_budget": 92710,
+            "investable_surplus": 676014
+          }
+        },
+        "calculation_hash": "e1cde92d74ff06a37c05c0504d3b76de2ab3f057cd85d7a7cb35c11a9b61ea1d"
+      }
+    },
+    {
+      "kind": "payroll",
+      "name": "future_brackets_carried",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2027-12-31",
+        "retirement_date": "2028-04-15",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "ac7cc9dd2c7978215cfe2447c9ee123bd62e2b392643b81ef0b52b8a887a5f65",
+        "as_of_date": "2027-12-31",
+        "retirement_date": "2028-04-15",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 4,
+        "ledger": [
+          {
+            "pay_date": "2028-01-15",
+            "year_rule_status": "projection_carries_2027_rules_pending_official_2028",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 129000,
+            "bonus_events": [
+              {
+                "name": "春節獎金",
+                "months": "1.0",
+                "amount": 129000,
+                "festival_date": null,
+                "timing_status": "projected_pay_month;_employer_payment_calendar_required"
+              }
+            ],
+            "gross_pay": 258000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 25800,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 36936,
+            "net_cash_after_payroll": 221064,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 25800,
+            "investable_surplus": 180197
+          },
+          {
+            "pay_date": "2028-02-15",
+            "year_rule_status": "projection_carries_2027_rules_pending_official_2028",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 129000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12900,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 24036,
+            "net_cash_after_payroll": 104964,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 12900,
+            "investable_surplus": 51198
+          },
+          {
+            "pay_date": "2028-03-15",
+            "year_rule_status": "projection_carries_2027_rules_pending_official_2028",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 131000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 131000,
+            "bonus": 393000,
+            "bonus_events": [
+              {
+                "name": "績效獎金",
+                "months": "3.0",
+                "amount": 393000,
+                "festival_date": null,
+                "timing_status": "projected_pay_month;_employer_payment_calendar_required"
+              }
+            ],
+            "gross_pay": 524000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 52400,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 63536,
+            "net_cash_after_payroll": 460464,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 52400,
+            "investable_surplus": 446197
+          },
+          {
+            "pay_date": "2028-04-15",
+            "year_rule_status": "projection_carries_2027_rules_pending_official_2028",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 131000,
+            "earned_month_fraction": "0.5",
+            "insurance_month_fraction": "0.5",
+            "payment_after_retirement": false,
+            "regular_salary": 65500,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 65500,
+            "labor_and_employment_insurance": 595,
+            "health_insurance": 0,
+            "voluntary_labor_pension": 3951,
+            "income_tax_withholding": 6550,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 11096,
+            "net_cash_after_payroll": 54404,
+            "planned_living_and_capex_cost": 33333,
+            "tax_included_in_living_budget": 6550,
+            "investable_surplus": 27621
+          }
+        ],
+        "totals": {
+          "regular_salary": 454500,
+          "bonus": 522000,
+          "gross_pay": 976500,
+          "labor_and_employment_insurance": 4168,
+          "health_insurance": 6129,
+          "voluntary_labor_pension": 27657,
+          "income_tax_withholding": 97650,
+          "supplemental_nhi_high_bonus": 0,
+          "total_payroll_deductions": 135604,
+          "net_cash_after_payroll": 840896,
+          "planned_living_and_capex_cost": 233333,
+          "tax_included_in_living_budget": 97650,
+          "investable_surplus": 705213
+        },
+        "calendar_year_totals": {
+          "2028": {
+            "regular_salary": 454500,
+            "bonus": 522000,
+            "gross_pay": 976500,
+            "labor_and_employment_insurance": 4168,
+            "health_insurance": 6129,
+            "voluntary_labor_pension": 27657,
+            "income_tax_withholding": 97650,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 135604,
+            "net_cash_after_payroll": 840896,
+            "planned_living_and_capex_cost": 233333,
+            "tax_included_in_living_budget": 97650,
+            "investable_surplus": 705213
+          }
+        },
+        "calculation_hash": "b4a9343c2104f411a5c7ccc4f4be247bf98adf931845bd6a18042918419e2ed1"
+      }
+    },
+    {
+      "kind": "payroll",
+      "name": "prior_bonus_affects_nhi",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2027-02-20",
+        "retirement_date": "2027-06-30",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "0a66814120fd73a0a2f4459802b9e1d785d54e1f2ed3428e89132db440ba9928",
+        "as_of_date": "2027-02-20",
+        "retirement_date": "2027-06-30",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 4,
+        "ledger": [
+          {
+            "pay_date": "2027-03-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 387000,
+            "bonus_events": [
+              {
+                "name": "績效獎金",
+                "months": "3.0",
+                "amount": 387000,
+                "festival_date": null,
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 516000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 51600,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 62736,
+            "net_cash_after_payroll": 453264,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 51600,
+            "investable_surplus": 438197
+          },
+          {
+            "pay_date": "2027-04-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 129000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12900,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 24036,
+            "net_cash_after_payroll": 104964,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 12900,
+            "investable_surplus": 51198
+          },
+          {
+            "pay_date": "2027-05-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 129000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12900,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 24036,
+            "net_cash_after_payroll": 104964,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12900,
+            "investable_surplus": 51197
+          },
+          {
+            "pay_date": "2027-06-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 129000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 129000,
+            "bonus": 64500,
+            "bonus_events": [
+              {
+                "name": "端午獎金",
+                "months": "0.5",
+                "amount": 64500,
+                "festival_date": "2027-06-09",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 193500,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 19350,
+            "supplemental_nhi_high_bonus": 1091,
+            "total_payroll_deductions": 31577,
+            "net_cash_after_payroll": 161923,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 20441,
+            "investable_surplus": 115697
+          }
+        ],
+        "totals": {
+          "regular_salary": 516000,
+          "bonus": 451500,
+          "gross_pay": 967500,
+          "labor_and_employment_insurance": 4764,
+          "health_insurance": 8172,
+          "voluntary_labor_pension": 31608,
+          "income_tax_withholding": 96750,
+          "supplemental_nhi_high_bonus": 1091,
+          "total_payroll_deductions": 142385,
+          "net_cash_after_payroll": 825115,
+          "planned_living_and_capex_cost": 266667,
+          "tax_included_in_living_budget": 97841,
+          "investable_surplus": 656289
+        },
+        "calendar_year_totals": {
+          "2027": {
+            "regular_salary": 516000,
+            "bonus": 451500,
+            "gross_pay": 967500,
+            "labor_and_employment_insurance": 4764,
+            "health_insurance": 8172,
+            "voluntary_labor_pension": 31608,
+            "income_tax_withholding": 96750,
+            "supplemental_nhi_high_bonus": 1091,
+            "total_payroll_deductions": 142385,
+            "net_cash_after_payroll": 825115,
+            "planned_living_and_capex_cost": 266667,
+            "tax_included_in_living_budget": 97841,
+            "investable_surplus": 656289
+          }
+        },
+        "calculation_hash": "f06772f546eb31b3a292b1560f6355b390def979e1e3ea8524a0483531f44e78"
+      }
+    },
+    {
+      "kind": "payroll",
+      "name": "full_february",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-02-28",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "expected": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "input_fingerprint": "36f889d90fc44a7599247265029852654e2b544738b0427e74e32a4c8706a91e",
+        "as_of_date": "2026-12-31",
+        "retirement_date": "2027-02-28",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "tax_treatment": {
+          "method": "user_confirmed_payroll_withholding_rate",
+          "rate": "0.1",
+          "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "included_payment_count": 2,
+        "ledger": [
+          {
+            "pay_date": "2027-01-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 0,
+            "bonus_events": [],
+            "gross_pay": 127000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 12700,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 23836,
+            "net_cash_after_payroll": 103164,
+            "planned_living_and_capex_cost": 66667,
+            "tax_included_in_living_budget": 12700,
+            "investable_surplus": 49197
+          },
+          {
+            "pay_date": "2027-02-15",
+            "year_rule_status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule",
+            "nhi_wage": 131700,
+            "labor_pension_wage": 131700,
+            "contractual_monthly_salary": 127000,
+            "earned_month_fraction": "1.0",
+            "insurance_month_fraction": "1.0",
+            "payment_after_retirement": false,
+            "regular_salary": 127000,
+            "bonus": 127000,
+            "bonus_events": [
+              {
+                "name": "春節獎金",
+                "months": "1.0",
+                "amount": 127000,
+                "festival_date": "2027-02-06",
+                "timing_status": "explicit_paydate"
+              }
+            ],
+            "gross_pay": 254000,
+            "labor_and_employment_insurance": 1191,
+            "health_insurance": 2043,
+            "voluntary_labor_pension": 7902,
+            "income_tax_withholding": 25400,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 36536,
+            "net_cash_after_payroll": 217464,
+            "planned_living_and_capex_cost": 66666,
+            "tax_included_in_living_budget": 25400,
+            "investable_surplus": 176198
+          }
+        ],
+        "totals": {
+          "regular_salary": 254000,
+          "bonus": 127000,
+          "gross_pay": 381000,
+          "labor_and_employment_insurance": 2382,
+          "health_insurance": 4086,
+          "voluntary_labor_pension": 15804,
+          "income_tax_withholding": 38100,
+          "supplemental_nhi_high_bonus": 0,
+          "total_payroll_deductions": 60372,
+          "net_cash_after_payroll": 320628,
+          "planned_living_and_capex_cost": 133333,
+          "tax_included_in_living_budget": 38100,
+          "investable_surplus": 225395
+        },
+        "calendar_year_totals": {
+          "2027": {
+            "regular_salary": 254000,
+            "bonus": 127000,
+            "gross_pay": 381000,
+            "labor_and_employment_insurance": 2382,
+            "health_insurance": 4086,
+            "voluntary_labor_pension": 15804,
+            "income_tax_withholding": 38100,
+            "supplemental_nhi_high_bonus": 0,
+            "total_payroll_deductions": 60372,
+            "net_cash_after_payroll": 320628,
+            "planned_living_and_capex_cost": 133333,
+            "tax_included_in_living_budget": 38100,
+            "investable_surplus": 225395
+          }
+        },
+        "calculation_hash": "b3cdf9bd3adca8b0eebe96b4811f88c049e4bb88033a4706ab7a2305cbd888fd"
+      }
+    },
+    {
+      "kind": "pension",
+      "name": "2027-06-30",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-08-27",
+        "retirement_date": "2027-06-30",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "pension": {
+        "age": 60,
+        "benefit": 3000000,
+        "new_car_purchase_2026_real_twd": 1400000,
+        "policy": "3000000 is the August 2026 balance. Add employer 6% of earned regular salary after August through retirement, March raises and partial final month, plus the user-confirmed payroll-bracket employee 6% contribution. Projected account earnings use the current 1.7108% reference as simple interest on the August balance and later timed contributions; this is a planning proxy, not a guarantee on the August total. Do not add a second guarantee payment without the complete contribution/earnings history. One withdrawal after retirement and age 60; application the next day when retirement is after age 60. Cash is modeled 30 days later. Car purchase remains on 2030-10-16 from existing liquidity if the benefit has not arrived; no duplicate reservation. Bear investments use the five-batch ladder.",
+        "new_car_purchase_date": "2030-10-16",
+        "note": "The dated car event is debited once on 2030-10-16. If the labor-pension cash has already arrived it is earmarked until that date; otherwise existing liquid assets bridge the car before the later receipt. No second 1.4M deduction or reservation is allowed.",
+        "amount_basis": "nominal TWD opening balance at balance_as_of_date",
+        "receipt_amount_basis": "nominal TWD at receipt",
+        "balance_as_of_date": "2026-08-31",
+        "employer_contribution_rate": 0.06,
+        "investment_return_assumption": 0.017108,
+        "eligible_date": "2030-10-15",
+        "receipt_lag_days": 30,
+        "receipt_date_rule": "max(age_60_date, retirement_date + 1 day) + 30 days",
+        "return_assumption": {
+          "reference_rate": 0.017108,
+          "reference_month": "2026-08",
+          "verified_through": "2026-09",
+          "source": "https://www.blf.gov.tw/49200/49255/49261/49269/49277/73025/?cprint=pt",
+          "mode": "simple-interest forward planning proxy based on current guarantee reference, not an exact statutory guarantee",
+          "future_rates": "hold latest published rate as an explicit assumption; actual monthly guarantees may change",
+          "legal_guarantee": "Compare cumulative actual earnings and cumulative guaranteed earnings over the whole contribution period at claim; only any shortfall is supplemented, never add both",
+          "opening_principal_twd": null,
+          "opening_accumulated_earnings_twd": null,
+          "opening_cumulative_guaranteed_earnings_twd": null,
+          "exact_guarantee_calculable": false
+        }
+      },
+      "expected": {
+        "balance_as_of_date": "2026-08-31",
+        "opening_nominal_twd": 3000000,
+        "employer_contributions_nominal_twd": "76680.0",
+        "employee_contributions_nominal_twd": 79020,
+        "total_nominal_twd": "3377083.84",
+        "projected_future_earnings_nominal_twd": "221383.84",
+        "statutory_guarantee_top_up_nominal_twd": null,
+        "earnings_basis": "simple-interest planning proxy; exact lifetime guarantee requires contribution and prior-earnings history",
+        "retirement_date": "2027-06-30",
+        "investment_return_assumption": "0.017108",
+        "employer_basis": "6% of earned regular salary; bonuses excluded",
+        "receipt_events": {
+          "2030-11-14": "3377083.84"
+        },
+        "application_date": "2030-10-15",
+        "receipt_date": "2030-11-14",
+        "posting_convention": "One receipt after retirement and age 60; application the day after retirement if already 60; cash 30 days after application. Includes final earned contributions; actual account posting must be confirmed."
+      }
+    },
+    {
+      "kind": "pension",
+      "name": "2031-04-15",
+      "config": {
+        "calculation_standard": "PRE_RETIREMENT_PAYROLL_STANDARD_D105",
+        "calculation_version": "2.2.0",
+        "currency": "TWD",
+        "as_of_date": "2026-08-27",
+        "retirement_date": "2031-04-15",
+        "payday_day_of_month": 15,
+        "payday_convention": "Monthly 15th cash paydate. The final month earns contractual monthly salary times inclusive employment days divided by actual calendar days; earned final wages remain payable on the 15th even after retirement. Future employer settlement dates and bonus eligibility are planning assumptions.",
+        "employee_profile": {
+          "monthly_salary": 127000,
+          "nhi_dependents": 0,
+          "income_tax_withholding": {
+            "method": "user_confirmed_payroll_withholding_rate",
+            "rate": 0.1,
+            "note": "D-076 records Steven's actual payroll withholding as 10% of salary and bonuses. This is cash withheld from pay, not a final annual income-tax assessment."
+          },
+          "voluntary_labor_pension": {
+            "employee_rate": 0.06,
+            "note": "Keep the existing 6% voluntary contribution. It reduces spendable cash before retirement and remains locked until age 60; it is not added to the pre-retirement investable-cash contribution."
+          },
+          "annual_salary_increase": {
+            "amount": 2000,
+            "first_increase_date": "2027-03-01",
+            "frequency": "every March 1; bonus uses salary on payment date"
+          }
+        },
+        "bonus_events": [
+          {
+            "name": "中秋獎金",
+            "festival_date": "2026-09-25",
+            "pay_date": "2026-09-15",
+            "months": 0.5
+          },
+          {
+            "name": "春節獎金",
+            "festival_date": "2027-02-06",
+            "pay_date": "2027-02-15",
+            "months": 1.0
+          },
+          {
+            "name": "績效獎金",
+            "pay_date": "2027-03-15",
+            "months": 3.0
+          },
+          {
+            "name": "端午獎金",
+            "festival_date": "2027-06-09",
+            "pay_date": "2027-06-15",
+            "months": 0.5
+          }
+        ],
+        "social_insurance_by_year": {
+          "2026": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.115,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "official_115_schedule"
+          },
+          "2027": {
+            "labor_insurance_wage": 45800,
+            "ordinary_labor_insurance_rate": 0.12,
+            "employment_insurance_rate": 0.01,
+            "labor_and_employment_employee_share": 0.2,
+            "nhi_wage": 131700,
+            "nhi_rate": 0.0517,
+            "nhi_employee_share": 0.3,
+            "supplemental_nhi_rate": 0.0211,
+            "labor_pension_wage": 131700,
+            "status": "labor_rate_statutory_step;_nhi_and_labor-pension_brackets_carried_from_115_pending_116_official_schedule"
+          }
+        },
+        "planned_living_costs": {
+          "monthly_living_expense": 62500,
+          "annual_prorated_costs": {
+            "home_repair_amortization": 20000,
+            "appliance_amortization": 30000
+          },
+          "proration_method": "Display only: annual August-2026 living budget TWD750000 includes all taxes and routine car repairs; home/appliance TWD50000 annual average is additional. Shown payroll taxes consume the living envelope; other annual investment/settlement taxes are handled by the full monthly model. The model never deducts this displayed surplus/budget again.",
+          "all_taxes_included": true,
+          "purchasing_power_base_date": "2026-08-31"
+        },
+        "revalidation": {
+          "required_before": "2027-01-15",
+          "reason": "The 116 (2027) NHI premium schedule and labor-pension wage brackets were not officially published as of 2026-08-27. Recalculate the ledger if either changes; the 2027 ordinary labor-insurance rate is set from the existing statutory step schedule."
+        },
+        "recurring_bonuses": [
+          {
+            "name": "春節獎金",
+            "months": 1.0,
+            "month": 2,
+            "month_by_year": {
+              "2028": 1,
+              "2031": 1,
+              "2033": 1
+            }
+          },
+          {
+            "name": "績效獎金",
+            "months": 3.0,
+            "month": 3
+          },
+          {
+            "name": "端午獎金",
+            "months": 0.5,
+            "month": 6,
+            "month_by_year": {
+              "2028": 5
+            }
+          },
+          {
+            "name": "中秋獎金",
+            "months": 0.5,
+            "month": 9,
+            "month_by_year": {
+              "2028": 10,
+              "2031": 10
+            }
+          }
+        ],
+        "recurrence_note": "Explicit paydates override projected recurring months. Future bonus payment months are planning assumptions, not an employer calendar. Do not infer an unearned termination-month salary or a guaranteed payment from a candidate date.",
+        "wage_brackets_115": {
+          "nhi_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000,
+            156400,
+            162800,
+            169200,
+            175600,
+            182000,
+            189500,
+            197000,
+            204500,
+            212000,
+            219500,
+            228200,
+            236900,
+            245600,
+            254300,
+            263000,
+            273000,
+            283000,
+            293000,
+            303000,
+            313000
+          ],
+          "labor_pension_wage": [
+            115500,
+            120900,
+            126300,
+            131700,
+            137100,
+            142500,
+            147900,
+            150000
+          ]
+        },
+        "sources": [
+          "https://www.nhi.gov.tw/ch/cp-19421-f9533-2569-1.html",
+          "https://www.bli.gov.tw/0102563.html",
+          "https://www.bli.gov.tw/0107306.html",
+          "https://www.bli.gov.tw/0101852.html",
+          "https://www.bli.gov.tw/0014162.htm",
+          "https://www.mohw.gov.tw/cp-2704-27995-1.html"
+        ],
+        "final_month_convention": {
+          "salary": "actual_calendar_employment_days_inclusive / actual_days_in_month",
+          "labor_and_employment_insurance_and_self_pension": "partial month uses insured days / 30; full month uses 1 regardless of month length",
+          "employer_nhi": "full monthly premium only if still employed on the last day of the month; otherwise transferred coverage is within the normal living budget",
+          "bonus": "contractual salary on payment date, only if still employed on that date; employer confirmation required"
+        }
+      },
+      "pension": {
+        "age": 60,
+        "benefit": 3000000,
+        "new_car_purchase_2026_real_twd": 1400000,
+        "policy": "3000000 is the August 2026 balance. Add employer 6% of earned regular salary after August through retirement, March raises and partial final month, plus the user-confirmed payroll-bracket employee 6% contribution. Projected account earnings use the current 1.7108% reference as simple interest on the August balance and later timed contributions; this is a planning proxy, not a guarantee on the August total. Do not add a second guarantee payment without the complete contribution/earnings history. One withdrawal after retirement and age 60; application the next day when retirement is after age 60. Cash is modeled 30 days later. Car purchase remains on 2030-10-16 from existing liquidity if the benefit has not arrived; no duplicate reservation. Bear investments use the five-batch ladder.",
+        "new_car_purchase_date": "2030-10-16",
+        "note": "The dated car event is debited once on 2030-10-16. If the labor-pension cash has already arrived it is earmarked until that date; otherwise existing liquid assets bridge the car before the later receipt. No second 1.4M deduction or reservation is allowed.",
+        "amount_basis": "nominal TWD opening balance at balance_as_of_date",
+        "receipt_amount_basis": "nominal TWD at receipt",
+        "balance_as_of_date": "2026-08-31",
+        "employer_contribution_rate": 0.06,
+        "investment_return_assumption": 0.017108,
+        "eligible_date": "2030-10-15",
+        "receipt_lag_days": 30,
+        "receipt_date_rule": "max(age_60_date, retirement_date + 1 day) + 30 days",
+        "return_assumption": {
+          "reference_rate": 0.017108,
+          "reference_month": "2026-08",
+          "verified_through": "2026-09",
+          "source": "https://www.blf.gov.tw/49200/49255/49261/49269/49277/73025/?cprint=pt",
+          "mode": "simple-interest forward planning proxy based on current guarantee reference, not an exact statutory guarantee",
+          "future_rates": "hold latest published rate as an explicit assumption; actual monthly guarantees may change",
+          "legal_guarantee": "Compare cumulative actual earnings and cumulative guaranteed earnings over the whole contribution period at claim; only any shortfall is supplemented, never add both",
+          "opening_principal_twd": null,
+          "opening_accumulated_earnings_twd": null,
+          "opening_cumulative_guaranteed_earnings_twd": null,
+          "exact_guarantee_calculable": false
+        }
+      },
+      "expected": {
+        "balance_as_of_date": "2026-08-31",
+        "opening_nominal_twd": 3000000,
+        "employer_contributions_nominal_twd": "438210.0",
+        "employee_contributions_nominal_twd": 446823,
+        "total_nominal_twd": "4156374.35",
+        "projected_future_earnings_nominal_twd": "271341.35",
+        "statutory_guarantee_top_up_nominal_twd": null,
+        "earnings_basis": "simple-interest planning proxy; exact lifetime guarantee requires contribution and prior-earnings history",
+        "retirement_date": "2031-04-15",
+        "investment_return_assumption": "0.017108",
+        "employer_basis": "6% of earned regular salary; bonuses excluded",
+        "receipt_events": {
+          "2031-05-16": "4156374.35"
+        },
+        "application_date": "2031-04-16",
+        "receipt_date": "2031-05-16",
+        "posting_convention": "One receipt after retirement and age 60; application the day after retirement if already 60; cash 30 days after application. Includes final earned contributions; actual account posting must be confirmed."
+      }
+    },
+    {
+      "kind": "incomePortfolio",
+      "name": "stock_us_sgov_deposit_renewal",
+      "total": "10000000",
+      "weights": {
+        "0050": "0.25",
+        "VOO": "0.25",
+        "SGOV": "0.1",
+        "TWD_term_deposits": "0.4"
+      },
+      "profiles": {
+        "0050": {
+          "regular_cash_yield": "0.08",
+          "cash_withholding_rate": "0",
+          "creditable_foreign_tax_rate": "0",
+          "domestic_dividend_share": "1",
+          "domestic_interest_share": "0",
+          "savings_interest_share": "0",
+          "other_domestic_income_share": "0",
+          "overseas_income_share": "0",
+          "distribution_event_template": [
+            {
+              "gross_event_fraction": "0.25",
+              "nhi_chargeable_share": "1"
+            },
+            {
+              "gross_event_fraction": "0.25",
+              "nhi_chargeable_share": "1"
+            },
+            {
+              "gross_event_fraction": "0.25",
+              "nhi_chargeable_share": "1"
+            },
+            {
+              "gross_event_fraction": "0.25",
+              "nhi_chargeable_share": "1"
+            }
+          ]
+        },
+        "VOO": {
+          "regular_cash_yield": "0.02",
+          "cash_withholding_rate": "0.3",
+          "creditable_foreign_tax_rate": "0.3",
+          "domestic_dividend_share": "0",
+          "domestic_interest_share": "0",
+          "savings_interest_share": "0",
+          "other_domestic_income_share": "0",
+          "overseas_income_share": "1",
+          "distribution_event_template": [
+            {
+              "gross_event_fraction": "1",
+              "nhi_chargeable_share": "0"
+            }
+          ]
+        },
+        "SGOV": {
+          "regular_cash_yield": "0.04",
+          "cash_withholding_rate": "0",
+          "creditable_foreign_tax_rate": "0",
+          "domestic_dividend_share": "0",
+          "domestic_interest_share": "0",
+          "savings_interest_share": "0",
+          "other_domestic_income_share": "0",
+          "overseas_income_share": "1",
+          "distribution_event_template": [
+            {
+              "gross_event_fraction": "1",
+              "nhi_chargeable_share": "0"
+            }
+          ]
+        },
+        "TWD_term_deposits": {
+          "regular_cash_yield": "0.017",
+          "cash_withholding_rate": "0",
+          "creditable_foreign_tax_rate": "0",
+          "domestic_dividend_share": "0",
+          "domestic_interest_share": "1",
+          "savings_interest_share": "1",
+          "other_domestic_income_share": "0",
+          "overseas_income_share": "0",
+          "distribution_event_template": [
+            {
+              "gross_event_fraction": "0.3333333333333333333333333333",
+              "nhi_chargeable_share": "1"
+            },
+            {
+              "gross_event_fraction": "0.3333333333333333333333333333",
+              "nhi_chargeable_share": "1"
+            },
+            {
+              "gross_event_fraction": "0.3333333333333333333333333333",
+              "nhi_chargeable_share": "1"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "gross": "344400",
+        "source_accrued_gross": "358000",
+        "protected_permanent_term_deposit_twd": "800000",
+        "permanent_term_deposit_interest_reinvested": "13600",
+        "domestic_distributions": "200000",
+        "domestic_interest": "68000",
+        "savings_interest": "68000",
+        "other_domestic_income": "0",
+        "overseas_income": "90000",
+        "us_withholding": "15000",
+        "creditable_foreign_tax": "15000",
+        "nhi_chargeable": "268000",
+        "term_deposit_nhi_unconfirmed_chargeable_upper_bound": "0",
+        "supplementary": "5654.8",
+        "domestic_tax": "-17000",
+        "interest_tax": "0",
+        "income_tax_and_withholding": "-2000",
+        "overseas_amt": "0",
+        "after_all_tax": "340745.2",
+        "dividend_tax_election": {
+          "selected_method": "COMBINED_PROGRESSIVE_WITH_8_5_PERCENT_REFUNDABLE_CREDIT",
+          "selected": {
+            "ordinary_net_income": "0",
+            "progressive_tax_before_credit": "0",
+            "dividend_credit": "17000",
+            "ordinary_tax_after_credit": "-17000",
+            "overseas_income_included": "0",
+            "basic_income": "0",
+            "basic_tax": "0",
+            "ordinary_tax_for_comparison": "0",
+            "difference_before_foreign_tax_credit": "0",
+            "foreign_tax_credit_limit": "0",
+            "foreign_tax_credit": "0",
+            "additional_basic_tax": "0",
+            "taiwan_tax_after_amt_and_credit": "-17000"
+          },
+          "combined": {
+            "ordinary_net_income": "0",
+            "progressive_tax_before_credit": "0",
+            "dividend_credit": "17000",
+            "ordinary_tax_after_credit": "-17000",
+            "overseas_income_included": "0",
+            "basic_income": "0",
+            "basic_tax": "0",
+            "ordinary_tax_for_comparison": "0",
+            "difference_before_foreign_tax_credit": "0",
+            "foreign_tax_credit_limit": "0",
+            "foreign_tax_credit": "0",
+            "additional_basic_tax": "0",
+            "taiwan_tax_after_amt_and_credit": "-17000"
+          },
+          "separate": {
+            "ordinary_net_income": "0",
+            "progressive_tax": "0",
+            "separate_dividend_tax": "56000",
+            "dividend_credit": "0",
+            "ordinary_tax_after_credit": "56000",
+            "overseas_income_included": "0",
+            "basic_income": "200000",
+            "basic_tax": "0",
+            "ordinary_tax_for_comparison": "56000",
+            "difference_before_foreign_tax_credit": "0",
+            "foreign_tax_credit_limit": "0",
+            "foreign_tax_credit": "0",
+            "additional_basic_tax": "0",
+            "taiwan_tax_after_amt_and_credit": "56000"
+          },
+          "inputs": {
+            "domestic_dividend": "200000",
+            "domestic_interest": "68000",
+            "savings_interest": "68000",
+            "other_domestic_income": "0",
+            "salary_income": "0",
+            "overseas_income": "90000",
+            "creditable_foreign_tax": "15000",
+            "personal_exemption": "101000",
+            "standard_deduction": "136000",
+            "savings_deduction": "68000",
+            "salary_deduction": "0",
+            "age_70_or_older": false
+          }
+        },
+        "by_asset": {
+          "0050": {
+            "position": "2500000",
+            "gross": "200000",
+            "us_withholding": "0",
+            "creditable_foreign_tax": "0",
+            "nhi_chargeable": "200000",
+            "domestic_dividend": "200000",
+            "domestic_interest": "0",
+            "savings_interest": "0",
+            "other_domestic_income": "0",
+            "overseas_income": "0",
+            "nhi_events": [
+              {
+                "gross_payment_twd": "50000.0",
+                "nhi_component_twd": "50000.0",
+                "nhi_chargeable_base_twd": "50000.0"
+              },
+              {
+                "gross_payment_twd": "50000.0",
+                "nhi_component_twd": "50000.0",
+                "nhi_chargeable_base_twd": "50000.0"
+              },
+              {
+                "gross_payment_twd": "50000.0",
+                "nhi_component_twd": "50000.0",
+                "nhi_chargeable_base_twd": "50000.0"
+              },
+              {
+                "gross_payment_twd": "50000.0",
+                "nhi_component_twd": "50000.0",
+                "nhi_chargeable_base_twd": "50000.0"
+              }
+            ]
+          },
+          "VOO": {
+            "position": "2500000",
+            "gross": "50000",
+            "us_withholding": "15000",
+            "creditable_foreign_tax": "15000",
+            "nhi_chargeable": "0",
+            "domestic_dividend": "0",
+            "domestic_interest": "0",
+            "savings_interest": "0",
+            "other_domestic_income": "0",
+            "overseas_income": "50000",
+            "nhi_events": [
+              {
+                "gross_payment_twd": "50000.0",
+                "nhi_component_twd": "0.0",
+                "nhi_chargeable_base_twd": "0.0"
+              }
+            ]
+          },
+          "SGOV": {
+            "position": "1000000",
+            "gross": "40000",
+            "us_withholding": "0",
+            "creditable_foreign_tax": "0",
+            "nhi_chargeable": "0",
+            "domestic_dividend": "0",
+            "domestic_interest": "0",
+            "savings_interest": "0",
+            "other_domestic_income": "0",
+            "overseas_income": "40000",
+            "nhi_events": [
+              {
+                "gross_payment_twd": "40000.0",
+                "nhi_component_twd": "0.0",
+                "nhi_chargeable_base_twd": "0.0"
+              }
+            ]
+          },
+          "TWD_term_deposits": {
+            "position": "4000000",
+            "gross": "68000",
+            "us_withholding": "0",
+            "creditable_foreign_tax": "0",
+            "nhi_chargeable": "67999.99999999999999999999998",
+            "domestic_dividend": "0",
+            "domestic_interest": "68000",
+            "savings_interest": "68000",
+            "other_domestic_income": "0",
+            "overseas_income": "0",
+            "nhi_events": [
+              {
+                "gross_payment_twd": "22666.67",
+                "nhi_component_twd": "22666.67",
+                "nhi_chargeable_base_twd": "22666.67"
+              },
+              {
+                "gross_payment_twd": "22666.67",
+                "nhi_component_twd": "22666.67",
+                "nhi_chargeable_base_twd": "22666.67"
+              },
+              {
+                "gross_payment_twd": "22666.67",
+                "nhi_component_twd": "22666.67",
+                "nhi_chargeable_base_twd": "22666.67"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "kind": "laborInsurance",
+      "name": "1970-10-15:2027-06-30",
+      "birth": "1970-10-15",
+      "retirement": "2027-06-30",
+      "policy": {
+        "birth_date": "1970-10-15",
+        "start_age": 60,
+        "start_date": "2030-10-15",
+        "normal_claim_age": 65,
+        "normal_start_date": "2035-10-15",
+        "base_monthly_nominal": 20017,
+        "monthly_nominal": 16013.6,
+        "early_claim_reduction": 0.2,
+        "adjustment_per_year": 0.04,
+        "maximum_adjustment_years": 5,
+        "indexation": "Claim-cohort annual-average CPI. Compare previous-year annual average with claim-year/last-adjusted annual average; round percentage to 2 decimal places. At >=5%, increase by actual accumulated percentage from May next year, paid June-end; reset reference after adjustment. Age-based reduction or increase is permanent and uses 4% per year prorated by completed claim-age months, capped at 20%.",
+        "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
+      },
+      "expected": {
+        "earliest_claim_date": "2030-10-15",
+        "normal_claim_date": "2035-10-15",
+        "claim_date": "2030-10-15",
+        "months_early": 60,
+        "months_delayed": 0,
+        "permanent_adjustment": "-0.19999999999999998",
+        "monthly_nominal": "16013.6"
+      }
+    },
+    {
+      "kind": "laborInsurance",
+      "name": "1970-10-15:2037-04-15",
+      "birth": "1970-10-15",
+      "retirement": "2037-04-15",
+      "policy": {
+        "birth_date": "1970-10-15",
+        "start_age": 60,
+        "start_date": "2030-10-15",
+        "normal_claim_age": 65,
+        "normal_start_date": "2035-10-15",
+        "base_monthly_nominal": 20017,
+        "monthly_nominal": 16013.6,
+        "early_claim_reduction": 0.2,
+        "adjustment_per_year": 0.04,
+        "maximum_adjustment_years": 5,
+        "indexation": "Claim-cohort annual-average CPI. Compare previous-year annual average with claim-year/last-adjusted annual average; round percentage to 2 decimal places. At >=5%, increase by actual accumulated percentage from May next year, paid June-end; reset reference after adjustment. Age-based reduction or increase is permanent and uses 4% per year prorated by completed claim-age months, capped at 20%.",
+        "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
+      },
+      "expected": {
+        "earliest_claim_date": "2030-10-15",
+        "normal_claim_date": "2035-10-15",
+        "claim_date": "2037-04-16",
+        "months_early": 0,
+        "months_delayed": 18,
+        "permanent_adjustment": "0.06",
+        "monthly_nominal": "21218.02"
+      }
+    },
+    {
+      "kind": "laborInsurance",
+      "name": "1972-02-29:2031-04-15",
+      "birth": "1972-02-29",
+      "retirement": "2031-04-15",
+      "policy": {
+        "birth_date": "1970-10-15",
+        "start_age": 60,
+        "start_date": "2030-10-15",
+        "normal_claim_age": 65,
+        "normal_start_date": "2035-10-15",
+        "base_monthly_nominal": 20017,
+        "monthly_nominal": 16013.6,
+        "early_claim_reduction": 0.2,
+        "adjustment_per_year": 0.04,
+        "maximum_adjustment_years": 5,
+        "indexation": "Claim-cohort annual-average CPI. Compare previous-year annual average with claim-year/last-adjusted annual average; round percentage to 2 decimal places. At >=5%, increase by actual accumulated percentage from May next year, paid June-end; reset reference after adjustment. Age-based reduction or increase is permanent and uses 4% per year prorated by completed claim-age months, capped at 20%.",
+        "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
+      },
+      "expected": {
+        "earliest_claim_date": "2032-02-29",
+        "normal_claim_date": "2037-02-28",
+        "claim_date": "2032-02-29",
+        "months_early": 60,
+        "months_delayed": 0,
+        "permanent_adjustment": "-0.19999999999999998",
+        "monthly_nominal": "16013.6"
+      }
+    }
+  ]
+}

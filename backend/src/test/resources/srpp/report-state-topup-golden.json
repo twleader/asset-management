@@ -1,0 +1,1109 @@
+{
+  "cases": [
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": null,
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "",
+        "halved": false,
+        "month": "",
+        "processedFillIds": [],
+        "verified": true,
+        "week": ""
+      },
+      "date": "2026-09-01",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": null,
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "2026-09-01",
+        "halved": false,
+        "month": "2026-09",
+        "processedFillIds": [],
+        "verified": true,
+        "week": "2026-W36"
+      },
+      "fills": [],
+      "fx": 32,
+      "kind": "pace",
+      "name": "initial"
+    },
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": null,
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "2026-09-01",
+        "halved": false,
+        "month": "2026-09",
+        "processedFillIds": [],
+        "verified": true,
+        "week": "2026-W36"
+      },
+      "date": "2026-09-15",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "100",
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "11200",
+          "weekBatches": 0
+        },
+        "day": "2026-09-15",
+        "halved": false,
+        "month": "2026-09",
+        "processedFillIds": [
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "fills": [
+        {
+          "confirmed": true,
+          "date": "2026-09-15",
+          "fillId": "scheduled0",
+          "fx": 32,
+          "nominalTwd": 11200,
+          "price": 100,
+          "scheduled": true,
+          "shares": 0,
+          "symbol": "VOO"
+        }
+      ],
+      "fx": 32,
+      "kind": "pace",
+      "name": "scheduled"
+    },
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "100",
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "11200",
+          "weekBatches": 0
+        },
+        "day": "2026-09-15",
+        "halved": false,
+        "month": "2026-09",
+        "processedFillIds": [
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "date": "2026-09-15",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 1,
+          "previousShortfall": "0",
+          "spent": "50000",
+          "weekLots": 1
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "99",
+          "monthBatches": 1,
+          "previousShortfall": "0",
+          "spent": "161200",
+          "weekBatches": 1
+        },
+        "day": "2026-09-15",
+        "halved": true,
+        "month": "2026-09",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "fills": [
+        {
+          "confirmed": true,
+          "date": "2026-09-15",
+          "fillId": "discretionary_and_local0",
+          "fx": 34,
+          "nominalTwd": 150000,
+          "price": 99,
+          "scheduled": false,
+          "shares": 0,
+          "symbol": "VOO"
+        },
+        {
+          "confirmed": true,
+          "date": "2026-09-15",
+          "fillId": "discretionary_and_local1",
+          "fx": 34,
+          "nominalTwd": 50000,
+          "price": 50,
+          "scheduled": false,
+          "shares": 1000,
+          "symbol": "009826"
+        }
+      ],
+      "fx": 34,
+      "kind": "pace",
+      "name": "discretionary_and_local"
+    },
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 1,
+          "previousShortfall": "0",
+          "spent": "50000",
+          "weekLots": 1
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "99",
+          "monthBatches": 1,
+          "previousShortfall": "0",
+          "spent": "161200",
+          "weekBatches": 1
+        },
+        "day": "2026-09-15",
+        "halved": true,
+        "month": "2026-09",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "date": "2026-09-16",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "50000",
+          "weekLots": 1
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "99",
+          "monthBatches": 1,
+          "previousShortfall": "0",
+          "spent": "161200",
+          "weekBatches": 1
+        },
+        "day": "2026-09-16",
+        "halved": true,
+        "month": "2026-09",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "fills": [],
+      "fx": 32,
+      "kind": "pace",
+      "name": "sticky_halving"
+    },
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 0,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "50000",
+          "weekLots": 1
+        },
+        "VOO": {
+          "consecutiveShortfalls": 0,
+          "lastFillPrice": "99",
+          "monthBatches": 1,
+          "previousShortfall": "0",
+          "spent": "161200",
+          "weekBatches": 1
+        },
+        "day": "2026-09-16",
+        "halved": true,
+        "month": "2026-09",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W38"
+      },
+      "date": "2026-10-01",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 1,
+          "dayLots": 0,
+          "previousShortfall": "20000",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 1,
+          "lastFillPrice": "99",
+          "monthBatches": 0,
+          "previousShortfall": "138800",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "2026-10-01",
+        "halved": false,
+        "month": "2026-10",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W40"
+      },
+      "fills": [],
+      "fx": 32,
+      "kind": "pace",
+      "name": "next_month_shortfall"
+    },
+    {
+      "before": {
+        "009826": {
+          "consecutiveShortfalls": 1,
+          "dayLots": 0,
+          "previousShortfall": "20000",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 1,
+          "lastFillPrice": "99",
+          "monthBatches": 0,
+          "previousShortfall": "138800",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "2026-10-01",
+        "halved": false,
+        "month": "2026-10",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W40"
+      },
+      "date": "2026-12-01",
+      "expected": {
+        "009826": {
+          "consecutiveShortfalls": 1,
+          "dayLots": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekLots": 0
+        },
+        "VOO": {
+          "consecutiveShortfalls": 1,
+          "lastFillPrice": "99",
+          "monthBatches": 0,
+          "previousShortfall": "0",
+          "spent": "0",
+          "weekBatches": 0
+        },
+        "day": "2026-12-01",
+        "halved": false,
+        "month": "2026-12",
+        "processedFillIds": [
+          "discretionary_and_local0",
+          "discretionary_and_local1",
+          "scheduled0"
+        ],
+        "verified": true,
+        "week": "2026-W49"
+      },
+      "fills": [],
+      "fx": 32,
+      "kind": "pace",
+      "name": "skip_month"
+    },
+    {
+      "before": {
+        "active": false,
+        "bondsSold": 0,
+        "budget": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": 0,
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "0"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.15",
+        "eligibleBonds": 3000000,
+        "equity": 6000000,
+        "fills": [],
+        "gain": "0.2",
+        "qualified": true,
+        "session": 0,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "eligible": false,
+        "gainAboveAnchor": "0.2",
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 0,
+        "pullback": "0"
+      },
+      "kind": "ladder",
+      "mode": "BULL",
+      "name": "BULL0"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": 0,
+        "budget": [
+          "80000",
+          "120000",
+          "200000",
+          "250000",
+          "350000"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": "0.2",
+        "initialBonds": 0,
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "1000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.15",
+        "eligibleBonds": 3000000,
+        "equity": 6000000,
+        "fills": [],
+        "gain": "0.15",
+        "qualified": true,
+        "session": 5,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "eligible": true,
+        "gainAboveAnchor": "0.2",
+        "growingFill": true,
+        "ladderAmount": "80000",
+        "nextBatch": 0,
+        "pullback": "0.041666666666666685"
+      },
+      "kind": "ladder",
+      "mode": "BULL",
+      "name": "BULL1"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": 0,
+        "budget": [
+          "80000",
+          "120000",
+          "200000",
+          "250000",
+          "350000"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": "0.2",
+        "initialBonds": 0,
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "1000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.2",
+        "eligibleBonds": 3000000,
+        "equity": 6000000,
+        "fills": [],
+        "gain": "0.17",
+        "qualified": true,
+        "session": 10,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "eligible": false,
+        "gainAboveAnchor": "0.2",
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 0,
+        "pullback": "0.025"
+      },
+      "kind": "ladder",
+      "mode": "BULL",
+      "name": "BULL2"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": 0,
+        "budget": [
+          "80000",
+          "120000",
+          "200000",
+          "250000",
+          "350000"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": "0.2",
+        "initialBonds": 0,
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "1000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.2",
+        "eligibleBonds": 3000000,
+        "equity": 6000000,
+        "fills": [],
+        "gain": "0.15",
+        "qualified": true,
+        "session": 15,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "eligible": true,
+        "gainAboveAnchor": "0.2",
+        "growingFill": true,
+        "ladderAmount": "80000",
+        "nextBatch": 0,
+        "pullback": "0.041666666666666685"
+      },
+      "kind": "ladder",
+      "mode": "BULL",
+      "name": "BULL3"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": 0,
+        "budget": [
+          "80000",
+          "120000",
+          "200000",
+          "250000",
+          "350000"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": "0.2",
+        "initialBonds": 0,
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "1000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.05",
+        "eligibleBonds": 3000000,
+        "equity": 6000000,
+        "fills": [],
+        "gain": "0.05",
+        "qualified": true,
+        "session": 20,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "eligible": true,
+        "gainAboveAnchor": "0.2",
+        "growingFill": true,
+        "ladderAmount": "80000",
+        "nextBatch": 0,
+        "pullback": "0.12500000000000003"
+      },
+      "kind": "ladder",
+      "mode": "BULL",
+      "name": "BULL4"
+    },
+    {
+      "before": {
+        "active": false,
+        "bondsSold": "0",
+        "budget": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": "0",
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "0"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.15",
+        "eligibleBonds": 3000000,
+        "equity": 3500000,
+        "fills": [],
+        "gain": "0.2",
+        "qualified": true,
+        "session": 0,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "bondAllowance": "0",
+        "eligible": false,
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 0
+      },
+      "kind": "ladder",
+      "mode": "BEAR",
+      "name": "BEAR0"
+    },
+    {
+      "before": {
+        "active": false,
+        "bondsSold": "0",
+        "budget": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": "0",
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "0"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.15",
+        "eligibleBonds": 3000000,
+        "equity": 3500000,
+        "fills": [],
+        "gain": "0.15",
+        "qualified": true,
+        "session": 5,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "bondAllowance": "0",
+        "eligible": false,
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 0
+      },
+      "kind": "ladder",
+      "mode": "BEAR",
+      "name": "BEAR1"
+    },
+    {
+      "before": {
+        "active": false,
+        "bondsSold": "0",
+        "budget": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "fills": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": "0",
+        "lastAmount": "0",
+        "lastFill": -100,
+        "pendingClose": false,
+        "spent": [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "0"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.2",
+        "eligibleBonds": 3000000,
+        "equity": 3500000,
+        "fills": [
+          {
+            "bondSale": 0,
+            "confirmed": true,
+            "deployed": "192000",
+            "rung": 0,
+            "session": 10
+          }
+        ],
+        "gain": "0.17",
+        "qualified": true,
+        "session": 10,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "bondAllowance": "2000000",
+        "eligible": false,
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 1
+      },
+      "kind": "ladder",
+      "mode": "BEAR",
+      "name": "BEAR2"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": "0",
+        "budget": [
+          "240000",
+          "360000",
+          "600000",
+          "750000",
+          "1050000"
+        ],
+        "fills": [
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": "3000000",
+        "lastAmount": "192000",
+        "lastFill": 10,
+        "pendingClose": false,
+        "spent": [
+          "192000",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "3000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.2",
+        "eligibleBonds": 3000000,
+        "equity": 3500000,
+        "fills": [],
+        "gain": "0.15",
+        "qualified": true,
+        "session": 15,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "bondAllowance": "2000000",
+        "eligible": false,
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 1
+      },
+      "kind": "ladder",
+      "mode": "BEAR",
+      "name": "BEAR3"
+    },
+    {
+      "before": {
+        "active": true,
+        "bondsSold": "0",
+        "budget": [
+          "240000",
+          "360000",
+          "600000",
+          "750000",
+          "1050000"
+        ],
+        "fills": [
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "highWaterGain": 0,
+        "initialBonds": "3000000",
+        "lastAmount": "192000",
+        "lastFill": 10,
+        "pendingClose": false,
+        "spent": [
+          "192000",
+          "0",
+          "0",
+          "0",
+          "0"
+        ],
+        "verified": true,
+        "windowBudget": "3000000"
+      },
+      "event": {
+        "availableCash": 1000000,
+        "corrected": false,
+        "drawdown": "-0.05",
+        "eligibleBonds": 3000000,
+        "equity": 3500000,
+        "fills": [],
+        "gain": "0.05",
+        "qualified": true,
+        "session": 20,
+        "total": 10000000,
+        "totalBonds": 3000000,
+        "verified": true
+      },
+      "expected": {
+        "bondAllowance": "2000000",
+        "eligible": false,
+        "growingFill": false,
+        "ladderAmount": "0",
+        "nextBatch": 0
+      },
+      "kind": "ladder",
+      "mode": "BEAR",
+      "name": "BEAR4"
+    },
+    {
+      "before": {
+        "lastProcessedDate": "2026-09-01",
+        "lots": [
+          {
+            "age": 0,
+            "amount": 100000,
+            "settledDate": "2026-09-01",
+            "settlementVerified": true
+          },
+          {
+            "age": 0,
+            "amount": 200000,
+            "settledDate": "2026-09-02",
+            "settlementVerified": true
+          }
+        ],
+        "verified": true
+      },
+      "date": "2026-09-05",
+      "expected": {
+        "ages": [
+          1
+        ],
+        "amounts": [
+          "180000"
+        ],
+        "settledReserve": "180000"
+      },
+      "fills": [
+        {
+          "confirmed": true,
+          "market": "美股",
+          "payment": 120000,
+          "symbol": "VOO"
+        }
+      ],
+      "kind": "reserve",
+      "name": "settlement_age_bear_pause_fifo",
+      "sessions": [
+        {
+          "bearPaused": false,
+          "date": "2026-09-02"
+        },
+        {
+          "bearPaused": true,
+          "date": "2026-09-03"
+        },
+        {
+          "bearPaused": false,
+          "date": "2026-09-04"
+        }
+      ]
+    },
+    {
+      "current": 1400000,
+      "expectedRoom": "49994.8349086185",
+      "feeRate": "0.001425",
+      "group": 1400000,
+      "groupCap": "0.12",
+      "kind": "topupRoom",
+      "name": "1400000",
+      "targetWeight": "0.0725",
+      "total": 20000000
+    },
+    {
+      "current": 1440000,
+      "expectedRoom": "9998.9669817237",
+      "feeRate": "0.001425",
+      "group": 1440000,
+      "groupCap": "0.12",
+      "kind": "topupRoom",
+      "name": "1440000",
+      "targetWeight": "0.0725",
+      "total": 20000000
+    },
+    {
+      "current": 1450000,
+      "expectedRoom": "0",
+      "feeRate": "0.001425",
+      "group": 1450000,
+      "groupCap": "0.12",
+      "kind": "topupRoom",
+      "name": "1450000",
+      "targetWeight": "0.0725",
+      "total": 20000000
+    },
+    {
+      "expected": "900000",
+      "input": {
+        "bearPaused": false,
+        "commission": "0.001425",
+        "equityRoom": "3996582.9216020303",
+        "exactBuyGates": true,
+        "groupRoom": "6996012.2730043875",
+        "individualRoom": "2999145.2436055723",
+        "monthlyRoom": 900000,
+        "overdue": 1000000,
+        "physical": 7450000,
+        "priceLevel": 1
+      },
+      "kind": "reserveDeployment",
+      "name": "priority_monthly_cap"
+    },
+    {
+      "expected": "0",
+      "input": {
+        "bearPaused": true,
+        "commission": "0.001425",
+        "equityRoom": "3996582.9216020303",
+        "exactBuyGates": true,
+        "groupRoom": "6996012.2730043875",
+        "individualRoom": "2999145.2436055723",
+        "monthlyRoom": 900000,
+        "overdue": 1000000,
+        "physical": 7450000,
+        "priceLevel": 1
+      },
+      "kind": "reserveDeployment",
+      "name": "paused"
+    }
+  ],
+  "originalCalculatorHashes": {
+    "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
+    "execution_policy.py": "9b3ad1bac647318cd144706dbbe9a026dff8fb03ed15e55b287bb811a2ec7c95",
+    "transition_ledger.py": "2550ba102327e5642a56b415dd177411d8a5522f314f3164cc1556c18ff7ad6b"
+  },
+  "schema": "SRPP_STATE_TOPUP_GOLDEN_V1"
+}

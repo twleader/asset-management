@@ -52,6 +52,10 @@ class PortfolioService:
         if self._now().astimezone(TW_ZONE).date() != query_date:
             raise PortfolioError("QUERY_DATE_ROLLOVER")
 
+        return self.normalize(pair, query_date)
+
+    def normalize(self, pair: AccountingPair, query_date: date) -> dict[str, object]:
+        """Normalize an already captured official pair without any additional SDK call."""
         inventories = self._response_list(pair.inventories, "INVENTORIES_FAILED")
         unrealized = self._response_list(pair.unrealized, "UNREALIZED_FAILED")
         if (not inventories) != (not unrealized):

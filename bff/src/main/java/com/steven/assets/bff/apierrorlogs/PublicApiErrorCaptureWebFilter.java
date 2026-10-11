@@ -25,6 +25,8 @@ public class PublicApiErrorCaptureWebFilter implements WebFilter, Ordered {
         exchange.getAttributes().putIfAbsent(CAPTURE_ATTRIBUTE, new Capture(throwable, Instant.now()));
     }
     @Override public Mono<Void> filter(ServerWebExchange exchange,WebFilterChain chain){
+        if(OpenApiRouteCatalog.isReadOnlyReport(exchange.getRequest().getMethod().name(),exchange.getRequest().getPath().value()))
+            return chain.filter(exchange);
         OpenApiRouteCatalog.Operation op=OpenApiRouteCatalog.ROUTES.get(exchange.getRequest().getMethod().name()+" "+exchange.getRequest().getPath().value());
         if(op==null)return chain.filter(exchange);
         // An unhandled reactive error reaches this filter before WebFlux's exception resolver has

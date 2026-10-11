@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "broker": "fubon",
+  "queryDate": "2026-08-21",
+  "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+  "capturedAt": "2026-08-21T10:00:00+08:00",
+  "complete": true,
+  "verifiedZero": false,
+  "activeCount": 1,
+  "orders": [
+    {
+      "date": "2026-08-21",
+      "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+      "seq_no": "1234",
+      "order_no": "A123",
+      "asset_type": 0,
+      "market": "TAIEX",
+      "market_type": "Common",
+      "stock_no": "00679B",
+      "buy_sell": "Buy",
+      "price_type": "Limit",
+      "price": "28.1",
+      "quantity": 3000,
+      "time_in_force": "ROD",
+      "order_type": "Stock",
+      "is_pre_order": false,
+      "status": 10,
+      "after_price_type": null,
+      "after_price": "28.1",
+      "unit": 1000,
+      "after_qty": 2000,
+      "filled_qty": 1000,
+      "filled_money": 28100,
+      "last_time": "09:20:00.123",
+      "active": true,
+      "remainingQty": 1000,
+      "recommendationLegId": null,
+      "fillIds": []
+    }
+  ],
+  "portfolio": {
+    "batchId": "052d18ec48dcb0a1c9a17c3c",
+    "queryDate": "2026-08-21",
+    "accountFingerprint": "6ccad7ff94bfbe8ed5fdef31",
+    "emptyConfirmed": true,
+    "positions": [],
+    "reason": "EMPTY_CONFIRMED"
+  },
+  "revision": "97c1844bcb889033f1373599831cf2bc5cee7cedc1f57fc0486f39eb0aaf73a0"
+}

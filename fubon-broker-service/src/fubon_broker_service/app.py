@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 
 from .bank_balance import BankBalanceError, BankBalanceService
@@ -28,6 +29,8 @@ from .intraday_technical_indicators import (
 from .normalization import stock_code, stock_codes, strict_iso_date
 from .market_data_v1 import MarketDataV1Error, MarketDataV1Service
 from .portfolio import PortfolioError, PortfolioService
+from .order_results import OrderResultsService, OrderResultsError
+from .order_results_adapter import OrderResultsGatewayAdapter
 from .quotes import QuoteError, QuoteService
 from .realized_gain import RealizedGainError, RealizedGainService
 from .redaction import install_log_redaction, redact_mapping
@@ -271,10 +274,12 @@ def create_app(
     market_data_v1_service: MarketDataV1Service | None = None,
     stock_push_stream: StockPushStream | None = None,
     intraday_technical_indicator_service: IntradayTechnicalIndicatorService | None = None,
+    order_results_service: OrderResultsService | None = None,
 ) -> FastAPI:
     loader = config_loader or ConfigLoader.from_environment()
     sdk_gateway = gateway or SdkGateway(loader)
     portfolio = portfolio_service or PortfolioService(sdk_gateway)
+    order_results = order_results_service or OrderResultsService(OrderResultsGatewayAdapter(sdk_gateway))
     quotes = quote_service or QuoteService(sdk_gateway)
     trades = trade_service or TradeReadService(sdk_gateway)
     outcome_counters = counters or OutcomeCounters()
@@ -311,7 +316,7 @@ def create_app(
     application.state.taiex_index_stream = index_stream
     application.state.stock_push_stream = stock_stream
 
-    no_body_paths = {"/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read",
+    no_body_paths = {"/internal/orders/read", "/internal/bank-balance/read", "/internal/settlement/read", "/internal/realized-gains/read",
                      "/internal/market-data/stock-push/stream"}
     v1_market_data_paths = {"/internal/market-data/stock-basic/read", "/internal/market-data/intraday-candles/read",
                             "/internal/market-data/intraday-volumes/read", "/internal/market-data/historical-daily-candles/read",
@@ -439,6 +444,15 @@ def create_app(
                 "taiexIndexStream": ready and TaiexIndexStream.configured(current),
             },
         }
+
+    @application.post("/internal/orders/read")
+    async def orders_read(request: Request, _config: ConfigSnapshot = Depends(authorize)) -> dict[str, object]:
+        if await request.body():
+            raise HTTPException(status_code=400, detail={"reason": "INVALID_REQUEST"})
+        try:
+            return await run_in_threadpool(order_results.read)
+        except (SdkCallError, PortfolioError, OrderResultsError) as exc:
+            raise HTTPException(status_code=503, detail={"reason": exc.reason}) from None
 
     @application.post("/internal/portfolio/read")
     def portfolio_read(

@@ -44,6 +44,7 @@ MANIFEST = {
   ['GET', '/api/public/srpp/market-facts'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504],
   ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
+  ['GET', '/api/public/srpp/report-calculations'] => %w[200 400 404 405 409 502 503 504],
   ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
   ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 422 500 502 503],
@@ -70,6 +71,7 @@ OPERATION_IDS = {
   ['GET', '/api/public/srpp/market-facts'] => 'getSrppMarketFacts',
   ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals',
   ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries',
+  ['GET', '/api/public/srpp/report-calculations'] => 'getSrppReportCalculations',
   ['POST', '/api/srpp/daily-report-mail'] => 'sendSrppDailyReportMail',
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => 'getSrppDailyReportMail',
   ['POST', '/api/public/srpp/event-evidence/capture'] => 'captureSrppEventEvidence',
@@ -205,7 +207,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.24.0', 'Task 488 後 OpenAPI info.version 必須為 1.24.0')
+assert!(document.dig('info', 'version') == '1.25.0', 'Task 489 後 OpenAPI info.version 必須為 1.25.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -246,14 +248,14 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '二十三路 operationId 必須與 9090 manifest 完全一致')
+        '二十四路 operationId 必須與 9090 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 assert!(gateway_set == MANIFEST.keys.to_set,
-        "api-gateway allowlist 與二十三路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與二十四路 manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與二十三路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與二十四路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -975,8 +977,8 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 171,
-        "全量 strict audit 預期 171 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 219,
+        "全量 strict audit 預期 219 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1021,9 +1023,49 @@ bff_security = File.read(BFF_SECURITY)
 %w[/api/public/trading-radar/stock /api/public/transactions /api/public/trading-calendar /api/public/commodity-prices
    /api/public/srpp/daily-context /api/public/srpp/calculation-context
    /api/public/srpp/calculations /api/public/srpp/market-facts
-   /api/public/srpp/completed-technicals /api/public/srpp/technical-series].each do |path|
+   /api/public/srpp/completed-technicals /api/public/srpp/technical-series /api/public/srpp/report-calculations].each do |path|
   assert!(bff_security.include?("\"#{path}\""), "BFF SecurityConfig 缺 exact anonymous GET #{path}")
 end
+
+# Task 489: strict immutable report packages, complete nested classes and module identity union.
+report = openapi_routes.fetch(['GET', '/api/public/srpp/report-calculations'])
+assert!(report.fetch('parameters').map { |p| p.fetch('name') } ==
+          %w[email consumer tradingDate reportSlot policyBundleSha256 swaggerSha256 calculationRunId], 'report exact query parameter set')
+assert!(!report.key?('requestBody') && report.fetch('description').include?('GET只讀'), 'report GET cannot accept input or calculate')
+assert!(report.dig('responses', '200', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppReportCalculations', 'report response typed envelope')
+report_fields = %w[schemaVersion calculationRunId status identity authorityRevision sharedCalculationId inputSnapshot modules coverage executionScope tradeAuthorization placesOrders contentSha256]
+assert!(schemas.fetch('SrppReportCalculations').fetch('required') == report_fields, 'report complete envelope field identity')
+report_modules = schemas.fetch('SrppReportModule').fetch('oneOf').map { |v| schemas.fetch(v.fetch('$ref').split('/').last) }
+expected_report_module_ids = %w[ASSET_RECONCILIATION ALLOCATION_GAP FUNDING_CAPACITY CASH_INCOME PAYROLL_CASHFLOW BOND_D130_D195 DIVIDEND_TOPUP CORE_SELL_GUARD STRATEGIC_BUY_GATES GLOBAL_EQUITY_PACE ROTATION_AND_REGIME_CAPACITY SHORT_TERM_AND_US_TACTICAL]
+assert!(report_modules.map { |m| m.dig('properties', 'moduleId', 'const') } == expected_report_module_ids, 'exact twelve typed report modules')
+report_modules.each do |m|
+  assert!(m.fetch('required') == %w[moduleId status formulaVersion scope data missing reasonCodes inputRefs receipts], 'each report module complete fields')
+  data = schemas.fetch(m.dig('properties','data','$ref').split('/').last)
+  assert!(data.fetch('required') == %w[facts legs ranking eventEvidenceIntegrationStatus] && data.fetch('additionalProperties') == false, 'report module data cannot be opaque')
+  assert!(data.dig('properties','eventEvidenceIntegrationStatus','const') == 'NOT_BOUND', 'consumer event semantics not falsely included')
+end
+assert!(schemas.fetch('SrppReportLeg').fetch('required') == %w[symbol market broker subaccount strategy status action lots units limitPrice amount currency fees netProfitSpace rankingReason blockingReasons receipts], 'complete leg numeric and gate contract')
+assert!(schemas.fetch('SrppReportReceipt').fetch('required') == %w[ruleId calculatorVersion inputRefs status reason values scope], 'gate receipts must be typed')
+%w[SrppReportFact SrppReportFactAssetReconciliation SrppReportFactFundingCapacity].each do |name|
+  branches = schemas.fetch(name).dig('properties', 'unit', 'anyOf')
+  assert!(branches.any? { |b| b['enum'] == %w[PERCENT RATIO LOTS SHARES BOOLEAN YEARS COUNT] } &&
+          branches.any? { |b| b['pattern'] == '^[A-Z]{3}$' }, 'report strict fixed units or ISO3 money currency')
+end
+{
+  'SrppReportFactAssetReconciliation' => %w[bankCurrencyBalanceOriginal bankCurrencyBalanceTwd bankCurrencyPayableOriginal bankCurrencyReceivableOriginal],
+  'SrppReportFactCashIncome' => %w[spendableSgovGross domesticDividend domesticInterest savingsInterest otherDomesticIncome overseasIncome creditableForeignTax nhiChargeableIncome taxCalculation annualTaxPrepayments],
+  'SrppReportFactPayrollCashflow' => %w[paymentCount payrollDetail calendarYearPayroll pensionReceipt],
+  'SrppReportFactGlobalEquityPace' => %w[consecutiveShortfalls],
+  'SrppReportFactRotationAndRegimeCapacity' => %w[nextBatch settledReserve overdueReserve]
+}.each { |name, fields| assert!((fields - schemas.fetch(name).dig('properties', 'name', 'enum')).empty?, 'report complete formal fact names') }
+assert!(schemas.fetch('SrppReportLeg').dig('properties', 'units', 'description').include?('SHORT_TERM_D173/BOND_SHORT_TERM_D185') &&
+        schemas.fetch('SrppReportLeg').dig('properties', 'units', 'description').include?('9007199254740991'), 'TW short uses positive safe integer units only in exact strategies')
+assert!(schemas.fetch('SrppReportModulePayrollCashflow').fetch('description').include?('projection') &&
+        schemas.fetch('SrppReportModuleCashIncome').fetch('description').include?('凍結年度估算'), 'report arithmetic precision is distinct from actual income or official future year rules')
+report_problem = schemas.fetch('SrppReportProblem')
+assert!(report_problem.fetch('required') == %w[type title status detail instance code retryable] && report_problem.fetch('additionalProperties') == false, 'report RFC9457 exact seven fields')
+assert!(schemas.dig('SrppReportSourceVector','additionalProperties','$ref') == '#/components/schemas/SrppReportSourceReceipt', 'raw source payload hash refs typed')
+assert!(schemas.dig('SrppReportInputSnapshot','properties','inputBundleJcs','description').include?('BFF必須parse並重算'), 'raw JCS cannot be an unvalidated black box')
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
 assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且三份文件必須 byte-identical')
@@ -1038,7 +1080,7 @@ assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.l
         "9090 Swagger Markdown 各份必須位元組一致：#{swagger_copies.join(', ')}")
 
 assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
-puts 'PASS: 9090 gateway/OpenAPI 二十三條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 二十四條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
 
 # Task487/488: closed intraday metadata and immutable SRPP receipt schemas.
 %w[StockDecision TradingRadarListStock].each do |name|

@@ -24,12 +24,32 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 31 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 33 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(75);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(31);
+        assertThat(jobs()).hasSize(77);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(33);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(43);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test
+    void officialSourceShowsGatedReadOnlyMinuteTick() {
+        assertThat(jobs()).filteredOn(j -> "富邦官方委託與庫存不可變來源".equals(j.name()))
+            .singleElement().satisfies(job -> {
+                assertThat(job.cron()).isEqualTo("0 * * * * *");
+                assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                assertThat(job.description()).contains("cached", "09:00", "14:00", "最新失敗", "GET 不觸發");
+            });
+    }
+
+    @Test
+    void reportProducerShowsActualMinuteTickAndWindows() {
+        assertThat(jobs()).filteredOn(j -> "SRPP 不可變報告計算包發布".equals(j.name()))
+                .singleElement().satisfies(job -> {
+                    assertThat(job.cron()).isEqualTo("0 * * * * *");
+                    assertThat(job.zone()).isEqualTo("Asia/Taipei");
+                    assertThat(job.description()).contains("cached", "09:05", "12:00", "14:00", "GET 純讀");
+                });
     }
 
     @Test

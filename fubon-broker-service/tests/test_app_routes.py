@@ -196,6 +196,7 @@ def test_exact_adapter_routes_auth_and_methods(tmp_path):
         ("/internal/health", frozenset({"GET"})),
         ("/internal/config", frozenset({"GET"})),
         ("/internal/portfolio/read", frozenset({"POST"})),
+        ("/internal/orders/read", frozenset({"POST"})),
         ("/internal/market-data/tw-quotes", frozenset({"POST"})),
         ("/internal/market-data/etf-holdings", frozenset({"POST"})),
         ("/internal/trades/read", frozenset({"POST"})),
