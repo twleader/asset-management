@@ -50,7 +50,11 @@ export function displayUnknown(value) {
 }
 
 export function displayDurationMillis(value) {
-  return value == null ? '未記錄' : `${value} 毫秒`
+  if (value == null) return '未記錄'
+  const minutes = Math.floor(value / 60000)
+  const seconds = Math.floor((value % 60000) / 1000)
+  const milliseconds = value % 1000
+  return `${minutes} 分 ${seconds} 秒 ${milliseconds} 毫秒`
 }
 
 /** 只把 BFF 已計算的 graph 欄位映射到 ECharts graph series。 */
