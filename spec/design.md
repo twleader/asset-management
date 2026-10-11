@@ -11826,7 +11826,7 @@ business services 提供三個 controller thin read endpoints：
 
 | endpoint | input | response |
 |---|---|---|
-| GET /api/api-error-logs | source=ALL\|OPEN_API\|FUBON_API, optional operationKey, sort=NEWEST\|OLDEST | 每筆 id, source, operationKey, apiName, messageHeader, occurredAt |
+| GET /api/api-error-logs | source=ALL\|OPEN_API\|FUBON_API, optional operationKey, sort=NEWEST\|OLDEST, page=0起算（預設0） | Task493固定100筆page object：items每筆id/source/operationKey/apiName/messageHeader/nullable httpStatus/occurredAt；metadata totalElements/page/pageSize/totalPages |
 | GET /api/api-error-logs/operations | source=ALL\|OPEN_API\|FUBON_API | 依 catalog 排序的唯讀 `source`, `operationKey`, `apiName`, `apiUrl`, `displayOrder` |
 | GET /api/api-error-logs/{id} | path id | 上列識別欄位加完整 raw stackTrace |
 
@@ -12814,11 +12814,23 @@ Pure calculator fixtures must include genuinely ACTIONABLE injected verifiedpend
 
 HTTP problems:400 INVALID_REQUEST；404 CALCULATION_NOT_FOUND；409 NON_TRADING_DAY/POLICY_UNSUPPORTED/SWAGGER_MISMATCH/CONTEXT_IDENTITY_MISMATCH；502 UPSTREAM_INVALID；503 OWNER_UNAVAILABLE/CALENDAR_UNAVAILABLE/CONTEXT_NOT_READY。同舊receipt不覆寫。exact方法／descendant／matrix/slash阻擋和24-route contract保持一致；Swagger三份由機器YAML重產。
 
-## Requirement 188／Task 490：API logs API 名稱「全部」選項
+## Requirement 188／Tasks 490、493：API logs API 名稱「全部」選項
 
-`ApiErrorLogsView.vue` 的第三個既有 `el-select` 是 API 名稱篩選，新增 `aria-label="API 名稱"` 與第一個靜態 option `label="全部"`、`:value="ALL_OPERATION_FILTER"`；catalog 的 `v-for` options 保持在其後。Element Plus 把 `null` 視為 empty value、會顯示 placeholder，故 local-only `ALL_OPERATION_FILTER='ALL'` 是 `operationKey` 的初始值與 source-change reset 值，讓明確選取顯示「全部」。`value-on-clear` 保持元件允許的 `null`，然後 `@clear` 的 `restoreAllOperationFilter()` 把暫設 null 恢復為 sentinel；所以清除仍顯示「全部」，且不把非-empty sentinel 當不受支援的 `value-on-clear`。`selectedOperationKey()` 只在 `load()` 建立 BFF request 時把 sentinel 映射為 `null`，其餘實際 catalog key 原樣通過；因此 UI sentinel 永不越過前端。`@change="load"` 只讀取 list；不因第三個 select 的任何選取重新讀取 catalog。
+### Task 493：每頁 100 筆與 AND 語意
 
-`frontend/src/api/index.js` 的既有 `...(operationKey && { operationKey })` 是唯一的 request encoding：`selectedOperationKey()` 映射出的 `operationKey=null` 時 BFF request 只包含 `source`、`sort`，不發送 `operationKey`。local-only 的字串 `ALL` 絕不能傳過這個邊界，避免與 immutable catalog 的實際 operation key 混淆。BFF 仍只是既有 `GET /api/bff/api-error-logs` 的 opaque read proxy；business 的 filter SQL 既有 `:operationKey is null` 分支讀取指定 source 下的全部紀錄，沒有新 endpoint、資料庫查詢、寫入或安全模型變更。
+business 的 malformed int page 由 `GlobalExceptionHandler` 新增 `MethodArgumentTypeMismatchException` handler 統一回 400，固定 detail「Invalid request parameter」，不帶 raw value／型別診斷。該映射適用於 framework 的 query/path 型別轉換錯誤，原有業務例外映射不變；API logs controller 只委派 service，不設局部 exception handler。
+
+既有 GET /api/api-error-logs 與 /api/bff/api-error-logs 新增零起算 int page query，預設 0，負數／非整數回 400。每頁固定 100，無可調 pageSize query。business controller 只委派 service；service 使用 PageRequest.of(page,100)，repository Page 查詢保留交集與 occurredAt/id 同向排序，DB 執行 limit/offset 及同條件 count，不在記憶體切全清單。immutable PageResult record 為 {List<ListItem> items,long totalElements,int page,int pageSize,int totalPages}；pageSize 永為100，totalPages 為總數/100無條件進位，空集合0；越界items=[]但其他metadata保留。ListItem只有Long id、String source/operationKey/apiName/messageHeader、nullable Integer httpStatus、Instant occurredAt，不含stackTrace/dedupeKey。BFF使用自己模組的typed page record relay，不依賴backend類、不自行count/filter/sort/page、不調高全域buffer、不截斷欄位。
+
+來源ALL表示不限制來源；API名稱畫面的ALL在request前轉成omitted operationKey。查詢仍是 (source=ALL OR row.source=source) AND (operationKey omitted OR row.operationKey=operationKey)，NEWEST/OLDEST只控制同一集合的occurredAt/id同向排序。
+
+2026-10-11重現：business list3981筆、1128340bytes，但當時執行中的BFF whole-array decoder超過1048576bytes；BusinessErrorAdvice把帶upstream200的解碼例外relay成空200，畫面誤顯暫無資料。使用者追加每頁100筆及翻頁，Task493以DB分頁取代全量array。advice對帶2xx的WebClientResponseException改回502 application/problem+json，固定detail「無法讀取上游回應，請稍後重試」，不回原始body／診斷／stacktrace；非2xx relay不變。未來單頁仍過大的解碼失敗必可見。ADMIN、detail lazy load、30天retention、catalog與來源不變。
+
+前端el-pagination固定page-size=100、layout="total, prev, pager, next"，畫面頁碼從1起算，API傳page-1，換頁只讀該頁list。source/sort/API變動或清除皆回第一頁，來源變動還先更新catalog。API wrapper送source/sort/page且只在實際key時送operationKey。list採遞增請求識別，只讓最新請求更新rows/total/loading/error，舊回應不能覆蓋當前條件／頁碼。空集合畫面第1頁0筆；越界空頁保留翻頁控制以返回有資料頁。
+
+`ApiErrorLogsView.vue` 的第三個既有 `el-select` 是 API 名稱篩選，新增 `aria-label="API 名稱"` 與第一個靜態 option `label="全部"`、`:value="ALL_OPERATION_FILTER"`；catalog 的 `v-for` options 保持在其後。Element Plus 把 `null` 視為 empty value、會顯示 placeholder，故 local-only `ALL_OPERATION_FILTER='ALL'` 是 `operationKey` 的初始值與 source-change reset 值，讓明確選取顯示「全部」。`value-on-clear` 保持元件允許的 `null`，然後 `@clear` 的 `restoreAllOperationFilter()` 把暫設 null 恢復為 sentinel；所以清除仍顯示「全部」，且不把非-empty sentinel 當不受支援的 `value-on-clear`。`selectedOperationKey()` 只在 `load()` 建立 BFF request 時把 sentinel 映射為 `null`，其餘實際 catalog key 原樣通過；因此 UI sentinel 永不越過前端。Task493起 `@change="changeFilter"` 重設第1頁並只讀取 list；不因第三個 select 的任何選取重新讀取 catalog。
+
+`frontend/src/api/index.js` 的既有 `...(operationKey && { operationKey })` 是唯一的 request encoding：`selectedOperationKey()` 映射出的 `operationKey=null` 時 Task493起BFF request包含 `source`、`sort`、`page`，不發送 `operationKey`。local-only 的字串 `ALL` 絕不能傳過這個邊界，避免與 immutable catalog 的實際 operation key 混淆。Task493起BFF為既有list route的typed page proxy；business以相同filter SQL在DB分頁與count，沒有新endpoint、寫入或安全模型變更。
 
 既有 30 天 retention 的 cron-only 觸發無法補上服務在 03:15 之後重啟前已存在的到期 row；實際驗收也證明 Nginx tailer 的 whole-file replay 會在 cleanup 成功後重寫同一批歷史 line。因此 retention 必須同時處理既有資料與寫入邊界。保留 `ApiErrorLogRetentionScheduler` 的 `Asia/Taipei` 每日 03:15 cron 與 repository DB-time 嚴格截止；新增獨立薄元件 `ApiErrorLogRetentionStartupRunner`，實作 Spring Boot `ApplicationRunner`，並在 `run` 注入後呼叫 managed scheduler bean 的 `deleteExpired()` 恰好一次。這個跨 bean 呼叫保留 scheduler 的 `@Transactional` proxy，不能在 scheduler 本身自呼叫；選擇 Boot runner 是為了讓啟動任務進入 `SpringApplication.run` 的明確 runner 階段，而不是依賴事件 listener 的註冊。scheduler 回傳 `OptionalInt` outcome：repository 成功時（包括 0 row）是有值的刪除筆數，scheduler 內部捕捉的 repository failure 為 empty 且保留最小 warning；runner 只對有值 outcome 寫出精確 `API error log startup retention completed deleted=<non-negative integer>` info log，沒有 row content。runner 在這個 proxy 呼叫外捕捉 `RuntimeException`：這保護 transaction interceptor 在進入／提交 method 時可能拋出的例外，只記 exception class 的 warning，啟動繼續而由下次 cron／下次啟動重試。兩者共用同一個 delete；零列刪除是正常冪等情況。
 

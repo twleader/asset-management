@@ -1,5 +1,7 @@
 package com.steven.assets.apierrorlog;
 
+import com.steven.assets.model.AppUser;
+import com.steven.assets.security.CurrentUserContext;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Comparator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -113,6 +117,87 @@ class ApiErrorLogDedupeKeyPostgresTest {
         repository.saveAndFlush(row("OPEN_QUOTES_LIST", occurredAt, 400, null));
 
         assertThat(repository.findAll()).hasSize(2);
+    }
+
+    @Test
+    void database_pages_205_rows_as_100_100_5_with_timestamp_and_id_in_both_sort_directions() {
+        List<ApiErrorLog> persisted = seedPaginationRows();
+        ApiErrorLogService service = adminService();
+        List<Long> ascendingIds = persisted.stream()
+                .sorted(Comparator.comparing(ApiErrorLog::getOccurredAt).thenComparing(ApiErrorLog::getId))
+                .map(ApiErrorLog::getId).toList();
+        List<Long> descendingIds = ascendingIds.reversed();
+
+        for (String sort : List.of("NEWEST", "OLDEST")) {
+            List<Long> allPageIds = new ArrayList<>();
+            for (int page = 0; page < 3; page++) {
+                var result = service.list("ALL", null, sort, page);
+                assertThat(result.items()).hasSize(page == 2 ? 5 : 100);
+                assertThat(result.totalElements()).isEqualTo(205);
+                assertThat(result.page()).isEqualTo(page);
+                assertThat(result.pageSize()).isEqualTo(100);
+                assertThat(result.totalPages()).isEqualTo(3);
+                allPageIds.addAll(result.items().stream().map(ApiErrorLogService.ListItem::id).toList());
+            }
+            assertThat(allPageIds).containsExactlyElementsOf("NEWEST".equals(sort) ? descendingIds : ascendingIds);
+            assertThat(allPageIds).doesNotHaveDuplicates();
+        }
+        assertThat(service.list("ALL", null, "NEWEST", 3))
+                .isEqualTo(new ApiErrorLogService.PageResult(List.of(), 205, 3, 100, 3));
+    }
+
+    @Test
+    void database_filters_source_and_operation_as_an_intersection_and_counts_only_matching_rows() {
+        seedPaginationRows();
+        ApiErrorLogService service = adminService();
+
+        var allOpen = service.list("OPEN_API", null, "OLDEST", 0);
+        assertThat(allOpen.items()).hasSize(100).allSatisfy(item -> assertThat(item.source()).isEqualTo("OPEN_API"));
+        assertThat(allOpen.totalElements()).isEqualTo(136);
+        assertThat(allOpen.totalPages()).isEqualTo(2);
+        assertThat(service.list("OPEN_API", null, "OLDEST", 1).items()).hasSize(36);
+
+        for (String source : List.of("ALL", "OPEN_API")) {
+            var quotes = service.list(source, "OPEN_QUOTES_LIST", "NEWEST", 0);
+            assertThat(quotes.items()).hasSize(68).allSatisfy(item -> {
+                assertThat(item.source()).isEqualTo("OPEN_API");
+                assertThat(item.operationKey()).isEqualTo("OPEN_QUOTES_LIST");
+            });
+            assertThat(quotes.totalElements()).isEqualTo(68);
+            assertThat(quotes.totalPages()).isEqualTo(1);
+        }
+        var fubon = service.list("FUBON_API", "FUBON_PORTFOLIO_READ", "NEWEST", 0);
+        assertThat(fubon.items()).hasSize(69).allSatisfy(item -> {
+            assertThat(item.source()).isEqualTo("FUBON_API");
+            assertThat(item.operationKey()).isEqualTo("FUBON_PORTFOLIO_READ");
+            assertThat(item.httpStatus()).isNull();
+        });
+        assertThat(fubon.totalElements()).isEqualTo(69);
+        assertThat(service.list("OPEN_API", "OPEN_QUOTES_ONE", "NEWEST", 0))
+                .isEqualTo(new ApiErrorLogService.PageResult(List.of(), 0, 0, 100, 0));
+    }
+
+    private List<ApiErrorLog> seedPaginationRows() {
+        Instant base = Instant.parse("2026-10-11T01:00:00Z");
+        List<ApiErrorLog> rows = new ArrayList<>();
+        for (int i = 0; i < 205; i++) {
+            String source = i % 3 == 0 ? "FUBON_API" : "OPEN_API";
+            String key = switch (i % 3) {
+                case 0 -> "FUBON_PORTFOLIO_READ";
+                case 1 -> "OPEN_QUOTES_LIST";
+                default -> "OPEN_MARKET_INDEX";
+            };
+            rows.add(new ApiErrorLog(source, key, "分頁測試", "header " + i, "trace " + i,
+                    base.plusSeconds(i / 5), "FUBON_API".equals(source) ? null : 502, null));
+        }
+        return repository.saveAllAndFlush(rows);
+    }
+
+    private ApiErrorLogService adminService() {
+        CurrentUserContext currentUser = new CurrentUserContext();
+        currentUser.setEffectiveUserId(7L);
+        currentUser.setRole(AppUser.ROLE_ADMIN);
+        return new ApiErrorLogService(repository, currentUser);
     }
 
     @Test

@@ -75,7 +75,7 @@ export function apiErrorMessage(err, fallback = '操作失敗') {
 export const bffApi = {
   // ApiErrorLogs：僅管理者，且 detail 只在展開單列時取回 stacktrace。
   apiErrorLogs: {
-    list: ({ source = 'ALL', sort = 'NEWEST', operationKey = null } = {}) => api.get('/bff/api-error-logs', { params: { source, sort, ...(operationKey && { operationKey }) } }),
+    list: ({ source = 'ALL', sort = 'NEWEST', operationKey = null, page = 0 } = {}) => api.get('/bff/api-error-logs', { params: { source, sort, page, ...(operationKey && { operationKey }) } }),
     operations: (source = 'ALL') => api.get('/bff/api-error-logs/operations', { params: { source } }),
     detail: (id) => api.get(`/bff/api-error-logs/${id}`)
   },

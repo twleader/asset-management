@@ -3,6 +3,8 @@ package com.steven.assets.bff.common;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -42,11 +44,17 @@ public class BusinessErrorAdvice {
     public BusinessErrorAdvice(ApiErrorLogDiagnosticRenderer diagnosticRenderer) { this.diagnosticRenderer = diagnosticRenderer; }
 
     @ExceptionHandler(WebClientResponseException.class)
-    public ResponseEntity<String> handleBusinessError(WebClientResponseException ex, ServerWebExchange exchange) {
+    public ResponseEntity<?> handleBusinessError(WebClientResponseException ex, ServerWebExchange exchange) {
         capture(exchange, ex);
-        String body = ex.getResponseBodyAsString(StandardCharsets.UTF_8);
         // The caller's existing relay contract remains unchanged, but an upstream raw body may contain secrets.
         log.warn("business 回應 status={} error={} diagnostic={}", ex.getStatusCode(), ex.getClass().getSimpleName(), diagnosticRenderer.render(ex));
+
+        // A successful upstream status can still carry a body decoding failure.
+        if (ex.getStatusCode().is2xxSuccessful()) {
+            ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "無法讀取上游回應，請稍後重試");
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(problem);
+        }
+        String body = ex.getResponseBodyAsString(StandardCharsets.UTF_8);
 
         MediaType contentType = ex.getHeaders().getContentType();
         ResponseEntity.BodyBuilder builder = ResponseEntity.status(ex.getStatusCode());
