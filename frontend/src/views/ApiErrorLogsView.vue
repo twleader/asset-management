@@ -4,7 +4,7 @@
     <div class="filters">
       <el-select v-model="source" @change="changeSource" aria-label="來源"><el-option label="全部" value="ALL"/><el-option label="開放 API" value="OPEN_API"/><el-option label="富邦證 API" value="FUBON_API"/></el-select>
       <el-select v-model="sort" @change="load" aria-label="時間排序"><el-option label="由近而遠" value="NEWEST"/><el-option label="由遠而近" value="OLDEST"/></el-select>
-      <el-select v-model="operationKey" clearable placeholder="單一 API" @change="load"><el-option v-for="item in operations" :key="item.operationKey" :label="operationLabel(item)" :value="item.operationKey"/></el-select>
+      <el-select v-model="operationKey" clearable placeholder="單一 API" @change="load" @clear="restoreAllOperationFilter" aria-label="API 名稱" :value-on-clear="null"><el-option label="全部" :value="ALL_OPERATION_FILTER"/><el-option v-for="item in operations" :key="item.operationKey" :label="operationLabel(item)" :value="item.operationKey"/></el-select>
     </div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false"/>
     <el-table :data="rows" v-loading="loading" row-key="id" @expand-change="expand">
@@ -16,11 +16,14 @@
 </template>
 <script setup>
 import { bffApi, apiErrorMessage } from '@/api'
-const source = ref('ALL'), sort = ref('NEWEST'), operationKey = ref(null), rows = ref([]), operations = ref([]), details = ref({}), loading = ref(false), error = ref('')
+const ALL_OPERATION_FILTER = 'ALL'
+const source = ref('ALL'), sort = ref('NEWEST'), operationKey = ref(ALL_OPERATION_FILTER), rows = ref([]), operations = ref([]), details = ref({}), loading = ref(false), error = ref('')
 const operationLabel = item => `${item.apiName} — ${item.apiUrl}`
+const selectedOperationKey = () => operationKey.value === ALL_OPERATION_FILTER ? null : operationKey.value
+const restoreAllOperationFilter = () => { operationKey.value = ALL_OPERATION_FILTER }
 async function loadOperations () { operations.value = await bffApi.apiErrorLogs.operations(source.value) }
-async function load () { loading.value = true; error.value = ''; try { rows.value = await bffApi.apiErrorLogs.list({ source: source.value, sort: sort.value, operationKey: operationKey.value }) } catch (e) { error.value = apiErrorMessage(e, '無法讀取 API logs') } finally { loading.value = false } }
-async function changeSource () { operationKey.value = null; await loadOperations(); await load() }
+async function load () { loading.value = true; error.value = ''; try { rows.value = await bffApi.apiErrorLogs.list({ source: source.value, sort: sort.value, operationKey: selectedOperationKey() }) } catch (e) { error.value = apiErrorMessage(e, '無法讀取 API logs') } finally { loading.value = false } }
+async function changeSource () { operationKey.value = ALL_OPERATION_FILTER; await loadOperations(); await load() }
 async function expand (row, expandedRows) { if (!expandedRows.some(item => item.id === row.id) || Object.hasOwn(details.value, row.id)) return; try { const detail = await bffApi.apiErrorLogs.detail(row.id); details.value = { ...details.value, [row.id]: detail.stackTrace } } catch (e) { error.value = apiErrorMessage(e, '無法讀取詳細錯誤') } }
 onMounted(async () => { await loadOperations(); await load() })
 </script>

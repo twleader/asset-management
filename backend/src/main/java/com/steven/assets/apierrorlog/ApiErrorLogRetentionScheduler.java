@@ -5,10 +5,19 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.OptionalInt;
+
 @Slf4j @Component
 public class ApiErrorLogRetentionScheduler {
     private final ApiErrorLogRepository repository;
     public ApiErrorLogRetentionScheduler(ApiErrorLogRepository repository){this.repository=repository;}
     @Scheduled(cron="${api-error-log.retention-cron:0 15 3 * * *}", zone="Asia/Taipei")
-    @Transactional public void deleteExpired(){ try { repository.deleteExpired(); } catch(RuntimeException failure){ log.warn("API error log retention failed error={}", failure.getClass().getSimpleName()); } }
+    @Transactional public OptionalInt deleteExpired(){
+        try {
+            return OptionalInt.of(repository.deleteExpired());
+        } catch(RuntimeException failure){
+            log.warn("API error log retention failed error={}", failure.getClass().getSimpleName());
+            return OptionalInt.empty();
+        }
+    }
 }

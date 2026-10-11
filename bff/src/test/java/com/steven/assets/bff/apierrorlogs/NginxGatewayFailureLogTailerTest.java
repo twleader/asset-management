@@ -3,6 +3,7 @@ package com.steven.assets.bff.apierrorlogs;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -10,7 +11,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -24,6 +27,8 @@ import static org.mockito.Mockito.*;
  */
 class NginxGatewayFailureLogTailerTest {
 
+    private static final Clock FIXTURE_CLOCK = Clock.fixed(Instant.parse("2026-09-08T01:48:59Z"), ZoneOffset.UTC);
+
     /** Copied verbatim from spec/tasks/t421_api_error_log_status_and_gateway_capture.md, item 421.7. */
     private static final String MARKET_INDEX_CONNECTION_REFUSED_LINE =
             "2026/09/07 01:48:59 [error] 30#30: *21507 connect() failed (111: Connection refused) while "
@@ -35,6 +40,14 @@ class NginxGatewayFailureLogTailerTest {
                     + "/var/cache/nginx/proxy_temp/0/00/0000000000 while reading upstream, client: 127.0.0.1, "
                     + "server: _, request: \"GET /api/quotes HTTP/1.1\", upstream: \"http://172.18.0.3:8080/api/quotes\", "
                     + "host: \"127.0.0.1:9090\"";
+
+    @Test
+    void productionConstructorIsExplicitlyAutowiredWhenTestClockConstructorExists() throws NoSuchMethodException {
+        assertThat(NginxGatewayFailureLogTailer.class
+                .getConstructor(String.class, ApiErrorLogIngestClient.class, ApiErrorLogDiagnosticRenderer.class)
+                .isAnnotationPresent(Autowired.class))
+                .isTrue();
+    }
 
     @Test
     void matchedErrorLineIngestsOnceWithOpenMarketIndexStatus502AndTheLinesStableSha256DedupeKey(@TempDir Path dir) throws Exception {
@@ -109,6 +122,27 @@ class NginxGatewayFailureLogTailerTest {
     }
 
     @Test
+    void lineOlderThanRetentionWindowIsNotIngested(@TempDir Path dir) throws IOException {
+        Path log = writeLog(dir, MARKET_INDEX_CONNECTION_REFUSED_LINE);
+        ApiErrorLogIngestClient ingest = mock(ApiErrorLogIngestClient.class);
+
+        tailer(log, ingest, Clock.fixed(Instant.parse("2026-10-08T01:48:59Z"), ZoneOffset.UTC)).tail();
+
+        verifyNoInteractions(ingest);
+    }
+
+    @Test
+    void lineAtExactRetentionCutoffIsStillIngested(@TempDir Path dir) throws IOException {
+        Path log = writeLog(dir, MARKET_INDEX_CONNECTION_REFUSED_LINE);
+        ApiErrorLogIngestClient ingest = mock(ApiErrorLogIngestClient.class);
+
+        tailer(log, ingest, Clock.fixed(Instant.parse("2026-10-07T01:48:59Z"), ZoneOffset.UTC)).tail();
+
+        verify(ingest).ingest(eq("OPEN_MARKET_INDEX"), eq("大盤指數"), anyString(), anyString(),
+                eq(Instant.parse("2026-09-07T01:48:59Z")), eq(502), anyString());
+    }
+
+    @Test
     void missingMountedFileDoesNotThrowAndIngestsNothing(@TempDir Path dir) {
         Path missing = dir.resolve("not-mounted").resolve("error.log");
         ApiErrorLogIngestClient ingest = mock(ApiErrorLogIngestClient.class);
@@ -126,7 +160,11 @@ class NginxGatewayFailureLogTailerTest {
     }
 
     private static NginxGatewayFailureLogTailer tailer(Path log, ApiErrorLogIngestClient ingest) {
-        return new NginxGatewayFailureLogTailer(log.toString(), ingest, new ApiErrorLogDiagnosticRenderer(""));
+        return tailer(log, ingest, FIXTURE_CLOCK);
+    }
+
+    private static NginxGatewayFailureLogTailer tailer(Path log, ApiErrorLogIngestClient ingest, Clock clock) {
+        return new NginxGatewayFailureLogTailer(log.toString(), ingest, new ApiErrorLogDiagnosticRenderer(""), clock);
     }
 
     private static String sha256Hex(String value) throws NoSuchAlgorithmException {

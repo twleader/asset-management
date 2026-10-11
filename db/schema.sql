@@ -77,7 +77,15 @@ CREATE FUNCTION public.guard_api_error_log_retention() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'api_error_log is append-only'; END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.occurred_at < transaction_timestamp() - interval '30 days' THEN
+            RAISE EXCEPTION 'api_error_log is outside retention window';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'api_error_log is append-only';
+    END IF;
     IF OLD.occurred_at >= transaction_timestamp() - interval '30 days' THEN
         RAISE EXCEPTION 'api_error_log is within retention window';
     END IF;
@@ -5923,7 +5931,7 @@ CREATE TRIGGER api_error_log_operation_immutable BEFORE DELETE OR UPDATE ON publ
 -- Name: api_error_log api_error_log_retention_guard; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER api_error_log_retention_guard BEFORE DELETE OR UPDATE ON public.api_error_log FOR EACH ROW EXECUTE FUNCTION public.guard_api_error_log_retention();
+CREATE TRIGGER api_error_log_retention_guard BEFORE INSERT OR DELETE OR UPDATE ON public.api_error_log FOR EACH ROW EXECUTE FUNCTION public.guard_api_error_log_retention();
 
 
 --
