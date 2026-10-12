@@ -15,7 +15,6 @@ import org.springframework.http.codec.json.Jackson2JsonDecoder;
 import org.springframework.http.codec.json.Jackson2JsonEncoder;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
-import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
@@ -39,9 +38,6 @@ public class WebClientConfig {
     @Primary
     public WebClient businessServicesClient(WebClient.Builder builder,
                                             ObjectProvider<ReactorResourceFactory> resourceFactory) {
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(this::configureCodecs)
-                .build();
         return builder.clone()
                 // DNS 快取上限（Task 208，理由見 DnsCacheConfig）：gateway 那條由 HttpClientCustomizer 套，
                 // 這條 WebClient 是另一個 HttpClient 實例，必須在此明確套用，否則 business-services
@@ -52,7 +48,7 @@ public class WebClientConfig {
                 .clientConnector(new ReactorClientHttpConnector(
                         DnsCacheConfig.applyDnsCacheLimit(sharedHttpClient(resourceFactory), "webclient")))
                 .baseUrl(businessServicesUrl)
-                .exchangeStrategies(strategies)
+                .codecs(this::configureCodecs)
                 .filter(tenantHeaderFilter())
                 .build();
     }
@@ -81,20 +77,22 @@ public class WebClientConfig {
                                          ObjectProvider<ReactorResourceFactory> resourceFactory,
                                          String baseUrl,
                                          String clientName) {
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(this::configureCodecs)
-                .build();
         // clone 是安全邊界的一部分：不可因其他 bean 在 shared Builder 掛 filter，讓公開 client
         // 意外帶上 tenantHeaderFilter。
         return builder.clone()
                 .clientConnector(new ReactorClientHttpConnector(
                         DnsCacheConfig.applyDnsCacheLimit(sharedHttpClient(resourceFactory), clientName)))
                 .baseUrl(baseUrl)
-                .exchangeStrategies(strategies)
+                .codecs(this::configureCodecs)
                 .build();
     }
 
-    /** Custom strategies bypass Boot's codec customization, so retain Jackson 2 explicitly here. */
+    /**
+     * 以 builder.codecs 掛在 Boot codec customizer 之後執行，16MB 與 Jackson 2 設定才會生效。
+     * 不可改回 exchangeStrategies(...)：clone 會保留 Boot 的 codecs configurer，DefaultWebClientBuilder
+     * 先套自訂 strategies 再逐一套 configurer，spring.http.codecs.max-in-memory-size（預設 1MB）會蓋掉
+     * 這裡的上限，Task489 約 8MB 的 report-calculations 回應因此被讀成 DataBufferLimitException → 502。
+     */
     private void configureCodecs(ClientCodecConfigurer cfg) {
         cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024);
         cfg.defaultCodecs().jackson2JsonDecoder(new Jackson2JsonDecoder(json));
