@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -16,8 +17,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Component
 final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
 
-    private static final long DUMP_TIMEOUT_SECONDS = 300;
-    private static final long RESTORE_TIMEOUT_SECONDS = 900;
+    static final long DUMP_TIMEOUT_SECONDS = 720;
+    static final long RESTORE_TIMEOUT_SECONDS = 900;
+    static final long VALIDATE_TIMEOUT_SECONDS = 300;
     private static final AtomicBoolean PROCESS_CLEANUP_UNSAFE = new AtomicBoolean();
 
     private final String dbHost;
@@ -25,18 +27,31 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
     private final String dbName;
     private final String dbUser;
     private final String dbPassword;
+    private final ProcessStarter processStarter;
 
+    @Autowired
     ProcessBackupDatabaseProcess(
             @Value("${DB_HOST:postgres}") String dbHost,
             @Value("${DB_PORT:5432}") String dbPort,
             @Value("${DB_NAME}") String dbName,
             @Value("${DB_USERNAME}") String dbUser,
             @Value("${DB_PASSWORD}") String dbPassword) {
+        this(dbHost, dbPort, dbName, dbUser, dbPassword, ProcessBuilder::start);
+    }
+
+    ProcessBackupDatabaseProcess(
+            String dbHost,
+            String dbPort,
+            String dbName,
+            String dbUser,
+            String dbPassword,
+            ProcessStarter processStarter) {
         this.dbHost = dbHost;
         this.dbPort = dbPort;
         this.dbName = dbName;
         this.dbUser = dbUser;
         this.dbPassword = dbPassword;
+        this.processStarter = processStarter;
     }
 
     @Override
@@ -92,9 +107,13 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
                 builder.redirectOutput(stdoutFile.toFile());
             }
             builder.redirectError(stderrFile.toFile());
-            long maximum = "pg_restore".equals(label) ? RESTORE_TIMEOUT_SECONDS : DUMP_TIMEOUT_SECONDS;
+            long maximum = switch (label) {
+                case "pg_restore" -> RESTORE_TIMEOUT_SECONDS;
+                case "pg_restore --list" -> VALIDATE_TIMEOUT_SECONDS;
+                default -> DUMP_TIMEOUT_SECONDS;
+            };
             long timeoutSeconds = BackupWorkflowDeadline.commandSeconds(maximum);
-            process = builder.start();
+            process = processStarter.start(builder);
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 terminateAndWait(process);
                 throw new IllegalStateException(label + " 執行逾時");
@@ -144,5 +163,10 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
             throw new IllegalStateException("資料庫備份子行程無法安全停止");
         }
         if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    @FunctionalInterface
+    interface ProcessStarter {
+        Process start(ProcessBuilder builder) throws IOException;
     }
 }
