@@ -1418,6 +1418,16 @@
     "schedule_runtime_policy": {
       "core_draft_and_readback_by_minute": 40,
       "core_target_minutes": 22,
+      "core_deadline_receipt_d200": {
+        "calculator": "scripts/daily_timing.py",
+        "required_events": [
+          "draft_created",
+          "mime_readback",
+          "daily_core_validation"
+        ],
+        "completion_time": "LATEST_SUCCESSFUL_REQUIRED_EVENT",
+        "missing_or_failed_event_status": "CORE_COMPLETION_EVIDENCE_INCOMPLETE"
+      },
       "core_freeze_policy_d200": {
         "decision": "D-200",
         "freeze_event": "CORE_GMAIL_DRAFT_CREATED",
