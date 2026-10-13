@@ -45,7 +45,7 @@ final class ProcessBackupRemoteClient implements BackupRemoteClient {
     static final String EXPECTED_RAW_ROOT = "asset-management-backup";
     static final String EXPECTED_CRYPT_REMOTE = "GoogleDriver,root_folder_id=folder-id:"; // fixture only
     static final String CRYPT_BASE = "gdrive-crypt:";
-    static final long PROCESS_TIMEOUT_SECONDS = 300;
+    static final long PROCESS_TIMEOUT_SECONDS = 720;
 
     private static final Set<java.time.LocalDate> MOVED_DATES = Set.of(
             java.time.LocalDate.of(2026, 9, 29), java.time.LocalDate.of(2026, 9, 30),

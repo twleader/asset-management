@@ -543,6 +543,38 @@ class ProcessBackupRemoteClientTest {
     }
 
     @Test
+    void nonGateRcloneCommandUses720SecondCapAndWorkflowReserveClamp() throws Exception {
+        Path source = writeSource("source-v1");
+        List<Long> nonGateTimeouts = new ArrayList<>();
+        ProcessBackupRemoteClient.ProcessRunner runner = (command, config, timeout) -> {
+            if (isGate(command)) {
+                return ProcessBackupRemoteClient.CommandResult.success(gateTranscript(command));
+            }
+            nonGateTimeouts.add(timeout);
+            return ProcessBackupRemoteClient.CommandResult.success("[]");
+        };
+        ProcessBackupRemoteClient client = client(source, tempDir.resolve("writable.conf"), runner, defaultMover());
+
+        client.withVerifiedSession(session -> {
+            session.listJson("2026-10-02");
+            return null;
+        });
+
+        assertThat(nonGateTimeouts).containsExactly(ProcessBackupRemoteClient.PROCESS_TIMEOUT_SECONDS);
+
+        nonGateTimeouts.clear();
+        BackupWorkflowDeadline.within(Duration.ofSeconds(32), () -> client.withVerifiedSession(session -> {
+            session.listJson("2026-10-02");
+            return null;
+        }));
+
+        assertThat(nonGateTimeouts).hasSize(1);
+        assertThat(nonGateTimeouts.getFirst())
+                .isPositive()
+                .isLessThan(ProcessBackupRemoteClient.PROCESS_TIMEOUT_SECONDS);
+    }
+
+    @Test
     void missingDateDirectoryFailsListingAndExactDeleteMayReportMissing() throws Exception {
         Path source = writeSource("source-v1");
         AtomicInteger gates = new AtomicInteger();

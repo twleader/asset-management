@@ -139,6 +139,220 @@ class BackupServiceTest {
     }
 
     @Test
+    void usStartupRecoveryListenerReturnsWhileDumpIsBlockedAndDuplicateReadyEventStartsOneTask()
+            throws Exception {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        AtomicReference<ZonedDateTime> now = new AtomicReference<>(taipei(2026, 10, 13, 7, 0, 1));
+        CountDownLatch dumpEntered = new CountDownLatch(1);
+        CountDownLatch releaseDump = new CountDownLatch(1);
+        CountDownLatch backgroundDone = new CountDownLatch(1);
+        AtomicInteger starts = new AtomicInteger();
+        service = controlledService(now::get, task -> {
+            starts.incrementAndGet();
+            Thread.ofVirtual().start(() -> {
+                try {
+                    task.run();
+                } finally {
+                    backgroundDone.countDown();
+                }
+            });
+        });
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(false);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+        doAnswer(invocation -> {
+            dumpEntered.countDown();
+            if (!releaseDump.await(5, TimeUnit.SECONDS)) throw new AssertionError("dump stalled");
+            Files.write(invocation.getArgument(0), new byte[]{1, 2, 3, 4});
+            return null;
+        }).when(databaseProcess).dump(any());
+
+        Thread listener = Thread.ofVirtual().start(service::recoverTwDailyOnApplicationReady);
+        listener.join(1_000);
+
+        assertThat(listener.isAlive()).as("ApplicationReady listener must not await backup work").isFalse();
+        assertThat(dumpEntered.await(5, TimeUnit.SECONDS)).isTrue();
+        service.recoverTwDailyOnApplicationReady();
+        assertThat(starts).hasValue(1);
+        releaseDump.countDown();
+        assertThat(backgroundDone.await(5, TimeUnit.SECONDS)).isTrue();
+        verify(databaseProcess).dump(any());
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usStartupRecoveryAtOrBefore0700OrOnOutsideScheduledDaysDoesNotSubmitBackgroundTask() {
+        for (ZonedDateTime candidate : List.of(
+                taipei(2026, 10, 13, 6, 59, 59), taipei(2026, 10, 13, 7, 0, 0),
+                taipei(2026, 10, 12, 7, 0, 1), taipei(2026, 10, 11, 7, 0, 1))) {
+            AtomicInteger starts = new AtomicInteger();
+            BackupService candidateService = controlledService(() -> candidate, task -> starts.incrementAndGet());
+
+            candidateService.recoverTwDailyOnApplicationReady();
+
+            assertThat(starts).hasValue(0);
+        }
+        verifyNoInteractions(databaseProcess, recordRepo);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usStartupRecoveryStarterAndTaskFailuresAreSafe(CapturedOutput output) {
+        String starterSecret = "US_STARTER_SECRET_SENTINEL";
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        service = controlledService(() -> taipei(2026, 10, 13, 7, 0, 1),
+                task -> { throw new IllegalStateException(starterSecret); });
+
+        service.recoverTwDailyOnApplicationReady();
+
+        assertThat(output.getOut())
+                .contains("US daily startup recovery outcome=FAILED reason=THREAD_START_FAILED")
+                .doesNotContain(starterSecret);
+
+        String taskSecret = "US_TASK_SECRET_SENTINEL";
+        AtomicInteger reads = new AtomicInteger();
+        AtomicReference<Runnable> submitted = new AtomicReference<>();
+        service = controlledService(() -> {
+            if (reads.getAndIncrement() == 0) return taipei(2026, 10, 13, 7, 0, 1);
+            throw new IllegalStateException(taskSecret);
+        }, submitted::set);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+
+        service.recoverTwDailyOnApplicationReady();
+        submitted.get().run();
+
+        assertThat(output.getOut())
+                .contains("US daily startup recovery outcome=FAILED reason=UNEXPECTED_FAILURE")
+                .doesNotContain(taskSecret);
+        verifyNoInteractions(databaseProcess, recordRepo);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usStartupRecoverySkipsDisabledHolidayAndExistingExactUsDailyRowWithoutDump() {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        AtomicReference<ZonedDateTime> now = new AtomicReference<>(taipei(2026, 10, 13, 7, 0, 1));
+
+        setting.setBackupEnabled(false);
+        service = controlledService(now::get, Runnable::run);
+        service.recoverUsDailyOnStartup(date);
+        verifyNoInteractions(databaseProcess, recordRepo);
+
+        setting.setBackupEnabled(true);
+        service = controlledService(now::get, Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(false);
+        service.recoverUsDailyOnStartup(date);
+        verify(marketDataService).isUsTradingDay(date.minusDays(1));
+        verifyNoInteractions(databaseProcess, recordRepo);
+
+        service = controlledService(now::get, Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(true);
+        service.recoverUsDailyOnStartup(date);
+        verify(recordRepo).existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_");
+        verifyNoInteractions(databaseProcess);
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void successfulUsStartupRecoveryCreatesOneDailyBackupAndCronThenSkipsDurableRow() {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        service = controlledService(() -> taipei(2026, 10, 13, 7, 0, 1), Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(false, true);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+
+        service.recoverUsDailyOnStartup(date);
+        service.scheduledDailyUsBackup();
+
+        verify(databaseProcess, org.mockito.Mockito.times(1)).dump(any());
+        verify(upload).upload(any(), org.mockito.ArgumentMatchers.eq("daily"));
+        verify(recordRepo, org.mockito.Mockito.times(2))
+                .existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_");
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usRecoveryDoesNotTreatNonUsRowsAsItsDurableCompletion() {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        service = controlledService(() -> taipei(2026, 10, 13, 7, 0, 1), Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(false);
+        BackupRemoteClient.Session upload = mock(BackupRemoteClient.Session.class);
+        remoteClient.use(upload);
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+
+        service.recoverUsDailyOnStartup(date);
+
+        verify(databaseProcess).dump(any());
+        verify(recordRepo).existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_");
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usRecoveryCrossingDateOrTimeBeforeFilenameDoesNoMutation() {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        AtomicInteger reads = new AtomicInteger();
+        service = controlledService(() -> switch (reads.getAndIncrement()) {
+            case 0, 1 -> taipei(2026, 10, 13, 7, 0, 1);
+            default -> taipei(2026, 10, 14, 0, 0, 0);
+        }, Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(false);
+
+        service.recoverUsDailyOnStartup(date);
+
+        verify(databaseProcess, never()).dump(any());
+        verify(recordRepo, never()).saveAndFlush(any(BackupRecord.class));
+        assertThat(remoteClient.remaining()).isZero();
+
+        reads.set(0);
+        service = controlledService(() -> switch (reads.getAndIncrement()) {
+            case 0, 1 -> taipei(2026, 10, 13, 7, 0, 1);
+            default -> taipei(2026, 10, 13, 7, 0, 0);
+        }, Runnable::run);
+        service.recoverUsDailyOnStartup(date);
+
+        verify(databaseProcess, never()).dump(any());
+        verify(recordRepo, never()).saveAndFlush(any(BackupRecord.class));
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void usCronAtExact0700UsesControlledTaipeiRunDateAndDoesNotUseRecoveryGuard() {
+        LocalDate date = LocalDate.of(2026, 10, 13);
+        service = controlledService(() -> taipei(2026, 10, 13, 7, 0, 0), Runnable::run);
+        when(marketDataService.isUsTradingDay(date.minusDays(1))).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_"))
+                .thenReturn(false);
+        AtomicReference<java.nio.file.Path> dumped = new AtomicReference<>();
+        doAnswer(invocation -> {
+            java.nio.file.Path output = invocation.getArgument(0);
+            dumped.set(output);
+            Files.write(output, new byte[]{1, 2, 3, 4});
+            return null;
+        }).when(databaseProcess).dump(any());
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+        remoteClient.use(mock(BackupRemoteClient.Session.class));
+
+        service.scheduledDailyUsBackup();
+
+        assertThat(dumped.get().getFileName().toString()).startsWith("asset_daily_us_20261013_070000_");
+        verify(recordRepo).existsByFolderAndFilenameStartingWith("daily", "asset_daily_us_20261013_");
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
     void startupRecoveryAtOrBefore1530DoesNotSubmitBackgroundTask() {
         for (ZonedDateTime candidate : List.of(
                 taipei(2026, 10, 8, 15, 29, 59), taipei(2026, 10, 8, 15, 30, 0))) {
@@ -149,7 +363,7 @@ class BackupServiceTest {
 
             assertThat(starts).hasValue(0);
         }
-        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        verifyNoInteractions(databaseProcess, recordRepo);
         assertThat(remoteClient.remaining()).isZero();
     }
 
@@ -164,7 +378,7 @@ class BackupServiceTest {
         assertThat(output.getOut())
                 .contains("TW daily startup recovery outcome=FAILED reason=THREAD_START_FAILED")
                 .doesNotContain(sentinel);
-        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        verifyNoInteractions(databaseProcess, recordRepo);
         assertThat(remoteClient.remaining()).isZero();
     }
 
@@ -184,7 +398,7 @@ class BackupServiceTest {
         assertThat(output.getOut())
                 .contains("TW daily startup recovery outcome=FAILED reason=UNEXPECTED_FAILURE")
                 .doesNotContain(sentinel);
-        verifyNoInteractions(databaseProcess, recordRepo, marketDataService);
+        verifyNoInteractions(databaseProcess, recordRepo);
         assertThat(remoteClient.remaining()).isZero();
     }
 
@@ -274,7 +488,7 @@ class BackupServiceTest {
         service.recoverTwDailyOnApplicationReady();
         submitted.get().run();
 
-        verifyNoInteractions(databaseProcess, settingRepo, recordRepo, marketDataService);
+        verifyNoInteractions(databaseProcess, settingRepo, recordRepo);
         assertThat(remoteClient.remaining()).isZero();
         assertThat(candidateDate).isEqualTo(LocalDate.of(2026, 10, 8));
     }
