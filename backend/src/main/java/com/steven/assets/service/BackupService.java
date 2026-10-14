@@ -700,6 +700,10 @@ public class BackupService {
         } catch (BackupRemoteUnavailableException exception) {
             log.error("{}失敗: {}", label, exception.getMessage());
             return false;
+        } catch (BackupSafeFailureException safe) {
+            // 訊息為固定文字、不含 stderr／路徑／DB 內容（Requirement 192／Task 498）。
+            log.error("{}失敗: {}", label, safe.getMessage());
+            return false;
         } catch (RuntimeException ignored) {
             log.error("{}失敗: 備份子行程或本地索引目前不可用", label);
             return false;

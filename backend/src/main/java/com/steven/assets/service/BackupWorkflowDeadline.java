@@ -34,14 +34,14 @@ final class BackupWorkflowDeadline {
         long usable = workNanos();
         // Process APIs accept whole seconds; rounding up can run beyond the reserved cleanup window.
         long seconds = usable / 1_000_000_000L;
-        if (seconds < 1) throw new IllegalStateException("備份流程期限不足，未啟動子行程");
+        if (seconds < 1) throw new BackupSafeFailureException("備份流程期限不足，未啟動子行程");
         return Math.min(seconds, commandMaximumSeconds);
     }
 
     static void requireSeconds(long seconds) {
         Deque<Long> stack = DEADLINES.get();
         if (!stack.isEmpty() && stack.peek() - System.nanoTime() < Duration.ofSeconds(seconds).toNanos()) {
-            throw new IllegalStateException("備份流程期限不足，未啟動還原程序");
+            throw new BackupSafeFailureException("備份流程期限不足，未啟動還原程序");
         }
     }
 
@@ -60,19 +60,19 @@ final class BackupWorkflowDeadline {
     }
 
     static void requireWorkBudget() {
-        if (workNanos() <= 0) throw new IllegalStateException("備份流程期限不足，未提交資料庫變更");
+        if (workNanos() <= 0) throw new BackupSafeFailureException("備份流程期限不足，未提交資料庫變更");
     }
 
     static void lockWithinDeadline(ReentrantLock lock) {
         long waitNanos = workNanos();
-        if (waitNanos <= 0) throw new IllegalStateException("備份流程期限不足，未取得排他鎖");
+        if (waitNanos <= 0) throw new BackupSafeFailureException("備份流程期限不足，未取得排他鎖");
         try {
             if (!lock.tryLock(waitNanos, TimeUnit.NANOSECONDS)) {
-                throw new IllegalStateException("備份流程期限不足，未取得排他鎖");
+                throw new BackupSafeFailureException("備份流程期限不足，未取得排他鎖");
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("備份流程等待排他鎖時被中斷");
+            throw new BackupSafeFailureException("備份流程等待排他鎖時被中斷");
         }
     }
 

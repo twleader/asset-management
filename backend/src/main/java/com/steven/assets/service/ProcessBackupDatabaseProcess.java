@@ -20,6 +20,18 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
     static final long DUMP_TIMEOUT_SECONDS = 720;
     static final long RESTORE_TIMEOUT_SECONDS = 900;
     static final long VALIDATE_TIMEOUT_SECONDS = 300;
+
+    /** Drive 備份 pg_dump 排除 data 的完整限定表名（Requirement 192／Task 498；schema 與 trigger 仍會備份）。 */
+    static final String EXCLUDED_DATA_AI_FLOW_RUN = "public.ai_flow_run";
+    static final String EXCLUDED_DATA_AI_FLOW_EVENT = "public.ai_flow_event";
+    static final String EXCLUDED_DATA_SRPP_REPORT_PACKAGE = "public.srpp_report_calculation_package";
+    static final String EXCLUDED_DATA_SRPP_REPORT_BASE = "public.srpp_report_calculation_base";
+    static final List<String> EXCLUDED_DATA_TABLES = List.of(
+            EXCLUDED_DATA_AI_FLOW_RUN,
+            EXCLUDED_DATA_AI_FLOW_EVENT,
+            EXCLUDED_DATA_SRPP_REPORT_PACKAGE,
+            EXCLUDED_DATA_SRPP_REPORT_BASE);
+
     private static final AtomicBoolean PROCESS_CLEANUP_UNSAFE = new AtomicBoolean();
 
     private final String dbHost;
@@ -56,7 +68,7 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
 
     @Override
     public void dump(Path outputFile) {
-        run(List.of(
+        List<String> command = new ArrayList<>(List.of(
                 "pg_dump",
                 "-h", dbHost,
                 "-p", dbPort,
@@ -65,10 +77,12 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
                 "--format=custom",
                 "--compress=9",
                 "--no-owner",
-                "--no-acl",
-                "--exclude-table-data=public.ai_flow_run",
-                "--exclude-table-data=public.ai_flow_event"
-        ), outputFile, "pg_dump");
+                "--no-acl"
+        ));
+        for (String table : EXCLUDED_DATA_TABLES) {
+            command.add("--exclude-table-data=" + table);
+        }
+        run(List.copyOf(command), outputFile, "pg_dump");
     }
 
     @Override
@@ -93,7 +107,7 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
     }
 
     private void run(List<String> command, Path stdoutFile, String label) {
-        if (PROCESS_CLEANUP_UNSAFE.get()) throw new IllegalStateException("資料庫備份子行程狀態未定，已停止後續操作");
+        if (PROCESS_CLEANUP_UNSAFE.get()) throw new BackupSafeFailureException("資料庫備份子行程狀態未定，已停止後續操作");
         Path stderrFile = null;
         Process process = null;
         try {
@@ -116,23 +130,23 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
             process = processStarter.start(builder);
             if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 terminateAndWait(process);
-                throw new IllegalStateException(label + " 執行逾時");
+                throw new BackupSafeFailureException(label + " 執行逾時");
             }
             if (process.exitValue() != 0) {
                 // stderr 可能含資料庫細節；只回固定摘要，不把原始內容帶進 exception/log。
-                throw new IllegalStateException(label + " 執行失敗");
+                throw new BackupSafeFailureException(label + " 執行失敗");
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             if (process != null) {
                 terminateAndWait(process);
             }
-            throw new IllegalStateException(label + " 執行被中斷");
+            throw new BackupSafeFailureException(label + " 執行被中斷");
         } catch (IOException | UnsupportedOperationException | SecurityException failure) {
             if (process != null) {
                 terminateAndWait(process);
             }
-            throw new IllegalStateException(label + " 無法執行");
+            throw new BackupSafeFailureException(label + " 無法執行");
         } finally {
             if (stderrFile != null) {
                 try {
@@ -160,7 +174,7 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
         }
         if (process.isAlive() || descendants.stream().anyMatch(ProcessHandle::isAlive)) {
             PROCESS_CLEANUP_UNSAFE.set(true);
-            throw new IllegalStateException("資料庫備份子行程無法安全停止");
+            throw new BackupSafeFailureException("資料庫備份子行程無法安全停止");
         }
         if (interrupted) Thread.currentThread().interrupt();
     }
