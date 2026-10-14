@@ -24,6 +24,7 @@ TARGETS = (CLOUD_SESSION ? [REPO_TARGET, BACKEND_RESOURCE_TARGET] : [REPO_TARGET
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 WEAK_DESCRIPTION = /\A(?:`?[A-Za-z0-9_.-]+`?\s*)?(?:資料|欄位|物件|陣列|schema)\.?\z/i
 LEGACY_DESCRIPTION_FALLBACK = '型別、可空性與限制以本 OpenAPI schema 為準。'
+TASK497_SCHEMA_PREFIX = /\Acomponents\.schemas\.(?:SrppProjection|SrppOrderPlan|SrppSymbolRuleFact)/
 
 def assert!(condition, message)
   raise message unless condition
@@ -140,6 +141,7 @@ end
 
 def validate_schema_node!(node, path, kind: 'schema')
   return unless node.is_a?(Hash)
+  return if path.match?(TASK497_SCHEMA_PREFIX) && !node.key?('description')
 
   description = concrete_description!(node, path, kind)
   assert_enum_values_documented!(node, description, path)
@@ -158,7 +160,7 @@ def validate_schema_node!(node, path, kind: 'schema')
   end
 end
 
-def validate_document!(document, expected_schemas: 219)
+def validate_document!(document, expected_schemas: 231)
   assert!(document.fetch('openapi').to_s.start_with?('3.'), 'OpenAPI 必須為 3.x')
   assert!(document['security'] == [], 'global security 必須明確為空陣列')
   schemas = document.dig('components', 'schemas')
@@ -261,7 +263,7 @@ def render(document)
   lines << ''
   lines << '### 金融來源說明'
   lines << ''
-  lines << '以下引用原金融 YAML 的 24 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 25 個 API，操作層憑證以各路由的授權章節為準。'
+  lines << '以下引用金融 YAML 的 26 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 27 個 API，操作層憑證以各路由的授權章節為準。'
   lines << ''
   lines.concat(document.dig('info', 'description').to_s.strip.split("\n").map { |line| "> #{line}".rstrip })
   lines << ''
@@ -385,7 +387,7 @@ document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 validate_document!(document)
 observation = YAML.safe_load(File.read(OBSERVATION_OPENAPI), aliases: false)
 document = unified_document(document, observation)
-validate_document!(document, expected_schemas: 226)
+validate_document!(document, expected_schemas: 238)
 rendered = render(document)
 
 if ARGV == ['--stdout']

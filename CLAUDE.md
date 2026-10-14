@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（183 個 Requirements；最新編號為 190，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（184 個 Requirements；最新編號為 191，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -481,3 +481,9 @@ Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/
 使用者已明確授權將所有 9090 API 產生於 SRPP/docs 同一 Swagger，本輪取代 Tasks492／494 的「不修改 SRPP 文件／金融 Markdown bytes」限制。兩份 YAML 原路由／schema／版本維持，render-9090-openapi-docs.rb 讀兩份來源、驗獨立 refs 與 path／operationId／component 無碰撞後產生 25 pairs 統一 Markdown；repo docs、backend resource、地端 SRPP mirror 位元組一致。PublishedSwaggerIdentity 採統一文件 hash，因此重建 business-services；歷史 immutable receipts 不變，SRPP manifest不納Swagger文件但含consumer schema；只可在逐來源驗舊manifest一致後，更新schema文件身分metadata，原工具重產manifest並同步backend authority與冪等registry；schema驗證規則／模型／公式不變，其他來源漂移不得混納。
 
 Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 consumer schema。更新schema後，先以既有 daily_runtime_contract.make_contract/canonical 重產，驗僅 source_sha256[assumptions/srpp_report_calculations_schema.json] 變化、所有語義欄位原樣，再重產policy manifest（只允許schema及runtime contract兩個source hashes變化）。metadata同步工具須fail closed於其他漂移，失敗rollback三個SRPP檔及backend artifact；--check零寫入。
+
+### Requirement 191／Task 497 SRPP fail-closed 決策投影與逐檔事實 API 修訂
+
+本修訂優先於前述金融24／union25：金融1.26.0新增exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`，金融為26 pairs（22GET/4POST）；觀測仍獨立1.1.0的一POST，gateway/catalog/統一Swagger union為27 pairs（22GET/5POST）。mail的GET/POST仍共用Tailscale prefix，所以Tailscale是26 handlers；其餘均須exact allowlist，禁止root、`/api/`、wildcard或descendant。
+
+兩GET只讀既有immutable schemaVersion1 FINAL report-calculations package，identity含ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256、calculationRunId；不得改package output、consumer schema、manifest、registry、producer或SRPP runtime。eligible leg是module data.legs的BUY/SELL，市場精確台股→TW／美股→US，NONE排除，legId固定ASCII `moduleId.index`；未知market/action是502而非猜測。A2 universe是eligible TW legs的sorted unique投影，非input field，只由package content hash保護；input snapshot hash只identity-bind、不可宣稱包含或保護universe。無M1 capacity evidence，零capacity reflow/substitution。P2與fresh revisions不在本輪；CSV均single-key／UTF-8 single decode。A1 root無quoteCapture；每leg只在`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol及price/amount精確同源且sourceRevision=vector revision時才有sealed `sourceId/sourceRevision/sourceSha256/capturedAt/QUOTE receipt` quoteCapture，否則三者全null。A1不收client risk，derivedRisk固定DEFENSIVE/UNAVAILABLE/RISK_EVIDENCE_UNAVAILABLE：BUY zero/null、SELL frozen-only、REDUCE需唯一base unit。A2 facts恰12筆固定順序；僅week52/k/d/rsi5/bias10/wr9/premium的exact frozen source＋`validation=VERIFIED` vector及其SHA/capturedAt matching SOURCE receipt可AVAILABLE；overheat只在五項AVAILABLE時依指定pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED；其餘四筆固定null NOT_EVALUATED，皆不得推斷。只發布API和Task495 Swagger metadata；不改SRPP prompts/schedules/validators/runtime或adoption，另立任務才可採納。

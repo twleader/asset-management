@@ -7,9 +7,9 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.25.0` |
+| 契約版本 | `1.26.0` |
 | AI 流程觀測契約版本 | `1.1.0` |
-| 對外路徑 | 25 條：20 個 `GET`、5 個 `POST` |
+| 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
@@ -17,16 +17,16 @@
 
 ### 金融來源說明
 
-以下引用原金融 YAML 的 24 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 25 個 API，操作層憑證以各路由的授權章節為準。
+以下引用金融 YAML 的 26 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 27 個 API，操作層憑證以各路由的授權章節為準。
 
-> 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十四條精確 method/path pairs：
-> 二十條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
+> 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十六條精確 method/path pairs：
+> 二十二條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
 > ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
 > 中日報與事件證據可建立不可變收據或固定收件人郵件；決策端點採純計算 D130/D195，缺正式來源保持 BLOCKED。各端點絕不下單、刷新行情或呼叫券商。rescan
 > 經 business 端 30 秒全域 Redis 冷卻節流）。
 >
 > 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-> 二十四條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+> 二十六條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 > 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 >
 > Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
@@ -108,8 +108,10 @@
 | 21 | `POST` | `/api/public/srpp/daily-decision/evaluate` | `evaluateSrppDailyDecision` | 擷取不可變D130/D195日報決策 | 200 application/json: SrppDailyDecisionResponse<br>201 application/json: SrppDailyDecisionResponse<br>202 application/json: SrppDailyDecisionCapturing |
 | 22 | `GET` | `/api/srpp/daily-report-mail/{idempotencyKey}` | `getSrppDailyReportMail` | 查詢 SRPP 日報寄送的最終快照 | 200 application/json: SrppDailyReportMailResponse |
 | 23 | `GET` | `/api/public/srpp/technical-series` | `getSrppTechnicalSeries` | 單檔完成日逐日價量、OBV 與技術指標 | 200 application/json: SrppTechnicalSeriesResponse |
-| 24 | `GET` | `/api/public/srpp/report-calculations` | `getSrppReportCalculations` | 純讀背景預先計算的12模組不可變日報數值 | 200 application/json: SrppReportCalculations |
-| 25 | `POST` | `/api/srpp/ai-flow/events` | `recordSrppAiFlowEvents` | 記錄雙軌AI公開執行事件 | 200 application/json: AiFlowAck<br>201 application/json: AiFlowAck |
+| 24 | `GET` | `/api/public/srpp/order-plan` | `getSrppOrderPlan` | 從不可變報告包投影 fail-closed 決策計畫 | 200 application/json: SrppOrderPlanResponse |
+| 25 | `GET` | `/api/public/srpp/symbol-rule-facts` | `getSrppSymbolRuleFacts` | 從不可變包讀取逐檔 frozen 規則事實 | 200 application/json: SrppSymbolRuleFactsResponse |
+| 26 | `GET` | `/api/public/srpp/report-calculations` | `getSrppReportCalculations` | 純讀背景預先計算的12模組不可變日報數值 | 200 application/json: SrppReportCalculations |
+| 27 | `POST` | `/api/srpp/ai-flow/events` | `recordSrppAiFlowEvents` | 記錄雙軌AI公開執行事件 | 200 application/json: AiFlowAck<br>201 application/json: AiFlowAck |
 
 ## 路由詳情
 
@@ -8348,7 +8350,620 @@ asOf 必須早於市場本地今日且該日 bar 精確存在才會有序列。
 }
 ```
 
-### 24. `GET /api/public/srpp/report-calculations`
+### 24. `GET /api/public/srpp/order-plan`
+
+Task497 唯讀投影；僅接受有序 LLM decisions，固定 DEFENSIVE，不做容量重算、候選遞補、行情刷新、外呼、寫入或交易。
+
+#### 授權
+
+```json
+[
+
+]
+```
+
+#### 參數
+
+| 名稱 | 位置 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `email` | `query` | 否 | `string (email)` | example: `selected@example.invalid` | 選填 ACTIVE owner email；省略採 configured-admin。 |
+| `consumer` | `query` | 是 | `string` | enum: `Codex`, `Claude`<br>example: `Codex` | 消費者身份只允許 Codex 或 Claude。 |
+| `tradingDate` | `query` | 是 | `string (date)` | example: `2026-10-14` | 台北當日 ISO 日期。 |
+| `reportSlot` | `query` | 是 | `string` | enum: `09:05`, `12:00`<br>example: `12:00` | 不早於目前時間的報告時段 09:05 或 12:00。 |
+| `policyBundleSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | 不可變包的正式政策 SHA-256。 |
+| `swaggerSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` | 發布 Swagger SHA-256。 |
+| `calculationRunId` | `query` | 是 | `string (uuid)` | example: `11111111-1111-4111-8111-111111111111` | FINAL immutable package UUID。 |
+| `decisions` | `query` | 是 | `string` | example: `ASSET_RECONCILIATION.0~ADOPT` | 單一 CSV；每項為 moduleId.index 加 ADOPT、REDUCE、WAIT 或 VETO，不接受重複 legId。 |
+| `asOf` | `query` | 是 | `string (date-time)` | example: `2026-10-14T04:05:00Z` | RFC3339 時點，必在 package capture 與服務時計間。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppOrderPlanResponse | 封閉的 fail-closed 投影，永不授權交易。 |
+| `400` | application/problem+json: ProblemDetail | 封閉 query、CSV、body 或 asOf 不合法。 |
+| `404` | application/problem+json: ProblemDetail | 不存在或非 owner 的 immutable package。 |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET。 |
+| `409` | application/problem+json: ProblemDetail | 日曆、政策、Swagger 或 immutable identity 不一致。 |
+| `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游 immutable package 不符封閉驗證。 |
+| `503` | application/problem+json: ProblemDetail | owner、日曆或 package 暫時未就緒。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
+完整回應契約（包含 headers、media types 與 examples）：
+
+```json
+{
+  "200": {
+    "description": "封閉的 fail-closed 投影，永不授權交易。",
+    "headers": {
+      "Cache-Control": {
+        "description": "私有且不可共享快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppOrderPlanResponse"
+        },
+        "example": {
+          "schemaVersion": "1",
+          "planId": "5df7366f140b22c1eced073d4d20cb22262ac0dffc10b74e4fa3dcf60e9746c9",
+          "identity": {
+            "ownerUserId": 7,
+            "consumer": "Codex",
+            "tradingDate": "2026-10-14",
+            "reportSlot": "12:00",
+            "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swaggerSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "base": {
+            "packageContentSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "inputSnapshotSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "inputSnapshotCapturedAt": "2026-10-14T03:00:00Z"
+          },
+          "asOf": "2026-10-14T04:05:00Z",
+          "normalizedDecisions": [
+            {
+              "legId": "ASSET_RECONCILIATION.0",
+              "verdict": "ADOPT",
+              "amount": null,
+              "reason": null
+            }
+          ],
+          "derivedRisk": {
+            "mode": "DEFENSIVE",
+            "status": "UNAVAILABLE",
+            "reasonCodes": [
+              "RISK_EVIDENCE_UNAVAILABLE"
+            ],
+            "receiptRefs": [
+
+            ]
+          },
+          "legs": [
+            {
+              "legId": "ASSET_RECONCILIATION.0",
+              "market": "TW",
+              "symbol": "0050",
+              "action": "BUY",
+              "verdict": "ADOPT",
+              "reasonCodes": [
+                "RISK_EVIDENCE_UNAVAILABLE"
+              ],
+              "baseLots": 2,
+              "baseUnits": null,
+              "finalLots": 0,
+              "finalUnits": null,
+              "limitPrice": null,
+              "amount": null,
+              "quoteCapture": null,
+              "freshness": null,
+              "settlement": null,
+              "executable": false
+            }
+          ],
+          "coverage": {
+            "requestedCount": 1,
+            "completeCount": 0,
+            "partialCount": 0,
+            "unavailableCount": 0,
+            "notEvaluatedCount": 1
+          },
+          "executionScope": "REPORT_RECOMMENDATION_ONLY",
+          "tradeAuthorization": false,
+          "placesOrders": false,
+          "receiptRefs": [
+
+          ],
+          "contentSha256": "880aa367c7cb25905c0b55f5c38312beab768dd94899c2b5a88039cb6cc2d478"
+        }
+      }
+    }
+  },
+  "400": {
+    "description": "封閉 query、CSV、body 或 asOf 不合法。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "404": {
+    "description": "不存在或非 owner 的 immutable package。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "405": {
+    "description": "僅允許 GET。",
+    "headers": {
+      "Allow": {
+        "description": "唯一方法 GET。",
+        "schema": {
+          "type": "string",
+          "const": "GET"
+        }
+      }
+    },
+    "content": {
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        }
+      }
+    }
+  },
+  "409": {
+    "description": "日曆、政策、Swagger 或 immutable identity 不一致。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "502": {
+    "description": "上游 immutable package 不符封閉驗證。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      },
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        }
+      }
+    }
+  },
+  "503": {
+    "description": "owner、日曆或 package 暫時未就緒。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "504": {
+    "description": "HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。",
+    "content": {
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        },
+        "example": "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+      }
+    }
+  }
+}
+```
+
+### 25. `GET /api/public/srpp/symbol-rule-facts`
+
+Task497 唯讀投影；僅輸出 package 內台股 universe 的十二筆固定順序事實，無來源時以 NOT_EVALUATED 表示且不查新行情。
+
+#### 授權
+
+```json
+[
+
+]
+```
+
+#### 參數
+
+| 名稱 | 位置 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `email` | `query` | 否 | `string (email)` | example: `selected@example.invalid` | 選填 ACTIVE owner email；省略採 configured-admin。 |
+| `consumer` | `query` | 是 | `string` | enum: `Codex`, `Claude`<br>example: `Codex` | 消費者身份只允許 Codex 或 Claude。 |
+| `tradingDate` | `query` | 是 | `string (date)` | example: `2026-10-14` | 台北當日 ISO 日期。 |
+| `reportSlot` | `query` | 是 | `string` | enum: `09:05`, `12:00`<br>example: `12:00` | 不早於目前時間的報告時段 09:05 或 12:00。 |
+| `policyBundleSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | 不可變包的正式政策 SHA-256。 |
+| `swaggerSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` | 發布 Swagger SHA-256。 |
+| `calculationRunId` | `query` | 是 | `string (uuid)` | example: `11111111-1111-4111-8111-111111111111` | FINAL immutable package UUID。 |
+| `stockCodes` | `query` | 否 | `string` | example: `0050,2330` | 選填單一台股 CSV；非 package universe 逐列 UNAVAILABLE，不可用來搜尋新標的。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppSymbolRuleFactsResponse | 每個 symbol 固定十二筆 frozen facts，並保留 unavailable 理由。 |
+| `400` | application/problem+json: ProblemDetail | 封閉 query、CSV 或 body 不合法。 |
+| `404` | application/problem+json: ProblemDetail | 不存在或非 owner 的 immutable package。 |
+| `405` | text/html: NginxErrorHtml | 僅允許 GET。 |
+| `409` | application/problem+json: ProblemDetail | 日曆、政策、Swagger 或 immutable identity 不一致。 |
+| `502` | application/problem+json: ProblemDetail; text/html: NginxErrorHtml | 上游 immutable package 不符封閉驗證。 |
+| `503` | application/problem+json: ProblemDetail | owner、日曆或 package 暫時未就緒。 |
+| `504` | text/html: NginxErrorHtml | HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。 |
+
+完整回應契約（包含 headers、media types 與 examples）：
+
+```json
+{
+  "200": {
+    "description": "每個 symbol 固定十二筆 frozen facts，並保留 unavailable 理由。",
+    "headers": {
+      "Cache-Control": {
+        "description": "私有且不可共享快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppSymbolRuleFactsResponse"
+        },
+        "example": {
+          "schemaVersion": "1",
+          "identity": {
+            "ownerUserId": 7,
+            "consumer": "Codex",
+            "tradingDate": "2026-10-14",
+            "reportSlot": "12:00",
+            "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swaggerSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "base": {
+            "packageContentSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "inputSnapshotSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "inputSnapshotCapturedAt": "2026-10-14T03:00:00Z"
+          },
+          "symbols": [
+            {
+              "symbol": "0050",
+              "market": "TW",
+              "facts": [
+                {
+                  "name": "WEEK52_POSITION",
+                  "value": "0.5",
+                  "unit": "RATIO",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "K",
+                  "value": "91",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "D",
+                  "value": "81",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "RSI5",
+                  "value": "80",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "BIAS10",
+                  "value": "8",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "WILLIAMS_R9",
+                  "value": "20",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "PREMIUM_PERCENT",
+                  "value": "1",
+                  "unit": "PERCENT",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "OVERHEAT_HIT",
+                  "value": true,
+                  "unit": "NONE",
+                  "status": "AVAILABLE",
+                  "asOf": "2026-10-14T03:00:00Z",
+                  "sourceRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "receiptRefs": [
+                    {
+                      "kind": "SOURCE",
+                      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                      "capturedAt": "2026-10-14T02:30:00Z"
+                    }
+                  ],
+                  "reasonCodes": [
+
+                  ]
+                },
+                {
+                  "name": "LOW_HIT",
+                  "value": null,
+                  "unit": "NONE",
+                  "status": "NOT_EVALUATED",
+                  "asOf": null,
+                  "sourceRevision": null,
+                  "receiptRefs": [
+
+                  ],
+                  "reasonCodes": [
+                    "FROZEN_INPUT_UNAVAILABLE"
+                  ]
+                },
+                {
+                  "name": "ENTRY_WATCH",
+                  "value": null,
+                  "unit": "NONE",
+                  "status": "NOT_EVALUATED",
+                  "asOf": null,
+                  "sourceRevision": null,
+                  "receiptRefs": [
+
+                  ],
+                  "reasonCodes": [
+                    "FROZEN_INPUT_UNAVAILABLE"
+                  ]
+                },
+                {
+                  "name": "BUY_OBSERVATION",
+                  "value": null,
+                  "unit": "NONE",
+                  "status": "NOT_EVALUATED",
+                  "asOf": null,
+                  "sourceRevision": null,
+                  "receiptRefs": [
+
+                  ],
+                  "reasonCodes": [
+                    "FROZEN_INPUT_UNAVAILABLE"
+                  ]
+                },
+                {
+                  "name": "SELL_OBSERVATION",
+                  "value": null,
+                  "unit": "NONE",
+                  "status": "NOT_EVALUATED",
+                  "asOf": null,
+                  "sourceRevision": null,
+                  "receiptRefs": [
+
+                  ],
+                  "reasonCodes": [
+                    "FROZEN_INPUT_UNAVAILABLE"
+                  ]
+                }
+              ],
+              "status": "NOT_EVALUATED",
+              "reasonCodes": [
+
+              ]
+            }
+          ],
+          "coverage": {
+            "requestedCount": 1,
+            "completeCount": 0,
+            "partialCount": 0,
+            "unavailableCount": 0,
+            "notEvaluatedCount": 1
+          },
+          "executionScope": "REPORT_RECOMMENDATION_ONLY",
+          "tradeAuthorization": false,
+          "placesOrders": false,
+          "receiptRefs": [
+
+          ],
+          "contentSha256": "8e03f017a57bb0fb79d05dc1582463d938615946d3edbd08bc663e73a9cabd58"
+        }
+      }
+    }
+  },
+  "400": {
+    "description": "封閉 query、CSV 或 body 不合法。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "404": {
+    "description": "不存在或非 owner 的 immutable package。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "405": {
+    "description": "僅允許 GET。",
+    "headers": {
+      "Allow": {
+        "description": "唯一方法 GET。",
+        "schema": {
+          "type": "string",
+          "const": "GET"
+        }
+      }
+    },
+    "content": {
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        }
+      }
+    }
+  },
+  "409": {
+    "description": "日曆、政策、Swagger 或 immutable identity 不一致。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "502": {
+    "description": "上游 immutable package 不符封閉驗證。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      },
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        }
+      }
+    }
+  },
+  "503": {
+    "description": "owner、日曆或 package 暫時未就緒。",
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/ProblemDetail"
+        }
+      }
+    }
+  },
+  "504": {
+    "description": "HTTP 504 Gateway Time-out response class；Nginx upstream timeout 時回傳，gateway 的 connect/send/read timeout 分別為 5 秒／30 秒／60 秒。body 是 `text/html` 的 `NginxErrorHtml` item，不是 RFC 7807 JSON。",
+    "content": {
+      "text/html": {
+        "schema": {
+          "$ref": "#/components/schemas/NginxErrorHtml"
+        },
+        "example": "<html><head><title>504 Gateway Time-out</title></head><body><center><h1>504 Gateway Time-out</h1></center><hr><center>nginx</center></body></html>"
+      }
+    }
+  }
+}
+```
+
+### 26. `GET /api/public/srpp/report-calculations`
 
 Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB或Redis寫入/通知/email/券商交易。所有錯誤亦不觸發API error-log ingest；BFF與Nginx背景錯誤tailer為此exact GET具名排除persist，routecatalog只描述能力身份。背景每60秒cached日曆先行，在09:05–12:00與12:00–14:00發布對應slot；來源晚到重試、revision變動新ID，同輸入共享基底只算一次。每個query恰好一次，不接受未知/重複/空值/body/caller rawInput或建議；ACTIVE owner預設configured-admin，lookup5秒且caller Reactor identity清除。BFF驗全schema、exact owner/consumer/hash/clock、source refs、JCS來源原文與input/content hash、coverage、Decimal與positive-leg gates。12模組每項品質獨立，未完成公式scope固定NOT_EVALUATED/CALCULATOR_SCOPE_NOT_VERIFIED，不以null補0或聲稱COMPLETE；正式broker pending/subaccount缺少維持阻擋。consumer事件NOT_BOUND，未自動加入SRPP排程allowlist。成功example為isolated synthetic wire，非真交易日业务正例。
 
@@ -9066,7 +9681,7 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
 }
 ```
 
-### 25. `POST /api/srpp/ai-flow/events`
+### 27. `POST /api/srpp/ai-flow/events`
 
 唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。授權在owner/DB/error-ingest I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME都禁止；摘要採allowlist。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
 
@@ -31544,6 +32159,1002 @@ CAPTURING不是FINAL；有generation fencing与30秒lease，Retry-After=2。
 | `status` | 是 | `string` | 否 | enum: `CAPTURING` | CAPTURING代表擷取或較早slot尚在處理。 |
 | `code` | 是 | `string` | 否 | enum: `DECISION_CAPTURE_IN_PROGRESS` | DECISION_CAPTURE_IN_PROGRESS：稍後以同identity重試。 |
 | `identity` | 是 | `SrppDecisionIdentity` | 否 |  | 已取得lease的owner/date/slot與固定metadata。 |
+
+### `SrppProjectionIdentity`
+
+immutable package 與目前 ACTIVE owner 的完全一致身分綁定。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "immutable package 與目前 ACTIVE owner 的完全一致身分綁定。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ownerUserId",
+    "consumer",
+    "tradingDate",
+    "reportSlot",
+    "policyBundleSha256",
+    "swaggerSha256"
+  ],
+  "properties": {
+    "ownerUserId": {
+      "description": "ACTIVE owner 的安全整數 ID。",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "consumer": {
+      "description": "呼叫端消費者，只可為 Codex 或 Claude。",
+      "type": "string",
+      "enum": [
+        "Codex",
+        "Claude"
+      ]
+    },
+    "tradingDate": {
+      "description": "immutable package 對應的台北交易日期。",
+      "type": "string",
+      "format": "date"
+    },
+    "reportSlot": {
+      "description": "immutable package 的報告時段，只可為 09:05 或 12:00。",
+      "type": "string",
+      "enum": [
+        "09:05",
+        "12:00"
+      ]
+    },
+    "policyBundleSha256": {
+      "description": "已核對的政策 bundle SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "swaggerSha256": {
+      "description": "已核對的已發布 Swagger SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerUserId` | 是 | `integer` | 否 | minimum: 1<br>maximum: 9007199254740991 | ACTIVE owner 的安全整數 ID。 |
+| `consumer` | 是 | `string` | 否 | enum: `Codex`, `Claude` | 呼叫端消費者，只可為 Codex 或 Claude。 |
+| `tradingDate` | 是 | `string (date)` | 否 | format: date | immutable package 對應的台北交易日期。 |
+| `reportSlot` | 是 | `string` | 否 | enum: `09:05`, `12:00` | immutable package 的報告時段，只可為 09:05 或 12:00。 |
+| `policyBundleSha256` | 是 | `SrppSha256` | 否 |  | 已核對的政策 bundle SHA-256。 |
+| `swaggerSha256` | 是 | `SrppSha256` | 否 |  | 已核對的已發布 Swagger SHA-256。 |
+
+### `SrppProjectionBase`
+
+immutable package content、input snapshot 與 capture 時點的三項凍結綁定。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "immutable package content、input snapshot 與 capture 時點的三項凍結綁定。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packageContentSha256",
+    "inputSnapshotSha256",
+    "inputSnapshotCapturedAt"
+  ],
+  "properties": {
+    "packageContentSha256": {
+      "description": "完整 immutable report package 的 JCS SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "inputSnapshotSha256": {
+      "description": "package frozen input snapshot 的 JCS SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "inputSnapshotCapturedAt": {
+      "description": "frozen input snapshot 的 RFC3339 capture 時點。",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `packageContentSha256` | 是 | `SrppSha256` | 否 |  | 完整 immutable report package 的 JCS SHA-256。 |
+| `inputSnapshotSha256` | 是 | `SrppSha256` | 否 |  | package frozen input snapshot 的 JCS SHA-256。 |
+| `inputSnapshotCapturedAt` | 是 | `string (date-time)` | 否 | format: date-time | frozen input snapshot 的 RFC3339 capture 時點。 |
+
+### `SrppProjectionReceiptRef`
+
+可驗證的 immutable receipt 參照，不含任何 broker 或帳戶資料。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "可驗證的 immutable receipt 參照，不含任何 broker 或帳戶資料。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "sha256",
+    "capturedAt"
+  ],
+  "properties": {
+    "kind": {
+      "description": "receipt 類型：PACKAGE、POLICY_BUNDLE、QUOTE、D103、D124、D096、D175、D188、D189、D198、D195 或 SOURCE。",
+      "type": "string",
+      "enum": [
+        "PACKAGE",
+        "POLICY_BUNDLE",
+        "QUOTE",
+        "D103",
+        "D124",
+        "D096",
+        "D175",
+        "D188",
+        "D189",
+        "D198",
+        "D195",
+        "SOURCE"
+      ]
+    },
+    "sha256": {
+      "description": "receipt bytes 的小寫 SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "capturedAt": {
+      "description": "receipt 的 RFC3339 frozen capture 時點。",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `kind` | 是 | `string` | 否 | enum: `PACKAGE`, `POLICY_BUNDLE`, `QUOTE`, `D103`, `D124`, `D096`, `D175`, `D188`, `D189`, `D198`, `D195`, `SOURCE` | receipt 類型：PACKAGE、POLICY_BUNDLE、QUOTE、D103、D124、D096、D175、D188、D189、D198、D195 或 SOURCE。 |
+| `sha256` | 是 | `SrppSha256` | 否 |  | receipt bytes 的小寫 SHA-256。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 | format: date-time | receipt 的 RFC3339 frozen capture 時點。 |
+
+### `SrppProjectionCoverage`
+
+五個計數相加恆等於 requestedCount；不以未知資料補零。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "五個計數相加恆等於 requestedCount；不以未知資料補零。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "requestedCount",
+    "completeCount",
+    "partialCount",
+    "unavailableCount",
+    "notEvaluatedCount"
+  ],
+  "properties": {
+    "requestedCount": {
+      "description": "此 response 保留的 requested leg 或 symbol 數。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "completeCount": {
+      "description": "可由 frozen evidence 完整投影的項目數。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "partialCount": {
+      "description": "僅部分 frozen evidence 可投影的項目數。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "unavailableCount": {
+      "description": "明確 unavailable 的項目數，不代表數值為零。",
+      "type": "integer",
+      "minimum": 0
+    },
+    "notEvaluatedCount": {
+      "description": "frozen evidence 不足而未評估的項目數。",
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `requestedCount` | 是 | `integer` | 否 | minimum: 0 | 此 response 保留的 requested leg 或 symbol 數。 |
+| `completeCount` | 是 | `integer` | 否 | minimum: 0 | 可由 frozen evidence 完整投影的項目數。 |
+| `partialCount` | 是 | `integer` | 否 | minimum: 0 | 僅部分 frozen evidence 可投影的項目數。 |
+| `unavailableCount` | 是 | `integer` | 否 | minimum: 0 | 明確 unavailable 的項目數，不代表數值為零。 |
+| `notEvaluatedCount` | 是 | `integer` | 否 | minimum: 0 | frozen evidence 不足而未評估的項目數。 |
+
+### `SrppProjectionDecision`
+
+caller 送入並按 package leg 順序規格化的單一 LLM verdict。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "caller 送入並按 package leg 順序規格化的單一 LLM verdict。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "legId",
+    "verdict",
+    "amount",
+    "reason"
+  ],
+  "properties": {
+    "legId": {
+      "description": "moduleId.index 的 ASCII package leg identity。",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,127}\\.[0-9]{1,6}$"
+    },
+    "verdict": {
+      "description": "LLM verdict：ADOPT、REDUCE、WAIT 或 VETO。",
+      "type": "string",
+      "enum": [
+        "ADOPT",
+        "REDUCE",
+        "WAIT",
+        "VETO"
+      ]
+    },
+    "amount": {
+      "description": "僅 REDUCE 可給的大於等於 1 Decimal（最多 18 位整數與 8 位小數），否則 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[1-9][0-9]{0,17}(?:\\.[0-9]{1,8})?$"
+    },
+    "reason": {
+      "description": "非 ADOPT verdict 的具名原因：EVENT_RISK、RISK_MODE、MARKET_CONTEXT、PRIORITY_ELSEWHERE、EVIDENCE_CONFLICT、OTHER 或 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "EVENT_RISK",
+        "RISK_MODE",
+        "MARKET_CONTEXT",
+        "PRIORITY_ELSEWHERE",
+        "EVIDENCE_CONFLICT",
+        "OTHER",
+        null
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `legId` | 是 | `string` | 否 | pattern: ^[A-Z][A-Z0-9_]{0,127}\.[0-9]{1,6}$ | moduleId.index 的 ASCII package leg identity。 |
+| `verdict` | 是 | `string` | 否 | enum: `ADOPT`, `REDUCE`, `WAIT`, `VETO` | LLM verdict：ADOPT、REDUCE、WAIT 或 VETO。 |
+| `amount` | 是 | `string | null` | 是 | pattern: ^[1-9][0-9]{0,17}(?:\.[0-9]{1,8})?$ | 僅 REDUCE 可給的大於等於 1 Decimal（最多 18 位整數與 8 位小數），否則 null。 |
+| `reason` | 是 | `string | null` | 是 | enum: `EVENT_RISK`, `RISK_MODE`, `MARKET_CONTEXT`, `PRIORITY_ELSEWHERE`, `EVIDENCE_CONFLICT`, `OTHER`, null | 非 ADOPT verdict 的具名原因：EVENT_RISK、RISK_MODE、MARKET_CONTEXT、PRIORITY_ELSEWHERE、EVIDENCE_CONFLICT、OTHER 或 null。 |
+
+### `SrppProjectionDerivedRisk`
+
+v1 固定 DEFENSIVE 的風險結果；不接受 caller risk assertion。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "v1 固定 DEFENSIVE 的風險結果；不接受 caller risk assertion。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode",
+    "status",
+    "reasonCodes",
+    "receiptRefs"
+  ],
+  "properties": {
+    "mode": {
+      "description": "v1 固定 DEFENSIVE，不能由 caller 降低。",
+      "type": "string",
+      "const": "DEFENSIVE"
+    },
+    "status": {
+      "description": "v1 沒有 safely-bound risk evidence，固定 UNAVAILABLE。",
+      "type": "string",
+      "const": "UNAVAILABLE"
+    },
+    "reasonCodes": {
+      "description": "唯一理由 RISK_EVIDENCE_UNAVAILABLE。",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "description": "固定 RISK_EVIDENCE_UNAVAILABLE 缺少風險證據原因。",
+        "type": "string",
+        "const": "RISK_EVIDENCE_UNAVAILABLE"
+      }
+    },
+    "receiptRefs": {
+      "description": "v1 fixed risk 沒有 aggregate receipt，固定空陣列。",
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "description": "risk receipt 參照。",
+        "$ref": "#/components/schemas/SrppProjectionReceiptRef"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `mode` | 是 | `string` | 否 | enum: `DEFENSIVE` | v1 固定 DEFENSIVE，不能由 caller 降低。 |
+| `status` | 是 | `string` | 否 | enum: `UNAVAILABLE` | v1 沒有 safely-bound risk evidence，固定 UNAVAILABLE。 |
+| `reasonCodes` | 是 | `array of string` | 否 | minItems: 1<br>maxItems: 1<br>items: string<br>items 說明: 固定 RISK_EVIDENCE_UNAVAILABLE 缺少風險證據原因。 | 唯一理由 RISK_EVIDENCE_UNAVAILABLE。 |
+| `receiptRefs` | 是 | `array of SrppProjectionReceiptRef` | 否 | maxItems: 0<br>items: SrppProjectionReceiptRef<br>items 說明: risk receipt 參照。 | v1 fixed risk 沒有 aggregate receipt，固定空陣列。 |
+
+### `SrppProjectionQuoteCapture`
+
+只有 frozen source/vector/receipt 全數驗證時才可出現的 quote 證明。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "只有 frozen source/vector/receipt 全數驗證時才可出現的 quote 證明。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sourceId",
+    "sourceRevision",
+    "sourceSha256",
+    "capturedAt",
+    "receiptRef"
+  ],
+  "properties": {
+    "sourceId": {
+      "description": "與 leg 市場/代碼完全相同的 market:台股:symbol 或 market:美股:symbol source ID。",
+      "type": "string",
+      "pattern": "^market:(台股|美股):[^\\s]+$"
+    },
+    "sourceRevision": {
+      "description": "source vector 的 immutable revision，長度 1 至 128。",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sourceSha256": {
+      "description": "frozen quote source 的 SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "capturedAt": {
+      "description": "frozen quote source 的 RFC3339 capture 時點。",
+      "type": "string",
+      "format": "date-time"
+    },
+    "receiptRef": {
+      "description": "sourceSha256 與 capturedAt 同值的 QUOTE receipt。",
+      "allOf": [
+        {
+          "description": "QUOTE receipt 的標準封閉結構。",
+          "$ref": "#/components/schemas/SrppProjectionReceiptRef"
+        },
+        {
+          "description": "kind 固定為 QUOTE 的 receipt refinement。",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "QUOTE"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `string` | 否 | pattern: ^market:(台股\|美股):[^\s]+$ | 與 leg 市場/代碼完全相同的 market:台股:symbol 或 market:美股:symbol source ID。 |
+| `sourceRevision` | 是 | `string` | 否 | minLength: 1<br>maxLength: 128 | source vector 的 immutable revision，長度 1 至 128。 |
+| `sourceSha256` | 是 | `SrppSha256` | 否 |  | frozen quote source 的 SHA-256。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 | format: date-time | frozen quote source 的 RFC3339 capture 時點。 |
+| `receiptRef` | 是 | `schema` | 否 |  | sourceSha256 與 capturedAt 同值的 QUOTE receipt。 |
+
+### `SrppOrderPlanLeg`
+
+一個 eligible immutable BUY 或 SELL leg 的 fail-closed report-only 投影。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "一個 eligible immutable BUY 或 SELL leg 的 fail-closed report-only 投影。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "legId",
+    "market",
+    "symbol",
+    "action",
+    "verdict",
+    "reasonCodes",
+    "baseLots",
+    "baseUnits",
+    "finalLots",
+    "finalUnits",
+    "limitPrice",
+    "amount",
+    "quoteCapture",
+    "freshness",
+    "settlement",
+    "executable"
+  ],
+  "properties": {
+    "legId": {
+      "description": "moduleId.index 的 ASCII immutable leg ID。",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,127}\\.[0-9]{1,6}$"
+    },
+    "market": {
+      "description": "package 市場投影，只可為 TW 或 US。",
+      "type": "string",
+      "enum": [
+        "TW",
+        "US"
+      ]
+    },
+    "symbol": {
+      "description": "package 凍結的標的代號。",
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "description": "package action，只可為 BUY 或 SELL。",
+      "type": "string",
+      "enum": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    "verdict": {
+      "description": "normalized decision 或 omission 的 ADOPT、REDUCE、WAIT、VETO、NOT_DECIDED verdict。",
+      "type": "string",
+      "enum": [
+        "ADOPT",
+        "REDUCE",
+        "WAIT",
+        "VETO",
+        "NOT_DECIDED"
+      ]
+    },
+    "reasonCodes": {
+      "description": "fail-closed 的具名理由集合，不重複。",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "description": "單一 fail-closed reason code。",
+        "type": "string"
+      }
+    },
+    "baseLots": {
+      "description": "package frozen base lots；沒有合法 lots 時為 null。",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "baseUnits": {
+      "description": "package frozen canonical Decimal units；沒有合法 units 時為 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{0,7}[1-9])?$"
+    },
+    "finalLots": {
+      "description": "safe final lots；BUY 僅 0 或 null，SELL 只可 frozen base。",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "finalUnits": {
+      "description": "safe final canonical Decimal units；BUY 僅 0 或 null，SELL 只可 frozen base。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{0,7}[1-9])?$"
+    },
+    "limitPrice": {
+      "description": "僅 immutable leg 與完整同源 quote proof 的正 canonical price 精確相等時可給，否則 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[1-9][0-9]{0,17}(?:\\.[0-9]{0,7}[1-9])?$"
+    },
+    "amount": {
+      "description": "僅 immutable leg 與完整同源 quote proof 的正 canonical amount 精確相等時可給，否則 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[1-9][0-9]{0,17}(?:\\.[0-9]{0,7}[1-9])?$"
+    },
+    "quoteCapture": {
+      "description": "null 或完整同源 quote proof；無證明時 price/amount 同時為 null。",
+      "oneOf": [
+        {
+          "description": "v1 無可驗證 quote proof 的 null。",
+          "type": "null"
+        },
+        {
+          "description": "完整 immutable quote proof。",
+          "$ref": "#/components/schemas/SrppProjectionQuoteCapture"
+        }
+      ]
+    },
+    "freshness": {
+      "type": "null",
+      "description": "v1 不宣稱可驗證的 fresh/revision evidence。"
+    },
+    "settlement": {
+      "type": "null",
+      "description": "v1 不推斷交割或未交割賣款。"
+    },
+    "executable": {
+      "description": "固定 false；此 API 不能授權或執行交易。",
+      "type": "boolean",
+      "const": false
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `legId` | 是 | `string` | 否 | pattern: ^[A-Z][A-Z0-9_]{0,127}\.[0-9]{1,6}$ | moduleId.index 的 ASCII immutable leg ID。 |
+| `market` | 是 | `string` | 否 | enum: `TW`, `US` | package 市場投影，只可為 TW 或 US。 |
+| `symbol` | 是 | `string` | 否 | minLength: 1 | package 凍結的標的代號。 |
+| `action` | 是 | `string` | 否 | enum: `BUY`, `SELL` | package action，只可為 BUY 或 SELL。 |
+| `verdict` | 是 | `string` | 否 | enum: `ADOPT`, `REDUCE`, `WAIT`, `VETO`, `NOT_DECIDED` | normalized decision 或 omission 的 ADOPT、REDUCE、WAIT、VETO、NOT_DECIDED verdict。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 單一 fail-closed reason code。 | fail-closed 的具名理由集合，不重複。 |
+| `baseLots` | 是 | `integer | null` | 是 | minimum: 0 | package frozen base lots；沒有合法 lots 時為 null。 |
+| `baseUnits` | 是 | `string | null` | 是 | pattern: ^(?:0\|[1-9][0-9]{0,17})(?:\.[0-9]{0,7}[1-9])?$ | package frozen canonical Decimal units；沒有合法 units 時為 null。 |
+| `finalLots` | 是 | `integer | null` | 是 | minimum: 0 | safe final lots；BUY 僅 0 或 null，SELL 只可 frozen base。 |
+| `finalUnits` | 是 | `string | null` | 是 | pattern: ^(?:0\|[1-9][0-9]{0,17})(?:\.[0-9]{0,7}[1-9])?$ | safe final canonical Decimal units；BUY 僅 0 或 null，SELL 只可 frozen base。 |
+| `limitPrice` | 是 | `string | null` | 是 | pattern: ^[1-9][0-9]{0,17}(?:\.[0-9]{0,7}[1-9])?$ | 僅 immutable leg 與完整同源 quote proof 的正 canonical price 精確相等時可給，否則 null。 |
+| `amount` | 是 | `string | null` | 是 | pattern: ^[1-9][0-9]{0,17}(?:\.[0-9]{0,7}[1-9])?$ | 僅 immutable leg 與完整同源 quote proof 的正 canonical amount 精確相等時可給，否則 null。 |
+| `quoteCapture` | 是 | `schema` | 否 |  | null 或完整同源 quote proof；無證明時 price/amount 同時為 null。 |
+| `freshness` | 是 | `null` | 是 |  | v1 不宣稱可驗證的 fresh/revision evidence。 |
+| `settlement` | 是 | `null` | 是 |  | v1 不推斷交割或未交割賣款。 |
+| `executable` | 是 | `boolean` | 否 |  | 固定 false；此 API 不能授權或執行交易。 |
+
+### `SrppOrderPlanResponse`
+
+Task497 A1 sealed order-plan response；僅建議、從不授權或下單。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "Task497 A1 sealed order-plan response；僅建議、從不授權或下單。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "planId",
+    "identity",
+    "base",
+    "asOf",
+    "normalizedDecisions",
+    "derivedRisk",
+    "legs",
+    "coverage",
+    "executionScope",
+    "tradeAuthorization",
+    "placesOrders",
+    "receiptRefs",
+    "contentSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "sealed Task497 wire version，固定字串 1。",
+      "type": "string",
+      "const": "1"
+    },
+    "planId": {
+      "description": "response input 的 deterministic lowercase 64-hex content address。",
+      "$ref": "#/components/schemas/SrppSha256"
+    },
+    "identity": {
+      "description": "owner、consumer、日期、slot、policy 與 Swagger 的 exact identity。",
+      "$ref": "#/components/schemas/SrppProjectionIdentity"
+    },
+    "base": {
+      "description": "immutable package/input/capture base binding。",
+      "$ref": "#/components/schemas/SrppProjectionBase"
+    },
+    "asOf": {
+      "description": "經 server boundary 核對 captureAt <= asOf <= now 的 RFC3339 時點。",
+      "type": "string",
+      "format": "date-time"
+    },
+    "normalizedDecisions": {
+      "description": "query CSV 的 canonical ordered decisions，長度 1 至 25。",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 25,
+      "items": {
+        "description": "單一 canonical decision。",
+        "$ref": "#/components/schemas/SrppProjectionDecision"
+      }
+    },
+    "derivedRisk": {
+      "description": "固定 DEFENSIVE risk projection。",
+      "$ref": "#/components/schemas/SrppProjectionDerivedRisk"
+    },
+    "legs": {
+      "description": "package eligible BUY/SELL legs 的原始順序投影。",
+      "type": "array",
+      "items": {
+        "description": "單一 sealed leg projection。",
+        "$ref": "#/components/schemas/SrppOrderPlanLeg"
+      }
+    },
+    "coverage": {
+      "description": "所有輸出 legs 的 closed coverage counts。",
+      "$ref": "#/components/schemas/SrppProjectionCoverage"
+    },
+    "executionScope": {
+      "description": "固定 REPORT_RECOMMENDATION_ONLY，沒有執行能力。",
+      "type": "string",
+      "const": "REPORT_RECOMMENDATION_ONLY"
+    },
+    "tradeAuthorization": {
+      "description": "固定 false，不會取得交易授權。",
+      "type": "boolean",
+      "const": false
+    },
+    "placesOrders": {
+      "description": "固定 false，不會送出任何委託。",
+      "type": "boolean",
+      "const": false
+    },
+    "receiptRefs": {
+      "description": "aggregate immutable receipts，不含 per-leg quote proof。",
+      "type": "array",
+      "items": {
+        "description": "aggregate receipt 參照。",
+        "$ref": "#/components/schemas/SrppProjectionReceiptRef"
+      }
+    },
+    "contentSha256": {
+      "description": "移除本欄後整個 response 的 JCS SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1` | sealed Task497 wire version，固定字串 1。 |
+| `planId` | 是 | `SrppSha256` | 否 |  | response input 的 deterministic lowercase 64-hex content address。 |
+| `identity` | 是 | `SrppProjectionIdentity` | 否 |  | owner、consumer、日期、slot、policy 與 Swagger 的 exact identity。 |
+| `base` | 是 | `SrppProjectionBase` | 否 |  | immutable package/input/capture base binding。 |
+| `asOf` | 是 | `string (date-time)` | 否 | format: date-time | 經 server boundary 核對 captureAt <= asOf <= now 的 RFC3339 時點。 |
+| `normalizedDecisions` | 是 | `array of SrppProjectionDecision` | 否 | minItems: 1<br>maxItems: 25<br>items: SrppProjectionDecision<br>items 說明: 單一 canonical decision。 | query CSV 的 canonical ordered decisions，長度 1 至 25。 |
+| `derivedRisk` | 是 | `SrppProjectionDerivedRisk` | 否 |  | 固定 DEFENSIVE risk projection。 |
+| `legs` | 是 | `array of SrppOrderPlanLeg` | 否 | items: SrppOrderPlanLeg<br>items 說明: 單一 sealed leg projection。 | package eligible BUY/SELL legs 的原始順序投影。 |
+| `coverage` | 是 | `SrppProjectionCoverage` | 否 |  | 所有輸出 legs 的 closed coverage counts。 |
+| `executionScope` | 是 | `string` | 否 | enum: `REPORT_RECOMMENDATION_ONLY` | 固定 REPORT_RECOMMENDATION_ONLY，沒有執行能力。 |
+| `tradeAuthorization` | 是 | `boolean` | 否 |  | 固定 false，不會取得交易授權。 |
+| `placesOrders` | 是 | `boolean` | 否 |  | 固定 false，不會送出任何委託。 |
+| `receiptRefs` | 是 | `array of SrppProjectionReceiptRef` | 否 | items: SrppProjectionReceiptRef<br>items 說明: aggregate receipt 參照。 | aggregate immutable receipts，不含 per-leg quote proof。 |
+| `contentSha256` | 是 | `SrppSha256` | 否 |  | 移除本欄後整個 response 的 JCS SHA-256。 |
+
+### `SrppSymbolRuleFact`
+
+Task497 A2 單一 frozen source mapping 的 typed rule fact。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "Task497 A2 單一 frozen source mapping 的 typed rule fact。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "value",
+    "unit",
+    "status",
+    "asOf",
+    "sourceRevision",
+    "receiptRefs",
+    "reasonCodes"
+  ],
+  "properties": {
+    "name": {
+      "description": "固定 ordered fact name：WEEK52_POSITION、K、D、RSI5、BIAS10、WILLIAMS_R9、PREMIUM_PERCENT、OVERHEAT_HIT、LOW_HIT、ENTRY_WATCH、BUY_OBSERVATION 或 SELL_OBSERVATION。",
+      "type": "string",
+      "enum": [
+        "WEEK52_POSITION",
+        "K",
+        "D",
+        "RSI5",
+        "BIAS10",
+        "WILLIAMS_R9",
+        "PREMIUM_PERCENT",
+        "OVERHEAT_HIT",
+        "LOW_HIT",
+        "ENTRY_WATCH",
+        "BUY_OBSERVATION",
+        "SELL_OBSERVATION"
+      ]
+    },
+    "value": {
+      "description": "canonical Decimal、OVERHEAT_HIT boolean 或 unavailable/null；不以 0/false 代替未知。",
+      "oneOf": [
+        {
+          "description": "canonical Decimal frozen source value。",
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{0,7}[1-9])?$"
+        },
+        {
+          "description": "OVERHEAT_HIT 的 boolean pure-rule 結果。",
+          "type": "boolean"
+        },
+        {
+          "description": "unavailable 或 not-evaluated 的 null value。",
+          "type": "null"
+        }
+      ]
+    },
+    "unit": {
+      "description": "RATIO、PERCENT 或 NONE 的 typed unit。",
+      "type": "string",
+      "enum": [
+        "RATIO",
+        "PERCENT",
+        "NONE"
+      ]
+    },
+    "status": {
+      "description": "fact availability：AVAILABLE、NOT_EVALUATED 或 UNAVAILABLE。",
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "NOT_EVALUATED",
+        "UNAVAILABLE"
+      ]
+    },
+    "asOf": {
+      "description": "AVAILABLE 時為 package input snapshot capture T1，否則 null；不是來源 receipt capture T2。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "sourceRevision": {
+      "description": "AVAILABLE 時 source vector SHA-256，否則 null。",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "receiptRefs": {
+      "description": "AVAILABLE 時唯一 matching SOURCE receipt；其 capturedAt 是來源 T2，且 T2 必須不晚於 package capture T1；否則空陣列。",
+      "type": "array",
+      "items": {
+        "description": "matching source receipt。",
+        "$ref": "#/components/schemas/SrppProjectionReceiptRef"
+      }
+    },
+    "reasonCodes": {
+      "description": "unavailable/not-evaluated 的具名原因集合。",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "description": "單一 fact reason code。",
+        "type": "string"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `name` | 是 | `string` | 否 | enum: `WEEK52_POSITION`, `K`, `D`, `RSI5`, `BIAS10`, `WILLIAMS_R9`, `PREMIUM_PERCENT`, `OVERHEAT_HIT`, `LOW_HIT`, `ENTRY_WATCH`, `BUY_OBSERVATION`, `SELL_OBSERVATION` | 固定 ordered fact name：WEEK52_POSITION、K、D、RSI5、BIAS10、WILLIAMS_R9、PREMIUM_PERCENT、OVERHEAT_HIT、LOW_HIT、ENTRY_WATCH、BUY_OBSERVATION 或 SELL_OBSERVATION。 |
+| `value` | 是 | `schema` | 否 |  | canonical Decimal、OVERHEAT_HIT boolean 或 unavailable/null；不以 0/false 代替未知。 |
+| `unit` | 是 | `string` | 否 | enum: `RATIO`, `PERCENT`, `NONE` | RATIO、PERCENT 或 NONE 的 typed unit。 |
+| `status` | 是 | `string` | 否 | enum: `AVAILABLE`, `NOT_EVALUATED`, `UNAVAILABLE` | fact availability：AVAILABLE、NOT_EVALUATED 或 UNAVAILABLE。 |
+| `asOf` | 是 | `string | null (date-time)` | 是 | format: date-time | AVAILABLE 時為 package input snapshot capture T1，否則 null；不是來源 receipt capture T2。 |
+| `sourceRevision` | 是 | `string | null` | 是 | pattern: ^[0-9a-f]{64}$ | AVAILABLE 時 source vector SHA-256，否則 null。 |
+| `receiptRefs` | 是 | `array of SrppProjectionReceiptRef` | 否 | items: SrppProjectionReceiptRef<br>items 說明: matching source receipt。 | AVAILABLE 時唯一 matching SOURCE receipt；其 capturedAt 是來源 T2，且 T2 必須不晚於 package capture T1；否則空陣列。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 單一 fact reason code。 | unavailable/not-evaluated 的具名原因集合。 |
+
+### `SrppSymbolRuleFactsSymbol`
+
+單一台股 symbol 的固定十二筆 ordered frozen facts。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "單一台股 symbol 的固定十二筆 ordered frozen facts。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "symbol",
+    "market",
+    "facts",
+    "status",
+    "reasonCodes"
+  ],
+  "properties": {
+    "symbol": {
+      "description": "immutable derived TW universe 或 explicit requested 台股代碼。",
+      "type": "string",
+      "pattern": "^[0-9]{4,5}[A-Z]?$"
+    },
+    "market": {
+      "description": "A2 僅允許台股，固定 TW。",
+      "type": "string",
+      "const": "TW"
+    },
+    "facts": {
+      "description": "固定順序且恰 12 筆 rule facts。",
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "description": "單一 typed frozen fact。",
+        "$ref": "#/components/schemas/SrppSymbolRuleFact"
+      }
+    },
+    "status": {
+      "description": "symbol availability：NOT_EVALUATED 或 UNAVAILABLE；固定四筆 unavailable facts 使 v1 row 不會是 AVAILABLE。",
+      "type": "string",
+      "enum": [
+        "NOT_EVALUATED",
+        "UNAVAILABLE"
+      ]
+    },
+    "reasonCodes": {
+      "description": "row unavailable/not-evaluated 的具名原因集合。",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "description": "單一 symbol reason code。",
+        "type": "string"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | 是 | `string` | 否 | pattern: ^[0-9]{4,5}[A-Z]?$ | immutable derived TW universe 或 explicit requested 台股代碼。 |
+| `market` | 是 | `string` | 否 | enum: `TW` | A2 僅允許台股，固定 TW。 |
+| `facts` | 是 | `array of SrppSymbolRuleFact` | 否 | minItems: 12<br>maxItems: 12<br>items: SrppSymbolRuleFact<br>items 說明: 單一 typed frozen fact。 | 固定順序且恰 12 筆 rule facts。 |
+| `status` | 是 | `string` | 否 | enum: `NOT_EVALUATED`, `UNAVAILABLE` | symbol availability：NOT_EVALUATED 或 UNAVAILABLE；固定四筆 unavailable facts 使 v1 row 不會是 AVAILABLE。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 單一 symbol reason code。 | row unavailable/not-evaluated 的具名原因集合。 |
+
+### `SrppSymbolRuleFactsResponse`
+
+Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "Task497 A2 sealed symbol-rule-facts response；不讀 current market source。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "identity",
+    "base",
+    "symbols",
+    "coverage",
+    "executionScope",
+    "tradeAuthorization",
+    "placesOrders",
+    "receiptRefs",
+    "contentSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "sealed Task497 wire version，固定字串 1。",
+      "type": "string",
+      "const": "1"
+    },
+    "identity": {
+      "description": "owner、consumer、日期、slot、policy 與 Swagger 的 exact identity。",
+      "$ref": "#/components/schemas/SrppProjectionIdentity"
+    },
+    "base": {
+      "description": "immutable package/input/capture base binding。",
+      "$ref": "#/components/schemas/SrppProjectionBase"
+    },
+    "symbols": {
+      "description": "sorted unique TW requested/frozen universe rows。",
+      "type": "array",
+      "items": {
+        "description": "單一 sealed A2 symbol row。",
+        "$ref": "#/components/schemas/SrppSymbolRuleFactsSymbol"
+      }
+    },
+    "coverage": {
+      "description": "所有輸出 symbol rows 的 closed coverage counts。",
+      "$ref": "#/components/schemas/SrppProjectionCoverage"
+    },
+    "executionScope": {
+      "description": "固定 REPORT_RECOMMENDATION_ONLY，沒有執行能力。",
+      "type": "string",
+      "const": "REPORT_RECOMMENDATION_ONLY"
+    },
+    "tradeAuthorization": {
+      "description": "固定 false，不會取得交易授權。",
+      "type": "boolean",
+      "const": false
+    },
+    "placesOrders": {
+      "description": "固定 false，不會送出任何委託。",
+      "type": "boolean",
+      "const": false
+    },
+    "receiptRefs": {
+      "description": "aggregate immutable receipts。",
+      "type": "array",
+      "items": {
+        "description": "aggregate receipt 參照。",
+        "$ref": "#/components/schemas/SrppProjectionReceiptRef"
+      }
+    },
+    "contentSha256": {
+      "description": "移除本欄後整個 response 的 JCS SHA-256。",
+      "$ref": "#/components/schemas/SrppSha256"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `string` | 否 | enum: `1` | sealed Task497 wire version，固定字串 1。 |
+| `identity` | 是 | `SrppProjectionIdentity` | 否 |  | owner、consumer、日期、slot、policy 與 Swagger 的 exact identity。 |
+| `base` | 是 | `SrppProjectionBase` | 否 |  | immutable package/input/capture base binding。 |
+| `symbols` | 是 | `array of SrppSymbolRuleFactsSymbol` | 否 | items: SrppSymbolRuleFactsSymbol<br>items 說明: 單一 sealed A2 symbol row。 | sorted unique TW requested/frozen universe rows。 |
+| `coverage` | 是 | `SrppProjectionCoverage` | 否 |  | 所有輸出 symbol rows 的 closed coverage counts。 |
+| `executionScope` | 是 | `string` | 否 | enum: `REPORT_RECOMMENDATION_ONLY` | 固定 REPORT_RECOMMENDATION_ONLY，沒有執行能力。 |
+| `tradeAuthorization` | 是 | `boolean` | 否 |  | 固定 false，不會取得交易授權。 |
+| `placesOrders` | 是 | `boolean` | 否 |  | 固定 false，不會送出任何委託。 |
+| `receiptRefs` | 是 | `array of SrppProjectionReceiptRef` | 否 | items: SrppProjectionReceiptRef<br>items 說明: aggregate receipt 參照。 | aggregate immutable receipts。 |
+| `contentSha256` | 是 | `SrppSha256` | 否 |  | 移除本欄後整個 response 的 JCS SHA-256。 |
 
 ### `AiFlowOperation`
 

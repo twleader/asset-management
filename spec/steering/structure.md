@@ -574,7 +574,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 183 個 Requirements（最新編號為 190，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 184 個 Requirements（最新編號為 191，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417、459、460、466、467 僅有獨立任務檔，不追加索引
 ├── tasks/                # 任務檔
@@ -662,3 +662,9 @@ AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺�
 ADMIN 前端 `/ai-flow` 對應 AiFlowView，API均由自己的 BFF 讀同源業務流程記錄；只呈現實際公開動作、真實配對耗時與來源缺口。
 
 Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。
+
+### Requirement 191／Task 497 SRPP fail-closed 決策投影與逐檔事實 API 修訂
+
+金融OpenAPI升1.26.0，exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`令financial=26（22GET/4POST）。AI觀測維持獨立1.1.0/一POST，gateway/BFF catalog/統一Swagger唯一union=27（22GET/5POST）；mail共用prefix故Tailscale=26 handlers。每條路徑exact allowlist，拒root、`/api/`、wildcard、matrix及descendant。
+
+兩GET精確綁ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256與calculationRunId，只讀既有immutable schemaVersion1 FINAL package；禁止新計算、外呼、refresh、DB/Redis/error-ingestion寫、producer、notification/mail/reservation/交易，也不改package output、consumer schema、manifest、registry或SRPP runtime。eligible leg只為module data.legs BUY/SELL、台股→TW/美股→US，NONE排除；legId=`moduleId.index`，未知market/action上游502。A2 universe是eligible TW legs投影，非input field，只由content hash保護；input hash只identity-bind且不含/保護universe。v1無capacity evidence所以零capacity reflow/遞補；A1 root無quoteCapture，每leg只有`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol、price/amount精確同源且sourceRevision=vector revision才有typed QUOTE receipt quoteCapture，否則全null；A1 fixed defensive（BUY zero/null、SELL frozen-only、REDUCE唯一base unit）。A2 facts恰12筆無重名固定順序；七個exact radar/quote mapping僅在`validation=VERIFIED` vector+SHA/capturedAt matching SOURCE receipt可AVAILABLE，overheat只在五項AVAILABLE時依frozen pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED，四筆固定null NOT_EVALUATED；不推斷action/policy。P2/revision、client risk、SRPP adoption均不在本輪；不改prompts/schedules/validators，另立任務才可採納API。
