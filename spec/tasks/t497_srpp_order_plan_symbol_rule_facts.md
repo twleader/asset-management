@@ -22,6 +22,8 @@
 - [ ] **497.6 9090 contract。** 金融OpenAPI升1.26.0，financial=26（22GET/4POST）；AI觀測OpenAPI保持1.1.0／一POST；gateway/catalog/統一Swagger union=27（22GET/5POST）。同步Nginx exact/405、BFF security+route catalog、frontend exact404/matrix deny、Tailscale Serve、兩YAML local-ref/operationId/component safety、renderer、repo/backend/SRPP mirrors、PublishedSwaggerIdentity、OpenAPI/route-count contracts。mail GET/POST仍共用prefix，Tailscale=26handlers。拒root、`/api/`、wildcard、matrix、descendant，不修改觀測路由或引入交易能力。
 - [ ] **497.7 tests/deploy/consumer boundary。** 覆蓋v1 module/index leg projection、NONE排除、unknown action/market 502、derived TW universe、sealed success/problem/fact schema、coverage/JCS/CSV/owner isolation、A1 asOf/D175、逐leg quoteCapture的source/sourceVector `validation=VERIFIED`/revision exact equality/QUOTE receipt／price-amount同源與全null fallback、fixed DEFENSIVE/BUY zero-null/SELL frozen-only/REDUCE base invariant、P1/P2/M2/M3/M5/M7/D202 unavailable、zero capacity reflow/no substitute、A2 12筆no-duplicate fixed-order facts、七個source mapping/range/`validation=VERIFIED`/SOURCE receipt、overheat boundary、四筆fixed unavailable、outside universe、BFF hostile upstream。只發布API和Task495必要Swagger metadata；不得改v1 package output、consumer schema、manifest、registry或任何SRPP prompts/schedules/validators/runtime/adoption，另立任務才可採納API。執行：
 
+  帶有`@Transactional`的projection service必須持續可由Spring CGLIB proxy；名稱含`OrderPlan`的測試必須以真實Spring context證明該service是CGLIB proxy，避免僅編譯通過卻在container startup失敗。此項僅是runtime wiring驗收，不改變任何A1/A2行為、wire契約或商業規則。
+
   ```bash
   /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -Dtest='*SrppReport*,*OrderPlan*,*SymbolRuleFacts*' test
   /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f bff/pom.xml -Dtest='*SrppReport*,*OrderPlan*,*SymbolRuleFacts*' test

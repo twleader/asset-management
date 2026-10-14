@@ -19,7 +19,7 @@ import java.util.*;
 
 /** Task 497 immutable package projection.  It has no writer, vendor, broker or producer dependency. */
 @Service
-public final class SrppProjectionService {
+public class SrppProjectionService {
     private static final JsonNodeFactory F=JsonNodeFactory.instance;
     private static final List<String> FACTS=List.of("WEEK52_POSITION","K","D","RSI5","BIAS10","WILLIAMS_R9","PREMIUM_PERCENT","OVERHEAT_HIT","LOW_HIT","ENTRY_WATCH","BUY_OBSERVATION","SELL_OBSERVATION");
     private final CurrentUserContext owner; private final MarketDataService calendar; private final SrppPolicyRegistryService registry; private final PublishedSwaggerIdentity swagger; private final SrppReportAuthority authority; private final SrppReportRepository repository; private final Clock clock;
