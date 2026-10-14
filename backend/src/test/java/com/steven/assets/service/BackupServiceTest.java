@@ -1393,6 +1393,45 @@ class BackupServiceTest {
     }
 
     @Test
+    void scheduledDumpSafeFailureLogsItsFixedReason(CapturedOutput output) {
+        LocalDate date = LocalDate.of(2026, 10, 8);
+        service = controlledService(() -> taipei(2026, 10, 8, 15, 30, 1), Runnable::run);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false);
+        doThrow(new BackupSafeFailureException("pg_dump 執行逾時")).when(databaseProcess).dump(any());
+
+        service.recoverTwDailyOnStartup(date);
+
+        assertThat(output.getOut())
+                .contains("台股每日備份失敗: pg_dump 執行逾時")
+                .doesNotContain("備份子行程或本地索引目前不可用");
+        verify(recordRepo, never()).saveAndFlush(any(BackupRecord.class));
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
+    void scheduledDumpUnexpectedFailureNeverLogsItsMessage(CapturedOutput output) {
+        String sentinel = "DUMP_FAILURE_MESSAGE_SENTINEL";
+        LocalDate date = LocalDate.of(2026, 10, 8);
+        service = controlledService(() -> taipei(2026, 10, 8, 15, 30, 1), Runnable::run);
+        when(marketDataService.isTwTradingDay(date)).thenReturn(true);
+        when(recordRepo.existsByFolderAndFilenameStartingWith("daily", "asset_daily_tw_20261008_"))
+                .thenReturn(false);
+        doThrow(new IllegalStateException(sentinel, new RuntimeException("DUMP_FAILURE_CAUSE_SENTINEL")))
+                .when(databaseProcess).dump(any());
+
+        service.recoverTwDailyOnStartup(date);
+
+        assertThat(output.getOut())
+                .contains("台股每日備份失敗: 備份子行程或本地索引目前不可用")
+                .doesNotContain(sentinel)
+                .doesNotContain("DUMP_FAILURE_CAUSE_SENTINEL");
+        verify(recordRepo, never()).saveAndFlush(any(BackupRecord.class));
+        assertThat(remoteClient.remaining()).isZero();
+    }
+
+    @Test
     void listBackupsIsDatabaseOnlyAndNeverTouchesRemoteLock() {
         BackupRecord row = record(1, "asset_manual_20261002_010101.dump");
         when(recordRepo.findAllByOrderByModifiedAtDesc()).thenReturn(List.of(row));

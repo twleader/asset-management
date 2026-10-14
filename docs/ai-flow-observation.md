@@ -51,7 +51,7 @@ LaunchAgent `com.steven.srpp-ai-flow-collector`只接受正式main script，Proc
 
 ## 90天與重播
 
-台北日期只保留今天及前89日，按原reportDate判定，跨日完成仍屬原執行日期。collector只刪自己的過期spool、ack與state；不刪Codex／Claude／SRPP來源。backend啟動與每天台北00:00有界清理，SQL guard拒絕過期重灌、任意UPDATE與未過期DELETE。一般DB備份只排除ai_flow_run/event的data，schema及其餘金融data維持原備份流程。
+台北日期只保留今天及前89日，按原reportDate判定，跨日完成仍屬原執行日期。collector只刪自己的過期spool、ack與state；不刪Codex／Claude／SRPP來源。backend啟動與每天台北00:00有界清理，SQL guard拒絕過期重灌、任意UPDATE與未過期DELETE。Drive 備份 pg_dump 排除 ai_flow_run／ai_flow_event 與 SRPP 報告計算 base／package 的 data（Requirement 192／Task 498），schema 與其他金融 data 維持。
 
 本機atomic writer與cleanup共用每目錄空白0600技術lockfile，兩邊都非阻塞取鎖。writer活躍時cleanup跳過該目錄；SIGKILL／斷電後OS釋放lock，下一輪只回收本功能精確命名的未rename暫存檔，完整或殘缺JSON皆回收，不以mtime延長保留。每目錄每輪最多512 entries、整輪掃描1秒預算，Store保留iterator於下輪續掃；成功enqueue的final檔仍依原reportDate保留90天。本機collector receipt若含任何超期run也刪除。未知檔案、token、原app／SRPP來源及LaunchAgents其他檔案不在清理範圍；空技術lockfile不含流程資料。
 

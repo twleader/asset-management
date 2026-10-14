@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（184 個 Requirements；最新編號為 191，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（185 個 Requirements；最新編號為 192，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -472,7 +472,7 @@ Task488受正式已驗證SRPP政策的report-only calculator可純讀同一canon
 
 使用者明確要求今日不修改 SRPP 專案、規則、validator、prompt、排程或遠端 skill；本次保留原金融 OpenAPI `docs/openapi/docker-external-api.yaml` 與三份金融 Swagger 的完整 bytes／PublishedSwaggerIdentity，金融 renderer 僅以 `--check` 驗證。唯一新增 exact `POST /api/srpp/ai-flow/events` 由獨立 `docs/openapi/ai-flow-observation-api.yaml`（Task492 1.0.0；Task494 1.1.0）及 `docs/openapi/9090-ai-flow-observation.md` 提供完整閉合契約，獨立 renderer 只寫 asset-management；不偽設雲端環境、不覆寫 SRPP。兩份 YAML 分別解析 local refs，paths 不相交且 operationId 全域唯一；原金融24＋觀測1的 union 是 gateway／catalog 唯一精確集合25 method/path pairs（20 GET、5 POST），Tailscale24 handlers。此限縮例外優先於本文件較早的單一 YAML／三份重產要求；所有金融路由與 schema 仍依原契約。
 
-AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份僅排除這兩新表的data，schema與其他金融data保留。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
+AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份原僅排除這兩新表的data（Requirement 192／Task 498 起，Drive 備份另排除 SRPP 報告計算 base／package 兩表的 data，現為四表；schema 與其他金融 data 仍保留）。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
 
 Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。
 
