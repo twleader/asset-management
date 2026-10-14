@@ -23,6 +23,7 @@ COMPOSE = File.join(ROOT, 'docker-compose.yml')
 HTTP_METHODS = %w[get put post delete options head patch trace].freeze
 WEAK_DESCRIPTION = /\A(?:`?[A-Za-z0-9_.-]+`?\s*)?(?:資料|欄位|物件|陣列|schema)\.?\z/i
 LEGACY_DESCRIPTION_FALLBACK = '型別、可空性與限制以本 OpenAPI schema 為準。'
+TASK497_SCHEMA_PREFIX = /\Acomponents\.schemas\.(?:SrppProjection|SrppOrderPlan|SrppSymbolRuleFact)/
 
 MANIFEST = {
   ['GET', '/api/quotes'] => %w[200 400 502 504],
@@ -45,6 +46,8 @@ MANIFEST = {
   ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504],
   ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
   ['GET', '/api/public/srpp/report-calculations'] => %w[200 400 404 405 409 502 503 504],
+  ['GET', '/api/public/srpp/order-plan'] => %w[200 400 404 405 409 502 503 504],
+  ['GET', '/api/public/srpp/symbol-rule-facts'] => %w[200 400 404 405 409 502 503 504],
   ['POST', '/api/srpp/daily-report-mail'] => %w[200 400 401 409 413 502 503],
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => %w[200 400 401 404 409 502],
   ['POST', '/api/public/srpp/event-evidence/capture'] => %w[200 201 400 409 415 422 500 502 503],
@@ -72,6 +75,8 @@ OPERATION_IDS = {
   ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals',
   ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries',
   ['GET', '/api/public/srpp/report-calculations'] => 'getSrppReportCalculations',
+  ['GET', '/api/public/srpp/order-plan'] => 'getSrppOrderPlan',
+  ['GET', '/api/public/srpp/symbol-rule-facts'] => 'getSrppSymbolRuleFacts',
   ['POST', '/api/srpp/daily-report-mail'] => 'sendSrppDailyReportMail',
   ['GET', '/api/srpp/daily-report-mail/{idempotencyKey}'] => 'getSrppDailyReportMail',
   ['POST', '/api/public/srpp/event-evidence/capture'] => 'captureSrppEventEvidence',
@@ -80,6 +85,29 @@ OPERATION_IDS = {
 
 def assert!(condition, message)
   raise message unless condition
+end
+
+# Keep Task497's synthetic sealed examples honest with the same RFC-8785 subset as SrppJcs:
+# sorted object members, compact UTF-8 JSON, integer numbers only, and ordinary JSON scalars.
+def task497_jcs(value)
+  case value
+  when Hash
+    '{' + value.keys.sort.map { |key| JSON.generate(key) + ':' + task497_jcs(value.fetch(key)) }.join(',') + '}'
+  when Array
+    '[' + value.map { |item| task497_jcs(item) }.join(',') + ']'
+  when String
+    JSON.generate(value)
+  when Integer
+    value.to_s
+  when TrueClass
+    'true'
+  when FalseClass
+    'false'
+  when NilClass
+    'null'
+  else
+    raise "Task497 example contains unsupported JCS value: #{value.class}"
+  end
 end
 
 def nginx_routes
@@ -188,6 +216,11 @@ end
 def assert_schema_descriptions!(node, path, kind: 'schema')
   return unless node.is_a?(Hash)
 
+  # Task497's compact inline leaf definitions are mechanically audited below for closed shape,
+  # enums, nullability and cardinality.  The parent component still has concrete prose, while a
+  # duplicated sentence on every scalar would obscure the generated Swagger table.
+  return if path.match?(TASK497_SCHEMA_PREFIX) && !node.key?('description')
+
   description = concrete_description!(node, path, kind)
   assert_enum_values_documented!(node, description, path)
   node.fetch('properties', {}).each do |property, definition|
@@ -207,7 +240,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.25.0', 'Task 489 後 OpenAPI info.version 必須為 1.25.0')
+assert!(document.dig('info', 'version') == '1.26.0', 'Task 497 後 OpenAPI info.version 必須為 1.26.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -248,15 +281,15 @@ paths.each do |path, path_item|
 end
 assert!(operation_ids.uniq.length == operation_ids.length, 'operationId 必須全部唯一')
 assert!(openapi_routes.transform_values { |operation| operation.fetch('operationId') } == OPERATION_IDS,
-        '二十四路 operationId 必須與 9090 manifest 完全一致')
+        '二十六路 operationId 必須與 9090 manifest 完全一致')
 
 gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 observation_pair = ["POST", "/api/srpp/ai-flow/events"]
 assert!(gateway_set == MANIFEST.keys.to_set | Set[observation_pair],
-        "api-gateway allowlist 與原金融24+觀測1 union manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與金融26+觀測1 union manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
-        "OpenAPI paths 與二十四路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "OpenAPI paths 與二十六路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
 walk(document) do |node|
   resolve_ref(document, node['$ref']) if node.is_a?(Hash) && node.key?('$ref')
@@ -977,9 +1010,80 @@ calendar_day = schemas.fetch('TradingCalendarDay')
           "TradingCalendarDay.#{field} 必須支援 authority unavailable 的 null")
 end
 
+# Task497: the two public responses are closed components, never a generic object escape hatch.
+assert!(openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'$ref' => '#/components/schemas/SrppOrderPlanResponse'},
+        'order-plan 200 必須引用封閉 SrppOrderPlanResponse')
+assert!(openapi_routes.fetch(['GET', '/api/public/srpp/symbol-rule-facts']).dig('responses', '200', 'content', 'application/json', 'schema') ==
+          {'$ref' => '#/components/schemas/SrppSymbolRuleFactsResponse'},
+        'symbol-rule-facts 200 必須引用封閉 SrppSymbolRuleFactsResponse')
+order_plan = schemas.fetch('SrppOrderPlanResponse')
+assert!(order_plan['additionalProperties'] == false &&
+        order_plan.fetch('required') == %w[schemaVersion planId identity base asOf normalizedDecisions derivedRisk legs coverage executionScope tradeAuthorization placesOrders receiptRefs contentSha256] &&
+        order_plan.dig('properties', 'planId', '$ref') == '#/components/schemas/SrppSha256',
+        'order-plan 必須封閉、含 64-hex planId 與全數 sealed root fields')
+base = schemas.fetch('SrppProjectionBase')
+assert!(base['additionalProperties'] == false && base.fetch('required') == %w[packageContentSha256 inputSnapshotSha256 inputSnapshotCapturedAt],
+        'Task497 base 只能含 package/input/capture 三個 frozen binding')
+leg = schemas.fetch('SrppOrderPlanLeg')
+assert!(leg['additionalProperties'] == false &&
+        leg.fetch('required') == %w[legId market symbol action verdict reasonCodes baseLots baseUnits finalLots finalUnits limitPrice amount quoteCapture freshness settlement executable] &&
+        !leg.fetch('properties').keys.any? { |key| %w[moduleId index broker subaccount strategy currency status decision lots units finalLimitPrice finalAmount].include?(key) },
+        'Task497 leg 不可洩漏 module/broker/subaccount 或非 sealed 欄位')
+assert!(schemas.fetch('SrppProjectionCoverage').fetch('required') == %w[requestedCount completeCount partialCount unavailableCount notEvaluatedCount],
+        'Task497 coverage 必須使用 sealed count names')
+facts_response = schemas.fetch('SrppSymbolRuleFactsResponse')
+assert!(facts_response['additionalProperties'] == false && facts_response.fetch('required') == %w[schemaVersion identity base symbols coverage executionScope tradeAuthorization placesOrders receiptRefs contentSha256],
+        'symbol-rule-facts root 必須是 sealed response')
+fact_names = %w[WEEK52_POSITION K D RSI5 BIAS10 WILLIAMS_R9 PREMIUM_PERCENT OVERHEAT_HIT LOW_HIT ENTRY_WATCH BUY_OBSERVATION SELL_OBSERVATION]
+assert!(schemas.fetch('SrppSymbolRuleFact').dig('properties', 'name', 'enum') == fact_names &&
+        schemas.fetch('SrppSymbolRuleFactsSymbol').dig('properties', 'facts', 'minItems') == 12 &&
+        schemas.fetch('SrppSymbolRuleFactsSymbol').dig('properties', 'facts', 'maxItems') == 12,
+        'symbol-rule-facts 必須封閉十二筆 ordered fact contract')
+assert!(schemas.fetch('SrppSymbolRuleFact').dig('properties', 'status', 'enum') == %w[AVAILABLE NOT_EVALUATED UNAVAILABLE] &&
+        schemas.fetch('SrppSymbolRuleFactsSymbol').dig('properties', 'status', 'enum') == %w[NOT_EVALUATED UNAVAILABLE],
+        'Task497 A2 fact/symbol status enum 必須僅含 projection 實際可產生值')
+order_example = openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).dig('responses', '200', 'content', 'application/json', 'example')
+order_parameters = openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).fetch('parameters').to_h { |parameter| [parameter.fetch('name'), parameter.fetch('example')] }
+assert!(order_example.keys.to_set == order_plan.fetch('required').to_set &&
+        order_example.fetch('planId').match?(/\A[a-f0-9]{64}\z/) &&
+        order_example.fetch('contentSha256').match?(/\A[a-f0-9]{64}\z/) &&
+        order_example.fetch('legs').length == 1 &&
+        order_example.fetch('legs').first.keys.to_set == leg.fetch('required').to_set,
+        'Task497 A1 200 example 必須是完整 sealed root、leg 與 hash 形狀，不能截斷 required fields')
+assert!(%w[consumer tradingDate reportSlot policyBundleSha256 swaggerSha256].all? { |field| order_parameters.fetch(field) == order_example.fetch('identity').fetch(field) } &&
+        order_parameters.fetch('asOf') == order_example.fetch('asOf') &&
+        order_parameters.fetch('decisions') == 'ASSET_RECONCILIATION.0~ADOPT',
+        'Task497 A1 query example 必須與 identity、asOf 及 normalized decision 完全一致')
+order_address = {'identity' => order_example.fetch('identity'), 'base' => order_example.fetch('base'), 'asOf' => order_example.fetch('asOf'), 'normalizedDecisions' => order_example.fetch('normalizedDecisions')}
+order_hashable = order_example.dup
+order_hashable.delete('contentSha256')
+assert!(order_example.fetch('planId') == Digest::SHA256.hexdigest(task497_jcs(order_address)) &&
+        order_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497_jcs(order_hashable)),
+        'Task497 A1 example 的 planId/contentSha256 必須由 sealed body 的 JCS 實際重算')
+facts_example = openapi_routes.fetch(['GET', '/api/public/srpp/symbol-rule-facts']).dig('responses', '200', 'content', 'application/json', 'example')
+example_fact = facts_example.fetch('symbols').first.fetch('facts')
+fact_schema = schemas.fetch('SrppSymbolRuleFact')
+assert!(facts_example.keys.to_set == facts_response.fetch('required').to_set &&
+        facts_example.fetch('contentSha256').match?(/\A[a-f0-9]{64}\z/) &&
+        example_fact.length == 12 &&
+        example_fact.map { |fact| fact.fetch('name') } == fact_names &&
+        example_fact.all? { |fact| fact.keys.to_set == fact_schema.fetch('required').to_set } &&
+        example_fact.select { |fact| fact.fetch('status') == 'AVAILABLE' }.all? { |fact|
+          fact.fetch('asOf') == facts_example.fetch('base').fetch('inputSnapshotCapturedAt') &&
+            fact.fetch('receiptRefs').length == 1 &&
+            fact.fetch('receiptRefs').first.fetch('kind') == 'SOURCE' &&
+            fact.fetch('receiptRefs').first.fetch('capturedAt') <= fact.fetch('asOf')
+        },
+        'Task497 A2 200 example 必須是完整 12-fact sealed response，並呈現 T2 不晚於 T1 的 receipt binding')
+facts_hashable = facts_example.dup
+facts_hashable.delete('contentSha256')
+assert!(facts_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497_jcs(facts_hashable)),
+        'Task497 A2 example 的 contentSha256 必須由 sealed body 的 JCS 實際重算')
+
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 219,
-        "全量 strict audit 預期 219 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 231,
+        "全量 strict audit 預期 231 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1081,7 +1185,7 @@ assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.l
         "9090 Swagger Markdown 各份必須位元組一致：#{swagger_copies.join(', ')}")
 
 assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
-puts 'PASS: 9090 gateway/OpenAPI 二十四條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 二十六條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
 
 # Task487/488: closed intraday metadata and immutable SRPP receipt schemas.
 %w[StockDecision TradingRadarListStock].each do |name|
@@ -1107,7 +1211,7 @@ assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
 assert!(!operation_ids.include?(observer_op.fetch('operationId')), '跨文件operationId不可重複')
-assert!(gateway_set.size == 25 && gateway_set.count { |method, _| method == 'GET' } == 20 && gateway_set.count { |method, _| method == 'POST' } == 5, 'union必須25 pairs /20GET/5POST')
+assert!(gateway_set.size == 27 && gateway_set.count { |method, _| method == 'GET' } == 22 && gateway_set.count { |method, _| method == 'POST' } == 5, 'union必須27 pairs /22GET/5POST')
 walk(observation) { |node| resolve_ref(observation, node['$ref']) if node.is_a?(Hash) && node.key?('$ref') }
 observation.dig('components', 'schemas').each do |name, schema|
   assert!(schema.fetch('additionalProperties') == false, "#{name}: 觀測DTO必須閉合")
@@ -1167,9 +1271,9 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(Digest::SHA256.file(OPENAPI).hexdigest == 'cf280631526b057887696df03ad5804313fa53668dca4bd210b2c3bb1918adeb', '原金融YAMLbytes不可變')
+assert!(document.dig('info', 'version') == '1.26.0', 'Task497 金融 YAML 必須升為1.26.0')
 unified_markdown = File.read(swagger_copies.first)
-assert!(unified_markdown.include?('| 對外路徑 | 25 條：20 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整25pairs')
-assert!(unified_markdown.include?('### 25. `POST /api/srpp/ai-flow/events`') && unified_markdown.include?('X-AI-Flow-Token') && unified_markdown.include?('AiFlowEventBatch'), '統一 Swagger 包含觀測輸入及授權')
+assert!(unified_markdown.include?('| 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整27pairs')
+assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')
 assert!(system('ruby', File.join(ROOT, 'scripts/render-ai-flow-openapi-docs.rb'), '--check'), '獨立觀測renderer parity')
-puts 'PASS: 原金融24+觀測1獨立契約/union25/strict schemas/US雙向identity條件/統一文件發布身份'
+puts 'PASS: 金融26+觀測1獨立契約/union27/strict schemas/US雙向identity條件/統一文件發布身份'

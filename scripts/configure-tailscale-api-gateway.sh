@@ -28,6 +28,8 @@ readonly -a SERVE_PATHS=(
   '/api/public/srpp/completed-technicals'
   '/api/public/srpp/technical-series'
   '/api/public/srpp/report-calculations'
+  '/api/public/srpp/order-plan'
+  '/api/public/srpp/symbol-rule-facts'
   '/api/public/srpp/event-evidence/capture'
   '/api/public/srpp/daily-decision/evaluate'
   # Serve uses this path prefix only for the documented idempotency-key child segment; gateway rejects all other children.
@@ -213,6 +215,8 @@ expected = {
     "/api/public/srpp/market-facts": "http://127.0.0.1:9090/api/public/srpp/market-facts",
     "/api/public/srpp/completed-technicals": "http://127.0.0.1:9090/api/public/srpp/completed-technicals",
     "/api/public/srpp/report-calculations": "http://127.0.0.1:9090/api/public/srpp/report-calculations",
+    "/api/public/srpp/order-plan": "http://127.0.0.1:9090/api/public/srpp/order-plan",
+    "/api/public/srpp/symbol-rule-facts": "http://127.0.0.1:9090/api/public/srpp/symbol-rule-facts",
     "/api/public/srpp/technical-series": "http://127.0.0.1:9090/api/public/srpp/technical-series",
     "/api/public/srpp/event-evidence/capture": "http://127.0.0.1:9090/api/public/srpp/event-evidence/capture",
     "/api/public/srpp/daily-decision/evaluate": "http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate",
@@ -228,7 +232,7 @@ if not isinstance(handlers, dict):
     raise SystemExit("Handlers 必須是 object")
 handler_paths = set(handlers)
 if mode == "exact" and handler_paths != set(expected):
-    raise SystemExit("必須精確只有本任務管理的二十四條 path handler（對應二十五個 method/path pairs）")
+    raise SystemExit("必須精確只有本任務管理的二十六條 path handler（對應二十七個 method/path pairs）")
 if mode in {"allow-empty", "subset"} and not handler_paths.issubset(expected):
     raise SystemExit("Serve config 含非本任務 path handler")
 for path in handler_paths:
@@ -610,7 +614,7 @@ done
 
 serve_after="$work_dir/serve-after.json"
 "$TAILSCALE_BIN" serve status --json >"$serve_after"
-validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十四條 path handler（對應二十五個 method/path pairs）。'
+validate_owned_config "$serve_after" exact || die '建立後的 Serve config 不是預期二十六條 path handler（對應二十七個 method/path pairs）。'
 cleanup_partial=0
 
 printf 'Tailscale Serve 已安全設定：https://%s:9090\n' "$tail_dns"

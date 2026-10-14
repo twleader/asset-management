@@ -26,7 +26,7 @@ routes = [
     "/api/public/srpp/daily-context",
 ]
 if include_new:
-    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series", "/api/public/srpp/report-calculations", "/api/public/srpp/event-evidence/capture", "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail"]
+    routes += ["/api/public/srpp/calculation-context", "/api/public/srpp/calculations", "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series", "/api/public/srpp/report-calculations", "/api/public/srpp/order-plan", "/api/public/srpp/symbol-rule-facts", "/api/public/srpp/event-evidence/capture", "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail"]
 handlers = {route: {"Proxy": "http://127.0.0.1:9090" + route} for route in routes}
 if include_foreign:
     handlers["/admin"] = {"Proxy": "http://127.0.0.1:9090/admin"}
@@ -303,13 +303,15 @@ run_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 24 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 26 ]]
   grep -Fq -- '--set-path=/api/public/srpp/daily-context http://127.0.0.1:9090/api/public/srpp/daily-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculation-context http://127.0.0.1:9090/api/public/srpp/calculation-context' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/calculations http://127.0.0.1:9090/api/public/srpp/calculations' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/market-facts http://127.0.0.1:9090/api/public/srpp/market-facts' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/completed-technicals http://127.0.0.1:9090/api/public/srpp/completed-technicals' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/report-calculations http://127.0.0.1:9090/api/public/srpp/report-calculations' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/order-plan http://127.0.0.1:9090/api/public/srpp/order-plan' "$case_dir/tailscale.log"
+  grep -Fq -- '--set-path=/api/public/srpp/symbol-rule-facts http://127.0.0.1:9090/api/public/srpp/symbol-rule-facts' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/technical-series http://127.0.0.1:9090/api/public/srpp/technical-series' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/event-evidence/capture http://127.0.0.1:9090/api/public/srpp/event-evidence/capture' "$case_dir/tailscale.log"
   grep -Fq -- '--set-path=/api/public/srpp/daily-decision/evaluate http://127.0.0.1:9090/api/public/srpp/daily-decision/evaluate' "$case_dir/tailscale.log"
@@ -331,7 +333,7 @@ run_existing_subset_success() {
     "$SCRIPT" >"$case_dir/stdout" 2>"$case_dir/stderr"
 
   [[ "$(grep -Fxc reset "$case_dir/tailscale.log")" == 1 ]]
-  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 24 ]]
+  [[ "$(grep -c '^serve ' "$case_dir/tailscale.log")" == 26 ]]
   grep -Fq 'Tailscale Serve 已安全設定' "$case_dir/stdout"
 }
 
@@ -369,6 +371,6 @@ run_success
 run_existing_subset_success
 run_foreign_handler_rejected
 
-printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十四個 Serve path handlers（二十五個 API pairs）與 preflight regression'
+printf '%s\n' 'PASS: 十四路舊設定 subset、foreign handler rejection、套用後 exact 二十六個 Serve path handlers（二十七個 API pairs）與 preflight regression'
 
 python3 "$REPO_ROOT/scripts/tests/test_tailscale_ai_flow.py"
