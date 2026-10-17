@@ -20,7 +20,8 @@ public class DecisionPolicyAuthority {
         this.modelBytes=modelBytes;this.manifestBytes=manifestBytes;
         try {
             ObjectMapper mapper=new ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-            JsonNode model=mapper.readTree(modelBytes),manifest=SrppJcs.parseStrict(manifestBytes);
+            JsonNode model=parseModelStrictly(mapper,modelBytes),manifest=SrppJcs.parseStrict(manifestBytes);
+            if(!model.isObject()||!manifest.isObject())throw new IllegalArgumentException("POLICY_NOT_OBJECT");
             String modelHash=SrppJcs.sha256Hex(modelBytes),bundle=manifest.path("POLICY_BUNDLE_SHA256").asText();
             ObjectNode body=((ObjectNode)manifest).deepCopy();body.remove("POLICY_BUNDLE_SHA256");
             if(!bundle.equals(SrppJcs.hash(body))||!modelHash.equals(manifest.path("files").path("assumptions/model_inputs.json").asText()))throw new IllegalArgumentException("POLICY_BYTES_MISMATCH");
@@ -38,6 +39,11 @@ public class DecisionPolicyAuthority {
     public Policy policy(){return policy;}
     public String modelBytes(){return modelBytes;}
     public String manifestBytes(){return manifestBytes;}
+    private static JsonNode parseModelStrictly(ObjectMapper mapper,String modelBytes)throws Exception{
+        // Keep BigDecimal materialization for policy arithmetic, after strict duplicate/trailing-token validation.
+        SrppJcs.parseStrict(modelBytes);
+        return mapper.readTree(modelBytes);
+    }
     private static BigDecimal num(JsonNode n,String key){JsonNode v=n.get(key);if(v==null||!v.isNumber())throw new IllegalArgumentException(key);return v.decimalValue().stripTrailingZeros();}
     private static String resource(String name){try(var in=DecisionPolicyAuthority.class.getResourceAsStream("/srpp/decision/"+name)){if(in==null)throw new IllegalArgumentException("Missing decision authority");return new String(in.readAllBytes(),StandardCharsets.UTF_8);}catch(Exception e){throw new IllegalStateException(e);}}
 }

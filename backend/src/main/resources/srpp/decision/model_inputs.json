@@ -1,6 +1,6 @@
 {
   "model_version": "3.22.0",
-  "policy_version": "2.49.0",
+  "policy_version": "2.53.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -404,10 +404,10 @@
         "07-15",
         "10-15"
       ],
-      "bear_window": "broad equity benchmark drawdown >= 20%, price below MA200 and RISK_OFF",
+      "bear_window": "D-202 per market: TWSE capitalization-weighted index for Taiwan-listed buys, S&P 500 for VOO. A market's window opens when its benchmark's latest completed close is at least 20% below its 24-month highest close, below its 200-session simple MA200, and RISK_OFF (close below MA200 and MA200 below its level 20 sessions earlier). Only legs of an open market may buy; the other market's share stays cash.",
       "bear_action": "When the verified bear window holds, up to two-thirds of eligible bond ETFs may be sold and invested in stock ETFs after all costs, following the D-180 order: high-dividend back to its 10% target first, then all remaining proceeds into VOO and 0050 at 4:1. TWD funding may use only amounts that leave the daily elapsed-time indexed 2026-08-real TWD 800K emergency term-deposit and TWD 1.55M total-deposit floors intact; up to the daily elapsed-time indexed 2026-08-real TWD 1.5M living-reserve component may contribute, while its TWD 750K floor and all-bank USD earmarked for VOO remain protected. The emergency reserve is never tactical funding.",
       "bear_tactical_cap": "No fixed amount. The maximum candidate pool is refreshed from /api/assets/latest and includes no more than two-thirds of bond ETFs; it is not a forced trade amount.",
-      "bull_high_window": "broad benchmark and proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, drawdown < 20% and regime not RISK_OFF",
+      "bull_high_window": "D-202: the benchmark of the proposed stock's listing market (TWSE for Taiwan-listed holdings including 009826; S&P 500 for VOO and VT) and the proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, benchmark drawdown from its 24-month high < 20% and not RISK_OFF",
       "bull_action": "D-156 profit capture: the trend-confirmation and short-term-overheat gates arm, but do not immediately sell, five growing tranches (8/12/20/25/35% of one locked release budget). Let a verified same-basis high-water mark rise while the trend continues; each tranche requires both its gain-above-anchor rung (15/20/25/30/35%) and a subsequent high-water pullback rung (3/4/5/6/8%). Refill the three-year living reserve to its ceiling first, then buy eligible below-target bonds with the remainder.",
       "daily_bull_profit_capture_d156": {
         "decision": "D-156",
@@ -449,7 +449,47 @@
         ],
         "note": "A high-water pullback is an analysis trigger, never an automatic broker stop. The report may produce only a fresh limit-price recommendation backed by opposite-side depth; no order is placed. A 10% correction closes and resets the bull window after the current eligible tranche is evaluated, and unfilled budget is never forced."
       },
-      "pairing": "Both legs use the same REBALANCE_PAIR_ID; do not breach the reserve floor, bond lower bounds, individual limits or care bridge."
+      "pairing": "Both legs use the same REBALANCE_PAIR_ID; do not breach the reserve floor, bond lower bounds, individual limits or care bridge.",
+      "regime_benchmark_d202": {
+        "decision": "D-202",
+        "benchmarks": {
+          "台股": {
+            "index": "TWSE",
+            "name": "臺灣證券交易所集中市場加權指數",
+            "endpoint": "GET /api/public/market-index?market=TWSE&range=2y"
+          },
+          "美股": {
+            "index": "SPX",
+            "name": "S&P 500",
+            "endpoint": "GET /api/public/market-index?market=SPX&range=2y"
+          }
+        },
+        "close_basis": "LATEST_COMPLETED_SESSION_CLOSE_NO_INTRADAY",
+        "peak_window_months": 24,
+        "ma_sessions": 200,
+        "ma_slope_lookback_sessions": 20,
+        "bear_drawdown": 0.2,
+        "deep_bear_drawdown": 0.3,
+        "risk_off": "Same for both markets: close below MA200 and MA200 below its level 20 sessions earlier. Radar market.regime is not a window condition.",
+        "bear_buy_symbols_by_market": {
+          "台股": [
+            "00713",
+            "0056",
+            "00878",
+            "00919",
+            "0050"
+          ],
+          "美股": [
+            "VOO"
+          ]
+        },
+        "closed_market_share": "STAYS_CASH_LIKE_AN_INELIGIBLE_LEG",
+        "ladder_and_equity_ceiling_drawdown": "OWN_MARKET_DRAWDOWN_PER_LEG",
+        "bull_benchmark_selection": "LISTING_MARKET_OF_PROPOSED_STOCK",
+        "insufficient_or_stale_history": "MARKET_UNCONFIRMED_NO_SUBSTITUTION",
+        "model_and_d193_spending": "Unchanged monthly equity-sleeve proxy; disclosed in review/OPEN_ISSUES.md.",
+        "ladder_and_equity_ceiling_note": "D-203: each leg uses only its own market benchmark drawdown for the ladder batch and the 60%/70% equity ceiling; one market's trend never sizes or gates another market's leg."
+      }
     },
     "short_bond_income_tilt": {
       "decision": "D-185",
@@ -633,7 +673,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes for anything already reconciled; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-201",
+      "decision": "D-204",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -664,6 +704,88 @@
         "fill de-duplication and cooldown",
         "D-130 daily and weekly lot caps"
       ]
+    },
+    "cross_market_independence_d203": {
+      "decision": "D-203",
+      "rule": "Taiwan and US markets are correlated but trend differently. A market's index trend, moving averages, drawdown and radar regime may be a rule condition only for securities listed in that market. They are never a hard gate on buying or selling, sizing or pricing a security listed in the other market, except the narrow D-204 completed-Nasdaq-crash or primary-source-confirmed Taiwan-Strait-war gates. Cross-market information may inform LLM interpretation only; any wait or veto based on it needs a named reason and must not be written as a zero-lot rule.",
+      "taiwan_conditions": [
+        "TWSE index trend, MA200 and drawdown",
+        "Taiwan trading radar market.regime"
+      ],
+      "us_conditions": [
+        "S&P 500 trend, MA200 and drawdown",
+        "US radar evidence"
+      ],
+      "unchanged": "Six-category event-risk defensive mode and other event rules are not market-trend gates and are unchanged."
+    },
+    "cross_market_context_scoring_d204": {
+      "decision": "D-204",
+      "calculator": "scripts/cross_market_context.py",
+      "purpose": "Render the Taiwan-US completed-market linkage and verified cross-border political/economic context as a transparent advisory score. It is separate from the fixed six-category D-167/D-168 risk score and must never be added into that score or its defensive thresholds.",
+      "market_components": [
+        {
+          "id": "us_to_taiwan_market",
+          "label": "美股→台股市場連動",
+          "source_index": "IXIC",
+          "use": "Most recent completed Nasdaq Composite close is an advisory input for Taiwan-listed securities."
+        },
+        {
+          "id": "taiwan_to_us_market",
+          "label": "台股→美股市場連動",
+          "source_index": "TWSE",
+          "use": "Most recent completed Taiwan Stock Exchange close is an advisory input for US-listed securities."
+        }
+      ],
+      "daily_return_percent_bands": {
+        "positive_strong_at_or_above": 3.0,
+        "positive_at_or_above": 1.0,
+        "negative_at_or_below": -1.0,
+        "negative_strong_at_or_below": -3.0
+      },
+      "political_economic_component": {
+        "label": "台美政經互動",
+        "minimum": -2,
+        "maximum": 2,
+        "rubric": {
+          "-2": "可追溯資料確認台美間已發生重大但尚未構成台海戰爭的政策、貿易、資本流動或供應鏈衝擊。",
+          "-1": "可追溯資料確認有不利的台美政策或經濟外溢風險。",
+          "0": "可讀來源沒有新的跨境政經衝擊，或來源不足／矛盾時以EVIDENCE_INSUFFICIENT未評0分呈現。",
+          "1": "可追溯資料確認有正面的台美政策或經濟支持因素。",
+          "2": "可追溯資料確認有重大且直接的正面跨境政策、貿易或供應鏈支持。"
+        },
+        "evidence": "Every nonzero score needs at least one same-round traceable source URL and reference period. The LLM provides only the semantic classification; scripts/cross_market_context.py validates score range, evidence shape and output arithmetic."
+      },
+      "score_bounds": {
+        "minimum": -6,
+        "maximum": 6
+      },
+      "hard_gate": {
+        "nasdaq_index": "IXIC",
+        "nasdaq_completed_session_decline_pct_at_or_below": -5.0,
+        "taiwan_strait_war": "An active hard gate requires an explicit, current official-primary confirmation of direct Taiwan-Strait war or blockade. Military activity, exercises, rhetoric, sanctions, headlines, unverified reports and ordinary geopolitical tension are not this gate.",
+        "scope": "RISK_INCREASING_EQUITY_BUYS_ONLY",
+        "effect": "When active, block risk-increasing equity buys only. Do not block necessary risk reductions, defensive bond-ETF buying, evidence collection, reporting, or the user’s independent execution decisions."
+      },
+      "advisory_only": "Unless a listed hard gate is active, the total is a disclosed interpretation score only: it cannot create, suppress, resize, reprioritize or reprice an otherwise policy-qualified transaction. It is not a cross-market trend gate and it never replaces the listed market's own indicators, radar or hard gates."
+    },
+    "selection_substitution_d203": {
+      "decision": "D-203",
+      "applies_to": [
+        "D195_STRATEGIC_BOND_PRICE_SELECTION",
+        "D198_HIGH_DIVIDEND_TOPUP_SELECTION",
+        "D118_D132_ROTATION_BUYER_RANKING",
+        "LLM_PICK_AMONG_ELIGIBLE_CANDIDATES"
+      ],
+      "trigger": "The selected candidate is blocked by a hard gate, including unsuitable price tier, best-five depth, exact radar detail, radar direction, tradability L1, premium pause, price freshness, dedup/cooldown, capacity or funding.",
+      "procedure": "Evaluate the next candidate in the same original ranking and take the first one that itself passes every eligibility rule and hard gate. Size it from its own tier and capacity within the same daily/weekly quota; substitution never adds quota. If none qualifies, the use has zero lots this round.",
+      "excluded": [
+        "BEAR_VOO_0050_FIXED_4_TO_1_LEGS",
+        "CATHAY_EMERGENCY_00865B",
+        "EXISTING_SCHEDULED_DCA",
+        "PER_SYMBOL_POLICY_DIRECTION_CORE_SELLS"
+      ],
+      "timing": "Within existing deadlines: no new fetch after minute 35; after the core draft exists, disclose in the appendix only (D-200).",
+      "disclosure": "Report the original pick, the blocking gate and its evidence, and the substitute with its passing evidence."
     }
   },
   "retirement_cashflow_estimate_at_target": {
@@ -812,7 +934,7 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-201",
+      "decision": "D-204",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
@@ -879,7 +1001,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-201",
+    "decision": "D-204",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -912,7 +1034,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-201",
+      "decision": "D-204",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1268,7 +1390,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-201",
+      "decision": "D-204",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1319,7 +1441,7 @@
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-201",
+        "decision": "D-204",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1347,7 +1469,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-201",
+      "decision": "D-204",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1357,9 +1479,11 @@
         "09:05": "09:05",
         "12:00": "11:40"
       },
-      "api_slot_mapping_reason": "Only legacy context/calculations/market-facts/daily-decision use 12:00 -> 11:40. Task489 report-calculations uses actual reportSlot=09:05 or 12:00 and must not inherit the legacy mapping.",
+      "api_slot_mapping_reason": "Only legacy context/calculations/market-facts/daily-decision use 12:00 -> 11:40. Task489 report-calculations and Task497 sealed projections use actual reportSlot=09:05 or 12:00 and must not inherit the legacy mapping.",
       "read_only_routes": [
         "/api/public/srpp/report-calculations",
+        "/api/public/srpp/order-plan",
+        "/api/public/srpp/symbol-rule-facts",
         "/api/public/srpp/calculation-context",
         "/api/public/srpp/calculations",
         "/api/public/srpp/market-facts"
@@ -1393,7 +1517,7 @@
       "api_result_is_final_recommendation": false,
       "published_read_candidates": {
         "/api/public/srpp/report-calculations": {
-          "publication_status": "PUBLISHED_SWAGGER_1_25_0",
+          "publication_status": "PUBLISHED_SWAGGER_1_26_0",
           "daily_adoption_status": "ENABLED_TRIAL_RUNTIME_PENDING",
           "enabled_for_daily": true,
           "report_slots": [
@@ -1412,6 +1536,56 @@
             "TRADING_DAY_RUNTIME_ACCEPTANCE"
           ],
           "fallback_reason": "REPORT_CALCULATION_SCOPE_UNAVAILABLE"
+        },
+        "/api/public/srpp/order-plan": {
+          "publication_status": "PUBLISHED_SWAGGER_1_26_0",
+          "daily_adoption_status": "ENABLED_TRIAL_RUNTIME_PENDING",
+          "enabled_for_daily": true,
+          "report_slots": [
+            "09:05",
+            "12:00"
+          ],
+          "uses_legacy_api_slot_mapping": false,
+          "projection_version": "SRPP_ORDER_PLAN_PROJECTION_V1",
+          "consumer_verifier": "scripts/verify_srpp_projection_api.py",
+          "prerequisites": [
+            "VERIFIED_REPORT_CALCULATION_PACKAGE",
+            "EXPLICIT_LLM_JUDGMENT",
+            "CURRENT_POLICY_REGISTRATION",
+            "INDEPENDENT_CONSUMER_VERIFIER"
+          ],
+          "observations_pending": [
+            "SCOPED_SAME_INPUT_GOLDEN_PARITY",
+            "TRADING_DAY_RUNTIME_ACCEPTANCE"
+          ],
+          "fallback_reason": "ORDER_PLAN_PROJECTION_UNAVAILABLE",
+          "adoption_scope": "REPORT_RECOMMENDATION_ONLY",
+          "requires_explicit_decisions": true
+        },
+        "/api/public/srpp/symbol-rule-facts": {
+          "publication_status": "PUBLISHED_SWAGGER_1_26_0",
+          "daily_adoption_status": "ENABLED_TRIAL_RUNTIME_PENDING",
+          "enabled_for_daily": true,
+          "report_slots": [
+            "09:05",
+            "12:00"
+          ],
+          "uses_legacy_api_slot_mapping": false,
+          "projection_version": "SRPP_SYMBOL_RULE_FACTS_PROJECTION_V1",
+          "consumer_verifier": "scripts/verify_srpp_projection_api.py",
+          "prerequisites": [
+            "VERIFIED_REPORT_CALCULATION_PACKAGE",
+            "EXPLICIT_FROZEN_TW_SYMBOLS",
+            "CURRENT_POLICY_REGISTRATION",
+            "INDEPENDENT_CONSUMER_VERIFIER"
+          ],
+          "observations_pending": [
+            "SCOPED_SAME_INPUT_GOLDEN_PARITY",
+            "TRADING_DAY_RUNTIME_ACCEPTANCE"
+          ],
+          "fallback_reason": "SYMBOL_RULE_FACTS_EVIDENCE_UNAVAILABLE",
+          "adoption_scope": "FROZEN_EVIDENCE_ONLY",
+          "requires_explicit_stock_codes": true
         }
       }
     },
@@ -1540,7 +1714,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-201",
+      "current_entry_rule_decision": "D-204",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1677,7 +1851,7 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-201",
+      "decision": "D-204",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
@@ -1867,6 +2041,21 @@
         "EXIT_CANDIDATE",
         "AVOID"
       ],
+      "radar_action_policy_compatibility": {
+        "accepted_versions": [
+          "EVIDENCE_GATE_V1",
+          "EVIDENCE_GATE_V2"
+        ],
+        "v2_official_sma20_verification": {
+          "accepted_statuses": [
+            "CONFIRMED",
+            "NOT_COMPARABLE",
+            "UNAVAILABLE"
+          ],
+          "required_gate_applied": false,
+          "rule": "D-174 accepts V2 only when the required official SMA20 verification is present, non-CONFLICT and reports gateApplied=false. CONFLICT always blocks this timing leg because V2 may retain a sell candidate while downgrading its executable action to HOLD or WATCH."
+        }
+      },
       "state": "Consumer-isolated persisted high-water watch. Ratchet upward, cash-adjust to the current price basis, never reset on a new report or unfilled recommendation. Missing state starts a new watch with no same-day sale; corrupt or mismatched state fails only this timing leg.",
       "exceptions": [
         "MANDATORY_RISK_EXIT_WITH_EXISTING_RULE",
@@ -1905,7 +2094,7 @@
       "extended_by": "D-189"
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-201",
+      "decision": "D-204",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
@@ -1932,7 +2121,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B 6.333333% target. If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-201",
+        "decision": "D-204",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2048,7 +2237,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-201",
+  "decision": "D-204",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2069,7 +2258,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-201",
+    "decision": "D-204",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,
