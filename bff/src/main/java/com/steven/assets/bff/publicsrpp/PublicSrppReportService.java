@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.steven.assets.bff.security.AuthConstants;
 import com.steven.assets.bff.security.BffUser;
 import com.steven.assets.bff.security.BusinessUserClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -27,13 +28,10 @@ class PublicSrppReportService {
     private final BusinessUserClient users;
     private final WebClient business;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     PublicSrppReportService(BusinessUserClient users,
-                                  @Qualifier("businessServicesClient") WebClient business) {
-        this(users, business, java.time.Clock.system(java.time.ZoneId.of("Asia/Taipei")));
-    }
-
-    PublicSrppReportService(BusinessUserClient users, WebClient business, java.time.Clock clock) {
+                                  @Qualifier("businessServicesClient") WebClient business,
+                                  @Qualifier("srppReportClock") java.time.Clock clock) {
         this.users = users;
         this.business = business;
         this.clock = clock;
