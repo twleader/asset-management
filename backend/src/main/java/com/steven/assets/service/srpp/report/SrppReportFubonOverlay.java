@@ -5,7 +5,7 @@ import com.steven.assets.service.srpp.decision.*;
 import com.steven.assets.srpp.SrppJcs;
 import java.util.*;
 import static com.steven.assets.service.srpp.decision.DecisionFacts.*;
-/** D201 report-only frame; preserves the legacy capture object's values and historical hash. */
+/** Current-policy report-only frame; preserves the capture object's immutable values and hash. */
 public final class SrppReportFubonOverlay {
     private SrppReportFubonOverlay(){}
     public static DecisionInputCapturePort.Frozen apply(DecisionInputCapturePort.Frozen original,SrppReportFubonCapturePort.Capture capture){

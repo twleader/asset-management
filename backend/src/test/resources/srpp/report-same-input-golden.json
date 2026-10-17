@@ -16961,7 +16961,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "65dc1a1ebbbdce6bc172e158c6f75df037426480afbc3d1a569c1e3607cd5e98",
+        "policy_sha256": "b22a185b7616ea08a66fbeacf4e46ceb0f0597fbe0cbae9efeff93949768a9d9",
         "stock_code": "0050"
       }
     },
@@ -17194,7 +17194,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "65dc1a1ebbbdce6bc172e158c6f75df037426480afbc3d1a569c1e3607cd5e98",
+        "policy_sha256": "b22a185b7616ea08a66fbeacf4e46ceb0f0597fbe0cbae9efeff93949768a9d9",
         "stock_code": "0050"
       }
     },
@@ -18567,13 +18567,13 @@
   ],
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
-    "core_sell_guard.py": "6e413e03c37274778700711a6b024a74c34895fb22bccdf17164c01d0a258b45",
+    "core_sell_guard.py": "0382b67fb06897b41c4cc7223c60436e682fac3f8e76b728554e56df5aeac396",
     "execution_policy.py": "9b3ad1bac647318cd144706dbbe9a026dff8fb03ed15e55b287bb811a2ec7c95",
     "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
     "short_term_opportunities.py": "09230d8f848ab81db5bc6ed348b0eb7f3547c960d18f6b9dfac043da917ce31b",
     "strategic_buy_gate.py": "607d680d72fdebb344ebe45b7da3c7b2d9fe84c0d9ade316d3eb0a29536714d5",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "aba40b3ddec665234121c4c1ce88f1b872e89d25f237fc52d5db71dab32f7f39",
+  "policyBundleSha256": "ef4bd047956514548f2c5b3c0fafb56d250f46198efcc2e73bdce17e1eed3839",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

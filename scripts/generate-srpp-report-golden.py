@@ -2,9 +2,78 @@
 """Offline same-input parity fixtures from the ORIGINAL SRPP pure calculators; no production writes."""
 from pathlib import Path
 from decimal import Decimal
-import copy, datetime as dt, hashlib, json, sys
+import argparse, copy, datetime as dt, hashlib, json, os, subprocess, sys
+sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
-SRPP=Path('/Users/steven/Project/SRPP')
+parser=argparse.ArgumentParser(description='Generate or verify offline SRPP report same-input golden fixtures.')
+parser.add_argument('--srpp-root',type=Path,default=Path('/Users/steven/Project/SRPP'))
+parser.add_argument('--check',action='store_true',help='verify the tracked golden without writing it')
+parser.add_argument('--output',type=Path,help='explicit generated golden destination (default: tracked test resource)')
+args=parser.parse_args()
+if not args.srpp_root.is_absolute():
+ parser.error('--srpp-root must be an absolute path')
+SRPP=args.srpp_root.resolve()
+if not (SRPP/'assumptions/model_inputs.json').is_file():
+ parser.error('--srpp-root must contain assumptions/model_inputs.json')
+
+def reject_duplicate_keys(pairs):
+ result={}
+ for key,value in pairs:
+  if key in result: raise SystemExit(f'SRPP_REPORT_SOURCE_DUPLICATE_JSON_KEY:{key}')
+  result[key]=value
+ return result
+
+def parse_strict(data,label):
+ try:
+  return json.loads(data.decode('utf-8'),object_pairs_hook=reject_duplicate_keys,parse_float=Decimal)
+ except (UnicodeDecodeError,json.JSONDecodeError) as error:
+  raise SystemExit(f'SRPP_REPORT_{label}_JSON_INVALID:{error}') from error
+
+def read_only(command,label,cwd):
+ completed=subprocess.run(command,cwd=cwd,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+ if completed.returncode:
+  detail=completed.stderr.decode('utf-8','replace').strip().splitlines()
+  raise SystemExit(f'SRPP_REPORT_{label}_FAILED:{detail[-1] if detail else "exit non-zero"}')
+ return completed.stdout
+
+def canonical_decimal(value):
+ if isinstance(value,bool) or not isinstance(value,(Decimal,int)): raise SystemExit('SRPP_REPORT_FORMAL_TARGET_NOT_NUMERIC')
+ rendered=format(Decimal(value),'f')
+ if '.' in rendered: rendered=rendered.rstrip('0').rstrip('.')
+ return rendered or '0'
+
+def formal_policy_document(model):
+ allocations=model.get('detailed_target_allocation_2027') if isinstance(model,dict) else None
+ if not isinstance(allocations,dict) or not allocations: raise SystemExit('SRPP_REPORT_FORMAL_TARGET_MISSING')
+ targets={}
+ for code,weight in allocations.items():
+  if not isinstance(code,str): raise SystemExit('SRPP_REPORT_FORMAL_TARGET_CODE_INVALID')
+  if code=='TWD_term_deposits': key='CASH:TWD:TERM'
+  elif code=='demand_deposits_and_cash': key='CASH:TWD:DEMAND'
+  else: key=f"STOCK:{'美股' if code.isascii() and all(c.isupper() or c=='.' for c in code) else '台股'}:{code}"
+  targets[key]=canonical_decimal(weight)
+ return (json.dumps({'schema':'SRPP_POLICY_DOCUMENT_V1','targets':targets},ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n').encode('utf-8')
+
+MODEL_BYTES=(SRPP/'assumptions/model_inputs.json').read_bytes()
+MANIFEST_BYTES=(SRPP/'assumptions/policy_manifest.json').read_bytes()
+strict_model=parse_strict(MODEL_BYTES,'MODEL')
+manifest=parse_strict(MANIFEST_BYTES,'MANIFEST')
+receipt=parse_strict(read_only([sys.executable,str(SRPP/'scripts/policy_bundle.py'),'check','--purpose','daily','--consumer','Codex'],'OFFICIAL_POLICY_BUNDLE_CHECK',SRPP),'OFFICIAL_POLICY_BUNDLE_CHECK')
+policy_bundle_sha=manifest.get('POLICY_BUNDLE_SHA256') if isinstance(manifest,dict) else None
+if not isinstance(receipt,dict) or receipt.get('status')!='PASS' or not isinstance(policy_bundle_sha,str) or receipt.get('POLICY_BUNDLE_SHA256')!=policy_bundle_sha:
+ raise SystemExit('SRPP_REPORT_OFFICIAL_BUNDLE_MISMATCH')
+if manifest.get('files',{}).get('assumptions/model_inputs.json')!=hashlib.sha256(MODEL_BYTES).hexdigest():
+ raise SystemExit('SRPP_REPORT_SOURCE_MODEL_HASH_MISMATCH')
+if (ROOT/'backend/src/main/resources/srpp/decision/model_inputs.json').read_bytes()!=MODEL_BYTES or (ROOT/'backend/src/main/resources/srpp/decision/policy_manifest.json').read_bytes()!=MANIFEST_BYTES:
+ raise SystemExit('SRPP_REPORT_EMBEDDED_AUTHORITY_BYTES_MISMATCH')
+if (ROOT/'backend/src/main/resources/srpp/report/d201-policy-document.json').read_bytes()!=formal_policy_document(strict_model):
+ raise SystemExit('SRPP_REPORT_FORMAL_POLICY_MISMATCH')
+generated_sql=read_only(['ruby',str(ROOT/'scripts/srpp-report-policy-register.rb')],'RUBY_REGISTRATION_GENERATOR',ROOT)
+if generated_sql!=(ROOT/'backend/src/main/resources/srpp/report/d201-registration.sql').read_bytes():
+ raise SystemExit('SRPP_REPORT_REGISTRATION_SQL_MISMATCH')
+if not generated_sql.startswith(b'INSERT INTO srpp_policy_registry ') or b' ON CONFLICT (policy_bundle_sha256) DO NOTHING;' not in generated_sql or policy_bundle_sha.encode('ascii') not in generated_sql:
+ raise SystemExit('SRPP_REPORT_REGISTRATION_SQL_INVALID')
+model=json.loads(MODEL_BYTES.decode('utf-8'))
 sys.path.insert(0,str(SRPP/'scripts'))
 import execution_policy as ep
 import pre_retirement_cashflow as payroll
@@ -18,7 +87,6 @@ from test_us_tactical_order_check import USTacticalOrderCheckTests
 from test_strategic_buy_gate import StrategicBuyGateTests, evaluate as evaluate_test_strategic
 from bear_ladder import BullLadder
 import numpy as np
-model=json.loads((SRPP/'assumptions/model_inputs.json').read_text())
 
 def normalize(x):
  if isinstance(x,float): return format(Decimal(str(x)).normalize(),'f')
@@ -79,5 +147,12 @@ cases.append({'kind':'regime','live':{'verified':True,'mode':'BULL','anchor':100
 payroll_config=json.loads((SRPP/'assumptions/pre_retirement_payroll.json').read_text());payroll_result=payroll.calculate(payroll_config)
 for row in payroll_result['ledger'][:2]:
  cases.append({'kind':'payroll','row':row,'expected':{'grossSalary':row['gross_pay'],'withholding':row['income_tax_withholding'],'voluntaryPension':row['voluntary_labor_pension'],'takeHome':row['net_cash_after_payroll'],'investableContribution':row['investable_surplus']}})
-result={'schema':'SRPP_REPORT_SAME_INPUT_GOLDEN_V1','policyBundleSha256':json.loads((SRPP/'assumptions/policy_manifest.json').read_text())['POLICY_BUNDLE_SHA256'],'originalCalculatorHashes':{n:hashlib.sha256((SRPP/'scripts'/n).read_bytes()).hexdigest() for n in ['execution_policy.py','strategic_buy_gate.py','core_sell_guard.py','short_term_opportunities.py','us_tactical_order_check.py','bear_ladder.py','pre_retirement_cashflow.py']},'cases':cases}
-output=ROOT/'backend/src/test/resources/srpp/report-same-input-golden.json';output.write_text(json.dumps(normalize(result),ensure_ascii=False,sort_keys=True,indent=2)+'\n');print(f'{len(cases)} original-calculator parity cases written')
+result={'schema':'SRPP_REPORT_SAME_INPUT_GOLDEN_V1','policyBundleSha256':policy_bundle_sha,'originalCalculatorHashes':{n:hashlib.sha256((SRPP/'scripts'/n).read_bytes()).hexdigest() for n in ['execution_policy.py','strategic_buy_gate.py','core_sell_guard.py','short_term_opportunities.py','us_tactical_order_check.py','bear_ladder.py','pre_retirement_cashflow.py']},'cases':cases}
+output=(args.output if args.output else ROOT/'backend/src/test/resources/srpp/report-same-input-golden.json').resolve()
+rendered=json.dumps(normalize(result),ensure_ascii=False,sort_keys=True,indent=2)+'\n'
+if args.check:
+ if not output.is_file() or output.read_text()!=rendered: raise SystemExit('SRPP_REPORT_GOLDEN_MISMATCH')
+ print(f'{len(cases)} original-calculator parity cases match')
+else:
+ output.write_text(rendered)
+ print(f'{len(cases)} original-calculator parity cases written')
