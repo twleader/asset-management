@@ -76,6 +76,14 @@ public class StockAlert {
     @Column(nullable = false, precision = 10, scale = 4)
     private BigDecimal threshold;
 
+    /**
+     * 提醒用途（Requirement 194）：只表達使用者要關注買進或賣出的方向，
+     * 不是交易指令，也不得由警示條件自行推導。既有列保留 {@code UNSPECIFIED}。
+     */
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private String purpose = "UNSPECIFIED";
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean active = true;

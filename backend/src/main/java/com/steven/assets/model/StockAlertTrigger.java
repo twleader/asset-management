@@ -62,6 +62,14 @@ public class StockAlertTrigger {
     private String market;
 
     /**
+     * 觸發當下的提醒用途快照（Requirement 194）。補發必須讀此值，
+     * 不得回查後來可能已變更的 alert 或 group 設定。
+     */
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private String purpose = "UNSPECIFIED";
+
+    /**
      * 觸發時間，**存「該股市場」的牆鐘**（台股台北／美股紐約／英股倫敦），
      * 由 {@code StockAlertService.computeTriggeredAt()} 寫入。
      *

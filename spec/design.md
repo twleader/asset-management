@@ -12959,3 +12959,29 @@ DTO不允許opaque maps/unknown fields。A1 root固定schemaVersion/planId/ident
 現有歷史檔名 `d201-policy-document.json` 與 `d201-registration.sql` 為相容性容器，不是 D-201 authority；Task 499 可保留檔名但其資料和對外文字必由當前 authority 生成。registry SQL 僅 append new policy hash，以資料庫既有 uniqueness 做冪等；不新增 migration、不 seed、也不改歷史 row。
 
 離線 release gate 與顯式 golden generator 都使用同一個明確傳入的 SRPP source root；gate 先驗官方 bundle，再比較嵌入 artifacts、golden、formal targets policy document 和 generator stdout。它只讀取；唯一允許寫檔的動作是顯式 golden generator。semantic negative tests 必先建構能通過 raw bytes/JCS 的自洽 fixture，才驗 report gate，避免誤把前層 hash 拒絕當成語意 gate 覆蓋。runtime release 則只重建 `business-services`，並把 jar bytes、DB row 和 9090 request 的同一 SHA 做三點交叉驗證。報告必區分 200 與缺 current FINAL package 時合理的 fail-closed 回應，不能將部署成功擴大解釋為有可採納交易建議。
+
+## Requirement 194／Task 502：股票警示用途（買進／賣出）
+
+### 資料與相容策略
+
+警示用途是使用者對提醒的解讀方向，不是由觸發條件推導出的交易判斷。資料庫在 `stock_alert`、`stock_alert_group`、`stock_alert_trigger` 各加 `purpose VARCHAR(16) NOT NULL DEFAULT 'UNSPECIFIED'`，並以三個 named CHECK constraints 固定值域為 `BUY`、`SELL`、`UNSPECIFIED`。`v1.155.0-stock-alert-purpose.sql` 的加欄與約束均採可重跑寫法；加欄 default 使既有的單一警示、群組與 trigger 不需資料搬遷即可保留為 `UNSPECIFIED`，絕不以 alertType、threshold 或技術指標反推用途。
+
+單一警示（`group_id IS NULL`）以自己的 `stock_alert.purpose` 為用途。複合警示只有 `stock_alert_group.purpose` 是使用者可設定的來源；建立或更新群組時，service 把同一值同步存給成員 `stock_alert` 列，避免非空 schema 產生無意義值，但任何顯示、觸發與通知都只讀群組欄位，成員不形成第二份可獨立編輯的用途。所有既有以單一警示 id 進行的 update、delete、toggle-active 與 reorder 都必須先拒絕 `group_id != null` 的成員，且在 transaction 寫入前失敗；唯一可以改群組或其成員的路徑是 group CRUD／toggle／reorder。`StockAlertService.recordTrigger` 與 `recordGroupTrigger` 把當時單一／群組用途寫入新 `stock_alert_trigger`；用途屬 trigger 的不可變歷史快照，任何仍存在的 trigger 補發絕不以目前 alert/group 的用途覆寫它。原有 FK cascade 刪除 alert/group 時也會刪 trigger／recipient，故本需求不改變刪除後不能補發的既有邊界；已送出的 Email 不可被後續設定變動改寫。
+
+Java entity 與 DTO 使用 `String purpose` 以承接既有字串式 API／DB 契約；service 中集中驗證只接受 `BUY`、`SELL` 作為 create/update input。`UNSPECIFIED` 僅供讀取既有資料與歷史 trigger，不能由前端或 API 寫入為新的業務設定。`Response` 回傳 raw code，前端本地映射為「買進／賣出／未設定」，避免 API 夾帶易漂移的顯示字串。
+
+### 請求、畫面與觸發流程
+
+`StockAlertDto.Request` 與 `GroupRequest` 增加 `purpose`，create/update 走既有 controller/service endpoint，沒有新 BFF、gateway、OpenAPI 或公開路由。`StockAlertDto.Response` 回傳用途，單一與群組共用同一欄位。既有只切換啟停、刪除、拖曳排序及收件人 routing 不把 legacy 列偷偷升級成買進或賣出。
+
+`StockAlertView` 的混合清單在「警示條件」與建立時間間加入「買進／賣出」欄，使用醒目的 tag 顯示三種值。單一與群組 dialog 都有必選 radio/select；新建預設空值，不能送出；編輯 legacy `UNSPECIFIED` 時顯示「未設定」並阻止儲存，直到使用者明確選擇買進或賣出。群組的每一條 condition 不帶用途控制項，避免誤導成可有互相衝突的子用途。用途文字只能說明提醒意圖，不連接任何券商、下單或自動交易流程。
+
+### 通知與補發
+
+`AlertNotificationDispatcher.PendingTrigger` 持有 trigger-time purpose。live enqueue 從已驗證的單一／群組設定帶入用途；`toPending(StockAlertTrigger)` 讀 `trigger.purpose`，不回查現行 purpose。`UNSPECIFIED` 不論來自 legacy trigger 或 migration 後仍 active 的 legacy 設定首次觸發，都固定顯示為「未設定」。條件 label 繼續由現有 `StockAlertService.buildLabel`／`buildGroupLabel` 產生，兩個 shared helper 不插入用途，故 Watch Stock、條件列表與匯出維持既有語意。
+
+digest 以股票分組後，在每一股票卡片建立 insertion-order 的 `purpose -> distinct conditionLabel` 映射。HTML 及 `calendarLine` 同時使用該映射，呈現為「買進：條件 A、條件 B；賣出：條件 C」；只有 legacy history 時顯示「未設定：…」。這個映射而非單獨的一個用途 tag 是防止同檔混合方向時丟失條件歸屬的唯一資料來源。Email subject、收件人分組、可寄時段、圖片、24h cooldown、market-time、孤兒 label fallback 均不變；手動補發仍不新增日曆邀請，但其 Email 本文照樣以 snapshot purpose 顯示。
+
+### 驗證
+
+單元／整合測試驗證 service 拒絕 null、空白、`UNSPECIFIED`、unknown input，並拒絕對群組成員使用單一警示 mutation；單一與群組 response 保留 `BUY`／`SELL`／legacy `UNSPECIFIED`，寫入 trigger 的用途不隨之後設定改變。通知測試驗證 legacy active alert 的 live `UNSPECIFIED`、live 與 resend 都以 trigger-time 用途建立混合方向的 email/calendar 映射；刪除後既有 cascade 造成無可補發 row 是既有邊界，不假稱保留。前端建置驗證欄位、legacy 呈現與強制選擇不破壞 Vue 編譯。Liquibase 套用後以 `pg_dump --schema-only` 重新產生 `db/schema.sql`，drift test 必須回 0；最後只從同步後的 main rebuild/recreate `business-services` 和 `frontend`，以 health/read-only UI/API 路徑確認服務可用，不寄真實郵件、不交易。

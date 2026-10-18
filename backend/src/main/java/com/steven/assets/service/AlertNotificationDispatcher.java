@@ -78,6 +78,7 @@ public class AlertNotificationDispatcher {
                     alert.getMarket(),
                     stockName,
                     StockAlertService.buildLabel(alert),
+                    alert.getPurpose(),
                     triggeredAt,
                     price,
                     monthlyMa,
@@ -115,6 +116,7 @@ public class AlertNotificationDispatcher {
                     group.getMarket(),
                     stockName,
                     conditionLabel,
+                    group.getPurpose(),
                     triggeredAt,
                     price,
                     monthlyMa,
@@ -287,7 +289,7 @@ public class AlertNotificationDispatcher {
         return new PendingTrigger(
                 t.getAlertId(), t.getGroupId(),
                 t.getStockCode(), t.getMarket(),
-                resolveStockName(t.getStockCode(), t.getMarket()), label,
+                resolveStockName(t.getStockCode(), t.getMarket()), label, t.getPurpose(),
                 t.getTriggeredAt(), t.getPrice(),
                 t.getMonthlyMa(), t.getQuarterlyMa(), t.getAnnualMa(),
                 t.getKValue(), t.getDValue());
@@ -385,23 +387,28 @@ public class AlertNotificationDispatcher {
         int i = 0;
         for (List<PendingTrigger> group : grouped.values()) {
             i++;
-            // 同一股票多條件 → 合併成一筆：條件 label 去重串接，技術快照（時間/股價/MA/KD）取最近一筆觸發
+            // 同一股票多條件 → 合併成一筆：用途 → 去重條件的關係必須保留，不能把不同用途的
+            // label 壓成一串；技術快照（時間/股價/MA/KD）仍取最近一筆觸發。
             PendingTrigger latest = group.get(0);
-            LinkedHashSet<String> labels = new LinkedHashSet<>();
+            List<PurposeCondition> purposeConditions = new ArrayList<>();
             for (PendingTrigger t : group) {
                 if (t.triggeredAt != null
                         && (latest.triggeredAt == null || t.triggeredAt.isAfter(latest.triggeredAt))) {
                     latest = t;
                 }
-                labels.add(t.conditionLabel);
+                purposeConditions.add(new PurposeCondition(t.purpose, t.conditionLabel));
             }
-            // 日曆事件 DESCRIPTION 的逐檔摘要：與下方正文取用同一組 latest / labels，順序亦相同（Task 248）
-            calendarLines.add(calendarLine(latest.stockName, latest.stockCode, latest.market, labels, latest.price));
+            LinkedHashMap<String, LinkedHashSet<String>> mappedConditions =
+                    purposeConditionMap(purposeConditions);
+            String formattedPurposeConditions = formatPurposeConditions(mappedConditions);
+            // 日曆事件 DESCRIPTION 的逐檔摘要：與下方正文取用同一份用途／條件 mapping，順序亦相同。
+            calendarLines.add(calendarLine(latest.stockName, latest.stockCode, latest.market,
+                    mappedConditions, latest.price));
             sb.append("<div style=\"margin:0 0 22px;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px\">");
             sb.append("<div style=\"font-weight:700;font-size:15px;margin-bottom:6px\">")
               .append(i).append(". ").append(esc(latest.stockName))
               .append(" (").append(esc(latest.stockCode)).append(' ').append(esc(latest.market)).append(") — ")
-              .append(esc(String.join("、", labels))).append("</div>");
+              .append(esc(formattedPurposeConditions)).append("</div>");
             sb.append(row("觸發時間", latest.triggeredAt == null ? "-" : TS_FMT.format(latest.triggeredAt)));
             // 觸發股價＝觸發當下價（與圖內 legend 的「最新收盤」語意不同，故保留為文字）。
             // 月線 / 季線 / 年線 / KD 數值已全部入圖（PNG legend），文字不再重複列出。
@@ -448,15 +455,58 @@ public class AlertNotificationDispatcher {
         return new DigestMail(sb.toString(), images, grouped.size(), calendarLines);
     }
 
+    /** 單一用途／條件配對；供 digest 與純單元測試共用。 */
+    static record PurposeCondition(String purpose, String conditionLabel) {}
+
     /**
-     * 日曆事件 DESCRIPTION 的單檔摘要行（Task 248）。抽成 static 供純 JUnit 測試
-     * （{@link #buildDigest} 需要 AlertChartRenderer 等依賴，不值得為此引入 Mockito）。
+     * 依首次出現順序建立「用途 → 去重條件」映射。未知／null 是舊資料防禦性 fallback，
+     * 一律誠實顯示為 {@code UNSPECIFIED}，不能猜測成買進或賣出。
+     */
+    static LinkedHashMap<String, LinkedHashSet<String>> purposeConditionMap(
+            Collection<PurposeCondition> conditions) {
+        LinkedHashMap<String, LinkedHashSet<String>> result = new LinkedHashMap<>();
+        if (conditions == null) return result;
+        for (PurposeCondition condition : conditions) {
+            if (condition == null) continue;
+            result.computeIfAbsent(normalizePurpose(condition.purpose()), ignored -> new LinkedHashSet<>())
+                    .add(condition.conditionLabel());
+        }
+        return result;
+    }
+
+    /** HTML 與日曆共用的用途文案，保留 map 的 insertion order 與每種用途內的條件順序。 */
+    static String formatPurposeConditions(Map<String, ? extends Collection<String>> mappedConditions) {
+        if (mappedConditions == null || mappedConditions.isEmpty()) return "";
+        List<String> parts = new ArrayList<>();
+        for (Map.Entry<String, ? extends Collection<String>> entry : mappedConditions.entrySet()) {
+            Collection<String> labels = entry.getValue();
+            parts.add(purposeLabel(entry.getKey()) + "：" + (labels == null ? "" : String.join("、", labels)));
+        }
+        return String.join("；", parts);
+    }
+
+    private static String normalizePurpose(String purpose) {
+        return StockAlertService.PURPOSE_BUY.equals(purpose) || StockAlertService.PURPOSE_SELL.equals(purpose)
+                ? purpose : StockAlertService.PURPOSE_UNSPECIFIED;
+    }
+
+    private static String purposeLabel(String purpose) {
+        return switch (normalizePurpose(purpose)) {
+            case StockAlertService.PURPOSE_BUY -> "買進";
+            case StockAlertService.PURPOSE_SELL -> "賣出";
+            default -> "未設定";
+        };
+    }
+
+    /**
+     * 日曆事件 DESCRIPTION 的單檔摘要行（Task 248）。它和 HTML digest 共用
+     * {@link #formatPurposeConditions(Map)}，避免兩者對同檔混合用途的條件歸屬分歧。
      */
     static String calendarLine(String stockName, String stockCode, String market,
-                               Collection<String> labels, BigDecimal price) {
+                               Map<String, ? extends Collection<String>> mappedConditions, BigDecimal price) {
         return String.format("%s (%s %s) — %s 觸發價 %s",
                 stockName, stockCode, market,
-                labels == null ? "" : String.join("、", labels),
+                formatPurposeConditions(mappedConditions),
                 formatNumber(price));
     }
 
@@ -509,6 +559,7 @@ public class AlertNotificationDispatcher {
             String market,
             String stockName,
             String conditionLabel,
+            String purpose,
             LocalDateTime triggeredAt,
             BigDecimal price,
             BigDecimal monthlyMa,

@@ -3,7 +3,10 @@ package com.steven.assets.integration.fubon;
 import com.steven.assets.model.AssetSnapshot;
 import com.steven.assets.model.FubonEtfHoldingsSnapshot;
 import com.steven.assets.model.StockAlert;
+import com.steven.assets.model.StockAlertGroup;
+import com.steven.assets.model.StockAlertTrigger;
 import com.steven.assets.model.StockHolding;
+import jakarta.persistence.EntityManager;
 import com.steven.assets.repository.*;
 import com.steven.assets.service.MarketDataService;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +30,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -56,6 +60,9 @@ class FubonEtfHoldingsPostgresTest {
     @Autowired StockHoldingRepository stocks;
     @Autowired AssetSnapshotRepository snapshots;
     @Autowired StockAlertRepository alerts;
+    @Autowired StockAlertGroupRepository alertGroups;
+    @Autowired StockAlertTriggerRepository alertTriggers;
+    @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     private static final Instant NOW = Instant.parse("2026-08-28T07:30:00Z");
     private static final String PAYLOAD = """
@@ -76,7 +83,7 @@ class FubonEtfHoldingsPostgresTest {
         jdbc.execute("DROP TABLE fubon_etf_holdings_snapshot");
         jdbc.execute(schema.substring(start, end));
         jdbc.execute("ALTER TABLE fubon_etf_holdings_snapshot ADD PRIMARY KEY (etf_stock_code)");
-        stocks.deleteAll(); alerts.deleteAll(); snapshots.deleteAll();
+        alertTriggers.deleteAll(); stocks.deleteAll(); alerts.deleteAll(); alertGroups.deleteAll(); snapshots.deleteAll();
     }
 
     @Test
@@ -212,6 +219,22 @@ class FubonEtfHoldingsPostgresTest {
         alerts.saveAndFlush(StockAlert.builder().ownerUserId(11L).stockCode("0056").market("台股")
                 .alertType("PRICE_ABOVE").threshold(BigDecimal.ONE).build());
         assertThat(stocks.findTwRadarCandidateCodes()).containsExactly("0056", "006208", "00981A");
+    }
+
+    @Test
+    void stockAlertPurposeDefaultsSurviveActualCreateDropDatabaseRoundTrip() {
+        StockAlert alert = alerts.saveAndFlush(StockAlert.builder().ownerUserId(31L).stockCode("2330").market("台股")
+                .alertType("PRICE_ABOVE").threshold(BigDecimal.ONE).build());
+        StockAlertGroup group = alertGroups.saveAndFlush(StockAlertGroup.builder().ownerUserId(31L)
+                .stockCode("2330").market("台股").build());
+        StockAlertTrigger trigger = alertTriggers.saveAndFlush(StockAlertTrigger.builder().alertId(alert.getId())
+                .stockCode("2330").market("台股").triggeredAt(LocalDateTime.of(2026, 8, 28, 10, 0)).build());
+
+        entityManager.clear();
+
+        assertThat(alerts.findById(alert.getId()).orElseThrow().getPurpose()).isEqualTo("UNSPECIFIED");
+        assertThat(alertGroups.findById(group.getId()).orElseThrow().getPurpose()).isEqualTo("UNSPECIFIED");
+        assertThat(alertTriggers.findById(trigger.getId()).orElseThrow().getPurpose()).isEqualTo("UNSPECIFIED");
     }
 
     private void holding(Long owner, String date, String code, String market) {

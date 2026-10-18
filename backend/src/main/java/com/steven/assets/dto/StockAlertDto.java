@@ -16,6 +16,8 @@ public class StockAlertDto {
             /** MA_*_PCT 類型必填：均線天數（20 / 60 / 240） */
             Integer maPeriod,
             BigDecimal threshold,
+            /** 僅接受 {@code BUY} 或 {@code SELL}；{@code UNSPECIFIED} 僅供舊資料讀取。 */
+            String purpose,
             Boolean active,
             /**
              * 此警示要寄送的通知收件人 id 清單（Task 125）。create / update 以此覆寫 join 列。
@@ -53,6 +55,8 @@ public class StockAlertDto {
             String market,
             /** 群組成員條件（依此順序決定 displayOrder 與合併 label 的串接順序） */
             List<ConditionItem> conditions,
+            /** 僅接受 {@code BUY} 或 {@code SELL}；群組成員不可各自設定用途。 */
+            String purpose,
             Boolean active,
             /**
              * 此群組要寄送的通知收件人 id 清單（比照單一警示）。create / update 以此覆寫 join 列。
@@ -84,6 +88,8 @@ public class StockAlertDto {
             String alertType,
             Integer maPeriod,
             BigDecimal threshold,
+            /** {@code BUY} / {@code SELL} / 歷史保留的 {@code UNSPECIFIED}。 */
+            String purpose,
             Boolean active,
             /** 此警示目前選定的通知收件人 id 清單（Task 125；供前端對話框預勾）。 */
             List<Long> recipientIds,

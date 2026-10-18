@@ -122,6 +122,7 @@ public class StockAlertService {
         // 新增排在最後。Task 253 起獨立條件與群組共用同一個排序空間，故 max 必須跨兩張表取
         // （只看 stock_alert 會與既有群組的 displayOrder 撞號，混合清單的順序變成不確定）。
         int maxOrder = maxDisplayOrder();
+        validatePurpose(req.purpose());
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
         validateCondition(req.alertType(), req.maPeriod(), req.threshold());
@@ -134,6 +135,7 @@ public class StockAlertService {
                 .alertType(req.alertType())
                 .maPeriod(req.maPeriod())
                 .threshold(req.threshold())
+                .purpose(req.purpose())
                 .active(req.active() != null ? req.active() : true)
                 .displayOrder(maxOrder + 1)
                 .build();
@@ -194,6 +196,19 @@ public class StockAlertService {
     @Transactional
     public void reorder(List<StockAlertDto.OrderItem> orderedItems) {
         if (orderedItems == null) return;
+        // 先完整驗證再寫入：群組成員若混在 payload 後段，不能讓前段獨立條件已改排序後才被拒絕。
+        // 成員的排序只屬於群組內 label 順序，唯一可修改它們的入口是 group CRUD。
+        for (StockAlertDto.OrderItem item : orderedItems) {
+            if (item == null || item.id() == null) continue;
+            if ("GROUP".equals(item.kind())) {
+                groupRepo.findById(item.id()).ifPresent(g -> tenantGuard.assertOwned(g.getOwnerUserId()));
+            } else {
+                alertRepo.findById(item.id()).ifPresent(a -> {
+                    tenantGuard.assertOwned(a.getOwnerUserId());
+                    assertStandalone(a);
+                });
+            }
+        }
         for (int i = 0; i < orderedItems.size(); i++) {
             StockAlertDto.OrderItem item = orderedItems.get(i);
             if (item == null || item.id() == null) continue;
@@ -219,6 +234,8 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         tenantGuard.assertOwned(alert.getOwnerUserId());
+        assertStandalone(alert);
+        validatePurpose(req.purpose());
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
         validateCondition(req.alertType(), req.maPeriod(), req.threshold());
@@ -233,6 +250,7 @@ public class StockAlertService {
         alert.setAlertType(req.alertType());
         alert.setMaPeriod(req.maPeriod());
         alert.setThreshold(req.threshold());
+        alert.setPurpose(req.purpose());
         if (req.active() != null) alert.setActive(req.active());
         StockAlert saved = alertRepo.save(alert);
         // 通知收件人（Task 125）：非 null 才覆寫；null 視為「本次未更動收件人」，保留既有 join。
@@ -247,6 +265,7 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         tenantGuard.assertOwned(alert.getOwnerUserId());
+        assertStandalone(alert);
         recipientLinkRepo.deleteByAlertId(id);   // 連帶刪除 join 列（DB 亦有 ON DELETE CASCADE 雙保險）
         alertRepo.delete(alert);
     }
@@ -331,11 +350,34 @@ public class StockAlertService {
         StockAlert alert = alertRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found: " + id));
         tenantGuard.assertOwned(alert.getOwnerUserId());
+        assertStandalone(alert);
         alert.setActive(!alert.getActive());
         return toResponse(alertRepo.save(alert));
     }
 
     // ===== 複合條件群組 CRUD（Task 253）=====
+
+    /** Requirement 194：新建／更新只能是使用者明確選定的兩種提醒用途。 */
+    static final String PURPOSE_BUY = "BUY";
+    static final String PURPOSE_SELL = "SELL";
+    static final String PURPOSE_UNSPECIFIED = "UNSPECIFIED";
+
+    /**
+     * 新建／更新的用途驗證。{@code UNSPECIFIED} 只代表 migration 前的舊設定或歷史快照，
+     * 不能成為新的業務設定，也不從警示條件自行推導。
+     */
+    public static void validatePurpose(String purpose) {
+        if (!PURPOSE_BUY.equals(purpose) && !PURPOSE_SELL.equals(purpose)) {
+            throw new IllegalArgumentException("警示用途僅能選擇 BUY 或 SELL");
+        }
+    }
+
+    /** 群組成員不是獨立警示；避免單一 alert 端點形成第二份用途／排序／啟停設定來源。 */
+    private static void assertStandalone(StockAlert alert) {
+        if (alert.getGroupId() != null) {
+            throw new IllegalArgumentException("複合條件群組成員只能透過群組端點修改");
+        }
+    }
 
     /** 合法的警示類型（複合條件驗證用；與 {@link #buildLabel} 的 switch 分支一一對應）。 */
     private static final Set<String> VALID_ALERT_TYPES = Set.of(
@@ -498,6 +540,7 @@ public class StockAlertService {
      */
     @Transactional
     public StockAlertDto.Response createGroup(StockAlertDto.GroupRequest req) {
+        validatePurpose(req.purpose());
         validateConditions(req.conditions());
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
@@ -511,6 +554,7 @@ public class StockAlertService {
                 .ownerUserId(tenantGuard.requireCurrentUserId())
                 .stockCode(code)
                 .market(req.market())
+                .purpose(req.purpose())
                 .active(req.active() != null ? req.active() : true)
                 .displayOrder(maxDisplayOrder() + 1)
                 .build());
@@ -538,6 +582,7 @@ public class StockAlertService {
         StockAlertGroup group = groupRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("複合條件群組不存在：" + id));
         tenantGuard.assertOwned(group.getOwnerUserId());
+        validatePurpose(req.purpose());
         validateConditions(req.conditions());
         String code = req.stockCode().trim().toUpperCase();
         assertNameMatchesCode(code, req.market(), req.stockName());
@@ -548,6 +593,7 @@ public class StockAlertService {
         }
         group.setStockCode(code);
         group.setMarket(req.market());
+        group.setPurpose(req.purpose());
         if (req.active() != null) group.setActive(req.active());
         StockAlertGroup saved = groupRepo.save(group);
         alertRepo.deleteByGroupId(id);
@@ -582,6 +628,7 @@ public class StockAlertService {
                     .alertType(c.alertType())
                     .maPeriod(c.maPeriod())
                     .threshold(c.threshold())
+                    .purpose(group.getPurpose())
                     .active(true)
                     .displayOrder(base + i)
                     .build());
@@ -1050,6 +1097,7 @@ public class StockAlertService {
                     .groupId(group.getId())
                     .stockCode(group.getStockCode())
                     .market(group.getMarket())
+                    .purpose(group.getPurpose())
                     .triggeredAt(triggeredAt)
                     .price(price)
                     .monthlyMa(ind.monthlyMa())
@@ -1460,6 +1508,7 @@ public class StockAlertService {
                 .alertType(a.getAlertType())
                 .maPeriod(a.getMaPeriod())
                 .threshold(a.getThreshold())
+                .purpose(a.getPurpose())
                 .active(a.getActive())
                 .recipientIds(recipientLinkRepo.findRecipientIdsByAlertId(a.getId()))   // Task 125：回填選定收件人
                 .lastTriggeredAt(fresh ? a.getLastTriggeredAt() : null)
@@ -1493,6 +1542,7 @@ public class StockAlertService {
                 .stockCode(g.getStockCode())
                 .stockName(name)
                 .market(g.getMarket())
+                .purpose(g.getPurpose())
                 .active(g.getActive())
                 .recipientIds(groupRecipientRepo.findRecipientIdsByGroupId(g.getId()))
                 .lastTriggeredAt(fresh ? g.getLastTriggeredAt() : null)
@@ -1609,6 +1659,7 @@ public class StockAlertService {
                     .alertId(alert.getId())
                     .stockCode(alert.getStockCode())
                     .market(alert.getMarket())
+                    .purpose(alert.getPurpose())
                     .triggeredAt(triggeredAt)
                     .price(price)
                     .monthlyMa(ind.monthlyMa())

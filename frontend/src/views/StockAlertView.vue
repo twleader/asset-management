@@ -75,6 +75,13 @@
             <span v-else>{{ row.conditionLabel }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="買進／賣出" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag size="small" :type="purposeTagType(row.purpose)" effect="plain">
+              {{ purposeLabel(row.purpose) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="建立時間" width="120">
           <template #default="{ row }">
             <span style="font-size:12px;color:#64748b">{{ fmtDt(row.createdAt) }}</span>
@@ -261,6 +268,18 @@
             @blur="fetchStockCode(form)" />
         </el-form-item>
 
+        <el-form-item label="警示用途" required>
+          <div>
+            <el-radio-group v-model="form.purpose">
+              <el-radio value="BUY">買進</el-radio>
+              <el-radio value="SELL">賣出</el-radio>
+            </el-radio-group>
+            <div v-if="form.purpose === 'UNSPECIFIED'" style="font-size:12px;color:#e6a23c;margin-top:4px">
+              這筆舊資料目前為「未設定」，請明確選擇買進或賣出後才能儲存。
+            </div>
+          </div>
+        </el-form-item>
+
         <el-divider content-position="left">警示條件</el-divider>
 
         <el-form-item label="條件類型" required>
@@ -379,7 +398,7 @@
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">儲存</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!isPurposeSelected(form.purpose)" @click="save">儲存</el-button>
       </template>
     </el-dialog>
 
@@ -412,6 +431,18 @@
             style="width:200px"
             :suffix-icon="lookingUpName ? Loading : undefined"
             @blur="fetchStockCode(groupForm)" />
+        </el-form-item>
+
+        <el-form-item label="警示用途" required>
+          <div>
+            <el-radio-group v-model="groupForm.purpose">
+              <el-radio value="BUY">買進</el-radio>
+              <el-radio value="SELL">賣出</el-radio>
+            </el-radio-group>
+            <div v-if="groupForm.purpose === 'UNSPECIFIED'" style="font-size:12px;color:#e6a23c;margin-top:4px">
+              這筆舊資料目前為「未設定」，請明確選擇買進或賣出後才能儲存。
+            </div>
+          </div>
         </el-form-item>
 
         <el-divider content-position="left">
@@ -505,7 +536,7 @@
         </span>
         <el-button @click="groupDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="groupSaving"
-          :disabled="groupForm.conditions.length < MIN_GROUP_CONDITIONS"
+          :disabled="groupForm.conditions.length < MIN_GROUP_CONDITIONS || !isPurposeSelected(groupForm.purpose)"
           @click="saveGroup">儲存</el-button>
       </template>
     </el-dialog>
@@ -580,6 +611,7 @@ const defaultForm = () => ({
   kdIndicator: 'K',
   threshold: 5,
   priceThreshold: 0,
+  purpose: '',
   active: true,
   recipientIds: [],
 })
@@ -609,6 +641,22 @@ const maName = computed(() => maNameOf(form))
 
 function rowMaLabel(row) {
   return MA_NAMES[row.maPeriod] || '均線'
+}
+
+function isPurposeSelected(purpose) {
+  return purpose === 'BUY' || purpose === 'SELL'
+}
+
+function purposeLabel(purpose) {
+  if (purpose === 'BUY') return '買進'
+  if (purpose === 'SELL') return '賣出'
+  return '未設定'
+}
+
+function purposeTagType(purpose) {
+  if (purpose === 'BUY') return 'success'
+  if (purpose === 'SELL') return 'danger'
+  return 'info'
 }
 
 // 混合清單的列識別：群組 id 與獨立條件 id 分屬兩張表、值會相撞，必須帶 kind 才唯一（Task 253）
@@ -843,6 +891,8 @@ function openDialog(row = null) {
     form.stockCode = row.stockCode
     form.stockName = row.stockName || ''
     form.active = row.active
+    // 舊資料的 UNSPECIFIED 要如實顯示且不得直接存回；使用者必須明確補選用途。
+    form.purpose = isPurposeSelected(row.purpose) ? row.purpose : 'UNSPECIFIED'
     // 編輯：回填該警示已選收件人（Task 125）；舊資料若無則視為未選
     form.recipientIds = Array.isArray(row.recipientIds) ? [...row.recipientIds] : []
     parseAlertType(form, row.alertType, row.threshold, row.maPeriod)
@@ -960,6 +1010,10 @@ async function save() {
     ElMessage.warning('請填寫股票代號與市場')
     return
   }
+  if (!isPurposeSelected(form.purpose)) {
+    ElMessage.warning('請選擇警示用途：買進或賣出')
+    return
+  }
   saving.value = true
   try {
     const payload = {
@@ -969,6 +1023,7 @@ async function save() {
       alertType: buildAlertType(form),
       maPeriod: maPeriodOf(form),
       threshold: thresholdOf(form),
+      purpose: form.purpose,
       active: form.active,
       recipientIds: form.recipientIds,   // Task 125：此警示的通知收件人
     }
@@ -1016,6 +1071,7 @@ const groupForm = reactive({
   market: '台股',
   stockCode: '',
   stockName: '',
+  purpose: '',
   active: true,
   recipientIds: [],
   conditions: [],
@@ -1049,6 +1105,7 @@ function openGroupDialog(row = null) {
     market: marketTab.value,   // 預設跟隨當前市場 tab（比照單一條件 dialog）
     stockCode: '',
     stockName: '',
+    purpose: '',
     active: true,
     recipientIds: [],
     conditions: [],
@@ -1060,6 +1117,8 @@ function openGroupDialog(row = null) {
     groupForm.stockCode = row.stockCode
     groupForm.stockName = row.stockName || ''
     groupForm.active = row.active
+    // 舊群組用途一律顯示未設定；群組內 individual condition 不可另設用途。
+    groupForm.purpose = isPurposeSelected(row.purpose) ? row.purpose : 'UNSPECIFIED'
     groupForm.recipientIds = Array.isArray(row.recipientIds) ? [...row.recipientIds] : []
     // 逐條反解回表單列；順序即後端成員 displayOrder 升冪，與合併 label 的串接順序一致
     groupForm.conditions = (row.conditions || []).map(c => {
@@ -1092,6 +1151,10 @@ async function saveGroup() {
     ElMessage.warning('請填寫股票代號與市場')
     return
   }
+  if (!isPurposeSelected(groupForm.purpose)) {
+    ElMessage.warning('請選擇警示用途：買進或賣出')
+    return
+  }
   if (groupForm.conditions.length < MIN_GROUP_CONDITIONS) {
     ElMessage.warning(`複合條件至少需要 ${MIN_GROUP_CONDITIONS} 個條件`)
     return
@@ -1102,6 +1165,7 @@ async function saveGroup() {
       market: groupForm.market,
       stockCode: groupForm.stockCode.toUpperCase(),
       stockName: groupForm.stockName || null,
+      purpose: groupForm.purpose,
       conditions: groupForm.conditions.map(c => ({
         alertType: buildAlertType(c),
         maPeriod: maPeriodOf(c),
