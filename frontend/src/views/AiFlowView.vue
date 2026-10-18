@@ -383,7 +383,7 @@ const graphOption = computed(() => ({
       ...node,
       symbol: 'roundRect',
       symbolSize: [150, 48],
-      label: { show: true, position: 'inside', color: '#0f172a', formatter: node.graphLabel }
+      label: { show: true, position: 'inside', color: '#0f172a', width: 136, overflow: 'truncate', formatter: node.graphLabel }
     })),
     links: graphData.value.edges.map(edge => ({
       ...edge,

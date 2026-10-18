@@ -192,6 +192,19 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
   assert.match(view, /state\.detail\.slowSteps/)
 })
 
+test('長公開工具標題在節點內截斷，完整 title 仍保留於 tooltip', () => {
+  const longLabel = '公開工具呼叫：exec（內含 exec_command、web__run）'
+  const mapped = mapAiFlowGraphData({
+    nodes: [{ eventId: 'event-long', label: longLabel, status: 'SUCCEEDED', statusLabel: '成功', categoryLabel: '工具', timeLabel: '09:05:03', durationMillis: 12, x: 1, y: 2, color: '#123456', summary: '' }],
+    edges: []
+  })
+  assert.equal(mapped.nodes[0].tooltipText.split('\n')[0], longLabel)
+
+  const view = readFileSync(new URL('../views/AiFlowView.vue', import.meta.url), 'utf8')
+  assert.match(view, /symbolSize:\s*\[150,\s*48\]/)
+  assert.match(view, /label:\s*\{[^}]*position:\s*'inside'[^}]*width:\s*136[^}]*overflow:\s*'truncate'[^}]*formatter:\s*node\.graphLabel[^}]*\}/)
+})
+
 test('路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace', () => {
   const app = readFileSync(new URL('../App.vue', import.meta.url), 'utf8')
   const router = readFileSync(new URL('../router/index.js', import.meta.url), 'utf8')
