@@ -36,6 +36,23 @@ RUN_KEYS = {"runId", "consumer", "reportDate", "reportSlot", "sourceKind", "sour
 OPAQUE = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 HTTP_PATH = re.compile(r"/api(?:/[A-Za-z0-9._~{}-]+)+")
 DEFAULT_ENDPOINT = "http://127.0.0.1:9090/api/srpp/ai-flow/events"
+# 公開工具名稱（Task 500）：只接受閉合識別字，其餘一律回到原泛稱。
+TOOL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
+INNER_TOOL_DOT = re.compile(r"\btools\.([A-Za-z_][A-Za-z0-9_]{0,63})\s*\(")
+INNER_TOOL_BRACKET = re.compile(r"""\btools\[\s*["']([A-Za-z0-9_.:-]{1,64})["']\s*\]""")
+COMPOSITE_TOOLS = {"exec", "run_code"}
+TOOL_LABEL_LIMIT = 80
+TOOL_TITLE_NAMES = 3
+TOOL_STATE_NAMES = 8
+TOOL_SUMMARY_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
+# 與 backend AiFlowProtocol.SENSITIVE 的 pattern 字串逐分支一致（Java 的 (?is) 對應 re.I|re.S，
+# \b／\s 為 ASCII 語意故加 re.A）。測試會從 Java 原始碼解析比對，backend 改規則時此處必須同步。
+BACKEND_SENSITIVE_PATTERN = (
+    r"(authorization|bearer\s|token\s*[:=]|password|secret|api[_-]?key|private[_ -]?reasoning|chain.of.thought|"
+    r"\b(?:curl|wget|printenv|export)\s|\$\(|```|<[^>]+>|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|[A-Za-z]:\\|/Users/|/home/|"
+    r"\b(?:NT\$|USD|TWD)\s*[0-9]|(?:price|amount|balance|holdings|account|成本|金額|持股|庫存|股數|張數|帳號|帳戶)\s*[:=：]?\s*[0-9]|[0-9]{6,})"
+)
+BACKEND_SENSITIVE = re.compile(BACKEND_SENSITIVE_PATTERN, re.I | re.S | re.A)
 
 
 class ObservationError(Exception):
@@ -217,6 +234,89 @@ def operation_for_call(payload: dict) -> dict:
     return {"method": "TOOL", "path": "tool"}
 
 
+def build_tool_label(name: str, names: list[str]) -> str:
+    """`<name>` 或 `<name>（內含 a、b、c 等 N 項）`；整體不超過80字元。
+
+    title 最多列3個內含名稱；顯示數少於去重總數（含被長度裁掉者）一律附「等 N 項」。
+    放不下時逐一減少內含名稱，一個也放不下就只留 `<name>`。
+    """
+    total = len(names)
+    for shown in range(min(TOOL_TITLE_NAMES, total), 0, -1):
+        suffix = f" 等 {total} 項" if shown < total else ""
+        label = f"{name}（內含 {'、'.join(names[:shown])}{suffix}）"
+        if len(label) <= TOOL_LABEL_LIMIT:
+            return label
+    return name
+
+
+def tool_label(payload: dict) -> tuple[str, list[str]] | None:
+    """從公開工具呼叫取得 (標籤, 去重後內含工具識別字)；不合白名單回 None。
+
+    複合 exec／run_code 的實際工具不在 payload.name，只從呼叫文字擷取
+    `tools.<名稱>(` 或 `tools["名稱"]` 的識別字；不保存參數、指令或輸出。
+    名稱取自呼叫文字而非精確解析，字串字面值內的 `tools.x(` 也可能被擷取。
+    """
+    name = payload.get("name")
+    if not isinstance(name, str) or TOOL_NAME.fullmatch(name) is None:
+        return None
+    names: list[str] = []
+    if name.rsplit(".", 1)[-1] in COMPOSITE_TOOLS:
+        text = payload.get("input", payload.get("arguments", ""))
+        if isinstance(text, str):
+            hits = [(match.start(), match[1]) for match in INNER_TOOL_DOT.finditer(text)]
+            hits += [(match.start(), match[1]) for match in INNER_TOOL_BRACKET.finditer(text)]
+            seen: set[str] = set()
+            for _, inner in sorted(hits):
+                if TOOL_NAME.fullmatch(inner) is not None and inner not in seen:
+                    seen.add(inner)
+                    names.append(inner)
+    return build_tool_label(name, names), names
+
+
+def tool_label_info(label: tuple[str, list[str]] | None) -> dict | None:
+    """寫入 collector state 的標籤；只存 label、至多8個名稱與去重總數。"""
+    if label is None:
+        return None
+    return {"label": label[0], "names": list(label[1][:TOOL_STATE_NAMES]), "total": len(label[1])}
+
+
+def usable_label_info(value: Any) -> dict | None:
+    """state 內的標籤可能缺漏（部署前的舊 call）或被改壞；無法確認一律視為沒有標籤。"""
+    if not isinstance(value, dict):
+        return None
+    label, names, total = value.get("label"), value.get("names"), value.get("total")
+    if not isinstance(label, str) or not 1 <= len(label) <= TOOL_LABEL_LIMIT:
+        return None
+    if not isinstance(names, list) or len(names) > TOOL_STATE_NAMES:
+        return None
+    if any(not isinstance(item, str) or TOOL_NAME.fullmatch(item) is None for item in names):
+        return None
+    if type(total) is not int or total < len(names):
+        return None
+    return {"label": label, "names": names}
+
+
+def public_tool_text(prefix: str, label_info: Any, fallback_title: str, fallback_summary: str) -> tuple[str, str]:
+    """公開工具事件 title／summary 的唯一組裝點；任何檢查失敗都回到原泛稱。"""
+    info = usable_label_info(label_info)
+    if info is None:
+        return fallback_title, fallback_summary
+    title = prefix + "：" + info["label"]
+    summary = fallback_summary
+    # 先逐一減少名稱到放得下；單名上限64字元，保留1個名稱必然放得下。
+    for keep in range(len(info["names"]), 0, -1):
+        candidate = fallback_summary + TOOL_SUMMARY_NOTE + "、".join(info["names"][:keep])
+        if len(candidate) <= 500:
+            summary = candidate
+            break
+    if len(title) > 100 or len(summary) > 500:
+        return fallback_title, fallback_summary
+    for text in (title, summary):
+        if unsafe_public_text(text) or BACKEND_SENSITIVE.search(text) is not None:
+            return fallback_title, fallback_summary
+    return title, summary
+
+
 def tool_result_status(payload: dict) -> str:
     value = payload.get("output")
     if isinstance(value, str) and len(value) <= 1024 * 1024:
@@ -305,12 +405,13 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
         name = payload.get("name", "")
         if isinstance(name, str) and re.search(r"(?:spawn_agent|spawn_thread|create_thread)$", name):
             turn["missingChild"] = True
+        label_info = tool_label_info(tool_label(payload))
+        title, summary = public_tool_text("公開工具呼叫", label_info, "公開工具呼叫", "已觀測到工具開始；複合工具只記錄整批耗時。")
         call = event(source_id, f"line:{line}:call:{call_id}", line, step, "START", timestamp,
-                     "公開工具呼叫", "已觀測到工具開始；複合工具只記錄整批耗時。",
-                     status="RUNNING", operation=operation, attempt=attempt)
+                     title, summary, status="RUNNING", operation=operation, attempt=attempt)
         append_event(turn, call)
         turn["calls"][call_id] = {"eventId": call["eventId"], "stepId": step, "operation": operation, "paired": False,
-                                 "occurredAt": call["occurredAt"]}
+                                 "occurredAt": call["occurredAt"], "label": label_info}
     elif row_type == "response_item" and kind in {"function_call_output", "custom_tool_call_output"}:
         call_id = payload.get("call_id")
         call = turn["calls"].get(call_id)
@@ -318,9 +419,10 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
             state["malformed"] = True
             return
         call["paired"] = True
+        # 部署前已入 state 的舊 call 沒有 label 欄位；缺值維持原泛稱，不得 KeyError。
+        title, summary = public_tool_text("公開工具回傳", call.get("label"), "公開工具回傳", "已觀測到工具輸出，不推定金融操作或報告成功。")
         completed = event(source_id, f"line:{line}:output:{call_id}", line, call["stepId"], "END", timestamp,
-                          "公開工具回傳", "已觀測到工具輸出，不推定金融操作或報告成功。",
-                          status=tool_result_status(payload), operation=call["operation"],
+                          title, summary, status=tool_result_status(payload), operation=call["operation"],
                           parents=[call["eventId"]], relation="CALL_RESULT", attempt=attempt)
         if call.get("occurredAt") and completed["occurredAt"] and dt.datetime.fromisoformat(completed["occurredAt"]) < dt.datetime.fromisoformat(call["occurredAt"]):
             state["malformed"] = True

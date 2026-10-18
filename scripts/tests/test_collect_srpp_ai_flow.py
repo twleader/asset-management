@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import plistlib
+import re
 import select
 import signal
 import sqlite3
@@ -370,6 +371,461 @@ class SourceTests(Fixture):
         self.assertEqual("TRACE_PARTIAL", self.envelope()["events"][-1]["reasonCode"])
 
 
+START_GENERIC = "已觀測到工具開始；複合工具只記錄整批耗時。"
+END_GENERIC = "已觀測到工具輸出，不推定金融操作或報告成功。"
+TOOL_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
+JAVA_PROTOCOL = SCRIPTS.parent / "backend/src/main/java/com/steven/assets/service/aiflow/AiFlowProtocol.java"
+
+
+def tool_source_rows(calls, *, turn=TURN):
+    """每個 payload 一組呼叫＋輸出；最後接最終回覆與結束，供公開工具名稱測試使用。"""
+    values = [row("session_meta", {"id": THREAD}),
+              row("event_msg", {"type": "task_started", "turn_id": turn, "started_at": 1791421500000})]
+    for number, payload in enumerate(calls, 1):
+        call_type = payload.get("type", "custom_tool_call")
+        call_id = payload.get("call_id", f"call_tool{number}")
+        values.append(row("response_item", dict(payload, type=call_type, call_id=call_id)))
+        values.append(row("response_item", {"type": call_type + "_output", "call_id": call_id,
+                                            "output": json.dumps({"exit_code": 0})}, "2026-10-08T01:05:02Z"))
+    values += [row("response_item", {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"text": "FINAL"}]}, "2026-10-08T01:05:03Z"),
+               row("event_msg", {"type": "task_complete", "turn_id": turn, "completed_at": 1791421504000}, "2026-10-08T01:05:04Z")]
+    return values
+
+
+def split_top_level(pattern):
+    """依最外層 `|` 切分 regex 分支；跳過轉義、字元集與巢狀群組內的 `|`。"""
+    branches, current, depth, in_class, index = [], [], 0, False, 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            current.append(pattern[index:index + 2])
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "|" and depth == 0:
+            branches.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    branches.append("".join(current))
+    return branches
+
+
+def java_sensitive_branches():
+    source = JAVA_PROTOCOL.read_text(encoding="utf-8")
+    match = re.search(r'Pattern\s+SENSITIVE\s*=\s*Pattern\.compile\("((?:[^"\\]|\\.)*)"\)', source)
+    assert match, "找不到 AiFlowProtocol.SENSITIVE"
+    pattern = re.sub(r"\\(.)", r"\1", match.group(1))
+    assert pattern.startswith("(?is)(") and pattern.endswith(")"), pattern
+    return split_top_level(pattern[len("(?is)("):-1])
+
+
+class PublicToolNameTests(Fixture):
+    def reset_state(self):
+        # 同一測試內改寫來源檔前先清掉 collector state，避免被當成「來源被改寫」。
+        for state_file in (self.store.root / "sources").glob("codex-*.json"):
+            state_file.unlink()
+        self.collector = c.Collector(self.home, self.store)
+
+    def calls(self, *payloads, turn=TURN):
+        self.reset_state()
+        self.path.write_bytes(encode_rows(tool_source_rows(list(payloads), turn=turn)))
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        return value
+
+    def tool_events(self, value, kind):
+        return [e for e in value["events"] if e["stepId"].startswith("call-") and e["eventKind"] == kind]
+
+    def titles(self, value):
+        return ([e["title"] for e in self.tool_events(value, "START")], [e["title"] for e in self.tool_events(value, "END")])
+
+    def test_direct_tool_name_is_written_to_call_and_result(self):
+        value = self.calls({"name": "exec_command", "input": "ls"})
+        start, end = self.tool_events(value, "START")[0], self.tool_events(value, "END")[0]
+        self.assertEqual("公開工具呼叫：exec_command", start["title"])
+        self.assertEqual("公開工具回傳：exec_command", end["title"])
+        # 沒有內含工具時 summary 維持原句，不加註記。
+        self.assertEqual(START_GENERIC, start["summary"])
+        self.assertEqual(END_GENERIC, end["summary"])
+        self.assertEqual({"method": "TOOL", "path": "tool"}, start["operation"])
+
+    def test_function_call_arguments_key_is_supported(self):
+        value = self.calls({"type": "function_call", "name": "functions.exec_command", "arguments": json.dumps({"cmd": "ls"})})
+        self.assertEqual((["公開工具呼叫：functions.exec_command"], ["公開工具回傳：functions.exec_command"]), self.titles(value))
+
+    def test_exec_wrapper_lists_single_inner_tool(self):
+        value = self.calls({"name": "exec", "input": "const r = await tools.exec_command({cmd: 'ls'}); text(r)"})
+        start, end = self.tool_events(value, "START")[0], self.tool_events(value, "END")[0]
+        self.assertEqual("公開工具呼叫：exec（內含 exec_command）", start["title"])
+        self.assertEqual("公開工具回傳：exec（內含 exec_command）", end["title"])
+        self.assertEqual(START_GENERIC + TOOL_NOTE + "exec_command", start["summary"])
+        self.assertEqual(END_GENERIC + TOOL_NOTE + "exec_command", end["summary"])
+        # 仍是閉合分類碼，名稱只出現在 title／summary。
+        self.assertEqual({"method": "TOOL", "path": "tool"}, start["operation"])
+
+    def test_exec_wrapper_lists_up_to_three_inner_tools_in_call_order(self):
+        value = self.calls({"name": "exec", "input": "await tools.web__run({}); await tools.clock__curr_time({}); tools.exec_command({})"})
+        self.assertEqual((["公開工具呼叫：exec（內含 web__run、clock__curr_time、exec_command）"],
+                          ["公開工具回傳：exec（內含 web__run、clock__curr_time、exec_command）"]), self.titles(value))
+
+    def test_exec_wrapper_with_four_or_more_inner_tools_shows_total(self):
+        value = self.calls({"name": "exec", "input": "tools.apply_patch(a); tools.exec_command(b); tools.write_stdin(c); tools.web__run(d); tools.clock__curr_time(e)"})
+        start = self.tool_events(value, "START")[0]
+        self.assertEqual("公開工具呼叫：exec（內含 apply_patch、exec_command、write_stdin 等 5 項）", start["title"])
+        # summary 至多列 8 個，這裡 5 個全列。
+        self.assertTrue(start["summary"].endswith("apply_patch、exec_command、write_stdin、web__run、clock__curr_time"))
+
+    def test_length_trimmed_inner_names_still_report_total(self):
+        first, second = "mcp__codex_apps__gmail_search_emails", "mcp__codex_apps__gmail_read_message_x"
+        self.assertEqual(36, len(first))
+        value = self.calls({"name": "exec", "input": f"tools.{first}({{}}); tools.{second}({{}})"})
+        start = self.tool_events(value, "START")[0]
+        # 兩個名稱放不下80字元，只留第一個，但被裁掉的仍計入總數而附「等 2 項」。
+        self.assertEqual(f"公開工具呼叫：exec（內含 {first} 等 2 項）", start["title"])
+        self.assertLessEqual(len(start["title"].split("：", 1)[1]), 80)
+        self.assertTrue(start["summary"].endswith(first + "、" + second))
+
+    def test_label_never_exceeds_eighty_characters_and_drops_inner_when_none_fit(self):
+        inner = "x" * 64
+        label, names = c.tool_label({"name": "functions.exec", "input": f"tools.{inner}(1)"})
+        self.assertEqual(["x" * 64], names)
+        self.assertEqual("functions.exec", label)
+        self.assertNotIn("內含", label)
+        self.assertNotIn("等", label)
+        label, _ = c.tool_label({"name": "exec", "input": f"tools.{inner}(1)"})
+        self.assertEqual(f"exec（內含 {inner}）", label)
+        self.assertLessEqual(len(label), 80)
+        for count in range(0, 12):
+            names = [f"tool_{number:02d}_" + "y" * 50 for number in range(count)]
+            label, _ = c.tool_label({"name": "exec", "input": "; ".join(f"tools.{n}(1)" for n in names)})
+            self.assertLessEqual(len(label), 80)
+
+    def test_functions_prefix_is_kept_verbatim(self):
+        value = self.calls({"name": "functions.exec", "input": "tools.exec_command({})"},
+                           {"name": "functions.exec_command", "input": "ls"})
+        self.assertEqual((["公開工具呼叫：functions.exec（內含 exec_command）", "公開工具呼叫：functions.exec_command"],
+                          ["公開工具回傳：functions.exec（內含 exec_command）", "公開工具回傳：functions.exec_command"]), self.titles(value))
+
+    def test_run_code_wrapper_is_also_expanded(self):
+        value = self.calls({"name": "run_code", "input": "await tools.web__run({})"})
+        self.assertEqual((["公開工具呼叫：run_code（內含 web__run）"], ["公開工具回傳：run_code（內含 web__run）"]), self.titles(value))
+
+    def test_invalid_payload_names_fall_back_to_generic_titles(self):
+        for name in ("exec command", "a/b", "tool$(x)", "工具", "x" * 65, "", "_exec", ".exec", "exec\n", "exec;ls", None, 7):
+            with self.subTest(name=name):
+                value = self.calls({"name": name, "input": "tools.exec_command({})"})
+                self.assertEqual((["公開工具呼叫"], ["公開工具回傳"]), self.titles(value))
+                self.assertEqual(START_GENERIC, self.tool_events(value, "START")[0]["summary"])
+                self.assertEqual(END_GENERIC, self.tool_events(value, "END")[0]["summary"])
+        self.assertIsNone(c.tool_label({}))
+        self.assertEqual(("x" * 64, []), c.tool_label({"name": "x" * 64}))
+
+    def test_inner_names_must_pass_the_same_allowlist(self):
+        long_name, ok_long = "a" * 65, "b" * 64
+        text = (f'tools._x(1); tools["_y"]; tools.${{"z"}}(1); mytools.hidden(1); tools.{long_name}(1); tools["{long_name}"]; '
+                f'tools.ok_tool (1); tools[ "ok.bracket" ]; tools.{ok_long}(1); tools.a.b(1); tools. spaced(1)')
+        label, names = c.tool_label({"name": "exec", "input": text})
+        self.assertEqual(["ok_tool", "ok.bracket", ok_long], names)
+
+    def test_duplicate_inner_tool_counts_once_and_positions_merge_dot_and_bracket(self):
+        text = 'tools.alpha(1); tools["beta"]; tools.alpha(2); tools["alpha"]; tools.gamma(3); tools["beta"]; tools.delta(4)'
+        label, names = c.tool_label({"name": "exec", "input": text})
+        self.assertEqual(["alpha", "beta", "gamma", "delta"], names)
+        self.assertEqual("exec（內含 alpha、beta、gamma 等 4 項）", label)
+
+    def test_bracket_form_before_dot_form_follows_text_position(self):
+        _, names = c.tool_label({"name": "exec", "input": "tools['first_tool'](); tools.second_tool(); tools[\"third_tool\"]()"})
+        self.assertEqual(["first_tool", "second_tool", "third_tool"], names)
+
+    def test_string_literal_containing_call_text_is_still_extracted_known_limit(self):
+        # 名稱取自呼叫文字而非精確解析；字串字面值內的 tools.x( 也會被擷取，這是已載明的限制。
+        _, names = c.tool_label({"name": "exec", "input": 'const note = "tools.not_really_called(1)"'})
+        self.assertEqual(["not_really_called"], names)
+
+    def test_only_composite_wrappers_scan_call_text(self):
+        for name in ("exec_command", "functions.exec_command", "spawn_agent", "apply_patch"):
+            self.assertEqual((name, []), c.tool_label({"name": name, "input": "tools.hidden_tool(1)"}))
+        self.assertEqual(("exec", []), c.tool_label({"name": "exec", "input": 123}))
+        self.assertEqual(("exec", []), c.tool_label({"name": "exec"}))
+
+    def test_worst_case_eight_long_inner_names_stay_valid(self):
+        names = [f"t{number}" + "x" * 62 for number in range(8)]
+        self.assertTrue(all(len(n) == 64 for n in names))
+        text = "; ".join(f"tools.{n}(1)" for n in names)
+        for wrapper in ("exec", "functions.exec"):
+            with self.subTest(wrapper=wrapper):
+                value = self.calls({"name": wrapper, "input": text})
+                for item in self.tool_events(value, "START") + self.tool_events(value, "END"):
+                    self.assertLessEqual(len(item["title"]), 100)
+                    self.assertLessEqual(len(item["summary"]), 500)
+                start = self.tool_events(value, "START")[0]
+                if wrapper == "exec":
+                    self.assertEqual(f"公開工具呼叫：exec（內含 {names[0]} 等 8 項）", start["title"])
+                else:
+                    # 14字元的前綴讓一個64字元內含名稱也放不下，標籤只留名稱。
+                    self.assertEqual("公開工具呼叫：functions.exec", start["title"])
+                # summary 先逐一減少名稱到放得下，且至少保留1個。
+                kept = [n for n in names if n in start["summary"]]
+                self.assertGreaterEqual(len(kept), 1)
+                self.assertLess(len(kept), 8)
+                self.assertEqual(names[:len(kept)], kept)
+                longer = START_GENERIC + TOOL_NOTE + "、".join(names[:len(kept) + 1])
+                self.assertGreater(len(longer), 500)
+
+    def test_sensitive_looking_names_fall_back_to_generic_text(self):
+        cases = {
+            "six_digits": "tools.tool_1234567(1)",
+            "api_key": "tools.api_key_reader(1)",
+            "secret": "tools.secret_store(1)",
+            "password": "tools.password_vault(1)",
+            "token_word": "tools.token(1)",
+            # export 後接「等 N 項」的空白會命中 backend 的 \bexport\s。
+            "export_with_total": "tools.alpha(1); tools.beta(2); tools.export(3); tools.delta(4)",
+            "authorization": "tools.authorization_check(1)",
+        }
+        for case, text in cases.items():
+            with self.subTest(case=case):
+                value = self.calls({"name": "exec", "input": text})
+                self.assertEqual((["公開工具呼叫"], ["公開工具回傳"]), self.titles(value))
+                self.assertEqual(START_GENERIC, self.tool_events(value, "START")[0]["summary"])
+        for name in ("token=abc", "api key", "secret/x", "tool_1234567x_"):
+            with self.subTest(payload_name=name):
+                value = self.calls({"name": name, "input": "ls"})
+                self.assertEqual((["公開工具呼叫"], ["公開工具回傳"]), self.titles(value))
+        # 六位數字只有 backend 規則會擋，確認這條防線真的有生效，而非靠 unsafe_public_text。
+        self.assertFalse(c.unsafe_public_text("公開工具呼叫：exec（內含 tool_1234567）"))
+        title, summary = c.public_tool_text("公開工具呼叫", {"label": "exec（內含 tool_1234567）", "names": ["tool_1234567"], "total": 1},
+                                           "公開工具呼叫", START_GENERIC)
+        self.assertEqual(("公開工具呼叫", START_GENERIC), (title, summary))
+
+    def test_public_tool_text_rejects_unusable_or_oversized_state_labels(self):
+        good = {"label": "exec（內含 exec_command）", "names": ["exec_command"], "total": 1}
+        self.assertEqual(("公開工具呼叫：exec（內含 exec_command）", START_GENERIC + TOOL_NOTE + "exec_command"),
+                         c.public_tool_text("公開工具呼叫", good, "公開工具呼叫", START_GENERIC))
+        bad_values = [None, "x", [], {}, {"label": "x"}, {"label": "", "names": [], "total": 0},
+                      {"label": "x" * 81, "names": [], "total": 0}, dict(good, names="exec_command"),
+                      dict(good, names=["bad name"]), dict(good, names=["a"] * 9), dict(good, total="1"),
+                      dict(good, total=True), dict(good, total=0), {"label": 5, "names": [], "total": 0}]
+        for bad in bad_values:
+            with self.subTest(bad=bad):
+                self.assertEqual(("公開工具回傳", END_GENERIC), c.public_tool_text("公開工具回傳", bad, "公開工具回傳", END_GENERIC))
+
+    def test_backend_sensitive_equivalent_is_ascii_semantics(self):
+        self.assertTrue(c.BACKEND_SENSITIVE.search("叫export x"))
+        self.assertIsNone(re.compile(c.BACKEND_SENSITIVE_PATTERN, re.I | re.S).search("叫export x"))
+        self.assertTrue(c.BACKEND_SENSITIVE.search("EXPORT\tx"))
+        self.assertTrue(c.BACKEND_SENSITIVE.search("a\nCHAIN\nof\nTHOUGHT"))
+        self.assertIsNone(c.BACKEND_SENSITIVE.search("公開工具呼叫：exec（內含 exec_command、web__run 等 4 項）"))
+
+    def test_backend_sensitive_pattern_is_parsed_from_java_source_branch_by_branch(self):
+        self.assertTrue(JAVA_PROTOCOL.is_file(), JAVA_PROTOCOL)
+        java_branches = java_sensitive_branches()
+        python_pattern = c.BACKEND_SENSITIVE_PATTERN
+        self.assertTrue(python_pattern.startswith("(") and python_pattern.endswith(")"))
+        python_branches = split_top_level(python_pattern[1:-1])
+        self.assertEqual(java_branches, python_branches)
+        # 每個分支各給一個命中樣本；backend 新增或刪除分支會讓筆數不符而失敗，迫使雙方一起更新。
+        samples = ["Authorization", "Bearer x", "token = 1", "password", "secret", "api-key", "private reasoning",
+                   "chain of thought", "export x", "$(x)", "```", "<b>", "a@b.cc", "C:\\x", "/Users/x", "/home/x",
+                   "USD 12", "金額：5", "1234567"]
+        self.assertEqual(len(java_branches), len(samples))
+        java_whole = re.compile("(" + "|".join(java_branches) + ")", re.I | re.S | re.A)
+        for branch, sample in zip(java_branches, samples):
+            with self.subTest(branch=branch):
+                expected = re.compile(branch, re.I | re.S | re.A)
+                self.assertIsNotNone(expected.search(sample))
+                self.assertIsNotNone(c.BACKEND_SENSITIVE.search(sample))
+                self.assertEqual(bool(java_whole.search(sample)), bool(c.BACKEND_SENSITIVE.search(sample)))
+        for sample in ("公開工具呼叫：exec（內含 exec_command）", "web__run", "tools_12345", "Tokenizer", "export_x", "exports x"):
+            self.assertEqual(bool(java_whole.search(sample)), bool(c.BACKEND_SENSITIVE.search(sample)), sample)
+
+    def test_canary_input_never_reaches_title_summary_or_evidence(self):
+        value = self.calls(
+            {"name": "exec", "input": "Bearer SECRET_CANARY; holdings=FINANCIAL_CANARY; await tools.exec_command({cmd: 'curl -H Authorization https://x/api/assets/latest'})"},
+            {"name": "exec_command", "input": "export TOKEN=SECRET_CANARY; echo HOLDINGS_CANARY"})
+        text = c.canonical(value).decode()
+        for canary in ("SECRET_CANARY", "FINANCIAL_CANARY", "HOLDINGS_CANARY", "Bearer", "Authorization", "curl", "https://"):
+            self.assertNotIn(canary, text)
+        self.assertEqual(["公開工具呼叫：exec（內含 exec_command）", "公開工具呼叫：exec_command"], self.titles(value)[0])
+        persisted = "\n".join(p.read_text() for p in (self.store.root / "sources").glob("*.json"))
+        for canary in ("SECRET_CANARY", "FINANCIAL_CANARY", "HOLDINGS_CANARY"):
+            self.assertNotIn(canary, persisted)
+
+    def test_state_keeps_bounded_label_even_for_pathological_input(self):
+        text = "; ".join(f"tools.tool_{number}_{'z' * 40}(1)" for number in range(3000))
+        value = self.calls({"name": "exec", "input": text})
+        self.assertIn("等 3000 項", self.tool_events(value, "START")[0]["title"])
+        state = c.strict_json(next((self.store.root / "sources").glob("codex-*.json")).read_bytes())
+        label = next(iter(next(iter(state["turns"].values()))["calls"].values()))["label"]
+        self.assertEqual({"label", "names", "total"}, set(label))
+        self.assertEqual(8, len(label["names"]))
+        self.assertEqual(3000, label["total"])
+        self.assertLess(len(c.canonical(label)), 1200)
+
+    def test_end_event_reuses_label_across_save_and_reload(self):
+        full = tool_source_rows([{"name": "exec", "input": "await tools.exec_command({}); await tools.web__run({})"}])
+        # session_meta、task_started、呼叫為第一段；輸出以後在下一輪（新 Store／Collector，模擬重啟）才看到。
+        self.path.write_bytes(encode_rows(full[:3]))
+        first = self.envelope()
+        self.assertEqual([], self.tool_events(first, "END"))
+        start = self.tool_events(first, "START")[0]
+        state_file = next((self.store.root / "sources").glob("codex-*.json"))
+        label = next(iter(next(iter(c.strict_json(state_file.read_bytes())["turns"].values()))["calls"].values()))["label"]
+        self.assertIsInstance(label["names"], list)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        with self.path.open("ab") as stream:
+            stream.write(encode_rows(full[3:]))
+        second = self.envelope()
+        c.validate_envelope(second, TODAY)
+        self.assertEqual("公開工具回傳：exec（內含 exec_command、web__run）", self.tool_events(second, "END")[0]["title"])
+        self.assertEqual(start, self.tool_events(second, "START")[0])
+        self.assertEqual("TRACE_COMPLETE", second["events"][-1]["reasonCode"])
+
+    def test_pre_deployment_state_without_label_keeps_generic_end_and_frozen_start(self):
+        full = tool_source_rows([{"name": "exec", "input": "await tools.exec_command({})"}])
+        self.path.write_bytes(encode_rows(full[:3]))
+        # 舊 collector 的行為：沒有 label 欄位，START 事件已凍結為原泛稱。
+        with mock.patch.object(c, "tool_label", return_value=None):
+            old_first = self.envelope()
+        state_file = next((self.store.root / "sources").glob("codex-*.json"))
+        state = c.strict_json(state_file.read_bytes())
+        for call in next(iter(state["turns"].values()))["calls"].values():
+            call.pop("label")
+            self.assertNotIn("label", call)
+        c.atomic_json(state_file, state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        with self.path.open("ab") as stream:
+            stream.write(encode_rows(full[3:]))
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        start, end = self.tool_events(value, "START")[0], self.tool_events(value, "END")[0]
+        self.assertEqual("公開工具回傳", end["title"])
+        self.assertEqual(END_GENERIC, end["summary"])
+        self.assertEqual("CALL_RESULT", end["relation"])
+        self.assertEqual([start["eventId"]], end["parentEventIds"])
+        self.assertEqual("公開工具呼叫", start["title"])
+        self.assertEqual(self.tool_events(old_first, "START")[0], start)
+        self.assertEqual("TRACE_COMPLETE", value["events"][-1]["reasonCode"])
+
+    def test_unrecognizable_state_label_does_not_raise(self):
+        full = tool_source_rows([{"name": "exec", "input": "await tools.exec_command({})"}])
+        self.path.write_bytes(encode_rows(full[:3]))
+        self.envelope()
+        state_file = next((self.store.root / "sources").glob("codex-*.json"))
+        state = c.strict_json(state_file.read_bytes())
+        for call in next(iter(state["turns"].values()))["calls"].values():
+            call["label"] = {"label": 5, "names": "oops"}
+        c.atomic_json(state_file, state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        with self.path.open("ab") as stream:
+            stream.write(encode_rows(full[3:]))
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        self.assertEqual("公開工具回傳", self.tool_events(value, "END")[0]["title"])
+
+    def rich_rows(self):
+        return tool_source_rows([
+            {"name": "exec", "input": "tools.exec_command({}); tools.web__run({})"},
+            {"name": "functions.exec_command", "input": "curl -X POST https://host/api/public/trading-calendar"},
+            {"name": "functions.exec", "input": "Bearer SECRET_CANARY"},
+            {"name": "run_code", "input": "tools['clock__curr_time']()"},
+            {"name": "invalid name!", "input": "ls"},
+            {"type": "function_call", "name": "spawn_agent", "arguments": "{}"},
+        ])
+
+    def test_naming_changes_only_title_and_summary(self):
+        # 同一輸入下，剔除 title／summary 後的 envelope 必須與舊泛稱輸出逐位元相同：
+        # eventId／stepId／sequence／operation／parent／relation／status／evidence 都不得變。
+        def strip(value):
+            clone = json.loads(c.canonical(value))
+            for item in clone["events"]:
+                item["title"] = item["summary"] = ""
+            return c.canonical(clone)
+        for label, rows in (("default", source_rows()), ("rich", self.rich_rows()), ("child", source_rows(child=True))):
+            with self.subTest(fixture=label):
+                self.path.write_bytes(encode_rows(rows))
+                named = c.Collector(self.home, c.Store(self.home / "named-no-write", TODAY, dry_run=True)).scan_codex(self.record, c.ReadBudget())
+                with mock.patch.object(c, "tool_label", return_value=None):
+                    generic = c.Collector(self.home, c.Store(self.home / "generic-no-write", TODAY, dry_run=True)).scan_codex(self.record, c.ReadBudget())
+                self.assertEqual(strip(named[0]), strip(generic[0]))
+                self.assertEqual({e["eventId"] for e in generic[0]["events"]}, {e["eventId"] for e in named[0]["events"]})
+                generic_titles = {e["title"] for e in generic[0]["events"] if e["stepId"].startswith("call-")}
+                self.assertEqual({"公開工具呼叫", "公開工具回傳"}, generic_titles)
+                self.assertNotEqual(c.canonical(named[0]), c.canonical(generic[0]))
+                c.validate_envelope(named[0], TODAY)
+
+    def test_rich_titles_and_operation_classification_are_unchanged(self):
+        self.path.write_bytes(encode_rows(self.rich_rows()))
+        value = self.envelope()
+        starts = self.tool_events(value, "START")
+        self.assertEqual(["公開工具呼叫：exec（內含 exec_command、web__run）",
+                          "公開工具呼叫：functions.exec_command",
+                          "公開工具呼叫：functions.exec",
+                          "公開工具呼叫：run_code（內含 clock__curr_time）",
+                          "公開工具呼叫",
+                          "公開工具呼叫：spawn_agent"], [e["title"] for e in starts])
+        self.assertEqual([{"method": "TOOL", "path": "tool"},
+                          {"method": "POST", "path": "/api/public/trading-calendar"},
+                          {"method": "TOOL", "path": "tool"},
+                          {"method": "TOOL", "path": "tool"},
+                          {"method": "TOOL", "path": "tool"},
+                          {"method": "TOOL", "path": "tool"}], [e["operation"] for e in starts])
+        for start, end in zip(starts, self.tool_events(value, "END")):
+            self.assertEqual(start["stepId"], end["stepId"])
+            self.assertEqual([start["eventId"]], end["parentEventIds"])
+            self.assertEqual("CALL_RESULT", end["relation"])
+            self.assertEqual(start["operation"], end["operation"])
+            self.assertEqual(start["title"].replace("公開工具呼叫", "公開工具回傳"), end["title"])
+        self.assertEqual("TRACE_PARTIAL", value["events"][-1]["reasonCode"])
+
+    def test_named_missing_child_tools_remain_partial(self):
+        for name in ("spawn_agent", "functions.create_thread", "tools.spawn_thread"):
+            with self.subTest(name=name):
+                value = self.calls({"name": name, "input": "{}"})
+                self.assertEqual(f"公開工具呼叫：{name}", self.tool_events(value, "START")[0]["title"])
+                self.assertEqual("TRACE_PARTIAL", value["events"][-1]["reasonCode"])
+
+    def test_duplicate_call_id_and_unpaired_output_keep_existing_malformed_behavior(self):
+        value = self.calls({"name": "exec", "call_id": "dup1", "input": "tools.exec_command({})"},
+                           {"name": "exec", "call_id": "dup1", "input": "tools.web__run({})"})
+        self.assertEqual("TRACE_PARTIAL", value["events"][-1]["reasonCode"])
+        # 第二個重複 call_id 不覆蓋原呼叫，標籤也維持第一個。
+        self.assertEqual(["公開工具呼叫：exec（內含 exec_command）"], self.titles(value)[0])
+        rows = tool_source_rows([{"name": "exec", "input": "tools.exec_command({})"}])
+        rows[3]["payload"]["call_id"] = "unmatched"
+        self.reset_state()
+        self.path.write_bytes(encode_rows(rows))
+        orphan = self.envelope()
+        self.assertEqual("TRACE_PARTIAL", orphan["events"][-1]["reasonCode"])
+        self.assertEqual([], self.tool_events(orphan, "END"))
+
+    def test_acked_named_events_are_not_requeued_and_replay_keeps_ids(self):
+        value = self.calls({"name": "exec", "input": "tools.exec_command({}); tools.web__run({})"})
+        self.assertGreater(self.store.enqueue(value), 0)
+        pending = "\n".join(p.read_text() for p in (self.store.root / "pending").glob("*.json"))
+        self.assertIn("公開工具呼叫：exec（內含 exec_command、web__run）", pending)
+        result = s.send_round(self.store, c.DEFAULT_ENDPOINT, self.token(), transport=self.ack)
+        self.assertEqual(0, result["pendingBatches"])
+        self.assertEqual(0, self.store.enqueue(value))
+        self.assertEqual(len(value["events"]), self.store.enqueue(value, replay=True))
+
+
 class MarketSessionDiscoveryTests(Fixture):
     def seed_sources(self, count=63):
         root = self.home / ".codex"
@@ -596,10 +1052,14 @@ class MarketSessionDiscoveryTests(Fixture):
                         c.validate_envelope(value, TODAY)
 
     def test_existing_tw_full_canonical_envelopes_and_uuid_are_unchanged(self):
+        # Task 500：fixture 的呼叫名稱是 functions.exec，公開工具 title 由泛稱改為
+        # 「公開工具呼叫／回傳：functions.exec」，整份 envelope 的 digest 必然改變，故重新鎖定。
+        # runId 與「無 period 欄位」維持不變；eventId／stepId／operation 等不變量另由
+        # PublicToolNameTests 的結構等價測試保護，不得為了舊 hash 回綠而特例化 title。
         expected = {
-            "09:05": "9a38338f28f894b9c54b7057908577290b861eaf9cb1c19364aff954af4688f9",
-            "12:00": "7005442136644a2d14f9a03a1acb69946be6c962a588f72fa78b1d5808fe7fa1",
-            "11:40": "e7b34cd5b2ca5b85c3b3114e3020edc254caa8a2d4c197f99fcf6113a0b06d8d",
+            "09:05": "44036bbfb34cb46a70f8297226b53ac5014a2f0d47e388ba0daa741f3d0bf211",
+            "12:00": "d6a3f7ef5fc1f7e9da1fc71d7ba8d35fec6a2184de25c2a58203aabc2cc78613",
+            "11:40": "24e0457d988af1116e29927c857b133b57259489bd238622c280d8861c3bd55e",
         }
         for slot, digest in expected.items():
             store = c.Store(self.home / "legacy-no-write", TODAY, dry_run=True)

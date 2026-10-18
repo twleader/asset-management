@@ -6,7 +6,7 @@
 
 ## 被動收集與真正非同步
 
-`scripts/collect-srpp-ai-flow.py` 唯讀連接 Codex app 的 automation_runs → thread → 公開 JSONL。一次流程用真 thread_id＋turn_id，工具用同一 turn 的 call_id 配對；最終回覆讀 phase=final_answer，也支援已知舊 final channel。私人 reasoning、系統指令、shell指令、token、完整API/MIME內容及金融金額都不保存；公開進度只投影固定操作摘要。
+`scripts/collect-srpp-ai-flow.py` 唯讀連接 Codex app 的 automation_runs → thread → 公開 JSONL。一次流程用真 thread_id＋turn_id，工具用同一 turn 的 call_id 配對；最終回覆讀 phase=final_answer，也支援已知舊 final channel。私人 reasoning、系統指令、shell指令、token、完整API/MIME內容及金融金額都不保存；公開進度只投影固定操作摘要，唯一例外是公開工具呼叫／回傳會附上通過白名單的工具名稱（見下方「公開工具名稱」）。
 
 Codex只接受三個已查證的exact排程ID：`codex-srpp-09-30`→台股早盤09:05、`codex-srpp`→台股午盤12:00、`22-00`→美股22:00；不納入`22-00-2`守門員、`srpp-codex`週日展望或名稱相似的工具。時段是planned reportSlot，提前、手動補跑或跨午夜仍保留原排程時段，actual startedAt另取公開START。reportDate始終取automation.created_at的台北日期，同thread後續turn保持該日期，不換算成美國交易日期或依DST重標。查詢period=ALL涵蓋四個slot，MORNING只09:05、NOON含12:00與歷史11:40、US只22:00；不重寫舊台股JSON、UUID或歷史11:40。新增22:00只允許Codex＋22-00，台股既有producer相容範圍保留。
 
@@ -35,6 +35,16 @@ python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/sh
 
 只顯示清洗後 run metadata、事件數、完整度原因及CPU/IO量測；不輸出來源全文或憑證。一般state/spool限256MiB pending，檔案或磁碟故障不回報假成功。可用`--max-runs`／`--max-read-mib`／`--per-run-mib`／`--read-seconds`調整一次性歷史掃描，但上限仍為250 run／512MiB／每來源256MiB／60秒；背景模式固定預設預算，不允許放大。
 
+## 公開工具名稱
+
+時間軸、已配對的慢速步驟表與節點明細的公開工具事件，title 寫成「公開工具呼叫：<標籤>」與「公開工具回傳：<標籤>」，回傳沿用同一 call_id 配對到的呼叫標籤。標籤取自 Codex rollout 該筆呼叫的 `payload.name`，須符合 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}`；`functions.` 等前綴原樣保留。Codex 的 code mode 以 `exec`（或 `run_code`）包裝實際工具，`payload.name` 只會是 `exec`，所以這兩者另從呼叫文字擷取 `tools.<名稱>(` 與 `tools["名稱"]` 的內含工具識別字，寫成 `exec（內含 exec_command、web__run 等 N 項）`：title 最多列3個、整個標籤不超過80字元，列不完時附「等 N 項」；summary 另附至多8個名稱，並載明名稱取自呼叫文字、未收錄參數、指令或輸出。
+
+- 只保存白名單識別字，不保存、不顯示參數、指令或輸出，也不把整批耗時歸給任一內含工具；操作欄仍是閉合分類碼 `TOOL tool`，不新增欄位、path enum 或 API 契約。
+- 內含工具名稱取自呼叫文字，不是精確保證：字串字面值內的 `tools.x(` 也可能被擷取，也可能漏掉不用這兩種寫法的呼叫。
+- 名稱不合白名單、title 超過100字元、summary 超過500字元，或命中機密／金額／私人推理等 collector 與 backend 的敏感字樣規則時，該事件退回原泛稱「公開工具呼叫」「公開工具回傳」，不會使整批上傳被拒。
+- 已持久化的 immutable 事件不回寫：更新前的舊 run 仍顯示泛稱，這是預期而非缺陷；只有 collector 更新後新解析的 rollout 行才帶名稱。尚未配對、更新前已入 state 的舊呼叫，其回傳事件也維持泛稱。
+- 前端流程圖節點只有150px寬，前綴佔去大半，節點上只看得到少量名稱；完整名稱在 tooltip、時間軸、慢速步驟表與節點明細。
+
 ## 正式背景工作
 
 先從正式 main rebuild/recreate及驗收API，再產生與backend/BFF相同的獨立 collector token。三個AI token互不相同，也與金融／寄信憑證分離。token存於`~/.local/share/srpp-ai-flow/collector.token`，owner為目前使用者、檔案權限0600；state目錄0700。憑證不進git、plist arguments、環境日誌或畫面。
@@ -55,18 +65,25 @@ LaunchAgent `com.steven.srpp-ai-flow-collector`只接受正式main script，Proc
 
 本機atomic writer與cleanup共用每目錄空白0600技術lockfile，兩邊都非阻塞取鎖。writer活躍時cleanup跳過該目錄；SIGKILL／斷電後OS釋放lock，下一輪只回收本功能精確命名的未rename暫存檔，完整或殘缺JSON皆回收，不以mtime延長保留。每目錄每輪最多512 entries、整輪掃描1秒預算，Store保留iterator於下輪續掃；成功enqueue的final檔仍依原reportDate保留90天。本機collector receipt若含任何超期run也刪除。未知檔案、token、原app／SRPP來源及LaunchAgents其他檔案不在清理範圍；空技術lockfile不含流程資料。
 
-還原後可以重播90天內原觀測，UUID/事件內容保持相同；過期仍拒絕：
+還原後可以重播90天內原觀測，UUID保持相同，state 完整時事件內容也相同；過期仍拒絕：
 
 ```bash
 python3 scripts/collect-srpp-ai-flow.py --once --date 2026-10-08 --consumer Codex --replay
 python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/share/srpp-ai-flow/collector.token
 ```
 
+公開工具名稱改動後，事件 title／summary 在寫入 collector state 時即凍結，只有更新後新讀到的 rollout 行才套用新規則，所以新舊 title 不會對同一 eventId 並存。下列情況會讓同一 eventId 產生不同內容，必須遵守：
+
+- state 遺失（刪除或重置）而 DB 仍保有舊 title 時，不得 `--replay` 或重新從頭解析：backend 對同 eventId 但不同 payload 回 409 `EVENT_CONFLICT`，sender 對非200／201拒收並停止，依檔名排序該批永遠排最前，會堵死後面所有批次。
+- state 目錄（`~/.local/share/srpp-ai-flow`，含 sources／pending／acks）只能改名保留，不得刪除。`Store.enqueue` 先以 `acks/<runId>.json` 過濾已 ACK 的事件，所以只刪 state 通常不會 409；acks 也一併遺失，或 pending 仍有未送出的舊 title 批次時才會重送不同內容。
+- 部署前先檢查 `acks/` 的 run 集合與 DB `ai_flow_run` 一致；DB 已被還原清空（備份本就排除這兩表 data）時重播沒有舊 title 可衝突，才可 `--replay`。
+- 若已卡在 409，最後手段是把衝突 eventId 寫入對應的 `acks/<runId>.json`，並移除該 pending 檔（backend 的 SQL guard 禁止未過期 DELETE，沒有別的出口）。
+
 ## 未來排程主動接入
 
 本次不接入SRPP。未來獲准的runtime hook若要主動提供SCHEDULE_EVENTS，只呼叫本機enqueue，不能讓LLM逐步打卡，也必須先遵守原calendar gate。缺欄位或secret摘要會拒絕，不接受任意JSON。
 
-主動CLI在建立state或寫入spool前就驗證title／summary；拒絕USD／TWD／NT$等金額、price／amount／balance／account等key-value、原始shell指令與私人reasoning標記。自動collector仍只產生固定公開操作摘要，普通文字及無金額的貨幣標籤可保留。backend會再驗證，不依賴上傳後才保護本機spool。
+主動CLI在建立state或寫入spool前就驗證title／summary；拒絕USD／TWD／NT$等金額、price／amount／balance／account等key-value、原始shell指令與私人reasoning標記。自動collector仍只產生固定公開操作摘要，唯一例外是公開工具呼叫／回傳會附上來自 `payload.name` 或呼叫文字擷取、通過白名單的工具識別字；普通文字及無金額的貨幣標籤可保留。backend會再驗證，不依賴上傳後才保護本機spool。
 
 ```bash
 # 排程只enqueue並退出；獨立state防止混用collector credential
