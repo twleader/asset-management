@@ -147,6 +147,20 @@ class AiFlowRepositoryPostgresTest {
         assertThat(beforeRuns.getFirst().get("metadata_json").toString()).contains(AT);
         assertThat(beforeEvents).anySatisfy(row->assertThat(row.get("payload_json").toString()).contains("+08:00"));
     }
+    @Test void toolCallRoundTripsExactUnicodeWithoutExpandingTheRunDetail() {
+        String prefix = "😀\n\"\\台積電";
+        String parameters = prefix + "x".repeat(16384 - prefix.codePointCount(0, prefix.length()));
+        ToolCall call = new ToolCall("exec", List.of("exec_command"), parameters, 16384, false, 0, null);
+        List<Event> events = new ArrayList<>(complete());
+        Event original = events.get(1);
+        events.set(1, new Event(original.eventId(), original.sequence(), original.stepId(), original.eventKind(), original.status(),
+                original.occurredAt(), original.title(), original.summary(), original.operation(), original.reasonCode(), original.attemptNo(),
+                original.parentEventIds(), original.relation(), original.evidenceRefs(), original.reportedOutcome(), call));
+        assertThat(append(events).status()).isEqualTo(201);
+        assertThat(service.detail(RUN.toString(), query(DATE.toString())).nodes()).allSatisfy(node -> assertThat(node.toolCall()).isNull());
+        assertThat(service.toolCall(RUN.toString(), original.eventId(), query(DATE.toString())).toolCall()).isEqualTo(call);
+        assertThat(repository.event(7, RUN, UUID.fromString(original.eventId()), DATE, "Codex")).isPresent();
+    }
     @Test void durableAtomicAppendPureReplayAndMixedReplayStatuses(){
         var first=append(complete());assertThat(first.status()).isEqualTo(201);assertThat(first.ack().inserted()).isEqualTo(6);assertThat(count("ai_flow_event")).isEqualTo(6);
         var again=append(complete());assertThat(again.status()).isEqualTo(200);assertThat(again.ack().replayed()).isEqualTo(6);

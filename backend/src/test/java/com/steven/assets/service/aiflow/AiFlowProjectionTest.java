@@ -76,4 +76,17 @@ class AiFlowProjectionTest {
         for(List<Event> e:List.of(List.of(event(1,"a","START",null,List.of(id(1)),"BRANCH")),List.of(event(1,"a","START",null,List.of(id(2)),"BRANCH"),event(2,"b","END",null,List.of(id(1)),"BRANCH"))))
             assertThatThrownBy(()->AiFlowProjection.validateGraph(e)).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.code()).isEqualTo("INVALID_GRAPH"));
     }
+    @Test void projectionNeverAggregatesToolParametersAndSingleNodeResponseStaysBounded() throws Exception {
+        String parameters = "😀".repeat(16384);
+        ToolCall call = new ToolCall("exec", List.of("exec_command"), parameters, 16384, false, 0, null);
+        List<Event> events = new ArrayList<>();
+        for (int i = 1; i <= 300; i++) {
+            events.add(new Event(id(i), i, "tool-" + i, "START", "RUNNING", null, "公開工具呼叫", "公開摘要",
+                    new Operation("TOOL", "tool"), null, 1, List.of(), null, List.of(), null, call));
+        }
+        Detail detail = AiFlowProjection.detail(stored(complete()), events);
+        assertThat(detail.nodes()).allSatisfy(node -> assertThat(node.toolCall()).isNull());
+        assertThat(JSON.writeValueAsBytes(detail)).hasSizeLessThan(16 * 1024 * 1024);
+        assertThat(JSON.writeValueAsBytes(new ToolCallDetail(RUN.toString(), id(1), call))).hasSizeLessThan(256 * 1024);
+    }
 }

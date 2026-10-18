@@ -2,11 +2,11 @@
 
 「系統資訊 → AI 判斷流程」按台北日期、Codex／Claude及「全部時段、台股早盤、台股午盤、美股」查詢已記錄的公開執行歷程，預設全部時段。流程圖、時間軸與工具耗時來自實際事件；執行結束、自報結果、紀錄完整度與報告驗證分開顯示。沒有紀錄表示尚無已記錄執行，不能推定排程未跑。
 
-今天只部署 asset-management 的觀測功能。SRPP 的規則、排程、validator、prompt、遠端 skill 與原金融 Swagger 都維持既有檔案。觀測使用獨立契約 [AI 觀測 API](openapi/9090-ai-flow-observation.md)，不改金融 PublishedSwaggerIdentity。
+今天只部署 asset-management 的觀測功能。SRPP 的規則、排程、validator、prompt 與遠端 skill 都維持既有檔案；原金融 API 路由與契約不變。觀測使用獨立契約 [AI 觀測 API](openapi/9090-ai-flow-observation.md)，但 Task 501 的 observer 1.2.0 會重產統一 Swagger、改變 PublishedSwaggerIdentity，必須在部署前依既有身分同步流程同步 SRPP 的 consumer schema、runtime contract 與規則包身分。SRPP 的隱私政策文字不在本任務改動，須另立發布任務。
 
 ## 被動收集與真正非同步
 
-`scripts/collect-srpp-ai-flow.py` 唯讀連接 Codex app 的 automation_runs → thread → 公開 JSONL。一次流程用真 thread_id＋turn_id，工具用同一 turn 的 call_id 配對；最終回覆讀 phase=final_answer，也支援已知舊 final channel。私人 reasoning、系統指令、shell指令、token、完整API/MIME內容及金融金額都不保存；公開進度只投影固定操作摘要，唯一例外是公開工具呼叫／回傳會附上通過白名單的工具名稱（見下方「公開工具名稱」）。
+`scripts/collect-srpp-ai-flow.py` 唯讀連接 Codex app 的 automation_runs → thread → 公開 JSONL。一次流程用真 thread_id＋turn_id，工具用同一 turn 的 call_id 配對；最終回覆讀 phase=final_answer，也支援已知舊 final channel。私人 reasoning、系統指令、工具輸出、完整 API/MIME 回應及金融流程資料仍不保存；title／summary／evidence 仍只投影固定公開操作摘要，不保存原 command、env、帳戶、持股或金額。唯一具名例外是使用者 2026-10-18 授權：公開工具的 START 事件可帶 `toolCall.parameters` 原始輸入（見下方「公開工具名稱與參數」），collector 只對憑證樣式做最佳努力遮蔽，並非完整敏感資料偵測或保密保證。
 
 Codex只接受三個已查證的exact排程ID：`codex-srpp-09-30`→台股早盤09:05、`codex-srpp`→台股午盤12:00、`22-00`→美股22:00；不納入`22-00-2`守門員、`srpp-codex`週日展望或名稱相似的工具。時段是planned reportSlot，提前、手動補跑或跨午夜仍保留原排程時段，actual startedAt另取公開START。reportDate始終取automation.created_at的台北日期，同thread後續turn保持該日期，不換算成美國交易日期或依DST重標。查詢period=ALL涵蓋四個slot，MORNING只09:05、NOON含12:00與歷史11:40、US只22:00；不重寫舊台股JSON、UUID或歷史11:40。新增22:00只允許Codex＋22-00，台股既有producer相容範圍保留。
 
@@ -35,15 +35,19 @@ python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/sh
 
 只顯示清洗後 run metadata、事件數、完整度原因及CPU/IO量測；不輸出來源全文或憑證。一般state/spool限256MiB pending，檔案或磁碟故障不回報假成功。可用`--max-runs`／`--max-read-mib`／`--per-run-mib`／`--read-seconds`調整一次性歷史掃描，但上限仍為250 run／512MiB／每來源256MiB／60秒；背景模式固定預設預算，不允許放大。
 
-## 公開工具名稱
+## 公開工具名稱與參數
 
 時間軸、已配對的慢速步驟表與節點明細的公開工具事件，title 寫成「公開工具呼叫：<標籤>」與「公開工具回傳：<標籤>」，回傳沿用同一 call_id 配對到的呼叫標籤。標籤取自 Codex rollout 該筆呼叫的 `payload.name`，須符合 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}`；`functions.` 等前綴原樣保留。Codex 的 code mode 以 `exec`（或 `run_code`）包裝實際工具，`payload.name` 只會是 `exec`，所以這兩者另從呼叫文字擷取 `tools.<名稱>(` 與 `tools["名稱"]` 的內含工具識別字，寫成 `exec（內含 exec_command、web__run 等 N 項）`：title 最多列3個、整個標籤不超過80字元，列不完時附「等 N 項」；summary 另附至多8個名稱，並載明名稱取自呼叫文字、未收錄參數、指令或輸出。
 
-- 只保存白名單識別字，不保存、不顯示參數、指令或輸出，也不把整批耗時歸給任一內含工具；操作欄仍是閉合分類碼 `TOOL tool`，不新增欄位、path enum 或 API 契約。
+Task 501 保留上述 Task 500 名稱擷取與 title／summary 規則，並只在**公開工具呼叫的 START 事件**新增選填閉合物件 `toolCall`：`name`、`innerNames`、`parameters`、`parametersChars`、`truncated`、`redactedCount`，以及必要時唯一允許值為 `true` 的 `sourceTruncated`。`parameters` 是使用者授權保存的原始輸入，不保存工具輸出；collector 只以 `[REDACTED]` 最佳努力取代已知憑證樣式。這不是萬全遮蔽，不能將任何非命中內容宣稱為安全。
+
+- `parameters` 最多 16,384 個 Unicode code point。`parametersChars` 是遮蔽、清理後且套用這個輸出上限前的**已處理來源前綴**長度，不是完整原始輸入長度；`truncated=true` 時只保留前 16,384 個字元。
+- 原始輸入超過 1,048,576 個 code point 時，collector 只處理此前綴並帶 `sourceTruncated=true`；未帶該 key 不得被解讀為完整輸入已被驗證。`redactedCount=100000` 只表示「至少 100000 處」，不是精確總數。
+- 參數不隨完整 run detail、流程圖、tooltip、時間軸或慢速步驟表載入或顯示。僅 ADMIN 使用者選取節點後，才由同源 BFF 的逐節點明細按需讀取；舊事件與非工具節點回傳 `toolCall: null`。
 - 內含工具名稱取自呼叫文字，不是精確保證：字串字面值內的 `tools.x(` 也可能被擷取，也可能漏掉不用這兩種寫法的呼叫。
-- 名稱不合白名單、title 超過100字元、summary 超過500字元，或命中機密／金額／私人推理等 collector 與 backend 的敏感字樣規則時，該事件退回原泛稱「公開工具呼叫」「公開工具回傳」，不會使整批上傳被拒。
-- 已持久化的 immutable 事件不回寫：更新前的舊 run 仍顯示泛稱，這是預期而非缺陷；只有 collector 更新後新解析的 rollout 行才帶名稱。尚未配對、更新前已入 state 的舊呼叫，其回傳事件也維持泛稱。
-- 前端流程圖節點只有150px寬，前綴佔去大半，節點上只看得到少量名稱；完整名稱在 tooltip、時間軸、慢速步驟表與節點明細。
+- 名稱不合白名單、title 超過100字元、summary 超過500字元，或命中機密／金額／私人推理等 title／summary 敏感字樣規則時，該事件退回原泛稱「公開工具呼叫」「公開工具回傳」，不會使整批上傳被拒。
+- 已持久化的 immutable 事件不回寫：更新前的舊 run 仍顯示泛稱且沒有 `toolCall`，這是預期而非缺陷；只有 collector 更新後新解析的 rollout 行才帶新資料。尚未配對、更新前已入 state 的舊呼叫，其回傳事件也維持泛稱。
+- 前端流程圖節點只有150px寬，前綴佔去大半，節點上只看得到少量名稱；完整名稱仍可在不含參數的 tooltip、時間軸與慢速步驟表查看，參數只在上述按需節點明細出現。
 
 ## 正式背景工作
 
@@ -72,9 +76,9 @@ python3 scripts/collect-srpp-ai-flow.py --once --date 2026-10-08 --consumer Code
 python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/share/srpp-ai-flow/collector.token
 ```
 
-公開工具名稱改動後，事件 title／summary 在寫入 collector state 時即凍結，只有更新後新讀到的 rollout 行才套用新規則，所以新舊 title 不會對同一 eventId 並存。下列情況會讓同一 eventId 產生不同內容，必須遵守：
+公開工具名稱與 `toolCall` 都是不可變事件 payload 的一部分，在寫入 collector state 時即凍結。已入 state／pending 的舊事件不回寫、不補參數；不得為補資料刪 state 或使用 `--replay`。只有更新後新讀到的 rollout 行才套用新規則，所以新舊內容不會對同一 eventId 並存。下列情況會讓同一 eventId 產生不同內容，必須遵守：
 
-- state 遺失（刪除或重置）而 DB 仍保有舊 title 時，不得 `--replay` 或重新從頭解析：backend 對同 eventId 但不同 payload 回 409 `EVENT_CONFLICT`，sender 對非200／201拒收並停止，依檔名排序該批永遠排最前，會堵死後面所有批次。
+- state 遺失（刪除或重置）而 DB 仍保有舊 title 或 `toolCall` 時，不得 `--replay` 或重新從頭解析：backend 對同 eventId 但不同 payload 回 409 `EVENT_CONFLICT`，sender 對非200／201拒收並停止，依檔名排序該批永遠排最前，會堵死後面所有批次。
 - state 目錄（`~/.local/share/srpp-ai-flow`，含 sources／pending／acks）只能改名保留，不得刪除。`Store.enqueue` 先以 `acks/<runId>.json` 過濾已 ACK 的事件，所以只刪 state 通常不會 409；acks 也一併遺失，或 pending 仍有未送出的舊 title 批次時才會重送不同內容。
 - 部署前先檢查 `acks/` 的 run 集合與 DB `ai_flow_run` 一致；DB 已被還原清空（備份本就排除這兩表 data）時重播沒有舊 title 可衝突，才可 `--replay`。
 - 若已卡在 409，最後手段是把衝突 eventId 寫入對應的 `acks/<runId>.json`，並移除該 pending 檔（backend 的 SQL guard 禁止未過期 DELETE，沒有別的出口）。
@@ -83,7 +87,7 @@ python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/sh
 
 本次不接入SRPP。未來獲准的runtime hook若要主動提供SCHEDULE_EVENTS，只呼叫本機enqueue，不能讓LLM逐步打卡，也必須先遵守原calendar gate。缺欄位或secret摘要會拒絕，不接受任意JSON。
 
-主動CLI在建立state或寫入spool前就驗證title／summary；拒絕USD／TWD／NT$等金額、price／amount／balance／account等key-value、原始shell指令與私人reasoning標記。自動collector仍只產生固定公開操作摘要，唯一例外是公開工具呼叫／回傳會附上來自 `payload.name` 或呼叫文字擷取、通過白名單的工具識別字；普通文字及無金額的貨幣標籤可保留。backend會再驗證，不依賴上傳後才保護本機spool。
+主動CLI在建立state或寫入spool前就驗證 title／summary；拒絕 USD／TWD／NT$ 等金額、price／amount／balance／account 等 key-value、原始 shell 指令與私人 reasoning 標記。自動collector仍只產生固定公開操作摘要，工具名稱由 `payload.name` 或呼叫文字擷取的白名單識別字補充；Task 501 的選填 `toolCall.parameters` 另依其專屬閉合契約保存已遮蔽的公開工具輸入，不改寫這些 title／summary 規則，也不保存輸出。backend會再驗證，不依賴上傳後才保護本機spool。
 
 ```bash
 # 排程只enqueue並退出；獨立state防止混用collector credential

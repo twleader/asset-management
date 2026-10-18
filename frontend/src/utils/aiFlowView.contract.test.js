@@ -150,6 +150,86 @@ test('查詢錯誤不保留上一筆資料，明細舊回應不能跨 filter 回
   assert.equal(state.listLoading, false)
 })
 
+test('工具參數只在節點選取後讀取，清除、切換 run/filter 後舊回應不回填，null 不算錯誤', async () => {
+  const toolRequests = []
+  const loader = createAiFlowViewLoader({
+    listRuns: async ({ date }) => ({ runs: [{ runId: date === '2026-10-09' ? 'run-2' : 'run-1' }] }),
+    getRun: async runId => ({
+      run: { runId },
+      nodes: [{ eventId: 'node-1', toolCall: { name: 'exec', parameters: 'MUST_NOT_ENTER_DETAIL' } }],
+      edges: [],
+      slowSteps: []
+    }),
+    getToolCall: (runId, eventId, options) => {
+      const request = deferred()
+      toolRequests.push({ runId, eventId, ...options, ...request })
+      return request.promise
+    }
+  })
+  const state = createAiFlowViewState()
+  await loader.query(state, { date: '2026-10-08', consumer: 'Codex', period: 'ALL' })
+  await loader.loadDetail(state, state.runs[0], state.filters)
+
+  assert.equal(state.detail.nodes[0].toolCall, null)
+  assert.equal(toolRequests.length, 0)
+
+  const firstSelection = loader.selectNode(state, 'node-1', state.filters)
+  assert.equal(toolRequests.length, 1)
+  assert.equal(toolRequests[0].runId, 'run-1')
+  assert.equal(toolRequests[0].date, '2026-10-08')
+  assert.equal(toolRequests[0].consumer, 'Codex')
+  assert.equal(state.selectedToolCallLoading, true)
+  const toolCall = { name: 'exec', innerNames: [], parameters: 'SELECTED_ONLY_CANARY', parametersChars: 20, truncated: false, redactedCount: 0 }
+  toolRequests[0].resolve({ runId: 'run-1', eventId: 'node-1', toolCall })
+  await firstSelection
+  assert.deepEqual(state.selectedToolCall, toolCall)
+  assert.equal(state.selectedToolCallError, '')
+
+  const clearedSelection = loader.selectNode(state, 'node-2', state.filters)
+  const clearedSignal = toolRequests[1].signal
+  loader.clearSelectedNode(state)
+  assert.equal(clearedSignal.aborted, true)
+  toolRequests[1].resolve({ toolCall })
+  await clearedSelection
+  assert.equal(state.selectedNodeId, '')
+  assert.equal(state.selectedToolCall, null)
+
+  const switchedRunSelection = loader.selectNode(state, 'node-3', state.filters)
+  const switchedRunSignal = toolRequests[2].signal
+  await loader.loadDetail(state, { runId: 'run-2' }, state.filters)
+  assert.equal(switchedRunSignal.aborted, true)
+  toolRequests[2].resolve({ toolCall })
+  await switchedRunSelection
+  assert.equal(state.selectedRunId, 'run-2')
+  assert.equal(state.selectedToolCall, null)
+
+  const filteredSelection = loader.selectNode(state, 'node-4', state.filters)
+  const filteredSignal = toolRequests[3].signal
+  await loader.query(state, { date: '2026-10-09', consumer: 'Claude', period: 'US' })
+  assert.equal(filteredSignal.aborted, true)
+  toolRequests[3].resolve({ toolCall })
+  await filteredSelection
+  assert.equal(state.selectedNodeId, '')
+  assert.equal(state.selectedToolCall, null)
+
+  await loader.loadDetail(state, state.runs[0], state.filters)
+  const nullSelection = loader.selectNode(state, 'legacy-node', state.filters)
+  toolRequests[4].resolve({ runId: 'run-2', eventId: 'legacy-node', toolCall: null })
+  assert.equal(await nullSelection, true)
+  assert.equal(state.selectedToolCall, null)
+  assert.equal(state.selectedToolCallLoading, false)
+  assert.equal(state.selectedToolCallError, '')
+
+  const closedSelection = loader.selectNode(state, 'node-before-close', state.filters)
+  const closedSignal = toolRequests[5].signal
+  loader.clearDetail(state)
+  assert.equal(closedSignal.aborted, true)
+  toolRequests[5].resolve({ toolCall })
+  await closedSelection
+  assert.equal(state.selectedRunId, '')
+  assert.equal(state.selectedToolCall, null)
+})
+
 test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () => {
   const hostileText = '<img src=x onerror=alert(1)>'
   const detail = {
@@ -164,7 +244,8 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
       x: 17,
       y: 29,
       color: '#123456',
-      summary: '<script>不執行</script>'
+      summary: '<script>不執行</script>',
+      toolCall: { name: 'exec', parameters: 'TOOL_PARAMETER_CANARY' }
     }],
     edges: [{ id: 'edge-1', source: 'event-1', target: 'event-2', relation: 'NEXT_OBSERVED', label: '接續紀錄', curveness: 0.25 }]
   }
@@ -175,6 +256,9 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
   assert.equal(mapped.nodes[0].y, 29)
   assert.equal(mapped.nodes[0].itemStyle.color, '#123456')
   assert.equal(mapped.nodes[0].durationMillis, null)
+  assert.equal(Object.hasOwn(mapped.nodes[0].rawNode, 'toolCall'), false)
+  assert.equal(Object.hasOwn(mapped.nodes[0], 'toolCall'), false)
+  assert.doesNotMatch(JSON.stringify(mapped), /TOOL_PARAMETER_CANARY/)
   assert.match(mapped.nodes[0].tooltipText, /<img src=x onerror=alert\(1\)>/)
   assert.equal(mapped.edges[0].source, 'event-1')
   assert.equal(mapped.edges[0].target, 'event-2')
@@ -217,5 +301,29 @@ test('路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace', () =>
   assert.match(api, /api\.get\('\/bff\/ai-flow\/runs\/'/)
   assert.match(view, /bffApi\.aiFlow\.runs/)
   assert.match(view, /bffApi\.aiFlow\.detail/)
+  assert.match(view, /bffApi\.aiFlow\.toolCall/)
+  assert.ok(api.includes("'/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/tool-call'"))
+  const toolCallApi = api.slice(api.indexOf('toolCall: (runId, eventId,'), api.indexOf('\n  },', api.indexOf('toolCall: (runId, eventId,')))
+  assert.match(toolCallApi, /params:\s*\{ date, consumer \}/)
+  assert.match(toolCallApi, /signal,\s*skipErrorToast:\s*true/)
+  const utility = readFileSync(new URL('./aiFlowView.js', import.meta.url), 'utf8')
+  const graphOption = view.match(/const graphOption = computed\(\(\) => \([\s\S]*?\n\}\)\)/)?.[0]
+  assert.ok(graphOption)
+  assert.doesNotMatch(graphOption, /toolCall|parameters|selectedToolCall/)
+  assert.doesNotMatch(view, /console\.(?:log|info|warn|error|debug)\s*\([^)]*(?:toolCall|parameters)/s)
+  assert.match(utility, /toolCallController\?\.abort\(\)/)
+  assert.match(utility, /toolCallGeneration/)
+  assert.match(utility, /parentListGeneration !== listGeneration/)
+  assert.match(utility, /parentDetailGeneration !== detailGeneration/)
+  assert.match(view, /v-else-if="state\.selectedToolCall"/)
+  assert.match(view, /<pre class="tool-call-parameters">/)
+  assert.match(view, /max-height:\s*240px/)
+  assert.match(view, /overflow:\s*auto/)
+  assert.match(view, /white-space:\s*pre-wrap/)
+  assert.match(view, /word-break:\s*break-all/)
+  assert.match(view, /原始輸入超出 1,048,576 字元預掃上限；下列內容與長度只反映已處理前綴/)
+  assert.match(view, /至少 100000 處/)
+  assert.match(view, /已截斷：已處理前綴的遮蔽後長度/)
+  assert.doesNotMatch(view, /v-html\s*=/)
   assert.doesNotMatch(view, /\/api\/(?:ai-flow|srpp)/)
 })

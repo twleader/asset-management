@@ -43,6 +43,10 @@ public class JdbcAiFlowRepository implements AiFlowRepository {
         return jdbc.query("SELECT e.event_id,e.sequence,e.payload_json,e.payload_sha256 FROM ai_flow_event e JOIN ai_flow_run r ON r.owner_user_id=e.owner_user_id AND r.run_id=e.run_id WHERE e.owner_user_id=? AND e.run_id=? AND r.report_date >= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date - 89 ORDER BY e.sequence,e.event_id",
                 (rs, row) -> new StoredEvent(rs.getObject(1, UUID.class), rs.getInt(2), rs.getString(3), rs.getString(4)), owner, runId);
     }
+    @Override public Optional<StoredEvent> event(long owner, UUID runId, UUID eventId, LocalDate date, String consumer) {
+        return jdbc.query("SELECT e.event_id,e.sequence,e.payload_json,e.payload_sha256 FROM ai_flow_event e JOIN ai_flow_run r ON r.owner_user_id=e.owner_user_id AND r.run_id=e.run_id WHERE e.owner_user_id=? AND e.run_id=? AND e.event_id=? AND r.report_date=? AND r.consumer=? AND r.report_date >= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date - 89 AND r.report_date <= (transaction_timestamp() AT TIME ZONE 'Asia/Taipei')::date",
+                (rs, row) -> new StoredEvent(rs.getObject(1, UUID.class), rs.getInt(2), rs.getString(3), rs.getString(4)), owner, runId, eventId, date, consumer).stream().findFirst();
+    }
     @Override public void insertEvent(long owner, UUID runId, StoredEvent e) {
         jdbc.update("INSERT INTO ai_flow_event(owner_user_id,run_id,event_id,sequence,payload_json,payload_sha256) VALUES (?,?,?,?,?,?)",
                 owner, runId, e.eventId(), e.sequence(), e.payload(), e.hash());

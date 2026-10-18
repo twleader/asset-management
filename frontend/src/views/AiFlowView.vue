@@ -209,7 +209,7 @@
               <h4>節點明細</h4>
               <p>{{ displayUnknown(selectedNode.label) }}</p>
             </div>
-            <el-button text @click="state.selectedNodeId = ''">清除選取</el-button>
+            <el-button text @click="clearSelectedNode">清除選取</el-button>
           </div>
           <dl class="node-facts">
             <div><dt>事件狀態</dt><dd><el-tag :type="eventTagType(selectedNode.status)" effect="plain">{{ displayUnknown(selectedNode.statusLabel) }}</el-tag></dd></div>
@@ -218,6 +218,41 @@
             <div><dt>節點耗時</dt><dd>{{ displayDurationMillis(selectedNode.durationMillis) }}</dd></div>
             <div><dt>公開摘要</dt><dd>{{ displayUnknown(selectedNode.summary) }}</dd></div>
           </dl>
+          <p v-if="state.selectedToolCallLoading" class="tool-call-state" role="status">正在讀取所選節點的工具參數…</p>
+          <el-alert
+            v-else-if="state.selectedToolCallError"
+            class="tool-call-state"
+            type="error"
+            :closable="false"
+            show-icon
+            :title="state.selectedToolCallError"
+          />
+          <template v-else-if="state.selectedToolCall">
+            <dl class="node-facts tool-call-facts">
+              <div>
+                <dt>工具</dt>
+                <dd>
+                  {{ state.selectedToolCall.name }}
+                  <template v-if="state.selectedToolCall.innerNames.length">（內含 {{ state.selectedToolCall.innerNames.join('、') }}）</template>
+                </dd>
+              </div>
+              <div>
+                <dt>參數</dt>
+                <dd><pre class="tool-call-parameters">{{ state.selectedToolCall.parameters === '' ? '（無參數）' : state.selectedToolCall.parameters }}</pre></dd>
+              </div>
+            </dl>
+            <p v-if="state.selectedToolCall.truncated" class="tool-call-note">
+              已截斷：已處理前綴的遮蔽後長度 {{ state.selectedToolCall.parametersChars }} 字元，僅保留前 16384 字元
+            </p>
+            <p v-if="state.selectedToolCall.sourceTruncated === true" class="tool-call-note">
+              原始輸入超出 1,048,576 字元預掃上限；下列內容與長度只反映已處理前綴
+            </p>
+            <p v-if="state.selectedToolCall.redactedCount > 0" class="tool-call-note">
+              已處理範圍的憑證遮蔽數：
+              <template v-if="state.selectedToolCall.redactedCount === 100000">至少 100000 處</template>
+              <template v-else>{{ state.selectedToolCall.redactedCount }} 處</template>
+            </p>
+          </template>
           <div class="safe-text-actions">
             <el-button
               link
@@ -297,6 +332,8 @@ const loader = createAiFlowViewLoader({
     bffApi.aiFlow.runs({ date, consumer: selectedConsumer, period: selectedPeriod, signal }),
   getRun: (runId, { date, consumer: selectedConsumer, signal }) =>
     bffApi.aiFlow.detail(runId, { date, consumer: selectedConsumer, signal }),
+  getToolCall: (runId, eventId, { date, consumer: selectedConsumer, signal }) =>
+    bffApi.aiFlow.toolCall(runId, eventId, { date, consumer: selectedConsumer, signal }),
   errorMessage: error => apiErrorMessage(error, '目前無法讀取 AI 流程紀錄，請稍後再試。')
 })
 
@@ -415,7 +452,11 @@ function closeDetail() {
 }
 
 function selectNode(eventId) {
-  loader.selectNode(state, eventId)
+  void loader.selectNode(state, eventId, state.filters)
+}
+
+function clearSelectedNode() {
+  loader.clearSelectedNode(state)
 }
 
 function onChartClick(params) {
@@ -471,6 +512,10 @@ onBeforeUnmount(() => loader.clear(state))
 .node-detail { margin-top: 16px; }
 .node-detail .section-header { margin-bottom: 12px; }
 .node-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 10px; }
+.tool-call-facts { margin-top: 16px; }
+.tool-call-state, .tool-call-note { margin-top: 12px; }
+.tool-call-note { color: #64748b; font-size: 13px; line-height: 1.5; }
+.tool-call-parameters { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; font: inherit; }
 .safe-text-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 14px; }
 .safe-text-list { display: grid; gap: 14px; }
 .safe-text-list pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

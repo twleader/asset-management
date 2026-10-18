@@ -460,7 +460,13 @@ export const bffApi = {
     runs: ({ date, consumer, period = 'ALL', signal } = {}) =>
       api.get('/bff/ai-flow/runs', { params: { date, consumer, period }, signal, skipErrorToast: true }),
     detail: (runId, { date, consumer, signal } = {}) =>
-      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId), { params: { date, consumer }, signal, skipErrorToast: true })
+      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId), { params: { date, consumer }, signal, skipErrorToast: true }),
+    toolCall: (runId, eventId, { date, consumer, signal } = {}) =>
+      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/tool-call', {
+        params: { date, consumer },
+        signal,
+        skipErrorToast: true
+      })
   },
 
   // FubonApi（系統資訊 → 富邦證 API，Requirement 121）

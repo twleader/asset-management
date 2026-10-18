@@ -19,17 +19,17 @@ final class AiFlowFixtures {
     static String id(int n) { return String.format("00000000-0000-5000-8000-%012d", n); }
     static Event event(int n, String step, String kind, String time, List<String> parents, String relation) {
         return new Event(id(n), n, step, kind, kind.equals("START") ? "RUNNING" : "UNKNOWN", instant(time),
-                "觀測操作", "公開操作摘要", new Operation("TOOL", "tool"), null, 1, parents, relation, List.of(), null);
+                "觀測操作", "公開操作摘要", new Operation("TOOL", "tool"), null, 1, parents, relation, List.of(), null, null);
     }
     static Event lifecycle(int n, String step, String kind, String time, String evidence) {
         Event e = event(n, step, kind, time, List.of(), null);
         return new Event(e.eventId(), e.sequence(), e.stepId(), e.eventKind(), e.status(), instant(time), e.title(), e.summary(),
-                new Operation("LOCAL", "artifact"), null, 1, List.of(), null, List.of(new Evidence("APP_TERMINAL", evidence, null)), null);
+                new Operation("LOCAL", "artifact"), null, 1, List.of(), null, List.of(new Evidence("APP_TERMINAL", evidence, null)), null, null);
     }
     static Event coverage(int n, int cursor, int size, String hash, String reason) {
         return new Event(id(n), cursor, "trace-coverage", "OBSERVATION", "UNKNOWN", null, "紀錄完整度檢查",
                 "公開紀錄完整度", new Operation("LOCAL", "artifact"), reason, 1, List.of(), null,
-                List.of(new Evidence("TRACE_COVERAGE", "TRACE_V1:" + cursor + ":" + size, hash)), null);
+                List.of(new Evidence("TRACE_COVERAGE", "TRACE_V1:" + cursor + ":" + size, hash)), null, null);
     }
     static List<Event> complete() {
         return List.of(lifecycle(1,"task-started","START",AT,"task_started"),

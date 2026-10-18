@@ -17,5 +17,9 @@ public final class AiFlowBffController {
     @GetMapping("/runs/{id}") Mono<ResponseEntity<AiFlowDtos.Detail>> detail(@PathVariable String id,ServerHttpRequest request) {
         return service.detail(id,request).map(AiFlowBffController::okay);
     }
+    @GetMapping("/runs/{runId}/nodes/{eventId}/tool-call") Mono<ResponseEntity<AiFlowDtos.ToolCallDetail>> toolCall(
+            @PathVariable String runId,@PathVariable String eventId,ServerHttpRequest request) {
+        return service.toolCall(runId,eventId,request).map(AiFlowBffController::okay);
+    }
     private static <T> ResponseEntity<T> okay(T dto) {return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL,"private, no-store").body(dto);}
 }

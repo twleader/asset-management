@@ -333,3 +333,5 @@ git config core.hooksPath scripts/git-hooks
 AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份原僅排除這兩新表的data（Requirement 192／Task 498 起，Drive 備份另排除 SRPP 報告計算 base／package 兩表的 data，現為四表；schema 與其他金融 data 仍保留）。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
 
 Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。
+
+Task501 為使用者具名授權的狹義例外：observer 契約升 1.2.0，START event 可帶閉合 `toolCall` 保存公開工具名稱及經憑證樣式遮蔽後的原始參數；一般 Node/detail、圖與 tooltip 一律不載入參數，ADMIN 僅能經同源 BFF 逐節點 no-store read。此改動同步統一 Swagger 身分與 SRPP consumer metadata／bundle authority，但不改 SRPP policy 文字、prompt、validator、排程或 LLM 等待行為；Task494 的 1.1.0 為歷史敘述。

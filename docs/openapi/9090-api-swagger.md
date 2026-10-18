@@ -8,7 +8,7 @@
 | --- | --- |
 | OpenAPI | `3.1.0` |
 | 契約版本 | `1.26.0` |
-| AI 流程觀測契約版本 | `1.1.0` |
+| AI 流程觀測契約版本 | `1.2.0` |
 | 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -9683,7 +9683,7 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
 
 ### 27. `POST /api/srpp/ai-flow/events`
 
-唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。授權在owner/DB/error-ingest I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME都禁止；摘要採allowlist。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
+唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。授權在owner/DB/error-ingest I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。title／summary仍禁止私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME並採allowlist；唯使用者2026-10-18授權的公開工具START事件可在toolCall.parameters保存原始參數，collector僅以[REDACTED]最佳努力遮蔽憑證樣式、上限16384 Unicode code point，且不收工具輸出。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
 
 #### 授權
 
@@ -9747,6 +9747,40 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
 
             ],
             "reportedOutcome": null
+          },
+          {
+            "eventId": "9f3ba524-c143-5bb8-9514-45e783a646ab",
+            "sequence": 1,
+            "stepId": "tool-date",
+            "eventKind": "START",
+            "status": "RUNNING",
+            "occurredAt": "2026-10-08T09:05:03+08:00",
+            "title": "公開工具呼叫：exec",
+            "summary": "以公開工具讀取日期",
+            "operation": {
+              "method": "TOOL",
+              "path": "tool"
+            },
+            "reasonCode": null,
+            "attemptNo": 1,
+            "parentEventIds": [
+
+            ],
+            "relation": null,
+            "evidenceRefs": [
+
+            ],
+            "reportedOutcome": null,
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [
+
+              ],
+              "parameters": "{\"cmd\":\"date\"}",
+              "parametersChars": 14,
+              "truncated": false,
+              "redactedCount": 0
+            }
           }
         ]
       }
@@ -33158,7 +33192,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 
 ### `AiFlowOperation`
 
-公開操作分類；HTTP僅canonical path，LOCAL/TOOL僅六個allowlist分類，不保存原指令或秘密。
+公開操作分類；HTTP僅canonical path，LOCAL/TOOL僅六個allowlist分類。原始工具參數只可依Task 501存於獨立的AiFlowToolCall.parameters，絕不寫入operation。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -33166,7 +33200,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 {
   "type": "object",
   "additionalProperties": false,
-  "description": "公開操作分類；HTTP僅canonical path，LOCAL/TOOL僅六個allowlist分類，不保存原指令或秘密。",
+  "description": "公開操作分類；HTTP僅canonical path，LOCAL/TOOL僅六個allowlist分類。原始工具參數只可依Task 501存於獨立的AiFlowToolCall.parameters，絕不寫入operation。",
   "required": [
     "method",
     "path"
@@ -33401,9 +33435,9 @@ run immutable identity；server owner不能由producer指定；同source identit
 | `startedAt` | 是 | `string | null (date-time)` | 是 | format: date-time | 真實公開開始時間；缺來源為null。 |
 | `workflowVersion` | 是 | `string` | 否 | maxLength: 100 | 觀測協定版本，不替代投資政策版本。 |
 
-### `AiFlowEvent`
+### `AiFlowToolCall`
 
-不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；nullable key除reportedOutcome均必填。
+使用者2026-10-18授權保存的公開工具呼叫輸入；只允許START事件，輸出永不保存，collector只做憑證樣式的最佳努力遮蔽。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -33411,7 +33445,88 @@ run immutable identity；server owner不能由producer指定；同source identit
 {
   "type": "object",
   "additionalProperties": false,
-  "description": "不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；nullable key除reportedOutcome均必填。",
+  "description": "使用者2026-10-18授權保存的公開工具呼叫輸入；只允許START事件，輸出永不保存，collector只做憑證樣式的最佳努力遮蔽。",
+  "required": [
+    "name",
+    "innerNames",
+    "parameters",
+    "parametersChars",
+    "truncated",
+    "redactedCount"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "公開工具名稱，保留payload原始名稱與functions.等前綴，必須完整符合白名單識別字格式。",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+    },
+    "innerNames": {
+      "type": "array",
+      "description": "exec或run_code呼叫文字中已擷取的公開內含工具名稱；非複合工具使用空陣列，最多八個不重複名稱。",
+      "minItems": 0,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "description": "一個完整符合白名單格式的公開內含工具名稱，不含任何參數或工具輸出。",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+      }
+    },
+    "parameters": {
+      "type": "string",
+      "description": "經最佳努力憑證樣式遮蔽後的公開工具原始參數；以Unicode code point計，最多16384，永不保存工具輸出。",
+      "maxLength": 16384
+    },
+    "parametersChars": {
+      "type": "integer",
+      "description": "已處理來源前綴在16384輸出截斷前、經遮蔽與清理後的Unicode code point數；不是完整原始輸入長度。",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "當已處理前綴超過16384 Unicode code point且parameters只保留前16384個時為true；否則為false。"
+    },
+    "redactedCount": {
+      "type": "integer",
+      "description": "已處理來源前綴中被固定[REDACTED]標記取代的憑證片段數；100000代表至少此數，不保證精確總數。",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "sourceTruncated": {
+      "type": "boolean",
+      "const": true,
+      "description": "僅在原始輸入超過1048576 Unicode code point預掃上限時為true；缺省表示未命中，false與null非法。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `name` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$<br>minLength: 1<br>maxLength: 64 | 公開工具名稱，保留payload原始名稱與functions.等前綴，必須完整符合白名單識別字格式。 |
+| `innerNames` | 是 | `array of string` | 否 | minItems: 0<br>maxItems: 8<br>uniqueItems: true<br>items: string<br>items 說明: 一個完整符合白名單格式的公開內含工具名稱，不含任何參數或工具輸出。 | exec或run_code呼叫文字中已擷取的公開內含工具名稱；非複合工具使用空陣列，最多八個不重複名稱。 |
+| `parameters` | 是 | `string` | 否 | maxLength: 16384 | 經最佳努力憑證樣式遮蔽後的公開工具原始參數；以Unicode code point計，最多16384，永不保存工具輸出。 |
+| `parametersChars` | 是 | `integer` | 否 | minimum: 0<br>maximum: 2147483647 | 已處理來源前綴在16384輸出截斷前、經遮蔽與清理後的Unicode code point數；不是完整原始輸入長度。 |
+| `truncated` | 是 | `boolean` | 否 |  | 當已處理前綴超過16384 Unicode code point且parameters只保留前16384個時為true；否則為false。 |
+| `redactedCount` | 是 | `integer` | 否 | minimum: 0<br>maximum: 100000 | 已處理來源前綴中被固定[REDACTED]標記取代的憑證片段數；100000代表至少此數，不保證精確總數。 |
+| `sourceTruncated` | 否 | `boolean` | 否 | enum: `true` | 僅在原始輸入超過1048576 Unicode code point預掃上限時為true；缺省表示未命中，false與null非法。 |
+
+### `AiFlowEvent`
+
+不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall外，nullable key均必填。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall外，nullable key均必填。",
   "required": [
     "eventId",
     "sequence",
@@ -33487,6 +33602,10 @@ run immutable identity；server owner不能由producer指定；同source identit
     "operation": {
       "$ref": "#/components/schemas/AiFlowOperation",
       "description": "公開操作協定。"
+    },
+    "toolCall": {
+      "$ref": "#/components/schemas/AiFlowToolCall",
+      "description": "選填的公開工具START呼叫資料；缺省表示無此資訊，明確null與非START事件皆非法。"
     },
     "reasonCode": {
       "type": [
@@ -33567,6 +33686,7 @@ run immutable identity；server owner不能由producer指定；同source identit
 | `title` | 是 | `string` | 否 | maxLength: 100 | 公開動作標題，不可包含私人思考或秘密。 |
 | `summary` | 是 | `string` | 否 | maxLength: 500 | allowlist公開操作摘要，不收原command/env/header/完整API/MIME/帳號/持股/金額。 |
 | `operation` | 是 | `AiFlowOperation` | 否 |  | 公開操作協定。 |
+| `toolCall` | 否 | `AiFlowToolCall` | 否 |  | 選填的公開工具START呼叫資料；缺省表示無此資訊，明確null與非START事件皆非法。 |
 | `reasonCode` | 是 | `string | null` | 是 | maxLength: 100 | 公開停止/失敗或完整度原因碼；未知為null。 |
 | `attemptNo` | 是 | `integer` | 否 | minimum: 1 | 同一step重試的正整數，不覆写上一attempt。 |
 | `parentEventIds` | 是 | `array of string (uuid)` | 否 | maxItems: 16<br>uniqueItems: true<br>items: string (uuid)<br>items 說明: 每一筆為同run的穩定事件UUID。 | 同run已保存或本batch存在的父事件；禁止self/cycle。 |

@@ -17,10 +17,15 @@ public final class AiFlowDtos {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Evidence(String role, String id, String hash) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ToolCall(String name, List<String> innerNames, String parameters, int parametersChars,
+                           boolean truncated, int redactedCount,
+                           @JsonInclude(JsonInclude.Include.NON_NULL) Boolean sourceTruncated) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Event(String eventId, int sequence, String stepId, String eventKind, String status,
                         @JsonFormat(shape = JsonFormat.Shape.STRING) Instant occurredAt, String title, String summary, Operation operation,
                         String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
-                        List<Evidence> evidenceRefs, String reportedOutcome) {}
+                        List<Evidence> evidenceRefs, String reportedOutcome,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) ToolCall toolCall) {}
     public record Batch(int schemaVersion, Run run, List<Event> events) {}
     public record Ack(String runId, int inserted, int replayed, List<String> eventIds) {}
     public record AppendResult(int status, Ack ack) {}
@@ -40,7 +45,7 @@ public final class AiFlowDtos {
                        String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
                        List<Evidence> evidenceRefs, String reportedOutcome, String statusLabel,
                        String label, String categoryLabel, String timeLabel, Long durationMillis,
-                       int x, int y, String color) {}
+                       int x, int y, String color, ToolCall toolCall) {}
     public record Edge(String id, String source, String target, String relation, String label,
                        double curveness) {}
     public record SlowStep(String stepId, String nodeId, String title, Operation operation,
@@ -48,6 +53,8 @@ public final class AiFlowDtos {
                            @JsonFormat(shape = JsonFormat.Shape.STRING) Instant endedAt, long durationMillis, String status,
                            String statusLabel) {}
     public record Detail(RunView run, List<Node> nodes, List<Edge> edges, List<SlowStep> slowSteps) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ToolCallDetail(String runId, String eventId, ToolCall toolCall) {}
     public record Problem(String type, String title, int status, String detail, String instance,
                           String code, boolean retryable) {}
 }

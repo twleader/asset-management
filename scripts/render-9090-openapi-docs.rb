@@ -387,7 +387,7 @@ document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 validate_document!(document)
 observation = YAML.safe_load(File.read(OBSERVATION_OPENAPI), aliases: false)
 document = unified_document(document, observation)
-validate_document!(document, expected_schemas: 238)
+validate_document!(document, expected_schemas: 239)
 rendered = render(document)
 
 if ARGV == ['--stdout']

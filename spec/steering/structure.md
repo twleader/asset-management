@@ -663,8 +663,10 @@ ADMIN 前端 `/ai-flow` 對應 AiFlowView，API均由自己的 BFF 讀同源業�
 
 Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/11:40/22:00為closedprotocol codes，只有新增22:00↔(Codex,22-00)施雙向sourcebinding；既有TW各層相容範圍保留。原金融contract與路由bytes不變，observer契約獨立升1.1.0；仍不修改SRPP或增加LLM記錄等待。
 
+Task501 為使用者具名授權的狹義例外：observer 契約升 1.2.0，START event 可帶閉合 `toolCall` 保存公開工具名稱及經憑證樣式遮蔽後的原始參數；一般 Node/detail、圖與 tooltip 一律不載入參數，ADMIN 僅能經同源 BFF 逐節點 no-store read。此改動同步統一 Swagger 身分與 SRPP consumer metadata／bundle authority，但不改 SRPP policy 文字、prompt、validator、排程或 LLM 等待行為；Task494 的 1.1.0 為歷史敘述。
+
 ### Requirement 191／Task 497 SRPP fail-closed 決策投影與逐檔事實 API 修訂
 
-金融OpenAPI升1.26.0，exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`令financial=26（22GET/4POST）。AI觀測維持獨立1.1.0/一POST，gateway/BFF catalog/統一Swagger唯一union=27（22GET/5POST）；mail共用prefix故Tailscale=26 handlers。每條路徑exact allowlist，拒root、`/api/`、wildcard、matrix及descendant。
+金融OpenAPI升1.26.0，exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`令financial=26（22GET/4POST）。AI觀測現為獨立1.2.0/一POST，gateway/BFF catalog/統一Swagger唯一union=27（22GET/5POST）；mail共用prefix故Tailscale=26 handlers。每條路徑exact allowlist，拒root、`/api/`、wildcard、matrix及descendant。
 
 兩GET精確綁ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256與calculationRunId，只讀既有immutable schemaVersion1 FINAL package；禁止新計算、外呼、refresh、DB/Redis/error-ingestion寫、producer、notification/mail/reservation/交易，也不改package output、consumer schema、manifest、registry或SRPP runtime。eligible leg只為module data.legs BUY/SELL、台股→TW/美股→US，NONE排除；legId=`moduleId.index`，未知market/action上游502。A2 universe是eligible TW legs投影，非input field，只由content hash保護；input hash只identity-bind且不含/保護universe。v1無capacity evidence所以零capacity reflow/遞補；A1 root無quoteCapture，每leg只有`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol、price/amount精確同源且sourceRevision=vector revision才有typed QUOTE receipt quoteCapture，否則全null；A1 fixed defensive（BUY zero/null、SELL frozen-only、REDUCE唯一base unit）。A2 facts恰12筆無重名固定順序；七個exact radar/quote mapping僅在`validation=VERIFIED` vector+SHA/capturedAt matching SOURCE receipt可AVAILABLE，overheat只在五項AVAILABLE時依frozen pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED，四筆固定null NOT_EVALUATED；不推斷action/policy。P2/revision、client risk、SRPP adoption均不在本輪；不改prompts/schedules/validators，另立任務才可採納API。

@@ -1,8 +1,11 @@
 package com.steven.assets.service.aiflow;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import com.steven.assets.dto.aiflow.AiFlowDtos.*;
 import com.steven.assets.srpp.SrppJcs;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
@@ -96,6 +99,7 @@ class AiFlowProtocolTest {
         var a = AiFlowProtocol.parse(raw.toString()); var b = AiFlowProtocol.parse(JSON.valueToTree(a.batch()).toString());
         assertThat(a.metadataJson()).isEqualTo(b.metadataJson()); assertThat(a.payloads()).isEqualTo(b.payloads());
         assertThat(a.batch().events().getFirst().reportedOutcome()).isNull();
+        assertThat(JSON.valueToTree(a.batch()).path("events").get(0).has("toolCall")).isFalse();
     }
     @Test void rejectsDuplicateAtEveryDepthAndTrailingTokens() {
         String raw = raw(complete()).toString();
@@ -138,6 +142,48 @@ class AiFlowProtocolTest {
             ObjectNode r=raw(complete());((ObjectNode)r.path("events").get(5).path("evidenceRefs").get(0)).put("id",id);assertCode(r.toString(),"INVALID_GRAPH");
         }
         ObjectNode r=raw(complete());((ObjectNode)r.path("events").get(5)).put("occurredAt",AT);assertCode(r.toString(),"INVALID_GRAPH");
+    }
+    @Test void sharedToolCallVectorsKeepProducerIngressClosedAndLanguageIndependent() throws Exception {
+        JsonNode vectors = JSON.readTree(Files.readAllBytes(vectorsPath()));
+        assertThat(vectors.path("cases")).hasSize(78);
+        assertThat(vectors.path("cases").findValuesAsText("valid").size()).isEqualTo(78);
+        for (JsonNode vector : vectors.path("cases")) {
+            ObjectNode input = raw(complete());
+            ObjectNode event = (ObjectNode) input.path("events").get(0);
+            event.put("eventKind", vector.path("eventKind").asText());
+            if (vector.has("toolCall")) {
+                if (vector.path("toolCall").isObject()) event.set("toolCall", expandToolCall(vector.path("toolCall")));
+                else event.set("toolCall", vector.get("toolCall"));
+            } else event.remove("toolCall");
+            boolean accepted;
+            try { AiFlowProtocol.parse(input.toString()); accepted = true; }
+            catch (AiFlowProblem rejected) { accepted = false; }
+            assertThat(accepted).as(vector.path("id").asText()).isEqualTo(vector.path("valid").asBoolean());
+        }
+    }
+    @Test void toolCallParametersBypassPublicSummarySanitizationOnly() {
+        String parameters = "Authorization: Bearer demo-secret curl /Users/test 123456";
+        ObjectNode input = raw(complete());
+        ObjectNode event = (ObjectNode) input.path("events").get(0);
+        event.put("summary", parameters);
+        event.set("toolCall", JSON.valueToTree(new ToolCall("exec", List.of("exec_command"), parameters,
+                parameters.codePointCount(0, parameters.length()), false, 0, null)));
+        var parsed = AiFlowProtocol.parse(input.toString());
+        Event persisted = parsed.batch().events().getFirst();
+        assertThat(persisted.summary()).isEqualTo("[已省略敏感內容]");
+        assertThat(persisted.toolCall().parameters()).isEqualTo(parameters);
+        assertThat(JSON.valueToTree(persisted.toolCall()).has("sourceTruncated")).isFalse();
+        assertThat(parsed.payloads().getFirst()).contains(parameters).doesNotContain("\"summary\":\"" + parameters + "\"");
+    }
+    private static Path vectorsPath() {
+        Path moduleRelative = Path.of("../scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+        return Files.exists(moduleRelative) ? moduleRelative : Path.of("scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+    }
+    private static ObjectNode expandToolCall(JsonNode source) {
+        ObjectNode toolCall = (ObjectNode) source.deepCopy();
+        JsonNode recipe = toolCall.remove("parametersRecipe");
+        if (recipe != null) toolCall.put("parameters", recipe.path("unit").asText().repeat(recipe.path("count").asInt()));
+        return toolCall;
     }
     static void assertCode(String raw,String code){assertThatThrownBy(()->AiFlowProtocol.parse(raw)).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.code()).isEqualTo(code));}
 }

@@ -104,11 +104,21 @@ class SourceTests(Fixture):
         self.assertIsNone(next(e for e in value["events"] if e["stepId"] == "final-answer")["reportedOutcome"])
 
     def test_private_reasoning_commands_financial_outputs_never_persist(self):
-        self.envelope()
-        text = "\n".join(p.read_text() for p in (self.store.root / "sources").glob("*.json"))
-        self.assertNotIn("CANARY", text)
-        self.assertNotIn("Bearer", text)
-        self.assertNotIn("encrypted_content", text)
+        value = self.envelope()
+        # Task 501 只放寬 START.toolCall.parameters；私人推理、工具輸出，以及所有其餘
+        # envelope 欄位仍不可落入 state。此 fixture 的 Bearer 值則必須在 toolCall 中遮蔽。
+        visible = c.canonical(without_tool_calls(value)).decode()
+        persisted = c.strict_json(next((self.store.root / "sources").glob("*.json")).read_bytes())
+        for turn in persisted["turns"].values():
+            for event in turn["events"]:
+                event.pop("toolCall", None)
+        persisted_visible = c.canonical(persisted).decode()
+        for text in (visible, persisted_visible):
+            for private in ("PRIVATE_REASONING_CANARY", "TOKEN_CANARY", "SECRET_OUTPUT_CANARY", "encrypted_content"):
+                self.assertNotIn(private, text)
+        start = next(e for e in value["events"] if e["eventKind"] == "START" and e["stepId"].startswith("call-"))
+        self.assertIn(c.REDACTED, start["toolCall"]["parameters"])
+        self.assertNotIn("SECRET_CANARY", start["toolCall"]["parameters"])
 
     def test_call_result_pairing(self):
         events = self.envelope()["events"]
@@ -375,6 +385,28 @@ START_GENERIC = "已觀測到工具開始；複合工具只記錄整批耗時。
 END_GENERIC = "已觀測到工具輸出，不推定金融操作或報告成功。"
 TOOL_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
 JAVA_PROTOCOL = SCRIPTS.parent / "backend/src/main/java/com/steven/assets/service/aiflow/AiFlowProtocol.java"
+TOOL_CALL_VECTORS = SCRIPTS / "tests/fixtures/ai_flow_tool_call_vectors.json"
+
+
+def without_tool_calls(value):
+    """移除 Task 501 的獨立欄位，供鎖定既有 Task 500 envelope 不變量。"""
+    clone = json.loads(c.canonical(value))
+    for item in clone["events"]:
+        item.pop("toolCall", None)
+    return clone
+
+
+def materialize_tool_call(value):
+    """將跨語言 fixture 的 compact parametersRecipe 展開為實際入口 JSON。"""
+    if value is None:
+        return None
+    call = json.loads(json.dumps(value))
+    if not isinstance(call, dict):
+        return call
+    recipe = call.pop("parametersRecipe", None)
+    if recipe is not None:
+        call["parameters"] = recipe["unit"] * recipe["count"]
+    return call
 
 
 def tool_source_rows(calls, *, turn=TURN):
@@ -653,13 +685,17 @@ class PublicToolNameTests(Fixture):
         value = self.calls(
             {"name": "exec", "input": "Bearer SECRET_CANARY; holdings=FINANCIAL_CANARY; await tools.exec_command({cmd: 'curl -H Authorization https://x/api/assets/latest'})"},
             {"name": "exec_command", "input": "export TOKEN=SECRET_CANARY; echo HOLDINGS_CANARY"})
-        text = c.canonical(value).decode()
+        text = c.canonical(without_tool_calls(value)).decode()
         for canary in ("SECRET_CANARY", "FINANCIAL_CANARY", "HOLDINGS_CANARY", "Bearer", "Authorization", "curl", "https://"):
             self.assertNotIn(canary, text)
         self.assertEqual(["公開工具呼叫：exec（內含 exec_command）", "公開工具呼叫：exec_command"], self.titles(value)[0])
-        persisted = "\n".join(p.read_text() for p in (self.store.root / "sources").glob("*.json"))
-        for canary in ("SECRET_CANARY", "FINANCIAL_CANARY", "HOLDINGS_CANARY"):
-            self.assertNotIn(canary, persisted)
+        calls = [e["toolCall"] for e in self.tool_events(value, "START")]
+        parameters = "\n".join(item["parameters"] for item in calls)
+        self.assertNotIn("SECRET_CANARY", parameters)
+        self.assertIn(c.REDACTED, parameters)
+        # 使用者明確授權未命中遮蔽規則的原始參數；它們只可位於 toolCall，不能漏到 title／summary 等欄位。
+        self.assertIn("FINANCIAL_CANARY", parameters)
+        self.assertIn("HOLDINGS_CANARY", parameters)
 
     def test_state_keeps_bounded_label_even_for_pathological_input(self):
         text = "; ".join(f"tools.tool_{number}_{'z' * 40}(1)" for number in range(3000))
@@ -750,10 +786,10 @@ class PublicToolNameTests(Fixture):
         ])
 
     def test_naming_changes_only_title_and_summary(self):
-        # 同一輸入下，剔除 title／summary 後的 envelope 必須與舊泛稱輸出逐位元相同：
+        # 同一輸入下，剔除 title／summary 與 Task 501 新欄位後的 envelope 必須與舊泛稱輸出逐位元相同：
         # eventId／stepId／sequence／operation／parent／relation／status／evidence 都不得變。
         def strip(value):
-            clone = json.loads(c.canonical(value))
+            clone = without_tool_calls(value)
             for item in clone["events"]:
                 item["title"] = item["summary"] = ""
             return c.canonical(clone)
@@ -1052,22 +1088,202 @@ class MarketSessionDiscoveryTests(Fixture):
                         c.validate_envelope(value, TODAY)
 
     def test_existing_tw_full_canonical_envelopes_and_uuid_are_unchanged(self):
-        # Task 500：fixture 的呼叫名稱是 functions.exec，公開工具 title 由泛稱改為
-        # 「公開工具呼叫／回傳：functions.exec」，整份 envelope 的 digest 必然改變，故重新鎖定。
-        # runId 與「無 period 欄位」維持不變；eventId／stepId／operation 等不變量另由
-        # PublicToolNameTests 的結構等價測試保護，不得為了舊 hash 回綠而特例化 title。
-        expected = {
+        # Task 501 只在 START 加入 toolCall。移除該欄位後必須逐位元維持 Task 500
+        # digest；完整 envelope 則鎖定新的 digest，不能為了舊 hash 特例化新欄位。
+        expected_without_tool_call = {
             "09:05": "44036bbfb34cb46a70f8297226b53ac5014a2f0d47e388ba0daa741f3d0bf211",
             "12:00": "d6a3f7ef5fc1f7e9da1fc71d7ba8d35fec6a2184de25c2a58203aabc2cc78613",
             "11:40": "24e0457d988af1116e29927c857b133b57259489bd238622c280d8861c3bd55e",
         }
-        for slot, digest in expected.items():
+        expected_with_tool_call = {
+            "09:05": "9bfe3d9d890bd1f622aa7ccdfd6a9f46cc0d58ff965cc826749f08948d45de3a",
+            "12:00": "38b00b2ba03aa72b36043ee2eecf9126eb49bcaf3e44f9acf65dbb9804f83e0b",
+            "11:40": "e799f5d7c80f03ad1a4386a0151b0d456b689fe3dfe2d790abf79fd14953a82c",
+        }
+        for slot, digest in expected_with_tool_call.items():
             store = c.Store(self.home / "legacy-no-write", TODAY, dry_run=True)
             record = dict(self.record, slot=slot, automation="codex-srpp-09-30" if slot == "09:05" else "codex-srpp")
             value = c.Collector(self.home, store).scan_codex(record, c.ReadBudget())[0]
             self.assertEqual(digest, hashlib.sha256(c.canonical(value)).hexdigest())
+            self.assertEqual(expected_without_tool_call[slot], hashlib.sha256(c.canonical(without_tool_calls(value))).hexdigest())
             self.assertEqual("66a62e80-7ba1-54e1-9e9f-b0c22f2ebe55", value["run"]["runId"])
             self.assertNotIn("period", value["run"])
+
+
+class ToolCallParameterTests(Fixture):
+    def reset_state(self):
+        for state_file in (self.store.root / "sources").glob("codex-*.json"):
+            state_file.unlink()
+        self.collector = c.Collector(self.home, self.store)
+
+    def calls(self, *payloads, turn=TURN):
+        self.reset_state()
+        self.path.write_bytes(encode_rows(tool_source_rows(list(payloads), turn=turn)))
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        return value
+
+    def tool_events(self, value, kind):
+        return [event for event in value["events"] if event["stepId"].startswith("call-") and event["eventKind"] == kind]
+
+    def test_shared_cross_language_vectors_match_collector_contract(self):
+        vectors = json.loads(TOOL_CALL_VECTORS.read_text(encoding="utf-8"))["cases"]
+        self.assertEqual((78, 20, 58), (len(vectors), sum(case["valid"] for case in vectors), sum(not case["valid"] for case in vectors)))
+        self.assertIn("source-truncated-null", {case["id"] for case in vectors})
+        for case in vectors:
+            with self.subTest(case=case["id"]):
+                call = materialize_tool_call(case.get("toolCall")) if "toolCall" in case else None
+                if "toolCall" in case and call is not None:
+                    self.assertEqual(case["valid"], c.validate_tool_call(call, case["eventKind"]))
+                value = json.loads(c.canonical(self.envelope()))
+                item = value["events"][0]
+                item["eventKind"] = case["eventKind"]
+                if "toolCall" in case:
+                    item["toolCall"] = call
+                else:
+                    item.pop("toolCall", None)
+                if case["valid"]:
+                    c.validate_envelope(value, TODAY)
+                else:
+                    with self.assertRaises(c.ObservationError):
+                        c.validate_envelope(value, TODAY)
+
+    def test_redact_credentials_covers_required_positive_and_negative_examples(self):
+        jwt = "eyJabc.def.ghi"
+        github = "ghp_" + "a" * 36
+        pem = "-----BEGIN TEST PRIVATE KEY-----\nabc123def456\n-----END TEST PRIVATE KEY-----"
+        positives = (
+            ("Authorization: Bearer abcdefgh12345678", "abcdefgh12345678"),
+            ("curl -H 'X-AI-Flow-Token: abcd1234efgh5678'", "abcd1234efgh5678"),
+            ("API_KEY=sk-live-abcdef0123456789abcd", "sk-live-abcdef0123456789abcd"),
+            ("password=hunter2hunter2", "hunter2hunter2"),
+            ('{"access_token":"abc123def456"}', "abc123def456"),
+            ('{"clientSecret":"abc123def456"}', "abc123def456"),
+            (r'{\"cmd\":\"curl -H \'Authorization: Bearer abc12345def\'\"}', "abc12345def"),
+            ("https://user:pass1234@example.com/x", "pass1234"),
+            (jwt, jwt),
+            (github, github),
+            (pem, pem),
+        )
+        for raw, secret in positives:
+            with self.subTest(kind="positive"):
+                redacted, count = c.redact_credentials(raw)
+                self.assertGreaterEqual(count, 1)
+                self.assertNotIn(secret, redacted)
+                self.assertIn(c.REDACTED, redacted)
+                self.assertEqual((redacted, 0), c.redact_credentials(redacted))
+        negatives = (
+            '{"max_tokens": 1000}', "tokenizer", "git commit -m 'fix token handling'",
+            '{"query":"台積電 2330 本週走勢"}', "curl http://127.0.0.1:9090/api/assets/latest",
+            "secret_santa", "VGhpcyBpcyBhIGdlbmVyaWMgYmFzZTY0IHN0cmluZw==",
+        )
+        for raw in negatives:
+            with self.subTest(kind="negative"):
+                self.assertEqual((raw, 0), c.redact_credentials(raw))
+
+    def test_tool_call_accepts_all_supported_raw_sources_and_never_raises(self):
+        multi = c.tool_call({"name": "exec", "input": "await tools.exec_command({}); await tools.web__run({})"}, ["exec_command", "web__run"])
+        arguments = c.tool_call({"name": "exec_command", "arguments": '{"cmd":"ls"}'}, [])
+        dictionary = c.tool_call({"name": "apply_patch", "arguments": {"patch": "x"}}, [])
+        non_string = c.tool_call({"name": "apply_patch", "arguments": 7}, [])
+        empty = c.tool_call({"name": "apply_patch"}, [])
+        invalid = c.tool_call({"name": "bad name"}, [])
+        self.assertEqual(["exec_command", "web__run"], multi["innerNames"])
+        self.assertEqual('{"cmd":"ls"}', arguments["parameters"])
+        self.assertEqual('{"patch":"x"}', dictionary["parameters"])
+        self.assertEqual("", non_string["parameters"])
+        self.assertEqual("", empty["parameters"])
+        self.assertIsNone(invalid)
+        self.assertTrue(all(c.validate_tool_call(value, "START") for value in (multi, arguments, dictionary, non_string, empty)))
+
+    def test_large_composite_call_scans_tool_label_once_and_reuses_name_beyond_prescan(self):
+        class PatternSpy:
+            def __init__(self, pattern):
+                self.pattern, self.calls = pattern, 0
+
+            def finditer(self, value):
+                self.calls += 1
+                return self.pattern.finditer(value)
+
+        dot, bracket = PatternSpy(c.INNER_TOOL_DOT), PatternSpy(c.INNER_TOOL_BRACKET)
+        payload = {"name": "exec", "input": "x" * c.TOOL_PARAM_PRESCAN_LIMIT + "; tools.web__run({})"}
+        with mock.patch.object(c, "INNER_TOOL_DOT", dot), mock.patch.object(c, "INNER_TOOL_BRACKET", bracket), \
+             mock.patch.object(c, "tool_label", wraps=c.tool_label) as label:
+            value = self.calls(payload)
+        self.assertEqual(1, label.call_count)
+        self.assertEqual((1, 1), (dot.calls, bracket.calls))
+        start = self.tool_events(value, "START")[0]
+        self.assertIn("web__run", start["title"])
+        call = start["toolCall"]
+        self.assertEqual(["web__run"], call["innerNames"])
+        self.assertTrue(call["sourceTruncated"])
+        self.assertNotIn("web__run", call["parameters"])
+
+    def test_source_prescan_redaction_cap_and_code_point_truncation_boundaries(self):
+        source = c.tool_call({"name": "exec", "input": "x" * (c.TOOL_PARAM_PRESCAN_LIMIT + 1)}, [])
+        self.assertTrue(source["sourceTruncated"])
+        self.assertEqual(c.TOOL_PARAM_PRESCAN_LIMIT, source["parametersChars"])
+        self.assertEqual(c.TOOL_PARAM_LIMIT, c._code_point_count(source["parameters"]))
+        self.assertTrue(source["truncated"])
+
+        many = c.tool_call({"name": "exec", "input": "eyJ.a.b," * 100001}, [])
+        self.assertEqual(c.REDACTED_COUNT_MAX, many["redactedCount"])
+        self.assertTrue(many["truncated"])
+        self.assertGreater(many["parametersChars"], c.TOOL_PARAM_LIMIT)
+
+        raw_for_redaction = "token=abcd," * 2000
+        after_redaction = c.tool_call({"name": "exec", "input": raw_for_redaction}, [])
+        self.assertEqual(2000, after_redaction["redactedCount"])
+        self.assertGreater(after_redaction["parametersChars"], c._code_point_count(raw_for_redaction))
+        self.assertTrue(after_redaction["truncated"])
+
+        for count, truncated in ((16383, False), (16384, False), (16385, True)):
+            with self.subTest(count=count):
+                value = c.tool_call({"name": "exec", "input": "😀" * count}, [])
+                self.assertEqual(count, value["parametersChars"])
+                self.assertEqual(truncated, value["truncated"])
+                self.assertEqual(min(count, c.TOOL_PARAM_LIMIT), c._code_point_count(value["parameters"]))
+                self.assertTrue(c.validate_tool_call(value, "START"))
+
+        cleaned = c.tool_call({"name": "exec", "input": "a\x00\t\n\r\x1f\x7f\ud800b\udc00"}, [])
+        self.assertFalse(c._has_invalid_parameter_character(cleaned["parameters"]))
+        self.assertIn("\ufffd", cleaned["parameters"])
+        paired_surrogates = "\ud83d\ude00"
+        paired_call = {"name": "exec", "innerNames": [], "parameters": paired_surrogates,
+                       "parametersChars": 1, "truncated": False, "redactedCount": 0}
+        self.assertTrue(c.validate_tool_call(paired_call, "START"))
+
+    def test_start_only_envelope_and_old_state_remain_compatible(self):
+        full = tool_source_rows([{"name": "exec", "input": "tools.exec_command({cmd: 'ls'})"}])
+        self.path.write_bytes(encode_rows(full[:3]))
+        first = self.envelope()
+        start = self.tool_events(first, "START")[0]
+        self.assertIn("toolCall", start)
+        self.assertTrue(c.validate_tool_call(start["toolCall"], "START"))
+        state_path = next((self.store.root / "sources").glob("codex-*.json"))
+        old_state = c.strict_json(state_path.read_bytes())
+        for turn in old_state["turns"].values():
+            for item in turn["events"]:
+                item.pop("toolCall", None)
+        c.atomic_json(state_path, old_state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        with self.path.open("ab") as stream:
+            stream.write(encode_rows(full[3:]))
+        value = self.envelope()
+        restored_start, end = self.tool_events(value, "START")[0], self.tool_events(value, "END")[0]
+        self.assertNotIn("toolCall", restored_start)
+        self.assertNotIn("toolCall", end)
+        c.validate_envelope(value, TODAY)
+
+    def test_worst_case_single_event_is_valid_and_spoolable(self):
+        value = self.calls({"name": "exec", "input": "😀" * c.TOOL_PARAM_LIMIT})
+        start = self.tool_events(value, "START")[0]
+        self.assertEqual(c.TOOL_PARAM_LIMIT, c._code_point_count(start["toolCall"]["parameters"]))
+        c.validate_envelope(value, TODAY)
+        self.assertLess(len(c.canonical(value)), 256 * 1024)
+        self.assertGreater(self.store.enqueue(value), 0)
 
 
 class SpoolSenderTests(Fixture):

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.lang.reflect.*;
 import java.time.*;
 import java.util.*;
+import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
 import org.springframework.util.MultiValueMap;
 
@@ -19,6 +20,7 @@ final class AiFlowProtocol {
     static final Set<String> NULLABLE=Set.of("startedAt","endedAt","occurredAt","reportedOutcome","reasonCode","relation","hash","durationMillis","outcomeLabel");
     static final Set<String> OUTCOMES=Set.of("COMPLETED","PARTIAL","INCOMPLETE","STOPPED_L0","STOPPED_CONTRACT","SKIPPED_NON_TRADING_DAY");
     static final Set<String> STATUSES=Set.of("RUNNING","SUCCEEDED","FAILED","STOPPED","SKIPPED","UNKNOWN");
+    private static final Pattern TOOL_NAME=Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}");
     /** 僅觀測協定使用此 mapper；合法 offset 原文只解碼，不改寫 ingress bytes。 */
     private static JavaTimeModule timeModule() {
         var module=new JavaTimeModule();
@@ -77,7 +79,22 @@ final class AiFlowProtocol {
             Set<String> expected=new HashSet<>();
             for(var field:cl.getRecordComponents()) {
                 expected.add(field.getName()); JsonNode child=node.get(field.getName());
-                if(child==null && input && cl==AiFlowDtos.Event.class && field.getName().equals("reportedOutcome")) continue;
+                if(child==null && input && cl==AiFlowDtos.Event.class
+                    && Set.of("reportedOutcome","toolCall").contains(field.getName())) continue;
+                if(cl==AiFlowDtos.ToolCall.class && field.getName().equals("sourceTruncated")) {
+                    if(child==null) continue;
+                    if(!child.isBoolean() || !child.booleanValue()) throw AiFlowProblem.invalid();
+                    continue;
+                }
+                if(!input && cl==AiFlowDtos.Node.class && field.getName().equals("toolCall")) {
+                    if(child==null || !child.isNull()) throw AiFlowProblem.invalid();
+                    continue;
+                }
+                if(!input && cl==AiFlowDtos.ToolCallDetail.class && field.getName().equals("toolCall")) {
+                    if(child==null) throw AiFlowProblem.invalid();
+                    if(!child.isNull()) shape(child,field.getGenericType(),false);
+                    continue;
+                }
                 if(child==null) throw AiFlowProblem.invalid();
                 if(child.isNull()) { if(!NULLABLE.contains(field.getName()) || field.getType().isPrimitive()) throw AiFlowProblem.invalid(); }
                 else shape(child,field.getGenericType(),input);
@@ -126,7 +143,7 @@ final class AiFlowProtocol {
             member(ref.role(),Set.of("CALENDAR","POLICY","API_RECEIPT","VALIDATOR","RESULT","TIMING","DRAFT_RECEIPT","MIME_RECEIPT","APP_TERMINAL","TRACE_COVERAGE"));
             opaque(ref.id(),200); if(ref.hash()!=null && !ref.hash().matches("[0-9a-f]{64}")) throw AiFlowProblem.invalid();
         }
-        if(e.reportedOutcome()!=null) member(e.reportedOutcome(),OUTCOMES);
+        if(e.reportedOutcome()!=null) member(e.reportedOutcome(),OUTCOMES); toolCall(e.toolCall(),e.eventKind());
     }
     private static void operation(AiFlowDtos.Operation o) {
         member(o.method(),Set.of("GET","POST","PUT","PATCH","DELETE","LOCAL","TOOL"));
@@ -154,7 +171,8 @@ final class AiFlowProtocol {
         run(d.run(),q,owner,clock); require(d.run().runId().equals(id)); require(d.run().eventCount()==d.nodes().size());
         Set<String> nodes=new HashSet<>(),edges=new HashSet<>();
         for(var n:d.nodes()) {
-            event(new AiFlowDtos.Event(n.eventId(),n.sequence(),n.stepId(),n.eventKind(),n.status(),n.occurredAt(),n.title(),n.summary(),n.operation(),n.reasonCode(),n.attemptNo(),n.parentEventIds(),n.relation(),n.evidenceRefs(),n.reportedOutcome()));
+            require(n.toolCall()==null);
+            event(new AiFlowDtos.Event(n.eventId(),n.sequence(),n.stepId(),n.eventKind(),n.status(),n.occurredAt(),n.title(),n.summary(),n.operation(),n.reasonCode(),n.attemptNo(),n.parentEventIds(),n.relation(),n.evidenceRefs(),n.reportedOutcome(),null));
             require(nodes.add(n.eventId())); text(n.statusLabel(),100); text(n.label(),100); text(n.categoryLabel(),100); text(n.timeLabel(),100);
             require(n.durationMillis()==null || n.durationMillis()>=0); require(n.color().matches("#[0-9a-fA-F]{6}"));
         }
@@ -166,6 +184,11 @@ final class AiFlowProtocol {
             require(Duration.between(s.startedAt(),s.endedAt()).toMillis()==s.durationMillis());
             member(s.status(),STATUSES); text(s.statusLabel(),100); previous=s.durationMillis(); previousId=s.stepId();
         }
+    }
+    static void toolCallDetail(AiFlowDtos.ToolCallDetail detail,Query query,String runId,String eventId,Clock clock) {
+        window(query.date(),clock); uuid(runId); uuid(eventId);
+        require(detail.runId().equals(runId) && detail.eventId().equals(eventId));
+        if(detail.toolCall()!=null) toolCall(detail.toolCall(),"START");
     }
     private static void run(AiFlowDtos.RunView r,Query q,long owner,Clock clock) {
         metadata(new AiFlowDtos.RunMetadata(r.runId(),r.consumer(),r.reportDate(),r.reportSlot(),r.sourceKind(),r.sourceRunId(),r.automationId(),r.startedAt(),r.workflowVersion()),clock);
@@ -186,6 +209,31 @@ final class AiFlowProtocol {
     private static void member(String s,Set<String> allowed) { if(s==null || !allowed.contains(s)) throw AiFlowProblem.invalid(); }
     private static void relation(String s,boolean nullable) { if(s==null && nullable)return; member(s,Set.of("CALL_RESULT","DEPENDS_ON","BRANCH","NEXT_OBSERVED")); }
     private static void instant(Instant value,boolean nullable) { if(value==null && !nullable) throw AiFlowProblem.invalid(); }
+    private static void toolCall(AiFlowDtos.ToolCall call,String eventKind) {
+        if(call==null) return;
+        if(!"START".equals(eventKind)) throw AiFlowProblem.invalid();
+        toolName(call.name());
+        if(call.innerNames()==null || call.innerNames().size()>8 || new HashSet<>(call.innerNames()).size()!=call.innerNames().size()) throw AiFlowProblem.invalid();
+        call.innerNames().forEach(AiFlowProtocol::toolName);
+        int count=parameterText(call.parameters());
+        if(call.parametersChars()<0 || call.redactedCount()<0 || call.redactedCount()>100000
+            || call.parametersChars()<count || call.truncated()!=(call.parametersChars()>count)
+            || call.truncated() && count!=16384) throw AiFlowProblem.invalid();
+        if(call.sourceTruncated()!=null && !call.sourceTruncated()) throw AiFlowProblem.invalid();
+    }
+    private static void toolName(String value) { if(value==null || !TOOL_NAME.matcher(value).matches()) throw AiFlowProblem.invalid(); }
+    private static int parameterText(String value) {
+        if(value==null) throw AiFlowProblem.invalid();
+        int codePoints=value.codePointCount(0,value.length()); if(codePoints>16384) throw AiFlowProblem.invalid();
+        for(int i=0;i<value.length();i++) {
+            char c=value.charAt(i);
+            if((c<=0x1f && c!='\t' && c!='\n' && c!='\r') || c==0x7f) throw AiFlowProblem.invalid();
+            if(Character.isHighSurrogate(c)) {
+                if(++i>=value.length() || !Character.isLowSurrogate(value.charAt(i))) throw AiFlowProblem.invalid();
+            } else if(Character.isLowSurrogate(c)) throw AiFlowProblem.invalid();
+        }
+        return codePoints;
+    }
     private static void text(String s,int max) { if(s==null || s.length()>max || s.isBlank() || s.chars().anyMatch(c->c<32 && c!=10)) throw AiFlowProblem.invalid(); }
     private static void textAllowEmpty(String s,int max) { if(s==null || s.length()>max || s.chars().anyMatch(c->c<32 && c!=10)) throw AiFlowProblem.invalid(); }
     private static void nullableText(String s,int max) { if(s!=null)text(s,max); }

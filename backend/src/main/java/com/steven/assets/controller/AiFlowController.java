@@ -20,4 +20,9 @@ public final class AiFlowController {
     public ResponseEntity<Detail> detail(@PathVariable String runId, @RequestParam MultiValueMap<String, String> query) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.detail(runId, query));
     }
+    @GetMapping("/{runId}/nodes/{eventId}/tool-call")
+    public ResponseEntity<ToolCallDetail> toolCall(@PathVariable String runId, @PathVariable String eventId,
+                                                    @RequestParam MultiValueMap<String, String> query) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.toolCall(runId, eventId, query));
+    }
 }

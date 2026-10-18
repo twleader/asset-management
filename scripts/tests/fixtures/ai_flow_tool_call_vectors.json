@@ -1,0 +1,1055 @@
+{
+ "version": 1,
+ "comment": "Task 501 toolCall \u8de8\u8a9e\u8a00\u4e00\u81f4\u6027\u5411\u91cf\u3002collector(Python)\u3001backend\u3001BFF \u7684\u6e2c\u8a66\u5fc5\u9808\u8b80\u540c\u4e00\u4efd\u4e26\u5c0d valid \u6b04\u4f4d\u5f97\u5230\u76f8\u540c\u7d50\u679c\u3002 parametersRecipe \u8868\u793a parameters \u70ba unit \u91cd\u8907 count \u6b21\uff08\u907f\u514d\u5de8\u5927\u6a94\u6848\uff09\u3002 \u7121 toolCall key \u8868\u793a\u7f3a\u7701\uff1btoolCall:null \u8868\u793a\u660e\u78ba null\u3002\u4e8b\u4ef6\u5176\u4ed6\u6b04\u4f4d\u7531\u5404\u6e2c\u8a66\u7528\u81ea\u5df1\u7684\u5408\u6cd5 fixture \u88dc\u9f4a\u3002",
+ "limits": {
+  "parametersMaxCodePoints": 16384,
+  "nameMax": 64,
+  "innerNamesMax": 8,
+  "redactedCountMax": 100000
+ },
+ "cases": [
+  {
+   "id": "absent-key",
+   "eventKind": "START",
+   "valid": true,
+   "note": "toolCall \u7f3a\u7701\u4ee3\u8868\u7121\u6b64\u8cc7\u8a0a\uff0c\u5fc5\u9808\u5408\u6cd5\u4e14 canonical \u4e0d\u5f97\u88dc null"
+  },
+  {
+   "id": "absent-key-on-end",
+   "eventKind": "END",
+   "valid": true
+  },
+  {
+   "id": "minimal-empty-parameters",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "whitespace-controls-allowed",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\nb\tc\r\nd",
+    "parametersChars": 8,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "composite-with-inner",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "exec_command",
+     "web__run"
+    ],
+    "parameters": "const r = await tools.exec_command({cmd: \"date\"});",
+    "parametersChars": 50,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "prefixed-name",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "functions.exec_command",
+    "innerNames": [],
+    "parameters": "{\"cmd\":\"date\"}",
+    "parametersChars": 14,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-64-chars",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-names-8",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-name-64-chars",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "cjk-and-emoji",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "\u53f0\u7a4d\u96fb 2330 \u672c\u9031\u8d70\u52e2 \ud83d\ude00",
+    "parametersChars": 15,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "raw-sensitive-text-kept",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "Authorization: Bearer abc a@b.com curl http://x /Users/steven 1234567 holdings=100 \u5e33\u865f: 123",
+    "parametersChars": 90,
+    "truncated": false,
+    "redactedCount": 0
+   },
+   "note": "parameters \u4e0d\u5957\u7528 SENSITIVE"
+  },
+  {
+   "id": "backslash-and-quotes",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "{\"a\":\"b\\\\c\\\"d\"}",
+    "parametersChars": 15,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "emoji-16384",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 16384,
+    "truncated": false,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "\ud83d\ude00",
+     "count": 16384
+    }
+   },
+   "note": "16384 \u500b code point\uff08UTF-16 \u9577\u5ea6 32768\uff09\u5408\u6cd5"
+  },
+  {
+   "id": "ascii-16384",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 16384,
+    "truncated": false,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16384
+    }
+   }
+  },
+  {
+   "id": "truncated-valid",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 20000,
+    "truncated": true,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "\ud83d\ude00",
+     "count": 16384
+    }
+   }
+  },
+  {
+   "id": "truncated-min-chars",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 16385,
+    "truncated": true,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16384
+    }
+   }
+  },
+  {
+   "id": "redacted-count-max",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 100000
+   }
+  },
+  {
+   "id": "chars-int-max-truncated",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 2147483647,
+    "truncated": true,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16384
+    }
+   }
+  },
+  {
+   "id": "redacted-with-marker",
+   "eventKind": "START",
+   "valid": true,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "Authorization: Bearer [REDACTED]",
+    "parametersChars": 32,
+    "truncated": false,
+    "redactedCount": 1
+   }
+  },
+  {
+   "id": "explicit-null",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": null
+  },
+  {
+   "id": "non-start-end",
+   "eventKind": "END",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "non-start-observation",
+   "eventKind": "OBSERVATION",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "non-start-terminal",
+   "eventKind": "TERMINAL",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "toolCall-not-object-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": "exec"
+  },
+  {
+   "id": "toolCall-not-object-array",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": []
+  },
+  {
+   "id": "missing-name",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "missing-innerNames",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "missing-parameters",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "missing-parametersChars",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "missing-truncated",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "missing-redactedCount",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false
+   }
+  },
+  {
+   "id": "extra-key",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0,
+    "extra": 1
+   }
+  },
+  {
+   "id": "name-empty",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-leading-dot",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": ".exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-65-chars",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-trailing-newline",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec\n",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-space",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "ex ec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-slash",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "a/b",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-cjk",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "\u5de5\u5177",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "name-not-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": 5,
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-9-items",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "t0",
+     "t1",
+     "t2",
+     "t3",
+     "t4",
+     "t5",
+     "t6",
+     "t7",
+     "t8"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-duplicates",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "a",
+     "a"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-item-bad-pattern",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "a b"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-item-trailing-newline",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "a\n"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-item-65-chars",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-not-array",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": "a",
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "inner-item-not-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [
+     1
+    ],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "emoji-16385",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 16385,
+    "truncated": false,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "\ud83d\ude00",
+     "count": 16385
+    }
+   }
+  },
+  {
+   "id": "ascii-16385",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 16385,
+    "truncated": false,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16385
+    }
+   }
+  },
+  {
+   "id": "params-nul",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\u0000b",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-soh",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\u0001b",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-vt",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\u000bb",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-del",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\u007fb",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-lone-high-surrogate",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\ud800b",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-lone-low-surrogate",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "a\udc00b",
+    "parametersChars": 3,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-high-then-ascii",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "\ud800a",
+    "parametersChars": 2,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-not-string-number",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": 5,
+    "parametersChars": 1,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-not-string-object",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": {
+     "a": 1
+    },
+    "parametersChars": 1,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "params-null",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": null,
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "chars-less-than-count",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": 2,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "truncated-true-but-chars-equal",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": 3,
+    "truncated": true,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "truncated-false-but-chars-greater",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": 4,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "truncated-true-short-parameters",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": 100,
+    "truncated": true,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "truncated-true-16383-codepoints",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 20000,
+    "truncated": true,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16383
+    }
+   }
+  },
+  {
+   "id": "chars-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": "3",
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "chars-float",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "abc",
+    "parametersChars": 3.5,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "chars-negative",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": -1,
+    "truncated": false,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "chars-over-int-max",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parametersChars": 2147483648,
+    "truncated": true,
+    "redactedCount": 0,
+    "parametersRecipe": {
+     "unit": "a",
+     "count": 16384
+    }
+   }
+  },
+  {
+   "id": "truncated-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": "false",
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "truncated-int",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": 0,
+    "redactedCount": 0
+   }
+  },
+  {
+   "id": "redacted-negative",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": -1
+   }
+  },
+  {
+   "id": "redacted-100001",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": 100001
+   }
+  },
+  {
+   "id": "redacted-string",
+   "eventKind": "START",
+   "valid": false,
+   "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+    "redactedCount": "0"
+   }
+  },
+    {
+      "id": "redacted-float",
+      "eventKind": "START",
+      "valid": false,
+      "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "",
+    "parametersChars": 0,
+    "truncated": false,
+        "redactedCount": 1.5
+      }
+    },
+    {
+      "id": "source-truncated-true",
+      "eventKind": "START",
+      "valid": true,
+      "toolCall": {
+        "name": "exec",
+        "innerNames": [],
+        "parameters": "",
+        "parametersChars": 0,
+        "truncated": false,
+        "redactedCount": 0,
+        "sourceTruncated": true
+      }
+    },
+    {
+      "id": "source-truncated-false",
+      "eventKind": "START",
+      "valid": false,
+      "toolCall": {
+        "name": "exec",
+        "innerNames": [],
+        "parameters": "",
+        "parametersChars": 0,
+        "truncated": false,
+        "redactedCount": 0,
+        "sourceTruncated": false
+      }
+    },
+    {
+      "id": "source-truncated-not-boolean",
+      "eventKind": "START",
+      "valid": false,
+      "toolCall": {
+        "name": "exec",
+        "innerNames": [],
+        "parameters": "",
+        "parametersChars": 0,
+        "truncated": false,
+        "redactedCount": 0,
+        "sourceTruncated": "true"
+      }
+    },
+    {
+      "id": "source-truncated-null",
+      "eventKind": "START",
+      "valid": false,
+      "toolCall": {
+        "name": "exec",
+        "innerNames": [],
+        "parameters": "",
+        "parametersChars": 0,
+        "truncated": false,
+        "redactedCount": 0,
+        "sourceTruncated": null
+      }
+    }
+  ]
+}
