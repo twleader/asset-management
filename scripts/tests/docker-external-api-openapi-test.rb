@@ -1203,10 +1203,10 @@ assert!(confirmation.dig('properties', 'aggregationSource', 'enum') == ['LOCAL_A
 assert!(decision.dig('responses', '202', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppDailyDecisionCapturing', 'CAPTURING typed response')
 assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?('RUN_METADATA_MISMATCH'), 'metadata mismatch registered')
 
-# Tasks 492／494／495：機器契約仍獨立解析 refs，Markdown 統一發布。
+# Tasks 492／494／495／501：機器契約仍獨立解析 refs，Markdown 統一發布。
 observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
 assert!(observation.fetch('openapi') == '3.1.0', '觀測契約使用 OpenAPI 3.1 的 JSON Schema 條件')
-assert!(observation.dig('info', 'version') == '1.1.0', 'Task494 觀測契約版本固定1.1.0')
+assert!(observation.dig('info', 'version') == '1.2.0', 'Task501 觀測契約版本固定1.2.0')
 assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測 paths 只能唯一exact route')
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
@@ -1217,6 +1217,19 @@ observation.dig('components', 'schemas').each do |name, schema|
   assert!(schema.fetch('additionalProperties') == false, "#{name}: 觀測DTO必須閉合")
   assert_schema_descriptions!(schema, "observation.#{name}")
 end
+tool_call_schema = observation.dig('components', 'schemas', 'AiFlowToolCall')
+assert!(tool_call_schema.fetch('required') == %w[name innerNames parameters parametersChars truncated redactedCount], 'toolCall六個core欄位必須必填且sourceTruncated選填')
+assert!(tool_call_schema.fetch('additionalProperties') == false, 'toolCall必須閉合')
+assert!(tool_call_schema.dig('properties', 'name', 'minLength') == 1 && tool_call_schema.dig('properties', 'name', 'maxLength') == 64 && tool_call_schema.dig('properties', 'name', 'pattern') == '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$', 'toolCall名稱必須採完整白名單格式')
+assert!(tool_call_schema.dig('properties', 'innerNames', 'maxItems') == 8 && tool_call_schema.dig('properties', 'innerNames', 'uniqueItems') == true && tool_call_schema.dig('properties', 'innerNames', 'items', 'maxLength') == 64, 'toolCall內含名稱必須有限且不重複')
+assert!(tool_call_schema.dig('properties', 'parameters', 'maxLength') == 16_384, 'toolCall參數上限必須是16384 Unicode code point')
+assert!(tool_call_schema.dig('properties', 'parametersChars', 'minimum') == 0 && tool_call_schema.dig('properties', 'parametersChars', 'maximum') == 2_147_483_647, 'toolCall處理後字元數必須為32位非負整數')
+assert!(tool_call_schema.dig('properties', 'redactedCount', 'minimum') == 0 && tool_call_schema.dig('properties', 'redactedCount', 'maximum') == 100_000, 'toolCall遮蔽計數必須有cap')
+assert!(tool_call_schema.dig('properties', 'sourceTruncated', 'type') == 'boolean' && tool_call_schema.dig('properties', 'sourceTruncated', 'const') == true, 'sourceTruncated只能選填true')
+event_schema = observation.dig('components', 'schemas', 'AiFlowEvent')
+assert!(event_schema.dig('properties', 'toolCall', '$ref') == '#/components/schemas/AiFlowToolCall' && !event_schema.fetch('required').include?('toolCall'), 'Event.toolCall必須選填且使用閉合toolCall schema')
+example_tool_call = observer_op.dig('requestBody', 'content', 'application/json', 'example', 'events').find { |event| event['toolCall'] }
+assert!(example_tool_call && example_tool_call['eventKind'] == 'START' && example_tool_call.dig('toolCall', 'parameters') == '{"cmd":"date"}' && example_tool_call.dig('toolCall', 'parametersChars') == 14, '觀測request example必須提供無害的START toolCall')
 
 # 此 matcher 只驗本次 identity 條件所使用的 JSON Schema keywords，不冒充完整 schema engine。
 # 從實際 YAML 讀 oneOf/const/enum/required/closure，正反例必須經條件運算；不能只比對描述。

@@ -106,13 +106,25 @@ public class AiFlowService {
                     .orElseThrow(() -> new AiFlowProblem("NOT_FOUND")));
         }));
     }
+    public ToolCallDetail toolCall(String runId, String eventId, MultiValueMap<String, String> query) {
+        Parsed q = query(query, false); window(q.date()); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId); long ownerId = owner.readOwner();
+        return Objects.requireNonNull(reads.execute(tx -> {
+            window(q.date(), repository.databaseDate());
+            UUID parsedRunId = UUID.fromString(runId);
+            StoredRun storedRun = repository.detail(ownerId, parsedRunId, q.date(), q.consumer())
+                    .orElseThrow(() -> new AiFlowProblem("NOT_FOUND"));
+            validatedMetadata(storedRun);
+            StoredEvent storedEvent = repository.event(ownerId, parsedRunId, UUID.fromString(eventId), q.date(), q.consumer())
+                    .orElseThrow(() -> new AiFlowProblem("NOT_FOUND"));
+            requireHash(storedEvent.payload(), storedEvent.hash());
+            Event event = AiFlowProtocol.readEvent(storedEvent.payload());
+            if (!Objects.equals(event.eventId(), eventId) || event.sequence() != storedEvent.sequence())
+                throw new AiFlowProblem("UPSTREAM_INVALID");
+            return new ToolCallDetail(runId, eventId, event.toolCall());
+        }));
+    }
     private Detail project(StoredRun r) {
-        requireHash(r.metadata(), r.hash());
-        Run metadata = AiFlowProtocol.readRun(r.metadata());
-        if (!metadata.runId().equals(r.runId().toString()) || !metadata.consumer().equals(r.consumer())
-                || !metadata.reportDate().equals(r.date()) || !metadata.reportSlot().equals(r.slot())
-                || !metadata.sourceKind().equals(r.sourceKind()) || !metadata.sourceRunId().equals(r.sourceRunId()))
-            throw new AiFlowProblem("UPSTREAM_INVALID");
+        Run metadata = validatedMetadata(r);
         List<Event> events = repository.events(r.owner(), r.runId()).stream().map(e -> {
             requireHash(e.payload(), e.hash()); Event event = AiFlowProtocol.readEvent(e.payload());
             if (!event.eventId().equals(e.eventId().toString()) || event.sequence() != e.sequence()) throw new AiFlowProblem("UPSTREAM_INVALID");
@@ -121,6 +133,15 @@ public class AiFlowService {
         try { AiFlowProjection.validateGraph(events); }
         catch (AiFlowProblem ignored) { throw new AiFlowProblem("UPSTREAM_INVALID"); }
         return AiFlowProjection.detail(r, events);
+    }
+    private static Run validatedMetadata(StoredRun r) {
+        requireHash(r.metadata(), r.hash());
+        Run metadata = AiFlowProtocol.readRun(r.metadata());
+        if (!metadata.runId().equals(r.runId().toString()) || !metadata.consumer().equals(r.consumer())
+                || !metadata.reportDate().equals(r.date()) || !metadata.reportSlot().equals(r.slot())
+                || !metadata.sourceKind().equals(r.sourceKind()) || !metadata.sourceRunId().equals(r.sourceRunId()))
+            throw new AiFlowProblem("UPSTREAM_INVALID");
+        return metadata;
     }
     private record Parsed(LocalDate date, String consumer, String period) {}
     private Parsed query(MultiValueMap<String, String> query, boolean list) {

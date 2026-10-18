@@ -1,7 +1,10 @@
 package com.steven.assets.bff.aiflow;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.LinkedMultiValueMap;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 
@@ -83,5 +86,60 @@ class AiFlowProtocolTest {
     assertThatThrownBy(()->AiFlowProtocol.list(AiFlowFixtures.list("Codex",period,List.of(excluded)),query,7,AiFlowFixtures.CLOCK)).isInstanceOf(AiFlowProblem.class);
   }
   AiFlowProtocol.list(AiFlowFixtures.list("Claude","US",List.of()),new AiFlowProtocol.Query(AiFlowFixtures.DATE,"Claude","US"),7,AiFlowFixtures.CLOCK);
+ }
+ @Test void sharedToolCallVectorsMatchBackendAndCollectorIngressSemantics() throws Exception {
+  JsonNode vectors=AiFlowProtocol.JSON.readTree(Files.readAllBytes(vectorsPath()));
+  assertThat(vectors.path("cases")).hasSize(78);
+  for(JsonNode vector:vectors.path("cases")) {
+   ObjectNode input=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowFixtures.batch()));
+   ObjectNode event=(ObjectNode)input.path("events").get(0);event.put("eventKind",vector.path("eventKind").asText());
+   if(vector.has("toolCall")) {
+    if(vector.path("toolCall").isObject()) event.set("toolCall",expandToolCall(vector.path("toolCall")));
+    else event.set("toolCall",vector.get("toolCall"));
+   } else event.remove("toolCall");
+   boolean accepted;
+   try { AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK);accepted=true; }
+   catch(AiFlowProblem rejected) { accepted=false; }
+   assertThat(accepted).as(vector.path("id").asText()).isEqualTo(vector.path("valid").asBoolean());
+  }
+ }
+ @Test void ingressOptionalityAndReadSideToolCallIsolationHaveOppositeNullSemantics() throws Exception {
+  var input=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowFixtures.batch()));
+  assertThat(AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK).events().getFirst().toolCall()).isNull();
+  ((ObjectNode)input.path("events").get(0)).set("toolCall",AiFlowProtocol.JSON.readTree("null"));
+  assertThatThrownBy(()->AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK))
+   .extracting(e->((AiFlowProblem)e).code).isEqualTo("INVALID_REQUEST");
+
+  var operation=new AiFlowDtos.Operation("GET","/api/assets/{id}");
+  ObjectNode detail=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowOperationContractTest.projection(operation,operation)));
+  assertThat(AiFlowProtocol.decode(AiFlowFixtures.bytes(detail),AiFlowDtos.Detail.class,false).nodes().getFirst().toolCall()).isNull();
+  ObjectNode node=(ObjectNode)detail.path("nodes").get(0);
+  node.remove("toolCall");
+  assertThatThrownBy(()->AiFlowProtocol.decode(AiFlowFixtures.bytes(detail),AiFlowDtos.Detail.class,false))
+   .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+  node.set("toolCall",AiFlowProtocol.JSON.valueToTree(toolCall()));
+  assertThatThrownBy(()->AiFlowProtocol.decode(AiFlowFixtures.bytes(detail),AiFlowDtos.Detail.class,false))
+   .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+
+  var old=new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,null);
+  ObjectNode oldWire=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(old));
+  assertThat(oldWire.has("toolCall") && oldWire.get("toolCall").isNull()).isTrue();
+  var decoded=AiFlowProtocol.decode(AiFlowFixtures.bytes(old),AiFlowDtos.ToolCallDetail.class,false);
+  AiFlowProtocol.toolCallDetail(decoded,new AiFlowProtocol.Query(AiFlowFixtures.DATE,"Codex","ALL"),AiFlowFixtures.ID,AiFlowFixtures.EVENT,AiFlowFixtures.CLOCK);
+  var current=new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,toolCall());
+  ObjectNode currentWire=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(current));
+  assertThat(currentWire.path("toolCall").has("sourceTruncated")).isFalse();
+  AiFlowProtocol.toolCallDetail(AiFlowProtocol.decode(AiFlowFixtures.bytes(current),AiFlowDtos.ToolCallDetail.class,false),
+   new AiFlowProtocol.Query(AiFlowFixtures.DATE,"Codex","ALL"),AiFlowFixtures.ID,AiFlowFixtures.EVENT,AiFlowFixtures.CLOCK);
+ }
+ private static AiFlowDtos.ToolCall toolCall(){return new AiFlowDtos.ToolCall("exec",List.of("exec_command"),"{\"cmd\":\"date\"}",14,false,0,null);}
+ private static Path vectorsPath(){
+  Path moduleRelative=Path.of("../scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+  return Files.exists(moduleRelative)?moduleRelative:Path.of("scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+ }
+ private static ObjectNode expandToolCall(JsonNode source){
+  ObjectNode toolCall=(ObjectNode)source.deepCopy();JsonNode recipe=toolCall.remove("parametersRecipe");
+  if(recipe!=null)toolCall.put("parameters",recipe.path("unit").asText().repeat(recipe.path("count").asInt()));
+  return toolCall;
  }
 }

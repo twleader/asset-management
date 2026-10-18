@@ -13,6 +13,10 @@ public final class AiFlowDtos {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Evidence(String role, String id, String hash) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ToolCall(String name, List<String> innerNames, String parameters, int parametersChars,
+                           boolean truncated, int redactedCount,
+                           @JsonInclude(JsonInclude.Include.NON_NULL) Boolean sourceTruncated) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     public record RunMetadata(String runId, String consumer, LocalDate reportDate, String reportSlot,
                               String sourceKind, String sourceRunId, String automationId,
                               Instant startedAt, String workflowVersion) {}
@@ -20,7 +24,8 @@ public final class AiFlowDtos {
     public record Event(String eventId, int sequence, String stepId, String eventKind, String status,
                         Instant occurredAt, String title, String summary, Operation operation,
                         String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
-                        List<Evidence> evidenceRefs, String reportedOutcome) {}
+                        List<Evidence> evidenceRefs, String reportedOutcome,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) ToolCall toolCall) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Batch(int schemaVersion, RunMetadata run, List<Event> events) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -41,7 +46,7 @@ public final class AiFlowDtos {
                        String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
                        List<Evidence> evidenceRefs, String reportedOutcome, String statusLabel,
                        String label, String categoryLabel, String timeLabel, Long durationMillis,
-                       int x, int y, String color) {}
+                       int x, int y, String color, ToolCall toolCall) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Edge(String id, String source, String target, String relation, String label, double curveness) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -49,6 +54,8 @@ public final class AiFlowDtos {
                            Instant startedAt, Instant endedAt, long durationMillis, String status, String statusLabel) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Detail(RunView run, List<Node> nodes, List<Edge> edges, List<SlowStep> slowSteps) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ToolCallDetail(String runId, String eventId, ToolCall toolCall) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Problem(String type, String title, int status, String detail, String instance, String code, boolean retryable) {}
 }

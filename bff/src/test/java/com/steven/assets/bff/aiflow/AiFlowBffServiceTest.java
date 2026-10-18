@@ -166,4 +166,18 @@ class AiFlowBffServiceTest {
    assertThatThrownBy(()->bad.detail(AiFlowFixtures.ID,request).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
   }
  }
+ @Test void scopedToolCallReadForwardsConfiguredOwnerAndRejectsMismatchedUpstreamIdentity(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));AtomicReference<ClientRequest> sent=new AtomicReference<>();
+  var call=new AiFlowDtos.ToolCall("exec",List.of("exec_command"),"{\"cmd\":\"date\"}",14,false,0,null);
+  var expected=new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,call);
+  var service=service(request->{sent.set(request);return Mono.just(response(200,expected));});
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/tool-call?date=2026-10-08&consumer=Codex").build();
+  assertThat(service.toolCall(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).isEqualTo(expected);
+  assertThat(sent.get().url().toString()).isEqualTo("/api/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/tool-call?date=2026-10-08&consumer=Codex");
+  assertThat(sent.get().headers().getFirst(AuthConstants.HDR_USER_ID)).isEqualTo("7");
+
+  var bad=service(requestUpstream->Mono.just(response(200,new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.ID,call))));
+  assertThatThrownBy(()->bad.toolCall(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block())
+   .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+ }
 }

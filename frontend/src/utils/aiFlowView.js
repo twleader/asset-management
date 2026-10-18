@@ -59,27 +59,30 @@ export function displayDurationMillis(value) {
 
 /** 只把 BFF 已計算的 graph 欄位映射到 ECharts graph series。 */
 export function mapAiFlowGraphData(detail) {
-  const nodes = Array.isArray(detail?.nodes) ? detail.nodes.map(node => ({
-    id: node.eventId,
-    name: node.label,
-    graphLabel: [displayUnknown(node.label), displayUnknown(node.statusLabel)].join('\n'),
-    x: node.x,
-    y: node.y,
-    itemStyle: { color: node.color },
-    statusLabel: node.statusLabel,
-    categoryLabel: node.categoryLabel,
-    timeLabel: node.timeLabel,
-    durationMillis: node.durationMillis,
-    tooltipText: [
-      displayUnknown(node.label),
-      displayUnknown(node.statusLabel),
-      displayUnknown(node.categoryLabel),
-      displayUnknown(node.timeLabel),
-      displayDurationMillis(node.durationMillis),
-      displayUnknown(node.summary)
-    ].join('\n'),
-    rawNode: node
-  })) : []
+  const nodes = Array.isArray(detail?.nodes) ? detail.nodes.map(node => {
+    const { toolCall: _toolCall, ...rawNode } = node
+    return {
+      id: node.eventId,
+      name: node.label,
+      graphLabel: [displayUnknown(node.label), displayUnknown(node.statusLabel)].join('\n'),
+      x: node.x,
+      y: node.y,
+      itemStyle: { color: node.color },
+      statusLabel: node.statusLabel,
+      categoryLabel: node.categoryLabel,
+      timeLabel: node.timeLabel,
+      durationMillis: node.durationMillis,
+      tooltipText: [
+        displayUnknown(node.label),
+        displayUnknown(node.statusLabel),
+        displayUnknown(node.categoryLabel),
+        displayUnknown(node.timeLabel),
+        displayDurationMillis(node.durationMillis),
+        displayUnknown(node.summary)
+      ].join('\n'),
+      rawNode
+    }
+  }) : []
 
   const edges = Array.isArray(detail?.edges) ? detail.edges.map(edge => ({
     id: edge.id,
@@ -105,7 +108,10 @@ export function createAiFlowViewState(filters = {}) {
     detailError: '',
     detail: null,
     selectedRunId: '',
-    selectedNodeId: ''
+    selectedNodeId: '',
+    selectedToolCall: null,
+    selectedToolCallLoading: false,
+    selectedToolCallError: ''
   }
 }
 
@@ -113,17 +119,34 @@ function isCanceled(error) {
   return error?.name === 'AbortError' || error?.code === 'ERR_CANCELED'
 }
 
-/** 以 generation fence 保證已失效的清單或明細回應永遠不會回填畫面。 */
-export function createAiFlowViewLoader({ listRuns, getRun, errorMessage = error => error?.message || '查詢失敗，請稍後再試。' }) {
+/** 以各自的 generation fence 保證已失效的清單、明細或節點工具參數回應永不回填。 */
+export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, errorMessage = error => error?.message || '查詢失敗，請稍後再試。' }) {
   let listGeneration = 0
   let detailGeneration = 0
+  let toolCallGeneration = 0
   let listController = null
   let detailController = null
+  let toolCallController = null
+
+  function clearSelectedToolCall(state) {
+    toolCallGeneration += 1
+    toolCallController?.abort()
+    toolCallController = null
+    state.selectedToolCall = null
+    state.selectedToolCallLoading = false
+    state.selectedToolCallError = ''
+  }
+
+  function clearSelectedNode(state) {
+    state.selectedNodeId = ''
+    clearSelectedToolCall(state)
+  }
 
   function clearDetail(state) {
     detailGeneration += 1
     detailController?.abort()
     detailController = null
+    clearSelectedToolCall(state)
     state.detail = null
     state.detailError = ''
     state.detailLoading = false
@@ -181,6 +204,7 @@ export function createAiFlowViewLoader({ listRuns, getRun, errorMessage = error 
     state.detailLoading = true
     state.selectedRunId = run.runId
     state.selectedNodeId = ''
+    clearSelectedToolCall(state)
 
     try {
       const result = await getRun(run.runId, {
@@ -189,7 +213,9 @@ export function createAiFlowViewLoader({ listRuns, getRun, errorMessage = error 
         signal: detailController.signal
       })
       if (generation !== detailGeneration || parentGeneration !== listGeneration || state.selectedRunId !== run.runId) return false
-      state.detail = result
+      state.detail = result && Array.isArray(result.nodes)
+        ? { ...result, nodes: result.nodes.map(node => ({ ...node, toolCall: null })) }
+        : result
       return true
     } catch (error) {
       if (generation !== detailGeneration || parentGeneration !== listGeneration || isCanceled(error)) return false
@@ -200,9 +226,44 @@ export function createAiFlowViewLoader({ listRuns, getRun, errorMessage = error 
     }
   }
 
-  function selectNode(state, eventId) {
-    state.selectedNodeId = state.selectedNodeId === eventId ? '' : eventId
+  async function selectNode(state, eventId, filters = state.filters) {
+    if (!eventId || state.selectedNodeId === eventId) {
+      clearSelectedNode(state)
+      return false
+    }
+
+    clearSelectedToolCall(state)
+    state.selectedNodeId = eventId
+    if (typeof getToolCall !== 'function' || !state.selectedRunId) return false
+
+    const generation = toolCallGeneration
+    const parentListGeneration = listGeneration
+    const parentDetailGeneration = detailGeneration
+    const runId = state.selectedRunId
+    const controller = new AbortController()
+    toolCallController = controller
+    state.selectedToolCallLoading = true
+
+    try {
+      const result = await getToolCall(runId, eventId, {
+        date: filters.date,
+        consumer: filters.consumer,
+        signal: controller.signal
+      })
+      if (generation !== toolCallGeneration || parentListGeneration !== listGeneration ||
+        parentDetailGeneration !== detailGeneration || state.selectedRunId !== runId || state.selectedNodeId !== eventId) return false
+      state.selectedToolCall = result?.toolCall ?? null
+      return true
+    } catch (error) {
+      if (generation !== toolCallGeneration || parentListGeneration !== listGeneration ||
+        parentDetailGeneration !== detailGeneration || isCanceled(error)) return false
+      state.selectedToolCallError = errorMessage(error)
+      return false
+    } finally {
+      if (generation === toolCallGeneration && parentListGeneration === listGeneration &&
+        parentDetailGeneration === detailGeneration) state.selectedToolCallLoading = false
+    }
   }
 
-  return { query, loadDetail, clearDetail, selectNode, clear }
+  return { query, loadDetail, clearDetail, selectNode, clearSelectedNode, clear }
 }

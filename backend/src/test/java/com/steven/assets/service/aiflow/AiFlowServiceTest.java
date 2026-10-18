@@ -77,6 +77,44 @@ class AiFlowServiceTest {
                 Clock.fixed(DATE.atStartOfDay(ZoneId.of("Asia/Taipei")).plusDays(1).toInstant(),ZoneOffset.UTC));
         assertThatThrownBy(()->later.list(query(DATE.minusDays(89).toString()))).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.code()).isEqualTo("RETENTION_EXPIRED"));
     }
+    @Test void scopedToolCallReadVerifiesRunEventHashAndLeavesGeneralDetailEmpty() {
+        String parameters = "Authorization: Bearer [REDACTED]\\n{\"cmd\":\"date\"}";
+        var call = new com.steven.assets.dto.aiflow.AiFlowDtos.ToolCall("exec", List.of("exec_command"), parameters,
+                parameters.codePointCount(0, parameters.length()), false, 1, null);
+        List<com.steven.assets.dto.aiflow.AiFlowDtos.Event> events = new ArrayList<>(complete());
+        var original = events.get(1);
+        events.set(1, new com.steven.assets.dto.aiflow.AiFlowDtos.Event(original.eventId(), original.sequence(), original.stepId(),
+                original.eventKind(), original.status(), original.occurredAt(), original.title(), original.summary(), original.operation(),
+                original.reasonCode(), original.attemptNo(), original.parentEventIds(), original.relation(), original.evidenceRefs(),
+                original.reportedOutcome(), call));
+        var parsed = AiFlowProtocol.parse(raw(events).toString());
+        var rows = new ArrayList<AiFlowRepository.StoredEvent>();
+        for (int i = 0; i < events.size(); i++) rows.add(new AiFlowRepository.StoredEvent(UUID.fromString(events.get(i).eventId()),
+                events.get(i).sequence(), parsed.payloads().get(i), parsed.hashes().get(i)));
+        when(repository.detail(7L, RUN, DATE, "Codex")).thenReturn(Optional.of(stored(events)));
+        when(repository.events(7L, RUN)).thenReturn(rows);
+        when(repository.event(7L, RUN, UUID.fromString(original.eventId()), DATE, "Codex")).thenReturn(Optional.of(rows.get(1)));
+
+        assertThat(service.detail(RUN.toString(), query(DATE.toString())).nodes()).allSatisfy(node -> assertThat(node.toolCall()).isNull());
+        clearInvocations(repository);
+        var detail = service.toolCall(RUN.toString(), original.eventId(), query(DATE.toString()));
+        assertThat(detail.toolCall()).isEqualTo(call);
+        verify(repository).event(7L, RUN, UUID.fromString(original.eventId()), DATE, "Codex");
+        verify(repository, never()).events(anyLong(), any());
+
+        String oldEventId = events.getFirst().eventId();
+        when(repository.event(7L, RUN, UUID.fromString(oldEventId), DATE, "Codex")).thenReturn(Optional.of(rows.getFirst()));
+        assertThat(service.toolCall(RUN.toString(), oldEventId, query(DATE.toString())).toolCall()).isNull();
+
+        var mismatched = new AiFlowRepository.StoredEvent(UUID.fromString(original.eventId()), rows.get(1).sequence(),
+                rows.getFirst().payload(), rows.getFirst().hash());
+        when(repository.event(7L, RUN, UUID.fromString(original.eventId()), DATE, "Codex")).thenReturn(Optional.of(mismatched));
+        assertThatThrownBy(() -> service.toolCall(RUN.toString(), original.eventId(), query(DATE.toString())))
+                .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("UPSTREAM_INVALID"));
+        var wrongConsumer = query(DATE.toString()); wrongConsumer.set("consumer", "Claude");
+        assertThatThrownBy(() -> service.toolCall(RUN.toString(), original.eventId(), wrongConsumer))
+                .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("NOT_FOUND"));
+    }
     @Test void configuredOwnerIgnoresCallerForProducerAndReadRequiresExactAdmin(){
         var users=mock(UserAdminService.class);var context=mock(CurrentUserContext.class);
         when(users.configuredAdmin()).thenReturn(Optional.of(AppUser.builder().id(7L).role("ADMIN").status("ACTIVE").build()));

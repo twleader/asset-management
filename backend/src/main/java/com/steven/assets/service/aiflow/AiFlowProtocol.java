@@ -34,10 +34,11 @@ public final class AiFlowProtocol {
             "sourceKind", "sourceRunId", "automationId", "startedAt", "workflowVersion");
     private static final Set<String> EVENT_FIELDS = Set.of("eventId", "sequence", "stepId", "eventKind",
             "status", "occurredAt", "title", "summary", "operation", "reasonCode", "attemptNo",
-            "parentEventIds", "relation", "evidenceRefs", "reportedOutcome");
+            "parentEventIds", "relation", "evidenceRefs", "reportedOutcome", "toolCall");
     private static final Set<String> OUTCOMES = Set.of("COMPLETED", "PARTIAL", "INCOMPLETE", "STOPPED_L0",
             "STOPPED_CONTRACT", "SKIPPED_NON_TRADING_DAY");
     private static final Pattern SENSITIVE = Pattern.compile("(?is)(authorization|bearer\\s|token\\s*[:=]|password|secret|api[_-]?key|private[_ -]?reasoning|chain.of.thought|\\b(?:curl|wget|printenv|export)\\s|\\$\\(|```|<[^>]+>|[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}|[A-Za-z]:\\\\|/Users/|/home/|\\b(?:NT\\$|USD|TWD)\\s*[0-9]|(?:price|amount|balance|holdings|account|成本|金額|持股|庫存|股數|張數|帳號|帳戶)\\s*[:=：]?\\s*[0-9]|[0-9]{6,})");
+    private static final Pattern TOOL_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}");
     public record Validated(Batch batch, String metadataJson, String metadataHash,
                             List<String> payloads, List<String> hashes) {}
     public record Assessment(long cursor, long size, String hash, String reason) {}
@@ -57,12 +58,12 @@ public final class AiFlowProtocol {
             Set<String> eventIds = new HashSet<>();
             List<Event> typed = new ArrayList<>(); List<String> payloads = new ArrayList<>(); List<String> hashes = new ArrayList<>();
             for (JsonNode node : events) {
-                exact(node, EVENT_FIELDS, Set.of("reportedOutcome"));
+                exact(node, EVENT_FIELDS, Set.of("reportedOutcome", "toolCall"));
                 if (!node.has("reportedOutcome")) ((ObjectNode) node).putNull("reportedOutcome");
                 String id = text(node, "eventId", 36); uuid(id); if (!eventIds.add(id)) invalid();
                 integer(node.get("sequence"), 0, Integer.MAX_VALUE);
                 opaque(text(node, "stepId", 100));
-                choice(node, "eventKind", Set.of("START", "END", "OBSERVATION", "TERMINAL"));
+                String eventKind = choice(node, "eventKind", Set.of("START", "END", "OBSERVATION", "TERMINAL"));
                 choice(node, "status", Set.of("RUNNING", "SUCCEEDED", "FAILED", "STOPPED", "SKIPPED", "UNKNOWN"));
                 isoNullable(node.get("occurredAt"));
                 String title = text(node, "title", 100), summary = textAllowEmpty(node, "summary", 500);
@@ -91,6 +92,7 @@ public final class AiFlowProtocol {
                     if (hash != null && !hash.matches("[0-9a-f]{64}")) invalid();
                 }
                 nullableChoice(node, "reportedOutcome", OUTCOMES);
+                if (node.has("toolCall")) validateToolCall(node.get("toolCall"), eventKind);
                 Event event = JSON.treeToValue(node, Event.class);
                 Assessment assessment = assessment(event);
                 if (assessment != null && !Set.of("CODEX_ROLLOUT", "CLAUDE_ARTIFACT").contains(source)) invalid();
@@ -169,6 +171,46 @@ public final class AiFlowProtocol {
         catch (Exception ignored) { throw new AiFlowProblem("INVALID_REQUEST"); }
     }
     public static String sanitize(String value) { return SENSITIVE.matcher(value).find() ? "[已省略敏感內容]" : value; }
+    private static void validateToolCall(JsonNode value, String eventKind) {
+        if (!"START".equals(eventKind) || value == null || !value.isObject()) invalid();
+        exact(value, Set.of("name", "innerNames", "parameters", "parametersChars", "truncated", "redactedCount", "sourceTruncated"),
+                Set.of("sourceTruncated"));
+        String name = toolName(value.get("name"));
+        JsonNode names = value.get("innerNames");
+        if (!names.isArray() || names.size() > 8) invalid();
+        Set<String> uniqueNames = new HashSet<>();
+        for (JsonNode inner : names) if (!uniqueNames.add(toolName(inner))) invalid();
+        String parameters = parameterText(value.get("parameters"));
+        int parametersChars = integer(value.get("parametersChars"), 0, Integer.MAX_VALUE);
+        JsonNode truncatedNode = value.get("truncated");
+        if (!truncatedNode.isBoolean()) invalid();
+        boolean truncated = truncatedNode.booleanValue();
+        integer(value.get("redactedCount"), 0, 100000);
+        if (value.has("sourceTruncated")) {
+            JsonNode sourceTruncated = value.get("sourceTruncated");
+            if (!sourceTruncated.isBoolean() || !sourceTruncated.booleanValue()) invalid();
+        }
+        int parameterCodePoints = parameters.codePointCount(0, parameters.length());
+        if (parametersChars < parameterCodePoints || truncated != (parametersChars > parameterCodePoints)
+                || (truncated && parameterCodePoints != 16384)) invalid();
+    }
+    private static String toolName(JsonNode value) {
+        if (value == null || !value.isTextual() || !TOOL_NAME.matcher(value.asText()).matches()) invalid();
+        return value.asText();
+    }
+    private static String parameterText(JsonNode value) {
+        if (value == null || !value.isTextual()) invalid();
+        String text = value.asText();
+        if (text.codePointCount(0, text.length()) > 16384) invalid();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c <= 0x1f && c != '\t' && c != '\n' && c != '\r') || c == 0x7f) invalid();
+            if (Character.isHighSurrogate(c)) {
+                if (++i >= text.length() || !Character.isLowSurrogate(text.charAt(i))) invalid();
+            } else if (Character.isLowSurrogate(c)) invalid();
+        }
+        return text;
+    }
     private static void exact(JsonNode n, Set<String> keys, Set<String> optional) {
         if (n == null || !n.isObject()) invalid();
         for (String key : keys) if (!optional.contains(key) && !n.has(key)) invalid();

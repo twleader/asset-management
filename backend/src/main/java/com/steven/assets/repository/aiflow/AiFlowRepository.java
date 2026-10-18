@@ -18,6 +18,7 @@ public interface AiFlowRepository {
     LocalDate databaseDate();
     Optional<StoredRun> detail(long owner, UUID runId, LocalDate date, String consumer);
     List<StoredEvent> events(long owner, UUID runId);
+    Optional<StoredEvent> event(long owner, UUID runId, UUID eventId, LocalDate date, String consumer);
     void insertEvent(long owner, UUID runId, StoredEvent event);
     int purgeExpired(int limit);
     boolean expiredRemain();

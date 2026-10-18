@@ -39,6 +39,15 @@ final class AiFlowBffService {
                 .map(d->{validate(()->AiFlowProtocol.detail(d,q,owner.id(),id,clock));return d;}).timeout(Duration.ofSeconds(5)));
         }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
     }
+    Mono<AiFlowDtos.ToolCallDetail> toolCall(String runId,String eventId,ServerHttpRequest request) {
+        return Mono.defer(()->{
+            var q=AiFlowProtocol.Query.parse(request.getQueryParams(),true,clock); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId);
+            String path="/api/ai-flow/runs/"+runId+"/nodes/"+eventId+"/tool-call";
+            return owner().flatMap(owner->business.get().uri(u->u.path(path).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
+                .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.ToolCallDetail.class,200,path))
+                .map(d->{validate(()->AiFlowProtocol.toolCallDetail(d,q,runId,eventId,clock));return d;}).timeout(Duration.ofSeconds(5)));
+        }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
+    }
     record Recorded(int status,AiFlowDtos.Ack ack) {}
     Mono<Recorded> record(ServerHttpRequest request,byte[] bytes) {
         return Mono.defer(()->{

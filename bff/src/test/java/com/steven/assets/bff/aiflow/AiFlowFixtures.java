@@ -5,7 +5,7 @@ final class AiFlowFixtures {
  static final String ID="5bd55e21-7e39-5fa7-8c35-d2b2664e54e1", EVENT="6d6d7f46-c4c2-5520-8895-3f164c4f6d0e";
  static final LocalDate DATE=LocalDate.parse("2026-10-08");
  static final Instant START=Instant.parse("2026-10-08T01:05:00Z");
- static AiFlowDtos.Batch batch(){return new AiFlowDtos.Batch(1,new AiFlowDtos.RunMetadata(ID,"Codex",DATE,"09:05","CODEX_ROLLOUT","thread:turn","codex-srpp-09-30",START,"AI_FLOW_V1"),List.of(new AiFlowDtos.Event(EVENT,0,"calendar","START","RUNNING",START,"確認交易日","讀取日曆",new AiFlowDtos.Operation("LOCAL","calendar"),null,1,List.of(),null,List.of(),null)));}
+ static AiFlowDtos.Batch batch(){return new AiFlowDtos.Batch(1,new AiFlowDtos.RunMetadata(ID,"Codex",DATE,"09:05","CODEX_ROLLOUT","thread:turn","codex-srpp-09-30",START,"AI_FLOW_V1"),List.of(new AiFlowDtos.Event(EVENT,0,"calendar","START","RUNNING",START,"確認交易日","讀取日曆",new AiFlowDtos.Operation("LOCAL","calendar"),null,1,List.of(),null,List.of(),null,null)));}
  static AiFlowDtos.RunView run(long owner){return new AiFlowDtos.RunView(ID,owner,"Codex",DATE,"09:05","CODEX_ROLLOUT","thread:turn","codex-srpp-09-30",START,"AI_FLOW_V1","STARTED",null,"UNCONFIRMED","PARTIAL_OBSERVED",1,null,null,null,"早盤09:05","部分紀錄","執行已開始",null);}
  static AiFlowDtos.RunList list(long owner){return new AiFlowDtos.RunList(DATE,"Codex","ALL","Asia/Taipei",90,LocalDate.parse("2026-07-14"),List.of(run(owner)));}
  static AiFlowDtos.RunView run(long owner,String consumer,String slot,String automation){

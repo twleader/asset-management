@@ -45,6 +45,53 @@ TOOL_LABEL_LIMIT = 80
 TOOL_TITLE_NAMES = 3
 TOOL_STATE_NAMES = 8
 TOOL_SUMMARY_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
+# Task 501：完整公開工具參數經使用者明確授權，但仍盡力遮蔽憑證樣式。
+# 這些值是 observer／backend／BFF 共用契約的一部分，不能各自放寬。
+TOOL_PARAM_LIMIT = 16384
+TOOL_PARAM_PRESCAN_LIMIT = 1048576
+REDACTED = "[REDACTED]"
+REDACTED_COUNT_MAX = 100000
+TOOL_CALL_KEYS = {"name", "innerNames", "parameters", "parametersChars", "truncated", "redactedCount"}
+TOOL_CALL_OPTIONAL_KEYS = TOOL_CALL_KEYS | {"sourceTruncated"}
+
+# 只在 key 的最後連續段符合這些具名秘密時遮蔽；例如 X-AI-Flow-Token
+# 命中末段 token，secret_santa 與 max_tokens 則不命中。
+SECRET_KEY_SUFFIXES = (
+    ("authorization",), ("token",), ("secret",), ("password",), ("passwd",),
+    ("apikey",), ("api", "key"), ("access", "key"), ("private", "key"),
+    ("cookie",), ("credential",),
+)
+BEARER_CREDENTIAL = re.compile(
+    r"\b(?P<prefix>(?:Bearer|Basic)\s+)(?P<secret>[A-Za-z0-9._~+/=-]{8,})", re.I
+)
+# key／value 可以位於普通 shell / JSON，也可以是另一層 JSON 字串中的 \"key\"。value
+# 刻意不跨越引號、反斜線、空白及常見命令分隔符，避免吃掉後續公開文字。
+NAMED_CREDENTIAL = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?P<key>[A-Za-z][A-Za-z0-9_. -]{0,127}?)"
+    r"(?P<key_quote>\\?[\"'])?\s*[:=]\s*(?P<value_quote>\\?[\"'])?"
+    r"(?P<value>[^\s\"'\\\\,;&)}\[\]]+)",
+)
+JWT_CREDENTIAL = re.compile(
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?![A-Za-z0-9_-])"
+)
+PROVIDER_CREDENTIAL = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:"
+    r"sk-[A-Za-z0-9_-]{20,}|"
+    r"gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
+    r"AKIA[0-9A-Z]{16}|"
+    r"xox[abprs]-[A-Za-z0-9-]{10,}|"
+    r"AIza[A-Za-z0-9_-]{35}|"
+    r"ya29\.[A-Za-z0-9._-]{8,}"
+    r")(?![A-Za-z0-9_-])"
+)
+URL_USERINFO_CREDENTIAL = re.compile(
+    r"(?P<prefix>\b[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:)(?P<secret>[^/\s@]+)(?=@)"
+)
+PEM_PRIVATE_KEY = re.compile(
+    r"-----BEGIN [^\r\n-]*PRIVATE KEY-----.*?(?:-----END [^\r\n-]*PRIVATE KEY-----|\Z)", re.S
+)
+PARAMETER_SURROGATE = re.compile(r"[\ud800-\udfff]")
+PARAMETER_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 # 與 backend AiFlowProtocol.SENSITIVE 的 pattern 字串逐分支一致（Java 的 (?is) 對應 re.I|re.S，
 # \b／\s 為 ASCII 語意故加 re.A）。測試會從 Java 原始碼解析比對，backend 改規則時此處必須同步。
 BACKEND_SENSITIVE_PATTERN = (
@@ -57,6 +104,204 @@ BACKEND_SENSITIVE = re.compile(BACKEND_SENSITIVE_PATTERN, re.I | re.S | re.A)
 
 class ObservationError(Exception):
     """只公開固定錯誤碼，避免路徑、來源內容或憑證進入日誌。"""
+
+
+def _code_point_count(text: str) -> int:
+    """以 Unicode code point 計數，將手動組出的合法 surrogate pair 視為一個字元。"""
+    if PARAMETER_SURROGATE.search(text) is None:
+        return len(text)
+    count, index = 0, 0
+    while index < len(text):
+        current = ord(text[index])
+        if 0xD800 <= current <= 0xDBFF and index + 1 < len(text) and 0xDC00 <= ord(text[index + 1]) <= 0xDFFF:
+            index += 2
+        else:
+            index += 1
+        count += 1
+    return count
+
+
+def _take_code_points(text: str, limit: int) -> str:
+    """取前 limit 個 Unicode code point，不在 surrogate pair 中間截斷。"""
+    if limit <= 0:
+        return ""
+    if PARAMETER_SURROGATE.search(text) is None:
+        return text[:limit]
+    if len(text) <= limit:
+        return text
+    count, index = 0, 0
+    while index < len(text) and count < limit:
+        current = ord(text[index])
+        width = 2 if 0xD800 <= current <= 0xDBFF and index + 1 < len(text) and 0xDC00 <= ord(text[index + 1]) <= 0xDFFF else 1
+        index += width
+        count += 1
+    return text[:index]
+
+
+def _has_invalid_parameter_character(text: str) -> bool:
+    """檢查契約禁止的控制字元、DEL 與孤立 surrogate；成對 surrogate 合法。"""
+    if PARAMETER_SURROGATE.search(text) is None:
+        return PARAMETER_CONTROL.search(text) is not None
+    index = 0
+    while index < len(text):
+        code = ord(text[index])
+        if 0xD800 <= code <= 0xDBFF:
+            if index + 1 < len(text) and 0xDC00 <= ord(text[index + 1]) <= 0xDFFF:
+                index += 2
+                continue
+            return True
+        if 0xDC00 <= code <= 0xDFFF:
+            return True
+        if (code < 0x20 and code not in {0x09, 0x0A, 0x0D}) or code == 0x7F:
+            return True
+        index += 1
+    return False
+
+
+def _secret_key_segments(key: str) -> list[str]:
+    camel_split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", key)
+    return [piece.lower() for piece in re.split(r"[_ .-]+", camel_split) if piece]
+
+
+def _is_named_secret_key(key: str) -> bool:
+    segments = _secret_key_segments(key)
+    return any(len(segments) >= len(suffix) and tuple(segments[-len(suffix):]) == suffix
+               for suffix in SECRET_KEY_SUFFIXES)
+
+
+def redact_credentials(text: str) -> tuple[str, int]:
+    """以固定順序 best-effort 遮蔽常見憑證，只回傳遮蔽後字串與實際取代次數。"""
+    if not isinstance(text, str):
+        return text, 0
+    count = 0
+
+    def substitute(pattern: re.Pattern[str], replacement):
+        nonlocal text, count
+        text, matches = pattern.subn(replacement, text)
+        count += matches
+
+    substitute(BEARER_CREDENTIAL, lambda match: match.group("prefix") + REDACTED)
+
+    def named_replacement(match: re.Match[str]) -> str:
+        nonlocal count
+        value = match.group("value")
+        # Authorization: Bearer [REDACTED] 已由第一條規則處理，不能再把 Bearer 當祕密值。
+        if (len(value) < 4 or value == REDACTED or not _is_named_secret_key(match.group("key"))
+                or re.match(r"(?:Bearer|Basic)\s+\[REDACTED\]", match.string[match.start("value"):], re.I)):
+            return match.group(0)
+        count += 1
+        before = match.group(0)[:match.start("value") - match.start()]
+        after = match.group(0)[match.end("value") - match.start():]
+        return before + REDACTED + after
+
+    text = NAMED_CREDENTIAL.sub(named_replacement, text)
+    substitute(JWT_CREDENTIAL, REDACTED)
+    substitute(PROVIDER_CREDENTIAL, REDACTED)
+    def userinfo_replacement(match: re.Match[str]) -> str:
+        nonlocal count
+        if match.group("secret") == REDACTED:
+            return match.group(0)
+        count += 1
+        return match.group("prefix") + REDACTED
+
+    text = URL_USERINFO_CREDENTIAL.sub(userinfo_replacement, text)
+    substitute(PEM_PRIVATE_KEY, REDACTED)
+    return text, count
+
+
+def clean_parameter_text(text: str) -> str:
+    """將契約禁止的控制字元、DEL 與孤立 surrogate 改為 replacement character。"""
+    if PARAMETER_SURROGATE.search(text) is None:
+        return PARAMETER_CONTROL.sub("\ufffd", text)
+    parts: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        code = ord(char)
+        if 0xD800 <= code <= 0xDBFF and index + 1 < len(text) and 0xDC00 <= ord(text[index + 1]) <= 0xDFFF:
+            parts.append(chr(0x10000 + (code - 0xD800) * 0x400 + (ord(text[index + 1]) - 0xDC00)))
+            index += 2
+            continue
+        if 0xD800 <= code <= 0xDFFF or (code < 0x20 and code not in {0x09, 0x0A, 0x0D}) or code == 0x7F:
+            parts.append("\ufffd")
+        else:
+            parts.append(char)
+        index += 1
+    return "".join(parts)
+
+
+def validate_tool_call(value: Any, event_kind: Any) -> bool:
+    """驗證 Task 501 的閉合 toolCall，與 backend／BFF 使用同一個契約。"""
+    if (event_kind != "START" or not isinstance(value, dict)
+            or (set(value) != TOOL_CALL_KEYS and set(value) != TOOL_CALL_OPTIONAL_KEYS)):
+        return False
+    name = value.get("name")
+    inner_names = value.get("innerNames")
+    parameters = value.get("parameters")
+    parameters_chars = value.get("parametersChars")
+    truncated = value.get("truncated")
+    redacted_count = value.get("redactedCount")
+    if not isinstance(name, str) or TOOL_NAME.fullmatch(name) is None:
+        return False
+    if not isinstance(inner_names, list) or len(inner_names) > TOOL_STATE_NAMES:
+        return False
+    if any(not isinstance(item, str) or TOOL_NAME.fullmatch(item) is None for item in inner_names) or len(set(inner_names)) != len(inner_names):
+        return False
+    if not isinstance(parameters, str) or _code_point_count(parameters) > TOOL_PARAM_LIMIT or _has_invalid_parameter_character(parameters):
+        return False
+    if (isinstance(parameters_chars, bool) or not isinstance(parameters_chars, int)
+            or not 0 <= parameters_chars <= 2147483647):
+        return False
+    if not isinstance(truncated, bool) or isinstance(redacted_count, bool) or not isinstance(redacted_count, int) or not 0 <= redacted_count <= REDACTED_COUNT_MAX:
+        return False
+    length = _code_point_count(parameters)
+    if parameters_chars < length or truncated != (parameters_chars > length):
+        return False
+    if truncated and length != TOOL_PARAM_LIMIT:
+        return False
+    return "sourceTruncated" not in value or value["sourceTruncated"] is True
+
+
+def tool_call(payload: dict, inner_names: list[str]) -> dict | None:
+    """建立 START 專用工具參數；不讀 I/O、不再呼叫 tool_label 或掃描內含工具。"""
+    try:
+        name = payload.get("name")
+        if not isinstance(name, str) or TOOL_NAME.fullmatch(name) is None:
+            return None
+        names: list[str] = []
+        seen: set[str] = set()
+        for inner in inner_names:
+            if isinstance(inner, str) and TOOL_NAME.fullmatch(inner) is not None and inner not in seen:
+                seen.add(inner)
+                names.append(inner)
+                if len(names) == TOOL_STATE_NAMES:
+                    break
+        raw = payload.get("input", payload.get("arguments", ""))
+        if isinstance(raw, str):
+            raw_text = raw
+        elif isinstance(raw, (dict, list)):
+            raw_text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+        else:
+            raw_text = ""
+        source_truncated = _code_point_count(raw_text) > TOOL_PARAM_PRESCAN_LIMIT
+        processed = _take_code_points(raw_text, TOOL_PARAM_PRESCAN_LIMIT)
+        redacted, redacted_count = redact_credentials(processed)
+        cleaned = clean_parameter_text(redacted)
+        parameters_chars = _code_point_count(cleaned)
+        truncated = parameters_chars > TOOL_PARAM_LIMIT
+        result = {
+            "name": name,
+            "innerNames": names,
+            "parameters": _take_code_points(cleaned, TOOL_PARAM_LIMIT),
+            "parametersChars": parameters_chars,
+            "truncated": truncated,
+            "redactedCount": min(redacted_count, REDACTED_COUNT_MAX),
+        }
+        if source_truncated:
+            result["sourceTruncated"] = True
+        return result if validate_tool_call(result, "START") else None
+    except Exception:
+        return None
 
 
 def canonical(value: Any) -> bytes:
@@ -253,7 +498,9 @@ def tool_label(payload: dict) -> tuple[str, list[str]] | None:
     """從公開工具呼叫取得 (標籤, 去重後內含工具識別字)；不合白名單回 None。
 
     複合 exec／run_code 的實際工具不在 payload.name，只從呼叫文字擷取
-    `tools.<名稱>(` 或 `tools["名稱"]` 的識別字；不保存參數、指令或輸出。
+    `tools.<名稱>(` 或 `tools["名稱"]` 的識別字；本函式只保存名稱，不把參數
+    寫進 title／summary／label。Task 501 的 tool_call() 另依閉合契約保存已遮蔽
+    toolCall.parameters，仍不保存工具輸出。
     名稱取自呼叫文字而非精確解析，字串字面值內的 `tools.x(` 也可能被擷取。
     """
     name = payload.get("name")
@@ -405,10 +652,15 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
         name = payload.get("name", "")
         if isinstance(name, str) and re.search(r"(?:spawn_agent|spawn_thread|create_thread)$", name):
             turn["missingChild"] = True
-        label_info = tool_label_info(tool_label(payload))
+        # 同一呼叫只執行一次完整的名稱掃描；ToolCall.innerNames 重用這個結果。
+        label = tool_label(payload)
+        label_info = tool_label_info(label)
         title, summary = public_tool_text("公開工具呼叫", label_info, "公開工具呼叫", "已觀測到工具開始；複合工具只記錄整批耗時。")
         call = event(source_id, f"line:{line}:call:{call_id}", line, step, "START", timestamp,
                      title, summary, status="RUNNING", operation=operation, attempt=attempt)
+        captured = tool_call(payload, label[1] if label is not None else [])
+        if captured is not None:
+            call["toolCall"] = captured
         append_event(turn, call)
         turn["calls"][call_id] = {"eventId": call["eventId"], "stepId": step, "operation": operation, "paired": False,
                                  "occurredAt": call["occurredAt"], "label": label_info}
@@ -729,7 +981,7 @@ def validate_envelope(value: dict, today: dt.date):
         fail()
     ids = set()
     for item in events:
-        if not isinstance(item, dict) or set(item) != EVENT_KEYS:
+        if not isinstance(item, dict) or set(item) not in (EVENT_KEYS, EVENT_KEYS | {"toolCall"}):
             fail()
         try:
             uuid.UUID(item["eventId"])
@@ -741,6 +993,8 @@ def validate_envelope(value: dict, today: dt.date):
         if isinstance(item["sequence"], bool) or not isinstance(item["sequence"], int) or not 0 <= item["sequence"] <= 2147483647:
             fail()
         if not isinstance(item["eventKind"], str) or not isinstance(item["status"], str) or item["eventKind"] not in {"START", "END", "OBSERVATION", "TERMINAL"} or item["status"] not in {"RUNNING", "SUCCEEDED", "FAILED", "STOPPED", "SKIPPED", "UNKNOWN"}:
+            fail()
+        if "toolCall" in item and not validate_tool_call(item["toolCall"], item["eventKind"]):
             fail()
         if not isinstance(item["stepId"], str) or not 1 <= len(item["stepId"]) <= 100:
             fail()
