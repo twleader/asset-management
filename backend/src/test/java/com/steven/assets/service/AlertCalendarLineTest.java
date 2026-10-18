@@ -4,9 +4,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashSet;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -18,33 +15,42 @@ class AlertCalendarLineTest {
     @Test
     @DisplayName("單一條件")
     void singleLabel() {
-        assertEquals("台積電 (2330 台股) — 跌破季線 觸發價 1085",
+        assertEquals("台積電 (2330 台股) — 買進：跌破季線 觸發價 1085",
                 AlertNotificationDispatcher.calendarLine(
-                        "台積電", "2330", "台股", List.of("跌破季線"), new BigDecimal("1085")));
+                        "台積電", "2330", "台股", purposeConditions("BUY", "跌破季線"), new BigDecimal("1085")));
     }
 
     @Test
     @DisplayName("同股多條件以「、」串接，順序即傳入順序")
     void multipleLabelsJoined() {
-        LinkedHashSet<String> labels = new LinkedHashSet<>(List.of("跌破季線", "K 值低於 20"));
-        assertEquals("台積電 (2330 台股) — 跌破季線、K 值低於 20 觸發價 1085",
+        assertEquals("台積電 (2330 台股) — 賣出：跌破季線、K 值低於 20 觸發價 1085",
                 AlertNotificationDispatcher.calendarLine(
-                        "台積電", "2330", "台股", labels, new BigDecimal("1085")));
+                        "台積電", "2330", "台股",
+                        purposeConditions("SELL", "跌破季線", "SELL", "K 值低於 20"), new BigDecimal("1085")));
     }
 
     @Test
     @DisplayName("價格為 null 時顯示 -（沿用信件正文的 formatNumber 行為）")
     void nullPriceRendersDash() {
-        assertEquals("台積電 (2330 台股) — 跌破季線 觸發價 -",
+        assertEquals("台積電 (2330 台股) — 未設定：跌破季線 觸發價 -",
                 AlertNotificationDispatcher.calendarLine(
-                        "台積電", "2330", "台股", List.of("跌破季線"), null));
+                        "台積電", "2330", "台股", purposeConditions("UNSPECIFIED", "跌破季線"), null));
     }
 
     @Test
     @DisplayName("價格去掉尾隨零，不用科學記號")
     void stripsTrailingZeros() {
-        assertEquals("Apple (AAPL 美股) — 突破月線 觸發價 54.35",
+        assertEquals("Apple (AAPL 美股) — 買進：突破月線 觸發價 54.35",
                 AlertNotificationDispatcher.calendarLine(
-                        "Apple", "AAPL", "美股", List.of("突破月線"), new BigDecimal("54.350")));
+                        "Apple", "AAPL", "美股", purposeConditions("BUY", "突破月線"), new BigDecimal("54.350")));
+    }
+
+    private static java.util.LinkedHashMap<String, java.util.LinkedHashSet<String>> purposeConditions(
+            String... values) {
+        java.util.ArrayList<AlertNotificationDispatcher.PurposeCondition> conditions = new java.util.ArrayList<>();
+        for (int i = 0; i < values.length; i += 2) {
+            conditions.add(new AlertNotificationDispatcher.PurposeCondition(values[i], values[i + 1]));
+        }
+        return AlertNotificationDispatcher.purposeConditionMap(conditions);
     }
 }

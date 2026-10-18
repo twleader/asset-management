@@ -2629,7 +2629,9 @@ CREATE TABLE public.stock_alert (
     display_order integer DEFAULT 0 NOT NULL,
     ma_period integer,
     owner_user_id bigint NOT NULL,
-    group_id bigint
+    group_id bigint,
+    purpose character varying(16) DEFAULT 'UNSPECIFIED'::character varying NOT NULL,
+    CONSTRAINT ck_stock_alert_purpose CHECK (((purpose)::text = ANY ((ARRAY['BUY'::character varying, 'SELL'::character varying, 'UNSPECIFIED'::character varying])::text[])))
 );
 
 
@@ -2689,7 +2691,9 @@ CREATE TABLE public.stock_alert_group (
     last_triggered_kd_value numeric(10,4),
     last_triggered_d_value numeric(10,4),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    updated_at timestamp without time zone DEFAULT now() NOT NULL
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    purpose character varying(16) DEFAULT 'UNSPECIFIED'::character varying NOT NULL,
+    CONSTRAINT ck_stock_alert_group_purpose CHECK (((purpose)::text = ANY ((ARRAY['BUY'::character varying, 'SELL'::character varying, 'UNSPECIFIED'::character varying])::text[])))
 );
 
 
@@ -2799,7 +2803,9 @@ CREATE TABLE public.stock_alert_trigger (
     d_value numeric(10,4),
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     group_id bigint,
-    CONSTRAINT ck_sat_alert_xor_group CHECK (((alert_id IS NOT NULL) <> (group_id IS NOT NULL)))
+    purpose character varying(16) DEFAULT 'UNSPECIFIED'::character varying NOT NULL,
+    CONSTRAINT ck_sat_alert_xor_group CHECK (((alert_id IS NOT NULL) <> (group_id IS NOT NULL))),
+    CONSTRAINT ck_stock_alert_trigger_purpose CHECK (((purpose)::text = ANY ((ARRAY['BUY'::character varying, 'SELL'::character varying, 'UNSPECIFIED'::character varying])::text[])))
 );
 
 

@@ -106,12 +106,12 @@ class StockAlertTaiwanMasterBoundaryTest {
 
     private static StockAlertDto.Request request() {
         return new StockAlertDto.Request("00850", "使用者自填名稱", "台股", "PRICE_ABOVE", null,
-                BigDecimal.ONE, true, List.of());
+                BigDecimal.ONE, "BUY", true, List.of());
     }
 
     private static StockAlertDto.GroupRequest groupRequest() {
         return new StockAlertDto.GroupRequest("00850", "使用者自填名稱", "台股", List.of(
                 new StockAlertDto.ConditionItem("PRICE_ABOVE", null, BigDecimal.ONE, null),
-                new StockAlertDto.ConditionItem("PRICE_BELOW", null, BigDecimal.TEN, null)), true, List.of());
+                new StockAlertDto.ConditionItem("PRICE_BELOW", null, BigDecimal.TEN, null)), "BUY", true, List.of());
     }
 }

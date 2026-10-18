@@ -49,6 +49,14 @@ public class StockAlertGroup {
     @Column(nullable = false, length = 20)
     private String market;
 
+    /**
+     * 複合警示的唯一使用者可設定用途（Requirement 194）；成員列會同步此值，
+     * 但不得各自編輯。既有列保留 {@code UNSPECIFIED}。
+     */
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private String purpose = "UNSPECIFIED";
+
     /** 啟停以群組為單位；成員的 {@code active} 恆為 true，不個別啟停 */
     @Column(nullable = false)
     @Builder.Default
