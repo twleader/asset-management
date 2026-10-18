@@ -40,10 +40,12 @@ backend／BFF 不改，不需重跑其 AiFlow 測試；若實作過程發現必�
 
 ## 完成報告
 
-完成於2026-10-18（500.1–500.7）；500.8 的 collector 部署與真排程回讀於 merge 後進行，結果於下方補記。
+完成於2026-10-18（500.1–500.7）；500.8 的部署已做、真排程回讀尚待下一次排程（見文末「部署與待回讀」）。
 
 實作：`scripts/collect-srpp-ai-flow.py` 新增 `tool_label`／`build_tool_label`／`public_tool_text`，title 變成「公開工具呼叫：<標籤>」「公開工具回傳：<標籤>」，exec 另擷取內含工具；state 只存 `{label, names[:8], total}`，END 以 `call.get("label")` 取值，舊 state 無 label 維持泛稱；敏感字樣對齊 backend `SENSITIVE`（`re.I|re.S|re.A`），測試從 Java 原始碼解析比對防漂移。operation／eventId／stepId／UUID seed 不變。`test_existing_tw_full_canonical_envelopes_and_uuid_are_unchanged` 的三個 digest 已重算（09:05 `44036bbf…`、12:00 `d6a3f7ef…`、11:40 `24e0457d…`），runId 66a62e80-7ba1-54e1-9e9f-b0c22f2ebe55 與 `assertNotIn("period")` 保留，另有「剔除 title／summary 後與舊泛稱輸出逐位元相同」的結構等價斷言。`AiFlowView.vue` 節點 label 加 `width: 136`、`overflow: 'truncate'`，tooltip 仍含完整 title。`docs/ai-flow-observation.md` 已補「公開工具名稱」與重播／state 限制。backend、BFF、OpenAPI、DB、金融契約、SRPP 皆未改。
 
 驗證：collector 測試 128 項（原 98＋新 30）全過；`render-ai-flow-openapi-docs.rb --check`、`render-9090-openapi-docs.rb --check` 通過；`aiFlowView.contract.test.js` 通過、`npm run build` 成功。唯讀取樣（Store dry_run＋scan_codex，只印 title）最近 3 個 Codex run 共 200 個工具事件全部帶名稱，例如「公開工具呼叫：exec（內含 exec_command）」，envelope 皆通過 `validate_envelope`。feature 分支重建 frontend 後，運行中 `AiFlowView-*.js` 內確認含 `width:136` 與 `overflow:"truncate"`。
 
 已知取捨與既有問題：圖節點只有 150px，節點上看不全名稱，完整名稱在 tooltip、時間軸、慢速步驟表與節點明細；舊 run（如 10/16）已持久化的 immutable 事件仍顯示泛稱，只有部署後新解析的 rollout 行才帶名稱；內含工具名稱取自呼叫文字，非精確保證。前端 `npm test` 另有 `openApiContract.test.js` 一項既有紅燈（斷言金融 24 路／union 25，現況 26／27，Task 497 遺留），與本任務無關、未處理。spec 審查跑了兩輪；第二輪唯一 major（既有 digest 測試）修正後未再派第三輪，僅以 spec-check 與一致性 grep 複驗。
+
+部署與待回讀（2026-10-18）：feature `3fd6a502`、main no-ff merge `b53a1f62` 已 push。frontend 先從 feature 重建驗收，merge 後再從 main（`/Users/steven/Project/asset-management-main`）重建收斂；image SHA `72f667d5…`，運行中 `AiFlowView-*.js` 含 `width:136` 與 `overflow:"truncate"`，公網 Let's Encrypt 憑證指紋重建前後相同，effective 設定與 main 相同。collector：pending 為空，以 `launchctl kickstart -k` 重啟同一個 LaunchAgent（原 plist／token／main.env 不動、不刪 state、不 `--replay`），新 process 執行 main 的 script，`collector-receipt.json`／`sender-receipt.json` 回讀正常（queuedEvents 0、pending 0；errors 僅既有的 Claude metadata 項目）。當日（週日）沒有新排程 run，所以**尚未**看到線上新事件帶工具名稱；下一次真排程（週一台股 09:05）產生新 run 後，需在 ADMIN 頁面確認時間軸／慢速步驟表／節點明細顯示實際工具名稱、舊 run 仍為泛稱，500.8 的勾選待此回讀完成。
