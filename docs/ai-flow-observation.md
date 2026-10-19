@@ -20,6 +20,18 @@ Claude每日美股的exact ID與可讀來源尚未查證（`CLAUDE_US_SOURCE_UNV
 
 enqueue 原子寫入0600 spool後就退出，完全不HTTP。另一個 `scripts/send-srpp-ai-flow.py` process每輪最多3批，每批100事件、256KiB以內，單次網路timeout2秒、單輪5秒預算；失敗保留同一UUID/內容，下一輪重送。HTTP redirect不追蹤；ACK必須持久化後具有相同runId、全部eventIds與正確inserted/replayed計數，才刪pending。401、503、網路或磁碟故障只會留下紀錄缺口，不重跑金融流程。
 
+## Codex 模型服務容量不足
+
+`event_msg/task_complete` 一律先保留原有 generic `task-complete` terminal（`TERMINAL`／`UNKNOWN`、無 reasonCode）；它只表示公開執行已結束，並不表示報表成功、失敗或已寄送，`verifiedReportOutcome` 仍是 `UNCONFIRMED`。只有 `payload.error` 是物件且 `codex_error_info` **精確**為 `server_overloaded` 時，collector 才以該 generic terminal 為唯一 parent，追加一筆固定公開 child：`OBSERVATION`／`FAILED`／`MODEL_SERVICE_OVERLOADED`，標題「模型服務容量不足」，且只附 `APP_TERMINAL/task_complete` evidence。child 的 UUID 只由 parent event ID 與固定 public reason 建立；不保存 error message、未知 code、巢狀內容或其他 upstream 原文。
+
+未知、缺漏、非字串或非物件的 error 一律不產生 child。`FAILED` 在此只代表已觀測到模型服務暫時容量不足，不能推定 Gmail draft、MIME、金融計算或報告結果。若 parent sequence 已到協定整數上限，collector fail closed 而不追加 child。
+
+部署前已完整掃描、已 ACK 的舊 state 不會重建或改寫原 terminal。背景 collector 只在同一原始來源的 signature、完整 prefix hash、session identity 及 explicit `turn_id` 都重新驗證後，追加尚不存在的 child；不要求 final answer、`TRACE_COMPLETE`、工具配對或報表結果，因此 `complete=true`、`final=false`、`TRACE_PARTIAL` 的舊 run 也可安全補記。reconciliation state 只保存固定版本、進度 hash、opaque parent ID 與 `PENDING`／`COMPLETE` 或封閉 `BLOCKED_*` disposition，絕不保存 upstream error。`PENDING` 表示額度、期限或暫時 I/O 尚未完成；`BLOCKED_SOURCE_CHANGED`、`BLOCKED_IDENTITY_MISMATCH`、`BLOCKED_MALFORMED`、`BLOCKED_PARENT_MISMATCH`、`BLOCKED_SEQUENCE` 都不會重試為公開事件。
+
+未指定日期的背景輪巡，另有只保存 `{reportDate, createdAt, threadId}` 的 `terminal-failure-priority` round-robin cursor。它只在當日、最多25筆的既有 Codex record 中尋找可回補 state，每輪最多讀一筆 source，且不讀、寫或推進 `codex-discovery`。priority state/source 同受32MiB、全輪64MiB與前2.5秒限制；暫時 state/source I/O 或預算不足只留下 `PENDING`／空結果，不建立 trace coverage、envelope、pending 或 ACK。成功時才把 frozen 原事件加上新 child 交給原有 sender；ACK 已涵蓋 parent 時，spool 只會含 child。
+
+不得為補記刪除 state、使用 `--replay`、人工 POST `/api/srpp/ai-flow/events`，或讓 SRPP 報表排程等待觀測 API。正式重啟 collector 前，先以既有已登入 ADMIN 的唯讀 BFF detail 確認 generic parent 仍存在、是 `TERMINAL`／`UNKNOWN` 且含 `APP_TERMINAL/task_complete`；不符即停在 `BACKEND_PARENT_NOT_READY`。合併到 main 後才重啟同一 observer LaunchAgent，並以相同 detail 回讀「parent 不變、只多 child／edge」。
+
 ```bash
 # 僅唯讀評估真實歷史來源，不寫任何 state / spool / SRPP
 python3 scripts/collect-srpp-ai-flow.py --once --date 2026-10-08 --consumer Codex --dry-run

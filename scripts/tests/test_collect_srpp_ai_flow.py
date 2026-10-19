@@ -381,6 +381,312 @@ class SourceTests(Fixture):
         self.assertEqual("TRACE_PARTIAL", self.envelope()["events"][-1]["reasonCode"])
 
 
+class TerminalFailureTests(Fixture):
+    """Task 503：只接受固定 Codex code，且 legacy state 只新增 immutable child。"""
+    def terminal_rows(self, code="server_overloaded", *, final=True):
+        values = source_rows()
+        if not final:
+            values.pop(-2)
+        values[-1]["payload"]["error"] = {
+            "codex_error_info": code,
+            "message": "PRIVATE_CAPACITY_MESSAGE_CANARY authorization=secret",
+            "nested": {"raw": "PRIVATE_NESTED_CANARY"},
+        }
+        return values
+
+    def reset_source_state(self):
+        for path in (self.store.root / "sources").glob("codex-*.json"):
+            path.unlink()
+        self.collector = c.Collector(self.home, self.store)
+
+    def set_terminal_error(self, code="server_overloaded", *, final=True):
+        self.reset_source_state()
+        self.path.write_bytes(encode_rows(self.terminal_rows(code, final=final)))
+
+    @staticmethod
+    def terminal(events):
+        return next(event for event in events if event["stepId"] == "task-complete")
+
+    @staticmethod
+    def failure(events):
+        return [event for event in events if event["stepId"] == "task-complete-failure"]
+
+    def legacy_state(self, *, final=False):
+        self.set_terminal_error(final=final)
+        direct = self.envelope()
+        state_path = next((self.store.root / "sources").glob("codex-*.json"))
+        state = c.strict_json(state_path.read_bytes())
+        turn = state["turns"][TURN]
+        parent = self.terminal(turn["events"])
+        child = self.failure(turn["events"])[0]
+        turn["events"] = [event for event in turn["events"] if event["eventId"] != child["eventId"]]
+        turn["last"] = parent["eventId"]
+        state.pop("terminalFailureParserVersion", None)
+        state.pop(c.TERMINAL_FAILURE_STATE, None)
+        c.atomic_json(state_path, state)
+        return state_path, state, parent, direct
+
+    def legacy_ack(self, state):
+        turn = state["turns"][TURN]
+        all_events = turn["events"] + list(turn.get("assessments", {}).values())
+        c.atomic_json(self.store.root / "acks" / (turn["run"]["runId"] + ".json"),
+                      {"reportDate": turn["run"]["reportDate"], "runId": turn["run"]["runId"],
+                       "eventIds": sorted(event["eventId"] for event in all_events)})
+
+    @staticmethod
+    def refresh_legacy_source_identity(state, path):
+        metadata = path.stat()
+        state["cursor"] = metadata.st_size
+        state["prefixHash"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        state["sourceSignature"] = [metadata.st_dev, metadata.st_ino, metadata.st_size,
+                                    metadata.st_mtime_ns, metadata.st_ctime_ns]
+
+    def test_new_rollout_records_only_fixed_public_capacity_child(self):
+        self.set_terminal_error()
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        parent = self.terminal(value["events"])
+        children = self.failure(value["events"])
+        self.assertEqual(1, len(children))
+        child = children[0]
+        self.assertEqual({
+            "eventKind": "OBSERVATION", "stepId": "task-complete-failure", "status": "FAILED",
+            "operation": {"method": "LOCAL", "path": "artifact"}, "reasonCode": "MODEL_SERVICE_OVERLOADED",
+            "parentEventIds": [parent["eventId"]], "relation": "NEXT_OBSERVED",
+            "evidenceRefs": [{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}],
+            "reportedOutcome": None,
+        }.items(), {key: child[key] for key in ("eventKind", "stepId", "status", "operation", "reasonCode", "parentEventIds", "relation", "evidenceRefs", "reportedOutcome")}.items())
+        self.assertEqual(parent["sequence"] + 1, child["sequence"])
+        self.assertEqual(parent["occurredAt"], child["occurredAt"])
+        self.assertEqual(parent["attemptNo"], child["attemptNo"])
+        self.assertEqual(c.stable_id(parent["eventId"], "MODEL_SERVICE_OVERLOADED"), child["eventId"])
+        self.assertEqual(("TERMINAL", "UNKNOWN", None, None),
+                         (parent["eventKind"], parent["status"], parent["reasonCode"], parent["reportedOutcome"]))
+        visible = c.canonical(value).decode() + c.canonical(c.strict_json(next((self.store.root / "sources").glob("codex-*.json")).read_bytes())).decode()
+        self.assertNotIn("PRIVATE_CAPACITY_MESSAGE_CANARY", visible)
+        self.assertNotIn("PRIVATE_NESTED_CANARY", visible)
+        self.assertNotIn("server_overloaded", visible)
+
+    def test_unknown_or_malformed_error_keeps_only_generic_terminal(self):
+        cases = [None, "server_overloaded ", "other_provider_error", 42, ["server_overloaded"]]
+        for code in cases:
+            with self.subTest(code=code):
+                self.reset_source_state()
+                values = source_rows()
+                if code is None:
+                    values[-1]["payload"].pop("error", None)
+                elif isinstance(code, list):
+                    values[-1]["payload"]["error"] = code
+                else:
+                    values[-1]["payload"]["error"] = {"codex_error_info": code,
+                                                        "message": "PRIVATE_UNKNOWN_ERROR_CANARY"}
+                self.path.write_bytes(encode_rows(values))
+                value = self.envelope()
+                self.assertEqual([], self.failure(value["events"]))
+                self.assertEqual("UNKNOWN", self.terminal(value["events"])["status"])
+                self.assertNotIn("PRIVATE_UNKNOWN_ERROR_CANARY", c.canonical(value).decode())
+
+    def test_legacy_partial_ack_state_reconciles_once_and_queues_child_only(self):
+        state_path, state, parent, _ = self.legacy_state(final=False)
+        frozen_parent = c.canonical(parent)
+        self.legacy_ack(state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        value = self.envelope()
+        children = self.failure(value["events"])
+        self.assertEqual(1, len(children))
+        self.assertEqual("TRACE_PARTIAL", value["events"][-1]["reasonCode"])
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual(frozen_parent, c.canonical(self.terminal(updated["turns"][TURN]["events"])))
+        recon = updated[c.TERMINAL_FAILURE_STATE]
+        self.assertEqual((1, True, "COMPLETE"), (recon["version"], recon["complete"], recon["parents"][TURN]["disposition"]))
+        self.assertEqual({"cursor", "line", "prefixHash", "complete", "version", "parents"}, set(recon))
+        self.assertEqual(1, self.store.enqueue(value))
+        pending = [c.strict_json(path.read_bytes()) for path in (self.store.root / "pending").glob("*.json")]
+        self.assertEqual(1, len(pending))
+        self.assertEqual([children[0]["eventId"]], [event["eventId"] for event in pending[0]["events"]])
+        sent = s.send_round(self.store, c.DEFAULT_ENDPOINT, self.token(), transport=self.ack)
+        self.assertEqual((1, 0), (sent["insertedEvents"], sent["pendingBatches"]))
+        self.assertEqual(c.canonical(value), c.canonical(self.envelope()))
+
+    def test_legacy_reconciliation_marks_existing_known_child_and_unknown_code_complete(self):
+        state_path, state, parent, _ = self.legacy_state()
+        _, existing = c.terminal_failure_child({"error": {"codex_error_info": "server_overloaded"}}, parent)
+        state["turns"][TURN]["events"].append(existing)
+        c.atomic_json(state_path, state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        value = self.envelope()
+        self.assertEqual([existing["eventId"]], [item["eventId"] for item in self.failure(value["events"])])
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual("COMPLETE", updated[c.TERMINAL_FAILURE_STATE]["parents"][TURN]["disposition"])
+
+        self.reset_source_state()
+        self.path.write_bytes(encode_rows(self.terminal_rows("another_provider_code")))
+        self.envelope()
+        unknown_path = next((self.store.root / "sources").glob("codex-*.json"))
+        unknown_state = c.strict_json(unknown_path.read_bytes())
+        unknown_state.pop("terminalFailureParserVersion", None)
+        unknown_state.pop(c.TERMINAL_FAILURE_STATE, None)
+        c.atomic_json(unknown_path, unknown_state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        unknown = self.envelope()
+        self.assertEqual([], self.failure(unknown["events"]))
+        rebuilt = c.strict_json(unknown_path.read_bytes())
+        self.assertEqual("COMPLETE", rebuilt[c.TERMINAL_FAILURE_STATE]["parents"][TURN]["disposition"])
+        self.assertNotIn("another_provider_code", c.canonical(rebuilt).decode())
+
+    def test_legacy_reconciliation_blocks_sequence_without_rewriting_parent(self):
+        state_path, state, parent, _ = self.legacy_state()
+        turn = state["turns"][TURN]
+        parent["sequence"] = c.MAX_EVENT_SEQUENCE
+        c.atomic_json(state_path, state)
+        self.store.close()
+        self.store = c.Store(self.home / "state", TODAY)
+        self.collector = c.Collector(self.home, self.store)
+        value = self.envelope()
+        self.assertEqual([], self.failure(value["events"]))
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual("BLOCKED_SEQUENCE", updated[c.TERMINAL_FAILURE_STATE]["parents"][TURN]["disposition"])
+        self.assertEqual(c.MAX_EVENT_SEQUENCE, self.terminal(updated["turns"][TURN]["events"])["sequence"])
+
+    def test_legacy_reconciliation_fail_closed_for_source_identity_malformed_and_parent_boundaries(self):
+        for expected in ("BLOCKED_SOURCE_CHANGED", "BLOCKED_IDENTITY_MISMATCH", "BLOCKED_MALFORMED", "BLOCKED_PARENT_MISMATCH"):
+            with self.subTest(expected=expected):
+                state_path, state, _, _ = self.legacy_state()
+                if expected == "BLOCKED_SOURCE_CHANGED":
+                    state["sourceSignature"] = [0, 0, 0, 0, 0]
+                else:
+                    values = self.terminal_rows()
+                    if expected == "BLOCKED_IDENTITY_MISMATCH":
+                        values[0]["payload"]["id"] = "other-thread"
+                    elif expected == "BLOCKED_MALFORMED":
+                        values[-1]["payload"]["turn_id"] = []
+                    else:
+                        values[-1]["payload"]["turn_id"] = TURN2
+                    self.path.write_bytes(encode_rows(values))
+                    self.refresh_legacy_source_identity(state, self.path)
+                c.atomic_json(state_path, state)
+                self.store.close()
+                self.store = c.Store(self.home / "state", TODAY)
+                self.collector = c.Collector(self.home, self.store)
+                value = self.envelope()
+                self.assertEqual([], self.failure(value["events"]))
+                updated = c.strict_json(state_path.read_bytes())
+                self.assertEqual(expected, updated[c.TERMINAL_FAILURE_STATE]["parents"][TURN]["disposition"])
+                # 已封閉拒絕的 state 不可在下一輪又被選為回補候選。
+                self.assertEqual([], self.collector.terminal_failure_targets(updated))
+
+    def priority_record(self, thread, created_at, *, path=True):
+        trace = self.sessions / (thread + ".jsonl")
+        values = self.terminal_rows()
+        values[0]["payload"]["id"] = thread
+        trace.write_bytes(encode_rows(values))
+        record = {"thread": thread, "automation": "codex-srpp-09-30", "day": TODAY.isoformat(),
+                  "slot": "09:05", "path": str(trace)}
+        direct = self.collector.scan_codex(record, c.ReadBudget())
+        state_path = next((self.store.root / "sources").glob("codex-" + hashlib.sha256(thread.encode()).hexdigest() + ".json"))
+        state = c.strict_json(state_path.read_bytes())
+        turn = state["turns"][TURN]
+        child = self.failure(turn["events"])[0]
+        turn["events"] = [event for event in turn["events"] if event["eventId"] != child["eventId"]]
+        turn["last"] = self.terminal(turn["events"])["eventId"]
+        state.pop("terminalFailureParserVersion", None)
+        state.pop(c.TERMINAL_FAILURE_STATE, None)
+        c.atomic_json(state_path, state)
+        if not path:
+            record["path"] = None
+        return record, state_path, state, trace, direct
+
+    def seed_priority_sqlite(self, rows):
+        root = self.home / ".codex"
+        (root / "sqlite").mkdir(exist_ok=True)
+        with contextlib.closing(sqlite3.connect(root / "sqlite/codex-dev.db")) as app, contextlib.closing(sqlite3.connect(root / "state_5.sqlite")) as threads:
+            app.execute("CREATE TABLE automation_runs(thread_id TEXT PRIMARY KEY,automation_id TEXT,created_at INTEGER)")
+            threads.execute("CREATE TABLE threads(id TEXT PRIMARY KEY,rollout_path TEXT)")
+            for record, trace, created_at in rows:
+                app.execute("INSERT INTO automation_runs VALUES(?,?,?)", (record["thread"], record["automation"], created_at))
+                threads.execute("INSERT INTO threads VALUES(?,?)", (record["thread"], str(trace) if record["path"] else None))
+            app.commit()
+            threads.commit()
+
+    def test_today_priority_reconciles_acked_state_without_discovery_or_second_load(self):
+        created = int(dt.datetime.combine(TODAY, dt.time(9, 5), c.TAIPEI).timestamp() * 1000)
+        record, state_path, state, trace, _ = self.priority_record("priority-current", created)
+        self.legacy_ack(state)
+        self.seed_priority_sqlite([(record, trace, created)])
+        frozen_events = c.canonical(state["turns"][TURN]["events"])
+        original_load = self.store.load
+        with mock.patch.object(self.store, "load", wraps=original_load) as load:
+            result = self.collector.collect(consumer="Codex", budget=c.ReadBudget(runs=25))
+        state_name = "codex-" + hashlib.sha256(record["thread"].encode()).hexdigest()
+        self.assertFalse(any(call.args[0] == state_name for call in load.call_args_list))
+        self.assertEqual(1, result["queuedEvents"])
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual(frozen_events, c.canonical([event for event in updated["turns"][TURN]["events"] if event["stepId"] != "task-complete-failure"]))
+        priority = self.store.load(c.TERMINAL_FAILURE_PRIORITY)
+        self.assertEqual({"reportDate", "createdAt", "threadId"}, set(priority))
+        self.assertFalse((self.store.root / "sources" / "codex-discovery.json").exists())
+        pending = c.strict_json(next((self.store.root / "pending").glob("*.json")).read_bytes())
+        self.assertEqual(["task-complete-failure"], [event["stepId"] for event in pending["events"]])
+
+    def test_priority_round_robin_advances_after_temporary_source_io(self):
+        newest = int(dt.datetime.combine(TODAY, dt.time(9, 6), c.TAIPEI).timestamp() * 1000)
+        older = newest - 60_000
+        blocked, blocked_path, blocked_state, blocked_trace, _ = self.priority_record("priority-newest", newest, path=False)
+        usable, _, _, usable_trace, _ = self.priority_record("priority-older", older)
+        self.seed_priority_sqlite([(blocked, blocked_trace, newest), (usable, usable_trace, older)])
+        frozen = c.canonical(blocked_state["turns"][TURN]["events"])
+        first, first_thread = self.collector.collect_terminal_failure_priority(c.ReadBudget(runs=25))
+        self.assertEqual(([], "priority-newest"), (first, first_thread))
+        after_first = c.strict_json(blocked_path.read_bytes())
+        self.assertEqual(frozen, c.canonical(after_first["turns"][TURN]["events"]))
+        self.assertEqual("PENDING", after_first[c.TERMINAL_FAILURE_STATE]["parents"][TURN]["disposition"])
+        second, second_thread = self.collector.collect_terminal_failure_priority(c.ReadBudget(runs=25))
+        self.assertEqual("priority-older", second_thread)
+        self.assertEqual(["task-complete-failure"], [event["stepId"] for event in second[0]["events"] if event["stepId"] == "task-complete-failure"])
+        self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
+
+    def test_priority_state_budget_exhaustion_keeps_frozen_state_and_emits_nothing(self):
+        created = int(dt.datetime.combine(TODAY, dt.time(9, 5), c.TAIPEI).timestamp() * 1000)
+        record, state_path, _, trace, _ = self.priority_record("priority-budget", created)
+        self.seed_priority_sqlite([(record, trace, created)])
+        frozen = state_path.read_bytes()
+        budget = c.ReadBudget(remaining=128, per_run=128, runs=25)
+        envelopes, selected = self.collector.collect_terminal_failure_priority(budget)
+        self.assertEqual(([], None), (envelopes, selected))
+        self.assertLessEqual(budget.consumed, 128)
+        self.assertEqual(frozen, state_path.read_bytes())
+        self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
+        self.assertTrue((self.store.root / "sources" / (c.TERMINAL_FAILURE_PRIORITY + ".json")).exists())
+
+    def test_priority_state_unavailable_advances_only_its_own_cursor(self):
+        created = int(dt.datetime.combine(TODAY, dt.time(9, 5), c.TAIPEI).timestamp() * 1000)
+        record, state_path, state, trace, _ = self.priority_record("priority-state-unavailable", created)
+        self.seed_priority_sqlite([(record, trace, created)])
+        frozen = c.canonical(state["turns"][TURN]["events"])
+        name = "codex-" + hashlib.sha256(record["thread"].encode()).hexdigest()
+        original = self.store.load_bounded
+
+        def unavailable(target, *args, **kwargs):
+            if target == name:
+                return None, 0
+            return original(target, *args, **kwargs)
+
+        with mock.patch.object(self.store, "load_bounded", side_effect=unavailable):
+            envelopes, selected = self.collector.collect_terminal_failure_priority(c.ReadBudget(runs=25))
+        self.assertEqual(([], None), (envelopes, selected))
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual(frozen, c.canonical(updated["turns"][TURN]["events"]))
+        self.assertNotIn(c.TERMINAL_FAILURE_STATE, updated)
+        self.assertEqual(record["thread"], self.store.load(c.TERMINAL_FAILURE_PRIORITY)["threadId"])
+        self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
+
+
 START_GENERIC = "已觀測到工具開始；複合工具只記錄整批耗時。"
 END_GENERIC = "已觀測到工具輸出，不推定金融操作或報告成功。"
 TOOL_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
@@ -1004,6 +1310,7 @@ class MarketSessionDiscoveryTests(Fixture):
         self.store.purge()
         self.assertFalse(cursor_path.exists())
         self.assertTrue(c.managed_state_name("sources", "codex-discovery.json"))
+        self.assertTrue(c.managed_state_name("sources", "terminal-failure-priority.json"))
         self.assertFalse(c.managed_state_name("sources", "app-discovery.json"))
 
     def test_us_early_manual_run_and_cross_midnight_turn_keep_planned_slot_original_date(self):
@@ -1428,22 +1735,36 @@ class SpoolSenderTests(Fixture):
         value = self.envelope()
         source = value["run"]["sourceRunId"]
         events = []
-        for number in range(205):
+        for number in range(99):
             previous = [events[-1]["eventId"]] if events else []
             events.append(c.event(source, str(number), number, "step-" + str(number), "OBSERVATION", None,
                                   "公開觀測", "已觀測到時間接續。", parents=previous, relation="NEXT_OBSERVED" if previous else None))
+        parent = c.event(source, "task-complete", 99, "task-complete", "TERMINAL", None,
+                         "本輪執行結束", "只證明執行已結束，報告結果仍未確認。",
+                         parents=[events[-1]["eventId"]], relation="NEXT_OBSERVED",
+                         refs=[{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}])
+        _, child = c.terminal_failure_child({"error": {"codex_error_info": "server_overloaded"}}, parent)
+        self.assertIsNotNone(child)
+        events.extend((parent, child))
+        for number in range(101, 205):
+            events.append(c.event(source, str(number), number, "step-" + str(number), "OBSERVATION", None,
+                                  "公開觀測", "已觀測到時間接續。", parents=[events[-1]["eventId"]], relation="NEXT_OBSERVED"))
         value["events"] = events
         self.store.enqueue(value)
         persisted = set()
+        batches = []
         def atomic_dependency_server(_, __, body):
             batch = c.strict_json(body)
             ids = {item["eventId"] for item in batch["events"]}
             self.assertTrue(all(set(item["parentEventIds"]) <= persisted | ids for item in batch["events"]))
+            batches.append(ids)
             persisted.update(ids)
             return self.ack(_, __, body)
         result = s.send_round(self.store, c.DEFAULT_ENDPOINT, self.token(), transport=atomic_dependency_server)
         self.assertEqual(3, result["ackedBatches"])
         self.assertEqual(205, len(persisted))
+        self.assertLess(next(index for index, ids in enumerate(batches) if parent["eventId"] in ids),
+                        next(index for index, ids in enumerate(batches) if child["eventId"] in ids))
 
     def test_round_does_not_start_request_when_less_than_two_seconds_remain(self):
         value = self.envelope()

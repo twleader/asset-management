@@ -168,6 +168,21 @@ class AiFlowRepositoryPostgresTest {
         var result=append(mixed);assertThat(result.status()).isEqualTo(201);assertThat(result.ack().inserted()).isEqualTo(1);assertThat(result.ack().replayed()).isEqualTo(1);assertThat(count("ai_flow_event")).isEqualTo(7);
         assertThat(service.detail(RUN.toString(),query(DATE.toString())).run().traceCoverage()).isEqualTo("FULL_OBSERVED");
     }
+    @Test void childOnlyModelCapacityFailurePreservesGenericTerminalCanonicalPayload(){
+        List<Event> original=complete();assertThat(append(original).status()).isEqualTo(201);
+        Event parent=original.get(4);
+        var before=jdbc.queryForList("SELECT event_id,payload_json,payload_sha256 FROM ai_flow_event WHERE owner_user_id=7 AND run_id=? AND event_id=?",RUN,UUID.fromString(parent.eventId()));
+        Event child=new Event(id(7),parent.sequence()+1,"task-complete-failure","OBSERVATION","FAILED",parent.occurredAt(),
+                "模型服務容量不足","已觀測到模型服務暫時容量不足；報告結果尚未確認。",new Operation("LOCAL","artifact"),"MODEL_SERVICE_OVERLOADED",parent.attemptNo(),
+                List.of(parent.eventId()),"NEXT_OBSERVED",List.of(new Evidence("APP_TERMINAL","task_complete",null)),null,null);
+        var appended=append(List.of(child));assertThat(appended.status()).isEqualTo(201);assertThat(appended.ack().inserted()).isEqualTo(1);
+        assertThat(count("ai_flow_event")).isEqualTo(7);
+        assertThat(jdbc.queryForList("SELECT event_id,payload_json,payload_sha256 FROM ai_flow_event WHERE owner_user_id=7 AND run_id=? AND event_id=?",RUN,UUID.fromString(parent.eventId()))).isEqualTo(before);
+        var detail=service.detail(RUN.toString(),query(DATE.toString()));
+        assertThat(detail.run().verifiedReportOutcome()).isEqualTo("UNCONFIRMED");
+        assertThat(detail.nodes()).anySatisfy(node->{assertThat(node.eventId()).isEqualTo(child.eventId());assertThat(node.eventKind()).isEqualTo("OBSERVATION");assertThat(node.status()).isEqualTo("FAILED");assertThat(node.reasonCode()).isEqualTo("MODEL_SERVICE_OVERLOADED");assertThat(node.parentEventIds()).containsExactly(parent.eventId());});
+        assertThat(detail.edges()).anySatisfy(edge->{assertThat(edge.source()).isEqualTo(parent.eventId());assertThat(edge.target()).isEqualTo(child.eventId());assertThat(edge.relation()).isEqualTo("NEXT_OBSERVED");});
+    }
     @Test void metadataAndEventConflictRollBackEveryNewEventAndNoOverwrite(){
         append(complete());ObjectNode altered=raw(List.of(event(7,"extra","OBSERVATION",null,List.of(),null),complete().getFirst()));
         ((ObjectNode)altered.path("events").get(1)).put("title","不同內容");
