@@ -53,6 +53,18 @@ REDACTED = "[REDACTED]"
 REDACTED_COUNT_MAX = 100000
 TOOL_CALL_KEYS = {"name", "innerNames", "parameters", "parametersChars", "truncated", "redactedCount"}
 TOOL_CALL_OPTIONAL_KEYS = TOOL_CALL_KEYS | {"sourceTruncated"}
+MAX_EVENT_SEQUENCE = 2147483647
+TERMINAL_FAILURE_CODEX_INFO = "server_overloaded"
+TERMINAL_FAILURE_REASON = "MODEL_SERVICE_OVERLOADED"
+TERMINAL_FAILURE_STATE = "terminalFailureReconciliation"
+TERMINAL_FAILURE_PRIORITY = "terminal-failure-priority"
+TERMINAL_FAILURE_VERSION = 1
+TERMINAL_FAILURE_PENDING = "PENDING"
+TERMINAL_FAILURE_COMPLETE = "COMPLETE"
+TERMINAL_FAILURE_BLOCKED = {
+    "BLOCKED_SOURCE_CHANGED", "BLOCKED_IDENTITY_MISMATCH", "BLOCKED_MALFORMED",
+    "BLOCKED_PARENT_MISMATCH", "BLOCKED_SEQUENCE",
+}
 
 # 只在 key 的最後連續段符合這些具名秘密時遮蔽；例如 X-AI-Flow-Token
 # 命中末段 token，secret_santa 與 max_tokens 則不命中。
@@ -435,6 +447,46 @@ def event(source_id: str, identity: str, sequence: int, step: str, kind: str,
             "relation": relation, "evidenceRefs": list(refs), "reportedOutcome": outcome}
 
 
+def generic_task_complete(item: Any) -> bool:
+    """只接受既有、不可變 generic task-complete terminal 作為補記 child 的 parent。"""
+    if not isinstance(item, dict):
+        return False
+    if (item.get("stepId"), item.get("eventKind"), item.get("status"), item.get("reasonCode"),
+            item.get("reportedOutcome")) != ("task-complete", "TERMINAL", "UNKNOWN", None, None):
+        return False
+    try:
+        uuid.UUID(item.get("eventId"))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    if type(item.get("sequence")) is not int or not 0 <= item["sequence"] <= MAX_EVENT_SEQUENCE:
+        return False
+    if type(item.get("attemptNo")) is not int or not 1 <= item["attemptNo"] <= MAX_EVENT_SEQUENCE:
+        return False
+    return item.get("evidenceRefs") == [{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}]
+
+
+def terminal_failure_child(payload: Any, parent: Any) -> tuple[str | None, dict | None]:
+    """將唯一白名單 Codex terminal error 投影成 immutable child。
+
+    回傳的狀態只會是 fixed public code；絕不把 upstream error 本身帶進 event、UUID 或 state。
+    """
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict) or error.get("codex_error_info") != TERMINAL_FAILURE_CODEX_INFO:
+        return None, None
+    if not generic_task_complete(parent):
+        return "BLOCKED_PARENT_MISMATCH", None
+    if parent["sequence"] >= MAX_EVENT_SEQUENCE:
+        return "BLOCKED_SEQUENCE", None
+    return TERMINAL_FAILURE_COMPLETE, event(
+        parent["eventId"], TERMINAL_FAILURE_REASON, parent["sequence"] + 1,
+        "task-complete-failure", "OBSERVATION", parent["occurredAt"],
+        "模型服務容量不足", "已觀測到模型服務暫時容量不足；報告結果尚未確認。",
+        status="FAILED", operation={"method": "LOCAL", "path": "artifact"},
+        parents=[parent["eventId"]], relation="NEXT_OBSERVED", reason=TERMINAL_FAILURE_REASON,
+        refs=[{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}],
+        outcome=None, attempt=parent["attemptNo"])
+
+
 def coverage(source_id: str, cursor: int, size: int, digest: str, reason: str) -> dict:
     if not 0 <= cursor <= size <= 2147483647:
         raise ObservationError("SOURCE_TOO_LARGE")
@@ -634,9 +686,14 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
     timestamp = row.get("timestamp")
     if row_type == "event_msg" and kind == "task_complete":
         turn["complete"] = True
-        append_event(turn, event(source_id, f"line:{line}:task_complete", line, "task-complete", "TERMINAL",
-                     public_time(payload.get("completed_at")) or timestamp, "本輪執行結束", "只證明執行已結束，報告結果仍未確認。",
-                     refs=[{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}], attempt=attempt))
+        parent = event(source_id, f"line:{line}:task_complete", line, "task-complete", "TERMINAL",
+                       public_time(payload.get("completed_at")) or timestamp, "本輪執行結束", "只證明執行已結束，報告結果仍未確認。",
+                       refs=[{"role": "APP_TERMINAL", "id": "task_complete", "hash": None}], attempt=attempt)
+        append_event(turn, parent)
+        _, child = terminal_failure_child(payload, parent)
+        if child is not None:
+            # child 的 parent／relation 是固定契約，不能讓 generic chronology 覆寫它。
+            append_event(turn, child, chronology=False)
         state["activeTurn"] = None
     elif row_type == "response_item" and kind in {"function_call", "custom_tool_call"}:
         call_id = payload.get("call_id")
@@ -741,6 +798,39 @@ class Store:
             return value if isinstance(value, dict) else {}
         except (OSError, ObservationError):
             raise ObservationError("STATE_UNAVAILABLE")
+
+    def load_bounded(self, name: str, budget: ReadBudget, *, maximum: int, deadline: float) -> tuple[dict | None, int]:
+        """嚴格計量 priority state；None 代表暫時不可讀或額度不足，絕不猜測內容。
+
+        此路徑刻意不呼叫 load()：一般 load 的64MiB上限不適合 priority 的每候選32MiB
+        共同額度，也會讓同一 state 在選取與 reconciliation 被讀兩次。
+        """
+        if self.dry_run:
+            value = self.memory.get(name, {})
+            return (value if isinstance(value, dict) else None), 0
+        path = self.root / "sources" / (name + ".json")
+        try:
+            with open_readonly(path, self.root) as stream:
+                size = os.fstat(stream.fileno()).st_size
+                if size > maximum or size > budget.remaining or not budget.available() or time.monotonic() >= deadline:
+                    return None, 0
+                chunks: list[bytes] = []
+                remaining = size
+                while remaining:
+                    if not budget.available() or time.monotonic() >= deadline:
+                        return None, 0
+                    chunk = stream.read(min(1024 * 1024, remaining, budget.remaining))
+                    if not chunk:
+                        return None, 0
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+                    budget.charge(len(chunk))
+                value = strict_json(b"".join(chunks))
+                return (value if isinstance(value, dict) else None), size
+        except FileNotFoundError:
+            return {}, 0
+        except (OSError, ObservationError, ValueError, TypeError):
+            return None, 0
 
     def close(self):
         for iterator in self.purge_iterators.values():
@@ -852,7 +942,7 @@ class Store:
 def managed_state_name(section: str, name: str) -> bool:
     uuid_pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
     patterns = {
-        "sources": r"(?:codex-[0-9a-f]{64}|claude-meta-[0-9a-f]{64}|codex-discovery|claude-discovery|emission-cursor)\.json",
+        "sources": r"(?:codex-[0-9a-f]{64}|claude-meta-[0-9a-f]{64}|codex-discovery|claude-discovery|emission-cursor|terminal-failure-priority)\.json",
         "pending": uuid_pattern + r"-[0-9]{10}-[0-9a-f]{64}\.json",
         "acks": uuid_pattern + r"\.json",
         "receipts": r"(?:collector|sender)-receipt\.json",
@@ -1099,6 +1189,338 @@ class Collector:
             self.store.save("codex-discovery", {"reportDate": self.store.today.isoformat(),
                                                "createdAt": record["discoveryCreatedAt"], "threadId": record["thread"]})
 
+    @staticmethod
+    def _terminal_failure_section(state: dict, *, create=False) -> dict | None:
+        value = state.get(TERMINAL_FAILURE_STATE)
+        if value is None:
+            if not create:
+                return None
+            value = {"version": TERMINAL_FAILURE_VERSION, "cursor": 0, "line": 0,
+                     "prefixHash": hashlib.sha256(b"").hexdigest(), "complete": False, "parents": {}}
+            state[TERMINAL_FAILURE_STATE] = value
+        if not isinstance(value, dict) or set(value) != {"version", "cursor", "line", "prefixHash", "complete", "parents"}:
+            return None
+        if value.get("version") != TERMINAL_FAILURE_VERSION or type(value.get("cursor")) is not int or value["cursor"] < 0:
+            return None
+        if type(value.get("line")) is not int or value["line"] < 0 or not isinstance(value.get("prefixHash"), str):
+            return None
+        if re.fullmatch(r"[0-9a-f]{64}", value["prefixHash"]) is None or type(value.get("complete")) is not bool or not isinstance(value.get("parents"), dict):
+            return None
+        for turn_id, parent in value["parents"].items():
+            if not isinstance(turn_id, str) or OPAQUE.fullmatch(turn_id) is None or not isinstance(parent, dict):
+                return None
+            if set(parent) != {"parentEventId", "disposition"} or parent.get("disposition") not in (TERMINAL_FAILURE_PENDING, TERMINAL_FAILURE_COMPLETE, *TERMINAL_FAILURE_BLOCKED):
+                return None
+            try:
+                uuid.UUID(parent.get("parentEventId"))
+            except (ValueError, TypeError, AttributeError):
+                return None
+        return value
+
+    def terminal_failure_targets(self, state: dict) -> list[tuple[str, dict]] | None:
+        """找出尚可補記的 frozen generic parents；不在此處寫 state 或重建任何事件。"""
+        # 新 collector 已在逐行解析時完成同一白名單判斷；只有部署前 state 才需要回補。
+        if state.get("terminalFailureParserVersion") == TERMINAL_FAILURE_VERSION:
+            return []
+        section = self._terminal_failure_section(state)
+        if TERMINAL_FAILURE_STATE in state and section is None:
+            return None
+        turns = state.get("turns")
+        if not isinstance(turns, dict):
+            return []
+        result: list[tuple[str, dict]] = []
+        parents = section["parents"] if section is not None else {}
+        for turn_id, turn in turns.items():
+            if not isinstance(turn_id, str) or OPAQUE.fullmatch(turn_id) is None or not isinstance(turn, dict):
+                continue
+            events = turn.get("events")
+            if not isinstance(events, list):
+                continue
+            generic = [item for item in events if generic_task_complete(item)]
+            if len(generic) != 1:
+                continue
+            parent = generic[0]
+            old = parents.get(turn_id)
+            if isinstance(old, dict) and old.get("disposition") in (TERMINAL_FAILURE_COMPLETE, *TERMINAL_FAILURE_BLOCKED):
+                continue
+            # 已有同 stable ID 的 child 仍要完整重驗來源後才可標為 COMPLETE；
+            # 否則手動/毀損 state 可能把未驗證 event 偽裝成已完成回補。
+            result.append((turn_id, parent))
+        return result
+
+    @staticmethod
+    def _set_terminal_failure_disposition(section: dict, turn_id: str, parent: dict, disposition: str):
+        section["parents"][turn_id] = {"parentEventId": parent["eventId"], "disposition": disposition}
+
+    @staticmethod
+    def _set_terminal_failure_progress(section: dict, cursor: int, line: int, digest: str, complete: bool):
+        section.update({"cursor": cursor, "line": line, "prefixHash": digest, "complete": complete})
+
+    @staticmethod
+    def _priority_available(budget: ReadBudget, deadline: float) -> bool:
+        return budget.available() and time.monotonic() < deadline
+
+    def reconcile_terminal_failures(self, record: dict, state: dict, budget: ReadBudget, *,
+                                    maximum: int | None = None, deadline: float | None = None) -> tuple[list[str], bool]:
+        """對舊的完整 state 做唯讀 source revalidation，僅 append 新 public child。
+
+        來源內的錯誤物件只存在於此函式的短暫記憶體；state 只保存固定 disposition。
+        """
+        targets = self.terminal_failure_targets(state)
+        if not targets:
+            return [], False
+        section = self._terminal_failure_section(state, create=True)
+        if section is None:
+            return [], False
+        changed = False
+        valid: list[tuple[str, dict]] = []
+        for turn_id, parent in targets:
+            existing = section["parents"].get(turn_id)
+            if existing is not None and existing.get("parentEventId") != parent["eventId"]:
+                self._set_terminal_failure_disposition(section, turn_id, parent, "BLOCKED_PARENT_MISMATCH")
+                changed = True
+                continue
+            turn = state.get("turns", {}).get(turn_id, {})
+            run = turn.get("run") if isinstance(turn, dict) else None
+            if not isinstance(run, dict) or run.get("sourceRunId") != record["thread"] + ":" + turn_id:
+                self._set_terminal_failure_disposition(section, turn_id, parent, "BLOCKED_IDENTITY_MISMATCH")
+                changed = True
+                continue
+            valid.append((turn_id, parent))
+        if not valid:
+            return [], changed
+        deadline = deadline if deadline is not None else budget.start + budget.seconds
+        empty_hash = hashlib.sha256(b"").hexdigest()
+
+        def pending(cursor=0, line=0, digest=empty_hash):
+            nonlocal changed
+            for turn_id, parent in valid:
+                self._set_terminal_failure_disposition(section, turn_id, parent, TERMINAL_FAILURE_PENDING)
+            self._set_terminal_failure_progress(section, cursor, line, digest, False)
+            changed = True
+
+        def blocked(code: str, *, cursor=0, line=0, digest=empty_hash):
+            nonlocal changed
+            for turn_id, parent in valid:
+                self._set_terminal_failure_disposition(section, turn_id, parent, code)
+            self._set_terminal_failure_progress(section, cursor, line, digest, True)
+            changed = True
+
+        path = pathlib.Path(record["path"]) if record.get("path") else None
+        if path is None or not self._priority_available(budget, deadline):
+            pending()
+            return [], changed
+        root = self.home / ".codex/sessions"
+        try:
+            with open_readonly(path, root) as stream:
+                source_stat = os.fstat(stream.fileno())
+                size = source_stat.st_size
+                signature = [source_stat.st_dev, source_stat.st_ino, size, source_stat.st_mtime_ns, source_stat.st_ctime_ns]
+                expected_signature = state.get("sourceSignature")
+                cursor = state.get("cursor")
+                expected_hash = state.get("prefixHash")
+                if (state.get("sourceChanged") or expected_signature != signature or type(cursor) is not int or cursor != size
+                        or not isinstance(expected_hash, str) or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None):
+                    blocked("BLOCKED_SOURCE_CHANGED")
+                    return [], changed
+                limit = min(maximum if maximum is not None else budget.per_run, budget.remaining)
+                if size > limit or size > MAX_EVENT_SEQUENCE:
+                    pending()
+                    return [], changed
+                digest = hashlib.sha256()
+                offset, line = 0, 0
+                saw_session = False
+                identity_mismatch = False
+                malformed = False
+                terminal_rows: dict[str, dict] = {}
+                buffered: list[bytes] = []
+                while offset < size:
+                    if not self._priority_available(budget, deadline) or offset >= limit:
+                        pending(offset, line, digest.hexdigest())
+                        return [], changed
+                    amount = min(1024 * 1024, size - offset, limit - offset, budget.remaining)
+                    if amount <= 0:
+                        pending(offset, line, digest.hexdigest())
+                        return [], changed
+                    chunk = stream.readline(amount)
+                    if not chunk:
+                        malformed = True
+                        break
+                    digest.update(chunk)
+                    offset += len(chunk)
+                    budget.charge(len(chunk))
+                    buffered.append(chunk)
+                    if not self._priority_available(budget, deadline):
+                        pending(offset, line, digest.hexdigest())
+                        return [], changed
+                    if not chunk.endswith(b"\n"):
+                        if offset < size:
+                            continue
+                        malformed = True
+                        break
+                    line += 1
+                    raw = b"".join(buffered)
+                    buffered.clear()
+                    try:
+                        row = strict_json(raw)
+                    except (ObservationError, TypeError, ValueError, AttributeError):
+                        malformed = True
+                        break
+                    if not isinstance(row, dict):
+                        malformed = True
+                        break
+                    payload = row.get("payload")
+                    if row.get("type") == "session_meta":
+                        saw_session = True
+                        if not isinstance(payload, dict) or payload.get("id") != record["thread"]:
+                            identity_mismatch = True
+                    elif row.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "task_complete":
+                        explicit_turn = payload.get("turn_id")
+                        if isinstance(explicit_turn, str) and OPAQUE.fullmatch(explicit_turn) is not None:
+                            if explicit_turn in terminal_rows:
+                                malformed = True
+                                break
+                            terminal_rows[explicit_turn] = payload
+                        else:
+                            malformed = True
+                            break
+                if malformed or buffered:
+                    blocked("BLOCKED_MALFORMED", cursor=offset, line=line, digest=digest.hexdigest())
+                    return [], changed
+                if not saw_session:
+                    # Only a matching session_meta proves this source belongs to the persisted thread.
+                    identity_mismatch = True
+                if identity_mismatch:
+                    blocked("BLOCKED_IDENTITY_MISMATCH", cursor=offset, line=line, digest=digest.hexdigest())
+                    return [], changed
+                if offset != size or digest.hexdigest() != expected_hash:
+                    blocked("BLOCKED_SOURCE_CHANGED", cursor=offset, line=line, digest=digest.hexdigest())
+                    return [], changed
+                affected: list[str] = []
+                for turn_id, parent in valid:
+                    payload = terminal_rows.get(turn_id)
+                    if payload is None:
+                        self._set_terminal_failure_disposition(section, turn_id, parent, "BLOCKED_PARENT_MISMATCH")
+                        changed = True
+                        continue
+                    disposition, child = terminal_failure_child(payload, parent)
+                    turn = state["turns"][turn_id]
+                    existing = [item for item in turn["events"]
+                                if isinstance(item, dict) and item.get("eventId") == stable_id(parent["eventId"], TERMINAL_FAILURE_REASON)]
+                    if disposition is None:
+                        # 來源未命中白名單卻已有固定 child，不能把 state 內的 event 當成來源證據。
+                        self._set_terminal_failure_disposition(section, turn_id, parent,
+                                                               "BLOCKED_PARENT_MISMATCH" if existing else TERMINAL_FAILURE_COMPLETE)
+                    elif child is None:
+                        self._set_terminal_failure_disposition(section, turn_id, parent, disposition)
+                    else:
+                        if not existing:
+                            append_event(turn, child, chronology=False)
+                            affected.append(turn_id)
+                            self._set_terminal_failure_disposition(section, turn_id, parent, TERMINAL_FAILURE_COMPLETE)
+                        elif len(existing) == 1 and existing[0] == child:
+                            # 上一輪已 append 但尚未寫入 COMPLETE 的安全續跑情境。
+                            self._set_terminal_failure_disposition(section, turn_id, parent, TERMINAL_FAILURE_COMPLETE)
+                        else:
+                            # 同 UUID 但內容不同會在 ingress 形成 immutable conflict，不能默認成功。
+                            self._set_terminal_failure_disposition(section, turn_id, parent, "BLOCKED_PARENT_MISMATCH")
+                    changed = True
+                self._set_terminal_failure_progress(section, offset, line, digest.hexdigest(), True)
+                # 完整來源已以本版白名單重新判定，後續 fast path 不再重讀來源。
+                state["terminalFailureParserVersion"] = TERMINAL_FAILURE_VERSION
+                return affected, changed
+        except (OSError, ObservationError):
+            pending()
+            return [], changed
+
+    @staticmethod
+    def frozen_terminal_failure_envelopes(state: dict, turn_ids: list[str]) -> list[dict]:
+        result = []
+        for turn_id in turn_ids:
+            turn = state.get("turns", {}).get(turn_id)
+            if not isinstance(turn, dict) or not isinstance(turn.get("run"), dict) or not isinstance(turn.get("events"), list):
+                continue
+            assessments = turn.get("assessments", {})
+            preserved = list(assessments.values()) if isinstance(assessments, dict) else []
+            result.append({"schemaVersion": 1, "run": turn["run"],
+                           "events": sorted(turn["events"] + preserved, key=lambda item: (item["sequence"], item["eventId"]))})
+        return result
+
+    def terminal_failure_priority_records(self, budget: ReadBudget, deadline: float) -> list[dict]:
+        """當日 SQL 候選採獨立 round-robin；永不碰 codex-discovery。"""
+        priority, _ = self.store.load_bounded(TERMINAL_FAILURE_PRIORITY, budget, maximum=64 * 1024, deadline=deadline)
+        priority = priority if isinstance(priority, dict) else {}
+        today = self.store.today
+        start = int(dt.datetime.combine(today, dt.time(), TAIPEI).timestamp() * 1000)
+        end = int(dt.datetime.combine(today + dt.timedelta(days=1), dt.time(), TAIPEI).timestamp() * 1000)
+        created, thread = priority.get("createdAt"), priority.get("threadId")
+        has_cursor = (priority.get("reportDate") == today.isoformat() and type(created) is int and start <= created < end
+                      and isinstance(thread, str) and OPAQUE.fullmatch(thread) is not None)
+        try:
+            root = self.home / ".codex"
+            placeholders = ",".join("?" for _ in CODEX_TASKS)
+            select = f"SELECT thread_id, automation_id, created_at FROM automation_runs WHERE automation_id IN ({placeholders}) AND created_at >= ? AND created_at < ?"
+            suffix = " ORDER BY created_at DESC, thread_id LIMIT 25"
+            with readonly_db(root / "sqlite/codex-dev.db", root, "automation_runs", {"thread_id", "automation_id", "created_at"}) as app:
+                parameters = (*CODEX_TASKS, start, end)
+                if has_cursor:
+                    rows = app.execute(select + " AND (created_at < ? OR (created_at = ? AND thread_id > ?))" + suffix,
+                                       (*parameters, created, created, thread)).fetchall()
+                    if not rows:
+                        rows = app.execute(select + suffix, parameters).fetchall()
+                else:
+                    rows = app.execute(select + suffix, parameters).fetchall()
+            with readonly_db(root / "state_5.sqlite", root, "threads", {"id", "rollout_path"}) as threads:
+                result = []
+                for thread_id, automation, created_at in rows:
+                    if not isinstance(thread_id, str) or OPAQUE.fullmatch(thread_id) is None or type(created_at) is not int:
+                        continue
+                    match = threads.execute("SELECT rollout_path FROM threads WHERE id=?", (thread_id,)).fetchone()
+                    result.append({"thread": thread_id, "automation": automation, "day": today.isoformat(),
+                                   "slot": CODEX_TASKS[automation], "path": match[0] if match else None,
+                                   "priorityCreatedAt": created_at})
+                return result
+        except (sqlite3.Error, OSError, ObservationError):
+            self.note_error("TERMINAL_FAILURE_PRIORITY_UNAVAILABLE")
+            return []
+
+    def advance_terminal_failure_priority(self, record: dict):
+        if not self.store.dry_run:
+            self.store.save(TERMINAL_FAILURE_PRIORITY, {"reportDate": self.store.today.isoformat(),
+                                                         "createdAt": record["priorityCreatedAt"], "threadId": record["thread"]})
+
+    def collect_terminal_failure_priority(self, budget: ReadBudget) -> tuple[list[dict], str | None]:
+        """只處理一筆當日 source；暫時問題回空，不產生 coverage／envelope／pending。"""
+        if budget.runs <= 1:
+            return [], None
+        deadline = min(budget.start + 2.5, budget.start + budget.seconds)
+        if not self._priority_available(budget, deadline):
+            return [], None
+        for record in self.terminal_failure_priority_records(budget, deadline):
+            if not self._priority_available(budget, deadline):
+                break
+            name = "codex-" + hashlib.sha256(record["thread"].encode()).hexdigest()
+            before = budget.consumed
+            candidate_limit = min(32 * 1024 * 1024, budget.per_run)
+            state, loaded = self.store.load_bounded(name, budget, maximum=candidate_limit, deadline=deadline)
+            if state is None:
+                # 實際 state 嘗試（含暫時 I/O）前進 cursor；若時間／額度尚未讀到任何 byte 則停止。
+                if budget.consumed == before and not self._priority_available(budget, deadline):
+                    break
+                self.advance_terminal_failure_priority(record)
+                continue
+            targets = self.terminal_failure_targets(state)
+            if not targets:
+                self.advance_terminal_failure_priority(record)
+                continue
+            maximum = candidate_limit - loaded
+            affected, changed = self.reconcile_terminal_failures(record, state, budget, maximum=maximum, deadline=deadline)
+            if changed:
+                self.store.save(name, state)
+            self.advance_terminal_failure_priority(record)
+            return self.frozen_terminal_failure_envelopes(state, affected), record["thread"]
+        return [], None
+
     def scan_codex(self, record: dict, budget: ReadBudget) -> list[dict]:
         name = "codex-" + hashlib.sha256(record["thread"].encode()).hexdigest()
         state = self.store.load(name)
@@ -1122,7 +1544,17 @@ class Collector:
                 key = str(path)
                 # 此stat僅是已掃bytes的完整性cache，不是run身份／日期／app聯結。
                 # ctime/inode也必須一致；同mtime的前綴改寫仍重新hash並永久partial。
+                if (state.get("terminalFailureParserVersion") != TERMINAL_FAILURE_VERSION and state["cursor"] == size
+                        and state["turns"] and state.get("sourceSignature") != signature):
+                    # 來源漂移會由既有 scan 路徑標為 partial；同時把 legacy 補記明確封閉，
+                    # 避免它在未來背景 priority 中被誤當成可安全回補。
+                    _, reconciled = self.reconcile_terminal_failures(record, state, budget, maximum=per_run)
+                    if reconciled:
+                        self.store.save(name, state)
                 if state.get("sourceSignature") == signature and state["cursor"] == size and not state.get("sourceChanged") and state["turns"]:
+                    _, reconciled = self.reconcile_terminal_failures(record, state, budget, maximum=per_run)
+                    if reconciled:
+                        self.store.save(name, state)
                     return self.envelopes(state, size)
                 target = min(state["cursor"], size)
                 verifier = self.verifiers.get(key)
@@ -1194,6 +1626,7 @@ class Collector:
                     state["turns"] = {}
                     self.note_error("CODEX_IDENTITY_MISMATCH")
                     return self.unavailable_codex(record, state, "UNLINKED")
+                state["terminalFailureParserVersion"] = TERMINAL_FAILURE_VERSION
                 self.store.save(name, state)
                 if not state["turns"]:
                     return self.unavailable_codex(record, state, "RAW_TRACE_UNAVAILABLE")
@@ -1358,9 +1791,19 @@ class Collector:
         purged = self.store.purge()
         envelopes = []
         if consumer in (None, "Codex"):
-            for record in self.codex_runs(day, budget.runs):
+            priority_thread = None
+            discovery_limit = budget.runs
+            if day is None and budget.runs > 1:
+                # 當日舊 ACK 回補最多消耗一筆 source；實際選中時才佔用 discovery 名額。
+                priority_envelopes, priority_thread = self.collect_terminal_failure_priority(budget)
+                envelopes.extend(priority_envelopes)
+                if priority_thread is not None:
+                    discovery_limit -= 1
+            for record in self.codex_runs(day, discovery_limit):
                 if not budget.available():
                     break
+                if record["thread"] == priority_thread:
+                    continue
                 envelopes.extend(self.scan_codex(record, budget))
                 self.advance_codex_discovery(record)
         if consumer in (None, "Claude") and budget.available():
