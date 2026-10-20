@@ -25,10 +25,32 @@ class AiFlowBffServiceTest {
  private final BusinessUserClient users=mock(BusinessUserClient.class);
  private AiFlowBffService service(ExchangeFunction exchange){return new AiFlowBffService(users,WebClient.builder().exchangeFunction(exchange).build(),credentials,AiFlowFixtures.CLOCK);}
  private ClientResponse response(int status,Object dto){return ClientResponse.create(HttpStatusCode.valueOf(status)).header(HttpHeaders.CONTENT_TYPE,"application/json").body(new String(AiFlowFixtures.bytes(dto),java.nio.charset.StandardCharsets.UTF_8)).build();}
+ private AiFlowDtos.ChoiceSetSummary choiceSummary(AiFlowDtos.ChoiceSet choices){
+  return new AiFlowDtos.ChoiceSetSummary(choices.title(),choices.selectedOptionId(),choices.options().stream()
+   .map(option->new AiFlowDtos.ChoiceOptionSummary(option.optionId(),option.label(),option.toolName(),option.optionId().equals(choices.selectedOptionId()))).toList());
+ }
+ private ObjectNode projectionWithChoice(AiFlowDtos.ChoiceSet choices,String eventKind,AiFlowDtos.ChoiceSetSummary summary){
+  try {
+   var operation=new AiFlowDtos.Operation("GET","/api/assets/{id}");
+   ObjectNode detail=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowOperationContractTest.projection(operation,operation)));
+   ObjectNode node=(ObjectNode)detail.path("nodes").get(0);
+   node.put("eventKind",eventKind);node.set("choiceSetSummary",AiFlowProtocol.JSON.valueToTree(summary));
+   return detail;
+  } catch(Exception invalid){throw new AssertionError(invalid);}
+ }
  @Test void query_reject_and_auth_failure_have_zero_owner_or_upstream_IO(){
   var s=service(r->Mono.error(new AssertionError("no upstream")));
   assertThatThrownBy(()->s.list(MockServerHttpRequest.get("/api/bff/ai-flow/runs?date=2026-10-08&consumer=Codex&owner=8").build()).block()).isInstanceOf(AiFlowProblem.class);
   assertThatThrownBy(()->s.record(MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).build(),AiFlowFixtures.bytes(AiFlowFixtures.batch())).block()).isInstanceOf(AiFlowProblem.class);
+  var original=AiFlowFixtures.batch().events().getFirst();var call=AiFlowFixtures.choiceToolCall();
+  var choiceEvent=new AiFlowDtos.Event(original.eventId(),original.sequence(),original.stepId(),original.eventKind(),original.status(),original.occurredAt(),original.title(),original.summary(),original.operation(),original.reasonCode(),original.attemptNo(),original.parentEventIds(),original.relation(),original.evidenceRefs(),original.reportedOutcome(),call,AiFlowFixtures.choiceSet(call));
+  var choiceBatch=new AiFlowDtos.Batch(1,AiFlowFixtures.batch().run(),List.of(choiceEvent));
+  var consumerToken=MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).header(AiFlowCredentials.HEADER,"codex").contentType(MediaType.APPLICATION_JSON).build();
+  assertThatThrownBy(()->s.record(consumerToken,AiFlowFixtures.bytes(choiceBatch)).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("FORBIDDEN");
+  var claude=AiFlowFixtures.batch("Claude","09:05","srpp-0905-claude").run();
+  var wrongSource=new AiFlowDtos.Batch(1,claude,List.of(choiceEvent));
+  var collector=MockServerHttpRequest.post(AiFlowProducerTokenWebFilter.PATH).header(AiFlowCredentials.HEADER,"collector").contentType(MediaType.APPLICATION_JSON).build();
+  assertThatThrownBy(()->s.record(collector,AiFlowFixtures.bytes(wrongSource)).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("FORBIDDEN");
   verifyNoInteractions(users);
  }
  @Test void invalid_periods_and_us_producer_bindings_reject_before_owner_or_upstream_IO(){
@@ -179,5 +201,78 @@ class AiFlowBffServiceTest {
   var bad=service(requestUpstream->Mono.just(response(200,new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.ID,call))));
   assertThatThrownBy(()->bad.toolCall(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block())
    .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+ }
+ @Test void scopedChoiceSetReadForwardsConfiguredOwnerValidatesDetailAndKeepsLegacyNull(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));var sent=new java.util.ArrayList<ClientRequest>();
+  var call=AiFlowFixtures.choiceToolCall();var choices=AiFlowFixtures.choiceSet(call);
+  var expected=new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,choices);
+  var summary=choiceSummary(choices);var projection=projectionWithChoice(choices,"START",summary);
+  var service=service(request->{sent.add(request);String path=request.url().getPath();
+   if(path.endsWith("/choice-set"))return Mono.just(response(200,expected));
+   if(path.endsWith("/tool-call"))return Mono.just(response(200,new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,call)));
+   if(path.equals("/api/ai-flow/runs/"+AiFlowFixtures.ID))return Mono.just(response(200,projection));
+   return Mono.error(new AssertionError("unexpected upstream path "+path));});
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/choice-set?date=2026-10-08&consumer=Codex").build();
+  assertThat(service.choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).isEqualTo(expected);
+  assertThat(sent).extracting(value->value.url().toString()).containsExactlyInAnyOrder(
+   "/api/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/choice-set?date=2026-10-08&consumer=Codex",
+   "/api/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/tool-call?date=2026-10-08&consumer=Codex",
+   "/api/ai-flow/runs/"+AiFlowFixtures.ID+"?date=2026-10-08&consumer=Codex");
+  assertThat(sent).allSatisfy(value->assertThat(value.headers().getFirst(AuthConstants.HDR_USER_ID)).isEqualTo("7"));
+
+  var legacy=new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,null);
+  assertThat(service(requestUpstream->Mono.just(response(200,legacy))).choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).isEqualTo(legacy);
+  var bad=service(requestUpstream->Mono.just(response(200,new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.ID,choices))));
+  assertThatThrownBy(()->bad.choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block())
+   .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+ }
+ @Test void choiceSetReadsAndNodeSummaryRejectHostileActualCallMetadataAndEventKind(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  var actual=AiFlowFixtures.choiceToolCall();var base=AiFlowFixtures.choiceSet(actual);
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/choice-set?date=2026-10-08&consumer=Codex").build();
+  for(String attack:List.of("parameters","metadata","wrong-event-kind","missing-tool-call")){
+   AiFlowDtos.ChoiceSet choices=base;AiFlowDtos.ToolCall tool=actual;String kind="START";
+   if(attack.equals("parameters")){
+    String changed="{\"cmd\":\"date -u\"}";choices=new AiFlowDtos.ChoiceSet(base.title(),base.selectedOptionId(),List.of(
+     new AiFlowDtos.ChoiceOption("current-date","目前日期","exec",changed,changed.codePointCount(0,changed.length()),false,0,null),base.options().get(1)));
+   } else if(attack.equals("metadata")){
+    var selected=base.options().getFirst();choices=new AiFlowDtos.ChoiceSet(base.title(),base.selectedOptionId(),List.of(
+     new AiFlowDtos.ChoiceOption(selected.optionId(),selected.label(),selected.toolName(),selected.parameters(),selected.parametersChars(),selected.truncated(),1,selected.sourceTruncated()),base.options().get(1)));
+   } else if(attack.equals("wrong-event-kind")) kind="END";
+   else tool=null;
+   var detail=new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,choices);
+   var projection=projectionWithChoice(choices,kind,choiceSummary(choices));var upstreamTool=tool;
+   var service=service(upstream->{String path=upstream.url().getPath();
+    if(path.endsWith("/choice-set"))return Mono.just(response(200,detail));
+    if(path.endsWith("/tool-call"))return Mono.just(response(200,new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,upstreamTool)));
+    if(path.equals("/api/ai-flow/runs/"+AiFlowFixtures.ID))return Mono.just(response(200,projection));
+    return Mono.error(new AssertionError("unexpected upstream path "+path));});
+   assertThatThrownBy(()->service.choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).as(attack)
+    .extracting(error->((AiFlowProblem)error).code).isEqualTo("UPSTREAM_INVALID");
+  }
+ }
+ @Test void detailRevalidatesChoiceSummaryAgainstPrivateSameEventReadsWithoutExposingParameters(){
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));
+  var call=AiFlowFixtures.choiceToolCall();var choices=AiFlowFixtures.choiceSet(call);
+  var projection=projectionWithChoice(choices,"START",choiceSummary(choices));var requests=new java.util.ArrayList<ClientRequest>();
+  var service=service(upstream->{requests.add(upstream);String path=upstream.url().getPath();
+   if(path.equals("/api/ai-flow/runs/"+AiFlowFixtures.ID))return Mono.just(response(200,projection));
+   if(path.endsWith("/choice-set"))return Mono.just(response(200,new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,choices)));
+   if(path.endsWith("/tool-call"))return Mono.just(response(200,new AiFlowDtos.ToolCallDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,call)));
+   return Mono.error(new AssertionError("unexpected upstream path "+path));});
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"?date=2026-10-08&consumer=Codex").build();
+  var response=service.detail(AiFlowFixtures.ID,request).block();
+  assertThat(response.nodes().getFirst().toolCall()).isNull();
+  assertThat(new String(AiFlowFixtures.bytes(response),java.nio.charset.StandardCharsets.UTF_8)).doesNotContain("{\"cmd\":\"date\"}","date -u");
+  assertThat(requests).hasSize(3);
+ }
+ @Test void choiceSetControllerKeepsDetailPrivateAndNoStore(){
+  var service=mock(AiFlowBffService.class);var request=MockServerHttpRequest.get("/").build();
+  var detail=new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,null);
+  when(service.choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request)).thenReturn(Mono.just(detail));
+  var response=new AiFlowBffController(service).choiceSet(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block();
+  assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+  assertThat(response.getHeaders().getFirst(HttpHeaders.CACHE_CONTROL)).isEqualTo("private, no-store");
+  assertThat(response.getBody()).isEqualTo(detail);
  }
 }

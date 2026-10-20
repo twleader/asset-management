@@ -574,7 +574,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 187 個 Requirements（最新編號為 194，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 188 個 Requirements（最新編號為 195，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417、459、460、466、467 僅有獨立任務檔，不追加索引
 ├── tasks/                # 任務檔
@@ -665,8 +665,10 @@ Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/
 
 Task501 為使用者具名授權的狹義例外：observer 契約升 1.2.0，START event 可帶閉合 `toolCall` 保存公開工具名稱及經憑證樣式遮蔽後的原始參數；一般 Node/detail、圖與 tooltip 一律不載入參數，ADMIN 僅能經同源 BFF 逐節點 no-store read。此改動同步統一 Swagger 身分與 SRPP consumer metadata／bundle authority，但不改 SRPP policy 文字、prompt、validator、排程或 LLM 等待行為；Task494 的 1.1.0 為歷史敘述。
 
+Task504 將 observer 契約升至 1.3.0，僅讓 `consumer=Codex`、`sourceKind=CODEX_ROLLOUT`、collector grant 的公開 START 工具事件攜帶顯式 choiceSet；它不是私有 LLM reasoning，無公開 trace exporter 已標記的候選資料就不推測。raw candidate input 只能是已審核、bounded 的公開工具參數字串，不能為 object、array 或私密推理；一般流程圖資料僅讀 summary，完整候選參數與既有工具參數都只能由 ADMIN 同源逐節點 no-store read 取得；圖上須同時顯示採用與未選擇分支但不含參數。任何 Swagger／consumer authority 變更都必重新產生 rule-bundle hash；跨 repo identity 只可寫入乾淨受管理的 SRPP feature worktree，9090 的交易日驗證仍須在實際時段唯讀執行。此變更不改 SRPP policy、prompt、validator、排程或 LLM 等待行為。
+
 ### Requirement 191／Task 497 SRPP fail-closed 決策投影與逐檔事實 API 修訂
 
-金融OpenAPI升1.26.0，exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`令financial=26（22GET/4POST）。AI觀測現為獨立1.2.0/一POST，gateway/BFF catalog/統一Swagger唯一union=27（22GET/5POST）；mail共用prefix故Tailscale=26 handlers。每條路徑exact allowlist，拒root、`/api/`、wildcard、matrix及descendant。
+金融OpenAPI升1.26.0，exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`令financial=26（22GET/4POST）。Task504 後 AI觀測現為獨立1.3.0/一POST，gateway/BFF catalog/統一Swagger唯一union=27（22GET/5POST）；mail共用prefix故Tailscale=26 handlers。每條路徑exact allowlist，拒root、`/api/`、wildcard、matrix及descendant。
 
 兩GET精確綁ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256與calculationRunId，只讀既有immutable schemaVersion1 FINAL package；禁止新計算、外呼、refresh、DB/Redis/error-ingestion寫、producer、notification/mail/reservation/交易，也不改package output、consumer schema、manifest、registry或SRPP runtime。eligible leg只為module data.legs BUY/SELL、台股→TW/美股→US，NONE排除；legId=`moduleId.index`，未知market/action上游502。A2 universe是eligible TW legs投影，非input field，只由content hash保護；input hash只identity-bind且不含/保護universe。v1無capacity evidence所以零capacity reflow/遞補；A1 root無quoteCapture，每leg只有`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol、price/amount精確同源且sourceRevision=vector revision才有typed QUOTE receipt quoteCapture，否則全null；A1 fixed defensive（BUY zero/null、SELL frozen-only、REDUCE唯一base unit）。A2 facts恰12筆無重名固定順序；七個exact radar/quote mapping僅在`validation=VERIFIED` vector+SHA/capturedAt matching SOURCE receipt可AVAILABLE，overheat只在五項AVAILABLE時依frozen pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED，四筆固定null NOT_EVALUATED；不推斷action/policy。P2/revision、client risk、SRPP adoption均不在本輪；不改prompts/schedules/validators，另立任務才可採納API。

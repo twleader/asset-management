@@ -48,7 +48,7 @@ test('缺少必要結構時 fail closed', () => {
   )
 })
 
-test('金融 24 路與觀測 1 路分開解析，union 精確為 25 個 method/path', () => {
+test('金融 26 路與觀測 1 路分開解析，union 精確為 27 個 method/path', () => {
   // 每份契約各自解析自己的 components；不把獨立 OpenAPI component namespace 合併。
   const financialYaml = readFileSync(new URL('../../../docs/openapi/docker-external-api.yaml', import.meta.url), 'utf8')
   const observationYaml = readFileSync(new URL('../../../docs/openapi/ai-flow-observation-api.yaml', import.meta.url), 'utf8')
@@ -64,7 +64,7 @@ test('金融 24 路與觀測 1 路分開解析，union 精確為 25 個 method/p
   const observationPaths = new Set(observation.operations.map(operation => operation.path))
   const operationIds = [...financial.operations, ...observation.operations].map(operation => operation.operationId)
 
-  assert.equal(entries.length, 24)
+  assert.equal(entries.length, 26)
   assert.deepEqual(entries, [
     'GET /api/assets/latest',
     'GET /api/public/commodity-prices',
@@ -77,7 +77,9 @@ test('金融 24 路與觀測 1 路分開解析，union 精確為 25 個 method/p
     'GET /api/public/srpp/completed-technicals',
     'GET /api/public/srpp/daily-context',
     'GET /api/public/srpp/market-facts',
+    'GET /api/public/srpp/order-plan',
     'GET /api/public/srpp/report-calculations',
+    'GET /api/public/srpp/symbol-rule-facts',
     'GET /api/public/srpp/technical-series',
     'GET /api/public/trading-calendar',
     'GET /api/public/trading-radar/stock',
@@ -93,8 +95,8 @@ test('金融 24 路與觀測 1 路分開解析，union 精確為 25 個 method/p
   ])
   assert.deepEqual(observationEntries, ['POST /api/srpp/ai-flow/events'])
   assert.equal([...financialPaths].filter(path => observationPaths.has(path)).length, 0)
-  assert.equal(entries.length + observationEntries.length, 25)
-  assert.equal(new Set(operationIds).size, 25)
+  assert.equal(entries.length + observationEntries.length, 27)
+  assert.equal(new Set(operationIds).size, 27)
 })
 
 test('切換 OpenAPI 文件會先清除舊契約並忽略較晚返回的舊請求', async () => {

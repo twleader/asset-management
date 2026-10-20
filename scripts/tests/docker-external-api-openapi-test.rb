@@ -1173,13 +1173,12 @@ assert!(schemas.dig('SrppReportSourceVector','additionalProperties','$ref') == '
 assert!(schemas.dig('SrppReportInputSnapshot','properties','inputBundleJcs','description').include?('BFF必須parse並重算'), 'raw JCS cannot be an unvalidated black box')
 
 renderer = File.join(ROOT, 'scripts/render-9090-openapi-docs.rb')
-assert!(system('ruby', renderer, '--check'), 'OpenAPI Markdown renderer --check 必須通過且三份文件必須 byte-identical')
+assert!(system('ruby', renderer, '--check', '--asset-only'), 'OpenAPI Markdown renderer asset-only --check 必須通過且不讀寫 SRPP')
 
-# Task 484.9：business-services 以 classpath resource 計算「已發布 Swagger 身分」，它必須與 docs 版本位元組一致；
-# SRPP 鏡像只在地端同步（雲端以 CLAUDE_CODE_REMOTE=true 辨識，該處沒有 SRPP 專案）。
+# Task 504：預設／asset-only renderer 不得讀寫 SRPP；SRPP 第三份 mirror 只能在指定乾淨 feature
+# worktree 的 --srpp-root release gate 驗證，不能用本 repo 單元測試偷偷接觸 primary checkout。
 swagger_copies = [File.join(ROOT, 'docs/openapi/9090-api-swagger.md'),
                   File.join(ROOT, 'backend/src/main/resources/srpp/9090-api-swagger.md')]
-swagger_copies << '/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md' unless ENV['CLAUDE_CODE_REMOTE'] == 'true'
 swagger_copies.each { |copy| assert!(File.file?(copy), "缺 9090 Swagger Markdown：#{copy}") }
 assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.length == 1,
         "9090 Swagger Markdown 各份必須位元組一致：#{swagger_copies.join(', ')}")
@@ -1206,7 +1205,7 @@ assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?
 # Tasks 492／494／495／501：機器契約仍獨立解析 refs，Markdown 統一發布。
 observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
 assert!(observation.fetch('openapi') == '3.1.0', '觀測契約使用 OpenAPI 3.1 的 JSON Schema 條件')
-assert!(observation.dig('info', 'version') == '1.2.0', 'Task501 觀測契約版本固定1.2.0')
+assert!(observation.dig('info', 'version') == '1.3.0', 'Task504 觀測契約版本固定1.3.0')
 assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測 paths 只能唯一exact route')
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
@@ -1228,8 +1227,16 @@ assert!(tool_call_schema.dig('properties', 'redactedCount', 'minimum') == 0 && t
 assert!(tool_call_schema.dig('properties', 'sourceTruncated', 'type') == 'boolean' && tool_call_schema.dig('properties', 'sourceTruncated', 'const') == true, 'sourceTruncated只能選填true')
 event_schema = observation.dig('components', 'schemas', 'AiFlowEvent')
 assert!(event_schema.dig('properties', 'toolCall', '$ref') == '#/components/schemas/AiFlowToolCall' && !event_schema.fetch('required').include?('toolCall'), 'Event.toolCall必須選填且使用閉合toolCall schema')
+choice_set_schema = observation.dig('components', 'schemas', 'AiFlowChoiceSet')
+choice_option_schema = observation.dig('components', 'schemas', 'AiFlowChoiceOption')
+assert!(event_schema.dig('properties', 'choiceSet', '$ref') == '#/components/schemas/AiFlowChoiceSet' && !event_schema.fetch('required').include?('choiceSet'), 'Event.choiceSet必須選填且使用閉合choiceSet schema')
+assert!(choice_set_schema.fetch('additionalProperties') == false && choice_set_schema.fetch('required') == %w[title selectedOptionId options], 'choiceSet必須閉合且三個核心欄位必填')
+assert!(choice_set_schema.dig('properties', 'options', 'minItems') == 2 && choice_set_schema.dig('properties', 'options', 'maxItems') == 8, 'choiceSet候選數必須為2至8')
+assert!(choice_option_schema.fetch('additionalProperties') == false && choice_option_schema.fetch('required') == %w[optionId label toolName parameters parametersChars truncated redactedCount], 'choice option必須閉合且參數metadata完整')
+assert!(choice_option_schema.dig('properties', 'label', 'maxLength') == 100 && choice_option_schema.dig('properties', 'parameters', 'maxLength') == 16_384, 'choice option文字與參數上限必須明示')
 example_tool_call = observer_op.dig('requestBody', 'content', 'application/json', 'example', 'events').find { |event| event['toolCall'] }
 assert!(example_tool_call && example_tool_call['eventKind'] == 'START' && example_tool_call.dig('toolCall', 'parameters') == '{"cmd":"date"}' && example_tool_call.dig('toolCall', 'parametersChars') == 14, '觀測request example必須提供無害的START toolCall')
+assert!(example_tool_call.dig('choiceSet', 'selectedOptionId') == 'current-date' && example_tool_call.dig('choiceSet', 'options').size == 2, '觀測request example必須提供無害的公開候選集合')
 
 # 此 matcher 只驗本次 identity 條件所使用的 JSON Schema keywords，不冒充完整 schema engine。
 # 從實際 YAML 讀 oneOf/const/enum/required/closure，正反例必須經條件運算；不能只比對描述。

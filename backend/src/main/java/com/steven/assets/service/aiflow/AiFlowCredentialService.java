@@ -41,6 +41,11 @@ public final class AiFlowCredentialService {
             throw new AiFlowProblem("FORBIDDEN");
         }
     }
+    /** choiceSet 是 collector-only public exporter receipt；一般 consumer/schedule grant 不可注入。 */
+    public void authorizeChoiceSet(Grant grant, String consumer, String sourceKind, boolean hasChoiceSet) {
+        if (hasChoiceSet && (!grant.collector() || !"Codex".equals(consumer) || !"CODEX_ROLLOUT".equals(sourceKind)))
+            throw new AiFlowProblem("FORBIDDEN");
+    }
     private static boolean same(String a, String b) {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }

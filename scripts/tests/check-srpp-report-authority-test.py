@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
 
 REPO = Path(__file__).resolve().parents[2]
-SRPP = Path("/Users/steven/Project/SRPP")
+# A release verifies the managed SRPP feature worktree before its no-ff merge;
+# otherwise use the clean main checkout, never a mutable primary checkout.
+SRPP = Path(os.environ.get("SRPP_RELEASE_WORKTREE", "/Users/steven/Project/SRPP-main")).resolve()
 SPEC = importlib.util.spec_from_file_location(
     "check_srpp_report_authority", REPO / "scripts/check-srpp-report-authority.py")
 assert SPEC and SPEC.loader

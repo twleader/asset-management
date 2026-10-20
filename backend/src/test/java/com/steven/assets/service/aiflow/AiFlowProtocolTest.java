@@ -175,9 +175,75 @@ class AiFlowProtocolTest {
         assertThat(JSON.valueToTree(persisted.toolCall()).has("sourceTruncated")).isFalse();
         assertThat(parsed.payloads().getFirst()).contains(parameters).doesNotContain("\"summary\":\"" + parameters + "\"");
     }
+    @Test void publicChoiceSetRequiresExactAdoptedToolAndNeverLeaksParametersIntoSummary() {
+        ToolCall call = choiceToolCall(); ChoiceSet choices = choiceSet(call);
+        ObjectNode input = raw(complete()); ObjectNode event = (ObjectNode) input.path("events").get(1);
+        event.set("toolCall", JSON.valueToTree(call)); event.set("choiceSet", JSON.valueToTree(choices));
+        var parsed = AiFlowProtocol.parse(input.toString()); Event persisted = parsed.batch().events().get(1);
+        assertThat(persisted.choiceSet()).isEqualTo(choices);
+        ChoiceSetSummary summary = AiFlowProtocol.choiceSetSummary(persisted);
+        assertThat(summary.options()).extracting(ChoiceOptionSummary::selected).containsExactly(true, false);
+        assertThat(JSON.valueToTree(summary).toString()).doesNotContain("parameters", "date -u");
+
+        ObjectNode mismatch = input.deepCopy();
+        ((ObjectNode) mismatch.path("events").get(1).path("choiceSet").path("options").get(0)).put("parameters", "{\"cmd\":\"date -u\"}");
+        assertCode(mismatch.toString(), "INVALID_REQUEST");
+        ObjectNode truncated = input.deepCopy();
+        ((ObjectNode) truncated.path("events").get(1).path("toolCall")).put("sourceTruncated", true);
+        assertCode(truncated.toString(), "INVALID_REQUEST");
+        ObjectNode unsafe = input.deepCopy();
+        ((ObjectNode) unsafe.path("events").get(1).path("choiceSet").path("options").get(1)).put("label", "private reasoning: hidden");
+        assertCode(unsafe.toString(), "INVALID_REQUEST");
+    }
+    @Test void publicChoiceSetUsesUnicodeCodePointsAndClosedNestedShapes() {
+        ToolCall call = choiceToolCall(); ObjectNode valid = raw(complete()); ObjectNode event = (ObjectNode) valid.path("events").get(1);
+        event.set("toolCall", JSON.valueToTree(call)); event.set("choiceSet", JSON.valueToTree(choiceSet(call)));
+        ((ObjectNode) event.path("choiceSet")).put("title", "😀".repeat(100));
+        assertThat(AiFlowProtocol.parse(valid.toString()).batch().events().get(1).choiceSet().title()).hasSize(200);
+        ObjectNode tooLong = valid.deepCopy(); ((ObjectNode) tooLong.path("events").get(1).path("choiceSet")).put("title", "😀".repeat(101));
+        assertCode(tooLong.toString(), "INVALID_REQUEST");
+        ObjectNode unknown = valid.deepCopy(); ((ObjectNode) unknown.path("events").get(1).path("choiceSet")).put("reasoning", "forbidden");
+        assertCode(unknown.toString(), "INVALID_REQUEST");
+    }
+    @Test void sharedChoiceSetVectorsKeepFinalWireClosedAcrossCollectorBackendAndBff() throws Exception {
+        JsonNode vectors = JSON.readTree(Files.readAllBytes(choiceVectorsPath()));
+        assertThat(vectors.path("cases")).hasSize(15);
+        for (JsonNode vector : vectors.path("cases")) {
+            ObjectNode input = raw(complete()); ObjectNode event = (ObjectNode) input.path("events").get(0);
+            event.put("eventKind", vector.path("eventKind").asText());
+            JsonNode tool = vectors.path("toolCall").deepCopy();
+            switch (vector.path("tool").asText()) {
+                case "absent" -> event.remove("toolCall");
+                case "sourceTruncated" -> { ((ObjectNode) tool).put("sourceTruncated", true); event.set("toolCall", tool); }
+                case "privateParameters" -> { ((ObjectNode) tool).put("parameters", "PRIVATE_REASONING_CANARY"); ((ObjectNode) tool).put("parametersChars", "PRIVATE_REASONING_CANARY".codePointCount(0, "PRIVATE_REASONING_CANARY".length())); event.set("toolCall", tool); }
+                case "markerParameters" -> { String marker = vector.path("marker").asText(); ((ObjectNode) tool).put("parameters", marker); ((ObjectNode) tool).put("parametersChars", marker.codePointCount(0, marker.length())); event.set("toolCall", tool); }
+                default -> event.set("toolCall", tool);
+            }
+            JsonNode choice = vectors.path("choiceSet").deepCopy();
+            switch (vector.path("choice").asText()) {
+                case "absent" -> event.remove("choiceSet");
+                case "null" -> event.putNull("choiceSet");
+                case "array" -> event.set("choiceSet", JSON.createArrayNode());
+                case "unknownNested" -> { ((ObjectNode) choice.path("options").get(0)).put("reasoning", "forbidden"); event.set("choiceSet", choice); }
+                case "mismatchParameters" -> { ((ObjectNode) choice.path("options").get(0)).put("parameters", "{\"cmd\":\"date -u\"}"); event.set("choiceSet", choice); }
+                case "unsafeTitle" -> { ((ObjectNode) choice).put("title", "private reasoning: hidden"); event.set("choiceSet", choice); }
+                case "privateParameters" -> { ((ObjectNode) choice.path("options").get(0)).put("parameters", "PRIVATE_REASONING_CANARY"); ((ObjectNode) choice.path("options").get(0)).put("parametersChars", "PRIVATE_REASONING_CANARY".codePointCount(0, "PRIVATE_REASONING_CANARY".length())); event.set("choiceSet", choice); }
+                case "markerParameters" -> { String marker = vector.path("marker").asText(); ((ObjectNode) choice.path("options").get(0)).put("parameters", marker); ((ObjectNode) choice.path("options").get(0)).put("parametersChars", marker.codePointCount(0, marker.length())); event.set("choiceSet", choice); }
+                default -> event.set("choiceSet", choice);
+            }
+            boolean accepted;
+            try { AiFlowProtocol.parse(input.toString()); accepted = true; }
+            catch (AiFlowProblem rejected) { accepted = false; }
+            assertThat(accepted).as(vector.path("id").asText()).isEqualTo(vector.path("valid").asBoolean());
+        }
+    }
     private static Path vectorsPath() {
         Path moduleRelative = Path.of("../scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
         return Files.exists(moduleRelative) ? moduleRelative : Path.of("scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+    }
+    private static Path choiceVectorsPath() {
+        Path moduleRelative = Path.of("../scripts/tests/fixtures/ai_flow_choice_set_vectors.json");
+        return Files.exists(moduleRelative) ? moduleRelative : Path.of("scripts/tests/fixtures/ai_flow_choice_set_vectors.json");
     }
     private static ObjectNode expandToolCall(JsonNode source) {
         ObjectNode toolCall = (ObjectNode) source.deepCopy();

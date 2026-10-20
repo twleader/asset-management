@@ -19,17 +19,17 @@ final class AiFlowFixtures {
     static String id(int n) { return String.format("00000000-0000-5000-8000-%012d", n); }
     static Event event(int n, String step, String kind, String time, List<String> parents, String relation) {
         return new Event(id(n), n, step, kind, kind.equals("START") ? "RUNNING" : "UNKNOWN", instant(time),
-                "觀測操作", "公開操作摘要", new Operation("TOOL", "tool"), null, 1, parents, relation, List.of(), null, null);
+                "觀測操作", "公開操作摘要", new Operation("TOOL", "tool"), null, 1, parents, relation, List.of(), null, null, null);
     }
     static Event lifecycle(int n, String step, String kind, String time, String evidence) {
         Event e = event(n, step, kind, time, List.of(), null);
         return new Event(e.eventId(), e.sequence(), e.stepId(), e.eventKind(), e.status(), instant(time), e.title(), e.summary(),
-                new Operation("LOCAL", "artifact"), null, 1, List.of(), null, List.of(new Evidence("APP_TERMINAL", evidence, null)), null, null);
+                new Operation("LOCAL", "artifact"), null, 1, List.of(), null, List.of(new Evidence("APP_TERMINAL", evidence, null)), null, null, null);
     }
     static Event coverage(int n, int cursor, int size, String hash, String reason) {
         return new Event(id(n), cursor, "trace-coverage", "OBSERVATION", "UNKNOWN", null, "紀錄完整度檢查",
                 "公開紀錄完整度", new Operation("LOCAL", "artifact"), reason, 1, List.of(), null,
-                List.of(new Evidence("TRACE_COVERAGE", "TRACE_V1:" + cursor + ":" + size, hash)), null, null);
+                List.of(new Evidence("TRACE_COVERAGE", "TRACE_V1:" + cursor + ":" + size, hash)), null, null, null);
     }
     static List<Event> complete() {
         return List.of(lifecycle(1,"task-started","START",AT,"task_started"),
@@ -44,6 +44,18 @@ final class AiFlowFixtures {
                 "CODEX_ROLLOUT", "thread:turn", "codex-srpp-09-30", instant(AT), "AI_FLOW_V1"), events));
     }
     static Instant instant(String value) { return value == null ? null : OffsetDateTime.parse(value).toInstant(); }
+    static ToolCall choiceToolCall() {
+        String parameters = "{\"cmd\":\"date\"}";
+        return new ToolCall("exec", List.of(), parameters, parameters.codePointCount(0, parameters.length()), false, 0, null);
+    }
+    static ChoiceSet choiceSet(ToolCall call) {
+        String alternate = "{\"cmd\":\"date -u\"}";
+        return new ChoiceSet("日期讀取方式", "current-date", List.of(
+                new ChoiceOption("current-date", "目前日期", call.name(), call.parameters(), call.parametersChars(),
+                        call.truncated(), call.redactedCount(), call.sourceTruncated()),
+                new ChoiceOption("utc-date", "協調世界時間", "exec", alternate,
+                        alternate.codePointCount(0, alternate.length()), false, 0, null)));
+    }
     static StoredRun stored(List<Event> events) {
         var v = AiFlowProtocol.parse(raw(events).toString()); var r = v.batch().run();
         return new StoredRun(7,RUN,r.consumer(),DATE,r.reportSlot(),r.sourceKind(),r.sourceRunId(),v.metadataJson(),v.metadataHash());

@@ -191,13 +191,74 @@ fi
 # 排除 JUnit / Spring 的框架註解——它們長得像測試類名，但不是本專案的檔案，
 # 報出來無法可修，只會逼人繞過閘門。`(^|[^@A-Za-z])` 濾掉 @SpringBootTest 這種寫法。
 FRAMEWORK_TESTS='^(SpringBootTest|WebMvcTest|DataJpaTest|WebFluxTest|JsonTest|RestClientTest|JdbcTest|DataRedisTest|ParameterizedTest|RepeatedTest|TestNGTest)$'
-for t in $(added_lines 'spec/**' | grep -oE '(^|[^@A-Za-z])[A-Z][A-Za-z0-9]*Test\b' \
-           | grep -oE '[A-Z][A-Za-z0-9]*Test' | sort -u); do
-  printf '%s' "$t" | grep -qE "$FRAMEWORK_TESTS" && continue
-  if ! find . -path ./.git -prune -o -name "${t}.java" -print -o -name "${t}.js" -print 2>/dev/null | grep -q .; then
-    block "spec 提到測試類 ${t}，但全樹找不到 ${t}.java/.js —— 宣稱的驗證不存在（Task 160 前例）"
-  fi
-done
+# 只信任目前 checkout 的受控測試根目錄，絕不可從 `.` 掃描。此 repo 把其他
+# worktree 放在 `.claude/worktrees/`；若由那裡命中同名 class，刪掉本 checkout
+# 的測試仍會被錯放行。分開 Java/JS roots 亦避免拿任意同名來源檔冒充測試。
+B5_JAVA_TEST_SOURCE_ROOTS=(
+  "backend/src/test"
+  "bff/src/test"
+  "external-materials-service/src/test"
+)
+B5_JS_TEST_SOURCE_ROOTS=(
+  "frontend/src"
+  "scripts/tests"
+)
+B5_TEST_SOURCE_ROOTS=(
+  "${B5_JAVA_TEST_SOURCE_ROOTS[@]}"
+  "${B5_JS_TEST_SOURCE_ROOTS[@]}"
+)
+
+b5_validate_current_test_roots() {
+  local source_root
+  for source_root in "${B5_TEST_SOURCE_ROOTS[@]}"; do
+    # source root 本身不得是 symlink；find 預設也不會追隨其下的 symlink。
+    # 兩者合用，確保命中的 regular file 屬於這個 checkout，而非巢狀 worktree。
+    if [ ! -d "$source_root" ] || [ -L "$source_root" ]; then
+      return 2
+    fi
+  done
+  return 0
+}
+
+b5_find_current_checkout_test() {
+  local test_name="$1" source_root file_name found_test_file
+  for source_root in "${B5_TEST_SOURCE_ROOTS[@]}"; do
+    case "$source_root" in
+      backend/src/test|bff/src/test|external-materials-service/src/test) file_name="${test_name}.java" ;;
+      frontend/src|scripts/tests) file_name="${test_name}.js" ;;
+      *) return 2 ;;
+    esac
+    # 即使有人把產物或巢狀 repo 放進受控 root，也不得從 `.claude`／`.git`、
+    # build／target／dist 或 node_modules 取證；只接受原始測試檔。
+    found_test_file=$(find "$source_root" \
+      \( -type d \( -name .claude -o -name .git -o -name build -o -name target -o -name dist -o -name node_modules \) -prune \) -o \
+      \( -type f -name "$file_name" -print -quit \) 2>/dev/null)
+    if [ "$?" -ne 0 ]; then
+      return 2
+    fi
+    if [ -n "$found_test_file" ]; then
+      printf '%s\n' "$found_test_file"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! b5_validate_current_test_roots; then
+  block "B5 受控測試根目錄缺失、不可讀或為 symlink，拒絕由其他 worktree 補足"
+else
+  for t in $(added_lines 'spec/**' | grep -oE '(^|[^@A-Za-z])[A-Z][A-Za-z0-9]*Test\b' \
+             | grep -oE '[A-Z][A-Za-z0-9]*Test' | sort -u); do
+    printf '%s' "$t" | grep -qE "$FRAMEWORK_TESTS" && continue
+    found_test_file=$(b5_find_current_checkout_test "$t")
+    found_test_status=$?
+    case "$found_test_status" in
+      0) ;;
+      1) block "spec 提到測試類 ${t}，但目前 checkout 的受控測試根目錄找不到 ${t}.java/.js —— 宣稱的驗證不存在（Task 160 前例）" ;;
+      *) block "無法搜尋目前 checkout 的受控測試根目錄中的 ${t}，為避免把未驗證的 spec 放行而拒絕" ;;
+    esac
+  done
+fi
 
 # ── B6. @Scheduled 變更是否同步排程登錄表 ─────────────────────────
 # 只掃 .java：文件裡「提到」@Scheduled（例如本檢查自己的說明）不算改動了排程。

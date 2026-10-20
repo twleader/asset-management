@@ -45,6 +45,8 @@ public class AiFlowService {
         } catch (IllegalArgumentException ignored) { throw new AiFlowProblem("UNSUPPORTED_MEDIA_TYPE"); }
         var validated = AiFlowProtocol.parse(raw); Run r = validated.batch().run();
         credentials.authorize(grant, r.consumer(), r.sourceKind());
+        credentials.authorizeChoiceSet(grant, r.consumer(), r.sourceKind(),
+                validated.batch().events().stream().anyMatch(event -> event.choiceSet() != null));
         window(r.reportDate());
         long ownerId = owner.configuredOwner();
         try {
@@ -121,6 +123,23 @@ public class AiFlowService {
             if (!Objects.equals(event.eventId(), eventId) || event.sequence() != storedEvent.sequence())
                 throw new AiFlowProblem("UPSTREAM_INVALID");
             return new ToolCallDetail(runId, eventId, event.toolCall());
+        }));
+    }
+    public ChoiceSetDetail choiceSet(String runId, String eventId, MultiValueMap<String, String> query) {
+        Parsed q = query(query, false); window(q.date()); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId); long ownerId = owner.readOwner();
+        return Objects.requireNonNull(reads.execute(tx -> {
+            window(q.date(), repository.databaseDate());
+            UUID parsedRunId = UUID.fromString(runId);
+            StoredRun storedRun = repository.detail(ownerId, parsedRunId, q.date(), q.consumer())
+                    .orElseThrow(() -> new AiFlowProblem("NOT_FOUND"));
+            validatedMetadata(storedRun);
+            StoredEvent storedEvent = repository.event(ownerId, parsedRunId, UUID.fromString(eventId), q.date(), q.consumer())
+                    .orElseThrow(() -> new AiFlowProblem("NOT_FOUND"));
+            requireHash(storedEvent.payload(), storedEvent.hash());
+            Event event = AiFlowProtocol.readEvent(storedEvent.payload());
+            if (!Objects.equals(event.eventId(), eventId) || event.sequence() != storedEvent.sequence())
+                throw new AiFlowProblem("UPSTREAM_INVALID");
+            return new ChoiceSetDetail(runId, eventId, AiFlowProtocol.choiceSet(event));
         }));
     }
     private Detail project(StoredRun r) {

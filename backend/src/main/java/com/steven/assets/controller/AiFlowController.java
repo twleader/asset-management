@@ -25,4 +25,9 @@ public final class AiFlowController {
                                                     @RequestParam MultiValueMap<String, String> query) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.toolCall(runId, eventId, query));
     }
+    @GetMapping("/{runId}/nodes/{eventId}/choice-set")
+    public ResponseEntity<ChoiceSetDetail> choiceSet(@PathVariable String runId, @PathVariable String eventId,
+                                                      @RequestParam MultiValueMap<String, String> query) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.choiceSet(runId, eventId, query));
+    }
 }

@@ -382,12 +382,12 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - **9090／Tailscale 同步鐵則：**凡掛載到 Nginx `api-gateway:9090` 的 API，都必須在同一變更中
   掛載到 Tailscale Serve HTTPS `:9090` 的同名 exact path；新增、修改或移除 9090 路由時，必須同步
   更新 Tailscale 設定腳本與回歸測試，禁止存在只供 loopback 9090 使用、未掛到 Tailscale 的 API。
-- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛相同十九條 exact path，包含 USD/TWD 公開匯率
-  與第六條寫入路由。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛現行 26 個 exact path handlers（金融 26 個
+  method/path pairs 加觀測 POST；寄信 POST 與其 GET child 共用 handler）。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
 - 每一條掛載到 9090 的 API 都必須在 `docs/openapi/docker-external-api.yaml` 提供完整、可驗證的
   OpenAPI 3 契約；路徑、HTTP method、參數、成功與錯誤回應、所有可達巢狀 schema、必填／nullable
   語意與安全邊界都不得省略。Gateway allowlist 與 OpenAPI paths 必須由自動化 contract test 雙向比對，
-  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；每次 9090 API 變更必須由它重產三份位元組一致的 Swagger Markdown：本專案 `docs/openapi/9090-api-swagger.md`、business-services 的 classpath resource `backend/src/main/resources/srpp/9090-api-swagger.md`（已發布 Swagger 身分，Task 484），並在**地端**覆寫 `/Users/steven/Project/SRPP/docs/9090 Port API Swagger.md`（雲端 session 不需覆寫：renderer 以 `CLAUDE_CODE_REMOTE=true` 辨識雲端，寫入與 `--check` 都只處理本專案內的兩份；雲端變更 merge 後，下次在地端重產即補同步）；改 YAML 後還必須重建 `business-services`，否則 SRPP 的 capture／evaluate 會因 Swagger 身分不符回 409 `SWAGGER_MISMATCH`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
+  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；現行集合是金融 26（22 GET／4 POST）加觀測 1（POST），共 27 個 method/path pairs。每次 9090 API 變更必須由它重產本專案 `docs/openapi/9090-api-swagger.md` 與 business-services classpath resource `backend/src/main/resources/srpp/9090-api-swagger.md`（已發布 Swagger 身分，Task 484）的位元組一致 Markdown。只有明示 `--srpp-root <absolute managed feature worktree>` 時，renderer 才可寫第三份 `docs/9090 Port API Swagger.md`；預設與 `--asset-only`（包括 `--check`）絕不讀寫 SRPP，禁止拿 primary checkout 或 main 當 target。跨 repo 的 renderer → sync → renderer `--check` → sync `--check` 順序、僅允許的 dirty 產物與 hash/registry/runtime gate 以 Task504 發布段為準；改 YAML 後還必須重建 `business-services`，否則 SRPP 的 capture／evaluate 會因 Swagger 身分不符回 409 `SWAGGER_MISMATCH`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
 
 ### 從任一 worktree 重建 Docker 服務前，先比對該 worktree 的 `.env` 與 main 的 `.env`
 
@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（187 個 Requirements；最新編號為 194，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（188 個 Requirements；最新編號為 195，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -470,7 +470,7 @@ Task488受正式已驗證SRPP政策的report-only calculator可純讀同一canon
 
 ### Requirement 190／Tasks 492、494 AI 判斷流程觀測例外
 
-使用者明確要求今日不修改 SRPP 專案、規則、validator、prompt、排程或遠端 skill；本次保留原金融 OpenAPI `docs/openapi/docker-external-api.yaml` 與三份金融 Swagger 的完整 bytes／PublishedSwaggerIdentity，金融 renderer 僅以 `--check` 驗證。唯一新增 exact `POST /api/srpp/ai-flow/events` 由獨立 `docs/openapi/ai-flow-observation-api.yaml`（Task492 1.0.0；Task494 1.1.0）及 `docs/openapi/9090-ai-flow-observation.md` 提供完整閉合契約，獨立 renderer 只寫 asset-management；不偽設雲端環境、不覆寫 SRPP。兩份 YAML 分別解析 local refs，paths 不相交且 operationId 全域唯一；原金融24＋觀測1的 union 是 gateway／catalog 唯一精確集合25 method/path pairs（20 GET、5 POST），Tailscale24 handlers。此限縮例外優先於本文件較早的單一 YAML／三份重產要求；所有金融路由與 schema 仍依原契約。
+使用者明確要求今日不修改 SRPP 專案、規則、validator、prompt、排程或遠端 skill；本次保留原金融 OpenAPI `docs/openapi/docker-external-api.yaml` 與三份金融 Swagger 的完整 bytes／PublishedSwaggerIdentity，金融 renderer 僅以 `--check` 驗證。唯一新增 exact `POST /api/srpp/ai-flow/events` 由獨立 `docs/openapi/ai-flow-observation-api.yaml`（Task492 1.0.0；Task494 1.1.0）及 `docs/openapi/9090-ai-flow-observation.md` 提供完整閉合契約，獨立 renderer 只寫 asset-management；不偽設雲端環境、不覆寫 SRPP。兩份 YAML 分別解析 local refs，paths 不相交且 operationId 全域唯一；當時的金融24＋觀測1／union25／Tailscale24 已由後續 Task497／Task504 取代，現行為金融26＋觀測1、union27（22 GET／5 POST）及 Tailscale26 handlers。所有金融路由與 schema 仍依原契約。
 
 AI觀測 producer token 與金融／寄信憑證分離；未授權及配置缺失在任何 owner／DB／error-ingest I/O 前拒絕，整條觀測 ingress 所有結果排除 API error ingestion，仍保留 route 身分及最小操作日誌。瀏覽器只經新 ADMIN 專屬 `/api/bff/ai-flow/...`；不直讀來源檔或DB。Codex/Claude、period/reportSlot/automationId、sourceKind及event/status/relationship為閉合互通協定碼，不是可管理投資業務分類。兩新表的 immutable canonical JSON與查詢identity索引列是具名歷史snapshot正規化例外；不存可導出的state、duration或layout。每日流程按台北 report_date 只保留今天及前89天，DB禁止過期重灌／任意UPDATE／未過期DELETE，正常資料庫備份原僅排除這兩新表的data（Requirement 192／Task 498 起，Drive 備份另排除 SRPP 報告計算 base／package 兩表的 data，現為四表；schema 與其他金融 data 仍保留）。獨立host背景collector只讀公開trace，現有LLM金融排程不新增回報呼叫／等待，SRPP詳細接入另日進行。
 
@@ -482,12 +482,20 @@ Task494延續觀測例外：period=ALL/MORNING/NOON/US及reportSlot=09:05/12:00/
 
 ### Requirement 190／Task 495 統一文件發布修訂
 
-使用者已明確授權將所有 9090 API 產生於 SRPP/docs 同一 Swagger，本輪取代 Tasks492／494 的「不修改 SRPP 文件／金融 Markdown bytes」限制。兩份 YAML 原路由／schema／版本維持，render-9090-openapi-docs.rb 讀兩份來源、驗獨立 refs 與 path／operationId／component 無碰撞後產生 25 pairs 統一 Markdown；repo docs、backend resource、地端 SRPP mirror 位元組一致。PublishedSwaggerIdentity 採統一文件 hash，因此重建 business-services；歷史 immutable receipts 不變，SRPP manifest不納Swagger文件但含consumer schema；只可在逐來源驗舊manifest一致後，更新schema文件身分metadata，原工具重產manifest並同步backend authority與冪等registry；schema驗證規則／模型／公式不變，其他來源漂移不得混納。
+使用者已明確授權將所有 9090 API 產生於 SRPP/docs 同一 Swagger，本輪取代 Tasks492／494 的「不修改 SRPP 文件／金融 Markdown bytes」限制。兩份 YAML 原路由／schema／版本維持，render-9090-openapi-docs.rb 讀兩份來源、驗獨立 refs 與 path／operationId／component 無碰撞後產生**現行 27 pairs**統一 Markdown（金融26＋觀測1）；repo docs、backend resource 與明示 SRPP feature worktree 的 mirror 位元組一致。PublishedSwaggerIdentity 採統一文件 hash，因此重建 business-services；歷史 immutable receipts 不變，SRPP manifest不納Swagger文件但含consumer schema；只可在逐來源驗舊manifest一致後，更新schema文件身分metadata，原工具重產manifest並同步backend authority與冪等registry；schema驗證規則／模型／公式不變，其他來源漂移不得混納。
 
 Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 consumer schema。更新schema後，先以既有 daily_runtime_contract.make_contract/canonical 重產，驗僅 source_sha256[assumptions/srpp_report_calculations_schema.json] 變化、所有語義欄位原樣，再重產policy manifest（只允許schema及runtime contract兩個source hashes變化）。metadata同步工具須fail closed於其他漂移，失敗rollback三個SRPP檔及backend artifact；--check零寫入。
 
+### Task 504 受控 SRPP identity／hash／runtime 發布鏈
+
+`render-9090-openapi-docs.rb` 的預設與 `--asset-only`（包括 `--check`）只處理 asset-management 兩份 mirror，絕不讀寫 SRPP；`sync-srpp-swagger-identity.py --asset-only` 也只回報不接觸 SRPP。跨 repo 唯一允許順序是：在絕對、非 symlink、非 main、乾淨的 Git managed SRPP feature worktree 先執行 `ruby scripts/render-9090-openapi-docs.rb --srpp-root <SRPP_WORKTREE>`，再執行 `python3 scripts/sync-srpp-swagger-identity.py --srpp-root <SRPP_WORKTREE>`，接著依序執行兩支工具的 `--check --srpp-root <SRPP_WORKTREE>`。公開 sync 入口在任何 SRPP 讀寫前均驗證該 worktree；mutation 只可接續 renderer 產生的 `docs/9090 Port API Swagger.md` 未 staged 修改，兩個 check 可接續該 mirror 加 `assumptions/srpp_report_calculations_schema.json`、`assumptions/daily_runtime_contract.json`、`assumptions/policy_manifest.json` 四個固定未 staged 產物。staged、rename、untracked 或任何其他 dirty path 一律拒絕，不能為了順序而放寬成任意 dirty worktree。
+
+任何規則包、Swagger identity、consumer metadata 或 authority 衍生檔變更後，均必須重算並記錄新的 policy bundle SHA-256；沒有新 hash 不得發布。完成 renderer/sync 後，必須在 `<SRPP_WORKTREE>` 通過 `python3 scripts/policy_bundle.py check --purpose daily --consumer Codex`、`python3 scripts/daily_runtime_contract.py check` 與 manifest SHA-256 readback，再通過 `python3 scripts/check-srpp-report-authority.py --srpp-root <SRPP_WORKTREE> --check`，並以 `ruby scripts/srpp-report-policy-register.rb` 產生受追蹤、insert-only 的 registry SQL；不得 UPDATE／DELETE 歷史 row。SRPP 與 asset-management 都完成各自 commit、no-ff merge、push 與 remote-ref readback 後，才由授權 release operator 執行 SQL，並唯讀回讀精確 registry row 與 jar embedded authority。
+
+9090 runtime acceptance 不能以靜態 hash、健康檢查或日曆代替。asset-management 由乾淨 main 重建/recreate 後，先唯讀 `GET /api/public/trading-calendar?year=<YYYY>`，要求 200 及 `availability.tw.status="AVAILABLE"`，只以 `days[].twTrading==true` 選出目標交易日。僅在目標日 Asia/Taipei `09:05 <= now < 13:30`、新 hash 的 registry row 與 jar authority 都已唯讀回讀時，才可用同一組 `policyBundleSha256`／`swaggerSha256` 對 9090 report-calculations 做唯讀 GET readback；09:05 前、13:30 後或尚未到目標日均為 `NOT_YET_EXECUTED`，不得手動 POST observer、重跑報告、寄信或交易。
+
 ### Requirement 191／Task 497 SRPP fail-closed 決策投影與逐檔事實 API 修訂
 
-本修訂優先於前述金融24／union25：金融1.26.0新增exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`，金融為26 pairs（22GET/4POST）；觀測仍獨立1.2.0的一POST，gateway/catalog/統一Swagger union為27 pairs（22GET/5POST）。mail的GET/POST仍共用Tailscale prefix，所以Tailscale是26 handlers；其餘均須exact allowlist，禁止root、`/api/`、wildcard或descendant。
+本修訂優先於前述金融24／union25：金融1.26.0新增exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`，金融為26 pairs（22GET/4POST）；Task504 後觀測為獨立1.3.0的一POST，gateway/catalog/統一Swagger union仍為27 pairs（22GET/5POST）。mail的GET/POST仍共用Tailscale prefix，所以Tailscale是26 handlers；其餘均須exact allowlist，禁止root、`/api/`、wildcard或descendant。
 
 兩GET只讀既有immutable schemaVersion1 FINAL report-calculations package，identity含ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256、calculationRunId；不得改package output、consumer schema、manifest、registry、producer或SRPP runtime。eligible leg是module data.legs的BUY/SELL，市場精確台股→TW／美股→US，NONE排除，legId固定ASCII `moduleId.index`；未知market/action是502而非猜測。A2 universe是eligible TW legs的sorted unique投影，非input field，只由package content hash保護；input snapshot hash只identity-bind、不可宣稱包含或保護universe。無M1 capacity evidence，零capacity reflow/substitution。P2與fresh revisions不在本輪；CSV均single-key／UTF-8 single decode。A1 root無quoteCapture；每leg只在`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol及price/amount精確同源且sourceRevision=vector revision時才有sealed `sourceId/sourceRevision/sourceSha256/capturedAt/QUOTE receipt` quoteCapture，否則三者全null。A1不收client risk，derivedRisk固定DEFENSIVE/UNAVAILABLE/RISK_EVIDENCE_UNAVAILABLE：BUY zero/null、SELL frozen-only、REDUCE需唯一base unit。A2 facts恰12筆固定順序；僅week52/k/d/rsi5/bias10/wr9/premium的exact frozen source＋`validation=VERIFIED` vector及其SHA/capturedAt matching SOURCE receipt可AVAILABLE；overheat只在五項AVAILABLE時依指定pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED；其餘四筆固定null NOT_EVALUATED，皆不得推斷。只發布API和Task495 Swagger metadata；不改SRPP prompts/schedules/validators/runtime或adoption，另立任務才可採納。

@@ -8,6 +8,7 @@ import org.springframework.http.*;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.*;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
@@ -34,9 +35,11 @@ final class AiFlowBffService {
     Mono<AiFlowDtos.Detail> detail(String id,ServerHttpRequest request) {
         return Mono.defer(()->{
             var q=AiFlowProtocol.Query.parse(request.getQueryParams(),true,clock); AiFlowProtocol.uuid(id);
-            return owner().flatMap(owner->business.get().uri(u->u.path("/api/ai-flow/runs/"+id).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
-                .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.Detail.class,200,"/api/ai-flow/runs/"+id))
-                .map(d->{validate(()->AiFlowProtocol.detail(d,q,owner.id(),id,clock));return d;}).timeout(Duration.ofSeconds(5)));
+            return owner().flatMap(owner->readDetail(id,q,owner)
+                // Node summary deliberately omits parameters.  Before returning it, fetch the
+                // same immutable event's private detail and actual toolCall internally and prove
+                // the selected choice still equals that call; never add either value back to Node.
+                .flatMap(d->validateChoiceSummaries(d,q,owner,id).thenReturn(d)).timeout(Duration.ofSeconds(5)));
         }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
     }
     Mono<AiFlowDtos.ToolCallDetail> toolCall(String runId,String eventId,ServerHttpRequest request) {
@@ -48,6 +51,51 @@ final class AiFlowBffService {
                 .map(d->{validate(()->AiFlowProtocol.toolCallDetail(d,q,runId,eventId,clock));return d;}).timeout(Duration.ofSeconds(5)));
         }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
     }
+    Mono<AiFlowDtos.ChoiceSetDetail> choiceSet(String runId,String eventId,ServerHttpRequest request) {
+        return Mono.defer(()->{
+            var q=AiFlowProtocol.Query.parse(request.getQueryParams(),true,clock); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId);
+            return owner().flatMap(owner->readChoiceSet(runId,eventId,q,owner).flatMap(choice->{
+                // Old/non-choice nodes remain a truthful nullable read and need no synthetic
+                // actual tool call.  A non-null choice set must prove its same-event START node,
+                // summary and selected call through internal read-only business requests.
+                if(choice.choiceSet()==null) return Mono.just(choice);
+                return Mono.zip(readToolCall(runId,eventId,q,owner),readDetail(runId,q,owner)).map(pair->{
+                    var node=pair.getT2().nodes().stream().filter(candidate->candidate.eventId().equals(eventId)).findFirst()
+                        .orElseThrow(()->new AiFlowProblem("UPSTREAM_INVALID"));
+                    validate(()->AiFlowProtocol.choiceSetMatchesActual(choice.choiceSet(),node.eventKind(),pair.getT1().toolCall()));
+                    validate(()->AiFlowProtocol.choiceSetSummaryMatches(choice.choiceSet(),node.choiceSetSummary()));
+                    return choice;
+                });
+            }).timeout(Duration.ofSeconds(5)));
+        }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
+    }
+    private Mono<AiFlowDtos.Detail> readDetail(String runId,AiFlowProtocol.Query q,BffUser owner) {
+        String path="/api/ai-flow/runs/"+runId;
+        return business.get().uri(u->u.path(path).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
+            .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.Detail.class,200,path))
+            .map(d->{validate(()->AiFlowProtocol.detail(d,q,owner.id(),runId,clock));return d;});
+    }
+    private Mono<AiFlowDtos.ToolCallDetail> readToolCall(String runId,String eventId,AiFlowProtocol.Query q,BffUser owner) {
+        String path="/api/ai-flow/runs/"+runId+"/nodes/"+eventId+"/tool-call";
+        return business.get().uri(u->u.path(path).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
+            .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.ToolCallDetail.class,200,path))
+            .map(d->{validate(()->AiFlowProtocol.toolCallDetail(d,q,runId,eventId,clock));return d;});
+    }
+    private Mono<AiFlowDtos.ChoiceSetDetail> readChoiceSet(String runId,String eventId,AiFlowProtocol.Query q,BffUser owner) {
+        String path="/api/ai-flow/runs/"+runId+"/nodes/"+eventId+"/choice-set";
+        return business.get().uri(u->u.path(path).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
+            .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.ChoiceSetDetail.class,200,path))
+            .map(d->{validate(()->AiFlowProtocol.choiceSetDetail(d,q,runId,eventId,clock));return d;});
+    }
+    private Mono<Void> validateChoiceSummaries(AiFlowDtos.Detail detail,AiFlowProtocol.Query q,BffUser owner,String runId) {
+        return Flux.fromIterable(detail.nodes()).filter(node->node.choiceSetSummary()!=null).concatMap(node->
+            Mono.zip(readChoiceSet(runId,node.eventId(),q,owner),readToolCall(runId,node.eventId(),q,owner)).map(pair->{
+                validate(()->AiFlowProtocol.choiceSetMatchesActual(pair.getT1().choiceSet(),node.eventKind(),pair.getT2().toolCall()));
+                validate(()->AiFlowProtocol.choiceSetSummaryMatches(pair.getT1().choiceSet(),node.choiceSetSummary()));
+                return node;
+            })
+        ).then();
+    }
     record Recorded(int status,AiFlowDtos.Ack ack) {}
     Mono<Recorded> record(ServerHttpRequest request,byte[] bytes) {
         return Mono.defer(()->{
@@ -56,6 +104,7 @@ final class AiFlowBffService {
             if(media==null || !MediaType.APPLICATION_JSON.isCompatibleWith(media)) throw new AiFlowProblem("UNSUPPORTED_MEDIA_TYPE");
             if(!request.getQueryParams().isEmpty()) throw AiFlowProblem.invalid();
             var batch=AiFlowProtocol.batch(bytes,clock); credentials.authorize(grant,batch.run());
+            credentials.authorizeChoiceSet(grant,batch.run(),batch.events().stream().anyMatch(event->event.choiceSet()!=null));
             return owner().flatMap(owner->business.post().uri(AiFlowProducerTokenWebFilter.PATH)
                 .headers(h->{ownerHeaders(h,owner);h.set(AiFlowCredentials.HEADER,request.getHeaders().getFirst(AiFlowCredentials.HEADER));})
                 .contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON).bodyValue(bytes)

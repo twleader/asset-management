@@ -1,5 +1,6 @@
 package com.steven.assets.service.aiflow;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.steven.assets.repository.aiflow.AiFlowRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.UserAdminService;
@@ -86,7 +87,7 @@ class AiFlowServiceTest {
         events.set(1, new com.steven.assets.dto.aiflow.AiFlowDtos.Event(original.eventId(), original.sequence(), original.stepId(),
                 original.eventKind(), original.status(), original.occurredAt(), original.title(), original.summary(), original.operation(),
                 original.reasonCode(), original.attemptNo(), original.parentEventIds(), original.relation(), original.evidenceRefs(),
-                original.reportedOutcome(), call));
+                original.reportedOutcome(), call, null));
         var parsed = AiFlowProtocol.parse(raw(events).toString());
         var rows = new ArrayList<AiFlowRepository.StoredEvent>();
         for (int i = 0; i < events.size(); i++) rows.add(new AiFlowRepository.StoredEvent(UUID.fromString(events.get(i).eventId()),
@@ -123,6 +124,41 @@ class AiFlowServiceTest {
         assertThatThrownBy(adapter::readOwner).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.status()).isEqualTo(403));
         when(context.getEffectiveUserId()).thenReturn(7L);assertThat(adapter.readOwner()).isEqualTo(7);
         clearInvocations(users);when(context.isAdmin()).thenReturn(false);assertThatThrownBy(adapter::readOwner).isInstanceOf(AiFlowProblem.class);verifyNoInteractions(users);
+    }
+    @Test void scopedChoiceSetReadVerifiesPayloadAndCollectorOnlyIngressLeavesNoPartialWrite() {
+        var call = choiceToolCall(); var choices = choiceSet(call);
+        List<com.steven.assets.dto.aiflow.AiFlowDtos.Event> events = new ArrayList<>(complete());
+        var original = events.get(1);
+        events.set(1, new com.steven.assets.dto.aiflow.AiFlowDtos.Event(original.eventId(), original.sequence(), original.stepId(),
+                original.eventKind(), original.status(), original.occurredAt(), original.title(), original.summary(), original.operation(),
+                original.reasonCode(), original.attemptNo(), original.parentEventIds(), original.relation(), original.evidenceRefs(),
+                original.reportedOutcome(), call, choices));
+        var parsed = AiFlowProtocol.parse(raw(events).toString());
+        var rows = new ArrayList<AiFlowRepository.StoredEvent>();
+        for (int i = 0; i < events.size(); i++) rows.add(new AiFlowRepository.StoredEvent(UUID.fromString(events.get(i).eventId()),
+                events.get(i).sequence(), parsed.payloads().get(i), parsed.hashes().get(i)));
+        when(repository.detail(7L, RUN, DATE, "Codex")).thenReturn(Optional.of(stored(events)));
+        when(repository.events(7L, RUN)).thenReturn(rows);
+        when(repository.event(7L, RUN, UUID.fromString(original.eventId()), DATE, "Codex")).thenReturn(Optional.of(rows.get(1)));
+        var detail = service.choiceSet(RUN.toString(), original.eventId(), query(DATE.toString()));
+        assertThat(detail.choiceSet()).isEqualTo(choices);
+        assertThat(service.detail(RUN.toString(), query(DATE.toString())).nodes())
+                .filteredOn(node -> node.choiceSetSummary() != null)
+                .singleElement().satisfies(node -> {
+                    assertThat(node.toolCall()).isNull();
+                    assertThat(node.choiceSetSummary().options()).extracting(option -> option.selected()).containsExactly(true, false);
+                });
+
+        clearInvocations(owner, repository, manager);
+        assertThatThrownBy(() -> service.ingest(List.of("codex-token"), "application/json", raw(events).toString()))
+                .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("FORBIDDEN"));
+        verifyNoInteractions(owner, repository, manager);
+        ObjectNode wrongSource = raw(events);
+        ((ObjectNode) wrongSource.path("run")).put("consumer", "Claude").put("sourceKind", "CLAUDE_ARTIFACT")
+                .put("automationId", "srpp-0905-claude");
+        assertThatThrownBy(() -> service.ingest(List.of("collector-token"), "application/json", wrongSource.toString()))
+                .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("FORBIDDEN"));
+        verifyNoInteractions(owner, repository, manager);
     }
     @Test void purgeIsBoundedAtTwentyBatchesAndNeverTouchesFinancialRepositories(){
         when(repository.purgeExpired(500)).thenReturn(500);when(repository.expiredRemain()).thenReturn(true);

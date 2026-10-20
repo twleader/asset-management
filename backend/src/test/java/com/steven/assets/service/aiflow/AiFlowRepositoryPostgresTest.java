@@ -155,7 +155,7 @@ class AiFlowRepositoryPostgresTest {
         Event original = events.get(1);
         events.set(1, new Event(original.eventId(), original.sequence(), original.stepId(), original.eventKind(), original.status(),
                 original.occurredAt(), original.title(), original.summary(), original.operation(), original.reasonCode(), original.attemptNo(),
-                original.parentEventIds(), original.relation(), original.evidenceRefs(), original.reportedOutcome(), call));
+                original.parentEventIds(), original.relation(), original.evidenceRefs(), original.reportedOutcome(), call, null));
         assertThat(append(events).status()).isEqualTo(201);
         assertThat(service.detail(RUN.toString(), query(DATE.toString())).nodes()).allSatisfy(node -> assertThat(node.toolCall()).isNull());
         assertThat(service.toolCall(RUN.toString(), original.eventId(), query(DATE.toString())).toolCall()).isEqualTo(call);
@@ -174,7 +174,7 @@ class AiFlowRepositoryPostgresTest {
         var before=jdbc.queryForList("SELECT event_id,payload_json,payload_sha256 FROM ai_flow_event WHERE owner_user_id=7 AND run_id=? AND event_id=?",RUN,UUID.fromString(parent.eventId()));
         Event child=new Event(id(7),parent.sequence()+1,"task-complete-failure","OBSERVATION","FAILED",parent.occurredAt(),
                 "模型服務容量不足","已觀測到模型服務暫時容量不足；報告結果尚未確認。",new Operation("LOCAL","artifact"),"MODEL_SERVICE_OVERLOADED",parent.attemptNo(),
-                List.of(parent.eventId()),"NEXT_OBSERVED",List.of(new Evidence("APP_TERMINAL","task_complete",null)),null,null);
+                List.of(parent.eventId()),"NEXT_OBSERVED",List.of(new Evidence("APP_TERMINAL","task_complete",null)),null,null,null);
         var appended=append(List.of(child));assertThat(appended.status()).isEqualTo(201);assertThat(appended.ack().inserted()).isEqualTo(1);
         assertThat(count("ai_flow_event")).isEqualTo(7);
         assertThat(jdbc.queryForList("SELECT event_id,payload_json,payload_sha256 FROM ai_flow_event WHERE owner_user_id=7 AND run_id=? AND event_id=?",RUN,UUID.fromString(parent.eventId()))).isEqualTo(before);
