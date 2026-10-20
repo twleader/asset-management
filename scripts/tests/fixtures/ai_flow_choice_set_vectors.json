@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "comment": "Task 504 final-wire choiceSet cross-language vectors. Each implementation starts from its own otherwise-valid batch, applies tool/choice selectors exactly, and must match valid.",
+  "toolCall": {
+    "name": "exec",
+    "innerNames": [],
+    "parameters": "{\"cmd\":\"date\"}",
+    "parametersChars": 14,
+    "truncated": false,
+    "redactedCount": 0
+  },
+  "choiceSet": {
+    "title": "公開日期候選",
+    "selectedOptionId": "current-date",
+    "options": [
+      {
+        "optionId": "current-date",
+        "label": "目前日期",
+        "toolName": "exec",
+        "parameters": "{\"cmd\":\"date\"}",
+        "parametersChars": 14,
+        "truncated": false,
+        "redactedCount": 0
+      },
+      {
+        "optionId": "utc-date",
+        "label": "協調世界時間",
+        "toolName": "exec",
+        "parameters": "{\"cmd\":\"date -u\"}",
+        "parametersChars": 17,
+        "truncated": false,
+        "redactedCount": 0
+      }
+    ]
+  },
+  "cases": [
+    {"id": "absent-choice", "eventKind": "START", "tool": "base", "choice": "absent", "valid": true},
+    {"id": "valid-choice", "eventKind": "START", "tool": "base", "choice": "base", "valid": true},
+    {"id": "explicit-null", "eventKind": "START", "tool": "base", "choice": "null", "valid": false},
+    {"id": "non-object", "eventKind": "START", "tool": "base", "choice": "array", "valid": false},
+    {"id": "unknown-nested-key", "eventKind": "START", "tool": "base", "choice": "unknownNested", "valid": false},
+    {"id": "non-start", "eventKind": "END", "tool": "base", "choice": "base", "valid": false},
+    {"id": "missing-actual-tool", "eventKind": "START", "tool": "absent", "choice": "base", "valid": false},
+    {"id": "adopted-parameters-mismatch", "eventKind": "START", "tool": "base", "choice": "mismatchParameters", "valid": false},
+    {"id": "actual-source-truncated", "eventKind": "START", "tool": "sourceTruncated", "choice": "base", "valid": false},
+    {"id": "unsafe-title", "eventKind": "START", "tool": "base", "choice": "unsafeTitle", "valid": false},
+    {"id": "private-choice-parameters", "eventKind": "START", "tool": "privateParameters", "choice": "privateParameters", "valid": false},
+    {"id": "private-choice-parameters-lf", "eventKind": "START", "tool": "markerParameters", "choice": "markerParameters", "marker": "PRIVATE\nREASONING_CANARY", "valid": false},
+    {"id": "private-choice-parameters-tab", "eventKind": "START", "tool": "markerParameters", "choice": "markerParameters", "marker": "PRIVATE\tREASONING_CANARY", "valid": false},
+    {"id": "chain-choice-parameters-lf", "eventKind": "START", "tool": "markerParameters", "choice": "markerParameters", "marker": "CHAIN\nOF\nTHOUGHT_CANARY", "valid": false},
+    {"id": "begin-private-choice-parameters-lf", "eventKind": "START", "tool": "markerParameters", "choice": "markerParameters", "marker": "BEGIN\nPRIVATE_REASONING_CANARY", "valid": false}
+  ]
+}

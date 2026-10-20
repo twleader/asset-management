@@ -103,6 +103,63 @@ class AiFlowProtocolTest {
    assertThat(accepted).as(vector.path("id").asText()).isEqualTo(vector.path("valid").asBoolean());
   }
  }
+ @Test void sharedChoiceSetVectorsMatchCollectorAndBackendFinalWireSemantics() throws Exception {
+  JsonNode vectors=AiFlowProtocol.JSON.readTree(Files.readAllBytes(choiceVectorsPath()));
+  assertThat(vectors.path("cases")).hasSize(15);
+  for(JsonNode vector:vectors.path("cases")) {
+   ObjectNode input=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowFixtures.batch()));
+   ObjectNode event=(ObjectNode)input.path("events").get(0);event.put("eventKind",vector.path("eventKind").asText());
+   JsonNode tool=vectors.path("toolCall").deepCopy();
+   switch(vector.path("tool").asText()) {
+    case "absent" -> event.remove("toolCall");
+    case "sourceTruncated" -> {((ObjectNode)tool).put("sourceTruncated",true);event.set("toolCall",tool);}
+    case "privateParameters" -> {((ObjectNode)tool).put("parameters","PRIVATE_REASONING_CANARY");((ObjectNode)tool).put("parametersChars","PRIVATE_REASONING_CANARY".codePointCount(0,"PRIVATE_REASONING_CANARY".length()));event.set("toolCall",tool);}
+    case "markerParameters" -> {String marker=vector.path("marker").asText();((ObjectNode)tool).put("parameters",marker);((ObjectNode)tool).put("parametersChars",marker.codePointCount(0,marker.length()));event.set("toolCall",tool);}
+    default -> event.set("toolCall",tool);
+   }
+   JsonNode choice=vectors.path("choiceSet").deepCopy();
+   switch(vector.path("choice").asText()) {
+    case "absent" -> event.remove("choiceSet");
+    case "null" -> event.putNull("choiceSet");
+    case "array" -> event.set("choiceSet",AiFlowProtocol.JSON.createArrayNode());
+    case "unknownNested" -> {((ObjectNode)choice.path("options").get(0)).put("reasoning","forbidden");event.set("choiceSet",choice);}
+    case "mismatchParameters" -> {((ObjectNode)choice.path("options").get(0)).put("parameters","{\"cmd\":\"date -u\"}");event.set("choiceSet",choice);}
+    case "unsafeTitle" -> {((ObjectNode)choice).put("title","private reasoning: hidden");event.set("choiceSet",choice);}
+    case "privateParameters" -> {((ObjectNode)choice.path("options").get(0)).put("parameters","PRIVATE_REASONING_CANARY");((ObjectNode)choice.path("options").get(0)).put("parametersChars","PRIVATE_REASONING_CANARY".codePointCount(0,"PRIVATE_REASONING_CANARY".length()));event.set("choiceSet",choice);}
+    case "markerParameters" -> {String marker=vector.path("marker").asText();((ObjectNode)choice.path("options").get(0)).put("parameters",marker);((ObjectNode)choice.path("options").get(0)).put("parametersChars",marker.codePointCount(0,marker.length()));event.set("choiceSet",choice);}
+    default -> event.set("choiceSet",choice);
+   }
+   boolean accepted;
+   try {AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK);accepted=true;}
+   catch(AiFlowProblem rejected) {accepted=false;}
+   assertThat(accepted).as(vector.path("id").asText()).isEqualTo(vector.path("valid").asBoolean());
+  }
+ }
+ @Test void publicChoiceSetIsClosedExactAndKeepsSummaryAndLegacyDetailDistinct() throws Exception {
+  var call=AiFlowFixtures.choiceToolCall();var choices=AiFlowFixtures.choiceSet(call);
+  ObjectNode input=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowFixtures.batch()));
+  ObjectNode event=(ObjectNode)input.path("events").get(0);
+  event.set("toolCall",AiFlowProtocol.JSON.valueToTree(call));event.set("choiceSet",AiFlowProtocol.JSON.valueToTree(choices));
+  assertThat(AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK).events().getFirst().choiceSet()).isEqualTo(choices);
+  ObjectNode mismatch=input.deepCopy();((ObjectNode)mismatch.path("events").get(0).path("choiceSet").path("options").get(0)).put("parameters","{\"cmd\":\"date -u\"}");
+  assertThatThrownBy(()->AiFlowProtocol.batch(AiFlowFixtures.bytes(mismatch),AiFlowFixtures.CLOCK)).extracting(e->((AiFlowProblem)e).code).isEqualTo("INVALID_REQUEST");
+  ObjectNode unsafe=input.deepCopy();((ObjectNode)unsafe.path("events").get(0).path("choiceSet").path("options").get(1)).put("label","private reasoning: hidden");
+  assertThatThrownBy(()->AiFlowProtocol.batch(AiFlowFixtures.bytes(unsafe),AiFlowFixtures.CLOCK)).isInstanceOf(AiFlowProblem.class);
+  ObjectNode truncated=input.deepCopy();((ObjectNode)truncated.path("events").get(0).path("toolCall")).put("sourceTruncated",true);
+  assertThatThrownBy(()->AiFlowProtocol.batch(AiFlowFixtures.bytes(truncated),AiFlowFixtures.CLOCK)).isInstanceOf(AiFlowProblem.class);
+  ObjectNode explicitNull=input.deepCopy();((ObjectNode)explicitNull.path("events").get(0)).set("choiceSet",AiFlowProtocol.JSON.readTree("null"));
+  assertThatThrownBy(()->AiFlowProtocol.batch(AiFlowFixtures.bytes(explicitNull),AiFlowFixtures.CLOCK)).isInstanceOf(AiFlowProblem.class);
+
+  var summary=new AiFlowDtos.ChoiceSetSummary(choices.title(),choices.selectedOptionId(),List.of(
+   new AiFlowDtos.ChoiceOptionSummary("current-date","目前日期","exec",true),
+   new AiFlowDtos.ChoiceOptionSummary("utc-date","協調世界時間","exec",false)));
+  assertThat(AiFlowProtocol.JSON.valueToTree(summary).toString()).doesNotContain("parameters");
+  var legacy=new AiFlowDtos.ChoiceSetDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,null);
+  ObjectNode legacyWire=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(legacy));
+  assertThat(legacyWire.has("choiceSet") && legacyWire.get("choiceSet").isNull()).isTrue();
+  AiFlowProtocol.choiceSetDetail(AiFlowProtocol.decode(AiFlowFixtures.bytes(legacy),AiFlowDtos.ChoiceSetDetail.class,false),
+   new AiFlowProtocol.Query(AiFlowFixtures.DATE,"Codex","ALL"),AiFlowFixtures.ID,AiFlowFixtures.EVENT,AiFlowFixtures.CLOCK);
+ }
  @Test void ingressOptionalityAndReadSideToolCallIsolationHaveOppositeNullSemantics() throws Exception {
   var input=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(AiFlowFixtures.batch()));
   assertThat(AiFlowProtocol.batch(AiFlowFixtures.bytes(input),AiFlowFixtures.CLOCK).events().getFirst().toolCall()).isNull();
@@ -136,6 +193,10 @@ class AiFlowProtocolTest {
  private static Path vectorsPath(){
   Path moduleRelative=Path.of("../scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
   return Files.exists(moduleRelative)?moduleRelative:Path.of("scripts/tests/fixtures/ai_flow_tool_call_vectors.json");
+ }
+ private static Path choiceVectorsPath(){
+  Path moduleRelative=Path.of("../scripts/tests/fixtures/ai_flow_choice_set_vectors.json");
+  return Files.exists(moduleRelative)?moduleRelative:Path.of("scripts/tests/fixtures/ai_flow_choice_set_vectors.json");
  }
  private static ObjectNode expandToolCall(JsonNode source){
   ObjectNode toolCall=(ObjectNode)source.deepCopy();JsonNode recipe=toolCall.remove("parametersRecipe");

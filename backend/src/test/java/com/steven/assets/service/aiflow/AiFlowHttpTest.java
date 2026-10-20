@@ -42,8 +42,9 @@ class AiFlowHttpTest {
         var service=mock(AiFlowService.class);var detail=AiFlowProjection.detail(stored(complete()),complete());when(service.detail(anyString(),any())).thenReturn(detail);
         MockMvc mvc=mvc(service,new AiFlowCredentialService("c","h","r"));String body=mvc.perform(get("/api/ai-flow/runs/"+RUN).param("date",DATE.toString()).param("consumer","Codex")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         var root=JSON.readTree(body);assertThat(root.path("run").has("reportedOutcome")).isTrue();assertThat(root.path("run").get("reportedOutcome").isNull()).isTrue();
-        assertThat(root.path("run").properties()).hasSize(22);assertThat(root.path("nodes").get(0).has("durationMillis")).isTrue();assertThat(root.path("nodes").get(0).properties()).hasSize(24);
+        assertThat(root.path("run").properties()).hasSize(22);assertThat(root.path("nodes").get(0).has("durationMillis")).isTrue();assertThat(root.path("nodes").get(0).properties()).hasSize(25);
         assertThat(root.path("nodes").get(0).has("toolCall")).isTrue();assertThat(root.path("nodes").get(0).get("toolCall").isNull()).isTrue();
+        assertThat(root.path("nodes").get(0).has("choiceSetSummary")).isTrue();assertThat(root.path("nodes").get(0).get("choiceSetSummary").isNull()).isTrue();
         assertThat(root.path("nodes").get(0).path("evidenceRefs").get(0).has("hash")).isTrue();
         assertThat(root.path("run").path("reportDate").asText()).isEqualTo(DATE.toString());
         assertThat(root.path("run").path("startedAt").asText()).isEqualTo(instant(AT).toString());
@@ -58,6 +59,21 @@ class AiFlowHttpTest {
                 .andExpect(status().isOk()).andExpect(header().string(HttpHeaders.CACHE_CONTROL,"no-store"))
                 .andExpect(jsonPath("$.runId").value(RUN.toString())).andExpect(jsonPath("$.eventId").value(id(2)))
                 .andExpect(jsonPath("$.toolCall.parameters").value("{\"cmd\":\"date\"}"));
+    }
+    @Test void scopedChoiceSetReadIsNoStoreAndLegacyNullRemainsAnExplicitDetailKey() throws Exception {
+        var service=mock(AiFlowService.class);
+        var call=choiceToolCall(); var choices=choiceSet(call);
+        when(service.choiceSet(eq(RUN.toString()),eq(id(2)),any())).thenReturn(new ChoiceSetDetail(RUN.toString(),id(2),choices));
+        when(service.choiceSet(eq(RUN.toString()),eq(id(1)),any())).thenReturn(new ChoiceSetDetail(RUN.toString(),id(1),null));
+        MockMvc mvc=mvc(service,new AiFlowCredentialService("c","h","r"));
+        String path="/api/ai-flow/runs/"+RUN+"/nodes/"+id(2)+"/choice-set";
+        mvc.perform(get(path).param("date",DATE.toString()).param("consumer","Codex"))
+                .andExpect(status().isOk()).andExpect(header().string(HttpHeaders.CACHE_CONTROL,"no-store"))
+                .andExpect(jsonPath("$.runId").value(RUN.toString())).andExpect(jsonPath("$.eventId").value(id(2)))
+                .andExpect(jsonPath("$.choiceSet.options[0].parameters").value("{\"cmd\":\"date\"}"));
+        mvc.perform(get("/api/ai-flow/runs/"+RUN+"/nodes/"+id(1)+"/choice-set").param("date",DATE.toString()).param("consumer","Codex"))
+                .andExpect(status().isOk()).andExpect(header().string(HttpHeaders.CACHE_CONTROL,"no-store"))
+                .andExpect(jsonPath("$.choiceSet").value(org.hamcrest.Matchers.nullValue()));
     }
     static MockMvc mvc(AiFlowService service,AiFlowCredentialService credentials){
         var mapper=new ObjectMapper().registerModule(new JavaTimeModule())

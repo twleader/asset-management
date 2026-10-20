@@ -21,5 +21,9 @@ public final class AiFlowBffController {
             @PathVariable String runId,@PathVariable String eventId,ServerHttpRequest request) {
         return service.toolCall(runId,eventId,request).map(AiFlowBffController::okay);
     }
+    @GetMapping("/runs/{runId}/nodes/{eventId}/choice-set") Mono<ResponseEntity<AiFlowDtos.ChoiceSetDetail>> choiceSet(
+            @PathVariable String runId,@PathVariable String eventId,ServerHttpRequest request) {
+        return service.choiceSet(runId,eventId,request).map(AiFlowBffController::okay);
+    }
     private static <T> ResponseEntity<T> okay(T dto) {return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL,"private, no-store").body(dto);}
 }

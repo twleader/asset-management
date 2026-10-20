@@ -466,6 +466,12 @@ export const bffApi = {
         params: { date, consumer },
         signal,
         skipErrorToast: true
+      }),
+    choiceSet: (runId, eventId, { date, consumer, signal } = {}) =>
+      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/choice-set', {
+        params: { date, consumer },
+        signal,
+        skipErrorToast: true
       })
   },
 

@@ -253,6 +253,44 @@
               <template v-else>{{ state.selectedToolCall.redactedCount }} 處</template>
             </p>
           </template>
+          <template v-if="selectedNode.eventKind === 'START'">
+            <p v-if="state.selectedChoiceSetLoading" class="choice-set-state" role="status">正在讀取所選節點的公開候選…</p>
+            <el-alert
+              v-else-if="state.selectedChoiceSetError"
+              class="choice-set-state"
+              type="error"
+              :closable="false"
+              show-icon
+              :title="state.selectedChoiceSetError"
+            />
+            <section v-else-if="state.selectedChoiceSet" class="choice-set-detail" aria-label="公開候選">
+              <h5>公開候選</h5>
+              <p class="choice-set-title">{{ state.selectedChoiceSet.title }}</p>
+              <article v-for="option in selectedChoiceSetOptions" :key="option.optionId" class="choice-set-option">
+                <div class="choice-set-option-heading">
+                  <strong>{{ option.optionId === state.selectedChoiceSet.selectedOptionId ? '採用' : '未選擇' }}</strong>
+                  <span>{{ option.label }}</span>
+                </div>
+                <dl class="node-facts choice-set-facts">
+                  <div><dt>工具</dt><dd>{{ option.toolName }}</dd></div>
+                  <div><dt>清理後字元數</dt><dd>{{ option.parametersChars }}</dd></div>
+                  <div><dt>參數</dt><dd><pre class="choice-set-parameters">{{ option.parameters === '' ? '（無參數）' : option.parameters }}</pre></dd></div>
+                </dl>
+                <p v-if="option.truncated" class="choice-set-note">
+                  已截斷：已處理前綴的遮蔽後長度 {{ option.parametersChars }} 字元，僅保留前 16384 字元
+                </p>
+                <p v-if="option.sourceTruncated === true" class="choice-set-note">
+                  原始輸入超出 1,048,576 字元預掃上限；下列內容與長度只反映已處理前綴
+                </p>
+                <p v-if="option.redactedCount > 0" class="choice-set-note">
+                  已處理範圍的憑證遮蔽數：
+                  <template v-if="option.redactedCount === 100000">至少 100000 處</template>
+                  <template v-else>{{ option.redactedCount }} 處</template>
+                </p>
+              </article>
+            </section>
+            <p v-else-if="state.selectedToolCall" class="choice-set-state">未記錄公開候選</p>
+          </template>
           <div class="safe-text-actions">
             <el-button
               link
@@ -308,6 +346,7 @@ import {
   isDateOutsideWindow,
   isIsoDate,
   mapAiFlowGraphData,
+  resolveAiFlowGraphNodeSelection,
   todayTaipeiISO
 } from '@/utils/aiFlowView'
 
@@ -334,6 +373,8 @@ const loader = createAiFlowViewLoader({
     bffApi.aiFlow.detail(runId, { date, consumer: selectedConsumer, signal }),
   getToolCall: (runId, eventId, { date, consumer: selectedConsumer, signal }) =>
     bffApi.aiFlow.toolCall(runId, eventId, { date, consumer: selectedConsumer, signal }),
+  getChoiceSet: (runId, eventId, { date, consumer: selectedConsumer, signal }) =>
+    bffApi.aiFlow.choiceSet(runId, eventId, { date, consumer: selectedConsumer, signal }),
   errorMessage: error => apiErrorMessage(error, '目前無法讀取 AI 流程紀錄，請稍後再試。')
 })
 
@@ -384,17 +425,7 @@ watch(
 const graphData = computed(() => mapAiFlowGraphData(state.detail))
 // Preserve the server's coordinates at readable spacing instead of fitting a
 // long trace into one viewport. SVG avoids a tall raster canvas size limit.
-const graphHeight = computed(() => {
-  let minimum = Infinity
-  let maximum = -Infinity
-  for (const node of graphData.value.nodes) {
-    if (Number.isFinite(node.y)) {
-      minimum = Math.min(minimum, node.y)
-      maximum = Math.max(maximum, node.y)
-    }
-  }
-  return Number.isFinite(minimum) ? Math.max(700, maximum - minimum + 160) : 700
-})
+const graphHeight = computed(() => graphData.value.graphHeight)
 watch(() => state.selectedRunId, () => { graphZoom.value = 1 })
 const graphOption = computed(() => ({
   animation: false,
@@ -438,6 +469,8 @@ const graphOption = computed(() => ({
 
 const selectedNode = computed(() =>
   state.detail?.nodes?.find(node => node.eventId === state.selectedNodeId) || null)
+const selectedChoiceSetOptions = computed(() =>
+  Array.isArray(state.selectedChoiceSet?.options) ? state.selectedChoiceSet.options : [])
 
 function reloadRuns() {
   void loader.query(state, { date: reportDate.value, consumer: consumer.value, period: period.value })
@@ -451,8 +484,8 @@ function closeDetail() {
   loader.clearDetail(state)
 }
 
-function selectNode(eventId) {
-  void loader.selectNode(state, eventId, state.filters)
+function selectNode(eventId, { forceSelect = false } = {}) {
+  void loader.selectNode(state, eventId, state.filters, { forceSelect })
 }
 
 function clearSelectedNode() {
@@ -461,8 +494,8 @@ function clearSelectedNode() {
 
 function onChartClick(params) {
   if (params?.dataType !== 'node') return
-  const eventId = params?.data?.id
-  if (eventId) selectNode(eventId)
+  const { eventId, fromSynthetic } = resolveAiFlowGraphNodeSelection(graphData.value, params?.data?.id)
+  if (eventId) selectNode(eventId, { forceSelect: fromSynthetic })
 }
 
 function showSafeText(title, entries) {
@@ -513,9 +546,17 @@ onBeforeUnmount(() => loader.clear(state))
 .node-detail .section-header { margin-bottom: 12px; }
 .node-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 10px; }
 .tool-call-facts { margin-top: 16px; }
-.tool-call-state, .tool-call-note { margin-top: 12px; }
-.tool-call-note { color: #64748b; font-size: 13px; line-height: 1.5; }
+.tool-call-state, .tool-call-note, .choice-set-state, .choice-set-note { margin-top: 12px; }
+.tool-call-note, .choice-set-note { color: #64748b; font-size: 13px; line-height: 1.5; }
 .tool-call-parameters { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; font: inherit; }
+.choice-set-detail { display: grid; gap: 10px; margin-top: 16px; }
+.choice-set-detail h5 { color: #1e293b; font-size: 14px; }
+.choice-set-title { color: #475569; font-size: 13px; }
+.choice-set-option { padding: 14px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
+.choice-set-option-heading { display: flex; flex-wrap: wrap; gap: 8px; color: #1e293b; }
+.choice-set-option-heading strong { color: #166534; }
+.choice-set-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.choice-set-parameters { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; font: inherit; }
 .safe-text-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 14px; }
 .safe-text-list { display: grid; gap: 14px; }
 .safe-text-list pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

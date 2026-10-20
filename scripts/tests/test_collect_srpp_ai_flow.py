@@ -692,6 +692,9 @@ END_GENERIC = "已觀測到工具輸出，不推定金融操作或報告成功�
 TOOL_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
 JAVA_PROTOCOL = SCRIPTS.parent / "backend/src/main/java/com/steven/assets/service/aiflow/AiFlowProtocol.java"
 TOOL_CALL_VECTORS = SCRIPTS / "tests/fixtures/ai_flow_tool_call_vectors.json"
+PUBLIC_CHOICE_ROLLOUT = SCRIPTS / "tests/fixtures/ai_flow_public_choice_set_rollout.jsonl"
+CHOICE_SET_VECTORS = SCRIPTS / "tests/fixtures/ai_flow_choice_set_vectors.json"
+ABSENT = object()
 
 
 def without_tool_calls(value):
@@ -713,6 +716,41 @@ def materialize_tool_call(value):
     if recipe is not None:
         call["parameters"] = recipe["unit"] * recipe["count"]
     return call
+
+
+def materialize_choice_set(vectors, case):
+    """展開跨語言 final-wire choiceSet selector；不涉及任何 raw exporter input。"""
+    call = json.loads(json.dumps(vectors["toolCall"]))
+    if case["tool"] == "absent":
+        call = ABSENT
+    elif case["tool"] == "sourceTruncated":
+        call["sourceTruncated"] = True
+    elif case["tool"] == "privateParameters":
+        call["parameters"] = "PRIVATE_REASONING_CANARY"
+        call["parametersChars"] = c._code_point_count(call["parameters"])
+    elif case["tool"] == "markerParameters":
+        call["parameters"] = case["marker"]
+        call["parametersChars"] = c._code_point_count(call["parameters"])
+    choice = json.loads(json.dumps(vectors["choiceSet"]))
+    if case["choice"] == "absent":
+        choice = ABSENT
+    elif case["choice"] == "null":
+        choice = None
+    elif case["choice"] == "array":
+        choice = []
+    elif case["choice"] == "unknownNested":
+        choice["options"][0]["reasoning"] = "forbidden"
+    elif case["choice"] == "mismatchParameters":
+        choice["options"][0]["parameters"] = '{"cmd":"date -u"}'
+    elif case["choice"] == "unsafeTitle":
+        choice["title"] = "private reasoning: hidden"
+    elif case["choice"] == "privateParameters":
+        choice["options"][0]["parameters"] = "PRIVATE_REASONING_CANARY"
+        choice["options"][0]["parametersChars"] = c._code_point_count(choice["options"][0]["parameters"])
+    elif case["choice"] == "markerParameters":
+        choice["options"][0]["parameters"] = case["marker"]
+        choice["options"][0]["parametersChars"] = c._code_point_count(choice["options"][0]["parameters"])
+    return call, choice
 
 
 def tool_source_rows(calls, *, turn=TURN):
@@ -1591,6 +1629,214 @@ class ToolCallParameterTests(Fixture):
         c.validate_envelope(value, TODAY)
         self.assertLess(len(c.canonical(value)), 256 * 1024)
         self.assertGreater(self.store.enqueue(value), 0)
+
+
+class PublicChoiceSetTests(Fixture):
+    """Task 504：只接受同一 public tool-call line 的版本化公開候選。"""
+
+    @staticmethod
+    def raw_choice():
+        return {
+            "schemaVersion": c.PUBLIC_CHOICE_SCHEMA,
+            "publicSource": c.PUBLIC_CHOICE_SOURCE,
+            "title": "公開日期查詢候選",
+            "selectedOptionId": "date-now",
+            "options": [
+                {"optionId": "date-now", "label": "讀取目前日期", "toolName": "functions.exec",
+                 "input": '{"cmd":"date"}'},
+                {"optionId": "date-utc", "label": "讀取協調世界時間", "toolName": "functions.exec",
+                 "input": '{"cmd":"date -u"}'},
+            ],
+        }
+
+    def reset_state(self):
+        for state_file in (self.store.root / "sources").glob("codex-*.json"):
+            state_file.unlink()
+        self.collector = c.Collector(self.home, self.store)
+
+    def collect(self, payload):
+        self.reset_state()
+        values = source_rows()
+        values[4]["payload"] = {"type": "custom_tool_call", "call_id": "call_public1", **payload}
+        self.path.write_bytes(encode_rows(values))
+        return self.envelope()
+
+    @staticmethod
+    def start(value):
+        return next(event for event in value["events"]
+                    if event["eventKind"] == "START" and event["stepId"].startswith("call-"))
+
+    def test_readonly_public_rollout_fixture_preserves_only_final_public_choice_set(self):
+        self.path.write_bytes(PUBLIC_CHOICE_ROLLOUT.read_bytes())
+        value = self.envelope()
+        start = self.start(value)
+        c.validate_envelope(value, TODAY)
+        self.assertEqual("公開日期查詢候選", start["choiceSet"]["title"])
+        self.assertEqual("date-now", start["choiceSet"]["selectedOptionId"])
+        self.assertEqual("functions.exec", start["choiceSet"]["options"][0]["toolName"])
+        self.assertEqual(start["toolCall"]["parameters"], start["choiceSet"]["options"][0]["parameters"])
+        self.assertNotIn("publicChoiceSet", c.canonical(value).decode())
+        state = c.strict_json(next((self.store.root / "sources").glob("codex-*.json")).read_bytes())
+        state_text = c.canonical(state).decode()
+        self.assertIn('"choiceSet"', state_text)
+        self.assertNotIn("publicChoiceSet", state_text)
+
+    def test_only_explicit_safe_raw_source_can_add_choice_and_private_canary_never_persists(self):
+        cases = {
+            "payload-choiceSet-is-not-source": lambda payload: payload.update(choiceSet=self.raw_choice()),
+            "object-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": {"cmd": "date"}}, self.raw_choice()["options"][1]]}),
+            "array-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": ["date"]}, self.raw_choice()["options"][1]]}),
+            "nested-private-marker": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": '{"nested":{"reasoning":"PRIVATE_CHOICE_CANARY"}}'}, self.raw_choice()["options"][1]]}),
+            "unknown-raw-option-key": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "nested": "forbidden"}, self.raw_choice()["options"][1]]}),
+            "unsafe-raw-label": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "label": "private reasoning: hidden"}, self.raw_choice()["options"][1]]}),
+            "newline-private-raw-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": "PRIVATE\nREASONING_CANARY"}, self.raw_choice()["options"][1]]}),
+            "tab-private-raw-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": "PRIVATE\tREASONING_CANARY"}, self.raw_choice()["options"][1]]}),
+            "newline-chain-raw-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": "CHAIN\nOF\nTHOUGHT_CANARY"}, self.raw_choice()["options"][1]]}),
+            "newline-begin-private-raw-input": lambda payload: payload.update(publicChoiceSet={**self.raw_choice(), "options": [
+                {**self.raw_choice()["options"][0], "input": "BEGIN\nPRIVATE_REASONING_CANARY"}, self.raw_choice()["options"][1]]}),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name):
+                payload = {"name": "functions.exec", "input": '{"cmd":"date"}'}
+                mutate(payload)
+                value = self.collect(payload)
+                start = self.start(value)
+                self.assertIn("toolCall", start)
+                self.assertNotIn("choiceSet", start)
+                self.store.enqueue(value)
+                pending = "".join(path.read_text() for path in (self.store.root / "pending").glob("*.json"))
+                visible = (c.canonical(value).decode() + c.canonical(c.strict_json(
+                    next((self.store.root / "sources").glob("codex-*.json")).read_bytes())).decode() + pending)
+                for marker in ("PRIVATE_REASONING_CANARY", "PRIVATE_ANALYSIS_CANARY", "PRIVATE_CHOICE_CANARY",
+                               "PRIVATE\nREASONING_CANARY", "PRIVATE\tREASONING_CANARY",
+                               "CHAIN\nOF\nTHOUGHT_CANARY", "BEGIN\nPRIVATE_REASONING_CANARY"):
+                    self.assertNotIn(marker, visible)
+
+    def test_oversized_raw_candidate_is_counted_before_private_marker_scan_and_never_enters_state_or_pending(self):
+        raw = self.raw_choice()
+        raw["options"][0]["input"] = "x" * (c.TOOL_PARAM_PRESCAN_LIMIT + 1) + "PRIVATE_CHOICE_CANARY"
+        payload = {"name": "functions.exec", "input": '{"cmd":"date"}', "publicChoiceSet": raw}
+
+        class MarkerProbe:
+            def __init__(self):
+                self.seen = []
+
+            def search(self, text):
+                self.seen.append(len(text))
+                if len(text) > c.TOOL_PARAM_PRESCAN_LIMIT:
+                    raise AssertionError("超額 raw candidate 不得先執行 private-marker regex")
+                return None
+
+        probe = MarkerProbe()
+        with mock.patch.object(c, "PRIVATE_CHOICE_MARKER", probe):
+            value = self.collect(payload)
+        start = self.start(value)
+        self.assertNotIn("choiceSet", start)
+        self.assertEqual([], probe.seen)
+        self.assertGreater(self.store.enqueue(value), 0)
+        visible = c.canonical(value).decode() + c.canonical(c.strict_json(
+            next((self.store.root / "sources").glob("codex-*.json")).read_bytes())).decode()
+        visible += "".join(path.read_text() for path in (self.store.root / "pending").glob("*.json"))
+        self.assertNotIn("PRIVATE_CHOICE_CANARY", visible)
+
+    def test_final_wire_private_marker_is_rejected_before_enqueue(self):
+        value = self.collect({"name": "functions.exec", "input": '{"cmd":"date"}', "publicChoiceSet": self.raw_choice()})
+        state_before = {path.name: path.read_bytes() for path in (self.store.root / "sources").glob("*.json")}
+        pending_before = {path.name: path.read_bytes() for path in (self.store.root / "pending").glob("*.json")}
+        for marker in ("PRIVATE_REASONING_CANARY", "PRIVATE\nREASONING_CANARY", "PRIVATE\tREASONING_CANARY",
+                       "CHAIN\nOF\nTHOUGHT_CANARY", "BEGIN\nPRIVATE_REASONING_CANARY"):
+            with self.subTest(marker=repr(marker)):
+                malicious = json.loads(c.canonical(value))
+                start = self.start(malicious)
+                start["toolCall"]["parameters"] = marker
+                start["toolCall"]["parametersChars"] = c._code_point_count(marker)
+                start["choiceSet"]["options"][0]["parameters"] = marker
+                start["choiceSet"]["options"][0]["parametersChars"] = c._code_point_count(marker)
+                with self.assertRaises(c.ObservationError):
+                    c.validate_envelope(malicious, TODAY)
+                with self.assertRaises(c.ObservationError):
+                    self.store.enqueue(malicious)
+                self.assertEqual(state_before, {path.name: path.read_bytes() for path in (self.store.root / "sources").glob("*.json")})
+                self.assertEqual(pending_before, {path.name: path.read_bytes() for path in (self.store.root / "pending").glob("*.json")})
+                persisted = b"".join(state_before.values()) + b"".join(pending_before.values())
+                self.assertNotIn(marker.encode(), persisted)
+
+    def test_source_truncated_skips_whole_choice_before_reading_raw_candidate(self):
+        value = self.collect({"name": "functions.exec", "input": "x" * (c.TOOL_PARAM_PRESCAN_LIMIT + 1),
+                              "publicChoiceSet": {"not": "a permitted raw source"}})
+        start = self.start(value)
+        self.assertTrue(start["toolCall"]["sourceTruncated"])
+        self.assertNotIn("choiceSet", start)
+
+    def test_final_wire_requires_exact_actual_tool_and_rejects_null_or_source_truncated(self):
+        value = self.collect({"name": "functions.exec", "input": '{"cmd":"date"}', "publicChoiceSet": self.raw_choice()})
+        valid = json.loads(c.canonical(value))
+        c.validate_envelope(valid, TODAY)
+        start = self.start(valid)
+        bad_parameter = json.loads(c.canonical(valid))
+        self.start(bad_parameter)["choiceSet"]["options"][0]["parameters"] = '{"cmd":"date -u"}'
+        for invalid in (bad_parameter,
+                        self._replace_choice(valid, None),
+                        self._source_truncated(valid)):
+            with self.assertRaises(c.ObservationError):
+                c.validate_envelope(invalid, TODAY)
+        self.assertEqual(start["toolCall"], {key: value for key, value in start["choiceSet"]["options"][0].items()
+                                               if key not in {"optionId", "label", "toolName"}} | {"name": start["toolCall"]["name"], "innerNames": start["toolCall"]["innerNames"]})
+
+    @staticmethod
+    def _replace_choice(value, choice):
+        clone = json.loads(c.canonical(value))
+        PublicChoiceSetTests.start(clone)["choiceSet"] = choice
+        return clone
+
+    @staticmethod
+    def _source_truncated(value):
+        clone = json.loads(c.canonical(value))
+        PublicChoiceSetTests.start(clone)["toolCall"]["sourceTruncated"] = True
+        return clone
+
+    def test_astral_public_text_uses_code_points_not_utf16_and_raw_input_is_never_json_parsed(self):
+        actual = c.tool_call({"name": "functions.exec", "input": '{"cmd":"date"}'}, [])
+        raw = self.raw_choice()
+        raw["title"] = "😀" * 100
+        raw["options"][0]["label"] = "😀" * 100
+        self.assertIsNotNone(c.public_choice_set({"publicChoiceSet": raw}, actual))
+        raw["title"] += "😀"
+        self.assertIsNone(c.public_choice_set({"publicChoiceSet": raw}, actual))
+        oversized = self.raw_choice()
+        oversized["options"][1]["input"] = "x" * (c.TOOL_PARAM_PRESCAN_LIMIT + 1)
+        self.assertIsNone(c.public_choice_set({"publicChoiceSet": oversized}, actual))
+
+    def test_shared_final_wire_choice_vectors_match_backend_and_bff_contract(self):
+        vectors = json.loads(CHOICE_SET_VECTORS.read_text(encoding="utf-8"))
+        self.assertEqual(15, len(vectors["cases"]))
+        for case in vectors["cases"]:
+            with self.subTest(case=case["id"]):
+                value = json.loads(c.canonical(self.envelope()))
+                event = value["events"][0]
+                event["eventKind"] = case["eventKind"]
+                tool, choice = materialize_choice_set(vectors, case)
+                if tool is ABSENT:
+                    event.pop("toolCall", None)
+                else:
+                    event["toolCall"] = tool
+                if choice is ABSENT:
+                    event.pop("choiceSet", None)
+                else:
+                    event["choiceSet"] = choice
+                if case["valid"]:
+                    c.validate_envelope(value, TODAY)
+                else:
+                    with self.assertRaises(c.ObservationError):
+                        c.validate_envelope(value, TODAY)
 
 
 class SpoolSenderTests(Fixture):

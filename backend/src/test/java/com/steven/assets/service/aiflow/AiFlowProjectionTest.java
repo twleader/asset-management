@@ -82,7 +82,7 @@ class AiFlowProjectionTest {
         List<Event> events = new ArrayList<>();
         for (int i = 1; i <= 300; i++) {
             events.add(new Event(id(i), i, "tool-" + i, "START", "RUNNING", null, "公開工具呼叫", "公開摘要",
-                    new Operation("TOOL", "tool"), null, 1, List.of(), null, List.of(), null, call));
+                    new Operation("TOOL", "tool"), null, 1, List.of(), null, List.of(), null, call, null));
         }
         Detail detail = AiFlowProjection.detail(stored(complete()), events);
         assertThat(detail.nodes()).allSatisfy(node -> assertThat(node.toolCall()).isNull());

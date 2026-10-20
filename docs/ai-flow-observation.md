@@ -2,7 +2,7 @@
 
 「系統資訊 → AI 判斷流程」按台北日期、Codex／Claude及「全部時段、台股早盤、台股午盤、美股」查詢已記錄的公開執行歷程，預設全部時段。流程圖、時間軸與工具耗時來自實際事件；執行結束、自報結果、紀錄完整度與報告驗證分開顯示。沒有紀錄表示尚無已記錄執行，不能推定排程未跑。
 
-今天只部署 asset-management 的觀測功能。SRPP 的規則、排程、validator、prompt 與遠端 skill 都維持既有檔案；原金融 API 路由與契約不變。觀測使用獨立契約 [AI 觀測 API](openapi/9090-ai-flow-observation.md)，但 Task 501 的 observer 1.2.0 會重產統一 Swagger、改變 PublishedSwaggerIdentity，必須在部署前依既有身分同步流程同步 SRPP 的 consumer schema、runtime contract 與規則包身分。SRPP 的隱私政策文字不在本任務改動，須另立發布任務。
+今天只部署 asset-management 的觀測功能。SRPP 的規則、排程、validator、prompt 與遠端 skill 都維持既有檔案；原金融 API 路由與契約不變。觀測使用獨立契約 [AI 觀測 API](openapi/9090-ai-flow-observation.md)，Task 504 將 observer 升為 1.3.0，會重產統一 Swagger、改變 PublishedSwaggerIdentity；跨 repo 發布必須在明示、乾淨的 SRPP feature worktree 同步 consumer schema、runtime contract 與規則包身分。預設或 `--asset-only` renderer 不讀寫 SRPP；SRPP 的隱私政策文字不在本任務改動，須另立發布任務。
 
 ## 被動收集與真正非同步
 
@@ -61,6 +61,16 @@ Task 501 保留上述 Task 500 名稱擷取與 title／summary 規則，並只�
 - 已持久化的 immutable 事件不回寫：更新前的舊 run 仍顯示泛稱且沒有 `toolCall`，這是預期而非缺陷；只有 collector 更新後新解析的 rollout 行才帶新資料。尚未配對、更新前已入 state 的舊呼叫，其回傳事件也維持泛稱。
 - 前端流程圖節點只有150px寬，前綴佔去大半，節點上只看得到少量名稱；完整名稱仍可在不含參數的 tooltip、時間軸與慢速步驟表查看，參數只在上述按需節點明細出現。
 
+## 公開候選集合（不是 private reasoning）
+
+Task 504 只接受同一筆 Codex `CODEX_ROLLOUT` 的公開 `function_call`／`custom_tool_call` payload 中，由已版本化 public trace exporter 明示的 `publicChoiceSet`。它必須標示 `schemaVersion=AI_FLOW_PUBLIC_CHOICE_V1` 與 `publicSource=CODEX_PUBLIC_TRACE_EXPORTER`，並且每個 raw option 只有 `optionId`、`label`、`toolName` 與單一 UTF-8 `input` 字串。collector 不會讀取、保存或推導 assistant analysis、chain-of-thought、工具目錄、後續呼叫、工具輸出或固定工作流來補候選。
+
+本 workspace 沒有該 public exporter 的 source、release/tag 或部署授權。因此真實 LLM 分支的狀態是 `PUBLIC_CHOICE_PRODUCER_NOT_PROVIDED`；既有與新 rollout 沒有上游欄位時，`choiceSet` 必須缺省，畫面如實顯示「未記錄公開候選」。`scripts/tests/fixtures/ai_flow_public_choice_set_rollout.jsonl` 只是唯讀測試資料，不能當成真實 LLM 已產生候選的證明。
+
+collector 先以同一個標準化／憑證遮蔽 helper 處理每個已公開的 raw `input`，但不 JSON parse 或遞迴展開它。raw shape、版本／來源、字串型別、數量、id、採用關係、Unicode code-point 上限、private marker／reserved key、title／label 公開安全檢查或實際呼叫逐欄比對任一不符時，整組 `choiceSet` 都會省略，原 `toolCall` 事件仍保留。若 actual `toolCall.sourceTruncated=true`，collector 在讀取 raw choice 前就省略整組，避免把截斷資料說成已精確採用。
+
+final `choiceSet` 只可附於具有未截斷 `toolCall` 的 START 事件，含 2 到 8 個唯一 option；選中的 option 必須逐欄等於實際 `toolCall` 的 name、parameters、parametersChars、truncated、redactedCount 與 sourceTruncated。只有 AI-flow collector grant 的 Codex `CODEX_ROLLOUT` 可寫入；其他 grant、consumer 或 source 一律在任何 owner／DB 寫入前拒絕。一般流程圖／run detail 只取得不含 parameters 的 `choiceSetSummary`；ADMIN 以相同 date／consumer 身分按需讀取 `/nodes/{eventId}/choice-set`（business 與 BFF 都是 no-store），舊或非候選事件固定回 `choiceSet: null`。
+
 ## 正式背景工作
 
 先從正式 main rebuild/recreate及驗收API，再產生與backend/BFF相同的獨立 collector token。三個AI token互不相同，也與金融／寄信憑證分離。token存於`~/.local/share/srpp-ai-flow/collector.token`，owner為目前使用者、檔案權限0600；state目錄0700。憑證不進git、plist arguments、環境日誌或畫面。
@@ -88,7 +98,7 @@ python3 scripts/collect-srpp-ai-flow.py --once --date 2026-10-08 --consumer Code
 python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/share/srpp-ai-flow/collector.token
 ```
 
-公開工具名稱與 `toolCall` 都是不可變事件 payload 的一部分，在寫入 collector state 時即凍結。已入 state／pending 的舊事件不回寫、不補參數；不得為補資料刪 state 或使用 `--replay`。只有更新後新讀到的 rollout 行才套用新規則，所以新舊內容不會對同一 eventId 並存。下列情況會讓同一 eventId 產生不同內容，必須遵守：
+公開工具名稱、`toolCall` 與已明示的 `choiceSet` 都是不可變事件 payload 的一部分，在寫入 collector state 時即凍結。已入 state／pending 的舊事件不回寫、不補參數或候選；不得為補資料刪 state 或使用 `--replay`。只有更新後新讀到的 rollout 行才套用新規則，所以新舊內容不會對同一 eventId 並存。下列情況會讓同一 eventId 產生不同內容，必須遵守：
 
 - state 遺失（刪除或重置）而 DB 仍保有舊 title 或 `toolCall` 時，不得 `--replay` 或重新從頭解析：backend 對同 eventId 但不同 payload 回 409 `EVENT_CONFLICT`，sender 對非200／201拒收並停止，依檔名排序該批永遠排最前，會堵死後面所有批次。
 - state 目錄（`~/.local/share/srpp-ai-flow`，含 sources／pending／acks）只能改名保留，不得刪除。`Store.enqueue` 先以 `acks/<runId>.json` 過濾已 ACK 的事件，所以只刪 state 通常不會 409；acks 也一併遺失，或 pending 仍有未送出的舊 title 批次時才會重送不同內容。

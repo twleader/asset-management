@@ -53,6 +53,18 @@ REDACTED = "[REDACTED]"
 REDACTED_COUNT_MAX = 100000
 TOOL_CALL_KEYS = {"name", "innerNames", "parameters", "parametersChars", "truncated", "redactedCount"}
 TOOL_CALL_OPTIONAL_KEYS = TOOL_CALL_KEYS | {"sourceTruncated"}
+# Task 504：候選只可來自同一公開 tool-call line 的已版本化 exporter。這些 key
+# 是最終 observer wire 格式，不會把 raw publicChoiceSet 寫入 state 或 envelope。
+CHOICE_SET_KEYS = {"title", "selectedOptionId", "options"}
+CHOICE_OPTION_KEYS = {"optionId", "label", "toolName", "parameters", "parametersChars", "truncated", "redactedCount"}
+CHOICE_OPTION_OPTIONAL_KEYS = CHOICE_OPTION_KEYS | {"sourceTruncated"}
+PUBLIC_CHOICE_SET_KEYS = {"schemaVersion", "publicSource", "title", "selectedOptionId", "options"}
+PUBLIC_CHOICE_OPTION_KEYS = {"optionId", "label", "toolName", "input"}
+PUBLIC_CHOICE_SCHEMA = "AI_FLOW_PUBLIC_CHOICE_V1"
+PUBLIC_CHOICE_SOURCE = "CODEX_PUBLIC_TRACE_EXPORTER"
+CHOICE_OPTION_MIN = 2
+CHOICE_OPTION_MAX = 8
+CHOICE_PARAMETER_TOTAL_LIMIT = 32768
 MAX_EVENT_SEQUENCE = 2147483647
 TERMINAL_FAILURE_CODEX_INFO = "server_overloaded"
 TERMINAL_FAILURE_REASON = "MODEL_SERVICE_OVERLOADED"
@@ -107,11 +119,24 @@ PARAMETER_CONTROL = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 # 與 backend AiFlowProtocol.SENSITIVE 的 pattern 字串逐分支一致（Java 的 (?is) 對應 re.I|re.S，
 # \b／\s 為 ASCII 語意故加 re.A）。測試會從 Java 原始碼解析比對，backend 改規則時此處必須同步。
 BACKEND_SENSITIVE_PATTERN = (
-    r"(authorization|bearer\s|token\s*[:=]|password|secret|api[_-]?key|private[_ -]?reasoning|chain.of.thought|"
+    r"(authorization|bearer\s|token\s*[:=]|password|secret|api[_-]?key|private[ \t\r\n\f\x0B_-]*reasoning|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|"
     r"\b(?:curl|wget|printenv|export)\s|\$\(|```|<[^>]+>|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|[A-Za-z]:\\|/Users/|/home/|"
     r"\b(?:NT\$|USD|TWD)\s*[0-9]|(?:price|amount|balance|holdings|account|成本|金額|持股|庫存|股數|張數|帳號|帳戶)\s*[:=：]?\s*[0-9]|[0-9]{6,})"
 )
 BACKEND_SENSITIVE = re.compile(BACKEND_SENSITIVE_PATTERN, re.I | re.S | re.A)
+# 候選 input 是 upstream 已宣告公開的工具參數文字，並非一段可供本端「挑選」或
+# 遞迴剖析的 JSON。即便來源宣稱公開，已知私有思考標記與保留 key 仍必須 fail closed。
+# 不對 input 套用整份 SENSITIVE，因為 Task 501 已明確授權已遮蔽的實際參數可包含數值；
+# title／label 則必須同時通過 unsafe_public_text 與 SENSITIVE。
+PRIVATE_CHOICE_MARKER = re.compile(
+    # 分隔符刻意限於 ASCII，並與 Java／JS 同步；不得裸用 `\s`，以免三者對 Unicode
+    # 空白字元的判定不同。
+    r"(?i)(?:private[ \t\r\n\f\x0B_-]*reasoning|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|"
+    r"(?:^|[,{\\[ \t\r\n\f\x0B\"'])?(?:reasoning|analysis|thinking|thoughts?)[ \t\r\n\f\x0B]*[\"']?[ \t\r\n\f\x0B]*[:=]|"
+    r"<[ \t\r\n\f\x0B]*/?[ \t\r\n\f\x0B]*(?:analysis|thinking|reasoning)[ \t\r\n\f\x0B]*>|"
+    r"(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)|"
+    r"私人推理|內部思考|思考鏈)"
+)
 
 
 class ObservationError(Exception):
@@ -130,6 +155,23 @@ def _code_point_count(text: str) -> int:
         else:
             index += 1
         count += 1
+    return count
+
+
+def _bounded_code_point_count(text: str, maximum: int) -> int | None:
+    """有界 code-point 計量；超過上限立即停止，不能先全字串掃描。"""
+    if maximum < 0:
+        return None
+    count, index = 0, 0
+    while index < len(text):
+        count += 1
+        if count > maximum:
+            return None
+        current = ord(text[index])
+        if 0xD800 <= current <= 0xDBFF and index + 1 < len(text) and 0xDC00 <= ord(text[index + 1]) <= 0xDFFF:
+            index += 2
+        else:
+            index += 1
     return count
 
 
@@ -274,6 +316,29 @@ def validate_tool_call(value: Any, event_kind: Any) -> bool:
     return "sourceTruncated" not in value or value["sourceTruncated"] is True
 
 
+def standardize_tool_parameters(raw_text: str) -> dict | None:
+    """Task 501/504 唯一參數標準化與遮蔽路徑；呼叫端不得再解析 input。"""
+    try:
+        if not isinstance(raw_text, str):
+            return None
+        source_truncated = _code_point_count(raw_text) > TOOL_PARAM_PRESCAN_LIMIT
+        processed = _take_code_points(raw_text, TOOL_PARAM_PRESCAN_LIMIT)
+        redacted, redacted_count = redact_credentials(processed)
+        cleaned = clean_parameter_text(redacted)
+        parameters_chars = _code_point_count(cleaned)
+        result = {
+            "parameters": _take_code_points(cleaned, TOOL_PARAM_LIMIT),
+            "parametersChars": parameters_chars,
+            "truncated": parameters_chars > TOOL_PARAM_LIMIT,
+            "redactedCount": min(redacted_count, REDACTED_COUNT_MAX),
+        }
+        if source_truncated:
+            result["sourceTruncated"] = True
+        return result
+    except Exception:
+        return None
+
+
 def tool_call(payload: dict, inner_names: list[str]) -> dict | None:
     """建立 START 專用工具參數；不讀 I/O、不再呼叫 tool_label 或掃描內含工具。"""
     try:
@@ -295,22 +360,10 @@ def tool_call(payload: dict, inner_names: list[str]) -> dict | None:
             raw_text = json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
         else:
             raw_text = ""
-        source_truncated = _code_point_count(raw_text) > TOOL_PARAM_PRESCAN_LIMIT
-        processed = _take_code_points(raw_text, TOOL_PARAM_PRESCAN_LIMIT)
-        redacted, redacted_count = redact_credentials(processed)
-        cleaned = clean_parameter_text(redacted)
-        parameters_chars = _code_point_count(cleaned)
-        truncated = parameters_chars > TOOL_PARAM_LIMIT
-        result = {
-            "name": name,
-            "innerNames": names,
-            "parameters": _take_code_points(cleaned, TOOL_PARAM_LIMIT),
-            "parametersChars": parameters_chars,
-            "truncated": truncated,
-            "redactedCount": min(redacted_count, REDACTED_COUNT_MAX),
-        }
-        if source_truncated:
-            result["sourceTruncated"] = True
+        parameters = standardize_tool_parameters(raw_text)
+        if parameters is None:
+            return None
+        result = {"name": name, "innerNames": names, **parameters}
         return result if validate_tool_call(result, "START") else None
     except Exception:
         return None
@@ -718,6 +771,11 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
         captured = tool_call(payload, label[1] if label is not None else [])
         if captured is not None:
             call["toolCall"] = captured
+            # 只取同一筆 function/custom_tool_call 的 explicit publicChoiceSet；缺省或任何
+            # 不安全 shape 都只是「未記錄」，不得讓既有工具事件失敗或從其他事件推測。
+            choices = public_choice_set(payload, captured)
+            if choices is not None:
+                call["choiceSet"] = choices
         append_event(turn, call)
         turn["calls"][call_id] = {"eventId": call["eventId"], "stepId": step, "operation": operation, "paired": False,
                                  "occurredAt": call["occurredAt"], "label": label_info}
@@ -1028,11 +1086,124 @@ def unsafe_public_text(text: str) -> bool:
         r"\d[\d,]*(?:\.\d+)?\s*\b(?:USD|TWD|NTD|EUR|JPY)\b",
         r"(?:\b(?:price|amount|balance|holdings?|account|acct|position|quantity|qty|cost|shares?|lots?|portfolio|cash|market_value|total_value)\b|成本|金額|餘額|持倉|部位|股數|張數|單價|帳戶|帳號)\s*[\"']?\s*[:=：]",
         r"(?:\b(?:raw[_ -]*(?:command|shell|response|api|mime|reasoning)|command|cmd|shell)\b)\s*[\"']?\s*[:=：]",
-        r"(?:<\s*/?\s*(?:analysis|think|thinking|reasoning)\s*>|(?:^|\n)\s*(?:analysis|thinking|reasoning|private[ _-]*(?:analysis|reasoning)|chain[ _-]*of[ _-]*thought|hidden[ _-]*reasoning)\s*[:=]|\b(?:BEGIN|END)[ _-]+(?:PRIVATE|CHAIN_OF_THOUGHT|REASONING)\b|(?:私人推理|內部思考|思考鏈)\s*[:=：])",
+        r"(?:<[ \t\r\n\f\x0B]*/?[ \t\r\n\f\x0B]*(?:analysis|think|thinking|reasoning)[ \t\r\n\f\x0B]*>|(?:^|\n)[ \t\r\n\f\x0B]*(?:analysis|thinking|reasoning|private[ \t\r\n\f\x0B_-]*(?:analysis|reasoning)|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|hidden[ \t\r\n\f\x0B_-]*reasoning)[ \t\r\n\f\x0B]*[:=]|\b(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)\b|(?:私人推理|內部思考|思考鏈)[ \t\r\n\f\x0B]*[:=：])",
         r"^\s*(?:[$#]\s*)?(?:curl|wget|bash|zsh|sh|pwsh|powershell|python(?:3)?|node|cat|echo|printf)\s+\S",
         r"(?:/Users/|/private/|/tmp/|~/|[A-Z]:\\)",
     )
     return any(re.search(pattern, text, re.I) for pattern in patterns)
+
+
+def _valid_public_choice_text(value: Any) -> bool:
+    """Choice title／label 是公開摘要，不適用 Task 501 參數例外。"""
+    if not isinstance(value, str) or not 1 <= _code_point_count(value) <= 100 or value.isspace():
+        return False
+    if _has_invalid_parameter_character(value):
+        return False
+    return not unsafe_public_text(value) and BACKEND_SENSITIVE.search(value) is None
+
+
+def _choice_option_matches_tool_call(option: dict, actual: dict) -> bool:
+    return (option.get("toolName") == actual.get("name")
+            and option.get("parameters") == actual.get("parameters")
+            and option.get("parametersChars") == actual.get("parametersChars")
+            and option.get("truncated") == actual.get("truncated")
+            and option.get("redactedCount") == actual.get("redactedCount")
+            and option.get("sourceTruncated") == actual.get("sourceTruncated"))
+
+
+def _valid_choice_option(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) not in (CHOICE_OPTION_KEYS, CHOICE_OPTION_OPTIONAL_KEYS):
+        return False
+    if (not isinstance(value.get("optionId"), str) or TOOL_NAME.fullmatch(value["optionId"]) is None
+            or not _valid_public_choice_text(value.get("label"))
+            or not isinstance(value.get("toolName"), str) or TOOL_NAME.fullmatch(value["toolName"]) is None):
+        return False
+    tool = {"name": value["toolName"], "innerNames": [], "parameters": value.get("parameters"),
+            "parametersChars": value.get("parametersChars"), "truncated": value.get("truncated"),
+            "redactedCount": value.get("redactedCount")}
+    if "sourceTruncated" in value:
+        tool["sourceTruncated"] = value["sourceTruncated"]
+    # final wire 也可能經由 local spool 重新驗證，不能只依 raw producer gate；
+    # 否則 private marker 會先寫進 state/pending，等 backend 才拒絕。
+    return (validate_tool_call(tool, "START")
+            and PRIVATE_CHOICE_MARKER.search(value["parameters"]) is None)
+
+
+def validate_choice_set(value: Any, event_kind: Any, actual_tool_call: Any) -> bool:
+    """驗最終 wire choiceSet；不得以同名工具取代逐欄相同的採用事實。"""
+    if (event_kind != "START" or not validate_tool_call(actual_tool_call, "START")
+            or actual_tool_call.get("sourceTruncated") is True
+            or not isinstance(value, dict) or set(value) != CHOICE_SET_KEYS):
+        return False
+    if (not _valid_public_choice_text(value.get("title"))
+            or not isinstance(value.get("selectedOptionId"), str)
+            or TOOL_NAME.fullmatch(value["selectedOptionId"]) is None):
+        return False
+    options = value.get("options")
+    if not isinstance(options, list) or not CHOICE_OPTION_MIN <= len(options) <= CHOICE_OPTION_MAX:
+        return False
+    option_ids: set[str] = set()
+    selected: list[dict] = []
+    total = 0
+    for option in options:
+        if not _valid_choice_option(option) or option["optionId"] in option_ids:
+            return False
+        option_ids.add(option["optionId"])
+        total += _code_point_count(option["parameters"])
+        if total > CHOICE_PARAMETER_TOTAL_LIMIT:
+            return False
+        if option["optionId"] == value["selectedOptionId"]:
+            selected.append(option)
+    return len(selected) == 1 and _choice_option_matches_tool_call(selected[0], actual_tool_call)
+
+
+def public_choice_set(payload: dict, actual_tool_call: dict | None) -> dict | None:
+    """只消費同一 public tool-call 的 explicit candidate，從不讀 reasoning／output 或猜測。"""
+    try:
+        # actual source 被預掃截斷時，任何候選皆無法誠實逐欄比對；甚至不讀 raw choice。
+        if actual_tool_call is None or actual_tool_call.get("sourceTruncated") is True:
+            return None
+        raw = payload.get("publicChoiceSet")
+        if not isinstance(raw, dict) or set(raw) != PUBLIC_CHOICE_SET_KEYS:
+            return None
+        if (raw.get("schemaVersion") != PUBLIC_CHOICE_SCHEMA or raw.get("publicSource") != PUBLIC_CHOICE_SOURCE
+                or not _valid_public_choice_text(raw.get("title"))
+                or not isinstance(raw.get("selectedOptionId"), str)
+                or TOOL_NAME.fullmatch(raw["selectedOptionId"]) is None):
+            return None
+        raw_options = raw.get("options")
+        if not isinstance(raw_options, list) or not CHOICE_OPTION_MIN <= len(raw_options) <= CHOICE_OPTION_MAX:
+            return None
+        options: list[dict] = []
+        option_ids: set[str] = set()
+        raw_total = 0
+        for raw_option in raw_options:
+            if not isinstance(raw_option, dict) or set(raw_option) != PUBLIC_CHOICE_OPTION_KEYS:
+                return None
+            option_id, label, tool_name, source_input = (raw_option.get("optionId"), raw_option.get("label"),
+                                                          raw_option.get("toolName"), raw_option.get("input"))
+            if (not isinstance(option_id, str) or TOOL_NAME.fullmatch(option_id) is None or option_id in option_ids
+                    or not _valid_public_choice_text(label)
+                    or not isinstance(tool_name, str) or TOOL_NAME.fullmatch(tool_name) is None
+                    or not isinstance(source_input, str)):
+                return None
+            # 必須先以可提前停止的 code-point 計量確認單項及總量；超額 raw
+            # 不得先交給 regex／standardize，避免巨大惡意字串驅動無界掃描。
+            count = _bounded_code_point_count(source_input, TOOL_PARAM_PRESCAN_LIMIT - raw_total)
+            if count is None:
+                return None
+            option_ids.add(option_id)
+            raw_total += count
+            if PRIVATE_CHOICE_MARKER.search(source_input) is not None:
+                return None
+            parameters = standardize_tool_parameters(source_input)
+            if parameters is None:
+                return None
+            options.append({"optionId": option_id, "label": label, "toolName": tool_name, **parameters})
+        result = {"title": raw["title"], "selectedOptionId": raw["selectedOptionId"], "options": options}
+        return result if validate_choice_set(result, "START", actual_tool_call) else None
+    except Exception:
+        return None
 
 
 def validate_envelope(value: dict, today: dt.date):
@@ -1071,7 +1242,9 @@ def validate_envelope(value: dict, today: dt.date):
         fail()
     ids = set()
     for item in events:
-        if not isinstance(item, dict) or set(item) not in (EVENT_KEYS, EVENT_KEYS | {"toolCall"}):
+        allowed_event_keys = (EVENT_KEYS, EVENT_KEYS | {"toolCall"}, EVENT_KEYS | {"choiceSet"},
+                              EVENT_KEYS | {"toolCall", "choiceSet"})
+        if not isinstance(item, dict) or set(item) not in allowed_event_keys:
             fail()
         try:
             uuid.UUID(item["eventId"])
@@ -1086,6 +1259,11 @@ def validate_envelope(value: dict, today: dt.date):
             fail()
         if "toolCall" in item and not validate_tool_call(item["toolCall"], item["eventKind"]):
             fail()
+        if "choiceSet" in item:
+            # local collector represents its own collector grant; other producer grants cannot enter this spool.
+            if run["consumer"] != "Codex" or run["sourceKind"] != "CODEX_ROLLOUT" or "toolCall" not in item \
+                    or not validate_choice_set(item["choiceSet"], item["eventKind"], item["toolCall"]):
+                fail()
         if not isinstance(item["stepId"], str) or not 1 <= len(item["stepId"]) <= 100:
             fail()
         if isinstance(item["attemptNo"], bool) or not isinstance(item["attemptNo"], int) or not 1 <= item["attemptNo"] <= 2147483647:

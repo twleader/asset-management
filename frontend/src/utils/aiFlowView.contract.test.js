@@ -11,6 +11,8 @@ import {
   fallbackAiFlowEarliestDate,
   isDateOutsideWindow,
   mapAiFlowGraphData,
+  resolveAiFlowGraphNodeId,
+  resolveAiFlowGraphNodeSelection,
   todayTaipeiISO
 } from './aiFlowView.js'
 
@@ -156,7 +158,11 @@ test('工具參數只在節點選取後讀取，清除、切換 run/filter 後�
     listRuns: async ({ date }) => ({ runs: [{ runId: date === '2026-10-09' ? 'run-2' : 'run-1' }] }),
     getRun: async runId => ({
       run: { runId },
-      nodes: [{ eventId: 'node-1', toolCall: { name: 'exec', parameters: 'MUST_NOT_ENTER_DETAIL' } }],
+      nodes: [{
+        eventId: 'node-1',
+        toolCall: { name: 'exec', parameters: 'MUST_NOT_ENTER_DETAIL' },
+        choiceSet: { options: [{ parameters: 'MUST_NOT_ENTER_DETAIL' }] }
+      }],
       edges: [],
       slowSteps: []
     }),
@@ -171,6 +177,7 @@ test('工具參數只在節點選取後讀取，清除、切換 run/filter 後�
   await loader.loadDetail(state, state.runs[0], state.filters)
 
   assert.equal(state.detail.nodes[0].toolCall, null)
+  assert.equal(Object.hasOwn(state.detail.nodes[0], 'choiceSet'), false)
   assert.equal(toolRequests.length, 0)
 
   const firstSelection = loader.selectNode(state, 'node-1', state.filters)
@@ -276,6 +283,277 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
   assert.match(view, /state\.detail\.slowSteps/)
 })
 
+test('公開候選只形成 UI 分支、改接 inbound edge，並維持固定不重疊 layout', () => {
+  const parameterCanary = 'CHOICE_PARAMETERS_MUST_NOT_ENTER_GRAPH'
+  const node = (eventId, eventKind, x, y, choiceSetSummary) => ({
+    eventId,
+    eventKind,
+    label: `節點 ${eventId}`,
+    statusLabel: '成功',
+    categoryLabel: '工具',
+    timeLabel: '09:05:03',
+    durationMillis: 20,
+    x,
+    y,
+    color: '#123456',
+    summary: '公開摘要',
+    toolCall: { parameters: parameterCanary },
+    choiceSet: { parameters: parameterCanary },
+    choiceSetSummary
+  })
+  const summary = (title, selectedOptionId, options) => ({ title, selectedOptionId, options })
+  const option = (optionId, label, toolName, selected) => ({ optionId, label, toolName, selected })
+  const mapped = mapAiFlowGraphData({
+    nodes: [
+      node('parent', 'OBSERVATION', 0, 50),
+      node('start-a', 'START', 220, 100, summary('第一組公開候選', 'a-adopt', [
+        option('a-reject', '等候資料', 'wait_tool', false),
+        option('a-adopt', '讀取資料', 'read_tool', true)
+      ])),
+      node('start-b', 'START', 440, 200, summary('第二組公開候選', 'b-adopt', [
+        option('b-adopt', '採用工具', 'tool_b', true),
+        option('b-reject', '略過工具', 'tool_c', false)
+      ])),
+      node('not-start', 'END', 660, 300, summary('不得顯示', 'no', [
+        option('no', '不應出現', 'tool_no', true),
+        option('no-alt', '不應出現二', 'tool_no_alt', false)
+      ]))
+    ],
+    edges: [
+      { id: 'in-a', source: 'parent', target: 'start-a', relation: 'NEXT', label: '接續紀錄', curveness: 0 },
+      { id: 'in-b', source: 'start-a', target: 'start-b', relation: 'NEXT', label: '接續紀錄', curveness: 0 }
+    ]
+  })
+
+  const hubA = 'ui-choice:start-a:hub'
+  const hubB = 'ui-choice:start-b:hub'
+  const rejectedA = 'ui-choice:start-a:option:a-reject'
+  const adoptedA = 'ui-choice:start-a:option:a-adopt'
+  const adoptedB = 'ui-choice:start-b:option:b-adopt'
+  const rejectedB = 'ui-choice:start-b:option:b-reject'
+  assert.equal(mapped.nodes.length, 10)
+  assert.equal(mapped.edges.find(edge => edge.id === 'in-a').target, hubA)
+  assert.equal(mapped.edges.find(edge => edge.id === 'in-b').target, hubB)
+  assert.deepEqual(
+    mapped.edges.find(edge => edge.id === 'ui-choice:start-a:edge:adopted:a-adopt'),
+    {
+      id: 'ui-choice:start-a:edge:adopted:a-adopt',
+      source: adoptedA,
+      target: 'start-a',
+      relation: 'PUBLIC_CHOICE_ADOPTED',
+      label: '採用',
+      curveness: 0,
+      tooltipText: '採用'
+    }
+  )
+  assert.equal(mapped.edges.find(edge => edge.target === rejectedA).label, '未選擇')
+  assert.equal(mapped.edges.find(edge => edge.target === rejectedB).label, '未選擇')
+  assert.equal(mapped.edges.some(edge => edge.source === rejectedA), false)
+  assert.equal(mapped.edges.some(edge => edge.source === rejectedB), false)
+
+  const byId = Object.fromEntries(mapped.nodes.map(graphNode => [graphNode.id, graphNode]))
+  assert.deepEqual([byId[hubA].x, byId[hubA].y], [920, 460])
+  assert.deepEqual([byId[rejectedA].x, byId[rejectedA].y], [1180, 420])
+  assert.deepEqual([byId[adoptedA].x, byId[adoptedA].y], [1180, 500])
+  assert.deepEqual([byId[hubB].x, byId[hubB].y], [920, 740])
+  assert.deepEqual([byId[adoptedB].x, byId[adoptedB].y], [1180, 700])
+  assert.deepEqual([byId[rejectedB].x, byId[rejectedB].y], [1180, 780])
+  assert.equal(mapped.nodes.some(graphNode => graphNode.id.startsWith('ui-choice:not-start:')), false)
+  assert.equal(mapped.graphHeight, 940)
+  assert.ok(mapped.nodes.every(graphNode => Number.isFinite(graphNode.x) && Number.isFinite(graphNode.y)))
+  assert.equal(new Set(mapped.nodes.map(graphNode => `${graphNode.x}:${graphNode.y}`)).size, mapped.nodes.length)
+  assert.equal(resolveAiFlowGraphNodeId(mapped, hubA), 'start-a')
+  assert.equal(resolveAiFlowGraphNodeId(mapped, rejectedB), 'start-b')
+  assert.equal(resolveAiFlowGraphNodeId(mapped, 'start-a'), 'start-a')
+  assert.equal(resolveAiFlowGraphNodeId(mapped, 'ui-choice:unknown'), '')
+  assert.doesNotMatch(JSON.stringify(mapped), /CHOICE_PARAMETERS_MUST_NOT_ENTER_GRAPH/)
+  assert.doesNotMatch(JSON.stringify(mapped), /choiceSetSummary/)
+  assert.doesNotMatch(JSON.stringify(mapped), /toolCall/)
+})
+
+test('不安全或不閉合的公開候選摘要整組省略，且絕不進入圖與 tooltip', () => {
+  const parameterCanary = 'CHOICE_PARAMETERS_MUST_NOT_ENTER_GRAPH'
+  const makeSummary = (title = '公開候選', label = '讀取資料') => ({
+    title,
+    selectedOptionId: 'adopt',
+    options: [
+      { optionId: 'adopt', label, toolName: 'read_tool', selected: true },
+      { optionId: 'wait', label: '等候資料', toolName: 'wait_tool', selected: false }
+    ]
+  })
+  const mapFor = choiceSetSummary => mapAiFlowGraphData({
+    nodes: [{
+      eventId: 'actual-start',
+      eventKind: 'START',
+      label: '實際工具節點',
+      statusLabel: '成功',
+      categoryLabel: '工具',
+      timeLabel: '09:05:03',
+      durationMillis: 10,
+      x: 220,
+      y: 100,
+      color: '#123456',
+      summary: '公開摘要',
+      choiceSetSummary
+    }],
+    edges: []
+  })
+  const assertOmitted = (choiceSetSummary, forbiddenText) => {
+    const mapped = mapFor(choiceSetSummary)
+    assert.equal(mapped.nodes.length, 1)
+    assert.equal(mapped.nodes.some(node => node.id.startsWith('ui-choice:')), false)
+    if (forbiddenText) assert.doesNotMatch(JSON.stringify(mapped), new RegExp(forbiddenText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+
+  const astral100 = '🙂'.repeat(100)
+  const accepted = mapFor(makeSummary(astral100, astral100))
+  assert.equal(accepted.nodes.length, 4)
+  assert.equal(accepted.nodes.some(node => node.id === 'ui-choice:actual-start:hub'), true)
+
+  const rawCandidate = makeSummary()
+  rawCandidate.options[0] = { ...rawCandidate.options[0], parameters: parameterCanary }
+  assertOmitted(rawCandidate, parameterCanary)
+  assertOmitted(makeSummary(`parameters: ${parameterCanary}`), parameterCanary)
+  assertOmitted(makeSummary('private reasoning: hidden branch'), 'private reasoning')
+  assertOmitted(makeSummary('公開候選', 'analysis: hidden branch'), 'analysis: hidden')
+  assertOmitted(makeSummary('公開候選', 'price: 123'), 'price: 123')
+  assertOmitted(makeSummary('公開候選\u0001'), '公開候選')
+  assertOmitted(makeSummary('公開候選', '\uD800'), '')
+  assertOmitted(makeSummary('🙂'.repeat(101)), '🙂')
+  const markerVectors = JSON.parse(readFileSync(
+    new URL('../../../scripts/tests/fixtures/ai_flow_choice_set_vectors.json', import.meta.url), 'utf8'
+  ))
+  const separatorCanaries = markerVectors.cases.filter(vector => typeof vector.marker === 'string')
+  assert.deepEqual(separatorCanaries.map(vector => vector.id), [
+    'private-choice-parameters-lf',
+    'private-choice-parameters-tab',
+    'chain-choice-parameters-lf',
+    'begin-private-choice-parameters-lf'
+  ])
+  for (const vector of separatorCanaries) {
+    assertOmitted(makeSummary(vector.marker), vector.marker)
+  }
+  const classifierSource = readFileSync(new URL('./aiFlowView.js', import.meta.url), 'utf8')
+  assert.ok(classifierSource.includes('private[ \\t\\r\\n\\f\\x0B_-]*reasoning'))
+  assert.ok(classifierSource.includes('chain[ \\t\\r\\n\\f\\x0B._-]*of[ \\t\\r\\n\\f\\x0B._-]*thought'))
+  assertOmitted({ ...makeSummary(), selectedOptionId: 'not valid' }, '公開候選')
+  const invalidTool = makeSummary()
+  invalidTool.options[0] = { ...invalidTool.options[0], toolName: 'not valid' }
+  assertOmitted(invalidTool, '公開候選')
+})
+
+test('synthetic 點擊以 fromSynthetic 強制保留已選的實際 parent，不產生 synthetic API 請求', async () => {
+  const graphData = mapAiFlowGraphData({
+    nodes: [{
+      eventId: 'actual-start', eventKind: 'START', label: '實際工具節點', statusLabel: '成功', categoryLabel: '工具',
+      timeLabel: '09:05:03', durationMillis: 10, x: 220, y: 100, color: '#123456', summary: '公開摘要',
+      choiceSetSummary: {
+        title: '公開候選', selectedOptionId: 'adopt', options: [
+          { optionId: 'adopt', label: '讀取資料', toolName: 'read_tool', selected: true },
+          { optionId: 'wait', label: '等候資料', toolName: 'wait_tool', selected: false }
+        ]
+      }
+    }],
+    edges: []
+  })
+  const synthetic = resolveAiFlowGraphNodeSelection(graphData, 'ui-choice:actual-start:option:wait')
+  assert.deepEqual(synthetic, { eventId: 'actual-start', fromSynthetic: true })
+  assert.deepEqual(resolveAiFlowGraphNodeSelection(graphData, 'actual-start'), { eventId: 'actual-start', fromSynthetic: false })
+
+  let requests = 0
+  const loader = createAiFlowViewLoader({
+    listRuns: async () => ({ runs: [] }),
+    getRun: async () => ({}),
+    getToolCall: async () => { requests += 1; return { toolCall: null } },
+    getChoiceSet: async () => { requests += 1; return { choiceSet: null } }
+  })
+  const state = createAiFlowViewState({ date: '2026-10-21' })
+  state.selectedRunId = 'run-1'
+  state.selectedNodeId = 'actual-start'
+  assert.equal(await loader.selectNode(state, synthetic.eventId, state.filters, { forceSelect: synthetic.fromSynthetic }), true)
+  assert.equal(state.selectedNodeId, 'actual-start')
+  assert.equal(requests, 0)
+  assert.equal(await loader.selectNode(state, 'actual-start', state.filters), false)
+  assert.equal(state.selectedNodeId, '')
+})
+
+test('工具與公開候選 detail 同時請求，兩者各自 abort、stale fence 與錯誤狀態隔離', async () => {
+  const toolRequests = []
+  const choiceRequests = []
+  const loader = createAiFlowViewLoader({
+    listRuns: async () => ({ runs: [{ runId: 'run-1' }] }),
+    getRun: async () => ({ run: { runId: 'run-1' }, nodes: [], edges: [], slowSteps: [] }),
+    getToolCall: (runId, eventId, options) => {
+      const request = deferred()
+      toolRequests.push({ runId, eventId, ...options, ...request })
+      return request.promise
+    },
+    getChoiceSet: (runId, eventId, options) => {
+      const request = deferred()
+      choiceRequests.push({ runId, eventId, ...options, ...request })
+      return request.promise
+    },
+    errorMessage: error => `錯誤：${error.message}`
+  })
+  const state = createAiFlowViewState()
+  await loader.query(state, { date: '2026-10-21', consumer: 'Codex', period: 'ALL' })
+  await loader.loadDetail(state, state.runs[0], state.filters)
+
+  const initial = loader.selectNode(state, 'actual-start', state.filters)
+  assert.equal(toolRequests.length, 1)
+  assert.equal(choiceRequests.length, 1)
+  assert.equal(toolRequests[0].eventId, 'actual-start')
+  assert.equal(choiceRequests[0].eventId, 'actual-start')
+  assert.equal(state.selectedToolCallLoading, true)
+  assert.equal(state.selectedChoiceSetLoading, true)
+  const toolCall = { name: 'read_tool', innerNames: [], parameters: 'TOOL_DETAIL_ONLY', parametersChars: 16, truncated: false, redactedCount: 0 }
+  const choiceSet = {
+    title: '公開候選',
+    selectedOptionId: 'adopt',
+    options: [{ optionId: 'adopt', label: '讀取', toolName: 'read_tool', parameters: 'CHOICE_DETAIL_ONLY', parametersChars: 18, truncated: false, redactedCount: 0 }]
+  }
+  choiceRequests[0].resolve({ runId: 'run-1', eventId: 'actual-start', choiceSet: null })
+  toolRequests[0].resolve({ runId: 'run-1', eventId: 'actual-start', toolCall })
+  assert.equal(await initial, true)
+  assert.equal(state.selectedToolCall, toolCall)
+  assert.equal(state.selectedChoiceSet, null)
+  assert.equal(state.selectedToolCallError, '')
+  assert.equal(state.selectedChoiceSetError, '')
+
+  const stale = loader.selectNode(state, 'old-start', state.filters)
+  const current = loader.selectNode(state, 'current-start', state.filters)
+  assert.equal(toolRequests[1].signal.aborted, true)
+  assert.equal(choiceRequests[1].signal.aborted, true)
+  toolRequests[1].resolve({ toolCall: { ...toolCall, parameters: 'STALE_TOOL' } })
+  choiceRequests[1].resolve({ choiceSet })
+  await stale
+  assert.equal(state.selectedNodeId, 'current-start')
+  assert.equal(state.selectedToolCall, null)
+  assert.equal(state.selectedChoiceSet, null)
+
+  toolRequests[2].resolve({ toolCall })
+  choiceRequests[2].reject(new Error('公開候選讀取失敗'))
+  assert.equal(await current, true)
+  assert.equal(state.selectedToolCall, toolCall)
+  assert.equal(state.selectedChoiceSet, null)
+  assert.equal(state.selectedToolCallError, '')
+  assert.equal(state.selectedChoiceSetError, '錯誤：公開候選讀取失敗')
+
+  const closing = loader.selectNode(state, 'close-start', state.filters)
+  assert.equal(toolRequests[3].signal.aborted, false)
+  assert.equal(choiceRequests[3].signal.aborted, false)
+  loader.clearDetail(state)
+  assert.equal(toolRequests[3].signal.aborted, true)
+  assert.equal(choiceRequests[3].signal.aborted, true)
+  toolRequests[3].resolve({ toolCall })
+  choiceRequests[3].resolve({ choiceSet })
+  await closing
+  assert.equal(state.selectedRunId, '')
+  assert.equal(state.selectedNodeId, '')
+  assert.equal(state.selectedToolCall, null)
+  assert.equal(state.selectedChoiceSet, null)
+})
+
 test('長公開工具標題在節點內截斷，完整 title 仍保留於 tooltip', () => {
   const longLabel = '公開工具呼叫：exec（內含 exec_command、web__run）'
   const mapped = mapAiFlowGraphData({
@@ -302,21 +580,32 @@ test('路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace', () =>
   assert.match(view, /bffApi\.aiFlow\.runs/)
   assert.match(view, /bffApi\.aiFlow\.detail/)
   assert.match(view, /bffApi\.aiFlow\.toolCall/)
+  assert.match(view, /bffApi\.aiFlow\.choiceSet/)
   assert.ok(api.includes("'/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/tool-call'"))
+  assert.ok(api.includes("'/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/choice-set'"))
   const toolCallApi = api.slice(api.indexOf('toolCall: (runId, eventId,'), api.indexOf('\n  },', api.indexOf('toolCall: (runId, eventId,')))
   assert.match(toolCallApi, /params:\s*\{ date, consumer \}/)
   assert.match(toolCallApi, /signal,\s*skipErrorToast:\s*true/)
+  const choiceSetApi = api.slice(api.indexOf('choiceSet: (runId, eventId,'), api.indexOf('\n  },', api.indexOf('choiceSet: (runId, eventId,')))
+  assert.match(choiceSetApi, /params:\s*\{ date, consumer \}/)
+  assert.match(choiceSetApi, /signal,\s*skipErrorToast:\s*true/)
   const utility = readFileSync(new URL('./aiFlowView.js', import.meta.url), 'utf8')
   const graphOption = view.match(/const graphOption = computed\(\(\) => \([\s\S]*?\n\}\)\)/)?.[0]
   assert.ok(graphOption)
-  assert.doesNotMatch(graphOption, /toolCall|parameters|selectedToolCall/)
-  assert.doesNotMatch(view, /console\.(?:log|info|warn|error|debug)\s*\([^)]*(?:toolCall|parameters)/s)
+  assert.doesNotMatch(graphOption, /toolCall|choiceSet|parameters|selectedToolCall|selectedChoiceSet/)
+  assert.doesNotMatch(view, /console\.(?:log|info|warn|error|debug)\s*\([^)]*(?:toolCall|choiceSet|parameters)/s)
   assert.match(utility, /toolCallController\?\.abort\(\)/)
+  assert.match(utility, /choiceSetController\?\.abort\(\)/)
   assert.match(utility, /toolCallGeneration/)
+  assert.match(utility, /choiceSetGeneration/)
   assert.match(utility, /parentListGeneration !== listGeneration/)
   assert.match(utility, /parentDetailGeneration !== detailGeneration/)
   assert.match(view, /v-else-if="state\.selectedToolCall"/)
   assert.match(view, /<pre class="tool-call-parameters">/)
+  assert.match(view, /<pre class="choice-set-parameters">/)
+  assert.match(view, /未記錄公開候選/)
+  assert.match(view, /resolveAiFlowGraphNodeSelection\(graphData\.value, params\?\.data\?\.id\)/)
+  assert.match(view, /forceSelect: fromSynthetic/)
   assert.match(view, /max-height:\s*240px/)
   assert.match(view, /overflow:\s*auto/)
   assert.match(view, /white-space:\s*pre-wrap/)

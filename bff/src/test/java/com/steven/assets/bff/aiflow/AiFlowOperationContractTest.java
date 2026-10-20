@@ -62,33 +62,44 @@ class AiFlowOperationContractTest {
         }
     }
 
-    @Test void toolCallIngressSchemaRemainsOptionalClosedAndMatchesTheTypedValidator() throws Exception {
+    @Test void toolCallAndChoiceSetIngressSchemasRemainOptionalClosedAndMatchTheTypedValidator() throws Exception {
         try (InputStream source=getClass().getResourceAsStream("/ai-flow-observation-api.yaml")) {
             assertThat(source).isNotNull();
             Map<?,?> document=new Yaml().load(source);
             Map<?,?> schemas=(Map<?,?>)((Map<?,?>)document.get("components")).get("schemas");
             Map<?,?> event=(Map<?,?>)schemas.get("AiFlowEvent");
-            assertThat(((List<?>)event.get("required")).stream().map(Object::toString).toList()).doesNotContain("toolCall");
+            assertThat(((List<?>)event.get("required")).stream().map(Object::toString).toList()).doesNotContain("toolCall", "choiceSet");
             Map<?,?> eventProperties=(Map<?,?>)event.get("properties");
             assertThat(((Map<?,?>)eventProperties.get("toolCall")).get("$ref")).isEqualTo("#/components/schemas/AiFlowToolCall");
+            assertThat(((Map<?,?>)eventProperties.get("choiceSet")).get("$ref")).isEqualTo("#/components/schemas/AiFlowChoiceSet");
             Map<?,?> toolCall=(Map<?,?>)schemas.get("AiFlowToolCall");
             assertThat(toolCall.get("additionalProperties")).isEqualTo(false);
             assertThat(((List<?>)toolCall.get("required")).stream().map(Object::toString).toList()).containsExactly("name","innerNames","parameters","parametersChars","truncated","redactedCount");
             Map<?,?> fields=(Map<?,?>)toolCall.get("properties");
             assertThat(((Map<?,?>)fields.get("parameters")).get("maxLength")).isEqualTo(16384);
             assertThat(((Map<?,?>)fields.get("sourceTruncated")).get("const")).isEqualTo(true);
+            Map<?,?> choice=(Map<?,?>)schemas.get("AiFlowChoiceSet");
+            assertThat(choice.get("additionalProperties")).isEqualTo(false);
+            assertThat(((List<?>)choice.get("required")).stream().map(Object::toString).toList()).containsExactly("title","selectedOptionId","options");
+            Map<?,?> options=(Map<?,?>)((Map<?,?>)choice.get("properties")).get("options");
+            assertThat(options.get("minItems")).isEqualTo(2);
+            assertThat(options.get("maxItems")).isEqualTo(8);
+            Map<?,?> option=(Map<?,?>)schemas.get("AiFlowChoiceOption");
+            assertThat(option.get("additionalProperties")).isEqualTo(false);
+            assertThat(((List<?>)option.get("required")).stream().map(Object::toString).toList())
+                    .containsExactly("optionId","label","toolName","parameters","parametersChars","truncated","redactedCount");
         }
     }
 
     private static AiFlowDtos.Batch batch(AiFlowDtos.Operation operation) {
         var original=AiFlowFixtures.batch();var e=original.events().getFirst();
-        var event=new AiFlowDtos.Event(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),operation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),e.toolCall());
+        var event=new AiFlowDtos.Event(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),operation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),e.toolCall(),e.choiceSet());
         return new AiFlowDtos.Batch(original.schemaVersion(),original.run(),List.of(event));
     }
 
     static AiFlowDtos.Detail projection(AiFlowDtos.Operation nodeOperation,AiFlowDtos.Operation slowOperation) {
         var e=AiFlowFixtures.batch().events().getFirst();
-        var node=new AiFlowDtos.Node(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),nodeOperation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),"執行中","觀測步驟","API 呼叫","09:05:00",2000L,0,0,"#123456",null);
+        var node=new AiFlowDtos.Node(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),nodeOperation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),"執行中","觀測步驟","API 呼叫","09:05:00",2000L,0,0,"#123456",null,null);
         var slow=new AiFlowDtos.SlowStep(e.stepId(),e.eventId(),e.title(),slowOperation,AiFlowFixtures.START,AiFlowFixtures.START.plusSeconds(2),2000,"SUCCEEDED","成功");
         return new AiFlowDtos.Detail(AiFlowFixtures.run(7),List.of(node),List.of(),List.of(slow));
     }

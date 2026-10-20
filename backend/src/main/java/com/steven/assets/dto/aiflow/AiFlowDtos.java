@@ -20,12 +20,26 @@ public final class AiFlowDtos {
     public record ToolCall(String name, List<String> innerNames, String parameters, int parametersChars,
                            boolean truncated, int redactedCount,
                            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean sourceTruncated) {}
+    /**
+     * 僅來自已版本化 public trace exporter 的候選工具。這不是模型私有推理，且不含工具輸出。
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ChoiceOption(String optionId, String label, String toolName, String parameters, int parametersChars,
+                               boolean truncated, int redactedCount,
+                               @JsonInclude(JsonInclude.Include.NON_NULL) Boolean sourceTruncated) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ChoiceSet(String title, String selectedOptionId, List<ChoiceOption> options) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ChoiceOptionSummary(String optionId, String label, String toolName, boolean selected) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ChoiceSetSummary(String title, String selectedOptionId, List<ChoiceOptionSummary> options) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Event(String eventId, int sequence, String stepId, String eventKind, String status,
                         @JsonFormat(shape = JsonFormat.Shape.STRING) Instant occurredAt, String title, String summary, Operation operation,
                         String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
                         List<Evidence> evidenceRefs, String reportedOutcome,
-                        @JsonInclude(JsonInclude.Include.NON_NULL) ToolCall toolCall) {}
+                        @JsonInclude(JsonInclude.Include.NON_NULL) ToolCall toolCall,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) ChoiceSet choiceSet) {}
     public record Batch(int schemaVersion, Run run, List<Event> events) {}
     public record Ack(String runId, int inserted, int replayed, List<String> eventIds) {}
     public record AppendResult(int status, Ack ack) {}
@@ -45,7 +59,7 @@ public final class AiFlowDtos {
                        String reasonCode, int attemptNo, List<String> parentEventIds, String relation,
                        List<Evidence> evidenceRefs, String reportedOutcome, String statusLabel,
                        String label, String categoryLabel, String timeLabel, Long durationMillis,
-                       int x, int y, String color, ToolCall toolCall) {}
+                       int x, int y, String color, ToolCall toolCall, ChoiceSetSummary choiceSetSummary) {}
     public record Edge(String id, String source, String target, String relation, String label,
                        double curveness) {}
     public record SlowStep(String stepId, String nodeId, String title, Operation operation,
@@ -55,6 +69,8 @@ public final class AiFlowDtos {
     public record Detail(RunView run, List<Node> nodes, List<Edge> edges, List<SlowStep> slowSteps) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record ToolCallDetail(String runId, String eventId, ToolCall toolCall) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record ChoiceSetDetail(String runId, String eventId, ChoiceSet choiceSet) {}
     public record Problem(String type, String title, int status, String detail, String instance,
                           String code, boolean retryable) {}
 }

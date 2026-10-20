@@ -2,10 +2,10 @@
 openapi: 3.1.0
 info:
   title: AI 判斷流程觀測補充 API
-  version: 1.2.0
+  version: 1.3.0
   description: 獨立於原金融OpenAPI；只保存觀測事件，不調度LLM或執行金融操作。金融26 routes與本1觀測route的統一Swagger維持27
     method/path pairs，且本契約變更會連動PublishedSwaggerIdentity與SRPP消費者身分同步。流程只保留90個台北日期，正常DB backup保留schema但排除本功能兩表data。
-    Task 501依使用者2026-10-18授權，僅為公開工具START事件新增受限的toolCall.parameters；被動host collector仍非同步收集，不改SRPP規則或排程。
+    Task 504只為同一筆Codex公開工具START事件新增由版本化public trace exporter明示的choiceSet；它不是Chain-of-Thought，沒有公開候選時必須缺省。被動host collector仍非同步收集，不改SRPP規則或排程。
 servers:
 - url: http://127.0.0.1:9090
   description: 只供loopback與獲准Tailscale Serve HTTPS9090，不經公開frontend。
@@ -15,7 +15,7 @@ paths:
       operationId: recordSrppAiFlowEvents
       summary: 記錄雙軌AI公開執行事件
       description: 唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude
-        schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。授權在owner/DB/error-ingest
+        schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。choiceSet僅限collector的Codex/CODEX_ROLLOUT，其他grant或來源403且零寫入。授權在owner/DB/error-ingest
         I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override
         configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch
         atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。title／summary仍禁止私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME並採allowlist；唯使用者2026-10-18授權的公開工具START事件可在toolCall.parameters保存原始參數，collector僅以[REDACTED]最佳努力遮蔽憑證樣式、上限16384 Unicode code point，且不收工具輸出。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
@@ -82,6 +82,24 @@ paths:
                   parametersChars: 14
                   truncated: false
                   redactedCount: 0
+                choiceSet:
+                  title: 日期讀取方式
+                  selectedOptionId: current-date
+                  options:
+                  - optionId: current-date
+                    label: 目前日期
+                    toolName: exec
+                    parameters: '{"cmd":"date"}'
+                    parametersChars: 14
+                    truncated: false
+                    redactedCount: 0
+                  - optionId: utc-date
+                    label: 協調世界時間
+                    toolName: exec
+                    parameters: '{"cmd":"date -u"}'
+                    parametersChars: 17
+                    truncated: false
+                    redactedCount: 0
       responses:
         '200':
           description: 純冪等重播，所有內容已durable保存。
@@ -390,10 +408,89 @@ components:
           type: boolean
           const: true
           description: 僅在原始輸入超過1048576 Unicode code point預掃上限時為true；缺省表示未命中，false與null非法。
+    AiFlowChoiceOption:
+      type: object
+      additionalProperties: false
+      description: 上游public trace exporter已明示的單一公開工具候選；只保留已遮蔽參數，沒有工具輸出、private reasoning或巢狀raw envelope。
+      required:
+      - optionId
+      - label
+      - toolName
+      - parameters
+      - parametersChars
+      - truncated
+      - redactedCount
+      properties:
+        optionId:
+          type: string
+          description: 候選的閉合公開識別字，僅在本choiceSet內唯一且可作selectedOptionId。
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        label:
+          type: string
+          description: public-safe候選顯示名稱，以Unicode code point計1至100；不得含命令、帳戶、金額或private reasoning。
+          minLength: 1
+          maxLength: 100
+        toolName:
+          type: string
+          description: 候選公開工具名稱；selected option必須逐欄等於同事件的實際toolCall。
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        parameters:
+          type: string
+          description: 同Task 501標準化與憑證樣式遮蔽後的公開候選參數；只在ADMIN逐節點明細回傳，所有候選合計最多32768 code point。
+          maxLength: 16384
+        parametersChars:
+          type: integer
+          description: 遮蔽與控制字元清理後、parameters截斷前的Unicode code point數。
+          minimum: 0
+          maximum: 2147483647
+        truncated:
+          type: boolean
+          description: 當處理後參數超過16384 Unicode code point且parameters保留前綴時為true。
+        redactedCount:
+          type: integer
+          description: 已用固定遮蔽標記取代的憑證樣式數，100000表示至少該數。
+          minimum: 0
+          maximum: 100000
+        sourceTruncated:
+          type: boolean
+          const: true
+          description: 只在候選公開input超過1048576 Unicode code point預掃上限時為true；false與null非法。
+    AiFlowChoiceSet:
+      type: object
+      additionalProperties: false
+      description: 版本化public trace exporter明示的公開候選集合，不是LLM private reasoning；僅能附於未sourceTruncated的Codex CODEX_ROLLOUT START toolCall。
+      required:
+      - title
+      - selectedOptionId
+      - options
+      properties:
+        title:
+          type: string
+          description: public-safe候選集合標題，以Unicode code point計1至100；不能含private reasoning、命令、帳戶、持股或金額。
+          minLength: 1
+          maxLength: 100
+        selectedOptionId:
+          type: string
+          description: 唯一採用候選的閉合識別字，必須存在於options且其完整參數與metadata逐欄等於實際toolCall。
+          minLength: 1
+          maxLength: 64
+          pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        options:
+          type: array
+          description: 兩至八個明示公開候選，optionId不得重複；collector不從工具目錄、後續呼叫或缺漏資料推測選項。
+          minItems: 2
+          maxItems: 8
+          items:
+            "$ref": "#/components/schemas/AiFlowChoiceOption"
+            description: 一個封閉的公開候選，沿用AiFlowChoiceOption完整限制。
     AiFlowEvent:
       type: object
       additionalProperties: false
-      description: 不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall外，nullable key均必填。
+      description: 不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall／choiceSet外，nullable key均必填。
       required:
       - eventId
       - sequence
@@ -460,6 +557,9 @@ components:
         toolCall:
           "$ref": "#/components/schemas/AiFlowToolCall"
           description: 選填的公開工具START呼叫資料；缺省表示無此資訊，明確null與非START事件皆非法。
+        choiceSet:
+          "$ref": "#/components/schemas/AiFlowChoiceSet"
+          description: 選填的公開候選集合；只限同一Codex CODEX_ROLLOUT START toolCall與collector grant，actual sourceTruncated、明確null或任一不一致皆非法。
         reasonCode:
           type:
           - string
