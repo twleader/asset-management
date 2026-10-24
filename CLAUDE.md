@@ -503,3 +503,7 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 ### Requirement 196／Task 505 個股推播主來源例外
 
 既有台股十秒dispatcher在push模式僅對尚未完成當前SSE body generation/provider epoch初始化、或未健康的symbol做最多40檔、每檔60秒的受控價格補抓；健康以SDK訂閱ACK及heartbeat與Java有期限status授權確認，不以成交安靜判定故障。成交push先提交stock_intraday_quote canonical再Redis，不逐筆寫daily history。健康時必要五檔沿用獨立bounded Yahoo worker，未取本輪Fubon quote也可入候選；補抓有完整Fubon book仍primary。此條只取代既有五檔「必先執行同輪Fubon quote」trigger，並非新REST/跨provider拼接/五檔權威價例外；其餘DB comparator、Redis revision、radar、pure-read與唯讀券商邊界不變。
+
+### Requirement 190／Task 507 公開工具參數查閱修訂
+
+Task507取代舊summary的「未收錄參數、指令」文案：新觀測摘要指向節點明細查閱公開輸入，工具輸出仍不保存。時間軸及慢速步驟提供明確入口，以CALL_RESULT的唯一同step START查閱原按需BFF；缺記錄、空輸入、截斷及遮蔽範圍分開標示。exec/run_code程式碼是wrapper真實公開輸入，內含名稱僅為文字掃描，不聲稱已逐項執行或保存動態參數／獨立耗時。不改舊immutable事件、API/schema、金融Swagger identity或SRPP runtime/政策，不重播或回填。

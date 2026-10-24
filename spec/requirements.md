@@ -6186,3 +6186,15 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 觀察清單即時更新price/priceChange/changePercent及有權威事件值的OHLC/volume/source/status/time/date；警示條件、觸發snapshot及技術指標維持原資料。快照表單只對市場當日current/new模式更新具名行情，沿withoutDirtyChange保護手工欄位與dirty狀態；歷史日期不受live覆蓋。事件補讀不得呼叫會backfill/refresh/vendor I/O的prices或歷史接口；使用既有pure-read realtime。
 - [ ] 共用分析視窗只在開啟且符合標的時響應。當日分時以事件後至少300ms、最多每秒一次、不重疊且保留最後pending的canonical session純GET完整替換，避免PUBLISH早於ticks落地與自行造volume/comparison tuple。可在最後事件後再作一次bounded尾端補讀；generation擋下關窗/換股舊response。五檔僅在五檔tab開啟時用同樣coalesced、最少2秒間距純GET既有canonical book；price事件不冒充book資料、不拼不同來源。歷史K線、技術指標與凍結交易列不得因price事件重算或覆寫。
 - [ ] 允許在既有登入 intraday-ticks 鏈新增選填 readOnly=true（預設false，既有行為不變），一路透傳至 IntradaySessionQueryService，true時完全略過reference self-heal，仍讀既有reference cache並由同一business resolver產生完整session；事件刷新必帶true。允許WatchStock/TradingRadar各頁BFF新增登入pure-read realtime代理同一business價格cache API；不讀其他頁BFF、不觸發計算。只做這些具名內部契約，不新增行情provider/broker I/O、Redis/DB寫入或公開API；保持BFF/auth/nginx SSE無buffer及timeout。離線測試覆蓋共享、cleanup、重連、日期及亂序、HTTP/SSE競態、各頁實際handler、表單不dirty與歷史保護、dialog尾端補讀/換股/非重疊；Docker重建recreatefrontend及任何實改服務、唯讀smoke。非交易日不注入正式DB/Redis，盤中live驗收如實記未執行。
+
+### Task 507：公開工具與參數查閱入口（Requirement 190 修訂）
+
+**User Story：**作為管理員，我要直接從 AI 流程的事件時間軸與慢速步驟查閱呼叫的工具名稱和實際公開輸入，避免只看到 exec 與「未收錄參數」而誤以為沒有記錄。
+
+**Acceptance Criteria：**
+
+- [ ] Task 507 取代 Task 500／501 舊文案中籠統「未收錄參數、指令」的說法；新觀測摘要說明公開輸入可從節點明細按需查閱，工具輸出不保存。title／summary 本身仍不得含參數內容。已凍結事件不修改、不重播。
+- [ ] 時間軸的工具 START／可精確配對 END 與慢速步驟提供「查看工具與參數」入口。工具來源判斷限既有 `operation.method=TOOL` 或 collector `stepId` 的 `call-` 前綴；不靠摘要文字猜測。START 直接使用真 eventId；END 必須為 `CALL_RESULT` 且其 parentEventIds 中恰一筆既有同 stepId 的 START，才導向該 START。慢速表 nodeId 現為 END，須沿此配對找 START；找不到時明示未記錄且不送請求，不能拿 END 或 synthetic id 充當 START。
+- [ ] 點入口強制選取而不因重複點擊清除；ADMIN 仍只經原同源 BFF 的逐節點按需 GET，沿用 abort/generation fence，參數不放進一般 detail、流程圖、tooltip、時間軸或表格資料，不預載。節點明細清楚區分公開原始輸入、空輸入與未記錄；捲動或聚焦至明細讓結果可見。
+- [ ] `exec`／`run_code` 的公開原始碼就是 wrapper 的真實輸入；原樣文字呈現遮蔽後保存範圍，內含名稱明示僅從文字擷取，不能宣稱每個內含工具已呼叫、已取得其動態實際參數或逐一耗時。禁止 evaluate／執行來源、regex 抽字面值冒充執行時參數。16,384 code-point 輸出上限、1,048,576 prescan、truncated/sourceTruncated、至少 N 處遮蔽都誠實揭露，不能宣稱全量。
+- [ ] 不改 API/schema、DB、金融 Swagger identity、SRPP runtime／政策。同步操作文件並驗 collector、前端選取配對與非預載回歸；Docker rebuild/recreate frontend、原 collector daemon restart 後僅讀取驗收，不清 state、不 replay、不產生人工事件。

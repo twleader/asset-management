@@ -49,13 +49,14 @@ python3 scripts/send-srpp-ai-flow.py --once --token-file /Users/steven/.local/sh
 
 ## 公開工具名稱與參數
 
-時間軸、已配對的慢速步驟表與節點明細的公開工具事件，title 寫成「公開工具呼叫：<標籤>」與「公開工具回傳：<標籤>」，回傳沿用同一 call_id 配對到的呼叫標籤。標籤取自 Codex rollout 該筆呼叫的 `payload.name`，須符合 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}`；`functions.` 等前綴原樣保留。Codex 的 code mode 以 `exec`（或 `run_code`）包裝實際工具，`payload.name` 只會是 `exec`，所以這兩者另從呼叫文字擷取 `tools.<名稱>(` 與 `tools["名稱"]` 的內含工具識別字，寫成 `exec（內含 exec_command、web__run 等 N 項）`：title 最多列3個、整個標籤不超過80字元，列不完時附「等 N 項」；summary 另附至多8個名稱，並載明名稱取自呼叫文字、未收錄參數、指令或輸出。
+時間軸、已配對的慢速步驟表與節點明細的公開工具事件，title 寫成「公開工具呼叫：<標籤>」與「公開工具回傳：<標籤>」，回傳沿用同一 call_id 配對到的呼叫標籤。標籤取自 Codex rollout 該筆呼叫的 `payload.name`，須符合 `[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}`；`functions.` 等前綴原樣保留。Codex 的 code mode 以 `exec`（或 `run_code`）包裝實際工具，`payload.name` 只會是 `exec`，所以這兩者另從呼叫文字擷取 `tools.<名稱>(` 與 `tools["名稱"]` 的內含工具識別字，寫成 `exec（內含 exec_command、web__run 等 N 項）`：title 最多列3個、整個標籤不超過80字元，列不完時附「等 N 項」；summary 另附至多8個名稱，並載明名稱取自呼叫文字，公開輸入從節點明細查閱、工具輸出不保存（Task 507 取代舊不收錄參數文案）。
 
 Task 501 保留上述 Task 500 名稱擷取與 title／summary 規則，並只在**公開工具呼叫的 START 事件**新增選填閉合物件 `toolCall`：`name`、`innerNames`、`parameters`、`parametersChars`、`truncated`、`redactedCount`，以及必要時唯一允許值為 `true` 的 `sourceTruncated`。`parameters` 是使用者授權保存的原始輸入，不保存工具輸出；collector 只以 `[REDACTED]` 最佳努力取代已知憑證樣式。這不是萬全遮蔽，不能將任何非命中內容宣稱為安全。
 
 - `parameters` 最多 16,384 個 Unicode code point。`parametersChars` 是遮蔽、清理後且套用這個輸出上限前的**已處理來源前綴**長度，不是完整原始輸入長度；`truncated=true` 時只保留前 16,384 個字元。
 - 原始輸入超過 1,048,576 個 code point 時，collector 只處理此前綴並帶 `sourceTruncated=true`；未帶該 key 不得被解讀為完整輸入已被驗證。`redactedCount=100000` 只表示「至少 100000 處」，不是精確總數。
-- 參數不隨完整 run detail、流程圖、tooltip、時間軸或慢速步驟表載入或顯示。僅 ADMIN 使用者選取節點後，才由同源 BFF 的逐節點明細按需讀取；舊事件與非工具節點回傳 `toolCall: null`。
+- 時間軸與慢速步驟提供「查看工具與參數」入口，沿真實 CALL_RESULT 配對導向 START；找不到時明示「未記錄工具開始事件」。參數不隨完整 run detail、流程圖、tooltip、時間軸或慢速步驟表載入或顯示。僅 ADMIN 使用者選取節點後，才由同源 BFF 的逐節點明細按需讀取；舊事件與非工具節點回傳 `toolCall: null`。
+- `exec`／`run_code` 明細的程式碼是包裝工具的公開原始輸入，並非各內含工具動態實際參數的獨立紀錄；不保證各項已執行，沒有各項獨立耗時。空輸入與「未記錄工具參數」分開呈現，不宣稱截斷範圍以外的內容已完整保存。
 - 內含工具名稱取自呼叫文字，不是精確保證：字串字面值內的 `tools.x(` 也可能被擷取，也可能漏掉不用這兩種寫法的呼叫。
 - 名稱不合白名單、title 超過100字元、summary 超過500字元，或命中機密／金額／私人推理等 title／summary 敏感字樣規則時，該事件退回原泛稱「公開工具呼叫」「公開工具回傳」，不會使整批上傳被拒。
 - 已持久化的 immutable 事件不回寫：更新前的舊 run 仍顯示泛稱且沒有 `toolCall`，這是預期而非缺陷；只有 collector 更新後新解析的 rollout 行才帶新資料。尚未配對、更新前已入 state 的舊呼叫，其回傳事件也維持泛稱。

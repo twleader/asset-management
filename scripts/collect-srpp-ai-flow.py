@@ -44,7 +44,7 @@ COMPOSITE_TOOLS = {"exec", "run_code"}
 TOOL_LABEL_LIMIT = 80
 TOOL_TITLE_NAMES = 3
 TOOL_STATE_NAMES = 8
-TOOL_SUMMARY_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
+TOOL_SUMMARY_NOTE = "內含工具名稱取自呼叫文字；公開輸入請由節點明細查閱，工具輸出不保存。"
 # Task 501：完整公開工具參數經使用者明確授權，但仍盡力遮蔽憑證樣式。
 # 這些值是 observer／backend／BFF 共用契約的一部分，不能各自放寬。
 TOOL_PARAM_LIMIT = 16384

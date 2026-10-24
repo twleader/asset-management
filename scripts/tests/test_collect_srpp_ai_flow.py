@@ -689,7 +689,7 @@ class TerminalFailureTests(Fixture):
 
 START_GENERIC = "已觀測到工具開始；複合工具只記錄整批耗時。"
 END_GENERIC = "已觀測到工具輸出，不推定金融操作或報告成功。"
-TOOL_NOTE = "內含工具名稱取自呼叫文字，未收錄參數、指令或輸出。"
+TOOL_NOTE = "內含工具名稱取自呼叫文字；公開輸入請由節點明細查閱，工具輸出不保存。"
 JAVA_PROTOCOL = SCRIPTS.parent / "backend/src/main/java/com/steven/assets/service/aiflow/AiFlowProtocol.java"
 TOOL_CALL_VECTORS = SCRIPTS / "tests/fixtures/ai_flow_tool_call_vectors.json"
 PUBLIC_CHOICE_ROLLOUT = SCRIPTS / "tests/fixtures/ai_flow_public_choice_set_rollout.jsonl"
@@ -1456,6 +1456,18 @@ class MarketSessionDiscoveryTests(Fixture):
 
 
 class ToolCallParameterTests(Fixture):
+    def test_wrapper_public_input_remains_source_not_guessed_nested_runtime_parameters(self):
+        raw = 'const command = "printf hello"; await tools.exec_command({cmd: command, max_output_tokens: 123});'
+        value = self.calls({"type": "custom_tool_call", "call_id": "wrapper-source", "name": "exec", "input": raw})
+        start = self.tool_events(value, "START")[0]
+        self.assertEqual(raw, start["toolCall"]["parameters"])
+        self.assertEqual(["exec_command"], start["toolCall"]["innerNames"])
+        self.assertIn("公開輸入請由節點明細查閱", start["summary"])
+        self.assertNotIn("未收錄參數", start["summary"])
+        self.assertNotIn("printf hello", start["summary"])
+        self.assertNotIn("max_output_tokens", start["summary"])
+        self.assertEqual(set(start["toolCall"]), c.TOOL_CALL_KEYS)
+
     def reset_state(self):
         for state_file in (self.store.root / "sources").glob("codex-*.json"):
             state_file.unlink()

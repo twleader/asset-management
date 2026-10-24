@@ -181,6 +181,10 @@
                   <span class="timeline-category">{{ displayUnknown(node.categoryLabel) }}</span>
                 </button>
                 <p class="timeline-summary">{{ displayUnknown(node.summary) }}</p>
+                <template v-if="isToolNode(node)">
+                  <el-button v-if="toolStartId(node.eventId)" text type="primary" @click="showToolCall(node.eventId)">查看工具與參數</el-button>
+                  <p v-else class="tool-call-note">未記錄工具開始事件</p>
+                </template>
               </el-timeline-item>
             </el-timeline>
           </section>
@@ -198,12 +202,18 @@
               <el-table-column label="操作" min-width="160">
                 <template #default="{ row }"><code>{{ displayUnknown(row.operation?.method) }} {{ displayUnknown(row.operation?.path) }}</code></template>
               </el-table-column>
+              <el-table-column label="工具紀錄" min-width="170">
+                <template #default="{ row }">
+                  <el-button v-if="toolStartId(row.nodeId)" text type="primary" @click="showToolCall(row.nodeId)">查看工具與參數</el-button>
+                  <span v-else>未記錄工具開始事件</span>
+                </template>
+              </el-table-column>
             </el-table>
             <el-empty v-else description="沒有已配對且耗時可確認的步驟" />
           </section>
         </div>
 
-        <section v-if="selectedNode" class="node-detail">
+        <section v-if="selectedNode" ref="nodeDetail" class="node-detail" tabindex="-1" aria-label="節點明細">
           <div class="section-header">
             <div>
               <h4>節點明細</h4>
@@ -237,10 +247,14 @@
                 </dd>
               </div>
               <div>
-                <dt>參數</dt>
+                <dt>公開原始輸入</dt>
                 <dd><pre class="tool-call-parameters">{{ state.selectedToolCall.parameters === '' ? '（無參數）' : state.selectedToolCall.parameters }}</pre></dd>
               </div>
             </dl>
+            <p class="tool-call-note">已處理範圍的輸入長度（遮蔽、清理後）：{{ state.selectedToolCall.parametersChars }} 字元</p>
+            <p v-if="isCompositeToolCall" class="tool-call-note">
+              上方程式碼是包裝工具的公開原始輸入。內含工具名稱僅從文字擷取，不保證逐項已執行；動態參數與逐項耗時未獨立記錄。
+            </p>
             <p v-if="state.selectedToolCall.truncated" class="tool-call-note">
               已截斷：已處理前綴的遮蔽後長度 {{ state.selectedToolCall.parametersChars }} 字元，僅保留前 16384 字元
             </p>
@@ -253,6 +267,7 @@
               <template v-else>{{ state.selectedToolCall.redactedCount }} 處</template>
             </p>
           </template>
+          <p v-else class="tool-call-state">未記錄工具參數</p>
           <template v-if="selectedNode.eventKind === 'START'">
             <p v-if="state.selectedChoiceSetLoading" class="choice-set-state" role="status">正在讀取所選節點的公開候選…</p>
             <el-alert
@@ -347,6 +362,7 @@ import {
   isIsoDate,
   mapAiFlowGraphData,
   resolveAiFlowGraphNodeSelection,
+  resolveAiFlowToolStartId,
   todayTaipeiISO
 } from '@/utils/aiFlowView'
 
@@ -365,6 +381,8 @@ const safeTextVisible = ref(false)
 const safeTextTitle = ref('')
 const safeTextItems = ref([])
 const graphZoom = ref(1)
+const nodeDetail = ref(null)
+const isCompositeToolCall = computed(() => ['exec', 'run_code'].includes(state.selectedToolCall?.name?.split('.').at(-1)))
 
 const loader = createAiFlowViewLoader({
   listRuns: ({ date, consumer: selectedConsumer, period: selectedPeriod, signal }) =>
@@ -486,6 +504,24 @@ function closeDetail() {
 
 function selectNode(eventId, { forceSelect = false } = {}) {
   void loader.selectNode(state, eventId, state.filters, { forceSelect })
+}
+
+function toolStartId(eventId) {
+  return resolveAiFlowToolStartId(state.detail, eventId)
+}
+
+function isToolNode(node) {
+  return node?.operation?.method === 'TOOL' || node?.stepId?.startsWith('call-')
+}
+
+async function showToolCall(eventId) {
+  const startId = toolStartId(eventId)
+  if (!startId) return
+  const selection = loader.selectNode(state, startId, state.filters, { forceSelect: true })
+  await nextTick()
+  nodeDetail.value?.focus({ preventScroll: true })
+  nodeDetail.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  await selection
 }
 
 function clearSelectedNode() {

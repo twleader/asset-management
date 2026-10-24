@@ -13,6 +13,7 @@ import {
   mapAiFlowGraphData,
   resolveAiFlowGraphNodeId,
   resolveAiFlowGraphNodeSelection,
+  resolveAiFlowToolStartId,
   todayTaipeiISO
 } from './aiFlowView.js'
 
@@ -615,4 +616,71 @@ test('路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace', () =>
   assert.match(view, /已截斷：已處理前綴的遮蔽後長度/)
   assert.doesNotMatch(view, /v-html\s*=/)
   assert.doesNotMatch(view, /\/api\/(?:ai-flow|srpp)/)
+})
+
+
+test('工具入口沿 CALL_RESULT 找唯一同 step START；slow row END 不直接當參數 id', async () => {
+  const start = { eventId: 'start', eventKind: 'START', stepId: 'call-1', operation: { method: 'TOOL', path: 'tool' } }
+  const end = { eventId: 'end', eventKind: 'END', stepId: 'call-1', relation: 'CALL_RESULT', parentEventIds: ['start'], operation: start.operation }
+  const detail = { nodes: [start, end], slowSteps: [{ nodeId: 'end' }] }
+  assert.equal(resolveAiFlowToolStartId(detail, 'start'), 'start')
+  assert.equal(resolveAiFlowToolStartId(detail, 'end'), 'start')
+  assert.equal(resolveAiFlowToolStartId(detail, detail.slowSteps[0].nodeId), 'start')
+  assert.equal(resolveAiFlowToolStartId({ nodes: [{ ...start, operation: { method: 'LOCAL', path: 'calendar' } }] }, 'start'), 'start')
+  for (const invalidEnd of [
+    { ...end, stepId: 'different' },
+    { ...end, relation: 'NEXT_OBSERVED' },
+    { ...end, parentEventIds: [] },
+    { ...end, parentEventIds: ['missing'] },
+    { ...end, parentEventIds: ['start', 'start'] },
+    { ...end, parentEventIds: null },
+    { ...end, stepId: undefined }
+  ]) assert.equal(resolveAiFlowToolStartId({ nodes: [start, invalidEnd] }, 'end'), '')
+  const second = { ...start, eventId: 'second' }
+  assert.equal(resolveAiFlowToolStartId({ nodes: [start, second, { ...end, parentEventIds: ['start', 'second'] }] }, 'end'), '')
+  assert.equal(resolveAiFlowToolStartId({ nodes: [start, start, end] }, 'start'), '')
+  assert.equal(resolveAiFlowToolStartId({ nodes: [{ ...start, eventId: 'ui-choice:start:hub' }] }, 'ui-choice:start:hub'), '')
+  assert.equal(resolveAiFlowToolStartId({ nodes: [{ ...start, stepId: 'scheduled-start', operation: { method: 'LOCAL' } }] }, 'start'), '')
+  assert.equal(resolveAiFlowToolStartId(detail, 'missing'), '')
+  assert.equal(resolveAiFlowToolStartId(null, 'end'), '')
+
+  const requests = []
+  const loader = createAiFlowViewLoader({
+    listRuns: async () => ({ runs: [] }), getRun: async () => ({}),
+    getToolCall: async (runId, eventId) => { requests.push({ runId, eventId }); return { toolCall: { name: 'exec', innerNames: ['exec_command'], parameters: 'await tools.exec_command({cmd: command})', parametersChars: 39, truncated: false, redactedCount: 0 } } }
+  })
+  const state = createAiFlowViewState()
+  state.selectedRunId = 'run'
+  state.detail = detail
+  const id = resolveAiFlowToolStartId(state.detail, state.detail.slowSteps[0].nodeId)
+  await loader.selectNode(state, id, state.filters, { forceSelect: true })
+  assert.deepEqual(requests, [{ runId: 'run', eventId: 'start' }])
+  assert.equal(state.selectedToolCall.parameters, 'await tools.exec_command({cmd: command})')
+  await loader.selectNode(state, id, state.filters, { forceSelect: true })
+  assert.equal(state.selectedNodeId, 'start')
+  assert.equal(requests.length, 1)
+  assert.equal(Object.hasOwn(detail.nodes[0], 'toolCall'), false)
+})
+
+test('工具入口顯示公開原始輸入與來源界線，保留載入、錯誤、未記錄及空輸入狀態', () => {
+  const view = readFileSync(new URL('../views/AiFlowView.vue', import.meta.url), 'utf8')
+  assert.equal((view.match(/>查看工具與參數<\/el-button>/g) || []).length, 2)
+  assert.match(view, /showToolCall\(row\.nodeId\)/)
+  assert.match(view, /showToolCall\(node\.eventId\)/)
+  assert.match(view, /resolveAiFlowToolStartId\(state\.detail, eventId\)/)
+  assert.match(view, /if \(!startId\) return/)
+  assert.match(view, /loader\.selectNode\(state, startId, state\.filters, \{ forceSelect: true \}\)/)
+  assert.match(view, /nodeDetail\.value\?\.focus/)
+  assert.match(view, /scrollIntoView/)
+  assert.match(view, /未記錄工具開始事件/)
+  assert.match(view, /<dt>公開原始輸入<\/dt>/)
+  assert.match(view, /v-else class="tool-call-state">未記錄工具參數/)
+  assert.match(view, /parameters === '' \? '（無參數）'/)
+  assert.match(view, /selectedToolCallLoading[\s\S]*selectedToolCallError[\s\S]*v-else-if="state\.selectedToolCall"/)
+  assert.match(view, /內含工具名稱僅從文字擷取，不保證逐項已執行/)
+  assert.match(view, /動態參數與逐項耗時未獨立記錄/)
+  assert.match(view, /僅保留前 16384 字元/)
+  assert.match(view, /只反映已處理前綴/)
+  assert.match(view, /至少 100000 處/)
+  assert.doesNotMatch(view, /v-html|console\.(?:log|info|debug)/)
 })
