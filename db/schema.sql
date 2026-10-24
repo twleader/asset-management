@@ -2116,7 +2116,8 @@ CREATE TABLE public.notification_recipient (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     owner_user_id bigint NOT NULL,
     receive_market_analysis boolean DEFAULT true NOT NULL,
-    add_to_calendar boolean DEFAULT false NOT NULL
+    add_to_calendar boolean DEFAULT false NOT NULL,
+    name character varying(100)
 );
 
 

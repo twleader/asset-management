@@ -37,6 +37,10 @@ public class NotificationRecipient {
     @Column(nullable = false, length = 255)
     private String email;
 
+    /** 通知設定頁使用的選填顯示名稱（Task 509）；不影響寄送身分或收件人選取。 */
+    @Column(name = "name", length = 100, nullable = true)
+    private String name;
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean active = true;

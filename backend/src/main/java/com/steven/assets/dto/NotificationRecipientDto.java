@@ -2,6 +2,7 @@ package com.steven.assets.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
 
@@ -13,6 +14,7 @@ public class NotificationRecipientDto {
     public record Response(
             Long id,
             String email,
+            String name,
             Boolean active,
             Boolean receiveMarketAnalysis,
             Boolean addToCalendar,
@@ -22,10 +24,12 @@ public class NotificationRecipientDto {
 
     public record CreateRequest(
             @NotBlank @Email String email,
+            @Size(max = 100) String name,
             Boolean active
     ) {}
 
     public record UpdateRequest(
-            @NotBlank @Email String email
+            @NotBlank @Email String email,
+            @Size(max = 100) String name
     ) {}
 }
