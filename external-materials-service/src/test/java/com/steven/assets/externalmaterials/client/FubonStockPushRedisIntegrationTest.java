@@ -51,7 +51,14 @@ class FubonStockPushRedisIntegrationTest {
         when(clock.isTwMarketOpenKnown()).thenReturn(Optional.of(true));
         when(radar.current(300)).thenReturn(List.of("2330"));
         writer = new PriceCacheWriter(redis, sql, highLow, new IntradayTickStore(redis));
-        consumer = new FubonStockPushConsumer(clock, radar, writer);
+        when(sql.persistIntradayQuote(any())).thenAnswer(invocation -> {
+            var raw = invocation.getArgument(0, com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult.class);
+            var row = new StockSourceQuery.IntradayQuote(raw.stockCode(), raw.market(), raw.tradingDate(), raw.freshnessInstant(),
+                    raw.source(), raw.price(), raw.previousClose(), raw.openPrice(), raw.highPrice(), raw.lowPrice(),
+                    raw.buyPrice(), raw.sellPrice(), raw.volume(), raw.stockName());
+            return new StockSourceQuery.IntradayPersistenceResult(StockSourceQuery.IntradayPersistenceResult.Status.APPLIED, row);
+        });
+        consumer = new FubonStockPushConsumer(clock, radar, writer, sql);
         consumer.authorize(List.of("2330"), TRADE.plusSeconds(45));
     }
     private StockEvent event(Instant instant) {
@@ -88,7 +95,8 @@ class FubonStockPushRedisIntegrationTest {
             assertThat(actual.hasNonNull("buyPrice")).isFalse();
             assertThat(redis.opsForSet().members("price:index:台股")).containsExactly("2330");
             assertThat(redis.opsForList().size(ticks())).isEqualTo(1);
-            verifyNoInteractions(sql, highLow);
+            verifyNoInteractions(highLow);
+            verify(sql, atLeastOnce()).persistIntradayQuote(any());
         } finally { client.stop(); }
     }
     @Test void staleAndEqualLeaveEntireQuoteTtlPublishAndTicksUntouched() throws Exception {
@@ -102,7 +110,8 @@ class FubonStockPushRedisIntegrationTest {
         assertThat(redis.getExpire(key(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(ttl);
         assertThat(redis.opsForList().size(ticks())).isEqualTo(1);
         assertThat(messages.poll(150, TimeUnit.MILLISECONDS)).isNull();
-        verifyNoInteractions(sql, highLow);
+        verifyNoInteractions(highLow);
+            verify(sql, atLeastOnce()).persistIntradayQuote(any());
     }
     @Test void verifiedCloseCannotBeDowngradedAndMissingMetadataNeverMergesPreviousQuote() {
         consumer.accept(event(TRADE));

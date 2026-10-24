@@ -5,6 +5,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.util.List;
+import java.util.Set;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
 
@@ -20,6 +22,7 @@ public class FubonStockPushSubscriptionManager {
     private final FubonStockPushConsumer consumer;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private boolean remotePossiblyActive;
+    private volatile Scope authorized = new Scope(Set.of(), Instant.EPOCH);
     private volatile State lastState = new State("DISABLED", 0);
     public FubonStockPushSubscriptionManager(@Value("${fubon.stock-push-enabled:false}") String enabled,
             FubonMarketAccess access, MarketClock clock, FubonRadarScope radar, FubonMarketDataPort client,
@@ -46,13 +49,17 @@ public class FubonStockPushSubscriptionManager {
             remotePossiblyActive = true;
             client.subscriptions(codes);
             // Local authorization is shorter than the adapter's 120s lease, so a stalled manager fails closed.
-            consumer.authorize(codes, clock.instant().plusSeconds(45));
+            Instant validUntil = clock.instant().plusSeconds(45);
+            consumer.authorize(codes, validUntil);
+            authorized = new Scope(Set.copyOf(codes), validUntil);
+            consumer.repairPending();
             if (!stream.isRunning()) stream.start(consumer::accept);
-            lastState = new State(stream.isRunning() ? "SUBSCRIBED" : "RECONNECTING", codes.size());
+            lastState = new State(stream.isReadyFor(Set.copyOf(codes)) ? "SUBSCRIBED" : "RECONNECTING", codes.size());
         } catch (Unavailable unavailable) { clear(unavailable.reason()); }
         catch (RuntimeException failure) { clear("FAILED"); }
     }
     private void clear(String reason) {
+        authorized = new Scope(Set.of(), Instant.EPOCH);
         consumer.revoke();
         stream.stop();
         boolean cleanup = remotePossiblyActive;
@@ -64,6 +71,16 @@ public class FubonStockPushSubscriptionManager {
         lastState = new State(reason, 0);
     }
     @PreDestroy public synchronized void shutdown() { clear("DISABLED"); }
+    public boolean pushEnabled() { return featureReason(enabled, "STOCK_PUSH_DISABLED") == null; }
+    public String recoveryIdentity() { return stream.recoveryIdentity(); }
+    public boolean isPricePushHealthy(String symbol) {
+        Scope scope = authorized;
+        try {
+            return pushEnabled() && scope.symbols().contains(symbol) && clock.instant().isBefore(scope.validUntil())
+                    && clock.isTwMarketOpenKnown().orElse(false) && stream.isReadyFor(scope.symbols());
+        } catch (RuntimeException failure) { return false; }
+    }
     public State state() { return lastState; }
+    private record Scope(Set<String> symbols, Instant validUntil) {}
     public record State(String outcome, int symbolCount) {}
 }

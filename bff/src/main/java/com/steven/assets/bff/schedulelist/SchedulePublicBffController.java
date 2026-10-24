@@ -189,7 +189,7 @@ public class SchedulePublicBffController {
                     "每分鐘第30秒（僅有待清理資料）", "30 * * * * *", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "富邦個股即時推播訂閱更新",
                     "Normal mode aggregates 僅採實際成交與微秒時間，盤中只訂閱今日交易雷達台股，最多 300 檔；"
-                            + "清單每 30 秒更新、lease 最長 120 秒，停用／離開盤中／日曆未知即撤銷，不使用試撮或覆寫官方收盤",
+                            + "清單每 30 秒更新，lease 最長 120 秒，以訂閱確認及心跳驗證健康；成交先寫盤中 DB 再更新 Redis，停用／離開盤中／日曆未知即撤銷，不使用試撮或覆寫官方收盤",
                     "交易日盤中即時；訂閱清單每 30 秒更新", "fixedDelay=30000ms（訂閱清單）", TPE),
             new ScheduledJobDto(EXTERNAL, "股利", "富邦除權息現金股利證據同步",
                     "日期批次取得、只處理雷達交集，經既有股利證據 store 保存 PARTIAL 現金股利證據；"
@@ -213,7 +213,7 @@ public class SchedulePublicBffController {
                             + "immutable PostgreSQL fact 先提交，再 guarded 投影本地收盤，可信官方收盤永不覆寫",
                     "交易日 15:35", "0 35 15 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股個股即時價（盤中）",
-                    "盤中每 10 秒只查今日交易雷達內台股（最新持股 ∪ 觀察清單，排除 0000），依序查富邦證券 API、TWSE MIS、Yahoo，寫入 Redis 與最新盤中 snapshot；大盤 0000 由「台股大盤即時點位（盤中）」負責",
+                    "盤中每 10 秒處理今日交易雷達台股（最新持股 ∪ 觀察清單，排除 0000）；啟用成交推播且完成當前連線初始化後健康時停止重複查價，啟動／重連／異常按每檔最少 60 秒、每輪最多 40 檔補抓；五檔由獨立有限額 worker 更新，推播停用時維持富邦證券 API→TWSE MIS→Yahoo 價格輪詢，寫入盤中 DB 與 Redis；大盤另行處理",
                     "交易日 09:00–13:30 每 10 秒", "*/10 * 9-13 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "即時行情", "台股大盤即時點位（盤中）",
                     "盤中每 2 分鐘更新台股大盤（0000）即時點位至 Redis（來源 Yahoo ^TWII 5 分 K）；這是獨立大盤節拍，交易雷達台股個股即時價為每 10 秒，標的與來源皆不同（Task 228）",

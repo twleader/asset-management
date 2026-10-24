@@ -536,6 +536,38 @@ public final class FubonMarketJson {
         return value;
     }
 
+    /** Immutable evidence from the SDK bridge, never inferred from HTTP connection state. */
+    public record StockStatus(long connectionEpoch, long scopeVersion, Set<String> desiredSymbols,
+                              Set<String> confirmedSymbols, boolean ready) {
+        public StockStatus {
+            desiredSymbols = Set.copyOf(desiredSymbols);
+            confirmedSymbols = Set.copyOf(confirmedSymbols);
+        }
+    }
+    public static StockStatus stockStatus(JsonNode root) {
+        fields(root, Set.of("schemaVersion", "connectionEpoch", "scopeVersion", "desiredSymbols", "confirmedSymbols", "ready"));
+        if (integer(root.get("schemaVersion")) != 1) throw invalid();
+        long epoch = positiveLong(root.get("connectionEpoch"));
+        JsonNode scope = root.get("scopeVersion");
+        if (!scope.isIntegralNumber() || !scope.canConvertToLong() || scope.longValue() < 0) throw invalid();
+        Set<String> desired = statusSymbols(root.get("desiredSymbols"));
+        Set<String> confirmed = statusSymbols(root.get("confirmedSymbols"));
+        boolean ready = bool(root.get("ready"));
+        if (!desired.containsAll(confirmed) || ready && !confirmed.equals(desired)) throw invalid();
+        return new StockStatus(epoch, scope.longValue(), desired, confirmed, ready);
+    }
+    private static Set<String> statusSymbols(JsonNode node) {
+        if (!node.isArray() || node.size() > 300) throw invalid();
+        Set<String> result = new LinkedHashSet<>();
+        String previous = null;
+        for (JsonNode item : node) {
+            String symbol = text(item);
+            if (!validSymbol(symbol) || previous != null && previous.compareTo(symbol) >= 0) throw invalid();
+            result.add(symbol); previous = symbol;
+        }
+        return result;
+    }
+
     public static SubscriptionAck subscription(JsonNode root, int size) {
         fields(root, Set.of("outcome", "symbolCount", "leaseSeconds"));
         String expected = size == 0 ? "CLEARED" : "ACCEPTED";

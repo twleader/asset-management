@@ -260,7 +260,7 @@ public class FubonApiInfoBffController {
             // ===== 行情查詢（20：marketdata.rest_client.stock.*，11 已串接）=====
             new FubonApiInfoDto(true, "行情查詢", "個股即時報價與最佳五檔",
                     "marketdata.rest_client.stock.intraday.quote", "POST /internal/market-data/tw-quotes",
-                    "逐檔查詢台股即時成交價、漲跌、成交量與委買委賣最佳五檔，供交易雷達即時報價與庫存估值使用" + RO,
+                    "逐檔查詢台股成交價與最佳五檔；成交推播模式僅於啟動／重連／異常受控補抓，每輪最多 40 檔、每檔最少 60 秒；健康且初始化後不重複查價，必要五檔由獨立 Yahoo worker 更新；另保留庫存估值用途" + RO,
                     "business-services（庫存估值）／external-materials-service（台股即時報價）",
                     "symbol（路徑參數）",
                     "本系統已定義完整 typed DTO（見既有 quotes.py 正規化邏輯），含成交價／漲跌／五檔委買委賣等欄位"),
@@ -426,12 +426,12 @@ public class FubonApiInfoBffController {
             new FubonApiInfoDto(true, "即時推播", "個股即時推播",
                     "marketdata.websocket_client.stock（channel=\"aggregates\"）",
                     "GET /internal/market-data/stock-push/stream",
-                    "Normal mode aggregates 僅取 lastTrade 實際成交價與微秒時間，驗證當日盤中、範圍與嚴格較新後更新即時報價；"
-                            + "不使用試撮、不產生官方收盤價" + RO,
+                    "Normal mode aggregates 僅取 lastTrade 實際成交價與微秒時間，驗證當日盤中與範圍，先提交盤中 PostgreSQL canonical，再以嚴格較新更新 Redis；"
+                            + "以訂閱 ACK 與心跳確認健康，初始化後健康時不重複輪詢成交價；不使用試撮、不產生官方收盤價" + RO,
                     "external-materials-service（POST /internal/market-data/stock-push/subscriptions 每 30 秒更新雷達清單，"
                             + "最長 120 秒 lease；內網 SSE consumer，需另啟用設定）",
                     "subscriptions 傳 symbols（最多 300，空陣列撤銷）；SSE GET 無 body，台北 09:00 ≤ time < 13:30 且交易日已知",
-                    "SSE event=stock-price，id=symbol:tradeTimeMicros；symbol／market／exchange／type／sourceDate／tradeTimeMicros／tradeSize／"
+                    "SSE stock-status 每 5 秒回報連線 epoch／範圍／訂閱確認／ready（無 id）；stock-price 的 id=symbol:tradeTimeMicros；symbol／market／exchange／type／sourceDate／tradeTimeMicros／tradeSize／"
                             + "price／previousClose／openPrice／highPrice／lowPrice／name／source=FUBON_WS_AGGREGATES；buyPrice、sellPrice、volume 為 null，無原 SDK 包或帳戶資料")
 
     );

@@ -13031,3 +13031,13 @@ digest 以股票分組後，在每一股票卡片建立 insertion-order 的 `pur
 ### 驗證
 
 單元／整合測試驗證 service 拒絕 null、空白、`UNSPECIFIED`、unknown input，並拒絕對群組成員使用單一警示 mutation；單一與群組 response 保留 `BUY`／`SELL`／legacy `UNSPECIFIED`，寫入 trigger 的用途不隨之後設定改變。通知測試驗證 legacy active alert 的 live `UNSPECIFIED`、live 與 resend 都以 trigger-time 用途建立混合方向的 email/calendar 映射；刪除後既有 cascade 造成無可補發 row 是既有邊界，不假稱保留。前端建置驗證欄位、legacy 呈現與強制選擇不破壞 Vue 編譯。Liquibase 套用後以 `pg_dump --schema-only` 重新產生 `db/schema.sql`，drift test 必須回 0；最後只從同步後的 main rebuild/recreate `business-services` 和 `frontend`，以 health/read-only UI/API 路徑確認服務可用，不寄真實郵件、不交易。
+
+## Task 505：push-primary 個股盤中管線
+
+Python SDK aggregates → token protected stock SSE → Java consumer calendar/radar/lease驗證 → PostgreSQL stock_intraday_quote canonical transaction commit → Redis strict-newer latest與ticks。沿用既有表，無migration、無daily history寫入。每筆失敗只影響該事件，stale/equal只回讀DB canonical repair。consumer最多保留300筆已提交canonical，Redis失敗後由manager每30秒續租時重驗calendar/radar/auth後重試；移出scope或過日清除，不用raw、不外呼、不新增排程。
+
+stock-status為獨立健康控制協定，不進DB/Redis、不公開：schemaVersion=1、positive int64 connectionEpoch、nonnegative int64 scopeVersion、sorted unique desiredSymbols、confirmedSymbols subset與boolean ready，event/data only。Python每5秒發送，SDK有效heartbeat/pong/ACK/validated data最多75秒未收到即重連；Java本地15秒lease、worker/generation fence、15秒讀取idle watchdog主動close body。ready要求SDK connect完成且desired全ACK無pending；沒有成交不等於故障。manager的45秒授權與status exact desired set交集、known-open market才可 suppress polling。
+
+十秒dispatcher在push-enabled模式先取有效radar set，再以兩個獨立fair cursors處理：book candidates最多40每輪、snapshot candidates最多40且每檔60秒冷卻。每個SSE generation/provider connection epoch的每檔首次受控補抓後，healthy symbols不走任何generic價格REST；其餘codes僅selected bounded snapshot走Fubon→MIS→Yahoo。價格snapshot與Yahoo book共享市場/radar授權，但book worker仍獨立single-flight/bounded budget。健康時必要五檔由現有Yahoo worker供給，snapshot有完整Fubon book則沿用Fubon primary；本輪Fubon envelope DB失敗則兩book worker皆不啟動；不新增WS books或虛構REST，不混合欄位。這取代原『必須有本輪Fubon quote才可book fallback』trigger，source/revision/read contract保持原樣。
+
+stream start/stop/EOF/config/session/scope expiry撤銷ready，所有cooldown以monotonic控制且先登記再外呼。停用push保留原十秒價格行為。排程頻率不變，catalog敘述同步。只有external-materials、fubon-broker與catalog所在bff服務需重建；非交易日runtime只驗證服務、部署身分、closed gates，不偽造行情。

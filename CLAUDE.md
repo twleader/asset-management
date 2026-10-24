@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（188 個 Requirements；最新編號為 195，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（189 個 Requirements；最新編號為 196，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -499,3 +499,7 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 本修訂優先於前述金融24／union25：金融1.26.0新增exact `GET /api/public/srpp/order-plan`、`GET /api/public/srpp/symbol-rule-facts`，金融為26 pairs（22GET/4POST）；Task504 後觀測為獨立1.3.0的一POST，gateway/catalog/統一Swagger union仍為27 pairs（22GET/5POST）。mail的GET/POST仍共用Tailscale prefix，所以Tailscale是26 handlers；其餘均須exact allowlist，禁止root、`/api/`、wildcard或descendant。
 
 兩GET只讀既有immutable schemaVersion1 FINAL report-calculations package，identity含ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256、calculationRunId；不得改package output、consumer schema、manifest、registry、producer或SRPP runtime。eligible leg是module data.legs的BUY/SELL，市場精確台股→TW／美股→US，NONE排除，legId固定ASCII `moduleId.index`；未知market/action是502而非猜測。A2 universe是eligible TW legs的sorted unique投影，非input field，只由package content hash保護；input snapshot hash只identity-bind、不可宣稱包含或保護universe。無M1 capacity evidence，零capacity reflow/substitution。P2與fresh revisions不在本輪；CSV均single-key／UTF-8 single decode。A1 root無quoteCapture；每leg只在`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol及price/amount精確同源且sourceRevision=vector revision時才有sealed `sourceId/sourceRevision/sourceSha256/capturedAt/QUOTE receipt` quoteCapture，否則三者全null。A1不收client risk，derivedRisk固定DEFENSIVE/UNAVAILABLE/RISK_EVIDENCE_UNAVAILABLE：BUY zero/null、SELL frozen-only、REDUCE需唯一base unit。A2 facts恰12筆固定順序；僅week52/k/d/rsi5/bias10/wr9/premium的exact frozen source＋`validation=VERIFIED` vector及其SHA/capturedAt matching SOURCE receipt可AVAILABLE；overheat只在五項AVAILABLE時依指定pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED；其餘四筆固定null NOT_EVALUATED，皆不得推斷。只發布API和Task495 Swagger metadata；不改SRPP prompts/schedules/validators/runtime或adoption，另立任務才可採納。
+
+### Requirement 196／Task 505 個股推播主來源例外
+
+既有台股十秒dispatcher在push模式僅對尚未完成當前SSE body generation/provider epoch初始化、或未健康的symbol做最多40檔、每檔60秒的受控價格補抓；健康以SDK訂閱ACK及heartbeat與Java有期限status授權確認，不以成交安靜判定故障。成交push先提交stock_intraday_quote canonical再Redis，不逐筆寫daily history。健康時必要五檔沿用獨立bounded Yahoo worker，未取本輪Fubon quote也可入候選；補抓有完整Fubon book仍primary。此條只取代既有五檔「必先執行同輪Fubon quote」trigger，並非新REST/跨provider拼接/五檔權威價例外；其餘DB comparator、Redis revision、radar、pure-read與唯讀券商邊界不變。
