@@ -731,7 +731,7 @@ public class StockSourceQuery {
      * Stores the latest intraday observation independently from the authoritative daily close.
      * PostgreSQL performs the freshness decision so concurrent poller rounds cannot regress a quote.
      */
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public IntradayPersistenceResult persistIntradayQuote(
             com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult quote) {
         if (quote == null || quote.stockCode() == null || quote.market() == null
@@ -773,6 +773,18 @@ public class StockSourceQuery {
             log.warn("盤中 snapshot 寫入失敗 market={} code={}", quote.market(), quote.stockCode(), ex);
             return IntradayPersistenceResult.failed();
         }
+    }
+
+    /** Pure canonical read used only by the bounded background cache-repair path. */
+    public java.util.Optional<IntradayQuote> findIntradayQuote(String code, String market) {
+        List<IntradayQuote> rows = jdbc.query("""
+                SELECT q.stock_code, q.market, q.trading_date, q.provider_updated_at, q.source, q.actual_price,
+                  q.previous_close, q.open_price, q.high_price, q.low_price, q.buy_price, q.sell_price, q.volume,
+                  s.name AS stock_name
+                FROM stock_intraday_quote q LEFT JOIN stock s ON s.code=q.stock_code AND s.market=q.market
+                WHERE q.stock_code=? AND q.market=?
+                """, (rs, rowNum) -> readIntradayQuote(rs), code, market);
+        return rows.stream().findFirst();
     }
 
     private static IntradayQuote readIntradayQuote(java.sql.ResultSet rs) throws java.sql.SQLException {

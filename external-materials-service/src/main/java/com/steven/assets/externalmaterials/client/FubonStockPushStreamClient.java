@@ -19,6 +19,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /** Cancellable normalized stock SSE. No dependency on the TAIEX client, SDK, DB or Redis. */
 @Component
@@ -31,9 +32,24 @@ public class FubonStockPushStreamClient implements FubonStockPushStream {
     private final MarketClock clock;
     private final Transport transport;
     private final Sleeper sleeper;
+    private final LongSupplier monotonic;
+    private static final long HEALTH_LEASE = TimeUnit.SECONDS.toNanos(15);
+    private volatile ScheduledExecutorService watchdog;
+    private volatile Session session;
+    private static final class Session {
+        final long version;
+        final long connectionGeneration;
+        final InputStream body;
+        volatile long lastByte;
+        volatile long statusAt;
+        volatile FubonMarketJson.StockStatus status;
+        long epoch, scope;
+        Session(long version, long connectionGeneration, InputStream body, long now) { this.version = version; this.connectionGeneration = connectionGeneration; this.body = body; lastByte = now; }
+    }
     private final ExternalApiErrorLogWriter errorLogWriter;
     private final LifecycleFailureInterval failureInterval = new LifecycleFailureInterval();
     private final AtomicLong generation = new AtomicLong();
+    private final AtomicLong bodyGeneration = new AtomicLong();
     private final AtomicReference<InputStream> activeBody = new AtomicReference<>();
     private volatile ExecutorService worker;
     private volatile boolean running;
@@ -49,6 +65,11 @@ public class FubonStockPushStreamClient implements FubonStockPushStream {
         this(enabled, config, clock, transport, sleeper, null);
     }
     FubonStockPushStreamClient(String enabled, FubonMarketConfigState config, MarketClock clock, Transport transport, Sleeper sleeper, ExternalApiErrorLogWriter errorLogWriter) {
+        this(enabled, config, clock, transport, sleeper, errorLogWriter, System::nanoTime);
+    }
+    FubonStockPushStreamClient(String enabled, FubonMarketConfigState config, MarketClock clock, Transport transport,
+                              Sleeper sleeper, ExternalApiErrorLogWriter errorLogWriter, LongSupplier monotonic) {
+        this.monotonic = monotonic;
         this.enabled = enabled; this.config = config; this.clock = clock; this.transport = transport; this.sleeper = sleeper; this.errorLogWriter = errorLogWriter;
     }
     @Override public synchronized void start(Consumer<FubonMarketData.StockEvent> consumer) {
@@ -61,11 +82,16 @@ public class FubonStockPushStreamClient implements FubonStockPushStream {
         // a cancelled old loop from mutating the next start's deduplication state.
         long version = generation.incrementAndGet();
         running = true;
+        watchdog = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().factory());
+        watchdog.scheduleWithFixedDelay(this::checkIdle, 1, 1, TimeUnit.SECONDS);
         worker = Executors.newSingleThreadExecutor(Thread.ofVirtual().factory());
         worker.submit(() -> consume(version, consumer));
     }
     @Override @PreDestroy public synchronized void stop() {
         generation.incrementAndGet(); running = false;
+        session = null;
+        ScheduledExecutorService timer = watchdog; watchdog = null;
+        if (timer != null) timer.shutdownNow();
         closeQuietly(activeBody.getAndSet(null));
         ExecutorService current = worker; worker = null;
         if (current != null) current.shutdownNow();
@@ -73,6 +99,48 @@ public class FubonStockPushStreamClient implements FubonStockPushStream {
     }
     @Override public boolean isRunning() { return running; }
     public String state() { return state; }
+    @Override public synchronized boolean isReadyFor(Set<String> desiredSymbols) {
+        Session current = session;
+        if (current == null || !active(current.version) || activeBody.get() != current.body) return false;
+        var status = current.status;
+        return status != null && monotonic.getAsLong() - current.statusAt < HEALTH_LEASE
+                && status.ready() && status.desiredSymbols().equals(desiredSymbols)
+                && status.confirmedSymbols().containsAll(desiredSymbols);
+    }
+    @Override public synchronized String recoveryIdentity() {
+        Session current = session;
+        if (current == null || !active(current.version) || activeBody.get() != current.body
+                || current.status == null || monotonic.getAsLong() - current.statusAt >= HEALTH_LEASE) return null;
+        return current.connectionGeneration + ":" + current.status.connectionEpoch();
+    }
+    // Package seam lets offline tests advance a monotonic clock without sleeping fifteen seconds.
+    void checkIdle() {
+        Session expired;
+        synchronized (this) {
+            expired = session;
+            if (expired == null || !active(expired.version)
+                    || monotonic.getAsLong() - expired.lastByte < HEALTH_LEASE) return;
+            expired.status = null;
+            session = null;
+            activeBody.compareAndSet(expired.body, null);
+            state = "RECONNECTING";
+        }
+        closeQuietly(expired.body);
+    }
+    private synchronized void invalidate(long version, InputStream body) {
+        Session current = session;
+        if (current != null && current.version == version && current.body == body) {
+            current.status = null; session = null;
+        }
+    }
+    private synchronized void status(Session current, String data) {
+        if (session != current || !active(current.version)) return;
+        var incoming = FubonMarketJson.stockStatus(FubonMarketJson.parse(data));
+        if (incoming.connectionEpoch() < current.epoch || incoming.scopeVersion() < current.scope)
+            throw FubonMarketJson.invalid();
+        current.epoch = incoming.connectionEpoch(); current.scope = incoming.scopeVersion();
+        current.statusAt = monotonic.getAsLong(); current.status = incoming;
+    }
     private boolean active(long version) { return running && generation.get() == version; }
 
     private void consume(long version, Consumer<FubonMarketData.StockEvent> consumer) {
@@ -90,37 +158,70 @@ public class FubonStockPushStreamClient implements FubonStockPushStream {
                         if (active(version)) state = "RECONNECTING";
                     } else {
                         ownedBody = response.body();
-                        activeBody.set(response.body());
+                        synchronized (this) {
+                            if (!active(version)) return;
+                            activeBody.set(ownedBody);
+                            session = new Session(version, bodyGeneration.incrementAndGet(), ownedBody, monotonic.getAsLong());
+                            state = "CONNECTED";
+                        }
                         if (!active(version)) { activeBody.compareAndSet(ownedBody, null); closeQuietly(ownedBody); return; }
-                        state = "CONNECTED";
                         readFrames(response.body(), version, consumer);
-                        if (active(version)) recordFailure(version, new EOFException("Fubon stock push stream EOF"));
+                        invalidate(version, ownedBody);
+                        if (active(version)) { state = "RECONNECTING"; recordFailure(version, new EOFException("Fubon stock push stream EOF")); }
                     }
-                } catch (Exception failure) { if (active(version)) { recordFailure(version, failure); if (active(version)) state = "RECONNECTING"; } }
-                finally { if (ownedBody != null) activeBody.compareAndSet(ownedBody, null); }
+                } catch (Exception failure) { invalidate(version, ownedBody); if (active(version)) { recordFailure(version, failure); if (active(version)) state = "RECONNECTING"; } }
+                finally { invalidate(version, ownedBody); if (ownedBody != null) activeBody.compareAndSet(ownedBody, null); }
                 if (!active(version)) return;
                 try { sleeper.sleep(BACKOFF[Math.min(retries++, BACKOFF.length - 1)]); }
                 catch (InterruptedException cancelled) { Thread.currentThread().interrupt(); return; }
             }
-        } finally { if (generation.get() == version) running = false; }
+        } finally {
+            synchronized (this) {
+                if (generation.get() == version) {
+                    running = false; session = null;
+                    if (watchdog != null) { watchdog.shutdownNow(); watchdog = null; }
+                    if (worker != null) { worker.shutdown(); worker = null; }
+                }
+            }
+        }
     }
     private void readFrames(InputStream input, long version, Consumer<FubonMarketData.StockEvent> consumer) throws IOException {
-        BufferedInputStream buffered = new BufferedInputStream(input);
+        Session current = session;
+        BufferedInputStream buffered = new BufferedInputStream(new FilterInputStream(input) {
+            @Override public int read() throws IOException {
+                int value = super.read(); if (value >= 0) current.lastByte = monotonic.getAsLong(); return value;
+            }
+            @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                int count = in.read(bytes, offset, length);
+                if (count > 0) current.lastByte = monotonic.getAsLong(); return count;
+            }
+        });
         Map<String, String> frame = new HashMap<>();
         boolean invalid = false;
         int bytes = 0;
         String line;
-        while (active(version) && (line = line(buffered)) != null) {
+        while (active(version) && session == current && (line = line(buffered)) != null) {
             if (line.isEmpty()) {
+                boolean statusEvent = "stock-status".equals(frame.get("event"));
+                if (statusEvent) {
+                    try {
+                        if (invalid || !frame.keySet().equals(Set.of("event", "data"))) throw FubonMarketJson.invalid();
+                        status(current, frame.get("data"));
+                    } catch (RuntimeException malformed) {
+                        invalidate(version, input);
+                        throw new IOException("INVALID_STOCK_STATUS", malformed);
+                    }
+                }
                 boolean targetEvent = "stock-price".equals(frame.get("event"));
                 if (targetEvent && (invalid || !frame.keySet().equals(Set.of("event", "id", "data")))) {
+                    current.status = null;
                     recordFailure(version, new IllegalStateException("Fubon stock push malformed target frame"));
                     if (active(version)) state = "INVALID_EVENT";
                 } else if (targetEvent) {
                     try {
                         var event = FubonMarketJson.stock(FubonMarketJson.parse(frame.get("data")), frame.get("id"), clock.instant());
-                        if (active(version)) { consumer.accept(event); if (active(version)) failureInterval.reset(version); }
-                    } catch (RuntimeException badEvent) { if (active(version)) { recordFailure(version, badEvent); if (active(version)) state = "INVALID_EVENT"; } }
+                        if (active(version) && session == current) { consumer.accept(event); if (active(version)) failureInterval.reset(version); }
+                    } catch (RuntimeException badEvent) { current.status = null; if (active(version)) { recordFailure(version, badEvent); if (active(version)) state = "INVALID_EVENT"; } }
                 }
                 frame.clear(); invalid = false; bytes = 0; continue;
             }

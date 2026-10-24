@@ -42,6 +42,15 @@ public class TwLiveQuoteDispatcher {
     private final TwLiveQuoteProvider legacyProvider;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private int fubonCursor;
+    private int snapshotCursor;
+    private FubonStockPushSubscriptionManager pushManager;
+    private java.util.function.LongSupplier monotonic = System::nanoTime;
+    private final java.util.Map<String, Long> snapshotAttemptedAt = new java.util.HashMap<>();
+    private final java.util.Map<String, String> snapshotRecoveryIdentity = new java.util.HashMap<>();
+    @Autowired
+    void configurePushPrimary(FubonStockPushSubscriptionManager pushManager) { this.pushManager = pushManager; }
+
+    void useMonotonic(java.util.function.LongSupplier monotonic) { this.monotonic = monotonic; }
     private volatile long fubonSkipUntilNanos;
 
     @Autowired
@@ -153,12 +162,19 @@ public class TwLiveQuoteDispatcher {
             counters.increment(TwLiveQuoteOutcomeCounters.Outcome.SUCCESS);
             return TwLiveQuoteBatchResult.open(codes.size(), 0, 0, 0);
         }
-        Set<String> pending = new LinkedHashSet<>(effectiveCodes);
+        boolean pushPrimary = pushManager != null && pushManager.pushEnabled();
+        snapshotAttemptedAt.keySet().retainAll(effectiveCodes);
+        snapshotRecoveryIdentity.keySet().retainAll(effectiveCodes);
+        List<String> bookCandidates = pushPrimary ? selectFubonCodes(effectiveCodes) : List.of();
+        List<String> priceCandidates = pushPrimary ? selectSnapshotCodes(effectiveCodes) : effectiveCodes;
+        Set<String> pending = new LinkedHashSet<>(priceCandidates);
+        Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> validRoundBooks = Map.of();
         int succeeded = 0, written = 0, failed = 0;
+        boolean bookRoundAllowed = true;
         FubonNormalizedQuoteClient fubon = fubonEnabled && fubonLiveEnabled && System.nanoTime() >= fubonSkipUntilNanos
                 ? fubonClient.getIfAvailable() : null;
         if (fubon != null && !pending.isEmpty()) {
-            List<String> fubonCodes = selectFubonCodes(effectiveCodes);
+            List<String> fubonCodes = pushPrimary ? priceCandidates : selectFubonCodes(effectiveCodes);
             FubonNormalizedQuoteClient.BatchResult batch = fubon.fetch(fubonCodes);
             if (isRateLimited(batch)) {
                 fubonSkipUntilNanos = Math.max(fubonSkipUntilNanos,
@@ -166,6 +182,7 @@ public class TwLiveQuoteDispatcher {
                 log.warn("tw-live provider=FUBON status=RATE_LIMIT_SKIP windowSeconds=60");
             }
             FubonEnvelopeOutcome envelopeOutcome = persistFubonEnvelope(batch);
+            if (envelopeOutcome == FubonEnvelopeOutcome.STORE_FAILED) bookRoundAllowed = false;
             // Production only accepts Fubon prices/books after its full normalized response became
             // DB-canonical.  The null-store branch is retained strictly for pre-Task-380 unit seams.
             boolean processFubon = responseStore == null || envelopeOutcome == FubonEnvelopeOutcome.STORED;
@@ -182,16 +199,20 @@ public class TwLiveQuoteDispatcher {
                     // dispatcher's generic inFlight guard or trigger an extra provider request.
                     Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> books =
                             batch.orderBooks() == null ? Map.of() : batch.orderBooks();
-                    submitFubonOrderBooks(onlySelectedBooks(books, fubonCodes));
-                    submitYahooOrderBookFallback(fubonCodes, books.keySet());
+                    Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> selectedBooks = onlySelectedBooks(books, fubonCodes);
+                    validRoundBooks = selectedBooks;
+                    submitFubonOrderBooks(selectedBooks);
+                    if (!pushPrimary) submitYahooOrderBookFallback(fubonCodes, selectedBooks.keySet());
                 }
             } else if (envelopeOutcome == FubonEnvelopeOutcome.NO_ENVELOPE) {
                 // A transport/shape failure has no usable Fubon data but does not make Yahoo's
                 // independent, same-round book fallback unsafe.  A DB transaction failure is
                 // intentionally different: it suppresses both book workers for this batch.
-                submitYahooOrderBookFallback(fubonCodes, Set.of());
+                if (!pushPrimary) submitYahooOrderBookFallback(fubonCodes, Set.of());
             }
         }
+        // Books remain independently updated while healthy push suppresses *all* price providers.
+        if (pushPrimary && bookRoundAllowed) submitYahooOrderBookFallback(bookCandidates, validRoundBooks.keySet());
         for (List<String> chunk : chunks(new ArrayList<>(pending), PriceFetchClient.MAX_REQUESTED_CODES)) {
             PriceFetchClient.TwQuoteBatchSummary summary = prices.fetchTwBatch(chunk);
             for (var entry : summary.resolved().entrySet()) {
@@ -262,13 +283,36 @@ public class TwLiveQuoteDispatcher {
         counters.increment(applied ? TwLiveQuoteOutcomeCounters.Outcome.DB_APPLIED : TwLiveQuoteOutcomeCounters.Outcome.DB_STALE_OR_EQUAL);
         if (!applied) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.CANONICAL_REPAIR);
         PriceResult canonical = db.canonical().asPriceResult();
-        PriceCacheWriter.CacheWriteOutcome cache = writer.writeTaiwanLive(canonical, "FUBON_INTRADAY".equals(canonical.source()));
+        PriceCacheWriter.CacheWriteOutcome cache = writer.writeTaiwanLive(canonical, "FUBON_INTRADAY".equals(canonical.source()) || FubonMarketData.STOCK_SOURCE.equals(canonical.source()));
         if (cache == PriceCacheWriter.CacheWriteOutcome.WRITTEN) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_WRITTEN);
         else if (cache == PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_REJECTED);
         else counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_FAILED);
         log.info("tw-live-persistence dbOutcome={} redisOutcome={} canonicalRepair={}",
                 applied ? "DB_APPLIED" : "DB_STALE_OR_EQUAL", cache, !applied);
         return new ApplyResult(applied, cache == PriceCacheWriter.CacheWriteOutcome.WRITTEN, false);
+    }
+
+    /** Fair bounded recovery; failed requests also debit the per-symbol monotonic cooldown. */
+    private List<String> selectSnapshotCodes(List<String> all) {
+        List<String> selected = new ArrayList<>(FUBON_CODES_PER_ROUND);
+        long now = monotonic.getAsLong();
+        int last = snapshotCursor;
+        for (int visited = 0; visited < all.size() && selected.size() < FUBON_CODES_PER_ROUND; visited++) {
+            int index = (snapshotCursor + visited) % all.size();
+            last = index + 1;
+            String code = all.get(index);
+            String recoveryIdentity = pushManager.recoveryIdentity();
+            boolean initialized = snapshotRecoveryIdentity.containsKey(code)
+                    && java.util.Objects.equals(recoveryIdentity, snapshotRecoveryIdentity.get(code));
+            if (pushManager.isPricePushHealthy(code) && initialized) continue;
+            Long attemptedAt = snapshotAttemptedAt.get(code);
+            if (attemptedAt != null && now - attemptedAt < TimeUnit.SECONDS.toNanos(60)) continue;
+            snapshotAttemptedAt.put(code, now);
+            snapshotRecoveryIdentity.put(code, recoveryIdentity);
+            selected.add(code);
+        }
+        snapshotCursor = last % all.size();
+        return List.copyOf(selected);
     }
 
     private synchronized List<String> selectFubonCodes(List<String> all) {

@@ -256,6 +256,7 @@ def test_real_stock_subscriptions_to_http_sse_and_last_consumer_cleanup(tmp_path
             iterator = super().events()
             try:
                 yield await asyncio.wait_for(anext(iterator), timeout=2)
+                yield await asyncio.wait_for(anext(iterator), timeout=2)
             finally:
                 await iterator.aclose()
     fixture = StreamFixture(tmp_path, websocket_factory=OneTradeWebsocket)
@@ -271,8 +272,12 @@ def test_real_stock_subscriptions_to_http_sse_and_last_consumer_cleanup(tmp_path
             result = client.get(STOCK_STREAM, headers=HEADER)
             assert result.status_code == 200 and result.headers["content-type"].startswith("text/event-stream")
             assert result.headers["cache-control"] == "no-store" and result.headers["x-accel-buffering"] == "no"
-            assert result.text.startswith("event: stock-price\nid: 2330:")
-            data = json.loads(result.text.split("data: ")[1])
+            frames = result.text.strip().split("\n\n")
+            assert frames[0].startswith("event: stock-status\ndata: ") and "\nid:" not in frames[0]
+            state = json.loads(frames[0].split("data: ", 1)[1])
+            assert state["schemaVersion"] == 1 and state["desiredSymbols"] == ["2330"]
+            assert frames[1].startswith("event: stock-price\nid: 2330:")
+            data = json.loads(frames[1].split("data: ", 1)[1])
             assert data["price"] == "123.5" and data["tradeSize"] == 3 and data["volume"] is None
             assert fixture.stream._desired == set()
             assert client.get(STOCK_STREAM, headers=HEADER).status_code == 503

@@ -14,6 +14,29 @@ from helpers import ready_config
 from stock_push_fixtures import FakeWebsocket, STOCK_NOW, StreamFixture, TRADE_AT, packet, wait_for
 
 
+async def next_price(iterator):
+    while True:
+        frame = await anext(iterator)
+        if frame.startswith(b"event: stock-price\n"):
+            return frame
+
+
+def status(stream):
+    frame = stream._status_frame()
+    assert frame.startswith(b"event: stock-status\ndata: ") and b"\nid:" not in frame
+    assert frame.endswith(b"\n\n")
+    data = json.loads(frame.split(b"data: ", 1)[1])
+    assert set(data) == {"schemaVersion", "connectionEpoch", "scopeVersion", "desiredSymbols", "confirmedSymbols", "ready"}
+    assert data["schemaVersion"] == 1
+    assert type(data["connectionEpoch"]) is int and 0 < data["connectionEpoch"] < 2**63
+    assert type(data["scopeVersion"]) is int and 0 <= data["scopeVersion"] < 2**63
+    assert data["desiredSymbols"] == sorted(set(data["desiredSymbols"]))
+    assert data["confirmedSymbols"] == sorted(set(data["confirmedSymbols"]))
+    assert set(data["confirmedSymbols"]) <= set(data["desiredSymbols"])
+    assert type(data["ready"]) is bool
+    return data
+
+
 def test_desired_ack_is_not_provider_confirmation_and_empty_scope_opens_no_sdk(tmp_path):
     fixture = StreamFixture(tmp_path)
     stream, config = fixture.stream, fixture.loader.load()
@@ -239,7 +262,7 @@ def test_sse_real_normalization_bounded_queue_membership_recheck_and_final_consu
         client = fixture.start(["2330", "0050"])
         async def consume():
             iterator = fixture.stream.events()
-            pending = asyncio.create_task(anext(iterator))
+            pending = asyncio.create_task(next_price(iterator))
             await asyncio.sleep(0)
             for index in range(fixture.stream.QUEUE_SIZE + 10):
                 client.emit("message", packet(channel_id=client.ids["2330"], at=TRADE_AT + timedelta(microseconds=index)))
@@ -252,7 +275,7 @@ def test_sse_real_normalization_bounded_queue_membership_recheck_and_final_consu
             assert fixture.stream._latest["2330"] == previous and fixture.stream.last_reason == "REJECTED_STALE"
             fixture.stream.replace_desired(["0050"], fixture.loader.load())
             assert subscriber.qsize() == 0
-            pending = asyncio.create_task(anext(iterator))
+            pending = asyncio.create_task(next_price(iterator))
             await asyncio.sleep(0)
             client.emit("message", packet("0050", client.ids["0050"]))
             frame = await asyncio.wait_for(pending, 1)
@@ -271,7 +294,7 @@ def test_closing_one_of_two_consumers_preserves_subscription_until_last_closes(t
         client = fixture.start()
         async def consume():
             first, second = fixture.stream.events(), fixture.stream.events()
-            tasks = [asyncio.create_task(anext(iterator)) for iterator in (first, second)]
+            tasks = [asyncio.create_task(next_price(iterator)) for iterator in (first, second)]
             await asyncio.sleep(0)
             client.emit("message", packet(channel_id=client.ids["2330"]))
             await asyncio.wait_for(asyncio.gather(*tasks), 1)
@@ -297,6 +320,7 @@ def test_connect_hang_has_bounded_shutdown_and_no_post_cancel_subscribe(tmp_path
         fixture.stream.ensure_started(fixture.loader.load())
         client = fixture.sdks[0].normal_clients[0]
         assert client.connected.wait(1)
+        assert not status(fixture.stream)["ready"]
         started = time.monotonic()
         fixture.stream.shutdown()
         assert time.monotonic() - started < 0.5
@@ -325,5 +349,153 @@ def test_failed_connection_uses_capped_backoff_and_never_logs_raw_sdk_data(tmp_p
         assert delays == [0.25, 0.5, 1.0, 2.0, 5.0, 5.0, 5.0]
         assert "TEST_SECRET_PROVIDER_PAYLOAD" not in caplog.text
         assert len(fixture.sdks) == 1
+    finally:
+        fixture.close()
+
+
+def test_status_waits_for_connect_and_all_current_scope_acks(tmp_path):
+    fixture = StreamFixture(tmp_path, websocket_factory=lambda label: FakeWebsocket(label, auto_ack=False))
+    try:
+        fixture.stream.replace_desired(["2330", "0050"], fixture.loader.load())
+        assert not status(fixture.stream)["ready"]
+        client = fixture.start(["2330", "0050"])
+        assert not status(fixture.stream)["ready"]
+        def ack(symbol):
+            client.emit("message", {"event": "subscribed", "data":
+                        {"id": client.ids[symbol], "symbol": symbol, "channel": "aggregates"}})
+        ack("2330")
+        assert status(fixture.stream)["confirmedSymbols"] == ["2330"]
+        assert not status(fixture.stream)["ready"]
+        ack("0050")
+        assert status(fixture.stream)["ready"]
+        version = status(fixture.stream)["scopeVersion"]
+        fixture.stream.replace_desired(["2330", "1101"], fixture.loader.load())
+        assert status(fixture.stream)["scopeVersion"] > version
+        assert not status(fixture.stream)["ready"]
+        fixture.stream.revoke()
+        assert not status(fixture.stream)["ready"]
+    finally:
+        fixture.close()
+
+
+@pytest.mark.parametrize("kind", ["heartbeat", "pong"])
+def test_heartbeat_keeps_quiet_stocks_healthy_without_trades(tmp_path, kind):
+    fixture = StreamFixture(tmp_path)
+    try:
+        client = fixture.start()
+        assert status(fixture.stream)["ready"]
+        for _ in range(3):
+            fixture.clock[0] += 30
+            client.emit("message", {"event": kind, "data": {"time": 123456789}})
+            assert status(fixture.stream)["ready"]
+        assert fixture.stream._latest == {}
+        fixture.clock[0] += 30
+        assert not status(fixture.stream)["ready"]
+    finally:
+        fixture.close()
+
+
+@pytest.mark.parametrize("value", [None, True, 0, -1, "123", 123.5, {}, []])
+def test_invalid_heartbeat_does_not_refresh_activity(tmp_path, value):
+    fixture = StreamFixture(tmp_path)
+    try:
+        client = fixture.start()
+        previous = fixture.stream._last_sdk_activity
+        fixture.clock[0] += 30
+        client.emit("message", {"event": "heartbeat", "data": {"time": value}})
+        client.emit("message", {"event": "pong", "data": {"time": value}})
+        assert fixture.stream._last_sdk_activity == previous
+        invalid_trade = packet(channel_id=client.ids["2330"])
+        invalid_trade["data"]["lastTrade"]["price"] = "bad"
+        client.emit("message", invalid_trade)
+        client.emit("message", "malformed")
+        assert fixture.stream._last_sdk_activity == previous
+    finally:
+        fixture.close()
+
+
+def test_sdk_inactivity_reconnects_and_old_heartbeat_is_fenced(tmp_path):
+    fixture = StreamFixture(tmp_path, sleeper=lambda _seconds: None)
+    try:
+        first = fixture.start()
+        old_callback = first.callbacks["message"][-1]
+        initial_epoch = status(fixture.stream)["connectionEpoch"]
+        fixture.clock[0] += 75
+        assert status(fixture.stream)["ready"]
+        fixture.clock[0] += 0.001
+        assert not status(fixture.stream)["ready"]
+        fixture.stream._wake.set()
+        wait_for(lambda: len(fixture.sdks[0].normal_clients) >= 2 and status(fixture.stream)["ready"])
+        assert first.disconnected.is_set()
+        assert status(fixture.stream)["connectionEpoch"] > initial_epoch
+        previous = fixture.stream._last_sdk_activity
+        fixture.clock[0] += 1
+        old_callback({"event": "heartbeat", "data": {"time": 123}})
+        assert fixture.stream._last_sdk_activity == previous
+    finally:
+        fixture.close()
+
+
+@pytest.mark.parametrize("event", ["disconnect", "error"])
+def test_disconnect_or_error_revokes_health_immediately(tmp_path, event):
+    fixture = StreamFixture(tmp_path)
+    try:
+        first = fixture.start()
+        assert status(fixture.stream)["ready"]
+        first.emit(event)
+        assert not status(fixture.stream)["ready"]
+    finally:
+        fixture.close()
+
+
+def test_status_frames_immediate_and_every_five_seconds_without_trade(tmp_path):
+    fixture = StreamFixture(tmp_path)
+    try:
+        fixture.start(["2330", "0050"])
+        async def consume():
+            iterator = fixture.stream.events()
+            first = await asyncio.wait_for(anext(iterator), 1)
+            assert first.startswith(b"event: stock-status\n")
+            pending = asyncio.create_task(anext(iterator))
+            await asyncio.sleep(0)
+            assert not pending.done()
+            fixture.clock[0] += 5
+            second = await asyncio.wait_for(pending, 1)
+            assert second.startswith(b"event: stock-status\n")
+            assert json.loads(second.split(b"data: ", 1)[1])["ready"]
+            await iterator.aclose()
+        asyncio.run(consume())
+    finally:
+        fixture.close()
+
+
+def test_session_generation_change_cannot_refresh_health_or_accept_ack(tmp_path):
+    fixture = StreamFixture(tmp_path, websocket_factory=lambda label: FakeWebsocket(label, auto_ack=False))
+    try:
+        client = fixture.start()
+        callback = client.callbacks["message"][-1]
+        with fixture.gateway._session_lock:
+            fixture.gateway._session_generation += 1
+        callback({"event": "subscribed", "data":
+                  {"id": client.ids["2330"], "symbol": "2330", "channel": "aggregates"}})
+        callback({"event": "heartbeat", "data": {"time": 123}})
+        assert not status(fixture.stream)["ready"]
+        assert fixture.stream._confirmed == {} and fixture.stream._last_sdk_activity is None
+    finally:
+        fixture.close()
+
+
+def test_valid_trade_refreshes_activity_but_rejected_stale_trade_does_not(tmp_path):
+    fixture = StreamFixture(tmp_path)
+    try:
+        client = fixture.start()
+        fixture.clock[0] += 30
+        client.emit("message", packet(channel_id=client.ids["2330"]))
+        assert fixture.stream._last_sdk_activity == fixture.clock[0]
+        previous = fixture.stream._last_sdk_activity
+        fixture.clock[0] += 30
+        client.emit("message", packet(channel_id=client.ids["2330"]))
+        assert fixture.stream.last_reason == "REJECTED_STALE"
+        assert fixture.stream._last_sdk_activity == previous
     finally:
         fixture.close()

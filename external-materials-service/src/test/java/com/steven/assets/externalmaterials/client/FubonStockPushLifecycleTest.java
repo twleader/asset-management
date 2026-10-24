@@ -48,7 +48,7 @@ class FubonStockPushLifecycleTest {
                 millis -> new CountDownLatch(1).await());
         var radar = mock(FubonRadarScope.class); when(radar.current(300)).thenReturn(List.of("2330"));
         var port = mock(FubonMarketDataPort.class);
-        var consumer = new FubonStockPushConsumer(clock, radar, mock(PriceCacheWriter.class));
+        var consumer = new FubonStockPushConsumer(clock, radar, mock(PriceCacheWriter.class), mock(StockSourceQuery.class));
         var manager = new FubonStockPushSubscriptionManager("true", config(), clock, radar, port, stock, consumer);
         try {
             index.start(); manager.refreshSubscriptions();

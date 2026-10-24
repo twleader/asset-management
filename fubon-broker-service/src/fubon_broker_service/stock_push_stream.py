@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import queue
 import threading
@@ -43,6 +44,8 @@ class StockPushStream:
     LEASE_SECONDS = 120
     QUEUE_SIZE = 64
     ACK_TIMEOUT_SECONDS = 5.0
+    STATUS_SECONDS = 5.0
+    SDK_IDLE_SECONDS = 75.0
     _POLL_SECONDS = 0.1
     _BACKOFF_SECONDS = (0.25, 0.5, 1.0, 2.0, 5.0)
 
@@ -65,6 +68,8 @@ class StockPushStream:
         self._authorized_digest: bytes | None = None
         self._client: object | None = None
         self._generation: int | None = None
+        self._connected = False
+        self._last_sdk_activity: float | None = None
         self._epoch = 0
         self._scope_version = 0
         self._confirmed: dict[str, str] = {}
@@ -162,11 +167,16 @@ class StockPushStream:
             self._subscribers.add(subscriber)
             for event in sorted(self._latest.values(), key=lambda item: item.tradeTimeMicros)[-self.QUEUE_SIZE:]:
                 subscriber.put_nowait(_QueuedEvent(event, self._epoch, self._scope_version))
+        next_status = float("-inf")
         try:
             while True:
-                with self._lock:
-                    if not self._active_locked():
-                        return
+                if not self._authorized_now():
+                    return
+                if self._monotonic() >= next_status:
+                    status = self._status_frame()
+                    next_status = self._monotonic() + self.STATUS_SECONDS
+                    yield status
+                    continue
                 try:
                     item = subscriber.get_nowait()
                 except queue.Empty:
@@ -187,6 +197,21 @@ class StockPushStream:
                 if not self._subscribers:
                     self._clear_locked("NO_CONSUMERS")
             self._wake.set()
+
+    def _status_frame(self) -> bytes:
+        current_generation = self._gateway.session_generation
+        with self._lock:
+            confirmed = sorted(symbol for symbol, channel_id in self._confirmed.items()
+                               if symbol in self._desired and channel_id not in self._pending_unsubscribe)
+            ready = bool(self._active_locked() and self._connected and self._client is not None
+                         and current_generation == self._generation and not self._reconnect.is_set()
+                         and not self._pending_subscribe and not self._pending_unsubscribe
+                         and set(confirmed) == self._desired and self._last_sdk_activity is not None
+                         and self._monotonic() - self._last_sdk_activity <= self.SDK_IDLE_SECONDS)
+            data = {"schemaVersion": 1, "connectionEpoch": max(1, self._epoch),
+                    "scopeVersion": self._scope_version, "desiredSymbols": sorted(self._desired),
+                    "confirmedSymbols": confirmed, "ready": ready}
+        return ("event: stock-status\ndata: " + json.dumps(data, separators=(",", ":")) + "\n\n").encode()
 
     def revoke(self, reason: str = "NO_SUBSCRIPTIONS") -> None:
         with self._lock:
@@ -214,6 +239,8 @@ class StockPushStream:
         self.last_reason = reason
 
     def _invalidate_tracking_locked(self) -> None:
+        self._connected = False
+        self._last_sdk_activity = None
         self._retiring_ids.update(self._confirmed.values())
         self._retiring_ids.update(self._pending_unsubscribe)
         self._confirmed.clear()
@@ -270,9 +297,19 @@ class StockPushStream:
                     self._bind_callbacks(connection, epoch)
                     self._call_current(connection, epoch, "connect")
                     started = self._monotonic()
+                    with self._lock:
+                        if (self._client is connection.client and self._epoch == epoch
+                                and self._gateway.session_generation == connection.generation
+                                and not self._reconnect.is_set() and self._active_locked()):
+                            self._connected = True
                     while self._authorized_now() and not self._reconnect.is_set():
                         if self._gateway.session_generation != connection.generation:
                             raise SdkCallError("SESSION_CHANGED")
+                        with self._lock:
+                            last_activity = self._last_sdk_activity
+                        if self._monotonic() - (started if last_activity is None else last_activity) > self.SDK_IDLE_SECONDS:
+                            self._signal_reconnect(connection, epoch)
+                            raise SdkCallError("STOCK_PUSH_HEARTBEAT_TIMEOUT")
                         self._sync_subscriptions(connection, epoch)
                         if self._monotonic() - started >= 5:
                             backoff = 0
@@ -351,7 +388,8 @@ class StockPushStream:
 
     def _signal_reconnect(self, connection: StockPushConnection, epoch: int) -> None:
         with self._lock:
-            if self._client is not connection.client or self._epoch != epoch:
+            if (self._client is not connection.client or self._epoch != epoch
+                    or self._gateway.session_generation != connection.generation):
                 return
             self._invalidate_tracking_locked()
             self._reconnect.set()
@@ -371,6 +409,16 @@ class StockPushStream:
         kind = envelope.get("event")
         if kind in {"subscribed", "unsubscribed"}:
             self._accept_ack(connection, epoch, kind, envelope.get("data"))
+            return
+        if kind in {"heartbeat", "pong"}:
+            data = envelope.get("data")
+            timestamp = data.get("time") if isinstance(data, dict) else None
+            if type(timestamp) is int and timestamp > 0:
+                with self._lock:
+                    if (self._active_locked() and self._client is connection.client and self._epoch == epoch
+                            and self._gateway.session_generation == connection.generation
+                            and not self._reconnect.is_set()):
+                        self._last_sdk_activity = self._monotonic()
             return
         if kind == "error":
             self._signal_reconnect(connection, epoch)
@@ -397,6 +445,7 @@ class StockPushStream:
                 self.last_reason = "REJECTED_STALE"
                 self._count(Outcome.QUOTE_FAILED)
                 return
+            self._last_sdk_activity = self._monotonic()
             self._latest[event.symbol] = event
             item = _QueuedEvent(event, self._epoch, self._scope_version)
             for subscriber in tuple(self._subscribers):
@@ -432,7 +481,8 @@ class StockPushStream:
                 parsed[symbol] = channel_id
                 ids.add(channel_id)
             with self._lock:
-                if self._client is not connection.client or self._epoch != epoch or not self._active_locked():
+                if (self._client is not connection.client or self._epoch != epoch or not self._active_locked()
+                        or self._gateway.session_generation != connection.generation or self._reconnect.is_set()):
                     return
                 for symbol, channel_id in parsed.items():
                     if kind == "subscribed":
@@ -450,6 +500,7 @@ class StockPushStream:
                         self._pending_unsubscribe.pop(channel_id, None)
                         self._confirmed.pop(symbol, None)
                         self._latest.pop(symbol, None)
+                self._last_sdk_activity = self._monotonic()
             self._wake.set()
         except (ValueError, TypeError):
             self._signal_reconnect(connection, epoch)
