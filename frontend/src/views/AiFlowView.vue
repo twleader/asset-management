@@ -185,6 +185,12 @@
                   <el-button v-if="toolStartId(node.eventId)" text type="primary" @click="showToolCall(node.eventId)">查看工具與參數</el-button>
                   <p v-else class="tool-call-note">未記錄工具開始事件</p>
                 </template>
+                <el-button
+                  v-if="node.publicDecisionSummary"
+                  text
+                  type="primary"
+                  @click.stop="showPublicDecision(node.eventId)"
+                >查看公開決策摘要</el-button>
               </el-timeline-item>
             </el-timeline>
           </section>
@@ -306,6 +312,80 @@
             </section>
             <p v-else-if="state.selectedToolCall" class="choice-set-state">未記錄公開候選</p>
           </template>
+          <section
+            v-if="selectedNode.publicDecisionSummary || state.selectedPublicDecisionLoading || state.selectedPublicDecisionLoaded || state.selectedPublicDecisionError"
+            class="public-decision-detail"
+            aria-label="公開決策摘要明細"
+          >
+            <h5>公開決策摘要</h5>
+            <p class="public-decision-disclaimer">公開自述；不保證涵蓋所有內部考量，亦不證明工具已執行。</p>
+            <p v-if="state.selectedPublicDecisionLoading" class="choice-set-state" role="status">正在讀取公開決策摘要…</p>
+            <el-alert
+              v-else-if="state.selectedPublicDecisionError"
+              class="choice-set-state"
+              type="error"
+              :closable="false"
+              show-icon
+              :title="state.selectedPublicDecisionError"
+            />
+            <template v-else-if="state.selectedPublicDecisionLoaded && state.selectedPublicDecision">
+              <dl class="node-facts public-decision-facts">
+                <div><dt>來源版本</dt><dd>{{ state.selectedPublicDecision.source }}</dd></div>
+                <div><dt>決策識別</dt><dd>{{ state.selectedPublicDecision.decisionId }}</dd></div>
+                <div><dt>主題</dt><dd>{{ state.selectedPublicDecision.topic }}</dd></div>
+              </dl>
+              <article
+                v-for="option in selectedPublicDecisionOptions"
+                :key="option.id"
+                class="choice-set-option public-decision-option"
+              >
+                <div class="choice-set-option-heading">
+                  <strong>{{ option.id === state.selectedPublicDecision.selectedOptionId ? '已選擇（自述）' : '未選擇' }}</strong>
+                  <span>{{ option.label }}</span>
+                </div>
+                <dl class="node-facts public-decision-option-facts">
+                  <div><dt>公開動作</dt><dd>{{ option.action }}</dd></div>
+                  <div><dt>公開理由</dt><dd><pre class="public-decision-text">{{ option.reason }}</pre></dd></div>
+                  <div v-if="option.evidenceRefs.length">
+                    <dt>公開依據</dt>
+                    <dd>
+                      <ul class="public-decision-evidence-list">
+                        <li v-for="evidence in option.evidenceRefs" :key="evidence.role + ':' + evidence.id">
+                          {{ evidence.role }} · {{ evidence.id }} · {{ displayUnknown(evidence.hash) }}
+                        </li>
+                      </ul>
+                    </dd>
+                  </div>
+                  <div v-else><dt>公開依據</dt><dd>未列公開證據參照</dd></div>
+                </dl>
+                <template v-if="option.toolCall">
+                  <dl class="node-facts public-decision-option-facts">
+                    <div><dt>擬議工具</dt><dd>{{ option.toolCall.name }}<template v-if="option.toolCall.innerNames.length">（內含 {{ option.toolCall.innerNames.join('、') }}）</template></dd></div>
+                    <div><dt>擬議輸入</dt><dd><pre class="choice-set-parameters">{{ option.toolCall.parameters === '' ? '（無參數）' : option.toolCall.parameters }}</pre></dd></div>
+                    <div><dt>遮蔽後字元數</dt><dd>{{ option.toolCall.parametersChars }}</dd></div>
+                  </dl>
+                  <p class="choice-set-note">這是擬議工具輸入，不代表工具已呼叫或執行。</p>
+                  <p v-if="option.toolCall.truncated" class="choice-set-note">
+                    已截斷：已處理前綴的遮蔽後長度 {{ option.toolCall.parametersChars }} 字元，僅保留前 16384 字元
+                  </p>
+                  <p v-if="option.toolCall.sourceTruncated === true" class="choice-set-note">
+                    原始輸入超出 1,048,576 字元預掃上限；下列內容與長度只反映已處理前綴
+                  </p>
+                  <p v-if="option.toolCall.redactedCount > 0" class="choice-set-note">
+                    已處理範圍的憑證遮蔽數：
+                    <template v-if="option.toolCall.redactedCount === 100000">至少 100000 處</template>
+                    <template v-else>{{ option.toolCall.redactedCount }} 處</template>
+                  </p>
+                </template>
+                <p v-else class="choice-set-note">未記錄擬議工具輸入</p>
+              </article>
+            </template>
+            <p v-else-if="state.selectedPublicDecisionLoaded" class="choice-set-state">未記錄公開決策摘要</p>
+            <div v-else class="choice-set-state">
+              <p>完整公開決策明細會在你查閱時載入。</p>
+              <el-button text type="primary" @click="showPublicDecision(selectedNode.eventId)">查看公開決策摘要</el-button>
+            </div>
+          </section>
           <div class="safe-text-actions">
             <el-button
               link
@@ -393,6 +473,8 @@ const loader = createAiFlowViewLoader({
     bffApi.aiFlow.toolCall(runId, eventId, { date, consumer: selectedConsumer, signal }),
   getChoiceSet: (runId, eventId, { date, consumer: selectedConsumer, signal }) =>
     bffApi.aiFlow.choiceSet(runId, eventId, { date, consumer: selectedConsumer, signal }),
+  getPublicDecision: (runId, eventId, { date, consumer: selectedConsumer, signal }) =>
+    bffApi.aiFlow.publicDecision(runId, eventId, { date, consumer: selectedConsumer, signal }),
   errorMessage: error => apiErrorMessage(error, '目前無法讀取 AI 流程紀錄，請稍後再試。')
 })
 
@@ -489,6 +571,8 @@ const selectedNode = computed(() =>
   state.detail?.nodes?.find(node => node.eventId === state.selectedNodeId) || null)
 const selectedChoiceSetOptions = computed(() =>
   Array.isArray(state.selectedChoiceSet?.options) ? state.selectedChoiceSet.options : [])
+const selectedPublicDecisionOptions = computed(() =>
+  Array.isArray(state.selectedPublicDecision?.options) ? state.selectedPublicDecision.options : [])
 
 function reloadRuns() {
   void loader.query(state, { date: reportDate.value, consumer: consumer.value, period: period.value })
@@ -522,6 +606,17 @@ async function showToolCall(eventId) {
   nodeDetail.value?.focus({ preventScroll: true })
   nodeDetail.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   await selection
+}
+
+async function showPublicDecision(eventId) {
+  const selection = loader.selectNode(state, eventId, state.filters, { forceSelect: true })
+  await selection
+  if (state.selectedNodeId !== eventId || !state.selectedRunId) return
+  const request = loader.loadPublicDecision(state, eventId, state.filters)
+  await nextTick()
+  nodeDetail.value?.focus({ preventScroll: true })
+  nodeDetail.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  await request
 }
 
 function clearSelectedNode() {
@@ -591,6 +686,15 @@ onBeforeUnmount(() => loader.clear(state))
 .choice-set-option { padding: 14px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; }
 .choice-set-option-heading { display: flex; flex-wrap: wrap; gap: 8px; color: #1e293b; }
 .choice-set-option-heading strong { color: #166534; }
+.public-decision-detail { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.public-decision-detail h5 { color: #1e293b; font-size: 14px; }
+.public-decision-disclaimer { margin-top: 8px; color: #64748b; font-size: 13px; line-height: 1.5; }
+.public-decision-option { margin-top: 12px; background: #fff; }
+.public-decision-option .choice-set-option-heading strong { color: #1d4ed8; }
+.public-decision-facts, .public-decision-option-facts { grid-template-columns: 1fr; }
+.public-decision-text { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font: inherit; }
+.public-decision-evidence-list { margin: 0; padding-left: 18px; }
+.public-decision-evidence-list li { overflow-wrap: anywhere; }
 .choice-set-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .choice-set-parameters { max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0; font: inherit; }
 .safe-text-actions { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 14px; }

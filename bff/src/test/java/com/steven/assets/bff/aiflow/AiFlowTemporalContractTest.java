@@ -70,7 +70,7 @@ class AiFlowTemporalContractTest {
 
     @Test void detail_slow_step_duration_uses_instants_across_offset_boundaries() throws Exception {
         var event=AiFlowFixtures.batch().events().getFirst();
-        var node=new AiFlowDtos.Node(event.eventId(),event.sequence(),event.stepId(),event.eventKind(),event.status(),event.occurredAt(),event.title(),event.summary(),event.operation(),event.reasonCode(),event.attemptNo(),event.parentEventIds(),event.relation(),event.evidenceRefs(),event.reportedOutcome(),"執行中","確認交易日","交易日曆","09:05:00",null,0,0,"#123456",null,null);
+        var node=new AiFlowDtos.Node(event.eventId(),event.sequence(),event.stepId(),event.eventKind(),event.status(),event.occurredAt(),event.title(),event.summary(),event.operation(),event.reasonCode(),event.attemptNo(),event.parentEventIds(),event.relation(),event.evidenceRefs(),event.reportedOutcome(),"執行中","確認交易日","交易日曆","09:05:00",null,0,0,"#123456",null,null,null);
         var slow=new AiFlowDtos.SlowStep("calendar",event.eventId(),"確認交易日",event.operation(),AiFlowFixtures.START,AiFlowFixtures.START.plusSeconds(2),2000,"SUCCEEDED","成功");
         var detail=new AiFlowDtos.Detail(AiFlowFixtures.run(7),List.of(node),List.of(),List.of(slow));
         ObjectNode wire=(ObjectNode)AiFlowProtocol.JSON.readTree(AiFlowFixtures.bytes(detail));

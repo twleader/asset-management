@@ -38,11 +38,23 @@ class AiFlowHttpTest {
         mvc.perform(post("/api/srpp/ai-flow/events").header("X-AI-Flow-Token","r")).andExpect(status().isServiceUnavailable());
         mvc=mvc(service,new AiFlowCredentialService("c","h","r"));mvc.perform(post("/api/srpp/ai-flow/events").header("X-AI-Flow-Token","r").content("x".repeat(256*1024+1))).andExpect(status().isPayloadTooLarge());verifyNoInteractions(service);
     }
+    @Test void publicDecisionReadReturnsNoStoreAndLegacyNull() throws Exception {
+        var service=mock(AiFlowService.class);
+        var decision=AiFlowProtocol.parse(AiFlowPublicDecisionTest.rawDecision().toString()).batch().events().getFirst().publicDecision();
+        when(service.publicDecision(eq(RUN.toString()),eq(id(1)),any())).thenReturn(new PublicDecisionDetail(RUN.toString(),id(1),decision));
+        when(service.publicDecision(eq(RUN.toString()),eq(id(2)),any())).thenReturn(new PublicDecisionDetail(RUN.toString(),id(2),null));
+        var mvc=mvc(service,new AiFlowCredentialService("c","h","r"));
+        mvc.perform(get("/api/ai-flow/runs/"+RUN+"/nodes/"+id(1)+"/public-decision").param("date",DATE.toString()).param("consumer","Codex"))
+            .andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"))
+            .andExpect(jsonPath("$.publicDecision.options.length()").value(2)).andExpect(jsonPath("$.publicDecision.options[1].toolCall").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(get("/api/ai-flow/runs/"+RUN+"/nodes/"+id(2)+"/public-decision").param("date",DATE.toString()).param("consumer","Codex"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.publicDecision").value(org.hamcrest.Matchers.nullValue()));
+    }
     @Test void typedDtoRetainsEveryNullableKeyWithGlobalNonNullMapper()throws Exception{
         var service=mock(AiFlowService.class);var detail=AiFlowProjection.detail(stored(complete()),complete());when(service.detail(anyString(),any())).thenReturn(detail);
         MockMvc mvc=mvc(service,new AiFlowCredentialService("c","h","r"));String body=mvc.perform(get("/api/ai-flow/runs/"+RUN).param("date",DATE.toString()).param("consumer","Codex")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         var root=JSON.readTree(body);assertThat(root.path("run").has("reportedOutcome")).isTrue();assertThat(root.path("run").get("reportedOutcome").isNull()).isTrue();
-        assertThat(root.path("run").properties()).hasSize(22);assertThat(root.path("nodes").get(0).has("durationMillis")).isTrue();assertThat(root.path("nodes").get(0).properties()).hasSize(25);
+        assertThat(root.path("run").properties()).hasSize(22);assertThat(root.path("nodes").get(0).has("durationMillis")).isTrue();assertThat(root.path("nodes").get(0).properties()).hasSize(26);
         assertThat(root.path("nodes").get(0).has("toolCall")).isTrue();assertThat(root.path("nodes").get(0).get("toolCall").isNull()).isTrue();
         assertThat(root.path("nodes").get(0).has("choiceSetSummary")).isTrue();assertThat(root.path("nodes").get(0).get("choiceSetSummary").isNull()).isTrue();
         assertThat(root.path("nodes").get(0).path("evidenceRefs").get(0).has("hash")).isTrue();

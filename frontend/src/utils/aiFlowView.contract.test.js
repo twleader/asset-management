@@ -684,3 +684,171 @@ test('工具入口顯示公開原始輸入與來源界線，保留載入、錯�
   assert.match(view, /至少 100000 處/)
   assert.doesNotMatch(view, /v-html|console\.(?:log|info|debug)/)
 })
+
+test('公開決策圖分支完整保留 32 個選項，null 選擇不虛構採用且點擊回真實事件', () => {
+  const options = Array.from({ length: 32 }, (_, index) => ({
+    id: `option-${index}`,
+    label: `公開選項 ${index}`,
+    action: `公開動作 ${index}`,
+    selected: index === 31
+  }))
+  const node = {
+    eventId: 'decision-event', eventKind: 'OBSERVATION', status: 'UNKNOWN', label: '公開決策摘要', statusLabel: '未知',
+    categoryLabel: '觀察', timeLabel: '09:05:00', durationMillis: null, x: 220, y: 100, color: '#123456',
+    summary: '公開決策摘要（自述，未驗證執行）',
+    publicDecisionSummary: { decisionId: 'decision-1', topic: '資料來源選擇', selectedOptionId: 'option-31', options },
+    publicDecision: { reason: 'DECISION_REASON_MUST_NOT_ENTER_GRAPH', toolCall: { parameters: 'DECISION_PARAMETERS_MUST_NOT_ENTER_GRAPH' } }
+  }
+  const mapped = mapAiFlowGraphData({ nodes: [node], edges: [] })
+  const branches = mapped.nodes.filter(graphNode => graphNode.syntheticKind === 'decision-option')
+  assert.equal(branches.length, 32)
+  assert.deepEqual(branches.map(graphNode => graphNode.name), options.map(option => option.label))
+  assert.equal(branches.filter(graphNode => graphNode.graphLabel.startsWith('已選擇（自述）')).length, 1)
+  assert.equal(branches.find(graphNode => graphNode.graphLabel.startsWith('已選擇（自述）')).id, 'ui-decision:decision-event:option:option-31')
+  assert.equal(mapped.edges.some(edge => edge.source === 'ui-decision:decision-event:option:option-31' && edge.target === 'decision-event'), false)
+  assert.deepEqual(resolveAiFlowGraphNodeSelection(mapped, 'ui-decision:decision-event:option:option-31'), {
+    eventId: 'decision-event', fromSynthetic: true
+  })
+  assert.deepEqual(resolveAiFlowGraphNodeSelection(mapped, 'ui-decision:missing:option:x'), { eventId: '', fromSynthetic: false })
+  assert.doesNotMatch(JSON.stringify(mapped), /DECISION_REASON_MUST_NOT_ENTER_GRAPH|DECISION_PARAMETERS_MUST_NOT_ENTER_GRAPH|publicDecision/)
+
+  const unselected = mapAiFlowGraphData({
+    nodes: [{ ...node, publicDecisionSummary: {
+      decisionId: 'decision-2', topic: '等待確認', selectedOptionId: null,
+      options: options.map(option => ({ ...option, selected: false }))
+    } }],
+    edges: []
+  })
+  const unselectedBranches = unselected.nodes.filter(graphNode => graphNode.syntheticKind === 'decision-option')
+  assert.equal(unselectedBranches.length, 32)
+  assert.ok(unselectedBranches.every(graphNode => graphNode.graphLabel.startsWith('未選擇')))
+  assert.equal(unselected.edges.some(edge => edge.relation === 'PUBLIC_DECISION_OPTION' && edge.label === '已選擇（自述）'), false)
+
+  for (const invalidNode of [
+    { ...node, eventKind: 'UNKNOWN', status: 'UNKNOWN' },
+    { ...node, eventKind: 'OBSERVATION', status: 'SUCCEEDED' }
+  ]) {
+    const invalid = mapAiFlowGraphData({ nodes: [invalidNode], edges: [] })
+    assert.equal(invalid.nodes.some(graphNode => graphNode.syntheticKind === 'decision-option'), false)
+  }
+})
+
+test('公開決策明細只按需查詢，使用獨立 abort/generation 並在 filter、run、close、unmount 時失效', async () => {
+  const requests = []
+  const makeNode = eventId => ({
+    eventId, eventKind: 'OBSERVATION', status: 'UNKNOWN', publicDecisionSummary: {
+      decisionId: eventId, topic: '資料來源選擇', selectedOptionId: null,
+      options: [{ id: 'wait', label: '等待來源', action: '等待', selected: false }]
+    }
+  })
+  const decisionDetail = {
+    source: 'LLM_PUBLIC_SUMMARY_V1', decisionId: 'decision-1', topic: '資料來源選擇', selectedOptionId: null,
+    options: [{
+      id: 'wait', label: '等待來源', action: '等待', reason: 'DECISION_REASON_DETAIL_ONLY',
+      evidenceRefs: [{ role: 'SOURCE', id: 'evidence-1', hash: null }],
+      toolCall: {
+        name: 'fetch_report', innerNames: [], parameters: 'DECISION_PARAMETERS_DETAIL_ONLY', parametersChars: 34,
+        truncated: false, redactedCount: 0
+      }
+    }]
+  }
+  const loader = createAiFlowViewLoader({
+    listRuns: async () => ({ runs: [{ runId: 'run-2' }] }),
+    getRun: async runId => ({
+      run: { runId }, nodes: [makeNode('decision-1'), makeNode('decision-2')], edges: [], slowSteps: []
+    }),
+    getToolCall: async () => { throw new Error('decision event must not request tool parameters') },
+    getChoiceSet: async () => { throw new Error('decision event must not request choice set') },
+    getPublicDecision: (runId, eventId, options) => {
+      const request = deferred()
+      requests.push({ runId, eventId, ...options, ...request })
+      return request.promise
+    },
+    errorMessage: error => error.message
+  })
+  const state = createAiFlowViewState({ date: '2026-10-24', consumer: 'Codex' })
+  state.selectedRunId = 'run-1'
+  state.detail = { nodes: [makeNode('decision-1'), makeNode('decision-2')] }
+
+  assert.equal(await loader.selectNode(state, 'decision-1', state.filters, { forceSelect: true }), true)
+  assert.equal(requests.length, 0)
+  const stale = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].runId, 'run-1')
+  assert.equal(requests[0].eventId, 'decision-1')
+  assert.equal(requests[0].date, '2026-10-24')
+  assert.equal(requests[0].consumer, 'Codex')
+  assert.equal(state.selectedPublicDecisionLoading, true)
+
+  const current = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  assert.equal(requests[0].signal.aborted, true)
+  requests[0].resolve({ runId: 'run-1', eventId: 'decision-1', publicDecision: decisionDetail })
+  await stale
+  assert.equal(state.selectedPublicDecision, null)
+  requests[1].resolve({ runId: 'run-1', eventId: 'decision-1', publicDecision: decisionDetail })
+  assert.equal(await current, true)
+  assert.equal(state.selectedPublicDecision.options[0].reason, 'DECISION_REASON_DETAIL_ONLY')
+  assert.equal(state.selectedPublicDecision.options[0].toolCall.parameters, 'DECISION_PARAMETERS_DETAIL_ONLY')
+  assert.equal(state.selectedPublicDecisionLoaded, true)
+
+  const filterPending = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  await loader.query(state, { date: '2026-10-23', consumer: 'Claude', period: 'ALL' })
+  assert.equal(requests[2].signal.aborted, true)
+  requests[2].resolve({ runId: 'run-1', eventId: 'decision-1', publicDecision: decisionDetail })
+  await filterPending
+  assert.equal(state.selectedPublicDecision, null)
+
+  state.selectedRunId = 'run-2'
+  state.detail = { nodes: [makeNode('decision-1'), makeNode('decision-2')] }
+  state.selectedNodeId = 'decision-1'
+  const runPending = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  await loader.loadDetail(state, { runId: 'run-2' }, state.filters)
+  assert.equal(requests[3].signal.aborted, true)
+  requests[3].resolve({ runId: 'run-2', eventId: 'decision-1', publicDecision: decisionDetail })
+  await runPending
+  assert.equal(state.selectedPublicDecision, null)
+
+  state.selectedRunId = 'run-2'
+  state.detail = { nodes: [makeNode('decision-1')] }
+  state.selectedNodeId = 'decision-1'
+  const closePending = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  loader.clearDetail(state)
+  assert.equal(requests[4].signal.aborted, true)
+  requests[4].resolve({ runId: 'run-2', eventId: 'decision-1', publicDecision: decisionDetail })
+  await closePending
+  assert.equal(state.selectedPublicDecision, null)
+
+  state.selectedRunId = 'run-2'
+  state.detail = { nodes: [makeNode('decision-1')] }
+  state.selectedNodeId = 'decision-1'
+  const unmountPending = loader.loadPublicDecision(state, 'decision-1', state.filters)
+  loader.clear(state)
+  assert.equal(requests[5].signal.aborted, true)
+  requests[5].resolve({ runId: 'run-2', eventId: 'decision-1', publicDecision: decisionDetail })
+  await unmountPending
+  assert.equal(state.selectedPublicDecision, null)
+})
+
+test('公開決策全文只在獨立明細區以純文字顯示，Node summary 與圖表不帶理由或參數', () => {
+  const api = readFileSync(new URL('../api/index.js', import.meta.url), 'utf8')
+  const view = readFileSync(new URL('../views/AiFlowView.vue', import.meta.url), 'utf8')
+  const utility = readFileSync(new URL('./aiFlowView.js', import.meta.url), 'utf8')
+  const graphOption = view.match(/const graphOption = computed\(\(\) => \([\s\S]*?\n\}\)\)/)?.[0]
+  assert.ok(graphOption)
+  assert.match(api, /publicDecision:\s*\(runId, eventId, \{ date, consumer, signal \} = \{\}\)\s*=>[\s\S]*?\/public-decision/)
+  assert.match(api, /params:\s*\{ date, consumer \}[\s\S]*?signal,[\s\S]*?skipErrorToast:\s*true/)
+  assert.match(view, /v-if="node\.publicDecisionSummary"[\s\S]*?查看公開決策摘要/)
+  assert.match(view, /公開自述；不保證涵蓋所有內部考量，亦不證明工具已執行/)
+  assert.match(view, /已選擇（自述）/)
+  assert.match(view, /未記錄公開決策摘要/)
+  assert.match(view, /<pre class="public-decision-text">\{\{ option\.reason \}\}<\/pre>/)
+  assert.match(view, /<pre class="choice-set-parameters">\{\{ option\.toolCall\.parameters/)
+  assert.match(view, /原始輸入超出 1,048,576 字元預掃上限；下列內容與長度只反映已處理前綴/)
+  assert.match(view, /至少 100000 處/)
+  assert.match(utility, /publicDecisionController\?\.abort\(\)/)
+  assert.match(utility, /publicDecisionGeneration/)
+  assert.match(utility, /parentListGeneration !== listGeneration/)
+  assert.match(utility, /parentDetailGeneration !== detailGeneration/)
+  assert.doesNotMatch(graphOption, /publicDecision|reason|evidenceRefs|toolCall|parameters/)
+  assert.doesNotMatch(view, /v-html\s*=|console\.(?:log|info|warn|error|debug)/)
+})

@@ -479,6 +479,12 @@ export const bffApi = {
         params: { date, consumer },
         signal,
         skipErrorToast: true
+      }),
+    publicDecision: (runId, eventId, { date, consumer, signal } = {}) =>
+      api.get('/bff/ai-flow/runs/' + encodeURIComponent(runId) + '/nodes/' + encodeURIComponent(eventId) + '/public-decision', {
+        params: { date, consumer },
+        signal,
+        skipErrorToast: true
       })
   },
 

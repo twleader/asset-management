@@ -202,6 +202,25 @@ class AiFlowBffServiceTest {
   assertThatThrownBy(()->bad.toolCall(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block())
    .extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
  }
+ @Test void publicDecisionScopedReadForwardsOwnerValidatesIdentityAndNoStore() throws Exception {
+  when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));AtomicReference<ClientRequest> sent=new AtomicReference<>();
+  var d=AiFlowProtocol.batch(AiFlowFixtures.bytes(AiFlowPublicDecisionTest.rawDecision()),AiFlowFixtures.CLOCK).events().getFirst().publicDecision();
+  var expected=new AiFlowDtos.PublicDecisionDetail(AiFlowFixtures.ID,AiFlowFixtures.EVENT,d);
+  var service=service(request->{sent.set(request);return Mono.just(response(200,expected));});
+  var request=MockServerHttpRequest.get("/api/bff/ai-flow/runs/"+AiFlowFixtures.ID+"/nodes/"+AiFlowFixtures.EVENT+"/public-decision?date=2026-10-08&consumer=Codex").build();
+  assertThat(service.publicDecision(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).isEqualTo(expected);
+  assertThat(sent.get().url().toString()).endsWith("/public-decision?date=2026-10-08&consumer=Codex");
+  assertThat(sent.get().headers().getFirst(AuthConstants.HDR_USER_ID)).isEqualTo("7");
+  var bad=service(r->Mono.just(response(200,new AiFlowDtos.PublicDecisionDetail(AiFlowFixtures.ID,AiFlowFixtures.ID,d))));
+  assertThatThrownBy(()->bad.publicDecision(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("UPSTREAM_INVALID");
+  var controller=new AiFlowBffController(service);assertThat(controller.publicDecision(AiFlowFixtures.ID,AiFlowFixtures.EVENT,request).block().getHeaders().getCacheControl()).isEqualTo("private, no-store");
+ }
+ @Test void publicDecisionScheduleGrantFailsBeforeOwnerOrForward() throws Exception {
+  var raw=AiFlowPublicDecisionTest.rawDecision();((ObjectNode)raw.get("run")).put("sourceKind","SCHEDULE_EVENTS");
+  var service=service(r->{throw new AssertionError("must not forward");});
+  var request=MockServerHttpRequest.post("/api/srpp/ai-flow/events").header(AiFlowCredentials.HEADER,"codex").contentType(MediaType.APPLICATION_JSON).build();
+  assertThatThrownBy(()->service.record(request,AiFlowFixtures.bytes(raw)).block()).extracting(e->((AiFlowProblem)e).code).isEqualTo("FORBIDDEN");verifyNoInteractions(users);
+ }
  @Test void scopedChoiceSetReadForwardsConfiguredOwnerValidatesDetailAndKeepsLegacyNull(){
   when(users.configuredAdmin()).thenReturn(Mono.just(OWNER));var sent=new java.util.ArrayList<ClientRequest>();
   var call=AiFlowFixtures.choiceToolCall();var choices=AiFlowFixtures.choiceSet(call);

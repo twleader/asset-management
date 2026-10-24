@@ -83,7 +83,7 @@ final class AiFlowProtocol {
             for(var field:cl.getRecordComponents()) {
                 expected.add(field.getName()); JsonNode child=node.get(field.getName());
                 if(child==null && input && cl==AiFlowDtos.Event.class
-                    && Set.of("reportedOutcome","toolCall","choiceSet").contains(field.getName())) continue;
+                    && Set.of("reportedOutcome","toolCall","choiceSet","publicDecision").contains(field.getName())) continue;
                 if((cl==AiFlowDtos.ToolCall.class || cl==AiFlowDtos.ChoiceOption.class) && field.getName().equals("sourceTruncated")) {
                     if(child==null) continue;
                     if(!child.isBoolean() || !child.booleanValue()) throw AiFlowProblem.invalid();
@@ -106,6 +106,14 @@ final class AiFlowProtocol {
                 if(!input && cl==AiFlowDtos.ChoiceSetDetail.class && field.getName().equals("choiceSet")) {
                     if(child==null) throw AiFlowProblem.invalid();
                     if(!child.isNull()) shape(child,field.getGenericType(),false);
+                    continue;
+                }
+                if ((cl==AiFlowDtos.PublicDecisionOption.class && field.getName().equals("toolCall"))
+                    || ((cl==AiFlowDtos.PublicDecision.class || cl==AiFlowDtos.PublicDecisionSummary.class) && field.getName().equals("selectedOptionId"))
+                    || (!input && cl==AiFlowDtos.Node.class && field.getName().equals("publicDecisionSummary"))
+                    || (!input && cl==AiFlowDtos.PublicDecisionDetail.class && field.getName().equals("publicDecision"))) {
+                    if(child==null) throw AiFlowProblem.invalid();
+                    if(!child.isNull()) shape(child,field.getGenericType(),input);
                     continue;
                 }
                 if(child==null) throw AiFlowProblem.invalid();
@@ -158,6 +166,10 @@ final class AiFlowProtocol {
         }
         if(e.reportedOutcome()!=null) member(e.reportedOutcome(),OUTCOMES); toolCall(e.toolCall(),e.eventKind());
         choiceSet(e.choiceSet(),e.eventKind(),e.toolCall());
+        if(e.publicDecision()!=null) {
+            if(!e.eventKind().equals("OBSERVATION") || !e.status().equals("UNKNOWN")) throw AiFlowProblem.invalid();
+            publicDecision(e.publicDecision());
+        }
     }
     private static void operation(AiFlowDtos.Operation o) {
         member(o.method(),Set.of("GET","POST","PUT","PATCH","DELETE","LOCAL","TOOL"));
@@ -188,6 +200,8 @@ final class AiFlowProtocol {
             require(n.toolCall()==null);
             event(new AiFlowDtos.Event(n.eventId(),n.sequence(),n.stepId(),n.eventKind(),n.status(),n.occurredAt(),n.title(),n.summary(),n.operation(),n.reasonCode(),n.attemptNo(),n.parentEventIds(),n.relation(),n.evidenceRefs(),n.reportedOutcome(),null,null));
             choiceSetSummary(n.choiceSetSummary());
+            publicDecisionSummary(n.publicDecisionSummary());
+            if(n.publicDecisionSummary()!=null) require(n.eventKind().equals("OBSERVATION") && n.status().equals("UNKNOWN"));
             require(nodes.add(n.eventId())); text(n.statusLabel(),100); text(n.label(),100); text(n.categoryLabel(),100); text(n.timeLabel(),100);
             require(n.durationMillis()==null || n.durationMillis()>=0); require(n.color().matches("#[0-9a-fA-F]{6}"));
         }
@@ -225,6 +239,61 @@ final class AiFlowProtocol {
                 && option.toolName().equals(projected.toolName())
                 && projected.selected()==option.optionId().equals(set.selectedOptionId()));
         }
+    }
+    static void publicDecisionDetail(AiFlowDtos.PublicDecisionDetail d,Query q,String runId,String eventId,Clock clock) {
+        window(q.date(),clock); uuid(runId); uuid(eventId);
+        require(d.runId().equals(runId) && d.eventId().equals(eventId));
+        if(d.publicDecision()!=null) publicDecision(d.publicDecision());
+    }
+    private static void rejectPrivateDecisionStrings(JsonNode node) {
+        if(node.isTextual() && PRIVATE_CHOICE_MARKER.matcher(node.asText()).find()) throw AiFlowProblem.invalid();
+        if(node.isContainerNode()) node.forEach(AiFlowProtocol::rejectPrivateDecisionStrings);
+    }
+    private static boolean decisionBlank(String value) {
+        return value.codePoints().allMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c) || c == 0x85);
+    }
+    private static void publicDecision(AiFlowDtos.PublicDecision d) {
+        rejectPrivateDecisionStrings(JSON.valueToTree(d));
+        member(d.source(),Set.of("LLM_PUBLIC_SUMMARY_V1")); toolName(d.decisionId()); choiceText(d.topic()); if(decisionBlank(d.topic())) throw AiFlowProblem.invalid();
+        try { if(JSON.writeValueAsBytes(d).length>196608) throw AiFlowProblem.invalid(); }
+        catch(java.io.IOException invalid) { throw AiFlowProblem.invalid(); }
+        if(d.options()==null || d.options().isEmpty() || d.options().size()>32) throw AiFlowProblem.invalid();
+        Set<String> ids=new HashSet<>(); int total=0;
+        for(var o:d.options()) {
+            toolName(o.id()); if(!ids.add(o.id())) throw AiFlowProblem.invalid();
+            choiceText(o.label());choiceText(o.action());
+            if(decisionBlank(o.label()) || decisionBlank(o.action()))throw AiFlowProblem.invalid();
+            int reason=parameterText(o.reason());
+            if(decisionBlank(o.reason()) || reason>500 || PRIVATE_CHOICE_MARKER.matcher(o.reason()).find()) throw AiFlowProblem.invalid();
+            if(o.evidenceRefs()==null || o.evidenceRefs().size()>3) throw AiFlowProblem.invalid();
+            for(var ref:o.evidenceRefs()) {
+                member(ref.role(),Set.of("CALENDAR","POLICY","API_RECEIPT","VALIDATOR","RESULT","TIMING","DRAFT_RECEIPT","MIME_RECEIPT","APP_TERMINAL","TRACE_COVERAGE"));
+                opaque(ref.id(),200);
+                if(ref.id().matches(".*[?#@].*") || ref.id().chars().anyMatch(Character::isWhitespace)
+                    || ref.hash()!=null && !ref.hash().matches("[0-9a-f]{64}")) throw AiFlowProblem.invalid();
+            }
+            if(o.toolCall()!=null) {
+                toolCall(o.toolCall(),"START");
+                if(!o.toolCall().innerNames().isEmpty() || PRIVATE_CHOICE_MARKER.matcher(o.toolCall().parameters()).find()) throw AiFlowProblem.invalid();
+                total+=parameterText(o.toolCall().parameters());if(total>32768) throw AiFlowProblem.invalid();
+            }
+        }
+        if(d.selectedOptionId()!=null) {toolName(d.selectedOptionId());if(!ids.contains(d.selectedOptionId())) throw AiFlowProblem.invalid();}
+    }
+    private static void publicDecisionSummary(AiFlowDtos.PublicDecisionSummary d) {
+        if(d==null)return;
+        rejectPrivateDecisionStrings(JSON.valueToTree(d));
+        toolName(d.decisionId());choiceText(d.topic());if(decisionBlank(d.topic()))throw AiFlowProblem.invalid();
+        if(d.selectedOptionId()!=null)toolName(d.selectedOptionId());
+        if(d.options().isEmpty() || d.options().size()>32)throw AiFlowProblem.invalid();
+        Set<String> ids=new HashSet<>();
+        for(var o:d.options()) {
+            toolName(o.id());if(!ids.add(o.id()))throw AiFlowProblem.invalid();
+            choiceText(o.label());choiceText(o.action());
+            if(decisionBlank(o.label()) || decisionBlank(o.action()))throw AiFlowProblem.invalid();
+            require(o.selected()==o.id().equals(d.selectedOptionId()));
+        }
+        require(d.selectedOptionId()==null || ids.contains(d.selectedOptionId()));
     }
     private static void run(AiFlowDtos.RunView r,Query q,long owner,Clock clock) {
         metadata(new AiFlowDtos.RunMetadata(r.runId(),r.consumer(),r.reportDate(),r.reportSlot(),r.sourceKind(),r.sourceRunId(),r.automationId(),r.startedAt(),r.workflowVersion()),clock);

@@ -27,6 +27,9 @@ class AiFlowSecurityTest {
   String nodePath="/api/bff/ai-flow/runs/5bd55e21-7e39-5fa7-8c35-d2b2664e54e1/nodes/6d6d7f46-c4c2-5520-8895-3f164c4f6d0e/tool-call?date=2026-10-08&consumer=Codex";
   client.get().uri(nodePath).exchange().expectStatus().isUnauthorized();
   client.mutateWith(mockUser().roles("USER")).get().uri(nodePath).exchange().expectStatus().isForbidden();
+  String decisionPath=nodePath.replace("/tool-call?","/public-decision?");
+  client.get().uri(decisionPath).exchange().expectStatus().isUnauthorized();
+  client.mutateWith(mockUser().roles("USER")).get().uri(decisionPath).exchange().expectStatus().isForbidden();
   verifyNoInteractions(users,ingest);
  }
  @Test void producer_missing_wrong_and_multivalue_tokens401_before_owner_and_ingest(){

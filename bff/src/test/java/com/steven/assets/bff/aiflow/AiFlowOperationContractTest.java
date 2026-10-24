@@ -99,7 +99,7 @@ class AiFlowOperationContractTest {
 
     static AiFlowDtos.Detail projection(AiFlowDtos.Operation nodeOperation,AiFlowDtos.Operation slowOperation) {
         var e=AiFlowFixtures.batch().events().getFirst();
-        var node=new AiFlowDtos.Node(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),nodeOperation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),"執行中","觀測步驟","API 呼叫","09:05:00",2000L,0,0,"#123456",null,null);
+        var node=new AiFlowDtos.Node(e.eventId(),e.sequence(),e.stepId(),e.eventKind(),e.status(),e.occurredAt(),e.title(),e.summary(),nodeOperation,e.reasonCode(),e.attemptNo(),e.parentEventIds(),e.relation(),e.evidenceRefs(),e.reportedOutcome(),"執行中","觀測步驟","API 呼叫","09:05:00",2000L,0,0,"#123456",null,null,null);
         var slow=new AiFlowDtos.SlowStep(e.stepId(),e.eventId(),e.title(),slowOperation,AiFlowFixtures.START,AiFlowFixtures.START.plusSeconds(2),2000,"SUCCEEDED","成功");
         return new AiFlowDtos.Detail(AiFlowFixtures.run(7),List.of(node),List.of(),List.of(slow));
     }

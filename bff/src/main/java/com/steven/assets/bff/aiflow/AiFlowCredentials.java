@@ -39,6 +39,10 @@ final class AiFlowCredentials {
         if(hasChoiceSet && (!grant.collector() || !run.consumer().equals("Codex") || !run.sourceKind().equals("CODEX_ROLLOUT")))
             throw new AiFlowProblem("FORBIDDEN");
     }
+    void authorizePublicDecision(Grant grant,AiFlowDtos.RunMetadata run,boolean present) {
+        if(present && (!grant.collector() || !(run.consumer().equals("Codex") && run.sourceKind().equals("CODEX_ROLLOUT")
+            || run.consumer().equals("Claude") && run.sourceKind().equals("CLAUDE_ARTIFACT")))) throw new AiFlowProblem("FORBIDDEN");
+    }
     private static boolean same(String a,String b) {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8),b.getBytes(StandardCharsets.UTF_8));
     }

@@ -116,6 +116,22 @@ class AiFlowServiceTest {
         assertThatThrownBy(() -> service.toolCall(RUN.toString(), original.eventId(), wrongConsumer))
                 .isInstanceOfSatisfying(AiFlowProblem.class, problem -> assertThat(problem.code()).isEqualTo("NOT_FOUND"));
     }
+    @Test void publicDecisionScopedReadChecksHashAndScheduleGrantHasZeroIo() throws Exception {
+        var raw=AiFlowPublicDecisionTest.rawDecision();var parsed=AiFlowProtocol.parse(raw.toString());var event=parsed.batch().events().getFirst();
+        var row=new AiFlowRepository.StoredEvent(UUID.fromString(event.eventId()),event.sequence(),parsed.payloads().getFirst(),parsed.hashes().getFirst());
+        when(repository.detail(7L,RUN,DATE,"Codex")).thenReturn(Optional.of(stored(parsed.batch().events())));
+        when(repository.event(7L,RUN,UUID.fromString(event.eventId()),DATE,"Codex")).thenReturn(Optional.of(row));
+        assertThat(service.publicDecision(RUN.toString(),event.eventId(),query(DATE.toString())).publicDecision()).isEqualTo(event.publicDecision());
+        verify(repository,never()).events(anyLong(),any());
+        when(repository.event(7L,RUN,UUID.fromString(event.eventId()),DATE,"Codex")).thenReturn(Optional.of(new AiFlowRepository.StoredEvent(row.eventId(),row.sequence(),row.payload(),"0".repeat(64))));
+        assertThatThrownBy(()->service.publicDecision(RUN.toString(),event.eventId(),query(DATE.toString()))).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.code()).isEqualTo("UPSTREAM_INVALID"));
+        ((ObjectNode)raw.get("run")).put("sourceKind","SCHEDULE_EVENTS");clearInvocations(owner,repository,manager);
+        assertThatThrownBy(()->service.ingest(List.of("codex-token"),"application/json",raw.toString())).isInstanceOfSatisfying(AiFlowProblem.class,p->assertThat(p.status()).isEqualTo(403));
+        verifyNoInteractions(owner,repository,manager);
+        var auth=new AiFlowCredentialService("c","h","r");var grant=auth.authenticate(List.of("r"));
+        auth.authorizePublicDecision(grant,"Codex","CODEX_ROLLOUT",true);
+        auth.authorizePublicDecision(grant,"Claude","CLAUDE_ARTIFACT",true);
+    }
     @Test void configuredOwnerIgnoresCallerForProducerAndReadRequiresExactAdmin(){
         var users=mock(UserAdminService.class);var context=mock(CurrentUserContext.class);
         when(users.configuredAdmin()).thenReturn(Optional.of(AppUser.builder().id(7L).role("ADMIN").status("ACTIVE").build()));

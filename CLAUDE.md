@@ -507,3 +507,7 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 ### Requirement 190／Task 507 公開工具參數查閱修訂
 
 Task507取代舊summary的「未收錄參數、指令」文案：新觀測摘要指向節點明細查閱公開輸入，工具輸出仍不保存。時間軸及慢速步驟提供明確入口，以CALL_RESULT的唯一同step START查閱原按需BFF；缺記錄、空輸入、截斷及遮蔽範圍分開標示。exec/run_code程式碼是wrapper真實公開輸入，內含名稱僅為文字掃描，不聲稱已逐項執行或保存動態參數／獨立耗時。不改舊immutable事件、API/schema、金融Swagger identity或SRPP runtime/政策，不重播或回填。
+
+### Requirement 190／Task 508 公開決策摘要來源例外
+
+Task508以獨立選填Event.publicDecision記錄版本化LLM_PUBLIC_SUMMARY_V1公開自述；只能OBSERVATION/UNKNOWN，由collector grant讀Codex真commentary marker或Claude原final result.publicDecisions。它不靠Task504缺少的exporter、不偽造actual工具配對，不讀reasoning／其他自由文字，不證明工具已執行。每筆全部1..32候選、非空白公開短理由≤500、每項opaque refs≤3；擬議參數沿Task501遮蔽／截斷，超額整筆具名拒絕、不漏選項稱完整。理由可在使用者授權的合法scope含金融摘要，僅ADMIN按需明細可讀；Node只帶安全summary，圖／tooltip不含理由、refs或參數。兩軌真入口及既有美盤22-00本輪實際部署，時間／日曆no-op、金融閘門與時限不變，無觀測HTTP等待。Claude遠端device proof不可得具名BLOCKED_REMOTE_PROOF、不阻擋其他已授權工作。observer現1.4.0、金融YAML路由／schema不變，統一Swagger與SRPP新規則hash完整發布、authority/registry/jar驗同身份，下一交易日合法時窗read-only GET尚未執行時記NOT_YET_EXECUTED。

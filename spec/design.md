@@ -13061,3 +13061,17 @@ LIVE完整報價tuple允許明確存在的changePercent與priceChange為null（�
 前端新增純 resolver `resolveAiFlowToolStartId(detail,eventId)`：以 nodes 的真 eventId 查原節點，既有 operation.method=TOOL 或 stepId 以 call- 開頭才視為工具。START 回自身；END 限 relation=CALL_RESULT，其 parentEventIds 中恰一筆同 stepId 的 START（重複或多筆拒絕），回該 START id；其他一律空字串。慢速步驟原 nodeId 指 END，沿 resolver 找 START，不改 backend projection 或 slowStep schema。時間軸／慢速表只呈現查閱按鈕，不攜帶參數；按鈕調用既有 loader.selectNode(forceSelect=true)，再聚焦明細。沒有可配對 START 時禁用查閱並明示「未記錄工具開始事件」。按需成功回 null 顯示「未記錄工具參數」；空 parameters 才顯示「（無參數）」，錯誤與 loading 保留各自狀態。
 
 collector 只替換新解析行的固定 TOOL_SUMMARY_NOTE，仍限制 title 100／summary 500 字、敏感資料規則與截斷回退；舊 state/pending/DB bytes 不改。固定摘要不宣稱舊資料一定有參數，只提示「公開輸入請由節點明細查閱；工具輸出不保存」。docs 與 CLAUDE 補上 Task507 對舊 summary 文案的取代關係，金融 YAML／統一 mirror bytes 保持不變。
+
+## Requirement 190／Task 508：具名公開決策摘要通路
+
+保留原 toolCall／choiceSet 契約。新增獨立 publicDecision 而不偽裝成工具 START：既有 OBSERVATION／UNKNOWN 只表示已觀測到公開自述。單一 source=LLM_PUBLIC_SUMMARY_V1 兼作來源與版本，不再重複常量STATE／UNCONFIRMED。
+
+RawDecision closed keys：source、decisionId、topic、options、selectedOptionId。decisionId 採工具識別字 pattern、1..64；topic 1..100 Unicode code points、既有public-safe文字。options 1..32，每項 closed id/label/action/reason/evidenceRefs/tool：id唯一且同識別字規則；label/action各1..100且public-safe，action為字串而非業務enum；reason 1..500、經憑證遮蔽／控制字元清理，不允許私人思考標記；evidenceRefs沿既有Evidence(role,id,hash)，每項最多3個；tool必為null或closed{name,input}，input為單一已公開字串。selectedOptionId為null或必存在的option id，null表示未選，不推導失敗。raw marker UTF-8最多131072 bytes，最終所有option參數合計最多32768 code points，整個publicDecision JSON最多196608 bytes；超限整筆拒絕，絕不切掉option或reason。FinalDecision保持五root keys，每option以toolCall取代tool；非null者沿Task501單一standardize/redact helper、innerNames=[]，參數最多16384並明示truncated/sourceTruncated/redactedCount，屬擬議輸入而非實際呼叫。公開理由可包含使用者明確授權的當輪合法scope金融摘要，但只能在明細；topic/label/action及一般event摘要仍維持既有public-safe規則，不新增帳號、持股／金額或raw輸入至圖與tooltip。
+
+Codex台股兩任務及美盤22-00都以同marker為真producer；美盤沿原季節／日曆／官方／policy gate通過後才發表，gate失敗不讀新權威文件、不增加記錄義務。marker是一整則公開commentary，恰為開行 <<<SRPP_PUBLIC_DECISION_V1>>>、單一strict JSON RawDecision、結行 <<<END_SRPP_PUBLIC_DECISION_V1>>>，除首尾空白外無其他文字；不是一般assistant prose擷取或任意JSON掃描。僅明確公開commentary通道解析，analysis/final/tool result/user內容不解析；原進度事件可維持，只新增decision OBSERVATION。eventId由真thread:turn＋來源行號＋decisionId派生；同run重複decisionId內容相同冪等、不同內容拒絕，不回改舊事件。
+
+Claude僅從已通過原consumer/date/slot/automation身分檢查的當輪final result.json的選填publicDecisions array讀RawDecision，不讀其他自由文字。最多128筆；以finished_at有效且明確automation_id對應slot證明是已終結本輪result，publicDecisions與result一次atomic final寫入、不在被collector讀取後變更。沿原artifact raw SHA identity與個別index/id生成穩定事件；缺cliSessionId仍保留UNLINKED，不推測連結；有exact app link仍為RAW_TRACE_UNAVAILABLE。Codex不再從result重複匯入同批摘要。無欄位舊artifact維持原bytes與行為。
+
+backend/BFF Event選填publicDecision，封閉解碼只對本key允許省略、不允許null。ingress授權在owner/DB/error-ingest前限制collector與正確source；一般Node新增nullable PublicDecisionSummary(decisionId,topic,selectedOptionId,options[id,label,action,selected])。新ADMIN純讀 GET /api/ai-flow/runs/{runId}/nodes/{eventId}/public-decision 與同源 /api/bff/ai-flow/.../public-decision 投影同一immutable event並驗hash；ToolCall/ChoiceSet原API不變。一般Node不帶完整publicDecision；按需detail採獨立abort/generation fence，參數與理由只能Vue純文字pre/文字區塊，不進ECharts/tooltip/console。圖以自述候選分支呈現全部options，synthetic id獨立namespace並只導向原event。缺記錄固定「未記錄公開決策摘要」，不猜未列選項。
+
+observer API升1.4.0，金融YAML method/path/schema不變；統一Markdown與PublishedSwaggerIdentity因observer schema改變必重產。SRPP producer規則也變更，所以不能僅metadata refresh；受控Swagger同步須在乾淨managed SRPP feature先完成，之後才改政策入口並重建runtime/manifest新hash，完整同步backend authority/golden/insert-only registry。驗收及部署順序由Task508明定，不放寬現sync工具的dirty/source allowlist。

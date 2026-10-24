@@ -6198,3 +6198,15 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 點入口強制選取而不因重複點擊清除；ADMIN 仍只經原同源 BFF 的逐節點按需 GET，沿用 abort/generation fence，參數不放進一般 detail、流程圖、tooltip、時間軸或表格資料，不預載。節點明細清楚區分公開原始輸入、空輸入與未記錄；捲動或聚焦至明細讓結果可見。
 - [ ] `exec`／`run_code` 的公開原始碼就是 wrapper 的真實輸入；原樣文字呈現遮蔽後保存範圍，內含名稱明示僅從文字擷取，不能宣稱每個內含工具已呼叫、已取得其動態實際參數或逐一耗時。禁止 evaluate／執行來源、regex 抽字面值冒充執行時參數。16,384 code-point 輸出上限、1,048,576 prescan、truncated/sourceTruncated、至少 N 處遮蔽都誠實揭露，不能宣稱全量。
 - [ ] 不改 API/schema、DB、金融 Swagger identity、SRPP runtime／政策。同步操作文件並驗 collector、前端選取配對與非預載回歸；Docker rebuild/recreate frontend、原 collector daemon restart 後僅讀取驗收，不清 state、不 replay、不產生人工事件。
+
+### Task 508：兩軌公開決策摘要與真實 producer（Requirement 190 修訂）
+
+**User Story：**作為管理員，我要看到 LLM 在每個決策點明確公開列出的全部候選、參數、簡短理由與依據，以及採用／等待／否決等選擇，包含未選項；這是公開自述摘要，不是私人思考鏈或已執行證明。
+
+**Acceptance Criteria：**
+
+- [ ] Codex 真正台股入口須在日曆、Swagger、policy 檢核通過後、美盤22-00須在原季節時間gate／本機us日曆／官方核對與原policy檢核通過後，每個工具／資料來源／報告採納決策執行前，發出獨立 commentary 的版本化 closed JSON marker；Claude 真正入口須同樣公開列候選並將同一批具名摘要保存於既有當輪 final result.json.publicDecisions。兩來源共用驗證與標準化，不讀私人 reasoning、不寫 rollout、不新增觀測 HTTP 或等待；原日曆 no-op、核心凍結、35/40/60 分鐘、金融取數／交易權限照舊。
+- [ ] Event 新增可省略但不可明確 null 的 closed publicDecision，只能 OBSERVATION/UNKNOWN，由 collector grant 的 Codex/CODEX_ROLLOUT 或 Claude/CLAUDE_ARTIFACT 寫入。來源固定 LLM_PUBLIC_SUMMARY_V1，決策 id、主題、1..32 完整候選、選中 id 或 null；每項有名稱、任意安全 action 字串、最多500字公開理由、至多3個 opaque evidence refs 及可為 null 的擬議工具輸入。選中項僅表示公開選擇，不能等同 actual toolCall、交易授權或成功執行。
+- [ ] 所有通過驗證的公開候選完整保存並逐項顯示，不能只保留採用項。超額、未知／重複 key/id、無效 selected id、私人思考標記、身分或版本錯誤必整筆拒絕並在無敏感內容的 collector receipt 留具名原因；不得截掉候選後稱完整。參數沿既有截斷／憑證遮蔽metadata，公開理由也遮蔽憑證；必要截斷明示，未記錄不補猜。界面固定標示「公開自述；不保證涵蓋所有內部考量，亦不證明工具已執行」。
+- [ ] 一般 Node 只含無理由／依據／參數的安全選項 summary，既有按需 ADMIN 同源 BFF 明細才可讀完整 publicDecision。全部選項含未選項可見；synthetic node 與真事件分開，選取導向原決策事件。舊 run 不回寫、不 replay，Claude 原 UNLINKED/RAW_TRACE_UNAVAILABLE 保持，不將自述摘要升級為 trace complete。
+- [ ] 同一變更交付真正 Codex台股兩個與美盤22-00共三個prompt、Claude本機SKILL與現有遠端保存指令的部署讀回，不能停在producer absent；若Claude遠端裝置綁定缺工具能力，具名BLOCKED_REMOTE_PROOF、保留遠端舊狀態且不阻擋其他可完成工作，不虛稱遠端已部署。變更兩個repo均feature commit、no-ff merge、push與remote readback。observer/YAML/統一Swagger/consumer schema/runtime/新policy hash/backend embedded authority/insert-only registry/jar 必完全一致；下一交易日合法時窗以同一hash只讀GET驗證，時窗未到標 NOT_YET_EXECUTED，不能用健康檢查代替。

@@ -2450,5 +2450,207 @@ module.atomic_bytes(pathlib.Path(sys.argv[2]),bytes.fromhex(sys.argv[3]))
         self.assertNotIn("--exclude-table=", text)
 
 
+
+class PublicDecisionTests(Fixture):
+    def raw_decision(self):
+        vectors = json.loads((SCRIPTS / 'tests/fixtures/ai_flow_public_decision_vectors.json').read_text())
+        value = vectors['cases'][0]['publicDecision']
+        for option in value['options']:
+            tool = option.pop('toolCall')
+            option['tool'] = None if tool is None else {'name': tool['name'], 'input': tool['parameters']}
+        return value
+
+    def marker(self, value=None):
+        return c.PUBLIC_DECISION_OPEN + '\n' + json.dumps(self.raw_decision() if value is None else value, ensure_ascii=False) + '\n' + c.PUBLIC_DECISION_CLOSE
+
+    def message(self, text, phase='commentary', role='assistant'):
+        return {'type': 'message', 'role': role, 'phase': phase, 'content': [{'type': 'output_text', 'text': text}]}
+
+    def scan_messages(self, *messages):
+        values = [row('session_meta', {'id': THREAD}), row('event_msg', {'type': 'task_started', 'turn_id': TURN})]
+        values.extend(row('response_item', payload) for payload in messages)
+        values += [row('response_item', self.message('DONE', phase='final')),
+                   row('event_msg', {'type': 'task_complete', 'turn_id': TURN})]
+        self.path.write_bytes(encode_rows(values))
+        value = self.envelope()
+        c.validate_envelope(value, TODAY)
+        return value
+
+    def decision_events(self, value):
+        return [item for item in value['events'] if 'publicDecision' in item]
+
+    def claude_artifact(self, **overrides):
+        root = self.home / 'Project/SRPP/data/output/daily_runs/2026-10-08/Claude-0905-test'
+        root.mkdir(parents=True, exist_ok=True)
+        value = {'consumer': 'Claude', 'trading_date': '2026-10-08', 'slot': '0905',
+                 'automation_id': 'srpp-0905-claude', 'finished_at': '2026-10-08T01:35:00Z',
+                 'publicDecisions': [self.raw_decision()], 'unrelated': 'ARTIFACT_PRIVATE_CANARY'}
+        value.update(overrides)
+        (root / 'result.json').write_bytes(c.canonical(value))
+        return self.collector.claude_artifacts(dt.date(2026, 10, 8), c.ReadBudget())
+
+    def test_shared_final_wire_vectors(self):
+        vectors = json.loads((SCRIPTS / 'tests/fixtures/ai_flow_public_decision_vectors.json').read_text())
+        self.assertEqual(42, len(vectors['cases']))
+        for case in vectors['cases']:
+            with self.subTest(case=case['id']):
+                self.assertEqual(case['valid'], c.validate_public_decision(case['publicDecision'], case['eventKind'], case['status']))
+
+    def test_marker_collects_all_choices_as_observation_not_actual_tool_execution(self):
+        value = self.scan_messages(self.message(self.marker()))
+        events = self.decision_events(value)
+        self.assertEqual(1, len(events))
+        item = events[0]
+        self.assertEqual(('OBSERVATION', 'UNKNOWN'), (item['eventKind'], item['status']))
+        self.assertNotIn('toolCall', item)
+        self.assertEqual(['api', 'wait'], [option['id'] for option in item['publicDecision']['options']])
+        self.assertIn('公開', item['summary'])
+        self.assertNotIn('command', item['summary'])
+        self.assertEqual('await tools.exec_command({cmd: command})', item['publicDecision']['options'][0]['toolCall']['parameters'])
+        self.assertEqual(value, self.envelope())
+
+    def test_final_analysis_user_output_and_unmarked_prose_are_not_sources(self):
+        marker = self.marker()
+        value = self.scan_messages(self.message(marker, phase='analysis'), self.message(marker, phase='final'),
+                                   self.message(marker, role='user'), self.message(json.dumps(self.raw_decision())),
+                                   {'type': 'reasoning', 'text': marker})
+        self.assertEqual([], self.decision_events(value))
+        persisted = ''.join(p.read_text() for p in (self.store.root / 'sources').glob('*.json'))
+        self.assertNotIn('api-source', persisted)
+
+    def test_invalid_marker_is_named_without_saving_its_body(self):
+        value = self.scan_messages(self.message('prose ' + self.marker()))
+        self.assertEqual([], self.decision_events(value))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_MARKER_INVALID'])
+        self.assertNotIn('api-source', c.canonical(value).decode())
+
+    def test_duplicate_json_key_rejected_with_named_receipt(self):
+        body = self.marker().replace('"source":', '"source":"bad","source":', 1)
+        value = self.scan_messages(self.message(body))
+        self.assertEqual([], self.decision_events(value))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_JSON_INVALID'])
+
+    def test_private_marker_never_enters_state_or_envelope(self):
+        raw = self.raw_decision()
+        raw['options'][0]['reason'] = 'PRIVATE_REASONING_CANARY'
+        value = self.scan_messages(self.message(self.marker(raw)))
+        self.assertEqual([], self.decision_events(value))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_PRIVATE_MARKER'])
+        for state_file in (self.store.root / 'sources').glob('*.json'):
+            self.assertNotIn('PRIVATE_REASONING_CANARY', state_file.read_text())
+
+    def test_credentials_redacted_and_financial_reason_retained_only_in_details(self):
+        raw = self.raw_decision()
+        raw['options'][0]['reason'] = '金額 12000 元；Authorization: Bearer abc12345SecretCanary'
+        raw['options'][0]['tool']['input'] = '{"token":"abc12345SecretCanary","limit":12000}'
+        value = self.scan_messages(self.message(self.marker(raw)))
+        item = self.decision_events(value)[0]
+        self.assertIn('12000', item['publicDecision']['options'][0]['reason'])
+        self.assertNotIn('SecretCanary', c.canonical(value).decode())
+        self.assertIn(c.REDACTED, item['publicDecision']['options'][0]['reason'])
+        self.assertNotIn('12000', item['summary'])
+
+    def test_reason_is_never_silently_truncated(self):
+        raw = self.raw_decision()
+        raw['options'][0]['reason'] = '理' * 501
+        with self.assertRaisesRegex(c.ObservationError, 'PUBLIC_DECISION_INVALID'):
+            c.standardize_public_decision(raw)
+
+    def test_32_options_preserved_and_33_rejected_whole(self):
+        raw = self.raw_decision()
+        raw['options'] = [dict(raw['options'][1], id=f'option-{i}') for i in range(32)]
+        raw['selectedOptionId'] = None
+        self.assertEqual(32, len(c.standardize_public_decision(raw)['options']))
+        raw['options'].append(dict(raw['options'][0], id='extra'))
+        with self.assertRaisesRegex(c.ObservationError, 'PUBLIC_DECISION_OPTION_LIMIT'):
+            c.standardize_public_decision(raw)
+
+    def test_raw_marker_byte_limit_is_named_not_silent(self):
+        value = self.scan_messages(self.message(c.PUBLIC_DECISION_OPEN + '\n' + 'x' * c.PUBLIC_DECISION_RAW_LIMIT + '\n' + c.PUBLIC_DECISION_CLOSE))
+        self.assertEqual([], self.decision_events(value))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_TOO_LARGE'])
+
+    def test_proposed_parameters_use_existing_truncation_metadata(self):
+        raw = self.raw_decision()
+        raw['options'][0]['tool']['input'] = 'a' * 17000
+        tool = c.standardize_public_decision(raw)['options'][0]['toolCall']
+        self.assertEqual(16384, len(tool['parameters']))
+        self.assertEqual(17000, tool['parametersChars'])
+        self.assertTrue(tool['truncated'])
+        self.assertEqual([], tool['innerNames'])
+
+    def test_duplicate_decision_id_same_content_idempotent_different_content_named(self):
+        raw = self.raw_decision()
+        changed = json.loads(json.dumps(raw))
+        changed['selectedOptionId'] = None
+        value = self.scan_messages(self.message(self.marker(raw)), self.message(self.marker(raw)), self.message(self.marker(changed)))
+        self.assertEqual(1, len(self.decision_events(value)))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_ID_CONFLICT'])
+
+    def test_existing_frozen_commentary_is_not_backfilled(self):
+        value = self.scan_messages(self.message('ordinary progress'))
+        first = c.canonical(value)
+        reloaded = c.Collector(self.home, self.store).scan_codex(self.record, c.ReadBudget())[0]
+        self.assertEqual(first, c.canonical(reloaded))
+        self.assertEqual([], self.decision_events(reloaded))
+
+    def test_us_existing_automation_uses_same_public_marker_without_slot_changes(self):
+        self.record.update(automation='22-00', slot='22:00')
+        value = self.scan_messages(self.message(self.marker()))
+        self.assertEqual('22:00', value['run']['reportSlot'])
+        self.assertEqual(1, len(self.decision_events(value)))
+
+    def test_claude_final_artifact_uses_same_standardizer_preserves_unlinked(self):
+        value = self.claude_artifact()[0]
+        c.validate_envelope(value, TODAY)
+        self.assertEqual(c.standardize_public_decision(self.raw_decision()), self.decision_events(value)[0]['publicDecision'])
+        self.assertEqual('UNLINKED', value['events'][-1]['reasonCode'])
+        self.assertNotIn('ARTIFACT_PRIVATE_CANARY', c.canonical(value).decode())
+
+    def test_claude_exact_link_remains_raw_trace_unavailable(self):
+        value = self.claude_artifact(cliSessionId='session-id')[0]
+        self.assertEqual('RAW_TRACE_UNAVAILABLE', value['events'][-1]['reasonCode'])
+        self.assertEqual(1, len(self.decision_events(value)))
+
+    def test_claude_missing_final_or_identity_rejects_only_decisions(self):
+        for field, missing in [('finished_at', None), ('automation_id', None)]:
+            with self.subTest(field=field):
+                value = self.claude_artifact(**{field: missing})[0]
+                self.assertEqual([], self.decision_events(value))
+                self.assertEqual('artifact-result', value['events'][0]['stepId'])
+        self.assertEqual(2, self.collector.errors['PUBLIC_DECISION_ARTIFACT_NOT_FINAL_OR_IDENTIFIED'])
+
+    def test_claude_partial_invalid_array_does_not_drop_valid_published_decisions(self):
+        raw = self.raw_decision()
+        bad = dict(raw, decisionId='bad', unexpected=True)
+        value = self.claude_artifact(publicDecisions=[bad, raw])[0]
+        self.assertEqual(1, len(self.decision_events(value)))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_INVALID'])
+
+    def test_claude_duplicate_id_conflict_is_named_and_original_stays(self):
+        raw = self.raw_decision()
+        changed = dict(raw, selectedOptionId=None)
+        value = self.claude_artifact(publicDecisions=[raw, raw, changed])[0]
+        self.assertEqual(1, len(self.decision_events(value)))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_ID_CONFLICT'])
+
+    def test_claude_array_count_quota_rejects_whole_with_receipt(self):
+        value = self.claude_artifact(publicDecisions=[self.raw_decision()] * 129)[0]
+        self.assertEqual([], self.decision_events(value))
+        self.assertEqual(1, self.collector.errors['PUBLIC_DECISION_ARTIFACT_LIMIT'])
+
+    def test_explicit_public_decision_null_and_schedule_source_fail_closed(self):
+        value = self.envelope()
+        item = next(e for e in value['events'] if e['eventKind'] == 'OBSERVATION')
+        item['publicDecision'] = None
+        with self.assertRaises(c.ObservationError):
+            c.validate_envelope(value, TODAY)
+        item['publicDecision'] = c.standardize_public_decision(self.raw_decision())
+        c.validate_envelope(value, TODAY)
+        value['run']['sourceKind'] = 'SCHEDULE_EVENTS'
+        with self.assertRaises(c.ObservationError):
+            c.validate_envelope(value, TODAY)
+
+
 if __name__ == "__main__":
     unittest.main()
