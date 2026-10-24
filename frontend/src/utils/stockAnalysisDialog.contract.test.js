@@ -10,7 +10,7 @@ const holdingsTemplate = dialog.slice(dialog.indexOf('<!-- 持股明細'), dialo
 const holdingsSection = dialog.slice(dialog.indexOf('const holdingsData'), dialog.indexOf('// Task 261'))
 const fetchHoldingsBody = dialog.slice(dialog.indexOf('async function fetchHoldings'), dialog.indexOf('// 配色比照'))
 
-test('quote-detail contract reads server totals directly, is once-per-open, and guards stale requests', () => {
+test('quote-detail contract reads server totals directly, lazily loads, and guards stale requests', () => {
   assert.match(dialog, /stock\?\.market === '台股' && stock\?\.stockCode !== '0000'/)
   for (const label of ['成交', '昨收', '開盤', '漲跌幅', '最高', '漲跌', '最低', '總量', '均價', '昨量', '成交金額(億)', '振幅']) assert.ok(dialog.includes(label))
   assert.match(dialog, /quoteDetail\.bidTotalLots/)

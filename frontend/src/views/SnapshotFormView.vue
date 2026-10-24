@@ -1469,7 +1469,9 @@ import { ArrowLeft, Plus, Delete, Operation, InfoFilled } from '@element-plus/ic
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAssetStore } from '@/stores/assetStore'
-import { bffApi } from '@/api/index'
+import { createTrailingRefresh, mergeLiveQuote, patchLiveRow } from '@/utils/livePrices.js'
+import { marketToday } from '@/utils/displayQuote.js'
+import { bffApi, livePriceStream } from '@/api/index'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import UsFlag from '@/components/UsFlag.vue'
@@ -2246,9 +2248,17 @@ function applyEnrichedPrices(prices, rows, metadata = true) {
   const map = {}
   for (const p of prices ?? []) map[`${p.market}_${p.stockCode}`] = p
   for (const row of rows) {
-    const p = map[`${row.market}_${row.stockCode}`]
+    let p = map[`${row.market}_${row.stockCode}`]
     if (!p) continue
+    if (form.snapshotDate === marketToday(row.market)) {
+      p = livePriceStream.overlay(p)
+      const accepted = mergeLiveQuote(row, p)
+      if (accepted === row) continue
+      p = accepted
+    }
     applyEnrichedQuote(row, p)
+    row.tradingDate = p.tradingDate
+    row.priceUpdatedAt = p.updatedAt ?? row.priceUpdatedAt
     if (metadata && p.stockName && !row.stockName) row.stockName = p.stockName
     if (metadata && p.dividendRate != null) row.dividendRate = Number(p.dividendRate)
   }
@@ -2630,6 +2640,27 @@ const flattenStocks = () =>
 // ===== 自動載入與定時更新股價 =====
 const marketStatus = ref({ twMarketOpen: false, usMarketOpen: false })
 let priceTimer = null
+let stopLivePrices = null
+let liveEpoch = 0
+function applyLivePrice(quote) {
+  if (readScope.disposed || loadedFormKey.value !== routeKey() || formBlocked.value
+    || form.snapshotDate !== marketToday(quote.market)) return
+  withoutDirtyChange(() => { for (const row of form.stocks) patchLiveRow(row, quote, 'form') })
+}
+const catchupPrices = createTrailingRefresh(async () => {
+  if (readScope.disposed || loadedFormKey.value !== routeKey() || formBlocked.value || !livePriceStream.visible()) return
+  const epoch = liveEpoch
+  const read = readScope.capture({ slot: 'live-prices' })
+  try {
+    const data = await bffApi.snapshotForm.realtime(readOptions(read))
+    if (!read.isCurrent() || epoch !== liveEpoch || !livePriceStream.visible()) return
+    marketStatus.value = data?.marketStatus ?? marketStatus.value
+    for (const quote of data?.stockPrices ?? []) applyLivePrice(livePriceStream.overlay(quote))
+  } finally { read.finish() }
+}, { interval: 1000 })
+onMounted(() => {
+  stopLivePrices = livePriceStream.subscribe({ onQuote: applyLivePrice, onCatchup: startPriceAutoRefresh, onPause: () => { liveEpoch++; catchupPrices.cancel(); stopPriceAutoRefresh() } })
+})
 
 /**
  * 批次載入股價到各 row：
@@ -2665,8 +2696,10 @@ function loadAllPrices({ context = null, strict = false, metadata = false } = {}
 function startPriceAutoRefresh() {
   stopPriceAutoRefresh()
   if (readScope.disposed || loadedFormKey.value !== routeKey()) return
+  for (const quote of livePriceStream.quotes()) applyLivePrice(quote)
+  catchupPrices.request()
   priceTimer = setInterval(() => {
-    if (!formBlocked.value) loadAllPrices().catch(error => console.warn('股價更新失敗', error))
+    if (!formBlocked.value && livePriceStream.visible()) catchupPrices.request()
   }, 2 * 60 * 1000)
 }
 function stopPriceAutoRefresh() {
@@ -2674,6 +2707,8 @@ function stopPriceAutoRefresh() {
 }
 
 onUnmounted(() => {
+  stopLivePrices?.()
+  catchupPrices.dispose()
   readScope.dispose()
   stopPriceAutoRefresh()
   panelLoader.dispose()

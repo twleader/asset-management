@@ -236,8 +236,10 @@ public class MarketDataController {
     public HistoricalDataService.IntradaySession getIntradayTicks(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return historicalDataService.fetchIntradaySession(code, market, date);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(defaultValue = "false") boolean readOnly) {
+        return readOnly ? historicalDataService.fetchIntradaySession(code, market, date, true)
+                : historicalDataService.fetchIntradaySession(code, market, date);
     }
 
     /**

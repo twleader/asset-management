@@ -6173,3 +6173,16 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 既有十秒dispatcher保留節拍與input∩radar fail closed。push feature開啟時每個SSE generation/provider connection epoch的每檔首次補抓完成後，healthy symbols零Fubon quote、MIS、Yahoo generic價格查詢；未就緒／啟動／重連／真故障只走最多40-code fair cursor snapshot，每檔最少60秒一次，失敗也記冷卻、無積壓重試；初始化按本輪attempt記錄，即使ACK在首次十秒round前已ready仍需一次bounded snapshot，recovery identity必含SSE generation/provider epoch，初始未就緒identity不代表後續epoch已初始化；generic MIS/Yahoo只限同輪selected snapshot codes，不擴張到其餘codes。push停用保留原十秒價格鏈。冷卻用monotonic，移出scope清除狀態；不因成交安靜啟動補抓。
 - [ ] 五檔不新增不存在的books REST、不為五檔另查Fubon quote。健康push未取quote時，同輪選取最多40檔仍交給既有獨立bounded Yahoo五檔worker（8-code fair cursor、最多16 probes／最多4 concurrent probes／二秒probe／九秒round預算，並非每檔十秒）；補抓若有有效完整Fubon book仍優先；該輪normalized Fubon envelope DB失敗則兩book worker均不啟動。沿用完整snapshot、DB atomic source/time/revision comparator、Redis revision驗證、pure-read GET；不跨provider拼欄位、不將五檔當權威價格。此條明確取代 Requirements 108／114／115 對「同輪必須先執行Fubon quote才可Yahoo book」的trigger限制，僅限此新push模式，其他資料來源限制不變。
 - [ ] 更新排程catalog說明為成交推播主來源、60秒受控價格補抓、獨立bounded五檔；不改9090契約／SRPP／broker write。新增測試覆蓋DB失敗/commit順序/Redis失敗canonical repair、strict newer、health ACK/heartbeat/timeout/scope/EOF、healthy零價格查詢、bounded snapshot與獨立book fallback。重建recreate受影響服務並唯讀驗收；非交易日不得注入真DB/Redis或偽造盤中事件，盤中live驗收保留未執行。
+
+### Requirement 197／Task 506：全頁共享即時行情 SSE
+
+**User Story：** 作為使用者，我要所有顯示即時行情的網頁與共用分析視窗，在 Redis 發布 price-update 時即時更新，無須手動重整。
+
+**Acceptance Criteria：**
+
+- [ ] API client集中建立共享訂閱；同一 SPA 共用一條已登入的 `/api/market-data/prices/stream` SSE；Dashboard、TradingRadar、WatchStock、SnapshotForm 與所有來源頁開啟的 StockAnalysisDialog 訂閱同一服務。最後使用者離開即清除連線與timer；隱藏分頁暫停讀取與回復可見補讀。EventSource 自動重連時補抓 pure-read BFF 最新行情；永久 CLOSED 不無限重建，401不重試風暴。
+- [ ] 事件及HTTP回應需有market/code/date/status與更新時間檢查，舊事件不能倒退較新行情、昨日LIVE不能覆蓋今天；首屏HTTP晚到不得覆蓋已收SSE。CLOSE_PENDING/VERIFIED_CLOSE沿既有官方收盤保護；unknown/null不轉零。LIVE完整報價tuple允許明確存在的changePercent與priceChange為null（來源缺比較基準），仍更新正數price並原子清空比較欄，不保留舊漲跌、不推算或轉零；缺少比較欄或NaN拒絕。此為Requirement197對既有Requirement148 radar報價比較欄有限更新規則的具名修訂，策略凍結邊界不變。
+- [ ] 總覽沿既有snapshot-date gating更新報價並bounded合併刷新BFF即時估值；雷達個股及0000大盤只改具名price/changePercent/source/status/time/tradingDate，不重算或刷新策略、指標、score、regime、理由、歷史generatedAt。重連純行情補讀不得呼叫可能persist雷達snapshot的完整雷達讀取。
+- [ ] 觀察清單即時更新price/priceChange/changePercent及有權威事件值的OHLC/volume/source/status/time/date；警示條件、觸發snapshot及技術指標維持原資料。快照表單只對市場當日current/new模式更新具名行情，沿withoutDirtyChange保護手工欄位與dirty狀態；歷史日期不受live覆蓋。事件補讀不得呼叫會backfill/refresh/vendor I/O的prices或歷史接口；使用既有pure-read realtime。
+- [ ] 共用分析視窗只在開啟且符合標的時響應。當日分時以事件後至少300ms、最多每秒一次、不重疊且保留最後pending的canonical session純GET完整替換，避免PUBLISH早於ticks落地與自行造volume/comparison tuple。可在最後事件後再作一次bounded尾端補讀；generation擋下關窗/換股舊response。五檔僅在五檔tab開啟時用同樣coalesced、最少2秒間距純GET既有canonical book；price事件不冒充book資料、不拼不同來源。歷史K線、技術指標與凍結交易列不得因price事件重算或覆寫。
+- [ ] 允許在既有登入 intraday-ticks 鏈新增選填 readOnly=true（預設false，既有行為不變），一路透傳至 IntradaySessionQueryService，true時完全略過reference self-heal，仍讀既有reference cache並由同一business resolver產生完整session；事件刷新必帶true。允許WatchStock/TradingRadar各頁BFF新增登入pure-read realtime代理同一business價格cache API；不讀其他頁BFF、不觸發計算。只做這些具名內部契約，不新增行情provider/broker I/O、Redis/DB寫入或公開API；保持BFF/auth/nginx SSE無buffer及timeout。離線測試覆蓋共享、cleanup、重連、日期及亂序、HTTP/SSE競態、各頁實際handler、表單不dirty與歷史保護、dialog尾端補讀/換股/非重疊；Docker重建recreatefrontend及任何實改服務、唯讀smoke。非交易日不注入正式DB/Redis，盤中live驗收如實記未執行。

@@ -13041,3 +13041,15 @@ stock-status為獨立健康控制協定，不進DB/Redis、不公開：schemaVer
 十秒dispatcher在push-enabled模式先取有效radar set，再以兩個獨立fair cursors處理：book candidates最多40每輪、snapshot candidates最多40且每檔60秒冷卻。每個SSE generation/provider connection epoch的每檔首次受控補抓後，healthy symbols不走任何generic價格REST；其餘codes僅selected bounded snapshot走Fubon→MIS→Yahoo。價格snapshot與Yahoo book共享市場/radar授權，但book worker仍獨立single-flight/bounded budget。健康時必要五檔由現有Yahoo worker供給，snapshot有完整Fubon book則沿用Fubon primary；本輪Fubon envelope DB失敗則兩book worker皆不啟動；不新增WS books或虛構REST，不混合欄位。這取代原『必須有本輪Fubon quote才可book fallback』trigger，source/revision/read contract保持原樣。
 
 stream start/stop/EOF/config/session/scope expiry撤銷ready，所有cooldown以monotonic控制且先登記再外呼。停用push保留原十秒價格行為。排程頻率不變，catalog敘述同步。只有external-materials、fubon-broker與catalog所在bff服務需重建；非交易日runtime只驗證服務、部署身分、closed gates，不偽造行情。
+
+## Task 506：全頁共享即時行情
+
+以frontend純JS shared price stream集中管理同源已登入EventSource、subscriber生命週期、最後行情索引、onopen/visible catchup與bounded trailing refresh。各view只投影具名行情，HTTP初始資料完成後重放較新cache，避免首次載入競態。行情守門共用市場時區日期、wire finite number、status與來源時間，不將缺值推成零。
+
+Dashboard用既有pure-read realtime取服務端估值；Radar只patchstocks/market行情並純讀行情快照補漏，不呼叫getCurrent/refresh/evaluation。WatchStock沿tuple更新quote欄，alert/trigger不變。SnapshotForm沿readScope與withoutDirtyChange，只在市場當日更新行情，以realtime stockPrices補漏，不呼叫帶backfill的prices。StockAnalysisDialog可見當日圖與五檔tab訂閱，canonical session延遲300ms以上每秒最多一次且有尾端補讀，book最少2秒；非重疊、pending合併、generation隔離切股與關窗，不自行計算比較基準或volume。所有parent頁透過同一dialog生效。
+
+無schema/vendor/公開金融契約變更，所有讀取經各頁既有BFF及auth SSE。若Radar既有頁BFF沒有pure-read行情快照，可增加僅登入同頁realtime代理到既有business /api/market-data/prices，controller只委派服務，絕不觸發計算/寫入/provider。nginx SSE維持proxy_buffering off與足夠read timeout。
+
+事件與重連讀分時必使用既有登入 intraday-ticks 加readOnly=true；MarketDataController→HistoricalDataService→InternalPriceController→IntradaySessionQueryService透傳，預設false保留既有開窗bounded self-heal，true完全略過self-heal，只讀cache/reference/DB並同一resolver處理comparison tuple。共享EventSource建構在api/index.js之client層，其他模組不裸建。Watch/Radar pure-read realtime各走自己頁BFF，service委派同一business cache prices，事件不重算策略。US IXIC僅完成日無live producer，不拿其他symbol改寫。
+
+LIVE完整報價tuple允許明確存在的changePercent與priceChange為null（來源缺比較基準），仍更新正數price並原子清空比較欄，不保留舊漲跌、不推算或轉零；缺少比較欄或NaN拒絕。此為Requirement197對既有Requirement148 radar報價比較欄有限更新規則的具名修訂，策略凍結邊界不變。

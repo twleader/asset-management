@@ -391,8 +391,10 @@ public class InternalPriceController {
     public com.steven.assets.externalmaterials.service.IntradaySessionQueryService.IntradaySourceSession intradayTicks(
             @RequestParam String code,
             @RequestParam String market,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return intradaySessionQuery.query(code, market, date);
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(defaultValue = "false") boolean readOnly) {
+        return readOnly ? intradaySessionQuery.query(code, market, date, true)
+                : intradaySessionQuery.query(code, market, date);
     }
 
     /** 手動觸發 BOT 即期匯率抓取（同盤中 5 分鐘排程）。 */

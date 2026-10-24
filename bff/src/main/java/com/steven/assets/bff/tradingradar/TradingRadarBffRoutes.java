@@ -16,6 +16,11 @@ public class TradingRadarBffRoutes {
     @Bean
     public RouteLocator tradingRadarRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
+                .route("trading-radar-realtime", r -> r
+                        .order(-10)
+                        .path("/api/bff/trading-radar/realtime").and().method("GET")
+                        .filters(f -> f.setPath("/api/market-data/prices"))
+                        .uri(businessServicesUrl))
                 .route("trading-radar-route", r -> r
                         // List/stock are explicit browser contracts.  The same page-owned wildcard
                         // retains existing notification/export routes and forwards owner headers.
