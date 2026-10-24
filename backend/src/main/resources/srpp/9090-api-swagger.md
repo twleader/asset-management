@@ -8,7 +8,7 @@
 | --- | --- |
 | OpenAPI | `3.1.0` |
 | 契約版本 | `1.26.0` |
-| AI 流程觀測契約版本 | `1.3.0` |
+| AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
@@ -33672,6 +33672,155 @@ run immutable identity；server owner不能由producer指定；同source identit
 | `selectedOptionId` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$<br>minLength: 1<br>maxLength: 64 | 唯一採用候選的閉合識別字，必須存在於options且其完整參數與metadata逐欄等於實際toolCall。 |
 | `options` | 是 | `array of AiFlowChoiceOption` | 否 | minItems: 2<br>maxItems: 8<br>items: AiFlowChoiceOption<br>items 說明: 一個封閉的公開候選，沿用AiFlowChoiceOption完整限制。 | 兩至八個明示公開候選，optionId不得重複；collector不從工具目錄、後續呼叫或缺漏資料推測選項。 |
 
+### `AiFlowPublicDecisionOption`
+
+使用者明確公開的候選摘要；reason、refs及擬議工具輸入只供ADMIN按需明細，不代表工具已執行。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "使用者明確公開的候選摘要；reason、refs及擬議工具輸入只供ADMIN按需明細，不代表工具已執行。",
+  "required": [
+    "id",
+    "label",
+    "action",
+    "reason",
+    "evidenceRefs",
+    "toolCall"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "本公開決策內唯一的閉合識別字。",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+    },
+    "label": {
+      "type": "string",
+      "description": "沿既有public-safe限制的公開文字，以Unicode code point計數。",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "action": {
+      "type": "string",
+      "description": "任意public-safe公開動作描述，不是業務狀態enum。",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "reason": {
+      "type": "string",
+      "description": "明確公開的簡短理由，最佳努力憑證遮蔽後1至500 code point；私人思考標記拒絕、超長拒絕不截斷。",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "description": "最多三筆既有閉合Evidence公開依據。",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/components/schemas/AiFlowEvidence",
+        "description": "閉合公開依據。"
+      }
+    },
+    "toolCall": {
+      "description": "擬議工具輸入或null，innerNames必須空陣列；不是實際toolCall。沿Task501參數與截斷metadata限制。",
+      "oneOf": [
+        {
+          "$ref": "#/components/schemas/AiFlowToolCall",
+          "description": "完整擬議工具公開輸入。"
+        },
+        {
+          "type": "null",
+          "description": "未擬議工具輸入。"
+        }
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `id` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$<br>minLength: 1<br>maxLength: 64 | 本公開決策內唯一的閉合識別字。 |
+| `label` | 是 | `string` | 否 | minLength: 1<br>maxLength: 100 | 沿既有public-safe限制的公開文字，以Unicode code point計數。 |
+| `action` | 是 | `string` | 否 | minLength: 1<br>maxLength: 100 | 任意public-safe公開動作描述，不是業務狀態enum。 |
+| `reason` | 是 | `string` | 否 | minLength: 1<br>maxLength: 500 | 明確公開的簡短理由，最佳努力憑證遮蔽後1至500 code point；私人思考標記拒絕、超長拒絕不截斷。 |
+| `evidenceRefs` | 是 | `array of AiFlowEvidence` | 否 | maxItems: 3<br>items: AiFlowEvidence<br>items 說明: 閉合公開依據。 | 最多三筆既有閉合Evidence公開依據。 |
+| `toolCall` | 是 | `schema` | 否 |  | 擬議工具輸入或null，innerNames必須空陣列；不是實際toolCall。沿Task501參數與截斷metadata限制。 |
+
+### `AiFlowPublicDecision`
+
+版本化LLM公開決策摘要；只允許OBSERVATION/UNKNOWN及collector grant，Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。所有候選完整保存，參數合計最多32768 code point、整物件JSON UTF8最多196608 bytes；不是私人思考或執行證明。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "版本化LLM公開決策摘要；只允許OBSERVATION/UNKNOWN及collector grant，Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。所有候選完整保存，參數合計最多32768 code point、整物件JSON UTF8最多196608 bytes；不是私人思考或執行證明。",
+  "required": [
+    "source",
+    "decisionId",
+    "topic",
+    "options",
+    "selectedOptionId"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "LLM_PUBLIC_SUMMARY_V1",
+      "description": "LLM_PUBLIC_SUMMARY_V1表示公開摘要唯一來源版本。"
+    },
+    "decisionId": {
+      "type": "string",
+      "description": "本公開決策內唯一的閉合識別字。",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+    },
+    "topic": {
+      "type": "string",
+      "description": "沿既有public-safe限制的公開文字，以Unicode code point計數。",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "options": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "全部公開候選，id唯一；不得因上限刪除候選，超額整筆拒絕。",
+      "items": {
+        "$ref": "#/components/schemas/AiFlowPublicDecisionOption",
+        "description": "一筆完整候選。"
+      }
+    },
+    "selectedOptionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "明確選擇的現有option id或null；null表示未選擇。",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `source` | 是 | `string` | 否 | enum: `LLM_PUBLIC_SUMMARY_V1` | LLM_PUBLIC_SUMMARY_V1表示公開摘要唯一來源版本。 |
+| `decisionId` | 是 | `string` | 否 | pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$<br>minLength: 1<br>maxLength: 64 | 本公開決策內唯一的閉合識別字。 |
+| `topic` | 是 | `string` | 否 | minLength: 1<br>maxLength: 100 | 沿既有public-safe限制的公開文字，以Unicode code point計數。 |
+| `options` | 是 | `array of AiFlowPublicDecisionOption` | 否 | minItems: 1<br>maxItems: 32<br>items: AiFlowPublicDecisionOption<br>items 說明: 一筆完整候選。 | 全部公開候選，id唯一；不得因上限刪除候選，超額整筆拒絕。 |
+| `selectedOptionId` | 是 | `string | null` | 是 | pattern: ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$<br>minLength: 1<br>maxLength: 64 | 明確選擇的現有option id或null；null表示未選擇。 |
+
 ### `AiFlowEvent`
 
 不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall／choiceSet外，nullable key均必填。
@@ -33767,6 +33916,10 @@ run immutable identity；server owner不能由producer指定；同source identit
       "$ref": "#/components/schemas/AiFlowChoiceSet",
       "description": "選填的公開候選集合；只限同一Codex CODEX_ROLLOUT START toolCall與collector grant，actual sourceTruncated、明確null或任一不一致皆非法。"
     },
+    "publicDecision": {
+      "$ref": "#/components/schemas/AiFlowPublicDecision",
+      "description": "選填公開決策摘要；缺省合法、null非法，只允許OBSERVATION及UNKNOWN。"
+    },
     "reasonCode": {
       "type": [
         "string",
@@ -33848,6 +34001,7 @@ run immutable identity；server owner不能由producer指定；同source identit
 | `operation` | 是 | `AiFlowOperation` | 否 |  | 公開操作協定。 |
 | `toolCall` | 否 | `AiFlowToolCall` | 否 |  | 選填的公開工具START呼叫資料；缺省表示無此資訊，明確null與非START事件皆非法。 |
 | `choiceSet` | 否 | `AiFlowChoiceSet` | 否 |  | 選填的公開候選集合；只限同一Codex CODEX_ROLLOUT START toolCall與collector grant，actual sourceTruncated、明確null或任一不一致皆非法。 |
+| `publicDecision` | 否 | `AiFlowPublicDecision` | 否 |  | 選填公開決策摘要；缺省合法、null非法，只允許OBSERVATION及UNKNOWN。 |
 | `reasonCode` | 是 | `string | null` | 是 | maxLength: 100 | 公開停止/失敗或完整度原因碼；未知為null。 |
 | `attemptNo` | 是 | `integer` | 否 | minimum: 1 | 同一step重試的正整數，不覆写上一attempt。 |
 | `parentEventIds` | 是 | `array of string (uuid)` | 否 | maxItems: 16<br>uniqueItems: true<br>items: string (uuid)<br>items 說明: 每一筆為同run的穩定事件UUID。 | 同run已保存或本batch存在的父事件；禁止self/cycle。 |

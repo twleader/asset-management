@@ -46,6 +46,10 @@ public final class AiFlowCredentialService {
         if (hasChoiceSet && (!grant.collector() || !"Codex".equals(consumer) || !"CODEX_ROLLOUT".equals(sourceKind)))
             throw new AiFlowProblem("FORBIDDEN");
     }
+    public void authorizePublicDecision(Grant grant, String consumer, String sourceKind, boolean present) {
+        if (present && (!grant.collector() || !("Codex".equals(consumer) && "CODEX_ROLLOUT".equals(sourceKind)
+                || "Claude".equals(consumer) && "CLAUDE_ARTIFACT".equals(sourceKind)))) throw new AiFlowProblem("FORBIDDEN");
+    }
     private static boolean same(String a, String b) {
         return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
     }

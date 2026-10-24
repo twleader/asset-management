@@ -30,4 +30,9 @@ public final class AiFlowController {
                                                       @RequestParam MultiValueMap<String, String> query) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.choiceSet(runId, eventId, query));
     }
+    @GetMapping("/{runId}/nodes/{eventId}/public-decision")
+    public ResponseEntity<PublicDecisionDetail> publicDecision(@PathVariable String runId, @PathVariable String eventId,
+                                                      @RequestParam MultiValueMap<String, String> query) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.publicDecision(runId, eventId, query));
+    }
 }

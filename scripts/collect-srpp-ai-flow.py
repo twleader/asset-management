@@ -65,6 +65,18 @@ PUBLIC_CHOICE_SOURCE = "CODEX_PUBLIC_TRACE_EXPORTER"
 CHOICE_OPTION_MIN = 2
 CHOICE_OPTION_MAX = 8
 CHOICE_PARAMETER_TOTAL_LIMIT = 32768
+# Task 508: only explicit public summaries; never a private-reasoning source.
+PUBLIC_DECISION_SOURCE = "LLM_PUBLIC_SUMMARY_V1"
+PUBLIC_DECISION_OPEN = "<<<SRPP_PUBLIC_DECISION_V1>>>"
+PUBLIC_DECISION_CLOSE = "<<<END_SRPP_PUBLIC_DECISION_V1>>>"
+PUBLIC_DECISION_KEYS = {"source", "decisionId", "topic", "options", "selectedOptionId"}
+PUBLIC_DECISION_RAW_OPTION_KEYS = {"id", "label", "action", "reason", "evidenceRefs", "tool"}
+PUBLIC_DECISION_OPTION_KEYS = {"id", "label", "action", "reason", "evidenceRefs", "toolCall"}
+PUBLIC_DECISION_RAW_LIMIT = 131072
+PUBLIC_DECISION_WIRE_LIMIT = 196608
+PUBLIC_DECISION_OPTION_LIMIT = 32
+PUBLIC_DECISION_ARTIFACT_LIMIT = 128
+PUBLIC_DECISION_ARTIFACT_BYTES = 3145728
 MAX_EVENT_SEQUENCE = 2147483647
 TERMINAL_FAILURE_CODEX_INFO = "server_overloaded"
 TERMINAL_FAILURE_REASON = "MODEL_SERVICE_OVERLOADED"
@@ -692,7 +704,7 @@ def run_metadata(consumer: str, day: str, slot: str, source: str, identity: str,
 
 
 def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automation: str,
-                      day: str, slot: str) -> None:
+                      day: str, slot: str, note_error=None) -> None:
     payload = row.get("payload")
     if not isinstance(payload, dict):
         return
@@ -802,6 +814,26 @@ def parse_source_line(row: dict, line: int, state: dict, thread_id: str, automat
                          "AI 提供最終回覆", "已觀測到公開最終回覆；不儲存報告全文或私人推理。",
                          refs=[{"role": "APP_TERMINAL", "id": "final_answer", "hash": None}], attempt=attempt))
         elif phase == "commentary":
+            try:
+                decision = public_decision_commentary(payload)
+                if decision is not None:
+                    seen = turn.setdefault("publicDecisions", {})
+                    decision_id = decision["decisionId"]
+                    fingerprint = hashlib.sha256(canonical(decision)).hexdigest()
+                    if decision_id in seen:
+                        if seen[decision_id] != fingerprint:
+                            raise ObservationError("PUBLIC_DECISION_ID_CONFLICT")
+                        return
+                    item = event(source_id, f"line:{line}:public-decision:{decision_id}", line,
+                                 "decision-" + decision_id, "OBSERVATION", timestamp,
+                                 "公開決策摘要（自述，未驗證執行）", "已記錄明確公開的候選與選擇；不保證涵蓋所有內部考量，亦不證明工具已執行。", attempt=attempt)
+                    item["publicDecision"] = decision
+                    append_event(turn, item)
+                    seen[decision_id] = fingerprint
+                    return
+            except ObservationError as error:
+                if note_error is not None:
+                    note_error(str(error))
             append_event(turn, event(source_id, f"line:{line}:commentary", line, "progress-" + str(line), "OBSERVATION",
                          timestamp, "AI 提供執行進度", "已觀測到公開進度訊息，未收錄金融資料或私人推理。", attempt=attempt))
 
@@ -1206,6 +1238,143 @@ def public_choice_set(payload: dict, actual_tool_call: dict | None) -> dict | No
         return None
 
 
+def _public_decision_private_marker(value: Any) -> bool:
+    if isinstance(value, str):
+        return PRIVATE_CHOICE_MARKER.search(value) is not None
+    if isinstance(value, dict):
+        return any(_public_decision_private_marker(key) or _public_decision_private_marker(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_public_decision_private_marker(item) for item in value)
+    return False
+
+
+def _public_decision_text(value: Any) -> bool:
+    return _valid_public_choice_text(value) and bool(value.strip())
+
+
+def _public_decision_refs(refs: Any) -> bool:
+    return (isinstance(refs, list) and len(refs) <= 3 and all(
+        isinstance(ref, dict) and set(ref) == {"role", "id", "hash"}
+        and isinstance(ref["role"], str) and ref["role"] in ROLES
+        and isinstance(ref["id"], str) and OPAQUE.fullmatch(ref["id"]) is not None
+        and (ref["hash"] is None or isinstance(ref["hash"], str) and re.fullmatch(r"[0-9a-f]{64}", ref["hash"]) is not None)
+        for ref in refs))
+
+
+def validate_public_decision(value: Any, event_kind="OBSERVATION", status="UNKNOWN") -> bool:
+    """Closed final wire, shared by public marker/artifact ingress and local spool."""
+    try:
+        if (event_kind != "OBSERVATION" or status != "UNKNOWN" or not isinstance(value, dict)
+                or set(value) != PUBLIC_DECISION_KEYS or value["source"] != PUBLIC_DECISION_SOURCE
+                or not isinstance(value["decisionId"], str) or TOOL_NAME.fullmatch(value["decisionId"]) is None
+                or not _public_decision_text(value["topic"])):
+            return False
+        if _public_decision_private_marker(value):
+            return False
+        options = value["options"]
+        if not isinstance(options, list) or not 1 <= len(options) <= PUBLIC_DECISION_OPTION_LIMIT:
+            return False
+        ids, total = set(), 0
+        for option in options:
+            if (not isinstance(option, dict) or set(option) != PUBLIC_DECISION_OPTION_KEYS
+                    or not isinstance(option["id"], str) or TOOL_NAME.fullmatch(option["id"]) is None
+                    or option["id"] in ids or not _public_decision_text(option["label"])
+                    or not _public_decision_text(option["action"]) or not _public_decision_refs(option["evidenceRefs"])):
+                return False
+            ids.add(option["id"])
+            reason = option["reason"]
+            if (not isinstance(reason, str) or not reason.strip() or not 1 <= _code_point_count(reason) <= 500
+                    or _has_invalid_parameter_character(reason) or PRIVATE_CHOICE_MARKER.search(reason)):
+                return False
+            tool = option["toolCall"]
+            if tool is not None:
+                if (not validate_tool_call(tool, "START") or tool["innerNames"] != []
+                        or PRIVATE_CHOICE_MARKER.search(tool["parameters"])):
+                    return False
+                total += _code_point_count(tool["parameters"])
+                if total > CHOICE_PARAMETER_TOTAL_LIMIT:
+                    return False
+        selected = value["selectedOptionId"]
+        if selected is not None and (not isinstance(selected, str) or selected not in ids):
+            return False
+        return len(canonical(value)) <= PUBLIC_DECISION_WIRE_LIMIT
+    except (KeyError, TypeError, ValueError, UnicodeError, RecursionError):
+        return False
+
+
+def standardize_public_decision(raw: Any) -> dict:
+    """Explicit public-only raw input; reject whole records rather than drop options/reasons."""
+    try:
+        if not isinstance(raw, dict) or set(raw) != PUBLIC_DECISION_KEYS:
+            raise ObservationError("PUBLIC_DECISION_INVALID")
+        source_size = len(json.dumps(raw, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8", errors="surrogatepass"))
+        if source_size > PUBLIC_DECISION_RAW_LIMIT:
+            raise ObservationError("PUBLIC_DECISION_TOO_LARGE")
+        if _public_decision_private_marker(raw):
+            raise ObservationError("PUBLIC_DECISION_PRIVATE_MARKER")
+        options = raw["options"]
+        if not isinstance(options, list) or not 1 <= len(options) <= PUBLIC_DECISION_OPTION_LIMIT:
+            raise ObservationError("PUBLIC_DECISION_OPTION_LIMIT")
+        result_options = []
+        for option in options:
+            if not isinstance(option, dict) or set(option) != PUBLIC_DECISION_RAW_OPTION_KEYS:
+                raise ObservationError("PUBLIC_DECISION_INVALID")
+            reason = option["reason"]
+            if not isinstance(reason, str):
+                raise ObservationError("PUBLIC_DECISION_INVALID")
+            if PRIVATE_CHOICE_MARKER.search(reason):
+                raise ObservationError("PUBLIC_DECISION_PRIVATE_MARKER")
+            redacted, _ = redact_credentials(reason)
+            reason = clean_parameter_text(redacted)
+            tool = option["tool"]
+            if tool is not None:
+                if (not isinstance(tool, dict) or set(tool) != {"name", "input"}
+                        or not isinstance(tool["name"], str) or TOOL_NAME.fullmatch(tool["name"]) is None
+                        or not isinstance(tool["input"], str)):
+                    raise ObservationError("PUBLIC_DECISION_INVALID")
+                if PRIVATE_CHOICE_MARKER.search(tool["input"]):
+                    raise ObservationError("PUBLIC_DECISION_PRIVATE_MARKER")
+                parameters = standardize_tool_parameters(tool["input"])
+                if parameters is None:
+                    raise ObservationError("PUBLIC_DECISION_INVALID")
+                tool = {"name": tool["name"], "innerNames": [], **parameters}
+            result_options.append({"id": option["id"], "label": option["label"], "action": option["action"],
+                                   "reason": reason, "evidenceRefs": option["evidenceRefs"], "toolCall": tool})
+        result = {"source": raw["source"], "decisionId": raw["decisionId"], "topic": raw["topic"],
+                  "options": result_options, "selectedOptionId": raw["selectedOptionId"]}
+        if not validate_public_decision(result):
+            raise ObservationError("PUBLIC_DECISION_INVALID")
+        return result
+    except ObservationError:
+        raise
+    except (KeyError, TypeError, ValueError, UnicodeError, RecursionError):
+        raise ObservationError("PUBLIC_DECISION_INVALID") from None
+
+
+def public_decision_commentary(payload: dict) -> dict | None:
+    """One marker-only public message. Never parse prose, tool output, or other channels."""
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return None
+    texts = [item.get("text") for item in content if isinstance(item, dict) and item.get("type") == "output_text" and isinstance(item.get("text"), str)]
+    if not any(PUBLIC_DECISION_OPEN in text or PUBLIC_DECISION_CLOSE in text for text in texts):
+        return None
+    if len(content) != 1 or len(texts) != 1:
+        raise ObservationError("PUBLIC_DECISION_MARKER_INVALID")
+    text = texts[0].strip()
+    if len(text.encode("utf-8", errors="surrogatepass")) > PUBLIC_DECISION_RAW_LIMIT:
+        raise ObservationError("PUBLIC_DECISION_TOO_LARGE")
+    if not text.startswith(PUBLIC_DECISION_OPEN + "\n") or not text.endswith("\n" + PUBLIC_DECISION_CLOSE):
+        raise ObservationError("PUBLIC_DECISION_MARKER_INVALID")
+    body = text[len(PUBLIC_DECISION_OPEN) + 1:-len(PUBLIC_DECISION_CLOSE) - 1]
+    try:
+        return standardize_public_decision(strict_json(body))
+    except ObservationError as error:
+        if str(error).startswith("PUBLIC_DECISION_"):
+            raise
+        raise ObservationError("PUBLIC_DECISION_JSON_INVALID") from None
+
+
 def validate_envelope(value: dict, today: dt.date):
     """CLI 輸入採閉合協定；禁止借 spool 搬運任意 JSON / 私人文字。"""
     def fail():
@@ -1242,9 +1411,8 @@ def validate_envelope(value: dict, today: dt.date):
         fail()
     ids = set()
     for item in events:
-        allowed_event_keys = (EVENT_KEYS, EVENT_KEYS | {"toolCall"}, EVENT_KEYS | {"choiceSet"},
-                              EVENT_KEYS | {"toolCall", "choiceSet"})
-        if not isinstance(item, dict) or set(item) not in allowed_event_keys:
+        if (not isinstance(item, dict) or not EVENT_KEYS <= set(item)
+                or not set(item) <= EVENT_KEYS | {"toolCall", "choiceSet", "publicDecision"}):
             fail()
         try:
             uuid.UUID(item["eventId"])
@@ -1259,6 +1427,10 @@ def validate_envelope(value: dict, today: dt.date):
             fail()
         if "toolCall" in item and not validate_tool_call(item["toolCall"], item["eventKind"]):
             fail()
+        if "publicDecision" in item:
+            if (run["sourceKind"] not in {"CODEX_ROLLOUT", "CLAUDE_ARTIFACT"}
+                    or not validate_public_decision(item["publicDecision"], item["eventKind"], item["status"])):
+                fail()
         if "choiceSet" in item:
             # local collector represents its own collector grant; other producer grants cannot enter this spool.
             if run["consumer"] != "Codex" or run["sourceKind"] != "CODEX_ROLLOUT" or "toolCall" not in item \
@@ -1790,7 +1962,7 @@ class Collector:
                     try:
                         row = strict_json(raw)
                         if isinstance(row, dict):
-                            parse_source_line(row, state["line"], state, record["thread"], record["automation"], record["day"], record["slot"])
+                            parse_source_line(row, state["line"], state, record["thread"], record["automation"], record["day"], record["slot"], self.note_error)
                         else:
                             state["malformed"] = True
                     except (ObservationError, TypeError, ValueError, AttributeError):
@@ -1957,6 +2129,32 @@ class Collector:
                             events.append(event(identity, "timing:" + thash, 1, "artifact-timing", "OBSERVATION", None,
                                                 "同一執行的自報時間證據", "明確身份相同的時間文件；不把自報時間當作公開工具耗時。",
                                                 refs=[{"role": "TIMING", "id": "timing-" + thash[:32], "hash": thash}]))
+                    if "publicDecisions" in value:
+                        raw_decisions = value["publicDecisions"]
+                        if explicit_task != task or iso(value.get("finished_at")) is None:
+                            self.note_error("PUBLIC_DECISION_ARTIFACT_NOT_FINAL_OR_IDENTIFIED")
+                        elif (not isinstance(raw_decisions, list) or len(raw_decisions) > PUBLIC_DECISION_ARTIFACT_LIMIT
+                              or len(canonical(raw_decisions)) > PUBLIC_DECISION_ARTIFACT_BYTES):
+                            self.note_error("PUBLIC_DECISION_ARTIFACT_LIMIT")
+                        else:
+                            seen_decisions = {}
+                            for index, raw_decision in enumerate(raw_decisions):
+                                try:
+                                    decision = standardize_public_decision(raw_decision)
+                                    decision_id = decision["decisionId"]
+                                    fingerprint = hashlib.sha256(canonical(decision)).hexdigest()
+                                    if decision_id in seen_decisions:
+                                        if seen_decisions[decision_id] != fingerprint:
+                                            raise ObservationError("PUBLIC_DECISION_ID_CONFLICT")
+                                        continue
+                                    decision_event = event(identity, f"public-decision:{index}:{decision_id}", index + 2,
+                                                           "decision-" + decision_id, "OBSERVATION", value["finished_at"],
+                                                           "公開決策摘要（自述，未驗證執行）", "已記錄明確公開的候選與選擇；不保證涵蓋所有內部考量，亦不證明工具已執行。")
+                                    decision_event["publicDecision"] = decision
+                                    events.append(decision_event)
+                                    seen_decisions[decision_id] = fingerprint
+                                except ObservationError as error:
+                                    self.note_error(str(error))
                     events.append(coverage(identity, len(raw), len(raw), digest, reason))
                     result.append({"schemaVersion": 1, "run": run, "events": events})
                 except (OSError, ObservationError, TypeError, ValueError):

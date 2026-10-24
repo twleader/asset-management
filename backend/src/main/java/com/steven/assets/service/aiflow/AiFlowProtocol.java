@@ -34,7 +34,7 @@ public final class AiFlowProtocol {
             "sourceKind", "sourceRunId", "automationId", "startedAt", "workflowVersion");
     private static final Set<String> EVENT_FIELDS = Set.of("eventId", "sequence", "stepId", "eventKind",
             "status", "occurredAt", "title", "summary", "operation", "reasonCode", "attemptNo",
-            "parentEventIds", "relation", "evidenceRefs", "reportedOutcome", "toolCall", "choiceSet");
+            "parentEventIds", "relation", "evidenceRefs", "reportedOutcome", "toolCall", "choiceSet", "publicDecision");
     private static final Set<String> OUTCOMES = Set.of("COMPLETED", "PARTIAL", "INCOMPLETE", "STOPPED_L0",
             "STOPPED_CONTRACT", "SKIPPED_NON_TRADING_DAY");
     private static final Pattern SENSITIVE = Pattern.compile("(?is)(authorization|bearer\\s|token\\s*[:=]|password|secret|api[_-]?key|private[ \\t\\r\\n\\f\\x0B_-]*reasoning|chain[ \\t\\r\\n\\f\\x0B._-]*of[ \\t\\r\\n\\f\\x0B._-]*thought|\\b(?:curl|wget|printenv|export)\\s|\\$\\(|```|<[^>]+>|[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}|[A-Za-z]:\\\\|/Users/|/home/|\\b(?:NT\\$|USD|TWD)\\s*[0-9]|(?:price|amount|balance|holdings|account|成本|金額|持股|庫存|股數|張數|帳號|帳戶)\\s*[:=：]?\\s*[0-9]|[0-9]{6,})");
@@ -60,7 +60,7 @@ public final class AiFlowProtocol {
             Set<String> eventIds = new HashSet<>();
             List<Event> typed = new ArrayList<>(); List<String> payloads = new ArrayList<>(); List<String> hashes = new ArrayList<>();
             for (JsonNode node : events) {
-                exact(node, EVENT_FIELDS, Set.of("reportedOutcome", "toolCall", "choiceSet"));
+                exact(node, EVENT_FIELDS, Set.of("reportedOutcome", "toolCall", "choiceSet", "publicDecision"));
                 if (!node.has("reportedOutcome")) ((ObjectNode) node).putNull("reportedOutcome");
                 String id = text(node, "eventId", 36); uuid(id); if (!eventIds.add(id)) invalid();
                 integer(node.get("sequence"), 0, Integer.MAX_VALUE);
@@ -96,6 +96,7 @@ public final class AiFlowProtocol {
                 nullableChoice(node, "reportedOutcome", OUTCOMES);
                 if (node.has("toolCall")) validateToolCall(node.get("toolCall"), eventKind);
                 if (node.has("choiceSet")) validateChoiceSet(node.get("choiceSet"), eventKind, node.get("toolCall"));
+                if (node.has("publicDecision")) validatePublicDecision(node.get("publicDecision"), eventKind, node.get("status").asText());
                 Event event = JSON.treeToValue(node, Event.class);
                 Assessment assessment = assessment(event);
                 if (assessment != null && !Set.of("CODEX_ROLLOUT", "CLAUDE_ARTIFACT").contains(source)) invalid();
@@ -147,6 +148,7 @@ public final class AiFlowProtocol {
         try {
             Event event = JSON.treeToValue(SrppJcs.parseStrict(canonical), Event.class);
             validateStoredChoiceSet(event);
+            validateStoredPublicDecision(event, SrppJcs.parseStrict(canonical));
             return event;
         }
         catch (Exception ignored) { throw new AiFlowProblem("UPSTREAM_INVALID"); }
@@ -167,6 +169,63 @@ public final class AiFlowProtocol {
     public static ChoiceSet choiceSet(Event event) {
         try { validateStoredChoiceSet(event); return event.choiceSet(); }
         catch (AiFlowProblem invalid) { throw new AiFlowProblem("UPSTREAM_INVALID"); }
+    }
+    private static void validateStoredPublicDecision(Event event, JsonNode encoded) {
+        if (encoded.has("publicDecision")) validatePublicDecision(encoded.get("publicDecision"), event.eventKind(), event.status());
+    }
+    public static PublicDecision publicDecision(Event event) {
+        try {
+            if (event.publicDecision() != null) validatePublicDecision(JSON.valueToTree(event.publicDecision()), event.eventKind(), event.status());
+            return event.publicDecision();
+        } catch (RuntimeException invalid) { throw new AiFlowProblem("UPSTREAM_INVALID"); }
+    }
+    public static PublicDecisionSummary publicDecisionSummary(Event event) {
+        PublicDecision decision = publicDecision(event);
+        if (decision == null) return null;
+        return new PublicDecisionSummary(decision.decisionId(), decision.topic(), decision.selectedOptionId(),
+                decision.options().stream().map(o -> new PublicDecisionOptionSummary(o.id(), o.label(), o.action(),
+                        o.id().equals(decision.selectedOptionId()))).toList());
+    }
+    private static void rejectPrivateDecisionStrings(JsonNode node) {
+        if (node.isTextual() && PRIVATE_CHOICE_MARKER.matcher(node.asText()).find()) invalid();
+        if (node.isContainerNode()) node.forEach(AiFlowProtocol::rejectPrivateDecisionStrings);
+    }
+    private static boolean decisionBlank(String value) {
+        return value.codePoints().allMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c) || c == 0x85);
+    }
+    private static void validatePublicDecision(JsonNode value, String kind, String status) {
+        if (value != null) rejectPrivateDecisionStrings(value);
+        if (!"OBSERVATION".equals(kind) || !"UNKNOWN".equals(status)) invalid();
+        exact(value, Set.of("source", "decisionId", "topic", "options", "selectedOptionId"), Set.of());
+        choice(value, "source", Set.of("LLM_PUBLIC_SUMMARY_V1")); toolName(value.get("decisionId")); choiceText(value.get("topic")); if (decisionBlank(value.get("topic").asText())) invalid();
+        if (SrppJcs.canonicalize(value).getBytes(StandardCharsets.UTF_8).length > 196608) invalid();
+        JsonNode options = value.get("options");
+        if (!options.isArray() || options.isEmpty() || options.size() > 32) invalid();
+        Set<String> ids = new HashSet<>(); int total = 0;
+        for (JsonNode option : options) {
+            exact(option, Set.of("id", "label", "action", "reason", "evidenceRefs", "toolCall"), Set.of());
+            if (!ids.add(toolName(option.get("id")))) invalid();
+            choiceText(option.get("label")); choiceText(option.get("action"));
+            if (decisionBlank(option.get("label").asText()) || decisionBlank(option.get("action").asText())) invalid();
+            String reason = parameterText(option.get("reason"));
+            if (decisionBlank(reason) || reason.codePointCount(0, reason.length()) > 500 || PRIVATE_CHOICE_MARKER.matcher(reason).find()) invalid();
+            JsonNode refs = option.get("evidenceRefs");
+            if (!refs.isArray() || refs.size() > 3) invalid();
+            for (JsonNode ref : refs) {
+                exact(ref, Set.of("role", "id", "hash"), Set.of());
+                choice(ref, "role", Set.of("CALENDAR", "POLICY", "API_RECEIPT", "VALIDATOR", "RESULT", "TIMING", "DRAFT_RECEIPT", "MIME_RECEIPT", "APP_TERMINAL", "TRACE_COVERAGE"));
+                opaque(text(ref, "id", 200)); String hash = nullableText(ref, "hash", 64, false);
+                if (hash != null && !hash.matches("[0-9a-f]{64}")) invalid();
+            }
+            JsonNode call = option.get("toolCall");
+            if (!call.isNull()) {
+                validateToolCall(call, "START");
+                if (!call.get("innerNames").isEmpty() || PRIVATE_CHOICE_MARKER.matcher(call.get("parameters").asText()).find()) invalid();
+                total += call.get("parameters").asText().codePointCount(0, call.get("parameters").asText().length());
+                if (total > 32768) invalid();
+            }
+        }
+        if (!value.get("selectedOptionId").isNull() && !ids.contains(toolName(value.get("selectedOptionId")))) invalid();
     }
     public static Assessment assessment(Event event) {
         List<Evidence> refs = event.evidenceRefs().stream().filter(r -> "TRACE_COVERAGE".equals(r.role())).toList();

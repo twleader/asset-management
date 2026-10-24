@@ -81,7 +81,7 @@ public final class AiFlowProjection {
                     e.relation(), e.evidenceRefs(), e.reportedOutcome(), statusLabel(e.status()), e.title(),
                     category, timeLabel(e.occurredAt()), pair == null ? null : pair.millis(),
                     (e.attemptNo() - 1) % 4 * 220, i * 100, color(e.status()), null,
-                    AiFlowProtocol.choiceSetSummary(e)));
+                    AiFlowProtocol.choiceSetSummary(e), AiFlowProtocol.publicDecisionSummary(e)));
             for (String parent : e.parentEventIds()) edges.add(new Edge(parent + ":" + e.eventId(), parent,
                     e.eventId(), e.relation(), relationLabel(e.relation()), "BRANCH".equals(e.relation()) ? .15 : 0));
         }

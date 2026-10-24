@@ -1205,7 +1205,7 @@ assert!(schemas.dig('SrppCaptureProblem', 'properties', 'code', 'enum').include?
 # Tasks 492／494／495／501：機器契約仍獨立解析 refs，Markdown 統一發布。
 observation = YAML.safe_load(File.read(File.join(ROOT, 'docs/openapi/ai-flow-observation-api.yaml')), permitted_classes: [], aliases: false)
 assert!(observation.fetch('openapi') == '3.1.0', '觀測契約使用 OpenAPI 3.1 的 JSON Schema 條件')
-assert!(observation.dig('info', 'version') == '1.3.0', 'Task504 觀測契約版本固定1.3.0')
+assert!(observation.dig('info', 'version') == '1.4.0', 'Task508 觀測契約版本固定1.4.0')
 assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測 paths 只能唯一exact route')
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
@@ -1234,6 +1234,12 @@ assert!(choice_set_schema.fetch('additionalProperties') == false && choice_set_s
 assert!(choice_set_schema.dig('properties', 'options', 'minItems') == 2 && choice_set_schema.dig('properties', 'options', 'maxItems') == 8, 'choiceSet候選數必須為2至8')
 assert!(choice_option_schema.fetch('additionalProperties') == false && choice_option_schema.fetch('required') == %w[optionId label toolName parameters parametersChars truncated redactedCount], 'choice option必須閉合且參數metadata完整')
 assert!(choice_option_schema.dig('properties', 'label', 'maxLength') == 100 && choice_option_schema.dig('properties', 'parameters', 'maxLength') == 16_384, 'choice option文字與參數上限必須明示')
+decision_schema = observation.dig('components', 'schemas', 'AiFlowPublicDecision')
+public_option = observation.dig('components', 'schemas', 'AiFlowPublicDecisionOption')
+assert!(event_schema.dig('properties', 'publicDecision', '$ref') == '#/components/schemas/AiFlowPublicDecision' && !event_schema.fetch('required').include?('publicDecision'), 'Task508 publicDecision選填不nullable')
+assert!(decision_schema.fetch('required') == %w[source decisionId topic options selectedOptionId] && decision_schema.dig('properties','source','const') == 'LLM_PUBLIC_SUMMARY_V1', '公開摘要閉合版本及五個必填欄位')
+assert!(decision_schema.dig('properties','options','minItems') == 1 && decision_schema.dig('properties','options','maxItems') == 32, '完整公開候選1至32筆')
+assert!(public_option.fetch('required') == %w[id label action reason evidenceRefs toolCall] && public_option.dig('properties','reason','maxLength') == 500 && public_option.dig('properties','evidenceRefs','maxItems') == 3, '公開候選理由、依據及擬議工具契約')
 example_tool_call = observer_op.dig('requestBody', 'content', 'application/json', 'example', 'events').find { |event| event['toolCall'] }
 assert!(example_tool_call && example_tool_call['eventKind'] == 'START' && example_tool_call.dig('toolCall', 'parameters') == '{"cmd":"date"}' && example_tool_call.dig('toolCall', 'parametersChars') == 14, '觀測request example必須提供無害的START toolCall')
 assert!(example_tool_call.dig('choiceSet', 'selectedOptionId') == 'current-date' && example_tool_call.dig('choiceSet', 'options').size == 2, '觀測request example必須提供無害的公開候選集合')

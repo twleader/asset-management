@@ -1,0 +1,2263 @@
+{
+  "schema": "AI_FLOW_PUBLIC_DECISION_TEST_V1",
+  "cases": [
+    {
+      "id": "selected-proposed-tool",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "nothing-selected",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": null
+      }
+    },
+    {
+      "id": "arbitrary-safe-action",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "公開使用者自訂動作",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "financial-reason-detail-only",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "評估金額 12000 元，僅為公開摘要。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-500-codepoints",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "astral-topic-100",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "options-32",
+      "valid": true,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "option-0",
+            "label": "候選 0",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-1",
+            "label": "候選 1",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-2",
+            "label": "候選 2",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-3",
+            "label": "候選 3",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-4",
+            "label": "候選 4",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-5",
+            "label": "候選 5",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-6",
+            "label": "候選 6",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-7",
+            "label": "候選 7",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-8",
+            "label": "候選 8",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-9",
+            "label": "候選 9",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-10",
+            "label": "候選 10",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-11",
+            "label": "候選 11",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-12",
+            "label": "候選 12",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-13",
+            "label": "候選 13",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-14",
+            "label": "候選 14",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-15",
+            "label": "候選 15",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-16",
+            "label": "候選 16",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-17",
+            "label": "候選 17",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-18",
+            "label": "候選 18",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-19",
+            "label": "候選 19",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-20",
+            "label": "候選 20",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-21",
+            "label": "候選 21",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-22",
+            "label": "候選 22",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-23",
+            "label": "候選 23",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-24",
+            "label": "候選 24",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-25",
+            "label": "候選 25",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-26",
+            "label": "候選 26",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-27",
+            "label": "候選 27",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-28",
+            "label": "候選 28",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-29",
+            "label": "候選 29",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-30",
+            "label": "候選 30",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-31",
+            "label": "候選 31",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": null
+      }
+    },
+    {
+      "id": "missing-key",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unknown-root",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api",
+        "extra": "no"
+      }
+    },
+    {
+      "id": "wrong-source",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "PRIVATE_THOUGHTS",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "options-empty",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [],
+        "selectedOptionId": null
+      }
+    },
+    {
+      "id": "options-33",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "option-0",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-1",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-2",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-3",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-4",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-5",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-6",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-7",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-8",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-9",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-10",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-11",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-12",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-13",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-14",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-15",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-16",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-17",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-18",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-19",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-20",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-21",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-22",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-23",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-24",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-25",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-26",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-27",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-28",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-29",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-30",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-31",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          },
+          {
+            "id": "option-32",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": null
+      }
+    },
+    {
+      "id": "duplicate-option-id",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "api",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "missing-selected-id",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "absent"
+      }
+    },
+    {
+      "id": "unknown-option",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            },
+            "extra": "no"
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "private-reason",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "PRIVATE_REASONING_CANARY",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-501-codepoints",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理理",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-control-character",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "公開\u0000理由",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unsafe-label",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "amount=123",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unsafe-action",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "account=private",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "astral-topic-101",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unknown-evidence-key",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null,
+                "extra": "no"
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "too-many-evidence",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "rule",
+                "hash": null
+              },
+              {
+                "role": "POLICY",
+                "id": "rule",
+                "hash": null
+              },
+              {
+                "role": "POLICY",
+                "id": "rule",
+                "hash": null
+              },
+              {
+                "role": "POLICY",
+                "id": "rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "invalid-evidence-hash",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": "wrong"
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unknown-evidence-role",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "PRIVATE",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "nested-inner-names-not-empty",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [
+                "exec_command"
+              ],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "private-proposed-parameters",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "analysis: secret",
+              "parametersChars": 16,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "unknown-tool-key",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0,
+              "extra": "no"
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "wrong-event-kind",
+      "valid": false,
+      "eventKind": "START",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "wrong-event-status",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "SUCCEEDED",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-empty",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-ascii-space",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": " ",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-tab-lf",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "\t\n",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-em-space",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": " ",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-fullwidth",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "　",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-nbsp",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": " ",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "reason-blank-nel",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "topic-blank-nbsp",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": " ",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "label-blank-nbsp",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": " ",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "action-blank-nbsp",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": " ",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "private-decision-id",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "PRIVATE_REASONING_CANARY",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "public-rule",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    },
+    {
+      "id": "private-evidence-id",
+      "valid": false,
+      "eventKind": "OBSERVATION",
+      "status": "UNKNOWN",
+      "publicDecision": {
+        "source": "LLM_PUBLIC_SUMMARY_V1",
+        "decisionId": "api-source",
+        "topic": "選擇資料來源",
+        "options": [
+          {
+            "id": "api",
+            "label": "呼叫唯讀 API",
+            "action": "呼叫工具",
+            "reason": "依已發布契約先取得本輪證據。",
+            "evidenceRefs": [
+              {
+                "role": "POLICY",
+                "id": "PRIVATE_REASONING_CANARY",
+                "hash": null
+              }
+            ],
+            "toolCall": {
+              "name": "exec",
+              "innerNames": [],
+              "parameters": "await tools.exec_command({cmd: command})",
+              "parametersChars": 40,
+              "truncated": false,
+              "redactedCount": 0
+            }
+          },
+          {
+            "id": "wait",
+            "label": "等待證據",
+            "action": "WAIT",
+            "reason": "資料尚未齊全時維持等待。",
+            "evidenceRefs": [],
+            "toolCall": null
+          }
+        ],
+        "selectedOptionId": "api"
+      }
+    }
+  ]
+}

@@ -51,6 +51,15 @@ final class AiFlowBffService {
                 .map(d->{validate(()->AiFlowProtocol.toolCallDetail(d,q,runId,eventId,clock));return d;}).timeout(Duration.ofSeconds(5)));
         }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
     }
+    Mono<AiFlowDtos.PublicDecisionDetail> publicDecision(String runId,String eventId,ServerHttpRequest request) {
+        return Mono.defer(()->{
+            var q=AiFlowProtocol.Query.parse(request.getQueryParams(),true,clock); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId);
+            String path="/api/ai-flow/runs/"+runId+"/nodes/"+eventId+"/public-decision";
+            return owner().flatMap(owner->business.get().uri(u->u.path(path).queryParam("date",q.date()).queryParam("consumer",q.consumer()).build())
+                .headers(h->ownerHeaders(h,owner)).accept(MediaType.APPLICATION_JSON).exchangeToMono(r->read(r,AiFlowDtos.PublicDecisionDetail.class,200,path))
+                .map(d->{validate(()->AiFlowProtocol.publicDecisionDetail(d,q,runId,eventId,clock));return d;}).timeout(Duration.ofSeconds(5)));
+        }).onErrorMap(AiFlowBffService::classify).contextWrite(c->c.delete(AuthConstants.CTX_IDENTITY));
+    }
     Mono<AiFlowDtos.ChoiceSetDetail> choiceSet(String runId,String eventId,ServerHttpRequest request) {
         return Mono.defer(()->{
             var q=AiFlowProtocol.Query.parse(request.getQueryParams(),true,clock); AiFlowProtocol.uuid(runId); AiFlowProtocol.uuid(eventId);
@@ -105,6 +114,7 @@ final class AiFlowBffService {
             if(!request.getQueryParams().isEmpty()) throw AiFlowProblem.invalid();
             var batch=AiFlowProtocol.batch(bytes,clock); credentials.authorize(grant,batch.run());
             credentials.authorizeChoiceSet(grant,batch.run(),batch.events().stream().anyMatch(event->event.choiceSet()!=null));
+            credentials.authorizePublicDecision(grant,batch.run(),batch.events().stream().anyMatch(event->event.publicDecision()!=null));
             return owner().flatMap(owner->business.post().uri(AiFlowProducerTokenWebFilter.PATH)
                 .headers(h->{ownerHeaders(h,owner);h.set(AiFlowCredentials.HEADER,request.getHeaders().getFirst(AiFlowCredentials.HEADER));})
                 .contentType(MediaType.APPLICATION_JSON).accept(MediaType.APPLICATION_JSON).bodyValue(bytes)

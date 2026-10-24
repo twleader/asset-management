@@ -1,6 +1,6 @@
 # AI 判斷流程觀測補充 API
 
-版本：1.3.0；來源 SHA256：`91913cda9dc0abe8ed6babc72dce2dfea99899f44b9ca56e17d15cf794689e0d`
+版本：1.4.0；來源 SHA256：`9259cfb0464c9bfd3f7d8b4a17e56445b907dec2b2b20f91778a9e73c12ed892`
 
 獨立於原金融OpenAPI；只保存觀測事件，不調度LLM或執行金融操作。金融26 routes與本1觀測route的統一Swagger維持27 method/path pairs，且本契約變更會連動PublishedSwaggerIdentity與SRPP消費者身分同步。流程只保留90個台北日期，正常DB backup保留schema但排除本功能兩表data。 Task 504只為同一筆Codex公開工具START事件新增由版本化public trace exporter明示的choiceSet；它不是Chain-of-Thought，沒有公開候選時必須缺省。被動host collector仍非同步收集，不改SRPP規則或排程。
 
@@ -210,6 +210,31 @@ run immutable identity；server owner不能由producer指定；同source identit
 | selectedOptionId | "string" {"minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"} | 是 | 唯一採用候選的閉合識別字，必須存在於options且其完整參數與metadata逐欄等於實際toolCall。 |
 | options | "array" {"minItems":2,"maxItems":8,"items":{"$ref":"#/components/schemas/AiFlowChoiceOption","description":"一個封閉的公開候選，沿用AiFlowChoiceOption完整限制。"}} | 是 | 兩至八個明示公開候選，optionId不得重複；collector不從工具目錄、後續呼叫或缺漏資料推測選項。 |
 
+## AiFlowPublicDecisionOption
+
+使用者明確公開的候選摘要；reason、refs及擬議工具輸入只供ADMIN按需明細，不代表工具已執行。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| id | "string" {"minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"} | 是 | 本公開決策內唯一的閉合識別字。 |
+| label | "string" {"minLength":1,"maxLength":100} | 是 | 沿既有public-safe限制的公開文字，以Unicode code point計數。 |
+| action | "string" {"minLength":1,"maxLength":100} | 是 | 任意public-safe公開動作描述，不是業務狀態enum。 |
+| reason | "string" {"minLength":1,"maxLength":500} | 是 | 明確公開的簡短理由，最佳努力憑證遮蔽後1至500 code point；私人思考標記拒絕、超長拒絕不截斷。 |
+| evidenceRefs | "array" {"maxItems":3,"items":{"$ref":"#/components/schemas/AiFlowEvidence","description":"閉合公開依據。"}} | 是 | 最多三筆既有閉合Evidence公開依據。 |
+| toolCall | nil {"oneOf":[{"$ref":"#/components/schemas/AiFlowToolCall","description":"完整擬議工具公開輸入。"},{"type":"null","description":"未擬議工具輸入。"}]} | 是 | 擬議工具輸入或null，innerNames必須空陣列；不是實際toolCall。沿Task501參數與截斷metadata限制。 |
+
+## AiFlowPublicDecision
+
+版本化LLM公開決策摘要；只允許OBSERVATION/UNKNOWN及collector grant，Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。所有候選完整保存，參數合計最多32768 code point、整物件JSON UTF8最多196608 bytes；不是私人思考或執行證明。
+
+| 欄位 | 型別／限制 | 必填 | 用途 |
+| --- | --- | --- | --- |
+| source | "string" {"const":"LLM_PUBLIC_SUMMARY_V1"} | 是 | LLM_PUBLIC_SUMMARY_V1表示公開摘要唯一來源版本。 |
+| decisionId | "string" {"minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"} | 是 | 本公開決策內唯一的閉合識別字。 |
+| topic | "string" {"minLength":1,"maxLength":100} | 是 | 沿既有public-safe限制的公開文字，以Unicode code point計數。 |
+| options | "array" {"minItems":1,"maxItems":32,"items":{"$ref":"#/components/schemas/AiFlowPublicDecisionOption","description":"一筆完整候選。"}} | 是 | 全部公開候選，id唯一；不得因上限刪除候選，超額整筆拒絕。 |
+| selectedOptionId | ["string", "null"] {"minLength":1,"maxLength":64,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"} | 是 | 明確選擇的現有option id或null；null表示未選擇。 |
+
 ## AiFlowEvent
 
 不可變事件；所有欄位閉合，任何深度重複或未知JSON field拒400；除reportedOutcome與可省略的toolCall／choiceSet外，nullable key均必填。
@@ -227,6 +252,7 @@ run immutable identity；server owner不能由producer指定；同source identit
 | operation | #/components/schemas/AiFlowOperation  | 是 | 公開操作協定。 |
 | toolCall | #/components/schemas/AiFlowToolCall  | 否 | 選填的公開工具START呼叫資料；缺省表示無此資訊，明確null與非START事件皆非法。 |
 | choiceSet | #/components/schemas/AiFlowChoiceSet  | 否 | 選填的公開候選集合；只限同一Codex CODEX_ROLLOUT START toolCall與collector grant，actual sourceTruncated、明確null或任一不一致皆非法。 |
+| publicDecision | #/components/schemas/AiFlowPublicDecision  | 否 | 選填公開決策摘要；缺省合法、null非法，只允許OBSERVATION及UNKNOWN。 |
 | reasonCode | ["string", "null"] {"maxLength":100} | 是 | 公開停止/失敗或完整度原因碼；未知為null。 |
 | attemptNo | "integer" {"minimum":1} | 是 | 同一step重試的正整數，不覆写上一attempt。 |
 | parentEventIds | "array" {"items":{"type":"string","format":"uuid","description":"每一筆為同run的穩定事件UUID。"},"maxItems":16,"uniqueItems":true} | 是 | 同run已保存或本batch存在的父事件；禁止self/cycle。 |

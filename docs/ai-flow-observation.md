@@ -66,7 +66,7 @@ Task 501 保留上述 Task 500 名稱擷取與 title／summary 規則，並只�
 
 Task 504 只接受同一筆 Codex `CODEX_ROLLOUT` 的公開 `function_call`／`custom_tool_call` payload 中，由已版本化 public trace exporter 明示的 `publicChoiceSet`。它必須標示 `schemaVersion=AI_FLOW_PUBLIC_CHOICE_V1` 與 `publicSource=CODEX_PUBLIC_TRACE_EXPORTER`，並且每個 raw option 只有 `optionId`、`label`、`toolName` 與單一 UTF-8 `input` 字串。collector 不會讀取、保存或推導 assistant analysis、chain-of-thought、工具目錄、後續呼叫、工具輸出或固定工作流來補候選。
 
-本 workspace 沒有該 public exporter 的 source、release/tag 或部署授權。因此真實 LLM 分支的狀態是 `PUBLIC_CHOICE_PRODUCER_NOT_PROVIDED`；既有與新 rollout 沒有上游欄位時，`choiceSet` 必須缺省，畫面如實顯示「未記錄公開候選」。`scripts/tests/fixtures/ai_flow_public_choice_set_rollout.jsonl` 只是唯讀測試資料，不能當成真實 LLM 已產生候選的證明。
+本 workspace 沒有該 public exporter 的 source、release/tag 或部署授權。因此舊 tool-call choiceSet 的 exporter 狀態仍是 `PUBLIC_CHOICE_PRODUCER_NOT_PROVIDED`；沒有該上游欄位時 `choiceSet` 必須缺省。Task 508 另以真實 LLM 入口的具名公開摘要建立獨立 `publicDecision`，不再拿工具 choiceSet 來源缺口阻擋一般公開決策，也不偽造 exporter 欄位。`scripts/tests/fixtures/ai_flow_public_choice_set_rollout.jsonl` 只是唯讀測試資料，不能當成真實 LLM 已產生候選的證明。
 
 collector 先以同一個標準化／憑證遮蔽 helper 處理每個已公開的 raw `input`，但不 JSON parse 或遞迴展開它。raw shape、版本／來源、字串型別、數量、id、採用關係、Unicode code-point 上限、private marker／reserved key、title／label 公開安全檢查或實際呼叫逐欄比對任一不符時，整組 `choiceSet` 都會省略，原 `toolCall` 事件仍保留。若 actual `toolCall.sourceTruncated=true`，collector 在讀取 raw choice 前就省略整組，避免把截斷資料說成已精確採用。
 
@@ -123,3 +123,17 @@ python3 scripts/send-srpp-ai-flow.py --once \
 ```
 
 Claude使用自己的state與AI_FLOW_CLAUDE_TOKEN；兩種consumer token不能假稱CODEX_ROLLOUT／CLAUDE_ARTIFACT。collector credential亦不能發SCHEDULE_EVENTS；錯誤credential/source由API拒絕，sender保留pending不產生假ACK。金融和Gmail權限不從觀測憑證繼承。
+
+## Task 508：真正兩軌公開決策摘要
+
+Event 的選填 `publicDecision` 是獨立公開自述紀錄，只能 `OBSERVATION/UNKNOWN`；它不是 actual `toolCall` 或已執行證明，也不改舊 `choiceSet` 精確工具配對契約。producer來源固定 `LLM_PUBLIC_SUMMARY_V1`，閉合資料含 decisionId/topic/options/selectedOptionId；每項有 id/label/任意安全 action/公開短理由/opaque evidenceRefs/nullable 擬議 toolCall。一般 Node 只帶無理由、依據或參數的 `publicDecisionSummary`；ADMIN 從真決策節點按需讀 `/nodes/{eventId}/public-decision`，圖上列全部選項及選擇狀態，不把自述選項畫成工具執行成功。
+
+Codex 09:05、12:00及美盤22-00的真正入口，在各自原時間／日曆／Swagger或policy合法gate通過後，於每個實際決策前發獨立公開commentary：開行 `<<<SRPP_PUBLIC_DECISION_V1>>>`、單一strict JSON RawDecision、結行 `<<<END_SRPP_PUBLIC_DECISION_V1>>>`，不得附其他正文。collector只讀該明確公開通道的整塊marker，不掃analysis、final、user、tool output或一般assistant prose，不修改rollout。選擇只表示公開選擇，沒有actual call的獨立證據時不能宣稱已執行。
+
+Claude兩真正SKILL在同一合法決策點公開同樣摘要，並把相同RawDecision放既有當輪final result.json的選填 `publicDecisions` array；必須有明確automation_id、有效含offset finished_at，與原result一次atomic終結寫入後凍結。collector沿原consumer/date/slot/automation驗證、artifact raw SHA身分與index/id建事件，只讀具名欄位、不讀其他artifact自由文字；沒有cliSessionId保持UNLINKED，有exact app link仍RAW_TRACE_UNAVAILABLE，不提升完整度。Codex不另讀result摘要，以免重複。
+
+每筆1..32候選全部保留；raw marker≤128KiB、理由非空白且≤500 code points、每項refs≤3、參數沿16384 cap和精確截斷／遮蔽metadata、全選項參數≤32768 code points、final物件≤192KiB。Claude最多128筆且整array≤3MiB。reason與擬議input都先最佳努力遮蔽憑證，私人標記在所有深層字串拒絕；主題／名稱／action繼續public-safe，完整金融短理由只限使用者授權的當輪合法scope且只在明細。超額、unknown/duplicate key/id、無效版本／選擇／私人標記整筆拒絕，無內容的collector receipt保留具名code/count，不靜默截掉候選或理由；單筆錯誤不抹既有結果或其他有效公開摘要。已入state/pending/DB的事件不更新、不replay、不回填。
+
+畫面固定揭露「公開自述；不保證涵蓋所有內部考量，亦不證明工具已執行」。部署指令已更新不代表真實LLM已產生摘要；必須等原合法下一輪公開marker／final artifact及durable ACK才可稱實測。Claude遠端若需device-bound原生proof而工具不可用，保留舊遠端指令並具名BLOCKED_REMOTE_PROOF；本機SKILL、Codex三prompt與雙repo其他可完成工作照常完成，不虛稱遠端已更新。
+
+本次observer升1.4.0、統一Swagger hash與SRPP producer來源hash都改變，必依受控順序先同步Swagger metadata，再修改政策入口並重建runtime／manifest新hash；最終backend authority、insert-only registry、jar和三份Swagger同身份。下一交易日只在合法09:05至13:30前以同組新hash唯讀GET驗證，時窗尚未到記NOT_YET_EXECUTED；不能用healthy取代該readback，不人工POST、replay或觸發報告。

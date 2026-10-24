@@ -58,14 +58,20 @@ export function displayDurationMillis(value) {
 }
 
 const UI_CHOICE_PREFIX = 'ui-choice:'
+const UI_DECISION_PREFIX = 'ui-decision:'
 const CHOICE_HUB_X = 920
 const CHOICE_OPTION_X = 1180
 const CHOICE_OPTION_GAP = 80
 const CHOICE_GROUP_GAP = 120
+const DECISION_OPTION_GAP = 72
+const DECISION_GROUP_GAP = 144
 const GRAPH_BOTTOM_PADDING = 160
 const TOOL_NAME = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 const PUBLIC_CHOICE_SUMMARY_FIELDS = ['title', 'selectedOptionId', 'options']
 const PUBLIC_CHOICE_OPTION_SUMMARY_FIELDS = ['optionId', 'label', 'toolName', 'selected']
+const PUBLIC_DECISION_SUMMARY_FIELDS = ['decisionId', 'topic', 'selectedOptionId', 'options']
+const PUBLIC_DECISION_OPTION_SUMMARY_FIELDS = ['id', 'label', 'action', 'selected']
+const PUBLIC_DECISION_SOURCE = 'LLM_PUBLIC_SUMMARY_V1'
 const PRIVATE_CHOICE_MARKER = /(?:private[ \t\r\n\f\x0B_-]*reasoning|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|(?:^|[,{[ \t\r\n\f\x0B"'])?(?:reasoning|analysis|thinking|thoughts?)[ \t\r\n\f\x0B]*["']?[ \t\r\n\f\x0B]*[:=：]|<[ \t\r\n\f\x0B]*\/?[ \t\r\n\f\x0B]*(?:analysis|think|thinking|reasoning)[ \t\r\n\f\x0B]*>|(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)|私人推理|內部思考|思考鏈)/i
 const UNSAFE_PUBLIC_CHOICE_TEXT = /(?:https?:\/\/|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\bauthorization\b|\bbearer\b|\bapi[_ -]?key\b|\bpassword\b|\bsecret\b|\btoken\b|\$\(|```|<\s*script|持股|帳號|[0-9][,0-9]*(?:元|美元|股|張)|(?:NT\s*\$|US\s*\$|\b(?:USD|TWD|NTD|EUR|JPY)\b|[$€£¥])\s*[-+]?\s*\d|\d[\d,]*(?:\.\d+)?\s*\b(?:USD|TWD|NTD|EUR|JPY)\b|\b(?:parameters?|arguments?|input)\b\s*["']?\s*[:=：]|\b(?:raw[_ -]*(?:input|command|shell|response|api|mime|reasoning)|command|cmd|shell)\b\s*["']?\s*[:=：]|(?:<[ \t\r\n\f\x0B]*\/?[ \t\r\n\f\x0B]*(?:analysis|think|thinking|reasoning)[ \t\r\n\f\x0B]*>|(?:^|\n)[ \t\r\n\f\x0B]*(?:analysis|thinking|reasoning|private[ \t\r\n\f\x0B_-]*(?:analysis|reasoning)|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|hidden[ \t\r\n\f\x0B_-]*reasoning)[ \t\r\n\f\x0B]*[:=]|\b(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)|(?:私人推理|內部思考|思考鏈)[ \t\r\n\f\x0B]*[:=：])|(?:^|\n)\s*(?:curl|wget|bash|zsh|sh|pwsh|powershell|python(?:3)?|node|cat|echo|printf)\s+\S|(?:\/Users\/|\/private\/|\/tmp\/|~\/|[A-Z]:\\)|\d{6,})/i
 const SENSITIVE_FIELD_SEMANTIC = /(?:\b(?:price|amount|balance|holdings?|account|acct|position|quantity|qty|cost|shares?|lots?|portfolio|cash|market_value|total_value)\b\s*["']?\s*[:=：]|\b(?:price|amount|balance|holdings?|account|acct|position|quantity|qty|cost|shares?|lots?|portfolio|cash|market_value|total_value)\b\s*[-+]?\s*\d|(?:成本|金額|餘額|持倉|部位|股數|張數|單價|帳戶|帳號)\s*["']?\s*[:=：]?\s*\d|\b(?:NT\$|USD|TWD)\s*\d)/i
@@ -95,6 +101,13 @@ function hasExactOwnFields(value, allowedFields) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getOwnPropertySymbols(value).length !== 0) return false
   const fields = Object.getOwnPropertyNames(value)
   return fields.length === allowedFields.length && fields.every(field => allowedFields.includes(field))
+}
+
+function hasRequiredFieldsWithin(value, requiredFields, optionalFields = []) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.getOwnPropertySymbols(value).length !== 0) return false
+  const fields = Object.getOwnPropertyNames(value)
+  const allowedFields = [...requiredFields, ...optionalFields]
+  return requiredFields.every(field => fields.includes(field)) && fields.every(field => allowedFields.includes(field))
 }
 
 /** Summary text is public display metadata, never the Task 501 parameter exception. */
@@ -190,7 +203,114 @@ function choiceOptionId(eventId, optionId) {
   return `${UI_CHOICE_PREFIX}${eventId}:option:${optionId}`
 }
 
-function choiceSyntheticNode({ id, parentEventId, name, graphLabel, x, y, color, tooltipText, kind }) {
+function decisionHubId(eventId) {
+  return `${UI_DECISION_PREFIX}${eventId}:hub`
+}
+
+function decisionOptionId(eventId, optionId) {
+  return `${UI_DECISION_PREFIX}${eventId}:option:${optionId}`
+}
+
+function publicDecisionSummaryForGraph(node) {
+  const summary = node?.publicDecisionSummary
+  if (node?.eventKind !== 'OBSERVATION' || node?.status !== 'UNKNOWN' ||
+    !hasExactOwnFields(summary, PUBLIC_DECISION_SUMMARY_FIELDS)) return null
+  if (typeof summary.decisionId !== 'string' || !TOOL_NAME.test(summary.decisionId) ||
+    !isSafePublicChoiceText(summary.topic) ||
+    !(summary.selectedOptionId === null || (typeof summary.selectedOptionId === 'string' && TOOL_NAME.test(summary.selectedOptionId))) ||
+    !Array.isArray(summary.options) || summary.options.length < 1 || summary.options.length > 32) return null
+
+  const optionIds = new Set()
+  const options = []
+  let selectedFound = summary.selectedOptionId === null
+  for (const option of summary.options) {
+    if (!hasExactOwnFields(option, PUBLIC_DECISION_OPTION_SUMMARY_FIELDS) ||
+      typeof option.id !== 'string' || !TOOL_NAME.test(option.id) || optionIds.has(option.id) ||
+      !isSafePublicChoiceText(option.label) || !isSafePublicChoiceText(option.action) ||
+      typeof option.selected !== 'boolean') return null
+    const selected = summary.selectedOptionId !== null && option.id === summary.selectedOptionId
+    if (option.selected !== selected) return null
+    if (selected) selectedFound = true
+    optionIds.add(option.id)
+    options.push({ id: option.id, label: option.label, action: option.action, selected })
+  }
+  if (!selectedFound) return null
+  return { decisionId: summary.decisionId, topic: summary.topic, options }
+}
+
+function normalizePublicDecisionDetail(value) {
+  const fields = ['source', 'decisionId', 'topic', 'options', 'selectedOptionId']
+  if (!hasExactOwnFields(value, fields) || value.source !== PUBLIC_DECISION_SOURCE ||
+    typeof value.decisionId !== 'string' || !TOOL_NAME.test(value.decisionId) ||
+    typeof value.topic !== 'string' ||
+    !(value.selectedOptionId === null || (typeof value.selectedOptionId === 'string' && TOOL_NAME.test(value.selectedOptionId))) ||
+    !Array.isArray(value.options) || value.options.length < 1 || value.options.length > 32) {
+    throw new Error('公開決策摘要格式不完整')
+  }
+
+  const optionIds = new Set()
+  const options = value.options.map(option => {
+    if (!hasExactOwnFields(option, ['id', 'label', 'action', 'reason', 'evidenceRefs', 'toolCall']) ||
+      typeof option.id !== 'string' || !TOOL_NAME.test(option.id) || optionIds.has(option.id) ||
+      typeof option.label !== 'string' || typeof option.action !== 'string' || typeof option.reason !== 'string' ||
+      !Array.isArray(option.evidenceRefs) || option.evidenceRefs.length > 3) {
+      throw new Error('公開決策摘要格式不完整')
+    }
+    optionIds.add(option.id)
+
+    const evidenceRefs = option.evidenceRefs.map(evidence => {
+      if (!hasExactOwnFields(evidence, ['role', 'id', 'hash']) ||
+        typeof evidence.role !== 'string' || typeof evidence.id !== 'string' ||
+        !(evidence.hash === null || typeof evidence.hash === 'string')) {
+        throw new Error('公開決策摘要格式不完整')
+      }
+      return { role: evidence.role, id: evidence.id, hash: evidence.hash }
+    })
+
+    let toolCall = null
+    if (option.toolCall !== null) {
+      const required = ['name', 'innerNames', 'parameters', 'parametersChars', 'truncated', 'redactedCount']
+      if (!hasRequiredFieldsWithin(option.toolCall, required, ['sourceTruncated']) ||
+        typeof option.toolCall.name !== 'string' || !TOOL_NAME.test(option.toolCall.name) ||
+        !Array.isArray(option.toolCall.innerNames) || option.toolCall.innerNames.some(name => typeof name !== 'string' || !TOOL_NAME.test(name)) ||
+        typeof option.toolCall.parameters !== 'string' || !Number.isInteger(option.toolCall.parametersChars) ||
+        typeof option.toolCall.truncated !== 'boolean' || !Number.isInteger(option.toolCall.redactedCount) ||
+        (Object.hasOwn(option.toolCall, 'sourceTruncated') && option.toolCall.sourceTruncated !== true)) {
+        throw new Error('公開決策摘要格式不完整')
+      }
+      toolCall = {
+        name: option.toolCall.name,
+        innerNames: [...option.toolCall.innerNames],
+        parameters: option.toolCall.parameters,
+        parametersChars: option.toolCall.parametersChars,
+        truncated: option.toolCall.truncated,
+        redactedCount: option.toolCall.redactedCount,
+        ...(option.toolCall.sourceTruncated === true ? { sourceTruncated: true } : {})
+      }
+    }
+    return {
+      id: option.id,
+      label: option.label,
+      action: option.action,
+      reason: option.reason,
+      evidenceRefs,
+      toolCall
+    }
+  })
+
+  if (value.selectedOptionId !== null && !optionIds.has(value.selectedOptionId)) {
+    throw new Error('公開決策摘要格式不完整')
+  }
+  return {
+    source: value.source,
+    decisionId: value.decisionId,
+    topic: value.topic,
+    selectedOptionId: value.selectedOptionId,
+    options
+  }
+}
+
+function choiceSyntheticNode({ id, parentEventId, name, graphLabel, x, y, color, tooltipText, kind, categoryLabel = '公開候選分支' }) {
   return {
     id,
     name,
@@ -199,7 +319,7 @@ function choiceSyntheticNode({ id, parentEventId, name, graphLabel, x, y, color,
     y,
     itemStyle: { color },
     statusLabel: '',
-    categoryLabel: '公開候選分支',
+    categoryLabel,
     timeLabel: '',
     durationMillis: null,
     tooltipText,
@@ -239,7 +359,11 @@ export function mapAiFlowGraphData(detail) {
       ].join('\n'),
       rawNode: publicRawNode(safeNode)
     }
-    return { mapped, choiceSummary: choiceSummaryForGraph(safeNode) }
+    return {
+      mapped,
+      choiceSummary: choiceSummaryForGraph(safeNode),
+      decisionSummary: publicDecisionSummaryForGraph(safeNode)
+    }
   }) : []
 
   const groups = entries
@@ -307,6 +431,65 @@ export function mapAiFlowGraphData(detail) {
     cursor += summary.options.length * CHOICE_OPTION_GAP + CHOICE_GROUP_GAP
   }
 
+  const decisionEntries = entries
+    .filter(entry => entry.decisionSummary && typeof entry.mapped.id === 'string' && entry.mapped.id !== '')
+    .sort((left, right) => left.mapped.y - right.mapped.y || left.mapped.id.localeCompare(right.mapped.id))
+
+  for (const entry of decisionEntries) {
+    const eventId = entry.mapped.id
+    const summary = entry.decisionSummary
+    const hubId = decisionHubId(eventId)
+    const hubY = cursor + (summary.options.length - 1) * (DECISION_OPTION_GAP / 2)
+    syntheticNodes.push(choiceSyntheticNode({
+      id: hubId,
+      parentEventId: eventId,
+      name: summary.topic,
+      graphLabel: `公開決策摘要\n${summary.topic}`,
+      x: CHOICE_HUB_X,
+      y: hubY,
+      color: '#dbeafe',
+      tooltipText: ['公開決策摘要（自述，未驗證執行）', summary.topic].join('\n'),
+      kind: 'decision-hub',
+      categoryLabel: '公開決策摘要分支'
+    }))
+    syntheticEdges.push({
+      id: `${UI_DECISION_PREFIX}${eventId}:edge:summary`,
+      source: eventId,
+      target: hubId,
+      relation: 'PUBLIC_DECISION_SUMMARY',
+      label: '公開自述',
+      curveness: 0,
+      tooltipText: '公開決策摘要（自述，未驗證執行）'
+    })
+
+    summary.options.forEach((option, index) => {
+      const optionNodeId = decisionOptionId(eventId, option.id)
+      const optionStatus = option.selected ? '已選擇（自述）' : '未選擇'
+      syntheticNodes.push(choiceSyntheticNode({
+        id: optionNodeId,
+        parentEventId: eventId,
+        name: option.label,
+        graphLabel: `${optionStatus}\n${option.label}`,
+        x: CHOICE_OPTION_X,
+        y: cursor + index * DECISION_OPTION_GAP,
+        color: option.selected ? '#dbeafe' : '#e2e8f0',
+        tooltipText: [optionStatus, option.label, option.action].join('\n'),
+        kind: 'decision-option',
+        categoryLabel: '公開決策候選'
+      }))
+      syntheticEdges.push({
+        id: `${UI_DECISION_PREFIX}${eventId}:edge:option:${option.id}`,
+        source: hubId,
+        target: optionNodeId,
+        relation: 'PUBLIC_DECISION_OPTION',
+        label: optionStatus,
+        curveness: 0,
+        tooltipText: optionStatus
+      })
+    })
+    cursor += summary.options.length * DECISION_OPTION_GAP + DECISION_GROUP_GAP
+  }
+
   const edges = (Array.isArray(detail?.edges) ? detail.edges : []).map(edge => {
     const safeEdge = edge && typeof edge === 'object' ? edge : {}
     return {
@@ -329,7 +512,9 @@ export function mapAiFlowGraphData(detail) {
 export function resolveAiFlowGraphNodeSelection(graphData, nodeId) {
   const node = graphData?.nodes?.find(candidate => candidate.id === nodeId)
   if (node?.isSynthetic) return { eventId: node.parentEventId || '', fromSynthetic: true }
-  return { eventId: typeof nodeId === 'string' && !nodeId.startsWith(UI_CHOICE_PREFIX) ? nodeId : '', fromSynthetic: false }
+  const isSyntheticId = typeof nodeId === 'string' &&
+    (nodeId.startsWith(UI_CHOICE_PREFIX) || nodeId.startsWith(UI_DECISION_PREFIX))
+  return { eventId: typeof nodeId === 'string' && !isSyntheticId ? nodeId : '', fromSynthetic: false }
 }
 
 export function resolveAiFlowGraphNodeId(graphData, nodeId) {
@@ -353,7 +538,11 @@ export function createAiFlowViewState(filters = {}) {
     selectedToolCallError: '',
     selectedChoiceSet: null,
     selectedChoiceSetLoading: false,
-    selectedChoiceSetError: ''
+    selectedChoiceSetError: '',
+    selectedPublicDecision: null,
+    selectedPublicDecisionLoading: false,
+    selectedPublicDecisionLoaded: false,
+    selectedPublicDecisionError: ''
   }
 }
 
@@ -362,15 +551,17 @@ function isCanceled(error) {
 }
 
 /** 以各自的 generation fence 保證已失效的清單、明細或節點按需資料永不回填。 */
-export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoiceSet, errorMessage = error => error?.message || '查詢失敗，請稍後再試。' }) {
+export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoiceSet, getPublicDecision, errorMessage = error => error?.message || '查詢失敗，請稍後再試。' }) {
   let listGeneration = 0
   let detailGeneration = 0
   let toolCallGeneration = 0
   let choiceSetGeneration = 0
+  let publicDecisionGeneration = 0
   let listController = null
   let detailController = null
   let toolCallController = null
   let choiceSetController = null
+  let publicDecisionController = null
 
   function clearSelectedToolCall(state) {
     toolCallGeneration += 1
@@ -390,10 +581,21 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
     state.selectedChoiceSetError = ''
   }
 
+  function clearSelectedPublicDecision(state) {
+    publicDecisionGeneration += 1
+    publicDecisionController?.abort()
+    publicDecisionController = null
+    state.selectedPublicDecision = null
+    state.selectedPublicDecisionLoading = false
+    state.selectedPublicDecisionLoaded = false
+    state.selectedPublicDecisionError = ''
+  }
+
   function clearSelectedNode(state) {
     state.selectedNodeId = ''
     clearSelectedToolCall(state)
     clearSelectedChoiceSet(state)
+    clearSelectedPublicDecision(state)
   }
 
   function clearDetail(state) {
@@ -402,6 +604,7 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
     detailController = null
     clearSelectedToolCall(state)
     clearSelectedChoiceSet(state)
+    clearSelectedPublicDecision(state)
     state.detail = null
     state.detailError = ''
     state.detailLoading = false
@@ -461,6 +664,7 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
     state.selectedNodeId = ''
     clearSelectedToolCall(state)
     clearSelectedChoiceSet(state)
+    clearSelectedPublicDecision(state)
 
     try {
       const result = await getRun(run.runId, {
@@ -473,7 +677,7 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
         ? {
             ...result,
             nodes: result.nodes.map(node => {
-              const { toolCall: _toolCall, choiceSet: _choiceSet, ...publicNode } = node || {}
+              const { toolCall: _toolCall, choiceSet: _choiceSet, publicDecision: _publicDecision, ...publicNode } = node || {}
               return { ...publicNode, toolCall: null }
             })
           }
@@ -555,8 +759,12 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
 
     clearSelectedToolCall(state)
     clearSelectedChoiceSet(state)
+    clearSelectedPublicDecision(state)
     state.selectedNodeId = eventId
     if (!state.selectedRunId) return false
+
+    const selectedNode = state.detail?.nodes?.find(node => node?.eventId === eventId)
+    if (selectedNode?.publicDecisionSummary) return true
 
     const parentListGeneration = listGeneration
     const parentDetailGeneration = detailGeneration
@@ -568,12 +776,52 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
     return outcomes.some(Boolean)
   }
 
-  return { query, loadDetail, clearDetail, selectNode, clearSelectedNode, clear }
+  async function loadPublicDecision(state, eventId, filters = state.filters) {
+    if (typeof getPublicDecision !== 'function' || !eventId || !state.selectedRunId || state.selectedNodeId !== eventId) return false
+    const selectedNode = state.detail?.nodes?.find(node => node?.eventId === eventId)
+    if (!selectedNode?.publicDecisionSummary) return false
+
+    publicDecisionGeneration += 1
+    const generation = publicDecisionGeneration
+    const parentListGeneration = listGeneration
+    const parentDetailGeneration = detailGeneration
+    const runId = state.selectedRunId
+    publicDecisionController?.abort()
+    publicDecisionController = new AbortController()
+    state.selectedPublicDecision = null
+    state.selectedPublicDecisionLoading = true
+    state.selectedPublicDecisionLoaded = false
+    state.selectedPublicDecisionError = ''
+
+    try {
+      const result = await getPublicDecision(runId, eventId, {
+        date: filters.date,
+        consumer: filters.consumer,
+        signal: publicDecisionController.signal
+      })
+      if (generation !== publicDecisionGeneration || parentListGeneration !== listGeneration ||
+        parentDetailGeneration !== detailGeneration || state.selectedRunId !== runId || state.selectedNodeId !== eventId) return false
+      if (result?.runId !== runId || result?.eventId !== eventId) throw new Error('公開決策摘要識別不符')
+      state.selectedPublicDecision = result.publicDecision == null ? null : normalizePublicDecisionDetail(result.publicDecision)
+      state.selectedPublicDecisionLoaded = true
+      return true
+    } catch (error) {
+      if (generation !== publicDecisionGeneration || parentListGeneration !== listGeneration ||
+        parentDetailGeneration !== detailGeneration || isCanceled(error)) return false
+      state.selectedPublicDecisionError = errorMessage(error)
+      return false
+    } finally {
+      if (generation === publicDecisionGeneration && parentListGeneration === listGeneration &&
+        parentDetailGeneration === detailGeneration) state.selectedPublicDecisionLoading = false
+    }
+  }
+
+  return { query, loadDetail, clearDetail, selectNode, loadPublicDecision, clearSelectedNode, clear }
 }
 
 /** 只沿公開 CALL_RESULT 配對導回真正 START，不從標題推測工具。 */
 export function resolveAiFlowToolStartId(detail, eventId) {
-  if (typeof eventId !== 'string' || !eventId || eventId.startsWith('ui-choice:')) return ''
+  if (typeof eventId !== 'string' || !eventId || eventId.startsWith(UI_CHOICE_PREFIX) || eventId.startsWith(UI_DECISION_PREFIX)) return ''
   const nodes = Array.isArray(detail?.nodes) ? detail.nodes : []
   const matches = nodes.filter(node => node.eventId === eventId)
   if (matches.length !== 1) return ''
