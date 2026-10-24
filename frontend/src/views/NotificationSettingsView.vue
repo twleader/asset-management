@@ -20,6 +20,9 @@
     <el-card>
       <el-table :data="recipients" size="small" stripe empty-text="尚無收件人，警示觸發時不會寄信">
         <el-table-column prop="email" label="Email" min-width="240" />
+        <el-table-column label="名稱" min-width="160">
+          <template #default="{ row }">{{ row.name ?? '—' }}</template>
+        </el-table-column>
         <el-table-column label="狀態" width="100" align="center">
           <template #default="{ row }">
             <el-tag :type="row.active ? 'success' : 'danger'" size="small">
@@ -61,6 +64,9 @@
         <el-form-item label="Email" prop="email">
           <el-input v-model="form.email" placeholder="someone@example.com" />
         </el-form-item>
+        <el-form-item label="名稱" prop="name">
+          <el-input v-model="form.name" maxlength="100" placeholder="請輸入收件人名稱" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -81,7 +87,7 @@ const recipients = ref([])
 const dialogVisible = ref(false)
 const editing = ref(null)
 const formRef = ref()
-const form = reactive({ email: '' })
+const form = reactive({ email: '', name: '' })
 const rules = {
   email: [
     { required: true, message: '請輸入 email' },
@@ -98,6 +104,7 @@ async function load() {
 function openDialog(r = null) {
   editing.value = r
   form.email = r ? r.email : ''
+  form.name = r ? (r.name ?? '') : ''
   dialogVisible.value = true
 }
 
@@ -106,10 +113,10 @@ async function save() {
   saving.value = true
   try {
     if (editing.value) {
-      await bffApi.notificationSettings.updateRecipient(editing.value.id, { email: form.email })
+      await bffApi.notificationSettings.updateRecipient(editing.value.id, { email: form.email, name: form.name })
       ElMessage.success('已更新')
     } else {
-      await bffApi.notificationSettings.createRecipient({ email: form.email, active: true })
+      await bffApi.notificationSettings.createRecipient({ email: form.email, name: form.name, active: true })
       ElMessage.success('已新增')
     }
     dialogVisible.value = false

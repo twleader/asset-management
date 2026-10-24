@@ -1467,6 +1467,7 @@ Dashboard 每分鐘 realtime 回應必須同時套用 `stockPrices`、`marketSta
 | id | Long | PK |
 | ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | email | String | 收件人 email；存入前 trim + 轉小寫；與 ownerUserId 複合唯一（同一使用者不可重複，**不同使用者可各自使用同一 email**） |
+| name | String | 選填的顯示名稱；`VARCHAR(100)`、nullable=true，存入前 trim，空白字串正規化為 null；僅供通知設定頁辨識，既有列不回填、不得改變寄送或收件人挑選語意 |
 | active | Boolean | 是否啟用（false 不寄**股價警示**信，但保留設定） |
 | receiveMarketAnalysis | Boolean | 是否接收每日股市分析（預設 true；與 `active`〔接收警示〕**各自獨立**，見 Requirement 31 / Task 151） |
 | addToCalendar | Boolean | 警示 digest 是否夾帶 Google 日曆邀請（預設 false；**僅 `gmail.com` / `googlemail.com` 網域可設為 true**，見 Requirement 23 / Task 248） |
@@ -1730,7 +1731,7 @@ PUT    /api/stock-alerts/reorder          # 拖曳排序（body: ordered ids）
 POST   /api/stock-alerts/check            # 手動觸發檢查
 GET    /api/stock-alerts/lookup-name      # 以股票代號查名稱（前端共用）
 GET    /api/stock-alerts/lookup-code      # 反向：以股名查代號（只查本地 stock 主檔，精確匹配）
-GET    /api/stock-alerts/recipients       # 列出可挑選收件人 [{id,email,active}]（委派 NotificationRecipientService；供警示對話框「通知對象」多選；Task 125）
+GET    /api/stock-alerts/recipients       # 列出共用 NotificationRecipientDto.Response（name 是 additive 欄位；警示對話框仍只顯示 id/email/active；Task 125）
 GET    /api/stock-alerts/export-setting          # 觸發即時匯出設定（owner-scoped；Requirement 54）
 PUT    /api/stock-alerts/export-setting          # 更新設定（Drive 開關限主要管理者，否則 403）
 POST   /api/stock-alerts/export-setting/run-now  # 立即以視窗內已發生的觸發產檔（驗證落點用；視窗內無觸發亦寫出 triggers: [] 的合法 JSON）
@@ -1762,9 +1763,9 @@ PATCH  /api/stock-alerts/groups/{id}/active    # 啟用/停用群組
 
 #### Notification Recipients（Requirement 23 新增）
 ```
-GET    /api/notification-recipients                  # 列出所有收件人（含啟停狀態）
-POST   /api/notification-recipients                  # 新增收件人
-PUT    /api/notification-recipients/{id}             # 更新 email
+GET    /api/notification-recipients                  # 列出所有收件人（含 name 與啟停狀態）
+POST   /api/notification-recipients                  # 新增收件人（email 必填，name 選填）
+PUT    /api/notification-recipients/{id}             # 更新 email 與選填 name
 DELETE /api/notification-recipients/{id}             # 刪除
 PATCH  /api/notification-recipients/{id}/active      # 切換啟用/停用（＝是否接收股價警示信）
 PATCH  /api/notification-recipients/{id}/market-analysis # 切換「是否接收今日股市分析每日 Email」訂閱（Requirement 31 / Task 151；與 active 各自獨立）
@@ -1772,6 +1773,8 @@ PATCH  /api/notification-recipients/{id}/calendar     # 切換「警示 digest �
 
 # 前端 view 經 BFF：rewrite /api/bff/notification-settings/recipients/** → /api/notification-recipients/**
 ```
+
+`NotificationRecipientDto.Response`、`CreateRequest` 與 `UpdateRequest` 都含 `name`；`name` 使用可空 `String`，request 以 `@Size(max = 100)` 限制，service 在 create／update 兩條寫入路徑以同一 normalizer 執行 trim，空白值寫入 null。`email` 的 trim + lowercase、複合唯一鍵與既有 calendar 網域防線維持不變。通知設定頁使用既有 `NotificationSettingsBffRoutes` passthrough，表格欄位順序固定為 Email、名稱、狀態；名稱為 null 時顯示 `—`，新增／編輯對話框都可輸入名稱，名稱輸入框的固定 placeholder 為「請輸入收件人名稱」。共用 Response 因此會以 additive `name` 傳給 StockAlert／每日分析既有收件人選擇流程，但兩者仍只呈現／使用 email，不得把 name 當寄送身分；名稱也不得出現在 email digest 或日曆邀請內容。
 
 #### Exchange Rate History（新增）
 ```

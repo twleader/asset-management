@@ -33,6 +33,7 @@ public class NotificationRecipientService {
         NotificationRecipient saved = repo.save(NotificationRecipient.builder()
                 .ownerUserId(tenantGuard.requireCurrentUserId())
                 .email(email)
+                .name(normalizeName(req.name()))
                 .active(req.active() == null ? Boolean.TRUE : req.active())
                 .build());
         return toResponse(saved);
@@ -54,6 +55,7 @@ public class NotificationRecipientService {
                 r.setAddToCalendar(false);
             }
         }
+        r.setName(normalizeName(req.name()));
         return toResponse(repo.save(r));
     }
 
@@ -121,9 +123,15 @@ public class NotificationRecipientService {
         return email == null ? "" : email.trim().toLowerCase();
     }
 
+    private static String normalizeName(String name) {
+        if (name == null) return null;
+        String trimmed = name.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private NotificationRecipientDto.Response toResponse(NotificationRecipient r) {
         return new NotificationRecipientDto.Response(
-                r.getId(), r.getEmail(), r.getActive(), r.getReceiveMarketAnalysis(),
+                r.getId(), r.getEmail(), r.getName(), r.getActive(), r.getReceiveMarketAnalysis(),
                 r.getAddToCalendar(), r.getCreatedAt(), r.getUpdatedAt());
     }
 }
