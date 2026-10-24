@@ -13053,3 +13053,11 @@ Dashboard用既有pure-read realtime取服務端估值；Radar只patchstocks/mar
 事件與重連讀分時必使用既有登入 intraday-ticks 加readOnly=true；MarketDataController→HistoricalDataService→InternalPriceController→IntradaySessionQueryService透傳，預設false保留既有開窗bounded self-heal，true完全略過self-heal，只讀cache/reference/DB並同一resolver處理comparison tuple。共享EventSource建構在api/index.js之client層，其他模組不裸建。Watch/Radar pure-read realtime各走自己頁BFF，service委派同一business cache prices，事件不重算策略。US IXIC僅完成日無live producer，不拿其他symbol改寫。
 
 LIVE完整報價tuple允許明確存在的changePercent與priceChange為null（來源缺比較基準），仍更新正數price並原子清空比較欄，不保留舊漲跌、不推算或轉零；缺少比較欄或NaN拒絕。此為Requirement197對既有Requirement148 radar報價比較欄有限更新規則的具名修訂，策略凍結邊界不變。
+
+## Requirement 190／Task 507：工具輸入的可發現性與來源界線
+
+保持既有 immutable START.toolCall、ADMIN 同源 BFF 按需讀取與 Node.toolCall=null。公開 input/arguments 是來源證據，wrapper JavaScript 不執行、不解析成推測的 nested runtime calls；innerNames 僅為既有文字掃描結果，UI 必須清楚標示。
+
+前端新增純 resolver `resolveAiFlowToolStartId(detail,eventId)`：以 nodes 的真 eventId 查原節點，既有 operation.method=TOOL 或 stepId 以 call- 開頭才視為工具。START 回自身；END 限 relation=CALL_RESULT，其 parentEventIds 中恰一筆同 stepId 的 START（重複或多筆拒絕），回該 START id；其他一律空字串。慢速步驟原 nodeId 指 END，沿 resolver 找 START，不改 backend projection 或 slowStep schema。時間軸／慢速表只呈現查閱按鈕，不攜帶參數；按鈕調用既有 loader.selectNode(forceSelect=true)，再聚焦明細。沒有可配對 START 時禁用查閱並明示「未記錄工具開始事件」。按需成功回 null 顯示「未記錄工具參數」；空 parameters 才顯示「（無參數）」，錯誤與 loading 保留各自狀態。
+
+collector 只替換新解析行的固定 TOOL_SUMMARY_NOTE，仍限制 title 100／summary 500 字、敏感資料規則與截斷回退；舊 state/pending/DB bytes 不改。固定摘要不宣稱舊資料一定有參數，只提示「公開輸入請由節點明細查閱；工具輸出不保存」。docs 與 CLAUDE 補上 Task507 對舊 summary 文案的取代關係，金融 YAML／統一 mirror bytes 保持不變。

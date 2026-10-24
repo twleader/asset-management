@@ -570,3 +570,21 @@ export function createAiFlowViewLoader({ listRuns, getRun, getToolCall, getChoic
 
   return { query, loadDetail, clearDetail, selectNode, clearSelectedNode, clear }
 }
+
+/** 只沿公開 CALL_RESULT 配對導回真正 START，不從標題推測工具。 */
+export function resolveAiFlowToolStartId(detail, eventId) {
+  if (typeof eventId !== 'string' || !eventId || eventId.startsWith('ui-choice:')) return ''
+  const nodes = Array.isArray(detail?.nodes) ? detail.nodes : []
+  const matches = nodes.filter(node => node.eventId === eventId)
+  if (matches.length !== 1) return ''
+  const node = matches[0]
+  if (typeof node.stepId !== 'string' || !node.stepId) return ''
+  if (node.operation?.method !== 'TOOL' && !node.stepId.startsWith('call-')) return ''
+  if (node.eventKind === 'START') return node.eventId
+  if (node.eventKind !== 'END' || node.relation !== 'CALL_RESULT' || !Array.isArray(node.parentEventIds)) return ''
+  const parents = node.parentEventIds
+  if (new Set(parents).size !== parents.length) return ''
+  const starts = nodes.filter(candidate => parents.includes(candidate.eventId) &&
+    candidate.eventKind === 'START' && candidate.stepId === node.stepId)
+  return starts.length === 1 ? starts[0].eventId : ''
+}
