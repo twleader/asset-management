@@ -127,6 +127,11 @@ public class HistoricalDataService {
      * TWSE MIS reference evidence 可 bounded self-heal 的 non-public path）。
      */
     public IntradaySession fetchIntradaySession(String stockCode, String market, LocalDate date) {
+        return fetchIntradaySession(stockCode, market, date, false);
+    }
+
+    /** Event-driven reads use the same resolver without request-time reference writes. */
+    public IntradaySession fetchIntradaySession(String stockCode, String market, LocalDate date, boolean readOnly) {
         try {
             IntradaySourceSessionDto resp = priceServiceClient.get()
                     .uri(uriBuilder -> {
@@ -134,6 +139,7 @@ public class HistoricalDataService {
                                 .queryParam("code", stockCode)
                                 .queryParam("market", market);
                         if (date != null) uriBuilder.queryParam("date", date.toString());
+                        if (readOnly) uriBuilder.queryParam("readOnly", true);
                         return uriBuilder.build();
                     })
                     .retrieve()

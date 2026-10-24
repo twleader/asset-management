@@ -417,7 +417,8 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZ
 import VChart from 'vue-echarts'
 import { ArrowRight, Operation } from '@element-plus/icons-vue'
 import Sortable from 'sortablejs'
-import { bffApi } from '@/api'
+import { createTrailingRefresh, mergeLiveQuote } from '@/utils/livePrices.js'
+import { bffApi, livePriceStream } from '@/api'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import DashboardPanelState from '@/components/DashboardPanelState.vue'
 import { escapeHtml } from '@/utils/escapeHtml'
@@ -468,7 +469,7 @@ const retryPanel = panel => panelLoader.retry(panel)
 // 各 Panel 只維護自己的即時價副本；SSE 只是完成 payload 後的增量，不能成為首屏資料來源。
 const livePrices = reactive({ kpis: {}, allocation: {}, 'stock-values': {}, holdings: {} })
 function priceMap(prices) {
-  return Object.fromEntries((prices ?? []).map(p => [`${p.market}_${p.stockCode}`, p]))
+  return Object.fromEntries((prices ?? []).map(p => [`${p.market}_${p.stockCode}`, livePriceStream.overlay(p)]))
 }
 for (const panel of Object.keys(livePrices)) {
   watch(() => panelData(panel)?.stockPrices, prices => { livePrices[panel] = priceMap(prices) }, { immediate: true })
@@ -491,7 +492,7 @@ const detail = computed(() => holdingPayload.value?.snapshot ?? null)
 
 let priceStream = null
 let statusTimer = null
-let reconnectTimer = null
+const valuationRefresh = createTrailingRefresh(refreshMarketStatus, { interval: 1000 })
 let statusInFlight = false
 let isMounted = false
 let metadataController = null
@@ -516,7 +517,7 @@ async function loadSnapshots() {
       // 每個 panel 在自己的 request 完成時立即提交，不等待其它 panel。
       panelLoader.select(id, { allocation: { tab: allocationTab.value } })
       if (!priceStream) openPriceStream()
-      if (!statusTimer) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
+      if (!statusTimer && livePriceStream.visible()) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
     }
   } catch (error) {
     if (isMounted && metadataController === controller && !controller.signal.aborted) metadataError.value = error
@@ -538,43 +539,42 @@ onUnmounted(() => {
   panelLoader.dispose()
   metadataController?.abort()
   statusController?.abort()
-  if (priceStream) { priceStream.close(); priceStream = null }
+  if (priceStream) { priceStream(); priceStream = null }
+  valuationRefresh.dispose()
   if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
   if (orderSaveTimer) { clearTimeout(orderSaveTimer); orderSaveTimer = null }
   if (stockSortable) { stockSortable.destroy(); stockSortable = null }
 })
 
-function openPriceStream() {
-  if (priceStream) priceStream.close()
-  priceStream = new EventSource('/api/market-data/prices/stream')
-  priceStream.addEventListener('price-update', (ev) => {
-    try {
-      const p = JSON.parse(ev.data)
-      // 後端 SSE payload 用 changePct，前端內部用 changePercent，順手 mirror 一下
-      if (p.changePct != null && p.changePercent == null) p.changePercent = p.changePct
-      const key = `${p.market}_${p.stockCode}`
-      for (const panel of Object.keys(livePrices)) {
-        const current = livePrices[panel][key]
-        if (current) livePrices[panel] = { ...livePrices[panel], [key]: mergeSseQuote(current, p, marketToday(p.market)) }
-      }
-    } catch (e) {
-      console.warn('SSE 解析失敗:', e)
-    }
-  })
-  priceStream.onerror = () => {
-    // EventSource 內建 reconnect；只在被永久關閉時重建
-    if (isMounted && priceStream && priceStream.readyState === EventSource.CLOSED && !reconnectTimer) {
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null
-        if (isMounted) openPriceStream()
-      }, 5000)
+function applyLivePrice(p) {
+  const key = `${p.market}_${p.stockCode}`
+  let matched = false
+  for (const panel of Object.keys(livePrices)) {
+    const current = livePrices[panel][key]
+    if (current) {
+      const next = mergeLiveQuote(current, p)
+      if (next !== current) { livePrices[panel] = { ...livePrices[panel], [key]: next }; matched = true }
     }
   }
+  if (matched) valuationRefresh.request()
+}
+function openPriceStream() {
+  priceStream?.()
+  priceStream = livePriceStream.subscribe({
+    onQuote: applyLivePrice,
+    onCatchup: () => {
+      valuationRefresh.request()
+      if (!statusTimer) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
+    },
+    onPause: () => {
+      valuationRefresh.cancel(); statusController?.abort()
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+    }
+  })
 }
 
 async function refreshMarketStatus() {
-  if (statusInFlight || !isMounted) return
+  if (statusInFlight || !isMounted || !livePriceStream.visible()) return
   statusInFlight = true
   const controller = new AbortController()
   statusController = controller
@@ -584,7 +584,7 @@ async function refreshMarketStatus() {
   if (panels.trend.data && !panels.trend.loading) panelLoader.run('trend', { preserve: true })
   try {
     const data = await bffApi.dashboard.realtime({ signal: controller.signal })
-    if (!isMounted || controller.signal.aborted || selectedSnapshotId.value !== selectedId) return
+    if (!isMounted || !livePriceStream.visible() || controller.signal.aborted || selectedSnapshotId.value !== selectedId) return
     for (const panel of Object.keys(livePrices)) {
       panelLoader.update(panel, generations[panel], payload => {
         const next = { ...payload.data }
@@ -593,7 +593,7 @@ async function refreshMarketStatus() {
           const prices = { ...livePrices[panel] }
           for (const quote of data.stockPrices) {
             const key = `${quote.market}_${quote.stockCode}`
-            if (prices[key]) prices[key] = mergeSseQuote(prices[key], quote, marketToday(quote.market))
+            if (prices[key]) prices[key] = mergeLiveQuote(prices[key], livePriceStream.overlay(quote))
           }
           next.stockPrices = Object.values(prices)
         }

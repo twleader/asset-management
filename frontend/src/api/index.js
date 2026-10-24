@@ -1,5 +1,11 @@
 import axios from 'axios'
+import { createLivePriceStream } from '@/utils/livePrices.js'
 import { ElMessage } from 'element-plus'
+
+export const livePriceStream = createLivePriceStream({
+  connect: () => new EventSource('/api/market-data/prices/stream'),
+  document: typeof document === 'undefined' ? null : document
+})
 
 const api = axios.create({
   baseURL: '/api',
@@ -154,11 +160,11 @@ export const bffApi = {
     // Task 359：與 getQuoteDetail 同一慣例——失敗時不跳全域 toast，改由 dialog 局部降級到既有靜態連結 fallback。
     getEtfHoldings: (code, market) =>
       api.get('/bff/stock-analysis/etf-holdings', { params: { code, market }, skipErrorToast: true }),
-    getIntradayTicks: (code, market, date) =>
-      api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }) } }),
+    getIntradayTicks: (code, market, date, { readOnly = false, signal } = {}) =>
+      api.get('/bff/stock-analysis/intraday-ticks', { params: { code, market, ...(date && { date }), ...(readOnly && { readOnly: true }) }, signal, skipErrorToast: readOnly }),
     // Canonical persisted 台股五檔：完整 FUBON_BOOKS 優先、完整 YAHOO_TW fallback；此 GET 純讀不觸發 vendor。
-    getQuoteDetail: (code, market) =>
-      api.get('/bff/stock-analysis/quote-detail', { params: { code, market }, skipErrorToast: true }),
+    getQuoteDetail: (code, market, { signal } = {}) =>
+      api.get('/bff/stock-analysis/quote-detail', { params: { code, market }, signal, skipErrorToast: true }),
     // Task 136：走勢圖無歷史時即時觸發單檔 10 年回補（since 省略→後端預設 now−10y）。只補 stock_price_history，不入主檔。
     backfillStock: (code, market) =>
       api.post('/bff/stock-analysis/backfill-stock', null, { params: { code, market } })
@@ -326,6 +332,7 @@ export const bffApi = {
 
   // TradingRadar（今日交易雷達，Requirement 43）：純本地規則，零 AI API
   tradingRadar: {
+    realtime: () => api.get('/bff/trading-radar/realtime', { skipErrorToast: true }),
     // Legacy full-tree endpoint remains for non-page compatibility consumers only.
     get: () => api.get('/bff/trading-radar'),
     // Requirement 148: page initial/manual list and lazy single-stock detail stay on this page BFF.
@@ -522,6 +529,7 @@ export const bffApi = {
   // WatchStock — v1.22 起改為 stock_alert 衍生 view，操作以 (stockCode, market) tuple
   // 移除觀察一律在「警示條件」頁刪掉該股票最後一筆 alert，不再有觀察清單級的 delete
   watchStock: {
+    realtime: () => api.get('/bff/watch-stock/realtime', { skipErrorToast: true }),
     getAll:  () => api.get('/bff/watch-stock'),
     reorder: (orderedKeys) => api.put('/bff/watch-stock/order', orderedKeys),
     resendDigest: (market) => api.post('/bff/watch-stock/resend-digest', null, { params: { market } })

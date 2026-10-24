@@ -80,6 +80,39 @@ class IntradaySessionQueryServiceTest {
     }
 
     @Test
+    void readOnlyCurrentCacheMissNeverFetchesOrWritesReference() {
+        LocalDate day = LocalDate.of(2025, 1, 2);
+        when(marketClock.isTradingDay("台股", day)).thenReturn(true);
+        when(references.get("00881", "台股", day)).thenReturn(Optional.empty());
+        when(ticks.getTicks("00881", "台股", day)).thenReturn(List.of(
+                new IntradayTickStore.TickPoint(day + "T10:00:00", new BigDecimal("50"))));
+
+        var session = service(at(day), Runnable::run).query("00881", "台股", day, true);
+
+        assertThat(session.ticks()).hasSize(1);
+        assertThat(session.sessionReferencePrice()).isNull();
+        verifyNoInteractions(priceFetch);
+        verify(references, never()).put(anyString(), anyString(), any(), any());
+        verify(ticks).getTicks("00881", "台股", day);
+        verifyNoMoreInteractions(ticks);
+    }
+
+    @Test
+    void readOnlyCachedReferencePreservesCanonicalEvidenceWithoutWrites() {
+        LocalDate day = LocalDate.of(2025, 1, 2);
+        var reference = new SessionReferencePriceStore.SessionReferencePrice(new BigDecimal("50.55"),
+                SessionReferencePriceStore.TWSE_MIS_Y, at(day).instant());
+        when(references.get("00881", "台股", day)).thenReturn(Optional.of(reference));
+
+        var session = service(at(day), Runnable::run).query("00881", "台股", day, true);
+
+        assertThat(session.sessionReferencePrice()).isEqualByComparingTo("50.55");
+        assertThat(session.sessionReferenceDate()).isEqualTo(day);
+        verifyNoInteractions(priceFetch);
+        verify(references, never()).put(anyString(), anyString(), any(), any());
+    }
+
+    @Test
     void exactMissStoresOnlyQualifiedTwseMisReferenceAndMismatchFailsClosed() {
         LocalDate day = LocalDate.of(2025, 1, 2);
         when(marketClock.isTradingDay("台股", day)).thenReturn(true);

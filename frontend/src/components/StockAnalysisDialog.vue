@@ -218,7 +218,9 @@ import { BarChart, LineChart, CandlestickChart, PieChart } from 'echarts/charts'
 import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZoomComponent, MarkLineComponent, MarkPointComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
-import { bffApi } from '@/api/index.js'
+import { bffApi, livePriceStream } from '@/api/index.js'
+import { createTrailingRefresh } from '@/utils/livePrices.js'
+import { marketToday } from '@/utils/displayQuote.js'
 import { escapeHtml } from '@/utils/escapeHtml'
 import { comparisonLabel, intradayLatestDate, normalizeIntradaySession } from '@/utils/intradaySession.js'
 
@@ -371,23 +373,81 @@ async function fetchHistory() {
   }
 }
 
-async function fetchIntraday() {
-  if (!props.stock) return
-  intradayLoading.value = true
-  intradayTicks.value = []
-  intradaySession.value = null
-  try {
-    const data = await bffApi.stockAnalysis.getIntradayTicks(props.stock.stockCode, props.stock.market)
-    intradaySession.value = normalizeIntradaySession(data)
-    intradayTicks.value = intradaySession.value.ticks
-  } catch (e) {
-    console.warn('無法取得當日分時資料:', e)
-  } finally {
-    intradayLoading.value = false
-  }
+let liveGeneration = 0
+let intradayRequest = null
+let intradayController = null
+let bookController = null
+let stopLivePrices = null
+function liveIdentity() { return `${props.stock?.market}\u0000${props.stock?.stockCode}` }
+function liveCurrent(generation, key) {
+  return generation === liveGeneration && props.modelValue && livePriceStream.visible() && key === liveIdentity()
 }
+async function fetchIntraday(background = false) {
+  if (!props.stock || !props.modelValue || !livePriceStream.visible()) return
+  if (intradayRequest) return intradayRequest
+  const generation = liveGeneration, key = liveIdentity()
+  const { stockCode, market } = props.stock
+  const controller = new AbortController()
+  intradayController = controller
+  intradayLoading.value = true
+  if (!background) { intradayTicks.value = []; intradaySession.value = null }
+  const request = (async () => {
+    await Promise.resolve()
+    try {
+      const data = await bffApi.stockAnalysis.getIntradayTicks(stockCode, market, undefined, { readOnly: background, signal: controller.signal })
+      if (!liveCurrent(generation, key) || (background && (!isIntraday.value || activeTab.value !== 'chart'))) return
+      const session = normalizeIntradaySession(data)
+      if (background && session.tradingDate !== marketToday(market)) return
+      intradaySession.value = session
+      intradayTicks.value = session.ticks
+    } catch (e) { console.warn('無法取得當日分時資料:', e) }
+    finally {
+      if (generation === liveGeneration) intradayLoading.value = false
+      if (intradayRequest === request) intradayRequest = null
+    }
+  })()
+  intradayRequest = request
+  return request
+}
+const intradayRefresh = createTrailingRefresh(() => {
+  if (props.modelValue && isIntraday.value && activeTab.value === 'chart' && livePriceStream.visible()) return fetchIntraday(true)
+}, { delay: 300, interval: 1000, tail: true })
+const bookRefresh = createTrailingRefresh(() => {
+  if (props.modelValue && activeTab.value === 'quote-detail' && livePriceStream.visible()) return fetchQuoteDetail()
+}, { delay: 300, interval: 2000, tail: true })
+function requestLiveRead() {
+  if (activeTab.value === 'chart' && isIntraday.value) intradayRefresh.request()
+  if (activeTab.value === 'quote-detail') bookRefresh.request()
+}
+function pauseLiveReads() {
+  liveGeneration++
+  intradayController?.abort()
+  bookController?.abort()
+  intradayLoading.value = false
+  quoteRequestToken.value++
+  quoteDetailLoading.value = false
+  intradayRefresh.cancel(); bookRefresh.cancel()
+}
+function syncLiveSubscription() {
+  stopLivePrices?.(); stopLivePrices = null
+  pauseLiveReads()
+  intradayTicks.value = []; intradaySession.value = null; quoteDetail.value = null
+  if (!props.modelValue || !props.stock) return
+  stopLivePrices = livePriceStream.subscribe({
+    onQuote: quote => {
+      if (quote.market === props.stock?.market && quote.stockCode === props.stock?.stockCode) requestLiveRead()
+    },
+    onCatchup: requestLiveRead, onPause: pauseLiveReads
+  })
+}
+watch(() => [props.modelValue, props.stock?.market, props.stock?.stockCode], syncLiveSubscription)
+onMounted(syncLiveSubscription)
+watch(activeTab, () => { intradayRefresh.cancel(); bookRefresh.cancel(); requestLiveRead() })
+onUnmounted(() => { stopLivePrices?.(); pauseLiveReads(); intradayRefresh.dispose(); bookRefresh.dispose() })
 
 watch(months, (m) => {
+  intradayRefresh.cancel()
+  if (m === 0) intradayRefresh.request()
   // 切期間：清掉手動縮放，最高/最低標記回到該區間預設窗
   zoomPct.value = null
   if (m === 0 && !intradayTicks.value.length && !intradayLoading.value) {
@@ -396,6 +456,7 @@ watch(months, (m) => {
 })
 
 function onOpen() {
+  pauseLiveReads()
   activeTab.value = 'chart'
   months.value = 12
   chartMode.value = 'line'
@@ -447,21 +508,33 @@ function refreshQuoteDetail() {
   quoteDetailAttempted.value = true
   return fetchQuoteDetail()
 }
+let bookRequest = null
 async function fetchQuoteDetail() {
-  if (!props.stock || quoteDetailLoading.value) return
+  if (!props.stock || !props.modelValue || !livePriceStream.visible()) return
+  if (bookRequest) return bookRequest
   const stockCode = props.stock.stockCode
   const market = props.stock.market
   const token = ++quoteRequestToken.value
+  const generation = liveGeneration, key = liveIdentity()
+  const controller = new AbortController()
+  bookController = controller
   quoteDetailLoading.value = true
-  try {
-    const result = await bffApi.stockAnalysis.getQuoteDetail(stockCode, market)
-    if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market) quoteDetail.value = result
-  } catch (e) {
-    if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market) quoteDetail.value = { available: false, message: '暫時無法取得行情五檔' }
-  } finally {
-    if (token === quoteRequestToken.value) quoteDetailLoading.value = false
-  }
+  const request = (async () => {
+    await Promise.resolve()
+    try {
+      const result = await bffApi.stockAnalysis.getQuoteDetail(stockCode, market, { signal: controller.signal })
+      if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market && liveCurrent(generation, key)) quoteDetail.value = result
+    } catch (e) {
+      if (token === quoteRequestToken.value && props.stock?.stockCode === stockCode && props.stock?.market === market && liveCurrent(generation, key)) quoteDetail.value = { available: false, message: '暫時無法取得行情五檔' }
+    } finally {
+      if (token === quoteRequestToken.value) quoteDetailLoading.value = false
+      if (bookRequest === request) bookRequest = null
+    }
+  })()
+  bookRequest = request
+  return request
 }
+
 const quoteStatusText = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? '盤中' : quoteDetail.value?.marketStatus === 'CLOSED' ? '收盤' : '狀態未知')
 const quoteStatusType = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? 'danger' : quoteDetail.value?.marketStatus === 'CLOSED' ? 'info' : 'warning')
 const quoteSourceLabel = computed(() => quoteDetail.value?.source === 'FUBON_BOOKS' ? '富邦證券' : quoteDetail.value?.source === 'YAHOO_TW' ? 'Yahoo 股市' : '行情來源不明')

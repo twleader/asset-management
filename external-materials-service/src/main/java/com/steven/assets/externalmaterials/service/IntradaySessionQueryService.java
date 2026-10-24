@@ -91,6 +91,11 @@ public class IntradaySessionQueryService {
     }
 
     public IntradaySourceSession query(String code, String market, LocalDate requestedDate) {
+        return query(code, market, requestedDate, false);
+    }
+
+    /** Pure-read mode never starts or joins reference self-healing work. */
+    public IntradaySourceSession query(String code, String market, LocalDate requestedDate, boolean readOnly) {
         LocalDate today = LocalDate.now(wallClock.withZone(MarketClock.zoneOf(market)));
         LocalDate target;
         List<IntradayTickStore.TickPoint> ticks;
@@ -110,7 +115,7 @@ public class IntradaySessionQueryService {
             ticks = readTicks(code, market, target);
         }
 
-        Optional<SessionReferencePriceStore.SessionReferencePrice> evidence = referenceFor(code, market, target);
+        Optional<SessionReferencePriceStore.SessionReferencePrice> evidence = referenceFor(code, market, target, readOnly);
         if (evidence.isEmpty()) return new IntradaySourceSession(target, ticks, null, null, null);
         SessionReferencePriceStore.SessionReferencePrice reference = evidence.get();
         return new IntradaySourceSession(target, ticks, reference.price(), target, reference.source());
@@ -131,13 +136,13 @@ public class IntradaySessionQueryService {
      * global source priority therefore has no competing qualified Fubon/Yahoo candidate here.
      */
     private Optional<SessionReferencePriceStore.SessionReferencePrice> referenceFor(
-            String code, String market, LocalDate target) {
+            String code, String market, LocalDate target, boolean readOnly) {
         if (!"台股".equals(market) || target == null || code == null
                 || !STOCK_CODE.matcher(code).matches() || "0000".equals(code)) {
             return Optional.empty();
         }
         Optional<SessionReferencePriceStore.SessionReferencePrice> cached = referenceStore.get(code, market, target);
-        if (cached.isPresent()) return cached;
+        if (cached.isPresent() || readOnly) return cached;
         // Tick reads stay cache-only. Any current-session reference-cache miss may launch the
         // separate exact TWSE MIS lookup, even when ticks are already complete; history never does.
         LocalDate today = LocalDate.now(wallClock.withZone(MarketClock.zoneOf(market)));

@@ -17,20 +17,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class MarketDataIntradaySessionControllerTest {
-    @Test
-    void intradayEndpointSerializesObjectContractWithIsoDateAndEnum() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void intradayEndpointSerializesObjectContractWithIsoDateAndEnum(boolean readOnly) throws Exception {
         HistoricalDataService historical = mock(HistoricalDataService.class);
         var session = new HistoricalDataService.IntradaySession(LocalDate.of(2026, 8, 18),
                 List.of(new HistoricalDataService.IntradayTick("2026-08-18T13:30:00", new BigDecimal("49.48"))),
                 new BigDecimal("50.55"), LocalDate.of(2026, 8, 18), "TWSE_MIS_Y",
                 new BigDecimal("50.55"), HistoricalDataService.ComparisonKind.EX_RIGHTS_REFERENCE,
                 "TWSE_MIS_Y", new BigDecimal("49.48"), new BigDecimal("-1.07"), new BigDecimal("-2.116716"));
-        when(historical.fetchIntradaySession("00881", "台股", null)).thenReturn(session);
+        if (readOnly) when(historical.fetchIntradaySession("00881", "台股", null, true)).thenReturn(session);
+        else when(historical.fetchIntradaySession("00881", "台股", null)).thenReturn(session);
         MarketDataController controller = new MarketDataController(mock(MarketDataService.class), mock(StockPriceService.class),
                 historical, mock(PriceStreamService.class), mock(DividendHistoryService.class), mock(ExcelExportService.class),
                 mock(TechnicalIndicatorService.class), mock(CommodityLiveQuoteService.class));
         var result = MockMvcBuilders.standaloneSetup(controller).build()
-                .perform(get("/api/market-data/intraday-ticks").param("code", "00881").param("market", "台股"))
+                .perform(get("/api/market-data/intraday-ticks").param("code", "00881").param("market", "台股").param("readOnly", Boolean.toString(readOnly)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tradingDate").value("2026-08-18"))
                 .andExpect(jsonPath("$.ticks[0].time").value("2026-08-18T13:30:00"))

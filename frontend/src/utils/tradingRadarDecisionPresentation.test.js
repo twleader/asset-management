@@ -167,7 +167,7 @@ test('Task451 首屏平行讀獨立 panel，展開讀完整 tuple，SSE 只按 m
     '@expand-change="onRowExpand"',
     'PRICE_UPDATE_FIELD_MAPPING',
     "payload: 'price + changePercent|changePct'",
-    'applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)',
+    "patchLiveRow(row, payload, 'radar')",
     'applyStockEvaluationTuple',
     'expandedDetailKeys.has(key)',
     'cancelMarketDetails(marketName)'

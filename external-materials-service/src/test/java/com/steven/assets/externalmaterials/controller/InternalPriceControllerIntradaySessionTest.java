@@ -19,15 +19,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class InternalPriceControllerIntradaySessionTest {
-    @Test
-    void serializesOfficialObjectShapeAndIsoDatesInsteadOfLegacyBareArray() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void serializesOfficialObjectShapeAndIsoDatesInsteadOfLegacyBareArray(boolean readOnly) throws Exception {
         IntradaySessionQueryService query = mock(IntradaySessionQueryService.class);
         var session = new IntradaySessionQueryService.IntradaySourceSession(LocalDate.of(2026, 8, 18),
                 List.of(new IntradayTickStore.TickPoint("2026-08-18T13:30:00", new BigDecimal("49.48"))),
                 new BigDecimal("50.55"), LocalDate.of(2026, 8, 18), "TWSE_MIS_Y");
-        when(query.query("00881", "台股", null)).thenReturn(session);
+        if (readOnly) when(query.query("00881", "台股", null, true)).thenReturn(session);
+        else when(query.query("00881", "台股", null)).thenReturn(session);
         var result = MockMvcBuilders.standaloneSetup(controller(query))
-                .build().perform(get("/internal/intraday-ticks").param("code", "00881").param("market", "台股"))
+                .build().perform(get("/internal/intraday-ticks").param("code", "00881").param("market", "台股").param("readOnly", Boolean.toString(readOnly)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tradingDate").value("2026-08-18"))
                 .andExpect(jsonPath("$.sessionReferenceDate").value("2026-08-18"))

@@ -21,14 +21,16 @@ import static org.mockito.Mockito.when;
 
 class HistoricalDataIntradaySessionHttpTest {
     private HttpServer server;
+    private String requestQuery;
 
     @AfterEach
     void stop() {
         if (server != null) server.stop(0);
     }
 
-    @Test
-    void webClientDecodesObjectSessionAndUsesStrictPreviousRawClose() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void webClientDecodesObjectSessionAndUsesStrictPreviousRawClose(boolean readOnly) throws Exception {
         String body = "{\"tradingDate\":\"2026-08-18\",\"ticks\":[{\"time\":\"2026-08-18T13:30:00\",\"price\":49.48}],\"sessionReferencePrice\":50.55,\"sessionReferenceDate\":\"2026-08-18\",\"sessionReferenceSource\":\"TWSE_MIS_Y\"}";
         start(body);
         StockPriceHistoryRepository prices = mock(StockPriceHistoryRepository.class);
@@ -37,7 +39,8 @@ class HistoricalDataIntradaySessionHttpTest {
         when(prices.findPreviousPriceBefore("00881", "台股", LocalDate.of(2026, 8, 18))).thenReturn(Optional.of(raw));
         HistoricalDataService service = service(prices);
 
-        var session = service.fetchIntradaySession("00881", "台股", null);
+        var session = service.fetchIntradaySession("00881", "台股", null, readOnly);
+        assertThat(requestQuery.contains("readOnly=true")).isEqualTo(readOnly);
 
         assertThat(session.tradingDate()).isEqualTo(LocalDate.of(2026, 8, 18));
         assertThat(session.sessionReferencePrice()).isEqualByComparingTo("50.55");
@@ -79,6 +82,7 @@ class HistoricalDataIntradaySessionHttpTest {
     private void start(String body) throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/internal/intraday-ticks", exchange -> {
+            requestQuery = exchange.getRequestURI().getRawQuery();
             byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);

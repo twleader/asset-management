@@ -1499,7 +1499,8 @@ import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingD
 import { Bell, Download, Plus, Promotion, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
-import { bffApi } from '@/api'
+import { createTrailingRefresh, patchLiveRow } from '@/utils/livePrices.js'
+import { bffApi, livePriceStream } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { useAuthStore } from '@/stores/authStore'
@@ -1508,7 +1509,6 @@ import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
 import { isClosePending } from '@/utils/displayQuote'
-import { applyTradingRadarSsePriceUpdate } from '@/utils/tradingRadarSsePriceUpdate'
 import { applyStockEvaluationTuple, createTradingRadarPanelLoader } from '@/utils/tradingRadarPanelLoader'
 import { createTradingRadarRefreshJob } from '@/utils/tradingRadarRefreshJob'
 import { projectValuationEvidence } from '@/utils/valuationEvidence'
@@ -1594,10 +1594,14 @@ const analysisStock = ref(null)
 const technicalBackfillLoading = ref(false)
 const technicalBackfillJob = ref(null)
 let technicalBackfillTimer = null
-const RECONNECT_DELAY_MS = 5000
 
 let priceStream = null
-let reconnectTimer = null
+let liveEpoch = 0
+const catchupPrices = createTrailingRefresh(async () => {
+  const epoch = liveEpoch
+  const quotes = await bffApi.tradingRadar.realtime()
+  if (!disposed && epoch === liveEpoch && livePriceStream.visible()) for (const quote of quotes ?? []) applyPriceUpdate(livePriceStream.overlay(quote))
+}, { interval: 1000 })
 let disposed = false
 const expandedDetailKeys = reactive(new Set())
 const detailStates = reactive({})
@@ -1654,6 +1658,7 @@ const marketClass = computed(() => `regime-${String(currentMarket.value.regime |
 function commitPanel(panel, envelope) {
   if (panel === 'tw-market') {
     radar.value.market = envelope.data.market
+    for (const quote of livePriceStream.quotes()) applyPriceUpdate(quote)
     radar.value.ruleVersion = envelope.ruleVersion
     return
   }
@@ -1669,6 +1674,7 @@ function commitPanel(panel, envelope) {
   cancelMarketDetails(marketName)
   const retained = (radar.value.stocks || []).filter(row => row.market !== marketName)
   radar.value.stocks = [...retained, ...envelope.data.stocks]
+  for (const quote of livePriceStream.quotes()) applyPriceUpdate(quote)
   radar.value.skippedNonTwStocks = envelope.data.skippedNonTwStocks
   radar.value.ruleVersion = envelope.ruleVersion
 }
@@ -1785,17 +1791,19 @@ async function onBackfillTechnicalIndicators() {
 }
 
 function applyPriceUpdate(payload) {
+  if (payload?.market === '台股' && payload?.stockCode === '0000') {
+    const target = radar.value.market
+    const quoteRow = { ...target, market: '台股', stockCode: '0000', priceUpdatedAt: target.liveUpdatedAt }
+    if (patchLiveRow(quoteRow, payload, 'radar')) {
+      for (const field of ['price', 'changePercent', 'quoteStatus', 'tradingDate', 'priceSource']) target[field] = quoteRow[field]
+      target.liveUpdatedAt = quoteRow.priceUpdatedAt
+    }
+    return
+  }
   const row = (radar.value.stocks || []).find(item => item.market === payload?.market && String(item.stockCode) === String(payload?.stockCode))
-  if (!row || staleSse(row, payload)) return
-  if (!applyTradingRadarSsePriceUpdate(radar.value.stocks || [], payload)) return
+  if (!patchLiveRow(row, payload, 'radar')) return
   const state = detailStates[detailKey(row)]
-  if (state?.tuple?.stock) applyTradingRadarSsePriceUpdate([state.tuple.stock], payload)
-}
-
-function staleSse(row, payload) {
-  const incoming = Date.parse(payload?.updatedAt)
-  const present = Date.parse(row?.priceUpdatedAt)
-  return Number.isFinite(incoming) && Number.isFinite(present) && incoming <= present
+  if (state?.tuple?.stock) patchLiveRow(state.tuple.stock, payload, 'radar')
 }
 
 function detailKey(row) {
@@ -1857,6 +1865,7 @@ async function loadStockDetail(row, key) {
     // validate + tuple projection 都成功後才在同一同步區段換 row 與 detail，沒有半份成功。
     radar.value.stocks = tuple.rows
     state.tuple = tuple.detail
+    for (const quote of livePriceStream.quotes()) applyPriceUpdate(quote)
     state.loaded = true
   } catch (error) {
     if (isCurrent() && error?.code !== 'ERR_CANCELED' && error?.name !== 'AbortError') {
@@ -1888,29 +1897,9 @@ function cancelMarketDetails(market) {
 
 function openPriceStream() {
   if (disposed) return
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  if (priceStream) priceStream.close()
-
-  priceStream = new EventSource('/api/market-data/prices/stream')
-  priceStream.addEventListener('price-update', event => {
-    try {
-      applyPriceUpdate(JSON.parse(event.data))
-    } catch (e) {
-      console.warn('交易雷達 SSE 解析失敗:', e)
-    }
-  })
-  priceStream.onerror = () => {
-    if (disposed || !priceStream || priceStream.readyState !== EventSource.CLOSED) return
-    priceStream.close()
-    priceStream = null
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
-      openPriceStream()
-    }, RECONNECT_DELAY_MS)
-  }
+  priceStream?.()
+  priceStream = livePriceStream.subscribe({ onQuote: applyPriceUpdate,
+    onCatchup: () => catchupPrices.request(), onPause: () => { liveEpoch++; catchupPrices.cancel() } })
 }
 
 function onStockDblClick(row) {
@@ -2798,13 +2787,10 @@ onUnmounted(() => {
   refreshJob.dispose()
   for (const key of Object.keys(detailStates)) cancelDetail(key)
   if (priceStream) {
-    priceStream.close()
+    priceStream()
     priceStream = null
   }
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
+  catchupPrices.dispose()
 })
 </script>
 

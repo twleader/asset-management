@@ -405,6 +405,7 @@ public class SnapshotFormBffController {
                 row.put("changePercent", preferLive ? live.get("changePercent") : hist.get("changePercent"));
                 row.put("source", preferLive ? live.get("source") : hist.get("source"));
                 row.put("quoteStatus", preferLive ? live.get("quoteStatus") : hist.get("quoteStatus"));
+                row.put("updatedAt", preferLive ? live.get("updatedAt") : hist.get("updatedAt"));
                 row.put("stockName", firstNonNull(div.get("stockName"), live.get("stockName")));
                 BigDecimal dr = SnapshotEnricher.toBigDecimal(div.get("dividendRate"));
                 row.put("dividendRate", dr);

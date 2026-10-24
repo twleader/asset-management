@@ -144,10 +144,11 @@ import { Plus, Operation, Promotion } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import Sortable from 'sortablejs'
 import dayjs from 'dayjs'
-import { bffApi } from '@/api/index.js'
+import { bffApi, livePriceStream } from '@/api/index.js'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
 import TaiwanMap from '@/components/TaiwanMap.vue'
 import UsFlag from '@/components/UsFlag.vue'
+import { createTrailingRefresh, patchLiveRow } from '@/utils/livePrices.js'
 import { isClosePending } from '@/utils/displayQuote'
 
 // 觀察清單由 stock_alert 衍生：「新增觀察」按鈕請父層 (StockMonitorView) 切到警示條件 tab 並彈出新增 dialog
@@ -174,7 +175,10 @@ const volumeLabel = computed(() => marketTab.value === '台股' ? '成交量(張
 async function load() {
   loading.value = true
   try {
-    list.value = await bffApi.watchStock.getAll()
+    const rows = await bffApi.watchStock.getAll()
+    if (watchDisposed) return
+    list.value = rows
+    for (const quote of livePriceStream.quotes()) applyLivePrice(quote)
   } finally {
     loading.value = false
   }
@@ -232,7 +236,20 @@ function initSortable() {
   })
 }
 
+let watchDisposed = false
+let liveEpoch = 0
+let stopLivePrices = null
+function applyLivePrice(quote) {
+  for (const row of list.value) patchLiveRow(row, quote)
+}
+const catchupPrices = createTrailingRefresh(async () => {
+  const epoch = liveEpoch
+  const quotes = await bffApi.watchStock.realtime()
+  if (!watchDisposed && epoch === liveEpoch && livePriceStream.visible()) for (const quote of quotes ?? []) applyLivePrice(livePriceStream.overlay(quote))
+}, { interval: 1000 })
+onUnmounted(() => { watchDisposed = true; stopLivePrices?.(); catchupPrices.dispose(); sortableInstance?.destroy() })
 onMounted(async () => {
+  stopLivePrices = livePriceStream.subscribe({ onQuote: applyLivePrice, onCatchup: () => catchupPrices.request(), onPause: () => { liveEpoch++; catchupPrices.cancel() } })
   await load()
   nextTick(initSortable)
 })

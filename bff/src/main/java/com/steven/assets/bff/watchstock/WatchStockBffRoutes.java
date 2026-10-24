@@ -15,6 +15,11 @@ public class WatchStockBffRoutes {
     @Bean
     public RouteLocator watchStockRoutes(RouteLocatorBuilder builder) {
         return builder.routes()
+                .route("watch-stock-realtime", r -> r
+                        .order(-10)
+                        .path("/api/bff/watch-stock/realtime").and().method("GET")
+                        .filters(f -> f.setPath("/api/market-data/prices"))
+                        .uri(businessServicesUrl))
                 .route("watch-stock-route", r -> r
                         .path("/api/bff/watch-stock/**")
                         .filters(f -> f.rewritePath(
