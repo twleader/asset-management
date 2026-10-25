@@ -210,7 +210,7 @@ public class AssetService {
         java.time.LocalDate today = TransitProcessingDatePolicy.today(java.time.Clock.systemUTC());
         if (!snapshot.getSnapshotDate().isAfter(today)
                 && (previousLatest == null || snapshot.getSnapshotDate().isAfter(previousLatest.getSnapshotDate()))) {
-            removeDueTransit(snapshot, today);
+            TransitBankSettlement.settle(snapshot, today);
         }
         recalcTotals(snapshot);
         AssetSnapshot saved = snapshotRepo.save(snapshot);
@@ -308,15 +308,15 @@ public class AssetService {
         snapshot.setUsdExchangeRate(req.usdExchangeRate());
         snapshot.setNotes(req.notes());
 
-        // 富邦唯讀在途款是 source-owned projection；完整 PUT 不能藉由未含 source 的
-        // 管理資產 payload 覆寫、刪除或重建它。identity 固定是 bank id + transit type，
+        // 富邦唯讀在途款及來源管理活存是 source-owned projection；完整 PUT 不能藉由未含 source 的
+        // 管理資產 payload 覆寫、刪除或重建它。identity 固定是 bank id + deposit type，
         // 不看 request 自帶的 currency，避免 UI round-trip 產生第二筆同一 target。
         java.util.Set<DepositIdentity> protectedDepositIdentities = snapshot.getDeposits().stream()
-                .filter(AssetService::isFubonManagedTransit)
+                .filter(AssetService::isProtectedDeposit)
                 .map(AssetService::depositIdentity)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         supplementManagedProcessingDates(existingDeposits, req.deposits());
-        snapshot.getDeposits().removeIf(deposit -> !isFubonManagedTransit(deposit));
+        snapshot.getDeposits().removeIf(deposit -> !isProtectedDeposit(deposit));
         snapshot.getFunds().clear();
         // Preserve only scopes the one captured decision says are source-owned.
         snapshot.getStocks().removeIf(stock -> !scopeOwnership.isSourceOwned(
@@ -324,7 +324,7 @@ public class AssetService {
 
         if (req.deposits() != null) {
             req.deposits().forEach(d -> {
-                if (isFubonManagedTransit(existingDeposits.get(d.id()))
+                if (isProtectedDeposit(existingDeposits.get(d.id()))
                         || protectedDepositIdentities.contains(new DepositIdentity(d.bankId(), d.depositType()))) {
                     return;
                 }
@@ -393,7 +393,7 @@ public class AssetService {
         if (!snapshot.getSnapshotDate().isAfter(today)
                 && snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(snapshot.getOwnerUserId())
                         .map(latest -> java.util.Objects.equals(latest.getId(), snapshot.getId())).orElse(false)) {
-            removeDueTransit(snapshot, today);
+            TransitBankSettlement.settle(snapshot, today);
         }
         recalcTotals(snapshot);
         return toSummaryResponse(snapshotRepo.save(snapshot));
@@ -427,11 +427,6 @@ public class AssetService {
                 target.setProcessingDate(request.processingDate());
             }
         }
-    }
-
-    private static boolean removeDueTransit(AssetSnapshot snapshot, java.time.LocalDate today) {
-        return snapshot.getDeposits().removeIf(deposit -> TransitProcessingDatePolicy.isDue(
-                deposit.getCurrency(), deposit.getProcessingDate(), today));
     }
 
     /** Source-owned Fubon rows retain vendor fields; only one exact, valid cost candidate may update a baseline. */
@@ -1011,13 +1006,13 @@ public class AssetService {
      *
      * <p>{@code snapshotDate < today} 才動——同時是唯一鍵 {@code (owner_user_id, snapshot_date)} 防護：
      * 最新快照為該 owner 日期最大值，改為 today 必不與既有列相撞；未來日期 skip（不把未來快照往回搬）。
-     * 即使已是今天仍清除到期在途款；只重算被 roll 或清理的這一筆，不動歷史快照。
+     * 即使已是今天仍結清到期在途款；只重算被 roll 或清理的這一筆，不動歷史快照。
      *
      * <p>由 {@code SnapshotDateRollScheduler} 逐 owner 呼叫（本方法 {@code @Transactional} → 每 owner 獨立交易，
      * 單一 owner 失敗不連坐其他 owner）；不可把逐 owner 迴圈搬進本 service 呼叫本方法（self-invocation 繞過
      * Spring proxy，會使整批落同一交易連坐 rollback）。
      *
-     * @return true 表示有推進日期或清除到期款；false 表示無異動
+     * @return true 表示有推進日期或結清到期款；false 表示無異動
      */
     @Transactional
     public boolean rollLatestSnapshotToTodayForOwner(Long ownerId, java.time.LocalDate today) {
@@ -1025,8 +1020,8 @@ public class AssetService {
         if (latest == null) return false;
         if (latest.getSnapshotDate().isAfter(today)) return false;
         java.time.LocalDate old = latest.getSnapshotDate();
-        boolean removed = removeDueTransit(latest, today);
-        if (old.equals(today) && !removed) return false;
+        boolean settled = TransitBankSettlement.settle(latest, today);
+        if (old.equals(today) && !settled) return false;
         latest.setSnapshotDate(today);
         recalcTotals(latest);                 // 只用凍結 currentValue、只算這一筆
         snapshotRepo.save(latest);
@@ -1133,8 +1128,12 @@ public class AssetService {
                 && FUBON_TRANSIT_TYPES.contains(deposit.getDepositType());
     }
 
+    private static boolean isProtectedDeposit(BankDeposit deposit) {
+        return isFubonManagedTransit(deposit) || TransitBankSettlement.isSourceManagedCash(deposit);
+    }
+
     private static DepositIdentity depositIdentity(BankDeposit deposit) {
-        return new DepositIdentity(deposit.getBank().getId(), deposit.getDepositType());
+        return new DepositIdentity(deposit.getBank() == null ? null : deposit.getBank().getId(), deposit.getDepositType());
     }
 
     private static String depositUpdateMode(BankDeposit deposit) {
