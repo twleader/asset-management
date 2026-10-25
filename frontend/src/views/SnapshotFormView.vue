@@ -301,7 +301,7 @@
           <!-- 在途款項 Tab -->
           <el-tab-pane lazy label="在途款項" name="TRANSIT">
             <p class="transit-processing-date-hint">
-              儲存後，款項會於處理日自動移除；自動更新的舊款項若尚無日期，仍可補填。
+              儲存後，處理日會從同銀行、同幣別的活存扣除待付款，並將待收款加至活存；入帳成功才移除款項。找不到唯一對應活存、餘額不足或資料不全時，款項會保留。自動更新的舊款項若尚無日期，仍可補填。
             </p>
             <el-tabs v-model="transitTab" size="small" style="margin-top:4px">
               <!-- 台幣 -->

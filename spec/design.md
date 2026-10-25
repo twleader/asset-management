@@ -12381,7 +12381,7 @@ stale 同時表達必要完成日缺口及盤中當日 live 缺口：開盤前�
 
 FubonSettlementWriter 以合法 observation 每 future day 的 buy/sell settlement 分列（key snapshot/bank/type/processingDate），保留 aggregate SyncResult 形狀、驗證 freshness 與 owner race fence。不同日期不合併；missing/zero 不清既有未到期列；manual collisions 仍拒絕；null 日期 legacy 無憑據不得改配。此版本不修改 Python adapter 的合法性閘門。
 
-業務層共用純到期判定 helper，僅判斷 TRANSIT_* 且日期非 null 且 <= 台北今天。AssetService 在既有 row lock 的當前 latest 非未來快照上套用並重算，供完整 PUT/create 與 rollLatestSnapshotToTodayForOwner 使用。SnapshotDateRollScheduler 既有每日 00:05／開機 self-heal 外部 bean transaction 路徑不變；即使當日日期不用 roll，仍清到期款。未來快照與非 latest 歷史快照不動；每 owner 獨立 transaction。JOBS 修改既有描述即可，GET 無任何 mutation。到期只移除本機在途列，完全不模擬或執行支付。
+業務層共用純到期判定 helper，僅判斷 TRANSIT_* 且日期非 null 且 <= 台北今天。AssetService 在既有 row lock 的當前 latest 非未來快照上套用並重算，供完整 PUT/create 與 rollLatestSnapshotToTodayForOwner 使用。SnapshotDateRollScheduler 既有每日 00:05／開機 self-heal 外部 bean transaction 路徑不變；即使當日日期不用 roll，仍清到期款。未來快照與非 latest 歷史快照不動；每 owner 獨立 transaction。JOBS 修改既有描述即可，GET 無任何 mutation。Task 510 起到期先將本機在途款轉入對應活存再移除，完全不模擬或執行外部支付。
 
 完整 PUT 的 request id 先唯一／歸屬驗證（before delete），再捕捉所有保護 identity、補 legacy AUTO 日期、處理手動 collection replacement，最後在可清理 snapshot 清到期列並重算。舊 UI 帶不存在的 id 以 validation error 原子拒絕，不能將已到期 AUTO 再插為 MANUAL。相同身份多日期 AUTO 全部保留且忽略其普通編輯 payload。Excel 缺 id／日期不能覆蓋 source-managed 日期。日期有效性由 LocalDate 型別與服務層檢查，空日期不是今天。
 
@@ -13078,3 +13078,14 @@ Claude僅從已通過原consumer/date/slot/automation身分檢查的當輪final 
 backend/BFF Event選填publicDecision，封閉解碼只對本key允許省略、不允許null。ingress授權在owner/DB/error-ingest前限制collector與正確source；一般Node新增nullable PublicDecisionSummary(decisionId,topic,selectedOptionId,options[id,label,action,selected])。新ADMIN純讀 GET /api/ai-flow/runs/{runId}/nodes/{eventId}/public-decision 與同源 /api/bff/ai-flow/.../public-decision 投影同一immutable event並驗hash；ToolCall/ChoiceSet原API不變。一般Node不帶完整publicDecision；按需detail採獨立abort/generation fence，參數與理由只能Vue純文字pre/文字區塊，不進ECharts/tooltip/console。圖以自述候選分支呈現全部options，synthetic id獨立namespace並只導向原event。缺記錄固定「未記錄公開決策摘要」，不猜未列選項。
 
 observer API升1.4.0，金融YAML method/path/schema不變；統一Markdown與PublishedSwaggerIdentity因observer schema改變必重產。SRPP producer規則也變更，所以不能僅metadata refresh；受控Swagger同步須在乾淨managed SRPP feature先完成，之後才改政策入口並重建runtime/manifest新hash，完整同步backend authority/golden/insert-only registry。驗收及部署順序由Task508明定，不放寬現sync工具的dirty/source allowlist。
+
+
+## Requirement 150／Task 510：在途結清與活存原子調整
+
+以純 Service helper 規劃並套用每個 bankId／對應幣別／processingDate 批次，AssetService 的既有 create、PUT、roll 到期呼叫共用它。沿用 TransitProcessingDatePolicy 與既有 parent row lock，無新查詢／路由／資料表／排程。所有變動同 transaction：確認目標與完整批次→計算淨變動→更新活存→orphan removal→SnapshotAggregateCalculator.recalculate。GET 保持 pure read，不由 UI 先隱藏列。
+
+目標是同一快照同 bank id 的唯一 TWD「活存」或 USD「美元活存」既有產品 code 列，且 source=MANUAL／legacy null；不是新的業務分類 enum。來源為銀行的真實帳號並未存於此資料模型，因此不推測同銀行多筆活存中的哪一筆。完整 PUT 必在 collection replacement 前捕捉來源非 MANUAL/null 的 TWD／活存、USD／美元活存原列，沿用 AUTO transit preservation pattern：忽略 exact id 與 bankId＋depositType payload 碰撞、原列及非餘額欄位原樣保留，即使 payload 省略也不可移除，以免重建成 MANUAL 消除來源證據。缺目標／多目標／來源管理目標／無銀行／無有效金額時保留整批並記錄具名原因。不建立帳戶、不動定存／證券戶。
+
+依處理日期升序，以同日淨額計算。TWD 使用 persisted signed amount；USD 使用 abs(originalAmount) 乘 persisted amount.signum()，每列原幣須可驗證且 snapshot 匯率 >0，目標 originalAmount 不得缺失。新 USD 台幣 amount = 新原幣 × 快照匯率，HALF_UP 到整數，保持原估值慣例。若新活存為負，整批保留，避免現有表單與 normalizeDepositAmount 的 abs 將負餘額轉正。完整驗證後才改 entity，刪除失敗時目標／在途／aggregates 一起 rollback；刪掉的 id 在第二次舊 PUT 仍被既有驗證拒絕。
+
+未到期、null 日期、非 latest／未來快照均不動；手動取消在途列不代表結清。停機補跑與已是今天的 latest 都走同規則。沒有可靠證據可重建舊版已刪列，因此不補歷史差額。前端僅修訂說明文字，儲存後沿用 canonical detail reload，不新增 API response 欄位或 Swagger identity 變動。

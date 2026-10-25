@@ -5590,7 +5590,7 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] 完整 PUT 必先以既有 snapshot lock 鎖定並驗 owner；在移除任何 children 前，所有 supplied 非 null deposit id 必須唯一且屬該 locked snapshot，未知／重複／跨快照／跨 owner id 一律拒絕整次寫入，防止到期後舊畫面把已刪 AUTO 轉回 MANUAL。既有 AUTO 保護 identity 仍以 bankId＋depositType 跨 currency 防碰撞，保留同 identity 不同 processingDate 的全部 AUTO 列。僅對 AUTO 原 processingDate=null 且 request exact id、bankId、depositType、TRANSIT_TWD identity 相符者，接受使用者補填日期；已有日期不得修改／清除。AUTO 金額、notes、source 及其餘欄位全部保留。legacy client 缺 id 只沿用原保護，不得猜哪列的日期。Excel 同日覆蓋仍走 locked preservation，未提供日期必保留 AUTO 原值。
 - [ ] FubonSettlementWriter 對通過既有 envelope／owner／freshness／currency／signed amount 驗證的 future nonzero 來源，改以 bank＋depositType＋settlementDate 投影多列，各列 processingDate=官方 settlementDate；不得把不同處理日合併再以最大／最小日刪整筆。每日期方向寫入精確原值，既有 summary payableAmount／receivableAmount 仍為合計。相同資料 no-op；missing／zero directions 不清除未到期資料。manual 同 bank/type collision 仍 UNMANAGED_TARGET，錯幣別／同日重复 AUTO 為 AMBIGUOUS_TARGET。遇同 bank/type 的 AUTO null-date 舊列，不能用等額猜同一事件或覆寫／重複投影，必 fail closed 等使用者補填／到期移除。既有 adapter 對 same-day/past nonzero、malformed／stale／帳戶不明的拒絕不變，清理到期資料不得依賴本次券商查詢成功。
 - [ ] 到期定義為 processingDate <= Asia/Taipei 的今天。只清理每 owner 當前 latest snapshot、且 snapshotDate <= today 的 TRANSIT_TWD／TRANSIT_USD 有日期列；手動、自動皆適用。null 日期、未到期、普通存款、歷史快照及未來快照保持不變。沿用 SnapshotDateRollScheduler 每日 00:05 Asia/Taipei 與開機 self-heal，清理與 roll 在同一個 per-owner transaction、同一個既有 snapshot row lock 下完成；即使 snapshotDate 已是今天也必清理。服務停機跨日後下次啟動補跑；逐 owner 失敗隔離、idempotent、不因 Fubon feature flag 或來源 503 停止清理。更新既有 JOBS 此工作的描述，不新增排程或變更節拍。
-- [ ] 使用者建立／儲存當前最新且非未來快照時，已到期列在同次 transaction 立即移除；先取得 AUTO 保護 identity 再清理，確保該 payload 不會重建已刪 AUTO。到期移除用 orphan removal 並重算該 snapshot totalDeposit／totalAssets 等既有 aggregates；不改活存金額、不新增付款／交易／已實現損益，不修改券商、銀行端或歷史快照。GET 全程 pure read，不在畫面或公開 API 讀取時觸發刪除。
+- [ ] 使用者建立／儲存當前最新且非未來快照時，已到期列在同次 transaction 立即移除；先取得 AUTO 保護 identity 再清理，確保該 payload 不會重建已刪 AUTO。到期移除用 orphan removal 並重算該 snapshot totalDeposit／totalAssets 等既有 aggregates；Task 510 起須在同一交易先調整對應活存，成功後才移除。不新增付款／交易／已實現損益，不修改券商、銀行端或歷史快照。GET 全程 pure read，不在畫面或公開 API 讀取時觸發刪除。
 - [ ] 驗證涵蓋台北跨日、已是今天仍清理、停機補跑、過期／today／future／null、兩幣別、多 owner／歷史／future snapshot、aggregate、重跑零寫、writer 多日期與 missing/zero 保留、legacy null-date fail closed、手動來源保護、AUTO 日期補填及不可改既有日期、stale/跨 owner/重複 id 的全交易拒絕與 Excel round-trip。採 Java 21 focused tests＋真 PostgreSQL lifecycle/rollback 驗證、前端既有測試及 build、Docker affected images rebuild/recreate 與實際 GET。重產 db/schema.sql、schema drift/spec-check 零 BLOCK、架構審查後依專案流程 commit/no-ff merge/push，再驗 main runtime。使用者指出的舊款項，只在取得實際處理日後透過受 owner 保護的應用程式寫入路徑補填並驗證消失；不得把猜測日期或測試資料寫入實帳。
 
 
@@ -6212,3 +6212,17 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 所有通過驗證的公開候選完整保存並逐項顯示，不能只保留採用項。超額、未知／重複 key/id、無效 selected id、私人思考標記、身分或版本錯誤必整筆拒絕並在無敏感內容的 collector receipt 留具名原因；不得截掉候選後稱完整。參數沿既有截斷／憑證遮蔽metadata，公開理由也遮蔽憑證；必要截斷明示，未記錄不補猜。界面固定標示「公開自述；不保證涵蓋所有內部考量，亦不證明工具已執行」。
 - [ ] 一般 Node 只含無理由／依據／參數的安全選項 summary，既有按需 ADMIN 同源 BFF 明細才可讀完整 publicDecision。全部選項含未選項可見；synthetic node 與真事件分開，選取導向原決策事件。舊 run 不回寫、不 replay，Claude 原 UNLINKED/RAW_TRACE_UNAVAILABLE 保持，不將自述摘要升級為 trace complete。
 - [ ] 同一變更交付真正 Codex台股兩個與美盤22-00共三個prompt、Claude本機SKILL與現有遠端保存指令的部署讀回，不能停在producer absent；若Claude遠端裝置綁定缺工具能力，具名BLOCKED_REMOTE_PROOF、保留遠端舊狀態且不阻擋其他可完成工作，不虛稱遠端已部署。變更兩個repo均feature commit、no-ff merge、push與remote readback。observer/YAML/統一Swagger/consumer schema/runtime/新policy hash/backend embedded authority/insert-only registry/jar 必完全一致；下一交易日合法時窗以同一hash只讀GET驗證，時窗未到標 NOT_YET_EXECUTED，不能用健康檢查代替。
+
+
+#### Requirement 150 修訂／Task 510：在途款項到期轉入銀行存款
+
+**User Story：**身為資產管理使用者，我希望在途款項於款項處理日移除時，同銀行同幣別的活存同步增加或減少，讓已記錄的待收／待付款轉成已結清存款。
+
+**相容性修訂：**取代 Task 448 的「只移除、不改活存」行為，保留台北日期、owner/latest、row lock、GET pure read、AUTO 保護與過期表單拒絕邊界。這是本機資產記帳，無銀行／券商外部寫入。
+
+**Acceptance Criteria：**
+- [ ] 所有既有到期入口（最新非未來快照 create、完整 PUT、每日 roll／啟動補跑）共用相同 Service 規則。僅 processingDate 非 null 且 <= 台北今天的 TRANSIT_TWD／TRANSIT_USD 可結清；歷史／未來快照、未到期／null、一般手動刪除或取消在途列不調整存款，不追補已被舊版本刪除的款項。
+- [ ] 結清目標限定同 snapshot、非 null 相同 bank id、同對應幣別的唯一活存：TRANSIT_TWD→TWD／既有產品 code「活存」，TRANSIT_USD→USD／既有產品 code「美元活存」。不得依顯示名稱猜測、自建分類、增建存款列、拆定存、動證券戶或其他銀行；目標 source 必須為 MANUAL（含舊 null source）。完整 PUT 在 locked snapshot 的 collection replacement 前，將來源非 MANUAL/null 的 TWD／活存、USD／美元活存原列納入保護；原樣保留即使 payload 省略，並忽略 exact id 或同 bankId＋depositType 的 payload 碰撞，不能重建降級為 MANUAL。欠缺／重複目標、無銀行、來源管理目標、無有效金額或美元原幣／正匯率不足時保留在途列與存款原值，以具名日誌記錄原因，前端文字說明未能對應時保留。
+- [ ] 使用已保存的 signed amount 決定方向，待付款扣除、待收款增加。TWD 直接加 signed amount；USD 以 abs(originalAmount) × signed amount 的方向調整目標 originalAmount，再用 snapshot usdExchangeRate 與既有 HALF_UP 整數台幣換算重算目標 amount。目標利率／備註／銀行／類型／source 不變。
+- [ ] 同銀行同幣別同處理日批次淨額入帳，日期由舊到新處理；如果該批次會造成負活存，整批保留、不套 abs、不改其他帳戶。每批先完整驗證、再改目標並移除該批在途列；刪除與目標更新及 aggregates 在同一既有 snapshot row lock／transaction 中原子提交，失敗回滾，重跑不重複調整。結清本身保持 totalDeposit／totalAssets（USD 依原有逐列換算可能有整數捨入差）；利息以調整後活存重算。
+- [ ] 更新在途款項說明，明示待付款扣活存／待收款加活存、同銀行同幣別、無唯一目標／餘額不足會保留；前端只顯示不自行計算。既有 API／DTO／DB schema／9090 Swagger／排程節拍不變。驗證涵蓋兩幣別正負、同日淨額、不同銀行、缺少／重複／來源管理目標、餘額不足、USD 缺匯率／原幣、歷史／未來／null、重跑與 stale id、真 PostgreSQL rollback／row lock／零重複 DML，並完成受影響服務重建與 main 發布。

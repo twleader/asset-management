@@ -224,13 +224,20 @@ class AssetServiceTest {
         snapshot.setSnapshotDate(today);
         BankDeposit due = autoDeposit(10L, null);
         BankDeposit future = autoDeposit(11L, today.plusDays(1));
+        Bank bank = due.getBank();
+        when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
+        var cash = new AssetSnapshotDto.DepositRequest(7L, "活存", new BigDecimal("2000"),
+                null, "TWD", new BigDecimal("1.5"), "cash");
         prepareUpdate();
         when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L)).thenReturn(Optional.of(snapshot));
         service.updateSnapshot(1L, request(List.of(depositRequest(due, today, "TRANSIT_TWD"),
-                depositRequest(future, null, "TRANSIT_TWD"))));
-        assertThat(snapshot.getDeposits()).containsExactly(future);
-        assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-1002");
-        assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-1002");
+                depositRequest(future, null, "TRANSIT_TWD"), cash)));
+        assertThat(snapshot.getDeposits()).hasSize(2);
+        assertThat(snapshot.getDeposits().getFirst()).isSameAs(future);
+        assertThat(snapshot.getDeposits().get(1).getAmount()).isEqualByComparingTo("998");
+        assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-4");
+        assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-4");
+        assertThat(snapshot.getEstimatedAnnualDividend()).isEqualByComparingTo("15");
     }
 
     @Test
@@ -254,18 +261,22 @@ class AssetServiceTest {
     void createTransitRejectsCopiedIdsAndClearsDueRowsOnlyOnNewLatest() {
         LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
         when(tenantGuard.requireCurrentUserId()).thenReturn(9L);
-        var due = new AssetSnapshotDto.DepositRequest(null, "賣股待收款", BigDecimal.TEN,
+        Bank bank = Bank.builder().id(7L).code("manual").build();
+        when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
+        var due = new AssetSnapshotDto.DepositRequest(7L, "賣股待收款", BigDecimal.TEN,
                 null, "TRANSIT_TWD", null, null, null, today);
-        var normal = new AssetSnapshotDto.DepositRequest(null, "活存", BigDecimal.ONE,
+        var normal = new AssetSnapshotDto.DepositRequest(7L, "活存", BigDecimal.ONE,
                 null, "TWD", null, null, null, today);
         when(snapshotRepo.save(any())).thenAnswer(call -> call.getArgument(0));
         var result = service.createSnapshot(new AssetSnapshotDto.CreateSnapshotRequest(
                 today, BigDecimal.ONE, null, List.of(due, normal), List.of(), List.of()));
-        assertThat(result.totalDeposit()).isEqualByComparingTo("1");
+        assertThat(result.totalDeposit()).isEqualByComparingTo("11");
         ArgumentCaptor<AssetSnapshot> captured = ArgumentCaptor.forClass(AssetSnapshot.class);
         verify(snapshotRepo).save(captured.capture());
-        assertThat(captured.getValue().getDeposits()).singleElement()
-                .extracting(BankDeposit::getProcessingDate).isNull();
+        assertThat(captured.getValue().getDeposits()).singleElement().satisfies(row -> {
+            assertThat(row.getProcessingDate()).isNull();
+            assertThat(row.getAmount()).isEqualByComparingTo("11");
+        });
         assertThatThrownBy(() -> service.createSnapshot(new AssetSnapshotDto.CreateSnapshotRequest(
                 today, BigDecimal.ONE, null, List.of(new AssetSnapshotDto.DepositRequest(null, "活存",
                 BigDecimal.ONE, null, "TWD", null, null, 10L, null)), List.of(), List.of())))
@@ -281,6 +292,47 @@ class AssetServiceTest {
         service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(null, "賣股待收款",
                 BigDecimal.TEN, null, "TRANSIT_USD", null, null, manual.getId(), null))));
         assertThat(snapshot.getDeposits()).singleElement().extracting(BankDeposit::getProcessingDate).isNull();
+    }
+
+    @Test
+    void fullPutProtectsManagedCashOmissionExactIdAndBankTypeCollision() {
+        for (String currency : List.of("TWD", "USD")) {
+            snapshot.getDeposits().clear();
+            BankDeposit managed = BankDeposit.builder().id(40L).snapshot(snapshot)
+                    .bank(Bank.builder().id(7L).build()).currency(currency)
+                    .depositType("TWD".equals(currency) ? "活存" : "美元活存")
+                    .amount(new BigDecimal("100")).originalAmount(BigDecimal.TEN)
+                    .source("OTHER_SYNC").notes("source").annualInterestRate(BigDecimal.ONE).build();
+            snapshot.getDeposits().add(managed);
+            prepareUpdate();
+            service.updateSnapshot(1L, request(List.of()));
+            service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(8L, "renamed",
+                    BigDecimal.ONE, null, "TWD", null, "overwrite", 40L, null))));
+            service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(7L,
+                    managed.getDepositType(), BigDecimal.ONE, null, "OTHER", null, "overwrite"))));
+            assertThat(snapshot.getDeposits()).singleElement().isSameAs(managed);
+            assertThat(managed.getAmount()).isEqualByComparingTo("100");
+            assertThat(managed.getSource()).isEqualTo("OTHER_SYNC");
+            assertThat(managed.getNotes()).isEqualTo("source");
+        }
+        verifyNoInteractions(bankRepo);
+    }
+
+    @Test
+    void manualTransitOmittedFromPutIsCancelledWithoutAdjustingCash() {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        snapshot.setSnapshotDate(today);
+        Bank bank = Bank.builder().id(7L).build();
+        snapshot.getDeposits().add(BankDeposit.builder().id(41L).snapshot(snapshot).bank(bank)
+                .currency("TRANSIT_TWD").depositType("其他款項").amount(BigDecimal.TEN)
+                .processingDate(today).build());
+        when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
+        when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L)).thenReturn(Optional.of(snapshot));
+        prepareUpdate();
+        service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(7L,
+                "活存", new BigDecimal("100"), null, "TWD", null, null))));
+        assertThat(snapshot.getDeposits()).singleElement().satisfies(row ->
+                assertThat(row.getAmount()).isEqualByComparingTo("100"));
     }
 
     private void prepareUpdate() {
