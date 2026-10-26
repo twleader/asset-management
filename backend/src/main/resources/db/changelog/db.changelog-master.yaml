@@ -503,3 +503,10 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.156.0-notification-recipient-name.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.157.0-independent-asset-gain-export-schedules.sql
+      relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/changes/v1.158.0-independent-market-export-schedules.sql
+      relativeToChangelogFile: false

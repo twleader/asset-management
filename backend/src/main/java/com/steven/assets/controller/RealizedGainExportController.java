@@ -2,44 +2,37 @@ package com.steven.assets.controller;
 
 import com.steven.assets.dto.RealizedGainExportDto;
 import com.steven.assets.service.RealizedGainExportScheduleService;
+import com.steven.assets.service.RcloneClient;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
-/**
- * 已實現損益每日排程自動匯出設定端點（Requirement 39 / Task 196）。
- *
- * <p>per-user（owner-scoped）：由 BFF 帶 {@code X-User-*} → {@code CurrentUserContext} → {@code ownerFilter}，
- * 每個使用者只存取自己的排程設定。非 admin-only。
- *
- * <p>路徑共存：{@link RealizedGainController} 的 {@code GET /api/realized-gains/export} 為瀏覽器下載端點；
- * 本 controller 掛同前綴但一律帶子路徑（{@code /schedule}、{@code /run-now}），故無 ambiguous mapping。
- *
- * <p>資料夾瀏覽不在此：沿用 Requirement 34 既有的 {@code GET /api/export-schedule/browse}，BFF 直接 passthrough 至該端點。
- */
 @RestController
 @RequestMapping("/api/realized-gains/export")
 @RequiredArgsConstructor
 public class RealizedGainExportController {
-
     private final RealizedGainExportScheduleService service;
-
-    @GetMapping("/schedule")
-    public RealizedGainExportDto.SettingResponse getSchedule() {
-        return service.getForCurrentUser();
+    @GetMapping("/schedules")
+    public RealizedGainExportDto.SettingResponse getSchedules() { return service.getForCurrentUser(); }
+    @PostMapping("/schedules")
+    public RealizedGainExportDto.SettingResponse createSchedule(@RequestBody RealizedGainExportDto.ScheduleRequest request) {
+        return service.createForCurrentUser(request);
     }
-
-    @PutMapping("/schedule")
-    public RealizedGainExportDto.SettingResponse updateSchedule(@RequestBody RealizedGainExportDto.SettingRequest req) {
-        return service.updateForCurrentUser(req);
+    @PutMapping("/schedules/{id}")
+    public RealizedGainExportDto.SettingResponse updateSchedule(@PathVariable Long id, @RequestBody RealizedGainExportDto.ScheduleRequest request) {
+        return service.updateForCurrentUser(id, request);
     }
-
+    @DeleteMapping("/schedules/{id}")
+    public RealizedGainExportDto.SettingResponse deleteSchedule(@PathVariable Long id) { return service.deleteForCurrentUser(id); }
+    @PostMapping("/schedules/{id}/run-now")
+    public RealizedGainExportDto.RunNowResponse runNow(@PathVariable Long id) { return service.runNowForCurrentUser(id); }
+    @RequestMapping(value = "/schedule", method = {RequestMethod.GET, RequestMethod.PUT})
+    public void retiredSettings() { throw retired(); }
     @PostMapping("/run-now")
-    public RealizedGainExportDto.RunNowResponse runNow() {
-        return service.runNowForCurrentUser();
+    public void retiredRunNow() { throw retired(); }
+    private ResponseStatusException retired() {
+        return new ResponseStatusException(HttpStatus.GONE, "匯出設定已改為多筆獨立排程，請重新整理頁面");
     }
+
 }

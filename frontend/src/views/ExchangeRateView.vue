@@ -74,96 +74,83 @@
       </el-col>
     </el-row>
 
-    <!-- 排程自動匯出設定（Requirement 42 / Task 204） -->
+    <!-- 獨立排程匯出設定（Task 512） -->
     <el-card style="margin-top:20px">
       <template #header>
         <div style="display:flex;align-items:center;justify-content:space-between">
           <span class="section-title">⏱️ 排程自動匯出</span>
-          <div style="display:flex;gap:8px">
-            <el-button size="small" :loading="runningNow" :disabled="savingSchedule" @click="handleRunNow">立即匯出到目錄</el-button>
-            <el-button size="small" type="primary" :disabled="savingSchedule || runningNow" @click="openScheduleDialog">編輯設定</el-button>
-          </div>
+          <el-button size="small" type="primary" :disabled="scheduleLoading || scheduleMutationBusy || !!scheduleLoadError || schedules.length >= MAX_EXPORT_SCHEDULES" @click="openNewSchedule">新增排程</el-button>
         </div>
       </template>
-      <div class="schedule-status">已儲存：{{ schedule.enabled ? '啟用' : '停用' }}；{{ scheduleTimes.map(t => t.value + (t.enabled ? '' : '（停用）')).join('、') }}；{{ schedule.outputSubpath || '家目錄根' }}</div>
-      <el-dialog v-model="scheduleDialog.visible" title="編輯排程匯出設定" width="680px" :close-on-click-modal="!savingSchedule" :close-on-press-escape="!savingSchedule" :show-close="!savingSchedule" :before-close="closeScheduleDialog">
-      <el-form v-if="scheduleDialog.draft" :disabled="savingSchedule" :inline="true" label-width="100px" class="schedule-form">
-        <el-form-item label="啟用每日排程">
-          <el-switch v-model="scheduleDialog.draft.enabled" />
-        </el-form-item>
-        <el-form-item label="每日執行時間" class="schedule-times-item">
-          <div class="schedule-times">
-            <div v-for="(time, index) in scheduleDialog.times" :key="time.key" class="schedule-time-row">
-              <el-time-picker v-model="time.value" format="HH:mm" value-format="HH:mm"
-                placeholder="時:分" style="width:130px" />
-              <el-switch v-model="time.enabled" active-text="啟用" inactive-text="停用" />
-              <span class="schedule-time-status">{{ time.lastRunAt ? `${time.lastRunAt} ${time.lastRunStatus || ''}` : '尚未執行' }}</span>
-              <el-button text type="danger" :disabled="savingSchedule || (scheduleDialog.times.length === 1)" @click="removeScheduleTime(index)">移除</el-button>
-            </div>
-            <el-button :disabled="savingSchedule" text type="primary" @click="addScheduleTime">＋ 新增時間</el-button>
+
+      <el-alert v-if="scheduleLoadError" type="error" :closable="false" show-icon style="margin-bottom:12px" :title="scheduleLoadError">
+        <template #default><el-button link type="primary" @click="loadSchedules">重試載入</el-button></template>
+      </el-alert>
+      <el-skeleton v-if="scheduleLoading" :rows="2" animated />
+      <el-empty v-else-if="!scheduleLoadError && schedules.length === 0" description="尚未建立排程，按右上「新增排程」開始。" :image-size="80" />
+
+      <div v-for="(item, index) in schedules" :key="item.id" class="schedule-row">
+        <div class="schedule-row-head">
+          <div style="display:flex;align-items:center;gap:8px">
+            <strong>{{ item.name || `排程 #${index + 1}` }}</strong>
+            <el-tag size="small" :type="item.enabled ? 'success' : 'info'">{{ item.enabled ? '啟用' : '停用' }}</el-tag>
           </div>
-        </el-form-item>
-        <el-form-item label="匯出範圍">
-          <el-select v-model="scheduleDialog.draft.rangeMonths" style="width:140px">
-            <el-option v-for="o in rangeMonthOptions" :key="String(o.value)"
-              :label="o.label" :value="o.value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="輸出資料夾">
-          <el-input v-model="scheduleDialog.draft.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
-            <template #append>
-              <el-button :disabled="savingSchedule" @click="openDirPicker">選擇</el-button>
-            </template>
-          </el-input>
-        </el-form-item>
-        <!--
-          Google Drive 同步（Requirement 51 / Task 243）：本機一律照寫，這裡只是額外多上傳一份副本。
-          僅「主要管理者」可見可設——rclone remote 全機只有一份且綁定某個 Google 帳號，
-          若其他使用者能啟用，他的財務報表會被上傳到那個帳號的雲端硬碟。真正的閘門在後端。
-        -->
-        <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
-          <div style="display:flex; flex-direction:column; gap:6px">
-            <div style="display:flex; align-items:center; gap:12px">
-              <el-switch v-model="scheduleDialog.draft.gdriveEnabled" />
-              <el-input
-                v-model="scheduleDialog.draft.gdriveSubpath"
-                readonly
-                placeholder="（尚未選擇 Drive 資料夾）"
-                :disabled="savingSchedule || (!scheduleDialog.draft.gdriveEnabled)"
-                style="width:260px"
-              >
-                <template #append>
-                  <el-button :disabled="savingSchedule || (!scheduleDialog.draft.gdriveEnabled)" @click="openDirPicker('gdrive')">選擇</el-button>
-                </template>
-              </el-input>
-            </div>
-            <div style="font-size:12px; color:var(--el-text-color-secondary); line-height:1.7">
-              開啟後除了寫入上面的本機資料夾，會<strong>再上傳一份同樣的檔案</strong>到 Google Drive 的所選資料夾；
-              <strong>本機那一份永遠照寫、不受影響</strong>。
-              <template v-if="scheduleDialog.draft.gdriveEnabled && scheduleDialog.draft.gdriveSubpath">
-                <br />Drive 落點：<code>{{ scheduleDialog.draft.gdriveRemote || 'GDriveOutput' }}:{{ scheduleDialog.draft.gdriveSubpath }}</code>
-              </template>
-              <br />上次上傳：
-              <template v-if="scheduleDialog.draft.gdriveLastRunAt">
-                {{ scheduleDialog.draft.gdriveLastRunAt }} — <code>{{ scheduleDialog.draft.gdriveLastStatus || '—' }}</code>
-              </template>
-              <template v-else>—（尚未執行過）</template>
-            </div>
+          <div style="display:flex;gap:8px">
+            <el-button size="small" :loading="scheduleMutationBusy && activeScheduleId === item.id && activeScheduleAction === 'run'" :disabled="scheduleLoading || scheduleMutationBusy || !!scheduleLoadError" @click="handleRunNow(item)">立即匯出</el-button>
+            <el-button size="small" type="primary" :disabled="scheduleLoading || scheduleMutationBusy || !!scheduleLoadError" @click="openEditSchedule(item)">編輯設定</el-button>
+            <el-popconfirm title="確定刪除這筆排程？" width="200" @confirm="handleDeleteSchedule(item)">
+              <template #reference><el-button size="small" type="danger" :disabled="scheduleLoading || scheduleMutationBusy || !!scheduleLoadError">刪除</el-button></template>
+            </el-popconfirm>
           </div>
-        </el-form-item>
-      </el-form>
-      <div class="schedule-hint">
-        以主機家目錄 <code>{{ scheduleDialog.draft.baseDir || '/home/steven' }}</code> 為根（對映主機
-        <code>/Users/steven</code>）。按上方「選擇」開啟檔案總管式選擇器挑選子資料夾；例如選 <code>input</code> →
-        主機 <code>/Users/steven/input</code>。於下列每個啟用時間更新同日最新的台幣兌美元匯率檔：
-        <code>台幣兌美元_{使用者ID}_YYYYMMDD.xlsx</code> 與 <code>.json</code> <strong>兩份</strong>（主檔名相同、只差副檔名；內容同上方「匯出 Excel」）。
-        匯出範圍以<b>執行當日往前推</b>計算，故每日產出會隨時間滾動。
+        </div>
+        <div>每日 {{ formatExportScheduleTime(item.runHour, item.runMinute) }}；{{ formatExportRangeMonths(item.rangeMonths) }}；本機資料夾 {{ item.outputSubpath || '家目錄根' }}</div>
+        <div class="schedule-status">上次執行：{{ item.lastRunAt || '—' }}　{{ item.lastRunStatus || '' }}</div>
+        <div v-if="auth.isConfiguredAdmin" class="schedule-status">
+          Google Drive：{{ item.gdriveEnabled ? '已啟用' : '停用' }}；{{ item.gdriveSubpath || '未選資料夾' }}；上次上傳 {{ item.gdriveLastRunAt || '—' }}　{{ item.gdriveLastStatus || '' }}
+        </div>
       </div>
-      <div v-if="scheduleDialog.draft.lastRunAt || scheduleDialog.draft.lastRunStatus" class="schedule-status">
-        上次執行：{{ scheduleDialog.draft.lastRunAt || '—' }}　{{ scheduleDialog.draft.lastRunStatus || '' }}
-      </div>
-      <template #footer><el-button :disabled="savingSchedule" @click="scheduleDialog.visible = false">取消</el-button><el-button type="primary" :loading="savingSchedule" :disabled="savingSchedule" @click="saveSchedule">儲存設定</el-button></template>
+
+      <el-dialog v-model="scheduleDialog.visible" :title="scheduleDialog.mode === 'create' ? '新增匯率匯出排程' : '編輯匯率匯出排程'" width="680px" :close-on-click-modal="!scheduleMutationBusy" :close-on-press-escape="!scheduleMutationBusy" :show-close="!scheduleMutationBusy" :before-close="closeScheduleDialog">
+        <el-form v-if="scheduleDialog.draft" :disabled="scheduleMutationBusy" :inline="true" label-width="100px" class="schedule-form">
+          <el-form-item label="名稱"><el-input v-model="scheduleDialog.draft.name" maxlength="20" show-word-limit style="width:220px" placeholder="（選填，會進檔名）" /></el-form-item>
+          <el-form-item label="啟用每日排程"><el-switch v-model="scheduleDialog.draft.enabled" /></el-form-item>
+          <el-form-item label="每日執行時間"><el-time-picker v-model="scheduleDialog.draft._time" format="HH:mm" value-format="HH:mm" placeholder="時:分" style="width:130px" /></el-form-item>
+          <el-form-item label="匯出範圍">
+            <el-select v-model="scheduleDialog.draft.rangeMonths" style="width:170px">
+              <el-option v-for="option in getExportRangeMonthOptions(scheduleDialog.draft.rangeMonths)" :key="String(option.value)" :label="option.label" :value="option.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="輸出資料夾">
+            <el-input v-model="scheduleDialog.draft.outputSubpath" readonly placeholder="（家目錄根）" style="width:240px">
+              <template #append><el-button :disabled="scheduleMutationBusy" @click="openDirPicker('local')">選擇</el-button></template>
+            </el-input>
+          </el-form-item>
+          <el-form-item v-if="auth.isConfiguredAdmin" label="同步 Google Drive">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:center;gap:12px">
+                <el-switch v-model="scheduleDialog.draft.gdriveEnabled" />
+                <el-input v-model="scheduleDialog.draft.gdriveSubpath" readonly placeholder="（尚未選擇 Drive 資料夾）" :disabled="scheduleMutationBusy || !scheduleDialog.draft.gdriveEnabled" style="width:260px">
+                  <template #append><el-button :disabled="scheduleMutationBusy || !scheduleDialog.draft.gdriveEnabled" @click="openDirPicker('gdrive')">選擇</el-button></template>
+                </el-input>
+              </div>
+              <div style="font-size:12px;color:var(--el-text-color-secondary);line-height:1.7">
+                開啟後會在本機檔案之外，再上傳一份到 Google Drive。<strong>本機匯出不受影響</strong>。
+                <template v-if="scheduleDialog.draft.gdriveEnabled && scheduleDialog.draft.gdriveSubpath"><br />Drive 落點：<code>{{ scheduleDialog.draft.gdriveRemote || 'GDriveOutput' }}:{{ scheduleDialog.draft.gdriveSubpath }}</code></template>
+                <br />上次上傳：{{ scheduleDialog.draft.gdriveLastRunAt || '—' }}　{{ scheduleDialog.draft.gdriveLastStatus || '' }}
+              </div>
+            </div>
+          </el-form-item>
+        </el-form>
+        <div class="schedule-hint">
+          以主機家目錄 <code>{{ baseDir || '/home/steven' }}</code> 為根。每筆排程於自己的時間匯出所選匯率範圍，產生
+          <code>台幣兌美元_{使用者ID}[_{名稱}]_YYYYMMDD.xlsx</code> 與同名 <code>.json</code>。
+          同一使用者、日期、資料夾與名稱會覆寫；請以不同名稱或資料夾保留多份。空白名稱沿用舊檔名；取消會丟棄草稿。
+        </div>
+        <div class="schedule-status">上次執行：{{ scheduleDialog.draft?.lastRunAt || '—' }}　{{ scheduleDialog.draft?.lastRunStatus || '' }}</div>
+        <template #footer><el-button :disabled="scheduleMutationBusy" @click="cancelScheduleDialog">取消</el-button><el-button type="primary" :loading="scheduleMutationBusy && activeScheduleAction === 'save'" :disabled="scheduleMutationBusy" @click="saveSchedule">儲存排程</el-button></template>
       </el-dialog>
+
+      <div class="schedule-hint" style="margin-top:10px">本機輸出根目錄：<code>{{ baseDir || '/home/steven' }}</code>。立即匯出使用該筆已儲存的設定。</div>
     </el-card>
 
     <!-- 輸出資料夾選擇器 -->
@@ -251,8 +238,17 @@ import VChart from 'vue-echarts'
 import { bffApi, apiErrorMessage } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
-import { cloneExportSetting, replaceExportSetting } from '@/utils/exportSettingDraft'
 import { useAuthStore } from '@/stores/authStore'
+import {
+  MAX_EXPORT_SCHEDULES,
+  buildExportSchedulePayload,
+  createExportScheduleDraft,
+  formatExportScheduleTime,
+  formatExportRangeMonths,
+  getExportRangeMonthOptions,
+  getExportScheduleError,
+  requireExportScheduleList
+} from '@/utils/exportSchedules'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 
@@ -279,35 +275,17 @@ const exportDialog = reactive({ visible: false, range: [] })
 // File System Access API：可讓使用者自選存檔目錄；Safari／舊版瀏覽器沒有，退回一般下載
 const canPickDirectory = typeof window !== 'undefined' && 'showSaveFilePicker' in window
 
-// 排程自動匯出設定（Requirement 42 / Task 204）
-const schedule = reactive({
-  // Drive 同步（Task 243）；gdriveRemote 是後端給的顯示值，不入庫
-  gdriveEnabled: false, gdriveSubpath: '', gdriveRemote: '',
-  gdriveLastRunAt: null, gdriveLastStatus: '',
- 
-  enabled: false, outputSubpath: 'input',
-  rangeMonths: 120, lastRunAt: null, lastRunStatus: null, baseDir: ''
-})
-const scheduleTimes = ref([])
-let nextScheduleTimeKey = 1
-const savingSchedule = ref(false)
-const scheduleDialog = reactive({ visible: false, draft: null, times: [] })
-const runningNow = ref(false)
-
-// 全部十年以 120（月）表示而非 null：Element Plus 的 el-select 預設把 null 當成 empty value
-// （DEFAULT_EMPTY_VALUES 含 null），綁 null 會顯示灰色 placeholder 而非「全部十年」，
-// 使用者無法分辨「已選全部十年」與「尚未選擇」。後端 end.minusMonths(120) 與 minusYears(10) 等價，
-// 且 CHECK 允許 1..120，故語意零變動。後端仍保留 null 分支以相容未設定過的舊列。
-const ALL_TEN_YEARS_MONTHS = 120
-const rangeMonthOptions = [
-  { label: '近 1 個月', value: 1 },
-  { label: '近 3 個月', value: 3 },
-  { label: '近 6 個月', value: 6 },
-  { label: '近 1 年', value: 12 },
-  { label: '近 3 年', value: 36 },
-  { label: '近 5 年', value: 60 },
-  { label: '全部十年', value: ALL_TEN_YEARS_MONTHS }
-]
+// 每列是一筆獨立排程；所有 mutation 共用單一 busy guard。
+const schedules = ref([])
+const baseDir = ref('')
+const gdriveRemote = ref('')
+const scheduleLoading = ref(true)
+const scheduleLoadInFlight = ref(false)
+const scheduleLoadError = ref('')
+const scheduleMutationBusy = ref(false)
+const activeScheduleId = ref(null)
+const activeScheduleAction = ref('')
+const scheduleDialog = reactive({ visible: false, mode: 'create', draft: null })
 
 // 輸出資料夾選擇器（檔案總管式樹狀）
 // mode：'local'＝本機家目錄樹、'gdrive'＝Drive remote 樹（回傳形狀相同，共用同一棵 el-tree）
@@ -320,7 +298,7 @@ const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 onMounted(() => {
   fetchData()
   // 排程設定與匯率各自獨立，並行載入；設定讀取失敗不影響圖表
-  loadSchedule().catch(() => {})
+  loadSchedules()
 })
 
 async function fetchData() {
@@ -508,128 +486,138 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-// ===== 排程自動匯出 =====
+// ===== 獨立排程自動匯出 =====
 
-async function loadSchedule() {
-  const s = await bffApi.exchangeRate.getExportSchedule()
-  schedule.enabled = !!s.enabled
-  schedule.outputSubpath = s.outputSubpath ?? 'input'
-  // 後端 null（未設定過的舊列）＝全部十年，映射成 120 讓下拉正確顯示
-  schedule.rangeMonths = s.rangeMonths ?? ALL_TEN_YEARS_MONTHS
-  schedule.lastRunAt = s.lastRunAt ?? null
-  schedule.lastRunStatus = s.lastRunStatus ?? null
-  schedule.baseDir = s.baseDir ?? ''
-  applyGdrive(s)
-  // 只有 legacy response 未提供 times 才可回退；新契約回空列是錯誤，不可靜默補預設。
-  if (Array.isArray(s.times)) {
-    if (s.times.length === 0) throw new Error('排程時間設定異常，請重新儲存設定')
-    rebuildScheduleTimes(s.times)
-  } else {
-    rebuildScheduleTimes([{ runHour: s.runHour ?? 8, runMinute: s.runMinute ?? 0, enabled: true }])
+async function loadSchedules() {
+  if (scheduleLoadInFlight.value) return false
+  scheduleLoadInFlight.value = true
+  scheduleLoading.value = true
+  scheduleLoadError.value = ''
+  try {
+    const response = requireExportScheduleList(await bffApi.exchangeRate.getExportSchedules(), { requireRangeMonths: true })
+    schedules.value = response.schedules
+    baseDir.value = response.baseDir || ''
+    gdriveRemote.value = response.gdriveRemote || ''
+    return true
+  } catch (error) {
+    scheduleLoadError.value = getExportScheduleError(error, '排程清單載入失敗')
+    return false
+  } finally {
+    scheduleLoading.value = false
+    scheduleLoadInFlight.value = false
   }
 }
 
-function rebuildScheduleTimes(times) {
-  scheduleTimes.value = [...times]
-    .sort((a, b) => (a.runHour - b.runHour) || (a.runMinute - b.runMinute) || ((a.id ?? 0) - (b.id ?? 0)))
-    .map(time => ({
-      key: time.id ?? `new-${nextScheduleTimeKey++}`,
-      value: `${String(time.runHour).padStart(2, '0')}:${String(time.runMinute).padStart(2, '0')}`,
-      enabled: !!time.enabled,
-      lastRunAt: time.lastRunAt ?? null,
-      lastRunStatus: time.lastRunStatus ?? null
-    }))
+function applyScheduleList(response) {
+  const canonical = requireExportScheduleList(response, { requireRangeMonths: true })
+  schedules.value = canonical.schedules
+  baseDir.value = canonical.baseDir || ''
+  gdriveRemote.value = canonical.gdriveRemote || ''
 }
 
-function addScheduleTime() {
-  if (savingSchedule.value) return
-  scheduleDialog.times.push({ key: `new-${nextScheduleTimeKey++}`, value: '08:00', enabled: true, lastRunAt: null, lastRunStatus: null })
+function openNewSchedule() {
+  if (scheduleMutationBusy.value || scheduleLoading.value || scheduleLoadError.value || schedules.value.length >= MAX_EXPORT_SCHEDULES) return
+  scheduleDialog.mode = 'create'
+  scheduleDialog.draft = { ...createExportScheduleDraft(null, { includeRangeMonths: true }), gdriveRemote: gdriveRemote.value }
+  scheduleDialog.visible = true
 }
 
-function removeScheduleTime(index) {
-  if (savingSchedule.value) return
-  if (scheduleDialog.times.length > 1) scheduleDialog.times.splice(index, 1)
+function openEditSchedule(item) {
+  if (scheduleMutationBusy.value || scheduleLoading.value || scheduleLoadError.value) return
+  scheduleDialog.mode = 'edit'
+  scheduleDialog.draft = { ...createExportScheduleDraft(item, { includeRangeMonths: true }), gdriveRemote: gdriveRemote.value }
+  scheduleDialog.visible = true
+}
+
+function cancelScheduleDialog() {
+  if (scheduleMutationBusy.value) return
+  scheduleDialog.visible = false
+  scheduleDialog.draft = null
+  dirPicker.visible = false
+}
+
+function closeScheduleDialog(done) {
+  if (scheduleMutationBusy.value) return
+  scheduleDialog.draft = null
+  dirPicker.visible = false
+  done()
 }
 
 async function saveSchedule() {
-  if (savingSchedule.value || !scheduleDialog.draft) return
   const draft = scheduleDialog.draft
-  // 前後端都擋：開了同步卻沒選資料夾，後端也會回 400
-  if (draft.gdriveEnabled && !(draft.gdriveSubpath || '').trim()) {
-    ElMessage.warning('已開啟 Google Drive 同步時，必須選擇 Drive 目標資料夾')
-    return
-  }
-  if (!scheduleDialog.times.length) {
-    ElMessage.warning('至少需要一個執行時間')
-    return
-  }
-  const times = []
-  const seenTimes = new Set()
-  for (const time of scheduleDialog.times) {
-    const match = /^(\d{2}):(\d{2})$/.exec(time.value || '')
-    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
-      ElMessage.warning('請填寫有效的執行時間')
-      return
-    }
-    const key = `${match[1]}:${match[2]}`
-    if (seenTimes.has(key)) {
-      ElMessage.warning('執行時間不可重複')
-      return
-    }
-    seenTimes.add(key)
-    times.push({ runHour: Number(match[1]), runMinute: Number(match[2]), enabled: !!time.enabled })
-  }
-  if (draft.enabled && !times.some(time => time.enabled)) {
-    ElMessage.warning('啟用排程時至少需啟用一個時間')
-    return
-  }
-  savingSchedule.value = true
+  if (!draft || scheduleMutationBusy.value || scheduleLoadError.value) return
+  let payload
   try {
-    const s = await bffApi.exchangeRate.updateExportSchedule({
-      enabled: draft.enabled,
-      gdriveEnabled: draft.gdriveEnabled,
-      gdriveSubpath: (draft.gdriveSubpath || '').trim(),
-      times,
-      outputSubpath: (draft.outputSubpath || 'input').trim(),
-      rangeMonths: draft.rangeMonths
-    })
-    if (!Array.isArray(s.times) || !s.times.length) throw new Error('伺服器未回傳有效的排程時間')
-    replaceExportSetting(schedule, s)
-    rebuildScheduleTimes(s.times)
+    payload = buildExportSchedulePayload(draft, { isConfiguredAdmin: auth.isConfiguredAdmin })
+  } catch (error) {
+    ElMessage.warning(error.message)
+    return
+  }
+
+  scheduleMutationBusy.value = true
+  activeScheduleId.value = draft.id
+  activeScheduleAction.value = 'save'
+  let requestSucceeded = false
+  try {
+    const response = scheduleDialog.mode === 'create'
+      ? await bffApi.exchangeRate.createExportSchedule(payload)
+      : await bffApi.exchangeRate.updateExportSchedule(draft.id, payload)
+    requestSucceeded = true
+    applyScheduleList(response)
     scheduleDialog.visible = false
-    ElMessage.success('排程設定已儲存')
-    // 剛把 Drive 同步打開時後端會附一則自檢警告；正常時為 null，不顯示（Task 247.3.5）
-    showGdriveSelfCheckWarning(s.gdriveSelfCheckWarning)
-  } catch (e) {
-    ElMessage.error(apiErrorMessage(e, '儲存失敗，請稍後再試'))
+    scheduleDialog.draft = null
+    dirPicker.visible = false
+    ElMessage.success(scheduleDialog.mode === 'create' ? '排程已新增' : '排程設定已儲存')
+    showGdriveSelfCheckWarning(response.gdriveSelfCheckWarning)
+  } catch (error) {
+    ElMessage.error(`儲存失敗：${getExportScheduleError(error, '請稍後再試')}`)
+    if (requestSucceeded) await loadSchedules()
   } finally {
-    savingSchedule.value = false
+    scheduleMutationBusy.value = false
+    activeScheduleId.value = null
+    activeScheduleAction.value = ''
   }
 }
 
-function openScheduleDialog() {
-  if (savingSchedule.value || runningNow.value) return
-  scheduleDialog.draft = cloneExportSetting(schedule)
-  scheduleDialog.times = cloneExportSetting(scheduleTimes.value)
-  scheduleDialog.visible = true
-}
-function closeScheduleDialog(done) { if (!savingSchedule.value) done() }
-
-async function handleRunNow() {
-  if (savingSchedule.value || runningNow.value) return
-  runningNow.value = true
+async function handleDeleteSchedule(item) {
+  if (scheduleLoading.value || scheduleMutationBusy.value || scheduleLoadError.value) return
+  scheduleMutationBusy.value = true
+  activeScheduleId.value = item.id
+  activeScheduleAction.value = 'delete'
+  let requestSucceeded = false
   try {
-    const r = await bffApi.exchangeRate.runExportNow()
-    // path 依契約一律指 xlsx、jsonPath 指 json（Requirement 55 / Task 282）
-    showDualExportResult({ jsonPath: r.jsonPath, xlsxPath: r.path, gdriveStatus: r.gdriveStatus })
-  } catch (e) {
-    ElMessage.error(apiErrorMessage(e, '立即匯出失敗，請確認目錄與權限'))
+    const response = await bffApi.exchangeRate.deleteExportSchedule(item.id)
+    requestSucceeded = true
+    applyScheduleList(response)
+    ElMessage.success('排程已刪除')
+    showGdriveSelfCheckWarning(response.gdriveSelfCheckWarning)
+  } catch (error) {
+    ElMessage.error(`刪除失敗：${getExportScheduleError(error, '請稍後再試')}`)
+    if (requestSucceeded) await loadSchedules()
   } finally {
-    runningNow.value = false
+    scheduleMutationBusy.value = false
+    activeScheduleId.value = null
+    activeScheduleAction.value = ''
   }
-  loadSchedule().catch(() => {}) // 刷新上次執行資訊，失敗不影響匯出結果
 }
 
+async function handleRunNow(item) {
+  if (scheduleLoading.value || scheduleMutationBusy.value || scheduleLoadError.value) return
+  scheduleMutationBusy.value = true
+  activeScheduleId.value = item.id
+  activeScheduleAction.value = 'run'
+  try {
+    const result = await bffApi.exchangeRate.runExportScheduleNow(item.id)
+    showDualExportResult({ jsonPath: result.jsonPath, xlsxPath: result.path, gdriveStatus: result.gdriveStatus })
+    await loadSchedules()
+  } catch (error) {
+    ElMessage.error(`立即匯出失敗：${getExportScheduleError(error, '請確認目錄與權限')}`)
+  } finally {
+    scheduleMutationBusy.value = false
+    activeScheduleId.value = null
+    activeScheduleAction.value = ''
+  }
+}
 
 // 雙模式資料夾選擇器（Task 243，沿用 Task 241 於 CrawlerDataView 的寫法）
 const dirPickerTitle = computed(() =>
@@ -641,24 +629,15 @@ const dirPickerTitle = computed(() =>
 const dirPickerPreview = computed(() => {
   const isGdrive = dirPicker.mode === 'gdrive'
   const base = dirPicker.baseDir
-    || (isGdrive ? (schedule.gdriveRemote || 'GDriveOutput') + ':' : (schedule.baseDir || '/home/steven'))
+    || (isGdrive ? (scheduleDialog.draft?.gdriveRemote || gdriveRemote.value || 'GDriveOutput') + ':' : (baseDir.value || '/home/steven'))
   const parts = [dirPicker.picked, (dirPicker.newSub || '').trim()].filter(Boolean)
   const joined = parts.join('/')
   if (!joined) return base
   return isGdrive ? base + joined : base + '/' + joined
 })
 
-/** 把後端回的 Drive 欄位寫回本地狀態（讀取一律不驗證，不合法值也照顯示供使用者修正）。 */
-function applyGdrive(s) {
-  schedule.gdriveEnabled = !!s.gdriveEnabled
-  schedule.gdriveSubpath = s.gdriveSubpath || ''
-  schedule.gdriveRemote = s.gdriveRemote || ''
-  schedule.gdriveLastRunAt = s.gdriveLastRunAt || null
-  schedule.gdriveLastStatus = s.gdriveLastStatus || ''
-}
-
 function openDirPicker(mode = 'local') {
-  if (savingSchedule.value || !scheduleDialog.draft) return
+  if (scheduleMutationBusy.value || !scheduleDialog.draft || (mode === 'gdrive' && !auth.isConfiguredAdmin)) return
   dirPicker.mode = mode
   dirPicker.picked = (mode === 'gdrive' ? scheduleDialog.draft.gdriveSubpath : scheduleDialog.draft.outputSubpath) || ''
   dirPicker.newSub = ''
@@ -684,10 +663,7 @@ async function loadDirNode(node, resolve) {
     const res = await browse(node.data.path || '')
     resolve((res.directories || []).map(d => ({ name: d.name, path: d.path, key: d.path, leaf: false })))
   } catch (e) {
-    // Drive 端失敗要顯示原因（remote 未設定／授權失效）；空樹會被誤讀為「Drive 裡沒有資料夾」
-    if (dirPicker.mode === 'gdrive') {
-      dirPicker.error = e?.response?.data?.detail || e?.message || 'Google Drive 資料夾讀取失敗'
-    }
+    dirPicker.error = getExportScheduleError(e, dirPicker.mode === 'gdrive' ? 'Google Drive 資料夾讀取失敗' : '輸出資料夾讀取失敗')
     resolve([])
   }
 }
@@ -695,7 +671,7 @@ async function loadDirNode(node, resolve) {
 const onDirNodeClick = (data) => { dirPicker.picked = data.path || '' }
 
 function confirmDirPick() {
-  if (savingSchedule.value || !scheduleDialog.draft) return
+  if (scheduleMutationBusy.value || !scheduleDialog.draft) return
   let p = dirPicker.picked || ''
   const sub = (dirPicker.newSub || '').trim().replace(/^\/+|\/+$/g, '')
   if (sub) p = p ? `${p}/${sub}` : sub
@@ -727,11 +703,9 @@ const spreadChartOption = computed(() => {
 .kpi-value { font-size: 24px; font-weight: 700; color: #1e293b; }
 .kpi-sub { font-size: 12px; color: #94a3b8; margin-top: 4px; }
 .dialog-note { font-size: 12px; color: #64748b; line-height: 1.6; }
+.schedule-row { padding: 12px 0; border-bottom: 1px solid var(--el-border-color-lighter); line-height: 1.7; }
+.schedule-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .schedule-form { margin-bottom: 4px; }
-.schedule-times-item :deep(.el-form-item__content) { align-items: flex-start; }
-.schedule-times { display: flex; flex-direction: column; gap: 6px; }
-.schedule-time-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
-.schedule-time-status { color: var(--el-text-color-secondary); font-size: 12px; min-width: 160px; }
 .schedule-hint { font-size: 12px; color: #94a3b8; line-height: 1.6; }
 .schedule-hint code { background: #f1f5f9; color: #475569; padding: 1px 5px; border-radius: 4px; font-size: 11px; }
 .schedule-status { margin-top: 8px; font-size: 12px; color: #64748b; }

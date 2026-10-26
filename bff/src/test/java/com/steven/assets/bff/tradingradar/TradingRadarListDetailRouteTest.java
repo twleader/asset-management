@@ -20,7 +20,9 @@ class TradingRadarListDetailRouteTest {
         try (GenericApplicationContext context = new GenericApplicationContext()) {
             context.registerBean(org.springframework.boot.webflux.autoconfigure.WebFluxProperties.class);
             context.registerBean(PathRoutePredicateFactory.class);
+            context.registerBean(org.springframework.cloud.gateway.handler.predicate.MethodRoutePredicateFactory.class);
             context.registerBean(RewritePathGatewayFilterFactory.class);
+            context.registerBean(org.springframework.cloud.gateway.filter.factory.SetPathGatewayFilterFactory.class);
             context.refresh();
             TradingRadarBffRoutes config = new TradingRadarBffRoutes();
             ReflectionTestUtils.setField(config, "businessServicesUrl", "http://business.test");

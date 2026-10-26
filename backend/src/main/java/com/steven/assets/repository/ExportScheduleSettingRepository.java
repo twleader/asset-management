@@ -2,28 +2,26 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.ExportScheduleSetting;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 
-/**
- * 排程自動匯出設定 repository（Requirement 34 / Task 171）。
- *
- * <p>HTTP 情境下 {@code @Filter(ownerFilter)} 由 {@link com.steven.assets.security.TenantFilterAspect}
- * 自動套用，{@code findByOwnerUserId} 只會回本人列；背景排程 {@code findAll()} 無 request context
- * → filter 不啟用，回全部 owner 列供逐列產檔。
- */
+/** Owner-scoped access to independent asset and gain export schedules. */
 public interface ExportScheduleSettingRepository extends JpaRepository<ExportScheduleSetting, Long> {
 
-    /** Parent-only lock: collection joins would make PostgreSQL FOR UPDATE invalid. */
-    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
-    @org.springframework.data.jpa.repository.Query("select s from ExportScheduleSetting s where s.ownerUserId = :owner")
-    Optional<ExportScheduleSetting> findLockedByOwnerUserId(@org.springframework.data.repository.query.Param("owner") Long owner);
+    List<ExportScheduleSetting> findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(Long ownerUserId);
 
-    @EntityGraph(attributePaths = "times")
-    Optional<ExportScheduleSetting> findByOwnerUserId(Long ownerUserId);
+    long countByOwnerUserId(Long ownerUserId);
 
-    @Override
-    @EntityGraph(attributePaths = "times")
-    java.util.List<ExportScheduleSetting> findAll();
+    Optional<ExportScheduleSetting> findByIdAndOwnerUserId(Long id, Long ownerUserId);
+
+    /** Lock only the parent row; the eager market collection is loaded separately by Hibernate. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from ExportScheduleSetting s where s.id = :id and s.ownerUserId = :owner")
+    Optional<ExportScheduleSetting> findLockedByIdAndOwnerUserId(@Param("id") Long id,
+                                                                @Param("owner") Long ownerUserId);
 }

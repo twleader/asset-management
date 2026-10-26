@@ -3,43 +3,34 @@ package com.steven.assets.controller;
 import com.steven.assets.dto.CommodityExportDto;
 import com.steven.assets.service.CommodityExportScheduleService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
-/**
- * 油價金價每日排程自動匯出設定端點（Requirement 41 / Task 203）。
- *
- * <p>per-user（owner-scoped）：由 BFF 帶 {@code X-User-*} → {@code CurrentUserContext} → {@code ownerFilter}，
- * 每個使用者只存取自己的排程設定。非 admin-only。
- *
- * <p>路徑選擇：掛獨立前綴 {@code /api/commodity-export}，不掛在 {@code /api/market-data/commodity} 之下——
- * 後者是全域行情資料的查詢／匯出，本 controller 是 per-user 設定，語意不同，分開避免混淆。
- *
- * <p>資料夾瀏覽不在此：沿用 Requirement 34 既有的 {@code GET /api/export-schedule/browse}，BFF 直接 passthrough。
- */
 @RestController
 @RequestMapping("/api/commodity-export")
 @RequiredArgsConstructor
 public class CommodityExportController {
-
     private final CommodityExportScheduleService service;
-
-    @GetMapping("/schedule")
-    public CommodityExportDto.SettingResponse getSchedule() {
-        return service.getForCurrentUser();
+    @GetMapping("/schedules")
+    public CommodityExportDto.SettingResponse getSchedules() { return service.getForCurrentUser(); }
+    @PostMapping("/schedules")
+    public CommodityExportDto.SettingResponse createSchedule(@RequestBody CommodityExportDto.ScheduleRequest request) {
+        return service.createForCurrentUser(request);
     }
-
-    @PutMapping("/schedule")
-    public CommodityExportDto.SettingResponse updateSchedule(@RequestBody CommodityExportDto.SettingRequest req) {
-        return service.updateForCurrentUser(req);
+    @PutMapping("/schedules/{id}")
+    public CommodityExportDto.SettingResponse updateSchedule(@PathVariable Long id, @RequestBody CommodityExportDto.ScheduleRequest request) {
+        return service.updateForCurrentUser(id, request);
     }
-
+    @DeleteMapping("/schedules/{id}")
+    public CommodityExportDto.SettingResponse deleteSchedule(@PathVariable Long id) { return service.deleteForCurrentUser(id); }
+    @PostMapping("/schedules/{id}/run-now")
+    public CommodityExportDto.RunNowResponse runNow(@PathVariable Long id) { return service.runNowForCurrentUser(id); }
+    @RequestMapping(value = "/schedule", method = {RequestMethod.GET, RequestMethod.PUT})
+    public void retiredSettings() { throw retired(); }
     @PostMapping("/run-now")
-    public CommodityExportDto.RunNowResponse runNow() {
-        return service.runNowForCurrentUser();
+    public void retiredRunNow() { throw retired(); }
+    private ResponseStatusException retired() {
+        return new ResponseStatusException(HttpStatus.GONE, "匯出設定已改為多筆獨立排程，請重新整理頁面");
     }
 }

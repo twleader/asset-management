@@ -176,9 +176,11 @@ export const bffApi = {
     recalcDividends:   () => api.post('/bff/asset-history/recalc-dividends'),
     deleteSnapshot:    (id) => api.delete(`/bff/asset-history/${id}`),
     exportExcel:       () => api.get('/bff/asset-history/export', { responseType: 'blob' }),
-    getExportSchedule:    () => api.get('/bff/asset-history/export-schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/asset-history/export-schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/asset-history/export-schedule/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    getExportSchedules:      () => api.get('/bff/asset-history/export-schedules', { skipErrorToast: true }),
+    createExportSchedule:    (data) => api.post('/bff/asset-history/export-schedules', data, { skipErrorToast: true }),
+    updateExportSchedule:    (id, data) => api.put(`/bff/asset-history/export-schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule:    (id) => api.delete(`/bff/asset-history/export-schedules/${id}`, { skipErrorToast: true }),
+    runExportScheduleNow:    (id) => api.post(`/bff/asset-history/export-schedules/${id}/run-now`, null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') => api.get('/bff/asset-history/export-schedule/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/asset-history/export-schedule/browse-gdrive', { params: { subpath }, skipErrorToast: true })
@@ -192,9 +194,11 @@ export const bffApi = {
     delete:      (id) => api.delete(`/bff/realized-gain/${id}`),
     lookupName:  (params) => api.get('/bff/realized-gain/lookup-name', { params }),  // 走本頁 BFF，轉呼同一支 business /api/stock-alerts/lookup-name
     exportExcel: () => api.get('/bff/realized-gain/export', { responseType: 'blob' }),
-    getExportSchedule:    () => api.get('/bff/realized-gain/export/schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/realized-gain/export/schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/realized-gain/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    getExportSchedules:      () => api.get('/bff/realized-gain/export/schedules', { skipErrorToast: true }),
+    createExportSchedule:    (data) => api.post('/bff/realized-gain/export/schedules', data, { skipErrorToast: true }),
+    updateExportSchedule:    (id, data) => api.put(`/bff/realized-gain/export/schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule:    (id) => api.delete(`/bff/realized-gain/export/schedules/${id}`, { skipErrorToast: true }),
+    runExportScheduleNow:    (id) => api.post(`/bff/realized-gain/export/schedules/${id}/run-now`, null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') => api.get('/bff/realized-gain/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/realized-gain/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
@@ -235,9 +239,11 @@ export const bffApi = {
         responseType: 'blob',
         timeout: 120000
       }),
-    getExportSchedule:    () => api.get('/bff/commodity-price/export/schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/commodity-price/export/schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/commodity-price/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    getExportSchedules:      () => api.get('/bff/commodity-price/export/schedules', { skipErrorToast: true }),
+    createExportSchedule:    (data) => api.post('/bff/commodity-price/export/schedules', data, { skipErrorToast: true }),
+    updateExportSchedule:    (id, data) => api.put(`/bff/commodity-price/export/schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule:    (id) => api.delete(`/bff/commodity-price/export/schedules/${id}`, { skipErrorToast: true }),
+    runExportScheduleNow:    (id) => api.post(`/bff/commodity-price/export/schedules/${id}/run-now`, null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') => api.get('/bff/commodity-price/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/commodity-price/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
@@ -255,9 +261,11 @@ export const bffApi = {
         responseType: 'blob',
         timeout: 120000
       }),
-    getExportSchedule:    () => api.get('/bff/exchange-rate/export/schedule', { skipErrorToast: true }),
-    updateExportSchedule: (data) => api.put('/bff/exchange-rate/export/schedule', data, { skipErrorToast: true }),
-    runExportNow:         () => api.post('/bff/exchange-rate/export/run-now', null, { timeout: 60000, skipErrorToast: true }),
+    getExportSchedules:      () => api.get('/bff/exchange-rate/export/schedules', { skipErrorToast: true }),
+    createExportSchedule:    (data) => api.post('/bff/exchange-rate/export/schedules', data, { skipErrorToast: true }),
+    updateExportSchedule:    (id, data) => api.put(`/bff/exchange-rate/export/schedules/${id}`, data, { skipErrorToast: true }),
+    deleteExportSchedule:    (id) => api.delete(`/bff/exchange-rate/export/schedules/${id}`, { skipErrorToast: true }),
+    runExportScheduleNow:    (id) => api.post(`/bff/exchange-rate/export/schedules/${id}/run-now`, null, { timeout: 60000, skipErrorToast: true }),
     browseExportDir:      (subpath = '') => api.get('/bff/exchange-rate/export/browse', { params: { subpath }, skipErrorToast: true }),
     // Google Drive 資料夾樹懶載入（Requirement 51 / Task 243）
     browseGdriveExportDir: (subpath = '') => api.get('/bff/exchange-rate/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })

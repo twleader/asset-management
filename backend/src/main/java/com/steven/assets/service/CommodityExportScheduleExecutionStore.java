@@ -1,99 +1,110 @@
 package com.steven.assets.service;
 
-import com.steven.assets.repository.CommodityExportScheduleRepository;
-import com.steven.assets.repository.ExportScheduleFreshRead;
-
-import com.steven.assets.service.CapturedExport;
-import com.steven.assets.service.ExportExecutionPort;
-
 import com.steven.assets.model.CommodityExportSchedule;
-import com.steven.assets.model.CommodityExportScheduleTime;
+import com.steven.assets.repository.CommodityExportScheduleRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
-import java.time.*;
-import java.util.*;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
-/** Parent lock is shared by UI updates, capture and completion; no export I/O is done here. */
+/** Short transaction boundary for owner-locked schedule writes, captures and writeback. */
 @Service
-public class CommodityExportScheduleExecutionStore implements ExportExecutionPort<CommodityExportSchedule> {
-    private final CommodityExportScheduleRepository settingRepo;
-    private final ExportScheduleFreshRead freshRead;
-    public CommodityExportScheduleExecutionStore(CommodityExportScheduleRepository settingRepo, ExportScheduleFreshRead freshRead) {
-        this.settingRepo = settingRepo; this.freshRead = freshRead;
+public class CommodityExportScheduleExecutionStore {
+    private final CommodityExportScheduleRepository scheduleRepository;
+    private final com.steven.assets.repository.ExportScheduleFreshRead freshRead;
+
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    public CommodityExportScheduleExecutionStore(CommodityExportScheduleRepository scheduleRepository, com.steven.assets.repository.ExportScheduleFreshRead freshRead) {
+        this.freshRead = freshRead;
+        this.scheduleRepository = scheduleRepository;
     }
-    private CommodityExportSchedule lockOwner(Long owner) {
-        return settingRepo.findLockedByOwnerUserId(owner).map(freshRead::refresh).orElse(null);
-    }
+
+    /**
+     * Serialize all owner writes, including first-time writes for owners with no schedule rows.
+     * The lock is transaction scoped and namespaced independently from every other advisory lock.
+     */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public <T> T update(Long owner, Function<CommodityExportSchedule, T> change) {
-        CommodityExportSchedule s = lockOwner(owner);
-        if (s == null) { s = CommodityExportSchedule.builder().ownerUserId(owner).build(); settingRepo.saveAndFlush(s); }
-        s.getTimes().size();
-        return change.apply(s);
+    public <T> T write(Long ownerId, Function<List<CommodityExportSchedule>, T> operation) {
+        acquireOwnerLock(ownerId);
+        List<CommodityExportSchedule> owned = new ArrayList<>(
+                scheduleRepository.findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(ownerId));
+        owned.replaceAll(row -> scheduleRepository.findLockedByIdAndOwnerUserId(row.getId(), ownerId)
+                .map(freshRead::refresh).orElseThrow());
+        return operation.apply(owned);
     }
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public CapturedExport manual(Long owner) {
-        CommodityExportSchedule s = lockOwner(owner);
-        if (s == null) return new CapturedExport(null, owner, null, null, null, null, "input", false, null, null,
-                List.of());
-        return new CapturedExport(s.getId(), owner, null, null, null, null, s.getOutputSubpath(),
-            s.isGdriveEnabled(), s.getGdriveSubpath(), s.getRangeMonths(), List.of());
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public List<CommodityExportSchedule> listForOwner(Long ownerId) {
+        return scheduleRepository.findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(ownerId);
     }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public List<CapturedExport> due(Long id, Long owner, LocalDate date, LocalTime now) {
-        CommodityExportSchedule s = lockOwner(owner);
-        if (s == null || !Objects.equals(s.getId(), id) || !Boolean.TRUE.equals(s.getEnabled())) return List.of();
-        if (s.getTimes().isEmpty()) {
-            CommodityExportScheduleTime legacy = CommodityExportScheduleTime.builder().runHour(s.getRunHour()).runMinute(s.getRunMinute())
-                .enabled(true).lastRunDate(s.getLastRunDate()).lastRunAt(s.getLastRunAt())
-                .lastRunStatus(s.getLastRunStatus()).build();
-            s.addTime(legacy); settingRepo.saveAndFlush(s);
+    public Optional<CommodityExportScheduleCapture> manual(Long scheduleId, Long ownerId) {
+        return scheduleRepository.findLockedByIdAndOwnerUserId(scheduleId, ownerId)
+                .map(freshRead::refresh).map(schedule -> capture(schedule, null));
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public List<CommodityExportScheduleCapture> due(Long scheduleId, Long ownerId,
+                                                LocalDate date, LocalTime now) {
+        CommodityExportSchedule schedule = scheduleRepository.findLockedByIdAndOwnerUserId(scheduleId, ownerId)
+                .map(freshRead::refresh).orElse(null);
+        if (schedule == null || !Boolean.TRUE.equals(schedule.getEnabled())
+                || schedule.getRunHour() == null || schedule.getRunMinute() == null
+                || schedule.getLastRunDate() != null && !schedule.getLastRunDate().isBefore(date)
+                || now.isBefore(LocalTime.of(schedule.getRunHour(), schedule.getRunMinute()))) {
+            return List.of();
         }
-        List<CapturedExport> captures = new ArrayList<>();
-        for (CommodityExportScheduleTime t : s.getTimes()) {
-            if (!Boolean.TRUE.equals(t.getEnabled()) || (t.getLastRunDate() != null && !t.getLastRunDate().isBefore(date))
-                    || now.isBefore(LocalTime.of(t.getRunHour(), t.getRunMinute()))) continue;
-            captures.add(new CapturedExport(s.getId(), owner, t.getId(), t.getRunHour(), t.getRunMinute(), date,
-                s.getOutputSubpath(), s.isGdriveEnabled(), s.getGdriveSubpath(), s.getRangeMonths(), List.of()));
-        }
-        return List.copyOf(captures);
+        return List.of(capture(schedule, date));
     }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void complete(CapturedExport input, LocalDateTime completedAt, String localStatus, String driveStatus) {
-        if (input.scheduleId() == null) return;
-        CommodityExportSchedule s = lockOwner(input.ownerId());
-        if (s == null || !Objects.equals(s.getId(), input.scheduleId())) return;
-        CommodityExportScheduleTime child = null;
-        if (input.childId() != null) {
-            child = s.getTimes().stream().filter(t -> Objects.equals(t.getId(), input.childId())
-                && Objects.equals(t.getRunHour(), input.hour()) && Objects.equals(t.getRunMinute(), input.minute()))
-                .findFirst().orElse(null);
-            if (child == null) return;
-            if (child.getLastRunDate() == null || child.getLastRunDate().isBefore(input.attemptDate()))
-                child.setLastRunDate(input.attemptDate());
-            if (CapturedExport.notOlder(completedAt, child.getLastRunAt())) {
-                child.setLastRunAt(completedAt); child.setLastRunStatus(CapturedExport.truncate(localStatus, 500));
-                if (CapturedExport.notOlder(completedAt, child.getUpdatedAt())) child.setUpdatedAt(completedAt);
+    public void complete(CommodityExportScheduleCapture input, LocalDateTime completedAt,
+                         String localStatus, String driveStatus) {
+        if (input == null || input.scheduleId() == null) return;
+        CommodityExportSchedule schedule = scheduleRepository.findLockedByIdAndOwnerUserId(
+                input.scheduleId(), input.ownerId()).map(freshRead::refresh).orElse(null);
+        if (!input.isSameSettings(schedule)) return;
+
+        if (input.attemptDate() != null
+                && (schedule.getLastRunDate() == null || schedule.getLastRunDate().isBefore(input.attemptDate()))) {
+            schedule.setLastRunDate(input.attemptDate());
+        }
+        if (CommodityExportScheduleCapture.notOlder(completedAt, schedule.getLastRunAt())) {
+            schedule.setLastRunAt(completedAt);
+            schedule.setLastRunStatus(CommodityExportScheduleCapture.truncate(localStatus, 500));
+            if (CommodityExportScheduleCapture.notOlder(completedAt, schedule.getUpdatedAt())) {
+                schedule.setUpdatedAt(completedAt);
             }
         }
-        if (CapturedExport.notOlder(completedAt, s.getLastRunAt())) {
-            s.setLastRunAt(completedAt); s.setLastRunStatus(CapturedExport.truncate(localStatus, 500));
-            CommodityExportScheduleTime representative = s.getTimes().stream().filter(t -> Boolean.TRUE.equals(t.getEnabled()))
-                .min(Comparator.comparing(CommodityExportScheduleTime::getRunHour).thenComparing(CommodityExportScheduleTime::getRunMinute)
-                    .thenComparing(CommodityExportScheduleTime::getId)).orElseGet(() -> s.getTimes().stream()
-                .min(Comparator.comparing(CommodityExportScheduleTime::getRunHour).thenComparing(CommodityExportScheduleTime::getRunMinute)
-                    .thenComparing(CommodityExportScheduleTime::getId)).orElse(null));
-            if (representative != null) { s.setRunHour(representative.getRunHour());
-                s.setRunMinute(representative.getRunMinute()); s.setLastRunDate(representative.getLastRunDate()); }
+        if (driveStatus != null && input.gdriveEnabled() && schedule.isGdriveEnabled()
+                && CommodityExportScheduleCapture.notOlder(completedAt, schedule.getGdriveLastRunAt())) {
+            schedule.setGdriveLastRunAt(completedAt);
+            schedule.setGdriveLastStatus(CommodityExportScheduleCapture.truncate(driveStatus, 512));
         }
-        if (driveStatus != null && s.isGdriveEnabled() == input.gdriveEnabled()
-                && Objects.equals(s.getOutputSubpath(), input.outputSubpath())
-                && Objects.equals(s.getGdriveSubpath(), input.gdriveSubpath()) && Objects.equals(s.getRangeMonths(), input.rangeMonths())
-                && CapturedExport.notOlder(completedAt, s.getGdriveLastRunAt())) {
-            s.setGdriveLastRunAt(completedAt); s.setGdriveLastStatus(CapturedExport.truncate(driveStatus, 512));
-        }
-        if (CapturedExport.notOlder(completedAt, s.getUpdatedAt())) s.setUpdatedAt(completedAt);
+    }
+
+    private CommodityExportScheduleCapture capture(CommodityExportSchedule schedule, LocalDate attemptDate) {
+        return new CommodityExportScheduleCapture(schedule.getId(), schedule.getOwnerUserId(), schedule.getName(),
+                Boolean.TRUE.equals(schedule.getEnabled()), schedule.getRunHour(), schedule.getRunMinute(),
+                attemptDate, schedule.getOutputSubpath(), schedule.getRangeMonths(), schedule.isGdriveEnabled(), schedule.getGdriveSubpath());
+    }
+
+    private void acquireOwnerLock(Long ownerId) {
+        entityManager.createNativeQuery("""
+                SELECT pg_advisory_xact_lock(
+                    hashtextextended('commodity_export_schedule:' || CAST(:ownerId AS text), 0))
+                """).setParameter("ownerId", ownerId).getSingleResult();
     }
 }

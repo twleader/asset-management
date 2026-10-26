@@ -122,32 +122,33 @@ public class AssetHistoryBffController {
     // ===== 排程自動匯出設定（Requirement 34 / Task 171，per-user owner-scoped）=====
     // 沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-* → 後端 ownerFilter 縮到本人）。
 
-    @GetMapping("/export-schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
-        return businessServicesClient.get()
-                .uri("/api/export-schedule/settings")
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .map(ResponseEntity::ok);
+    @GetMapping("/export-schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedules() {
+        return businessServicesClient.get().uri("/api/export-schedule/schedules").retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
     }
-
-    @PutMapping("/export-schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
-        return businessServicesClient.put()
-                .uri("/api/export-schedule/settings")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .map(ResponseEntity::ok);
+    @PostMapping("/export-schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> createExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post().uri("/api/export-schedule/schedules").bodyValue(body).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
     }
-
+    @PutMapping("/export-schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return businessServicesClient.put().uri("/api/export-schedule/schedules/{id}", id).bodyValue(body).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @DeleteMapping("/export-schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteExportSchedule(@PathVariable Long id) {
+        return businessServicesClient.delete().uri("/api/export-schedule/schedules/{id}", id).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @PostMapping("/export-schedules/{id}/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow(@PathVariable Long id) {
+        return businessServicesClient.post().uri("/api/export-schedule/schedules/{id}/run-now", id).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @RequestMapping(value = "/export-schedule", method = {org.springframework.web.bind.annotation.RequestMethod.GET, org.springframework.web.bind.annotation.RequestMethod.PUT})
+    public void retiredExportSettings() { throw retiredExport(); }
     @PostMapping("/export-schedule/run-now")
-    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
-        return businessServicesClient.post()
-                .uri("/api/export-schedule/run-now")
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .map(ResponseEntity::ok);
+    public void retiredExportRunNow() { throw retiredExport(); }
+    private org.springframework.web.server.ResponseStatusException retiredExport() {
+        return new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
+                "匯出設定已改為多筆獨立排程，請重新整理頁面");
     }
 
     // 唯讀資料夾瀏覽（檔案總管式選擇器逐層懶載入）；subpath 由 WebClient 展開並 URL-encode。

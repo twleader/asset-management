@@ -1,540 +1,235 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.ExportScheduleDto;
-import com.steven.assets.model.AppUser;
-import com.steven.assets.model.ExportScheduleSetting;
-import com.steven.assets.repository.AppUserRepository;
-import com.steven.assets.repository.ExportScheduleSettingRepository;
-import com.steven.assets.security.AdminRequiredException;
-import com.steven.assets.security.CurrentUserContext;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import com.steven.assets.model.*;
+import com.steven.assets.repository.*;
+import com.steven.assets.security.*;
+import com.steven.assets.service.export.*;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
+import jakarta.persistence.EntityManager;
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-/**
- * 歷年資產匯出頁的 Google Drive 同步（Requirement 51 / Task 243）——六個結構相近頁面的代表。
- *
- * <p>驗證規則本身由 {@link GdriveOutputSupportTest} 涵蓋；這裡測的是「service 有沒有正確串上它」，
- * 以及三條最關鍵的迴歸：
- * <ol>
- *   <li><b>非主要管理者不能啟用</b>——rclone remote 全機只有一份且綁定某個 Google 帳號，
- *       允許其他人啟用等於把他的財務報表上傳到那個帳號的雲端硬碟，而且從當事人角度完全不可見</li>
- *   <li><b>背景排程逐列重驗 owner</b>——背景執行緒沒有 {@code CurrentUserContext}，PUT 當下的檢查在此不適用</li>
- *   <li><b>上傳失敗不影響本機</b>——本機那一份是既有的留存機制，Drive 只是附加副本</li>
- * </ol>
- */
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
+/** Real renderers/local dual writer; in-memory store has no claim to prove PostgreSQL transactions. */
 class ExportScheduleGdriveTest {
-
-    private static final ZoneId TW = ZoneId.of("Asia/Taipei");
-    private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final long ADMIN_ID = 1L;
-    private static final long OTHER_ID = 2L;
-    private static final String DRIVE_DIR = "投資理財/資產管理";
-
-    @Mock private ExportScheduleSettingRepository settingRepo;
-    @Mock private ExcelExportService excelExportService;
-    @Mock private ObjectProvider<CurrentUserContext> currentUserProvider;
-    @Mock private RcloneClient rcloneClient;
-    @Mock private AppUserRepository userRepo;
-    @Mock private UserAdminService userAdminService;
-    /** 啟用當下的自檢（Task 247）；替身預設回 null＝自檢正常，要測警告時再 stub。 */
-    @Mock private GdriveSelfCheck selfCheck;
-
-    @TempDir Path baseDir;
-
-    private ExportScheduleService service;
-
-    @BeforeEach
-    void setup() {
-        GdriveOutputSupport gdrive =
-                new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
-        service = new ExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, gdrive,
-                new com.steven.assets.service.export.ExcelDocRenderer(),
-                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
-                baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
-        when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    @TempDir Path base;
+    final List<ExportScheduleSetting> rows = new ArrayList<>();
+    final ExportScheduleSettingRepository repo = mock(ExportScheduleSettingRepository.class);
+    final ExcelExportService excel = mock(ExcelExportService.class);
+    final RcloneClient rclone = mock(RcloneClient.class);
+    final AppUserRepository users = mock(AppUserRepository.class);
+    final UserAdminService admin = mock(UserAdminService.class);
+    final GdriveSelfCheck check = mock(GdriveSelfCheck.class);
+    final ObjectProvider<CurrentUserContext> provider = mock(ObjectProvider.class);
+    final CurrentUserContext user = new CurrentUserContext();
+    final AtomicLong ids = new AtomicLong(100);
+    ExportScheduleService service;
+    ExportScheduleExecutionStore store;
+    static final ZoneId TW = ZoneId.of("Asia/Taipei");
+    @BeforeEach void setup() {
+        user.setEffectiveUserId(1L); when(provider.getObject()).thenReturn(user);
+        var fresh = mock(ExportScheduleFreshRead.class);
+        when(fresh.refresh(any())).thenAnswer(i -> i.getArgument(0));
+        store = new ExportScheduleExecutionStore(repo, fresh);
+        var em = mock(EntityManager.class); var query = mock(jakarta.persistence.Query.class);
+        when(em.createNativeQuery(anyString())).thenReturn(query);
+        when(query.setParameter(anyString(), any())).thenReturn(query);
+        ReflectionTestUtils.setField(store, "entityManager", em);
+        when(repo.findAll()).thenAnswer(i -> new ArrayList<>(rows));
+        when(repo.findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(anyLong())).thenAnswer(i ->
+                new ArrayList<>(rows.stream().filter(r -> r.getOwnerUserId().equals(i.getArgument(0))).toList()));
+        when(repo.findLockedByIdAndOwnerUserId(anyLong(), anyLong())).thenAnswer(i -> rows.stream()
+                .filter(r -> r.getId().equals(i.getArgument(0)) && r.getOwnerUserId().equals(i.getArgument(1))).findFirst());
+        when(repo.saveAndFlush(any())).thenAnswer(i -> { ExportScheduleSetting row = i.getArgument(0); row.setId(ids.incrementAndGet()); rows.add(row); return row; });
+        doAnswer(i -> { rows.remove(i.getArgument(0)); return null; }).when(repo).delete(any());
+        var drive = new GdriveOutputSupport(rclone, users, admin, check, "GDriveOutput");
+        service = new ExportScheduleService(repo, store, excel, provider, drive, new ExcelDocRenderer(),
+                new JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()), new DualFormatExportWriter(drive), base.toString());
+        when(excel.liveAssetsDoc()).thenReturn(doc()); when(excel.liveAssetsDocForOwner(anyLong())).thenReturn(doc());
     }
-
-    /** 最小合法 doc：本測試驗的是 Drive 同步與狀態欄，內容只需能被兩個 renderer 產出。 */
-    private static com.steven.assets.service.export.ExportDoc doc() {
-        var table = new com.steven.assets.service.export.ExportDoc.Table(
-                null, null, java.util.List.of("代號"), true, false, false, null,
-                java.util.List.of(java.util.List.of("2330")));
-        return new com.steven.assets.service.export.ExportDoc("資產總覽",
-                java.util.List.of(new com.steven.assets.service.export.ExportDoc.Sheet(
-                        "當前即時資產", java.util.List.of(table), 1)));
+    static ExportDoc doc() {
+        return new ExportDoc("資產總覽", List.of(new ExportDoc.Sheet("資料", List.of(new ExportDoc.Table(null,null,
+                List.of("代碼"),true,false,false,null,List.of(List.of("2330")))),1)));
     }
-
-    private void givenCurrentUser(long id) {
-        CurrentUserContext ctx = new CurrentUserContext();
-        ctx.setEffectiveUserId(id);
-        when(currentUserProvider.getObject()).thenReturn(ctx);
+    ExportScheduleSetting row(long id, int hour) {
+        ExportScheduleSetting row = ExportScheduleSetting.builder().id(id).ownerUserId(1L).enabled(true).runHour(hour).runMinute(0).outputSubpath("input").build();
+        rows.add(row); return row;
     }
-
-    /** @param configuredAdmin 是否為主要管理者（{@code ADMIN_EMAIL} 本人），與 role 欄位無關 */
-    private void givenUser(long id, String email, boolean configuredAdmin) {
-        AppUser u = new AppUser();
-        u.setId(id);
-        u.setEmail(email);
-        when(userRepo.findById(id)).thenReturn(Optional.of(u));
-        when(userAdminService.isConfiguredAdmin(email)).thenReturn(configuredAdmin);
+    ExportScheduleDto.ScheduleRequest request(String name, Boolean enabled, Integer hour, Integer minute, String local, Boolean drive, String remote) {
+        return new ExportScheduleDto.ScheduleRequest(name,enabled,hour,minute,local,drive,remote);
     }
-
-    private ExportScheduleSetting setting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
-        return ExportScheduleSetting.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
-                .id(owner).ownerUserId(owner)
-                .enabled(true).runHour(0).runMinute(0).outputSubpath("input")
-                .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath)
-                .build();
+    ExportScheduleDto.ScheduleRequest request(String name, int hour) { return request(name,false,hour,0,"input",null,null); }
+    void configured(long id, boolean allowed) {
+        var u = new AppUser(); u.setId(id); u.setEmail("owner"+id+"@example.test");
+        when(users.findById(id)).thenReturn(Optional.of(u)); when(admin.isConfiguredAdmin(u.getEmail())).thenReturn(allowed);
     }
-
-    private Path expectedLocalFile(long owner) {
-        return baseDir.resolve("input")
-                .resolve("資產總覽_" + owner + "_" + LocalDate.now(TW).format(FILE_DATE) + ".xlsx");
+    @Test void emptyGetIsEmptyAndNeverCreatesRows() {
+        assertThat(service.getForCurrentUser().schedules()).isEmpty(); verify(repo,never()).saveAndFlush(any()); verifyNoInteractions(check,rclone);
     }
-
-    // ===== 243.2.1／243.2.2：只有主要管理者能啟用 =====
-
-    @Test
-    void 非主要管理者啟用Drive回403_即使role是ADMIN() {
-        // 這裡刻意用「role 為 ADMIN 但 email 非 ADMIN_EMAIL」的使用者：若實作誤用 role 判準，本測試會過不了。
-        givenCurrentUser(OTHER_ID);
-        givenUser(OTHER_ID, "hi.steven@gmail.com", false);
-        when(settingRepo.findByOwnerUserId(OTHER_ID)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(new ExportScheduleDto.SettingRequest(
-                true, 8, 0, "input", true, DRIVE_DIR)))
-                .isInstanceOf(AdminRequiredException.class);   // 403，不是 400
-        // This in-memory fixture has no rollback evidence; the real PostgreSQL suite proves no setting remains.
-    }
-
-    @Test
-    void 主要管理者可啟用() {
-        givenCurrentUser(ADMIN_ID);
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 8, 0, "input", true, DRIVE_DIR));
-
-        assertThat(resp.gdriveEnabled()).isTrue();
-        assertThat(resp.gdriveSubpath()).isEqualTo(DRIVE_DIR);
-        assertThat(resp.gdriveRemote()).isEqualTo("GDriveOutput");
-    }
-
-    @Test
-    void 非主要管理者仍可設定本機路徑與排程時間() {
-        // 這個不對稱是刻意的：只有 Drive 這一項會把資料送出本機。整支 PUT 限 ADMIN 會破壞既有的
-        // per-user 排程設定能力（Requirement 39／49 明訂非管理者亦可設定自己的排程）。
-        givenCurrentUser(OTHER_ID);
-        givenUser(OTHER_ID, "hi.steven@gmail.com", false);
-        when(settingRepo.findByOwnerUserId(OTHER_ID)).thenReturn(Optional.empty());
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 9, 30, "Project/SRPP/data/input", null, null));
-
-        assertThat(resp.outputSubpath()).isEqualTo("Project/SRPP/data/input");
-        assertThat(resp.runHour()).isEqualTo(9);
-        assertThat(resp.gdriveEnabled()).isFalse();
-    }
-
-    @Test
-    void 多個時間依時分排序且各自保留相同時間的guard() {
-        givenCurrentUser(ADMIN_ID);
-        ExportScheduleSetting current = setting(ADMIN_ID, false, null);
-        var nineThirty = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
-                .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).build();
-        current.addTime(nineThirty);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
-
-        ExportScheduleDto.SettingResponse response = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, "input", null, null,
-                        List.of(new ExportScheduleDto.TimeRequest(12, 0, true),
-                                new ExportScheduleDto.TimeRequest(9, 30, true))));
-
-        assertThat(response.times()).extracting(ExportScheduleDto.TimeResponse::runHour).containsExactly(9, 12);
-        assertThat(current.getTimes()).hasSize(2);
-        assertThat(current.getTimes()).anySatisfy(time -> {
-            assertThat(time.getRunHour()).isEqualTo(9);
-            assertThat(time.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
+    @Test void createDefaultsDisabledNormalizesNamesAndPathsAndAllowsSameTargets() {
+        var first = service.createForCurrentUser(request("   ",null,8,0," ",null,null));
+        assertThat(first.schedules()).singleElement().satisfies(r -> {
+            assertThat(r.enabled()).isFalse(); assertThat(r.name()).isNull(); assertThat(r.outputSubpath()).isEqualTo("input");
         });
-        // rollback representative 也必須是最早 enabled child。
-        assertThat(current.getRunHour()).isEqualTo(9);
-        assertThat(current.getRunMinute()).isEqualTo(30);
+        service.createForCurrentUser(request(null,8)); assertThat(rows).hasSize(2);
     }
-
-    @Test
-    void 無設定時GET回transient啟用0800且不寫DB() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        ExportScheduleDto.SettingResponse response = service.getForCurrentUser();
-
-        assertThat(response.enabled()).isFalse();
-        assertThat(response.times()).singleElement().satisfies(time -> {
-            assertThat(time.runHour()).isEqualTo(8);
-            assertThat(time.runMinute()).isZero();
-            assertThat(time.enabled()).isTrue();
-            assertThat(time.lastRunAt()).isNull();
-            assertThat(time.lastRunStatus()).isNull();
-        });
-        verify(settingRepo, never()).save(any());
+    @Test void listAndMutationResponsesAreCompleteAndSortedByTimeThenId() {
+        row(4,12); row(3,8); row(2,8);
+        assertThat(service.getForCurrentUser().schedules()).extracting(ExportScheduleDto.ScheduleItem::id).containsExactly(2L,3L,4L);
+        assertThat(service.createForCurrentUser(request("中 A_1-",9)).schedules()).extracting(ExportScheduleDto.ScheduleItem::runHour).containsExactly(8,8,9,12);
     }
-
-    @Test
-    void 儲存拒絕空時間清單() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(false, "input", null, null, List.of())))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("至少需要一個執行時間");
-        verify(settingRepo, never()).save(any());
+    @Test void editsKeepOnlyTheirOwnGuardAndExecutionMetadata() {
+        var a=row(1,8); var b=row(2,9); var date=LocalDate.now(TW); a.setLastRunDate(date); a.setLastRunStatus("kept");
+        a.setGdriveLastStatus("kept-drive"); b.setLastRunStatus("other");
+        var response=service.updateForCurrentUser(1L,request("new",11));
+        assertThat(response.schedules()).hasSize(2); assertThat(a.getLastRunDate()).isEqualTo(date);
+        assertThat(a.getLastRunStatus()).isEqualTo("kept"); assertThat(a.getGdriveLastStatus()).isEqualTo("kept-drive");
+        assertThat(b.getLastRunStatus()).isEqualTo("other");
     }
-
-    @Test
-    void 儲存拒絕重複時間() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(false, "input", null, null,
-                        List.of(new ExportScheduleDto.TimeRequest(8, 0, true),
-                                new ExportScheduleDto.TimeRequest(8, 0, false)))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("執行時間不可重複");
-        verify(settingRepo, never()).save(any());
+    @Test void deleteReturnsRemainingFullList() {
+        row(1,8);row(2,9); assertThat(service.deleteForCurrentUser(1L).schedules()).extracting(ExportScheduleDto.ScheduleItem::id).containsExactly(2L);
     }
-
-    @Test
-    void 總排程啟用時拒絕所有時間停用() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, "input", null, null,
-                        List.of(new ExportScheduleDto.TimeRequest(8, 0, false),
-                                new ExportScheduleDto.TimeRequest(12, 0, false)))))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("至少需啟用一個時間");
-        verify(settingRepo, never()).save(any());
+    @Test void eleventhScheduleIsRejected() {
+        for(int i=0;i<10;i++) row(i+1,8);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,8))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("10");
+        assertThat(rows).hasSize(10);
     }
-
-    // ===== 243.1.1：未送出的欄位＝不變更 =====
-
-    @Test
-    void 未送gdriveEnabled不得把已開啟的開關關掉() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 8, 0, "input", null, null));
-
-        assertThat(resp.gdriveEnabled()).isTrue();
-        assertThat(resp.gdriveSubpath()).isEqualTo(DRIVE_DIR);
-    }
-
-    @Test
-    void 關閉開關不清空既有子路徑() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 8, 0, "input", false, null));
-
-        assertThat(resp.gdriveEnabled()).isFalse();
-        assertThat(resp.gdriveSubpath()).isEqualTo(DRIVE_DIR); // 關掉再開回來不必重填
-    }
-
-    @Test
-    void 讀取既有不合法的Drive值不擲例外() {
-        // 若讀取也失敗，設定頁會 500，使用者就沒有任何入口能把它改回正常值。
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID))
-                .thenReturn(Optional.of(setting(ADMIN_ID, true, "/絕對路徑")));
-
-        ExportScheduleDto.SettingResponse resp = service.getForCurrentUser();
-
-        assertThat(resp.gdriveSubpath()).isEqualTo("/絕對路徑"); // 原樣回傳供前端顯示與修正
-    }
-
-    // ===== 247.3：啟用當下的自檢（八頁共用掛載點的串接）=====
-
-    @Test
-    void 啟用當下自檢失敗仍回2xx_設定照存且不覆蓋上次上傳兩欄() {
-        // 自檢失敗不得讓儲存變成 4xx／5xx：使用者必須能先把設定存起來再去修授權，
-        // 否則唯一的修正入口被自己鎖死。
-        givenCurrentUser(ADMIN_ID);
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        LocalDateTime lastUpload = LocalDateTime.of(2026, 7, 27, 23, 0);
-        s.setGdriveLastRunAt(lastUpload);
-        s.setGdriveLastStatus("成功：GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_20260727.xlsx（1234 bytes）");
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
-        when(selfCheck.checkLocal("GDriveOutput"))
-                .thenReturn("讀不到 rclone 設定 /etc/rclone/rclone.conf（檔案不存在或掛載已失效）");
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 8, 0, "input", true, DRIVE_DIR));
-
-        assertThat(resp.gdriveSelfCheckWarning()).contains("讀不到 rclone 設定");
-        assertThat(resp.gdriveEnabled()).isTrue();
-        assertThat(s.isGdriveEnabled()).isTrue();               // 設定確實入庫
-        assertThat(s.getGdriveSubpath()).isEqualTo(DRIVE_DIR);
-        // 那兩欄的語意是「上次上傳」（九個前端頁面都這樣標）：寫進自檢結果會永久覆蓋昨晚真正的上傳記錄，
-        // 且 gdrive_last_run_at 會變成一個根本沒發生過上傳的時刻。
-        assertThat(s.getGdriveLastRunAt()).isEqualTo(lastUpload);
-        assertThat(s.getGdriveLastStatus()).startsWith("成功：");
-    }
-
-    @Test
-    void 已啟用時再次儲存不重跑自檢_回應也不帶警告() {
-        givenCurrentUser(ADMIN_ID);
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);   // 明確送 true 仍會走權限檢查
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-
-        ExportScheduleDto.SettingResponse resp = service.updateForCurrentUser(
-                new ExportScheduleDto.SettingRequest(true, 9, 30, "input", true, DRIVE_DIR));
-
-        assertThat(resp.gdriveSelfCheckWarning()).isNull();
-        verify(selfCheck, never()).checkLocal(anyString());
-    }
-
-    @Test
-    void 讀取設定不做自檢() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-
-        assertThat(service.getForCurrentUser().gdriveSelfCheckWarning()).isNull();
-        verify(selfCheck, never()).checkLocal(anyString());
-    }
-
-    // ===== 243.3.3：run-now 也上傳並回報落點 =====
-
-    @Test
-    void runNow啟用時上傳並回報落點() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenReturn("GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_x.xlsx");
-
-        ExportScheduleDto.RunNowResponse r = service.runNowForCurrentUser();
-
-        assertThat(Path.of(r.path())).exists();                       // 本機照寫
-        assertThat(r.gdrivePath()).startsWith("GDriveOutput:" + DRIVE_DIR);
-        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
-    }
-
-    @Test
-    void 未啟用時run_now不上傳且不碰狀態欄() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, false, null)));
-        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
-
-        ExportScheduleDto.RunNowResponse r = service.runNowForCurrentUser();
-
-        assertThat(r.gdriveStatus()).isNull();
-        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
-    }
-
-    @Test
-    void runNow既有多時間設定不新增也不修改childGuard() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var morning = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(8).runMinute(0)
-                .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
-        s.addTime(morning);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
-        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
-
-        service.runNowForCurrentUser();
-
-        assertThat(s.getTimes()).containsExactly(morning);
-        assertThat(morning.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
-        assertThat(morning.getLastRunStatus()).isEqualTo("原有狀態");
-    }
-
-    @Test
-    void runNow無設定只產檔而不建立設定或child() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-        when(excelExportService.liveAssetsDoc()).thenReturn(doc());
-
-        var result = service.runNowForCurrentUser();
-        assertThat(result.path()).isNotNull();
-        assertThat(result.jsonPath()).isNotNull();
-        verify(settingRepo, never()).save(any());
-        verify(settingRepo, never()).saveAndFlush(any());
-    }
-
-    @Test
-    void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws IOException {
-        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var first = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
-        var second = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1).enabled(true).build();
-        s.addTime(first);
-        s.addTime(second);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID))
-                .thenThrow(new RuntimeException("第一個失敗"))
-                .thenReturn(doc());
-
-        service.selfHealOnStartup();
-
-        assertThat(first.getLastRunDate()).isEqualTo(LocalDate.now(TW));
-        assertThat(second.getLastRunDate()).isEqualTo(LocalDate.now(TW));
-        assertThat(first.getLastRunStatus()).startsWith("失敗：第一個失敗");
-        assertThat(second.getLastRunStatus()).startsWith("xlsx 成功：");
-        assertThat(s.getRunHour()).isZero();
-        assertThat(s.getRunMinute()).isZero();
-        assertThat(s.getLastRunDate()).isEqualTo(first.getLastRunDate());
-        assertThat(s.getLastRunStatus()).isEqualTo(second.getLastRunStatus());
-        assertThat(s.getLastRunAt()).isEqualTo(second.getLastRunAt());
-        verify(excelExportService, times(2)).liveAssetsDocForOwner(ADMIN_ID);
-    }
-
-    @Test
-    void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
-        ExportScheduleSetting s = setting(ADMIN_ID, false, null);
-        var due = com.steven.assets.model.ExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
-                .runHour(0).runMinute(0).enabled(true).build();
-        s.addTime(due);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-
-        CountDownLatch started = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenAnswer(invocation -> {
-            started.countDown();
-            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("測試等待逾時");
-            return doc();
-        });
-
-        CompletableFuture<Void> startup = CompletableFuture.runAsync(service::selfHealOnStartup);
-        try {
-            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
-            service.tick();
-        } finally {
-            release.countDown();
+    @Test void foreignOrUnknownIdsAreNotFoundForAllIdOperations() {
+        var foreign=row(1,8);foreign.setOwnerUserId(2L);
+        for(long id:List.of(1L,999L)) {
+            assertThatThrownBy(() -> service.updateForCurrentUser(id,request(null,8))).isInstanceOf(NoSuchElementException.class);
+            assertThatThrownBy(() -> service.deleteForCurrentUser(id)).isInstanceOf(NoSuchElementException.class);
+            assertThatThrownBy(() -> service.runNowForCurrentUser(id)).isInstanceOf(NoSuchElementException.class);
         }
-        startup.get(5, TimeUnit.SECONDS);
-
-        verify(excelExportService, times(1)).liveAssetsDocForOwner(ADMIN_ID);
+        verify(excel,never()).liveAssetsDoc();verifyNoInteractions(rclone);
+    }
+    @Test void unauthenticatedAccessIsRejectedBeforeReadsOrFiles() {
+        user.setEffectiveUserId(null);
+        assertThatThrownBy(() -> service.getForCurrentUser()).isInstanceOf(UnauthenticatedException.class);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,8))).isInstanceOf(UnauthenticatedException.class);
+        assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).isInstanceOf(UnauthenticatedException.class);
+        verify(repo,never()).findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(anyLong());
+    }
+    @Test void invalidRequiredTimesAreRejectedBeforeMutation() {
+        for(var r:List.of(request(null,false,null,0,"input",null,null),request(null,false,8,null,"input",null,null),
+                request(null,-1),request(null,24),request(null,false,8,60,"input",null,null)))
+            assertThatThrownBy(() -> service.createForCurrentUser(r)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(rows).isEmpty();
+    }
+    @Test void invalidNamesAndLongPathsAreRejected() {
+        for(String name:List.of("../escape","a/b","a:b","emoji😀","a".repeat(21)))
+            assertThatThrownBy(() -> service.createForCurrentUser(request(name,8))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"x".repeat(256),null,null))).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void traversalAndEscapingSymlinksAreRejectedAtSaveAndAtExport() throws Exception {
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"../escape",null,null))).isInstanceOf(IllegalArgumentException.class);
+        var outside=Files.createTempDirectory("asset511-outside-");
+        try { Files.createSymbolicLink(base.resolve("alias"),outside);
+            assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"alias",null,null))).isInstanceOf(IllegalArgumentException.class);
+            var r=row(1,0);r.setOutputSubpath("alias");
+            assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("不可跳脫");
+            try(var files=Files.list(outside)){assertThat(files).isEmpty();}
+        } finally { Files.deleteIfExists(base.resolve("alias"));Files.deleteIfExists(outside); }
+    }
+    @Test void symlinkChangedDuringRenderingIsRevalidatedBeforeWriting() throws Exception {
+        var r=row(1,0);r.setOutputSubpath("switch"); var outside=Files.createTempDirectory("asset511-render-");
+        var renderer=mock(ExcelDocRenderer.class);ReflectionTestUtils.setField(service,"excelDocRenderer",renderer);
+        when(renderer.render(any())).thenAnswer(i -> {Files.createSymbolicLink(base.resolve("switch"),outside);return new byte[]{1};});
+        try { assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("不可跳脫");
+            try(var files=Files.list(outside)){assertThat(files).isEmpty();}
+        } finally {Files.deleteIfExists(base.resolve("switch"));Files.deleteIfExists(outside);}
+    }
+    @Test void manualRunIgnoresEnabledUsesHttpDocAndPreservesDateGuard() {
+        var r=row(1,0);r.setEnabled(false);r.setLastRunDate(LocalDate.now(TW).minusDays(1));
+        var result=service.runNowForCurrentUser(1L);
+        assertThat(Path.of(result.path())).exists();assertThat(Path.of(result.jsonPath())).exists();
+        assertThat(r.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1)); assertThat(r.getLastRunStatus()).contains("成功");
+        verify(excel,times(1)).liveAssetsDoc();verify(excel,never()).liveAssetsDocForOwner(anyLong());
+        assertThat(result.path()).endsWith("資產總覽_1_"+LocalDate.now(TW).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)+".xlsx");
+    }
+    @Test void nameIsInsertedIntoIdenticalJsonAndExcelBaseNames() {
+        var r=row(1,0);r.setName("A 資產_1-"); var result=service.runNowForCurrentUser(1L);
+        assertThat(result.path()).contains("資產總覽_1_A 資產_1-_");
+        assertThat(result.jsonPath()).isEqualTo(result.path().replace(".xlsx",".json"));
+    }
+    @Test void storedInvalidNameFailsWithoutCreatingEscapingFiles() {
+        var r=row(1,0);r.setName("../bad");assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("名稱");
+    }
+    @Test void dueRowsRunInTimeIdOrderAndOneFailureDoesNotBlockNextOwner() {
+        var b=row(2,0);b.setOwnerUserId(2L);var a=row(1,0);
+        when(excel.liveAssetsDocForOwner(1L)).thenThrow(new IllegalStateException("first-fails"));service.tick();
+        assertThat(a.getLastRunDate()).isEqualTo(LocalDate.now(TW)); assertThat(a.getLastRunStatus()).contains("first-fails");
+        assertThat(b.getLastRunDate()).isEqualTo(LocalDate.now(TW)); assertThat(b.getLastRunStatus()).contains("成功");
+        var order=inOrder(excel);order.verify(excel).liveAssetsDocForOwner(1L);order.verify(excel).liveAssetsDocForOwner(2L);
+        service.tick(); verify(excel,times(1)).liveAssetsDocForOwner(1L);verify(excel,times(1)).liveAssetsDocForOwner(2L);
+    }
+    @Test void guardDisabledAndFutureTimeAreIndependent() {
+        var done=row(1,0);done.setLastRunDate(LocalDate.now(TW));var off=row(2,0);off.setEnabled(false);
+        var future=row(3,23);future.setRunMinute(59);var due=row(4,0);
+        service.tick();assertThat(done.getLastRunStatus()).isNull();assertThat(off.getLastRunDate()).isNull();
+        assertThat(store.due(3L,1L,LocalDate.now(TW),LocalTime.NOON)).isEmpty();
         assertThat(due.getLastRunDate()).isEqualTo(LocalDate.now(TW));
     }
-
-    // ===== 243.4：背景排程逐列複驗 owner =====
-
-    @Test
-    void 背景排程遇非主要管理者owner_跳過上傳但本機照寫() throws IOException {
-        // 該列可能在啟用後 owner 被改、DB 值被 psql 直改繞過 API、或 ADMIN_EMAIL 換人。
-        givenUser(OTHER_ID, "hi.steven@gmail.com", false);
-        ExportScheduleSetting s = setting(OTHER_ID, true, DRIVE_DIR);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(OTHER_ID)).thenReturn(doc());
-
-        service.selfHealOnStartup();
-
-        assertThat(expectedLocalFile(OTHER_ID)).exists();              // 本機那一份不受影響
-        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：");    // 既有排程狀態仍為成功
-        assertThat(s.getGdriveLastStatus()).contains("跳過").contains("主要管理者");
-        assertThat(s.getGdriveLastRunAt()).isNotNull();                // 不可靜默跳過
-        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
+    @Test void startupAndMinuteTickShareCasWhileExportIsInProgress() throws Exception {
+        row(1,0); var started=new CountDownLatch(1);var release=new CountDownLatch(1);
+        when(excel.liveAssetsDocForOwner(1L)).thenAnswer(i -> {started.countDown();assertThat(release.await(5,TimeUnit.SECONDS)).isTrue();return doc();});
+        var executor=Executors.newSingleThreadExecutor();
+        try {var run=executor.submit(service::selfHealOnStartup);assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();service.tick();
+            release.countDown();run.get(5,TimeUnit.SECONDS);verify(excel,times(1)).liveAssetsDocForOwner(1L);
+        } finally {release.countDown();executor.shutdownNow();}
     }
-
-    @Test
-    void 背景排程主要管理者_本機與Drive都寫() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenReturn("GDriveOutput:" + DRIVE_DIR + "/資產總覽_1_x.xlsx");
-
-        service.selfHealOnStartup();
-
-        assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：").contains("／json 成功：");
-        assertThat(s.getGdriveLastStatus()).startsWith("xlsx 成功：").contains("／json ");
+    @Test void nonConfiguredAdminCannotEnableDriveButCanCreateLocalSchedule() {
+        configured(1,false); assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"input",true,"drive"))).isInstanceOf(AdminRequiredException.class);
+        assertThat(service.createForCurrentUser(request(null,8)).schedules()).hasSize(1);
     }
-
-    // ===== 243.3.4：上傳失敗為 best-effort =====
-
-    @Test
-    void 上傳失敗不影響本機也不向外擲例外() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("rclone exit 3"));
-
-        service.selfHealOnStartup();   // 不得擲例外——一列炸掉不能拖垮其餘 owner
-
-        assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：");        // 本機確實成功，不得標記為失敗
-        assertThat(s.getGdriveLastStatus()).contains("失敗：");             // 兩個狀態欄必須可分辨
+    @Test void driveNullFieldsKeepExistingAndTurningOffKeepsPath() {
+        var r=row(1,8);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        service.updateForCurrentUser(1L,request(null,8));assertThat(r.isGdriveEnabled()).isTrue();assertThat(r.getGdriveSubpath()).isEqualTo("drive");
+        service.updateForCurrentUser(1L,request(null,false,8,0,"input",false,null));
+        assertThat(r.isGdriveEnabled()).isFalse();assertThat(r.getGdriveSubpath()).isEqualTo("drive");
     }
-
-    @Test
-    void 逾時不寫成失敗() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID)).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenThrow(new RcloneClient.RcloneTimeoutException("timeout", 45));
-
-        service.selfHealOnStartup();
-
-        assertThat(s.getGdriveLastStatus()).contains("逾時").contains("可能已完成");
+    @Test void driveSelfCheckWarningIsEphemeralAndDoesNotReplaceLastUpload() {
+        configured(1,true);var r=row(1,8);r.setGdriveLastStatus("old-upload");r.setGdriveLastRunAt(LocalDateTime.of(2026,1,1,1,0));
+        when(check.checkLocal("GDriveOutput")).thenReturn("configuration unavailable");
+        var result=service.updateForCurrentUser(1L,request(null,false,8,0,"input",true,"drive"));
+        assertThat(result.gdriveSelfCheckWarning()).contains("unavailable");assertThat(r.getGdriveLastStatus()).isEqualTo("old-upload");
+        assertThat(r.getGdriveLastRunAt()).isEqualTo(LocalDateTime.of(2026,1,1,1,0));
+        assertThat(service.getForCurrentUser().gdriveSelfCheckWarning()).isNull();
+        service.updateForCurrentUser(1L,request(null,false,8,0,"input",true,"drive"));verify(check,times(1)).checkLocal(anyString());
     }
-
-    @Test
-    void 本機產檔失敗時完全不上傳但仍寫狀態欄() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        ExportScheduleSetting s = setting(ADMIN_ID, true, DRIVE_DIR);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.liveAssetsDocForOwner(ADMIN_ID))
-                .thenThrow(new RuntimeException("產檔失敗"));
-
-        service.selfHealOnStartup();
-
-        assertThat(s.getLastRunStatus()).startsWith("失敗：");
-        // 絕不上傳前一次的舊檔；狀態欄也不得停留在上一次的成功
-        assertThat(s.getGdriveLastStatus()).startsWith("跳過：");
-        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
+    @Test void getReturnsInvalidStoredDrivePathWithoutValidationOrSelfCheck() {
+        var r=row(1,8);r.setGdriveSubpath("/bad");assertThat(service.getForCurrentUser().schedules().getFirst().gdriveSubpath()).isEqualTo("/bad");verifyNoInteractions(check);
+    }
+    @Test void configuredAdminUploadsBothFormatsAndReportsDrivePaths() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(rclone.copyTo(anyString(),any(),anyString(),anyString())).thenAnswer(i -> "GDriveOutput:drive/"+i.getArgument(3));
+        var result=service.runNowForCurrentUser(1L);assertThat(result.gdrivePath()).endsWith(".xlsx");assertThat(result.jsonGdrivePath()).endsWith(".json");
+        verify(rclone,times(2)).copyTo(eq("GDriveOutput"),any(),eq("drive"),anyString());assertThat(r.getGdriveLastStatus()).contains("成功");
+    }
+    @Test void backgroundRechecksDriveOwnerButKeepsLocalFilesOnDenial() {
+        configured(1,false);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");service.tick();
+        assertThat(r.getLastRunStatus()).contains("成功");assertThat(r.getGdriveLastStatus()).contains("主要管理者");verifyNoInteractions(rclone);
+    }
+    @Test void driveFailureAndTimeoutRemainSeparateFromSuccessfulLocalWrite() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(rclone.copyTo(anyString(),any(),anyString(),anyString())).thenThrow(new RuntimeException("exit3"));service.tick();
+        assertThat(r.getLastRunStatus()).contains("成功");assertThat(r.getGdriveLastStatus()).contains("失敗");
+        doThrow(new RcloneClient.RcloneTimeoutException("timeout",45)).when(rclone).copyTo(anyString(),any(),anyString(),anyString());
+        service.runNowForCurrentUser(1L);assertThat(r.getGdriveLastStatus()).contains("逾時","可能已完成");
+    }
+    @Test void localFailureSkipsAllUploadsAndStillRecordsDueGuard() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(excel.liveAssetsDocForOwner(1L)).thenThrow(new IllegalStateException("doc-failure"));service.tick();
+        assertThat(r.getLastRunDate()).isEqualTo(LocalDate.now(TW));assertThat(r.getLastRunStatus()).contains("doc-failure");
+        assertThat(r.getGdriveLastStatus()).contains("跳過");verifyNoInteractions(rclone);
     }
 }
