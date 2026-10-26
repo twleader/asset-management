@@ -1,0 +1,86 @@
+{
+  "phase": "FEATURE_RUNTIME",
+  "policyBundleSha256": "b1f5c448dbc3b67e13de93c4c23259e3f4bfeb63e01accd63990f1b28deba340",
+  "status": "PASSED_FEATURE_RUNTIME",
+  "modelSelection": "Terra unavailable in delegation tool; inherited main agent model and effort",
+  "reportCalculations": "NOT_YET_EXECUTED",
+  "pre": {
+    "asset-business-services": {
+      "containerId": "95b7613d0303de1ffc9730c4778c1eb374242cab4a5fee6330182a35c7fe3f8d",
+      "image": "sha256:b000118679cd62a5a191c1f0900a992ba820b00f6634c71ce43f863753343edf",
+      "startedAt": "2026-10-26T09:33:47.184637584Z"
+    },
+    "asset-bff": {
+      "containerId": "adb6a477769b151f3ceea1cfc6e16ff5be3f3d15ce20f528dd6333c137f8b8b8",
+      "image": "sha256:8ae12001cfcb2d329dd117ae1e8b30421946a516189086ec89a2dc7ea1416d37",
+      "startedAt": "2026-10-26T08:08:58.73118609Z"
+    },
+    "asset-api-gateway": {
+      "containerId": "81314516c647a3858ed6186ede86e77ecd5d84ab921ee776a788a9157a77ee5a",
+      "image": "sha256:1db798898f64e570358b842c143de1e6cff893a8f3c43cde82e10d82254cbd8b",
+      "startedAt": "2026-10-24T13:24:23.679180668Z"
+    }
+  },
+  "recreateStart": 1793008884.416794,
+  "upstreamHealth": "healthy",
+  "acceptedImage": "sha256:f081f4e9ba72c7dfcb8b213d4a8f1300033f5df32b28d066af075ac64edcbdf0",
+  "marketIndex": {
+    "http": 200,
+    "market": "TWSE",
+    "range": "1m",
+    "mode": "DAILY",
+    "labels": 21,
+    "recoveryFailures": []
+  },
+  "quotes": {
+    "http": 200,
+    "shape": "array",
+    "rows": 58
+  },
+  "jarResources": {
+    "decision/model_inputs.json": {
+      "sha256": "8ee4eb614a73099455b25d163fce6b675e543e1120963add38d0d7d96f8a8b6d",
+      "byteEqual": true
+    },
+    "decision/policy_manifest.json": {
+      "sha256": "0b0866e6cd60454e3f288ee648d611ca28d4351a328dda67827d806caa5b7ace",
+      "byteEqual": true
+    },
+    "9090-api-swagger.md": {
+      "sha256": "40819f617271e21b33efbca040134c3024e4915d1d34c735fa3b6a2489d45afe",
+      "byteEqual": true
+    },
+    "report/d201-registration.sql": {
+      "sha256": "bf722fae1dbeb2a7e61a34d7e28a2934e7016a8a912dde23de9839714e86e334",
+      "byteEqual": true
+    },
+    "report/d201-policy-document.json": {
+      "sha256": "5d7c4e55ee8b2f63f9548939f6aa3063a102bb46c4baa0ba4c9b654b684c6261",
+      "byteEqual": true
+    }
+  },
+  "effectiveConfigMismatchKeys": [],
+  "mountsExactlyEqualToMain": true,
+  "post": {
+    "asset-business-services": {
+      "containerId": "4d3b912ea98e47891aa4b74f33ebe9d297faad45af7545b6dc1a7f6d97aa9bdf",
+      "image": "sha256:f081f4e9ba72c7dfcb8b213d4a8f1300033f5df32b28d066af075ac64edcbdf0",
+      "startedAt": "2026-10-26T10:01:18.887749377Z",
+      "health": "healthy"
+    },
+    "asset-bff": {
+      "containerId": "adb6a477769b151f3ceea1cfc6e16ff5be3f3d15ce20f528dd6333c137f8b8b8",
+      "image": "sha256:8ae12001cfcb2d329dd117ae1e8b30421946a516189086ec89a2dc7ea1416d37",
+      "startedAt": "2026-10-26T08:08:58.73118609Z",
+      "health": "healthy"
+    },
+    "asset-api-gateway": {
+      "containerId": "81314516c647a3858ed6186ede86e77ecd5d84ab921ee776a788a9157a77ee5a",
+      "image": "sha256:1db798898f64e570358b842c143de1e6cff893a8f3c43cde82e10d82254cbd8b",
+      "startedAt": "2026-10-24T13:24:23.679180668Z",
+      "health": "healthy"
+    }
+  },
+  "runtimeReportAcceptance": "NOT_YET_EXECUTED",
+  "registryMutation": false
+}

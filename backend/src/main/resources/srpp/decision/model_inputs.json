@@ -407,7 +407,7 @@
       "bear_window": "D-202 per market: TWSE capitalization-weighted index for Taiwan-listed buys, S&P 500 for VOO. A market's window opens when its benchmark's latest completed close is at least 20% below its 24-month highest close, below its 200-session simple MA200, and RISK_OFF (close below MA200 and MA200 below its level 20 sessions earlier). Only legs of an open market may buy; the other market's share stays cash.",
       "bear_action": "When the verified bear window holds, up to two-thirds of eligible bond ETFs may be sold and invested in stock ETFs after all costs, following the D-180 order: high-dividend back to its 10% target first, then all remaining proceeds into VOO and 0050 at 4:1. TWD funding may use only amounts that leave the daily elapsed-time indexed 2026-08-real TWD 800K emergency term-deposit and TWD 1.55M total-deposit floors intact; up to the daily elapsed-time indexed 2026-08-real TWD 1.5M living-reserve component may contribute, while its TWD 750K floor and all-bank USD earmarked for VOO remain protected. The emergency reserve is never tactical funding.",
       "bear_tactical_cap": "No fixed amount. The maximum candidate pool is refreshed from /api/assets/latest and includes no more than two-thirds of bond ETFs; it is not a forced trade amount.",
-      "bull_high_window": "D-202: the benchmark of the proposed stock's listing market (TWSE for Taiwan-listed holdings including 009826; S&P 500 for VOO and VT) and the proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, benchmark drawdown from its 24-month high < 20% and not RISK_OFF",
+      "bull_high_window": "D-202: the benchmark of the proposed stock's listing market (TWSE for Taiwan-listed holdings including 009826; S&P 500 for VOO and VT) and the proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, benchmark drawdown from its 24-month high < 20% and not RISK_OFF; week52Position and short-term overheat qualify initial arming only, not an already-armed pullback tranche; market benchmark, price, radar, funding, capacity, cooldown and other hard gates still apply.",
       "bull_action": "D-156 profit capture: the trend-confirmation and short-term-overheat gates arm, but do not immediately sell, five growing tranches (8/12/20/25/35% of one locked release budget). Let a verified same-basis high-water mark rise while the trend continues; each tranche requires both its gain-above-anchor rung (15/20/25/30/35%) and a subsequent high-water pullback rung (3/4/5/6/8%). Refill the three-year living reserve to its ceiling first, then buy eligible below-target bonds with the remainder.",
       "daily_bull_profit_capture_d156": {
         "decision": "D-156",
@@ -447,7 +447,12 @@
           "ZERO_TARGET_OR_HARD_RISK_EXIT",
           "RADAR_COMPATIBLE_TIMEBOX_EXIT"
         ],
-        "note": "A high-water pullback is an analysis trigger, never an automatic broker stop. The report may produce only a fresh limit-price recommendation backed by opposite-side depth; no order is placed. A 10% correction closes and resets the bull window after the current eligible tranche is evaluated, and unfilled budget is never forced."
+        "note": "A high-water pullback is an analysis trigger, never an automatic broker stop. The report may produce only a fresh limit-price recommendation backed by opposite-side depth; no order is placed. A 10% correction closes and resets the bull window after the current eligible tranche is evaluated, and unfilled budget is never forced.",
+        "arming_only_gates": [
+          "WEEK52_POSITION_GTE_0_95",
+          "SHORT_TERM_OVERHEAT"
+        ],
+        "armed_tranche_rechecks_arming_only_gates": false
       },
       "pairing": "Both legs use the same REBALANCE_PAIR_ID; do not breach the reserve floor, bond lower bounds, individual limits or care bridge.",
       "regime_benchmark_d202": {
@@ -500,7 +505,7 @@
       "00865B_target": 0.063333333333,
       "00719B_target": 0.176666666667,
       "SGOV_target": 0.02,
-      "SGOV_role": "D-185: raised from 1% to 2%, funded from the 00697B cut, with the prior no-new-purchase restriction lifted (see sgov_new_purchase_policy_d185) and SGOV added to the D-130 daily bond-purchase rotation so it can actually reach the new target. Its separate age-70-to-80 disposal rule is unaffected.",
+      "SGOV_role": "D-185: raised from 1% to 2%, funded from the 00697B cut, with new purchases allowed through its separate U.S. strategic-buy path. SGOV does not use the D-130 Taiwan-listed daily bond cadence. Its separate age-70-to-80 disposal rule is unaffected.",
       "00697B_target_reduction_note": "00697B (intermediate-duration, rate-sensitive) cut from 8% to 2% under D-185; Steven wants only a small strategic holding there. The freed 6 percentage points split 5pp to 00719B and 1pp to SGOV.",
       "00697B_target": 0.02,
       "purpose": "Increase spendable distributions while preserving the 28% total bond-ETF bucket; 00865B NAV growth remains noncash until units are sold."
@@ -938,12 +943,14 @@
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
-      "strong_bull_regime": "Existing D-156 MonthlySignals proxy: rising 10-month average, price at least 15% above the locked anchor, and at least 6 months in the window; confirmation at month end, effective from the next modeled period.",
+      "strong_bull_regime": "Existing D-156 MonthlySignals proxy: rising 10-month average, price at least 15% above the locked anchor, and at least 6 months in the window; confirmation at month end, effective from the next modeled period. Use a separate market-state observer with a fixed six-month window, never tactical wait selection or prior-sale state.",
       "precedence_if_signals_conflict": "BEAR_MARKET_REDUCTION",
       "application": "Change the annualized real spending rate by -50000 in bear months or +50000 in strong-bull months; prorate by actual modeled period days. Neutral months use the age-tier base. No future-month look-ahead.",
       "base_case_included": true,
       "allocation_timing_enabled_by_this_rule": false,
-      "live_trading_authority": false
+      "live_trading_authority": false,
+      "strong_bull_minimum_window_months": 6,
+      "independent_of_tactical_wait_and_fills": true
     }
   },
   "horizon": {

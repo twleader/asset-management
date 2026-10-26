@@ -13047,6 +13047,16 @@ DTO不允許opaque maps/unknown fields。A1 root固定schemaVersion/planId/ident
 
 離線 release gate 與顯式 golden generator 都使用同一個明確傳入的 SRPP source root；gate 先驗官方 bundle，再比較嵌入 artifacts、golden、formal targets policy document 和 generator stdout。它只讀取；唯一允許寫檔的動作是顯式 golden generator。semantic negative tests 必先建構能通過 raw bytes/JCS 的自洽 fixture，才驗 report gate，避免誤把前層 hash 拒絕當成語意 gate 覆蓋。runtime release 則只重建 `business-services`，並把 jar bytes、DB row 和 9090 request 的同一 SHA 做三點交叉驗證。報告必區分 200 與缺 current FINAL package 時合理的 fail-closed 回應，不能將部署成功擴大解釋為有可採納交易建議。
 
+### Task 514：判斷矛盾修正後的 authority 發布
+
+2026-10-26 的發佈採用 `/Users/steven/.codex/worktrees/srpp-logic-repair-20261026/SRPP` 完成獨立審查及測試的最終 model/manifest 原始 bytes。Task 499 的 D-204 版本與 hash 留作歷史紀錄；Java `SrppReportAuthority` 和 Ruby registration generator 已以十欄候選語意 gate 相容演進政策，這次保留其驗證，不把新版本重加成 hard-lock。讀回並記錄最終 source decision/version、model SHA、manifest SHA 與 bundle SHA，逐位元嵌入 backend，再重產 22-case same-input golden、formal targets document 及 insert-only SQL。若修正涉及 Java 既有 calculator，先修相同輸入 parity 差異，不能只更新 golden。
+
+state-topup generator 改為必要顯式 `--srpp-root`（絕對、存在的來源目錄）及唯讀 `--check`；不再使用 primary 的隱式路徑。先驗同一root的官方daily/Codex bundle與backend model/manifest bytes，再載入原計算器；顯式生成只寫既有state-topup fixture，check比較完整預期bytes、22個case與source hashes，任何漂移非0且零寫入。本輪 execution_policy.py 變更連動主report22案例及state-topup22案例來源hash與parity；income/payroll/short/us fixtures 不變。新增generator regression涵蓋顯式root選取、relative/missing root、官方來源/embedded拒絕及stale source hash/case與check零寫入，測試命令明示 `SRPP_RELEASE_WORKTREE=/Users/steven/.codex/worktrees/srpp-logic-repair-20261026/SRPP`，避免authority regression退回main舊來源。
+
+本次 OpenAPI 不變；三份 Swagger mirror 與 consumer metadata 使用原身份，等 SRPP source 提交乾淨後以 renderer/sync 的 `--check --srpp-root` 證明一致。只有真正的 Swagger identity 更新才在乾淨 SRPP feature worktree 按 renderer→sync→兩次 check 執行，維持 Task 504 的四固定 dirty 產物 gate。authority release check、完整 backend tests、Ruby registry tests 與 9090 contract tests 通過後，兩 repo 各自 commit/no-ff merge/push/remote-ref readback。clean main rebuild/recreate business-services；授權 release operator 只執行生成的 insert-only registry SQL，唯讀核對新 row 與 running jar、live Swagger 同身份。
+
+2026-10-26 非台股交易日；本輪只執行 safe calendar GET（200、`availability.tw.status="AVAILABLE"`、`days[].twTrading`），以真值選下一目標交易日。report-calculations 業務成功驗收記 `NOT_YET_EXECUTED`，唯有目標交易日台北 09:05（含）至13:30（不含）、精確 registry/jar readback 後才用同一 policyBundleSha256/swaggerSha256 GET 驗收。健康、靜態 hash、calendar 200 或歷史 package 均不能替代此成功證據；不補建 package、不手動 producer/observer/行情/郵件/券商呼叫。這項時窗約束優先於 Task 499 較早的一般 live readback 文字。
+
 ## Requirement 194／Task 502：股票警示用途（買進／賣出）
 
 ### 資料與相容策略
