@@ -657,6 +657,42 @@ public class StockSourceQuery implements StockUniversePort, StockMarketRepositor
         return true;
     }
 
+    /** 僅查兩年有界區間；缺欄是待修證據，並非寫入授權。 */
+    public Optional<LocalDate> findEarliestIncompleteUsHistory(String code, LocalDate from, LocalDate to) {
+        return Optional.ofNullable(jdbc.queryForObject("""
+                SELECT MIN(trading_date) FROM stock_price_history
+                WHERE stock_code=? AND market='美股' AND trading_date BETWEEN ? AND ?
+                  AND (open_price IS NULL OR open_price<=0 OR high_price IS NULL OR high_price<=0
+                    OR low_price IS NULL OR low_price<=0 OR close_price IS NULL OR close_price<=0
+                    OR high_price<low_price OR volume IS NULL OR volume<0)
+                """, LocalDate.class, code, from, to));
+    }
+
+    /** 整根來源 bar 原子補缺；完整既有列不受歷史來源的覆寫。 */
+    public boolean upsertIncompleteUsHistory(String code, LocalDate date,
+                                             BigDecimal open, BigDecimal high, BigDecimal low,
+                                             BigDecimal close, Long volume) {
+        if (date == null || !date.isBefore(LocalDate.now(MarketClock.US_ZONE))
+                || open == null || high == null || low == null || close == null
+                || open.signum()<=0 || high.signum()<=0 || low.signum()<=0 || close.signum()<=0
+                || high.compareTo(open.max(close))<0 || low.compareTo(open.min(close))>0
+                || volume == null || volume<0) return false;
+        return jdbc.update("""
+                INSERT INTO stock_price_history
+                  (stock_code, market, trading_date, open_price, high_price, low_price, close_price, volume, close_source)
+                VALUES (?, '美股', ?, ?, ?, ?, ?, ?, 'YAHOO_HISTORICAL_REPAIR')
+                ON CONFLICT (stock_code, market, trading_date) DO UPDATE SET
+                  open_price=EXCLUDED.open_price, high_price=EXCLUDED.high_price, low_price=EXCLUDED.low_price,
+                  close_price=EXCLUDED.close_price, volume=EXCLUDED.volume, close_source=EXCLUDED.close_source
+                WHERE stock_price_history.open_price IS NULL OR stock_price_history.open_price<=0
+                   OR stock_price_history.high_price IS NULL OR stock_price_history.high_price<=0
+                   OR stock_price_history.low_price IS NULL OR stock_price_history.low_price<=0
+                   OR stock_price_history.close_price IS NULL OR stock_price_history.close_price<=0
+                   OR stock_price_history.high_price<stock_price_history.low_price
+                   OR stock_price_history.volume IS NULL OR stock_price_history.volume<0
+                """, code, date, open, high, low, close, volume) == 1;
+    }
+
     /**
      * 寫入已驗證的收盤價與其可稽核來源。呼叫端必須已驗證來源日期恰等於 tradingDate。
      */

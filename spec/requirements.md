@@ -6301,3 +6301,16 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 既有每分鐘tick與startup共用AtomicBoolean，按時分/id逐row補跑、完成不論成功失敗只設該row當日guard，一列失敗不阻斷其他row/owner。run-now忽略enabled但不消耗guard、不建立未知id；編輯設定保留guard/status。owner namespace advisory transaction lock涵蓋首筆建立與10筆上限/CRUD；id+owner fresh row lock capture不可變設定，交易外doc/render/local/Drive；complete只寫仍存在且captured name/enabled/time/path/range/Drive全部相同的row、不復活刪除、晚結果不覆蓋編輯。
 - [ ] 匯率仍以 `ExcelExportService.exchangeRatesDoc("USD",start,end)`、油金仍 `commodityPricesDoc(start,end)`，都是既有全域公開歷史來源、不加owner行情過濾或request-time外部抓取；各row依台北執行日end與rangeMonths算start，null=end.minusYears(10)，其餘end.minusMonths(N)。一次doc render雙格式，沿用local-first/Drive best-effort，保存時及產檔前重驗基底與symlink containment。無name沿用 `台幣兌美元_{ownerId}_yyyyMMdd`、`油價金價_{ownerId}_yyyyMMdd`，有name在owner後插`_{name}`，副檔名xlsx/json。同日同目錄同name合法覆寫，UI說明用不同name或目錄保留不同版本。
 - [ ] 與Task511同session驗收四頁；commodity/exchange舊singleton/children測試改成多row的對等實質覆蓋，保留雙格式/Drive/資料來源/租戶隔離及其他功能測試。新增isolated PostgreSQL migration/超限rollback/冪等、首筆併發上限、stale completion、guard、range獨立性、名稱檔名與symlink測試；BFF新路由/410；前端測試/build與四頁互動。重建三服務、遷移前後receipt比對、重產schema與drift=0、no-ff合併推送、乾淨main重建/readback。不得改9090/SRPP或交易。
+
+
+## Task 515 修訂：美股完成日歷史缺口自動修復（Requirement 7）
+
+**User Story:** 作為美股報告使用者，我希望短暫漏掉的上一完成交易日與既有不完整 OHLCV 由正式背景資料流程修復，報告 GET 仍只讀精確 asOf 的真實日 K。
+
+**Acceptance Criteria:**
+
+- [ ] 啟動的美股持有代號一律執行增量回補，不再因最新日距今未滿7天略過；原台股／英股條件不變。既有每日18:30台北回補的美股集合為持有代號與透視成份股聯集，逐檔失敗隔離，維持2秒節流；不新增排程。
+- [ ] 美股回補保留原10年首次／前向回補，已覆蓋起點的標的至少重疊最近7曆日，且包含截至紐約昨日、2年內最早不完整日。不得從不存在的日期合成bar、借前日、內插或改變完成日API的exact-asOf。
+- [ ] 不完整定義為任一OHLC為null或非正、high<low、volume為null或負數；volume=0是真零、單獨不算缺口。只接收來源完整且正值OHLC、high>=max(open,close)、low<=min(open,close)、volume非null且>=0、日期在請求範圍且嚴格早於紐約今日的日K。來源失敗／缺日／不完整時保留原列與具名缺口。Yahoo來源缺volume保留null，不得轉成0；來源chart.meta.symbol必須精確等於請求代號、currency必須為USD，缺漏／錯誤身份整批拒絕；timestamp只接受正整數且可轉long，非法時間戳不轉0。台股透視單檔失敗須隔離，不能攔住每日美股持股回補。
+- [ ] 寫入以單一PostgreSQL INSERT ON CONFLICT的WHERE檢查當下列仍不完整，補缺列或整根以同一Yahoo日K替換不完整列，close_source記為YAHOO_HISTORICAL_REPAIR；完整既有列（含已驗證收盤）零修改。查詢最早缺口不表示可放鬆atomic寫入guard。不得改台／英股寫入、即時Redis、owner資產、券商或交易。
+- [ ] 來源HTTP只在external-materials-service既有背景／維護入口；9090 completed-technicals／technical-series維持pure read、原公式與Swagger bytes。同步排程列表文案。測試覆蓋短缺日、2年內舊缺欄、完整列保護、來源缺值／未完成日／未來日、來源區間越界、零量及併發寫入後guard。正式驗收先讀DB、走受控背景／既有維護流程，再唯讀9090確認精確日期、coverage與sourceSha256；來源不能修復時明示阻擋，不得宣稱成功。

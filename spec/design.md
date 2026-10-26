@@ -13170,3 +13170,10 @@ business路由base為 `/api/exchange-rate-export/schedules`、`/api/commodity-ex
 Liquibase `changes/v1.158.0-independent-market-export-schedules.sql` 單一PostgreSQL DO transaction、splitStatements:false，接在v1.157之後註冊master。每張child存在才split，修改parent前先保留完整原parent資料供其他child複製，首child按(hour,minute,id)保留parent id，其餘nextval；AND原兩級enabled、child guard/status、parent range/path/Drive設定完整保留，無child原row不動guard。清空無法歸屬的舊共享Drive結果、name初始null；preflight兩功能每owner split後>10就RAISE整體rollback，owner unique移除、加index，成功split才drop children。child已不在時重跑不再清空新狀態；欄位/constraint/index採冪等保護，保留原CHECK/NOT NULL/owner FK現狀。無舊image rollback相容保證。
 
 四頁共同UI操作規範可共用純草稿helper，但不跨頁BFF或複製business資料計算；匯率/油金額外保留range選單，任意整數1..120的既有值不可靜默改成120，null可顯示全部十年。每筆執行單次讀原歷史資料源、兩render/dual writer，baseName空name保持舊字節、有name只加suffix；同名覆寫在UI明示。owner lock覆蓋無row併發與CRUD，short transaction捕捉/寫回，IO在交易外；失敗隔離/guard/run-now/stale completion行為與需求逐項一致。排程列表維持原兩個poll，文案改為多筆獨立排程（時點依DB），不加annotation、不寫死執行時間。
+
+
+## Task 515：美股完成日增量回補與不完整列修復
+
+external-materials-service的HistoricalBackfillService保留現有啟動與每日18:30台北排程；啟動US逐檔無7日stale門檻，每日US集合併入collectAllHeldCodes的US代號（台／英集合不擴張）。兩路逐檔例外隔離並保留2秒節流。backfillUsStock的start延續首次／更早歷史需求，否則取maxDate+1、today-7天、2年內最早不完整列的最早日；today為America/New_York日期，end=min(until或today,today-1)，start>end零I/O，相等仍可抓該一日。來源bar必須落在[start,end]且早於today。最早不完整列由StockSourceQuery參數化SQL只查US及[today-2年,today-1]。
+
+完整來源OHLCV要求O/H/L/C全部>0、H>=max(O,C)、L<=min(O,C)、volume>=0且非null；PriceFetchClient美股歷史解析缺volume保留null；先驗chart.meta.symbol精確等於請求代號、currency為USD，缺／錯身份回空來源，timestamp僅正整數且可轉long，非法逐列跳過。每日台股透視回補逐檔catch，不能中止後續US聯集。StockSourceQuery專用atomic upsert以US固定市場，ON CONFLICT WHERE僅目前OHLC任一null/非正、H<L、volume null/負數時更新整根來源bar及YAHOO_HISTORICAL_REPAIR來源；完整列返回false。不存在日期僅來源真正有bar才INSERT，不推測日曆、不刪舊列、不補假bar，完整既有bar保持原close_source。此guard不讀快取、不寫Redis、不以pre-read決定可覆寫。沒有schema、API、Swagger、公式、asOf或政策身份變更。SchedulePublicBffController.JOBS同步現有18:30描述。
