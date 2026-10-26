@@ -15,7 +15,7 @@
 - [x] **513.3 Entity 不作 transport。** MarketDataController 的 StockPriceHistory、ExchangeRateHistory、CommodityPriceHistory，以及 MacroHistoryController 的 TaiwanGdpPerCapitaHistory、JapanGdpPerCapitaHistory、KoreaGdpPerCapitaHistory、TwseIndexDailyHistory、UsIndexDailyHistory，改成 immutable record 投影。使用原實際序列化欄位，不漏 id、closeSource、sourceUrl、sourceAvailableAt、fetchedAt、realGdpGrowthRate、closePointTr、tradeVolume、tradeValue、volume。BigDecimal／LocalDate／Instant／null 不變；ResponseEntity 的 200／404 分支與列表查無資料的空陣列不變；純 DTO 轉換可在 Controller。原 Service 的 domain 查詢保持，不擴散到其他計算 caller、不加 migration 或資料副本。用獨立 Jackson fixture 比較原 Entity 與 DTO JSON 的完整相等，涵蓋 null 與非 null。
 - [x] **513.4 IO 依賴向內。** 只對確認的業務 IO 直接依賴新增實際需要的窄 port，adapter 負責固定 HTTP／Redis／SDK，組裝點注入。內層不 new concrete adapter、不留 URL constructor 偷建、不回 concrete client 的私有 nested DTO。共享 immutable 值移中立層，caller／fixture 同步引用；不是公開 FQCN 相容性承諾。既有 already-outer adapter／pure function 不為形式再包 wrapper。MarketDataService 的 quoteDetail、dividendRate、非台股 ETF、dividendHistory、twHolidays、closure detect 六項固定能力明確分開，quoteDetail 2 秒、closure detect 20 秒、其餘原期限原樣；cache／fallback／純 ETF 分類與本地台股 ETF snapshot 不變。
 - [x] **513.5 安全與相容。** 不改來源優先序、owner 選擇／tenant、計算／金融建議、資料庫正規化、commit→Redis 次序、canonical revision／comparator、cache key/bytes/TTL、SDK scope／native admission／retry／deadline、retention、time/calendar gate、broker flags 與排程。不碰 SRPP 專案、規則、registry 或 authority；金融／觀測 OpenAPI、27 exact method/path pairs、26 Tailscale handlers 不變。不發信、不呼真人券商、不 manual sync／rescan／observer POST。Python raw capture 只能在 process 記憶體，repr/log/response 不洩漏 raw／帳戶／secret。舊 Tasks401–404 非本次完成的 checkbox 不勾選。
-- [ ] **513.6 閘門與驗收。** 寫 code 前完成機械檢查及獨立 spec-auditor，記錄內容 hash；實作由 subagent，之後完整 diff（包含新檔）交 arch-auditor。隔離單元／fixture 測試驗證 port delegation、HTTP 固定契約、JSON 相容及錯誤分支；既有適用套件全測。受影響服務依 run-stack 重建/recreate，先核對 main .env/secret mounts（不輸出值），保持 flags；只安全 GET，必要 broker 正常路徑僅 fake SDK 證明。驗收後 feature commit→main --no-ff merge→push→remote readback，再從乾淨 main 重建驗證。
+- [x] **513.6 閘門與驗收。** 寫 code 前完成機械檢查及獨立 spec-auditor，記錄內容 hash；實作由 subagent，之後完整 diff（包含新檔）交 arch-auditor。隔離單元／fixture 測試驗證 port delegation、HTTP 固定契約、JSON 相容及錯誤分支；既有適用套件全測。受影響服務依 run-stack 重建/recreate，先核對 main .env/secret mounts（不輸出值），保持 flags；只安全 GET，必要 broker 正常路徑僅 fake SDK 證明。驗收後 feature commit→main --no-ff merge→push→remote readback，再從乾淨 main 重建驗證。
 
 ## 驗證
 
@@ -36,7 +36,7 @@ Docker 驗收由 run-stack subagent 在 main 設定對齊後，僅 build 及 `up
 
 ## 完成報告
 
-程式、隔離測試、獨立 diff 架構驗收與 feature runtime 已完成；main 部署及 Git landing 為 `NOT_YET_EXECUTED`，完成後再回填，不以 feature 驗收代替 main 證據。
+程式、隔離測試、獨立 diff 架構驗收、feature／main runtime 與程式 Git landing 均已完成。下列 main 證據來自合併後的獨立重建，不以 feature 驗收代替。
 
 ### 全範圍審查與 finding ledger
 
@@ -74,4 +74,12 @@ coverage 包含 backend、BFF、frontend、external-materials、Fubon、Yuanta�
 - 驗收曾誤用未定義 actuator 路徑：business 回 500、external 回 404，記為 `CLIENT_ROUTE_ERROR`，沒有將它們當成功證據或修無關路由。external／Fubon documented `/internal/health` 為 UP；business 以 Docker health 與五個實際市場 GET 驗收。
 - 獨立 diff 架構驗收：critical 0／major 0／minor 0，完整 287 檔、其中 179 production 檔；arch hash `547976b55d1f`。此後沒有 production 變更。
 
-main 部署與 Git landing：`NOT_YET_EXECUTED`。待 merge／push／remote readback 後，必須從乾淨 main 重新 build／recreate，再回填精確 Git 與 runtime 證據。
+### Git landing 與 main runtime（2026-10-26 17:33–17:34 Asia/Taipei）
+
+- 程式 feature commit：`dfc45ec0cfa8de3b5d701d6b8b3a7608ab1fe5cb`（重構分層與外部資料介面）。
+- 程式 main no-ff merge：`2e18dc83832bddbc7c143c3b0c259167e18a1401`；parents 為 `4d8c9abc1bd2c22035de8aed95d5ab9e425939f4` 與上述 feature。已 push 至 `git@github.com:twleader/asset-management.git`，遠端 feature／main 完整 SHA 與本地相同；兩工作樹乾淨、trees 相等。此為程式落地證據，後續本檔的完成紀錄提交不改 production。
+- main runtime 狀態 `PASS`：從乾淨 `/Users/steven/Project/asset-management-main` 的上述 main SHA 完成三服務 build／recreate／healthy；三容器 Compose working directory 均為該 main 目錄。
+- 1115 個 main source／resource hashes 與已測 production manifest 全相等；manifest 總 hash `d27d0e204efb8bc2b0eef49c5c3e1c896eb2c2ef420787495d808529e6574838`。main `.env` 未改，effective env、live flags 與 canonical mounts 皆相符。
+- 五組市場 JSON keys／shape／完整內容 5/5 精確 MATCH；backend 新 classes／embedded Swagger、external 35 個 ports／neutral classes 與 Python 全部 33 個 src hashes 皆正確。BFF 未重啟，首頁／9090 三個既有市場 GET／正式 health routes 成功；未再呼叫未定義 actuator 路徑。
+- main 最後 readback 的穩定 healthy image IDs：business `b000118679cd62a5a191c1f0900a992ba820b00f6634c71ce43f863753343edf`、external `8346d6cef1646c19b50dd600142f288700129e0b32774ae9f67523c9bee913cd`、Fubon `57fa267e61c8ebcae799e92dbfe3385a3572b5082785e6eeb1e0c2525d059591`。
+- 最終證據回填只修改本任務檔，不改 production；保留「未再全範圍重審」及「正式券商權限／真人 SDK 正常路徑未外部驗證」的限制。沒有把健康檢查、測試 skip、既有服務或 feature 成功當作 main／真人券商成功。
