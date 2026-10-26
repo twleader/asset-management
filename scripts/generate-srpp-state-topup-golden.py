@@ -1,14 +1,56 @@
 #!/usr/bin/env python3
 """Original SRPP state equations, frozen scalar same-input fixtures. Offline only."""
-import copy,datetime as dt,hashlib,json,sys
+import argparse,copy,datetime as dt,hashlib,json,os,subprocess,sys
 from pathlib import Path
 from decimal import Decimal
 import numpy as np
-ROOT=Path(__file__).resolve().parents[1]; SRPP=Path('/Users/steven/Project/SRPP');sys.path.insert(0,str(SRPP/'scripts'))
+sys.dont_write_bytecode=True
+ROOT=Path(__file__).resolve().parents[1]
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--srpp-root',type=Path,required=True,help='explicit original SRPP source root')
+parser.add_argument('--check',action='store_true',help='verify the tracked fixture without writing it')
+args=parser.parse_args()
+if not args.srpp_root.is_absolute():
+ parser.error('--srpp-root must be an absolute path')
+SRPP=args.srpp_root.resolve()
+if not (SRPP/'assumptions/model_inputs.json').is_file() or not (SRPP/'scripts/policy_bundle.py').is_file():
+ parser.error('--srpp-root must contain the original SRPP policy source and checker')
+
+def reject_duplicate_keys(pairs):
+ result={}
+ for key,value in pairs:
+  if key in result: raise SystemExit(f'SRPP_STATE_TOPUP_DUPLICATE_JSON_KEY:{key}')
+  result[key]=value
+ return result
+
+def parse_strict(data,label):
+ try:
+  return json.loads(data.decode('utf-8'),object_pairs_hook=reject_duplicate_keys)
+ except (UnicodeDecodeError,json.JSONDecodeError) as error:
+  raise SystemExit(f'SRPP_STATE_TOPUP_{label}_JSON_INVALID:{error}') from error
+
+# Verify the authored source before importing any of its pure calculators.
+receipt_run=subprocess.run([sys.executable,str(SRPP/'scripts/policy_bundle.py'),'check','--purpose','daily','--consumer','Codex'],cwd=SRPP,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'},stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+if receipt_run.returncode:
+ raise SystemExit('SRPP_STATE_TOPUP_OFFICIAL_POLICY_BUNDLE_CHECK_FAILED')
+receipt=parse_strict(receipt_run.stdout,'OFFICIAL_RECEIPT')
+model_bytes=(SRPP/'assumptions/model_inputs.json').read_bytes()
+manifest_bytes=(SRPP/'assumptions/policy_manifest.json').read_bytes()
+manifest=parse_strict(manifest_bytes,'MANIFEST')
+if not isinstance(receipt,dict) or receipt.get('status')!='PASS' or not isinstance(manifest,dict) or receipt.get('POLICY_BUNDLE_SHA256')!=manifest.get('POLICY_BUNDLE_SHA256') or not isinstance(manifest.get('POLICY_BUNDLE_SHA256'),str):
+ raise SystemExit('SRPP_STATE_TOPUP_OFFICIAL_BUNDLE_MISMATCH')
+if manifest.get('files',{}).get('assumptions/model_inputs.json')!=hashlib.sha256(model_bytes).hexdigest():
+ raise SystemExit('SRPP_STATE_TOPUP_SOURCE_MODEL_HASH_MISMATCH')
+for name,expected in [('model_inputs.json',model_bytes),('policy_manifest.json',manifest_bytes)]:
+ embedded=ROOT/'backend/src/main/resources/srpp/decision'/name
+ if not embedded.is_file() or embedded.read_bytes()!=expected:
+  raise SystemExit('SRPP_STATE_TOPUP_EMBEDDED_AUTHORITY_BYTES_MISMATCH:'+name)
+model=parse_strict(model_bytes,'MODEL')
+sys.path.insert(0,str(SRPP/'scripts'))
 import execution_policy as ep
 from bear_ladder import BullLadder,BearLadder
 from transition_ledger import TransitionLedger
-model=json.loads((SRPP/'assumptions/model_inputs.json').read_text());cfg=model['execution_policy_overrides']['global_equity_build_cadence_d141'];dyn=model['execution_policy']['dynamic_allocation_policy_d141'];cases=[]
+cfg=model['execution_policy_overrides']['global_equity_build_cadence_d141'];dyn=model['execution_policy']['dynamic_allocation_policy_d141'];cases=[]
 def num(v):return float(np.asarray(v).reshape(-1)[0])
 def pace_state(c,ids):
  return {'verified':True,'processedFillIds':sorted(ids),'month':('%04d-%02d'%c.month) if c.month else '', 'week':c.week or '', 'day':c.day or '', 'halved':bool(c.halved[0]), **{code:{'spent':num(c.spent[code]),'previousShortfall':num(c.previous_shortfall[code]),'consecutiveShortfalls':int(c.consecutive_shortfalls[code][0]),**({'monthBatches':int(c.voo_month_batches[0]),'weekBatches':int(c.voo_week_batches[0]),'lastFillPrice':num(c.last_voo_fill_price) if np.isfinite(c.last_voo_fill_price[0]) else None} if code=='VOO' else {'dayLots':int(c.local_day_lots[0]),'weekLots':int(c.local_week_lots[0])})}for code in ('VOO','009826')}}
@@ -54,4 +96,15 @@ def normalize(v):
  if isinstance(v,dict):return {k:normalize(x) for k,x in v.items()}
  if isinstance(v,list):return [normalize(x) for x in v]
  return v
-out={'schema':'SRPP_STATE_TOPUP_GOLDEN_V1','originalCalculatorHashes':{n:hashlib.sha256((SRPP/'scripts'/n).read_bytes()).hexdigest() for n in ('execution_policy.py','bear_ladder.py','transition_ledger.py')},'cases':cases};path=ROOT/'backend/src/test/resources/srpp/report-state-topup-golden.json';path.write_text(json.dumps(normalize(out),ensure_ascii=False,sort_keys=True,indent=2)+'\n');print(f'{len(cases)} original state/component parity cases written')
+out={'schema':'SRPP_STATE_TOPUP_GOLDEN_V1','originalCalculatorHashes':{n:hashlib.sha256((SRPP/'scripts'/n).read_bytes()).hexdigest() for n in ('execution_policy.py','bear_ladder.py','transition_ledger.py')},'cases':cases}
+if len(cases)!=22:
+ raise SystemExit('SRPP_STATE_TOPUP_CASE_COUNT_INVALID')
+path=ROOT/'backend/src/test/resources/srpp/report-state-topup-golden.json'
+rendered=(json.dumps(normalize(out),ensure_ascii=False,sort_keys=True,indent=2)+'\n').encode('utf-8')
+if args.check:
+ if not path.is_file() or path.read_bytes()!=rendered:
+  raise SystemExit('SRPP_STATE_TOPUP_GOLDEN_BYTES_MISMATCH')
+ print(f'{len(cases)} original state/component parity cases match')
+else:
+ path.write_bytes(rendered)
+ print(f'{len(cases)} original state/component parity cases written')

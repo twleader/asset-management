@@ -1102,7 +1102,7 @@
   ],
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
-    "execution_policy.py": "9b3ad1bac647318cd144706dbbe9a026dff8fb03ed15e55b287bb811a2ec7c95",
+    "execution_policy.py": "6787b2ec3cbdc1b9c0b50f0343371ef9db4b973fe54c22adbf1e6ba8751a0d6f",
     "transition_ledger.py": "2550ba102327e5642a56b415dd177411d8a5522f314f3164cc1556c18ff7ad6b"
   },
   "schema": "SRPP_STATE_TOPUP_GOLDEN_V1"

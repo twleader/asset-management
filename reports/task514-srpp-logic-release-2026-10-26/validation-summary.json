@@ -1,0 +1,27 @@
+{
+  "backend_maven_exit_code": 0,
+  "report_files": 349,
+  "totals": {
+    "tests": 3315,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 2
+  },
+  "skipped_cases": [
+    {
+      "class": "com.steven.assets.service.IndexExportScheduleServiceTest",
+      "test": "symlinkToCaseVariantDoesNotProveCaseInsensitiveFilesystemOnLinux",
+      "reason": null
+    },
+    {
+      "class": "com.steven.assets.service.srpp.report.SrppReportRepositoryPostgresTest",
+      "test": "existingReadOnlyCanonicalMarketFrameFitsActualEscapedWireLimit",
+      "reason": "System property [srpp.report.size-probe] does not exist"
+    }
+  ],
+  "policyBundleSha256": "b1f5c448dbc3b67e13de93c4c23259e3f4bfeb63e01accd63990f1b28deba340",
+  "sourceSha256": {
+    "model_inputs.json": "8ee4eb614a73099455b25d163fce6b675e543e1120963add38d0d7d96f8a8b6d",
+    "policy_manifest.json": "0b0866e6cd60454e3f288ee648d611ca28d4351a328dda67827d806caa5b7ace"
+  }
+}
