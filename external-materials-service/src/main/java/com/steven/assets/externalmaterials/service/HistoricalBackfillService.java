@@ -49,7 +49,7 @@ public class HistoricalBackfillService {
 
     /**
      * 啟動時自動補齊：app ready 後在背景執行（延遲 8s 等 DB / 連線就緒）。
-     * 若主檔股票無資料、最新資料超過 7 天未更新、或最早資料晚於 10 年前，從 10 年前回補。
+     * 台／英股保留無資料、超過7日stale或歷史不足10年的條件；美股每檔進入完成日增量補缺。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void startupBackfill() {
@@ -82,16 +82,8 @@ public class HistoricalBackfillService {
                         sleep(600);
                     }
                 }
-                for (String code : usCodes) {
-                    LocalDate maxDate = store.findMaxTradingDate(code, "美股").orElse(null);
-                    LocalDate minDate = store.findMinTradingDate(code, "美股").orElse(null);
-                    if (maxDate == null || maxDate.isBefore(staleThreshold)
-                            || (minDate != null && since.isBefore(minDate))) {
-                        log.info("啟動補齊美股 {} (maxDate={}, minDate={})", code, maxDate, minDate);
-                        backfillUsStock(code, since, null);
-                        sleep(2000);
-                    }
-                }
+                // 即使僅漏掉最近一個完成日，也必須進入正式增量修復。
+                backfillUsCodes(usCodes, since);
                 for (String code : ukCodes) {
                     LocalDate maxDate = store.findMaxTradingDate(code, "英股").orElse(null);
                     LocalDate minDate = store.findMinTradingDate(code, "英股").orElse(null);
@@ -260,27 +252,40 @@ public class HistoricalBackfillService {
         LocalDate maxDate = store.findMaxTradingDate(stockCode, "美股").orElse(null);
         LocalDate minDate = store.findMinTradingDate(stockCode, "美股").orElse(null);
         LocalDate start;
-        if (maxDate == null) start = since;
-        else if (minDate != null && since.isBefore(minDate)) start = since;
-        else start = maxDate.plusDays(1);
-        LocalDate end = (until != null) ? until : today;
-        if (!start.isBefore(end)) return 0;
+        if (maxDate == null || (minDate != null && since.isBefore(minDate))) {
+            start = since;
+        } else {
+            start = maxDate.plusDays(1);
+            if (today.minusDays(7).isBefore(start)) start = today.minusDays(7);
+        }
+        LocalDate incomplete = store.findEarliestIncompleteUsHistory(
+                stockCode, today.minusYears(2), today.minusDays(1)).orElse(null);
+        if (incomplete != null && incomplete.isBefore(start)) start = incomplete;
+        LocalDate end = until == null || !until.isBefore(today) ? today.minusDays(1) : until;
+        if (start.isAfter(end)) return 0;
 
-        log.info("回補美股 {} 歷史價格: {} ~ {}", stockCode, start, end);
+        log.info("回補美股 {} 完成日歷史: {} ~ {}", stockCode, start, end);
         int count = 0;
         for (HistoricalBar bar : priceFetch.fetchUsHistoricalRange(stockCode, start, end)) {
-            if (bar.tradingDate().equals(today)) {
-                log.debug("跳過美股 {} 今日 ({}) bar — 今日列獨佔給 ClosePersister", stockCode, today);
-                continue;
-            }
-            if (store.existsHistory(stockCode, "美股", bar.tradingDate())) continue;
-            if (store.upsertHistory(stockCode, "美股", bar.tradingDate(),
-                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) {
-                count++;   // 被拒的非正收盤列不得算成已寫入（Task 279）
-            }
+            if (bar.tradingDate() == null || bar.tradingDate().isBefore(start)
+                    || bar.tradingDate().isAfter(end) || !bar.tradingDate().isBefore(today)) continue;
+            if (store.upsertIncompleteUsHistory(stockCode, bar.tradingDate(),
+                    bar.open(), bar.high(), bar.low(), bar.close(), bar.volume())) count++;
         }
-        if (count > 0) log.info("美股 {} 匯入 {} 筆", stockCode, count);
+        log.info("美股 {} 完成日修復實際寫入 {} 筆", stockCode, count);
         return count;
+    }
+
+    /** 每檔失敗隔離；來源與 DB 的錯誤不得讓後續持股永遠缺資料。 */
+    void backfillUsCodes(Set<String> codes, LocalDate since) {
+        for (String code : codes) {
+            try {
+                backfillUsStock(code, since, null);
+            } catch (Exception e) {
+                log.warn("美股 {} 完成日回補失敗，保留原資料: {}", code, e.getClass().getSimpleName());
+            }
+            sleep(2000);
+        }
     }
 
     public int backfillUkStock(String stockCode, LocalDate since, LocalDate until) {
@@ -420,20 +425,35 @@ public class HistoricalBackfillService {
      */
     @Scheduled(cron = "0 30 18 * * *", zone = "Asia/Taipei")
     public void dailyLookthroughBackfill() {
-        Thread.ofVirtual().name("lookthrough-backfill").start(() -> {
+        Thread.ofVirtual().name("lookthrough-backfill").start(this::runDailyLookthroughBackfill);
+    }
+
+    void runDailyLookthroughBackfill() {
+        try {
+            LocalDate since = LocalDate.now().minusYears(10);
+            Set<String> twCodes = new LinkedHashSet<>();
+            Set<String> usCodes = new LinkedHashSet<>();
+            // 持有的美股 ETF 自身常不在透視前十名，不能只更新其成份股。
+            store.collectAllHeldCodes(new LinkedHashSet<>(), usCodes, new LinkedHashSet<>());
             try {
-                LocalDate since = LocalDate.now().minusYears(10);
-                Set<String> twCodes = new LinkedHashSet<>();
-                Set<String> usCodes = new LinkedHashSet<>();
                 collectLookthroughTopConstituents(twCodes, usCodes);
-                log.info("每日透視成份股回補：台股 {} 檔、美股 {} 檔", twCodes.size(), usCodes.size());
-                for (String code : twCodes) { backfillTwStock(code, since, null); sleep(600); }
-                for (String code : usCodes) { backfillUsStock(code, since, null); sleep(2000); }
-                log.info("每日透視成份股回補完成");
             } catch (Exception e) {
-                log.warn("每日透視成份股回補失敗: {}", e.getMessage());
+                log.warn("透視代號收集失敗，仍回補已收集美股持股: {}", e.getClass().getSimpleName());
             }
-        });
+            log.info("每日歷史回補：透視台股 {} 檔、持有及透視美股 {} 檔", twCodes.size(), usCodes.size());
+            for (String code : twCodes) {
+                try {
+                    backfillTwStock(code, since, null);
+                } catch (Exception e) {
+                    log.warn("透視台股 {} 回補失敗，不攔住美股持股回補: {}", code, e.getClass().getSimpleName());
+                }
+                sleep(600);
+            }
+            backfillUsCodes(usCodes, since);
+            log.info("每日透視及美股持股回補完成");
+        } catch (Exception e) {
+            log.warn("每日透視成份股回補失敗: {}", e.getClass().getSimpleName());
+        }
     }
 
     /**

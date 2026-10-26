@@ -1170,37 +1170,50 @@ public class PriceFetchClient implements LivePriceFetchPort {
                     + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d";
             String body = curlGetWithRetry(url, 2);
 
-            JsonNode root = mapper.readTree(body);
-            JsonNode chart = root.path("chart").path("result").path(0);
-            JsonNode timestamps = chart.path("timestamp");
-            JsonNode quotes = chart.path("indicators").path("quote").path(0);
-            if (!timestamps.isArray()) {
-                String err = root.path("chart").path("error").path("description").asText("");
-                log.warn("Yahoo Finance {} 無資料: {}", stockCode, err.isEmpty() ? "no timestamps" : err);
-                return List.of();
-            }
-            List<HistoricalBar> bars = new java.util.ArrayList<>();
-            for (int i = 0; i < timestamps.size(); i++) {
-                long ts = timestamps.get(i).asLong();
-                LocalDate date = java.time.Instant.ofEpochSecond(ts)
-                        .atZone(java.time.ZoneId.of("America/New_York")).toLocalDate();
-                if (date.isBefore(start)) continue;
-                JsonNode close = quotes.path("close").path(i);
-                if (close.isNull() || close.isMissingNode()) continue;
-                bars.add(new HistoricalBar(
-                        date,
-                        jsonDecimal(quotes.path("open").path(i)),
-                        jsonDecimal(quotes.path("high").path(i)),
-                        jsonDecimal(quotes.path("low").path(i)),
-                        jsonDecimal(close),
-                        quotes.path("volume").path(i).asLong(0),
-                        stockCode));
-            }
-            return bars;
+            return parseUsHistoricalResponse(mapper.readTree(body), stockCode, start);
         } catch (Exception e) {
             log.warn("Yahoo Finance {} 區間抓取失敗: {}", stockCode, e.getMessage());
             return List.of();
         }
+    }
+
+    /** 純解析入口，讓來源缺量可直接以真實 JSON fixture 驗證。 */
+    static List<HistoricalBar> parseUsHistoricalResponse(JsonNode root, String stockCode, LocalDate start) {
+        JsonNode chart = root.path("chart").path("result").path(0);
+        if (!stockCode.equals(chart.path("meta").path("symbol").asText())
+                || !"USD".equals(chart.path("meta").path("currency").asText())) {
+            log.warn("Yahoo Finance {} 歷史來源身分不符，保留原資料", stockCode);
+            return List.of();
+        }
+        JsonNode timestamps = chart.path("timestamp");
+        JsonNode quotes = chart.path("indicators").path("quote").path(0);
+        if (!timestamps.isArray()) {
+            String err = root.path("chart").path("error").path("description").asText("");
+            log.warn("Yahoo Finance {} 無資料: {}", stockCode, err.isEmpty() ? "no timestamps" : err);
+            return List.of();
+        }
+        List<HistoricalBar> bars = new java.util.ArrayList<>();
+        for (int i = 0; i < timestamps.size(); i++) {
+            JsonNode timestamp = timestamps.get(i);
+            if (!timestamp.isIntegralNumber() || !timestamp.canConvertToLong() || timestamp.longValue() <= 0) continue;
+            long ts = timestamp.longValue();
+            LocalDate date = java.time.Instant.ofEpochSecond(ts)
+                    .atZone(java.time.ZoneId.of("America/New_York")).toLocalDate();
+            if (date.isBefore(start)) continue;
+            JsonNode close = quotes.path("close").path(i);
+            if (close.isNull() || close.isMissingNode()) continue;
+            bars.add(new HistoricalBar(
+                    date,
+                    jsonDecimal(quotes.path("open").path(i)),
+                    jsonDecimal(quotes.path("high").path(i)),
+                    jsonDecimal(quotes.path("low").path(i)),
+                    jsonDecimal(close),
+                    quotes.path("volume").path(i).isIntegralNumber()
+                            && quotes.path("volume").path(i).canConvertToLong()
+                            ? quotes.path("volume").path(i).longValue() : null,
+                    stockCode));
+        }
+        return bars;
     }
 
     /**

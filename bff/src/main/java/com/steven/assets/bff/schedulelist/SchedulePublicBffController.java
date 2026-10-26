@@ -297,7 +297,7 @@ public class SchedulePublicBffController {
                     "每交易日同步股票配息資料入庫",
                     "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
             new ScheduledJobDto(EXTERNAL, "ETF 透視", "ETF 透視成份股回補",
-                    "每日重算 ETF 透視前 10 大成份股並增量補齊歷史收盤",
+                    "每日重算 ETF 透視前 10 大成份股，並補齊持有美股完成日及有界歷史缺欄",
                     "每日 18:30", "0 30 18 * * *", TPE),
             new ScheduledJobDto(EXTERNAL, "財經新聞", "財經新聞抓取",
                     "抓取財經新聞＋公開資訊快照；執行時間改由 DB 驅動，可於「爬蟲資訊查詢」頁增減多個時間點（Requirement 38）。"
