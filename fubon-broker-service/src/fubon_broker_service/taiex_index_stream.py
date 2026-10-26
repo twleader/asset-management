@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from .config import ConfigSnapshot
+from .config_values import ConfigSnapshot
 from .numeric import NumericError, canonical_decimal
-from .sdk_gateway import SdkCallError, SdkGateway
+from .ports import IndexStreamGateway
+from .errors import SdkCallError
 
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class TaiexIndexStream:
 
     def __init__(
         self,
-        gateway: SdkGateway,
+        gateway: IndexStreamGateway,
         *,
         sleeper: Callable[[float], None] = time.sleep,
         thread_factory: Callable[..., threading.Thread] = threading.Thread,

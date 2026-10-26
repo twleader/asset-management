@@ -26,7 +26,7 @@ class MarketDataServiceTwHolidayProxyTest {
         server.start();
         try {
             MarketDataService service = new MarketDataService(
-                    "http://127.0.0.1:" + server.getAddress().getPort(), null, null);
+                    new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, null);
 
             assertThat(service.isTwTradingDayCachedOnly(LocalDate.of(2099, 1, 2))).isEmpty();
             assertThat(service.futureTradingSessionsCachedOnly(
@@ -55,7 +55,7 @@ class MarketDataServiceTwHolidayProxyTest {
         server.start();
         try {
             MarketDataService service = new MarketDataService(
-                    "http://127.0.0.1:" + server.getAddress().getPort(), null, null);
+                    new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, null);
 
             assertThat(service.getTwHolidays(2099))
                     .containsExactlyEntriesOf(Map.of("2099-01-01", "DGPA provisional"));
@@ -90,7 +90,7 @@ class MarketDataServiceTwHolidayProxyTest {
         server.start();
         try {
             MarketDataService service = new MarketDataService(
-                    "http://127.0.0.1:" + server.getAddress().getPort(), null, null);
+                    new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, null);
             Map<Integer, Map<String, String>> requestScopedCache = new java.util.HashMap<>();
 
             Map<String, String> first = service.getTwHolidays(2099, requestScopedCache);

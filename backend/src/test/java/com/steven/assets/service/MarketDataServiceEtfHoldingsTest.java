@@ -27,7 +27,7 @@ class MarketDataServiceEtfHoldingsTest {
 
     @Test
     void missingFailedInvalidAndEmptyStatesRemainDistinct() {
-        var service = new MarketDataService("http://127.0.0.1:1", null, repository);
+        var service = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository);
         when(repository.findById("0050")).thenReturn(Optional.empty());
         assertThat(service.getEtfHoldings("0050", "台股").message()).isEqualTo("尚無同步資料");
         var failed = snapshot(PAYLOAD); failed.setSuccess(false); failed.setReason("SDK_CALL_SATURATED");
@@ -51,7 +51,7 @@ class MarketDataServiceEtfHoldingsTest {
     @Test
     void validSnapshotReturnsSourceDateNotLaterFetchDate() {
         when(repository.findById("0050")).thenReturn(Optional.of(snapshot(PAYLOAD)));
-        var result = new MarketDataService("http://127.0.0.1:1", null, repository).getEtfHoldings("0050", "台股");
+        var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository).getEtfHoldings("0050", "台股");
         assertThat(result.supported()).isTrue();
         assertThat(result.source()).isEqualTo("Fubon");
         assertThat(result.asOfDate()).isEqualTo("2026-08-27");
@@ -63,7 +63,7 @@ class MarketDataServiceEtfHoldingsTest {
     @Test
     void databaseFailureStaysFailSoftAndDoesNotFallback() {
         when(repository.findById("0050")).thenThrow(new IllegalStateException("private db error"));
-        var result = new MarketDataService("http://127.0.0.1:1", null, repository).getEtfHoldings("0050", "台股");
+        var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository).getEtfHoldings("0050", "台股");
         assertThat(result.supported()).isFalse();
         assertThat(result.message()).isEqualTo("同步資料暫時無法讀取");
     }
@@ -75,7 +75,7 @@ class MarketDataServiceEtfHoldingsTest {
         server.createContext("/internal/etf-holdings", exchange -> { calls.incrementAndGet(); exchange.sendResponseHeaders(500, -1); exchange.close(); });
         server.start();
         try {
-            var service = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null, repository);
+            var service = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, repository);
             when(repository.findById("0050")).thenReturn(Optional.empty(), Optional.of(snapshot(PAYLOAD)), Optional.of(snapshot("{}")));
             service.getEtfHoldings("0050", "台股"); service.getEtfHoldings("0050", "台股"); service.getEtfHoldings("0050", "台股");
             assertThat(calls).hasValue(0);
@@ -92,7 +92,7 @@ class MarketDataServiceEtfHoldingsTest {
         });
         server.start();
         try {
-            var result = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null, repository).getEtfHoldings("QQQ", "美股");
+            var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, repository).getEtfHoldings("QQQ", "美股");
             assertThat(result.supported()).isTrue();
             assertThat(result.source()).isEqualTo("Yahoo");
             verifyNoInteractions(repository);
@@ -101,7 +101,7 @@ class MarketDataServiceEtfHoldingsTest {
 
     @Test
     void unavailableUsServicePreservesExistingFallback() {
-        var result = new MarketDataService("http://127.0.0.1:1", null, repository).getEtfHoldings("QQQ", "美股");
+        var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository).getEtfHoldings("QQQ", "美股");
         assertThat(result.supported()).isFalse();
         assertThat(result.message()).isEqualTo("external-materials-service 不可用");
         verifyNoInteractions(repository);

@@ -95,6 +95,6 @@ class HistoricalDataIntradaySessionHttpTest {
         return new HistoricalDataService(prices, mock(PriceQueryService.class),
                 mock(ExchangeRateHistoryRepository.class), mock(CommodityPriceHistoryRepository.class),
                 mock(FundMasterRepository.class), mock(TwseIndexDailyHistoryRepository.class),
-                "http://127.0.0.1:" + server.getAddress().getPort());
+                new com.steven.assets.integration.marketdata.HistoricalDataHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()));
     }
 }

@@ -2,9 +2,10 @@ package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.OrderBookLevel;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.YahooProbeOutcome;
+import com.steven.assets.externalmaterials.service.port.YahooOrderBookSourcePort;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,6 +33,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /**
  * Strict producer-only Yahoo Taiwan order-book probe.
@@ -41,7 +44,7 @@ import java.util.regex.Pattern;
  * path injects or calls this client.</p>
  */
 @Component
-public class TwQuoteDetailFetchClient {
+public class TwQuoteDetailFetchClient implements YahooOrderBookSourcePort {
 
     static final int MAX_BODY_BYTES = 2 * 1024 * 1024;
     public static final Duration PROBE_TIMEOUT = Duration.ofSeconds(2);
@@ -84,37 +87,6 @@ public class TwQuoteDetailFetchClient {
             throw new IllegalArgumentException("probeTimeout must be positive");
         }
         this.probeTimeout = probeTimeout;
-    }
-
-    public record OrderBookLevel(int level, BigDecimal bidPrice, Long bidVolumeLots,
-                                 BigDecimal askPrice, Long askVolumeLots) {}
-
-    public record QuoteDetailResult(String stockCode, String stockName, String market,
-                                    boolean supported, boolean available, String source, String message,
-                                    Instant sourceTime, Instant fetchedAt, String marketStatus,
-                                    BigDecimal price, BigDecimal previousClose, BigDecimal openPrice,
-                                    BigDecimal highPrice, BigDecimal lowPrice, BigDecimal averagePrice,
-                                    BigDecimal change, BigDecimal changePercent, BigDecimal turnoverYi,
-                                    Long volumeLots, Long previousVolumeLots, BigDecimal amplitudePercent,
-                                    Long innerVolumeLots, Long outerVolumeLots, BigDecimal innerPercent,
-                                    BigDecimal outerPercent, Long bidTotalLots, Long askTotalLots,
-                                    List<OrderBookLevel> levels) {}
-
-    /** Immutable result for one suffix request; only FOUND carries a snapshot. */
-    public record YahooProbeOutcome(Kind kind, QuoteDetailResult snapshot) {
-        public enum Kind { FOUND, STRUCTURAL_MISS, TRANSIENT_OR_INVALID }
-
-        public static YahooProbeOutcome found(QuoteDetailResult snapshot) {
-            return new YahooProbeOutcome(Kind.FOUND, snapshot);
-        }
-
-        public static YahooProbeOutcome structuralMiss() {
-            return new YahooProbeOutcome(Kind.STRUCTURAL_MISS, null);
-        }
-
-        public static YahooProbeOutcome transientOrInvalid() {
-            return new YahooProbeOutcome(Kind.TRANSIENT_OR_INVALID, null);
-        }
     }
 
     /** Probe a {@code .TW} or {@code .TWO} URL. Invalid input makes no network request. */

@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonTechnicalCache;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 

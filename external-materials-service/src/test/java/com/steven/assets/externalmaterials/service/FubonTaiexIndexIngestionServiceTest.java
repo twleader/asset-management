@@ -1,16 +1,17 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
-
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -31,17 +32,17 @@ class FubonTaiexIndexIngestionServiceTest {
         StockSourceQuery source = mock(StockSourceQuery.class);
         FubonTaiexIndexIngestionService service = service(store, writer, source);
         Instant provider = NOW.plusNanos(123_000);
-        FubonTaiexIndexStore.CanonicalIndex canonical = canonical(provider, "22345.67");
-        when(store.persist(any())).thenReturn(new FubonTaiexIndexStore.PersistResult(
-                FubonTaiexIndexStore.PersistStatus.APPLIED, canonical));
+        TaiexCanonicalData.CanonicalIndex canonical = canonical(provider, "22345.67");
+        when(store.persist(any())).thenReturn(new TaiexCanonicalData.PersistResult(
+                TaiexCanonicalData.PersistStatus.APPLIED, canonical));
         when(source.loadRecentTaiexCloses(2)).thenReturn(List.of(
-                new StockSourceQuery.ClosePoint(LocalDate.of(2026, 8, 26), new BigDecimal("22000.00"))));
-        when(writer.writeTaiwanIndexLive(any())).thenReturn(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                new StockMarketData.ClosePoint(LocalDate.of(2026, 8, 26), new BigDecimal("22000.00"))));
+        when(writer.writeTaiwanIndexLive(any())).thenReturn(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         assertThat(service.ingest(event(provider, "22345.67")))
                 .isEqualTo(FubonTaiexIndexIngestionService.IngestionOutcome.DB_APPLIED);
 
-        ArgumentCaptor<FubonTaiexIndexStore.Candidate> candidate = ArgumentCaptor.forClass(FubonTaiexIndexStore.Candidate.class);
+        ArgumentCaptor<TaiexCanonicalData.Candidate> candidate = ArgumentCaptor.forClass(TaiexCanonicalData.Candidate.class);
         verify(store).persist(candidate.capture());
         assertThat(candidate.getValue().providerUpdatedAt()).isEqualTo(provider);
         assertThat(candidate.getValue().indexPoint()).isEqualByComparingTo("22345.67");
@@ -61,21 +62,21 @@ class FubonTaiexIndexIngestionServiceTest {
         StockSourceQuery source = mock(StockSourceQuery.class);
         FubonTaiexIndexIngestionService service = service(store, writer, source);
         Instant provider = NOW.plusNanos(456_000);
-        FubonTaiexIndexStore.CanonicalIndex canonical = canonical(provider, "22345.67");
+        TaiexCanonicalData.CanonicalIndex canonical = canonical(provider, "22345.67");
         when(source.loadRecentTaiexCloses(2)).thenReturn(List.of());
 
-        when(store.persist(any())).thenReturn(new FubonTaiexIndexStore.PersistResult(
-                FubonTaiexIndexStore.PersistStatus.STALE_OR_EQUAL, canonical));
+        when(store.persist(any())).thenReturn(new TaiexCanonicalData.PersistResult(
+                TaiexCanonicalData.PersistStatus.STALE_OR_EQUAL, canonical));
         assertThat(service.ingest(event(provider, "99999.99")))
                 .isEqualTo(FubonTaiexIndexIngestionService.IngestionOutcome.DB_STALE_OR_EQUAL);
         verify(writer, never()).writeTaiwanIndexLive(any());
 
         when(store.persist(any())).thenReturn(
-                new FubonTaiexIndexStore.PersistResult(FubonTaiexIndexStore.PersistStatus.APPLIED, canonical),
-                new FubonTaiexIndexStore.PersistResult(FubonTaiexIndexStore.PersistStatus.STALE_OR_EQUAL, canonical));
+                new TaiexCanonicalData.PersistResult(TaiexCanonicalData.PersistStatus.APPLIED, canonical),
+                new TaiexCanonicalData.PersistResult(TaiexCanonicalData.PersistStatus.STALE_OR_EQUAL, canonical));
         when(writer.writeTaiwanIndexLive(any())).thenReturn(
-                PriceCacheWriter.CacheWriteOutcome.FAILED,
-                PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                PriceProjectionData.CacheWriteOutcome.FAILED,
+                PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         assertThat(service.ingest(event(provider, "22345.67")))
                 .isEqualTo(FubonTaiexIndexIngestionService.IngestionOutcome.DB_APPLIED);
@@ -109,8 +110,8 @@ class FubonTaiexIndexIngestionServiceTest {
         PriceCacheWriter writer = mock(PriceCacheWriter.class);
         StockSourceQuery source = mock(StockSourceQuery.class);
         FubonTaiexIndexIngestionService service = service(store, writer, source);
-        when(store.persist(any())).thenReturn(new FubonTaiexIndexStore.PersistResult(
-                FubonTaiexIndexStore.PersistStatus.FAILED, null));
+        when(store.persist(any())).thenReturn(new TaiexCanonicalData.PersistResult(
+                TaiexCanonicalData.PersistStatus.FAILED, null));
 
         assertThat(service.ingest(event(NOW, "22345.67")))
                 .isEqualTo(FubonTaiexIndexIngestionService.IngestionOutcome.DB_FAILED);
@@ -128,8 +129,8 @@ class FubonTaiexIndexIngestionServiceTest {
         return new FubonTaiexIndexEvent("IR0001", "TWSE", "INDEX", index, micros);
     }
 
-    private static FubonTaiexIndexStore.CanonicalIndex canonical(Instant instant, String index) {
-        return new FubonTaiexIndexStore.CanonicalIndex("0000", "IR0001", "TWSE",
+    private static TaiexCanonicalData.CanonicalIndex canonical(Instant instant, String index) {
+        return new TaiexCanonicalData.CanonicalIndex("0000", "IR0001", "TWSE",
                 instant.atZone(MarketClock.TW_ZONE).toLocalDate(), instant, new BigDecimal(index), "FUBON_INDICES");
     }
 }

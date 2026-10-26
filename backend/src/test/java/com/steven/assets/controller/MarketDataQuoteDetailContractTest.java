@@ -27,7 +27,7 @@ class MarketDataQuoteDetailContractTest {
     @MockitoBean HistoricalDataService historicalDataService;
     @MockitoBean PriceStreamService priceStreamService;
     @MockitoBean DividendHistoryService dividendHistoryService;
-    @MockitoBean ExcelExportService excelExportService;
+    @MockitoBean MarketHistoryApplicationService historyApplication;
     @MockitoBean TechnicalIndicatorService technicalIndicatorService;
     @MockitoBean CommodityLiveQuoteService commodityLiveQuoteService;
     @MockitoBean CurrentUserContext currentUserContext;

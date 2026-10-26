@@ -1,12 +1,10 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData.CanonicalResponse;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData.PersistResult;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData.ReadResult;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.service.port.FubonResponseRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -15,6 +13,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonResponseRules.*;
 
 /**
  * PostgreSQL-canonical latest normalized Fubon LIVE response state.
@@ -25,10 +29,9 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Component
-public class FubonLiveResponseStore {
+public class FubonLiveResponseStore implements FubonResponseRepository {
 
     private static final String TAIWAN = "台股";
-    private static final Pattern CODE = Pattern.compile("^[0-9]{4,6}[A-Z]?$");
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate writeTransaction;
@@ -41,37 +44,11 @@ public class FubonLiveResponseStore {
         this.readTransaction.setReadOnly(true);
     }
 
-    public enum WriteStatus { STORED, FAILED }
-    public enum ReadStatus { FOUND, NOT_FOUND, FAILED }
-
-    /** DB-returned row only; callers must never use a raw Fubon candidate as a Redis payload. */
-    public record CanonicalResponse(
-            String stockCode,
-            String market,
-            Instant receivedAt,
-            String batchId,
-            String countersJson,
-            String responseRowJson) {}
-
-    public record PersistResult(WriteStatus status, List<CanonicalResponse> canonicalRows) {
-        static PersistResult stored(List<CanonicalResponse> rows) {
-            return new PersistResult(WriteStatus.STORED, List.copyOf(rows));
-        }
-
-        static PersistResult failed() { return new PersistResult(WriteStatus.FAILED, List.of()); }
-    }
-
-    public record ReadResult(ReadStatus status, CanonicalResponse canonical) {
-        static ReadResult found(CanonicalResponse value) { return new ReadResult(ReadStatus.FOUND, value); }
-        static ReadResult missing() { return new ReadResult(ReadStatus.NOT_FOUND, null); }
-        static ReadResult failed() { return new ReadResult(ReadStatus.FAILED, null); }
-    }
-
     /**
      * Writes an entire validated batch in one transaction with one microsecond receipt instant.
      * A stale row is re-read inside the transaction and is still returned as the DB canonical value.
      */
-    public PersistResult persist(FubonNormalizedQuoteClient.ValidatedEnvelope envelope, Instant receiptAt) {
+    public PersistResult persist(NormalizedQuoteData.ValidatedEnvelope envelope, Instant receiptAt) {
         if (!validEnvelope(envelope) || receiptAt == null) return PersistResult.failed();
         Instant receivedAt = receiptAt.truncatedTo(ChronoUnit.MICROS);
         try {
@@ -96,7 +73,7 @@ public class FubonLiveResponseStore {
         }
     }
 
-    private PersistResult persistWithinTransaction(FubonNormalizedQuoteClient.ValidatedEnvelope envelope,
+    private PersistResult persistWithinTransaction(NormalizedQuoteData.ValidatedEnvelope envelope,
                                                    Instant receivedAt) {
         List<CanonicalResponse> rows = new ArrayList<>();
         for (Map.Entry<String, String> entry : envelope.responseRows().entrySet()) {
@@ -143,13 +120,10 @@ public class FubonLiveResponseStore {
                 rs.getString("counters"), rs.getString("response_row"));
     }
 
-    private static boolean validEnvelope(FubonNormalizedQuoteClient.ValidatedEnvelope envelope) {
+    private static boolean validEnvelope(NormalizedQuoteData.ValidatedEnvelope envelope) {
         return envelope != null && envelope.batchId() != null && !envelope.batchId().isBlank()
                 && envelope.countersJson() != null && !envelope.countersJson().isBlank()
                 && envelope.responseRows() != null && !envelope.responseRows().isEmpty();
     }
 
-    static boolean supportedIdentity(String code, String market) {
-        return TAIWAN.equals(market) && code != null && CODE.matcher(code).matches() && !"0000".equals(code);
-    }
 }

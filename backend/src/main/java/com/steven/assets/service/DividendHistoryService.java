@@ -1,14 +1,14 @@
 package com.steven.assets.service;
 
+import com.steven.assets.service.port.DividendSyncPort;
+import com.steven.assets.model.marketdata.MarketDataResults;
 import com.steven.assets.model.StockDividendHistory;
 import com.steven.assets.repository.StockDividendHistoryRepository;
-import com.steven.assets.service.MarketDataService.DividendHistoryResult;
-import com.steven.assets.service.MarketDataService.DividendRow;
+import com.steven.assets.model.marketdata.MarketDataResults.DividendHistoryResult;
+import com.steven.assets.model.marketdata.MarketDataResults.DividendRow;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Year;
 import java.time.Instant;
@@ -32,17 +32,17 @@ public class DividendHistoryService {
 
     private final StockDividendHistoryRepository repo;
     private final DividendCurrentStateProjectionService projectionService;
-    private final WebClient externalClient;
+    private final DividendSyncPort external;
 
     @org.springframework.beans.factory.annotation.Autowired
     private DividendCashEnrichmentService enrichmentService;
 
     public DividendHistoryService(StockDividendHistoryRepository repo,
                                   DividendCurrentStateProjectionService projectionService,
-                                  @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
+                                  DividendSyncPort external) {
         this.repo = repo;
         this.projectionService = projectionService;
-        this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.external = external;
     }
 
     /** 從 DB 讀股利歷史；DB 沒資料時 fallback 觸發 external-materials-service 同步。 */
@@ -55,13 +55,7 @@ public class DividendHistoryService {
             // cold cache：請 external-materials-service 抓一次，等回應後重新讀 DB
             boolean synced = false;
             try {
-                externalClient.post()
-                        .uri(uri -> uri.path("/internal/dividend/sync")
-                                .queryParam("code", code)
-                                .queryParam("market", market).build())
-                        .retrieve()
-                        .toBodilessEntity()
-                        .block();
+                external.sync(code, market);
                 synced = true;
             } catch (RuntimeException e) {
                 log.warn("觸發 external-materials-service /internal/dividend/sync 失敗: {}", e.getMessage());

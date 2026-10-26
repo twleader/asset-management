@@ -148,7 +148,7 @@ class PriceQueryServiceDisplayTest {
     }
 
     private PriceQueryService serviceAt(String instant) {
-        return new PriceQueryService(redis, history, "http://localhost", calendar,
+        return new PriceQueryService(new com.steven.assets.integration.marketdata.RedisPriceCacheReadAdapter(redis), history, new com.steven.assets.integration.marketdata.PriceRefreshHttpAdapter("http://localhost"), calendar,
                 Clock.fixed(Instant.parse(instant), ZoneOffset.UTC));
     }
 

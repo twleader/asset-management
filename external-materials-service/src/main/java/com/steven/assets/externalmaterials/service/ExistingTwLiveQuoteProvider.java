@@ -1,10 +1,11 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import lombok.extern.slf4j.Slf4j;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Legacy test fixture only. Task 370 routes every production Taiwan LIVE round through
@@ -36,7 +37,7 @@ public class ExistingTwLiveQuoteProvider implements TwLiveQuoteProvider {
         if (!marketOpenAuthorized) return TwLiveQuoteBatchResult.closed(requested);
         if (codes == null || codes.isEmpty()) return TwLiveQuoteBatchResult.open(0, 0, 0, 0);
 
-        PriceFetchClient.TwQuoteBatchSummary summary;
+        PriceData.TwQuoteBatchSummary summary;
         try {
             summary = client.fetchTwBatch(codes);
         } catch (Exception ex) {
@@ -50,7 +51,7 @@ public class ExistingTwLiveQuoteProvider implements TwLiveQuoteProvider {
         int writeFailures = 0;
         for (var entry : summary.resolved().entrySet()) {
             PriceResult result = entry.getValue();
-            PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, false);
+            PriceProjectionData.CacheWriteOutcome outcome = writer.write(result, false);
             switch (outcome) {
                 case WRITTEN -> {
                     written++;

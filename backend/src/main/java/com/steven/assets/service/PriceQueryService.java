@@ -7,10 +7,9 @@ import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import com.steven.assets.service.port.PriceCacheReadPort;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import com.steven.assets.service.port.PriceRefreshPort;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -42,16 +41,10 @@ import java.util.Set;
 @Service
 public class PriceQueryService {
 
-    /**
-     * 交易雷達手動回補的等待上界（Task 249）。
-     * 鏈路預算：nginx /api/ 60s > axios 45s > 本值 30s > external 端自身約 20s（個股並行 ＋ 大盤 12s 上限）。
-     */
-    private static final long EXTERNAL_REFRESH_TIMEOUT_SECONDS = 30;
-
-    private final StringRedisTemplate redis;
+    private final PriceCacheReadPort redis;
     private final StockPriceHistoryRepository historyRepo;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final WebClient priceServiceClient;
+    private final PriceRefreshPort external;
     private final MarketDataService marketDataService;
     private final Clock clock;
 
@@ -59,21 +52,21 @@ public class PriceQueryService {
             "TWSE_MI_INDEX", "TPEX_DAILY_CLOSE", "FINMIND_TW_CLOSE");
 
     @Autowired
-    public PriceQueryService(StringRedisTemplate redis,
+    public PriceQueryService(PriceCacheReadPort redis,
                              StockPriceHistoryRepository historyRepo,
-                             @Value("${external-materials.base-url:http://external-materials-service:8080}") String priceServiceUrl,
+                             PriceRefreshPort external,
                              MarketDataService marketDataService) {
-        this(redis, historyRepo, priceServiceUrl, marketDataService, Clock.systemUTC());
+        this(redis, historyRepo, external, marketDataService, Clock.systemUTC());
     }
 
-    PriceQueryService(StringRedisTemplate redis,
+    PriceQueryService(PriceCacheReadPort redis,
                       StockPriceHistoryRepository historyRepo,
-                      String priceServiceUrl,
+                      PriceRefreshPort external,
                       MarketDataService marketDataService,
                       Clock clock) {
         this.redis = redis;
         this.historyRepo = historyRepo;
-        this.priceServiceClient = WebClient.builder().baseUrl(priceServiceUrl).build();
+        this.external = external;
         this.marketDataService = marketDataService;
         this.clock = clock;
     }
@@ -137,7 +130,7 @@ public class PriceQueryService {
                 .map(key -> "price:" + key.market() + ":" + key.stockCode()).toList();
         List<String> values;
         try {
-            values = redis.opsForValue().multiGet(redisKeys);
+            values = redis.multiGet(redisKeys);
         } catch (RuntimeException unavailable) {
             values = Collections.nCopies(keys.size(), null);
         }
@@ -234,7 +227,7 @@ public class PriceQueryService {
     private Optional<LivePrice> readRedis(String stockCode, String market) {
         String key = "price:" + market + ":" + stockCode;
         try {
-            String json = redis.opsForValue().get(key);
+            String json = redis.get(key);
             if (json != null) return Optional.of(parse(json));
         } catch (Exception e) {
             log.warn("Redis 讀取或解析失敗 {}: {}", key, e.getMessage());
@@ -260,7 +253,7 @@ public class PriceQueryService {
     public Optional<EtfNav> getEtfNav(String stockCode, String market) {
         String key = "price:etfnav:" + market + ":" + stockCode;
         try {
-            String json = redis.opsForValue().get(key);
+            String json = redis.get(key);
             if (json == null) return Optional.empty();
             return Optional.of(parseEtfNav(json, stockCode, market));
         } catch (Exception e) {
@@ -280,7 +273,7 @@ public class PriceQueryService {
                 .map(key -> "price:etfnav:" + key.market() + ":" + key.stockCode()).toList();
         List<String> values;
         try {
-            values = redis.opsForValue().multiGet(redisKeys);
+            values = redis.multiGet(redisKeys);
         } catch (RuntimeException unavailable) {
             values = Collections.nCopies(keys.size(), null);
         }
@@ -318,7 +311,7 @@ public class PriceQueryService {
         for (String market : new String[]{"台股", "美股", "英股"}) {
             String indexKey = "price:index:" + market;
             try {
-                Set<String> codes = redis.opsForSet().members(indexKey);
+                Set<String> codes = redis.members(indexKey);
                 if (codes == null) continue;
                 for (String code : codes) readRedis(code, market).ifPresent(all::add);
             } catch (Exception e) {
@@ -362,25 +355,11 @@ public class PriceQueryService {
      * 一律由呼叫端降級處理，不得讓它變成 5xx。</p>
      */
     public JsonNode refreshTradingRadarPrices() {
-        return priceServiceClient.post()
-                .uri("/internal/refresh/tw-radar")
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block(java.time.Duration.ofSeconds(EXTERNAL_REFRESH_TIMEOUT_SECONDS));
+        return external.refreshTradingRadarPrices();
     }
 
     public java.util.Map<String, Object> triggerRefresh() {
-        priceServiceClient.post()
-                .uri("/internal/refresh")
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .subscribe(
-                        resp -> log.info("price-service refresh 完成 tw={} us={}",
-                                resp.path("twUpdated").asInt(0),
-                                resp.path("usUpdated").asInt(0)),
-                        err -> log.warn("呼叫 price-service /internal/refresh 失敗: {}", err.getMessage())
-                );
-        return java.util.Map.of("triggered", true);
+        return external.triggerRefresh();
     }
 
     private LivePrice parse(String json) throws Exception {

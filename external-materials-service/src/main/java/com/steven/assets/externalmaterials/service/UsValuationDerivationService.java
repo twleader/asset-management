@@ -1,10 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.StockFundamentalFetchClient;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -23,6 +20,9 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 /**
  * 美股歷史估值序列推導（Requirement 74 / Task 334.3）：由<b>已入庫的官方財報</b>逐交易日推導
@@ -219,7 +219,7 @@ public class UsValuationDerivationService {
     /** 單一標的的推導與落地；供 {@link #deriveAll()} 與（需要時）針對性重跑使用。 */
     public CodeResult deriveForCode(String code) {
         List<FundamentalObservationStore.QuarterFact> quarters = store.secEdgarQuarters(code);
-        List<StockSourceQuery.ClosePoint> closes = stockSource.loadAllCloses(code, US_MARKET);
+        List<StockMarketData.ClosePoint> closes = stockSource.loadAllCloses(code, US_MARKET);
         List<DividendHistoryQuery.CashDividendEvent> dividends =
                 dividendHistory.activeCashDividends(code, US_MARKET);
 
@@ -285,7 +285,7 @@ public class UsValuationDerivationService {
     static List<StockFundamentalFetchClient.Valuation> derive(
             String stockCode,
             List<FundamentalObservationStore.QuarterFact> quarters,
-            List<StockSourceQuery.ClosePoint> closes,
+            List<StockMarketData.ClosePoint> closes,
             List<DividendHistoryQuery.CashDividendEvent> dividends) {
         return deriveDetailed(stockCode, quarters, closes, dividends).rows();
     }
@@ -294,7 +294,7 @@ public class UsValuationDerivationService {
     static Derivation deriveDetailed(
             String stockCode,
             List<FundamentalObservationStore.QuarterFact> quarters,
-            List<StockSourceQuery.ClosePoint> closes,
+            List<StockMarketData.ClosePoint> closes,
             List<DividendHistoryQuery.CashDividendEvent> dividends) {
         if (stockCode == null || stockCode.isBlank() || quarters == null || closes == null) return Derivation.EMPTY;
 
@@ -330,13 +330,13 @@ public class UsValuationDerivationService {
         DividendSeries dividendSeries = resolveDividends(stockCode, dividends);
 
         // 輸出順序是對外契約（deriveForCode 以 index 0 判斷「可用區段起點」），不倚賴呼叫端的排序。
-        List<StockSourceQuery.ClosePoint> ascending = closes.stream()
+        List<StockMarketData.ClosePoint> ascending = closes.stream()
                 .filter(p -> p != null && p.date() != null)
-                .sorted(Comparator.comparing(StockSourceQuery.ClosePoint::date))
+                .sorted(Comparator.comparing(StockMarketData.ClosePoint::date))
                 .toList();
 
         List<StockFundamentalFetchClient.Valuation> out = new ArrayList<>();
-        for (StockSourceQuery.ClosePoint point : ascending) {
+        for (StockMarketData.ClosePoint point : ascending) {
             if (point.close() == null || point.close().signum() <= 0) continue;
             LocalDate day = point.date();
             Instant closeInstant = marketCloseInstant(day);

@@ -1,11 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.*;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.service.port.FubonNormalizedQuotePort;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
-import java.util.*;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -26,13 +30,13 @@ class TwLiveQuotePushPrimaryTest {
         doAnswer(invocation -> { invocation.<Set<String>>getArgument(0).addAll(codes); return null; }).when(source).collectTwRadarCodes(any());
         when(manager.pushEnabled()).thenReturn(true);
         when(manager.recoveryIdentity()).thenReturn("body1:epoch1");
-        when(fubon.fetch(anyList())).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SERVICE_UNAVAILABLE,List.of(),40,40));
-        when(prices.fetchTwBatch(anyList())).thenReturn(new PriceFetchClient.TwQuoteBatchSummary(Map.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),0,0));
+        when(fubon.fetch(anyList())).thenReturn(new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SERVICE_UNAVAILABLE,List.of(),40,40));
+        when(prices.fetchTwBatch(anyList())).thenReturn(new PriceData.TwQuoteBatchSummary(Map.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),Set.of(),0,0));
         when(prices.getYahooTwLivePrice(any())).thenReturn(Optional.empty());
-        ObjectProvider<FubonNormalizedQuoteClient> fp = mock(ObjectProvider.class); when(fp.getIfAvailable()).thenReturn(fubon);
+        ObjectProvider<FubonNormalizedQuotePort> fp = mock(ObjectProvider.class); when(fp.getIfAvailable()).thenReturn(fubon);
         ObjectProvider<TwYahooOrderBookFallbackRoundWriter> bp = mock(ObjectProvider.class); when(bp.getIfAvailable()).thenReturn(books);
-        dispatcher = new TwLiveQuoteDispatcher(clock,prices,fp,source,mock(PriceCacheWriter.class),new TwLiveQuoteOutcomeCounters(),null,bp,true,true);
+        dispatcher = new TwLiveQuoteDispatcher(clock,prices,fp,source, source,mock(PriceCacheWriter.class),new TwLiveQuoteOutcomeCounters(),null,bp,true,true);
         dispatcher.configurePushPrimary(manager); dispatcher.useMonotonic(nano::get);
     }
     @Test void readyBeforeFirstRoundStillGetsBoundedInitializationThenHealthySuppressesAllPriceProvidersButBooksContinue() {
@@ -74,11 +78,11 @@ class TwLiveQuotePushPrimaryTest {
         var bookProvider = mock(ObjectProvider.class); when(bookProvider.getIfAvailable()).thenReturn(bookWriter);
         var yahooProvider = mock(ObjectProvider.class); when(yahooProvider.getIfAvailable()).thenReturn(books);
         var store = mock(FubonLiveResponseStore.class);
-        when(store.persist(any(),any())).thenReturn(FubonLiveResponseStore.PersistResult.failed());
-        var envelope = new FubonNormalizedQuoteClient.ValidatedEnvelope("offline-batch", "{}", Map.of());
-        when(fubon.fetch(anyList())).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SUCCESS,List.of(),1,0,Map.of(),Map.of(),envelope));
-        var guarded = new TwLiveQuoteDispatcher(clock,prices,fp,source,mock(PriceCacheWriter.class),
+        when(store.persist(any(),any())).thenReturn(FubonResponseData.PersistResult.failed());
+        var envelope = new NormalizedQuoteData.ValidatedEnvelope("offline-batch", "{}", Map.of());
+        when(fubon.fetch(anyList())).thenReturn(new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SUCCESS,List.of(),1,0,Map.of(),Map.of(),envelope));
+        var guarded = new TwLiveQuoteDispatcher(clock,prices,fp,source, source,mock(PriceCacheWriter.class),
                 new TwLiveQuoteOutcomeCounters(),bookProvider,yahooProvider,store,mock(FubonLiveResponseCache.class),true,true);
         guarded.configurePushPrimary(manager);
         guarded.refresh(Set.of("1000"));

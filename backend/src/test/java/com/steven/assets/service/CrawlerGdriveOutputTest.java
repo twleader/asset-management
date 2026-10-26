@@ -54,7 +54,7 @@ class CrawlerGdriveOutputTest {
                 rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
         // 後三個參數為 Task 280 手動匯出 proxy／Task 329 公開重新搜尋所需（本測試不觸及，給不會被用到的值）
         service = new CrawlerExportPathService(repo, "/home/steven", gdrive,
-                "http://external-materials-service:8080", 50, redis);
+                new com.steven.assets.integration.crawler.CrawlerRunHttpAdapter("http://external-materials-service:8080"), 50, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
         // save 回傳被存進去的那個 entity，讓 assert 能直接看寫入結果
         when(repo.save(any(CrawlerExportSetting.class))).thenAnswer(inv -> inv.getArgument(0));
     }

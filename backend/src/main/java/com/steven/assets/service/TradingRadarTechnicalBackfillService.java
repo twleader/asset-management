@@ -1,6 +1,6 @@
 package com.steven.assets.service;
 
-import com.steven.assets.client.ExternalTechnicalHistoryBackfillClient;
+import com.steven.assets.service.port.TechnicalHistoryBackfillPort;
 import com.steven.assets.dto.TradingRadarTechnicalBackfillJobDto;
 import com.steven.assets.security.CurrentUserContext;
 import org.springframework.http.HttpStatus;
@@ -15,11 +15,11 @@ import java.util.concurrent.ConcurrentMap;
 @Service
 public class TradingRadarTechnicalBackfillService {
     private final CurrentUserContext currentUser;
-    private final ExternalTechnicalHistoryBackfillClient external;
+    private final TechnicalHistoryBackfillPort external;
     private final ConcurrentMap<String, TradingRadarTechnicalBackfillJobDto> snapshots = new ConcurrentHashMap<>();
 
     public TradingRadarTechnicalBackfillService(CurrentUserContext currentUser,
-                                                ExternalTechnicalHistoryBackfillClient external) {
+                                                TechnicalHistoryBackfillPort external) {
         this.currentUser = currentUser; this.external = external;
     }
 

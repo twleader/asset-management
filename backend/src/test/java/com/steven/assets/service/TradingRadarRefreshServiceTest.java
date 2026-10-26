@@ -61,7 +61,7 @@ class TradingRadarRefreshServiceTest {
     @BeforeEach
     void setUp() {
         service = new TradingRadarRefreshService(
-                priceQueryService, marketDataService, currentUserContext, redis);
+                priceQueryService, marketDataService, currentUserContext, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
         when(redis.opsForValue()).thenReturn(valueOps);
         when(currentUserContext.hasUser()).thenReturn(true);
         when(currentUserContext.getEffectiveUserId()).thenReturn(1L);

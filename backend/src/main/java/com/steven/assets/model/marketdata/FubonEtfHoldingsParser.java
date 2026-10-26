@@ -1,11 +1,11 @@
-package com.steven.assets.integration.fubon;
+package com.steven.assets.model.marketdata;
 
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.service.MarketDataService.EtfHolding;
+import com.steven.assets.model.marketdata.MarketDataResults.EtfHolding;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -39,7 +39,7 @@ public final class FubonEtfHoldingsParser {
         return parse(expectedCode, normalizedJson, LocalDate.now(TW_ZONE));
     }
 
-    static Optional<Parsed> parse(String expectedCode, String normalizedJson, LocalDate today) {
+    public static Optional<Parsed> parse(String expectedCode, String normalizedJson, LocalDate today) {
         if (!validEtfCode(expectedCode) || normalizedJson == null || normalizedJson.isBlank() || today == null) {
             return Optional.empty();
         }

@@ -1,5 +1,11 @@
 package com.steven.assets.service;
 
+import com.steven.assets.service.port.HistoricalDataPort;
+
+import com.steven.assets.model.marketdata.HistoricalSourceData.IntradayBarDto;
+import com.steven.assets.model.marketdata.HistoricalSourceData.IntradayTickDto;
+import com.steven.assets.model.marketdata.HistoricalSourceData.IntradaySourceSessionDto;
+import com.steven.assets.model.marketdata.HistoricalSourceData.LiveRefreshDto;
 import com.steven.assets.model.ExchangeRateHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
@@ -9,11 +15,9 @@ import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.util.MarketZones;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -33,8 +37,7 @@ public class HistoricalDataService {
     private final com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo;
     private final com.steven.assets.repository.FundMasterRepository fundMasterRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
-    private final WebClient priceServiceClient;
-
+    private final HistoricalDataPort external;
 
     public HistoricalDataService(
             StockPriceHistoryRepository priceHistRepo,
@@ -43,14 +46,14 @@ public class HistoricalDataService {
             com.steven.assets.repository.CommodityPriceHistoryRepository commodityHistRepo,
             com.steven.assets.repository.FundMasterRepository fundMasterRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
-            @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
+            HistoricalDataPort external) {
         this.priceHistRepo = priceHistRepo;
         this.priceQuery = priceQuery;
         this.rateHistRepo = rateHistRepo;
         this.commodityHistRepo = commodityHistRepo;
         this.fundMasterRepo = fundMasterRepo;
         this.twseDailyRepo = twseDailyRepo;
-        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.external = external;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -62,18 +65,8 @@ public class HistoricalDataService {
     public record IntradayBar(LocalDateTime time, BigDecimal open, BigDecimal high,
                                BigDecimal low, BigDecimal close) {}
 
-    /** 內部 DTO：對應 ext-materials-service 的回應格式（time 為 ISO 字串）。 */
-    private record IntradayBarDto(String time, BigDecimal open, BigDecimal high,
-                                   BigDecimal low, BigDecimal close) {}
-
     /** 「當日」走勢圖分時 tick：盤中 polling 累積 / 盤後外部源覆寫，前端透明讀取。 */
     public record IntradayTick(String time, BigDecimal price) {}
-
-    private record IntradayTickDto(String time, BigDecimal price) {}
-
-    private record IntradaySourceSessionDto(LocalDate tradingDate, List<IntradayTickDto> ticks,
-                                            BigDecimal sessionReferencePrice, LocalDate sessionReferenceDate,
-                                            String sessionReferenceSource) {}
 
     public enum ComparisonKind {
         PREVIOUS_CLOSE("昨收"), EX_RIGHTS_REFERENCE("除權息參考價"),
@@ -133,18 +126,7 @@ public class HistoricalDataService {
     /** Event-driven reads use the same resolver without request-time reference writes. */
     public IntradaySession fetchIntradaySession(String stockCode, String market, LocalDate date, boolean readOnly) {
         try {
-            IntradaySourceSessionDto resp = priceServiceClient.get()
-                    .uri(uriBuilder -> {
-                        uriBuilder.path("/internal/intraday-ticks")
-                                .queryParam("code", stockCode)
-                                .queryParam("market", market);
-                        if (date != null) uriBuilder.queryParam("date", date.toString());
-                        if (readOnly) uriBuilder.queryParam("readOnly", true);
-                        return uriBuilder.build();
-                    })
-                    .retrieve()
-                    .bodyToMono(IntradaySourceSessionDto.class)
-                    .block();
+            IntradaySourceSessionDto resp = external.intradaySession(stockCode, market, date, readOnly);
             if (resp == null || resp.tradingDate() == null) return unavailable(date, market);
             List<IntradayTick> out = new ArrayList<>();
             if (resp.ticks() != null) for (IntradayTickDto d : resp.ticks()) {
@@ -184,14 +166,7 @@ public class HistoricalDataService {
 
     public List<IntradayBar> fetchIntraday5m(String stockCode, String market, int daysBack) {
         try {
-            IntradayBarDto[] resp = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/intraday-5m")
-                            .queryParam("code", stockCode)
-                            .queryParam("market", market)
-                            .queryParam("daysBack", daysBack).build())
-                    .retrieve()
-                    .bodyToMono(IntradayBarDto[].class)
-                    .block();
+            IntradayBarDto[] resp = external.intraday5m(stockCode, market, daysBack);
             if (resp == null) return List.of();
             List<IntradayBar> bars = new ArrayList<>();
             for (IntradayBarDto d : resp) {
@@ -215,18 +190,7 @@ public class HistoricalDataService {
     @SuppressWarnings("unchecked")
     public Map<String, Object> backfillSingleStock(String stockCode, String market, LocalDate since, LocalDate until) {
         try {
-            return priceServiceClient.post()
-                    .uri(uriBuilder -> {
-                        uriBuilder.path("/internal/backfill/stock")
-                                .queryParam("code", stockCode)
-                                .queryParam("market", market)
-                                .queryParam("since", since.toString());
-                        if (until != null) uriBuilder.queryParam("until", until.toString());
-                        return uriBuilder.build();
-                    })
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            return external.backfillStock(stockCode, market, since, until);
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/stock 失敗: {}", e.getMessage());
             return Map.of("stockCode", stockCode, "market", market, "records", 0,
@@ -241,11 +205,7 @@ public class HistoricalDataService {
     @SuppressWarnings("unchecked")
     public Map<String, Object> backfillAll() {
         try {
-            return priceServiceClient.post()
-                    .uri("/internal/backfill/all")
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            return external.backfillAll();
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/all 失敗: {}", e.getMessage());
             return Map.of("error", e.getMessage());
@@ -255,14 +215,7 @@ public class HistoricalDataService {
     public int backfillExchangeRate(String currency, LocalDate since) {
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> resp = priceServiceClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/exchange-rate")
-                            .queryParam("currency", currency)
-                            .queryParam("since", since.toString())
-                            .build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            Map<String, Object> resp = external.backfillExchangeRate(currency, since);
             return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/exchange-rate 失敗: {}", e.getMessage());
@@ -273,14 +226,7 @@ public class HistoricalDataService {
     public int backfillExchangeRateFrom(String currency, LocalDate since) {
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> resp = priceServiceClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/exchange-rate-from")
-                            .queryParam("currency", currency)
-                            .queryParam("since", since.toString())
-                            .build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            Map<String, Object> resp = external.backfillExchangeRateFrom(currency, since);
             return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/exchange-rate-from 失敗: {}", e.getMessage());
@@ -292,14 +238,7 @@ public class HistoricalDataService {
     public int backfillCommodity(String code, LocalDate since) {
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> resp = priceServiceClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/commodity")
-                            .queryParam("code", code)
-                            .queryParam("since", since.toString())
-                            .build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            Map<String, Object> resp = external.backfillCommodity(code, since);
             return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/commodity 失敗: {}", e.getMessage());
@@ -311,14 +250,7 @@ public class HistoricalDataService {
     public int backfillCommodityFrom(String code, LocalDate since) {
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> resp = priceServiceClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/backfill/commodity-from")
-                            .queryParam("code", code)
-                            .queryParam("since", since.toString())
-                            .build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .block();
+            Map<String, Object> resp = external.backfillCommodityFrom(code, since);
             return resp == null ? 0 : ((Number) resp.getOrDefault("records", 0)).intValue();
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/backfill/commodity-from 失敗: {}", e.getMessage());
@@ -364,12 +296,7 @@ public class HistoricalDataService {
     /** 手動觸發 BOT 即期匯率抓取（前端 /api/market-data/exchange-rate/refresh proxy）。 */
     public void fetchBotExchangeRate(String currency) {
         try {
-            priceServiceClient.post()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/exchange-rate/refresh-bot")
-                            .queryParam("currency", currency).build())
-                    .retrieve()
-                    .toBodilessEntity()
-                    .block();
+            external.refreshExchangeRateBot(currency);
         } catch (Exception e) {
             log.warn("呼叫 ext-materials-service /internal/exchange-rate/refresh-bot 失敗: {}", e.getMessage());
         }
@@ -384,7 +311,6 @@ public class HistoricalDataService {
             log.info("已清除 {} 筆超過 {} 年的 {} 匯率資料", deleted, keepYears, currency);
         }
     }
-
 
     // ═══════════════════════════════════════════════════════════════════════
     //  查詢 API
@@ -524,10 +450,6 @@ public class HistoricalDataService {
         return result;
     }
 
-    /** 對應 ext-materials-service /internal/commodity/live-refresh 回應格式。 */
-    private record LiveRefreshDto(boolean inSession, List<String> updated) {
-    }
-
     /** POST /api/market-data/commodity/live-refresh 回應（Requirement 77 / Task 337，不可變 record）。 */
     public record LiveRefreshResult(boolean inSession, List<String> updated) {
     }
@@ -541,11 +463,7 @@ public class HistoricalDataService {
      */
     public LiveRefreshResult liveRefreshCommodities() {
         try {
-            LiveRefreshDto resp = priceServiceClient.post()
-                    .uri("/internal/commodity/live-refresh")
-                    .retrieve()
-                    .bodyToMono(LiveRefreshDto.class)
-                    .block();
+            LiveRefreshDto resp = external.refreshCommodities();
             if (resp == null) return new LiveRefreshResult(false, List.of());
             return new LiveRefreshResult(resp.inSession(),
                     resp.updated() == null ? List.of() : resp.updated());
@@ -582,17 +500,7 @@ public class HistoricalDataService {
 
     private String fetchStockName(String code, String market) {
         try {
-            Map<String, String> resp = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/stock-name")
-                            .queryParam("code", code).queryParam("market", market).build())
-                    .retrieve()
-                    .bodyToMono(Map.class)
-                    .map(m -> {
-                        @SuppressWarnings("unchecked")
-                        Map<String, String> r = (Map<String, String>) m;
-                        return r;
-                    })
-                    .block();
+            Map<String, String> resp = external.stockName(code, market);
             return resp == null ? "" : resp.getOrDefault("name", "");
         } catch (Exception e) {
             log.warn("呼叫 /internal/stock-name 失敗 {} {}: {}", market, code, e.getMessage());

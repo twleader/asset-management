@@ -1,14 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Locks the shared LOCAL document schema used by the business cache reader. */
 class FubonTechnicalV2CacheLocalDocumentTest {

@@ -1,15 +1,16 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.FubonIntradayTechnical;
-import com.steven.assets.externalmaterials.service.FubonMarketData;
 import com.steven.assets.externalmaterials.service.MarketClock;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Set;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Exact schema parser for the internal intraday-technical bundle and Redis document. */
 public final class FubonIntradayTechnicalJson {

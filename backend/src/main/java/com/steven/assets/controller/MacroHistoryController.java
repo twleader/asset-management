@@ -1,10 +1,10 @@
 package com.steven.assets.controller;
 
-import com.steven.assets.model.JapanGdpPerCapitaHistory;
-import com.steven.assets.model.KoreaGdpPerCapitaHistory;
-import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
-import com.steven.assets.model.TwseIndexDailyHistory;
-import com.steven.assets.model.UsIndexDailyHistory;
+import com.steven.assets.dto.HistoryDto.JapanGdpPerCapitaHistory;
+import com.steven.assets.dto.HistoryDto.KoreaGdpPerCapitaHistory;
+import com.steven.assets.dto.HistoryDto.TaiwanGdpPerCapitaHistory;
+import com.steven.assets.dto.HistoryDto.TwseIndexDailyHistory;
+import com.steven.assets.dto.HistoryDto.UsIndexDailyHistory;
 import com.steven.assets.service.MacroHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 股市分析頁（Requirement 18）資料來源：台/日/韓人均 GDP、台股集中市場日線、除 TWSE 外的 code-keyed 指數日線與當日分時。
@@ -28,26 +27,14 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class MacroHistoryController {
 
-    /** 除 TWSE 外可查當日分時的 code-keyed 指數；含 TPEX 官方分時。 */
-    private static final Set<String> CODED_INDEX_CODES = Set.copyOf(MacroHistoryService.PAGE_CODED_INDEX_CODES);
-
-    /**
-     * 日線回補 refresh 守門集合：頁面 code-keyed 指數 ∪ 含息報酬指數（SP500TR）。
-     * TPEX 走官方逐月回補；SP500TR 仍可經相容路由回補，卻不屬於本頁白名單。
-     */
-    private static final Set<String> US_INDEX_REFRESH_CODES = java.util.stream.Stream
-            .concat(MacroHistoryService.PAGE_CODED_INDEX_CODES.stream(),
-                    MacroHistoryService.TOTAL_RETURN_US_INDEX_CODES.stream())
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
-
     private final MacroHistoryService macroHistoryService;
     /** 指數日線 Excel 匯出（Requirement 45 / Task 216）；與排程匯出走同一支產檔方法，確保兩途徑內容一致。 */
-    private final com.steven.assets.service.ExcelExportService excelExportService;
+    private final com.steven.assets.service.MacroHistoryApplicationService application;
 
     @GetMapping("/taiwan-gdp")
     public List<TaiwanGdpPerCapitaHistory> getTaiwanGdp(
             @RequestParam(required = false) Integer since) {
-        return macroHistoryService.getTaiwanGdp(since);
+        return macroHistoryService.getTaiwanGdp(since).stream().map(TaiwanGdpPerCapitaHistory::from).toList();
     }
 
     @PostMapping("/taiwan-gdp/refresh-from-imf")
@@ -58,7 +45,7 @@ public class MacroHistoryController {
     @GetMapping("/japan-gdp")
     public List<JapanGdpPerCapitaHistory> getJapanGdp(
             @RequestParam(required = false) Integer since) {
-        return macroHistoryService.getJapanGdp(since);
+        return macroHistoryService.getJapanGdp(since).stream().map(JapanGdpPerCapitaHistory::from).toList();
     }
 
     @PostMapping("/japan-gdp/refresh-from-imf")
@@ -69,7 +56,7 @@ public class MacroHistoryController {
     @GetMapping("/korea-gdp")
     public List<KoreaGdpPerCapitaHistory> getKoreaGdp(
             @RequestParam(required = false) Integer since) {
-        return macroHistoryService.getKoreaGdp(since);
+        return macroHistoryService.getKoreaGdp(since).stream().map(KoreaGdpPerCapitaHistory::from).toList();
     }
 
     @PostMapping("/korea-gdp/refresh-from-imf")
@@ -81,7 +68,7 @@ public class MacroHistoryController {
     public List<TwseIndexDailyHistory> getTwseDaily(
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to) {
-        return macroHistoryService.getTwseDaily(from, to);
+        return macroHistoryService.getTwseDaily(from, to).stream().map(TwseIndexDailyHistory::from).toList();
     }
 
     @PostMapping("/twse-daily-index/refresh")
@@ -96,15 +83,12 @@ public class MacroHistoryController {
             @RequestParam String code,
             @RequestParam(required = false) LocalDate from,
             @RequestParam(required = false) LocalDate to) {
-        return macroHistoryService.getUsDaily(code, from, to);
+        return macroHistoryService.getUsDaily(code, from, to).stream().map(UsIndexDailyHistory::from).toList();
     }
 
     @PostMapping("/us-daily-index/refresh")
     public Map<String, Object> refreshUsDaily(@RequestParam String code) {
-        if (!US_INDEX_REFRESH_CODES.contains(code)) {
-            return Map.of("error", "未知指數代碼: " + code, "upserted", 0);
-        }
-        return macroHistoryService.refreshUsIndexDaily(code);
+        return application.refreshUsDaily(code);
     }
 
     /**
@@ -126,7 +110,7 @@ public class MacroHistoryController {
      * 預設回近 10 年。全域公開行情，無 owner 過濾。
      *
      * <p>白名單用 {@link MacroHistoryService#DAILY_INDEX_CODES}（＝頁面下拉的 10 個指數），
-     * <b>不可</b>誤用 {@link #US_INDEX_REFRESH_CODES}——那含績效比較頁的 SP500TR，不在本頁可選範圍。
+     * <b>不可</b>誤用回補白名單——那含績效比較頁的 SP500TR，不在本頁可選範圍。
      * 資安（Requirement 29）：market 會流入查詢與產出檔名，未知代碼直接擋為 400。
      */
     @GetMapping("/index-daily/export")
@@ -135,19 +119,11 @@ public class MacroHistoryController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
             throws java.io.IOException {
-        String code = market == null ? "" : market.trim().toUpperCase();
-        if (!MacroHistoryService.DAILY_INDEX_CODES.contains(code)) {
-            throw new IllegalArgumentException("未知指數代碼: " + market);
-        }
-        if (start == null) start = LocalDate.now().minusYears(10);
-        if (end == null) end = LocalDate.now();
-        if (start.isAfter(end)) {
-            throw new IllegalArgumentException("起始日不可晚於結束日");
-        }
-        byte[] data = excelExportService.exportIndexDaily(code, start, end);
+        var export = application.exportIndex(market, start, end);
+        byte[] data = export.content();
         java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
-        String filename = com.steven.assets.service.ExcelExportService.indexLabel(code)
-                + "_" + fileFmt.format(start) + "_" + fileFmt.format(end) + ".xlsx";
+        String filename = com.steven.assets.service.ExcelExportService.indexLabel(export.code())
+                + "_" + fileFmt.format(export.start()) + "_" + fileFmt.format(export.end()) + ".xlsx";
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentDisposition(org.springframework.http.ContentDisposition
                 .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
@@ -161,10 +137,6 @@ public class MacroHistoryController {
     /** 指數「當日」分時走勢（TPEX 為官方 MIS，其餘為既有來源；transient）。market 含 TWSE、TPEX 與八檔海外指數。 */
     @GetMapping("/index-intraday")
     public List<MacroHistoryService.IntradayPoint> getIndexIntraday(@RequestParam String market) {
-        // 資安（Requirement 29）：market 會流入 external-materials-service；以已知指數白名單擋參數注入
-        if (!"TWSE".equals(market) && !CODED_INDEX_CODES.contains(market)) {
-            throw new IllegalArgumentException("未知指數代碼: " + market);
-        }
-        return macroHistoryService.fetchIndexIntraday(market);
+        return application.intraday(market);
     }
 }

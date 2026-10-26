@@ -1,7 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -12,7 +11,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executors;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -39,10 +38,10 @@ class PriceFetchClientTwseMisTest {
             return response;
         });
 
-        PriceFetchClient.TwQuoteBatchSummary summary = client(http).fetchTwBatch(List.of("6488"));
+        PriceData.TwQuoteBatchSummary summary = client(http).fetchTwBatch(List.of("6488"));
 
         assertThat(summary.resolved()).containsKey("6488");
-        PriceFetchClient.PriceResult row = summary.resolved().get("6488");
+        PriceData.PriceResult row = summary.resolved().get("6488");
         assertThat(row.price()).isEqualByComparingTo("123.50");
         assertThat(row.tradingDate()).isEqualTo(LocalDate.of(2026, 8, 21));
         assertThat(row.freshnessInstant()).isEqualTo(Instant.parse("2026-08-21T05:30:00Z"));
@@ -61,7 +60,7 @@ class PriceFetchClientTwseMisTest {
                 """);
         when(http.send(any(HttpRequest.class), any())).thenAnswer(ignored -> response);
 
-        PriceFetchClient.TwQuoteBatchSummary summary = client(http).fetchTwBatch(Set.of("6488"));
+        PriceData.TwQuoteBatchSummary summary = client(http).fetchTwBatch(Set.of("6488"));
 
         assertThat(summary.noTradeCodes()).containsExactly("6488");
         assertThat(summary.httpRequests()).isEqualTo(2);
@@ -81,7 +80,7 @@ class PriceFetchClientTwseMisTest {
                 """);
         when(http.send(any(HttpRequest.class), any())).thenAnswer(ignored -> response);
 
-        PriceFetchClient.TwQuoteBatchSummary summary = client(http)
+        PriceData.TwQuoteBatchSummary summary = client(http)
                 .fetchTwBatch(List.of("0056", "00713"));
 
         assertThat(summary.resolved()).containsKey("0056");

@@ -93,7 +93,7 @@ class FubonEtfHoldingsPostgresTest {
         assertThat(jdbc.queryForObject("SELECT raw_response_json->>'sourceDate' FROM fubon_etf_holdings_snapshot WHERE etf_stock_code='0050'", String.class)).isEqualTo("2026-08-27");
         var persisted = repository.findById("0050").orElseThrow();
         assertThat(persisted.getFetchedAt()).isEqualTo(NOW);
-        var result = new MarketDataService("http://127.0.0.1:1", null, repository).getEtfHoldings("0050", "台股");
+        var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository).getEtfHoldings("0050", "台股");
         assertThat(result.asOfDate()).isEqualTo("2026-08-27");
         assertThat(result.holdings()).hasSize(1);
         assertThat(result.holdings().getFirst().shares()).isEqualByComparingTo("530358242");
@@ -168,7 +168,7 @@ class FubonEtfHoldingsPostgresTest {
         writer.save(row("00719B", true, null, EMPTY_PAYLOAD));
         assertThat(jdbc.queryForObject("SELECT jsonb_array_length(raw_response_json->'holdings') "
                 + "FROM fubon_etf_holdings_snapshot WHERE etf_stock_code='00719B'", Integer.class)).isZero();
-        var result = new MarketDataService("http://127.0.0.1:1", null, repository)
+        var result = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:1"), null, repository)
                 .getEtfHoldings("00719B", "台股");
         assertThat(result.supported()).isTrue();
         assertThat(result.asOfDate()).isNull();

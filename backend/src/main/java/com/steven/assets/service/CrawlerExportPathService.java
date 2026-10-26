@@ -6,11 +6,10 @@ import com.steven.assets.model.CrawlerSchedule;
 import com.steven.assets.repository.CrawlerExportSettingRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import com.steven.assets.service.port.CooldownStorePort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import com.steven.assets.service.port.CrawlerRunPort;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -47,7 +46,7 @@ public class CrawlerExportPathService {
     private final CrawlerExportSettingRepository repo;
 
     /** 公開觸發「重新搜尋」的冷卻閘門；backend 既有 Bean，{@code TradingRadarRefreshService} 已注入同一顆。 */
-    private final StringRedisTemplate redis;
+    private final CooldownStorePort redis;
 
     /** 容器內基底輸出目錄，經 docker volume 對映到 host 家目錄（與 business 的排程匯出共用同一基底）。 */
     private final String baseDir;
@@ -68,20 +67,18 @@ public class CrawlerExportPathService {
     private final long runNowTimeoutSeconds;
 
     /** 手動匯出用；爬蟲跑在 ext，本服務只是 proxy（比照 {@code POST /api/fund-nav/refresh} 的既有模式）。 */
-    private final WebClient externalClient;
+    private final CrawlerRunPort external;
 
     public CrawlerExportPathService(CrawlerExportSettingRepository repo,
                                     @Value("${EXPORT_OUTPUT_DIR:/home/steven}") String baseDir,
                                     GdriveOutputSupport gdrive,
-                                    @Value("${external-materials.base-url:http://external-materials-service:8080}")
-                                    String externalUrl,
+                                    CrawlerRunPort external,
                                     @Value("${crawler.run-now.timeout-seconds:50}") long runNowTimeoutSeconds,
-                                    StringRedisTemplate redis) {
+                                    CooldownStorePort redis) {
         this.repo = repo;
         this.baseDir = baseDir;
         this.gdrive = gdrive;
-        // 靜態 WebClient.builder()——與 backend 其餘 6 處呼叫 ext 的寫法一致（全樹零處注入 WebClient.Builder）
-        this.externalClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.external = external;
         this.runNowTimeoutSeconds = runNowTimeoutSeconds;
         this.redis = redis;
     }
@@ -91,7 +88,7 @@ public class CrawlerExportPathService {
      * {@code POST /internal/news-poller/export-now}。
      */
     public CrawlerExportPathDto.RunNowResponse runNow(String crawlerKey) {
-        return proxyManualRun(crawlerKey, "/internal/news-poller/export-now", "匯出");
+        return proxyManualRun(crawlerKey, CrawlerRunPort.Operation.EXPORT, "匯出");
     }
 
     /**
@@ -99,7 +96,7 @@ public class CrawlerExportPathService {
      * {@code POST /internal/news-poller/fetch-and-export-now}。
      */
     public CrawlerExportPathDto.RunNowResponse fetchAndRunNow(String crawlerKey) {
-        return proxyManualRun(crawlerKey, "/internal/news-poller/fetch-and-export-now", "抓取");
+        return proxyManualRun(crawlerKey, CrawlerRunPort.Operation.FETCH_AND_EXPORT, "抓取");
     }
 
     /**
@@ -114,7 +111,7 @@ public class CrawlerExportPathService {
                     "冷卻中，請 " + PUBLIC_RESCAN_COOLDOWN_SECONDS + " 秒後再試");
         }
         CrawlerExportPathDto.RunNowResponse result = proxyManualRun(
-                CrawlerSchedule.CRAWLER_NEWS_POLLER, "/internal/news-poller/public-rescan", "重新搜尋");
+                CrawlerSchedule.CRAWLER_NEWS_POLLER, CrawlerRunPort.Operation.PUBLIC_RESCAN, "重新搜尋");
         String status = result.status();
         if ("BUSY".equals(status) || "DISABLED".equals(status) || "ERROR".equals(status)) {
             // 這三種結果代表本次呼叫沒有真的促成一輪對外抓取（或根本沒連到 ext），
@@ -126,7 +123,7 @@ public class CrawlerExportPathService {
             // 從「呼叫已返回」的當下重新起算一個全新 30 秒窗口，EXPIRE 對已過期、不存在的 key 無效，
             // 無法重建。詳見 Requirement 71 對應 AC 與 design.md 的完整理由（含明確接受的殘餘落差）。
             try {
-                redis.opsForValue().set(PUBLIC_RESCAN_COOLDOWN_KEY, "1",
+                redis.set(PUBLIC_RESCAN_COOLDOWN_KEY, "1",
                         java.time.Duration.ofSeconds(PUBLIC_RESCAN_COOLDOWN_SECONDS));
             } catch (Exception e) {
                 log.warn("爬蟲公開重新搜尋冷卻鍵重新起算失敗（不影響本次呼叫結果）：{}", e.toString());
@@ -138,7 +135,7 @@ public class CrawlerExportPathService {
     /** Redis 例外時 fail-open（視為取得鎖），不因 Redis 抖動就永遠擋住這個公開入口。 */
     private boolean acquirePublicRescanCooldown() {
         try {
-            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(
+            return Boolean.TRUE.equals(redis.setIfAbsent(
                     PUBLIC_RESCAN_COOLDOWN_KEY, "1", java.time.Duration.ofSeconds(PUBLIC_RESCAN_COOLDOWN_SECONDS)));
         } catch (Exception e) {
             log.warn("爬蟲公開重新搜尋冷卻閘門讀寫失敗，本次放行：{}", e.toString());
@@ -160,7 +157,7 @@ public class CrawlerExportPathService {
      *
      * <p><b>刻意不加 {@code @Transactional}</b>：不能把數十秒的 HTTP 呼叫包進資料庫交易。
      */
-    private CrawlerExportPathDto.RunNowResponse proxyManualRun(String crawlerKey, String path, String action) {
+    private CrawlerExportPathDto.RunNowResponse proxyManualRun(String crawlerKey, CrawlerRunPort.Operation operation, String action) {
         // 這兩支的 proxy 目標是 news-poller 專屬端點、crawlerKey 不會被帶下去；
         // 不驗就等於 ?crawler=whatever 也會觸發爬蟲。
         if (!CrawlerSchedule.CRAWLER_NEWS_POLLER.equals(crawlerKey)) {
@@ -172,13 +169,7 @@ public class CrawlerExportPathService {
                 "爬蟲仍在背景執行（已超過 " + runNowTimeoutSeconds + " 秒），這一輪會跑完並照常寫檔；"
                         + "請稍後重新整理頁面查看結果");
         try {
-            return externalClient.post()
-                    .uri(path)
-                    .retrieve()
-                    .bodyToMono(CrawlerExportPathDto.RunNowResponse.class)
-                    .timeout(Duration.ofSeconds(runNowTimeoutSeconds))
-                    .onErrorResume(TimeoutException.class, e -> Mono.just(running))
-                    .block();
+            return external.run(operation, runNowTimeoutSeconds, running);
         } catch (Exception e) {
             // 逾時走不到這裡（已由上面 onErrorResume 攔下）；這裡只剩連線不通、5xx 等真正的失敗
             return new CrawlerExportPathDto.RunNowResponse(

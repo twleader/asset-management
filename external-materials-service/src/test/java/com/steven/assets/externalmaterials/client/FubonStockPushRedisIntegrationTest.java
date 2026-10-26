@@ -1,6 +1,15 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import com.steven.assets.externalmaterials.service.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -9,13 +18,7 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 import static com.steven.assets.externalmaterials.service.FubonMarketTestData.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -52,11 +55,11 @@ class FubonStockPushRedisIntegrationTest {
         when(radar.current(300)).thenReturn(List.of("2330"));
         writer = new PriceCacheWriter(redis, sql, highLow, new IntradayTickStore(redis));
         when(sql.persistIntradayQuote(any())).thenAnswer(invocation -> {
-            var raw = invocation.getArgument(0, com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult.class);
-            var row = new StockSourceQuery.IntradayQuote(raw.stockCode(), raw.market(), raw.tradingDate(), raw.freshnessInstant(),
+            var raw = invocation.getArgument(0, com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult.class);
+            var row = new StockMarketData.IntradayQuote(raw.stockCode(), raw.market(), raw.tradingDate(), raw.freshnessInstant(),
                     raw.source(), raw.price(), raw.previousClose(), raw.openPrice(), raw.highPrice(), raw.lowPrice(),
                     raw.buyPrice(), raw.sellPrice(), raw.volume(), raw.stockName());
-            return new StockSourceQuery.IntradayPersistenceResult(StockSourceQuery.IntradayPersistenceResult.Status.APPLIED, row);
+            return new StockMarketData.IntradayPersistenceResult(StockMarketData.IntradayPersistenceResult.Status.APPLIED, row);
         });
         consumer = new FubonStockPushConsumer(clock, radar, writer, sql);
         consumer.authorize(List.of("2330"), TRADE.plusSeconds(45));
@@ -145,7 +148,7 @@ class FubonStockPushRedisIntegrationTest {
         var good = event(TRADE);
         var invalid = new StockEvent(good.symbol(), good.sourceDate(), good.tradeTime(), good.tradeTimeMicros(), 0,
                 good.price(), good.previousClose(), good.openPrice(), good.highPrice(), good.lowPrice(), good.name());
-        assertThat(writer.writeFubonStockPush(invalid, TRADE.plusSeconds(10))).isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+        assertThat(writer.writeFubonStockPush(invalid, TRADE.plusSeconds(10))).isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
         assertThat(redis.keys("*")).isEmpty();
     }
     private FubonMarketConfigState config() {

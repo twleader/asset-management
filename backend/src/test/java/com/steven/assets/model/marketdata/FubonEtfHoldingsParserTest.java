@@ -1,4 +1,4 @@
-package com.steven.assets.integration.fubon;
+package com.steven.assets.model.marketdata;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;

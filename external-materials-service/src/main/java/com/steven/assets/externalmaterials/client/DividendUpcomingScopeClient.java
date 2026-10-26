@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -17,13 +18,13 @@ public interface DividendUpcomingScopeClient {
             LocalDate scopeTo,
             Instant sourceAvailableAt,
             boolean complete,
-            List<DividendFetchClient.DividendEvent> events,
+            List<DividendData.DividendEvent> events,
             String errorReason,
             List<String> sourceUrls) {
 
         public UpcomingScope(String provider, LocalDate scopeFrom, LocalDate scopeTo,
                              Instant sourceAvailableAt, boolean complete,
-                             List<DividendFetchClient.DividendEvent> events,
+                             List<DividendData.DividendEvent> events,
                              String errorReason) {
             this(provider, scopeFrom, scopeTo, sourceAvailableAt, complete, events,
                     errorReason, List.of());

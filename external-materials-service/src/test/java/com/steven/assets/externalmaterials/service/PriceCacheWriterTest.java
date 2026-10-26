@@ -2,19 +2,19 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.RedisScript;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
-
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -54,7 +54,7 @@ class PriceCacheWriterTest {
                         new BigDecimal("101.00"), new BigDecimal("99.00")));
 
         assertThat(writer.write(result("2330", "TWSE"), false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         JsonNode payload = capturedPayload();
         assertThat(payload.path("tradingDate").asText()).isEqualTo("2026-08-21");
@@ -79,7 +79,7 @@ class PriceCacheWriterTest {
                         new BigDecimal("100.00"), new BigDecimal("100.00")));
 
         assertThat(writer.write(result("2330", "TWSE"), false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
 
         verify(highLow).observe("2330", "台股", DATE, new BigDecimal("100.00"));
         verifyNoInteractions(ticks);
@@ -90,7 +90,7 @@ class PriceCacheWriterTest {
         PriceResult index = result("0000", "TWSE指數(5m)");
 
         assertThat(writer.write(index, false, false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         verifyNoInteractions(highLow, ticks);
     }
@@ -102,7 +102,7 @@ class PriceCacheWriterTest {
                 null, null, null, new BigDecimal("22000.00"), null, null, null, DATE, INSTANT);
 
         assertThat(writer.writeTaiwanIndexLive(index))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         Object[] args = capturedArgs();
         assertThat(args).hasSize(5);
@@ -124,7 +124,7 @@ class PriceCacheWriterTest {
                 null, null, null, null, null, null, null, DATE, INSTANT);
 
         assertThat(writer.write(invalid, false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.SKIPPED_INVALID_PRICE);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.SKIPPED_INVALID_PRICE);
 
         verifyNoInteractions(redis, highLow, ticks);
     }
@@ -132,7 +132,7 @@ class PriceCacheWriterTest {
     @Test
     void verifiedCompatibilityDateMismatchFailsWithoutRedis() {
         assertThat(writer.writeVerifiedClose(result("2330", "TWSE"), DATE.minusDays(1)))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
         verifyNoInteractions(redis, highLow, ticks);
     }
 
@@ -144,7 +144,7 @@ class PriceCacheWriterTest {
                 new BigDecimal("102.00"), new BigDecimal("99.00"), 2000L, DATE, INSTANT);
 
         assertThat(writer.writeVerifiedClose(close))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         Object[] args = capturedArgs();
         assertThat(args).hasSize(4); // Task 350 Lua contract remains exactly ARGV[1..4].
@@ -161,8 +161,8 @@ class PriceCacheWriterTest {
                 .thenReturn(Optional.of(new BigDecimal("21.20")));
 
         assertThat(writer.syncClosedFromDb("009804", "台股",
-                new StockSourceQuery.DatedClose(DATE, new BigDecimal("21.70")), INSTANT))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                new StockMarketData.DatedClose(DATE, new BigDecimal("21.70")), INSTANT))
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         Object[] args = capturedArgs();
         assertThat(args).hasSize(4); // metadata preservation is inferred from PREVIOUS_CLOSE in Lua.

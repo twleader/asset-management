@@ -1,11 +1,11 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookRules;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
+import com.steven.assets.externalmaterials.service.port.OrderBookCachePort;
+import com.steven.assets.externalmaterials.service.port.OrderBookRepository;
+import com.steven.assets.externalmaterials.service.port.YahooOrderBookSourcePort;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -18,6 +18,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
 
 /**
  * Independent bounded Yahoo fallback for selected Fubon codes that lacked a complete Fubon book.
@@ -39,9 +43,9 @@ public class TwYahooOrderBookFallbackRoundWriter {
     private static final Pattern TAIWAN_CODE = Pattern.compile("^[0-9]{4,6}[A-Z]?$");
 
     private final ExecutorService executor;
-    private final TwQuoteDetailFetchClient yahoo;
-    private final IntradayOrderBookSnapshotStore store;
-    private final QuoteDetailCache cache;
+    private final YahooOrderBookSourcePort yahoo;
+    private final OrderBookRepository store;
+    private final OrderBookCachePort cache;
     private final Duration roundTimeout;
     private final AtomicBoolean running = new AtomicBoolean();
     private int cursor;
@@ -49,18 +53,18 @@ public class TwYahooOrderBookFallbackRoundWriter {
     @Autowired
     public TwYahooOrderBookFallbackRoundWriter(
             @Qualifier("twYahooOrderBookFallbackExecutor") ExecutorService executor,
-            TwQuoteDetailFetchClient yahoo,
-            IntradayOrderBookSnapshotStore store,
-            QuoteDetailCache cache) {
+            YahooOrderBookSourcePort yahoo,
+            OrderBookRepository store,
+            OrderBookCachePort cache) {
         this(executor, yahoo, store, cache, Duration.ofSeconds(ROUND_TIMEOUT_SECONDS));
     }
 
     /** Package-visible duration seam keeps the nine-second production boundary deterministic in tests. */
     TwYahooOrderBookFallbackRoundWriter(
             ExecutorService executor,
-            TwQuoteDetailFetchClient yahoo,
-            IntradayOrderBookSnapshotStore store,
-            QuoteDetailCache cache,
+            YahooOrderBookSourcePort yahoo,
+            OrderBookRepository store,
+            OrderBookCachePort cache,
             Duration roundTimeout) {
         this.executor = executor;
         this.yahoo = yahoo;
@@ -116,16 +120,16 @@ public class TwYahooOrderBookFallbackRoundWriter {
 
     private void probeAndPersist(String code) {
         try {
-            TwQuoteDetailFetchClient.YahooProbeOutcome outcome = yahoo.probeTw(code);
-            if (outcome.kind() == TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.STRUCTURAL_MISS) {
+            QuoteDetailData.YahooProbeOutcome outcome = yahoo.probeTw(code);
+            if (outcome.kind() == QuoteDetailData.YahooProbeOutcome.Kind.STRUCTURAL_MISS) {
                 outcome = yahoo.probeTwo(code);
             }
-            if (outcome.kind() != TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND
-                    || outcome.snapshot() == null || !store.isPersistable(outcome.snapshot())) {
+            if (outcome.kind() != QuoteDetailData.YahooProbeOutcome.Kind.FOUND
+                    || outcome.snapshot() == null || !OrderBookRules.isPersistable(outcome.snapshot())) {
                 return;
             }
-            IntradayOrderBookSnapshotStore.PersistResult persisted = store.persist(outcome.snapshot());
-            if (persisted.status() != IntradayOrderBookSnapshotStore.PersistStatus.FAILED
+            OrderBookData.PersistResult persisted = store.persist(outcome.snapshot());
+            if (persisted.status() != OrderBookData.PersistStatus.FAILED
                     && persisted.canonical() != null) {
                 cache.writeStrictNewer(persisted.canonical());
             }

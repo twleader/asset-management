@@ -2,7 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Pure validation also used by the final narrow writer entry, not only the JSON parser. */
 public final class FubonStockPushContract {

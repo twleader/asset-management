@@ -1,16 +1,16 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import org.junit.jupiter.api.Test;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
@@ -188,7 +188,7 @@ class FubonScheduledMarketClientApiErrorLogTest {
         root.put("queryFrom", DAY.minusDays(10).toString());
         root.put("queryTo", DAY.toString());
         var profiles = root.putArray("profiles");
-        for (var profile : com.steven.assets.externalmaterials.service.FubonMarketData.TECHNICAL_PROFILES) {
+        for (var profile : com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.TECHNICAL_PROFILES) {
             var item = profiles.addObject();
             item.put("profileId", profile.profileId());
             String reason = profile.profileId().equals(firstFailedProfile) ? firstReason

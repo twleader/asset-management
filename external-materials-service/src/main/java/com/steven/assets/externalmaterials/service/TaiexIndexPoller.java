@@ -1,17 +1,20 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
-import com.steven.assets.externalmaterials.client.MacroDataFetchClient.DayQuote;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-
+import com.steven.assets.externalmaterials.model.marketdata.IndexDayData.DayQuote;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData;
+import com.steven.assets.externalmaterials.service.port.IndexIntradaySourcePort;
+import com.steven.assets.externalmaterials.service.port.PriceProjectionPort;
+import com.steven.assets.externalmaterials.service.port.StockMarketRepository;
+import com.steven.assets.externalmaterials.service.port.TaiexCanonicalRepository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 
 /**
  * 台股大盤（0000）盤中即時點位 → Redis（Task 228，Requirement 43 修訂 V6）。
@@ -22,7 +25,7 @@ import java.util.List;
  * 的既有盤後批次（TwseIndexPoller）完全不受影響，仍是完成日 K 的唯一權威來源；本類別只餵
  * Redis 的盤中即時層。
  *
- * 抓取來源為 MacroDataFetchClient.fetchIndexIntradayDay("TWSE")（Task 263 新增；與「股市大盤查詢」頁
+ * 抓取來源為 IndexIntradaySourcePort.fetchIndexIntradayDay("TWSE")（Task 263 新增；與「股市大盤查詢」頁
  * 「當日走勢」圖表用的 fetchIndexIntraday 同一個 Yahoo ^TWII 5 分 K URL、同一支 curlGetWithRetry，
  * 但回傳含所屬日期與當日 open/high/low），不新增外部 API 依賴。
  */
@@ -33,19 +36,19 @@ public class TaiexIndexPoller {
     private static final String TAIEX_CODE = "0000";
     private static final String TW_MARKET = "台股";
 
-    private final MacroDataFetchClient macroClient;
-    private final PriceCacheWriter writer;
-    private final StockSourceQuery source;
+    private final IndexIntradaySourcePort macroClient;
+    private final PriceProjectionPort writer;
+    private final StockMarketRepository source;
     private final MarketClock clock;
-    private final FubonTaiexIndexStore fubonIndexStore;
+    private final TaiexCanonicalRepository fubonIndexStore;
 
     @Autowired
     public TaiexIndexPoller(
-            MacroDataFetchClient macroClient,
-            PriceCacheWriter writer,
-            StockSourceQuery source,
+            IndexIntradaySourcePort macroClient,
+            PriceProjectionPort writer,
+            StockMarketRepository source,
             MarketClock clock,
-            FubonTaiexIndexStore fubonIndexStore) {
+            TaiexCanonicalRepository fubonIndexStore) {
         this.macroClient = macroClient;
         this.writer = writer;
         this.source = source;
@@ -55,9 +58,9 @@ public class TaiexIndexPoller {
 
     /** Compatibility constructor for existing package-level unit tests. */
     TaiexIndexPoller(
-            MacroDataFetchClient macroClient,
-            PriceCacheWriter writer,
-            StockSourceQuery source,
+            IndexIntradaySourcePort macroClient,
+            PriceProjectionPort writer,
+            StockMarketRepository source,
             MarketClock clock) {
         this(macroClient, writer, source, clock, null);
     }
@@ -77,8 +80,8 @@ public class TaiexIndexPoller {
     void updateOnce() {
         LocalDate today = LocalDate.now(MarketClock.TW_ZONE);
         if (fubonIndexStore != null) {
-            FubonTaiexIndexStore.FindResult current = fubonIndexStore.findForTradingDate(today);
-            if (current.status() == FubonTaiexIndexStore.ReadStatus.FOUND && current.canonical() != null) {
+            TaiexCanonicalData.FindResult current = fubonIndexStore.findForTradingDate(today);
+            if (current.status() == TaiexCanonicalData.ReadStatus.FOUND && current.canonical() != null) {
                 writer.writeTaiwanIndexLive(fubonPriceResult(current.canonical()));
                 return;
             }
@@ -103,7 +106,7 @@ public class TaiexIndexPoller {
         // 於 14:00 寫入今日完成日 K 後「最新一筆」即為今日，昨收會變成今日收盤。現行 cron（9-13）
         // 與 isTwMarketOpen()（上界 13:30）使本方法不會在 14:00 後執行，故此為防禦性處理。
         // loadRecentTaiexCloses 回傳為升冪，由後往前找第一筆嚴格早於 quote.date() 者。
-        List<StockSourceQuery.ClosePoint> prevRows = source.loadRecentTaiexCloses(2);
+        List<StockMarketData.ClosePoint> prevRows = source.loadRecentTaiexCloses(2);
         BigDecimal previousClose = null;
         for (int i = prevRows.size() - 1; i >= 0; i--) {
             if (prevRows.get(i).date().isBefore(quote.date())) {
@@ -114,8 +117,8 @@ public class TaiexIndexPoller {
 
         PriceResult result = new PriceResult(
                 TAIEX_CODE, TW_MARKET, quote.latestClose(),
-                null, null,                 // change / changePct：由 PriceCacheWriter 依 previousClose 自算
-                "TWSE指數(5m)",              // 含括號 → PriceCacheWriter 不會把這筆併入 IntradayTickStore
+                null, null,                 // change / changePct：由 PriceProjectionPort 依 previousClose 自算
+                "TWSE指數(5m)",              // 含括號 → PriceProjectionPort 不會把這筆併入 IntradayTickStore
                 "台股大盤",
                 null, null,                 // buyPrice / sellPrice：指數無此概念
                 quote.open(),               // 當日第一格開盤（Task 263：原本留 null，觀察清單「開盤」欄因此恆為空白）
@@ -130,7 +133,7 @@ public class TaiexIndexPoller {
         writer.write(result, false, false);
     }
 
-    private PriceResult fubonPriceResult(FubonTaiexIndexStore.CanonicalIndex canonical) {
+    private PriceResult fubonPriceResult(TaiexCanonicalData.CanonicalIndex canonical) {
         return new PriceResult(
                 TAIEX_CODE, TW_MARKET, canonical.indexPoint(), null, null, "FUBON_INDICES", "台股大盤",
                 null, null, null, previousCloseBefore(canonical.tradingDate()), null, null, null,
@@ -138,9 +141,9 @@ public class TaiexIndexPoller {
     }
 
     private BigDecimal previousCloseBefore(LocalDate tradingDate) {
-        List<StockSourceQuery.ClosePoint> rows = source.loadRecentTaiexCloses(2);
+        List<StockMarketData.ClosePoint> rows = source.loadRecentTaiexCloses(2);
         for (int index = rows.size() - 1; index >= 0; index--) {
-            StockSourceQuery.ClosePoint row = rows.get(index);
+            StockMarketData.ClosePoint row = rows.get(index);
             if (row.date().isBefore(tradingDate)) return row.close();
         }
         return null;

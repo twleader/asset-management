@@ -2,12 +2,13 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.NewsRow;
 import com.steven.assets.externalmaterials.client.TwseInfoFetchClient;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData.ClosePoint;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData.DatedClose;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData.IntradayPersistenceResult;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData.IntradayQuote;
+import com.steven.assets.externalmaterials.service.port.StockMarketRepository;
+import com.steven.assets.externalmaterials.service.port.StockUniversePort;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -15,6 +16,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import static com.steven.assets.externalmaterials.model.marketdata.TaiwanRadarRules.*;
 
 /**
  * 從共用 Postgres 讀取「需要抓哪些股票」的清單，以及寫入收盤價歷史。
@@ -23,7 +30,7 @@ import java.util.Set;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class StockSourceQuery {
+public class StockSourceQuery implements StockUniversePort, StockMarketRepository {
 
     public static final String TWSE_MI_INDEX = "TWSE_MI_INDEX";
     public static final String TPEX_DAILY_CLOSE = "TPEX_DAILY_CLOSE";
@@ -174,11 +181,6 @@ public class StockSourceQuery {
                 (java.sql.ResultSet rs) -> { twCodes.add(rs.getString("code")); });
     }
 
-    /** 與台股雷達 SQL 的正規表達式完全相同，避免下游 Fubon consumer 擴張主檔錨定後的範圍。 */
-    static boolean isTaiwanRadarCode(String code) {
-        return code != null && code.matches("^[0-9]{4,6}[A-Z]?$") && !"0000".equals(code);
-    }
-
     private static void classify(String code, String market,
                                  Set<String> twCodes, Set<String> usCodes, Set<String> ukCodes) {
         if ("美股".equals(market)) usCodes.add(code);
@@ -255,12 +257,6 @@ public class StockSourceQuery {
                 }));
     }
 
-    /**
-     * Latest date and close from the same database row. Quote-cache synchronization must use this
-     * single query so a concurrent official repair cannot pair an old price with a newly read date.
-     */
-    public record DatedClose(LocalDate date, BigDecimal close) {}
-
     public Optional<DatedClose> findLatestDatedClose(String stockCode, String market) {
         return Optional.ofNullable(jdbc.query(
                 "SELECT trading_date, close_price FROM stock_price_history "
@@ -297,9 +293,6 @@ public class StockSourceQuery {
                 ps -> { ps.setString(1, stockCode); ps.setString(2, market); ps.setObject(3, tradingDate); },
                 rs -> rs.next() ? rs.getBigDecimal(1) : null));
     }
-
-    /** 一筆日收盤（交易日＋收盤價），供均線計算（Task 207）。 */
-    public record ClosePoint(LocalDate date, BigDecimal close) {}
 
     /**
      * 取某台股個股最近 n 筆日收盤（{@code stock_price_history}，濾除 null 收盤），<b>由舊到新</b>排序，供均線
@@ -733,7 +726,7 @@ public class StockSourceQuery {
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public IntradayPersistenceResult persistIntradayQuote(
-            com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult quote) {
+            com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult quote) {
         if (quote == null || quote.stockCode() == null || quote.market() == null
                 || quote.tradingDate() == null || quote.freshnessInstant() == null
                 || quote.price() == null || quote.price().signum() <= 0) {
@@ -794,24 +787,6 @@ public class StockSourceQuery {
                 rs.getBigDecimal("open_price"), rs.getBigDecimal("high_price"), rs.getBigDecimal("low_price"),
                 rs.getBigDecimal("buy_price"), rs.getBigDecimal("sell_price"),
                 rs.getObject("volume", Long.class), rs.getString("stock_name"));
-    }
-
-    public record IntradayQuote(String stockCode, String market, LocalDate tradingDate, Instant updatedAt,
-                                String source, BigDecimal actualPrice, BigDecimal previousClose,
-                                BigDecimal openPrice, BigDecimal highPrice, BigDecimal lowPrice,
-                                BigDecimal buyPrice, BigDecimal sellPrice, Long volume, String stockName) {
-        public com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult asPriceResult() {
-            return new com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult(stockCode, market,
-                    actualPrice, null, null, source, stockName, buyPrice, sellPrice, openPrice, previousClose,
-                    highPrice, lowPrice, volume, tradingDate, updatedAt);
-        }
-    }
-
-    public record IntradayPersistenceResult(Status status, IntradayQuote canonical) {
-        public enum Status { APPLIED, STALE_OR_EQUAL, FAILED }
-        static IntradayPersistenceResult applied(IntradayQuote quote) { return new IntradayPersistenceResult(Status.APPLIED, quote); }
-        static IntradayPersistenceResult stale(IntradayQuote quote) { return new IntradayPersistenceResult(Status.STALE_OR_EQUAL, quote); }
-        static IntradayPersistenceResult failed() { return new IntradayPersistenceResult(Status.FAILED, null); }
     }
 
     /** 取得除息日前一交易日收盤 (basis) + 填息天數（除息日後幾天股價回到 basis）。 */

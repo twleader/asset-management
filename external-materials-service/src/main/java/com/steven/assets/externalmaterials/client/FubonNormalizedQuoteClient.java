@@ -6,36 +6,40 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.steven.assets.externalmaterials.service.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.BatchResult;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.BatchStatus;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.ValidatedEnvelope;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.service.port.FubonNormalizedQuotePort;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
 
 /** Internal-only client for the Python adapter's one normalized quote endpoint. */
 @Component
 @ConditionalOnProperty(prefix = "fubon", name = "enabled", havingValue = "true")
-public class FubonNormalizedQuoteClient {
+public class FubonNormalizedQuoteClient implements FubonNormalizedQuotePort {
 
     private static final Pattern CODE = Pattern.compile("^[0-9A-Z]{2,10}$");
     private static final int MAX_CODES = 100;
@@ -189,7 +193,7 @@ public class FubonNormalizedQuoteClient {
             }
 
             List<ProviderTimedPriceObservation> observations = new ArrayList<>();
-            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks = new LinkedHashMap<>();
+            Map<String, QuoteDetailData.QuoteDetailResult> orderBooks = new LinkedHashMap<>();
             Map<String, String> failureReasons = new LinkedHashMap<>();
             Map<String, String> responseRows = new LinkedHashMap<>();
             int rejected = 0;
@@ -400,50 +404,6 @@ public class FubonNormalizedQuoteClient {
             }
         }
         return List.copyOf(normalized);
-    }
-
-    public enum BatchStatus {
-        SUCCESS,
-        PARTIAL_FAILURE,
-        MISCONFIGURED,
-        SERVICE_UNAVAILABLE,
-        INVALID_REQUEST,
-        INVALID_RESPONSE,
-        RATE_LIMITED
-    }
-
-    public record BatchResult(
-            BatchStatus status,
-            List<ProviderTimedPriceObservation> observations,
-            int requested,
-            int rejected,
-            Map<String, String> failureReasons,
-            Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks,
-            ValidatedEnvelope envelope
-    ) {
-        public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
-                           int requested, int rejected, Map<String, String> failureReasons) {
-            this(status, observations, requested, rejected, failureReasons, Map.of(), null);
-        }
-        public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
-                           int requested, int rejected) {
-            this(status, observations, requested, rejected, Map.of(), Map.of(), null);
-        }
-        public BatchResult(BatchStatus status, List<ProviderTimedPriceObservation> observations,
-                           int requested, int rejected, Map<String, String> failureReasons,
-                           Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> orderBooks) {
-            this(status, observations, requested, rejected, failureReasons, orderBooks, null);
-        }
-        static BatchResult failed(BatchStatus status, int requested) {
-            return new BatchResult(status, List.of(), requested, requested, Map.of(), Map.of(), null);
-        }
-    }
-
-    /** Exact validated wire envelope.  The JSON strings are only normalized adapter output, never SDK raw data. */
-    public record ValidatedEnvelope(String batchId, String countersJson, Map<String, String> responseRows) {
-        public ValidatedEnvelope {
-            responseRows = responseRows == null ? Map.of() : Map.copyOf(responseRows);
-        }
     }
 
     record RawResponse(int statusCode, String body) {}

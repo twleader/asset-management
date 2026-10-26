@@ -1,17 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient;
-import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -39,7 +37,7 @@ class DividendEventKeyMigrationTest {
         // identity 會對不上，這一列會被誤判為「新 snapshot 未含舊 event」而 CANCELLED。
         long id = 1L;
         String staleEventKey = "PRE_357_LEGACY_EVENT_KEY_WITHOUT_EX_RIGHTS_DATE";
-        var reconstructed = new DividendFetchClient.DividendEvent(
+        var reconstructed = new DividendData.DividendEvent(
                 2022, BigDecimal.ZERO, new BigDecimal("0.30"), "2022-09-22", null, null, null);
         String freshHash = DividendSnapshotStore.canonicalEventHash(reconstructed);
         assertThat(staleEventKey).isNotEqualTo(freshHash);
@@ -63,7 +61,7 @@ class DividendEventKeyMigrationTest {
     void migrationIsIdempotentWhenEventKeyAlreadyMatchesNewFormula() throws SQLException {
         // 冪等性：模擬「已在新版 canonicalEvent() 之下重新 sync 過」的列，其 event_key
         // 已經是新公式雜湊——重跑遷移不得再次更新，否則重跑不安全（每次啟動都要跑一次）。
-        var event = new DividendFetchClient.DividendEvent(
+        var event = new DividendData.DividendEvent(
                 2025, BigDecimal.ZERO, new BigDecimal("0.30"), null, "2025-09-25", null, null);
         String alreadyCurrentKey = DividendSnapshotStore.canonicalEventHash(event);
 

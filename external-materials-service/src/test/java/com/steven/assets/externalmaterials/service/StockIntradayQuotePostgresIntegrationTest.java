@@ -1,6 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Properties;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,15 +16,6 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.interceptor.TransactionProxyFactoryBean;
 import org.testcontainers.containers.PostgreSQLContainer;
-
-import javax.sql.DataSource;
-import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.Properties;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -33,16 +32,16 @@ class StockIntradayQuotePostgresIntegrationTest {
 
             StockSourceQuery query = transactionalProxy(jdbc, dataSource);
             assertThat(query.persistIntradayQuote(quote("新名", "2026-08-24T02:00:01Z", "101")).status())
-                    .isEqualTo(StockSourceQuery.IntradayPersistenceResult.Status.APPLIED);
+                    .isEqualTo(StockMarketData.IntradayPersistenceResult.Status.APPLIED);
             java.util.Map<String, Object> appliedSnapshot = jdbc.queryForMap(
                     "SELECT stock_code, market, trading_date, provider_updated_at, source, actual_price, previous_close, "
                             + "open_price, high_price, low_price, buy_price, sell_price, volume "
                             + "FROM stock_intraday_quote WHERE stock_code='2330' AND market='台股'");
             assertThat(query.persistIntradayQuote(quote("倒灌名", "2026-08-24T02:00:01Z", "99")).status())
-                    .isEqualTo(StockSourceQuery.IntradayPersistenceResult.Status.STALE_OR_EQUAL);
-            StockSourceQuery.IntradayPersistenceResult older =
+                    .isEqualTo(StockMarketData.IntradayPersistenceResult.Status.STALE_OR_EQUAL);
+            StockMarketData.IntradayPersistenceResult older =
                     query.persistIntradayQuote(quote("更舊名", "2026-08-24T02:00:00Z", "98"));
-            assertThat(older.status()).isEqualTo(StockSourceQuery.IntradayPersistenceResult.Status.STALE_OR_EQUAL);
+            assertThat(older.status()).isEqualTo(StockMarketData.IntradayPersistenceResult.Status.STALE_OR_EQUAL);
             assertThat(older.canonical().actualPrice()).isEqualByComparingTo("101");
             assertThat(jdbc.queryForMap(
                     "SELECT stock_code, market, trading_date, provider_updated_at, source, actual_price, previous_close, "

@@ -3,14 +3,17 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .normalization import strict_vendor_date
 from .numeric import MAX_SHARES, NumericError, canonical_decimal, checked_share_add, exact_integer
-from .sdk_gateway import AccountingPair, SdkCallError, SdkGateway, enum_text, raw_field
+from .ports import PortfolioReader
+from .captures import AccountingPair
+from .errors import SdkCallError
+from .raw_values import enum_text, raw_field
 
 
 TW_ZONE = ZoneInfo("Asia/Taipei")
@@ -26,8 +29,8 @@ class PortfolioError(ValueError):
 @dataclass(frozen=True)
 class RawIdentity:
     source_date: date
-    account: str
-    branch_no: str
+    account: str = field(repr=False)
+    branch_no: str = field(repr=False)
     stock_code: str
     order_type: str
 
@@ -35,7 +38,7 @@ class RawIdentity:
 class PortfolioService:
     def __init__(
         self,
-        gateway: SdkGateway,
+        gateway: PortfolioReader,
         now: Callable[[], datetime] | None = None,
         fingerprint: Callable[[str, str, str], str] | None = None,
     ) -> None:

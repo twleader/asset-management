@@ -29,7 +29,7 @@ class MarketDataIntradaySessionControllerTest {
         if (readOnly) when(historical.fetchIntradaySession("00881", "台股", null, true)).thenReturn(session);
         else when(historical.fetchIntradaySession("00881", "台股", null)).thenReturn(session);
         MarketDataController controller = new MarketDataController(mock(MarketDataService.class), mock(StockPriceService.class),
-                historical, mock(PriceStreamService.class), mock(DividendHistoryService.class), mock(ExcelExportService.class),
+                historical, mock(PriceStreamService.class), mock(DividendHistoryService.class), new MarketHistoryApplicationService(historical,mock(MarketDataService.class),mock(ExcelExportService.class)),
                 mock(TechnicalIndicatorService.class), mock(CommodityLiveQuoteService.class));
         var result = MockMvcBuilders.standaloneSetup(controller).build()
                 .perform(get("/api/market-data/intraday-ticks").param("code", "00881").param("market", "台股").param("readOnly", Boolean.toString(readOnly)))

@@ -1,14 +1,11 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.service.port.LivePriceFetchPort;
+import com.steven.assets.externalmaterials.service.port.PriceProjectionPort;
+import com.steven.assets.externalmaterials.service.port.StockMarketRepository;
+import com.steven.assets.externalmaterials.service.port.StockUniversePort;
 import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.Optional;
@@ -17,6 +14,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 
 /**
  * 盤中股價輪詢：
@@ -30,9 +33,10 @@ import java.util.function.Consumer;
 @Service
 public class PricePoller {
 
-    private final PriceFetchClient client;
-    private final PriceCacheWriter writer;
-    private final StockSourceQuery source;
+    private final LivePriceFetchPort client;
+    private final PriceProjectionPort writer;
+    private final StockMarketRepository source;
+    private final StockUniversePort universe;
     private final MarketClock clock;
     private final TwLiveQuoteDispatcher twLiveDispatcher;
     private final Consumer<Runnable> warmupLauncher;
@@ -42,27 +46,28 @@ public class PricePoller {
 
     @Autowired
     public PricePoller(
-            PriceFetchClient client,
-            PriceCacheWriter writer,
-            StockSourceQuery source,
+            LivePriceFetchPort client,
+            PriceProjectionPort writer,
+            StockMarketRepository source, StockUniversePort universe,
             MarketClock clock,
             TwLiveQuoteDispatcher twLiveDispatcher) {
-        this(client, writer, source, clock, twLiveDispatcher, task -> {
+        this(client, writer, source, universe, clock, twLiveDispatcher, task -> {
             Thread thread = new Thread(task, "price-cache-warmup");
             thread.start();
         });
     }
 
     PricePoller(
-            PriceFetchClient client,
-            PriceCacheWriter writer,
-            StockSourceQuery source,
+            LivePriceFetchPort client,
+            PriceProjectionPort writer,
+            StockMarketRepository source, StockUniversePort universe,
             MarketClock clock,
             TwLiveQuoteDispatcher twLiveDispatcher,
             Consumer<Runnable> warmupLauncher) {
         this.client = client;
         this.writer = writer;
         this.source = source;
+        this.universe = universe;
         this.clock = clock;
         this.twLiveDispatcher = twLiveDispatcher;
         this.warmupLauncher = warmupLauncher;
@@ -73,7 +78,7 @@ public class PricePoller {
         Set<String> twCodes = new LinkedHashSet<>();
         Set<String> usCodes = new LinkedHashSet<>();
         Set<String> ukCodes = new LinkedHashSet<>();
-        source.collectAllStockCodes(twCodes, usCodes, ukCodes);
+        universe.collectAllStockCodes(twCodes, usCodes, ukCodes);
         if (twCodes.isEmpty() && usCodes.isEmpty() && ukCodes.isEmpty()) return;
         log.info("price-service 啟動，背景補抓 cold cache：台股 {} 檔，美股 {} 檔，英股 {} 檔",
                 twCodes.size(), usCodes.size(), ukCodes.size());
@@ -92,7 +97,7 @@ public class PricePoller {
     @Scheduled(cron = "*/10 * 9-13 * * MON-FRI", zone = "Asia/Taipei")
     public void scheduledTwIntradayUpdate() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us, uk);
+        universe.collectHeldStockCodes(tw, us, uk);
         tw.remove("0000");
         if (!tw.isEmpty()) log.info("更新台股即時價格 ({} 檔)", tw.size());
         updatePrices(tw, "台股", false);
@@ -102,7 +107,7 @@ public class PricePoller {
     public void scheduledUsIntradayUpdate() {
         if (!clock.isUsMarketOpen()) return;
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us, uk);
+        universe.collectHeldStockCodes(tw, us, uk);
         if (us.isEmpty()) return;
         log.info("更新美股即時價格 ({} 檔)", us.size());
         updatePrices(us, "美股", false);
@@ -112,7 +117,7 @@ public class PricePoller {
     public void scheduledUkIntradayUpdate() {
         if (!clock.isUkMarketOpen()) return;
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us, uk);
+        universe.collectHeldStockCodes(tw, us, uk);
         if (uk.isEmpty()) return;
         log.info("更新英股即時價格 ({} 檔)", uk.size());
         updatePrices(uk, "英股", false);
@@ -121,7 +126,7 @@ public class PricePoller {
     /** 同步抓所有持股價格寫 Redis。供 /internal/refresh 端點使用。 */
     public RefreshSummary refreshAll() {
         Set<String> tw = new LinkedHashSet<>(), us = new LinkedHashSet<>(), uk = new LinkedHashSet<>();
-        source.collectHeldStockCodes(tw, us, uk);
+        universe.collectHeldStockCodes(tw, us, uk);
         boolean usOpen = clock.isUsMarketOpen();
         boolean ukOpen = clock.isUkMarketOpen();
         TwLiveQuoteBatchResult twResult = updatePrices(tw, "台股", false);
@@ -168,11 +173,11 @@ public class PricePoller {
                         if (optional.isEmpty() || optional.get().price() == null) return;
                         PriceResult result = optional.get();
                         succeeded.incrementAndGet();
-                        PriceCacheWriter.CacheWriteOutcome outcome = writer.write(result, markClosed);
-                        if (outcome == PriceCacheWriter.CacheWriteOutcome.WRITTEN) {
+                        PriceProjectionData.CacheWriteOutcome outcome = writer.write(result, markClosed);
+                        if (outcome == PriceProjectionData.CacheWriteOutcome.WRITTEN) {
                             written.incrementAndGet();
-                        } else if (outcome == PriceCacheWriter.CacheWriteOutcome.FAILED
-                                || outcome == PriceCacheWriter.CacheWriteOutcome.SKIPPED_INVALID_PRICE) {
+                        } else if (outcome == PriceProjectionData.CacheWriteOutcome.FAILED
+                                || outcome == PriceProjectionData.CacheWriteOutcome.SKIPPED_INVALID_PRICE) {
                             failed.incrementAndGet();
                         }
                     } catch (Exception e) {

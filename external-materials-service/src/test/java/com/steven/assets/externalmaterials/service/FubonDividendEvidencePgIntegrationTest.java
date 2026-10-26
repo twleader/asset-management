@@ -1,8 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendEvent;
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendFetchResult;
-import com.steven.assets.externalmaterials.client.DividendFetchClient.FetchStatus;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendEvent;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendFetchResult;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.FetchStatus;
+import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.*;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -11,14 +18,7 @@ import org.springframework.transaction.interceptor.TransactionProxyFactoryBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import java.math.BigDecimal;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.*;
-import java.util.regex.Pattern;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 

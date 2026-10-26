@@ -1,10 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
-import static com.steven.assets.externalmaterials.service.FubonMarketData.MARKET;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.PROVIDER;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.TECHNICAL_PROFILES;
-import static org.assertj.core.api.Assertions.assertThat;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
@@ -20,6 +16,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.MARKET;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.PROVIDER;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.TECHNICAL_PROFILES;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Exercises the deployed Lua script against Redis rather than mocking its

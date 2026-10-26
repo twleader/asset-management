@@ -53,7 +53,7 @@ class CrawlerManualExportProxyTest {
     }
 
     private CrawlerExportPathService serviceAt(String baseUrl, long timeoutSeconds) {
-        return new CrawlerExportPathService(repo, "/home/steven", gdrive, baseUrl, timeoutSeconds, redis);
+        return new CrawlerExportPathService(repo, "/home/steven", gdrive, new com.steven.assets.integration.crawler.CrawlerRunHttpAdapter(baseUrl), timeoutSeconds, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
     }
 
     /** 未被監聽的埠：連線一定失敗（不是逾時）。 */

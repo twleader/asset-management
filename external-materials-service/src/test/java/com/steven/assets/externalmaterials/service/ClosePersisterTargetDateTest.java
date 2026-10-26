@@ -2,14 +2,11 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
 import com.steven.assets.externalmaterials.client.TwOfficialCloseClient;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.core.StringRedisTemplate;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.Instant;
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
@@ -17,7 +14,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -87,8 +86,8 @@ class ClosePersisterTargetDateTest {
         assertThat(result.expected()).isEqualTo(2);
         assertThat(result.verified()).isEqualTo(1);
         assertThat(result.missingCodes()).containsExactly("00679B");
-        org.mockito.ArgumentCaptor<PriceFetchClient.PriceResult> observation =
-                org.mockito.ArgumentCaptor.forClass(PriceFetchClient.PriceResult.class);
+        org.mockito.ArgumentCaptor<PriceData.PriceResult> observation =
+                org.mockito.ArgumentCaptor.forClass(PriceData.PriceResult.class);
         verify(cache).writeVerifiedClose(observation.capture());
         assertThat(observation.getValue().tradingDate()).isEqualTo(target);
         assertThat(observation.getValue().freshnessInstant())
@@ -177,7 +176,7 @@ class ClosePersisterTargetDateTest {
             return null;
         }).when(source).collectHeldStockCodes(anySet(), anySet(), anySet());
         when(source.hasTrustedTwClose("00679B", target)).thenReturn(false);
-        PriceFetchClient.PriceResult result = new PriceFetchClient.PriceResult(
+        PriceData.PriceResult result = new PriceData.PriceResult(
                 "00679B", "台股", new BigDecimal("30.00"), null, null, "FinMind", null,
                 null, null, null, null, null, null, null,
                 target, Instant.parse("2026-08-21T04:00:00Z"));

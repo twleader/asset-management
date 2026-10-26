@@ -1,18 +1,26 @@
-package com.steven.assets.externalmaterials.client;
+package com.steven.assets.externalmaterials.model.marketdata;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendEvent;
-import com.steven.assets.externalmaterials.service.MarketClock;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
-import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Strict normalized-wire validation; it neither fetches nor repairs source evidence. */
 public final class FubonMarketJson {
@@ -80,7 +88,7 @@ public final class FubonMarketJson {
     }
     private static Instant observation(JsonNode node, LocalDate queryDate, Instant now) {
         Instant value = instant(node);
-        if (value.isAfter(now) || !value.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate))
+        if (value.isAfter(now) || !value.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate().equals(queryDate))
             throw invalid();
         return value;
     }
@@ -306,7 +314,7 @@ public final class FubonMarketJson {
         for (JsonNode candle : source) {
             fields(candle, Set.of("candleAt", "open", "high", "low", "close", "volume", "average"));
             Instant candleAt = zInstant(candle.get("candleAt"));
-            var localCandle = candleAt.atZone(MarketClock.TW_ZONE);
+            var localCandle = candleAt.atZone(java.time.ZoneId.of("Asia/Taipei"));
             if (candleAt.getNano() != 0 || candleAt.getEpochSecond() % 60 != 0
                     || !localCandle.toLocalDate().equals(queryDate)
                     || localCandle.toLocalTime().isBefore(java.time.LocalTime.of(9, 0))
@@ -411,7 +419,7 @@ public final class FubonMarketJson {
         task425Base(root, symbol, now);
         if (!Set.of("TWSE", "TPEx").contains(text(root.get("exchange")))) throw invalid();
         if (!date(root.get("queryFrom")).equals(from) || !date(root.get("queryTo")).equals(to)
-                || from.isAfter(to) || from.plusDays(30).isBefore(to) || !to.isBefore(now.atZone(MarketClock.TW_ZONE).toLocalDate()))
+                || from.isAfter(to) || from.plusDays(30).isBefore(to) || !to.isBefore(now.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate()))
             throw invalid();
         equal(root.get("timeframe"), "1");
         Instant observed = task425Instant(root.get("observedAt"));
@@ -435,8 +443,8 @@ public final class FubonMarketJson {
                 if (!timestamp.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})")) throw invalid();
                 at = parsed.toInstant();
             } catch (RuntimeException failure) { throw invalid(); }
-            LocalDate sourceDate = at.atZone(MarketClock.TW_ZONE).toLocalDate();
-            LocalTime time = at.atZone(MarketClock.TW_ZONE).toLocalTime();
+            LocalDate sourceDate = at.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate();
+            LocalTime time = at.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalTime();
             if (sourceDate.isBefore(from) || sourceDate.isAfter(to) || time.getSecond() != 0 || time.getNano() != 0
                     || time.isBefore(LocalTime.of(9, 0)) || time.isAfter(LocalTime.of(13, 30))
                     || at.isAfter(observed) || previous != null && !at.isAfter(previous)) throw invalid();
@@ -471,7 +479,7 @@ public final class FubonMarketJson {
     }
     private static Instant task425Observation(JsonNode node, LocalDate queryDate, Instant now) {
         Instant value = task425Instant(node);
-        if (value.isAfter(now) || !value.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)) throw invalid();
+        if (value.isAfter(now) || !value.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate().equals(queryDate)) throw invalid();
         return value;
     }
     private static Instant task425Instant(JsonNode node) {
@@ -481,7 +489,7 @@ public final class FubonMarketJson {
     }
     private static Instant zObservation(JsonNode node, LocalDate queryDate, Instant now) {
         Instant value = zInstant(node);
-        if (value.isAfter(now) || !value.atZone(MarketClock.TW_ZONE).toLocalDate().equals(queryDate)) throw invalid();
+        if (value.isAfter(now) || !value.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate().equals(queryDate)) throw invalid();
         return value;
     }
     private static Instant zInstant(JsonNode node) {
@@ -588,8 +596,8 @@ public final class FubonMarketJson {
         if (!(symbol + ":" + micros).equals(id)) throw invalid();
         Instant time = Instant.ofEpochSecond(micros / 1_000_000, micros % 1_000_000 * 1000);
         LocalDate day = date(root.get("sourceDate"));
-        if (time.isAfter(now) || !time.atZone(MarketClock.TW_ZONE).toLocalDate().equals(day)
-                || !now.atZone(MarketClock.TW_ZONE).toLocalDate().equals(day)
+        if (time.isAfter(now) || !time.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate().equals(day)
+                || !now.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate().equals(day)
                 || !inSession(time) || !inSession(now)) throw invalid();
         BigDecimal price = decimal(text(root.get("price")), 20, 10, true);
         BigDecimal previous = optionalPrice(root.get("previousClose")), open = optionalPrice(root.get("openPrice")),

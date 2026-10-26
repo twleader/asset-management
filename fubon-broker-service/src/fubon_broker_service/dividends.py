@@ -8,7 +8,9 @@ from .normalization import (
     TAIPEI, canonical_number, decimal_value, instant, observed_at, stock_codes,
     strict_iso_date, utc_now,
 )
-from .sdk_gateway import SdkCallError, SdkGateway
+from .ports import DividendReader
+from .errors import SdkCallError
+from .payload_limits import check_marketdata_size
 
 
 class DividendError(ValueError):
@@ -20,7 +22,7 @@ class DividendError(ValueError):
 class DividendService:
     """One official date batch, then exact requested-symbol filtering and partial evidence."""
 
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now) -> None:
+    def __init__(self, gateway: DividendReader, *, now: Callable[[], datetime] = utc_now) -> None:
         self._gateway, self._now = gateway, now
 
     def read(self, symbols: list[str], start_date: str, end_date: str) -> dict[str, object]:
@@ -50,7 +52,7 @@ class DividendService:
         result = {"queryDate": query_date.isoformat(), "observedAt": observed_at(finished),
                   "scopeFrom": start_date, "scopeTo": end_date, "provider": "FUBON_SDK", "rows": output}
         try:
-            SdkGateway._check_marketdata_size(result)
+            check_marketdata_size(result)
         except SdkCallError:
             raise DividendError("DIVIDEND_RESPONSE_TOO_LARGE") from None
         return result

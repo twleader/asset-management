@@ -1,7 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -12,7 +11,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -31,7 +30,7 @@ class DividendFetchCoverageTest {
 
     @Test
     void verifiedUpcomingIsSeparateFromAndDoesNotDiscardHistoricalObservation() throws Exception {
-        var upcomingEvent = new DividendFetchClient.DividendEvent(
+        var upcomingEvent = new DividendData.DividendEvent(
                 2026, new BigDecimal("0.27"), BigDecimal.ZERO,
                 "2026-08-10", null, "2026-08-13", null);
         DividendUpcomingScopeClient upcoming = (code, market, from, to) ->
@@ -45,13 +44,13 @@ class DividendFetchCoverageTest {
 
         assertThat(observations).hasSize(2);
         assertThat(observations.get(0).status())
-                .isEqualTo(DividendFetchClient.FetchStatus.PARTIAL);
+                .isEqualTo(DividendData.FetchStatus.PARTIAL);
         assertThat(observations.get(0).source()).isEqualTo("NASDAQ");
         assertThat(observations.get(0).events())
-                .extracting(DividendFetchClient.DividendEvent::exDividendDate)
+                .extracting(DividendData.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-01");
         assertThat(observations.get(1).status())
-                .isEqualTo(DividendFetchClient.FetchStatus.COMPLETE);
+                .isEqualTo(DividendData.FetchStatus.COMPLETE);
         assertThat(observations.get(1).scopeFrom()).isEqualTo(TODAY);
         assertThat(observations.get(1).scopeTo()).isEqualTo(TODAY.plusDays(45));
         assertThat(observations.get(1).events()).containsExactly(upcomingEvent);
@@ -67,7 +66,7 @@ class DividendFetchCoverageTest {
 
         var result = client.fetch("NO_DIV", "美股", 10);
 
-        assertThat(result.status()).isEqualTo(DividendFetchClient.FetchStatus.EMPTY_COMPLETE);
+        assertThat(result.status()).isEqualTo(DividendData.FetchStatus.EMPTY_COMPLETE);
         assertThat(result.complete()).isTrue();
         assertThat(result.scopeTo()).isEqualTo(TODAY.plusDays(45));
     }
@@ -84,11 +83,11 @@ class DividendFetchCoverageTest {
 
         assertThat(observations).hasSize(2);
         assertThat(observations.get(0).status())
-                .isIn(DividendFetchClient.FetchStatus.PARTIAL,
-                        DividendFetchClient.FetchStatus.FAILED);
+                .isIn(DividendData.FetchStatus.PARTIAL,
+                        DividendData.FetchStatus.FAILED);
         assertThat(observations.get(0).complete()).isFalse();
         assertThat(observations.get(1).status())
-                .isEqualTo(DividendFetchClient.FetchStatus.PARTIAL);
+                .isEqualTo(DividendData.FetchStatus.PARTIAL);
         assertThat(observations.get(1).complete()).isFalse();
         assertThat(observations.get(1).errorReason())
                 .contains("台股尚無可證明完整 upcoming scope");
@@ -96,7 +95,7 @@ class DividendFetchCoverageTest {
 
     @Test
     void incompleteUpcomingWithKnownEventIsRetainedAsNonAuthoritativeObservation() throws Exception {
-        var upcomingEvent = new DividendFetchClient.DividendEvent(
+        var upcomingEvent = new DividendData.DividendEvent(
                 2026, new BigDecimal("0.18"), BigDecimal.ZERO,
                 TODAY.plusDays(8).toString(), null, TODAY.plusDays(12).toString(), null);
         DividendUpcomingScopeClient upcoming = (code, market, from, to) ->
@@ -112,7 +111,7 @@ class DividendFetchCoverageTest {
         assertThat(observations).hasSize(2);
         var partialUpcoming = observations.get(1);
         assertThat(partialUpcoming.source()).isEqualTo("NASDAQ_DIVIDEND_CALENDAR");
-        assertThat(partialUpcoming.status()).isEqualTo(DividendFetchClient.FetchStatus.PARTIAL);
+        assertThat(partialUpcoming.status()).isEqualTo(DividendData.FetchStatus.PARTIAL);
         assertThat(partialUpcoming.complete()).isFalse();
         assertThat(partialUpcoming.scopeFrom()).isEqualTo(TODAY);
         assertThat(partialUpcoming.scopeTo()).isEqualTo(TODAY.plusDays(10));
@@ -181,7 +180,7 @@ class DividendFetchCoverageTest {
 
         assertThat(scope.complete()).isTrue();
         assertThat(scope.provider()).contains("FinMind");
-        assertThat(scope.events()).extracting(DividendFetchClient.DividendEvent::exDividendDate)
+        assertThat(scope.events()).extracting(DividendData.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-10");
         assertThat(scope.covers(TODAY, TODAY.plusDays(45))).isTrue();
     }
@@ -392,7 +391,7 @@ class DividendFetchCoverageTest {
         var observations = client.fetchObservations("2885", "台股", 10);
         var events = observations.get(0).events();
 
-        assertThat(events).extracting(DividendFetchClient.DividendEvent::exRightsDate)
+        assertThat(events).extracting(DividendData.DividendEvent::exRightsDate)
                 .containsExactlyInAnyOrder("2022-09-22", "2025-09-25");
         assertThat(events).allSatisfy(e -> {
             assertThat(e.exDividendDate()).isNull();

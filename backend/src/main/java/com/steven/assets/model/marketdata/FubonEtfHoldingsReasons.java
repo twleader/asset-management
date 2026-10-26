@@ -1,4 +1,4 @@
-package com.steven.assets.integration.fubon;
+package com.steven.assets.model.marketdata;
 
 import java.util.Set;
 

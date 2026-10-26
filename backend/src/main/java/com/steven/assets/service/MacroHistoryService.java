@@ -1,5 +1,10 @@
 package com.steven.assets.service;
 
+import com.steven.assets.service.port.MacroDataPort;
+
+import com.steven.assets.model.marketdata.IndexIntradayPoint;
+import com.steven.assets.model.marketdata.MacroSourceData.DailyOhlcDto;
+import com.steven.assets.model.marketdata.MacroSourceData.TwseReturnIndexDto;
 import com.steven.assets.model.JapanGdpPerCapitaHistory;
 import com.steven.assets.model.KoreaGdpPerCapitaHistory;
 import com.steven.assets.model.TaiwanGdpPerCapitaHistory;
@@ -11,12 +16,8 @@ import com.steven.assets.repository.TaiwanGdpPerCapitaHistoryRepository;
 import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import com.steven.assets.repository.UsIndexDailyHistoryRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.reactive.function.client.ExchangeStrategies;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -80,7 +81,7 @@ public class MacroHistoryService {
     private final KoreaGdpPerCapitaHistoryRepository koreaGdpRepo;
     private final TwseIndexDailyHistoryRepository twseDailyRepo;
     private final UsIndexDailyHistoryRepository usDailyRepo;
-    private final WebClient priceServiceClient;
+    private final MacroDataPort external;
 
     public MacroHistoryService(
             TaiwanGdpPerCapitaHistoryRepository gdpRepo,
@@ -88,21 +89,13 @@ public class MacroHistoryService {
             KoreaGdpPerCapitaHistoryRepository koreaGdpRepo,
             TwseIndexDailyHistoryRepository twseDailyRepo,
             UsIndexDailyHistoryRepository usDailyRepo,
-            @Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
+            MacroDataPort external) {
         this.gdpRepo = gdpRepo;
         this.japanGdpRepo = japanGdpRepo;
         this.koreaGdpRepo = koreaGdpRepo;
         this.twseDailyRepo = twseDailyRepo;
         this.usDailyRepo = usDailyRepo;
-        // maxInMemorySize 提高至 16MB（WebClient 預設 256KB）：/internal/macro/us-index 一次回近 10 年
-        // （~2500 筆）且 Task 288 起每筆多了 volume/value 兩欄，實測已超出預設值導致
-        // DataBufferLimitException（回補回 upserted=0，靜默失敗、無明顯錯誤畫面）。16MB 與 BFF
-        // 既有 businessServicesClient（bff/.../WebClientConfig.java）同一慣例值。
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(cfg -> cfg.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
-                .build();
-        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl)
-                .exchangeStrategies(strategies).build();
+        this.external = external;
     }
 
     // ========== 股市分析頁查詢（read）— 由 MacroHistoryController 委派（Controller 不直接讀 repository） ==========
@@ -246,14 +239,7 @@ public class MacroHistoryService {
         try {
             // IMF response keys are integer years (YYYY) but Map<Integer, ...> via JSON arrives as Map<String, ...>;
             // 用 ParameterizedTypeReference 解析後手動轉。
-            Map<String, BigDecimal> raw = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/imf")
-                            .queryParam("indicator", indicator)
-                            .queryParam("country", country)
-                            .queryParam("scale", scale).build())
-                    .retrieve()
-                    .bodyToMono(new ParameterizedTypeReference<Map<String, BigDecimal>>() {})
-                    .block();
+            Map<String, BigDecimal> raw = external.imf(indicator, country, scale);
             if (raw == null) return Map.of();
             Map<Integer, BigDecimal> out = new java.util.LinkedHashMap<>();
             raw.forEach((k, v) -> {
@@ -276,11 +262,7 @@ public class MacroHistoryService {
      */
     private DgbasData fetchDgbasProxy() {
         try {
-            Map<String, Map<String, BigDecimal>> raw = priceServiceClient.get()
-                    .uri("/internal/macro/dgbas")
-                    .retrieve()
-                    .bodyToMono(new ParameterizedTypeReference<Map<String, Map<String, BigDecimal>>>() {})
-                    .block();
+            Map<String, Map<String, BigDecimal>> raw = external.dgbas();
             if (raw == null) return new DgbasData(Map.of(), Map.of());
             return new DgbasData(toIntKey(raw.get("growth")), toIntKey(raw.get("gdpUsd")));
         } catch (Exception e) {
@@ -349,18 +331,9 @@ public class MacroHistoryService {
         }
     }
 
-    private record DailyOhlcDto(String tradingDate, BigDecimal open, BigDecimal high,
-                                 BigDecimal low, BigDecimal close, Long volume, BigDecimal value) {}
-
     private List<TwseIndexDailyHistory> fetchTwseMonthlyDailyProxy(YearMonth ym) {
         try {
-            DailyOhlcDto[] arr = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/twse-monthly")
-                            .queryParam("year", ym.getYear())
-                            .queryParam("month", ym.getMonthValue()).build())
-                    .retrieve()
-                    .bodyToMono(DailyOhlcDto[].class)
-                    .block();
+            DailyOhlcDto[] arr = external.twseMonthly(ym);
             if (arr == null) return List.of();
             List<TwseIndexDailyHistory> out = new ArrayList<>();
             for (DailyOhlcDto d : arr) {
@@ -378,9 +351,6 @@ public class MacroHistoryService {
         }
     }
 
-    /** TWSE 發行量加權股價「報酬指數」（含息）某交易日收盤 proxy 回傳。 */
-    private record TwseReturnIndexDto(String tradingDate, BigDecimal close) {}
-
     /**
      * 抓「單日」TWSE 報酬指數收盤（含息）。
      * 經 /internal/macro/twse-return-index proxy 打 ext-materials（非交易日/查無回 204）；
@@ -388,12 +358,7 @@ public class MacroHistoryService {
      */
     private BigDecimal fetchTwseReturnIndexProxy(LocalDate date) {
         try {
-            TwseReturnIndexDto dto = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/twse-return-index")
-                            .queryParam("date", date.toString()).build())
-                    .retrieve()
-                    .bodyToMono(TwseReturnIndexDto.class)
-                    .block();
+            TwseReturnIndexDto dto = external.twseReturnIndex(date);
             return dto == null ? null : dto.close();
         } catch (Exception e) {
             log.warn("呼叫 /internal/macro/twse-return-index {} 失敗: {}", date, e.getMessage());
@@ -526,12 +491,7 @@ public class MacroHistoryService {
 
     private List<UsIndexDailyHistory> fetchUsIndexDailyProxy(String code) {
         try {
-            DailyOhlcDto[] arr = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/us-index")
-                            .queryParam("code", code).build())
-                    .retrieve()
-                    .bodyToMono(DailyOhlcDto[].class)
-                    .block();
+            DailyOhlcDto[] arr = external.usIndex(code);
             if (arr == null) return List.of();
             List<UsIndexDailyHistory> out = new ArrayList<>();
             for (DailyOhlcDto d : arr) {
@@ -555,13 +515,10 @@ public class MacroHistoryService {
      */
     public List<IntradayPoint> fetchIndexIntraday(String market) {
         try {
-            IntradayPoint[] arr = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/macro/index-intraday")
-                            .queryParam("market", market).build())
-                    .retrieve()
-                    .bodyToMono(IntradayPoint[].class)
-                    .block();
-            return arr == null ? List.of() : java.util.Arrays.asList(arr);
+            IndexIntradayPoint[] arr = external.indexIntraday(market);
+            return arr == null ? List.of() : java.util.Arrays.asList(java.util.Arrays.stream(arr)
+                    .map(point -> point == null ? null : new IntradayPoint(point.time(), point.close()))
+                    .toArray(IntradayPoint[]::new));
         } catch (Exception e) {
             log.warn("呼叫 /internal/macro/index-intraday {} 失敗: {}", market, e.getMessage());
             return List.of();

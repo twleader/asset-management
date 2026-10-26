@@ -2,15 +2,12 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData.CacheWriteOutcome;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.service.port.PriceProjectionPort;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -23,6 +20,13 @@ import java.time.temporal.ChronoField;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
+import org.springframework.stereotype.Component;
 
 /**
  * Writes every latest quote through an atomic Redis freshness guard.
@@ -34,14 +38,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class PriceCacheWriter {
-
-    public enum CacheWriteOutcome {
-        WRITTEN,
-        REJECTED_STALE,
-        SKIPPED_INVALID_PRICE,
-        FAILED
-    }
+public class PriceCacheWriter implements PriceProjectionPort {
 
     private static final Duration LIVE_TTL = Duration.ofHours(24);
     private static final String PRICE_UPDATE_CHANNEL = "price-update";
@@ -187,7 +184,7 @@ public class PriceCacheWriter {
 
     /** DB latest close and date are from one row; retrievalInstant is captured once by the caller. */
     public CacheWriteOutcome syncClosedFromDb(
-            String code, String market, StockSourceQuery.DatedClose datedClose, Instant retrievalInstant) {
+            String code, String market, StockMarketData.DatedClose datedClose, Instant retrievalInstant) {
         if (datedClose == null || datedClose.close() == null || datedClose.close().signum() <= 0) {
             return CacheWriteOutcome.SKIPPED_INVALID_PRICE;
         }

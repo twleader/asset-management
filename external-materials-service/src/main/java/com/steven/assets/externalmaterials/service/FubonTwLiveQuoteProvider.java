@@ -1,12 +1,12 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient.BatchResult;
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient.BatchStatus;
-import lombok.extern.slf4j.Slf4j;
-
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.BatchResult;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.BatchStatus;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
 import java.util.List;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Legacy test fixture only. Task 370 routes every production Taiwan LIVE round through

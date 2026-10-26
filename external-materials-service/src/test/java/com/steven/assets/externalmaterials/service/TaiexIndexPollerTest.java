@@ -1,15 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
-import com.steven.assets.externalmaterials.client.MacroDataFetchClient.DayQuote;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.IndexDayData.DayQuote;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData;
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -79,8 +79,8 @@ class TaiexIndexPollerTest {
                 new DayQuote(TODAY, new BigDecimal("20000.00"), new BigDecimal("20180.00"),
                         new BigDecimal("19870.00"), new BigDecimal("20050.00"), finalBar));
         when(source.loadRecentTaiexCloses(2)).thenReturn(
-                List.of(new StockSourceQuery.ClosePoint(TODAY.minusDays(4), new BigDecimal("19700.00")),
-                        new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00"))));
+                List.of(new StockMarketData.ClosePoint(TODAY.minusDays(4), new BigDecimal("19700.00")),
+                        new StockMarketData.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00"))));
 
         org.mockito.ArgumentCaptor<PriceResult> captor = org.mockito.ArgumentCaptor.forClass(PriceResult.class);
         poller.updateOnce();
@@ -110,7 +110,7 @@ class TaiexIndexPollerTest {
                 new DayQuote(TODAY, new BigDecimal("20000.00"), new BigDecimal("20180.00"),
                         new BigDecimal("19870.00"), new BigDecimal("20050.00")));
         when(source.loadRecentTaiexCloses(2)).thenReturn(
-                List.of(new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00"))));
+                List.of(new StockMarketData.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00"))));
 
         poller.updateOnce();
 
@@ -128,8 +128,8 @@ class TaiexIndexPollerTest {
                         new BigDecimal("19870.00"), new BigDecimal("20050.00")));
         // 升冪：前一交易日、以及「與點位同日」的今日完成日 K（14:00 之後才會有）
         when(source.loadRecentTaiexCloses(2)).thenReturn(
-                List.of(new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00")),
-                        new StockSourceQuery.ClosePoint(TODAY, new BigDecimal("20050.00"))));
+                List.of(new StockMarketData.ClosePoint(TODAY.minusDays(1), new BigDecimal("19800.00")),
+                        new StockMarketData.ClosePoint(TODAY, new BigDecimal("20050.00"))));
 
         org.mockito.ArgumentCaptor<PriceResult> captor = org.mockito.ArgumentCaptor.forClass(PriceResult.class);
         poller.updateOnce();
@@ -143,13 +143,13 @@ class TaiexIndexPollerTest {
         FubonTaiexIndexStore store = mock(FubonTaiexIndexStore.class);
         TaiexIndexPoller fubonFirst = new TaiexIndexPoller(macroClient, writer, source, clock, store);
         Instant sourceTime = TODAY.atTime(10, 0).atZone(MarketClock.TW_ZONE).toInstant();
-        FubonTaiexIndexStore.CanonicalIndex canonical = new FubonTaiexIndexStore.CanonicalIndex(
+        TaiexCanonicalData.CanonicalIndex canonical = new TaiexCanonicalData.CanonicalIndex(
                 "0000", "IR0001", "TWSE", TODAY, sourceTime,
                 new BigDecimal("22345.67"), "FUBON_INDICES");
-        when(store.findForTradingDate(TODAY)).thenReturn(new FubonTaiexIndexStore.FindResult(
-                FubonTaiexIndexStore.ReadStatus.FOUND, canonical));
+        when(store.findForTradingDate(TODAY)).thenReturn(new TaiexCanonicalData.FindResult(
+                TaiexCanonicalData.ReadStatus.FOUND, canonical));
         when(source.loadRecentTaiexCloses(2)).thenReturn(List.of(
-                new StockSourceQuery.ClosePoint(TODAY.minusDays(1), new BigDecimal("22000.00"))));
+                new StockMarketData.ClosePoint(TODAY.minusDays(1), new BigDecimal("22000.00"))));
 
         fubonFirst.updateOnce();
 

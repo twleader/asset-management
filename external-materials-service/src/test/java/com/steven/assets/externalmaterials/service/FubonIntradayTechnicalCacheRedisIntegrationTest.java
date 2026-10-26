@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;

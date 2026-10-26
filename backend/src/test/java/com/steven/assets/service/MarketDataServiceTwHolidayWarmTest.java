@@ -37,7 +37,7 @@ class MarketDataServiceTwHolidayWarmTest {
         });
         server.start();
         try {
-            return test.apply(new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null, null), calls);
+            return test.apply(new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, null), calls);
         } finally {
             server.stop(0);
         }

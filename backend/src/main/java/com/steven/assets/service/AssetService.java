@@ -1,5 +1,6 @@
 package com.steven.assets.service;
 
+import com.steven.assets.model.marketdata.MarketDataResults;
 import com.steven.assets.dto.AssetSnapshotDto;
 import com.steven.assets.dto.RealizedGainDto;
 import com.steven.assets.model.*;
@@ -97,7 +98,7 @@ public class AssetService {
         for (StockHolding st : snapshot.getStocks()) {
             if (st.getDividendRate() != null && st.getDividendRate().compareTo(BigDecimal.ZERO) > 0) continue;
             try {
-                MarketDataService.DividendRateResult r =
+                MarketDataResults.DividendRateResult r =
                         marketDataService.getDividendRate(st.getStockCode(), st.getMarket());
                 if (r != null && r.dividendRate() != null && r.dividendRate().compareTo(BigDecimal.ZERO) > 0) {
                     st.setDividendRate(r.dividendRate());
@@ -834,7 +835,7 @@ public class AssetService {
                 String key = st.getMarket() + "_" + st.getStockCode();
                 BigDecimal rate = rateCache.computeIfAbsent(key, k -> {
                     try {
-                        MarketDataService.DividendRateResult r =
+                        MarketDataResults.DividendRateResult r =
                                 marketDataService.getDividendRate(st.getStockCode(), st.getMarket());
                         return (r != null) ? r.dividendRate() : null;
                     } catch (Exception e) {

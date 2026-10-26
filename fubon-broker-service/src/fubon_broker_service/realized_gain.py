@@ -6,7 +6,9 @@ from datetime import date, datetime
 from .accounting_normalization import account_binding_explicit, checked_result, observation, verify_identity
 from .normalization import TAIPEI, instant, signed_integer, stock_code, strict_vendor_date, utc_now
 from .numeric import MAX_SHARES, canonical_decimal, exact_integer
-from .sdk_gateway import SdkGateway, SelectedAccount, enum_text, raw_field
+from .ports import RealizedGainReader
+from .captures import SelectedAccount
+from .raw_values import enum_text, raw_field
 
 
 class RealizedGainError(ValueError):
@@ -18,7 +20,7 @@ class RealizedGainError(ValueError):
 class RealizedGainService:
     """Verified fields only: no invented fill identity, net proceeds or acquisition cost."""
 
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now) -> None:
+    def __init__(self, gateway: RealizedGainReader, *, now: Callable[[], datetime] = utc_now) -> None:
         self._gateway, self._now = gateway, now
 
     def read(self) -> dict[str, object]:

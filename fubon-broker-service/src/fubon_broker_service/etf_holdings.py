@@ -10,7 +10,8 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .numeric import NumericError, canonical_decimal
-from .sdk_gateway import SdkCallError, SdkGateway
+from .ports import EtfHoldingsReader
+from .errors import SdkCallError
 
 
 TW_ZONE = ZoneInfo("Asia/Taipei")
@@ -44,7 +45,7 @@ class EtfHoldingsService:
 
     def __init__(
         self,
-        gateway: SdkGateway,
+        gateway: EtfHoldingsReader,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self._gateway = gateway

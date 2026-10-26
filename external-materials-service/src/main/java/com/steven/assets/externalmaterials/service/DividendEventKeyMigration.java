@@ -1,16 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.util.ArrayList;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
 
 /**
  * Task 357／357.3a-0：{@code DividendSnapshotStore.canonicalEvent()} 新增
@@ -81,7 +80,7 @@ public class DividendEventKeyMigration {
         }
         List<Object[]> updates = new ArrayList<>();
         for (Row row : rows) {
-            DividendFetchClient.DividendEvent event = new DividendFetchClient.DividendEvent(
+            DividendData.DividendEvent event = new DividendData.DividendEvent(
                     row.year(), row.cashDividend(), row.stockDividend(),
                     row.exDividendDate(), row.exRightsDate(),
                     row.cashPaymentDate(), row.stockPaymentDate());

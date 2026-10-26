@@ -1,12 +1,11 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.time.LocalDate;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.Mockito.mock;
@@ -42,9 +41,9 @@ class PriceFetchClientTwSessionReferenceTest {
 
     @Test
     void fubonPreviousCloseAndYahooCannotPretendToBeQualifiedTwseMisDY() {
-        assertThatIllegalArgumentException().isThrownBy(() -> new PriceFetchClient.TwSessionReference(
+        assertThatIllegalArgumentException().isThrownBy(() -> new PriceData.TwSessionReference(
                 "00881", LocalDate.of(2026, 8, 18), new BigDecimal("50.55"), "FUBON_PREVIOUS_CLOSE"));
-        assertThatIllegalArgumentException().isThrownBy(() -> new PriceFetchClient.TwSessionReference(
+        assertThatIllegalArgumentException().isThrownBy(() -> new PriceData.TwSessionReference(
                 "00881", LocalDate.of(2026, 8, 18), new BigDecimal("50.55"), "YAHOO"));
     }
 

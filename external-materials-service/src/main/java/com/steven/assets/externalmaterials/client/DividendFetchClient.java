@@ -1,21 +1,19 @@
 package com.steven.assets.externalmaterials.client;
 
-import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.DividendDates;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendEvent;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendFetchResult;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.FetchStatus;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -24,6 +22,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
  * 從 FinMind / NASDAQ 抓股利歷史，原本在 backend MarketDataService.getDividendHistory，
@@ -64,59 +66,6 @@ public class DividendFetchClient {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
-
-    /**
-     * @param exDividendDate 除息日（現金股利基準日），ISO yyyy-MM-dd 或 null（Task 357／Requirement 94：
-     *                       停止與除權日互相 fallback，只配股事件此欄一律 null，不得以除權日冒充）
-     * @param exRightsDate   除權日（股票股利基準日），ISO yyyy-MM-dd 或 null；只配息事件此欄一律 null
-     */
-    public record DividendEvent(
-            Integer year,
-            BigDecimal cashDividend,
-            BigDecimal stockDividend,
-            String exDividendDate,        // ISO YYYY-MM-DD or null
-            String exRightsDate,          // ISO YYYY-MM-DD or null
-            String cashPaymentDate,       // ISO or null
-            String stockPaymentDate       // ISO or null
-    ) {}
-
-    public enum FetchStatus { COMPLETE, EMPTY_COMPLETE, PARTIAL, FAILED }
-
-    /**
-     * Typed fetch observation。空事件只有在 provider 明確成功完成整段 scope 時才是
-     * {@link FetchStatus#EMPTY_COMPLETE}；例外／timeout 不得再與成功查無事件混成同一結果。
-     */
-    public record DividendFetchResult(
-            String source,
-            List<DividendEvent> events,
-            FetchStatus status,
-            LocalDate scopeFrom,
-            LocalDate scopeTo,
-            Instant sourceAvailableAt,
-            String errorReason,
-            List<String> sourceUrls) {
-        public DividendFetchResult(String source, List<DividendEvent> events,
-                                   FetchStatus status, LocalDate scopeFrom, LocalDate scopeTo,
-                                   Instant sourceAvailableAt, String errorReason) {
-            this(source, events, status, scopeFrom, scopeTo, sourceAvailableAt, errorReason, List.of());
-        }
-
-        public DividendFetchResult {
-            events = events == null ? List.of() : List.copyOf(events);
-            sourceUrls = sourceUrls == null ? List.of() : sourceUrls.stream()
-                    .filter(url -> url != null && !url.isBlank()).distinct().toList();
-        }
-
-        public DividendFetchResult(String source, List<DividendEvent> events) {
-            this(source, events, FetchStatus.PARTIAL,
-                    LocalDate.now().minusYears(1), LocalDate.now(), Instant.now(),
-                    "legacy result 未提供可驗證的 upcoming scope", List.of());
-        }
-
-        public boolean complete() {
-            return status == FetchStatus.COMPLETE || status == FetchStatus.EMPTY_COMPLETE;
-        }
-    }
 
     public DividendFetchResult fetch(String stockCode, String market, int years) {
         List<DividendFetchResult> observations = fetchObservations(stockCode, market, years);

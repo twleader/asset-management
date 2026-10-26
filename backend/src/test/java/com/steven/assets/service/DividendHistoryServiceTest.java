@@ -47,7 +47,7 @@ class DividendHistoryServiceTest {
         });
         syncServer.start();
         service = new DividendHistoryService(repo, projection,
-                "http://127.0.0.1:" + syncServer.getAddress().getPort());
+                new com.steven.assets.integration.marketdata.DividendSyncHttpAdapter("http://127.0.0.1:" + syncServer.getAddress().getPort()));
     }
 
     @AfterEach

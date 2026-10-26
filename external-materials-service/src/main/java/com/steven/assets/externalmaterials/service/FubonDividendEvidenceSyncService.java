@@ -1,14 +1,15 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendFetchResult;
-import com.steven.assets.externalmaterials.client.DividendFetchClient.FetchStatus;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendFetchResult;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.FetchStatus;
+import com.steven.assets.externalmaterials.service.port.DividendEvidencePort;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Adds only PARTIAL Fubon evidence through the existing append-only store. */
 @Service
@@ -17,14 +18,14 @@ public class FubonDividendEvidenceSyncService {
     private final FubonMarketRunGate gate;
     private final FubonRadarScope radar;
     private final FubonMarketDataPort client;
-    private final DividendSnapshotStore store;
+    private final DividendEvidencePort store;
     private final MarketClock clock;
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private volatile Result lastResult = new Result("DISABLED", false, "NOT_RUN", 0, 0, 0, 0);
 
     public FubonDividendEvidenceSyncService(@Value("${fubon.dividend-sync-enabled:false}") String enabled,
             FubonMarketRunGate gate, FubonRadarScope radar, FubonMarketDataPort client,
-            DividendSnapshotStore store, MarketClock clock) {
+            DividendEvidencePort store, MarketClock clock) {
         this.enabled = enabled; this.gate = gate; this.radar = radar; this.client = client;
         this.store = store; this.clock = clock;
     }

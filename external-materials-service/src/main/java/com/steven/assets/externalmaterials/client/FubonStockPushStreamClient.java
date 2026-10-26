@@ -1,13 +1,11 @@
 package com.steven.assets.externalmaterials.client;
 
-import com.steven.assets.externalmaterials.service.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.FubonStockPushStream;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import jakarta.annotation.PreDestroy;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 import java.io.*;
 import java.net.URI;
 import java.net.http.*;
@@ -20,6 +18,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /** Cancellable normalized stock SSE. No dependency on the TAIEX client, SDK, DB or Redis. */
 @Component

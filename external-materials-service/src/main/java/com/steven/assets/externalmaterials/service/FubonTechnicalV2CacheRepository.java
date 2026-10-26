@@ -1,13 +1,13 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import java.time.Instant;
+import java.util.*;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
-import java.time.Instant;
-import java.util.*;
 
 /** Pair MGET/dual-key Lua implementation; no vendor request and no database mutation. */
 @Repository
