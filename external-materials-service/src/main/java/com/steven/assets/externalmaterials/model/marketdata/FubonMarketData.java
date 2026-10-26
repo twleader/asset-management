@@ -1,6 +1,6 @@
-package com.steven.assets.externalmaterials.service;
+package com.steven.assets.externalmaterials.model.marketdata;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient.DividendEvent;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -43,7 +43,7 @@ public final class FubonMarketData {
         return value.signum() == 0 ? "0" : value.stripTrailingZeros().toPlainString();
     }
     public static boolean inSession(Instant time) {
-        LocalTime local = time.atZone(MarketClock.TW_ZONE).toLocalTime();
+        LocalTime local = time.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalTime();
         return !local.isBefore(LocalTime.of(9, 0)) && local.isBefore(LocalTime.of(13, 30));
     }
     public static Map<String, Object> parameters(String group) {

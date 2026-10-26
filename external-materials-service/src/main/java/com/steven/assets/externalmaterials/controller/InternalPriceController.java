@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.controller;
 
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import com.steven.assets.externalmaterials.service.ClosePersister;
 import com.steven.assets.externalmaterials.service.DividendPersister;
 import com.steven.assets.externalmaterials.service.ExchangeRatePoller;
@@ -8,12 +9,13 @@ import com.steven.assets.externalmaterials.service.FundDividendPoller;
 import com.steven.assets.externalmaterials.service.FundNavBackfillService;
 import com.steven.assets.externalmaterials.service.FundNavPoller;
 import com.steven.assets.externalmaterials.service.HistoricalBackfillService;
-import com.steven.assets.externalmaterials.service.MarketDataFetchService;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import com.steven.assets.externalmaterials.service.PricePoller;
+import com.steven.assets.externalmaterials.service.MarketDataFetchService;
 import com.steven.assets.externalmaterials.service.PricePoller.RefreshSummary;
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
+import com.steven.assets.externalmaterials.service.PricePoller;
 import com.steven.assets.externalmaterials.service.QuoteDetailReadService;
+import java.time.LocalDate;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,9 +23,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.time.LocalDate;
-import java.util.Map;
 
 /**
  * 僅 docker network 內 business-services 呼叫；不對外暴露。
@@ -57,7 +56,7 @@ public class InternalPriceController {
 
     /** 台股十秒富邦快照的純讀投影：專用 Redis → canonical PostgreSQL，絕不 request-time 外呼。 */
     @GetMapping("/quote-detail")
-    public TwQuoteDetailFetchClient.QuoteDetailResult quoteDetail(
+    public QuoteDetailData.QuoteDetailResult quoteDetail(
             @RequestParam String code, @RequestParam String market) {
         return quoteDetailReadService.read(code, market);
     }

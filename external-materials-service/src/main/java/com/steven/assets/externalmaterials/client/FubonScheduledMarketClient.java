@@ -1,23 +1,24 @@
 package com.steven.assets.externalmaterials.client;
 
-import com.steven.assets.externalmaterials.service.FubonMarketDataPort;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
-import com.steven.assets.externalmaterials.service.MarketClock;
 import com.steven.assets.externalmaterials.service.FubonIntradayTechnical;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
+import com.steven.assets.externalmaterials.service.FubonMarketDataPort;
+import com.steven.assets.externalmaterials.service.MarketClock;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.Flow;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Exact normalized adapter routes only. No account selector, readiness probe or vendor fallback. */
 @Component

@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 class MacroHistoryControllerTpexCompatibilityTest {
 
     private final MacroHistoryService macro = mock(MacroHistoryService.class);
-    private final MacroHistoryController controller = new MacroHistoryController(macro, mock(ExcelExportService.class));
+    private final MacroHistoryController controller = new MacroHistoryController(macro, new com.steven.assets.service.MacroHistoryApplicationService(macro, mock(ExcelExportService.class)));
 
     @Test
     void 相容GET不套頁面白名單故SP500TR仍可查詢() {
@@ -44,7 +44,7 @@ class MacroHistoryControllerTpexCompatibilityTest {
     void TPEX可走既有日線匯出白名單() throws Exception {
         LocalDate day = LocalDate.of(2026, 8, 20);
         ExcelExportService export = mock(ExcelExportService.class);
-        MacroHistoryController exportController = new MacroHistoryController(macro, export);
+        MacroHistoryController exportController = new MacroHistoryController(macro, new com.steven.assets.service.MacroHistoryApplicationService(macro, export));
         when(export.exportIndexDaily("TPEX", day, day)).thenReturn(new byte[] {1, 2, 3});
 
         assertThat(exportController.exportIndexDaily("TPEX", day, day).getBody().getByteArray())

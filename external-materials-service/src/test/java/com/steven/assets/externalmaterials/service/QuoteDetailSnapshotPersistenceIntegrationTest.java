@@ -1,25 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.data.redis.connection.RedisConnection;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-
-import javax.sql.DataSource;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookCacheData;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.CanonicalLookup;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.PersistResult;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.PersistStatus;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.ReadStatus;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.RevisionLookup;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,7 +21,23 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-
+import javax.sql.DataSource;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Real PostgreSQL/Redis coverage for the strict canonical header-plus-five-level transaction. */
@@ -92,11 +97,11 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
 
         var persisted = store.persist(incoming);
 
-        assertThat(persisted.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+        assertThat(persisted.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book_level", Integer.class)).isEqualTo(5);
         assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("台積電");
-        assertThat(cache.writeStrictNewer(persisted.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
+        assertThat(cache.writeStrictNewer(persisted.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.WRITTEN);
         assertThat(redis.opsForValue().get(QuoteDetailCache.key("台股", "2330"))).contains("FUBON_BOOKS");
         assertThat(redis.getExpire(QuoteDetailCache.key("台股", "2330"))).isBetween(86_390L, 86_400L);
         assertThat(redis.hasKey("price:台股:2330")).isFalse();
@@ -109,14 +114,14 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
     void equalOrOlderCannotMutateHeaderLevelsFetchedTimeNameOrRedisTtl() throws Exception {
         var current = snapshot("新名", "2026-08-21T05:00:00Z", "100", levels());
         var applied = store.persist(current);
-        assertThat(cache.writeStrictNewer(applied.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
+        assertThat(cache.writeStrictNewer(applied.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.WRITTEN);
         String beforePayload = redis.opsForValue().get(QuoteDetailCache.key("台股", "2330"));
         Instant beforeFetched = jdbc.queryForObject("SELECT fetched_at FROM stock_intraday_order_book",
                 (rs, rowNum) -> rs.getTimestamp(1).toInstant());
         Long beforeTtl = redis.getExpire(QuoteDetailCache.key("台股", "2330"));
         Thread.sleep(1_100L);
         var olderLevels = java.util.stream.IntStream.rangeClosed(1, 5)
-                .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
+                .mapToObj(level -> new QuoteDetailData.OrderBookLevel(level,
                         BigDecimal.valueOf(70 - level), (long) (100 + level),
                         BigDecimal.valueOf(80 + level), (long) (200 + level)))
                 .toList();
@@ -124,9 +129,9 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         var equal = snapshot("等名", "2026-08-21T05:00:00Z", "98", olderLevels);
         for (var stale : List.of(older, equal)) {
             var persisted = store.persist(stale);
-            assertThat(persisted.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.STALE_OR_EQUAL);
+            assertThat(persisted.status()).isEqualTo(OrderBookData.PersistStatus.STALE_OR_EQUAL);
             assertThat(cache.writeStrictNewer(persisted.canonical()))
-                    .isEqualTo(QuoteDetailCache.WriteOutcome.REJECTED_STALE);
+                    .isEqualTo(OrderBookCacheData.WriteOutcome.REJECTED_STALE);
         }
 
         assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class)).isEqualTo("台積電");
@@ -146,25 +151,25 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
 
         var persisted = store.persist(snapshot("來源名稱", "2026-08-21T05:00:00Z", "100", levels()));
 
-        assertThat(persisted.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.FAILED);
+        assertThat(persisted.status()).isEqualTo(OrderBookData.PersistStatus.FAILED);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_intraday_order_book_level", Integer.class)).isZero();
     }
 
     @Test
     void halfSideAndUnknownSourceAreRejectedWhileYahooIsAnApprovedCanonicalSource() {
-        List<TwQuoteDetailFetchClient.OrderBookLevel> half = new java.util.ArrayList<>(levels());
-        half.set(2, new TwQuoteDetailFetchClient.OrderBookLevel(3, BigDecimal.valueOf(98), null,
+        List<QuoteDetailData.OrderBookLevel> half = new java.util.ArrayList<>(levels());
+        half.set(2, new QuoteDetailData.OrderBookLevel(3, BigDecimal.valueOf(98), null,
                 BigDecimal.valueOf(103), 3L));
         var malformed = snapshot("台積電", "2026-08-21T05:00:00Z", "100", half);
-        var yahoo = new TwQuoteDetailFetchClient.QuoteDetailResult(
+        var yahoo = new QuoteDetailData.QuoteDetailResult(
                 malformed.stockCode(), malformed.stockName(), malformed.market(), malformed.supported(), malformed.available(),
                 "YAHOO_TW", malformed.message(), malformed.sourceTime(), malformed.fetchedAt(), malformed.marketStatus(),
                 malformed.price(), malformed.previousClose(), malformed.openPrice(), malformed.highPrice(), malformed.lowPrice(),
                 malformed.averagePrice(), malformed.change(), malformed.changePercent(), malformed.turnoverYi(), malformed.volumeLots(),
                 malformed.previousVolumeLots(), malformed.amplitudePercent(), malformed.innerVolumeLots(), malformed.outerVolumeLots(),
                 malformed.innerPercent(), malformed.outerPercent(), malformed.bidTotalLots(), malformed.askTotalLots(), levels());
-        var unknownSource = new TwQuoteDetailFetchClient.QuoteDetailResult(
+        var unknownSource = new QuoteDetailData.QuoteDetailResult(
                 yahoo.stockCode(), yahoo.stockName(), yahoo.market(), yahoo.supported(), yahoo.available(),
                 "UNTRUSTED", yahoo.message(), yahoo.sourceTime(), yahoo.fetchedAt(), yahoo.marketStatus(),
                 yahoo.price(), yahoo.previousClose(), yahoo.openPrice(), yahoo.highPrice(), yahoo.lowPrice(),
@@ -172,9 +177,9 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
                 yahoo.previousVolumeLots(), yahoo.amplitudePercent(), yahoo.innerVolumeLots(), yahoo.outerVolumeLots(),
                 yahoo.innerPercent(), yahoo.outerPercent(), yahoo.bidTotalLots(), yahoo.askTotalLots(), yahoo.levels());
 
-        assertThat(store.persist(malformed).status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.FAILED);
-        assertThat(store.persist(yahoo).status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
-        assertThat(store.persist(unknownSource).status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.FAILED);
+        assertThat(store.persist(malformed).status()).isEqualTo(OrderBookData.PersistStatus.FAILED);
+        assertThat(store.persist(yahoo).status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
+        assertThat(store.persist(unknownSource).status()).isEqualTo(OrderBookData.PersistStatus.FAILED);
         assertThat(jdbc.queryForObject("SELECT source FROM stock_intraday_order_book", String.class)).isEqualTo("YAHOO_TW");
     }
 
@@ -190,12 +195,12 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         CountDownLatch start = new CountDownLatch(1);
         ExecutorService workers = Executors.newFixedThreadPool(2);
         try {
-            Future<IntradayOrderBookSnapshotStore.PersistResult> fubonResult = workers.submit(() -> {
+            Future<OrderBookData.PersistResult> fubonResult = workers.submit(() -> {
                 ready.countDown();
                 if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("race start timed out");
                 return fubonStore.persist(fubon);
             });
-            Future<IntradayOrderBookSnapshotStore.PersistResult> yahooResult = workers.submit(() -> {
+            Future<OrderBookData.PersistResult> yahooResult = workers.submit(() -> {
                 ready.countDown();
                 if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("race start timed out");
                 return yahooStore.persist(olderYahoo);
@@ -203,10 +208,10 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
             assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
             start.countDown();
             assertThat(fubonResult.get(10, TimeUnit.SECONDS).status())
-                    .isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+                    .isEqualTo(OrderBookData.PersistStatus.APPLIED);
             assertThat(yahooResult.get(10, TimeUnit.SECONDS).status())
-                    .isIn(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED,
-                            IntradayOrderBookSnapshotStore.PersistStatus.STALE_OR_EQUAL);
+                    .isIn(OrderBookData.PersistStatus.APPLIED,
+                            OrderBookData.PersistStatus.STALE_OR_EQUAL);
         } finally {
             workers.shutdownNow();
         }
@@ -221,14 +226,14 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
     @Test
     void revisionFenceRejectsDelayedFubonCacheWriteAfterAcceptedNewerYahoo() throws Exception {
         var fubon = store.persist(snapshot("FUBON_BOOKS", "富邦名", "2026-08-21T05:00:00Z", "100", levels()));
-        assertThat(fubon.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
-        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
+        assertThat(fubon.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
+        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.WRITTEN);
         var yahoo = store.persist(snapshot("YAHOO_TW", "Yahoo 名", "2026-08-21T05:00:01Z", "101", levels()));
-        assertThat(yahoo.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+        assertThat(yahoo.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
         assertThat(yahoo.canonical().canonicalRevision()).isEqualTo(fubon.canonical().canonicalRevision() + 1);
-        assertThat(cache.writeStrictNewer(yahoo.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
+        assertThat(cache.writeStrictNewer(yahoo.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.WRITTEN);
 
-        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.REJECTED_STALE);
+        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.REJECTED_STALE);
         var payload = new ObjectMapper().readTree(redis.opsForValue().get(QuoteDetailCache.key("台股", "2330")));
         assertThat(payload.path("canonicalRevision").asText()).isEqualTo(Long.toString(yahoo.canonical().canonicalRevision()));
         assertThat(payload.path("snapshot").path("source").asText()).isEqualTo("YAHOO_TW");
@@ -241,11 +246,11 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
     void committedYahooRevisionWithRedisFailureCannotServeDelayedFubonPayload() throws Exception {
         var fubon = store.persist(snapshot("FUBON_BOOKS", "富邦名", "2026-08-21T05:00:00Z", "100", levels()));
         var yahoo = store.persist(snapshot("YAHOO_TW", "Yahoo 名", "2026-08-21T05:00:01Z", "101", levels()));
-        assertThat(fubon.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
-        assertThat(yahoo.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+        assertThat(fubon.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
+        assertThat(yahoo.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
         // Simulate Redis failing immediately after the accepted Yahoo DB transaction. A delayed old
         // payload can occupy an empty key, but the reader must compare its revision with PostgreSQL.
-        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(QuoteDetailCache.WriteOutcome.WRITTEN);
+        assertThat(cache.writeStrictNewer(fubon.canonical())).isEqualTo(OrderBookCacheData.WriteOutcome.WRITTEN);
         String beforeRead = redis.opsForValue().get(QuoteDetailCache.key("台股", "2330"));
 
         var result = new QuoteDetailReadService(cache, store).read("2330", "台股");
@@ -259,7 +264,7 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
     @Test
     void canonicalReadKeepsHeaderAndLevelsAtOneRepeatableReadRevisionDuringConcurrentWriter() throws Exception {
         var older = store.persist(snapshot("FUBON_BOOKS", "富邦舊名", "2026-08-21T05:00:00Z", "100", levels()));
-        assertThat(older.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+        assertThat(older.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
 
         CountDownLatch headerRead = new CountDownLatch(1);
         CountDownLatch allowLevelRead = new CountDownLatch(1);
@@ -267,22 +272,22 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         IntradayOrderBookSnapshotStore readerStore = new IntradayOrderBookSnapshotStore(
                 hookedJdbc, new DataSourceTransactionManager(dataSource));
         var newerLevels = java.util.stream.IntStream.rangeClosed(1, 5)
-                .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
+                .mapToObj(level -> new QuoteDetailData.OrderBookLevel(level,
                         BigDecimal.valueOf(300 - level), (long) level,
                         BigDecimal.valueOf(301 + level), (long) (level + 10)))
                 .toList();
         ExecutorService workers = Executors.newSingleThreadExecutor();
         try {
-            Future<IntradayOrderBookSnapshotStore.CanonicalLookup> reader = workers.submit(
+            Future<OrderBookData.CanonicalLookup> reader = workers.submit(
                     () -> readerStore.findCanonical("2330", "台股"));
             assertThat(headerRead.await(5, TimeUnit.SECONDS)).isTrue();
 
             var newer = store.persist(snapshot("FUBON_BOOKS", "富邦新名", "2026-08-21T05:00:01Z", "101", newerLevels));
-            assertThat(newer.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+            assertThat(newer.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
             allowLevelRead.countDown();
 
             var result = reader.get(10, TimeUnit.SECONDS);
-            assertThat(result.status()).isEqualTo(IntradayOrderBookSnapshotStore.ReadStatus.FOUND);
+            assertThat(result.status()).isEqualTo(OrderBookData.ReadStatus.FOUND);
             assertThat(result.canonical().canonicalRevision()).isEqualTo(older.canonical().canonicalRevision());
             assertThat(result.canonical().snapshot().stockName()).isEqualTo("台積電");
             assertThat(jdbc.queryForObject("SELECT name FROM stock WHERE code='2330' AND market='台股'", String.class))
@@ -297,8 +302,8 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
     @Test
     void readerReturnsCompleteRPlusOneCommittedBetweenItsHeaderAndFullCanonicalReadWithoutCacheRepair() {
         var fubon = store.persist(snapshot("FUBON_BOOKS", "富邦名", "2026-08-21T05:00:00Z", "100", levels()));
-        assertThat(fubon.status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
-        AtomicReference<IntradayOrderBookSnapshotStore.PersistResult> yahooWrite = new AtomicReference<>();
+        assertThat(fubon.status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
+        AtomicReference<OrderBookData.PersistResult> yahooWrite = new AtomicReference<>();
         IntradayOrderBookSnapshotStore writerStore = store;
         IntradayOrderBookSnapshotStore readerStore = new AdvanceAfterRevisionStore(
                 jdbc, new DataSourceTransactionManager(dataSource), () -> yahooWrite.set(writerStore.persist(
@@ -307,7 +312,7 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         var result = new QuoteDetailReadService(cache, readerStore).read("2330", "台股");
 
         assertThat(yahooWrite.get()).isNotNull();
-        assertThat(yahooWrite.get().status()).isEqualTo(IntradayOrderBookSnapshotStore.PersistStatus.APPLIED);
+        assertThat(yahooWrite.get().status()).isEqualTo(OrderBookData.PersistStatus.APPLIED);
         assertThat(result.available()).isTrue();
         assertThat(result.source()).isEqualTo("YAHOO_TW");
         assertThat(result.price()).isEqualByComparingTo("101");
@@ -383,24 +388,24 @@ class QuoteDetailSnapshotPersistenceIntegrationTest {
         jdbc.execute(Files.readString(fallback).replaceAll("(?m)^--.*$", "").trim());
     }
 
-    private static List<TwQuoteDetailFetchClient.OrderBookLevel> levels() {
+    private static List<QuoteDetailData.OrderBookLevel> levels() {
         return java.util.stream.IntStream.rangeClosed(1, 5)
-                .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
+                .mapToObj(level -> new QuoteDetailData.OrderBookLevel(level,
                         BigDecimal.valueOf(100 - level), (long) level,
                         BigDecimal.valueOf(100 + level), (long) (level + 10)))
                 .toList();
     }
 
-    private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot(
-            String name, String sourceTime, String price, List<TwQuoteDetailFetchClient.OrderBookLevel> levels) {
+    private static QuoteDetailData.QuoteDetailResult snapshot(
+            String name, String sourceTime, String price, List<QuoteDetailData.OrderBookLevel> levels) {
         return snapshot("FUBON_BOOKS", name, sourceTime, price, levels);
     }
 
-    private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot(
+    private static QuoteDetailData.QuoteDetailResult snapshot(
             String source, String name, String sourceTime, String price,
-            List<TwQuoteDetailFetchClient.OrderBookLevel> levels) {
+            List<QuoteDetailData.OrderBookLevel> levels) {
         BigDecimal actual = new BigDecimal(price);
-        return new TwQuoteDetailFetchClient.QuoteDetailResult(
+        return new QuoteDetailData.QuoteDetailResult(
                 "2330", name, "台股", true, true, source, null,
                 Instant.parse(sourceTime), Instant.parse("2026-08-21T05:00:02Z"), "OPEN",
                 actual, BigDecimal.valueOf(99), BigDecimal.valueOf(100), BigDecimal.valueOf(101), BigDecimal.valueOf(98),

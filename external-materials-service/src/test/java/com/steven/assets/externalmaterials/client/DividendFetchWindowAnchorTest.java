@@ -1,7 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -11,7 +10,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -124,7 +123,7 @@ class DividendFetchWindowAnchorTest {
         var observations = fetcher.fetchObservations("2885", "台股", 10);
         var events = observations.get(0).events();
 
-        assertThat(events).extracting(DividendFetchClient.DividendEvent::exDividendDate)
+        assertThat(events).extracting(DividendData.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-18");
     }
 
@@ -157,7 +156,7 @@ class DividendFetchWindowAnchorTest {
 
         assertThat(capturedUris).noneMatch(uri -> uri.contains("end_date"));
         assertThat(scope.events())
-                .extracting(DividendFetchClient.DividendEvent::exRightsDate)
+                .extracting(DividendData.DividendEvent::exRightsDate)
                 .contains(to.minusDays(2).toString())
                 .doesNotContain(to.plusDays(5).toString());
     }

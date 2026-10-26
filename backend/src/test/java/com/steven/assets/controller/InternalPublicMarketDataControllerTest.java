@@ -1,5 +1,7 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.model.marketdata.ReadOnlyIntradayData;
+import com.steven.assets.model.marketdata.MarketDataResults;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.MarketDataService;
@@ -32,8 +34,8 @@ class InternalPublicMarketDataControllerTest {
 
     @Test
     void dividendReadonlyResultKeepsTheFullEnvelopeAndNeverUsesColdSyncMethod() throws Exception {
-        MarketDataService.DividendHistoryResult result = new MarketDataService.DividendHistoryResult(
-                "0050", "台股", "DB", "查無資料", List.of(new MarketDataService.DividendRow(
+        MarketDataResults.DividendHistoryResult result = new MarketDataResults.DividendHistoryResult(
+                "0050", "台股", "DB", "查無資料", List.of(new MarketDataResults.DividendRow(
                 2025, new BigDecimal("2.5"), BigDecimal.ZERO, "2025-01-15", new BigDecimal("1.2"),
                 "2025-02-10", null, 26, new BigDecimal("180"), "2025-01-20")));
         when(dividendHistoryService.findFromDbReadOnly("0050", "台股", 10)).thenReturn(result);
@@ -55,7 +57,7 @@ class InternalPublicMarketDataControllerTest {
     @Test
     void intradayBridgeRequiresDateAndOnlyProxiesSpecifiedReadonlyOutcome() throws Exception {
         when(readOnlyService.readIntradayTicks("2330", "台股", LocalDate.of(2026, 8, 24)))
-                .thenReturn(new PublicMarketDataReadOnlyService.ReadOnlyIntradayTicks(
+                .thenReturn(new ReadOnlyIntradayData.ReadOnlyIntradayTicks(
                         LocalDate.of(2026, 8, 24), "EMPTY", List.of()));
 
         mvc.perform(get("/internal/public-market-data/intraday-ticks-readonly")

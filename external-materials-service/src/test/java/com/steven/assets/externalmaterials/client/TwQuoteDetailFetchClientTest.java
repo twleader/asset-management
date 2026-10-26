@@ -1,8 +1,7 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -19,7 +18,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -31,9 +30,9 @@ class TwQuoteDetailFetchClientTest {
     void matchingTwoExchangeOnTwUrlIsFoundWithStrictCompleteFiveLevels() {
         ScriptedTransport transport = new ScriptedTransport(response(200, html(data("TWO", "2330", true))));
 
-        TwQuoteDetailFetchClient.YahooProbeOutcome outcome = client(transport).probeTw("2330");
+        QuoteDetailData.YahooProbeOutcome outcome = client(transport).probeTw("2330");
 
-        assertThat(outcome.kind()).isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+        assertThat(outcome.kind()).isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.FOUND);
         assertThat(outcome.snapshot().source()).isEqualTo("YAHOO_TW");
         assertThat(outcome.snapshot().marketStatus()).isEqualTo("OPEN");
         assertThat(outcome.snapshot().levels()).hasSize(5);
@@ -47,7 +46,7 @@ class TwQuoteDetailFetchClientTest {
         TwQuoteDetailFetchClient client = client(transport);
 
         assertThat(client.probeTw("2330").kind())
-                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.STRUCTURAL_MISS);
+                .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.STRUCTURAL_MISS);
         assertThat(client.fetch("2330", "台股").available()).isTrue();
         assertThat(transport.urls).containsExactly(
                 "https://tw.stock.yahoo.com/quote/2330.TW",
@@ -66,10 +65,10 @@ class TwQuoteDetailFetchClientTest {
                 data("TAI", "2330", true).replace("2026-08-26T03:00:00Z", "2026-08-25T03:00:00Z"))) {
             ScriptedTransport transport = new ScriptedTransport(response(200, html(malformed)));
             assertThat(client(transport).probeTw("2330").kind())
-                    .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                    .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
         }
         assertThat(client(new ScriptedTransport(response(429, "busy"))).probeTw("2330").kind())
-                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
     }
 
     @Test
@@ -79,9 +78,9 @@ class TwQuoteDetailFetchClientTest {
         String over = valid + " ".repeat(TwQuoteDetailFetchClient.MAX_BODY_BYTES + 1 - valid.getBytes(StandardCharsets.UTF_8).length);
 
         assertThat(client(new ScriptedTransport(response(200, under))).probeTw("2330").kind())
-                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+                .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.FOUND);
         assertThat(client(new ScriptedTransport(response(200, over))).probeTw("2330").kind())
-                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
     }
 
     @Test
@@ -90,7 +89,7 @@ class TwQuoteDetailFetchClientTest {
         TwQuoteDetailFetchClient client = client(transport);
 
         assertThat(client.probeTw("AAPL").kind())
-                .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
         assertThat(transport.urls).isEmpty();
         assertThat(TwQuoteDetailFetchClient.extractQuoteData("x\"quote\":{\"data\":{} x\"quote\":{\"data\":{}"))
                 .isNull();
@@ -115,16 +114,16 @@ class TwQuoteDetailFetchClientTest {
         TwQuoteDetailFetchClient client = new TwQuoteDetailFetchClient(transport, new ObjectMapper(),
                 Clock.fixed(NOW, ZoneOffset.UTC), Duration.ofMillis(100));
         ExecutorService callers = Executors.newFixedThreadPool(5);
-        List<Future<TwQuoteDetailFetchClient.YahooProbeOutcome>> outcomes = new ArrayList<>();
+        List<Future<QuoteDetailData.YahooProbeOutcome>> outcomes = new ArrayList<>();
         try {
             long started = System.nanoTime();
             for (int index = 0; index < 5; index++) {
                 outcomes.add(callers.submit(() -> client.probeTw("2330")));
             }
             assertThat(transport.firstFourStarted.await(1, TimeUnit.SECONDS)).isTrue();
-            for (Future<TwQuoteDetailFetchClient.YahooProbeOutcome> outcome : outcomes) {
+            for (Future<QuoteDetailData.YahooProbeOutcome> outcome : outcomes) {
                 assertThat(outcome.get(2, TimeUnit.SECONDS).kind())
-                        .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                        .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
             }
 
             // The fifth caller and a successor probe cannot turn a timed-out logical request into
@@ -132,21 +131,21 @@ class TwQuoteDetailFetchClientTest {
             assertThat(transport.calls).hasValue(4);
             assertThat(transport.active).hasValue(4);
             assertThat(client.probeTw("2330").kind())
-                    .isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
+                    .isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.TRANSIENT_OR_INVALID);
             assertThat(transport.calls).hasValue(4);
             assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
 
             transport.release.countDown();
             assertThat(transport.allPhysicalCallsEnded.await(2, TimeUnit.SECONDS)).isTrue();
-            TwQuoteDetailFetchClient.YahooProbeOutcome recovered = null;
+            QuoteDetailData.YahooProbeOutcome recovered = null;
             long recoveryDeadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
             while (System.nanoTime() < recoveryDeadline) {
                 recovered = client.probeTw("2330");
-                if (recovered.kind() == TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND) break;
+                if (recovered.kind() == QuoteDetailData.YahooProbeOutcome.Kind.FOUND) break;
                 Thread.yield();
             }
             assertThat(recovered).isNotNull();
-            assertThat(recovered.kind()).isEqualTo(TwQuoteDetailFetchClient.YahooProbeOutcome.Kind.FOUND);
+            assertThat(recovered.kind()).isEqualTo(QuoteDetailData.YahooProbeOutcome.Kind.FOUND);
             assertThat(transport.calls).hasValue(5);
         } finally {
             transport.release.countDown();

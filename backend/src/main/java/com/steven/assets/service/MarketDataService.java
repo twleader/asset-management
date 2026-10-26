@@ -1,17 +1,18 @@
 package com.steven.assets.service;
 
-import com.steven.assets.integration.fubon.FubonEtfHoldingsParser;
-import com.steven.assets.integration.fubon.FubonEtfHoldingsReasons;
+import com.steven.assets.service.port.MarketDataReadPort;
+import com.steven.assets.model.marketdata.MarketDataResults.DividendRateResult;
+import com.steven.assets.model.marketdata.MarketDataResults.EtfHoldingsResult;
+import com.steven.assets.model.marketdata.MarketDataResults.DividendHistoryResult;
+import com.steven.assets.model.marketdata.FubonEtfHoldingsParser;
+import com.steven.assets.model.marketdata.FubonEtfHoldingsReasons;
 import com.steven.assets.model.FubonEtfHoldingsSnapshot;
 import com.steven.assets.repository.FubonEtfHoldingsSnapshotRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.dto.QuoteDetailDto;
 import com.steven.assets.util.MarketZones;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
@@ -31,15 +32,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * 市場資料代理層：殖利率 / ETF 持股 / 股利歷史 / 台股年度休市全數透過 ext-materials-service `/internal/*` 取得。
  *
  * 對外 API（外部行情 API）已集中在 ext-materials-service `MarketDataFetchService`，
- * 本服務僅保留：(1) 公開 record 類型；(2) 1 小時殖利率快取；(3) 當年度短期假日快取；
+ * 本服務保留：(1) 窄 port 委派；(2) 1 小時殖利率快取；(3) 當年度短期假日快取；
  *            (4) 美股 / 英股假日純計算（無外部 API）；(5) ETF 白名單判斷（純計算）。
  */
 @Slf4j
 @Service
 public class MarketDataService {
-
-    /** Bound the internal pure-read bridge so a stalled peer remains a child-local failure. */
-    static final Duration QUOTE_DETAIL_TIMEOUT = Duration.ofSeconds(2);
 
     /** 美東時區，供 {@link #mostRecentCompletedUsTradingDay(Instant)} 換算「當地今天」。 */
     private static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
@@ -50,62 +48,17 @@ public class MarketDataService {
     /** 台股市場代碼字面值，供 {@link #getEtfHoldings(String, String)} 分流判斷（Task 390）。 */
     private static final String TW_MARKET = "台股";
 
-    private final WebClient priceServiceClient;
+    private final MarketDataReadPort external;
     private final StockRepository stockMasterRepo;
     private final FubonEtfHoldingsSnapshotRepository fubonEtfHoldingsSnapshotRepository;
 
-    public MarketDataService(@Value("${external-materials.base-url:http://external-materials-service:8080}")
-                             String externalUrl,
+    public MarketDataService(MarketDataReadPort external,
                              StockRepository stockMasterRepo,
                              FubonEtfHoldingsSnapshotRepository fubonEtfHoldingsSnapshotRepository) {
-        this.priceServiceClient = WebClient.builder().baseUrl(externalUrl).build();
+        this.external = external;
         this.stockMasterRepo = stockMasterRepo;
         this.fubonEtfHoldingsSnapshotRepository = fubonEtfHoldingsSnapshotRepository;
     }
-
-    public record DividendRateResult(
-            String stockCode, String market, BigDecimal dividendRate,
-            String source, String description, String stockName) {
-        public DividendRateResult(String stockCode, String market, BigDecimal dividendRate,
-                                  String source, String description) {
-            this(stockCode, market, dividendRate, source, description, null);
-        }
-    }
-
-    public record EtfHolding(String stockCode, String stockName, BigDecimal weight, BigDecimal shares) {}
-
-    public record EtfHoldingsResult(
-            String stockCode, String market, boolean supported, String source,
-            String asOfDate, String message, List<EtfHolding> holdings) {}
-
-    public record DividendRow(
-            Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
-            String exDividendDate, BigDecimal yieldPct,
-            String cashPaymentDate, String stockPaymentDate,
-            Integer fillDays, BigDecimal previousClose,
-            /**
-             * 除權日（Task 357／Requirement 94），ISO {@code yyyy-MM-dd} 或 null。
-             * 追加在既有欄位之後，供下游 bff／frontend 計算
-             * anchorDate = {@code exDividendDate ?? exRightsDate}（357.3e-1／357.3e-2）。
-             */
-            String exRightsDate) {
-        /** Compatibility constructor：357 之前既有的完整形狀（不含除權日）。 */
-        public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
-                           String exDividendDate, BigDecimal yieldPct,
-                           String cashPaymentDate, String stockPaymentDate,
-                           Integer fillDays, BigDecimal previousClose) {
-            this(year, cashDividend, stockDividend, exDividendDate, yieldPct,
-                    cashPaymentDate, stockPaymentDate, fillDays, previousClose, null);
-        }
-
-        public DividendRow(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
-                           String exDividendDate, BigDecimal yieldPct) {
-            this(year, cashDividend, stockDividend, exDividendDate, yieldPct, null, null, null, null);
-        }
-    }
-
-    public record DividendHistoryResult(
-            String stockCode, String market, String source, String message, List<DividendRow> rows) {}
 
     public record PriceResult(
             String stockCode, String market, BigDecimal price,
@@ -128,9 +81,7 @@ public class MarketDataService {
 
     public QuoteDetailDto.Response getQuoteDetail(String stockCode, String market) {
         try {
-            QuoteDetailDto.Response result = priceServiceClient.get().uri(uriBuilder -> uriBuilder.path("/internal/quote-detail")
-                            .queryParam("code", stockCode).queryParam("market", market).build())
-                    .retrieve().bodyToMono(QuoteDetailDto.Response.class).timeout(QUOTE_DETAIL_TIMEOUT).block();
+            QuoteDetailDto.Response result = external.quoteDetail(stockCode, market);
             if (approvedQuoteDetailSnapshot(result, stockCode, market)) return result;
             if (result != null && !result.supported()) return unavailable(stockCode, market, false, "此市場不支援行情五檔");
         } catch (Exception e) {
@@ -196,12 +147,7 @@ public class MarketDataService {
 
         DividendRateResult result;
         try {
-            result = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/dividend-rate")
-                            .queryParam("code", stockCode).queryParam("market", market).build())
-                    .retrieve()
-                    .bodyToMono(DividendRateResult.class)
-                    .block();
+            result = external.dividendRate(stockCode, market);
             if (result == null) {
                 result = new DividendRateResult(stockCode, market, null, "N/A", "查無配息資料", null);
             }
@@ -237,12 +183,7 @@ public class MarketDataService {
             return getTwEtfHoldingsFromFubonSnapshot(stockCode, market);
         }
         try {
-            EtfHoldingsResult r = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/etf-holdings")
-                            .queryParam("code", stockCode).queryParam("market", market).build())
-                    .retrieve()
-                    .bodyToMono(EtfHoldingsResult.class)
-                    .block();
+            EtfHoldingsResult r = external.etfHoldings(stockCode, market);
             if (r != null) return r;
         } catch (Exception e) {
             log.warn("呼叫 /internal/etf-holdings 失敗 {} {}: {}", market, stockCode, e.getMessage());
@@ -282,13 +223,7 @@ public class MarketDataService {
 
     public DividendHistoryResult getDividendHistory(String stockCode, String market, int years) {
         try {
-            DividendHistoryResult r = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/dividend-history")
-                            .queryParam("code", stockCode).queryParam("market", market)
-                            .queryParam("years", years).build())
-                    .retrieve()
-                    .bodyToMono(DividendHistoryResult.class)
-                    .block();
+            DividendHistoryResult r = external.dividendHistory(stockCode, market, years);
             if (r != null) return r;
         } catch (Exception e) {
             log.warn("呼叫 /internal/dividend-history 失敗 {} {}: {}", market, stockCode, e.getMessage());
@@ -389,12 +324,7 @@ public class MarketDataService {
      */
     public boolean refreshTwClosureToday() {
         try {
-            Boolean closed = priceServiceClient.post()
-                    .uri("/internal/tw-closure/detect")
-                    .retrieve()
-                    .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                    .map(m -> Boolean.TRUE.equals(m.get("closedToday")))
-                    .block(Duration.ofSeconds(20));
+            Boolean closed = external.detectTwClosure();
             boolean closedToday = Boolean.TRUE.equals(closed);
             log.info("花費前置：即時偵測台股颱風假 closedToday={}", closedToday);
             return closedToday;
@@ -406,12 +336,7 @@ public class MarketDataService {
 
     private Map<String, String> fetchTwHolidaysFromExt(int year) {
         try {
-            Map<String, String> r = priceServiceClient.get()
-                    .uri(uriBuilder -> uriBuilder.path("/internal/tw-holidays")
-                            .queryParam("year", year).build())
-                    .retrieve()
-                    .bodyToMono(new ParameterizedTypeReference<Map<String, String>>() {})
-                    .block();
+            Map<String, String> r = external.twHolidays(year);
             return r != null ? r : Map.of();
         } catch (Exception e) {
             log.warn("呼叫 /internal/tw-holidays 失敗 year={}: {}", year, e.getMessage());

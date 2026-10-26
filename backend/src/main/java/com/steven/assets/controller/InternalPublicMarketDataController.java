@@ -1,5 +1,7 @@
 package com.steven.assets.controller;
 
+import com.steven.assets.model.marketdata.ReadOnlyIntradayData;
+import com.steven.assets.model.marketdata.MarketDataResults;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.MarketDataService;
 import com.steven.assets.service.PublicMarketDataReadOnlyService;
@@ -43,7 +45,7 @@ public class InternalPublicMarketDataController {
      * 保留完整 readonly dividend envelope；既有 /api/market-data/dividends-readonly 的 bare array 不變。
      */
     @GetMapping("/dividends-readonly-result")
-    public ResponseEntity<MarketDataService.DividendHistoryResult> dividendsReadOnlyResult(
+    public ResponseEntity<MarketDataResults.DividendHistoryResult> dividendsReadOnlyResult(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(defaultValue = "10") @Min(1) @Max(10) int years) {
@@ -52,7 +54,7 @@ public class InternalPublicMarketDataController {
 
     /** 指定日期的 read-only tick outcome；不能選日期、cold-start 或寫入。 */
     @GetMapping("/intraday-ticks-readonly")
-    public ResponseEntity<PublicMarketDataReadOnlyService.ReadOnlyIntradayTicks> intradayTicksReadOnly(
+    public ResponseEntity<ReadOnlyIntradayData.ReadOnlyIntradayTicks> intradayTicksReadOnly(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {

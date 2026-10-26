@@ -1,18 +1,11 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.EtfNavFetchClient;
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import org.springframework.beans.factory.ObjectProvider;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.stereotype.Service;
-
+import com.steven.assets.externalmaterials.model.DividendDates;
+import com.steven.assets.externalmaterials.service.port.TaiwanHolidaySourcePort;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -21,9 +14,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.time.DayOfWeek;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -33,6 +25,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
 
 /**
  * 殖利率 / ETF 持股 / 股利歷史 / 台股年度休市 / 股票名稱對外抓取（從 backend MarketDataService 搬遷至此）。
@@ -49,7 +48,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Service
-public class MarketDataFetchService {
+public class MarketDataFetchService implements TaiwanHolidaySourcePort {
 
     private static final String UA =
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "

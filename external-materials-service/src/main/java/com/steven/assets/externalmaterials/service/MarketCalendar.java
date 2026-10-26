@@ -1,9 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.service.port.TaiwanHolidaySourcePort;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -14,6 +11,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 /**
  * 交易日 / 國定假日判定（external-materials-service 內的權威）。
@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>假日來源：
  * <ul>
- *   <li>台股：委派 {@link MarketDataFetchService#getTwHolidays(int)}（TWSE 官方年度表優先；
+ *   <li>台股：委派 {@link TaiwanHolidaySourcePort#getTwHolidays(int)}（TWSE 官方年度表優先；
  *       尚未公布時使用完整 DGPA 行事曆暫行；兩者都不可用時保守視為交易日）。</li>
  *   <li>美股 / 英股：NYSE / LSE 法定規則純函式計算。</li>
  * </ul>
@@ -40,7 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MarketCalendar {
 
     private static final Duration TW_AUTHORITY_RETRY_INTERVAL = Duration.ofSeconds(30);
-    private final MarketDataFetchService marketData;
+    private final TaiwanHolidaySourcePort marketData;
     private final Clock clock;
     private final Map<Integer, Instant> twAuthorityRetryNotBefore = new ConcurrentHashMap<>();
 
@@ -49,11 +49,11 @@ public class MarketCalendar {
     private final Map<Integer, Set<String>> ukHolidayCache = new ConcurrentHashMap<>();
 
     @Autowired
-    public MarketCalendar(MarketDataFetchService marketData) {
+    public MarketCalendar(TaiwanHolidaySourcePort marketData) {
         this(marketData, Clock.systemUTC());
     }
 
-    MarketCalendar(MarketDataFetchService marketData, Clock clock) {
+    MarketCalendar(TaiwanHolidaySourcePort marketData, Clock clock) {
         this.marketData = marketData;
         this.clock = clock;
     }

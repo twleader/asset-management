@@ -1,18 +1,20 @@
 package com.steven.assets.externalmaterials.service;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
-
-import java.math.BigDecimal;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData.Candidate;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData.CanonicalIndex;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData.FindResult;
+import com.steven.assets.externalmaterials.model.marketdata.TaiexCanonicalData.PersistResult;
+import com.steven.assets.externalmaterials.service.port.TaiexCanonicalRepository;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * PostgreSQL-canonical one-row TAIEX realtime state.
@@ -23,7 +25,7 @@ import java.util.Optional;
  */
 @Slf4j
 @Component
-public class FubonTaiexIndexStore {
+public class FubonTaiexIndexStore implements TaiexCanonicalRepository {
 
     private static final String INDEX_CODE = "0000";
     private static final String EXCHANGE = "TWSE";
@@ -39,55 +41,6 @@ public class FubonTaiexIndexStore {
         this.writeTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.readTransaction = new TransactionTemplate(transactionManager);
         this.readTransaction.setReadOnly(true);
-    }
-
-    public enum PersistStatus { APPLIED, STALE_OR_EQUAL, FAILED }
-    public enum ReadStatus { FOUND, NOT_FOUND, FAILED }
-
-    /** Returned values came from PostgreSQL, never from an incoming raw SSE frame. */
-    public record CanonicalIndex(
-            String indexCode,
-            String providerSymbol,
-            String exchange,
-            LocalDate tradingDate,
-            Instant providerUpdatedAt,
-            BigDecimal indexPoint,
-            String source) {
-    }
-
-    public record Candidate(
-            String providerSymbol,
-            LocalDate tradingDate,
-            Instant providerUpdatedAt,
-            BigDecimal indexPoint) {
-    }
-
-    public record PersistResult(PersistStatus status, CanonicalIndex canonical) {
-        static PersistResult applied(CanonicalIndex row) {
-            return new PersistResult(PersistStatus.APPLIED, row);
-        }
-
-        static PersistResult stale(CanonicalIndex row) {
-            return new PersistResult(PersistStatus.STALE_OR_EQUAL, row);
-        }
-
-        static PersistResult failed() {
-            return new PersistResult(PersistStatus.FAILED, null);
-        }
-    }
-
-    public record FindResult(ReadStatus status, CanonicalIndex canonical) {
-        static FindResult found(CanonicalIndex row) {
-            return new FindResult(ReadStatus.FOUND, row);
-        }
-
-        static FindResult missing() {
-            return new FindResult(ReadStatus.NOT_FOUND, null);
-        }
-
-        static FindResult failed() {
-            return new FindResult(ReadStatus.FAILED, null);
-        }
     }
 
     public PersistResult persist(Candidate candidate) {

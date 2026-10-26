@@ -3,33 +3,29 @@ package com.steven.assets.externalmaterials.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseCacheData.CachedResponse;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseCacheData.WriteOutcome;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseRules;
+import com.steven.assets.externalmaterials.service.port.FubonResponseCachePort;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.List;
-import java.util.Optional;
-
 /** Dedicated DB-canonical Redis mirror for full normalized Fubon LIVE rows. */
 @Slf4j
 @Component
-public class FubonLiveResponseCache {
+public class FubonLiveResponseCache implements FubonResponseCachePort {
 
     private static final Duration TTL = Duration.ofHours(24);
     private static final DefaultRedisScript<String> WRITE = writeScript();
-
-    public enum WriteOutcome { WRITTEN, REJECTED_STALE, FAILED }
-
-    public record CachedResponse(
-            Instant receivedAt,
-            String batchId,
-            String countersJson,
-            String responseRowJson) {}
 
     private final StringRedisTemplate redis;
     private final ObjectMapper mapper;
@@ -44,7 +40,7 @@ public class FubonLiveResponseCache {
     }
 
     /** Uses only a DB-returned canonical row and never refreshes a stale key's TTL. */
-    public WriteOutcome writeStrictNewer(FubonLiveResponseStore.CanonicalResponse canonical) {
+    public WriteOutcome writeStrictNewer(FubonResponseData.CanonicalResponse canonical) {
         if (!validCanonical(canonical)) return WriteOutcome.FAILED;
         try {
             String receiptMicros = receiptMicros(canonical.receivedAt());
@@ -70,7 +66,7 @@ public class FubonLiveResponseCache {
 
     /** Pure candidate read.  Readers must still validate this exact receipt time against PostgreSQL. */
     public Optional<CachedResponse> find(String code, String market) {
-        if (!FubonLiveResponseStore.supportedIdentity(code, market)) return Optional.empty();
+        if (!FubonResponseRules.supportedIdentity(code, market)) return Optional.empty();
         try {
             String value = redis.opsForValue().get(key(market, code));
             if (value == null) return Optional.empty();
@@ -103,8 +99,8 @@ public class FubonLiveResponseCache {
         } catch (ArithmeticException overflow) { return null; }
     }
 
-    private static boolean validCanonical(FubonLiveResponseStore.CanonicalResponse row) {
-        return row != null && FubonLiveResponseStore.supportedIdentity(row.stockCode(), row.market())
+    private static boolean validCanonical(FubonResponseData.CanonicalResponse row) {
+        return row != null && FubonResponseRules.supportedIdentity(row.stockCode(), row.market())
                 && row.receivedAt() != null && row.receivedAt().equals(row.receivedAt().truncatedTo(ChronoUnit.MICROS))
                 && receiptMicros(row.receivedAt()) != null && row.batchId() != null && !row.batchId().isBlank()
                 && row.countersJson() != null && row.responseRowJson() != null;

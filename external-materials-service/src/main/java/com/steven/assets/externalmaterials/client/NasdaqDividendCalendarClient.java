@@ -2,9 +2,7 @@ package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -23,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 /**
  * Explicit-range upcoming dividend adapter backed by Nasdaq's date-scoped
@@ -86,7 +86,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
         ScopeResult result = cached.result();
         if (!result.complete()) return UpcomingScope.unavailable(result.errorReason());
         ScopeCalendar calendar = result.calendar();
-        List<DividendFetchClient.DividendEvent> events = calendar.bySymbol()
+        List<DividendData.DividendEvent> events = calendar.bySymbol()
                 .getOrDefault(stockCode.trim().toUpperCase(Locale.ROOT), List.of());
         return new UpcomingScope("NASDAQ_DIVIDEND_CALENDAR", from, to,
                 calendar.fetchedAt(), true, events, null,
@@ -95,7 +95,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
     }
 
     private ScopeCalendar load(LocalDate from, LocalDate to) {
-        Map<String, List<DividendFetchClient.DividendEvent>> bySymbol = new HashMap<>();
+        Map<String, List<DividendData.DividendEvent>> bySymbol = new HashMap<>();
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
             DayCalendar day = fetchDay(date);
             if (!day.complete()) throw new ScopeFetchException(day.errorReason());
@@ -103,7 +103,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
                 bySymbol.computeIfAbsent(event.symbol(), ignored -> new ArrayList<>()).add(event.event());
             }
         }
-        Map<String, List<DividendFetchClient.DividendEvent>> immutable = new HashMap<>();
+        Map<String, List<DividendData.DividendEvent>> immutable = new HashMap<>();
         bySymbol.forEach((symbol, events) -> immutable.put(symbol, List.copyOf(events)));
         return new ScopeCalendar(Map.copyOf(immutable), clock.instant());
     }
@@ -150,7 +150,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
                 }
                 LocalDate payment = parseDate(row.path("payment_Date").asText(null));
                 // US-only：Nasdaq dividend_Rate 只有現金股利，exRightsDate 恆 null。
-                events.add(new SymbolEvent(symbol, new DividendFetchClient.DividendEvent(
+                events.add(new SymbolEvent(symbol, new DividendData.DividendEvent(
                         exDate.getYear(), amount.setScale(4, RoundingMode.HALF_UP), BigDecimal.ZERO,
                         exDate.toString(), null, payment == null ? null : payment.toString(), null)));
             }
@@ -172,7 +172,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
         catch (RuntimeException e) { return null; }
     }
 
-    record SymbolEvent(String symbol, DividendFetchClient.DividendEvent event) {}
+    record SymbolEvent(String symbol, DividendData.DividendEvent event) {}
 
     record DayCalendar(boolean complete, List<SymbolEvent> events, String errorReason) {
         static DayCalendar complete(List<SymbolEvent> events) {
@@ -182,7 +182,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
     }
 
     private record ScopeKey(LocalDate from, LocalDate to, LocalDate observedDate) {}
-    private record ScopeCalendar(Map<String, List<DividendFetchClient.DividendEvent>> bySymbol,
+    private record ScopeCalendar(Map<String, List<DividendData.DividendEvent>> bySymbol,
                                  Instant fetchedAt) {}
 
     private record ScopeResult(ScopeCalendar calendar, String errorReason) {

@@ -1,5 +1,6 @@
 package com.steven.assets.integration.fubon;
 
+import com.steven.assets.model.marketdata.FubonEtfHoldingsParser;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.fasterxml.jackson.databind.ObjectMapper;

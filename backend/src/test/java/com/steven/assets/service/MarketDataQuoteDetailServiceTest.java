@@ -49,7 +49,7 @@ class MarketDataQuoteDetailServiceTest {
         });
         server.start();
         stalledRequestObserved = new CountDownLatch(1);
-        service = new MarketDataService("http://127.0.0.1:" + server.getAddress().getPort(), null, null);
+        service = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://127.0.0.1:" + server.getAddress().getPort()), null, null);
     }
 
     @AfterEach void stop() { server.stop(0); }
@@ -98,7 +98,6 @@ class MarketDataQuoteDetailServiceTest {
 
     @Test
     void stalledQuoteDetailBridge在嚴格兩秒後failSoft且不靠sleep() throws Exception {
-        assertThat(MarketDataService.QUOTE_DETAIL_TIMEOUT).isEqualTo(Duration.ofSeconds(2));
         CountDownLatch releaseResponse = new CountDownLatch(1);
         responseGate.set(releaseResponse);
         ExecutorService caller = Executors.newSingleThreadExecutor();

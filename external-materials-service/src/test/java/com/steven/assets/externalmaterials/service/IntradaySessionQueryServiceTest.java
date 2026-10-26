@@ -1,10 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -21,7 +18,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -30,8 +29,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 class IntradaySessionQueryServiceTest {
@@ -119,7 +118,7 @@ class IntradaySessionQueryServiceTest {
         when(ticks.getTicks("00881", "台股", day)).thenReturn(List.of());
         when(references.get(anyString(), anyString(), any())).thenReturn(Optional.empty());
         when(priceFetch.fetchTwSessionReference("00881", day)).thenReturn(Optional.of(
-                new PriceFetchClient.TwSessionReference("00881", day, new BigDecimal("50.55"), "TWSE_MIS_Y")));
+                new PriceData.TwSessionReference("00881", day, new BigDecimal("50.55"), "TWSE_MIS_Y")));
 
         var exact = service(at(day), Runnable::run).query("00881", "台股", day);
 
@@ -130,7 +129,7 @@ class IntradaySessionQueryServiceTest {
         reset(references, priceFetch);
         when(references.get(anyString(), anyString(), any())).thenReturn(Optional.empty());
         when(priceFetch.fetchTwSessionReference("00881", day)).thenReturn(Optional.of(
-                new PriceFetchClient.TwSessionReference("00881", day.plusDays(1), new BigDecimal("50.55"), "TWSE_MIS_Y")));
+                new PriceData.TwSessionReference("00881", day.plusDays(1), new BigDecimal("50.55"), "TWSE_MIS_Y")));
         var mismatch = service(at(day), Runnable::run).query("00881", "台股", day);
         assertThat(mismatch.sessionReferencePrice()).isNull();
         verify(references, never()).put(anyString(), anyString(), any(), any());
@@ -161,7 +160,7 @@ class IntradaySessionQueryServiceTest {
                 new IntradayTickStore.TickPoint("2025-01-02T09:15:00", new BigDecimal("50.10"))));
         when(references.get("00881", "台股", day)).thenReturn(Optional.empty());
         when(priceFetch.fetchTwSessionReference("00881", day)).thenReturn(Optional.of(
-                new PriceFetchClient.TwSessionReference("00881", day, new BigDecimal("50.55"), "TWSE_MIS_Y")));
+                new PriceData.TwSessionReference("00881", day, new BigDecimal("50.55"), "TWSE_MIS_Y")));
 
         var session = service(at(day), Runnable::run).query("00881", "台股", day);
 

@@ -1,7 +1,8 @@
 package com.steven.assets.externalmaterials.service;
 
-import java.util.function.Consumer;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public interface FubonStockPushStream {
     void start(Consumer<FubonMarketData.StockEvent> consumer);

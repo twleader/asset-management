@@ -2,7 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import java.time.LocalDate;
 import java.util.List;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 public interface FubonMarketDataPort {
     DividendBatch dividends(List<String> symbols, LocalDate queryDate);

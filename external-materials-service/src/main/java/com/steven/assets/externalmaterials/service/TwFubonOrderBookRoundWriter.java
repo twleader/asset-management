@@ -1,14 +1,17 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookRules;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
+import com.steven.assets.externalmaterials.service.port.OrderBookCachePort;
+import com.steven.assets.externalmaterials.service.port.OrderBookRepository;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
 
 /**
  * Independent, single-flight sink for same-round Fubon best-five snapshots.
@@ -21,22 +24,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class TwFubonOrderBookRoundWriter {
 
     private final ExecutorService executor;
-    private final IntradayOrderBookSnapshotStore store;
-    private final QuoteDetailCache cache;
+    private final OrderBookRepository store;
+    private final OrderBookCachePort cache;
     private final AtomicBoolean running = new AtomicBoolean();
 
     public TwFubonOrderBookRoundWriter(
             @Qualifier("twFubonOrderBookWriterExecutor") ExecutorService executor,
-            IntradayOrderBookSnapshotStore store,
-            QuoteDetailCache cache) {
+            OrderBookRepository store,
+            OrderBookCachePort cache) {
         this.executor = executor;
         this.store = store;
         this.cache = cache;
     }
 
-    public void submit(Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> snapshots) {
+    public void submit(Map<String, QuoteDetailData.QuoteDetailResult> snapshots) {
         if (snapshots == null || snapshots.isEmpty() || !running.compareAndSet(false, true)) return;
-        final Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> immutable;
+        final Map<String, QuoteDetailData.QuoteDetailResult> immutable;
         try {
             immutable = Map.copyOf(new LinkedHashMap<>(snapshots));
         } catch (RuntimeException invalidInput) {
@@ -57,12 +60,12 @@ public class TwFubonOrderBookRoundWriter {
         }
     }
 
-    private void run(Map<String, TwQuoteDetailFetchClient.QuoteDetailResult> snapshots) {
-        for (TwQuoteDetailFetchClient.QuoteDetailResult snapshot : snapshots.values()) {
+    private void run(Map<String, QuoteDetailData.QuoteDetailResult> snapshots) {
+        for (QuoteDetailData.QuoteDetailResult snapshot : snapshots.values()) {
             try {
-                if (!store.isPersistable(snapshot)) continue;
-                IntradayOrderBookSnapshotStore.PersistResult persisted = store.persist(snapshot);
-                if (persisted.status() == IntradayOrderBookSnapshotStore.PersistStatus.FAILED
+                if (!OrderBookRules.isPersistable(snapshot)) continue;
+                OrderBookData.PersistResult persisted = store.persist(snapshot);
+                if (persisted.status() == OrderBookData.PersistStatus.FAILED
                         || persisted.canonical() == null) {
                     continue;
                 }

@@ -1,8 +1,9 @@
 package com.steven.assets.externalmaterials.service;
 
-import org.springframework.stereotype.Component;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import org.springframework.stereotype.Component;
 
 @Component
 public class FubonMarketRunGate {

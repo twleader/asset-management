@@ -1,17 +1,16 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /**
  * The sole external-materials Jdbc writer for Task408 source facts.  It never

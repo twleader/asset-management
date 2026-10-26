@@ -1,14 +1,18 @@
-package com.steven.assets.externalmaterials.service;
+package com.steven.assets.externalmaterials.model.marketdata;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonFormat;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Versioned, independent cache contract. Dates/decimals remain exact strings in Redis Lua. */
 public final class FubonTechnicalCache {
@@ -69,7 +73,7 @@ public final class FubonTechnicalCache {
             result.put(name, group.available()
                     ? new Group(group.payload(), group.sourceDate(), null, group.parameters(),
                     hash(name, group.payload()), observed,
-                    group.sourceDate().atStartOfDay(MarketClock.TW_ZONE).plusDays(7).toInstant(), attempt)
+                    group.sourceDate().atStartOfDay(java.time.ZoneId.of("Asia/Taipei")).plusDays(7).toInstant(), attempt)
                     : new Group(null, null, null, group.parameters(), null, null, null, attempt));
         }
         Document candidate = new Document(1, read.symbol(), MARKET, PROVIDER, manifest(), result);
@@ -126,8 +130,8 @@ public final class FubonTechnicalCache {
         LocalDate date = FubonMarketJson.date(node.get("sourceDate"));
         Instant observed = FubonMarketJson.instant(node.get("observedAt"));
         Instant expires = FubonMarketJson.instant(node.get("expiresAt"));
-        if (attempted.isBefore(observed) || date.isAfter(observed.atZone(MarketClock.TW_ZONE).toLocalDate())
-                || !expires.equals(date.atStartOfDay(MarketClock.TW_ZONE).plusDays(7).toInstant()))
+        if (attempted.isBefore(observed) || date.isAfter(observed.atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate())
+                || !expires.equals(date.atStartOfDay(java.time.ZoneId.of("Asia/Taipei")).plusDays(7).toInstant()))
             throw FubonMarketJson.invalid();
         var temporary = FubonMarketJson.MAPPER.createObjectNode();
         temporary.put("status", "AVAILABLE").putNull("reason").put("sourceDate", date.toString()).putNull("sourceTimestamp");

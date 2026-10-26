@@ -28,6 +28,22 @@
 
 採用標準分層架構：Controller → Service → Repository → Entity
 
+### Requirement 198／Task 513：既有架構符規重構
+
+本次以最新 main 為基準，完整檢視 active source 的依賴與資料流，修復已確認的分層違規；不把尚未執行的歷史規格當作程式證據。
+
+`NewsHeadlineController` 委派新聞查詢 Service；它負責台北日界的半開區間、fetched／published 選擇、類別篩選與原排序。`FundNavController` 委派基金主檔 application service 及維護 service；Repository、銀行關聯、CRUD／active、基準日 NAV／配息 enrichment 不留在 Controller。固定 NAV／配息 refresh／backfill 移至窄 port 的 HTTP adapter，保留原 method/path/query、回應及失敗處理。
+
+`MarketDataController`、`MacroHistoryController` 的八種 JPA 歷史 Entity 由不可變 DTO 投影取代；股票、匯率、商品、台日韓 GDP、台股及海外指數原可見屬性一一保留（包含 id、source metadata、成交量／金額與 null）。DTO 可由 mapper 或 service 產生，Controller 只作 transport 轉換；原 Service 內部需供計算使用的 Entity 查詢保持。沒有 migration 或新的資料副本。
+
+對已確認的業務流程直接依賴 IO，採 consumer 所需的窄 port 與中立 immutable value；HTTP／Redis／SDK adapter 留最外層，由組裝點注入。固定 internal operation 不擴為任意 URL 代理；pure read 與維護副作用方法保持分開；既有 transport 的期限、codec 與錯誤交由 adapter，業務 cache／fallback 規則仍在原 service。中立值不得反向依賴 controller 或具體 client。Python 的 raw capture 與消毒例外可移至中立模組，但 raw SDK payload 仍只在 adapter process 內，不輸出、不落地。
+
+本次保持金融規則與 API wire 相容，不趁重構更動 owner、租戶、來源、commit/Redis 次序、canonical comparator、retention、time/calendar gate、SDK admission、deadline、排程與 broker flags。Tasks401–404 的非架構需求仍以各自未完成狀態保存。BFF 本身是介面轉接層，合法 aggregation HTTP 不誤判為 business vendor I/O；既有 SSE passthrough 及所有具名例外維持。完整 findings、修正範圍與未能驗證部分記於本次任務。
+
+Task513 的實際窄介面位於 backend `service/port/`：行情六能力採 `MarketDataReadPort`（取代本文件 Task404 規劃名稱 `InternalMarketDataPort`），其他 HTTP 能力分為 `HistoricalDataPort`、`MacroDataPort`、`ReadOnlyIntradayPort`、`DividendSyncPort`、`PriceRefreshPort`、`CrawlerRunPort`、`FundMaintenancePort`、`TechnicalHistoryBackfillPort`，Redis 由 `PriceCacheReadPort` 與 `CooldownStorePort` 隔離。HTTP adapter 在 `integration/marketdata`、`integration/crawler`、`integration/fund` 或既有 client，neutral records／ETF parser 在 `model/marketdata`。此命名修訂不宣稱 Task404 其餘 readiness／富邦 writer 規劃完成。
+
+external-materials 的 14 個 `service/port` 由原 client／store／cache／writer 直接實作，共享 DTO、純驗證及 technical JSON codec 位於 `model/marketdata`。Python 的 12 個窄 Protocol 位於 `ports.py`，captures、errors、raw_values、payload_limits、config_values、session_identity 為中立契約／純 helper；app 與 SDK／order-results outer adapter 才知道具體 gateway。原 outer imports 以 re-export 維持相容，core 不藉 re-export 反向依賴 gateway 或 mounted-file loader。
+
 ```
 com.steven.assets/
 ├── controller/          # REST endpoints, request/response mapping

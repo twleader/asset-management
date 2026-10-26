@@ -2,20 +2,11 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.transaction.interceptor.TransactionProxyFactoryBean;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
-
-import javax.sql.DataSource;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.service.port.FubonNormalizedQuotePort;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +15,18 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
-
+import javax.sql.DataSource;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.interceptor.TransactionProxyFactoryBean;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
@@ -67,17 +69,17 @@ class TwLivePersistencePgRedisIntegrationTest {
                 FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
                 when(fubon.fetch(anyList())).thenReturn(
                         batch(appliedRaw), batch(staleRaw), batch(dbFailedRaw));
-                @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> provider = mock(ObjectProvider.class);
+                @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuotePort> provider = mock(ObjectProvider.class);
                 when(provider.getIfAvailable()).thenReturn(fubon);
                 PriceFetchClient prices = mock(PriceFetchClient.class);
-                when(prices.fetchTwBatch(anyList())).thenReturn(new PriceFetchClient.TwQuoteBatchSummary(
+                when(prices.fetchTwBatch(anyList())).thenReturn(new PriceData.TwQuoteBatchSummary(
                         java.util.Map.of(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of(),
                         java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), 0, 0));
                 when(prices.getYahooTwLivePrice("2330")).thenReturn(Optional.empty());
                 MarketClock clock = mock(MarketClock.class);
                 when(clock.isTwMarketOpenKnown()).thenReturn(Optional.of(true));
                 TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(
-                        clock, prices, provider, source, writer, new TwLiveQuoteOutcomeCounters(), true, true);
+                        clock, prices, provider, source, source, writer, new TwLiveQuoteOutcomeCounters(), true, true);
 
                 // The database transaction applies, but a wrong Redis key type makes Lua fail before any cache mutation.
                 redis.opsForList().rightPush("price:台股:2330", "wrong-type");
@@ -111,8 +113,8 @@ class TwLivePersistencePgRedisIntegrationTest {
         }
     }
 
-    private static FubonNormalizedQuoteClient.BatchResult batch(PriceResult result) {
-        return new FubonNormalizedQuoteClient.BatchResult(FubonNormalizedQuoteClient.BatchStatus.SUCCESS,
+    private static NormalizedQuoteData.BatchResult batch(PriceResult result) {
+        return new NormalizedQuoteData.BatchResult(NormalizedQuoteData.BatchStatus.SUCCESS,
                 List.of(new ProviderTimedPriceObservation(result, result.tradingDate(), result.freshnessInstant())), 1, 0);
     }
 

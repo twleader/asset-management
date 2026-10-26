@@ -11,7 +11,8 @@ from .accounting_normalization import (
     verify_optional_identity,
 )
 from .normalization import TAIPEI, instant, require_fields, signed_integer, strict_vendor_date, utc_now
-from .sdk_gateway import SdkGateway, raw_field
+from .ports import SettlementReader
+from .raw_values import raw_field
 
 
 AMOUNT_FIELDS = {
@@ -32,7 +33,7 @@ class SettlementError(ValueError):
 class SettlementService:
     """Parse source observations without claiming the undocumented 3d range is complete."""
 
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now) -> None:
+    def __init__(self, gateway: SettlementReader, *, now: Callable[[], datetime] = utc_now) -> None:
         self._gateway, self._now = gateway, now
 
     def read(self) -> dict[str, object]:

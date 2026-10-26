@@ -2,8 +2,7 @@ package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -16,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -35,7 +34,7 @@ class PriceProducerTimestampTest {
                  "indicators":{"quote":[{"open":[100.50]}]}}
                 """.formatted(epoch));
 
-        PriceFetchClient.PriceResult quote = PriceFetchClient
+        PriceData.PriceResult quote = PriceFetchClient
                 .parseYahooLsePrice("CSPX", result).orElseThrow();
 
         assertThat(quote.freshnessInstant()).isEqualTo(Instant.ofEpochSecond(epoch));
@@ -56,7 +55,7 @@ class PriceProducerTimestampTest {
         when(http.send(any(HttpRequest.class), any())).thenAnswer(ignored -> response);
         CountingClock clock = new CountingClock(Instant.parse("2026-08-21T08:00:00Z"));
 
-        PriceFetchClient.PriceResult quote = client(http, clock)
+        PriceData.PriceResult quote = client(http, clock)
                 .getTwClosingPriceFromFinMind("0056", LocalDate.of(2026, 8, 21)).orElseThrow();
 
         assertThat(quote.tradingDate()).isEqualTo(LocalDate.of(2026, 8, 21));
@@ -93,7 +92,7 @@ class PriceProducerTimestampTest {
                  "open":[100,101],"high":[101,103],"low":[99,100]}]}}
                 """.formatted(earlier, latest));
 
-        PriceFetchClient.PriceResult quote = PriceFetchClient
+        PriceData.PriceResult quote = PriceFetchClient
                 .parseYahooTwLiveChart("2330", chart, now).orElseThrow();
 
         assertThat(quote.price()).isEqualByComparingTo("102");
@@ -138,7 +137,7 @@ class PriceProducerTimestampTest {
             }
         };
 
-        PriceFetchClient.PriceResult quote = client.getYahooTwLivePrice("2330").orElseThrow();
+        PriceData.PriceResult quote = client.getYahooTwLivePrice("2330").orElseThrow();
 
         assertThat(suffixes).containsExactly(".TW", ".TWO");
         assertThat(quote.price()).isEqualByComparingTo("101");

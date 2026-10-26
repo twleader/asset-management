@@ -1,5 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.FubonIntradayTechnical;
 import java.time.Instant;
 import java.time.LocalDate;

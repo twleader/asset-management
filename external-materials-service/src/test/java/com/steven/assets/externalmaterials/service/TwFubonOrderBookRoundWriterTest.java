@@ -1,14 +1,13 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -28,9 +27,9 @@ class TwFubonOrderBookRoundWriterTest {
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         var snapshot = snapshot("2026-08-21T05:00:00Z");
-        var canonical = new IntradayOrderBookSnapshotStore.CanonicalSnapshot(snapshot, 1L);
-        when(store.isPersistable(snapshot)).thenReturn(true);
-        when(store.persist(snapshot)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.applied(canonical));
+        var canonical = new OrderBookData.CanonicalSnapshot(snapshot, 1L);
+
+        when(store.persist(snapshot)).thenReturn(OrderBookData.PersistResult.applied(canonical));
 
         new TwFubonOrderBookRoundWriter(executor, store, cache).submit(Map.of("2330", snapshot));
 
@@ -44,15 +43,15 @@ class TwFubonOrderBookRoundWriterTest {
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         var stale = snapshot("2026-08-21T05:00:00Z");
-        var canonical = new IntradayOrderBookSnapshotStore.CanonicalSnapshot(
+        var canonical = new OrderBookData.CanonicalSnapshot(
                 snapshot("2026-08-21T05:00:00.000001Z"), 7L);
-        when(store.isPersistable(stale)).thenReturn(true);
-        when(store.persist(stale)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.stale(canonical));
+
+        when(store.persist(stale)).thenReturn(OrderBookData.PersistResult.stale(canonical));
 
         new TwFubonOrderBookRoundWriter(executor, store, cache).submit(Map.of("2330", stale));
 
         verify(cache).writeStrictNewer(canonical);
-        verify(cache, never()).writeStrictNewer(new IntradayOrderBookSnapshotStore.CanonicalSnapshot(stale, 1L));
+        verify(cache, never()).writeStrictNewer(new OrderBookData.CanonicalSnapshot(stale, 1L));
     }
 
     @Test
@@ -61,8 +60,8 @@ class TwFubonOrderBookRoundWriterTest {
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         var snapshot = snapshot("2026-08-21T05:00:00Z");
-        when(store.isPersistable(snapshot)).thenReturn(true);
-        when(store.persist(snapshot)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.failed());
+
+        when(store.persist(snapshot)).thenReturn(OrderBookData.PersistResult.failed());
 
         new TwFubonOrderBookRoundWriter(executor, store, cache).submit(Map.of("2330", snapshot));
 
@@ -94,13 +93,13 @@ class TwFubonOrderBookRoundWriterTest {
         return executor;
     }
 
-    private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot(String sourceTime) {
-        List<TwQuoteDetailFetchClient.OrderBookLevel> levels = java.util.stream.IntStream.rangeClosed(1, 5)
-                .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
+    private static QuoteDetailData.QuoteDetailResult snapshot(String sourceTime) {
+        List<QuoteDetailData.OrderBookLevel> levels = java.util.stream.IntStream.rangeClosed(1, 5)
+                .mapToObj(level -> new QuoteDetailData.OrderBookLevel(level,
                         BigDecimal.valueOf(100 - level), (long) level,
                         BigDecimal.valueOf(100 + level), (long) (level + 10)))
                 .toList();
-        return new TwQuoteDetailFetchClient.QuoteDetailResult(
+        return new QuoteDetailData.QuoteDetailResult(
                 "2330", "台積電", "台股", true, true, "FUBON_BOOKS", null,
                 Instant.parse(sourceTime), Instant.parse("2026-08-21T05:00:01Z"), "OPEN",
                 BigDecimal.valueOf(100), BigDecimal.valueOf(99), BigDecimal.valueOf(100),

@@ -2,11 +2,12 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Task408 dual-key Redis document. v1 bytes and decoder are intentionally elsewhere. */
 public final class FubonTechnicalV2Cache {

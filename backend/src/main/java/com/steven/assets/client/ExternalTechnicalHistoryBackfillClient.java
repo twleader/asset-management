@@ -1,6 +1,7 @@
 package com.steven.assets.client;
 
 import com.steven.assets.dto.TradingRadarTechnicalBackfillJobDto;
+import com.steven.assets.service.port.TechnicalHistoryBackfillPort;
 import com.steven.assets.integration.fubon.FubonConfigState;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -9,7 +10,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.Duration;
 
 @Component
-public class ExternalTechnicalHistoryBackfillClient {
+public class ExternalTechnicalHistoryBackfillClient implements TechnicalHistoryBackfillPort {
     private static final String TOKEN_HEADER = "X-Internal-Service-Token";
     private static final String BASE_PATH = "/internal/technical-indicators/history-backfill-jobs";
     private final WebClient client;
@@ -22,6 +23,7 @@ public class ExternalTechnicalHistoryBackfillClient {
         this.config = config;
     }
 
+    @Override
     public TradingRadarTechnicalBackfillJobDto start() {
         FubonConfigState.Snapshot snapshot = config.snapshot();
         if (snapshot.state() != FubonConfigState.State.READY) throw new IllegalStateException("FUBON_NOT_READY");
@@ -29,6 +31,7 @@ public class ExternalTechnicalHistoryBackfillClient {
                 .bodyToMono(TradingRadarTechnicalBackfillJobDto.class).block(Duration.ofSeconds(10));
     }
 
+    @Override
     public TradingRadarTechnicalBackfillJobDto get(String jobId) {
         FubonConfigState.Snapshot snapshot = config.snapshot();
         if (snapshot.state() != FubonConfigState.State.READY) throw new IllegalStateException("FUBON_NOT_READY");

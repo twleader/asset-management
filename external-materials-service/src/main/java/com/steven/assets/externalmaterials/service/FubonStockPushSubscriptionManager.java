@@ -1,14 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
 import jakarta.annotation.PreDestroy;
+import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import java.util.List;
-import java.util.Set;
-import java.time.Instant;
-import java.util.concurrent.atomic.AtomicBoolean;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Owns only stock desired-set renewal and the external stock consumer, never the index stream. */
 @Service

@@ -2,26 +2,25 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
-
-import javax.sql.DataSource;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseCacheData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-
+import javax.sql.DataSource;
+import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Real PostgreSQL/Redis receipt fencing for Task 380's full normalized Fubon response mirror. */
@@ -52,19 +51,19 @@ class FubonLiveResponseStorePgRedisIntegrationTest {
                 FubonLiveResponseCache cache = new FubonLiveResponseCache(redis, JSON);
                 FubonLiveResponseReadService bridge = new FubonLiveResponseReadService(cache, store, JSON);
 
-                FubonNormalizedQuoteClient.ValidatedEnvelope atomicFailure = envelope("atomic-failure", Map.of(
+                NormalizedQuoteData.ValidatedEnvelope atomicFailure = envelope("atomic-failure", Map.of(
                         "2330", successRow("2330", "100.00", "2026-08-24T02:00:00Z"),
                         "2317", ""));
                 assertThat(store.persist(atomicFailure, Instant.parse("2026-08-24T02:00:00.100001Z")).status())
-                        .isEqualTo(FubonLiveResponseStore.WriteStatus.FAILED);
+                        .isEqualTo(FubonResponseData.WriteStatus.FAILED);
                 assertThat(jdbc.queryForObject("SELECT count(*) FROM fubon_tw_live_quote_response", Integer.class)).isZero();
 
                 Instant receiptA = Instant.parse("2026-08-24T02:00:00.100001Z");
                 Instant receiptB = Instant.parse("2026-08-24T02:00:01.200002Z");
                 CountDownLatch aCommitted = new CountDownLatch(1);
                 CountDownLatch releaseAMirror = new CountDownLatch(1);
-                AtomicReference<FubonLiveResponseStore.PersistResult> persistedA = new AtomicReference<>();
-                AtomicReference<FubonLiveResponseCache.WriteOutcome> delayedOutcome = new AtomicReference<>();
+                AtomicReference<FubonResponseData.PersistResult> persistedA = new AtomicReference<>();
+                AtomicReference<FubonResponseCacheData.WriteOutcome> delayedOutcome = new AtomicReference<>();
                 Thread delayedA = new Thread(() -> {
                     persistedA.set(store.persist(envelope("batch-a", Map.of(
                             "2330", successRow("2330", "100.00", "2026-08-24T02:00:00Z"),
@@ -83,18 +82,18 @@ class FubonLiveResponseStorePgRedisIntegrationTest {
                 delayedA.start();
                 assertThat(aCommitted.await(3, TimeUnit.SECONDS)).isTrue();
 
-                FubonLiveResponseStore.PersistResult persistedB = store.persist(envelope("batch-b", Map.of(
+                FubonResponseData.PersistResult persistedB = store.persist(envelope("batch-b", Map.of(
                         "2330", successRow("2330", "101.50", "2026-08-24T02:00:01Z"),
                         "2317", failureRow("2317", "QUOTE_FAILED"))), receiptB);
-                assertThat(persistedB.status()).isEqualTo(FubonLiveResponseStore.WriteStatus.STORED);
+                assertThat(persistedB.status()).isEqualTo(FubonResponseData.WriteStatus.STORED);
                 assertThat(cache.writeStrictNewer(rowFor(persistedB, "2330")))
-                        .isEqualTo(FubonLiveResponseCache.WriteOutcome.WRITTEN);
+                        .isEqualTo(FubonResponseCacheData.WriteOutcome.WRITTEN);
                 releaseAMirror.countDown();
                 delayedA.join(3_000);
                 assertThat(delayedA.isAlive()).isFalse();
-                assertThat(delayedOutcome.get()).isEqualTo(FubonLiveResponseCache.WriteOutcome.REJECTED_STALE);
+                assertThat(delayedOutcome.get()).isEqualTo(FubonResponseCacheData.WriteOutcome.REJECTED_STALE);
 
-                FubonLiveResponseStore.CanonicalResponse canonical = store.find("2330", "台股").canonical();
+                FubonResponseData.CanonicalResponse canonical = store.find("2330", "台股").canonical();
                 assertThat(canonical.receivedAt()).isEqualTo(receiptB);
                 assertThat(canonical.batchId()).isEqualTo("batch-b");
                 JsonNode databaseRow = JSON.readTree(canonical.responseRowJson());
@@ -134,13 +133,13 @@ class FubonLiveResponseStorePgRedisIntegrationTest {
         }
     }
 
-    private static FubonLiveResponseStore.CanonicalResponse rowFor(
-            FubonLiveResponseStore.PersistResult result, String code) {
+    private static FubonResponseData.CanonicalResponse rowFor(
+            FubonResponseData.PersistResult result, String code) {
         return result.canonicalRows().stream().filter(row -> code.equals(row.stockCode())).findFirst().orElseThrow();
     }
 
-    private static FubonNormalizedQuoteClient.ValidatedEnvelope envelope(String batchId, Map<String, String> rows) {
-        return new FubonNormalizedQuoteClient.ValidatedEnvelope(batchId, counters(), new LinkedHashMap<>(rows));
+    private static NormalizedQuoteData.ValidatedEnvelope envelope(String batchId, Map<String, String> rows) {
+        return new NormalizedQuoteData.ValidatedEnvelope(batchId, counters(), new LinkedHashMap<>(rows));
     }
 
     private static String counters() {
@@ -170,7 +169,7 @@ class FubonLiveResponseStorePgRedisIntegrationTest {
                 + "\",\"quote\":null}";
     }
 
-    private static String mirrorPayload(FubonLiveResponseStore.CanonicalResponse canonical) throws Exception {
+    private static String mirrorPayload(FubonResponseData.CanonicalResponse canonical) throws Exception {
         return "{\"receivedAt\":\"" + canonical.receivedAt() + "\",\"receivedEpochMicros\":\""
                 + FubonLiveResponseCache.receiptMicros(canonical.receivedAt()) + "\",\"batchId\":\""
                 + canonical.batchId() + "\",\"counters\":" + canonical.countersJson() + ",\"responseRow\":"

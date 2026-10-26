@@ -1,11 +1,9 @@
 package com.steven.assets.externalmaterials.client;
 
-import com.steven.assets.externalmaterials.model.DividendDates;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.DividendDates;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -24,6 +22,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 /**
  * Current official TWSE/TPEx ex-right/ex-dividend announcement snapshot.
@@ -94,7 +94,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         });
         ScopeResult result = cached.result();
         if (!result.complete()) return UpcomingScope.unavailable(result.errorReason());
-        List<DividendFetchClient.DividendEvent> events = selectTarget(
+        List<DividendData.DividendEvent> events = selectTarget(
                 stockCode, from, to, result.events());
         return new UpcomingScope(PROVIDER, from, to, result.sourceAvailableAt(),
                 true, events, null, List.of(TWSE_URL, TPEX_URL));
@@ -190,26 +190,26 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
      * 純配股）→ 落 exRightsDate、exDividendDate 為 null。修正前不論 kind 為何一律塞進
      * exDividendDate，是除權日被誤標成除息日的原始缺陷之一。
      */
-    private static DividendFetchClient.DividendEvent toEvent(
+    private static DividendData.DividendEvent toEvent(
             LocalDate date, BigDecimal cash, BigDecimal stock, String kind) {
         String iso = date.toString();
         if (positive(cash) && positive(stock)) {
-            return new DividendFetchClient.DividendEvent(
+            return new DividendData.DividendEvent(
                     date.getYear(), cash, stock, iso, iso, null, null);
         }
         if (kind != null && kind.contains("息")) {
-            return new DividendFetchClient.DividendEvent(
+            return new DividendData.DividendEvent(
                     date.getYear(), cash, stock, iso, null, null, null);
         }
-        return new DividendFetchClient.DividendEvent(
+        return new DividendData.DividendEvent(
                 date.getYear(), cash, stock, null, iso, null, null);
     }
 
     @SafeVarargs
-    private static List<DividendFetchClient.DividendEvent> selectTarget(
+    private static List<DividendData.DividendEvent> selectTarget(
             String stockCode, LocalDate from, LocalDate to, List<OfficialEvent>... sources) {
         String target = stockCode.trim().toUpperCase(Locale.ROOT);
-        Map<LocalDate, DividendFetchClient.DividendEvent> byDate = new LinkedHashMap<>();
+        Map<LocalDate, DividendData.DividendEvent> byDate = new LinkedHashMap<>();
         for (List<OfficialEvent> source : sources) {
             for (OfficialEvent event : source) {
                 // 357.2e：純配股列的 exDividendDate 拆分後為 null，dedupe key 必須改用
@@ -220,7 +220,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
                         || date.isBefore(from) || date.isAfter(to)) {
                     continue;
                 }
-                DividendFetchClient.DividendEvent existing = byDate.putIfAbsent(date, event.event());
+                DividendData.DividendEvent existing = byDate.putIfAbsent(date, event.event());
                 if (existing != null && !existing.equals(event.event())) {
                     throw new IllegalStateException("TWSE/TPEx 同日事件互相矛盾 code=" + target
                             + " date=" + date);
@@ -231,7 +231,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
     }
 
     /** 算術本體委派 {@link DividendDates#anchorDate}；本 module 內只有那一份實作。 */
-    private static LocalDate anchorDate(DividendFetchClient.DividendEvent event) {
+    private static LocalDate anchorDate(DividendData.DividendEvent event) {
         return DividendDates.anchorDate(
                 parseDateOrNull(event.exDividendDate()), parseDateOrNull(event.exRightsDate()));
     }
@@ -310,7 +310,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
     }
 
-    private record OfficialEvent(String code, DividendFetchClient.DividendEvent event) {}
+    private record OfficialEvent(String code, DividendData.DividendEvent event) {}
     private record OfficialPayload(List<OfficialEvent> events, Instant sourceAvailableAt) {}
 
     private record ScopeKey(LocalDate from, LocalDate to, LocalDate observedDate) {}

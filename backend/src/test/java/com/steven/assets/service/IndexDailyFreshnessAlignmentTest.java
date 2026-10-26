@@ -53,7 +53,7 @@ class IndexDailyFreshnessAlignmentTest {
     @Mock MacroHistoryService macroHistoryService;
     @Mock UsIndexDailyHistoryRepository usDailyRepo;
 
-    private final MarketDataService marketDataService = new MarketDataService("http://unused", null, null);
+    private final MarketDataService marketDataService = new MarketDataService(new com.steven.assets.integration.marketdata.MarketDataReadHttpAdapter("http://unused"), null, null);
     private final Map<String, LocalDate> latestByCode = new HashMap<>();
     private IndexDailyRefreshScheduler scheduler;
 

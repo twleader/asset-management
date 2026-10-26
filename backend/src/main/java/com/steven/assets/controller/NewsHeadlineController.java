@@ -1,17 +1,13 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.dto.NewsHeadlineDto;
-import com.steven.assets.model.News;
-import com.steven.assets.repository.NewsHeadlineRepository;
-import com.steven.assets.util.MarketZones;
+import com.steven.assets.service.NewsHeadlineQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
-import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -23,7 +19,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class NewsHeadlineController {
 
-    private final NewsHeadlineRepository repo;
+    private final NewsHeadlineQueryService headlines;
 
     /**
      * GET /api/news-headlines?date=YYYY-MM-DD&dateField=fetched|published&category=
@@ -40,21 +36,6 @@ public class NewsHeadlineController {
             @RequestParam(required = false, defaultValue = "fetched") String dateField,
             @RequestParam(required = false) String category) {
 
-        LocalDate day = (date == null || date.isBlank())
-                ? LocalDate.now(MarketZones.TW_ZONE)
-                : LocalDate.parse(date.trim());
-        Instant from = day.atStartOfDay(MarketZones.TW_ZONE).toInstant();
-        Instant to = day.plusDays(1).atStartOfDay(MarketZones.TW_ZONE).toInstant();
-
-        boolean byPublished = "published".equalsIgnoreCase(dateField == null ? "" : dateField.trim());
-        List<News> rows = byPublished
-                ? repo.findByPublishedAtGreaterThanEqualAndPublishedAtLessThanOrderByPublishedAtDesc(from, to)
-                : repo.findByFetchedAtGreaterThanEqualAndFetchedAtLessThanOrderByFetchedAtDesc(from, to);
-
-        String cat = category == null || category.isBlank() ? null : category.trim();
-        return rows.stream()
-                .filter(n -> cat == null || cat.equalsIgnoreCase(n.getCategory()))
-                .map(NewsHeadlineDto::from)
-                .toList();
+        return headlines.query(date, dateField, category);
     }
 }

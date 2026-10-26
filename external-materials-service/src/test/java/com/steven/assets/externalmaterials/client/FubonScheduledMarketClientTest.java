@@ -1,10 +1,10 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.sun.net.httpserver.HttpServer;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import org.junit.jupiter.api.Test;
+import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -18,7 +18,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.junit.jupiter.api.Test;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 import static com.steven.assets.externalmaterials.service.FubonMarketTestData.*;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;

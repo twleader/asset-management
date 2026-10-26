@@ -2,10 +2,14 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.service.port.FubonNormalizedQuotePort;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -13,7 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -34,33 +39,33 @@ class TwLiveQuoteDispatcherRadarScopeTest {
         StockSourceQuery source = radar("2330");
         PriceFetchClient prices = mock(PriceFetchClient.class);
         FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
-        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubonProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuotePort> fubonProvider = mock(ObjectProvider.class);
         when(fubonProvider.getIfAvailable()).thenReturn(fubon);
         PriceResult raw = quote("2330", "100.00");
-        when(fubon.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SUCCESS,
+        when(fubon.fetch(List.of("2330"))).thenReturn(new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SUCCESS,
                 List.of(new ProviderTimedPriceObservation(raw, raw.tradingDate(), raw.freshnessInstant())), 1, 0,
                 Map.of(), Map.of(), envelope("2330")));
-        StockSourceQuery.IntradayQuote canonical = mock(StockSourceQuery.IntradayQuote.class);
+        StockMarketData.IntradayQuote canonical = mock(StockMarketData.IntradayQuote.class);
         when(canonical.asPriceResult()).thenReturn(raw);
-        when(source.persistIntradayQuote(any())).thenReturn(new StockSourceQuery.IntradayPersistenceResult(
-                StockSourceQuery.IntradayPersistenceResult.Status.APPLIED, canonical));
+        when(source.persistIntradayQuote(any())).thenReturn(new StockMarketData.IntradayPersistenceResult(
+                StockMarketData.IntradayPersistenceResult.Status.APPLIED, canonical));
         PriceCacheWriter writer = mock(PriceCacheWriter.class);
-        when(writer.writeTaiwanLive(any(), eq(true))).thenReturn(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        when(writer.writeTaiwanLive(any(), eq(true))).thenReturn(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         FubonLiveResponseStore store = mock(FubonLiveResponseStore.class);
-        FubonLiveResponseStore.CanonicalResponse stored = new FubonLiveResponseStore.CanonicalResponse(
+        FubonResponseData.CanonicalResponse stored = new FubonResponseData.CanonicalResponse(
                 "2330", "台股", Instant.parse("2026-08-24T02:00:02Z"), "batch-radar", counters(),
                 "{\"stockCode\":\"2330\",\"status\":\"SUCCESS\",\"reason\":null,\"quote\":{}}");
         when(store.persist(any(), eq(Instant.parse("2026-08-24T02:00:02Z")))).thenReturn(
-                new FubonLiveResponseStore.PersistResult(FubonLiveResponseStore.WriteStatus.STORED, List.of(stored)));
+                new FubonResponseData.PersistResult(FubonResponseData.WriteStatus.STORED, List.of(stored)));
         FubonLiveResponseCache responseCache = mock(FubonLiveResponseCache.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> fubonBooks = mock(ObjectProvider.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBooks = mock(ObjectProvider.class);
         TwYahooOrderBookFallbackRoundWriter yahooBookWorker = mock(TwYahooOrderBookFallbackRoundWriter.class);
         when(yahooBooks.getIfAvailable()).thenReturn(yahooBookWorker);
 
-        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, prices, fubonProvider, source, writer,
+        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, prices, fubonProvider, source, source, writer,
                 new TwLiveQuoteOutcomeCounters(), fubonBooks, yahooBooks, store, responseCache, true, true);
         dispatcher.refresh(Set.of("2330", "2454", "AAPL", "0000"));
 
@@ -77,10 +82,10 @@ class TwLiveQuoteDispatcherRadarScopeTest {
         MarketClock clock = openClock();
         StockSourceQuery empty = radar();
         PriceFetchClient prices = mock(PriceFetchClient.class);
-        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubon = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuotePort> fubon = mock(ObjectProvider.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> fubonBooks = mock(ObjectProvider.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBooks = mock(ObjectProvider.class);
-        TwLiveQuoteDispatcher emptyDispatcher = new TwLiveQuoteDispatcher(clock, prices, fubon, empty,
+        TwLiveQuoteDispatcher emptyDispatcher = new TwLiveQuoteDispatcher(clock, prices, fubon, empty, empty,
                 mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(), fubonBooks, yahooBooks,
                 mock(FubonLiveResponseStore.class), mock(FubonLiveResponseCache.class), true, true);
 
@@ -91,7 +96,7 @@ class TwLiveQuoteDispatcherRadarScopeTest {
         doAnswer(invocation -> { throw new IllegalStateException("radar unavailable"); })
                 .when(failed).collectTwRadarCodes(any());
         TwLiveQuoteDispatcher failedDispatcher = new TwLiveQuoteDispatcher(openClock(), mock(PriceFetchClient.class),
-                mock(ObjectProvider.class), failed, mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(),
+                mock(ObjectProvider.class), failed, failed, mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(),
                 mock(FubonLiveResponseStore.class), mock(FubonLiveResponseCache.class), true, true);
         assertThat(failedDispatcher.refresh(Set.of("2330")).succeeded()).isZero();
     }
@@ -104,20 +109,20 @@ class TwLiveQuoteDispatcherRadarScopeTest {
         when(prices.fetchTwBatch(List.of("2330"))).thenReturn(emptyMis());
         when(prices.getYahooTwLivePrice("2330")).thenReturn(Optional.empty());
         FubonNormalizedQuoteClient fubon = mock(FubonNormalizedQuoteClient.class);
-        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuoteClient> fubonProvider = mock(ObjectProvider.class);
+        @SuppressWarnings("unchecked") ObjectProvider<FubonNormalizedQuotePort> fubonProvider = mock(ObjectProvider.class);
         when(fubonProvider.getIfAvailable()).thenReturn(fubon);
         PriceResult fubonPrice = quote("2330", "100.00");
-        when(fubon.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SUCCESS,
+        when(fubon.fetch(List.of("2330"))).thenReturn(new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SUCCESS,
                 List.of(new ProviderTimedPriceObservation(fubonPrice, fubonPrice.tradingDate(), fubonPrice.freshnessInstant())),
                 1, 0, Map.of(), Map.of(), envelope("2330")));
         FubonLiveResponseStore store = mock(FubonLiveResponseStore.class);
         when(store.persist(any(), eq(Instant.parse("2026-08-24T02:00:02Z"))))
-                .thenReturn(new FubonLiveResponseStore.PersistResult(FubonLiveResponseStore.WriteStatus.FAILED, List.of()));
+                .thenReturn(new FubonResponseData.PersistResult(FubonResponseData.WriteStatus.FAILED, List.of()));
         @SuppressWarnings("unchecked") ObjectProvider<TwFubonOrderBookRoundWriter> fubonBooks = mock(ObjectProvider.class);
         @SuppressWarnings("unchecked") ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooBooks = mock(ObjectProvider.class);
 
-        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, prices, fubonProvider, source,
+        TwLiveQuoteDispatcher dispatcher = new TwLiveQuoteDispatcher(clock, prices, fubonProvider, source, source,
                 mock(PriceCacheWriter.class), new TwLiveQuoteOutcomeCounters(), fubonBooks, yahooBooks,
                 store, mock(FubonLiveResponseCache.class), true, true);
         dispatcher.refresh(Set.of("2330", "2454"));
@@ -146,8 +151,8 @@ class TwLiveQuoteDispatcherRadarScopeTest {
         return source;
     }
 
-    private static PriceFetchClient.TwQuoteBatchSummary emptyMis() {
-        return new PriceFetchClient.TwQuoteBatchSummary(Map.of(), Set.of(), Set.of(), Set.of(), Set.of(), Set.of(),
+    private static PriceData.TwQuoteBatchSummary emptyMis() {
+        return new PriceData.TwQuoteBatchSummary(Map.of(), Set.of(), Set.of(), Set.of(), Set.of(), Set.of(),
                 Set.of(), Set.of(), 0, 0);
     }
 
@@ -158,8 +163,8 @@ class TwLiveQuoteDispatcherRadarScopeTest {
                 LocalDate.of(2026, 8, 24), Instant.parse("2026-08-24T02:00:00Z"));
     }
 
-    private static FubonNormalizedQuoteClient.ValidatedEnvelope envelope(String code) {
-        return new FubonNormalizedQuoteClient.ValidatedEnvelope("batch-radar", counters(), Map.of(code,
+    private static NormalizedQuoteData.ValidatedEnvelope envelope(String code) {
+        return new NormalizedQuoteData.ValidatedEnvelope("batch-radar", counters(), Map.of(code,
                 "{\"stockCode\":\"" + code + "\",\"status\":\"SUCCESS\",\"reason\":null,\"quote\":{}}"));
     }
 

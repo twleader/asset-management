@@ -1,5 +1,7 @@
 package com.steven.assets.integration.fubon;
 
+import com.steven.assets.model.marketdata.FubonEtfHoldingsReasons;
+import com.steven.assets.model.marketdata.FubonEtfHoldingsParser;
 import com.steven.assets.model.FubonEtfHoldingsSnapshot;
 import com.steven.assets.repository.FubonEtfHoldingsSnapshotRepository;
 import com.steven.assets.repository.StockHoldingRepository;

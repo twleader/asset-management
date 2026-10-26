@@ -18,7 +18,8 @@ import time
 from uuid import uuid4
 
 from .normalization import TAIPEI, canonical_number, instant, observed_at, stock_code, strict_iso_date, utc_now
-from .sdk_gateway import SdkCallError, SdkGateway
+from .ports import TechnicalIndicatorReader
+from .errors import SdkCallError
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ MAX_TECHNICAL_ROWS = MAX_TECHNICAL_SPAN_DAYS + 1
 class TechnicalIndicatorService:
     """Fixed 365-day inclusive aggregate; no caller-controlled vendor method or parameters."""
 
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now,
+    def __init__(self, gateway: TechnicalIndicatorReader, *, now: Callable[[], datetime] = utc_now,
                  monotonic: Callable[[], float] = time.monotonic) -> None:
         self._gateway, self._now, self._monotonic = gateway, now, monotonic
 

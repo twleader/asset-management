@@ -1,20 +1,20 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
-import java.time.format.DateTimeFormatterBuilder;
-import java.math.BigDecimal;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Dedicated Task425 price-volume cache.  It is never a generic price/tick cache or DB writer. */
 @Repository

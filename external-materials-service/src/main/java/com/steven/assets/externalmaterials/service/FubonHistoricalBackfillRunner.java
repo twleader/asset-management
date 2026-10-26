@@ -2,19 +2,19 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.FubonMarketConfigState;
+import com.steven.assets.externalmaterials.model.marketdata.TaiwanRadarRules;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.ExitCodeGenerator;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Explicit, serial, auditable Task466 invocation. It never participates in normal service startup. */
 @Component
@@ -258,7 +258,7 @@ public class FubonHistoricalBackfillRunner implements ApplicationRunner, ExitCod
     }
     private static List<String> validatedScope(List<String> codes) {
         if (codes == null || codes.isEmpty() || codes.size() > 30 || !codes.equals(codes.stream().distinct().sorted().toList())
-                || codes.stream().anyMatch(code -> !StockSourceQuery.isTaiwanRadarCode(code) || !validSymbol(code)))
+                || codes.stream().anyMatch(code -> !TaiwanRadarRules.isTaiwanRadarCode(code) || !validSymbol(code)))
             throw new Unavailable("RADAR_INVALID", true);
         return List.copyOf(codes);
     }

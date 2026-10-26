@@ -1,14 +1,13 @@
 package com.steven.assets.externalmaterials.service;
 
 import java.time.Instant;
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** One-minute, cache-only consumer for the Fubon intraday technical endpoint. */
 @Service

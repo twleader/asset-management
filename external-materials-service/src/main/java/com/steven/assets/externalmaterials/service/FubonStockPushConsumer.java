@@ -1,24 +1,29 @@
 package com.steven.assets.externalmaterials.service;
 
-import org.springframework.stereotype.Service;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.service.port.PriceProjectionPort;
+import com.steven.assets.externalmaterials.service.port.StockMarketRepository;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.springframework.stereotype.Service;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Rechecks scope and time at consumption; removed/expired/closed packets never enter the writer. */
 @Service
 public class FubonStockPushConsumer {
     private final MarketClock clock;
     private final FubonRadarScope radar;
-    private final PriceCacheWriter writer;
-    private final StockSourceQuery source;
+    private final PriceProjectionPort writer;
+    private final StockMarketRepository source;
     // Only rows returned after the canonical service transaction committed enter this bounded map.
-    private final Map<String, StockSourceQuery.IntradayQuote> pendingRepairs = new HashMap<>();
+    private final Map<String, StockMarketData.IntradayQuote> pendingRepairs = new HashMap<>();
     private final Map<String, LongAdder> counters = new ConcurrentHashMap<>();
     private volatile Authorization authorization = new Authorization(Set.of(), Instant.EPOCH);
-    public FubonStockPushConsumer(MarketClock clock, FubonRadarScope radar, PriceCacheWriter writer, StockSourceQuery source) {
+    public FubonStockPushConsumer(MarketClock clock, FubonRadarScope radar, PriceProjectionPort writer, StockMarketRepository source) {
         this.clock = clock; this.radar = radar; this.writer = writer; this.source = source;
     }
     public synchronized void authorize(Collection<String> symbols, Instant validUntil) {
@@ -41,13 +46,13 @@ public class FubonStockPushConsumer {
                 if (captured != authorization || !commitAt.isBefore(captured.validUntil())
                         || !FubonStockPushContract.valid(event, commitAt)
                         || !clock.isTwMarketOpenKnown().orElse(false)) return count("DISABLED");
-                var raw = new com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult(
+                var raw = new com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult(
                         event.symbol(), MARKET, event.price(), null, null, STOCK_SOURCE, event.name(), null, null,
                         event.openPrice(), event.previousClose(), event.highPrice(), event.lowPrice(), null,
                         event.sourceDate(), event.tradeTime());
                 // The separate proxied service returns only after its database transaction completes.
                 var persisted = source.persistIntradayQuote(raw);
-                if (persisted == null || persisted.status() == StockSourceQuery.IntradayPersistenceResult.Status.FAILED
+                if (persisted == null || persisted.status() == StockMarketData.IntradayPersistenceResult.Status.FAILED
                         || persisted.canonical() == null) return count("DB_FAILED");
                 return count(project(persisted.canonical()).name());
             }
@@ -82,15 +87,15 @@ public class FubonStockPushConsumer {
             }
         } catch (RuntimeException failure) { count("REPAIR_FAILED"); }
     }
-    private PriceCacheWriter.CacheWriteOutcome project(StockSourceQuery.IntradayQuote canonical) {
+    private PriceProjectionData.CacheWriteOutcome project(StockMarketData.IntradayQuote canonical) {
         var result = canonical.asPriceResult();
-        PriceCacheWriter.CacheWriteOutcome outcome;
+        PriceProjectionData.CacheWriteOutcome outcome;
         try {
             outcome = writer.writeTaiwanLive(result,
                     STOCK_SOURCE.equals(result.source()) || "FUBON_INTRADAY".equals(result.source()));
-        } catch (RuntimeException failure) { outcome = PriceCacheWriter.CacheWriteOutcome.FAILED; }
-        if (outcome == null) outcome = PriceCacheWriter.CacheWriteOutcome.FAILED;
-        if (outcome == PriceCacheWriter.CacheWriteOutcome.FAILED) {
+        } catch (RuntimeException failure) { outcome = PriceProjectionData.CacheWriteOutcome.FAILED; }
+        if (outcome == null) outcome = PriceProjectionData.CacheWriteOutcome.FAILED;
+        if (outcome == PriceProjectionData.CacheWriteOutcome.FAILED) {
             if (pendingRepairs.size() < 300 || pendingRepairs.containsKey(canonical.stockCode()))
                 pendingRepairs.put(canonical.stockCode(), canonical);
         } else pendingRepairs.remove(canonical.stockCode());

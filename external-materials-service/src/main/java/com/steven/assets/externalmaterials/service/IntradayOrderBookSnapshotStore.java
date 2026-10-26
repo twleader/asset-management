@@ -1,23 +1,27 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.CanonicalLookup;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.CanonicalSnapshot;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.PersistResult;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.ReadStatus;
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData.RevisionLookup;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
+import com.steven.assets.externalmaterials.service.port.OrderBookRepository;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.regex.Pattern;
+import static com.steven.assets.externalmaterials.model.marketdata.OrderBookRules.*;
 
 /**
  * PostgreSQL is the sole canonical authority for a Taiwan five-level snapshot.
@@ -28,12 +32,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Component
-public class IntradayOrderBookSnapshotStore {
-
-    private static final String TAIWAN = "台股";
-    private static final String FUBON = "FUBON_BOOKS";
-    private static final String YAHOO = "YAHOO_TW";
-    private static final Pattern CODE = Pattern.compile("^[0-9]{4,6}[A-Z]?$");
+public class IntradayOrderBookSnapshotStore implements OrderBookRepository {
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate writeTransaction;
@@ -51,86 +50,11 @@ public class IntradayOrderBookSnapshotStore {
         this.readTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
 
-    public enum PersistStatus { APPLIED, STALE_OR_EQUAL, FAILED }
-    public enum ReadStatus { FOUND, NOT_FOUND, FAILED }
-
-    /** A typed full snapshot paired only with the revision assigned by PostgreSQL. */
-    public record CanonicalSnapshot(TwQuoteDetailFetchClient.QuoteDetailResult snapshot, long canonicalRevision) {}
-
-    public record PersistResult(PersistStatus status, CanonicalSnapshot canonical) {
-        static PersistResult applied(CanonicalSnapshot value) {
-            return new PersistResult(PersistStatus.APPLIED, value);
-        }
-
-        static PersistResult stale(CanonicalSnapshot value) {
-            return new PersistResult(PersistStatus.STALE_OR_EQUAL, value);
-        }
-
-        static PersistResult failed() {
-            return new PersistResult(PersistStatus.FAILED, null);
-        }
-    }
-
-    /** Header-only pure-read result; it distinguishes a DB failure from a normal miss. */
-    public record RevisionLookup(ReadStatus status, long canonicalRevision) {
-        static RevisionLookup found(long revision) { return new RevisionLookup(ReadStatus.FOUND, revision); }
-        static RevisionLookup missing() { return new RevisionLookup(ReadStatus.NOT_FOUND, 0L); }
-        static RevisionLookup failed() { return new RevisionLookup(ReadStatus.FAILED, 0L); }
-    }
-
-    /** Full pure-read result; callers must not treat a failed DB read as a cache hit. */
-    public record CanonicalLookup(ReadStatus status, CanonicalSnapshot canonical) {
-        static CanonicalLookup found(CanonicalSnapshot canonical) { return new CanonicalLookup(ReadStatus.FOUND, canonical); }
-        static CanonicalLookup missing() { return new CanonicalLookup(ReadStatus.NOT_FOUND, null); }
-        static CanonicalLookup failed() { return new CanonicalLookup(ReadStatus.FAILED, null); }
-    }
-
-    /** Validates every value before it can reach the canonical write transaction. */
-    public boolean isPersistable(TwQuoteDetailFetchClient.QuoteDetailResult snapshot) {
-        if (snapshot == null || !snapshot.supported() || !snapshot.available()
-                || !TAIWAN.equals(snapshot.market()) || !allowedSource(snapshot.source())
-                || !"OPEN".equals(snapshot.marketStatus()) || snapshot.stockCode() == null
-                || !CODE.matcher(snapshot.stockCode()).matches() || "0000".equals(snapshot.stockCode())
-                || snapshot.stockName() == null || snapshot.stockName().isBlank()
-                || snapshot.stockName().trim().equalsIgnoreCase(snapshot.stockCode())
-                || snapshot.sourceTime() == null || snapshot.sourceTime().isBefore(Instant.EPOCH)
-                || !hasMicrosecondPrecision(snapshot.sourceTime()) || snapshot.fetchedAt() == null
-                || !validPositive(snapshot.price()) || !validPositive(snapshot.previousClose())
-                || !validPositiveOrNull(snapshot.openPrice()) || !validPositiveOrNull(snapshot.highPrice())
-                || !validPositiveOrNull(snapshot.lowPrice()) || !validPositiveOrNull(snapshot.averagePrice())
-                || !validNonNegativeOrNull(snapshot.turnoverYi()) || !validNonNegativeOrNull(snapshot.volumeLots())
-                || !validNonNegativeOrNull(snapshot.previousVolumeLots())
-                || !validNonNegativeOrNull(snapshot.innerVolumeLots())
-                || !validNonNegativeOrNull(snapshot.outerVolumeLots())
-                || snapshot.levels() == null || snapshot.levels().size() != 5) {
-            return false;
-        }
-        if (snapshot.highPrice() != null && snapshot.lowPrice() != null
-                && snapshot.highPrice().compareTo(snapshot.lowPrice()) < 0) return false;
-        Set<BigDecimal> bidPrices = new HashSet<>();
-        Set<BigDecimal> askPrices = new HashSet<>();
-        BigDecimal previousBid = null;
-        BigDecimal previousAsk = null;
-        for (int index = 0; index < 5; index++) {
-            TwQuoteDetailFetchClient.OrderBookLevel level = snapshot.levels().get(index);
-            if (level == null || level.level() != index + 1
-                    || !validCompleteSide(level.bidPrice(), level.bidVolumeLots(), bidPrices)
-                    || !validCompleteSide(level.askPrice(), level.askVolumeLots(), askPrices)
-                    || (previousBid != null && previousBid.compareTo(level.bidPrice()) <= 0)
-                    || (previousAsk != null && previousAsk.compareTo(level.askPrice()) >= 0)) {
-                return false;
-            }
-            previousBid = level.bidPrice();
-            previousAsk = level.askPrice();
-        }
-        return true;
-    }
-
     /**
      * Applies a candidate atomically and returns the committed canonical row plus its revision.
      * A valid existing stock master is required; header and all five levels then commit together.
      */
-    public PersistResult persist(TwQuoteDetailFetchClient.QuoteDetailResult snapshot) {
+    public PersistResult persist(QuoteDetailData.QuoteDetailResult snapshot) {
         if (!isPersistable(snapshot)) return PersistResult.failed();
         try {
             PersistResult result = writeTransaction.execute(ignored -> persistWithinTransaction(snapshot));
@@ -172,12 +96,12 @@ public class IntradayOrderBookSnapshotStore {
     }
 
     /** Backward-compatible convenience for old internal tests; new readers use {@link #findCanonical}. */
-    public Optional<TwQuoteDetailFetchClient.QuoteDetailResult> find(String code, String market) {
+    public Optional<QuoteDetailData.QuoteDetailResult> find(String code, String market) {
         CanonicalLookup lookup = findCanonical(code, market);
         return lookup.status() == ReadStatus.FOUND ? Optional.of(lookup.canonical().snapshot()) : Optional.empty();
     }
 
-    private PersistResult persistWithinTransaction(TwQuoteDetailFetchClient.QuoteDetailResult snapshot) {
+    private PersistResult persistWithinTransaction(QuoteDetailData.QuoteDetailResult snapshot) {
         List<String> masterNames = jdbc.query("SELECT name FROM stock WHERE code=? AND market=?",
                 (rs, rowNum) -> rs.getString("name"), snapshot.stockCode(), snapshot.market());
         if (masterNames.size() != 1 || invalidMasterName(masterNames.getFirst(), snapshot.stockCode())) {
@@ -220,7 +144,7 @@ public class IntradayOrderBookSnapshotStore {
 
         jdbc.update("DELETE FROM stock_intraday_order_book_level WHERE stock_code=? AND market=?",
                 snapshot.stockCode(), snapshot.market());
-        for (TwQuoteDetailFetchClient.OrderBookLevel level : snapshot.levels()) {
+        for (QuoteDetailData.OrderBookLevel level : snapshot.levels()) {
             jdbc.update("""
                     INSERT INTO stock_intraday_order_book_level
                       (stock_code, market, level, bid_price, bid_volume_lots, ask_price, ask_volume_lots)
@@ -257,12 +181,12 @@ public class IntradayOrderBookSnapshotStore {
                 rs.getLong("canonical_revision"), rs.getString("stock_name")), code, market);
         if (headers.isEmpty()) return Optional.empty();
         Header header = headers.getFirst();
-        List<TwQuoteDetailFetchClient.OrderBookLevel> levels = jdbc.query("""
+        List<QuoteDetailData.OrderBookLevel> levels = jdbc.query("""
                 SELECT level, bid_price, bid_volume_lots, ask_price, ask_volume_lots
                 FROM stock_intraday_order_book_level
                 WHERE stock_code=? AND market=?
                 ORDER BY level
-                """, (rs, rowNum) -> new TwQuoteDetailFetchClient.OrderBookLevel(
+                """, (rs, rowNum) -> new QuoteDetailData.OrderBookLevel(
                 rs.getInt("level"), rs.getBigDecimal("bid_price"), rs.getObject("bid_volume_lots", Long.class),
                 rs.getBigDecimal("ask_price"), rs.getObject("ask_volume_lots", Long.class)), code, market);
         if (levels.size() != 5) return Optional.empty();
@@ -271,7 +195,7 @@ public class IntradayOrderBookSnapshotStore {
         BigDecimal changePercent = percentage(change, header.previousClose);
         BigDecimal amplitude = header.highPrice == null || header.lowPrice == null
                 ? null : percentage(header.highPrice.subtract(header.lowPrice), header.previousClose);
-        TwQuoteDetailFetchClient.QuoteDetailResult snapshot = new TwQuoteDetailFetchClient.QuoteDetailResult(
+        QuoteDetailData.QuoteDetailResult snapshot = new QuoteDetailData.QuoteDetailResult(
                 header.stockCode, header.stockName, header.market, true, true, header.source, null,
                 header.sourceUpdatedAt, header.fetchedAt, header.marketStatus, header.actualPrice,
                 header.previousClose, header.openPrice, header.highPrice, header.lowPrice, header.averagePrice,
@@ -282,44 +206,6 @@ public class IntradayOrderBookSnapshotStore {
                 total(levels, true), total(levels, false), List.copyOf(levels));
         return isPersistable(snapshot) && header.canonicalRevision > 0
                 ? Optional.of(new CanonicalSnapshot(snapshot, header.canonicalRevision)) : Optional.empty();
-    }
-
-    private static boolean isSupportedIdentity(String code, String market) {
-        return TAIWAN.equals(market) && code != null && CODE.matcher(code).matches() && !"0000".equals(code);
-    }
-
-    private static boolean invalidMasterName(String name, String code) {
-        return name == null || name.isBlank() || name.trim().equalsIgnoreCase(code);
-    }
-
-    private static boolean allowedSource(String source) {
-        return FUBON.equals(source) || YAHOO.equals(source);
-    }
-
-    private static boolean hasMicrosecondPrecision(Instant value) {
-        return value.getNano() % 1_000 == 0;
-    }
-
-    private static boolean validPositive(BigDecimal value) {
-        return value != null && value.signum() > 0 && value.precision() <= 20
-                && value.scale() >= 0 && value.scale() <= 10;
-    }
-
-    private static boolean validPositiveOrNull(BigDecimal value) {
-        return value == null || validPositive(value);
-    }
-
-    private static boolean validNonNegativeOrNull(BigDecimal value) {
-        return value == null || (value.signum() >= 0 && value.precision() <= 20
-                && value.scale() >= 0 && value.scale() <= 10);
-    }
-
-    private static boolean validNonNegativeOrNull(Long value) {
-        return value == null || value >= 0;
-    }
-
-    private static boolean validCompleteSide(BigDecimal price, Long lots, Set<BigDecimal> seen) {
-        return validPositive(price) && lots != null && lots > 0 && seen.add(price.stripTrailingZeros());
     }
 
     private static BigDecimal percentage(BigDecimal numerator, BigDecimal denominator) {
@@ -340,10 +226,10 @@ public class IntradayOrderBookSnapshotStore {
         }
     }
 
-    private static Long total(List<TwQuoteDetailFetchClient.OrderBookLevel> levels, boolean bid) {
+    private static Long total(List<QuoteDetailData.OrderBookLevel> levels, boolean bid) {
         try {
             long total = 0;
-            for (TwQuoteDetailFetchClient.OrderBookLevel level : levels) {
+            for (QuoteDetailData.OrderBookLevel level : levels) {
                 total = Math.addExact(total, bid ? level.bidVolumeLots() : level.askVolumeLots());
             }
             return total;

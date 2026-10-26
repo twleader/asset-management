@@ -2,7 +2,7 @@ package com.steven.assets.externalmaterials.controller;
 
 import com.steven.assets.externalmaterials.client.MacroDataFetchClient;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import com.steven.assets.externalmaterials.service.ClosePersister;
 import com.steven.assets.externalmaterials.service.CommodityPricePoller;
 import com.steven.assets.externalmaterials.service.DividendPersister;
@@ -26,7 +26,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -93,7 +92,7 @@ class InternalPriceControllerPublicRescanTest {
 
     @Test
     void quoteDetail端點只委派pureReader並保留typedUnavailable的200() throws Exception {
-        TwQuoteDetailFetchClient.QuoteDetailResult unavailable = new TwQuoteDetailFetchClient.QuoteDetailResult(
+        QuoteDetailData.QuoteDetailResult unavailable = new QuoteDetailData.QuoteDetailResult(
                 "2330", null, "台股", true, false, null, "暫時無法取得行情五檔",
                 null, null, "UNKNOWN", null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null, null, java.util.List.of());

@@ -13,7 +13,9 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .numeric import MAX_VOLUME, NumericError, canonical_decimal, exact_integer
-from .sdk_gateway import SdkCallError, SdkGateway, raw_field
+from .ports import QuoteReader
+from .errors import SdkCallError
+from .raw_values import raw_field
 
 
 TW_ZONE = ZoneInfo("Asia/Taipei")
@@ -55,7 +57,7 @@ class QuoteService:
 
     def __init__(
         self,
-        gateway: SdkGateway,
+        gateway: QuoteReader,
         now: Callable[[], datetime] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:

@@ -1,10 +1,9 @@
 package com.steven.assets.externalmaterials.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +13,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The source-fact writer reads the same literal-byte fixture as the Python

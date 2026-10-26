@@ -12,7 +12,7 @@ from datetime import UTC, datetime, time as wall_time
 from decimal import Decimal
 
 from .normalization import TAIPEI, canonical_number, instant, observed_at, stock_code, strict_iso_date, utc_now
-from .sdk_gateway import SdkGateway
+from .ports import MarketDataV1Source
 
 
 def _task425_observed_at(value: datetime) -> str:
@@ -82,7 +82,7 @@ def _root_identity(source: object, symbol: str, query_date: str, *, include_name
 
 
 class MarketDataV1Service:
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now) -> None:
+    def __init__(self, gateway: MarketDataV1Source, *, now: Callable[[], datetime] = utc_now) -> None:
         self._gateway, self._now = gateway, now
 
     def basic(self, symbol: str) -> dict[str, object]:

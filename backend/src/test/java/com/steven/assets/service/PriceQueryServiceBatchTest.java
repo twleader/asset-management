@@ -38,7 +38,7 @@ class PriceQueryServiceBatchTest {
         when(values.multiGet(anyList())).thenReturn(Arrays.asList(
                 "{\"stockCode\":\"2330\",\"market\":\"台股\",\"price\":100,\"tradingDate\":\"2026-09-12\"}",
                 null));
-        PriceQueryService service = new PriceQueryService(redis, historyRepository, "http://unused",
+        PriceQueryService service = new PriceQueryService(new com.steven.assets.integration.marketdata.RedisPriceCacheReadAdapter(redis), historyRepository, new com.steven.assets.integration.marketdata.PriceRefreshHttpAdapter("http://unused"),
                 marketDataService, Clock.systemUTC());
         PriceQueryService.PriceKey tw = new PriceQueryService.PriceKey("2330", "台股");
         PriceQueryService.PriceKey us = new PriceQueryService.PriceKey("2330", "美股");

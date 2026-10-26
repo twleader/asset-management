@@ -2,10 +2,7 @@ package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient.BatchStatus;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData.BatchStatus;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +13,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class FubonNormalizedQuoteClientTest {

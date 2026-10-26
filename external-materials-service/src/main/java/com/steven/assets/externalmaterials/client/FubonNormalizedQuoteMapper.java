@@ -1,10 +1,10 @@
 package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import com.steven.assets.externalmaterials.service.ProviderTimedPriceObservation;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -113,7 +113,7 @@ final class FubonNormalizedQuoteMapper {
         return new MappedQuote(observation, mapOrderBook(quote, observation));
     }
 
-    private TwQuoteDetailFetchClient.QuoteDetailResult mapOrderBook(
+    private QuoteDetailData.QuoteDetailResult mapOrderBook(
             JsonNode quote, ProviderTimedPriceObservation observation) {
         try {
             JsonNode book = quote.get("orderBook");
@@ -128,7 +128,7 @@ final class FubonNormalizedQuoteMapper {
             }
             JsonNode levelsNode = book.get("levels");
             if (levelsNode == null || !levelsNode.isArray() || levelsNode.size() != 5) return null;
-            List<TwQuoteDetailFetchClient.OrderBookLevel> levels = new ArrayList<>(5);
+            List<QuoteDetailData.OrderBookLevel> levels = new ArrayList<>(5);
             Set<BigDecimal> bidPrices = new HashSet<>();
             Set<BigDecimal> askPrices = new HashSet<>();
             BigDecimal previousBid = null;
@@ -149,7 +149,7 @@ final class FubonNormalizedQuoteMapper {
                         || (previousAsk != null && previousAsk.compareTo(ask.price()) >= 0)) {
                     return null;
                 }
-                levels.add(new TwQuoteDetailFetchClient.OrderBookLevel(
+                levels.add(new QuoteDetailData.OrderBookLevel(
                         index + 1, bid.price(), bid.volumeLots(), ask.price(), ask.volumeLots()));
                 previousBid = bid.price();
                 previousAsk = ask.price();
@@ -162,7 +162,7 @@ final class FubonNormalizedQuoteMapper {
                     ? null : percentage(price.highPrice().subtract(price.lowPrice()), price.previousClose());
             Long inner = optionalNonNegativeLong(book, "innerVolumeLots");
             Long outer = optionalNonNegativeLong(book, "outerVolumeLots");
-            return new TwQuoteDetailFetchClient.QuoteDetailResult(
+            return new QuoteDetailData.QuoteDetailResult(
                     price.stockCode(), price.stockName(), MARKET, true, true, "FUBON_BOOKS", null,
                     bookUpdatedAt, now, "OPEN", price.price(), price.previousClose(), price.openPrice(),
                     price.highPrice(), price.lowPrice(), optionalPositiveDecimal(book, "averagePrice"),
@@ -266,11 +266,11 @@ final class FubonNormalizedQuoteMapper {
         }
     }
 
-    private static Long total(List<TwQuoteDetailFetchClient.OrderBookLevel> levels, boolean bid) {
+    private static Long total(List<QuoteDetailData.OrderBookLevel> levels, boolean bid) {
         try {
             long total = 0;
             boolean present = false;
-            for (TwQuoteDetailFetchClient.OrderBookLevel level : levels) {
+            for (QuoteDetailData.OrderBookLevel level : levels) {
                 Long lots = bid ? level.bidVolumeLots() : level.askVolumeLots();
                 if (lots != null) {
                     total = Math.addExact(total, lots);
@@ -287,7 +287,7 @@ final class FubonNormalizedQuoteMapper {
 
     record MappedQuote(
             ProviderTimedPriceObservation observation,
-            TwQuoteDetailFetchClient.QuoteDetailResult orderBook) {}
+            QuoteDetailData.QuoteDetailResult orderBook) {}
 
     private static String requiredText(JsonNode object, String field) {
         JsonNode value = object.get(field);

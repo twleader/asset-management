@@ -5,7 +5,7 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.security.CurrentUserContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
+import com.steven.assets.service.port.CooldownStorePort;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -31,7 +31,7 @@ public class TradingRadarRefreshService {
     private final PriceQueryService priceQueryService;
     private final MarketDataService marketDataService;
     private final CurrentUserContext currentUserContext;
-    private final StringRedisTemplate redis;
+    private final CooldownStorePort redis;
 
     public TradingRadarDto.RefreshResponse refreshAndGet() {
         Long ownerId = currentUserContext.hasUser() ? currentUserContext.getEffectiveUserId() : null;
@@ -67,10 +67,10 @@ public class TradingRadarRefreshService {
                 + (ownerId == null ? "anonymous" : ownerId);
         Duration ttl = Duration.ofSeconds(COOLDOWN_SECONDS);
         try {
-            if (!Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(ownerKey, "1", ttl))) {
+            if (!Boolean.TRUE.equals(redis.setIfAbsent(ownerKey, "1", ttl))) {
                 return false;
             }
-            if (Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(COOLDOWN_GLOBAL_KEY, "1", ttl))) {
+            if (Boolean.TRUE.equals(redis.setIfAbsent(COOLDOWN_GLOBAL_KEY, "1", ttl))) {
                 return true;
             }
             redis.delete(ownerKey);  // 沒真的抓，就不燒掉自己的冷卻

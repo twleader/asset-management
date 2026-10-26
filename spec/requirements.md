@@ -14,6 +14,20 @@
 
 ## Requirements
 
+### Requirement 198／Task 513：既有程式的架構符規重構
+
+**User Story:** 作為維護者，我希望既有程式也遵守專案分層及依賴方向，使業務邏輯可以在隔離的測試中驗證，並避免 HTTP、持久化與券商實作滲入內層。
+
+**Acceptance Criteria:**
+
+- [ ] 所有 active 模組均納入架構審查：backend、BFF、external-materials、兩個 broker adapter、frontend，以及部署／資料庫／腳本契約；generated、vendored、歸檔文件不當作待重構程式。確認問題須保留位置、規範、影響與處置紀錄。
+- [ ] `NewsHeadlineController` 與 `FundNavController` 不直接持有 Repository 或 HTTP client；新聞日期區間／類別查詢、基金主檔 CRUD、NAV／配息 enrichment 與固定 internal 操作由 Service／outer adapter 負責。既有 path、verb、JSON 欄位、狀態碼、查詢排序、空值及失敗語意保持。
+- [ ] 市價、匯率、商品、GDP 與指數歷史 API 回傳不可變 transport record，不回 JPA Entity；投影保存所有既有可見欄位、精度、日期與 null，不增加持久化副本，也不改既有 API schema 或 Swagger identity。
+- [ ] 確認違規的業務流程以實際需要的窄 port 隔離 HTTP、Redis、券商 SDK 與其他 IO。port 不接受任意 URL，不回傳 concrete adapter 私有 nested type；共享值放中立層。組裝點可持有具體 adapter，純計算與已經是 outer adapter 的程式不為形式再包 interface。
+- [ ] 重構不得改變來源優先序、Redis／DB commit 次序、canonical revision、cache key／bytes／TTL、owner 選擇、租戶隔離、time/calendar gate、deadline／重試／限流、交易邊界、失敗狀態與排程。舊 Tasks 401–404 尚未落地的其他功能與生命週期改動不因本需求自動視為完成；本次僅處理確認的架構依賴。
+- [ ] frontend 仍經本頁 BFF；既有共用 SSE 與明文列出的具名例外保留。9090／Tailscale exact manifest、OpenAPI 與 SRPP authority 不變；不發信、不觸發真人同步或券商交易。
+- [ ] 重構須有獨立 spec 審查、變更後架構審查，以及相應的隔離測試、受影響服務 image rebuild／container recreate 與安全 GET 驗收；驗收通過後以 feature commit、main no-ff merge、push 和 remote readback 收尾。
+
 ### Requirement 1: 資產快照管理
 
 **User Story:** 作為使用者，我希望能建立與管理特定日期的資產快照，以便追蹤我在不同時間點的淨資產狀況。

@@ -1,10 +1,9 @@
 package com.steven.assets.externalmaterials.client;
 
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
 import java.time.LocalDate;
 import java.util.List;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -40,7 +39,7 @@ class MarketDividendUpcomingScopeClientTest {
         LocalDate from = LocalDate.of(2026, 8, 9);
         LocalDate to = from.plusDays(45);
         var officialUnavailable = DividendUpcomingScopeClient.UpcomingScope.unavailable("official down");
-        var providerEvent = new DividendFetchClient.DividendEvent(
+        var providerEvent = new DividendData.DividendEvent(
                 2026, new java.math.BigDecimal("0.25"), java.math.BigDecimal.ZERO,
                 "2026-08-10", null, null, null);
         var providerScope = new DividendUpcomingScopeClient.UpcomingScope(

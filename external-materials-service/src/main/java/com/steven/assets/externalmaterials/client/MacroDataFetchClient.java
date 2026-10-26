@@ -2,9 +2,8 @@ package com.steven.assets.externalmaterials.client;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.IndexDayData.DayQuote;
+import com.steven.assets.externalmaterials.service.port.IndexIntradaySourcePort;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.net.URI;
@@ -24,6 +23,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 /**
  * 總體經濟資料抓取（IMF DataMapper / TWSE FMTQIK）。
@@ -31,7 +32,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class MacroDataFetchClient {
+public class MacroDataFetchClient implements IndexIntradaySourcePort {
 
     private static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
 
@@ -843,21 +844,6 @@ public class MacroDataFetchClient {
         if (!ts.matches("\\d{6}")) return false;
         String expected = String.format("%02d%02d%02d", time.getHour(), time.getMinute(), time.getSecond());
         return expected.equals(ts);
-    }
-
-    /**
-     * 指數當日 5 分 K 摘要（Task 263）：date 為該批點位所屬的交易所當地日期，呼叫端據此守門。
-     * 四個數值欄各自獨立判 null（某陣列整日皆 null 時該欄為 null，不影響其餘欄位）。
-     */
-    public record DayQuote(java.time.LocalDate date, BigDecimal open, BigDecimal high,
-                           BigDecimal low, BigDecimal latestClose,
-                           java.time.Instant freshnessInstant) {
-        /** Source-compatible fixture constructor; production always supplies the final 5m timestamp. */
-        public DayQuote(java.time.LocalDate date, BigDecimal open, BigDecimal high,
-                        BigDecimal low, BigDecimal latestClose) {
-            this(date, open, high, low, latestClose,
-                    date == null ? null : date.atStartOfDay(java.time.ZoneId.of("Asia/Taipei")).toInstant());
-        }
     }
 
     /**

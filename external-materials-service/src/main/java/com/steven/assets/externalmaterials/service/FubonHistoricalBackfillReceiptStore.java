@@ -1,17 +1,16 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.*;
 
 /** Writes the immutable Task466 campaign manifest and append-only per-window attempts. */
 @Repository

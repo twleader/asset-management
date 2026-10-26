@@ -3,21 +3,13 @@ package com.steven.assets.externalmaterials.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import com.steven.assets.externalmaterials.client.TwOfficialCloseClient;
 import com.steven.assets.externalmaterials.client.TwOfficialCloseClient.OfficialClose;
 import com.steven.assets.externalmaterials.client.TwOfficialCloseClient.OfficialCloseBatch;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-
+import com.steven.assets.externalmaterials.client.TwOfficialCloseClient;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -27,6 +19,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
 
 /**
  * 盤後收盤價持久化（台股）：

@@ -1,14 +1,22 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import com.steven.assets.externalmaterials.model.marketdata.TaiwanRadarRules;
+import com.steven.assets.externalmaterials.service.port.FubonNormalizedQuotePort;
+import com.steven.assets.externalmaterials.service.port.FubonResponseCachePort;
+import com.steven.assets.externalmaterials.service.port.FubonResponseRepository;
+import com.steven.assets.externalmaterials.service.port.LivePriceFetchPort;
+import com.steven.assets.externalmaterials.service.port.PriceProjectionPort;
+import com.steven.assets.externalmaterials.service.port.StockMarketRepository;
+import com.steven.assets.externalmaterials.service.port.StockUniversePort;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -18,8 +26,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /** Taiwan-only coordinator. One code is persisted before its canonical row is allowed into Redis. */
 @Slf4j
@@ -27,15 +40,16 @@ import java.util.concurrent.TimeUnit;
 public class TwLiveQuoteDispatcher {
     static final int FUBON_CODES_PER_ROUND = 40;
     private final MarketClock clock;
-    private final PriceFetchClient prices;
-    private final ObjectProvider<FubonNormalizedQuoteClient> fubonClient;
-    private final StockSourceQuery source;
-    private final PriceCacheWriter writer;
+    private final LivePriceFetchPort prices;
+    private final ObjectProvider<FubonNormalizedQuotePort> fubonClient;
+    private final StockMarketRepository source;
+    private final StockUniversePort universe;
+    private final PriceProjectionPort writer;
     private final TwLiveQuoteOutcomeCounters counters;
     private final ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter;
     private final ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooOrderBookFallbackWriter;
-    private final FubonLiveResponseStore responseStore;
-    private final FubonLiveResponseCache responseCache;
+    private final FubonResponseRepository responseStore;
+    private final FubonResponseCachePort responseCache;
     private final boolean fubonEnabled;
     private final boolean fubonLiveEnabled;
     /** Compatibility seam for pre-370 unit fixtures; production always uses the coordinator path. */
@@ -54,17 +68,18 @@ public class TwLiveQuoteDispatcher {
     private volatile long fubonSkipUntilNanos;
 
     @Autowired
-    public TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
-                                 ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
-                                 StockSourceQuery source, PriceCacheWriter writer,
+    public TwLiveQuoteDispatcher(MarketClock clock, LivePriceFetchPort prices,
+                                 ObjectProvider<FubonNormalizedQuotePort> fubonClient,
+                                 StockMarketRepository source, StockUniversePort universe, PriceProjectionPort writer,
                                  TwLiveQuoteOutcomeCounters counters,
                                  ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
                                  ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooOrderBookFallbackWriter,
-                                 FubonLiveResponseStore responseStore,
-                                 FubonLiveResponseCache responseCache,
+                                 FubonResponseRepository responseStore,
+                                 FubonResponseCachePort responseCache,
                                  @Value("${fubon.enabled:false}") boolean fubonEnabled,
                                  @Value("${fubon.tw-live-quotes-enabled:false}") boolean fubonLiveEnabled) {
         this.clock = clock; this.prices = prices; this.fubonClient = fubonClient; this.source = source;
+        this.universe = universe;
         this.writer = writer; this.counters = counters; this.fubonEnabled = fubonEnabled;
         this.orderBookWriter = orderBookWriter;
         this.yahooOrderBookFallbackWriter = yahooOrderBookFallbackWriter;
@@ -74,54 +89,54 @@ public class TwLiveQuoteDispatcher {
     }
 
     /** Existing production-path test seam; real Spring wiring uses the constructor above. */
-    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
-                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
-                          StockSourceQuery source, PriceCacheWriter writer,
+    TwLiveQuoteDispatcher(MarketClock clock, LivePriceFetchPort prices,
+                          ObjectProvider<FubonNormalizedQuotePort> fubonClient,
+                          StockMarketRepository source, StockUniversePort universe, PriceProjectionPort writer,
                           TwLiveQuoteOutcomeCounters counters,
                           boolean fubonEnabled, boolean fubonLiveEnabled) {
-        this(clock, prices, fubonClient, source, writer, counters, null, null, null, null,
+        this(clock, prices, fubonClient, source, universe, writer, counters, null, null, null, null,
                 fubonEnabled, fubonLiveEnabled);
     }
 
     /** Existing test seam for the Fubon writer only. */
-    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
-                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
-                          StockSourceQuery source, PriceCacheWriter writer,
+    TwLiveQuoteDispatcher(MarketClock clock, LivePriceFetchPort prices,
+                          ObjectProvider<FubonNormalizedQuotePort> fubonClient,
+                          StockMarketRepository source, StockUniversePort universe, PriceProjectionPort writer,
                           TwLiveQuoteOutcomeCounters counters,
                           ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
                           boolean fubonEnabled, boolean fubonLiveEnabled) {
-        this(clock, prices, fubonClient, source, writer, counters, orderBookWriter, null, null, null,
+        this(clock, prices, fubonClient, source, universe, writer, counters, orderBookWriter, null, null, null,
                 fubonEnabled, fubonLiveEnabled);
     }
 
     /**
-     * Binary/source-compatible pre-Task-380 test seam.  Spring always selects the injected
+     * Pre-Task-380 test seam.  Spring always selects the injected
      * coordinator constructor above; this overload deliberately carries no response store.
      */
-    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
-                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
-                          StockSourceQuery source, PriceCacheWriter writer,
+    TwLiveQuoteDispatcher(MarketClock clock, LivePriceFetchPort prices,
+                          ObjectProvider<FubonNormalizedQuotePort> fubonClient,
+                          StockMarketRepository source, StockUniversePort universe, PriceProjectionPort writer,
                           TwLiveQuoteOutcomeCounters counters,
                           ObjectProvider<TwFubonOrderBookRoundWriter> orderBookWriter,
                           ObjectProvider<TwYahooOrderBookFallbackRoundWriter> yahooOrderBookFallbackWriter,
                           boolean fubonEnabled, boolean fubonLiveEnabled) {
-        this(clock, prices, fubonClient, source, writer, counters, orderBookWriter,
+        this(clock, prices, fubonClient, source, universe, writer, counters, orderBookWriter,
                 yahooOrderBookFallbackWriter, null, null, fubonEnabled, fubonLiveEnabled);
     }
 
     /** Task 380 test seam with the response store/cache enabled but no background book workers. */
-    TwLiveQuoteDispatcher(MarketClock clock, PriceFetchClient prices,
-                          ObjectProvider<FubonNormalizedQuoteClient> fubonClient,
-                          StockSourceQuery source, PriceCacheWriter writer,
+    TwLiveQuoteDispatcher(MarketClock clock, LivePriceFetchPort prices,
+                          ObjectProvider<FubonNormalizedQuotePort> fubonClient,
+                          StockMarketRepository source, StockUniversePort universe, PriceProjectionPort writer,
                           TwLiveQuoteOutcomeCounters counters,
-                          FubonLiveResponseStore responseStore, FubonLiveResponseCache responseCache,
+                          FubonResponseRepository responseStore, FubonResponseCachePort responseCache,
                           boolean fubonEnabled, boolean fubonLiveEnabled) {
-        this(clock, prices, fubonClient, source, writer, counters, null, null, responseStore, responseCache,
+        this(clock, prices, fubonClient, source, universe, writer, counters, null, null, responseStore, responseCache,
                 fubonEnabled, fubonLiveEnabled);
     }
 
     TwLiveQuoteDispatcher(MarketClock clock, TwLiveQuoteProvider provider, TwLiveQuoteOutcomeCounters counters) {
-        this.clock = clock; this.prices = null; this.fubonClient = null; this.source = null; this.writer = null;
+        this.clock = clock; this.prices = null; this.fubonClient = null; this.source = null; this.universe = null; this.writer = null;
         this.counters = counters; this.orderBookWriter = null; this.yahooOrderBookFallbackWriter = null;
         this.responseStore = null; this.responseCache = null;
         this.fubonEnabled = false; this.fubonLiveEnabled = false; this.legacyProvider = provider;
@@ -168,14 +183,14 @@ public class TwLiveQuoteDispatcher {
         List<String> bookCandidates = pushPrimary ? selectFubonCodes(effectiveCodes) : List.of();
         List<String> priceCandidates = pushPrimary ? selectSnapshotCodes(effectiveCodes) : effectiveCodes;
         Set<String> pending = new LinkedHashSet<>(priceCandidates);
-        Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> validRoundBooks = Map.of();
+        Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> validRoundBooks = Map.of();
         int succeeded = 0, written = 0, failed = 0;
         boolean bookRoundAllowed = true;
-        FubonNormalizedQuoteClient fubon = fubonEnabled && fubonLiveEnabled && System.nanoTime() >= fubonSkipUntilNanos
+        FubonNormalizedQuotePort fubon = fubonEnabled && fubonLiveEnabled && System.nanoTime() >= fubonSkipUntilNanos
                 ? fubonClient.getIfAvailable() : null;
         if (fubon != null && !pending.isEmpty()) {
             List<String> fubonCodes = pushPrimary ? priceCandidates : selectFubonCodes(effectiveCodes);
-            FubonNormalizedQuoteClient.BatchResult batch = fubon.fetch(fubonCodes);
+            NormalizedQuoteData.BatchResult batch = fubon.fetch(fubonCodes);
             if (isRateLimited(batch)) {
                 fubonSkipUntilNanos = Math.max(fubonSkipUntilNanos,
                         System.nanoTime() + TimeUnit.SECONDS.toNanos(60));
@@ -197,9 +212,9 @@ public class TwLiveQuoteDispatcher {
                     }
                     // This is a non-queued, isolated sink: its slow DB/Redis work cannot retain this
                     // dispatcher's generic inFlight guard or trigger an extra provider request.
-                    Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> books =
+                    Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> books =
                             batch.orderBooks() == null ? Map.of() : batch.orderBooks();
-                    Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> selectedBooks = onlySelectedBooks(books, fubonCodes);
+                    Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> selectedBooks = onlySelectedBooks(books, fubonCodes);
                     validRoundBooks = selectedBooks;
                     submitFubonOrderBooks(selectedBooks);
                     if (!pushPrimary) submitYahooOrderBookFallback(fubonCodes, selectedBooks.keySet());
@@ -213,8 +228,8 @@ public class TwLiveQuoteDispatcher {
         }
         // Books remain independently updated while healthy push suppresses *all* price providers.
         if (pushPrimary && bookRoundAllowed) submitYahooOrderBookFallback(bookCandidates, validRoundBooks.keySet());
-        for (List<String> chunk : chunks(new ArrayList<>(pending), PriceFetchClient.MAX_REQUESTED_CODES)) {
-            PriceFetchClient.TwQuoteBatchSummary summary = prices.fetchTwBatch(chunk);
+        for (List<String> chunk : chunks(new ArrayList<>(pending), LivePriceFetchPort.MAX_REQUESTED_CODES)) {
+            PriceData.TwQuoteBatchSummary summary = prices.fetchTwBatch(chunk);
             for (var entry : summary.resolved().entrySet()) {
                 ApplyResult outcome = persistThenCache(entry.getValue(), false);
                 if (outcome.dbFailed) { pending.remove(entry.getKey()); failed++; }
@@ -237,7 +252,7 @@ public class TwLiveQuoteDispatcher {
         if (source == null) return List.of();
         try {
             Set<String> radarRaw = new LinkedHashSet<>();
-            source.collectTwRadarCodes(radarRaw);
+            universe.collectTwRadarCodes(radarRaw);
             Set<String> radar = new HashSet<>(normalizedCodes(radarRaw));
             return input.stream().filter(TwLiveQuoteDispatcher::isTaiwanCode)
                     .filter(radar::contains).toList();
@@ -248,48 +263,48 @@ public class TwLiveQuoteDispatcher {
     }
 
     /** One full validated batch must be durable before it can influence canonical price or book paths. */
-    private FubonEnvelopeOutcome persistFubonEnvelope(FubonNormalizedQuoteClient.BatchResult batch) {
+    private FubonEnvelopeOutcome persistFubonEnvelope(NormalizedQuoteData.BatchResult batch) {
         if (responseStore == null) return FubonEnvelopeOutcome.STORED;
         if (batch == null || batch.envelope() == null) return FubonEnvelopeOutcome.NO_ENVELOPE;
-        FubonLiveResponseStore.PersistResult persisted = responseStore.persist(batch.envelope(), clock.instant());
-        if (persisted.status() != FubonLiveResponseStore.WriteStatus.STORED) {
+        FubonResponseData.PersistResult persisted = responseStore.persist(batch.envelope(), clock.instant());
+        if (persisted.status() != FubonResponseData.WriteStatus.STORED) {
             log.warn("tw-live provider=FUBON responseStore=FAILED priceAndBook=SKIPPED");
             return FubonEnvelopeOutcome.STORE_FAILED;
         }
         if (responseCache != null) {
-            for (FubonLiveResponseStore.CanonicalResponse row : persisted.canonicalRows()) {
+            for (FubonResponseData.CanonicalResponse row : persisted.canonicalRows()) {
                 responseCache.writeStrictNewer(row); // DB remains canonical if this best-effort mirror fails.
             }
         }
         return FubonEnvelopeOutcome.STORED;
     }
 
-    private static boolean isRateLimited(FubonNormalizedQuoteClient.BatchResult batch) {
+    private static boolean isRateLimited(NormalizedQuoteData.BatchResult batch) {
         if (batch == null) return false;
-        if (batch.status() == FubonNormalizedQuoteClient.BatchStatus.RATE_LIMITED) return true;
+        if (batch.status() == NormalizedQuoteData.BatchStatus.RATE_LIMITED) return true;
         return (batch.failureReasons() == null ? Map.<String, String>of() : batch.failureReasons()).values().stream().anyMatch(reason ->
                 "RATE_LIMITED".equals(reason) || "RATE_LIMIT_CIRCUIT_OPEN".equals(reason)
                         || "RATE_LIMIT_BUDGET_EXHAUSTED".equals(reason));
     }
 
     private ApplyResult persistThenCache(PriceResult raw, boolean fubon) {
-        StockSourceQuery.IntradayPersistenceResult db = source.persistIntradayQuote(raw);
-        if (db.status() == StockSourceQuery.IntradayPersistenceResult.Status.FAILED) {
+        StockMarketData.IntradayPersistenceResult db = source.persistIntradayQuote(raw);
+        if (db.status() == StockMarketData.IntradayPersistenceResult.Status.FAILED) {
             counters.increment(TwLiveQuoteOutcomeCounters.Outcome.DB_FAILED);
             log.warn("tw-live-persistence dbOutcome=DB_FAILED redisOutcome=NOT_ATTEMPTED");
             return ApplyResult.failed();
         }
-        boolean applied = db.status() == StockSourceQuery.IntradayPersistenceResult.Status.APPLIED;
+        boolean applied = db.status() == StockMarketData.IntradayPersistenceResult.Status.APPLIED;
         counters.increment(applied ? TwLiveQuoteOutcomeCounters.Outcome.DB_APPLIED : TwLiveQuoteOutcomeCounters.Outcome.DB_STALE_OR_EQUAL);
         if (!applied) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.CANONICAL_REPAIR);
         PriceResult canonical = db.canonical().asPriceResult();
-        PriceCacheWriter.CacheWriteOutcome cache = writer.writeTaiwanLive(canonical, "FUBON_INTRADAY".equals(canonical.source()) || FubonMarketData.STOCK_SOURCE.equals(canonical.source()));
-        if (cache == PriceCacheWriter.CacheWriteOutcome.WRITTEN) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_WRITTEN);
-        else if (cache == PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_REJECTED);
+        PriceProjectionData.CacheWriteOutcome cache = writer.writeTaiwanLive(canonical, "FUBON_INTRADAY".equals(canonical.source()) || FubonMarketData.STOCK_SOURCE.equals(canonical.source()));
+        if (cache == PriceProjectionData.CacheWriteOutcome.WRITTEN) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_WRITTEN);
+        else if (cache == PriceProjectionData.CacheWriteOutcome.REJECTED_STALE) counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_REJECTED);
         else counters.increment(TwLiveQuoteOutcomeCounters.Outcome.REDIS_FAILED);
         log.info("tw-live-persistence dbOutcome={} redisOutcome={} canonicalRepair={}",
                 applied ? "DB_APPLIED" : "DB_STALE_OR_EQUAL", cache, !applied);
-        return new ApplyResult(applied, cache == PriceCacheWriter.CacheWriteOutcome.WRITTEN, false);
+        return new ApplyResult(applied, cache == PriceProjectionData.CacheWriteOutcome.WRITTEN, false);
     }
 
     /** Fair bounded recovery; failed requests also debit the per-symbol monotonic cooldown. */
@@ -323,17 +338,17 @@ public class TwLiveQuoteDispatcher {
         return selected;
     }
     private void submitFubonOrderBooks(
-            java.util.Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> snapshots) {
+            java.util.Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> snapshots) {
         if (orderBookWriter == null || snapshots == null || snapshots.isEmpty()) return;
         TwFubonOrderBookRoundWriter writer = orderBookWriter.getIfAvailable();
         if (writer != null) writer.submit(snapshots);
     }
 
-    private static Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult>
-    onlySelectedBooks(Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> snapshots,
+    private static Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult>
+    onlySelectedBooks(Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> snapshots,
                       List<String> selected) {
         if (snapshots == null || snapshots.isEmpty() || selected == null || selected.isEmpty()) return Map.of();
-        Map<String, com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient.QuoteDetailResult> result =
+        Map<String, com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData.QuoteDetailResult> result =
                 new java.util.LinkedHashMap<>();
         for (String code : selected) {
             var snapshot = snapshots.get(code);
@@ -353,7 +368,7 @@ public class TwLiveQuoteDispatcher {
         if (fallback != null) fallback.submit(candidates);
     }
     private static boolean isTaiwanCode(String code) {
-        return StockSourceQuery.isTaiwanRadarCode(code);
+        return TaiwanRadarRules.isTaiwanRadarCode(code);
     }
     private static List<String> normalizedCodes(Collection<String> raw) {
         TreeSet<String> sorted = new TreeSet<>();

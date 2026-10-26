@@ -1,16 +1,16 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.FubonNormalizedQuoteClient;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
-
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -83,16 +83,16 @@ class FubonTwLiveQuoteProviderTest {
         verifyNoInteractions(source);
 
         client = mock(FubonNormalizedQuoteClient.class);
-        when(client.fetch(List.of("2330"))).thenReturn(new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SERVICE_UNAVAILABLE, List.of(), 1, 1));
+        when(client.fetch(List.of("2330"))).thenReturn(new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SERVICE_UNAVAILABLE, List.of(), 1, 1));
         provider = new FubonTwLiveQuoteProvider(client, writer, source, counters);
         TwLiveQuoteBatchResult unavailable = provider.refresh(Set.of("2330"), true);
         assertThat(unavailable.written()).isZero();
         assertThat(unavailable.failed()).isEqualTo(1);
     }
 
-    private FubonNormalizedQuoteClient.BatchResult successBatch() {
-        return new FubonNormalizedQuoteClient.BatchResult(
-                FubonNormalizedQuoteClient.BatchStatus.SUCCESS, List.of(observation), 1, 0);
+    private NormalizedQuoteData.BatchResult successBatch() {
+        return new NormalizedQuoteData.BatchResult(
+                NormalizedQuoteData.BatchStatus.SUCCESS, List.of(observation), 1, 0);
     }
 }

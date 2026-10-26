@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import queue
 import re
@@ -9,98 +7,19 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from .config import ConfigLoader, ConfigSnapshot
 from .normalization import strict_iso_date
+# Compatibility exports for existing outer adapters and SDK fixtures.
+from .captures import AccountingPair, AccountingRead, OrderPortfolioRead, SelectedAccount, StockPushConnection
+from .errors import SdkCallError
+from .payload_limits import check_marketdata_size
+from .raw_values import enum_text, raw_field
+from .session_identity import session_config_digest
 
 
 logger = logging.getLogger(__name__)
-
-
-_PORTFOLIO_NATIVE_ENUM_TEXT = re.compile(r"\A(?:OrderType|BSAction)\.([A-Za-z_][A-Za-z0-9_]*)\Z")
-
-
-class SdkCallError(RuntimeError):
-    def __init__(
-        self,
-        reason: str,
-        *,
-        auth_invalid: bool = False,
-        misconfigured: bool = False,
-        retry_after_seconds: float | None = None,
-        completion_event: threading.Event | None = None,
-    ) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.auth_invalid = auth_invalid
-        self.misconfigured = misconfigured
-        self.retry_after_seconds = retry_after_seconds
-        # A bounded native SDK worker can outlive the caller that observed its
-        # timeout.  The event is deliberately opaque and local-only; callers use
-        # it solely to keep an admitted single-flight alive until the worker has
-        # released its native slot in finally.
-        self.completion_event = completion_event
-
-
-@dataclass(frozen=True)
-class SelectedAccount:
-    raw: object = field(repr=False)
-    branch_no: str = field(repr=False)
-    account_number: str = field(repr=False)
-    selector_explicit: bool = False
-
-
-@dataclass(frozen=True)
-class AccountingRead:
-    response: object = field(repr=False)
-    account: SelectedAccount = field(repr=False)
-    internal_token: str = field(repr=False)
-
-
-@dataclass(frozen=True)
-class AccountingPair:
-    inventories: object
-    unrealized: object
-    account: SelectedAccount
-    internal_token: str
-
-
-@dataclass(frozen=True)
-class OrderPortfolioRead:
-    orders: AccountingRead = field(repr=False)
-    portfolio: AccountingPair = field(repr=False)
-
-
-@dataclass(frozen=True)
-class StockPushConnection:
-    client: object = field(repr=False)
-    generation: int
-
-
-def raw_field(value: object, name: str) -> object | None:
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def enum_text(value: object, *, allow_native_portfolio_text: bool = False) -> str | None:
-    if value is None:
-        return None
-    candidate = getattr(value, "value", value)
-    if not isinstance(candidate, (str, int)):
-        candidate = getattr(value, "name", None)
-    if candidate is not None:
-        return str(candidate)
-    if not allow_native_portfolio_text:
-        return None
-    try:
-        native_text = str(value)
-    except Exception:
-        return None
-    match = _PORTFOLIO_NATIVE_ENUM_TEXT.fullmatch(native_text)
-    return match.group(1) if match else None
 
 
 class SdkGateway:
@@ -520,14 +439,7 @@ class SdkGateway:
         # SDK responses are already decoded; bound the adapter payload without logging it or
         # allocating another unbounded serialized copy. The blocking-call semaphore also bounds
         # timed-out SDK requests that cannot be interrupted by Python.
-        try:
-            size = 0
-            for chunk in json.JSONEncoder(ensure_ascii=False, default=str).iterencode(response):
-                size += len(chunk.encode("utf-8"))
-                if size > maximum_bytes:
-                    raise SdkCallError("MARKETDATA_RESPONSE_TOO_LARGE")
-        except (TypeError, ValueError):
-            raise SdkCallError("MARKETDATA_SCHEMA_INVALID") from None
+        return check_marketdata_size(response, maximum_bytes=maximum_bytes)
 
     def _read_accounting(
         self, method_name: str, *args: object, deadline: float | None = None
@@ -1136,18 +1048,7 @@ class SdkGateway:
 
     @staticmethod
     def _session_config_digest(config: ConfigSnapshot) -> bytes:
-        joined = "\0".join(
-            (
-                config.personal_id or "",
-                config.api_key or "",
-                config.certificate_password or "",
-                str(config.certificate_path or ""),
-                config.account_branch_no or "",
-                config.account_number or "",
-                config.internal_service_token or "",
-            )
-        )
-        return hashlib.sha256(joined.encode("utf-8")).digest()
+        return session_config_digest(config)
 
     @staticmethod
     def _response_auth_invalid(response: object) -> bool:

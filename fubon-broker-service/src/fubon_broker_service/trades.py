@@ -9,7 +9,9 @@ from typing import Callable
 from .accounting_normalization import checked_result, verify_identity
 from .normalization import stock_code, strict_iso_date, strict_vendor_date
 from .numeric import MAX_SHARES, NumericError, canonical_decimal, exact_integer
-from .sdk_gateway import SdkGateway, SelectedAccount, enum_text, raw_field
+from .ports import TradeReader
+from .captures import SelectedAccount
+from .raw_values import enum_text, raw_field
 
 
 _VALID_SIDES = {"Buy", "Sell"}
@@ -37,7 +39,7 @@ class TradeReadService:
 
     def __init__(
         self,
-        gateway: SdkGateway,
+        gateway: TradeReader,
         fingerprint: Callable[[str, str, str], str] | None = None,
         batch_id: Callable[[], str] | None = None,
     ) -> None:

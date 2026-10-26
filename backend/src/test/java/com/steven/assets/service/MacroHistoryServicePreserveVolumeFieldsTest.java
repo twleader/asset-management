@@ -45,7 +45,7 @@ class MacroHistoryServicePreserveVolumeFieldsTest {
     @BeforeEach
     void setUp() {
         service = new MacroHistoryService(gdpRepo, japanGdpRepo, koreaGdpRepo,
-                twseDailyRepo, usDailyRepo, "http://localhost:0");
+                twseDailyRepo, usDailyRepo, new com.steven.assets.integration.marketdata.MacroDataHttpAdapter("http://localhost:0"));
     }
 
     private TwseIndexDailyHistory freshRow(LocalDate date, Long tradeVolume, BigDecimal tradeValue) {

@@ -1,9 +1,6 @@
 package com.steven.assets.externalmaterials.service;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
+import com.steven.assets.externalmaterials.model.marketdata.FubonTechnicalCache;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,7 +9,11 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 @Service
 public class FubonTechnicalIndicatorSyncService {

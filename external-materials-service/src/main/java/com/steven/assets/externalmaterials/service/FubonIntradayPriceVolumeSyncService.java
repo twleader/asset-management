@@ -1,13 +1,13 @@
 package com.steven.assets.externalmaterials.service;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import java.time.Instant;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Task425 one-minute, read-only broker producer.  Radar requests only use the cache reader. */
 @Service

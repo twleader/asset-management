@@ -1,12 +1,13 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonTechnicalCache;
+import java.util.*;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
-import java.util.*;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Validated compare-and-merge in Lua, with a CAS check binding validation to the exact existing bytes. */
 @Component

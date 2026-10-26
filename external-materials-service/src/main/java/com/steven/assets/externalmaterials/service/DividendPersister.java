@@ -1,17 +1,18 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.DividendFetchClient;
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
+import com.steven.assets.externalmaterials.model.marketdata.DividendEvidenceData;
+import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-
-import java.time.Instant;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 
 /**
  * 股利 evidence 抓取排程。只 append snapshot/event/observation；不維護
@@ -67,7 +68,7 @@ public class DividendPersister {
 
     /** 抓單檔並 append immutable evidence；回傳本次所有 observation 的事件筆數。 */
     public int syncOne(String code, String market) {
-        List<DividendFetchClient.DividendFetchResult> observations =
+        List<DividendData.DividendFetchResult> observations =
                 client.fetchObservations(code, market, RETAIN_YEARS);
         if (observations == null || observations.isEmpty()) {
             log.warn("股利 evidence 未回任何 observation：{} {}", market, code);
@@ -75,8 +76,8 @@ public class DividendPersister {
         }
         Instant observedAt = Instant.now();
         int eventCount = 0;
-        for (DividendFetchClient.DividendFetchResult fetched : observations) {
-            DividendSnapshotStore.PersistResult persisted = snapshots.record(
+        for (DividendData.DividendFetchResult fetched : observations) {
+            DividendEvidenceData.PersistResult persisted = snapshots.record(
                     code, market, fetched, observedAt);
             if (persisted.snapshotId() <= 0 || fetched == null) {
                 log.warn("股利 evidence 未落地：{} {} status={} reason={}", market, code,

@@ -1,8 +1,6 @@
 package com.steven.assets.externalmaterials.client;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
-
+import com.steven.assets.externalmaterials.model.marketdata.PriceData;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -13,16 +11,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -40,7 +39,7 @@ class PriceFetchClientTwBatchTest {
         List<String> codes = new ArrayList<>();
         for (int i = 0; i < 321; i++) codes.add(String.format("X%03d", i));
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http).fetchTwBatch(codes);
+        PriceData.TwQuoteBatchSummary result = client(http).fetchTwBatch(codes);
 
         assertThat(result.missingCodes()).containsExactlyElementsOf(codes);
         assertThat(result.capacityRejectedCodes()).containsExactlyElementsOf(codes);
@@ -63,7 +62,7 @@ class PriceFetchClientTwBatchTest {
         List<String> codes = new ArrayList<>();
         for (int i = 0; i < 41; i++) codes.add(String.format("C%02d", i));
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http).fetchTwBatch(codes);
+        PriceData.TwQuoteBatchSummary result = client(http).fetchTwBatch(codes);
 
         assertThat(result.missingCodes()).containsExactlyElementsOf(codes);
         assertThat(result.httpRequests()).isEqualTo(4);
@@ -92,7 +91,7 @@ class PriceFetchClientTwBatchTest {
             return response;
         });
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http)
+        PriceData.TwQuoteBatchSummary result = client(http)
                 .fetchTwBatch(List.of("0056", "00713"));
 
         assertThat(result.resolved().keySet()).containsExactly("0056", "00713");
@@ -110,7 +109,7 @@ class PriceFetchClientTwBatchTest {
                 "{\"rtcode\":\"9999\",\"rtmessage\":\"upstream busy\",\"msgArray\":[]}");
         when(http.send(any(HttpRequest.class), any())).thenAnswer(ignored -> response);
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http).fetchTwBatch(Set.of("0056"));
+        PriceData.TwQuoteBatchSummary result = client(http).fetchTwBatch(Set.of("0056"));
 
         assertThat(result.missingCodes()).containsExactly("0056");
         assertThat(result.httpRequests()).isEqualTo(2);
@@ -129,7 +128,7 @@ class PriceFetchClientTwBatchTest {
                 "{\"c\":\"FOREIGN\",\"z\":\"10\"}"));
         when(http.send(any(HttpRequest.class), any())).thenAnswer(ignored -> response);
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http)
+        PriceData.TwQuoteBatchSummary result = client(http)
                 .fetchTwBatch(List.of("0056", "00713", "00878", "00919"));
 
         assertThat(result.resolved().keySet()).containsExactly("0056");
@@ -189,7 +188,7 @@ class PriceFetchClientTwBatchTest {
         List<String> codes = new ArrayList<>();
         for (int i = 0; i < 41; i++) codes.add(String.format("C%02d", i));
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(http, nanoTime, executorFactory)
+        PriceData.TwQuoteBatchSummary result = client(http, nanoTime, executorFactory)
                 .fetchTwBatch(codes);
 
         assertThat(result.resolved()).containsKey("C40");
@@ -210,7 +209,7 @@ class PriceFetchClientTwBatchTest {
         AtomicInteger reads = new AtomicInteger();
         LongSupplier nanoTime = () -> timeline[reads.getAndIncrement()];
 
-        PriceFetchClient.TwQuoteBatchSummary result = client(
+        PriceData.TwQuoteBatchSummary result = client(
                 http, nanoTime, DirectExecutorService::new).fetchTwBatch(List.of("0056"));
 
         assertThat(result.resolved()).isEmpty();

@@ -1,15 +1,14 @@
 package com.steven.assets.externalmaterials.service;
 
-import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.PreparedStatementSetter;
-import org.springframework.jdbc.core.ResultSetExtractor;
-
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.concurrent.atomic.AtomicReference;
-
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,11 +30,11 @@ class StockSourceQueryDatedCloseTest {
         when(jdbc.query(anyString(), any(PreparedStatementSetter.class), any(ResultSetExtractor.class)))
                 .thenAnswer(invocation -> {
                     sql.set(invocation.getArgument(0));
-                    ResultSetExtractor<StockSourceQuery.DatedClose> extractor = invocation.getArgument(2);
+                    ResultSetExtractor<StockMarketData.DatedClose> extractor = invocation.getArgument(2);
                     return extractor.extractData(rows);
                 });
 
-        StockSourceQuery.DatedClose result = new StockSourceQuery(jdbc)
+        StockMarketData.DatedClose result = new StockSourceQuery(jdbc)
                 .findLatestDatedClose("0056", "台股").orElseThrow();
 
         assertThat(result.date()).isEqualTo(LocalDate.of(2026, 8, 20));

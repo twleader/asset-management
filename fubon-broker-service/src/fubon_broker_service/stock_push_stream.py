@@ -10,10 +10,13 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from .config import ConfigSnapshot
+from .config_values import ConfigSnapshot
 from .counters import Outcome, OutcomeCounters
 from .normalization import stock_codes, utc_now
-from .sdk_gateway import SdkCallError, SdkGateway, StockPushConnection
+from .ports import StockPushGateway
+from .captures import StockPushConnection
+from .errors import SdkCallError
+from .session_identity import session_config_digest
 from .stock_push_events import StockPriceEvent, decode_stock_message, market_time_open, normalize_stock_message
 
 
@@ -50,7 +53,7 @@ class StockPushStream:
     _BACKOFF_SECONDS = (0.25, 0.5, 1.0, 2.0, 5.0)
 
     def __init__(
-        self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now,
+        self, gateway: StockPushGateway, *, now: Callable[[], datetime] = utc_now,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         counters: OutcomeCounters | None = None,
@@ -120,7 +123,7 @@ class StockPushStream:
                 self._drain_queues_locked()
                 self._latest = {symbol: event for symbol, event in self._latest.items() if symbol in desired}
             self._desired = desired
-            self._authorized_digest = SdkGateway._session_config_digest(config)
+            self._authorized_digest = session_config_digest(config)
             self._lease_until = self._monotonic() + self.LEASE_SECONDS
         self._wake.set()
         # No consumer means no SDK connection. The following GET creates the dedicated client;
@@ -136,7 +139,7 @@ class StockPushStream:
                 if not self._active_locked():
                     self._clear_locked("NO_SUBSCRIPTIONS")
                     raise StockPushError("NO_SUBSCRIPTIONS")
-                if self._authorized_digest != SdkGateway._session_config_digest(config):
+                if self._authorized_digest != session_config_digest(config):
                     self._clear_locked("CONFIG_CHANGED")
                     raise StockPushError("CONFIG_CHANGED")
                 if self._worker is not None and self._worker.is_alive():
@@ -270,7 +273,7 @@ class StockPushStream:
             if not self.configured(config):
                 self._clear_locked(self.configuration_reason(config))
                 return False
-            if self._authorized_digest != SdkGateway._session_config_digest(config):
+            if self._authorized_digest != session_config_digest(config):
                 self._clear_locked("CONFIG_CHANGED")
                 return False
             if not self._active_locked():

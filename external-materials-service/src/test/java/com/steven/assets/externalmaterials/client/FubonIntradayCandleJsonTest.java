@@ -1,9 +1,10 @@
 package com.steven.assets.externalmaterials.client;
 
-import java.time.Instant;
-import java.time.LocalDate;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
+import java.time.Instant;
+import java.time.LocalDate;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 

@@ -1,10 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.NewsRow;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
@@ -15,6 +12,9 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
 
 /**
  * 公開資訊「均線突破」快照組裝（Task 207）：由 DB 日收盤計算季線 MA60／年線 MA240（SMA），偵測
@@ -98,7 +98,7 @@ public class MaCrossSnapshotClient {
         List<Event> events = new ArrayList<>();
         for (Target t : TARGETS) {
             try {
-                List<StockSourceQuery.ClosePoint> series = t.index()
+                List<StockMarketData.ClosePoint> series = t.index()
                         ? source.loadRecentTaiexCloses(LOOKBACK)
                         : source.loadRecentStockCloses(t.code(), MARKET_TW, LOOKBACK);
                 events.addAll(detect(t, series));
@@ -125,7 +125,7 @@ public class MaCrossSnapshotClient {
     private record Event(String text, String code, int period, LocalDate dataDate) {}
 
     /** 對單一標的偵測季線／年線的漲破/跌破，回傳 0~2 則事件。 */
-    private List<Event> detect(Target t, List<StockSourceQuery.ClosePoint> series) {
+    private List<Event> detect(Target t, List<StockMarketData.ClosePoint> series) {
         List<Event> out = new ArrayList<>();
         int n = series.size();
         if (n < 2) return out;   // 至少要前一交易日＋前二交易日
@@ -168,7 +168,7 @@ public class MaCrossSnapshotClient {
      * 均線取樣視窗 {@code [endIdx-period, endIdx]}（含算 maT1 所需的多一筆）內，是否存在相鄰兩日變動超過門檻。
      * 有則代表視窗跨越分割點、MA 被舊權值污染，該均線本輪不可信。
      */
-    private static boolean windowHasGap(List<StockSourceQuery.ClosePoint> series, int endIdx, int period) {
+    private static boolean windowHasGap(List<StockMarketData.ClosePoint> series, int endIdx, int period) {
         int start = Math.max(0, endIdx - period);
         for (int i = start + 1; i <= endIdx; i++) {
             BigDecimal prev = series.get(i - 1).close();
@@ -187,7 +187,7 @@ public class MaCrossSnapshotClient {
     }
 
     /** series（由舊到新）中，以索引 endIdx（含）結尾往前 n 筆收盤的 SMA；筆數不足或含 null 回 null。 */
-    private static BigDecimal sma(List<StockSourceQuery.ClosePoint> series, int endIdx, int n) {
+    private static BigDecimal sma(List<StockMarketData.ClosePoint> series, int endIdx, int n) {
         int start = endIdx - n + 1;
         if (start < 0) return null;
         BigDecimal sum = BigDecimal.ZERO;

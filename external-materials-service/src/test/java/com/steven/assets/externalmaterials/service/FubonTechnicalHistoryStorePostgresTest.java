@@ -1,19 +1,17 @@
 package com.steven.assets.externalmaterials.service;
 
-import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.containers.PostgreSQLContainer;
-
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Actual PostgreSQL writes for partial capture, rerun, conflict, and exact-17 provenance. */

@@ -1,16 +1,15 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.NormalizedQuoteData;
 import com.steven.assets.externalmaterials.service.ExternalApiErrorLogWriter;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -31,7 +30,7 @@ class FubonNormalizedQuoteClientApiErrorLogTest {
 
         var result = client.fetch(List.of("2330"));
 
-        assertThat(result.status()).isEqualTo(FubonNormalizedQuoteClient.BatchStatus.INVALID_RESPONSE);
+        assertThat(result.status()).isEqualTo(NormalizedQuoteData.BatchStatus.INVALID_RESPONSE);
         verify(writer).record(eq("FUBON_TW_QUOTES_LIVE"), eq("盤中台股即時報價"), any(Throwable.class), eq(NOW.instant()));
     }
 
@@ -44,7 +43,7 @@ class FubonNormalizedQuoteClientApiErrorLogTest {
 
         var result = client.fetch(List.of("2330"));
 
-        assertThat(result.status()).isEqualTo(FubonNormalizedQuoteClient.BatchStatus.PARTIAL_FAILURE);
+        assertThat(result.status()).isEqualTo(NormalizedQuoteData.BatchStatus.PARTIAL_FAILURE);
         verify(writer).record(eq("FUBON_TW_QUOTES_LIVE"), eq("盤中台股即時報價"), any(Throwable.class), eq(NOW.instant()));
     }
 
@@ -57,7 +56,7 @@ class FubonNormalizedQuoteClientApiErrorLogTest {
 
         var result = client.fetch(List.of("2330"));
 
-        assertThat(result.status()).isEqualTo(FubonNormalizedQuoteClient.BatchStatus.INVALID_RESPONSE);
+        assertThat(result.status()).isEqualTo(NormalizedQuoteData.BatchStatus.INVALID_RESPONSE);
         verify(writer).record(eq("FUBON_TW_QUOTES_LIVE"), eq("盤中台股即時報價"), any(Throwable.class), eq(NOW.instant()));
     }
 

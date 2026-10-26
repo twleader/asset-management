@@ -1,12 +1,8 @@
 package com.steven.assets.externalmaterials.service;
 
-import com.steven.assets.externalmaterials.client.DividendFetchClient;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
-
+import com.steven.assets.externalmaterials.model.marketdata.DividendData;
+import com.steven.assets.externalmaterials.model.marketdata.DividendEvidenceData.PersistResult;
+import com.steven.assets.externalmaterials.service.port.DividendEvidencePort;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -20,16 +16,19 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Append-only dividend snapshot/event/fetch-observation writer (Task 307.6). */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class DividendSnapshotStore {
+public class DividendSnapshotStore implements DividendEvidencePort {
 
     private final JdbcTemplate jdbc;
-
-    public record PersistResult(long snapshotId, String contentHash, boolean complete, String status) {}
 
     /**
      * Reuses an immutable snapshot for equal canonical content and appends one observation per fetch.
@@ -38,7 +37,7 @@ public class DividendSnapshotStore {
      */
     @Transactional
     public PersistResult record(
-        String code, String market, DividendFetchClient.DividendFetchResult fetched, Instant observedAt) {
+        String code, String market, DividendData.DividendFetchResult fetched, Instant observedAt) {
         if (code == null || market == null || fetched == null) {
             recordAttempt(code, market, fetched, observedAt, "FAILED", "null fetch input", null);
             return new PersistResult(0, null, false, "FAILED");
@@ -99,7 +98,7 @@ public class DividendSnapshotStore {
         }
         Instant seen = observedAt == null ? Instant.now() : observedAt;
         boolean complete = fetched.complete()
-                && fetched.status() != DividendFetchClient.FetchStatus.PARTIAL;
+                && fetched.status() != DividendData.FetchStatus.PARTIAL;
         jdbc.update(
                 "INSERT INTO stock_dividend_fetch_observation "
                         + "(snapshot_id,observed_at,status,complete,scope_from,scope_to,source_available_at,error_reason) "
@@ -109,10 +108,10 @@ public class DividendSnapshotStore {
         return new PersistResult(snapshotId, contentHash, complete, fetched.status().name());
     }
 
-    private void appendEvents(long snapshotId, List<DividendFetchClient.DividendEvent> events,
+    private void appendEvents(long snapshotId, List<DividendData.DividendEvent> events,
                               Instant sourceAvailableAt) {
         if (events == null) return;
-        for (DividendFetchClient.DividendEvent event : distinctCanonicalEvents(events)) {
+        for (DividendData.DividendEvent event : distinctCanonicalEvents(events)) {
             String key = canonicalEventHash(event);
             // 357.3a-0：ex_rights_date 緊接 ex_dividend_date 之後同步寫入；只改
             // canonicalEvent()（雜湊輸入）不改這裡的 INSERT 會讓雜湊算對但值仍寫不進去。
@@ -127,23 +126,23 @@ public class DividendSnapshotStore {
         }
     }
 
-    private static List<DividendFetchClient.DividendEvent> nonNullEvents(
-            List<DividendFetchClient.DividendEvent> events) {
+    private static List<DividendData.DividendEvent> nonNullEvents(
+            List<DividendData.DividendEvent> events) {
         return events == null ? List.of() : events.stream().filter(Objects::nonNull).toList();
     }
 
     /**
-     * Event rows are keyed by {@link #canonicalEventHash(DividendFetchClient.DividendEvent)}.
+     * Event rows are keyed by {@link #canonicalEventHash(DividendData.DividendEvent)}.
      * Keep the hash, expected row count, and insert loop on the same distinct canonical set;
      * otherwise a provider payload containing the same event twice makes a successful insert
      * look like a failed repair because the database correctly de-duplicates the event key.
      */
-    private static List<DividendFetchClient.DividendEvent> distinctCanonicalEvents(
-            List<DividendFetchClient.DividendEvent> events) {
+    private static List<DividendData.DividendEvent> distinctCanonicalEvents(
+            List<DividendData.DividendEvent> events) {
         if (events == null || events.isEmpty()) return List.of();
         Set<String> seen = new HashSet<>();
-        List<DividendFetchClient.DividendEvent> distinct = new ArrayList<>();
-        for (DividendFetchClient.DividendEvent event : events) {
+        List<DividendData.DividendEvent> distinct = new ArrayList<>();
+        for (DividendData.DividendEvent event : events) {
             if (event != null && seen.add(canonicalEvent(event))) distinct.add(event);
         }
         return List.copyOf(distinct);
@@ -157,7 +156,7 @@ public class DividendSnapshotStore {
     }
 
     private void recordAttempt(String code, String market,
-                               DividendFetchClient.DividendFetchResult fetched,
+                               DividendData.DividendFetchResult fetched,
                                Instant observedAt, String status, String reason, Long snapshotId) {
         try {
             jdbc.update("""
@@ -179,14 +178,14 @@ public class DividendSnapshotStore {
         }
     }
 
-    public static String canonicalContentHash(List<DividendFetchClient.DividendEvent> events) {
+    public static String canonicalContentHash(List<DividendData.DividendEvent> events) {
         List<String> canonical = new ArrayList<>();
         distinctCanonicalEvents(events).stream().map(DividendSnapshotStore::canonicalEvent)
                 .sorted(Comparator.naturalOrder()).forEach(canonical::add);
         return sha256(String.join("\n", canonical));
     }
 
-    public static String canonicalEventHash(DividendFetchClient.DividendEvent event) {
+    public static String canonicalEventHash(DividendData.DividendEvent event) {
         return sha256(canonicalEvent(event));
     }
 
@@ -195,7 +194,7 @@ public class DividendSnapshotStore {
      * 排除在 canonical 之外會讓「同一事件」的判定永遠少一個維度。此變更會讓既有
      * event_key 全數改變，遷移機制見 {@link DividendEventKeyMigration}。
      */
-    private static String canonicalEvent(DividendFetchClient.DividendEvent event) {
+    private static String canonicalEvent(DividendData.DividendEvent event) {
         if (event == null) return "NULL";
         return String.join("|", value(event.year()), value(parse(event.exDividendDate())),
                 value(parse(event.exRightsDate())),

@@ -1,13 +1,14 @@
 package com.steven.assets.externalmaterials.client;
 
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import com.steven.assets.externalmaterials.service.MarketClock;
-import org.junit.jupiter.api.Test;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 

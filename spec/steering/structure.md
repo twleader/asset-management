@@ -2,6 +2,8 @@
 
 > **用途：** 本文件由 AWS KIRO SDD 在每次對話中載入，提供「程式碼放在哪、命名規則、模組界線」的長期 context。本文件描述穩定的目錄結構與慣例；新增檔案時請依此放置。
 
+> **Task513 現況修訂：** backend 已落地的固定 HTTP／Redis 窄介面位於 `service/port/`，行情六能力的實際名稱是 `MarketDataReadPort`，取代下文 Task404 的規劃名稱 `InternalMarketDataPort`；其他 ports 為 HistoricalData／MacroData／ReadOnlyIntraday／DividendSync／PriceRefresh／CrawlerRun／FundMaintenance／TechnicalHistoryBackfill，以及 PriceCacheRead／CooldownStore。實作位於 integration 或既有 outer client，neutral records／ETF parser 位於 `model/marketdata`。external-materials 的 14 個 ports 位於 `service/port`，共享 values／純 helper／codec 位於 `model/marketdata`；Python 的 consumer Protocol／captures／errors／純 helpers／config values 已中立化。此段只更新本輪架構落地位置，不代表 Tasks401–404 其餘功能／生命週期需求已完成。
+
 ---
 
 ## 1. Repository Top-Level
@@ -574,7 +576,7 @@ frontend/
 
 ```
 spec/
-├── requirements.md       # 190 個 Requirements（最新編號為 197，136–140 間為並行 worktree 保留跳號）
+├── requirements.md       # 191 個 Requirements（最新編號為 198，136–140 間為並行 worktree 保留跳號）
 ├── design.md             # 架構圖、ERD、Service 職責、Sequence
 ├── tasks.md              # 索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、416）＋尚未歸檔的 201 起區段；Task 417、459、460、466、467 僅有獨立任務檔，不追加索引
 ├── tasks/                # 任務檔

@@ -2,12 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.client.StockFundamentalFetchClient;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.PreparedStatementSetter;
-import org.springframework.jdbc.core.ResultSetExtractor;
-
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
@@ -24,7 +19,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.PreparedStatementSetter;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -226,7 +225,7 @@ class UsValuationDerivationServiceTest {
                         : q)
                 .toList();
 
-        List<StockSourceQuery.ClosePoint> prices = closes("2024-11-01", "2026-03-06", "100.00");
+        List<StockMarketData.ClosePoint> prices = closes("2024-11-01", "2026-03-06", "100.00");
         List<StockFundamentalFetchClient.Valuation> baseline =
                 UsValuationDerivationService.derive("AVGO", intact, prices, List.of());
         List<StockFundamentalFetchClient.Valuation> gated =
@@ -252,7 +251,7 @@ class UsValuationDerivationServiceTest {
         assertThat(UsValuationDerivationService.derivedShares(bd("1.00"), bd("-1000000000"))).isNull();
         assertThat(UsValuationDerivationService.derivedShares(bd("0.00"), bd("1000000000"))).isNull();
 
-        List<StockSourceQuery.ClosePoint> prices = closes("2024-11-01", "2026-03-06", "100.00");
+        List<StockMarketData.ClosePoint> prices = closes("2024-11-01", "2026-03-06", "100.00");
         List<StockFundamentalFetchClient.Valuation> baseline =
                 UsValuationDerivationService.derive("AMZN", twoYearsFlatQuarters(), prices, List.of());
         List<StockFundamentalFetchClient.Valuation> gated =
@@ -309,7 +308,7 @@ class UsValuationDerivationServiceTest {
         assertThat(effective.get(UsValuationDerivationService.periodIndex(2025, 2)))
                 .isEqualTo(filed("2025-10-31"));
 
-        List<StockSourceQuery.ClosePoint> prices = closes("2024-10-01", "2026-08-14", "100.00");
+        List<StockMarketData.ClosePoint> prices = closes("2024-10-01", "2026-08-14", "100.00");
         List<StockFundamentalFetchClient.Valuation> rows =
                 UsValuationDerivationService.derive("MSFT", quarters, prices, List.of());
 
@@ -439,7 +438,7 @@ class UsValuationDerivationServiceTest {
      */
     @Test
     void derivedRowsCarryTheDividendYieldFromTheResolvedSeries() {
-        List<StockSourceQuery.ClosePoint> prices = closes("2025-01-20", "2025-05-09", "100.00");
+        List<StockMarketData.ClosePoint> prices = closes("2025-01-20", "2025-05-09", "100.00");
         List<StockFundamentalFetchClient.Valuation> rows = UsValuationDerivationService.derive(
                 "MSFT", growingQuarters(), prices, List.of(
                         dividend("2024-05-15", "0.75"), dividend("2024-08-15", "0.75"),
@@ -790,12 +789,12 @@ class UsValuationDerivationServiceTest {
                 LocalDate.parse(exDate), bd(amount), "hash-" + exDate + "-" + amount, "NASDAQ+Yahoo Finance");
     }
 
-    private static List<StockSourceQuery.ClosePoint> closes(String from, String to, String price) {
-        List<StockSourceQuery.ClosePoint> rows = new ArrayList<>();
+    private static List<StockMarketData.ClosePoint> closes(String from, String to, String price) {
+        List<StockMarketData.ClosePoint> rows = new ArrayList<>();
         LocalDate end = LocalDate.parse(to);
         for (LocalDate day = LocalDate.parse(from); !day.isAfter(end); day = day.plusDays(1)) {
             if (day.getDayOfWeek() == DayOfWeek.SATURDAY || day.getDayOfWeek() == DayOfWeek.SUNDAY) continue;
-            rows.add(new StockSourceQuery.ClosePoint(day, bd(price)));
+            rows.add(new StockMarketData.ClosePoint(day, bd(price)));
         }
         return rows;
     }
@@ -827,9 +826,9 @@ class UsValuationDerivationServiceTest {
      * 與 {@code derive} 用同一組判準（可見性以當日美股收盤時刻為界、視窗取最新四季且必須連續）。
      */
     private static Map<LocalDate, Integer> windowTopByDay(
-            Map<Integer, Instant> availability, List<StockSourceQuery.ClosePoint> prices) {
+            Map<Integer, Instant> availability, List<StockMarketData.ClosePoint> prices) {
         Map<LocalDate, Integer> tops = new LinkedHashMap<>();
-        for (StockSourceQuery.ClosePoint point : prices) {
+        for (StockMarketData.ClosePoint point : prices) {
             Instant close = UsValuationDerivationService.marketCloseInstant(point.date());
             List<Integer> visible = availability.entrySet().stream()
                     .filter(entry -> entry.getValue() != null && !entry.getValue().isAfter(close))

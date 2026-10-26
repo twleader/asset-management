@@ -3,7 +3,24 @@ package com.steven.assets.externalmaterials.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.steven.assets.externalmaterials.client.PriceFetchClient.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceData.PriceResult;
+import com.steven.assets.externalmaterials.model.marketdata.PriceProjectionData;
+import com.steven.assets.externalmaterials.model.marketdata.ProviderTimedPriceObservation;
+import com.steven.assets.externalmaterials.model.marketdata.StockMarketData;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,23 +39,6 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -127,15 +127,15 @@ class PriceCacheWriterFubonRedisIntegrationTest {
                 null, null, null, new BigDecimal("99"), null, null, null, DATE, Instant.parse("2026-08-21T05:00:00Z"));
         PriceResult older = new PriceResult("2330", "台股", new BigDecimal("98"), null, null, "TWSE_MIS", "台積電",
                 null, null, null, new BigDecimal("99"), null, null, null, DATE, Instant.parse("2026-08-21T04:59:59Z"));
-        assertThat(writer.writeTaiwanLive(first, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(first, true)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
         awaitMessages(1); messages.clear();
         String before = redis.opsForValue().get(priceKey());
         long ticksBefore = ticks().size();
         Long latestTtlBefore = redis.getExpire(priceKey(), TimeUnit.MILLISECONDS);
         Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
         assertThat(redis.opsForSet().members(indexKey())).containsExactly("2330");
-        assertThat(writer.writeTaiwanLive(equal, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
-        assertThat(writer.writeTaiwanLive(older, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(equal, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(older, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
         assertThat(redis.opsForValue().get(priceKey())).isEqualTo(before);
         assertThat(redis.opsForSet().members(indexKey())).containsExactly("2330");
         assertThat(redis.getExpire(priceKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(latestTtlBefore);
@@ -151,15 +151,15 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         PriceResult mis = live("TWSE_MIS", "2026-08-21T05:01:00Z", "101");
         PriceResult yahoo = live("Yahoo", "2026-08-21T05:02:00Z", "102");
 
-        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
-        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
-        assertThat(writer.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
+        assertThat(writer.writeTaiwanLive(yahoo, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
         awaitMessages(3); messages.clear();
         String latest = redis.opsForValue().get(priceKey());
         int ticksBefore = ticks().size();
 
-        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
-        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(fubon, true)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(writer.writeTaiwanLive(mis, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
 
         assertThat(redis.opsForValue().get(priceKey())).isEqualTo(latest);
         assertThat(MAPPER.readTree(latest).path("source").asText()).isEqualTo("Yahoo");
@@ -184,7 +184,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
             Long indexTtlBefore = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
 
             assertThat(writer.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:01:00Z", "101"), false))
-                    .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+                    .isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
 
             assertThat(redis.opsForValue().get(priceKey())).isEqualTo(malformed);
             assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
@@ -220,7 +220,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
             Long indexTtl = redis.getExpire(indexKey(), TimeUnit.MILLISECONDS);
 
             assertThat(writer.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:01:00Z", "101"), false))
-                    .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+                    .isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
 
             assertThat(redis.opsForValue().get(priceKey())).isEqualTo(raw);
             assertThat(redis.opsForSet().members(indexKey())).containsExactly("sentinel-index-member");
@@ -237,7 +237,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         redis.opsForValue().set(priceKey(), "{not-json", Duration.ofMinutes(25));
 
         assertThat(writer.writeVerifiedClose(live("TWSE", "2026-08-21T05:01:00Z", "101")))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         assertThat(MAPPER.readTree(redis.opsForValue().get(priceKey())).path("quoteStatus").asText())
                 .isEqualTo("VERIFIED_CLOSE");
@@ -254,9 +254,9 @@ class PriceCacheWriterFubonRedisIntegrationTest {
                 .thenReturn(java.util.Optional.of(new BigDecimal("101.25")));
 
         assertThat(writer.syncClosedFromDb(
-                "2330", "台股", new StockSourceQuery.DatedClose(DATE, new BigDecimal("101.25")),
+                "2330", "台股", new StockMarketData.DatedClose(DATE, new BigDecimal("101.25")),
                 Instant.parse("2026-08-21T05:00:00Z")))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
 
         JsonNode payload = MAPPER.readTree(redis.opsForValue().get(priceKey()));
         assertThat(payload.path("quoteStatus").asText()).isEqualTo("PREVIOUS_CLOSE");
@@ -272,25 +272,25 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         PriceResult mis = live("TWSE_MIS", "2026-08-21T05:01:00Z", "101");
         PriceResult yahoo = live("Yahoo", "2026-08-21T05:02:00Z", "102");
 
-        assertThat(realWriter.writeTaiwanLive(fubon, true)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(realWriter.writeTaiwanLive(fubon, true)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
         assertThat(redis.hasKey(dayHlKey())).isFalse();
-        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
-        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
+        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
         String dayHl = redis.opsForValue().get(dayHlKey());
         Long dayHlTtlBefore = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
         assertThat(MAPPER.readTree(dayHl).path("high").asText()).isEqualTo("102");
         assertThat(MAPPER.readTree(dayHl).path("low").asText()).isEqualTo("101");
 
-        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
-        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(realWriter.writeTaiwanLive(mis, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
+        assertThat(realWriter.writeTaiwanLive(yahoo, false)).isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
         assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHl);
         assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(dayHlTtlBefore);
 
         PriceResult verified = live("TWSE", "2026-08-21T05:03:00Z", "103");
-        assertThat(realWriter.writeVerifiedClose(verified)).isEqualTo(PriceCacheWriter.CacheWriteOutcome.WRITTEN);
+        assertThat(realWriter.writeVerifiedClose(verified)).isEqualTo(PriceProjectionData.CacheWriteOutcome.WRITTEN);
         String verifiedPayload = redis.opsForValue().get(priceKey());
         assertThat(realWriter.writeTaiwanLive(live("Yahoo", "2026-08-21T05:04:00Z", "104"), false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.REJECTED_STALE);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.REJECTED_STALE);
         assertThat(redis.opsForValue().get(priceKey())).isEqualTo(verifiedPayload);
         assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHl);
 
@@ -298,7 +298,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         String dayHlBeforeMalformed = redis.opsForValue().get(dayHlKey());
         Long malformedDayHlTtl = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
         assertThat(realWriter.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:05:00Z", "105"), false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
         assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHlBeforeMalformed);
         assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(malformedDayHlTtl);
 
@@ -308,7 +308,7 @@ class PriceCacheWriterFubonRedisIntegrationTest {
         String dayHlBeforeCoreReject = redis.opsForValue().get(dayHlKey());
         Long coreRejectDayHlTtl = redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS);
         assertThat(realWriter.writeTaiwanLive(live("TWSE_MIS", "2026-08-21T05:06:00Z", "106"), false))
-                .isEqualTo(PriceCacheWriter.CacheWriteOutcome.FAILED);
+                .isEqualTo(PriceProjectionData.CacheWriteOutcome.FAILED);
         assertThat(redis.opsForValue().get(dayHlKey())).isEqualTo(dayHlBeforeCoreReject);
         assertThat(redis.getExpire(dayHlKey(), TimeUnit.MILLISECONDS)).isLessThanOrEqualTo(coreRejectDayHlTtl);
     }

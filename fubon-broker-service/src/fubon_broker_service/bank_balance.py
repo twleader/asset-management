@@ -5,7 +5,8 @@ from datetime import datetime
 
 from .accounting_normalization import checked_result, observation, verify_identity
 from .normalization import signed_integer, utc_now
-from .sdk_gateway import SdkGateway, raw_field
+from .ports import BankBalanceReader
+from .raw_values import raw_field
 
 
 class BankBalanceError(ValueError):
@@ -19,7 +20,7 @@ class BankBalanceError(ValueError):
 class BankBalanceService:
     """Validate the official Result/BankRemain before exposing a fingerprint-only DTO."""
 
-    def __init__(self, gateway: SdkGateway, *, now: Callable[[], datetime] = utc_now) -> None:
+    def __init__(self, gateway: BankBalanceReader, *, now: Callable[[], datetime] = utc_now) -> None:
         self._gateway, self._now = gateway, now
 
     def read(self) -> dict[str, object]:

@@ -2,8 +2,11 @@ package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Service;
-
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseCacheData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseData;
+import com.steven.assets.externalmaterials.model.marketdata.FubonResponseRules;
+import com.steven.assets.externalmaterials.service.port.FubonResponseCachePort;
+import com.steven.assets.externalmaterials.service.port.FubonResponseRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.springframework.stereotype.Service;
 
 /**
  * Pure internal bridge reader for the dedicated Fubon full-response mirror.
@@ -37,11 +41,11 @@ public class FubonLiveResponseReadService {
     private static final Set<String> BOOK_LEVEL_FIELDS = Set.of(
             "level", "bidPrice", "bidVolumeLots", "askPrice", "askVolumeLots");
 
-    private final FubonLiveResponseCache cache;
-    private final FubonLiveResponseStore store;
+    private final FubonResponseCachePort cache;
+    private final FubonResponseRepository store;
     private final ObjectMapper mapper;
 
-    public FubonLiveResponseReadService(FubonLiveResponseCache cache, FubonLiveResponseStore store,
+    public FubonLiveResponseReadService(FubonResponseCachePort cache, FubonResponseRepository store,
                                         ObjectMapper mapper) {
         this.cache = cache;
         this.store = store;
@@ -49,15 +53,15 @@ public class FubonLiveResponseReadService {
     }
 
     public BridgeResponse read(String code, String market) {
-        if (!FubonLiveResponseStore.supportedIdentity(code, market)) {
+        if (!FubonResponseRules.supportedIdentity(code, market)) {
             return unavailable(false, UNSUPPORTED);
         }
-        Optional<FubonLiveResponseCache.CachedResponse> cached = cache.find(code, market);
-        FubonLiveResponseStore.ReadResult current = store.find(code, market);
-        if (current.status() != FubonLiveResponseStore.ReadStatus.FOUND || current.canonical() == null) {
+        Optional<FubonResponseCacheData.CachedResponse> cached = cache.find(code, market);
+        FubonResponseData.ReadResult current = store.find(code, market);
+        if (current.status() != FubonResponseData.ReadStatus.FOUND || current.canonical() == null) {
             return unavailable(true, UNAVAILABLE);
         }
-        FubonLiveResponseStore.CanonicalResponse canonical = current.canonical();
+        FubonResponseData.CanonicalResponse canonical = current.canonical();
         if (cached.filter(value -> cacheMatchesCanonical(value, canonical)).isPresent()) {
             return safeProjection(canonical.stockCode(), canonical.market(), canonical.receivedAt(),
                     cached.orElseThrow().batchId(), cached.orElseThrow().responseRowJson());
@@ -148,8 +152,8 @@ public class FubonLiveResponseReadService {
                 nullableNonNegativeLong(node, "outerVolumeLots"), List.copyOf(levels));
     }
 
-    private boolean cacheMatchesCanonical(FubonLiveResponseCache.CachedResponse cached,
-                                          FubonLiveResponseStore.CanonicalResponse canonical) {
+    private boolean cacheMatchesCanonical(FubonResponseCacheData.CachedResponse cached,
+                                          FubonResponseData.CanonicalResponse canonical) {
         return canonical.receivedAt().equals(cached.receivedAt())
                 && canonical.batchId().equals(cached.batchId())
                 && sameJson(cached.countersJson(), canonical.countersJson())

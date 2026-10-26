@@ -87,7 +87,7 @@ class CrawlerExportPathServicePublicRescanTest {
         });
         extServer.start();
         return new CrawlerExportPathService(repo, "/home/steven", gdrive,
-                "http://127.0.0.1:" + extServer.getAddress().getPort(), 50, redis);
+                new com.steven.assets.integration.crawler.CrawlerRunHttpAdapter("http://127.0.0.1:" + extServer.getAddress().getPort()), 50, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
     }
 
     private static String runNowJson(String status) {
@@ -182,7 +182,7 @@ class CrawlerExportPathServicePublicRescanTest {
         when(redis.opsForValue()).thenReturn(valueOps);
         cooldownAvailable();
         CrawlerExportPathService service = new CrawlerExportPathService(
-                repo, "/home/steven", gdrive, deadUrl(), 5, redis);
+                repo, "/home/steven", gdrive, new com.steven.assets.integration.crawler.CrawlerRunHttpAdapter(deadUrl()), 5, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
 
         CrawlerExportPathDto.RunNowResponse r = service.publicRescan();
 
@@ -250,7 +250,7 @@ class CrawlerExportPathServicePublicRescanTest {
         });
         extServer.start();
         CrawlerExportPathService service = new CrawlerExportPathService(repo, "/home/steven", gdrive,
-                "http://127.0.0.1:" + extServer.getAddress().getPort(), 1, redis);
+                new com.steven.assets.integration.crawler.CrawlerRunHttpAdapter("http://127.0.0.1:" + extServer.getAddress().getPort()), 1, new com.steven.assets.integration.marketdata.RedisCooldownStoreAdapter(redis));
 
         CrawlerExportPathDto.RunNowResponse r = service.publicRescan();
 

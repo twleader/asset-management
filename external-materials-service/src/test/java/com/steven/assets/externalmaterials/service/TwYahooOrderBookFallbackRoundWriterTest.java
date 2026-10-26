@@ -1,8 +1,8 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.client.TwQuoteDetailFetchClient;
-import org.junit.jupiter.api.Test;
-
+import com.steven.assets.externalmaterials.model.marketdata.OrderBookData;
+import com.steven.assets.externalmaterials.model.marketdata.QuoteDetailData;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -14,7 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -30,7 +30,7 @@ class TwYahooOrderBookFallbackRoundWriterTest {
     void stableFortyCandidatesUseEightCodeFairCursorAndTryEveryCodeWithinFiveAcceptedRounds() {
         ExecutorService executor = inlineExecutor();
         TwQuoteDetailFetchClient yahoo = mock(TwQuoteDetailFetchClient.class);
-        when(yahoo.probeTw(any())).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid());
+        when(yahoo.probeTw(any())).thenReturn(QuoteDetailData.YahooProbeOutcome.transientOrInvalid());
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
         TwYahooOrderBookFallbackRoundWriter writer = new TwYahooOrderBookFallbackRoundWriter(executor, yahoo, store, cache);
@@ -51,8 +51,8 @@ class TwYahooOrderBookFallbackRoundWriterTest {
     void structuralMissIsTheOnlyPathToSecondSuffixAndEightCodesStayWithinSixteenProbes() {
         ExecutorService executor = inlineExecutor();
         TwQuoteDetailFetchClient yahoo = mock(TwQuoteDetailFetchClient.class);
-        when(yahoo.probeTw(any())).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.structuralMiss());
-        when(yahoo.probeTwo(any())).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid());
+        when(yahoo.probeTw(any())).thenReturn(QuoteDetailData.YahooProbeOutcome.structuralMiss());
+        when(yahoo.probeTwo(any())).thenReturn(QuoteDetailData.YahooProbeOutcome.transientOrInvalid());
         TwYahooOrderBookFallbackRoundWriter writer = new TwYahooOrderBookFallbackRoundWriter(executor, yahoo,
                 mock(IntradayOrderBookSnapshotStore.class), mock(QuoteDetailCache.class));
 
@@ -70,7 +70,7 @@ class TwYahooOrderBookFallbackRoundWriterTest {
     void defensiveCandidateNormalizationNeverExpandsPastTheDispatchersFortyCodeWindow() {
         ExecutorService executor = inlineExecutor();
         TwQuoteDetailFetchClient yahoo = mock(TwQuoteDetailFetchClient.class);
-        when(yahoo.probeTw(any())).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid());
+        when(yahoo.probeTw(any())).thenReturn(QuoteDetailData.YahooProbeOutcome.transientOrInvalid());
         TwYahooOrderBookFallbackRoundWriter writer = new TwYahooOrderBookFallbackRoundWriter(executor, yahoo,
                 mock(IntradayOrderBookSnapshotStore.class), mock(QuoteDetailCache.class));
         List<String> candidates = java.util.stream.IntStream.rangeClosed(1, 41)
@@ -88,11 +88,11 @@ class TwYahooOrderBookFallbackRoundWriterTest {
         ExecutorService executor = inlineExecutor();
         TwQuoteDetailFetchClient yahoo = mock(TwQuoteDetailFetchClient.class);
         var found = snapshot("YAHOO_TW");
-        var canonical = new IntradayOrderBookSnapshotStore.CanonicalSnapshot(found, 4L);
-        when(yahoo.probeTw("2330")).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.found(found));
+        var canonical = new OrderBookData.CanonicalSnapshot(found, 4L);
+        when(yahoo.probeTw("2330")).thenReturn(QuoteDetailData.YahooProbeOutcome.found(found));
         IntradayOrderBookSnapshotStore store = mock(IntradayOrderBookSnapshotStore.class);
-        when(store.isPersistable(found)).thenReturn(true);
-        when(store.persist(found)).thenReturn(IntradayOrderBookSnapshotStore.PersistResult.applied(canonical));
+
+        when(store.persist(found)).thenReturn(OrderBookData.PersistResult.applied(canonical));
         QuoteDetailCache cache = mock(QuoteDetailCache.class);
 
         new TwYahooOrderBookFallbackRoundWriter(executor, yahoo, store, cache).submit(List.of("2330"));
@@ -123,7 +123,7 @@ class TwYahooOrderBookFallbackRoundWriterTest {
             return null;
         }).when(executor).execute(any(Runnable.class));
         TwQuoteDetailFetchClient yahoo = mock(TwQuoteDetailFetchClient.class);
-        when(yahoo.probeTw(any())).thenReturn(TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid());
+        when(yahoo.probeTw(any())).thenReturn(QuoteDetailData.YahooProbeOutcome.transientOrInvalid());
         TwYahooOrderBookFallbackRoundWriter writer = new TwYahooOrderBookFallbackRoundWriter(executor, yahoo,
                 mock(IntradayOrderBookSnapshotStore.class), mock(QuoteDetailCache.class));
 
@@ -151,7 +151,7 @@ class TwYahooOrderBookFallbackRoundWriterTest {
             firstWave.countDown();
             try {
                 if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("probe release timed out");
-                return TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid();
+                return QuoteDetailData.YahooProbeOutcome.transientOrInvalid();
             } finally {
                 active.decrementAndGet();
                 completed.countDown();
@@ -198,7 +198,7 @@ class TwYahooOrderBookFallbackRoundWriterTest {
                 interrupted.countDown();
                 Thread.currentThread().interrupt();
             }
-            return TwQuoteDetailFetchClient.YahooProbeOutcome.transientOrInvalid();
+            return QuoteDetailData.YahooProbeOutcome.transientOrInvalid();
         }).when(yahoo).probeTw(any());
         Duration testDeadline = Duration.ofMillis(150);
         TwYahooOrderBookFallbackRoundWriter writer = new TwYahooOrderBookFallbackRoundWriter(executor, yahoo,
@@ -228,12 +228,12 @@ class TwYahooOrderBookFallbackRoundWriterTest {
         return executor;
     }
 
-    private static TwQuoteDetailFetchClient.QuoteDetailResult snapshot(String source) {
-        List<TwQuoteDetailFetchClient.OrderBookLevel> levels = java.util.stream.IntStream.rangeClosed(1, 5)
-                .mapToObj(level -> new TwQuoteDetailFetchClient.OrderBookLevel(level,
+    private static QuoteDetailData.QuoteDetailResult snapshot(String source) {
+        List<QuoteDetailData.OrderBookLevel> levels = java.util.stream.IntStream.rangeClosed(1, 5)
+                .mapToObj(level -> new QuoteDetailData.OrderBookLevel(level,
                         BigDecimal.valueOf(101 - level), (long) level,
                         BigDecimal.valueOf(101 + level), (long) (level + 10))).toList();
-        return new TwQuoteDetailFetchClient.QuoteDetailResult(
+        return new QuoteDetailData.QuoteDetailResult(
                 "2330", "台積電", "台股", true, true, source, null,
                 Instant.parse("2026-08-26T03:00:00Z"), Instant.parse("2026-08-26T03:00:01Z"), "OPEN",
                 BigDecimal.valueOf(100), BigDecimal.valueOf(99), BigDecimal.valueOf(100),

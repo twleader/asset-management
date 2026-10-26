@@ -1,11 +1,12 @@
 package com.steven.assets.controller;
 
-import com.steven.assets.model.CommodityPriceHistory;
-import com.steven.assets.model.ExchangeRateHistory;
-import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.dto.HistoryDto.CommodityPriceHistory;
+import com.steven.assets.dto.HistoryDto.ExchangeRateHistory;
+import com.steven.assets.dto.HistoryDto.StockPriceHistory;
 import com.steven.assets.service.DividendHistoryService;
 import com.steven.assets.service.HistoricalDataService;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.model.marketdata.MarketDataResults;
 import com.steven.assets.dto.QuoteDetailDto;
 import com.steven.assets.service.PriceStreamService;
 import com.steven.assets.service.StockPriceService;
@@ -42,7 +43,7 @@ public class MarketDataController {
     private final HistoricalDataService historicalDataService;
     private final PriceStreamService priceStreamService;
     private final DividendHistoryService dividendHistoryService;
-    private final com.steven.assets.service.ExcelExportService excelExportService;
+    private final com.steven.assets.service.MarketHistoryApplicationService historyApplication;
     private final com.steven.assets.service.TechnicalIndicatorService technicalIndicatorService;
     private final com.steven.assets.service.CommodityLiveQuoteService commodityLiveQuoteService;
 
@@ -52,11 +53,7 @@ public class MarketDataController {
      */
     @GetMapping("/holidays")
     public Map<String, Object> getHolidays(@RequestParam int year) {
-        return Map.of(
-            "tw", marketDataService.getTwHolidays(year),
-            "us", marketDataService.getUsHolidays(year),
-            "uk", marketDataService.getUkHolidays(year)
-        );
+        return historyApplication.holidays(year);
     }
 
     /**
@@ -64,7 +61,7 @@ public class MarketDataController {
      * GET /api/market-data/dividend-rate?code=0050&market=台股
      */
     @GetMapping("/dividend-rate")
-    public ResponseEntity<MarketDataService.DividendRateResult> getDividendRate(
+    public ResponseEntity<MarketDataResults.DividendRateResult> getDividendRate(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         return ResponseEntity.ok(marketDataService.getDividendRate(code, market));
@@ -142,7 +139,7 @@ public class MarketDataController {
      * GET /api/market-data/etf-holdings?code=0050&market=台股
      */
     @GetMapping("/etf-holdings")
-    public ResponseEntity<MarketDataService.EtfHoldingsResult> getEtfHoldings(
+    public ResponseEntity<MarketDataResults.EtfHoldingsResult> getEtfHoldings(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market) {
         return ResponseEntity.ok(marketDataService.getEtfHoldings(code, market));
@@ -153,7 +150,7 @@ public class MarketDataController {
      * GET /api/market-data/dividends?code=0050&market=台股&years=10
      */
     @GetMapping("/dividends")
-    public ResponseEntity<MarketDataService.DividendHistoryResult> getDividendHistory(
+    public ResponseEntity<MarketDataResults.DividendHistoryResult> getDividendHistory(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(defaultValue = "10") int years) {
@@ -166,7 +163,7 @@ public class MarketDataController {
      * GET /api/market-data/dividends-readonly?code=0050&market=台股&years=10
      */
     @GetMapping("/dividends-readonly")
-    public List<MarketDataService.DividendRow> getDividendHistoryReadOnly(
+    public List<MarketDataResults.DividendRow> getDividendHistoryReadOnly(
             @RequestParam @Pattern(regexp = CODE_PATTERN, message = "股票代號格式不合法") String code,
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(defaultValue = "10") int years) {
@@ -208,7 +205,7 @@ public class MarketDataController {
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        return historicalDataService.getStockHistory(code, market, start, end);
+        return historicalDataService.getStockHistory(code, market, start, end).stream().map(StockPriceHistory::from).toList();
     }
 
     /**
@@ -238,8 +235,7 @@ public class MarketDataController {
             @RequestParam @Pattern(regexp = MARKET_PATTERN, message = "市場別格式不合法") String market,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(defaultValue = "false") boolean readOnly) {
-        return readOnly ? historicalDataService.fetchIntradaySession(code, market, date, true)
-                : historicalDataService.fetchIntradaySession(code, market, date);
+        return historyApplication.intradaySession(code, market, date, readOnly);
     }
 
     /**
@@ -265,12 +261,7 @@ public class MarketDataController {
             @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        if (start == null && end == null) {
-            return historicalDataService.getAllExchangeRates(currency);
-        }
-        if (start == null) start = LocalDate.now().minusYears(10);
-        if (end == null) end = LocalDate.now();
-        return historicalDataService.getExchangeRateHistory(currency, start, end);
+        return historyApplication.exchangeRates(currency, start, end).stream().map(ExchangeRateHistory::from).toList();
     }
 
     /**
@@ -282,6 +273,7 @@ public class MarketDataController {
             @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         return historicalDataService.getExchangeRateOnDate(currency, date)
+                .map(ExchangeRateHistory::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -294,6 +286,7 @@ public class MarketDataController {
     public ResponseEntity<ExchangeRateHistory> getLatestExchangeRate(
             @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency) {
         return historicalDataService.getLatestExchangeRate(currency)
+                .map(ExchangeRateHistory::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -305,11 +298,7 @@ public class MarketDataController {
     @PostMapping("/exchange-rate/refresh")
     public Map<String, Object> refreshExchangeRate(
             @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency) {
-        int backfilled = historicalDataService.backfillExchangeRate(currency, LocalDate.now().minusDays(10));
-        historicalDataService.fetchBotExchangeRate(currency);
-        // 每次刷新時順便清理超過 10 年的舊資料
-        historicalDataService.purgeOldExchangeRates(currency, 10);
-        return Map.of("backfilled", backfilled, "currency", currency, "botFetched", true);
+        return historyApplication.refreshExchangeRate(currency);
     }
 
     /**
@@ -320,9 +309,7 @@ public class MarketDataController {
     public Map<String, Object> backfillExchangeRateHistory(
             @RequestParam(defaultValue = "USD") @Pattern(regexp = CURRENCY_PATTERN, message = "幣別格式不合法") String currency,
             @RequestParam(required = false) LocalDate since) {
-        if (since == null) since = LocalDate.now().minusYears(10);
-        int count = historicalDataService.backfillExchangeRateFrom(currency, since);
-        return Map.of("backfilled", count, "currency", currency, "since", since.toString());
+        return historyApplication.backfillExchangeRate(currency, since);
     }
 
     /**
@@ -336,11 +323,11 @@ public class MarketDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
             throws java.io.IOException {
-        LocalDate[] range = normalizeTenYearRange(start, end);
-        byte[] data = excelExportService.exportExchangeRates(currency, range[0], range[1]);
+        var export = historyApplication.exportExchangeRates(currency, start, end);
+        byte[] data = export.content();
         java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
         String filename = com.steven.assets.service.ExcelExportService.exchangeRateLabel(currency)
-                + "_" + fileFmt.format(range[0]) + "_" + fileFmt.format(range[1]) + ".xlsx";
+                + "_" + fileFmt.format(export.start()) + "_" + fileFmt.format(export.end()) + ".xlsx";
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentDisposition(org.springframework.http.ContentDisposition
                 .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
@@ -362,8 +349,9 @@ public class MarketDataController {
     public Map<String, List<CommodityPriceHistory>> getCommodityHistory(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
-        LocalDate[] range = normalizeTenYearRange(start, end);
-        return historicalDataService.getCommodityHistory(range[0], range[1]);
+        return historyApplication.commodities(start, end).entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                Map.Entry::getKey, entry -> entry.getValue().stream().map(CommodityPriceHistory::from).toList(),
+                (left, right) -> left, java.util.LinkedHashMap::new));
     }
 
     /**
@@ -372,8 +360,7 @@ public class MarketDataController {
      */
     @PostMapping("/commodity/refresh")
     public Map<String, Object> refreshCommodities() {
-        Map<String, Object> backfilled = historicalDataService.refreshCommodities();
-        return Map.of("backfilled", backfilled);
+        return historyApplication.refreshCommodities();
     }
 
     /**
@@ -405,10 +392,10 @@ public class MarketDataController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end)
             throws java.io.IOException {
-        LocalDate[] range = normalizeTenYearRange(start, end);
-        byte[] data = excelExportService.exportCommodityPrices(range[0], range[1]);
+        var export = historyApplication.exportCommodities(start, end);
+        byte[] data = export.content();
         java.time.format.DateTimeFormatter fileFmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
-        String filename = "油價金價_" + fileFmt.format(range[0]) + "_" + fileFmt.format(range[1]) + ".xlsx";
+        String filename = "油價金價_" + fileFmt.format(export.start()) + "_" + fileFmt.format(export.end()) + ".xlsx";
         org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
         headers.setContentDisposition(org.springframework.http.ContentDisposition
                 .attachment().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build());
@@ -419,13 +406,4 @@ public class MarketDataController {
                 .body(new org.springframework.core.io.ByteArrayResource(data));
     }
 
-    /** 補預設值（近 10 年）並驗證區間；start 晚於 end 直接擋為 400。 */
-    private LocalDate[] normalizeTenYearRange(LocalDate start, LocalDate end) {
-        if (start == null) start = LocalDate.now().minusYears(10);
-        if (end == null) end = LocalDate.now();
-        if (start.isAfter(end)) {
-            throw new IllegalArgumentException("起始日期不可晚於結束日期：" + start + " > " + end);
-        }
-        return new LocalDate[] { start, end };
-    }
 }

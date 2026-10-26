@@ -1,12 +1,12 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.steven.assets.externalmaterials.client.FubonMarketJson;
+import com.steven.assets.externalmaterials.model.marketdata.FubonMarketJson;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.TreeMap;
-import static com.steven.assets.externalmaterials.service.FubonMarketData.*;
+import static com.steven.assets.externalmaterials.model.marketdata.FubonMarketData.*;
 
 /** Deliberately fake normalized provider examples, never live account or market evidence. */
 public final class FubonMarketTestData {
