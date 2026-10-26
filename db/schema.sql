@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：117 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：113 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -794,6 +794,7 @@ CREATE TABLE public.commodity_export_schedule (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
+    name character varying(20),
     CONSTRAINT ck_commodity_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_commodity_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59))),
     CONSTRAINT ck_commodity_export_schedule_range CHECK (((range_months IS NULL) OR ((range_months >= 1) AND (range_months <= 120))))
@@ -817,44 +818,6 @@ CREATE SEQUENCE public.commodity_export_schedule_id_seq
 --
 
 ALTER SEQUENCE public.commodity_export_schedule_id_seq OWNED BY public.commodity_export_schedule.id;
-
-
---
--- Name: commodity_export_schedule_time; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.commodity_export_schedule_time (
-    id bigint NOT NULL,
-    schedule_id bigint NOT NULL,
-    run_hour integer NOT NULL,
-    run_minute integer NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    last_run_date date,
-    last_run_at timestamp without time zone,
-    last_run_status character varying(500),
-    updated_at timestamp without time zone,
-    CONSTRAINT ck_commodity_export_schedule_time_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
-    CONSTRAINT ck_commodity_export_schedule_time_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
-);
-
-
---
--- Name: commodity_export_schedule_time_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.commodity_export_schedule_time_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: commodity_export_schedule_time_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.commodity_export_schedule_time_id_seq OWNED BY public.commodity_export_schedule_time.id;
 
 
 --
@@ -1156,6 +1119,7 @@ CREATE TABLE public.exchange_rate_export_schedule (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
+    name character varying(20),
     CONSTRAINT ck_exchange_rate_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_exchange_rate_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59))),
     CONSTRAINT ck_exchange_rate_export_schedule_range CHECK (((range_months IS NULL) OR ((range_months >= 1) AND (range_months <= 120))))
@@ -1179,44 +1143,6 @@ CREATE SEQUENCE public.exchange_rate_export_schedule_id_seq
 --
 
 ALTER SEQUENCE public.exchange_rate_export_schedule_id_seq OWNED BY public.exchange_rate_export_schedule.id;
-
-
---
--- Name: exchange_rate_export_schedule_time; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.exchange_rate_export_schedule_time (
-    id bigint NOT NULL,
-    schedule_id bigint NOT NULL,
-    run_hour integer NOT NULL,
-    run_minute integer NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    last_run_date date,
-    last_run_at timestamp without time zone,
-    last_run_status character varying(500),
-    updated_at timestamp without time zone,
-    CONSTRAINT ck_exchange_rate_export_schedule_time_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
-    CONSTRAINT ck_exchange_rate_export_schedule_time_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
-);
-
-
---
--- Name: exchange_rate_export_schedule_time_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.exchange_rate_export_schedule_time_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: exchange_rate_export_schedule_time_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.exchange_rate_export_schedule_time_id_seq OWNED BY public.exchange_rate_export_schedule_time.id;
 
 
 --
@@ -1265,6 +1191,7 @@ CREATE TABLE public.export_schedule_setting (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
+    name character varying(20),
     CONSTRAINT ck_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
 );
@@ -1315,44 +1242,6 @@ CREATE SEQUENCE public.export_schedule_setting_id_seq
 --
 
 ALTER SEQUENCE public.export_schedule_setting_id_seq OWNED BY public.export_schedule_setting.id;
-
-
---
--- Name: export_schedule_time; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.export_schedule_time (
-    id bigint NOT NULL,
-    schedule_id bigint NOT NULL,
-    run_hour integer NOT NULL,
-    run_minute integer NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    last_run_date date,
-    last_run_at timestamp without time zone,
-    last_run_status character varying(500),
-    updated_at timestamp without time zone,
-    CONSTRAINT ck_export_schedule_time_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
-    CONSTRAINT ck_export_schedule_time_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
-);
-
-
---
--- Name: export_schedule_time_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.export_schedule_time_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: export_schedule_time_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.export_schedule_time_id_seq OWNED BY public.export_schedule_time.id;
 
 
 --
@@ -2295,6 +2184,7 @@ CREATE TABLE public.realized_gain_export_schedule (
     gdrive_subpath character varying(512),
     gdrive_last_run_at timestamp without time zone,
     gdrive_last_status character varying(512),
+    name character varying(20),
     CONSTRAINT ck_rg_export_schedule_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
     CONSTRAINT ck_rg_export_schedule_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
 );
@@ -2317,44 +2207,6 @@ CREATE SEQUENCE public.realized_gain_export_schedule_id_seq
 --
 
 ALTER SEQUENCE public.realized_gain_export_schedule_id_seq OWNED BY public.realized_gain_export_schedule.id;
-
-
---
--- Name: realized_gain_export_schedule_time; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.realized_gain_export_schedule_time (
-    id bigint NOT NULL,
-    schedule_id bigint NOT NULL,
-    run_hour integer NOT NULL,
-    run_minute integer NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    last_run_date date,
-    last_run_at timestamp without time zone,
-    last_run_status character varying(500),
-    updated_at timestamp without time zone,
-    CONSTRAINT ck_rg_export_schedule_time_hour CHECK (((run_hour >= 0) AND (run_hour <= 23))),
-    CONSTRAINT ck_rg_export_schedule_time_minute CHECK (((run_minute >= 0) AND (run_minute <= 59)))
-);
-
-
---
--- Name: realized_gain_export_schedule_time_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.realized_gain_export_schedule_time_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: realized_gain_export_schedule_time_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.realized_gain_export_schedule_time_id_seq OWNED BY public.realized_gain_export_schedule_time.id;
 
 
 --
@@ -3822,13 +3674,6 @@ ALTER TABLE ONLY public.commodity_export_schedule ALTER COLUMN id SET DEFAULT ne
 
 
 --
--- Name: commodity_export_schedule_time id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.commodity_export_schedule_time ALTER COLUMN id SET DEFAULT nextval('public.commodity_export_schedule_time_id_seq'::regclass);
-
-
---
 -- Name: crawler_export_setting id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -3850,24 +3695,10 @@ ALTER TABLE ONLY public.exchange_rate_export_schedule ALTER COLUMN id SET DEFAUL
 
 
 --
--- Name: exchange_rate_export_schedule_time id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_rate_export_schedule_time ALTER COLUMN id SET DEFAULT nextval('public.exchange_rate_export_schedule_time_id_seq'::regclass);
-
-
---
 -- Name: export_schedule_setting id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.export_schedule_setting ALTER COLUMN id SET DEFAULT nextval('public.export_schedule_setting_id_seq'::regclass);
-
-
---
--- Name: export_schedule_time id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.export_schedule_time ALTER COLUMN id SET DEFAULT nextval('public.export_schedule_time_id_seq'::regclass);
 
 
 --
@@ -3931,13 +3762,6 @@ ALTER TABLE ONLY public.portfolio_advice ALTER COLUMN id SET DEFAULT nextval('pu
 --
 
 ALTER TABLE ONLY public.realized_gain_export_schedule ALTER COLUMN id SET DEFAULT nextval('public.realized_gain_export_schedule_id_seq'::regclass);
-
-
---
--- Name: realized_gain_export_schedule_time id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.realized_gain_export_schedule_time ALTER COLUMN id SET DEFAULT nextval('public.realized_gain_export_schedule_time_id_seq'::regclass);
 
 
 --
@@ -4254,14 +4078,6 @@ ALTER TABLE ONLY public.commodity_export_schedule
 
 
 --
--- Name: commodity_export_schedule_time commodity_export_schedule_time_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.commodity_export_schedule_time
-    ADD CONSTRAINT commodity_export_schedule_time_pkey PRIMARY KEY (id);
-
-
---
 -- Name: commodity_price_history commodity_price_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4334,14 +4150,6 @@ ALTER TABLE ONLY public.exchange_rate_export_schedule
 
 
 --
--- Name: exchange_rate_export_schedule_time exchange_rate_export_schedule_time_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_rate_export_schedule_time
-    ADD CONSTRAINT exchange_rate_export_schedule_time_pkey PRIMARY KEY (id);
-
-
---
 -- Name: exchange_rate_history exchange_rate_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4355,14 +4163,6 @@ ALTER TABLE ONLY public.exchange_rate_history
 
 ALTER TABLE ONLY public.export_schedule_setting
     ADD CONSTRAINT export_schedule_setting_pkey PRIMARY KEY (id);
-
-
---
--- Name: export_schedule_time export_schedule_time_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.export_schedule_time
-    ADD CONSTRAINT export_schedule_time_pkey PRIMARY KEY (id);
 
 
 --
@@ -4667,14 +4467,6 @@ ALTER TABLE ONLY public.portfolio_advice_setting
 
 ALTER TABLE ONLY public.realized_gain_export_schedule
     ADD CONSTRAINT realized_gain_export_schedule_pkey PRIMARY KEY (id);
-
-
---
--- Name: realized_gain_export_schedule_time realized_gain_export_schedule_time_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.realized_gain_export_schedule_time
-    ADD CONSTRAINT realized_gain_export_schedule_time_pkey PRIMARY KEY (id);
 
 
 --
@@ -5230,22 +5022,6 @@ ALTER TABLE ONLY public.broker_filled_trade_cost_projection
 
 
 --
--- Name: commodity_export_schedule uq_commodity_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.commodity_export_schedule
-    ADD CONSTRAINT uq_commodity_export_schedule_owner UNIQUE (owner_user_id);
-
-
---
--- Name: commodity_export_schedule_time uq_commodity_export_schedule_time; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.commodity_export_schedule_time
-    ADD CONSTRAINT uq_commodity_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute);
-
-
---
 -- Name: commodity_price_history uq_commodity_price_code_date; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5286,38 +5062,6 @@ ALTER TABLE ONLY public.etf_nav_observation
 
 
 --
--- Name: exchange_rate_export_schedule uq_exchange_rate_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_rate_export_schedule
-    ADD CONSTRAINT uq_exchange_rate_export_schedule_owner UNIQUE (owner_user_id);
-
-
---
--- Name: exchange_rate_export_schedule_time uq_exchange_rate_export_schedule_time; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_rate_export_schedule_time
-    ADD CONSTRAINT uq_exchange_rate_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute);
-
-
---
--- Name: export_schedule_setting uq_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.export_schedule_setting
-    ADD CONSTRAINT uq_export_schedule_owner UNIQUE (owner_user_id);
-
-
---
--- Name: export_schedule_time uq_export_schedule_time; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.export_schedule_time
-    ADD CONSTRAINT uq_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute);
-
-
---
 -- Name: fubon_historical_backfill_window_attempt uq_fubon_historical_backfill_window_attempt; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5339,22 +5083,6 @@ ALTER TABLE ONLY public.investment_profile
 
 ALTER TABLE ONLY public.notification_recipient
     ADD CONSTRAINT uq_recipient_owner_email UNIQUE (owner_user_id, email);
-
-
---
--- Name: realized_gain_export_schedule uq_rg_export_schedule_owner; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.realized_gain_export_schedule
-    ADD CONSTRAINT uq_rg_export_schedule_owner UNIQUE (owner_user_id);
-
-
---
--- Name: realized_gain_export_schedule_time uq_rg_export_schedule_time; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.realized_gain_export_schedule_time
-    ADD CONSTRAINT uq_rg_export_schedule_time UNIQUE (schedule_id, run_hour, run_minute);
 
 
 --
@@ -5547,10 +5275,10 @@ CREATE INDEX idx_broker_fill_cost_projection_pending ON public.broker_filled_tra
 
 
 --
--- Name: idx_commodity_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_commodity_export_schedule_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_commodity_export_schedule_time_schedule ON public.commodity_export_schedule_time USING btree (schedule_id);
+CREATE INDEX idx_commodity_export_schedule_owner ON public.commodity_export_schedule USING btree (owner_user_id);
 
 
 --
@@ -5610,17 +5338,17 @@ CREATE INDEX idx_etf_nav_observation_nav_date ON public.etf_nav_observation USIN
 
 
 --
--- Name: idx_exchange_rate_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_exchange_rate_export_schedule_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_exchange_rate_export_schedule_time_schedule ON public.exchange_rate_export_schedule_time USING btree (schedule_id);
+CREATE INDEX idx_exchange_rate_export_schedule_owner ON public.exchange_rate_export_schedule USING btree (owner_user_id);
 
 
 --
--- Name: idx_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_export_schedule_owner; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_export_schedule_time_schedule ON public.export_schedule_time USING btree (schedule_id);
+CREATE INDEX idx_export_schedule_owner ON public.export_schedule_setting USING btree (owner_user_id);
 
 
 --
@@ -5757,17 +5485,17 @@ CREATE INDEX idx_portfolio_advice_owner_created ON public.portfolio_advice USING
 
 
 --
+-- Name: idx_realized_gain_export_schedule_owner; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_realized_gain_export_schedule_owner ON public.realized_gain_export_schedule USING btree (owner_user_id);
+
+
+--
 -- Name: idx_realized_gain_owner; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_realized_gain_owner ON public.realized_gain USING btree (owner_user_id);
-
-
---
--- Name: idx_rg_export_schedule_time_schedule; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_rg_export_schedule_time_schedule ON public.realized_gain_export_schedule_time USING btree (schedule_id);
 
 
 --
@@ -6225,30 +5953,6 @@ ALTER TABLE ONLY public.broker_filled_trade_cost_projection
 
 
 --
--- Name: commodity_export_schedule_time commodity_export_schedule_time_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.commodity_export_schedule_time
-    ADD CONSTRAINT commodity_export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.commodity_export_schedule(id) ON DELETE CASCADE;
-
-
---
--- Name: exchange_rate_export_schedule_time exchange_rate_export_schedule_time_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.exchange_rate_export_schedule_time
-    ADD CONSTRAINT exchange_rate_export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.exchange_rate_export_schedule(id) ON DELETE CASCADE;
-
-
---
--- Name: export_schedule_time export_schedule_time_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.export_schedule_time
-    ADD CONSTRAINT export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.export_schedule_setting(id) ON DELETE CASCADE;
-
-
---
 -- Name: fund_holding fk2ic58t3gkyb93k5qiavdn43x6; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6478,14 +6182,6 @@ ALTER TABLE ONLY public.index_export_schedule_market
 
 ALTER TABLE ONLY public.payment_account
     ADD CONSTRAINT payment_account_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.payment_category(id);
-
-
---
--- Name: realized_gain_export_schedule_time realized_gain_export_schedule_time_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.realized_gain_export_schedule_time
-    ADD CONSTRAINT realized_gain_export_schedule_time_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.realized_gain_export_schedule(id) ON DELETE CASCADE;
 
 
 --

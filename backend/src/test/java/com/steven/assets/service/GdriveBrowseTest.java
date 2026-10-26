@@ -57,13 +57,12 @@ class GdriveBrowseTest {
         // 讓「remote 不可用必須往上拋、不得吞成空清單」這條斷言仍測到真正的路徑。
         GdriveOutputSupport gdrive = new GdriveOutputSupport(
                 rcloneClient, appUserRepo, userAdminService, selfCheck, "GDriveOutput");
-        service = new ExportScheduleService(settingRepo, excelExportService, currentUserProvider,
+        service = new ExportScheduleService(settingRepo, ExportScheduleUnitHarness.assetStore(settingRepo), excelExportService, currentUserProvider,
                 gdrive,
                 new com.steven.assets.service.export.ExcelDocRenderer(),
                 new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
                 new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
                 "/home/steven");
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
     }
 
     @Test

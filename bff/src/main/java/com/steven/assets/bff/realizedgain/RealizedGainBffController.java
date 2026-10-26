@@ -102,22 +102,33 @@ public class RealizedGainBffController {
 
     // ===== 排程自動匯出（Requirement 39 / Task 196）=====
 
-    @GetMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
-        return businessServicesClient.get().uri("/api/realized-gains/export/schedule")
-                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    @GetMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedules() {
+        return businessServicesClient.get().uri("/api/realized-gains/export/schedules").retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
     }
-
-    @PutMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
-        return businessServicesClient.put().uri("/api/realized-gains/export/schedule")
-                .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    @PostMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> createExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post().uri("/api/realized-gains/export/schedules").bodyValue(body).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
     }
-
+    @PutMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return businessServicesClient.put().uri("/api/realized-gains/export/schedules/{id}", id).bodyValue(body).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @DeleteMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteExportSchedule(@PathVariable Long id) {
+        return businessServicesClient.delete().uri("/api/realized-gains/export/schedules/{id}", id).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @PostMapping("/export/schedules/{id}/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow(@PathVariable Long id) {
+        return businessServicesClient.post().uri("/api/realized-gains/export/schedules/{id}/run-now", id).retrieve().bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {}).map(ResponseEntity::ok);
+    }
+    @RequestMapping(value = "/export/schedule", method = {org.springframework.web.bind.annotation.RequestMethod.GET, org.springframework.web.bind.annotation.RequestMethod.PUT})
+    public void retiredExportSettings() { throw retiredExport(); }
     @PostMapping("/export/run-now")
-    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
-        return businessServicesClient.post().uri("/api/realized-gains/export/run-now")
-                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    public void retiredExportRunNow() { throw retiredExport(); }
+    private org.springframework.web.server.ResponseStatusException retiredExport() {
+        return new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
+                "匯出設定已改為多筆獨立排程，請重新整理頁面");
     }
 
     /**

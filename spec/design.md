@@ -997,11 +997,9 @@ PortfolioAdviceSetting   (配置建議設定，單列 id = 1；engine / model / 
 
 # 排程匯出（Requirement 34 / 37 / 39 / 49 / 69 / 73）
 # 「一功能一張排程表」——刻意不合併，理由見本文件 Requirement 39 之關鍵設計決策
-AppUser (1) ──── (1) ExportScheduleSetting            (owner_user_id UNIQUE；最新資產匯出的共用路徑／Drive／總開關；Requirement 34／69)
-ExportScheduleSetting (1) ──── (N) ExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 69)
+AppUser (1) ──── (N) ExportScheduleSetting (Task 511；一列一個獨立每日時間／目錄／Drive／guard，上限 10 筆；移除 ExportScheduleTime)
 AppUser (1) ──── (1) TradingCalendarExportSchedule    (owner_user_id UNIQUE；交易日曆每日排程匯出設定；比另兩張多一個 format 欄〔json/excel〕；Requirement 37)
-AppUser (1) ──── (1) RealizedGainExportSchedule       (owner_user_id UNIQUE；已實現損益匯出的共用路徑／Drive／總開關；Requirement 39／73)
-RealizedGainExportSchedule (1) ──── (N) RealizedGainExportScheduleTime (每個每日執行時間各有 enabled／last-run guard；Requirement 73)
+AppUser (1) ──── (N) RealizedGainExportSchedule (Task 511；一列一個獨立每日時間／目錄／Drive／guard，上限 10 筆；移除時間子表)
 AppUser (1) ──── (N) AssetTransactionExportSchedule   (每人多筆每日排程；Task 255 起移除 owner_user_id UNIQUE；Requirement 49)
 
 # 台股臨時休市（颱風假；Requirement 7）
@@ -3523,6 +3521,9 @@ BFF（`TodayMarketAnalysisBffController`，`/api/bff/today-market-analysis`）�
 
 ## Requirement 34（Task 171）：歷年資產 Excel 匯出增強與每日排程自動匯出
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 「歷年資產」頁既有「匯出 Excel」按鈕（`/api/bff/asset-history/export` → `/api/snapshots/export` → `ExcelExportService.exportFull()`）增強為「完整匯出 ＋ 第一張『當前彙總』總表」；並新增每個使用者可各自設定的每日排程，把最新資產寫檔到指定目錄。Requirement 69 起原本的單一時間改為多時間點；輸出路徑、Drive 與總啟用仍為 owner 共用設定。
 
 ### Requirement 155／Task 437：台股股票主檔名稱 authority chain
@@ -4244,6 +4245,9 @@ Drive 沿用 Requirement 55 的年度雙檔守門：只有某年 `path` 與 `jso
 
 ## Requirement 39（Task 196）：已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 ### 架構與資料流
 
 沿用 Requirement 34（歷年資產排程匯出）的整體形狀，差異只在「匯出哪份活頁簿」與「目錄瀏覽改為複用」。
@@ -4469,6 +4473,9 @@ CommodityPriceView.vue
 
 ## Requirement 41（Task 203）：油價金價 Excel 排程自動匯出到指定目錄
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 ### 與既有三套匯出排程的定位
 
 | 需求 | 資料範圍 | 背景產檔是否需 owner 過濾 | 產檔方法 |
@@ -4617,6 +4624,9 @@ empty value（`DEFAULT_EMPTY_VALUES` 含 `null`），綁 `null` 時 `hasModelVal
 
 ## Requirement 42（Task 204）：台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 結構完全比照 R41（油價金價），因兩者性質相同：**全域公開行情 ＋ per-user 排程設定**。
 以下只記與 R41 的差異；未提及處即與 R41 一致。
 
@@ -4726,6 +4736,9 @@ run-now 不動當日 guard——全部同 R41，不重述。
 ---
 
 ## Requirement 145／Task 423：台幣兌美元匯出多個每日執行時間
+
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
 
 本節取代上方 Requirement 42 的單一時間排程資料模型與 `GET/PUT schedule` 契約；手動下載、
 匯率資料來源、USD 常數、輸出範圍、目錄安全、雙格式輸出及 Google Drive 規則均維持原樣。
@@ -7672,6 +7685,9 @@ Market target date 不自行算：三個日期都由 `PriceQueryService.displayS
 
 ## Requirement 69／Task 326：最新資產匯出多時間點
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 ### Entity 與 migration
 
 `ExportScheduleSetting` 保持 owner-scoped parent；新增 `List<ExportScheduleTime> times` 的一對多關聯（cascade all + orphan removal），並提供 `addTime` helper 維持雙向關係。`ExportScheduleTime` 的 owner 只透過 parent 取得，不重複保存 `owner_user_id`。HTTP 先以 owner 取得 parent，再讀其 children；背景 poll 可讀所有 parent 與 eager/fetch-joined children，不能以 client 傳入的 schedule id 跨 owner 讀取。
@@ -7928,6 +7944,9 @@ frontend :80  ── exact + matrix 變體 → 404（同既有五條的第二防
 
 ## Requirement 72／Task 330：油價金價匯出多時間點
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 模式與作法完全比照 Requirement 69（歷年資產），差異只在本頁多出的 `range_months` 滾動範圍與既有雙格式／Drive 欄位——這兩者維持 parent-only、不受本次影響。
 
 ### Entity 與 migration
@@ -7952,6 +7971,9 @@ Migration 以既有 parent 的時分與 last-run 欄位建立一列 child，copy
 ---
 
 ## Requirement 73／Task 331：已實現損益匯出多時間點
+
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
 
 本段是 Requirement 69／Task 326（最新資產多時間點）在已實現損益頁的**同形套用**：資料模型、DTO 欄位名、驗證訊息、rollback 策略與 UI 互動一律沿用同一套做法，兩頁差別只有表名、entity 名、端點前綴與匯出內容。刻意不抽共用父類別／泛型 service——兩支 service 的檔名、doc 來源、租戶隔離方式與 Drive 欄位語意雖相近但各自獨立演進（例如本頁背景產檔必須 `enableFilter`、最新資產頁則走 live 估值），過早抽象會讓兩邊互相牽制；一致性以「相同結構與相同命名」維持，不以繼承維持。
 
@@ -13089,3 +13111,36 @@ observer API升1.4.0，金融YAML method/path/schema不變；統一Markdown與Pu
 依處理日期升序，以同日淨額計算。TWD 使用 persisted signed amount；USD 使用 abs(originalAmount) 乘 persisted amount.signum()，每列原幣須可驗證且 snapshot 匯率 >0，目標 originalAmount 不得缺失。新 USD 台幣 amount = 新原幣 × 快照匯率，HALF_UP 到整數，保持原估值慣例。若新活存為負，整批保留，避免現有表單與 normalizeDepositAmount 的 abs 將負餘額轉正。完整驗證後才改 entity，刪除失敗時目標／在途／aggregates 一起 rollback；刪掉的 id 在第二次舊 PUT 仍被既有驗證拒絕。
 
 未到期、null 日期、非 latest／未來快照均不動；手動取消在途列不代表結清。停機補跑與已是今天的 latest 都走同規則。沒有可靠證據可重建舊版已刪列，因此不補歷史差額。前端僅修訂說明文字，儲存後沿用 canonical detail reload，不新增 API response 欄位或 Swagger identity 變動。
+
+## Task 511：兩頁獨立匯出排程設計（取代 Requirements 69／73 的 children 模型）
+
+兩個功能各維持自己的 parent table／service／controller 與 BFF，不合併業務表。`export_schedule_setting` 與 `realized_gain_export_schedule` 各新增 nullable `name varchar(20)`、移除 owner unique、加 owner index；既有 run_hour/run_minute/last_run_date 成為唯一時分與 guard，移除兩個時間 child table 及 JPA mapping。DTO 一律 record。使用獨立不可變 capture，保留 exact settings 比對與短交易邊界，不更改 commodity／exchange-rate 共用 execution port 的行為。
+
+### HTTP 契約
+
+| 功能 | business base | 頁面 BFF base |
+|---|---|---|
+| 最新資產 | `/api/export-schedule/schedules` | `/api/bff/asset-history/export-schedules` |
+| 已實現損益 | `/api/realized-gains/export/schedules` | `/api/bff/realized-gain/export/schedules` |
+
+兩組都提供 GET/POST base、PUT/DELETE `/{id}`、POST `/{id}/run-now`。POST/PUT body 為 `{name,enabled,runHour,runMinute,outputSubpath,gdriveEnabled,gdriveSubpath}`；時分必填且整數範圍 0–23/0–59，enabled 未送預設 false。名稱 null／空白正規化 null，其餘只准中英數、底線、連字號與空白且最多20字；路徑空白維持既有 input 預設；Drive 兩欄 null＝保留舊值，create 的原值為 false/null。存檔不改 last-run guard/status。
+
+GET 與三種 CRUD 回 `{baseDir,gdriveRemote,schedules:[{id,name,enabled,runHour,runMinute,outputSubpath,lastRunAt,lastRunStatus,gdriveEnabled,gdriveSubpath,gdriveLastRunAt,gdriveLastStatus}],gdriveSelfCheckWarning}`，按 `(runHour,runMinute,id)` 排序，時間字串沿用台北 `yyyy-MM-dd HH:mm:ss`，無結果 null。run-now 回既有七欄 `{path,sizeBytes,gdrivePath,gdriveStatus,jsonPath,jsonSizeBytes,jsonGdrivePath}`，未成功產出的路徑 null。400 為非法欄位／第11筆、401 無認證、403 未獲 Drive 權限、404 他人或未知 id；舊 singleton GET/PUT 及無 id run-now 為410（提示重新整理、零副作用），共用 browse 仍可用。
+
+owner namespace advisory transaction lock（兩功能不同 namespace）序列化 create/update/delete，含無首筆時仍能鎖；id＋owner row lock 取得 fresh entity，短 REQUIRES_NEW 交易只 capture 或寫回，產 doc/render/local/Drive 在交易外。capture 含 name/enabled/time/path/Drive，complete 比對全組設定及 id/owner，不同就丟棄結果；已刪不重建。手動 capture attemptDate=null、due capture attemptDate=今天；只有 due complete 改 guard。每筆產檔與寫回例外隔離。排程列表維持原兩個 poll，描述改成多筆獨立排程。
+
+### 資料遷移與檔名
+
+Liquibase `changes/v1.157.0-independent-asset-gain-export-schedules.sql` 以單一 PostgreSQL DO transaction、splitStatements:false 註冊 master 末尾。兩張 child table 在同 transaction 中 split：每 parent 按 child 時分/id 排序，第一筆保留 parent id，其他用序列配置；在更動第一筆前保留原 parent 設定與 enabled 供其他列。每筆 enabled 是原 parent 與 child 的 AND，local guard/status 取 child；無 child parent 原樣保留。所有 name=null，複製 output/Drive 設定，Drive last-run 清 null（共享歷史無法歸屬）。先檢查每 owner 每功能 split 後最多10筆，超限 RAISE rollback；只有成功 split 後 drop child tables。以 child table 是否存在作遷移 guard，重執行不再 split、不清新狀態；約束／欄位／index 使用冪等防護。保留既有 hour/minute checks、not null、owner FK 狀態，不新增金融分類。需重產 schema；舊 image 不相容，回退需受控 DB rollback，不能直接跑舊 image。
+
+baseName 無 name 時逐字沿用既有名稱；有 name 以 `_{name}` 插在 ownerId 後，不含 schedule id。同名同目錄同日覆寫是明示契約，split 的舊排程保留 null 名稱以維持下游來源。兩頁草稿對話框採 TransactionView 的操作習慣，新增先開 disabled draft、儲存才 POST；每列只一個 time picker，顯示本機與 Drive 狀態。資料夾 picker 只改當前 draft，不回寫清單；取消丟棄。loading/error/empty 分開，列表 mutation 期間統一防重入。
+
+## Task 512：匯率及油價金價獨立匯出排程設計
+
+此修訂取代Requirements41/42/72/145舊singleton+children模型，並取代Task511「不更改commodity/exchange-rate行為」的範圍限制；Task511兩頁契約不變。兩功能各自保留現有table/service/controller/BFF，parent新增nullable name varchar(20)、owner index，移除owner UNIQUE與children；run_hour/run_minute/last_run_date成唯一事實，range_months與其他設定各row獨立。DTO為record；各自immutable capture與short-transaction execution store比對完整設定（含range），不改其他匯出業務表。
+
+business路由base為 `/api/exchange-rate-export/schedules`、`/api/commodity-export/schedules`，BFF為 `/api/bff/exchange-rate/export/schedules`、`/api/bff/commodity-price/export/schedules`；兩頁API client各走自身BFF。GET清單、POST新增、PUT/DELETE id、POST id/run-now；舊singleton與無id run-now410，無副作用；共用browse仍走同一business能力、各頁自身BFF。完整request/response/error/range/Drive語義與上述Task512需求一致。
+
+Liquibase `changes/v1.158.0-independent-market-export-schedules.sql` 單一PostgreSQL DO transaction、splitStatements:false，接在v1.157之後註冊master。每張child存在才split，修改parent前先保留完整原parent資料供其他child複製，首child按(hour,minute,id)保留parent id，其餘nextval；AND原兩級enabled、child guard/status、parent range/path/Drive設定完整保留，無child原row不動guard。清空無法歸屬的舊共享Drive結果、name初始null；preflight兩功能每owner split後>10就RAISE整體rollback，owner unique移除、加index，成功split才drop children。child已不在時重跑不再清空新狀態；欄位/constraint/index採冪等保護，保留原CHECK/NOT NULL/owner FK現狀。無舊image rollback相容保證。
+
+四頁共同UI操作規範可共用純草稿helper，但不跨頁BFF或複製business資料計算；匯率/油金額外保留range選單，任意整數1..120的既有值不可靜默改成120，null可顯示全部十年。每筆執行單次讀原歷史資料源、兩render/dual writer，baseName空name保持舊字節、有name只加suffix；同名覆寫在UI明示。owner lock覆蓋無row併發與CRUD，short transaction捕捉/寫回，IO在交易外；失敗隔離/guard/run-now/stale completion行為與需求逐項一致。排程列表維持原兩個poll，文案改為多筆獨立排程（時點依DB），不加annotation、不寫死執行時間。

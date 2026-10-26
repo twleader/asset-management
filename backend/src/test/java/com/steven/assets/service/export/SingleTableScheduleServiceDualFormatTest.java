@@ -90,13 +90,11 @@ class SingleTableScheduleServiceDualFormatTest {
         var dual = new DualFormatExportWriter(gdrive);
 
         gainService = new RealizedGainExportScheduleService(
-                gainRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(gainService, gainRepo);
+                gainRepo, com.steven.assets.service.ExportScheduleUnitHarness.gainStore(gainRepo), excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
         commodityService = new CommodityExportScheduleService(
-                commodityRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(commodityService, commodityRepo);
+                commodityRepo, com.steven.assets.service.ExportScheduleUnitHarness.commodityStore(commodityRepo), excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
         rateService = new ExchangeRateExportScheduleService(
-                rateRepo, excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
+                rateRepo, com.steven.assets.service.ExportScheduleUnitHarness.rateStore(rateRepo), excelExportService, currentUserProvider, gdrive, excel, json, dual, baseDir.toString());
 
         when(gainRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(commodityRepo.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -170,7 +168,7 @@ class SingleTableScheduleServiceDualFormatTest {
     @Test
     @DisplayName("台幣兌美元匯率：兩份落檔、主檔名一致，且 doc 只取一次")
     void 匯率() throws Exception {
-        var s = ExchangeRateExportSchedule.builder().ownerUserId(1L).enabled(true)
+        var s = ExchangeRateExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).ownerUserId(1L).enabled(true)
                 .runHour(0).runMinute(0).outputSubpath("out").lastRunDate(LocalDate.now(TW).minusDays(1)).build();
         when(rateRepo.findAll()).thenReturn(List.of(s));
 

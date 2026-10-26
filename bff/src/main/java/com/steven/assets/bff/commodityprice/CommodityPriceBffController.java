@@ -113,32 +113,38 @@ public class CommodityPriceBffController {
     // ===== 排程自動匯出設定（Requirement 41 / Task 203，per-user owner-scoped）=====
     // 沿用 businessServicesClient（WebClientConfig.tenantHeaderFilter 自動帶 X-User-* → 後端 ownerFilter 縮到本人）。
 
-    @GetMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedule() {
-        return businessServicesClient.get()
-                .uri("/api/commodity-export/schedule")
-                .retrieve()
-                .bodyToMono(MAP)
-                .map(ResponseEntity::ok);
+    @GetMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> getExportSchedules() {
+        return businessServicesClient.get().uri("/api/commodity-export/schedules")
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
-
-    @PutMapping("/export/schedule")
-    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@RequestBody Map<String, Object> body) {
-        return businessServicesClient.put()
-                .uri("/api/commodity-export/schedule")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(MAP)
-                .map(ResponseEntity::ok);
+    @PostMapping("/export/schedules")
+    public Mono<ResponseEntity<Map<String, Object>>> createExportSchedule(@RequestBody Map<String, Object> body) {
+        return businessServicesClient.post().uri("/api/commodity-export/schedules").bodyValue(body)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
     }
-
+    @PutMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> updateExportSchedule(@org.springframework.web.bind.annotation.PathVariable Long id, @RequestBody Map<String, Object> body) {
+        return businessServicesClient.put().uri("/api/commodity-export/schedules/{id}", id).bodyValue(body)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+    @org.springframework.web.bind.annotation.DeleteMapping("/export/schedules/{id}")
+    public Mono<ResponseEntity<Map<String, Object>>> deleteExportSchedule(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return businessServicesClient.delete().uri("/api/commodity-export/schedules/{id}", id)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+    @PostMapping("/export/schedules/{id}/run-now")
+    public Mono<ResponseEntity<Map<String, Object>>> runExportNow(@org.springframework.web.bind.annotation.PathVariable Long id) {
+        return businessServicesClient.post().uri("/api/commodity-export/schedules/{id}/run-now", id)
+                .retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+    }
+    @RequestMapping(value = "/export/schedule", method = {org.springframework.web.bind.annotation.RequestMethod.GET, org.springframework.web.bind.annotation.RequestMethod.PUT})
+    public void retiredExportSchedule() { throw retiredExport(); }
     @PostMapping("/export/run-now")
-    public Mono<ResponseEntity<Map<String, Object>>> runExportNow() {
-        return businessServicesClient.post()
-                .uri("/api/commodity-export/run-now")
-                .retrieve()
-                .bodyToMono(MAP)
-                .map(ResponseEntity::ok);
+    public void retiredRunExportNow() { throw retiredExport(); }
+    private org.springframework.web.server.ResponseStatusException retiredExport() {
+        return new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.GONE,
+                "匯出設定已改為多筆獨立排程，請重新整理頁面");
     }
 
     /** 目錄列舉沿用 Requirement 34 既有的 business 端點（語意相同＝列出基底下子目錄），不新增第四份實作。 */

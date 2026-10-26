@@ -1,54 +1,39 @@
 package com.steven.assets.bff.exchangerate;
-
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.reactive.function.client.ClientResponse;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.http.*;
+import org.springframework.web.reactive.function.client.*;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import java.util.*;
+import java.util.concurrent.atomic.*;
+import static org.assertj.core.api.Assertions.*;
 
-import java.util.Map;
-
-import static org.assertj.core.api.Assertions.assertThat;
-
-/** Requirement 145 / Task 423：Map passthrough 不得裁切 times[]。 */
 class ExchangeRateBffScheduleTest {
-
-    private static final String SCHEDULE_JSON = """
-            {"enabled":true,"outputSubpath":"input","rangeMonths":60,
-             "times":[{"id":1,"runHour":9,"runMinute":20,"enabled":true,"lastRunAt":"2026-09-11 09:20:00","lastRunStatus":"成功"},
-                       {"id":2,"runHour":18,"runMinute":0,"enabled":false,"lastRunAt":null,"lastRunStatus":null}],
-             "lastRunAt":"2026-09-11 09:20:00","lastRunStatus":"成功","baseDir":"/home/steven"}
-            """;
-
-    private static WebClient stubClient(String json) {
-        return WebClient.builder().exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK)
-                .header("Content-Type", "application/json").body(json).build())).build();
+    static final String JSON="{\"baseDir\":\"/home/steven\",\"gdriveRemote\":\"GDriveOutput\",\"schedules\":[{\"id\":9,\"name\":\"A\",\"runHour\":8,\"runMinute\":15,\"enabled\":false,\"outputSubpath\":\"input\",\"rangeMonths\":17}]}";
+    @Test void allIndependentRoutesUseOwnBusinessResourcesAndKeepFullList() {
+        var requests=new ArrayList<ClientRequest>();
+        var client=WebClient.builder().exchangeFunction(r->{requests.add(r);return Mono.just(ClientResponse.create(HttpStatus.OK).header("Content-Type","application/json").body(JSON).build());}).build();
+        var c=new ExchangeRateBffController(client);var body=Map.<String,Object>of("name","A","runHour",8,"runMinute",15);
+        assertThat(c.getExportSchedules().block().getBody()).containsKey("schedules");
+        assertThat(c.createExportSchedule(body).block().getBody()).containsKey("schedules");
+        assertThat(c.updateExportSchedule(9L,body).block().getBody()).containsKey("schedules");
+        assertThat(c.deleteExportSchedule(9L).block().getBody()).containsKey("schedules");
+        assertThat(c.runExportNow(9L).block().getBody()).containsKey("schedules");
+        assertThat(requests).extracting(r->r.method()+" "+r.url().getPath()).containsExactly("GET /api/exchange-rate-export/schedules","POST /api/exchange-rate-export/schedules","PUT /api/exchange-rate-export/schedules/9","DELETE /api/exchange-rate-export/schedules/9","POST /api/exchange-rate-export/schedules/9/run-now");
     }
-
-    @SuppressWarnings("unchecked")
-    @Test
-    void getAndPutSchedule_完整保留多時間陣列且不補回舊topLevel時間() {
-        var controller = new ExchangeRateBffController(stubClient(SCHEDULE_JSON));
-        Map<String, Object> get = controller.getExportSchedule().block().getBody();
-        Map<String, Object> put = controller.updateExportSchedule(Map.of("enabled", true, "times",
-                java.util.List.of(Map.of("runHour", 9, "runMinute", 20, "enabled", true)))).block().getBody();
-
-        for (Map<String, Object> body : java.util.List.of(get, put)) {
-            var times = (java.util.List<Map<String, Object>>) body.get("times");
-            assertThat(times).hasSize(2);
-            assertThat(times.get(0)).containsEntry("runHour", 9).containsEntry("runMinute", 20);
-            assertThat(times.get(1)).containsEntry("enabled", false);
-            assertThat(body).doesNotContainKeys("runHour", "runMinute");
-        }
+    @Test void retiredRoutesHaveNoUpstreamSideEffects() {
+        var calls=new AtomicInteger();var c=new ExchangeRateBffController(WebClient.builder().exchangeFunction(r->{calls.incrementAndGet();return Mono.error(new AssertionError("unexpected upstream"));}).build());
+        assertThatThrownBy(c::retiredExportSchedule).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode()).isEqualTo(HttpStatus.GONE));
+        assertThatThrownBy(c::retiredRunExportNow).isInstanceOfSatisfying(ResponseStatusException.class,e->assertThat(e.getStatusCode()).isEqualTo(HttpStatus.GONE));
+        assertThat(calls.get()).isZero();
     }
-
-    @Test
-    void runNow_保留既有雙格式回應() {
-        String response = """
-                {"path":"/tmp/a.xlsx","sizeBytes":1,"gdrivePath":null,"gdriveStatus":null,
-                 "jsonPath":"/tmp/a.json","jsonSizeBytes":2,"jsonGdrivePath":null}
-                """;
-        Map<String, Object> body = new ExchangeRateBffController(stubClient(response)).runExportNow().block().getBody();
-        assertThat(body).containsKeys("path", "sizeBytes", "gdrivePath", "gdriveStatus", "jsonPath", "jsonSizeBytes", "jsonGdrivePath");
+    @Test void upstreamErrorsRemainErrorsAndAreNeverEmptySuccess() {
+        var c=new ExchangeRateBffController(WebClient.builder().exchangeFunction(r->Mono.just(ClientResponse.create(HttpStatus.NOT_FOUND).body("missing").build())).build());
+        assertThatThrownBy(()->c.getExportSchedules().block()).isInstanceOf(WebClientResponseException.NotFound.class);
+    }
+    @Test void runNowKeepsAllSevenDualFormatFields() {
+        String json="{\"path\":\"/x.xlsx\",\"sizeBytes\":1,\"gdrivePath\":null,\"gdriveStatus\":null,\"jsonPath\":\"/x.json\",\"jsonSizeBytes\":2,\"jsonGdrivePath\":null}";
+        var c=new ExchangeRateBffController(WebClient.builder().exchangeFunction(r->Mono.just(ClientResponse.create(HttpStatus.OK).header("Content-Type","application/json").body(json).build())).build());
+        assertThat(c.runExportNow(9L).block().getBody()).hasSize(7).containsEntry("path","/x.xlsx").containsEntry("jsonPath","/x.json");
     }
 }

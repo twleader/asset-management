@@ -1033,6 +1033,9 @@
 
 ### Requirement 34: 歷年資產 Excel 匯出增強（當前彙總表）與每日排程自動匯出
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 **User Story:** 作為使用者，我希望在「歷年資產」頁一鍵把我的所有資產匯出成一份 Excel（含一張「當前全資產彙總」總表），並且能設定每日自動匯出到指定目錄，讓我不必每次手動下載也能定期留存資產快照。
 
 **Acceptance Criteria:**
@@ -1178,6 +1181,9 @@
 
 ### Requirement 39: 已實現損益 Excel 匯出到指定目錄與每日排程自動匯出
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 **User Story:** 作為使用者，我希望在「已實現損益」頁除了手動下載 Excel 之外，還能指定輸出資料夾並設定每日自動匯出時間，讓我的已實現損益明細定期留存到本機目錄，不必每次手動點按下載。
 
 **Acceptance Criteria:**
@@ -1217,6 +1223,9 @@
 
 ### Requirement 41: 油價金價 Excel 排程自動匯出到指定目錄
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 **User Story:** 作為使用者，我希望「油價金價」頁除了手動另存之外，還能指定輸出資料夾並設定每日自動匯出時間，讓油金價歷史定期留存到本機目錄，不必每次手動點按匯出。
 
 **Acceptance Criteria:**
@@ -1237,6 +1246,9 @@
 
 ### Requirement 145／Task 423：台幣兌美元匯率每日匯出支援多個執行時間
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 **User Story:** 作為使用者，我希望「台幣兌美元」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份匯率檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾、匯出範圍或 Google Drive 設定。
 
 > 本 Requirement 只取代 Requirement 42 的單一每日時間模型。每位 owner 的輸出資料夾、`range_months`、Drive 設定與整體最近一次結果仍共用；檔名仍為 `台幣兌美元_{ownerId}_yyyyMMdd`，較晚的同日排程覆寫相同 `.xlsx` 與 `.json` 成為最新內容，不新增時間戳或額外歷史檔。手動 Excel 下載、立即匯出、匯率資料來源與 USD 固定幣別均不變。
@@ -1255,6 +1267,9 @@
 ---
 
 ### Requirement 42: 台幣兌美元匯率 Excel 匯出與排程自動匯出到指定目錄
+
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
 
 **User Story:** 作為使用者，我希望「台幣兌美元」頁也能像油價金價一樣，指定時間區間把匯率歷史匯出成 Excel，並可設定每日自動匯出到指定資料夾，讓匯率歷史定期留存到本機目錄。
 
@@ -2785,6 +2800,9 @@ FROM stock_price_history WHERE market='台股';
 
 ### Requirement 69: 最新資產每日匯出支援多個執行時間
 
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
+
 **User Story:** 作為使用者，我希望「排程自動匯出最新資產」能在同一天設定多個執行時間，讓同一份最新資產檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾或 Google Drive 設定。
 
 > **本 Requirement 只把 Requirement 34 的單一每日時間改為多時間點。** 匯出內容仍是同一支 `ExcelExportService.liveAssetsDoc*()`、每次仍同時產出 `.xlsx` 與 `.json`、輸出資料夾與 Google Drive 設定仍為每位使用者共用一份，手動「立即匯出」與歷年資產的多分頁手動匯出語意均不變。檔名仍為 `資產總覽_{ownerId}_yyyyMMdd`；同一日期的較晚排程會更新同名的「當日最新」兩份檔，不因多時間點新增時間戳或累積多份歷史檔。
@@ -2881,6 +2899,9 @@ FROM stock_price_history WHERE market='台股';
 
 ### Requirement 72: 油價金價每日匯出支援多個執行時間
 
+> **Task 512 現行修訂：** 本節關於singleton／共用設定、children、舊端點及rollback的歷史契約，已由下方「Task 512 修訂」取代；資料來源、雙格式與Drive安全規則保留。
+
+
 **User Story:** 作為使用者，我希望「油價金價」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份油價金價檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾或 Google Drive 設定。
 
 > **編號說明：** Requirement 71／Task 329 已被另一支並行 worktree（「爬蟲資訊查詢」頁公開觸發重新搜尋 API）先行佔用，本需求依編號避讓慣例改用 Requirement 72／Task 330；Liquibase `v1.103.0` 不受影響（對方該任務未新增 changeset）。
@@ -2903,6 +2924,9 @@ FROM stock_price_history WHERE market='台股';
 ---
 
 ### Requirement 73: 已實現損益每日匯出支援多個執行時間
+
+> **Task 511 現行修訂：** 本節關於單一共用設定、children、舊端點與 rollback 的歷史契約由下方「Task 511 修訂」取代；未涉及的匯出內容、租戶隔離、雙格式與 Drive 安全規則維持。
+
 
 **User Story:** 作為使用者，我希望「已實現損益」頁的「排程自動匯出」能在同一天設定多個執行時間，讓同一份已實現損益檔可在早、中、晚依序刷新，而不必建立多套輸出資料夾或 Google Drive 設定。
 
@@ -6226,3 +6250,32 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 使用已保存的 signed amount 決定方向，待付款扣除、待收款增加。TWD 直接加 signed amount；USD 以 abs(originalAmount) × signed amount 的方向調整目標 originalAmount，再用 snapshot usdExchangeRate 與既有 HALF_UP 整數台幣換算重算目標 amount。目標利率／備註／銀行／類型／source 不變。
 - [ ] 同銀行同幣別同處理日批次淨額入帳，日期由舊到新處理；如果該批次會造成負活存，整批保留、不套 abs、不改其他帳戶。每批先完整驗證、再改目標並移除該批在途列；刪除與目標更新及 aggregates 在同一既有 snapshot row lock／transaction 中原子提交，失敗回滾，重跑不重複調整。結清本身保持 totalDeposit／totalAssets（USD 依原有逐列換算可能有整數捨入差）；利息以調整後活存重算。
 - [ ] 更新在途款項說明，明示待付款扣活存／待收款加活存、同銀行同幣別、無唯一目標／餘額不足會保留；前端只顯示不自行計算。既有 API／DTO／DB schema／9090 Swagger／排程節拍不變。驗證涵蓋兩幣別正負、同日淨額、不同銀行、缺少／重複／來源管理目標、餘額不足、USD 缺匯率／原幣、歷史／未來／null、重跑與 stale id、真 PostgreSQL rollback／row lock／零重複 DML，並完成受影響服務重建與 main 發布。
+
+## Task 511 修訂：歷年資產與已實現損益多筆獨立匯出排程（Requirements 34／39／69／73）
+
+**User Story:** 作為使用者，我希望「歷年資產管理」及「已實現損益」的匯出設定比照「交易紀錄」，可以新增多筆各自獨立的每日排程，分別編輯時間、名稱、輸出目錄與 Google Drive，並個別刪除或立即匯出。
+
+**Acceptance Criteria:**
+
+- [ ] 每頁每位 owner 最多 10 筆獨立排程，每筆只有一個每日時分、enabled、選填名稱（trim 後 1–20 字，只准中英數、底線、連字號、空白）、本機子路徑及 Drive 設定，並各自保存當日 guard 與執行狀態。GET 零筆回空清單且不建立預設。新增預設停用，只有儲存成功才建立，取消不留資料；儲存失敗保留草稿；所有變更以伺服器回傳完整排序清單取代 UI 資料，不合併舊列。
+- [ ] 新的每頁清單支援新增／編輯／刪除（須確認）／立即匯出。名稱、啟用狀態、時間、本機目錄、上次執行與 Drive 狀態可辨識；編輯與資料夾選擇使用隔離草稿；操作進行中阻擋重複請求及互相干擾的操作，錯誤顯示而非當成空清單。
+- [ ] 新資產 API 為 `/api/export-schedule/schedules`，新損益 API 為 `/api/realized-gains/export/schedules`：GET 清單、POST 新增、PUT `/{id}` 修改、DELETE `/{id}` 刪除、POST `/{id}/run-now`。對應 BFF 分別為 `/api/bff/asset-history/export-schedules` 及 `/api/bff/realized-gain/export/schedules`，沿用各頁自己的 API client。不存在或他人 id 一律 404、無認證 401；所有修改須 server 驗證。舊 singleton 設定與無 id run-now HTTP 路由退役，回 410 且無寫入／產檔／Drive 副作用，提示重新整理；目錄 browse 路由保持。
+- [ ] 一個舊 child 轉一筆排程，按時分與 id 排序後第一筆沿用原 parent id；其他筆配置新 id。enabled = 原 parent.enabled AND child.enabled；繼承原輸出目錄／Drive 設定及 child guard/status，不因升級重跑已執行時間。無 child 的原 parent 保留原時分、enabled、guard/status。名稱預設 null，空名沿用既有檔名，因而原多時間同日覆寫模式不變。舊 parent 的共享 Drive 執行結果不可假冒逐筆結果，遷移全部清為 null；設定保留。遷移後超過 10 筆須整體拒絕，不得截斷。移除 owner UNIQUE 及兩頁時間子表，parent 時分／guard 成為唯一事實；不支援回退至依賴舊子表的 image。
+- [ ] 無名稱檔名仍為 `資產總覽_{ownerId}_yyyyMMdd`、`已實現損益_{ownerId}_yyyyMMdd`；有名稱則在 ownerId 後加 `_{name}`，同一 baseName 產 `.xlsx` 與 `.json`。同 owner、日期、目錄與名稱相同會覆寫，UI 明示可用不同名稱或目錄區分。同名合法，不額外默默加 id 或改舊下游檔名。
+- [ ] 每分鐘與 startup 共用同一 AtomicBoolean 防重入，按時分／id 逐列補跑到點未 guard 的啟用排程；成功或失敗都更新那筆當日 guard，一筆失敗不阻斷下一筆。run-now 指定那筆，忽略 enabled，但不動其當日 guard；不得建立不存在的排程。設定編輯保留 guard，異步結果寫回只准 exact id＋owner、仍相同的 captured 設定；已刪、改時分／目錄／名稱／Drive／enabled 者不寫回舊結果，不 resurrect。DB 短交易捕捉不可變輸入後在交易外產檔，owner 層鎖保護包括第一筆建立在內的上限與 CRUD 併發；Compose 單 replica 前提維持。
+- [ ] 資產仍使用 `ExcelExportService.liveAssetsDoc*`，損益仍使用 `realizedGainsDoc*`，背景指定 owner；共用 renderer／DualFormatExportWriter，單次 doc 雙格式、local-first、Drive best-effort、configured-admin 限制、啟用自檢警告不入庫均維持。存檔與產檔皆防路徑跳脫，產檔前重驗實體路徑防 symlink；不涉及券商交易、9090 或 SRPP 規則／檔案。
+- [ ] 驗證包含 PostgreSQL migration 多時間／停用／guard／無 child／冪等／超限 rollback、owner CRUD/404/10 筆併發、逐列 due 與 run-now guard、晚到結果不覆蓋編輯與刪除、名稱檔名與路徑防護、雙格式／Drive；BFF 新路由及舊路由 410；兩頁 build 與互動；重建 business-services／bff／frontend 容器實測並重產 db/schema.sql，確認 schema drift 為零後 no-ff merge/push，從 main 重建再讀回。
+
+## Task 512 修訂：台幣兌美元與油價金價多筆獨立排程（Requirements 41／42／72／145）
+
+**User Story:** 作為使用者，我希望台幣兌美元與油價金價也比照交易紀錄，能新增多筆獨立匯出排程，每筆分別設定名稱、時間、啟用、資料範圍、目錄、Google Drive，並各自編輯、刪除與立即匯出。
+
+**Acceptance Criteria:**
+
+- [ ] 每頁每 owner 最多10筆，一列一個時分與各自guard/status、name、outputSubpath、rangeMonths、Drive設定；GET無列回空清單、不寫DB。新增先開enabled=false草稿，儲存才POST，取消零寫入、失敗留草稿；清單以server完整排序回應取代、操作防重入；載入錯誤與空清單分開，提供重試。每列清楚顯示名稱／時間／停用與否／資料範圍／本機和Drive狀態，資料夾picker只改隔離draft。
+- [ ] API：business base為 `/api/exchange-rate-export/schedules` 與 `/api/commodity-export/schedules`；BFF base各為 `/api/bff/exchange-rate/export/schedules` 與 `/api/bff/commodity-price/export/schedules`。GET/POST base、PUT/DELETE `/{id}`、POST `/{id}/run-now`。舊GET/PUT `/schedule`及無id `/run-now`回410提示重新整理、零副作用；browse與手動下載端點維持。無認證401、Drive無權403、他人或未知id404、非法欄位或第11筆400。
+- [ ] request為 `{name,enabled,runHour,runMinute,outputSubpath,rangeMonths,gdriveEnabled,gdriveSubpath}`，時分必填整數且0–23/0–59，enabled缺省false。name trim、空白/null→null，其餘最多20個中英數／底線／連字號／空白；rangeMonths為null（全部十年）或整數1..120，UI保留原選項1/3/6/12/36/60/120、null顯示全部十年，120與null匯出範圍相同。Drive欄null保留原值、create原值false/null，只有configured-admin能啟用、啟用自檢警告不入庫；輸出子路徑空白仍input。GET/CRUD回 `{baseDir,gdriveRemote,schedules:[{id,name,enabled,runHour,runMinute,outputSubpath,rangeMonths,lastRunAt,lastRunStatus,gdriveEnabled,gdriveSubpath,gdriveLastRunAt,gdriveLastStatus}],gdriveSelfCheckWarning}`，按時分/id排序，時間字串台北yyyy-MM-dd HH:mm:ss、未執行null；run-now回原七欄path/sizeBytes/gdrivePath/gdriveStatus/jsonPath/jsonSizeBytes/jsonGdrivePath。
+- [ ] 遷移每個舊child各一row、首個按時分/id沿用parent id、其餘新id，enabled=原parent AND child，child時分/guard/status與parent目錄/rangeMonths/Drive設定完整保留；無child原parent保留其原時分/enabled/guard/status。全部name=null，舊共享Drive執行結果清null、不假冒逐筆結果。先檢查split後每owner最多10筆，超限整筆transaction rollback、不截斷；移除owner unique、兩張children與JPA mapping，parent時分/guard成唯一事實。新migration可冪等重跑，不再split或清新狀態；舊image不相容，回退需受控DB rollback。
+- [ ] 既有每分鐘tick與startup共用AtomicBoolean，按時分/id逐row補跑、完成不論成功失敗只設該row當日guard，一列失敗不阻斷其他row/owner。run-now忽略enabled但不消耗guard、不建立未知id；編輯設定保留guard/status。owner namespace advisory transaction lock涵蓋首筆建立與10筆上限/CRUD；id+owner fresh row lock capture不可變設定，交易外doc/render/local/Drive；complete只寫仍存在且captured name/enabled/time/path/range/Drive全部相同的row、不復活刪除、晚結果不覆蓋編輯。
+- [ ] 匯率仍以 `ExcelExportService.exchangeRatesDoc("USD",start,end)`、油金仍 `commodityPricesDoc(start,end)`，都是既有全域公開歷史來源、不加owner行情過濾或request-time外部抓取；各row依台北執行日end與rangeMonths算start，null=end.minusYears(10)，其餘end.minusMonths(N)。一次doc render雙格式，沿用local-first/Drive best-effort，保存時及產檔前重驗基底與symlink containment。無name沿用 `台幣兌美元_{ownerId}_yyyyMMdd`、`油價金價_{ownerId}_yyyyMMdd`，有name在owner後插`_{name}`，副檔名xlsx/json。同日同目錄同name合法覆寫，UI說明用不同name或目錄保留不同版本。
+- [ ] 與Task511同session驗收四頁；commodity/exchange舊singleton/children測試改成多row的對等實質覆蓋，保留雙格式/Drive/資料來源/租戶隔離及其他功能測試。新增isolated PostgreSQL migration/超限rollback/冪等、首筆併發上限、stale completion、guard、range獨立性、名稱檔名與symlink測試；BFF新路由/410；前端測試/build與四頁互動。重建三服務、遷移前後receipt比對、重產schema與drift=0、no-ff合併推送、乾淨main重建/readback。不得改9090/SRPP或交易。

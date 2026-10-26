@@ -1,597 +1,257 @@
 package com.steven.assets.service;
 
 import com.steven.assets.dto.CommodityExportDto;
-import com.steven.assets.model.AppUser;
-import com.steven.assets.model.CommodityExportSchedule;
-import com.steven.assets.model.CommodityExportScheduleTime;
-import com.steven.assets.repository.AppUserRepository;
-import com.steven.assets.repository.CommodityExportScheduleRepository;
-import com.steven.assets.security.CurrentUserContext;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import com.steven.assets.model.*;
+import com.steven.assets.repository.*;
+import com.steven.assets.security.*;
+import com.steven.assets.service.export.*;
+import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.test.util.ReflectionTestUtils;
+import jakarta.persistence.EntityManager;
+import java.nio.file.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-import java.io.IOException;
-import java.nio.file.Path;
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-/**
- * 油價金價排程自動匯出（Requirement 41 / Task 203；多時間點 Requirement 72 / Task 330）——
- * {@code CommodityExportScheduleService} 專屬測試。
- *
- * <p>main 上本服務原本完全沒有專屬測試檔（{@link com.steven.assets.service.export.SingleTableScheduleServiceDualFormatTest}
- * 只涵蓋雙格式落檔的既有單時間行為，未觸及本任務新增的多時間點邏輯），故本檔為新建，不是擴充既有測試。
- *
- * <p>Drive 規則驗證本身由 {@code GdriveOutputSupportTest} 涵蓋；這裡測的是「service 有沒有正確串上它」，
- * 寫法比照歷年資產頁同一種改造的 {@code ExportScheduleGdriveTest}（Requirement 69 / Task 326）。
- *
- * <p>兩個 renderer 與 {@link com.steven.assets.service.export.DualFormatExportWriter} 除了「render 失敗互不影響」
- * 那一支測試外一律注入<b>真實實例</b>：換成 mock 就驗不到「兩份檔真的被寫出來」。
- */
-@ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
+/** Real renderers/local dual writer; in-memory store has no claim to prove PostgreSQL transactions. */
 class CommodityExportScheduleServiceTest {
-
-    private static final ZoneId TW = ZoneId.of("Asia/Taipei");
-    private static final DateTimeFormatter FILE_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final long ADMIN_ID = 1L;
-    private static final long OTHER_ID = 2L;
-    private static final String DRIVE_DIR = "投資理財/油價金價";
-
-    @Mock private CommodityExportScheduleRepository settingRepo;
-    @Mock private ExcelExportService excelExportService;
-    @Mock private ObjectProvider<CurrentUserContext> currentUserProvider;
-    @Mock private RcloneClient rcloneClient;
-    @Mock private AppUserRepository userRepo;
-    @Mock private UserAdminService userAdminService;
-    /** 啟用當下的自檢（Task 247）；替身預設回 null＝自檢正常，要測警告時再 stub。 */
-    @Mock private GdriveSelfCheck selfCheck;
-
-    @TempDir Path baseDir;
-
-    private GdriveOutputSupport gdrive;
-    private CommodityExportScheduleService service;
-
-    @BeforeEach
-    void setup() {
-        gdrive = new GdriveOutputSupport(rcloneClient, userRepo, userAdminService, selfCheck, "GDriveOutput");
-        service = new CommodityExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, gdrive,
-                new com.steven.assets.service.export.ExcelDocRenderer(),
-                new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),
-                new com.steven.assets.service.export.DualFormatExportWriter(gdrive),
-                baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(service, settingRepo);
-        when(settingRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    @TempDir Path base;
+    final List<CommodityExportSchedule> rows = new ArrayList<>();
+    final CommodityExportScheduleRepository repo = mock(CommodityExportScheduleRepository.class);
+    final ExcelExportService excel = mock(ExcelExportService.class);
+    final RcloneClient rclone = mock(RcloneClient.class);
+    final AppUserRepository users = mock(AppUserRepository.class);
+    final UserAdminService admin = mock(UserAdminService.class);
+    final GdriveSelfCheck check = mock(GdriveSelfCheck.class);
+    final ObjectProvider<CurrentUserContext> provider = mock(ObjectProvider.class);
+    final CurrentUserContext user = new CurrentUserContext();
+    final AtomicLong ids = new AtomicLong(100);
+    CommodityExportScheduleService service;
+    CommodityExportScheduleExecutionStore store;
+    static final ZoneId TW = ZoneId.of("Asia/Taipei");
+    @BeforeEach void setup() {
+        user.setEffectiveUserId(1L); when(provider.getObject()).thenReturn(user);
+        var fresh = mock(ExportScheduleFreshRead.class);
+        when(fresh.refresh(any())).thenAnswer(i -> i.getArgument(0));
+        store = new CommodityExportScheduleExecutionStore(repo, fresh);
+        var em = mock(EntityManager.class); var query = mock(jakarta.persistence.Query.class);
+        when(em.createNativeQuery(anyString())).thenReturn(query);
+        when(query.setParameter(anyString(), any())).thenReturn(query);
+        ReflectionTestUtils.setField(store, "entityManager", em);
+        when(repo.findAll()).thenAnswer(i -> new ArrayList<>(rows));
+        when(repo.findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(anyLong())).thenAnswer(i ->
+                new ArrayList<>(rows.stream().filter(r -> r.getOwnerUserId().equals(i.getArgument(0))).toList()));
+        when(repo.findLockedByIdAndOwnerUserId(anyLong(), anyLong())).thenAnswer(i -> rows.stream()
+                .filter(r -> r.getId().equals(i.getArgument(0)) && r.getOwnerUserId().equals(i.getArgument(1))).findFirst());
+        when(repo.saveAndFlush(any())).thenAnswer(i -> { CommodityExportSchedule row = i.getArgument(0); row.setId(ids.incrementAndGet()); rows.add(row); return row; });
+        doAnswer(i -> { rows.remove(i.getArgument(0)); return null; }).when(repo).delete(any());
+        var drive = new GdriveOutputSupport(rclone, users, admin, check, "GDriveOutput");
+        service = new CommodityExportScheduleService(repo, store, excel, provider, drive, new ExcelDocRenderer(),
+                new JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()), new DualFormatExportWriter(drive), base.toString());
+        when(excel.commodityPricesDoc(any(),any())).thenReturn(doc());
     }
-
-    /** 最小合法 doc：本測試驗的是排程／guard／Drive 狀態，內容只需能被兩個 renderer 產出。 */
-    private static com.steven.assets.service.export.ExportDoc doc() {
-        var table = new com.steven.assets.service.export.ExportDoc.Table(
-                null, null, java.util.List.of("日期"), true, false, false, null,
-                java.util.List.of(java.util.List.of("2026-08-15")));
-        return new com.steven.assets.service.export.ExportDoc("油價金價",
-                java.util.List.of(new com.steven.assets.service.export.ExportDoc.Sheet(
-                        "油價金價", java.util.List.of(table), 1)));
+    static ExportDoc doc() {
+        return new ExportDoc("油價金價", List.of(new ExportDoc.Sheet("資料", List.of(new ExportDoc.Table(null,null,
+                List.of("代碼"),true,false,false,null,List.of(List.of("2330")))),1)));
     }
-
-    private void givenCurrentUser(long id) {
-        CurrentUserContext ctx = new CurrentUserContext();
-        ctx.setEffectiveUserId(id);
-        when(currentUserProvider.getObject()).thenReturn(ctx);
+    CommodityExportSchedule row(long id, int hour) {
+        CommodityExportSchedule row = CommodityExportSchedule.builder().id(id).ownerUserId(1L).enabled(true).runHour(hour).runMinute(0).outputSubpath("input").build();
+        rows.add(row); return row;
     }
-
-    /** @param configuredAdmin 是否為主要管理者（{@code ADMIN_EMAIL} 本人），與 role 欄位無關 */
-    private void givenUser(long id, String email, boolean configuredAdmin) {
-        AppUser u = new AppUser();
-        u.setId(id);
-        u.setEmail(email);
-        when(userRepo.findById(id)).thenReturn(Optional.of(u));
-        when(userAdminService.isConfiguredAdmin(email)).thenReturn(configuredAdmin);
+    CommodityExportDto.ScheduleRequest request(String name, Boolean enabled, Integer hour, Integer minute, String local, Boolean drive, String remote) {
+        return new CommodityExportDto.ScheduleRequest(name,enabled,hour,minute,local,null,drive,remote);
     }
-
-    private CommodityExportSchedule setting(long owner, boolean gdriveEnabled, String gdriveSubpath) {
-        return CommodityExportSchedule.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
-                .id(owner).ownerUserId(owner)
-                .enabled(true).outputSubpath("input")
-                .gdriveEnabled(gdriveEnabled).gdriveSubpath(gdriveSubpath)
-                .build();
+    CommodityExportDto.ScheduleRequest request(String name, int hour) { return request(name,false,hour,0,"input",null,null); }
+    void configured(long id, boolean allowed) {
+        var u = new AppUser(); u.setId(id); u.setEmail("owner"+id+"@example.test");
+        when(users.findById(id)).thenReturn(Optional.of(u)); when(admin.isConfiguredAdmin(u.getEmail())).thenReturn(allowed);
     }
-
-    private Path expectedLocalFile(long owner) {
-        return baseDir.resolve("input")
-                .resolve("油價金價_" + owner + "_" + LocalDate.now(TW).format(FILE_DATE) + ".xlsx");
+    @Test void emptyGetIsEmptyAndNeverCreatesRows() {
+        assertThat(service.getForCurrentUser().schedules()).isEmpty(); verify(repo,never()).saveAndFlush(any()); verifyNoInteractions(check,rclone);
     }
-
-    // ===== transient 預設（無 DB 列） =====
-
-    @Test
-    void 無設定時GET回transient啟用0800且不寫DB() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        CommodityExportDto.SettingResponse response = service.getForCurrentUser();
-
-        assertThat(response.enabled()).isFalse();
-        assertThat(response.times()).singleElement().satisfies(time -> {
-            assertThat(time.runHour()).isEqualTo(8);
-            assertThat(time.runMinute()).isZero();
-            assertThat(time.enabled()).isTrue();
-            assertThat(time.lastRunAt()).isNull();
-            assertThat(time.lastRunStatus()).isNull();
+    @Test void createDefaultsDisabledNormalizesNamesAndPathsAndAllowsSameTargets() {
+        var first = service.createForCurrentUser(request("   ",null,8,0," ",null,null));
+        assertThat(first.schedules()).singleElement().satisfies(r -> {
+            assertThat(r.enabled()).isFalse(); assertThat(r.name()).isNull(); assertThat(r.outputSubpath()).isEqualTo("input");
         });
-        verify(settingRepo, never()).save(any());
+        service.createForCurrentUser(request(null,8)); assertThat(rows).hasSize(2);
     }
-
-    // ===== times[] 排序、整包取代、驗證 =====
-
-    @Test
-    void 多個時間依時分排序且各自保留相同時間的guard_新時間guard為null() {
-        givenCurrentUser(ADMIN_ID);
-        CommodityExportSchedule current = setting(ADMIN_ID, false, null);
-        var nineThirty = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId())
-                .runHour(9).runMinute(30).enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1))
-                .lastRunStatus("舊狀態").build();
-        current.addTime(nineThirty);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
-
-        CommodityExportDto.SettingResponse response = service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(true, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(12, 0, true),
-                                new CommodityExportDto.TimeRequest(9, 30, true)),
-                        null, null));
-
-        assertThat(response.times()).extracting(CommodityExportDto.TimeResponse::runHour).containsExactly(9, 12);
-        assertThat(current.getTimes()).hasSize(2);
-        assertThat(current.getTimes()).anySatisfy(time -> {
-            assertThat(time.getRunHour()).isEqualTo(9);
-            assertThat(time.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
-            assertThat(time.getLastRunStatus()).isEqualTo("舊狀態");
-        });
-        assertThat(current.getTimes()).anySatisfy(time -> {
-            assertThat(time.getRunHour()).isEqualTo(12);
-            assertThat(time.getLastRunDate()).isNull();
-            assertThat(time.getLastRunStatus()).isNull();
-        });
-        // rollback representative 也必須是最早 enabled child。
-        assertThat(current.getRunHour()).isEqualTo(9);
-        assertThat(current.getRunMinute()).isEqualTo(30);
-        assertThat(current.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
+    @Test void listAndMutationResponsesAreCompleteAndSortedByTimeThenId() {
+        row(4,12); row(3,8); row(2,8);
+        assertThat(service.getForCurrentUser().schedules()).extracting(CommodityExportDto.ScheduleItem::id).containsExactly(2L,3L,4L);
+        assertThat(service.createForCurrentUser(request("中 A_1-",9)).schedules()).extracting(CommodityExportDto.ScheduleItem::runHour).containsExactly(8,8,9,12);
     }
-
-    @Test
-    void 整包取代時不在清單內的舊時間被移除() {
-        givenCurrentUser(ADMIN_ID);
-        CommodityExportSchedule current = setting(ADMIN_ID, false, null);
-        current.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(20).runMinute(0).enabled(true).build());
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(current));
-
-        CommodityExportDto.SettingResponse response = service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(true, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        null, null));
-
-        assertThat(response.times()).extracting(CommodityExportDto.TimeResponse::runHour).containsExactly(8);
-        assertThat(current.getTimes()).extracting(CommodityExportScheduleTime::getRunHour).containsExactly(8);
+    @Test void editsKeepOnlyTheirOwnGuardAndExecutionMetadata() {
+        var a=row(1,8); var b=row(2,9); var date=LocalDate.now(TW); a.setLastRunDate(date); a.setLastRunStatus("kept");
+        a.setGdriveLastStatus("kept-drive"); b.setLastRunStatus("other");
+        var response=service.updateForCurrentUser(1L,request("new",11));
+        assertThat(response.schedules()).hasSize(2); assertThat(a.getLastRunDate()).isEqualTo(date);
+        assertThat(a.getLastRunStatus()).isEqualTo("kept"); assertThat(a.getGdriveLastStatus()).isEqualTo("kept-drive");
+        assertThat(b.getLastRunStatus()).isEqualTo("other");
     }
-
-    @Test
-    void 儲存拒絕空時間清單() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", null, List.of(), null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("至少需要一個執行時間");
-        verify(settingRepo, never()).save(any());
+    @Test void deleteReturnsRemainingFullList() {
+        row(1,8);row(2,9); assertThat(service.deleteForCurrentUser(1L).schedules()).extracting(CommodityExportDto.ScheduleItem::id).containsExactly(2L);
     }
-
-    @Test
-    void 儲存拒絕重複時間() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true),
-                                new CommodityExportDto.TimeRequest(8, 0, false)),
-                        null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("執行時間不可重複");
-        verify(settingRepo, never()).save(any());
+    @Test void eleventhScheduleIsRejected() {
+        for(int i=0;i<10;i++) row(i+1,8);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,8))).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("10");
+        assertThat(rows).hasSize(10);
     }
-
-    @Test
-    void 儲存拒絕非法時分() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(24, 0, true)),
-                        null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("00:00～23:59");
-        verify(settingRepo, never()).save(any());
-    }
-
-    @Test
-    void 總排程啟用時拒絕所有時間停用() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(true, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, false),
-                                new CommodityExportDto.TimeRequest(12, 0, false)),
-                        null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("至少需啟用一個時間");
-        verify(settingRepo, never()).save(any());
-    }
-
-    @Test
-    void 總排程停用時允許所有時間停用() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        CommodityExportDto.SettingResponse response = service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, false)),
-                        null, null));
-
-        assertThat(response.enabled()).isFalse();
-        assertThat(response.times()).singleElement()
-                .satisfies(t -> assertThat(t.enabled()).isFalse());
-    }
-
-    // ===== rangeMonths 驗證不因多時間點而改變 =====
-
-    @Test
-    void rangeMonths超出上限擲例外() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", 121,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("匯出範圍(月)");
-        verify(settingRepo, never()).save(any());
-    }
-
-    @Test
-    void rangeMonths為零擲例外() {
-        givenCurrentUser(ADMIN_ID);
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", 0,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        null, null)))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("匯出範圍(月)");
-    }
-
-    @Test
-    void rangeMonthsNull代表全部十年_合法通過() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        CommodityExportDto.SettingResponse resp = service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        null, null));
-
-        assertThat(resp.rangeMonths()).isNull();
-    }
-
-    @Test
-    void rangeMonths在範圍內合法通過() {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-
-        CommodityExportDto.SettingResponse resp = service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(false, "input", 60,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        null, null));
-
-        assertThat(resp.rangeMonths()).isEqualTo(60);
-    }
-
-    // ===== 背景 due runner：多時間點各自判斷 =====
-
-    @Test
-    void 兩個到點時間各自執行_其一已guard不阻擋另一() throws Exception {
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var already = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0)
-                .enabled(true).lastRunDate(LocalDate.now(TW)).build(); // 今天已跑過
-        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1)
-                .enabled(true).build(); // 未跑過
-        s.addTime(already);
-        s.addTime(due);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        service.selfHealOnStartup();
-
-        assertThat(already.getLastRunStatus()).isNull(); // 未被動到
-        assertThat(due.getLastRunDate()).isEqualTo(LocalDate.now(TW));
-        assertThat(due.getLastRunStatus()).startsWith("xlsx 成功：");
-        verify(excelExportService, times(1)).commodityPricesDoc(any(), any());
-    }
-
-    @Test
-    void 停用的時間點不執行() throws Exception {
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var disabledTime = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(false).build();
-        s.addTime(disabledTime);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-
-        service.selfHealOnStartup();
-
-        verify(excelExportService, never()).commodityPricesDoc(any(), any());
-        assertThat(disabledTime.getLastRunDate()).isNull();
-    }
-
-    @Test
-    void 尚未到執行時間不跑() throws Exception {
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var future = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(23).runMinute(59).enabled(true).build();
-        s.addTime(future);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-
-        service.selfHealOnStartup();
-
-        verify(excelExportService, never()).commodityPricesDoc(any(), any());
-    }
-
-    @Test
-    void 多個overdue時間各跑一次_前一失敗不阻斷後一且parent摘要取最後完成child() throws Exception {
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var first = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
-        var second = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(1).enabled(true).build();
-        s.addTime(first);
-        s.addTime(second);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any()))
-                .thenThrow(new RuntimeException("第一個失敗"))
-                .thenReturn(doc());
-
-        service.selfHealOnStartup();
-
-        assertThat(first.getLastRunDate()).isEqualTo(LocalDate.now(TW));
-        assertThat(second.getLastRunDate()).isEqualTo(LocalDate.now(TW));
-        assertThat(first.getLastRunStatus()).startsWith("失敗：第一個失敗");
-        assertThat(second.getLastRunStatus()).startsWith("xlsx 成功：");
-        assertThat(s.getRunHour()).isZero();
-        assertThat(s.getRunMinute()).isZero();
-        assertThat(s.getLastRunDate()).isEqualTo(first.getLastRunDate());
-        assertThat(s.getLastRunStatus()).isEqualTo(second.getLastRunStatus());
-        assertThat(s.getLastRunAt()).isEqualTo(second.getLastRunAt());
-        verify(excelExportService, times(2)).commodityPricesDoc(any(), any());
-    }
-
-    @Test
-    void startup與minuteTick共用同一CAS避免同一時間重入() throws Exception {
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build();
-        s.addTime(due);
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-
-        CountDownLatch started = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        when(excelExportService.commodityPricesDoc(any(), any())).thenAnswer(invocation -> {
-            started.countDown();
-            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("測試等待逾時");
-            return doc();
-        });
-
-        CompletableFuture<Void> startup = CompletableFuture.runAsync(service::selfHealOnStartup);
-        try {
-            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
-            service.tick();
-        } finally {
-            release.countDown();
+    @Test void foreignOrUnknownIdsAreNotFoundForAllIdOperations() {
+        var foreign=row(1,8);foreign.setOwnerUserId(2L);
+        for(long id:List.of(1L,999L)) {
+            assertThatThrownBy(() -> service.updateForCurrentUser(id,request(null,8))).isInstanceOf(NoSuchElementException.class);
+            assertThatThrownBy(() -> service.deleteForCurrentUser(id)).isInstanceOf(NoSuchElementException.class);
+            assertThatThrownBy(() -> service.runNowForCurrentUser(id)).isInstanceOf(NoSuchElementException.class);
         }
-        startup.get(5, TimeUnit.SECONDS);
-
-        verify(excelExportService, times(1)).commodityPricesDoc(any(), any());
+        verify(excel,never()).commodityPricesDoc(any(),any());verifyNoInteractions(rclone);
+    }
+    @Test void unauthenticatedAccessIsRejectedBeforeReadsOrFiles() {
+        user.setEffectiveUserId(null);
+        assertThatThrownBy(() -> service.getForCurrentUser()).isInstanceOf(UnauthenticatedException.class);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,8))).isInstanceOf(UnauthenticatedException.class);
+        assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).isInstanceOf(UnauthenticatedException.class);
+        verify(repo,never()).findAllByOwnerUserIdOrderByRunHourAscRunMinuteAscIdAsc(anyLong());
+    }
+    @Test void invalidRequiredTimesAreRejectedBeforeMutation() {
+        for(var r:List.of(request(null,false,null,0,"input",null,null),request(null,false,8,null,"input",null,null),
+                request(null,-1),request(null,24),request(null,false,8,60,"input",null,null)))
+            assertThatThrownBy(() -> service.createForCurrentUser(r)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(rows).isEmpty();
+    }
+    @Test void invalidNamesAndLongPathsAreRejected() {
+        for(String name:List.of("../escape","a/b","a:b","emoji😀","a".repeat(21)))
+            assertThatThrownBy(() -> service.createForCurrentUser(request(name,8))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"x".repeat(256),null,null))).isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void traversalAndEscapingSymlinksAreRejectedAtSaveAndAtExport() throws Exception {
+        assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"../escape",null,null))).isInstanceOf(IllegalArgumentException.class);
+        var outside=Files.createTempDirectory("market512-outside-");
+        try { Files.createSymbolicLink(base.resolve("alias"),outside);
+            assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"alias",null,null))).isInstanceOf(IllegalArgumentException.class);
+            var r=row(1,0);r.setOutputSubpath("alias");
+            assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("不可跳脫");
+            assertThat(Files.list(outside)).isEmpty();
+        } finally { Files.deleteIfExists(base.resolve("alias"));Files.deleteIfExists(outside); }
+    }
+    @Test void symlinkChangedDuringRenderingIsRevalidatedBeforeWriting() throws Exception {
+        var r=row(1,0);r.setOutputSubpath("switch"); var outside=Files.createTempDirectory("market512-render-");
+        when(excel.commodityPricesDoc(any(),any())).thenAnswer(i -> { Files.createSymbolicLink(base.resolve("switch"),outside); return doc(); });
+        try { assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("不可跳脫");
+            assertThat(Files.list(outside)).isEmpty();
+        } finally {Files.deleteIfExists(base.resolve("switch"));Files.deleteIfExists(outside);}
+    }
+    @Test void manualRunIgnoresEnabledUsesHttpDocAndPreservesDateGuard() {
+        var r=row(1,0);r.setEnabled(false);r.setLastRunDate(LocalDate.now(TW).minusDays(1));
+        var result=service.runNowForCurrentUser(1L);
+        assertThat(Path.of(result.path())).exists();assertThat(Path.of(result.jsonPath())).exists();
+        assertThat(r.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1)); assertThat(r.getLastRunStatus()).contains("成功");
+        verify(excel,times(1)).commodityPricesDoc(any(),any());
+        assertThat(result.path()).endsWith("油價金價_1_"+LocalDate.now(TW).format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)+".xlsx");
+    }
+    @Test void nameIsInsertedIntoIdenticalJsonAndExcelBaseNames() {
+        var r=row(1,0);r.setName("A 資產_1-"); var result=service.runNowForCurrentUser(1L);
+        assertThat(result.path()).contains("油價金價_1_A 資產_1-_");
+        assertThat(result.jsonPath()).isEqualTo(result.path().replace(".xlsx",".json"));
+    }
+    @Test void storedInvalidNameFailsWithoutCreatingEscapingFiles() {
+        var r=row(1,0);r.setName("../bad");assertThatThrownBy(() -> service.runNowForCurrentUser(1L)).hasMessageContaining("名稱");
+    }
+    @Test void dueRowsRunInTimeIdOrderAndOneFailureDoesNotBlockNextOwner() {
+        var b=row(2,0);b.setOwnerUserId(2L);var a=row(1,0);
+        when(excel.commodityPricesDoc(any(),any())).thenThrow(new IllegalStateException("first-fails")).thenReturn(doc());service.tick();
+        assertThat(a.getLastRunDate()).isEqualTo(LocalDate.now(TW)); assertThat(a.getLastRunStatus()).contains("first-fails");
+        assertThat(b.getLastRunDate()).isEqualTo(LocalDate.now(TW)); assertThat(b.getLastRunStatus()).contains("成功");
+        service.tick(); verify(excel,times(2)).commodityPricesDoc(any(),any());
+    }
+    @Test void guardDisabledAndFutureTimeAreIndependent() {
+        var done=row(1,0);done.setLastRunDate(LocalDate.now(TW));var off=row(2,0);off.setEnabled(false);
+        var future=row(3,23);future.setRunMinute(59);var due=row(4,0);
+        service.tick();assertThat(done.getLastRunStatus()).isNull();assertThat(off.getLastRunDate()).isNull();
+        assertThat(store.due(3L,1L,LocalDate.now(TW),LocalTime.NOON)).isEmpty();
         assertThat(due.getLastRunDate()).isEqualTo(LocalDate.now(TW));
     }
-
-    // ===== owner 隔離 =====
-
-    @Test
-    void owner隔離_不同owner的child互不影響() throws Exception {
-        CommodityExportSchedule a = setting(ADMIN_ID, false, null);
-        a.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
-        CommodityExportSchedule b = setting(OTHER_ID, false, null);
-        b.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
-        when(settingRepo.findAll()).thenReturn(List.of(a, b));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        service.selfHealOnStartup();
-
-        assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(expectedLocalFile(OTHER_ID)).exists();
-        verify(excelExportService, times(2)).commodityPricesDoc(any(), any());
+    @Test void startupAndMinuteTickShareCasWhileExportIsInProgress() throws Exception {
+        row(1,0); var started=new CountDownLatch(1);var release=new CountDownLatch(1);
+        when(excel.commodityPricesDoc(any(),any())).thenAnswer(i -> {started.countDown();assertThat(release.await(5,TimeUnit.SECONDS)).isTrue();return doc();});
+        var executor=Executors.newSingleThreadExecutor();
+        try {var run=executor.submit(service::selfHealOnStartup);assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();service.tick();
+            release.countDown();run.get(5,TimeUnit.SECONDS);verify(excel,times(1)).commodityPricesDoc(any(),any());
+        } finally {release.countDown();executor.shutdownNow();}
+    }
+    @Test void nonConfiguredAdminCannotEnableDriveButCanCreateLocalSchedule() {
+        configured(1,false); assertThatThrownBy(() -> service.createForCurrentUser(request(null,false,8,0,"input",true,"drive"))).isInstanceOf(AdminRequiredException.class);
+        assertThat(service.createForCurrentUser(request(null,8)).schedules()).hasSize(1);
+    }
+    @Test void driveNullFieldsKeepExistingAndTurningOffKeepsPath() {
+        var r=row(1,8);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        service.updateForCurrentUser(1L,request(null,8));assertThat(r.isGdriveEnabled()).isTrue();assertThat(r.getGdriveSubpath()).isEqualTo("drive");
+        service.updateForCurrentUser(1L,request(null,false,8,0,"input",false,null));
+        assertThat(r.isGdriveEnabled()).isFalse();assertThat(r.getGdriveSubpath()).isEqualTo("drive");
+    }
+    @Test void driveSelfCheckWarningIsEphemeralAndDoesNotReplaceLastUpload() {
+        configured(1,true);var r=row(1,8);r.setGdriveLastStatus("old-upload");r.setGdriveLastRunAt(LocalDateTime.of(2026,1,1,1,0));
+        when(check.checkLocal("GDriveOutput")).thenReturn("configuration unavailable");
+        var result=service.updateForCurrentUser(1L,request(null,false,8,0,"input",true,"drive"));
+        assertThat(result.gdriveSelfCheckWarning()).contains("unavailable");assertThat(r.getGdriveLastStatus()).isEqualTo("old-upload");
+        assertThat(r.getGdriveLastRunAt()).isEqualTo(LocalDateTime.of(2026,1,1,1,0));
+        assertThat(service.getForCurrentUser().gdriveSelfCheckWarning()).isNull();
+        service.updateForCurrentUser(1L,request(null,false,8,0,"input",true,"drive"));verify(check,times(1)).checkLocal(anyString());
+    }
+    @Test void getReturnsInvalidStoredDrivePathWithoutValidationOrSelfCheck() {
+        var r=row(1,8);r.setGdriveSubpath("/bad");assertThat(service.getForCurrentUser().schedules().getFirst().gdriveSubpath()).isEqualTo("/bad");verifyNoInteractions(check);
+    }
+    @Test void configuredAdminUploadsBothFormatsAndReportsDrivePaths() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(rclone.copyTo(anyString(),any(),anyString(),anyString())).thenAnswer(i -> "GDriveOutput:drive/"+i.getArgument(3));
+        var result=service.runNowForCurrentUser(1L);assertThat(result.gdrivePath()).endsWith(".xlsx");assertThat(result.jsonGdrivePath()).endsWith(".json");
+        verify(rclone,times(2)).copyTo(eq("GDriveOutput"),any(),eq("drive"),anyString());assertThat(r.getGdriveLastStatus()).contains("成功");
+    }
+    @Test void backgroundRechecksDriveOwnerButKeepsLocalFilesOnDenial() {
+        configured(1,false);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");service.tick();
+        assertThat(r.getLastRunStatus()).contains("成功");assertThat(r.getGdriveLastStatus()).contains("主要管理者");verifyNoInteractions(rclone);
+    }
+    @Test void driveFailureAndTimeoutRemainSeparateFromSuccessfulLocalWrite() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(rclone.copyTo(anyString(),any(),anyString(),anyString())).thenThrow(new RuntimeException("exit3"));service.tick();
+        assertThat(r.getLastRunStatus()).contains("成功");assertThat(r.getGdriveLastStatus()).contains("失敗");
+        doThrow(new RcloneClient.RcloneTimeoutException("timeout",45)).when(rclone).copyTo(anyString(),any(),anyString(),anyString());
+        service.runNowForCurrentUser(1L);assertThat(r.getGdriveLastStatus()).contains("逾時","可能已完成");
+    }
+    @Test void localFailureSkipsAllUploadsAndStillRecordsDueGuard() {
+        configured(1,true);var r=row(1,0);r.setGdriveEnabled(true);r.setGdriveSubpath("drive");
+        when(excel.commodityPricesDoc(any(),any())).thenThrow(new IllegalStateException("doc-failure"));service.tick();
+        assertThat(r.getLastRunDate()).isEqualTo(LocalDate.now(TW));assertThat(r.getLastRunStatus()).contains("doc-failure");
+        assertThat(r.getGdriveLastStatus()).contains("跳過");verifyNoInteractions(rclone);
     }
 
-    // ===== run-now：不消耗任何時間點 =====
-
-    @Test
-    void runNow既有多時間設定不新增也不修改childGuard() throws Exception {
-        givenCurrentUser(ADMIN_ID);
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var morning = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(8).runMinute(0)
-                .enabled(true).lastRunDate(LocalDate.now(TW).minusDays(1)).lastRunStatus("原有狀態").build();
-        s.addTime(morning);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        service.runNowForCurrentUser();
-
-        assertThat(s.getTimes()).containsExactly(morning);
-        assertThat(morning.getLastRunDate()).isEqualTo(LocalDate.now(TW).minusDays(1));
-        assertThat(morning.getLastRunStatus()).isEqualTo("原有狀態");
+    @Test void eachRowUsesItsOwnRangeAndOnePersistedGlobalHistoryReadPerExport() {
+        var a=row(1,0);a.setRangeMonths(3);var b=row(2,0);b.setRangeMonths(17);b.setOutputSubpath("other");
+        var c=row(3,0);c.setRangeMonths(null);c.setName("all");service.tick();
+        var end=LocalDate.now(TW);
+        verify(excel).commodityPricesDoc(end.minusMonths(3),end);verify(excel).commodityPricesDoc(end.minusMonths(17),end);verify(excel).commodityPricesDoc(end.minusYears(10),end);
+        assertThat(base.resolve("other")).isDirectory();
     }
-
-    @Test
-    void runNow無設定只產檔而不建立設定或child() throws Exception {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.empty());
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        var result = service.runNowForCurrentUser();
-        assertThat(result.path()).isNotNull();
-        assertThat(result.jsonPath()).isNotNull();
-        verify(settingRepo, never()).save(any());
-        verify(settingRepo, never()).saveAndFlush(any());
+    @Test void allValidRangesRemainIndependentAndInvalidRangesAreRejected() {
+        for(Integer months:Arrays.asList(null,1,3,6,12,17,36,60,120)) {
+            var response=service.createForCurrentUser(new CommodityExportDto.ScheduleRequest(null,false,8,0,"input",months,null,null));
+            assertThat(response.schedules()).extracting(CommodityExportDto.ScheduleItem::rangeMonths).contains(months);
+        }
+        for(int months:new int[]{0,-1,121})
+            assertThatThrownBy(()->service.createForCurrentUser(new CommodityExportDto.ScheduleRequest(null,false,8,0,"input",months,null,null))).isInstanceOf(IllegalArgumentException.class);
     }
-
-    @Test
-    void runNow不動任何child當日guard_即使已到點() throws Exception {
-        givenCurrentUser(ADMIN_ID);
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        var due = CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build(); // 從未執行過
-        s.addTime(due);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        service.runNowForCurrentUser();
-
-        // run-now 本身會更新 parent 的 lastRunAt/lastRunStatus，但不得動任何 child 的 guard。
-        assertThat(due.getLastRunDate()).isNull();
-        assertThat(due.getLastRunAt()).isNull();
-        assertThat(due.getLastRunStatus()).isNull();
-        assertThat(s.getLastRunAt()).isNotNull();
-    }
-
-    // ===== 雙格式：render 失敗互不影響 =====
-
-    @Test
-    void xlsxRender失敗不影響json照常寫入() throws Exception {
-        var failingExcel = mock(com.steven.assets.service.export.ExcelDocRenderer.class);
-        when(failingExcel.render(any())).thenThrow(new RuntimeException("xlsx render 炸了"));
-        var jsonRenderer = new com.steven.assets.service.export.JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper());
-        var dual = new com.steven.assets.service.export.DualFormatExportWriter(gdrive);
-        CommodityExportScheduleService svc = new CommodityExportScheduleService(
-                settingRepo, excelExportService, currentUserProvider, gdrive,
-                failingExcel, jsonRenderer, dual, baseDir.toString());
-        com.steven.assets.service.ExportScheduleUnitHarness.attach(svc, settingRepo);
-
-        CommodityExportSchedule s = setting(ADMIN_ID, false, null);
-        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        svc.selfHealOnStartup();
-
-        Path json = baseDir.resolve("input")
-                .resolve("油價金價_" + ADMIN_ID + "_" + LocalDate.now(TW).format(FILE_DATE) + ".json");
-        Path xlsx = baseDir.resolve("input")
-                .resolve("油價金價_" + ADMIN_ID + "_" + LocalDate.now(TW).format(FILE_DATE) + ".xlsx");
-        assertThat(json).exists();
-        assertThat(xlsx).doesNotExist();
-        assertThat(s.getLastRunStatus()).contains("xlsx render 失敗").contains("json 成功：");
-    }
-
-    // ===== Google Drive best-effort（規則本身由 GdriveOutputSupportTest 涵蓋，這裡驗 service 有串上） =====
-
-    @Test
-    void runNow啟用時上傳並回報落點() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, true, DRIVE_DIR)));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenReturn("GDriveOutput:" + DRIVE_DIR + "/油價金價_1_x.xlsx");
-
-        CommodityExportDto.RunNowResponse r = service.runNowForCurrentUser();
-
-        assertThat(Path.of(r.path())).exists();                       // 本機照寫
-        assertThat(r.gdrivePath()).startsWith("GDriveOutput:" + DRIVE_DIR);
-        assertThat(r.gdriveStatus()).startsWith("xlsx 成功：").contains("／json ");
-    }
-
-    @Test
-    void 未啟用時run_now不上傳且不碰狀態欄() throws IOException {
-        givenCurrentUser(ADMIN_ID);
-        when(settingRepo.findByOwnerUserId(ADMIN_ID)).thenReturn(Optional.of(setting(ADMIN_ID, false, null)));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-
-        CommodityExportDto.RunNowResponse r = service.runNowForCurrentUser();
-
-        assertThat(r.gdriveStatus()).isNull();
-        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
-    }
-
-    @Test
-    void 上傳失敗不影響本機也不向外擲例外() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        CommodityExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any())).thenReturn(doc());
-        when(rcloneClient.copyTo(anyString(), any(), anyString(), anyString()))
-                .thenThrow(new RuntimeException("rclone exit 3"));
-
-        service.selfHealOnStartup();   // 不得擲例外——一列炸掉不能拖垮其餘 owner
-
-        assertThat(expectedLocalFile(ADMIN_ID)).exists();
-        assertThat(s.getLastRunStatus()).startsWith("xlsx 成功：");        // 本機確實成功，不得標記為失敗
-        assertThat(s.getGdriveLastStatus()).contains("失敗：");             // 兩個狀態欄必須可分辨
-    }
-
-    @Test
-    void 本機產檔失敗時完全不上傳但仍寫狀態欄() throws IOException {
-        givenUser(ADMIN_ID, "tw.leader@gmail.com", true);
-        CommodityExportSchedule s = setting(ADMIN_ID, true, DRIVE_DIR);
-        s.addTime(CommodityExportScheduleTime.builder().id(com.steven.assets.service.ExportScheduleUnitHarness.nextId()).runHour(0).runMinute(0).enabled(true).build());
-        when(settingRepo.findAll()).thenReturn(List.of(s));
-        when(excelExportService.commodityPricesDoc(any(), any()))
-                .thenThrow(new RuntimeException("產檔失敗"));
-
-        service.selfHealOnStartup();
-
-        assertThat(s.getLastRunStatus()).startsWith("失敗：");
-        // 絕不上傳前一次的舊檔；狀態欄也不得停留在上一次的成功
-        assertThat(s.getGdriveLastStatus()).startsWith("跳過：");
-        verify(rcloneClient, never()).copyTo(anyString(), any(), anyString(), anyString());
-    }
-
-    @Test
-    void 非主要管理者啟用Drive回403() {
-        givenCurrentUser(OTHER_ID);
-        givenUser(OTHER_ID, "hi.steven@gmail.com", false);
-        when(settingRepo.findByOwnerUserId(OTHER_ID)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> service.updateForCurrentUser(
-                new CommodityExportDto.SettingRequest(true, "input", null,
-                        List.of(new CommodityExportDto.TimeRequest(8, 0, true)),
-                        true, DRIVE_DIR)))
-                .isInstanceOf(com.steven.assets.security.AdminRequiredException.class);
-        // This in-memory fixture has no rollback evidence; the real PostgreSQL suite proves no setting remains.
+    @Test void xlsxRenderFailureStillWritesJsonFromTheSameDocument() throws Exception {
+        var renderer=mock(ExcelDocRenderer.class);when(renderer.render(any())).thenThrow(new IllegalStateException("render failed"));
+        var drive=new GdriveOutputSupport(rclone,users,admin,check,"GDriveOutput");
+        service=new CommodityExportScheduleService(repo,store,excel,provider,drive,renderer,
+                new JsonDocRenderer(new com.fasterxml.jackson.databind.ObjectMapper()),new DualFormatExportWriter(drive),base.toString());
+        row(1,0);var result=service.runNowForCurrentUser(1L);
+        assertThat(result.path()).isNull();assertThat(Path.of(result.jsonPath())).exists();verify(excel,times(1)).commodityPricesDoc(any(),any());
     }
 }

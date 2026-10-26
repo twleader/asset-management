@@ -324,6 +324,14 @@ class FubonAccountingProjectionPostgresTest {
 
     @Test
     void settlementKeepsSeparateOfficialDaysAndMissingDayNeverClearsFutureRows() {
+        // The current settlement rule requires one same-bank manual cash target with sufficient balance.
+        tx(() -> {
+            AssetSnapshot snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().add(BankDeposit.builder().snapshot(snapshot).bank(fubonBank)
+                    .depositType("活存").currency("TWD").amount(new BigDecimal("2000.00")).build());
+            aggregates.recalculate(snapshot);
+            snapshots.saveAndFlush(snapshot);
+        });
         String secondDay = SETTLEMENT_ROW.replace("2026-09-01", "2026-09-02")
                 .replace("1000", "2000").replace("-1002", "-2002");
         when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
@@ -334,7 +342,7 @@ class FubonAccountingProjectionPostgresTest {
         readSnapshot(snapshot -> {
             assertThat(transit(snapshot, PAYABLE)).extracting(BankDeposit::getProcessingDate)
                     .containsExactlyInAnyOrder(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2));
-            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-2904");
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-904");
         });
         clearInvocations(aggregates);
         sqlTrace.start();
@@ -348,18 +356,22 @@ class FubonAccountingProjectionPostgresTest {
                 read(settlementJson(NO_DATA_ROW), FubonDtos.SettlementBatch.class)));
         assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
         readSnapshot(snapshot -> {
-            assertThat(transit(snapshot, PAYABLE)).hasSize(2);
-            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-2904");
+            assertThat(transit(snapshot, PAYABLE).stream().map(BankDeposit::getProcessingDate).toList()).hasSize(2);
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-904");
         });
         // Same production lifecycle method used by the daily and startup jobs, independent of vendor success.
         assertThat(assetService.rollLatestSnapshotToTodayForOwner(ownerId, LocalDate.of(2026, 9, 1))).isTrue();
         readSnapshot(snapshot -> {
-            assertThat(transit(snapshot, PAYABLE)).singleElement().satisfies(target -> {
-                assertThat(target.getProcessingDate()).isEqualTo(LocalDate.of(2026, 9, 2));
-                assertThat(target.getAmount()).isEqualByComparingTo("-2002");
-            });
-            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-1902");
-            assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-1902");
+            assertThat(transit(snapshot, PAYABLE).stream().map(BankDeposit::getProcessingDate).toList())
+                    .containsExactly(LocalDate.of(2026, 9, 2));
+            assertThat(transit(snapshot, PAYABLE).getFirst().getAmount()).isEqualByComparingTo("-2002");
+            assertThat(snapshot.getDeposits().stream()
+                    .filter(row -> "TWD".equals(row.getCurrency()) && "活存".equals(row.getDepositType())
+                            && fubonBank.getId().equals(row.getBank().getId()))
+                    .map(BankDeposit::getAmount).toList()).singleElement()
+                    .satisfies(amount -> assertThat(amount).isEqualByComparingTo("998"));
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-904");
+            assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("-904");
         });
     }
 
