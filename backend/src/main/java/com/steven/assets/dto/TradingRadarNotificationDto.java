@@ -16,7 +16,7 @@ public final class TradingRadarNotificationDto {
 
     public record Option(String code, String label) {}
 
-    public record RecipientOption(Long id, String email, boolean active) {}
+    public record RecipientOption(Long id, String email, boolean active, String name) {}
 
     public record Response(
             String stockCode,

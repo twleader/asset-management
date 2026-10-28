@@ -1425,7 +1425,7 @@
                 :key="recipient.id"
                 :value="recipient.id"
               >
-                {{ recipient.email }}
+                {{ recipient.email }}<span v-if="recipient.name?.trim()"> [{{ recipient.name }}]</span>
                 <span v-if="!recipient.active" class="inactive-recipient">（目前停用，不會收到信）</span>
               </el-checkbox>
             </el-checkbox-group>
@@ -2974,7 +2974,22 @@ onUnmounted(() => {
 .notification-help { margin-bottom: 16px; }
 .state-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
 .state-options :deep(.el-checkbox) { margin-right: 0; }
-.recipient-options { display: flex; flex-direction: column; align-items: flex-start; }
+.recipient-options { display: flex; flex-direction: column; align-items: flex-start; width: 100%; max-width: 100%; }
+.recipient-options :deep(.el-checkbox) {
+  align-items: flex-start;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  margin-right: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.recipient-options :deep(.el-checkbox__label) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
 .no-recipient { display: flex; align-items: center; gap: 6px; color: #64748b; }
 .inactive-recipient { color: #dc2626; font-size: 12px; }
 .switch-note { margin-left: 10px; color: #64748b; font-size: 12px; }
