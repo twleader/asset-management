@@ -59,13 +59,12 @@ export function displayDurationMillis(value) {
 
 const UI_CHOICE_PREFIX = 'ui-choice:'
 const UI_DECISION_PREFIX = 'ui-decision:'
-const CHOICE_HUB_X = 920
-const CHOICE_OPTION_X = 1180
-const CHOICE_OPTION_GAP = 80
-const CHOICE_GROUP_GAP = 120
-const DECISION_OPTION_GAP = 72
-const DECISION_GROUP_GAP = 144
-const GRAPH_BOTTOM_PADDING = 160
+const GRAPH_HORIZONTAL_GAP = 240
+const GRAPH_VERTICAL_GAP = 120
+const GRAPH_PLOT_LEFT = 112
+const GRAPH_PLOT_TOP = 64
+const GRAPH_PLOT_RIGHT = 112
+const GRAPH_PLOT_BOTTOM = 80
 const TOOL_NAME = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 const PUBLIC_CHOICE_SUMMARY_FIELDS = ['title', 'selectedOptionId', 'options']
 const PUBLIC_CHOICE_OPTION_SUMMARY_FIELDS = ['optionId', 'label', 'toolName', 'selected']
@@ -75,11 +74,6 @@ const PUBLIC_DECISION_SOURCE = 'LLM_PUBLIC_SUMMARY_V1'
 const PRIVATE_CHOICE_MARKER = /(?:private[ \t\r\n\f\x0B_-]*reasoning|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|(?:^|[,{[ \t\r\n\f\x0B"'])?(?:reasoning|analysis|thinking|thoughts?)[ \t\r\n\f\x0B]*["']?[ \t\r\n\f\x0B]*[:=：]|<[ \t\r\n\f\x0B]*\/?[ \t\r\n\f\x0B]*(?:analysis|think|thinking|reasoning)[ \t\r\n\f\x0B]*>|(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)|私人推理|內部思考|思考鏈)/i
 const UNSAFE_PUBLIC_CHOICE_TEXT = /(?:https?:\/\/|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\bauthorization\b|\bbearer\b|\bapi[_ -]?key\b|\bpassword\b|\bsecret\b|\btoken\b|\$\(|```|<\s*script|持股|帳號|[0-9][,0-9]*(?:元|美元|股|張)|(?:NT\s*\$|US\s*\$|\b(?:USD|TWD|NTD|EUR|JPY)\b|[$€£¥])\s*[-+]?\s*\d|\d[\d,]*(?:\.\d+)?\s*\b(?:USD|TWD|NTD|EUR|JPY)\b|\b(?:parameters?|arguments?|input)\b\s*["']?\s*[:=：]|\b(?:raw[_ -]*(?:input|command|shell|response|api|mime|reasoning)|command|cmd|shell)\b\s*["']?\s*[:=：]|(?:<[ \t\r\n\f\x0B]*\/?[ \t\r\n\f\x0B]*(?:analysis|think|thinking|reasoning)[ \t\r\n\f\x0B]*>|(?:^|\n)[ \t\r\n\f\x0B]*(?:analysis|thinking|reasoning|private[ \t\r\n\f\x0B_-]*(?:analysis|reasoning)|chain[ \t\r\n\f\x0B._-]*of[ \t\r\n\f\x0B._-]*thought|hidden[ \t\r\n\f\x0B_-]*reasoning)[ \t\r\n\f\x0B]*[:=]|\b(?:BEGIN|END)[ \t\r\n\f\x0B._-]+(?:PRIVATE|CHAIN[ \t\r\n\f\x0B._-]*OF[ \t\r\n\f\x0B._-]*THOUGHT|REASONING)|(?:私人推理|內部思考|思考鏈)[ \t\r\n\f\x0B]*[:=：])|(?:^|\n)\s*(?:curl|wget|bash|zsh|sh|pwsh|powershell|python(?:3)?|node|cat|echo|printf)\s+\S|(?:\/Users\/|\/private\/|\/tmp\/|~\/|[A-Z]:\\)|\d{6,})/i
 const SENSITIVE_FIELD_SEMANTIC = /(?:\b(?:price|amount|balance|holdings?|account|acct|position|quantity|qty|cost|shares?|lots?|portfolio|cash|market_value|total_value)\b\s*["']?\s*[:=：]|\b(?:price|amount|balance|holdings?|account|acct|position|quantity|qty|cost|shares?|lots?|portfolio|cash|market_value|total_value)\b\s*[-+]?\s*\d|(?:成本|金額|餘額|持倉|部位|股數|張數|單價|帳戶|帳號)\s*["']?\s*[:=：]?\s*\d|\b(?:NT\$|USD|TWD)\s*\d)/i
-
-function finiteCoordinate(value, fallback) {
-  const coordinate = Number(value)
-  return Number.isFinite(coordinate) ? coordinate : fallback
-}
 
 function hasLoneSurrogate(value) {
   for (let index = 0; index < value.length; index += 1) {
@@ -331,19 +325,90 @@ function choiceSyntheticNode({ id, parentEventId, name, graphLabel, x, y, color,
   }
 }
 
+/** Give every visible node a stable layer and source-order position without changing its source record. */
+function applyStableDagLayout(nodes, edges) {
+  const indexById = new Map()
+  nodes.forEach((node, index) => {
+    if (typeof node.id === 'string' && node.id !== '' && !indexById.has(node.id)) indexById.set(node.id, index)
+  })
+
+  const indegrees = nodes.map(() => 0)
+  const ranks = nodes.map(() => 0)
+  const children = nodes.map(() => [])
+  for (const edge of edges) {
+    const sourceIndex = indexById.get(edge?.source)
+    const targetIndex = indexById.get(edge?.target)
+    if (sourceIndex == null || targetIndex == null || sourceIndex === targetIndex) continue
+    children[sourceIndex].push(targetIndex)
+    indegrees[targetIndex] += 1
+  }
+
+  const queue = []
+  indegrees.forEach((indegree, index) => {
+    if (indegree === 0) queue.push(index)
+  })
+  const processed = []
+  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+    const sourceIndex = queue[queueIndex]
+    processed.push(sourceIndex)
+    for (const targetIndex of children[sourceIndex]) {
+      ranks[targetIndex] = Math.max(ranks[targetIndex], ranks[sourceIndex] + 1)
+      indegrees[targetIndex] -= 1
+      if (indegrees[targetIndex] === 0) queue.push(targetIndex)
+    }
+  }
+
+  // A cycle leaves a finite residual set. Place that set together, in input order,
+  // after the acyclic prefix; its edges are retained but do not claim causal rank.
+  if (processed.length !== nodes.length) {
+    const lastProcessedRank = processed.reduce((maximum, index) => Math.max(maximum, ranks[index]), -1)
+    const fallbackRank = lastProcessedRank + 1
+    indegrees.forEach((indegree, index) => {
+      if (indegree > 0) ranks[index] = fallbackRank
+    })
+  }
+
+  const nextColumnByRank = new Map()
+  let maxColumn = 0
+  let maxRank = 0
+  nodes.forEach((node, index) => {
+    const rank = ranks[index]
+    const column = nextColumnByRank.get(rank) || 0
+    nextColumnByRank.set(rank, column + 1)
+    maxColumn = Math.max(maxColumn, column)
+    maxRank = Math.max(maxRank, rank)
+    node.x = column * GRAPH_HORIZONTAL_GAP
+    node.y = rank * GRAPH_VERTICAL_GAP
+  })
+
+  // ECharts expands a zero-span axis to [-1, 1]. Matching that two-pixel
+  // extent keeps one-row and one-column graphs at the same px-per-unit scale.
+  const plotBounds = {
+    left: GRAPH_PLOT_LEFT,
+    top: GRAPH_PLOT_TOP,
+    width: Math.max(2, maxColumn * GRAPH_HORIZONTAL_GAP),
+    height: Math.max(2, maxRank * GRAPH_VERTICAL_GAP)
+  }
+  return {
+    plotBounds,
+    graphWidth: plotBounds.left + plotBounds.width + GRAPH_PLOT_RIGHT,
+    graphHeight: plotBounds.top + plotBounds.height + GRAPH_PLOT_BOTTOM
+  }
+}
+
 /**
- * 只把 BFF 已計算的 graph 欄位映射到 ECharts graph series。
+ * 映射 BFF 公開 graph 欄位，並為可見節點計算純呈現分層座標。
  * 公開候選僅是 UI synthetic nodes：它們不會寫回 detail、timeline 或 API identity。
  */
 export function mapAiFlowGraphData(detail) {
-  const entries = Array.isArray(detail?.nodes) ? detail.nodes.map((node, index) => {
+  const entries = Array.isArray(detail?.nodes) ? detail.nodes.map(node => {
     const safeNode = node && typeof node === 'object' ? node : {}
     const mapped = {
       id: safeNode.eventId,
       name: safeNode.label,
       graphLabel: [displayUnknown(safeNode.label), displayUnknown(safeNode.statusLabel)].join('\n'),
-      x: finiteCoordinate(safeNode.x, (index % 4) * 220),
-      y: finiteCoordinate(safeNode.y, index * 100),
+      x: 0,
+      y: 0,
       itemStyle: { color: safeNode.color },
       statusLabel: safeNode.statusLabel,
       categoryLabel: safeNode.categoryLabel,
@@ -368,9 +433,7 @@ export function mapAiFlowGraphData(detail) {
 
   const groups = entries
     .filter(entry => entry.choiceSummary && typeof entry.mapped.id === 'string' && entry.mapped.id !== '')
-    .sort((left, right) => left.mapped.y - right.mapped.y || left.mapped.id.localeCompare(right.mapped.id))
 
-  let cursor = entries.reduce((maximum, entry) => Math.max(maximum, entry.mapped.y), 0) + CHOICE_GROUP_GAP
   const choiceGroups = new Map()
   const syntheticNodes = []
   const syntheticEdges = []
@@ -379,21 +442,20 @@ export function mapAiFlowGraphData(detail) {
     const eventId = entry.mapped.id
     const summary = entry.choiceSummary
     const hubId = choiceHubId(eventId)
-    const hubY = cursor + (summary.options.length - 1) * (CHOICE_OPTION_GAP / 2)
     choiceGroups.set(eventId, { hubId })
     syntheticNodes.push(choiceSyntheticNode({
       id: hubId,
       parentEventId: eventId,
       name: summary.title,
       graphLabel: `公開候選\n${summary.title}`,
-      x: CHOICE_HUB_X,
-      y: hubY,
+      x: 0,
+      y: 0,
       color: '#cbd5e1',
       tooltipText: `公開候選\n${summary.title}`,
       kind: 'choice-hub'
     }))
 
-    summary.options.forEach((option, index) => {
+    summary.options.forEach(option => {
       const optionNodeId = choiceOptionId(eventId, option.optionId)
       const selected = option.selected === true
       syntheticNodes.push(choiceSyntheticNode({
@@ -401,8 +463,8 @@ export function mapAiFlowGraphData(detail) {
         parentEventId: eventId,
         name: option.label,
         graphLabel: `${selected ? '採用' : '未選擇'}\n${option.label}`,
-        x: CHOICE_OPTION_X,
-        y: cursor + index * CHOICE_OPTION_GAP,
+        x: 0,
+        y: 0,
         color: selected ? '#bbf7d0' : '#e2e8f0',
         tooltipText: [selected ? '採用' : '未選擇', option.label, option.toolName].join('\n'),
         kind: 'choice-option'
@@ -428,25 +490,22 @@ export function mapAiFlowGraphData(detail) {
         })
       }
     })
-    cursor += summary.options.length * CHOICE_OPTION_GAP + CHOICE_GROUP_GAP
   }
 
   const decisionEntries = entries
     .filter(entry => entry.decisionSummary && typeof entry.mapped.id === 'string' && entry.mapped.id !== '')
-    .sort((left, right) => left.mapped.y - right.mapped.y || left.mapped.id.localeCompare(right.mapped.id))
 
   for (const entry of decisionEntries) {
     const eventId = entry.mapped.id
     const summary = entry.decisionSummary
     const hubId = decisionHubId(eventId)
-    const hubY = cursor + (summary.options.length - 1) * (DECISION_OPTION_GAP / 2)
     syntheticNodes.push(choiceSyntheticNode({
       id: hubId,
       parentEventId: eventId,
       name: summary.topic,
       graphLabel: `公開決策摘要\n${summary.topic}`,
-      x: CHOICE_HUB_X,
-      y: hubY,
+      x: 0,
+      y: 0,
       color: '#dbeafe',
       tooltipText: ['公開決策摘要（自述，未驗證執行）', summary.topic].join('\n'),
       kind: 'decision-hub',
@@ -462,7 +521,7 @@ export function mapAiFlowGraphData(detail) {
       tooltipText: '公開決策摘要（自述，未驗證執行）'
     })
 
-    summary.options.forEach((option, index) => {
+    summary.options.forEach(option => {
       const optionNodeId = decisionOptionId(eventId, option.id)
       const optionStatus = option.selected ? '已選擇（自述）' : '未選擇'
       syntheticNodes.push(choiceSyntheticNode({
@@ -470,8 +529,8 @@ export function mapAiFlowGraphData(detail) {
         parentEventId: eventId,
         name: option.label,
         graphLabel: `${optionStatus}\n${option.label}`,
-        x: CHOICE_OPTION_X,
-        y: cursor + index * DECISION_OPTION_GAP,
+        x: 0,
+        y: 0,
         color: option.selected ? '#dbeafe' : '#e2e8f0',
         tooltipText: [optionStatus, option.label, option.action].join('\n'),
         kind: 'decision-option',
@@ -487,10 +546,10 @@ export function mapAiFlowGraphData(detail) {
         tooltipText: optionStatus
       })
     })
-    cursor += summary.options.length * DECISION_OPTION_GAP + DECISION_GROUP_GAP
   }
 
-  const edges = (Array.isArray(detail?.edges) ? detail.edges : []).map(edge => {
+  const sourceEdges = Array.isArray(detail?.edges) ? detail.edges : []
+  const edges = sourceEdges.map(edge => {
     const safeEdge = edge && typeof edge === 'object' ? edge : {}
     return {
       id: safeEdge.id,
@@ -503,9 +562,13 @@ export function mapAiFlowGraphData(detail) {
     }
   })
   const nodes = [...entries.map(entry => entry.mapped), ...syntheticNodes]
-  const maxY = nodes.reduce((maximum, node) => Math.max(maximum, finiteCoordinate(node.y, 0)), 0)
+  const layoutEdges = sourceEdges
+    .filter(edge => edge && typeof edge === 'object' && edge.source !== edge.target)
+    .map(edge => ({ source: edge.source, target: choiceGroups.get(edge.target)?.hubId || edge.target }))
+  layoutEdges.push(...syntheticEdges)
+  const bounds = applyStableDagLayout(nodes, layoutEdges)
 
-  return { nodes, edges: [...edges, ...syntheticEdges], graphHeight: Math.max(700, maxY + GRAPH_BOTTOM_PADDING) }
+  return { nodes, edges: [...edges, ...syntheticEdges], ...bounds }
 }
 
 /** A synthetic graph node always selects its real persisted START event. */

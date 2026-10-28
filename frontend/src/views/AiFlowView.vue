@@ -140,9 +140,9 @@
             ? '這筆資料來自自報內容，尚未由完整原始流程鏈驗證。'
             : '這筆資料未達完整觀測；缺少的來源不會由畫面補推。'"
         />
-        <p class="graph-note">箭頭及標籤沿用伺服器提供的關係；「接續紀錄」只表示觀測順序。</p>
+        <p class="graph-note">同階判斷與候選水平並排；箭頭沿用已記錄的關係，「接續紀錄」只表示觀測順序。</p>
         <div v-if="graphData.nodes.length" class="graph-toolbar">
-          <span>上下捲動查看長流程；拖曳移動，按鈕縮放。</span>
+          <span>上下或左右捲動查看長流程；拖曳移動，按鈕縮放。</span>
           <div>
             <el-button size="small" :disabled="graphZoom <= 0.25" aria-label="縮小流程圖" @click="graphZoom = Math.max(0.25, graphZoom - 0.25)">−</el-button>
             <el-button size="small" aria-label="重設流程圖比例" @click="graphZoom = 1">{{ Math.round(graphZoom * 100) }}%</el-button>
@@ -152,7 +152,7 @@
         <div v-if="graphData.nodes.length" :key="state.selectedRunId" class="graph-panel" tabindex="0" aria-label="長流程圖捲動區">
           <VChart
             class="flow-chart"
-            :style="{ height: graphHeight + 'px' }"
+            :style="{ width: graphWidth + 'px', height: graphHeight + 'px' }"
             :init-options="{ renderer: 'svg' }"
             :option="graphOption"
             :autoresize="true"
@@ -523,8 +523,9 @@ watch(
 )
 
 const graphData = computed(() => mapAiFlowGraphData(state.detail))
-// Preserve the server's coordinates at readable spacing instead of fitting a
-// long trace into one viewport. SVG avoids a tall raster canvas size limit.
+// Fixed pixel geometry keeps each graph coordinate unit at one screen pixel.
+// SVG avoids a tall raster canvas size limit.
+const graphWidth = computed(() => graphData.value.graphWidth)
 const graphHeight = computed(() => graphData.value.graphHeight)
 watch(() => state.selectedRunId, () => { graphZoom.value = 1 })
 const graphOption = computed(() => ({
@@ -540,12 +541,10 @@ const graphOption = computed(() => ({
     roam: 'move',
     zoom: graphZoom.value,
     nodeScaleRatio: 0,
-    top: 80,
-    bottom: 80,
-    // Let ECharts derive width from the source aspect ratio. Forcing both
-    // horizontal edges stretches a single-column trace and flattens symbols.
-    left: 'center',
-    right: null,
+    left: graphData.value.plotBounds.left,
+    top: graphData.value.plotBounds.top,
+    width: graphData.value.plotBounds.width,
+    height: graphData.value.plotBounds.height,
     draggable: true,
     data: graphData.value.nodes.map(node => ({
       ...node,
@@ -639,7 +638,8 @@ onBeforeUnmount(() => loader.clear(state))
 </script>
 
 <style scoped>
-.ai-flow-view { display: grid; gap: 16px; max-width: 1440px; margin: 0 auto; }
+.ai-flow-view { display: grid; gap: 16px; min-width: 0; max-width: 1440px; margin: 0 auto; }
+.ai-flow-view :deep(.el-card), .ai-flow-view :deep(.el-card__body) { min-width: 0; }
 .page-header, .section-header, .run-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-header h2, .section-header h3 { color: #1e293b; font-size: 20px; }
 .page-header p, .section-header p { margin-top: 4px; color: #64748b; font-size: 14px; }
@@ -661,8 +661,8 @@ onBeforeUnmount(() => loader.clear(state))
 .partial-notice { margin-top: 14px; }
 .graph-note { margin: 14px 0 8px; color: #64748b; font-size: 13px; }
 .graph-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: #64748b; font-size: 13px; }
-.graph-panel { height: min(68vh, 700px); min-height: 460px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.flow-chart { width: 100%; min-width: 480px; }
+.graph-panel { width: 100%; max-width: 100%; min-width: 0; height: min(68vh, 700px); min-height: 460px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
+.flow-chart { display: block; }
 .detail-columns { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr); gap: 16px; margin-top: 18px; }
 .timeline-panel, .slow-steps-panel, .node-detail { min-width: 0; padding: 18px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
 .timeline-panel h4, .slow-steps-panel h4 { margin-bottom: 16px; }
