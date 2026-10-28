@@ -27,6 +27,50 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+function assertGraphGeometry(graph) {
+  assert.ok(Number.isFinite(graph.graphWidth) && graph.graphWidth > 0)
+  assert.ok(Number.isFinite(graph.graphHeight) && graph.graphHeight > 0)
+  assert.ok(['left', 'top', 'width', 'height'].every(key => Number.isFinite(graph.plotBounds[key])))
+  assert.ok(graph.plotBounds.width > 0 && graph.plotBounds.height > 0)
+  assert.ok(graph.graphWidth >= graph.plotBounds.left + graph.plotBounds.width)
+  assert.ok(graph.graphHeight >= graph.plotBounds.top + graph.plotBounds.height)
+  assert.ok(graph.nodes.every(node => Number.isFinite(node.x) && Number.isFinite(node.y)))
+  const horizontalSpan = graph.nodes.length
+    ? Math.max(...graph.nodes.map(node => node.x)) - Math.min(...graph.nodes.map(node => node.x))
+    : 0
+  const verticalSpan = graph.nodes.length
+    ? Math.max(...graph.nodes.map(node => node.y)) - Math.min(...graph.nodes.map(node => node.y))
+    : 0
+  assert.equal(graph.plotBounds.width, Math.max(2, horizontalSpan))
+  assert.equal(graph.plotBounds.height, Math.max(2, verticalSpan))
+
+  for (let left = 0; left < graph.nodes.length; left += 1) {
+    for (let right = left + 1; right < graph.nodes.length; right += 1) {
+      const deltaX = Math.abs(graph.nodes[left].x - graph.nodes[right].x)
+      const deltaY = Math.abs(graph.nodes[left].y - graph.nodes[right].y)
+      assert.ok(deltaX >= 150 || deltaY >= 48, `nodes overlap: ${graph.nodes[left].id}, ${graph.nodes[right].id}`)
+    }
+  }
+}
+
+function actualNode(eventId, extra = {}) {
+  return {
+    eventId,
+    eventKind: 'OBSERVATION',
+    status: 'SUCCEEDED',
+    label: eventId,
+    statusLabel: '成功',
+    categoryLabel: '觀察',
+    timeLabel: '09:05:00',
+    durationMillis: 10,
+    x: 9000,
+    y: 12000,
+    color: '#123456',
+    summary: '公開摘要',
+    ...extra
+  }
+}
+
 test('日期窗用台北日，90 天含今天；未知耗時保留為未記錄', () => {
   const now = new Date('2026-10-10T18:30:00.000Z')
   const today = todayTaipeiISO(now)
@@ -260,8 +304,10 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
   const mapped = mapAiFlowGraphData(detail)
   assert.equal(mapped.nodes[0].id, 'event-1')
   assert.equal(mapped.nodes[0].name, hostileText)
-  assert.equal(mapped.nodes[0].x, 17)
-  assert.equal(mapped.nodes[0].y, 29)
+  assert.equal(mapped.nodes[0].rawNode.x, 17)
+  assert.equal(mapped.nodes[0].rawNode.y, 29)
+  assert.ok(Number.isFinite(mapped.nodes[0].x))
+  assert.ok(Number.isFinite(mapped.nodes[0].y))
   assert.equal(mapped.nodes[0].itemStyle.color, '#123456')
   assert.equal(mapped.nodes[0].durationMillis, null)
   assert.equal(Object.hasOwn(mapped.nodes[0].rawNode, 'toolCall'), false)
@@ -272,11 +318,23 @@ test('ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤', () =
   assert.equal(mapped.edges[0].target, 'event-2')
   assert.equal(mapped.edges[0].relation, 'NEXT_OBSERVED')
   assert.equal(mapped.edges[0].label, '接續紀錄')
+  assertGraphGeometry(mapped)
 
   const view = readFileSync(new URL('../views/AiFlowView.vue', import.meta.url), 'utf8')
+  const graphOption = view.match(/const graphOption = computed\(\(\) => \([\s\S]*?\n\}\)\)/)?.[0]
+  assert.ok(graphOption)
   assert.doesNotMatch(view, /v-html\s*=/)
   assert.match(view, /renderMode:\s*'richText'/)
   assert.match(view, /edgeSymbol:\s*\['none',\s*'arrow'\]/)
+  assert.match(graphOption, /left:\s*graphData\.value\.plotBounds\.left/)
+  assert.match(graphOption, /top:\s*graphData\.value\.plotBounds\.top/)
+  assert.match(graphOption, /width:\s*graphData\.value\.plotBounds\.width/)
+  assert.match(graphOption, /height:\s*graphData\.value\.plotBounds\.height/)
+  assert.doesNotMatch(graphOption, /left:\s*'center'|right:\s*null/)
+  assert.match(view, /:style="\{ width: graphWidth \+ 'px', height: graphHeight \+ 'px' \}"/)
+  assert.match(view, /graph-panel[^\n]*overflow: auto/)
+  assert.match(view, /上下或左右捲動查看長流程/)
+  assert.match(view, /同階判斷與候選水平並排/)
   assert.match(view, /slotLabel/)
   assert.match(view, /reportedOutcome/)
   assert.match(view, /verifiedReportOutcome/)
@@ -353,16 +411,19 @@ test('公開候選只形成 UI 分支、改接 inbound edge，並維持固定不
   assert.equal(mapped.edges.some(edge => edge.source === rejectedB), false)
 
   const byId = Object.fromEntries(mapped.nodes.map(graphNode => [graphNode.id, graphNode]))
-  assert.deepEqual([byId[hubA].x, byId[hubA].y], [920, 460])
-  assert.deepEqual([byId[rejectedA].x, byId[rejectedA].y], [1180, 420])
-  assert.deepEqual([byId[adoptedA].x, byId[adoptedA].y], [1180, 500])
-  assert.deepEqual([byId[hubB].x, byId[hubB].y], [920, 740])
-  assert.deepEqual([byId[adoptedB].x, byId[adoptedB].y], [1180, 700])
-  assert.deepEqual([byId[rejectedB].x, byId[rejectedB].y], [1180, 780])
+  assert.equal(byId[rejectedA].y, byId[adoptedA].y)
+  assert.ok(byId[rejectedA].x < byId[adoptedA].x)
+  assert.ok(byId[hubA].y < byId[rejectedA].y)
+  assert.ok(byId[adoptedA].y < byId['start-a'].y)
+  assert.equal(byId[adoptedB].y, byId[rejectedB].y)
+  assert.ok(byId[adoptedB].x < byId[rejectedB].x)
+  assert.ok(byId[hubB].y < byId[adoptedB].y)
+  assert.ok(byId[adoptedB].y < byId['start-b'].y)
+  assert.equal(byId['start-a'].rawNode.x, 220)
+  assert.equal(byId['start-a'].rawNode.y, 100)
+  assert.ok(byId['start-a'].y < byId[hubB].y)
   assert.equal(mapped.nodes.some(graphNode => graphNode.id.startsWith('ui-choice:not-start:')), false)
-  assert.equal(mapped.graphHeight, 940)
-  assert.ok(mapped.nodes.every(graphNode => Number.isFinite(graphNode.x) && Number.isFinite(graphNode.y)))
-  assert.equal(new Set(mapped.nodes.map(graphNode => `${graphNode.x}:${graphNode.y}`)).size, mapped.nodes.length)
+  assertGraphGeometry(mapped)
   assert.equal(resolveAiFlowGraphNodeId(mapped, hubA), 'start-a')
   assert.equal(resolveAiFlowGraphNodeId(mapped, rejectedB), 'start-b')
   assert.equal(resolveAiFlowGraphNodeId(mapped, 'start-a'), 'start-a')
@@ -370,6 +431,203 @@ test('公開候選只形成 UI 分支、改接 inbound edge，並維持固定不
   assert.doesNotMatch(JSON.stringify(mapped), /CHOICE_PARAMETERS_MUST_NOT_ENTER_GRAPH/)
   assert.doesNotMatch(JSON.stringify(mapped), /choiceSetSummary/)
   assert.doesNotMatch(JSON.stringify(mapped), /toolCall/)
+})
+
+test('DAG 分層讓分叉同階、匯合取最高前驅層，且不改變輸入資料或原始座標', () => {
+  const detail = {
+    nodes: [
+      actualNode('root'),
+      actualNode('branch-a'),
+      actualNode('branch-b'),
+      actualNode('join'),
+      actualNode('isolated')
+    ],
+    edges: [
+      { id: 'root-a', source: 'root', target: 'branch-a', relation: 'NEXT', label: 'A', curveness: 0 },
+      { id: 'root-b', source: 'root', target: 'branch-b', relation: 'NEXT', label: 'B', curveness: 0 },
+      { id: 'a-join', source: 'branch-a', target: 'join', relation: 'JOIN', label: '匯合', curveness: 0 },
+      { id: 'b-join', source: 'branch-b', target: 'join', relation: 'JOIN', label: '匯合', curveness: 0 }
+    ]
+  }
+  const before = JSON.stringify(detail)
+  const first = mapAiFlowGraphData(detail)
+  const second = mapAiFlowGraphData(detail)
+  const byId = Object.fromEntries(first.nodes.map(node => [node.id, node]))
+
+  assert.equal(byId['branch-a'].y, byId['branch-b'].y)
+  assert.ok(byId['branch-a'].x < byId['branch-b'].x)
+  assert.ok(byId.join.y > byId['branch-a'].y)
+  assert.ok(byId.join.y > byId['branch-b'].y)
+  assert.equal(byId.root.y, byId.isolated.y)
+  assert.equal(byId.root.y, Math.min(...first.nodes.map(node => node.y)))
+  assert.ok(byId.root.x < byId.isolated.x)
+  assert.deepEqual(first.nodes.map(({ id, x, y }) => ({ id, x, y })), second.nodes.map(({ id, x, y }) => ({ id, x, y })))
+  assert.equal(JSON.stringify(detail), before)
+  assert.equal(byId.join.rawNode.x, 9000)
+  assert.equal(byId.join.rawNode.y, 12000)
+  assertGraphGeometry(first)
+})
+
+test('二至八個公開候選與一至三十二個決策選項同階排列並保留來源順序', () => {
+  const choice = (eventId, count) => {
+    const options = Array.from({ length: count }, (_, index) => ({
+      optionId: `option-${eventId}-${index}`,
+      label: `候選 ${eventId} ${index}`,
+      toolName: `tool_${eventId}_${index}`,
+      selected: index === count - 1
+    }))
+    return actualNode(eventId, {
+      eventKind: 'START',
+      choiceSetSummary: { title: `候選組 ${eventId}`, selectedOptionId: options.at(-1).optionId, options }
+    })
+  }
+  const decision = (eventId, count) => {
+    const options = Array.from({ length: count }, (_, index) => ({
+      id: `option-${eventId}-${index}`,
+      label: `決策 ${eventId} ${index}`,
+      action: `動作 ${eventId} ${index}`,
+      selected: index === count - 1
+    }))
+    return actualNode(eventId, {
+      eventKind: 'OBSERVATION',
+      status: 'UNKNOWN',
+      publicDecisionSummary: {
+        decisionId: `decision-${eventId}`,
+        topic: `主題 ${eventId}`,
+        selectedOptionId: options.at(-1).id,
+        options
+      }
+    })
+  }
+  const mapped = mapAiFlowGraphData({
+    nodes: [actualNode('root'), choice('choice-two', 2), choice('choice-eight', 8), decision('decision-one', 1), decision('decision-thirty-two', 32)],
+    edges: [
+      { id: 'root-choice-two', source: 'root', target: 'choice-two', relation: 'NEXT', label: '接續', curveness: 0 },
+      { id: 'root-choice-eight', source: 'root', target: 'choice-eight', relation: 'NEXT', label: '接續', curveness: 0 },
+      { id: 'root-decision-one', source: 'root', target: 'decision-one', relation: 'NEXT', label: '接續', curveness: 0 },
+      { id: 'root-decision-thirty-two', source: 'root', target: 'decision-thirty-two', relation: 'NEXT', label: '接續', curveness: 0 }
+    ]
+  })
+  const choiceTwo = mapped.nodes.filter(node => node.syntheticKind === 'choice-option' && node.parentEventId === 'choice-two')
+  const choiceEight = mapped.nodes.filter(node => node.syntheticKind === 'choice-option' && node.parentEventId === 'choice-eight')
+  const decisionOne = mapped.nodes.filter(node => node.syntheticKind === 'decision-option' && node.parentEventId === 'decision-one')
+  const decisionThirtyTwo = mapped.nodes.filter(node => node.syntheticKind === 'decision-option' && node.parentEventId === 'decision-thirty-two')
+
+  assert.equal(choiceTwo.length, 2)
+  assert.equal(choiceEight.length, 8)
+  assert.equal(new Set([...choiceTwo, ...choiceEight].map(node => node.y)).size, 1)
+  assert.ok([...choiceTwo, ...choiceEight].every((node, index, options) => index === 0 || options[index - 1].x < node.x))
+  for (const option of [...choiceTwo, ...choiceEight]) {
+    const incoming = mapped.edges.filter(edge => edge.target === option.id)
+    assert.equal(incoming.length, 1)
+    assert.equal(incoming[0].source, `ui-choice:${option.parentEventId}:hub`)
+  }
+  assert.deepEqual(choiceTwo.map(node => node.name), ['候選 choice-two 0', '候選 choice-two 1'])
+  assert.deepEqual(choiceEight.map(node => node.name), Array.from({ length: 8 }, (_, index) => `候選 choice-eight ${index}`))
+  assert.equal(decisionOne.length, 1)
+  assert.equal(decisionThirtyTwo.length, 32)
+  assert.equal(new Set([...decisionOne, ...decisionThirtyTwo].map(node => node.y)).size, 1)
+  assert.ok([...decisionOne, ...decisionThirtyTwo].every((node, index, options) => index === 0 || options[index - 1].x < node.x))
+  for (const option of [...decisionOne, ...decisionThirtyTwo]) {
+    const incoming = mapped.edges.filter(edge => edge.target === option.id)
+    assert.equal(incoming.length, 1)
+    assert.equal(incoming[0].source, `ui-decision:${option.parentEventId}:hub`)
+  }
+  assert.deepEqual(decisionThirtyTwo.map(node => node.name), Array.from({ length: 32 }, (_, index) => `決策 decision-thirty-two ${index}`))
+  assertGraphGeometry(mapped)
+})
+
+test('長流程的公開決策選項貼近所屬分支，不會集中排在末端', () => {
+  const decisionEvents = new Set([3, 8, 13])
+  const nodes = Array.from({ length: 20 }, (_, index) => {
+    if (!decisionEvents.has(index)) return actualNode(`event-${index}`)
+    return actualNode(`event-${index}`, {
+      eventKind: 'OBSERVATION',
+      status: 'UNKNOWN',
+      publicDecisionSummary: {
+        decisionId: `decision-${index}`,
+        topic: `判斷 ${index}`,
+        selectedOptionId: 'wait',
+        options: [
+          { id: 'wait', label: '等待來源', action: '等待', selected: true },
+          { id: 'continue', label: '繼續檢查', action: '檢查', selected: false }
+        ]
+      }
+    })
+  })
+  const mapped = mapAiFlowGraphData({
+    nodes,
+    edges: nodes.slice(1).map((node, index) => ({
+      id: `chain-${index}`,
+      source: nodes[index].eventId,
+      target: node.eventId,
+      relation: 'NEXT_OBSERVED',
+      label: '接續紀錄',
+      curveness: 0
+    }))
+  })
+  const byId = Object.fromEntries(mapped.nodes.map(node => [node.id, node]))
+  const finalEventY = byId['event-19'].y
+
+  for (const eventIndex of decisionEvents) {
+    const event = byId[`event-${eventIndex}`]
+    const options = mapped.nodes.filter(node => node.syntheticKind === 'decision-option' && node.parentEventId === event.id)
+    assert.equal(options.length, 2)
+    assert.equal(options[0].y, options[1].y)
+    assert.ok(options[0].y > event.y)
+    assert.ok(options[0].y < finalEventY)
+  }
+  assertGraphGeometry(mapped)
+})
+
+test('圖框處理空圖、單點、單列、單欄、未知端點、自連線與 cycle', () => {
+  const empty = mapAiFlowGraphData({ nodes: [], edges: [] })
+  assert.deepEqual(empty.nodes, [])
+  assertGraphGeometry(empty)
+
+  const singleton = mapAiFlowGraphData({ nodes: [actualNode('only')], edges: [] })
+  assert.equal(singleton.nodes.length, 1)
+  assert.equal(singleton.plotBounds.width, 2)
+  assert.equal(singleton.plotBounds.height, 2)
+  assertGraphGeometry(singleton)
+
+  const row = mapAiFlowGraphData({ nodes: [actualNode('row-a'), actualNode('row-b'), actualNode('row-c')], edges: [] })
+  assert.equal(new Set(row.nodes.map(node => node.y)).size, 1)
+  assert.ok(row.nodes[0].x < row.nodes[1].x && row.nodes[1].x < row.nodes[2].x)
+  assert.equal(row.plotBounds.height, 2)
+  assertGraphGeometry(row)
+
+  const column = mapAiFlowGraphData({
+    nodes: [actualNode('column-a'), actualNode('column-b'), actualNode('column-c')],
+    edges: [
+      { id: 'column-ab', source: 'column-a', target: 'column-b', relation: 'NEXT', label: '接續', curveness: 0 },
+      { id: 'column-bc', source: 'column-b', target: 'column-c', relation: 'NEXT', label: '接續', curveness: 0 }
+    ]
+  })
+  assert.equal(new Set(column.nodes.map(node => node.x)).size, 1)
+  assert.ok(column.nodes[0].y < column.nodes[1].y && column.nodes[1].y < column.nodes[2].y)
+  assert.equal(column.plotBounds.width, 2)
+  assertGraphGeometry(column)
+
+  const malformed = mapAiFlowGraphData({
+    nodes: [actualNode('left'), actualNode('right'), actualNode('cycle-a'), actualNode('cycle-b')],
+    edges: [
+      { id: 'unknown-in', source: 'missing', target: 'right', relation: 'UNKNOWN', label: '保留', curveness: 0 },
+      { id: 'unknown-out', source: 'right', target: 'missing', relation: 'UNKNOWN', label: '保留', curveness: 0 },
+      { id: 'self', source: 'left', target: 'left', relation: 'SELF', label: '自連線', curveness: 0 },
+      { id: 'cycle-forward', source: 'cycle-a', target: 'cycle-b', relation: 'CYCLE', label: '環', curveness: 0 },
+      { id: 'cycle-back', source: 'cycle-b', target: 'cycle-a', relation: 'CYCLE', label: '環', curveness: 0 }
+    ]
+  })
+  const malformedById = Object.fromEntries(malformed.nodes.map(node => [node.id, node]))
+  assert.equal(malformed.edges.length, 5)
+  assert.deepEqual(malformed.edges.map(edge => edge.id), ['unknown-in', 'unknown-out', 'self', 'cycle-forward', 'cycle-back'])
+  assert.equal(malformed.edges.find(edge => edge.id === 'self').source, 'left')
+  assert.equal(malformed.edges.find(edge => edge.id === 'self').target, 'left')
+  assert.equal(malformedById.left.y, malformedById.right.y)
+  assert.equal(malformedById['cycle-a'].y, malformedById['cycle-b'].y)
+  assert.ok(malformedById['cycle-a'].y > malformedById.left.y)
+  assertGraphGeometry(malformed)
 })
 
 test('不安全或不閉合的公開候選摘要整組省略，且絕不進入圖與 tooltip', () => {
