@@ -1788,7 +1788,7 @@ PATCH  /api/notification-recipients/{id}/calendar     # 切換「警示 digest �
 # 前端 view 經 BFF：rewrite /api/bff/notification-settings/recipients/** → /api/notification-recipients/**
 ```
 
-`NotificationRecipientDto.Response`、`CreateRequest` 與 `UpdateRequest` 都含 `name`；`name` 使用可空 `String`，request 以 `@Size(max = 100)` 限制，service 在 create／update 兩條寫入路徑以同一 normalizer 執行 trim，空白值寫入 null。`email` 的 trim + lowercase、複合唯一鍵與既有 calendar 網域防線維持不變。通知設定頁使用既有 `NotificationSettingsBffRoutes` passthrough，表格欄位順序固定為 Email、名稱、狀態；名稱為 null 時顯示 `—`，新增／編輯對話框都可輸入名稱，名稱輸入框的固定 placeholder 為「請輸入收件人名稱」。共用 Response 因此會以 additive `name` 傳給 StockAlert／每日分析既有收件人選擇流程，但兩者仍只呈現／使用 email，不得把 name 當寄送身分；名稱也不得出現在 email digest 或日曆邀請內容。
+`NotificationRecipientDto.Response`、`CreateRequest` 與 `UpdateRequest` 都含 `name`；`name` 使用可空 `String`，request 以 `@Size(max = 100)` 限制，service 在 create／update 兩條寫入路徑以同一 normalizer 執行 trim，空白值寫入 null。`email` 的 trim + lowercase、複合唯一鍵與既有 calendar 網域防線維持不變。通知設定頁使用既有 `NotificationSettingsBffRoutes` passthrough，表格欄位順序固定為 Email、名稱、狀態；名稱為 null 時顯示 `—`，新增／編輯對話框都可輸入名稱，名稱輸入框的固定 placeholder 為「請輸入收件人名稱」。共用 Response 因此會以 additive `name` 傳給 StockAlert／每日分析既有收件人選擇流程，股票警示頁 `StockAlertView` 的一般與複合警示新增／編輯對話框直接讀取既有 Response.name，將勾選標籤呈現為 `email [名稱]`（一個空格與半形方括號），name 缺少／null／空字串／純空白時只呈現 email。採用 Vue 文字插值，禁止 v-html，保留原停用提示；勾選 key/value、全選與 recipientIds 均仍使用 id。每日分析選擇流程維持現狀，所有寄送流程仍只使用 email，不得把 name 當寄送身分；名稱也不得出現在 email digest 或日曆邀請內容。
 
 #### Exchange Rate History（新增）
 ```

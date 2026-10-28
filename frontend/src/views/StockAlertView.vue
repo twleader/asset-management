@@ -381,8 +381,9 @@
               :indeterminate="recipientIndeterminate"
               style="margin-bottom:2px">全選</el-checkbox>
             <el-checkbox-group v-model="form.recipientIds" style="display:flex;flex-direction:column">
-              <el-checkbox v-for="r in recipients" :key="r.id" :value="r.id">
-                {{ r.email }}<span v-if="!r.active" style="color:#f56c6c;margin-left:4px">(停用)</span>
+              <el-checkbox v-for="r in recipients" :key="r.id" :value="r.id"
+                style="height:auto;min-height:32px;white-space:normal;overflow-wrap:anywhere">
+                {{ r.email }}<span v-if="r.name?.trim()"> [{{ r.name }}]</span><span v-if="!r.active" style="color:#f56c6c;margin-left:4px">(停用)</span>
               </el-checkbox>
             </el-checkbox-group>
             <div style="color:#94a3b8;font-size:12px;margin-top:2px;line-height:1.5">
@@ -514,8 +515,9 @@
               :indeterminate="recipientIndeterminate"
               style="margin-bottom:2px">全選</el-checkbox>
             <el-checkbox-group v-model="groupForm.recipientIds" style="display:flex;flex-direction:column">
-              <el-checkbox v-for="r in recipients" :key="r.id" :value="r.id">
-                {{ r.email }}<span v-if="!r.active" style="color:#f56c6c;margin-left:4px">(停用)</span>
+              <el-checkbox v-for="r in recipients" :key="r.id" :value="r.id"
+                style="height:auto;min-height:32px;white-space:normal;overflow-wrap:anywhere">
+                {{ r.email }}<span v-if="r.name?.trim()"> [{{ r.name }}]</span><span v-if="!r.active" style="color:#f56c6c;margin-left:4px">(停用)</span>
               </el-checkbox>
             </el-checkbox-group>
             <div style="color:#94a3b8;font-size:12px;margin-top:2px;line-height:1.5">
@@ -583,7 +585,7 @@ const editId = ref(null)
 const tableRef = ref(null)
 
 // ===== 通知收件人（Task 125）=====
-const recipients = ref([])               // 可挑選的全部收件人 [{id,email,active}]
+const recipients = ref([])               // 可挑選的全部收件人 [{id,email,name,active}]
 const allRecipientIds = computed(() => recipients.value.map(r => r.id))
 // 全選 / 半選的運算單一條件與複合條件兩個 dialog 共用（同一段語意不該各寫一份），
 // 作用對象依目前開啟的 dialog 決定 —— 兩個 dialog 不會同時開啟（Task 253）
