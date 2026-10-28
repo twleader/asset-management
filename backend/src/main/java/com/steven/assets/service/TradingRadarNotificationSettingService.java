@@ -114,7 +114,8 @@ public class TradingRadarNotificationSettingService {
         List<TradingRadarNotificationDto.RecipientOption> recipients = recipientRepo
                 .findAllByOrderByCreatedAtAsc().stream()
                 .map(recipient -> new TradingRadarNotificationDto.RecipientOption(
-                        recipient.getId(), recipient.getEmail(), Boolean.TRUE.equals(recipient.getActive())))
+                        recipient.getId(), recipient.getEmail(), Boolean.TRUE.equals(recipient.getActive()),
+                        recipient.getName()))
                 .toList();
         return new TradingRadarNotificationDto.Response(
                 code,

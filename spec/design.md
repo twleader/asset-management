@@ -1481,7 +1481,7 @@ Dashboard 每分鐘 realtime 回應必須同時套用 `stockPrices`、`marketSta
 | id | Long | PK |
 | ownerUserId | Long | 所屬使用者；多租戶隔離欄，nullable=false |
 | email | String | 收件人 email；存入前 trim + 轉小寫；與 ownerUserId 複合唯一（同一使用者不可重複，**不同使用者可各自使用同一 email**） |
-| name | String | 選填的顯示名稱；`VARCHAR(100)`、nullable=true，存入前 trim，空白字串正規化為 null；僅供通知設定頁辨識，既有列不回填、不得改變寄送或收件人挑選語意 |
+| name | String | 選填的顯示名稱；`VARCHAR(100)`、nullable=true，存入前 trim，空白字串正規化為 null；僅供通知設定頁、股票警示及交易雷達收件人清單辨識，既有列不回填、不得改變寄送或收件人挑選語意 |
 | active | Boolean | 是否啟用（false 不寄**股價警示**信，但保留設定） |
 | receiveMarketAnalysis | Boolean | 是否接收每日股市分析（預設 true；與 `active`〔接收警示〕**各自獨立**，見 Requirement 31 / Task 151） |
 | addToCalendar | Boolean | 警示 digest 是否夾帶 Google 日曆邀請（預設 false；**僅 `gmail.com` / `googlemail.com` 網域可設為 true**，見 Requirement 23 / Task 248） |
@@ -5941,6 +5941,8 @@ TradingRadarView「重新整理」→ POST /api/bff/trading-radar/refresh
 
 `TradingRadarView` 表格最右側的「通知設定」按鈕開啟逐檔 dialog。GET
 `/api/bff/trading-radar/notifications/{stockCode}?market=台股` 一次聚合設定、主動作／逆勢狀態 options，以及與通知設定頁同源的 `notification_recipient`；PUT 同一路徑覆寫 `active`、`actionStates`、`counterTrendStates`、`recipientIds`。BFF 沿用 `TradingRadarBffRoutes` rewrite 到 business，不在 BFF 儲存或計算。
+
+`TradingRadarNotificationDto.RecipientOption` 為 immutable record，沿用 id、email、active 並在末尾追加 nullable `String name`；`TradingRadarNotificationSettingService.toResponse` 從既有 owner-scoped `NotificationRecipientRepository.findAllByOrderByCreatedAtAsc()` 結果直接映射 `getName()`，不增加查詢或持久化。GET 與 PUT 回應共用此映射。`TradingRadarView` 仍只呼叫本頁通知 BFF，收件人顯示 `email [名稱]`（一個空格、半形方括號），name 缺少／null／空字串／純空白時只顯示 email；用 Vue 文字插值安全呈現，長標籤換行並保留停用提示。checkbox key/value 與 recipientIds 保持 id，Request、通知狀態、派送／基準、日曆、DB、公開 9090 契約皆不變。
 
 主動作選項涵蓋 `TradingRadarRuleEngine.Action` 全部 10 態；逆勢只提供 `OVERSOLD_WATCH`、`TRIAL_CANDIDATE`，不提供無訊號的 `NONE`。選項 label 由 backend 與雷達主 response 共用 label mapper 回傳，避免 dialog 與 Email 文案各自漂移。active 設定至少需一個狀態與一位收件人；inactive 可保存空選項。
 
