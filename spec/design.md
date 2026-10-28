@@ -12624,6 +12624,10 @@ Task 451 效能量測採改動前已保存的 authenticated list 基準與新版
 
 一般頁面資料排序由 BFF 負責；Requirement 167／Task 458 是明確限縮的純顯示例外：`RealizedGainView` 先依選中的年度取得 records，再依現有市場分頁篩選，最後才對已載入的可見列暫時排序，不改變 BFF 回傳或資料語意。日期欄使用自訂排序事件把方向交給純前端日期排序 helper；上箭頭明確套用升冪，下箭頭明確套用降冪。Element Plus 在再次點擊目前作用中的方向箭頭時會發出 `order: null`，頁面需保留目前排序並同步箭頭狀態，不得清除排序。升冪比較 ISO `YYYY-MM-DD` 日期，由早至晚；降冪反轉日期比較方向，而同日列一律以原始索引由前至後作 tie-break，禁止反轉整個升冪結果。排序 helper 複製陣列後排序，不修改 API 回傳的 `records`。`filteredStats` 仍對同一批年度／市場篩選記錄求和，列順序不影響總額。此互動不新增請求、不持久化狀態，也不改變匯出服務的全部年度範圍或其他列操作。
 
+### Requirement 166／Task 521：交易紀錄買／賣顯示篩選
+
+沿用 TransactionView 的 marketYearRecords → filterByStock 管線，再疊加純函式 filterByTransactionType(records, transactionTypeFilter)。空字串表示全部並保留原陣列，買／賣採既有 transactionType 完全相等比較，保留輸入列順序與物件，不修改 summaries。這是已載入明細的暫時顯示例外，沒有新 API／DTO／資料分類。股票選項及 pruneInvalidStockFilter 仍只依年度＋市場資料建立，不以買／賣縮減選項；買／賣亦適用基金，控制項獨立顯示。選取只在本頁記憶體內保存，年度／市場／load 時保留、頁面重載歸零。篩選列彈性換行；以 marketYearRecords 是否有列區別無符合條件與尚無記錄。年度卡片與匯出／排程及現有 CRUD／分析不改。
+
 ### Requirement 168／Task 459：已實現損益明細股票篩選
 
 一般資料篩選由 BFF 預先處理；Requirement 168／Task 459 是限縮的純顯示例外，沿用 `RealizedGainView` 已載入的 selected-year records 與 market tab 範圍，在其上建立股票選項及暫時篩選列。`RealizedGainResponse` 沒有資產類型欄位，因此只以非空白 `assetCode` 建立 `(assetCode, market)` 選項，不新增 DTO 或推測股票／基金類型；無代號列不參與選項但恆常顯示。選項以 `assetName（assetCode）` 呈現並按 `zh-Hant` 排序；多選為聯集，空選取顯示範圍內所有列。年度／市場或資料變更時只移除已失效 key。明細統計沿用股票篩選後的可見列計算；年度卡片摘要及全年度匯出不受影響。篩選與 Requirement 167 日期排序依序組合為「年度資料 → 市場 → 股票 → 日期排序」，不改寫 BFF records、不新增 I/O，且不影響 CRUD／雙擊等既有行為。
