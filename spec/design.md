@@ -13177,3 +13177,10 @@ Liquibase `changes/v1.158.0-independent-market-export-schedules.sql` 單一Postg
 external-materials-service的HistoricalBackfillService保留現有啟動與每日18:30台北排程；啟動US逐檔無7日stale門檻，每日US集合併入collectAllHeldCodes的US代號（台／英集合不擴張）。兩路逐檔例外隔離並保留2秒節流。backfillUsStock的start延續首次／更早歷史需求，否則取maxDate+1、today-7天、2年內最早不完整列的最早日；today為America/New_York日期，end=min(until或today,today-1)，start>end零I/O，相等仍可抓該一日。來源bar必須落在[start,end]且早於today。最早不完整列由StockSourceQuery參數化SQL只查US及[today-2年,today-1]。
 
 完整來源OHLCV要求O/H/L/C全部>0、H>=max(O,C)、L<=min(O,C)、volume>=0且非null；PriceFetchClient美股歷史解析缺volume保留null；先驗chart.meta.symbol精確等於請求代號、currency為USD，缺／錯身份回空來源，timestamp僅正整數且可轉long，非法逐列跳過。每日台股透視回補逐檔catch，不能中止後續US聯集。StockSourceQuery專用atomic upsert以US固定市場，ON CONFLICT WHERE僅目前OHLC任一null/非正、H<L、volume null/負數時更新整根來源bar及YAHOO_HISTORICAL_REPAIR來源；完整列返回false。不存在日期僅來源真正有bar才INSERT，不推測日曆、不刪舊列、不補假bar，完整既有bar保持原close_source。此guard不讀快取、不寫Redis、不以pre-read決定可覆寫。沒有schema、API、Swagger、公式、asOf或政策身份變更。SchedulePublicBffController.JOBS同步現有18:30描述。
+
+
+### Task 516：SRPP 可選雷達讀取的交易隔離
+
+背景 `SrppReportProducerScheduler` 的 owner/date 交易鎖保護 reservation 捕捉與 `SrppReportPublisher` 原子發布；不把 capture 移出該交易、不取消鎖。`DecisionInputCaptureAdapter` 與 `SrppReportExtraCaptureAdapter` 對政策 universe 中未在該 owner 正持股／watchlist 的標的，既有 catch 將雷達來源凍結 null／UNAVAILABLE。`TradingRadarService.getStockDetailForOwner` 現為 REQUIRED，例外即使被捕獲仍污染外層 rollback-only，導致 `UnexpectedRollbackException`。將這個僅供兩個 capture adapter 使用的 explicit-owner 方法改成 `@Transactional(readOnly=true, propagation=REQUIRES_NEW)`，暫停外層，讓可選來源失敗只回滾自己的讀取交易，再由原 adapter 保留缺值。瀏覽器查詢與其他交易傳播不動；不捕獲／清除外層 rollback-only，不把例外改成成功，不解除投資 gate。Spring 預設不會提供跨來源同一 DB snapshot，本修正維持 frozen sourceVector 原逐來源時間、revision、hash 驗證。
+
+驗證使用真 PostgreSQL 的 Spring 交易代理：實際 explicit-owner 方法對缺失目標拋例外，由外層 catch 後外層交易成功提交；inner readOnly、outer transaction 恢復及後續 owner/date 鎖／publication 路徑維持，外層全域例外仍全部回滾。既有 owner 隔離、producer calendar／slot、immutable／parallel publisher 測試回歸。Docker feature 驗收後合併並從乾淨 main 重建受影響 business-services；真交易日且台北 09:05≤now<13:30 才讀 9090 report-calculations 與相同 calculationRunId，缺失模組具名保留，逾時則 NOT_YET_EXECUTED。

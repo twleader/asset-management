@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import java.math.BigDecimal;
@@ -788,8 +789,8 @@ public class TradingRadarService {
         return getStockDetail(rawStockCode, rawMarket, null);
     }
 
-    /** Explicit tenant source for background SRPP capture; never depends on request-scoped identity. */
-    @Transactional(readOnly = true)
+    /** Explicit tenant source; an optional missing target cannot mark the caller's publication transaction rollback-only. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public TradingRadarDto.StockDetailResponse getStockDetailForOwner(long ownerId, String rawStockCode, String rawMarket) {
         if (ownerId <= 0) throw new IllegalArgumentException("ownerId");
         return getStockDetail(rawStockCode, rawMarket, ownerId);
