@@ -39,23 +39,35 @@
         <el-tab-pane label="英股" name="英股" />
       </el-tabs>
 
-      <div class="stock-filter-row" v-if="stockOptions.length">
-        <span class="stock-filter-label">股票：</span>
-        <el-select
-          v-model="stockFilter"
-          multiple
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          placeholder="全部"
-          style="min-width:260px"
-          size="small"
-        >
-          <el-option v-for="opt in stockOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
-        </el-select>
+      <div class="transaction-filters">
+        <div class="stock-filter-row" v-if="stockOptions.length">
+          <span class="stock-filter-label">股票：</span>
+          <el-select
+            v-model="stockFilter"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+            placeholder="全部"
+            style="width:260px; min-width:0; max-width:calc(100% - 52px)"
+            size="small"
+          >
+            <el-option v-for="opt in stockOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
+          </el-select>
+        </div>
+        <div class="transaction-type-filter-row">
+          <span class="transaction-type-filter-label">交易類型：</span>
+          <el-select v-model="transactionTypeFilter" aria-label="交易類型" placeholder="全部" size="small" style="width:128px">
+            <el-option value="" label="全部" />
+            <el-option v-for="type in TX_TYPES" :key="type" :value="type" :label="type" />
+          </el-select>
+        </div>
       </div>
 
-      <el-empty v-if="!filteredRecords.length" description="尚無記錄，請點擊「新增」新增第一筆" />
+      <el-empty
+        v-if="!filteredRecords.length"
+        :description="marketYearRecords.length ? '沒有符合篩選條件的交易紀錄' : '尚無記錄，請點擊「新增」新增第一筆'"
+      />
 
       <el-table v-else :data="filteredRecords" size="small" stripe class="tx-table"
         @row-dblclick="onRowDblClick">
@@ -434,7 +446,7 @@ import { bffApi } from '@/api'
 import { showGdriveSelfCheckWarning } from '@/utils/gdriveSelfCheck'
 import { showDualExportResult } from '@/utils/dualExportMessage'
 import { cloneExportSetting } from '@/utils/exportSettingDraft'
-import { filterByYearAndMarket, buildStockOptions, filterByStock, pruneInvalidStockFilter } from '@/utils/transactionStockFilter'
+import { filterByYearAndMarket, buildStockOptions, filterByStock, filterByTransactionType, pruneInvalidStockFilter } from '@/utils/transactionStockFilter'
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
@@ -448,6 +460,7 @@ const brokerOptions = ref([])   // displayName 字串
 const selectedYear = ref(null)
 const marketFilter = ref('')   // 市場 tab：''＝全部，否則 台股/美股/英股
 const stockFilter = ref([])    // 股票下拉篩選（可複選）：元素為 `${assetCode}__${market}` key，空陣列＝全部
+const transactionTypeFilter = ref('') // 交易類型單選：空字串＝全部
 const dialogVisible = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
@@ -610,11 +623,14 @@ onMounted(() => {
   Promise.allSettled([load(), loadSchedules()])
 })
 
-// ===== 明細（依 selectedYear／marketFilter 過濾 summaries[].records，再疊加股票篩選；Task 457）=====
+// ===== 明細（依年度／市場、股票及交易類型篩選已載入列；Task 457／521）=====
 const marketYearRecords = computed(() =>
   filterByYearAndMarket(summaries.value, selectedYear.value, marketFilter.value))
 const stockOptions = computed(() => buildStockOptions(marketYearRecords.value))
-const filteredRecords = computed(() => filterByStock(marketYearRecords.value, stockFilter.value))
+const filteredRecords = computed(() => filterByTransactionType(
+  filterByStock(marketYearRecords.value, stockFilter.value),
+  transactionTypeFilter.value
+))
 
 // 年度／市場改變（或 CRUD 後 summaries 重新載入）導致 stockOptions 重新計算時，
 // 移除已選但已不在新選項清單內的 key；仍有效的已選項要保留，不整批清空。
@@ -981,9 +997,12 @@ function confirmDirPick() {
 .tx-table :deep(.el-table__cell) { font-size: 13.5px; }
 .market-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
 
-/* 股票下拉篩選（Task 457） */
-.stock-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+/* 已載入明細的股票與交易類型篩選（Task 457／521） */
+.transaction-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-bottom: 12px; min-width: 0; }
+.stock-filter-row, .transaction-type-filter-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.stock-filter-row { max-width: 100%; }
 .stock-filter-label { font-size: 13px; color: #475569; white-space: nowrap; }
+.transaction-type-filter-label { font-size: 13px; color: #475569; white-space: nowrap; }
 
 /* 匯率自動帶入的狀態提示（Task 251） */
 .fx-hint { display: block; font-size: 12px; color: #94a3b8; line-height: 1.5; margin-top: 2px; }

@@ -42,6 +42,12 @@ export function filterByStock(records, stockFilter) {
   )
 }
 
+/** 依既有交易類型精確篩選；空值代表全部並保留來源陣列參照。 */
+export function filterByTransactionType(records, transactionType) {
+  if (!transactionType) return records
+  return records.filter(r => r.transactionType === transactionType)
+}
+
 /**
  * 當 selectedYear／marketFilter 改變（或 CRUD 後 summaries 重新載入）導致 stockOptions
  * 重新計算時，移除已選但已不在新選項清單內的 key；仍有效的已選項要保留，不整批清空。

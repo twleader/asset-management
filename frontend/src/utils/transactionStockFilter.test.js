@@ -4,6 +4,7 @@ import {
   filterByYearAndMarket,
   buildStockOptions,
   filterByStock,
+  filterByTransactionType,
   pruneInvalidStockFilter
 } from './transactionStockFilter.js'
 
@@ -82,6 +83,61 @@ test('filterByStock：帶兩個 key 時為聯集（兩檔股票列＋基金列�
   const records = [stockA, stockB, stockC, fundRow]
   const result = filterByStock(records, ['A__台股', 'B__台股'])
   assert.deepEqual(result, [stockA, stockB, fundRow])
+})
+
+test('filterByTransactionType：空值代表全部並回傳原陣列參照', () => {
+  const records = [stockA, fundRow]
+  assert.equal(filterByTransactionType(records, ''), records)
+})
+
+test('filterByTransactionType：買與賣精確篩選股票及基金列', () => {
+  const buyStock = { ...stockA, transactionType: '買' }
+  const sellStock = { ...stockB, transactionType: '賣' }
+  const buyFund = { ...fundRow, transactionType: '買' }
+  const sellFund = { ...fundRow, transactionType: '賣' }
+  const otherType = { ...stockB, assetCode: 'OTHER', transactionType: '買入' }
+  const records = [buyStock, sellStock, buyFund, sellFund, otherType]
+
+  assert.deepEqual(filterByTransactionType(records, '買'), [buyStock, buyFund])
+  assert.deepEqual(filterByTransactionType(records, '賣'), [sellStock, sellFund])
+})
+
+test('年度、市場、股票與交易類型依序取交集，股票選項仍來自未套用交易類型的範圍', () => {
+  const stockABuy = { ...stockA, transactionType: '買' }
+  const stockASell = { ...stockA, transactionType: '賣' }
+  const stockBBuy = { ...stockB, transactionType: '買' }
+  const fundBuy = { ...fundRow, market: '台股', transactionType: '買' }
+  const usSell = { ...stockB, assetCode: 'US', assetName: '美股', market: '美股', transactionType: '賣' }
+  const summaries = [
+    { year: 2024, records: [stockABuy, stockASell, stockBBuy, fundBuy, usSell] },
+    { year: 2025, records: [{ ...stockABuy, assetCode: 'NEXT', assetName: '次年股' }] }
+  ]
+  const marketYearRecords = filterByYearAndMarket(summaries, 2024, '台股')
+  const options = buildStockOptions(marketYearRecords)
+  const visibleRecords = filterByTransactionType(
+    filterByStock(marketYearRecords, ['A__台股']),
+    '買'
+  )
+
+  assert.deepEqual(options.map(option => option.value), ['A__台股', 'B__台股'])
+  assert.deepEqual(visibleRecords, [stockABuy, fundBuy])
+})
+
+test('filterByTransactionType：保留來源順序、列物件與原資料', () => {
+  const first = { ...stockA, transactionType: '賣' }
+  const second = { ...stockB, transactionType: '買' }
+  const third = { ...fundRow, transactionType: '買' }
+  const records = [first, second, third]
+  const originalRecords = [...records]
+  const originalValues = records.map(record => ({ ...record }))
+
+  const result = filterByTransactionType(records, '買')
+
+  assert.deepEqual(result, [second, third])
+  assert.equal(result[0], second)
+  assert.equal(result[1], third)
+  assert.deepEqual(records, originalRecords)
+  assert.deepEqual(records, originalValues)
 })
 
 test('pruneInvalidStockFilter：移除失效項、保留有效項', () => {
