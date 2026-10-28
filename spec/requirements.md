@@ -6044,6 +6044,8 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] BFF 驗 identity、schema、hash、來源 refs、coverage、數值／leg 不變量；無效 upstream 502 UPSTREAM_INVALID。兩 owner、consumer、slot 隔離；未知／跨 owner run ID 統一404，same owner 錯 metadata409。RFC9457 problems 精確 code/retryable，僅 calendar/context 暫缺可重試。
 - [ ] 同步 Nginx/BFF/security/catalog/Tailscale/frontend exact404/OpenAPI 及三份 Swagger；原23 pairs增為24 (20 GET/4 POST)。原 GET V1/V2／歷史 decision hash不改。單元、真PG原子發布／immutable/read-only、BFF adversarial及同來源SRPP golden測試，重建/recreate驗收後收尾。休市拒絕探測不可聲稱真交易日成功。
 
+**Task 516 交易隔離修正：**背景報告捕捉對每個 explicit owner 的雷達查詢使用獨立唯讀交易；owner 沒有持股／觀察清單的政策標的依既有例外處理凍結為 null／UNAVAILABLE，不得因 REQUIRED 參與外層交易而留下 rollback-only、取消全部報告發布。owner/date advisory transaction lock、reservation 捕捉順序、兩 consumer 原子發布、L0／政策全域 fail-closed、各模組狀態與 immutable/idempotency 保持。查詢無外部行情刷新、通知或券商寫入；本修正不變更金融 Swagger、政策／authority 或 hash。以真正 Spring 交易代理＋隔離 PostgreSQL 驗證可選來源失敗不取消外層提交、全域失敗仍回滾。
+
 ### Requirement 188／Tasks 490、493：API logs 的 API 名稱「全部」篩選與 30 天保留確認
 
 Task 493 的 business 參數型別轉換錯誤由既有 `GlobalExceptionHandler` 統一處理 `MethodArgumentTypeMismatchException`，回 400 與固定 detail「Invalid request parameter」，不得回傳 raw value 或型別診斷；API logs controller 不新增局部 exception handler。此 framework 參數錯誤映射共用於 business controllers，既有業務例外映射不變。
