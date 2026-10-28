@@ -6046,6 +6046,8 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 **Task 516 交易隔離修正：**背景報告捕捉對每個 explicit owner 的雷達查詢使用獨立唯讀交易；owner 沒有持股／觀察清單的政策標的依既有例外處理凍結為 null／UNAVAILABLE，不得因 REQUIRED 參與外層交易而留下 rollback-only、取消全部報告發布。owner/date advisory transaction lock、reservation 捕捉順序、兩 consumer 原子發布、L0／政策全域 fail-closed、各模組狀態與 immutable/idempotency 保持。查詢無外部行情刷新、通知或券商寫入；本修正不變更金融 Swagger、政策／authority 或 hash。以真正 Spring 交易代理＋隔離 PostgreSQL 驗證可選來源失敗不取消外層提交、全域失敗仍回滾。
 
+**Task 517 authority 發布補充：**兩軌共用 API-first／通膨可比證據／額度收據機械檢核完成後，以獨立審查並凍結的 SRPP source commit 為唯一來源，同步新規則包 identity；本次不改投資門檻、模型計算、金融 API 契約或 producer。完整 model/manifest bytes 與 bundle hash 必經既有 gate，生成原 22 案例 golden 及 insert-only registry SQL，不手填新 hash。既有 state-topup fixture 若有可由 Git 歷史證實的單一 calculator source-hash metadata 漂移，須原生成器隔離預覽證明全部22案例不變後才同步，不更動金融 expected。兩 repo main 已提交、no-ff merge、push 且 remote 回讀後才登錄新 row；正式容器僅從乾淨 asset main 重建。今日合法窗口內須以新 hash 真 GET 與同 run ID 讀回驗證，13:30 後維持 NOT_YET_EXECUTED，不以舊 hash 或靜態證據代替。
+
 ### Requirement 188／Tasks 490、493：API logs 的 API 名稱「全部」篩選與 30 天保留確認
 
 Task 493 的 business 參數型別轉換錯誤由既有 `GlobalExceptionHandler` 統一處理 `MethodArgumentTypeMismatchException`，回 400 與固定 detail「Invalid request parameter」，不得回傳 raw value 或型別診斷；API logs controller 不新增局部 exception handler。此 framework 參數錯誤映射共用於 business controllers，既有業務例外映射不變。
