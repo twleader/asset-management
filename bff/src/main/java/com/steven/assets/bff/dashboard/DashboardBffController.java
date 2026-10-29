@@ -1,6 +1,5 @@
 package com.steven.assets.bff.dashboard;
 
-import com.steven.assets.bff.common.LiveAssetsOverlay;
 import com.steven.assets.bff.common.SnapshotEnricher;
 import com.steven.assets.bff.dashboard.dto.DashboardSummaryDto;
 import com.steven.assets.bff.dashboard.dto.DashboardPanelResponse;
@@ -20,7 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.LocalDate;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -120,16 +118,14 @@ public class DashboardBffController {
                     List<Map<String, Object>> history = tuple.getT2();
                     Map<String, Object> marketStatus = tuple.getT3();
                     Map<String, Object> liveAssets = tuple.getT4();
-                    List<Map<String, Object>> prices = DashboardStockPrices.fromLiveAssets(liveAssets);
 
-                    // 最新一筆 history 套 per-market 基準日閘門覆蓋（僅「該市場今日」用 live，過去日期保留
-                    // 凍結收盤），與「歷年資產管理」共用同一支 LiveAssetsOverlay → 兩頁 history 同義欄位同值。
-                    LiveAssetsOverlay.applyToLatest(history, liveAssets);
+                    // 與歷年資產共用最新快照身份與 bounded 日期閘門。
+                    panelService.overlayHistory(history, liveAssets);
 
                     DashboardSummaryDto dto = new DashboardSummaryDto();
                     dto.setSnapshots(snapshots);
                     dto.setHistory(history);
-                    dto.setStockPrices(prices);
+                    dto.setStockPrices(Collections.emptyList());
                     dto.setMarketStatus(marketStatus);
                     dto.setLiveAssets(liveAssets);
 
@@ -140,8 +136,6 @@ public class DashboardBffController {
                     }
 
                     Object latestId = snapshots.get(0).get("id");
-                    Object basedateObj = snapshots.get(0).get("snapshotDate");
-                    LocalDate basedate = basedateObj != null ? LocalDate.parse(basedateObj.toString()) : null;
                     return businessServicesClient.get()
                             .uri("/api/snapshots/{id}", latestId)
                             .retrieve()
@@ -152,12 +146,8 @@ public class DashboardBffController {
                                 dto.setLatestSnapshotDetail(detail);
                                 return enricher.fetchSnapshotCloseData(detail)
                                         .map(cd -> {
-                                            // 「股價基準日規則」per-market：每筆 live price 依其市場各自決定
-                                            // 保留 live（basedate == 該市場時區的今日）或換成 basedate 收盤價。
-                                            // 解決過去 TW 過午夜後美股盤中（TW 凌晨）被誤判為非當日 → 顯示前一交易日收盤的問題。
-                                            // frozen（非當日）收盤價 entry 另帶入 changeMap 的當日漲跌，供收盤/週末頁顯示漲跌。
-                                            dto.setStockPrices(SnapshotEnricher.mergePerMarketPrices(
-                                                    basedate, prices, cd.closeMap(), cd.changeMap(), cd.displayRows()));
+                                            // 與 panels 共用身份／日期閘門，保留真正市場報價 tuple。
+                                            dto.setStockPrices(panelService.prices(detail, liveAssets, cd));
                                             dto.setMergedStocks(
                                                     enricher.buildMergedStocks(detail, cd.closeMap(), false, true));
                                             return ResponseEntity.ok(dto);

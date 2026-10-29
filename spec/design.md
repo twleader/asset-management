@@ -13201,6 +13201,14 @@ external-materials-service的HistoricalBackfillService保留現有啟動與每�
 依使用者本輪「所有生產部署只從乾淨 main」指示，feature 先做完整測試、離線 authority/golden/契約驗證及獨立 spec/arch 審查，不從 feature 重啟正式服務；兩 repo main 推送並回讀後才執行受追蹤 SQL 的單次 INSERT ON CONFLICT DO NOTHING，完整讀回精確 row 與舊 row 不變，再由 run-stack 從乾淨 main 重建/recreate business-services。BFF 保留；每次重啟前重驗 daily_market_analysis 今日 OK/email_sent_at 及十個 index latest/staleness durable gates，未通過先停止部署避免重複既有通知／外抓，不修改資料來騙 gate。重啟後需親核 hasOk=true／index最新略過 logs，且零新增相關寄送／補抓。今日僅台北09:05≤now<13:30且新 registry/JAR 身分讀回後，先真交易日曆 200/AVAILABLE/twTrading=true，再新 hash 的12:00 report GET、同 calculationRunId 逐位元/hash讀回及獨立 consumer verifier；兩軌包保持 owner/consumer 隔離，PARTIAL/UNAVAILABLE/NOT_EVALUATED/BLOCKED不升成功。超窗業務驗收記 NOT_YET_EXECUTED。
 
 
+### Task 523：最新快照與市場交易日分離
+
+快照是台北業務日，報價 tradingDate 是市場當地交易日，兩者不得互相改寫。新增可注入 Clock 的純判斷共用 helper：snapshot.id/liveAssets.snapshotId 非空相同、日期非空相同，且 basedate 等於台北今日或該市場今日。此 helper 僅供 Dashboard 最新快照投影及 LiveAssetsOverlay 的最新同一列使用，SnapshotEnricher.isCurrentBasedate 及編輯頁原規則不變。前端同規則再驗選取的是 metadata 第一筆，並使用各 panel 自己的 snapshot/liveAssets。未知身份與日期失敗皆凍結。
+
+DashboardStockPrices 的同一 live-assets 投影在符合資格時直接保留真正 tuple，供 DashboardPanelService 的首屏與舊 summary 使用；不符合者沿既有歷史來源。不可把 10/29 LIVE 改標為台北快照 10/30，也不放鬆 mergeLiveQuote 的時間 fence。股票現值沿既有 business live-assets，漲跌沿同一報價，前端既有估值與小計呈現不另加計算來源。LiveAssetsOverlay 共享此身份與日期 helper，讓 Dashboard 趨勢與歷年資產最新列維持同口徑，歷史其他列不動。
+
+realtime 回應若顯示同一最新快照 ID 的日期向前推進至台北今日，前端僅有界重載既有 metadata 與 panels；以 generation/AbortSignal 保護使用者切換，每個目標日期最多一個重載。不得直接改 snapshotDate 來冒充已讀新快照。所有新增邏輯為既有登入純讀鏈中的投影／顯示判斷，不增加公開契約、行情抓取、通知、資料持久化或券商呼叫。固定 Clock 的 Java 測試與執行真 SFC handlers 的前端測試覆蓋跨日及競態；Docker 只重建 BFF/frontend。
+
 ### Task 522：財報風險提示的 authority 發布邊界
 
 SRPP 的財報預警、獲利回吐壓力情境及續抱理由屬報告層；asset-management 本輪只發布其最終審查後 bundle 身分，保持 D-174 與金融 calculator、路由、producer、排程和資料表原狀。唯一來源為 root 凍結的乾淨 `/Users/steven/.codex/worktrees/us-earnings-reporting/SRPP` commit，完整 model/manifest bytes 同步到 classpath decision authority；正式 targets 與所有金融 expected 不變。主22案例 golden 與 insert-only registry SQL 僅由原工具生成，同源 release check 及全部 backend tests 查證；其他 fixtures 只唯讀檢查，漂移先具名回報。

@@ -549,7 +549,7 @@ class DashboardPanelServiceTest {
 
     private static String live(String date) {
         return """
-                {"snapshotDate":"%s","priceUpdatedAt":"2026-09-23T23:59:00Z","stocks":[
+                {"snapshotId":15,"snapshotDate":"%s","priceUpdatedAt":"2026-09-23T23:59:00Z","stocks":[
                  {"stockCode":"0050","market":"台股","stockName":"元大台灣50","currentPrice":105,
                   "liveValue":1050,"updatedAt":"2026-09-23T01:01:00Z","source":"FUBON","quoteStatus":"LIVE"},
                  {"stockCode":"2330","market":"台股","stockName":"台積電","currentPrice":550,

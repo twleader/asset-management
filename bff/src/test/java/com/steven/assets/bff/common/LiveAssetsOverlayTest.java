@@ -22,6 +22,7 @@ class LiveAssetsOverlayTest {
     private Map<String, Object> row(String date, double tw, double us,
                                     double deposit, double fund, double total) {
         Map<String, Object> m = new HashMap<>();
+        m.put("id", 15);
         m.put("snapshotDate", date);
         m.put("totalTwStockValue", new BigDecimal(String.valueOf(tw)));
         m.put("totalUsStockValue", new BigDecimal(String.valueOf(us)));
@@ -35,6 +36,7 @@ class LiveAssetsOverlayTest {
 
     private Map<String, Object> live(String date, double twLive, double usLive) {
         Map<String, Object> m = new HashMap<>();
+        m.put("snapshotId", 15);
         m.put("snapshotDate", date);
         List<Map<String, Object>> stocks = new ArrayList<>();
         Map<String, Object> a = new HashMap<>();

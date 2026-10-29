@@ -100,7 +100,7 @@ export function createTrailingRefresh(read, { delay = 0, interval = 1000, tail =
 }
 
 /** Browser-independent transport core; EventSource construction belongs to the API adapter. */
-export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000 }) {
+export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000, marketToday: todayForMarket = marketToday }) {
   const listeners = new Set(), latest = new Map()
   let source = null, closed = false
   const visible = () => !doc?.hidden
@@ -114,7 +114,7 @@ export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000
       if (source !== connection || !visible()) return
       let quote
       try { quote = JSON.parse(event.data) } catch { return }
-      const key = identity(quote), current = latest.get(key), next = mergeLiveQuote(current, quote)
+      const key = identity(quote), current = latest.get(key), next = mergeLiveQuote(current, quote, todayForMarket(quote?.market))
       if (!next || next === current) return
       latest.delete(key); latest.set(key, next)
       if (latest.size > maxQuotes) latest.delete(latest.keys().next().value)
@@ -144,12 +144,13 @@ export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000
       }
     },
     overlay(quote) {
-      const key = identity(quote), cached = latest.get(key), next = mergeLiveQuote(cached, quote)
+      const key = identity(quote), cached = latest.get(key), today = todayForMarket(quote?.market)
+      const next = mergeLiveQuote(cached, quote, today)
       if (next && next !== cached) {
         latest.delete(key); latest.set(key, next)
         if (latest.size > maxQuotes) latest.delete(latest.keys().next().value)
       }
-      return latest.has(key) ? (mergeLiveQuote(quote, latest.get(key)) ?? quote) : quote
+      return latest.has(key) ? (mergeLiveQuote(quote, latest.get(key), today) ?? quote) : quote
     },
     quotes() { return [...latest.values()] },
     visible

@@ -6329,6 +6329,18 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 來源HTTP只在external-materials-service既有背景／維護入口；9090 completed-technicals／technical-series維持pure read、原公式與Swagger bytes。同步排程列表文案。測試覆蓋短缺日、2年內舊缺欄、完整列保護、來源缺值／未完成日／未來日、來源區間越界、零量及併發寫入後guard。正式驗收先讀DB、走受控背景／既有維護流程，再唯讀9090確認精確日期、coverage與sourceSha256；來源不能修復時明示阻擋，不得宣稱成功。
 
 
+### Task 523：儀表板跨午夜即時估值（Requirement 197 修訂）
+
+**User Story：** 作為使用者，我要最新資產快照在台北跨日、美股仍交易時，持股股價、漲跌、現值、損益及總額持續更新。
+
+**Acceptance Criteria：**
+
+- [ ] 本修訂優先於總覽及最新資產歷史列既有的單一市場日期閘門。只有 snapshot.id 與 liveAssets.snapshotId 均存在且相同、snapshotDate 相同，且日期等於台北今日或該市場當地今日，才允許該市場 live overlay；前端另外要求選取最新快照。未來日、歷史快照、不同／缺少 ID 或日期不符均不得套用。SnapshotForm／SnapshotDetail 既有編輯日期契約不變。
+- [ ] 首次載入的 Dashboard holdings／stock-values／KPI／summary 必須採用同一 live-assets 的真正 tradingDate/source/updatedAt/quoteStatus/price/change tuple。台北 2026-10-30 00:16、美東 10/29 的最新 10/30 快照可顯示美股 10/29 LIVE，不能先投影成 10/30 PREVIOUS_CLOSE 再使合法 SSE 被拒。保留 CLOSE_PENDING 空價、VERIFIED_CLOSE 與原 SSE 日期／時序防倒退保護，不偽造日期或以空值轉零。
+- [ ] 各 panel 的 overlay 使用該 panel 的 snapshot/liveAssets，不依賴 holdings 是否先載入。共用 LiveAssetsOverlay 使 Dashboard 趨勢與歷年資產管理最新同一列採相同 bounded 日期／身份規則；其餘歷史列保持凍結。
+- [ ] 長開頁面收到同一最新 ID 已由後端推進至台北今日的 snapshotDate 時，只做有界、可取消的既有純讀 metadata/panel 重載；同一日期不得無限重載，晚回應不得覆蓋使用者切換至歷史快照。不得只改日期假裝完成重載。
+- [ ] 固定時鐘回歸驗證夏／冬令跨午夜、GOOGL／VOO／VT 首屏及後續 SSE、panel 獨立載入、歷史／身份不符／future／CLOSE_PENDING 保護與長開頁跨日。僅重建實改 frontend/BFF，保留正式設定；不新增 API/schema/Swagger、provider I/O、排程、金融政策、DB／Redis 寫入、郵件或券商操作。
+
 ### Task 522：美股財報風險報告改善的 authority 身分發布（Requirements 187／193）
 
 **User Story：** 作為 SRPP 報告讀者，我要財報事件預警、獲利回吐壓力情境與「為何仍續抱」的說明使用已審查的新規則包身分，並維持現行 D-174 賣出條件。
