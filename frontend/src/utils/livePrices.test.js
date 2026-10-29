@@ -5,8 +5,9 @@ import vm from 'node:vm'
 import { parse, compileScript } from 'vue/compiler-sfc'
 import { reactive, watch } from 'vue'
 import { createLivePriceStream, createTrailingRefresh, mergeLiveQuote, patchLiveRow } from './livePrices.js'
-import { marketToday, applyEnrichedQuote } from './displayQuote.js'
+import { marketToday, applyEnrichedQuote, isClosePending } from './displayQuote.js'
 import { normalizeIntradaySession } from './intradaySession.js'
+import { dashboardLiveIdentityMatches, isDashboardLivePriceEligible, isDashboardSnapshotRollover } from './dashboardLivePriceEligibility.js'
 
 const today = marketToday('台股')
 const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString().slice(0, 10)
@@ -29,10 +30,10 @@ class Timers {
     this.time = target; await flush()
   }
 }
-function fixture() {
+function fixture({ todayForMarket } = {}) {
   const sources = [], events = new Set()
   const document = { hidden: false, addEventListener: (_, fn) => events.add(fn), removeEventListener: (_, fn) => events.delete(fn) }
-  const stream = createLivePriceStream({ document, maxQuotes: 3, connect() {
+  const stream = createLivePriceStream({ document, maxQuotes: 3, ...(todayForMarket ? { marketToday: todayForMarket } : {}), connect() {
     const handlers = {}
     const source = { readyState: 0, closeCount: 0, addEventListener: (name, cb) => { handlers[name] = cb }, close() { this.closeCount++; this.readyState = 2 }, open() { this.readyState = 1; this.onopen?.() }, emit(value) { handlers['price-update']({ data: JSON.stringify(value) }) }, fail() { this.readyState = 2; this.onerror?.() } }
     sources.push(source); return source
@@ -48,7 +49,7 @@ function page(file, names, globals = {}, extra = '') {
   const snippets = ast.filter(node => (node.type === 'FunctionDeclaration' && names.includes(node.id.name))
     || (node.type === 'VariableDeclaration' && node.declarations.some(d => names.includes(d.id.name)))).map(node => source.slice(node.start, node.end))
   assert.equal(snippets.length, names.length, `all real declarations found: ${file}`)
-  const context = vm.createContext({ console, AbortController, patchLiveRow, mergeLiveQuote, marketToday,
+  const context = vm.createContext({ console, AbortController, patchLiveRow, mergeLiveQuote, marketToday, isClosePending,
     applyEnrichedQuote, normalizeIntradaySession, ...globals })
   vm.runInContext(`${extra}\n${snippets.join('\n')}`, context)
   return context
@@ -113,15 +114,289 @@ test('in-flight reads never overlap, pending survives, cancel invalidates traili
   scheduler.dispose(); await clock.tick(5000); assert.equal(reads, 2)
 })
 
-test('Dashboard real handler updates four maps, queues server valuation and replays SSE over late first HTTP', () => {
-  const f = fixture(); const stop = f.stream.subscribe({}); f.sources[0].emit(quote())
-  const maps = Object.fromEntries(['kpis', 'allocation', 'stock-values', 'holdings'].map(p => [p, { '台股_2330': older() }]))
+test('Dashboard live eligibility uses selected/latest identity and Taipei-or-market dates through DST', () => {
+  const crossMidnight = new Date('2026-10-29T16:16:00Z')
+  const snapshot = { id: 15, snapshotDate: '2026-10-30' }
+  const live = { snapshotId: 15, snapshotDate: '2026-10-30' }
+  assert.equal(isDashboardLivePriceEligible(snapshot, live, 15, 15, '美股', crossMidnight), true)
+  assert.equal(isDashboardLivePriceEligible(snapshot, live, 15, 15, '台股', crossMidnight), true)
+  assert.equal(isDashboardLivePriceEligible(snapshot, live, 15, 15, '英股', crossMidnight), true)
+  assert.equal(isDashboardLivePriceEligible(snapshot, live, 14, 15, '美股', crossMidnight), false)
+  assert.equal(isDashboardLivePriceEligible({ ...snapshot, id: 14 }, live, 15, 15, '美股', crossMidnight), false)
+  assert.equal(isDashboardLivePriceEligible(snapshot, { ...live, snapshotId: null }, 15, 15, '美股', crossMidnight), false)
+  assert.equal(isDashboardLivePriceEligible(snapshot, { ...live, snapshotDate: '2026-10-29' }, 15, 15, '美股', crossMidnight), false)
+  assert.equal(isDashboardLivePriceEligible({ ...snapshot, snapshotDate: '2026-10-31' }, { ...live, snapshotDate: '2026-10-31' }, 15, 15, '美股', crossMidnight), false)
+  assert.equal(isDashboardLivePriceEligible(snapshot, live, 15, 15, 'unknown', crossMidnight), false)
+  assert.equal(dashboardLiveIdentityMatches(snapshot, live, 15, 15), true)
+
+  const winter = new Date('2026-01-15T16:16:00Z')
+  const winterUs = { id: 15, snapshotDate: '2026-01-15' }
+  const winterLive = { snapshotId: 15, snapshotDate: '2026-01-15' }
+  assert.equal(isDashboardLivePriceEligible(winterUs, winterLive, 15, 15, '美股', winter), true)
+  assert.equal(isDashboardLivePriceEligible(winterUs, winterLive, 15, 15, '英股', winter), true)
+  assert.equal(isDashboardLivePriceEligible(winterUs, winterLive, 15, 15, '台股', winter), false)
+
+  const summer = new Date('2026-07-15T16:16:00Z')
+  const summerUs = { id: 15, snapshotDate: '2026-07-15' }
+  const summerLive = { snapshotId: 15, snapshotDate: '2026-07-15' }
+  assert.equal(isDashboardLivePriceEligible(summerUs, summerLive, 15, 15, '美股', summer), true)
+  assert.equal(isDashboardLivePriceEligible(summerUs, summerLive, 15, 15, '英股', summer), true)
+  assert.equal(isDashboardLivePriceEligible(summerUs, summerLive, 15, 15, '台股', summer), false)
+})
+
+test('Dashboard rollover only accepts a same-ID forward move to Taipei today', () => {
+  const now = new Date('2026-10-29T16:16:00Z')
+  const previous = { id: 15, snapshotDate: '2026-10-29' }
+  const today = { snapshotId: 15, snapshotDate: '2026-10-30' }
+  assert.equal(isDashboardSnapshotRollover(previous, today, 15, 15, now), true)
+  assert.equal(isDashboardSnapshotRollover({ ...previous, snapshotDate: '2026-10-31' }, today, 15, 15, now), false)
+  assert.equal(isDashboardSnapshotRollover({ ...previous, id: 14 }, today, 15, 15, now), false)
+  assert.equal(isDashboardSnapshotRollover(previous, { ...today, snapshotId: 14 }, 15, 15, now), false)
+  assert.equal(isDashboardSnapshotRollover(previous, today, 14, 15, now), false)
+  assert.equal(isDashboardSnapshotRollover({ ...previous, snapshotDate: '2026-10-30' }, today, 15, 15, now), false)
+})
+
+function usLiveQuote(stockCode, price, updatedAt, overrides = {}) {
+  return { market: '美股', stockCode, tradingDate: '2026-10-29', quoteStatus: 'LIVE', price,
+    priceChange: 1, changePercent: 0.2, updatedAt, source: 'NASDAQ', ...overrides }
+}
+
+test('Dashboard real SFC handler uses each panel identity, displays first US tuples, and accepts later SSE', () => {
+  const f = fixture(); const stop = f.stream.subscribe({})
+  const snapshot = { id: 15, snapshotDate: '2026-10-30' }
+  const liveAssets = { snapshotId: 15, snapshotDate: '2026-10-30' }
+  const panels = Object.fromEntries(['kpis', 'allocation', 'stock-values', 'holdings'].map(panel => [panel, {
+    snapshot, liveAssets: panel === 'holdings' ? { snapshotId: 14, snapshotDate: '2026-10-30' } : liveAssets
+  }]))
+  const rows = {
+    GOOGL: usLiveQuote('GOOGL', 285.17, '2026-10-30T00:16:00+08:00'),
+    VOO: usLiveQuote('VOO', 706.935, '2026-10-30T00:16:00+08:00'),
+    VT: usLiveQuote('VT', 157.885, '2026-10-30T00:16:00+08:00')
+  }
+  const maps = Object.fromEntries(Object.keys(panels).map(panel => [panel, Object.fromEntries(
+    Object.entries(rows).map(([symbol, row]) => [`美股_${symbol}`, { ...row }])
+  )]))
+  const crossNow = new Date('2026-10-29T16:16:00Z')
+  const eligible = (...args) => isDashboardLivePriceEligible(...args, crossNow)
   let refreshes = 0
-  const ctx = page('../views/DashboardView.vue', ['applyLivePrice', 'priceMap'], { livePrices: maps, livePriceStream: f.stream, valuationRefresh: { request: () => refreshes++ } })
-  ctx.applyLivePrice(quote()); for (const map of Object.values(maps)) assert.equal(map['台股_2330'].price, 110)
-  ctx.applyLivePrice(older()); for (const map of Object.values(maps)) assert.equal(map['台股_2330'].price, 110)
-  assert.equal(ctx.priceMap([older()])['台股_2330'].price, 110)
-  assert.equal(refreshes, 1); stop()
+  const ctx = page('../views/DashboardView.vue', ['applyLivePrice', 'canOverlayStreamQuote', 'priceMap', 'getRealtimePrice'], {
+    livePrices: maps, livePriceStream: f.stream, valuationRefresh: { request: () => refreshes++ },
+    panelData: panel => panels[panel], selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] },
+    shouldApplyLive: (market, base, assets) => eligible(base, assets, 15, 15, market),
+    isDashboardLivePriceEligible: eligible,
+    marketToday: market => market === '美股' ? '2026-10-29' : '2026-10-30',
+    isAcceptedTodayQuote: (quote, day) => quote.tradingDate === day && ['LIVE', 'VERIFIED_CLOSE'].includes(quote.quoteStatus),
+    mergeLiveQuote: (current, incoming) => mergeLiveQuote(current, incoming, '2026-10-29'),
+    refreshPanelForLive: () => assert.fail('no projection retry expected for a valid tuple')
+  })
+
+  for (const [symbol, price] of [['GOOGL', 285.17], ['VOO', 706.935], ['VT', 157.885]]) {
+    const quoteForPanel = ctx.getRealtimePrice({ market: '美股', stockCode: symbol }, maps.kpis, snapshot, liveAssets)
+    assert.equal(quoteForPanel.price, price)
+    assert.equal(quoteForPanel.priceChange, 1)
+  }
+  const first = usLiveQuote('GOOGL', 285.25, '2026-10-30T00:18:00+08:00')
+  ctx.applyLivePrice(first)
+  for (const panel of ['kpis', 'allocation', 'stock-values']) assert.equal(maps[panel]['美股_GOOGL'].price, 285.25)
+  assert.equal(maps.holdings['美股_GOOGL'].price, 285.17)
+  assert.equal(ctx.getRealtimePrice({ market: '美股', stockCode: 'GOOGL' }, maps.holdings, snapshot, panels.holdings.liveAssets), null)
+
+  panels.holdings.liveAssets = liveAssets
+  ctx.applyLivePrice(usLiveQuote('GOOGL', 285.31, '2026-10-30T00:19:00+08:00'))
+  assert.equal(maps.holdings['美股_GOOGL'].price, 285.31)
+  ctx.applyLivePrice(usLiveQuote('GOOGL', 1, '2026-10-30T00:17:00+08:00'))
+  for (const map of Object.values(maps)) assert.equal(map['美股_GOOGL'].price, 285.31)
+  assert.equal(ctx.priceMap([rows.GOOGL])['美股_GOOGL'].price, 285.17)
+  assert.equal(refreshes, 2)
+  stop()
+})
+
+test('Dashboard real priceMap cannot poison shared stream with a future frozen row before true US BFF and SSE tuples', () => {
+  const f = fixture({ todayForMarket: market => market === '美股' ? '2026-10-29' : '2026-10-30' })
+  const stop = f.stream.subscribe({})
+  const ctx = page('../views/DashboardView.vue', ['canOverlayStreamQuote', 'priceMap'], {
+    livePriceStream: f.stream, marketToday: market => market === '美股' ? '2026-10-29' : '2026-10-30'
+  })
+  const frozenFuture = usLiveQuote('GOOGL', 324.81, '2026-10-30T00:16:00+08:00', { tradingDate: '2026-10-30' })
+  assert.equal(ctx.priceMap([frozenFuture])['美股_GOOGL'].price, 324.81)
+  assert.equal(f.stream.quotes().length, 0)
+
+  const bffTuple = usLiveQuote('GOOGL', 285.17, '2026-10-30T00:16:00+08:00')
+  assert.equal(ctx.priceMap([bffTuple])['美股_GOOGL'].price, 285.17)
+  assert.equal(f.stream.quotes()[0].tradingDate, '2026-10-29')
+  f.sources[0].emit(usLiveQuote('GOOGL', 285.25, '2026-10-30T00:18:00+08:00'))
+  assert.equal(f.stream.quotes()[0].price, 285.25)
+  assert.equal(ctx.priceMap([bffTuple])['美股_GOOGL'].price, 285.25)
+  assert.equal(ctx.canOverlayStreamQuote({ ...bffTuple, quoteStatus: 'PREVIOUS_CLOSE' }), false)
+  assert.equal(ctx.canOverlayStreamQuote({ ...bffTuple, quoteStatus: null }), false)
+  assert.equal(ctx.canOverlayStreamQuote({ ...bffTuple, quoteStatus: 'CLOSE_PENDING', price: null }), true)
+  stop()
+})
+
+test('Dashboard real overlay receives panel-local snapshot/liveAssets and stays frozen for historical or invalid IDs', () => {
+  const now = new Date('2026-10-29T16:16:00Z')
+  const snapshot = { id: 15, snapshotDate: '2026-10-30', totalDeposit: 5, totalFundValue: 0 }
+  const live = { snapshotId: 15, snapshotDate: '2026-10-30', liveTotalAssets: 300,
+    stocks: [{ market: '美股', stockCode: 'GOOGL', liveValue: 285.17 }] }
+  const quoteMap = { '美股_GOOGL': usLiveQuote('GOOGL', 285.17, '2026-10-30T00:16:00+08:00') }
+  const eligible = (...args) => isDashboardLivePriceEligible(...args, now)
+  const ctx = page('../views/DashboardView.vue', [
+    'shouldApplyLive', 'getLiveValueFromAssets', 'getRealtimePrice', 'overlayLivePrice', 'withPanelLiveOverlay'
+  ], {
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] },
+    isDashboardLivePriceEligible: eligible, dashboardLiveIdentityMatches: (...args) => dashboardLiveIdentityMatches(...args),
+    marketToday: market => market === '美股' ? '2026-10-29' : '2026-10-30',
+    isAcceptedTodayQuote: (quote, day) => quote.tradingDate === day && ['LIVE', 'VERIFIED_CLOSE'].includes(quote.quoteStatus)
+  })
+  const stock = { market: '美股', stockCode: 'GOOGL', shares: 1, currentValue: 100, investmentCost: 80,
+    dividendRate: 0, estimatedDividend: 0, stockPrice: 100 }
+  const overlay = ctx.overlayLivePrice(stock, snapshot, live, quoteMap)
+  assert.equal(overlay.currentValue, 285.17)
+  assert.equal(overlay.stockPrice, 285.17)
+  const kpi = ctx.withPanelLiveOverlay(snapshot, [stock], live, quoteMap)
+  assert.equal(kpi.totalUsStockValue, 285.17)
+  assert.equal(kpi.totalAssets, 300)
+  const historical = ctx.overlayLivePrice(stock, { ...snapshot, snapshotDate: '2026-10-28' }, live, quoteMap)
+  assert.equal(historical.currentValue, 100)
+  const wrongId = ctx.overlayLivePrice(stock, snapshot, { ...live, snapshotId: 14 }, quoteMap)
+  assert.equal(wrongId.currentValue, 100)
+})
+
+test('Dashboard holdings price cell keeps price/change tuple together when live-assets is unavailable', () => {
+  const snapshot = { id: 15, snapshotDate: '2026-10-30' }
+  const assets = { snapshotId: 15, snapshotDate: '2026-10-30' }
+  const quoteMap = { '美股_GOOGL': usLiveQuote('GOOGL', 285.17, '2026-10-30T00:16:00+08:00') }
+  const eligible = (...args) => isDashboardLivePriceEligible(...args, new Date('2026-10-29T16:16:00Z'))
+  const holdingPayload = { value: { snapshot, liveAssets: null } }
+  const ctx = page('../views/DashboardView.vue', ['shouldApplyLive', 'getRealtimePrice', 'getPriceCell'], {
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, holdingPayload,
+    livePrices: { holdings: quoteMap }, isDashboardLivePriceEligible: eligible,
+    marketToday: market => market === '美股' ? '2026-10-29' : '2026-10-30',
+    isAcceptedTodayQuote: (quote, day) => quote.tradingDate === day && ['LIVE', 'VERIFIED_CLOSE'].includes(quote.quoteStatus),
+    isRowClosePending: () => false
+  })
+  const row = { market: '美股', stockCode: 'GOOGL', stockPrice: 324.81 }
+  const frozen = ctx.getPriceCell(row)
+  assert.equal(frozen.price, 324.81)
+  assert.equal(frozen.priceChange, null)
+  assert.equal(frozen.changePercent, null)
+  holdingPayload.value.liveAssets = assets
+  const live = ctx.getPriceCell(row)
+  assert.equal(live.price, 285.17)
+  assert.equal(live.priceChange, 1)
+  assert.equal(live.changePercent, 0.2)
+})
+
+test('Dashboard rollover SFC reload is bounded and late metadata cannot jump away from historical selection', async () => {
+  const original = { id: 15, snapshotDate: '2026-10-29' }, refreshed = { id: 15, snapshotDate: '2026-10-30' }
+  const gate = deferred(), calls = [], selections = []
+  const snapshots = { value: [original] }, selectedSnapshotId = { value: 15 }
+  const ctx = page('../views/DashboardView.vue', ['refreshLatestSnapshotForRollover', 'onSnapshotChange'], {
+    isMounted: true, snapshots, selectedSnapshotId, allocationTab: { value: 'category' },
+    bffApi: { dashboard: { snapshots: options => { calls.push(options); return gate.promise } } },
+    panelLoader: { select: id => { selections.push(id); return Promise.resolve() } }
+  }, 'let rolloverController = null, rolloverAttemptedScope = null, statusController = null, orderSaveTimer = null;')
+  const first = ctx.refreshLatestSnapshotForRollover(15, '2026-10-30')
+  ctx.refreshLatestSnapshotForRollover(15, '2026-10-30')
+  assert.equal(calls.length, 1)
+  ctx.onSnapshotChange(14)
+  gate.resolve([refreshed, { id: 14, snapshotDate: '2026-10-29' }])
+  await first
+  assert.deepEqual(snapshots.value, [original])
+  assert.deepEqual(selections, [14])
+  assert.equal(calls[0].signal.aborted, true)
+})
+
+test('Dashboard realtime restores unavailable live projection once and leaves look-through allocation tab untouched', async () => {
+  const snapshot = { id: 15, snapshotDate: '2026-10-30' }
+  const live = { snapshotId: 15, snapshotDate: '2026-10-30' }
+  const tuple = usLiveQuote('GOOGL', 285.17, '2026-10-30T00:16:00+08:00')
+  const panels = {
+    kpis: { data: { data: { snapshot, liveAssets: null, stockPrices: [{ ...tuple }] }, warnings: [] }, generation: 2, loading: false, context: {} },
+    allocation: { data: { data: { snapshot, classifiedHoldings: [{ name: '科技 ETF' }], twLookthrough: null, usLookthrough: {} }, warnings: [] }, generation: 4, loading: false, context: { tab: 'usStock' } },
+    'stock-values': { data: null, generation: 0, loading: false, context: {} },
+    holdings: { data: null, generation: 0, loading: false, context: {} },
+    trend: { data: null, generation: 0, loading: false, context: {} }
+  }
+  const livePrices = { kpis: { '美股_GOOGL': { ...tuple, tradingDate: '2026-10-30' } }, allocation: {}, 'stock-values': {}, holdings: {} }
+  const refreshes = [], fixedNow = new Date('2026-10-29T16:16:00Z')
+  const eligible = (...args) => isDashboardLivePriceEligible(...args, fixedNow)
+  const ctx = page('../views/DashboardView.vue', ['refreshMarketStatus', 'refreshPanelForLive'], {
+    isMounted: true, statusInFlight: false, selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, latest: { value: snapshot },
+    panels, livePrices, livePriceStream: { visible: () => true, overlay: quote => quote },
+    bffApi: { dashboard: { realtime: async () => ({ liveAssets: live, stockPrices: [tuple], marketStatus: {} }) } },
+    panelLoader: {
+      update(panel, generation, transform) {
+        if (!panels[panel]?.data || panels[panel].generation !== generation) return false
+        panels[panel].data = transform(panels[panel].data); return true
+      },
+      run(panel, options) { refreshes.push({ panel, options }); return Promise.resolve(null) }
+    },
+    dashboardLiveIdentityMatches: (...args) => dashboardLiveIdentityMatches(...args),
+    isDashboardLivePriceEligible: eligible,
+    isDashboardSnapshotRollover: () => false,
+    panelData: panel => panels[panel]?.data?.data ?? null,
+    refreshLatestSnapshotForRollover: () => assert.fail('same-date projection recovery is not a snapshot rollover'),
+    livePanelRefreshScope: new Map(),
+    mergeLiveQuote: (current, incoming) => mergeLiveQuote(current, incoming, '2026-10-29'),
+    marketToday: market => market === '美股' ? '2026-10-29' : '2026-10-30',
+    isAcceptedTodayQuote: (quote, day) => quote.tradingDate === day && ['LIVE', 'VERIFIED_CLOSE'].includes(quote.quoteStatus)
+  }, 'let statusController = null;')
+  await ctx.refreshMarketStatus()
+  assert.deepEqual(refreshes.map(item => item.panel), ['kpis'])
+  assert.equal(panels.kpis.data.data.liveAssets, null)
+  assert.equal(panels.allocation.data.data.usLookthrough instanceof Object, true)
+  assert.deepEqual(panels.allocation.context, { tab: 'usStock' })
+
+  const preserved = []
+  panels.allocation.context = { tab: 'usStock' }
+  const refreshContext = page('../views/DashboardView.vue', ['refreshPanelForLive'], {
+    isMounted: true, selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, panels,
+    livePanelRefreshScope: new Map(), marketToday: () => '2026-10-30',
+    panelLoader: { run: (panel, options) => preserved.push({ panel, options }) }
+  })
+  refreshContext.refreshPanelForLive('allocation', 15, '2026-10-30')
+  assert.equal(preserved[0].options.context.tab, 'usStock')
+})
+
+test('Dashboard frozen latest close keeps its own changes without using unrelated live comparisons', () => {
+  const snapshot = { id: 15, snapshotDate: '2026-10-30' }
+  const quote = { market: '美股', stockCode: 'GOOGL', tradingDate: '2026-10-30',
+    quoteStatus: 'VERIFIED_CLOSE', price: 285.17, priceChange: -39.72, changePercent: -12.22 }
+  const prices = { '美股_GOOGL': quote }
+  const selection = { value: 15 }
+  const ctx = page('../views/DashboardView.vue', ['getPriceCell'], {
+    selectedSnapshotId: selection, snapshots: { value: [snapshot] },
+    holdingPayload: { value: { snapshot, liveAssets: null } }, livePrices: { holdings: prices },
+    isRowClosePending: () => false, getRealtimePrice: () => null
+  })
+  const row = { market: '美股', stockCode: 'GOOGL', stockPrice: 285.17 }
+  assert.equal(ctx.getPriceCell(row).priceChange, -39.72)
+  assert.equal(ctx.getPriceCell(row).changePercent, -12.22)
+  quote.quoteStatus = 'PREVIOUS_CLOSE'
+  quote.tradingDate = '2026-10-29' // Weekend/holiday can use the preceding actual close.
+  assert.equal(ctx.getPriceCell(row).priceChange, -39.72)
+  quote.price = 324.81
+  assert.equal(ctx.getPriceCell(row).priceChange, null)
+  quote.price = 285.17
+  quote.tradingDate = '2026-10-31'
+  assert.equal(ctx.getPriceCell(row).priceChange, null)
+  quote.tradingDate = '2026-10-30'
+  quote.quoteStatus = 'LIVE'
+  assert.equal(ctx.getPriceCell(row).priceChange, null)
+  quote.quoteStatus = 'VERIFIED_CLOSE'
+  selection.value = 14
+  assert.equal(ctx.getPriceCell(row).priceChange, null)
+})
+
+test('Dashboard CLOSE_PENDING remains visible while eligible live-assets are unavailable', () => {
+  const snapshot = { id: 15, snapshotDate: marketToday('台股') }
+  const quote = { market: '美股', stockCode: 'GOOGL', tradingDate: snapshot.snapshotDate,
+    quoteStatus: 'CLOSE_PENDING', price: null }
+  const ctx = page('../views/DashboardView.vue', ['isBaselineToday', 'getQuoteForRow', 'isRowClosePending'], {
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }
+  })
+  assert.equal(ctx.isRowClosePending({ market: '美股', stockCode: 'GOOGL' }, { '美股_GOOGL': quote }, snapshot, null), true)
 })
 test('Radar real handler updates exact stock, detail and TW0000 quote while decision evidence stays frozen', () => {
   const row = { ...older(), score: 90, regime: 'BULL', action: 'WAIT', reasons: ['frozen'], indicators: { k: 10 } }
@@ -263,7 +538,15 @@ test('explicit null LIVE comparisons update authoritative price and atomically c
 test('all real page handlers accept explicit null comparisons, reject missing/NaN, and preserve strategy/manual evidence', () => {
   const f = fixture(); const stop = f.stream.subscribe({})
   const dashboardPrices = { holdings: { '台股_2330': older() }, kpis: { '台股_2330': older() } }
-  const dashboard = page('../views/DashboardView.vue', ['applyLivePrice'], { livePrices: dashboardPrices, valuationRefresh: { request() {} } })
+  const dashboardSnapshot = { id: 15, snapshotDate: today }
+  const dashboardLiveAssets = { snapshotId: 15, snapshotDate: today }
+  const dashboardPanels = { holdings: { snapshot: dashboardSnapshot, liveAssets: dashboardLiveAssets }, kpis: { snapshot: dashboardSnapshot, liveAssets: dashboardLiveAssets } }
+  const dashboard = page('../views/DashboardView.vue', ['applyLivePrice'], {
+    livePrices: dashboardPrices, valuationRefresh: { request() {} },
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [dashboardSnapshot] },
+    panelData: panel => dashboardPanels[panel], isDashboardLivePriceEligible,
+    refreshPanelForLive: () => assert.fail('fresh same-day tuple should merge directly')
+  })
   const watchRow = { ...older(), monthlyMa: 90, lastTriggeredPrice: 80 }
   const watchPage = page('../views/WatchStockView.vue', ['applyLivePrice'], { list: { value: [watchRow] } })
   const radarRow = { ...older(), score: 99, action: 'WAIT' }

@@ -13,8 +13,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
+import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,6 +37,7 @@ public class DashboardPanelService {
     private final WebClient businessServicesClient;
     private final SnapshotEnricher enricher;
     private final DashboardLookthroughService lookthroughService;
+    private final Clock clock;
     private final Duration panelBudget;
     private final Duration optionalBudget;
 
@@ -50,6 +51,13 @@ public class DashboardPanelService {
     DashboardPanelService(WebClient businessServicesClient, SnapshotEnricher enricher,
                           DashboardLookthroughService lookthroughService,
                           Duration panelBudget, Duration optionalBudget) {
+        this(businessServicesClient, enricher, lookthroughService, panelBudget, optionalBudget, Clock.systemUTC());
+    }
+
+    DashboardPanelService(WebClient businessServicesClient, SnapshotEnricher enricher,
+                          DashboardLookthroughService lookthroughService,
+                          Duration panelBudget, Duration optionalBudget, Clock clock) {
+        this.clock = clock;
         this.businessServicesClient = businessServicesClient;
         this.enricher = enricher;
         this.lookthroughService = lookthroughService;
@@ -90,7 +98,7 @@ public class DashboardPanelService {
     public Mono<DashboardPanelResponse> trend() {
         return complete(Mono.zip(history(null), liveAssets())
                 .map(t -> {
-                    LiveAssetsOverlay.applyToLatest(t.getT1(), t.getT2().data());
+                    LiveAssetsOverlay.applyToLatest(t.getT1(), t.getT2().data(), clock);
                     return response("trend", null, Map.of("history", t.getT1()), t.getT2().warnings());
                 }));
     }
@@ -122,7 +130,7 @@ public class DashboardPanelService {
                 .map(t -> {
                     StockSnapshot stock = t.getT1();
                     OptionalData live = t.getT3();
-                    LiveAssetsOverlay.applyToLatest(t.getT2(), live.data());
+                    LiveAssetsOverlay.applyToLatest(t.getT2(), live.data(), clock);
                     return response(panel, id, Map.of(
                             "snapshot", projectSnapshot(stock.detail(), null),
                             "history", t.getT2(),
@@ -162,10 +170,16 @@ public class DashboardPanelService {
     }
 
     private List<Map<String, Object>> prices(StockSnapshot stock, Map<String, Object> live) {
-        LocalDate basedate = LocalDate.parse(stock.detail().get("snapshotDate").toString());
-        SnapshotEnricher.SnapshotCloseData close = stock.close();
-        return SnapshotEnricher.mergePerMarketPrices(basedate, DashboardStockPrices.fromLiveAssets(live),
-                close.closeMap(), close.changeMap(), close.displayRows());
+        return DashboardStockPrices.forSnapshot(stock.detail(), live, stock.close(), clock);
+    }
+
+    List<Map<String, Object>> prices(Map<String, Object> snapshot, Map<String, Object> live,
+                                    SnapshotEnricher.SnapshotCloseData close) {
+        return DashboardStockPrices.forSnapshot(snapshot, live, close, clock);
+    }
+
+    void overlayHistory(List<Map<String, Object>> history, Map<String, Object> live) {
+        LiveAssetsOverlay.applyToLatest(history, live, clock);
     }
 
     private Mono<Map<String, Object>> detail(Long id) {

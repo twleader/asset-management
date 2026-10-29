@@ -273,7 +273,7 @@
             </el-table-column>
             <el-table-column label="股價/漲跌(%)" width="190" align="right">
               <template #default="{ row }">
-                <span v-if="isRowClosePending(row)" style="color:#d97706;font-size:12px">收盤價待補</span>
+                <span v-if="isHoldingRowClosePending(row)" style="color:#d97706;font-size:12px">收盤價待補</span>
                 <span v-else-if="getPriceCell(row)">
                   <span :style="{ fontWeight: 600, color: priceNumberColor(row) }">{{ formatPrice(getPriceCell(row).price) }}</span>
                   <span v-if="getPriceCell(row).priceChange != null"
@@ -424,6 +424,7 @@ import DashboardPanelState from '@/components/DashboardPanelState.vue'
 import { escapeHtml } from '@/utils/escapeHtml'
 import { isAcceptedTodayQuote, isClosePending, marketToday, mergeSseQuote } from '@/utils/displayQuote'
 import { createDashboardPanelLoader } from '@/utils/dashboardPanelLoader'
+import { dashboardLiveIdentityMatches, isDashboardLivePriceEligible, isDashboardSnapshotRollover } from '@/utils/dashboardLivePriceEligibility'
 
 let orderSaveTimer = null
 let stockSortable = null
@@ -468,13 +469,20 @@ const retryPanel = panel => panelLoader.retry(panel)
 
 // 各 Panel 只維護自己的即時價副本；SSE 只是完成 payload 後的增量，不能成為首屏資料來源。
 const livePrices = reactive({ kpis: {}, allocation: {}, 'stock-values': {}, holdings: {} })
+function canOverlayStreamQuote(p) {
+  return p != null && ['台股', '美股', '英股'].includes(p.market)
+    && ['LIVE', 'VERIFIED_CLOSE', 'CLOSE_PENDING'].includes(p.quoteStatus)
+    && p.tradingDate === marketToday(p.market)
+}
 function priceMap(prices) {
-  return Object.fromEntries((prices ?? []).map(p => [`${p.market}_${p.stockCode}`, livePriceStream.overlay(p)]))
+  return Object.fromEntries((prices ?? []).map(p => [
+    `${p.market}_${p.stockCode}`,
+    canOverlayStreamQuote(p) ? livePriceStream.overlay(p) : p
+  ]))
 }
 for (const panel of Object.keys(livePrices)) {
   watch(() => panelData(panel)?.stockPrices, prices => { livePrices[panel] = priceMap(prices) }, { immediate: true })
 }
-const stockPrices = computed(() => livePrices.holdings)
 const holdingPayload = computed(() => panelData('holdings'))
 const stockValuesPayload = computed(() => panelData('stock-values'))
 const kpiPayload = computed(() => panelData('kpis'))
@@ -486,9 +494,7 @@ const marketStatus = computed(() => holdingPayload.value?.marketStatus ?? {})
 const marketStatusAvailable = computed(() =>
   ['twMarketOpen', 'usMarketOpen', 'ukMarketOpen'].every(key => marketStatus.value[key] != null)
 )
-const liveAssets = computed(() => holdingPayload.value?.liveAssets ?? null)
 const latest = computed(() => snapshots.value.find(s => s.id === selectedSnapshotId.value) ?? null)
-const detail = computed(() => holdingPayload.value?.snapshot ?? null)
 
 let priceStream = null
 let statusTimer = null
@@ -497,6 +503,9 @@ let statusInFlight = false
 let isMounted = false
 let metadataController = null
 let statusController = null
+let rolloverController = null
+let rolloverAttemptedScope = null
+const livePanelRefreshScope = new Map()
 
 const metadataLoading = ref(false)
 const metadataError = ref(null)
@@ -539,6 +548,7 @@ onUnmounted(() => {
   panelLoader.dispose()
   metadataController?.abort()
   statusController?.abort()
+  rolloverController?.abort()
   if (priceStream) { priceStream(); priceStream = null }
   valuationRefresh.dispose()
   if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
@@ -550,13 +560,51 @@ function applyLivePrice(p) {
   const key = `${p.market}_${p.stockCode}`
   let matched = false
   for (const panel of Object.keys(livePrices)) {
+    const payload = panelData(panel)
+    if (!isDashboardLivePriceEligible(payload?.snapshot, payload?.liveAssets,
+      selectedSnapshotId.value, snapshots.value[0]?.id, p.market)) continue
     const current = livePrices[panel][key]
     if (current) {
       const next = mergeLiveQuote(current, p)
       if (next !== current) { livePrices[panel] = { ...livePrices[panel], [key]: next }; matched = true }
+      else if (current.tradingDate && p.tradingDate && current.tradingDate > p.tradingDate
+          && isAcceptedTodayQuote(p, marketToday(p.market))) {
+        // A pre-roll BFF projection can carry Taipei's newer snapshot date. Re-read the
+        // complete panel once for this snapshot/day; never weaken mergeLiveQuote ordering.
+        refreshPanelForLive(panel, selectedSnapshotId.value, payload.liveAssets.snapshotDate)
+      }
     }
   }
   if (matched) valuationRefresh.request()
+}
+
+function refreshPanelForLive(panel, snapshotId, liveDate) {
+  if (!isMounted || snapshotId == null || !liveDate || snapshotId !== selectedSnapshotId.value
+      || snapshotId !== snapshots.value[0]?.id) return
+  const scope = `${snapshotId}:${marketToday('台股')}`
+  if (livePanelRefreshScope.get(panel) === scope) return
+  livePanelRefreshScope.set(panel, scope)
+  panelLoader.run(panel, { context: panels[panel]?.context ?? {}, preserve: true })
+}
+
+function refreshLatestSnapshotForRollover(snapshotId, liveDate) {
+  if (!isMounted || snapshotId == null || !liveDate) return Promise.resolve(null)
+  const scope = `${snapshotId}:${liveDate}`
+  if (rolloverAttemptedScope === scope || rolloverController) return Promise.resolve(null)
+  rolloverAttemptedScope = scope
+  const selectedAtStart = selectedSnapshotId.value
+  const controller = new AbortController()
+  rolloverController = controller
+  return bffApi.dashboard.snapshots({ signal: controller.signal }).then(metadata => {
+    if (!isMounted || controller.signal.aborted || rolloverController !== controller
+        || selectedAtStart !== snapshotId || selectedSnapshotId.value !== snapshotId
+        || snapshots.value[0]?.id !== snapshotId || metadata?.[0]?.id !== snapshotId) return null
+    snapshots.value = metadata ?? []
+    // Re-fetch the full panel payloads; never mutate a stale snapshot's date locally.
+    return panelLoader.select(snapshotId, { allocation: { tab: allocationTab.value } })
+  }).catch(() => null).finally(() => {
+    if (rolloverController === controller) rolloverController = null
+  })
 }
 function openPriceStream() {
   priceStream?.()
@@ -579,25 +627,50 @@ async function refreshMarketStatus() {
   const controller = new AbortController()
   statusController = controller
   const selectedId = selectedSnapshotId.value
+  const latestId = snapshots.value[0]?.id
   const generations = Object.fromEntries(Object.keys(livePrices).map(panel => [panel, panels[panel].generation]))
   // 趨勢圖的即時估值也由自己的 BFF 完整更新；失敗保留上一份完整圖。
   if (panels.trend.data && !panels.trend.loading) panelLoader.run('trend', { preserve: true })
   try {
     const data = await bffApi.dashboard.realtime({ signal: controller.signal })
     if (!isMounted || !livePriceStream.visible() || controller.signal.aborted || selectedSnapshotId.value !== selectedId) return
+    const rolloverSnapshot = [latest.value, ...Object.keys(livePrices).map(panel => panelData(panel)?.snapshot)]
+      .find(snapshot => isDashboardSnapshotRollover(snapshot, data?.liveAssets, selectedId, latestId))
+    if (rolloverSnapshot) {
+      refreshLatestSnapshotForRollover(selectedId, data.liveAssets.snapshotDate)
+      return
+    }
     for (const panel of Object.keys(livePrices)) {
       panelLoader.update(panel, generations[panel], payload => {
         const next = { ...payload.data }
+        // Look-through allocation tabs have no stockPrices/liveAssets and must retain
+        // their selected tab while unrelated realtime status is refreshed.
+        const usesLivePrices = panel !== 'allocation' || panels.allocation.context.tab === 'category'
+        const liveMatches = usesLivePrices
+          && dashboardLiveIdentityMatches(next.snapshot, data?.liveAssets, selectedId, latestId)
+        if (liveMatches) {
+          const alreadyMatches = dashboardLiveIdentityMatches(next.snapshot, next.liveAssets, selectedId, latestId)
+          const hasFutureTuple = (data.stockPrices ?? []).some(quote => {
+            const current = livePrices[panel][`${quote.market}_${quote.stockCode}`]
+            return current?.tradingDate && quote.tradingDate && current.tradingDate > quote.tradingDate
+              && isAcceptedTodayQuote(quote, marketToday(quote.market))
+          })
+          if (!alreadyMatches || hasFutureTuple) {
+            refreshPanelForLive(panel, selectedId, data.liveAssets.snapshotDate)
+            return payload
+          }
+        }
         // 資產分類/穿透 tab 不需要 stockPrices 與 liveAssets。
-        if (Array.isArray(next.stockPrices) && data?.stockPrices?.length) {
+        if (liveMatches && Array.isArray(next.stockPrices) && data?.stockPrices?.length) {
           const prices = { ...livePrices[panel] }
           for (const quote of data.stockPrices) {
+            if (!isDashboardLivePriceEligible(next.snapshot, data.liveAssets, selectedId, latestId, quote.market)) continue
             const key = `${quote.market}_${quote.stockCode}`
             if (prices[key]) prices[key] = mergeLiveQuote(prices[key], livePriceStream.overlay(quote))
           }
           next.stockPrices = Object.values(prices)
         }
-        const hasLive = next.liveAssets != null && data?.liveAssets?.snapshotDate === next.snapshot?.snapshotDate
+        const hasLive = liveMatches
         const hasStatus = next.marketStatus != null &&
           ['twMarketOpen', 'usMarketOpen', 'ukMarketOpen'].every(key => typeof data?.marketStatus?.[key] === 'boolean')
         if (hasLive) next.liveAssets = data.liveAssets
@@ -617,33 +690,38 @@ async function refreshMarketStatus() {
 function onSnapshotChange(id) {
   if (id == null) return
   statusController?.abort()
+  rolloverController?.abort()
+  rolloverController = null
   if (orderSaveTimer) { clearTimeout(orderSaveTimer); orderSaveTimer = null }
   selectedSnapshotId.value = id
   panelLoader.select(id, { allocation: { tab: allocationTab.value } })
 }
 
-function isBaselineToday(market) {
-  // 跨時區處理：基準日要與「該市場當地時區的今天」比，不是 host machine 時區。
-  // 例：台灣已 4/30 凌晨，但美東仍是 4/29 下午盤中 → 對美股而言 basedate=4/29 仍視為今天。
-  const d = latest.value?.snapshotDate
+function isBaselineToday(market, snapshot) {
+  // 供「尚無 live 值」的顯示色使用；真正套 live 必須通過下方更嚴格的 ID/date 閘門。
+  if (selectedSnapshotId.value == null || selectedSnapshotId.value !== snapshots.value[0]?.id
+      || snapshot?.id !== selectedSnapshotId.value) return false
+  const d = snapshot?.snapshotDate
   if (!d) return false
   const tz = market === '美股' ? 'America/New_York' : market === '英股' ? 'Europe/London' : 'Asia/Taipei'
   const today = new Date().toLocaleDateString('en-CA', { timeZone: tz }) // YYYY-MM-DD
-  return d === today
+  const taipeiToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Taipei' })
+  return d === today || d === taipeiToday
 }
 
 /** 該市場 row 是否該套 live 行情（基準日==市場當地今日；不再加「市場開盤」閘門）。
  *  收盤後 Redis cache 於 24h TTL 過期後才失效，但 liveAssets 後端已 fallback 至最近一筆收盤價，
  *  故此函式只判斷 basedate；live overlay 是否真的可用由 overlayLivePrice 內部判斷。 */
-function shouldApplyLive(market) {
-  return isBaselineToday(market)
+function shouldApplyLive(market, snapshot, sourceLiveAssets) {
+  return isDashboardLivePriceEligible(snapshot, sourceLiveAssets,
+    selectedSnapshotId.value, snapshots.value[0]?.id, market)
 }
 
 /** 從 liveAssets.stocks 加總對應 row 的即時估值（台幣）。後端已乘 shares × livePrice ×（美股）匯率。
  *  注意：liveAssets.stocks 是「每 broker 每股票」一筆（同一檔在多家券商會有多筆），
  *  customTableData 是依 stockCode+market 合併過的（一檔一列），故必須 sum 全部 match 的 broker 列。
  *  若沒有任何一筆有 liveValue，回傳 null 讓上層 fallback。 */
-function getLiveValueFromAssets(row, sourceLiveAssets = liveAssets.value) {
+function getLiveValueFromAssets(row, sourceLiveAssets) {
   const list = sourceLiveAssets?.stocks
   if (!Array.isArray(list)) return null
   let sum = 0
@@ -657,10 +735,10 @@ function getLiveValueFromAssets(row, sourceLiveAssets = liveAssets.value) {
   return any ? sum : null
 }
 
-function getRealtimePrice(row, sourcePrices = stockPrices.value) {
+function getRealtimePrice(row, sourcePrices, snapshot, sourceLiveAssets) {
   // 基準日 != 該市場當地今日時，股價欄一律凍結為快照儲存的收盤價（priceChange 顯示由模板 fallback 處理）。
   // 不加閘門會讓 SSE 推送的 live 價滲入歷史快照的「股價」欄，與其他欄位（現值/損益/預估配息）凍結值不一致。
-  if (!shouldApplyLive(row.market)) return null
+  if (!shouldApplyLive(row.market, snapshot, sourceLiveAssets)) return null
   const key = `${row.market}_${row.stockCode}`
   const p = sourcePrices[key]
   if (!p || p.price == null) return null
@@ -672,12 +750,18 @@ function getRealtimePrice(row, sourcePrices = stockPrices.value) {
   }
 }
 
-function getQuoteForRow(row, sourcePrices = stockPrices.value) {
+function getQuoteForRow(row, sourcePrices) {
   return sourcePrices[`${row.market}_${row.stockCode}`]
 }
 
-function isRowClosePending(row, sourcePrices = stockPrices.value) {
-  return isBaselineToday(row.market) && isClosePending(getQuoteForRow(row, sourcePrices))
+function isRowClosePending(row, sourcePrices, snapshot) {
+  // Pending-close is an explicit BFF status and remains visible while live-assets is unavailable.
+  return isBaselineToday(row.market, snapshot) && isClosePending(getQuoteForRow(row, sourcePrices))
+}
+
+function isHoldingRowClosePending(row) {
+  return isRowClosePending(row, livePrices.holdings,
+    holdingPayload.value?.snapshot)
 }
 
 // 台股慣例配色：漲紅、跌綠、平盤灰（與股票走勢圖 markPoint「紅漲綠跌」一致）。
@@ -693,16 +777,23 @@ function changeArrow(v) {
 // 「股價/漲跌(%)」欄顯示資料：basedate == 該市場當日 → 即時價（getRealtimePrice）；
 // 否則 → 快照收盤價 + 該收盤日「vs 前一交易日」的當日漲跌（BFF 已算入 stockPrices，收盤/週末亦可顯示）。
 function getPriceCell(row) {
-  if (isRowClosePending(row)) return null
-  const live = getRealtimePrice(row)
+  const snapshot = holdingPayload.value?.snapshot
+  const assets = holdingPayload.value?.liveAssets
+  const prices = livePrices.holdings
+  if (isRowClosePending(row, prices, snapshot)) return null
+  const live = getRealtimePrice(row, prices, snapshot, assets)
   if (live) {
     return { price: live.price, priceChange: live.priceChange, changePercent: live.changePercent }
   }
   if (row.stockPrice == null) return null
-  const p = stockPrices.value[`${row.market}_${row.stockCode}`]
+  const p = prices[`${row.market}_${row.stockCode}`]
   // stockPrices map 只對應「目前正在檢視的是最新快照」的情境；選了歷史快照時其漲跌不對應該列收盤價 → 只顯示收盤價。
   const isLatestSnapshotView = selectedSnapshotId.value != null && selectedSnapshotId.value === snapshots.value[0]?.id
-  const belongsToRow = p && isLatestSnapshotView
+  const belongsToRow = p && isLatestSnapshotView && snapshot?.id === selectedSnapshotId.value
+    && ['PREVIOUS_CLOSE', 'VERIFIED_CLOSE'].includes(p.quoteStatus)
+    && p.price != null && Number.isFinite(Number(p.price)) && Number(p.price) === Number(row.stockPrice)
+    && /^\d{4}-\d{2}-\d{2}$/.test(p.tradingDate ?? '')
+    && /^\d{4}-\d{2}-\d{2}$/.test(snapshot.snapshotDate ?? '') && p.tradingDate <= snapshot.snapshotDate
   return {
     price: Number(row.stockPrice),
     priceChange: belongsToRow && p.priceChange != null ? Number(p.priceChange) : null,
@@ -711,8 +802,10 @@ function getPriceCell(row) {
 }
 // 股價數字本身顏色：live 或非基準日快照 → 深色；基準日今日但尚無 live → 灰。
 function priceNumberColor(row) {
-  if (getRealtimePrice(row)) return '#1e293b'
-  return isBaselineToday(row.market) ? '#94a3b8' : '#1e293b'
+  const snapshot = holdingPayload.value?.snapshot
+  const assets = holdingPayload.value?.liveAssets
+  if (getRealtimePrice(row, livePrices.holdings, snapshot, assets)) return '#1e293b'
+  return isBaselineToday(row.market, snapshot) ? '#94a3b8' : '#1e293b'
 }
 
 const formatShares = (v, market) => {
@@ -1295,13 +1388,13 @@ watch(mergedStocks, (stocks) => {
 //  1. liveAssets.stocks[].liveValue（與「歷年資產管理」共用同一支 API，收盤後 fallback 至最近收盤價）
 //  2. stockPrices map 即時價（SSE 推播；收盤後 Redis cache 24h TTL 過後此來源才會失效）
 //  3. row 原值（BFF 凍結在基準日的快照值）
-function overlayLivePrice(row, snapshot = holdingPayload.value?.snapshot, sourceLiveAssets = liveAssets.value, sourcePrices = stockPrices.value) {
-  if (!shouldApplyLive(row.market)) return row
+function overlayLivePrice(row, snapshot, sourceLiveAssets, sourcePrices) {
+  if (!shouldApplyLive(row.market, snapshot, sourceLiveAssets)) return row
   const shares = Number(row.shares ?? 0)
   if (shares <= 0) return row
 
   // 即時原幣股價（與表格「股價」欄同源 getRealtimePrice），供 tooltip 顯示，避免顯示快照舊收盤價
-  const live = getRealtimePrice(row, sourcePrices)
+  const live = getRealtimePrice(row, sourcePrices, snapshot, sourceLiveAssets)
   let cv = getLiveValueFromAssets(row, sourceLiveAssets)
   if (cv == null) {
     if (!live) return row
@@ -1340,9 +1433,9 @@ function withPanelLiveOverlay(s, stocks, live, prices) {
   // per-market 基準日閘門：basedate == 該市場當地今日才套 live；非今日市場（含昨日快照、今日尚未
   // 建檔、週末）一律維持快照凍結收盤值（= 該基準日收盤）。三市場皆非今日 → 走下方 sumOf 全 frozen 分支，
   // 顯示基準日收盤，與「歷年資產管理」per-market overlay 同源同值。
-  const twLive = shouldApplyLive('台股')
-  const usLive = shouldApplyLive('美股')
-  const ukLive = shouldApplyLive('英股')
+  const twLive = shouldApplyLive('台股', s, live)
+  const usLive = shouldApplyLive('美股', s, live)
+  const ukLive = shouldApplyLive('英股', s, live)
 
   const tw = stocks.filter(row => row.market === '台股')
   const us = stocks.filter(row => row.market === '美股')
@@ -1366,7 +1459,8 @@ function withPanelLiveOverlay(s, stocks, live, prices) {
   // per-market 加總相等，可採用以與「歷年資產管理」最新列同值；只要有任一市場非今日（昨日快照、今日尚未
   // 建檔、跨午夜），一律用 per-market 加總（非今日市場為基準日凍結收盤），避免把較新收盤洩漏進基準日估值。
   const allLive = twLive && usLive && ukLive
-  const liveMatchesLatest = live && live.snapshotDate === s.snapshotDate
+  const liveMatchesLatest = dashboardLiveIdentityMatches(s, live,
+    selectedSnapshotId.value, snapshots.value[0]?.id)
   const totalAssets = allLive && liveMatchesLatest && live.liveTotalAssets != null
         ? Number(live.liveTotalAssets)
         : totalDeposit + totalFundValue + totalStockValue
@@ -1395,7 +1489,12 @@ const allocationLiveLatest = computed(() => withPanelLiveOverlay(
 ))
 
 const stockTableData = computed(() =>
-  (customTableData[stockMarketTab.value] ?? []).map(row => overlayLivePrice(row))
+  (customTableData[stockMarketTab.value] ?? []).map(row => overlayLivePrice(
+    row,
+    holdingPayload.value?.snapshot,
+    holdingPayload.value?.liveAssets,
+    livePrices.holdings
+  ))
 )
 
 const stockTableSummary = computed(() => {
