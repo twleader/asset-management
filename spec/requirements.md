@@ -6327,3 +6327,13 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 不完整定義為任一OHLC為null或非正、high<low、volume為null或負數；volume=0是真零、單獨不算缺口。只接收來源完整且正值OHLC、high>=max(open,close)、low<=min(open,close)、volume非null且>=0、日期在請求範圍且嚴格早於紐約今日的日K。來源失敗／缺日／不完整時保留原列與具名缺口。Yahoo來源缺volume保留null，不得轉成0；來源chart.meta.symbol必須精確等於請求代號、currency必須為USD，缺漏／錯誤身份整批拒絕；timestamp只接受正整數且可轉long，非法時間戳不轉0。台股透視單檔失敗須隔離，不能攔住每日美股持股回補。
 - [ ] 寫入以單一PostgreSQL INSERT ON CONFLICT的WHERE檢查當下列仍不完整，補缺列或整根以同一Yahoo日K替換不完整列，close_source記為YAHOO_HISTORICAL_REPAIR；完整既有列（含已驗證收盤）零修改。查詢最早缺口不表示可放鬆atomic寫入guard。不得改台／英股寫入、即時Redis、owner資產、券商或交易。
 - [ ] 來源HTTP只在external-materials-service既有背景／維護入口；9090 completed-technicals／technical-series維持pure read、原公式與Swagger bytes。同步排程列表文案。測試覆蓋短缺日、2年內舊缺欄、完整列保護、來源缺值／未完成日／未來日、來源區間越界、零量及併發寫入後guard。正式驗收先讀DB、走受控背景／既有維護流程，再唯讀9090確認精確日期、coverage與sourceSha256；來源不能修復時明示阻擋，不得宣稱成功。
+
+
+### Task 522：美股財報風險報告改善的 authority 身分發布（Requirements 187／193）
+
+**User Story：** 作為 SRPP 報告讀者，我要財報事件預警、獲利回吐壓力情境與「為何仍續抱」的說明使用已審查的新規則包身分，並維持現行 D-174 賣出條件。
+
+- [ ] 只從 `/Users/steven/.codex/worktrees/us-earnings-reporting/SRPP` 最終獨立審查、提交乾淨並由 root 明確凍結的 commit 同步完整 model/manifest bytes；先驗 Codex/Claude daily bundle 與 runtime contract，記來源 commit、兩個 raw SHA 與 bundle SHA，禁止中間 manifest。本輪報告風險提示不新增保護性減碼例外、門檻、交易或寄送，也不更動金融計算公式。
+- [ ] 保留 Java authority 的 strict JSON／raw-byte／JCS／十欄報告候選語意閘門。由原 generator 使用同一顯式 SRPP root 重產主 report 22 案例及 insert-only registry SQL；formal targets、state-topup／income／payroll／short-US fixtures 預期不變。任何金融 expected 或來源 calculator hash 差異先停止並回報，不得更新 expected 掩蓋。
+- [ ] Swagger／API／schema／producer／排程本輪不變；三份 Swagger、consumer metadata 的現行精確 SHA 以乾淨來源的 renderer/sync `--check` 查證，不能任意執行跨 repo mutation。兩 repo 完成 feature commit、no-ff main merge、push 與 remote-ref readback 後，才可執行受追蹤 SQL 的單次 insert-only 登錄；完整讀回新 row，舊 rows 保留。
+- [ ] 正式 build/recreate 僅從乾淨 asset main 執行 run-stack，保留 main 設定／資料及 BFF。重啟前依當下台北日期與實際 scheduler 條件，唯讀逐項證明所有啟動及有界觀察期間的外抓／寄信／資產修改入口均 no-op：analysis self-heal、所有日期 PROCESSING=0、期間不跨啟用寄送分鐘、十個 index 最新、Fubon radar ETF 皆有成功 snapshot（或原設定停用／未 READY）、全 owner 最新快照與到期在途款符合原 roll no-op，並查其他啟動入口；跨日重新查證，不能沿用 2026-10-28/29 收據，不修改資料或旗標繞過。無法證明零新增寄送／補抓時停止部署並具名回報。健康、靜態 hash、registry 與 JAR 身分各自驗收；report-calculations 僅合法交易日台北 `09:05 <= now < 13:30` 完整身分查證後才唯讀 GET，窗口外固定 `NOT_YET_EXECUTED`，不以舊 hash 或健康檢查冒充成功。
