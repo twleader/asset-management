@@ -6360,3 +6360,15 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 共用 StockAnalysisDialog 在同一股票已有 available=true 行情時，自動補讀及手動重新整理期間保留摘要、內外盤及五檔既有 DOM，不切成整區載入中，也不因自動補讀閃動重新整理按鈕的 loading 圖示。新回應經既有身分／generation／token 守門後採用完整 canonical snapshot，由 Vue keyed patch 更新有變動的文字、顏色及量條寬度；相同值不重建表格節點。
 - [ ] 首次無可用行情時保留載入提示；API 明確 unavailable 或查詢失敗後仍呈現既有無資料／錯誤文案，不將舊資料偽裝為新行情。切換股票／關窗／隱藏與重開的取消及身分防護保持；null 值仍顯示「—」。
 - [ ] 保留原純讀 BFF 路徑、五檔至少兩秒的合併補讀、請求去重與完整來源時間；不更動 provider、計算、API、SSE、持久化或交易。驗證更新等待期間與成功後節點保持、變動／不變／null 值、錯誤／unavailable、換股及關窗舊回應隔離，並完成 frontend image rebuild/recreate。
+
+
+### Task 525：行情五檔獨立持續補讀（Requirement 197 修訂）
+
+**User Story：** 作為盤中查看五檔的使用者，我要即使成交推播未到或中斷，已開啟的行情五檔仍持續讀取新快照，且數值更新不閃爍。
+
+**Acceptance Criteria：**
+
+- [ ] 共用 StockAnalysisDialog 在開啟、瀏覽器可見、選取行情五檔且標的是台股非 0000 時，啟用獨立於成交 SSE 的每兩秒定時補讀。即使 EventSource 尚未 open、無成交事件或永久 CLOSED，仍持續讀既有 pure-read BFF；不建立第二條 SSE、不要求價格改變才讀五檔。
+- [ ] 定時與 SSE／catchup 更新共用 bookRefresh 節流；手動更新保留直接 fetchQuoteDetail 的原有時序，全部共用 bookRequest 去重；同一身分自動讀取至少間隔兩秒、不重疊，慢回應不累積並行請求或補讀風暴。完整 canonical snapshot 原樣採用，仍保留 Task524 的不閃爍 DOM 更新與 null／unavailable／錯誤語意。
+- [ ] 切換頁籤、關閉視窗、換股、瀏覽器隱藏與卸載會取消舊 timer；恢復可見或進入五檔重新啟用，只有一個 timer，重複 catchup／事件不重複建立。舊請求沿 abort／token／generation／market+code 守門，不能回填前標的。輪詢只限共用視窗，其他頁面及當日圖更新頻率不變。
+- [ ] 測試須在沒有任何 SSE event 的情境，令實際元件 timer 與真 fetchQuoteDetail 連續運行至少三輪，驗證請求數及數值／來源時間推進與 DOM 穩定；另驗慢回應、重複啟用、頁籤／可見性／換股／關窗／卸載清理。以真實 2330 canonical API／Redis／DB 取樣區分上游資料延遲與前端補讀；不要求每兩秒都有新 provider snapshot。不得改 provider／DB writer／策略／公開 API／授權或交易邊界，完成 frontend 容器驗收。

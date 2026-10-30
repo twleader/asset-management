@@ -378,6 +378,7 @@ let intradayRequest = null
 let intradayController = null
 let bookController = null
 let stopLivePrices = null
+let bookRefreshTimer = null
 function liveIdentity() { return `${props.stock?.market}\u0000${props.stock?.stockCode}` }
 function liveCurrent(generation, key) {
   return generation === liveGeneration && props.modelValue && livePriceStream.visible() && key === liveIdentity()
@@ -413,14 +414,32 @@ const intradayRefresh = createTrailingRefresh(() => {
   if (props.modelValue && isIntraday.value && activeTab.value === 'chart' && livePriceStream.visible()) return fetchIntraday(true)
 }, { delay: 300, interval: 1000, tail: true })
 const bookRefresh = createTrailingRefresh(() => {
-  if (props.modelValue && activeTab.value === 'quote-detail' && livePriceStream.visible()) return fetchQuoteDetail()
+  if (quoteDetailRefreshEligible()) return fetchQuoteDetail()
 }, { delay: 300, interval: 2000, tail: true })
 function requestLiveRead() {
   if (activeTab.value === 'chart' && isIntraday.value) intradayRefresh.request()
   if (activeTab.value === 'quote-detail') bookRefresh.request()
 }
+function quoteDetailRefreshEligible() {
+  return props.modelValue && activeTab.value === 'quote-detail' && props.stock?.market === '台股'
+    && !!props.stock?.stockCode && props.stock.stockCode !== '0000' && livePriceStream.visible()
+}
+function stopBookRefreshTimer() {
+  if (bookRefreshTimer == null) return
+  clearInterval(bookRefreshTimer)
+  bookRefreshTimer = null
+}
+function syncBookRefreshTimer() {
+  if (!quoteDetailRefreshEligible()) { stopBookRefreshTimer(); return }
+  if (bookRefreshTimer != null) return
+  bookRefreshTimer = setInterval(() => {
+    if (!quoteDetailRefreshEligible()) { stopBookRefreshTimer(); return }
+    requestLiveRead()
+  }, 2000)
+}
 function pauseLiveReads() {
   liveGeneration++
+  stopBookRefreshTimer()
   intradayController?.abort()
   bookController?.abort()
   intradayLoading.value = false
@@ -437,12 +456,13 @@ function syncLiveSubscription() {
     onQuote: quote => {
       if (quote.market === props.stock?.market && quote.stockCode === props.stock?.stockCode) requestLiveRead()
     },
-    onCatchup: requestLiveRead, onPause: pauseLiveReads
+    onCatchup: () => { syncBookRefreshTimer(); requestLiveRead() }, onPause: pauseLiveReads
   })
+  syncBookRefreshTimer()
 }
 watch(() => [props.modelValue, props.stock?.market, props.stock?.stockCode], syncLiveSubscription)
 onMounted(syncLiveSubscription)
-watch(activeTab, () => { intradayRefresh.cancel(); bookRefresh.cancel(); requestLiveRead() })
+watch(activeTab, () => { intradayRefresh.cancel(); bookRefresh.cancel(); syncBookRefreshTimer(); requestLiveRead() })
 onUnmounted(() => { stopLivePrices?.(); pauseLiveReads(); intradayRefresh.dispose(); bookRefresh.dispose() })
 
 watch(months, (m) => {

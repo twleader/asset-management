@@ -13221,3 +13221,12 @@ SRPP 的財報預警、獲利回吐壓力情境及續抱理由屬報告層；ass
 StockAnalysisDialog 的 quoteDetailLoading 仍代表既有單一 book request 進行中；只有尚無 available snapshot 才以整區載入提示取代表格，重新整理按鈕亦僅在尚無可用 snapshot 的查詢顯示 loading。已有可用 snapshot 時，等待自動或手動純 GET 的期間維持原摘要、內外盤及 orderbook DOM；成功後完整替換 quoteDetail reactive snapshot，既有摘要 label 與五檔 level key 維持節點身分，由 Vue patch 只更新差異文字、樣式及量條寬度，不逐欄混接資料來源、不使用每次改變的 key 或重掛載。首次 loading、unavailable 及 catch 錯誤沿原有分支顯示；本修正不新增沿用舊報價的失敗回退。來源／時間／盤中標籤隨 snapshot 同步，null 不補值。
 
 不改 bookRefresh 的 delay=300ms、interval=2000ms、tail 與去重／AbortController／quoteRequestToken／liveGeneration／market+code 身分守門；syncLiveSubscription 與 onOpen 仍清空前標的 snapshot。所有來源頁共用此元件，不新增 BFF 或公開 API、計算或寫入。離線以實際 Vue 渲染及延遲回應驅動 DOM 身分與數值驗證，並沿既有單元／契約測試確認生命週期隔離；實際 frontend Docker 服務完成 rebuild/recreate 後驗證產物與服務。
+
+
+## Task 525：五檔獨立於成交推播的持續純讀
+
+既有 bookRefresh 是事件驅動的 createTrailingRefresh（delay 300ms、interval 2000ms、tail=true），成交 onQuote、catchup 與切頁籤才會經此要求自動讀取，手動操作則直接 fetchQuoteDetail 並共用 bookRequest 去重，沒有持續輪詢；canonical book 的 Yahoo／Fubon producer 與 price-update 是獨立來源，不能假設 book 改變一定有 price event。加入元件生命週期內唯一的兩秒 timer，僅在 modelValue=true、瀏覽器可見、activeTab=quote-detail、market=台股、code 非空且非 0000 時請求同一 bookRefresh。timer 啟用不依賴 SSE 連線成功；既有 SSE 仍可提示補讀，並沿相同非重疊節流與 bookRequest 去重，不增加另一行情來源或第二 SSE。
+
+StockAnalysisDialog 自行持有 timer 與 idempotent start/stop 函式；syncLiveSubscription／頁籤切換／可見 catchup 會依目前條件啟用，pauseLiveReads 與卸載必清理。重複事件不可新增 timer；換股先停舊 timer 與 abort 舊 request，再為目前身分啟用。timer 回呼與實際讀取均檢查適用狀態，瀏覽器隱藏時不發 GET；恢復只作 bounded catchup，不補跑隱藏期間所有輪次。保留完整 snapshot assignment、quoteRequestToken／liveGeneration／market+code、Task524 的 available snapshot DOM 及失敗語意。BFF 仍 pure read persisted canonical，兩秒前端讀取不代表 provider 有兩秒新資料。
+
+驗證以假 timer 控制實際 SFC 函式、零 SSE 連續讀至少三輪及 abort/visibility/tab/unmount；瀏覽器使用實際編譯元件與可控延遲回應確認時間／總量連續變動而既有 DOM 不變。真實 2330 的 API 及 PostgreSQL／Redis revision 唯讀取樣作上游證據，不偽稱有登入 session 或以單次 HTTP200代表即時 UI。
