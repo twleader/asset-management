@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
-import { parse, compileScript } from 'vue/compiler-sfc'
+import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc'
 import { reactive, watch } from 'vue'
 import { createLivePriceStream, createTrailingRefresh, mergeLiveQuote, patchLiveRow } from './livePrices.js'
 import { marketToday, applyEnrichedQuote, isClosePending } from './displayQuote.js'
@@ -469,6 +469,42 @@ test('Dialog book real handler only reads open book tab, minimum two seconds and
   await clock.tick(5000); for (let i = 1; i < calls.length; i++) assert.ok(calls[i] - calls[i - 1] >= 2000)
   assert.equal(d.quoteDetail.value.levels[0].bidPrice, 1)
   d.activeTab.value = 'chart'; const before = calls.length; d.ctx.requestLiveRead(); await clock.tick(5000); assert.equal(calls.length, before)
+})
+test('quote detail compiled template keeps refresh feedback behind the available-snapshot boundary', () => {
+  const file = new URL('../components/StockAnalysisDialog.vue', import.meta.url)
+  const { descriptor } = parse(readFileSync(file, 'utf8'))
+  const fragment = descriptor.template.content.match(/<el-tab-pane(?=[^>]*\bname="quote-detail")[\s\S]*?<\/el-tab-pane>/)?.[0]
+  assert.ok(fragment, 'real quote-detail tab template exists')
+  const { code, errors } = compileTemplate({ source: fragment, filename: file.pathname, id: 'quote-detail-refresh-contract', compilerOptions: { mode: 'function' } })
+  assert.deepEqual(errors, [])
+  assert.equal(code.split('_ctx.quoteDetailLoading && !_ctx.quoteDetail?.available').length - 1, 2,
+    'button spinner and loading branch both require no available snapshot')
+})
+test('Dialog quote detail real handler deduplicates canonical reads and ignores late failures after stock switch or close', async () => {
+  const gate = deferred(), calls = []
+  const d = dialogFixture(new Timers(), { getQuoteDetail: (...args) => { calls.push(args); return gate.promise } })
+  const next = { available: true, canonicalRevision: 2, source: 'FUBON_BOOKS', levels: Array.from({ length: 5 }, (_, i) => ({ level: i + 1, bidPrice: 90 - i, bidVolumeLots: i + 1 })) }
+  d.quoteDetail.value = { available: true, canonicalRevision: 1, source: 'YAHOO_TW', levels: [{ level: 1, bidPrice: 80 }] }
+  const first = d.ctx.fetchQuoteDetail(), duplicate = d.ctx.fetchQuoteDetail()
+  assert.equal(d.quoteDetailLoading.value, true)
+  await flush()
+  assert.equal(calls.length, 1, 'one in-flight five-level request is shared')
+  assert.equal(calls[0][0], '2330'); assert.equal(calls[0][1], '台股'); assert.ok(calls[0][2].signal instanceof AbortSignal)
+  gate.resolve(next); await Promise.all([first, duplicate])
+  assert.strictEqual(d.quoteDetail.value, next, 'the complete canonical snapshot replaces the prior snapshot')
+  assert.equal(d.quoteDetail.value.levels.length, 5); assert.equal(d.quoteDetailLoading.value, false)
+
+  for (const abandon of [
+    dialog => { dialog.props.stock = { market: '台股', stockCode: '2317' } },
+    dialog => { dialog.props.modelValue = false }
+  ]) {
+    const late = deferred(), stale = dialogFixture(new Timers(), { getQuoteDetail: () => late.promise })
+    const request = stale.ctx.fetchQuoteDetail(); await flush()
+    stale.ctx.pauseLiveReads(); stale.quoteDetail.value = null; abandon(stale)
+    late.reject(new Error('late request failure')); await request
+    assert.equal(stale.quoteDetail.value, null, 'late rejection cannot restore an unavailable result')
+    assert.equal(stale.quoteDetailLoading.value, false)
+  }
 })
 
 

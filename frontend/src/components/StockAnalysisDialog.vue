@@ -90,8 +90,8 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="stock?.market === '台股' && stock?.stockCode !== '0000'" label="行情五檔" name="quote-detail">
-        <div class="quote-detail-head"><span>{{ quoteSourceLabel }} · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading" @click="refreshQuoteDetail">重新整理</el-button></div>
-        <div v-if="quoteDetailLoading" class="analysis-loading"><el-icon class="is-loading" size="36"><Loading /></el-icon><div>載入行情五檔中…</div></div>
+        <div class="quote-detail-head"><span>{{ quoteSourceLabel }} · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading && !quoteDetail?.available" @click="refreshQuoteDetail">重新整理</el-button></div>
+        <div v-if="quoteDetailLoading && !quoteDetail?.available" class="analysis-loading"><el-icon class="is-loading" size="36"><Loading /></el-icon><div>載入行情五檔中…</div></div>
         <div v-else-if="!quoteDetail?.available" class="analysis-empty">{{ quoteDetail?.message || '暫時無法取得行情五檔' }}<br><el-button size="small" style="margin-top:12px" @click="refreshQuoteDetail">重新整理</el-button></div>
         <template v-else>
           <div class="quote-summary">

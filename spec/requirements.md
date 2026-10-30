@@ -6349,3 +6349,14 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 保留 Java authority 的 strict JSON／raw-byte／JCS／十欄報告候選語意閘門。由原 generator 使用同一顯式 SRPP root 重產主 report 22 案例及 insert-only registry SQL；formal targets、state-topup／income／payroll／short-US fixtures 預期不變。任何金融 expected 或來源 calculator hash 差異先停止並回報，不得更新 expected 掩蓋。
 - [ ] Swagger／API／schema／producer／排程本輪不變；三份 Swagger、consumer metadata 的現行精確 SHA 以乾淨來源的 renderer/sync `--check` 查證，不能任意執行跨 repo mutation。兩 repo 完成 feature commit、no-ff main merge、push 與 remote-ref readback 後，才可執行受追蹤 SQL 的單次 insert-only 登錄；完整讀回新 row，舊 rows 保留。
 - [ ] 正式 build/recreate 僅從乾淨 asset main 執行 run-stack，保留 main 設定／資料及 BFF。重啟前依當下台北日期與實際 scheduler 條件，唯讀逐項證明所有啟動及有界觀察期間的外抓／寄信／資產修改入口均 no-op：analysis self-heal、所有日期 PROCESSING=0、期間不跨啟用寄送分鐘、十個 index 最新、Fubon radar ETF 皆有成功 snapshot（或原設定停用／未 READY）、全 owner 最新快照與到期在途款符合原 roll no-op，並查其他啟動入口；跨日重新查證，不能沿用 2026-10-28/29 收據，不修改資料或旗標繞過。無法證明零新增寄送／補抓時停止部署並具名回報。健康、靜態 hash、registry 與 JAR 身分各自驗收；report-calculations 僅合法交易日台北 `09:05 <= now < 13:30` 完整身分查證後才唯讀 GET，窗口外固定 `NOT_YET_EXECUTED`，不以舊 hash 或健康檢查冒充成功。
+
+
+### Task 524：行情五檔更新保留固定畫面（Requirement 197 修訂）
+
+**User Story：** 作為盤中查看行情的使用者，我要行情更新時只改變有變動的值，固定欄位及五檔表格持續留在畫面，避免整區閃爍與捲動跳動。
+
+**Acceptance Criteria：**
+
+- [ ] 共用 StockAnalysisDialog 在同一股票已有 available=true 行情時，自動補讀及手動重新整理期間保留摘要、內外盤及五檔既有 DOM，不切成整區載入中，也不因自動補讀閃動重新整理按鈕的 loading 圖示。新回應經既有身分／generation／token 守門後採用完整 canonical snapshot，由 Vue keyed patch 更新有變動的文字、顏色及量條寬度；相同值不重建表格節點。
+- [ ] 首次無可用行情時保留載入提示；API 明確 unavailable 或查詢失敗後仍呈現既有無資料／錯誤文案，不將舊資料偽裝為新行情。切換股票／關窗／隱藏與重開的取消及身分防護保持；null 值仍顯示「—」。
+- [ ] 保留原純讀 BFF 路徑、五檔至少兩秒的合併補讀、請求去重與完整來源時間；不更動 provider、計算、API、SSE、持久化或交易。驗證更新等待期間與成功後節點保持、變動／不變／null 值、錯誤／unavailable、換股及關窗舊回應隔離，並完成 frontend image rebuild/recreate。
