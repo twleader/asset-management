@@ -19,13 +19,18 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
 class Timers {
   time = 0; id = 0; tasks = new Map()
-  options = { now: () => this.time, setTimer: (fn, delay) => { const id = ++this.id; this.tasks.set(id, { fn, at: this.time + delay }); return id }, clearTimer: id => this.tasks.delete(id) }
+  visible = true
+  add(fn, delay, interval = null) { const id = ++this.id; this.tasks.set(id, { fn, at: this.time + delay, interval }); return id }
+  intervalCount() { return [...this.tasks.values()].filter(task => task.interval != null).length }
+  options = { now: () => this.time, setTimer: (fn, delay) => this.add(fn, delay), clearTimer: id => this.tasks.delete(id), setInterval: (fn, delay) => this.add(fn, delay, delay), clearInterval: id => this.tasks.delete(id) }
   async tick(ms) {
     const target = this.time + ms
     for (;;) {
       const next = [...this.tasks].filter(([, task]) => task.at <= target).sort((a, b) => a[1].at - b[1].at)[0]
       if (!next) break
-      this.time = next[1].at; this.tasks.delete(next[0]); next[1].fn(); await flush()
+      this.time = next[1].at
+      if (next[1].interval == null) this.tasks.delete(next[0]); else next[1].at += next[1].interval
+      next[1].fn(); await flush()
     }
     this.time = target; await flush()
   }
@@ -434,8 +439,8 @@ test('SnapshotForm actual handlers preserve dirty/manual fields, gate scope/date
 
 function dialogFixture(clock, api) {
   const props = { modelValue: true, stock: { market: '台股', stockCode: '2330' } }
-  const state = { props, activeTab: { value: 'chart' }, isIntraday: { value: true }, intradayLoading: { value: false }, intradaySession: { value: null }, intradayTicks: { value: [] }, quoteRequestToken: { value: 0 }, quoteDetailLoading: { value: false }, quoteDetail: { value: null }, livePriceStream: { visible: () => true }, bffApi: { stockAnalysis: api }, createTrailingRefresh: (read, options) => createTrailingRefresh(read, { ...options, ...clock.options }) }
-  const ctx = page('../components/StockAnalysisDialog.vue', ['liveIdentity', 'liveCurrent', 'fetchIntraday', 'fetchQuoteDetail', 'requestLiveRead', 'pauseLiveReads', 'intradayRefresh', 'bookRefresh'], state,
+  const state = { props, activeTab: { value: 'chart' }, isIntraday: { value: true }, intradayLoading: { value: false }, intradaySession: { value: null }, intradayTicks: { value: [] }, quoteRequestToken: { value: 0 }, quoteDetailLoading: { value: false }, quoteDetail: { value: null }, livePriceStream: { visible: () => clock.visible }, bffApi: { stockAnalysis: api }, createTrailingRefresh: (read, options) => createTrailingRefresh(read, { ...options, ...clock.options }) }
+  const ctx = page('../components/StockAnalysisDialog.vue', ['liveIdentity', 'liveCurrent', 'fetchIntraday', 'fetchQuoteDetail', 'requestLiveRead', 'quoteDetailRefreshEligible', 'stopBookRefreshTimer', 'syncBookRefreshTimer', 'pauseLiveReads', 'intradayRefresh', 'bookRefresh', 'bookRefreshTimer'], { ...state, setInterval: clock.options.setInterval, clearInterval: clock.options.clearInterval },
     'let liveGeneration = 0, intradayRequest = null, bookRequest = null, intradayController = null, bookController = null;')
   return { ctx, ...state }
 }
@@ -469,6 +474,60 @@ test('Dialog book real handler only reads open book tab, minimum two seconds and
   await clock.tick(5000); for (let i = 1; i < calls.length; i++) assert.ok(calls[i] - calls[i - 1] >= 2000)
   assert.equal(d.quoteDetail.value.levels[0].bidPrice, 1)
   d.activeTab.value = 'chart'; const before = calls.length; d.ctx.requestLiveRead(); await clock.tick(5000); assert.equal(calls.length, before)
+})
+test('Dialog quote-detail interval refreshes without SSE and repeated starts keep one timer', async () => {
+  const clock = new Timers(), calls = []
+  const d = dialogFixture(clock, { getQuoteDetail: async () => {
+    calls.push(clock.time)
+    return { available: true, canonicalRevision: calls.length, sourceTime: `t${calls.length}`, levels: [{ level: 1, bidVolumeLots: calls.length }] }
+  } })
+  d.activeTab.value = 'quote-detail'
+  d.ctx.syncBookRefreshTimer(); const firstTimer = d.ctx.bookRefreshTimer
+  d.ctx.syncBookRefreshTimer()
+  assert.equal(clock.intervalCount(), 1); assert.equal(d.ctx.bookRefreshTimer, firstTimer)
+  await clock.tick(6400)
+  assert.equal(calls.length, 3)
+  assert.ok(calls.every((at, i) => i === 0 || at - calls[i - 1] >= 2000))
+  assert.equal(d.quoteDetail.value.canonicalRevision, 3); assert.equal(d.quoteDetail.value.sourceTime, 't3')
+  d.ctx.stopBookRefreshTimer(); d.ctx.stopBookRefreshTimer(); assert.equal(clock.intervalCount(), 0)
+})
+test('Dialog quote-detail timer shares bookRefresh throttle with catchup and coalesces requests during slow reads', async () => {
+  const clock = new Timers(), gate = deferred(), calls = []
+  const d = dialogFixture(clock, { getQuoteDetail: (...args) => {
+    calls.push(clock.time)
+    return calls.length === 1 ? gate.promise : Promise.resolve({ available: true, canonicalRevision: calls.length, levels: [] })
+  } })
+  d.activeTab.value = 'quote-detail'; d.ctx.syncBookRefreshTimer(); d.ctx.requestLiveRead()
+  await clock.tick(300); assert.equal(calls.length, 1)
+  await clock.tick(6000); d.ctx.requestLiveRead() // Same path used by SSE/catchup while the first GET is pending.
+  assert.equal(calls.length, 1, 'timer pulses and catchup cannot overlap the pending read')
+  gate.resolve({ available: true, canonicalRevision: 1, levels: [] })
+  await flush(); await clock.tick(300); assert.equal(calls.length, 2)
+  await clock.tick(2000); assert.equal(calls.length, 3)
+  assert.ok(calls.every((at, i) => i === 0 || at - calls[i - 1] >= 2000))
+  assert.equal(d.quoteDetail.value.canonicalRevision, 3)
+  d.ctx.stopBookRefreshTimer()
+})
+test('Dialog quote-detail timer stops and resumes across hidden, tab, stock, close and pause cleanup states', () => {
+  const clock = new Timers(), d = dialogFixture(clock, { getQuoteDetail: async () => ({ available: true }) })
+  d.activeTab.value = 'quote-detail'; d.ctx.syncBookRefreshTimer()
+  assert.equal(clock.intervalCount(), 1)
+  clock.visible = false; d.ctx.pauseLiveReads(); d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 0)
+  clock.visible = true; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 1)
+  d.activeTab.value = 'chart'; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 0)
+  d.activeTab.value = 'quote-detail'; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 1)
+  for (const stock of [
+    { market: '美股', stockCode: 'AAPL' },
+    { market: '台股', stockCode: '' },
+    { market: '台股', stockCode: '0000' }
+  ]) {
+    d.ctx.pauseLiveReads(); d.props.stock = stock; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 0)
+  }
+  d.props.stock = { market: '台股', stockCode: '2317' }; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 1)
+  d.ctx.pauseLiveReads(); d.props.modelValue = false; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 0)
+  d.props.modelValue = true; d.ctx.syncBookRefreshTimer(); assert.equal(clock.intervalCount(), 1)
+  d.ctx.pauseLiveReads() // onUnmounted uses this shared cleanup path.
+  assert.equal(clock.intervalCount(), 0)
 })
 test('quote detail compiled template keeps refresh feedback behind the available-snapshot boundary', () => {
   const file = new URL('../components/StockAnalysisDialog.vue', import.meta.url)
