@@ -90,7 +90,16 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="stock?.market === '台股' && stock?.stockCode !== '0000'" label="行情五檔" name="quote-detail">
-        <div class="quote-detail-head"><span>{{ quoteSourceLabel }} · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading && !quoteDetail?.available" @click="refreshQuoteDetail">重新整理</el-button></div>
+        <div class="latest-trade">
+          <div class="latest-trade-title"><strong>最新成交</strong><span>{{ latestTradeStatusText }}</span></div>
+          <div class="latest-trade-values">
+            <b class="latest-trade-price" :style="{ color: quoteColor(latestTrade?.priceChange) }">{{ latestTradePrice }}</b>
+            <span :style="{ color: quoteColor(latestTrade?.priceChange) }">漲跌 {{ latestTradeChange }}</span>
+            <span :style="{ color: quoteColor(latestTrade?.changePercent) }">漲跌幅 {{ latestTradeChangePercent }}</span>
+          </div>
+          <div class="latest-trade-meta"><span>來源：{{ latestTradeSourceLabel }}</span><span>來源時間：<time class="latest-trade-time">{{ latestTradeTime }}</time></span></div>
+        </div>
+        <div class="quote-detail-head"><span>五檔快照 · {{ quoteSourceLabel }} · {{ quoteSourceTime }}</span><el-tag size="small" :type="quoteStatusType">{{ quoteStatusText }}</el-tag><el-button size="small" :loading="quoteDetailLoading && !quoteDetail?.available" @click="refreshQuoteDetail">重新整理</el-button></div>
         <div v-if="quoteDetailLoading && !quoteDetail?.available" class="analysis-loading"><el-icon class="is-loading" size="36"><Loading /></el-icon><div>載入行情五檔中…</div></div>
         <div v-else-if="!quoteDetail?.available" class="analysis-empty">{{ quoteDetail?.message || '暫時無法取得行情五檔' }}<br><el-button size="small" style="margin-top:12px" @click="refreshQuoteDetail">重新整理</el-button></div>
         <template v-else>
@@ -219,7 +228,7 @@ import { TitleComponent, TooltipComponent, LegendComponent, GridComponent, DataZ
 import VChart from 'vue-echarts'
 import { Loading } from '@element-plus/icons-vue'
 import { bffApi, livePriceStream } from '@/api/index.js'
-import { createTrailingRefresh } from '@/utils/livePrices.js'
+import { createTrailingRefresh, mergeLiveQuote } from '@/utils/livePrices.js'
 import { marketToday } from '@/utils/displayQuote.js'
 import { escapeHtml } from '@/utils/escapeHtml'
 import { comparisonLabel, intradayLatestDate, normalizeIntradaySession } from '@/utils/intradaySession.js'
@@ -383,6 +392,26 @@ function liveIdentity() { return `${props.stock?.market}\u0000${props.stock?.sto
 function liveCurrent(generation, key) {
   return generation === liveGeneration && props.modelValue && livePriceStream.visible() && key === liveIdentity()
 }
+function applyLatestTrade(quote) {
+  if (!props.modelValue || !livePriceStream.visible() || !props.stock
+      || quote?.market !== props.stock.market || quote?.stockCode !== props.stock.stockCode) return
+  const current = latestTrade.value
+  const merged = mergeLiveQuote(current, quote)
+  if (!merged || merged === current) return
+  const next = {
+    market: merged.market, stockCode: merged.stockCode, tradingDate: merged.tradingDate,
+    quoteStatus: merged.quoteStatus, price: merged.price, priceChange: merged.priceChange,
+    changePercent: merged.changePercent, source: merged.source, updatedAt: merged.updatedAt
+  }
+  if (current && ['market', 'stockCode', 'tradingDate', 'quoteStatus', 'price', 'priceChange', 'changePercent', 'source', 'updatedAt']
+    .every(key => current[key] === next[key])) return
+  latestTrade.value = next
+}
+function replayLatestTrade() {
+  if (!props.modelValue || !livePriceStream.visible() || !props.stock) return
+  const quote = livePriceStream.quotes().find(item => item.market === props.stock.market && item.stockCode === props.stock.stockCode)
+  if (quote) applyLatestTrade(quote)
+}
 async function fetchIntraday(background = false) {
   if (!props.stock || !props.modelValue || !livePriceStream.visible()) return
   if (intradayRequest) return intradayRequest
@@ -440,6 +469,7 @@ function syncBookRefreshTimer() {
 function pauseLiveReads() {
   liveGeneration++
   stopBookRefreshTimer()
+  latestTrade.value = null
   intradayController?.abort()
   bookController?.abort()
   intradayLoading.value = false
@@ -454,10 +484,14 @@ function syncLiveSubscription() {
   if (!props.modelValue || !props.stock) return
   stopLivePrices = livePriceStream.subscribe({
     onQuote: quote => {
-      if (quote.market === props.stock?.market && quote.stockCode === props.stock?.stockCode) requestLiveRead()
+      if (quote.market === props.stock?.market && quote.stockCode === props.stock?.stockCode) {
+        applyLatestTrade(quote)
+        requestLiveRead()
+      }
     },
-    onCatchup: () => { syncBookRefreshTimer(); requestLiveRead() }, onPause: pauseLiveReads
+    onCatchup: () => { replayLatestTrade(); syncBookRefreshTimer(); requestLiveRead() }, onPause: pauseLiveReads
   })
+  replayLatestTrade()
   syncBookRefreshTimer()
 }
 watch(() => [props.modelValue, props.stock?.market, props.stock?.stockCode], syncLiveSubscription)
@@ -524,6 +558,7 @@ const quoteDetail = ref(null)
 const quoteDetailLoading = ref(false)
 const quoteDetailAttempted = ref(false)
 const quoteRequestToken = ref(0)
+const latestTrade = ref(null)
 function refreshQuoteDetail() {
   quoteDetailAttempted.value = true
   return fetchQuoteDetail()
@@ -559,12 +594,42 @@ const quoteStatusText = computed(() => quoteDetail.value?.marketStatus === 'OPEN
 const quoteStatusType = computed(() => quoteDetail.value?.marketStatus === 'OPEN' ? 'danger' : quoteDetail.value?.marketStatus === 'CLOSED' ? 'info' : 'warning')
 const quoteSourceLabel = computed(() => quoteDetail.value?.source === 'FUBON_BOOKS' ? '富邦證券' : quoteDetail.value?.source === 'YAHOO_TW' ? 'Yahoo 股市' : '行情來源不明')
 const quoteSourceTime = computed(() => { const v = quoteDetail.value?.sourceTime; const date = v ? new Date(v) : null; return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('zh-TW',{ timeZone:'Asia/Taipei',dateStyle:'short',timeStyle:'medium' }).format(date) : '時間不明' })
+const latestTradeIsToday = computed(() => latestTrade.value?.tradingDate === marketToday(latestTrade.value?.market))
+const latestTradeCanDisplay = computed(() => latestTradeIsToday.value && ['LIVE', 'VERIFIED_CLOSE'].includes(latestTrade.value?.quoteStatus))
+const latestTradeStatusText = computed(() => {
+  const quote = latestTrade.value
+  if (!quote) return '等待當日即時成交'
+  const status = quote.quoteStatus === 'LIVE' ? '即時推播'
+    : quote.quoteStatus === 'CLOSE_PENDING' ? '收盤確認中'
+      : quote.quoteStatus === 'VERIFIED_CLOSE' ? '已驗證收盤'
+        : quote.quoteStatus === 'PREVIOUS_CLOSE' ? '前一交易日收盤參考' : '等待當日即時成交'
+  return latestTradeIsToday.value ? status : `${status}（${quote.tradingDate}）；等待當日即時成交`
+})
+const latestTradePrice = computed(() => latestTradeCanDisplay.value ? fmtQuote(latestTrade.value?.price) : '—')
+const latestTradeChange = computed(() => latestTradeCanDisplay.value ? signed(latestTrade.value?.priceChange) : '—')
+const latestTradeChangePercent = computed(() => {
+  const value = latestTrade.value?.changePercent
+  if (!latestTradeCanDisplay.value || value == null) return '—'
+  const number = Number(value)
+  return `${number > 0 ? '▲' : number < 0 ? '▼' : ''}${Math.abs(number).toFixed(2)}%`
+})
+const latestTradeSourceLabel = computed(() => latestTrade.value?.source === 'FUBON_WS_AGGREGATES' ? '富邦即時彙總'
+  : latestTrade.value?.source === 'FUBON' ? '富邦行情' : latestTrade.value?.source || '來源未知')
+const latestTradeTime = computed(() => {
+  const value = latestTrade.value?.updatedAt
+  if (!value) return '時間不明'
+  const normalized = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value) ? value : `${value}+08:00`
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) return '時間不明'
+  const formatted = new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', dateStyle: 'short', timeStyle: 'medium' }).format(date)
+  return `${formatted}.${String(date.getMilliseconds()).padStart(3, '0')}`
+})
 const fmtLots = v => v == null ? '—' : Number(v).toLocaleString('zh-TW')
 const fmtPct = v => v == null ? '—' : `${Number(v).toFixed(2)}%`
 const quoteValueColor = v => quoteDetail.value?.previousClose == null || v == null ? '#1e293b' : Number(v) > Number(quoteDetail.value.previousClose) ? '#dc2626' : Number(v) < Number(quoteDetail.value.previousClose) ? '#16a34a' : '#475569'
 const signed = v => v == null ? '—' : `${Number(v)>0?'▲':Number(v)<0?'▼':''}${fmtQuote(Math.abs(Number(v)))}`
 const quoteSummary = computed(() => { const q=quoteDetail.value||{}; return [
-  ['成交',fmtQuote(q.price),quoteValueColor(q.price)],['昨收',fmtQuote(q.previousClose),'#1e293b'],['開盤',fmtQuote(q.openPrice),quoteValueColor(q.openPrice)],['漲跌幅',q.changePercent==null?'—':`${Number(q.changePercent)>0?'▲':Number(q.changePercent)<0?'▼':''}${Math.abs(Number(q.changePercent)).toFixed(2)}%`,quoteColor(q.changePercent)],['最高',fmtQuote(q.highPrice),quoteValueColor(q.highPrice)],['漲跌',signed(q.change),quoteColor(q.change)],['最低',fmtQuote(q.lowPrice),quoteValueColor(q.lowPrice)],['總量',fmtLots(q.volumeLots),'#1e293b'],['均價',fmtQuote(q.averagePrice),'#1e293b'],['昨量',fmtLots(q.previousVolumeLots),'#1e293b'],['成交金額(億)',fmtQuote(q.turnoverYi),'#1e293b'],['振幅',fmtPct(q.amplitudePercent),'#1e293b']
+  ['快照成交',fmtQuote(q.price),quoteValueColor(q.price)],['昨收',fmtQuote(q.previousClose),'#1e293b'],['開盤',fmtQuote(q.openPrice),quoteValueColor(q.openPrice)],['漲跌幅',q.changePercent==null?'—':`${Number(q.changePercent)>0?'▲':Number(q.changePercent)<0?'▼':''}${Math.abs(Number(q.changePercent)).toFixed(2)}%`,quoteColor(q.changePercent)],['最高',fmtQuote(q.highPrice),quoteValueColor(q.highPrice)],['漲跌',signed(q.change),quoteColor(q.change)],['最低',fmtQuote(q.lowPrice),quoteValueColor(q.lowPrice)],['總量',fmtLots(q.volumeLots),'#1e293b'],['均價',fmtQuote(q.averagePrice),'#1e293b'],['昨量',fmtLots(q.previousVolumeLots),'#1e293b'],['成交金額(億)',fmtQuote(q.turnoverYi),'#1e293b'],['振幅',fmtPct(q.amplitudePercent),'#1e293b']
 ].map(([label,value,color])=>({label,value,color})) })
 const quoteLevels = computed(() => Array.from({length:5},(_,i)=>quoteDetail.value?.levels?.[i] ?? {level:i+1,bidPrice:null,bidVolumeLots:null,askPrice:null,askVolumeLots:null}))
 const bookWidth = (key,row) => { const m=Math.max(0,...quoteLevels.value.map(x=>Number(x[key]??0))); return m ? `${100*Number(row[key]??0)/m}%` : '0%' }
@@ -1258,6 +1323,10 @@ const chartOption = computed(() => {
   z-index: 1;
 }
 .quote-detail-head { display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:4px 0 12px;color:#64748b;font-size:12px }
+.latest-trade { display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin:4px 0 12px;padding:12px;border:1px solid #dbeafe;border-radius:6px;background:#f8fafc;color:#334155;font-size:13px }
+.latest-trade-title,.latest-trade-values,.latest-trade-meta { display:flex;align-items:baseline;gap:10px;flex-wrap:wrap }
+.latest-trade-title strong { color:#0f172a;font-size:14px }.latest-trade-title span,.latest-trade-meta { color:#64748b;font-size:12px }
+.latest-trade-values { font-variant-numeric:tabular-nums }.latest-trade-price { color:#1e293b;font-size:20px }
 .quote-summary { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:#e2e8f0;border:1px solid #e2e8f0 }
 .quote-item { display:flex;justify-content:space-between;padding:10px 12px;background:#fff;font-size:14px }.quote-item span{color:#64748b}.quote-item b{font-variant-numeric:tabular-nums}
 .quote-flow { margin:16px 0;color:#475569;font-size:13px;display:flex;gap:14px;flex-wrap:wrap }.quote-flow .inner{color:#16a34a}.quote-flow .outer{color:#dc2626}.flow-bar{display:flex;width:100%;height:8px;background:#e2e8f0;border-radius:4px;overflow:hidden}.flow-bar i{background:#16a34a}.flow-bar em{background:#dc2626}

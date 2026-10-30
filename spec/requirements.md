@@ -6372,3 +6372,16 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 定時與 SSE／catchup 更新共用 bookRefresh 節流；手動更新保留直接 fetchQuoteDetail 的原有時序，全部共用 bookRequest 去重；同一身分自動讀取至少間隔兩秒、不重疊，慢回應不累積並行請求或補讀風暴。完整 canonical snapshot 原樣採用，仍保留 Task524 的不閃爍 DOM 更新與 null／unavailable／錯誤語意。
 - [ ] 切換頁籤、關閉視窗、換股、瀏覽器隱藏與卸載會取消舊 timer；恢復可見或進入五檔重新啟用，只有一個 timer，重複 catchup／事件不重複建立。舊請求沿 abort／token／generation／market+code 守門，不能回填前標的。輪詢只限共用視窗，其他頁面及當日圖更新頻率不變。
 - [ ] 測試須在沒有任何 SSE event 的情境，令實際元件 timer 與真 fetchQuoteDetail 連續運行至少三輪，驗證請求數及數值／來源時間推進與 DOM 穩定；另驗慢回應、重複啟用、頁籤／可見性／換股／關窗／卸載清理。以真實 2330 canonical API／Redis／DB 取樣區分上游資料延遲與前端補讀；不要求每兩秒都有新 provider snapshot。不得改 provider／DB writer／策略／公開 API／授權或交易邊界，完成 frontend 容器驗收。
+
+
+### Task 526：共用分析視窗直接呈現 SSE 最新成交（Requirement 197 修訂）
+
+**User Story：** 作為使用者，我要成交價透過富邦→Redis→全站共用 SSE 直接更新到股票分析視窗，無須等待 Yahoo 五檔快照刷新，且能辨認兩份資料的來源與時間。
+
+**Acceptance Criteria：**
+
+- [ ] StockAnalysisDialog 沿唯一共用 livePriceStream，在同一市場／代號的 onQuote 直接採用經 mergeLiveQuote 驗證的成交 tuple，獨立顯示「最新成交」、來源時間、來源與 provider 給定漲跌／漲跌幅，不只用 SSE 觸發 HTTP 補讀。同價事件仍推進來源時間，不造價格跳動，不宣稱 aggregates 為完整逐筆成交。初次訂閱及可見 catchup 可重播同一 shared stream 既有 cache，但仍驗身分、日期、來源時間與 quoteStatus；不新增 SSE、vendor 或 API。
+- [ ] 最新成交與 quoteDetail 分別持有 state、來源時間與清楚標示；最新成交區在五檔快照 unavailable 時仍能更新。原 summary 首欄明示「快照成交」，原五檔快照完整保持，不能將 SSE 欄位混進 quoteDetail、用 Yahoo 舊昨收自行算即時漲跌、或以五檔值冒充最新成交。CLOSE_PENDING／PREVIOUS_CLOSE／VERIFIED_CLOSE 顯示真狀態，不把非當日 LIVE 叫即時；缺值顯示「—」／等待，null 不轉零。
+- [ ] 以既有 mergeLiveQuote 處理亂序、日期／身分、close fence、完整比較欄及 explicit-null；即時 state 在換股／關窗／pause 清理，恢復後只讀合法 cache，不回填前標的。舊 book HTTP 只能改 quoteDetail，不能倒退新 SSE 最新成交。只 patch 差異 DOM、不重建表格或啟用造假閃動。
+- [ ] 保留 T525 兩秒 book 純讀及所有 lifecycle／request guard，不改原其他頁推播、歷史／策略／表單 dirty 行為、Redis writer 或公開金融 API。核對 Dashboard／TradingRadar／WatchStock／SnapshotForm 已直接消費同一共享 SSE；七個來源頁透過共用 dialog 一次生效。
+- [ ] 測試真元件 onQuote/catchup/cache、更新／同價／亂序／昨日／錯股／null／close fence、慢 book response 不覆蓋新成交，與固定 DOM；以真 Redis／business SSE 唯讀接收證明 provider sourceTime 前進，再把實際 SSE 送入真 shared transport 與真 SFC handler 渲染，價格未變時不能假造變價。正式登入鏈缺 session 必明確保留限制；完成 frontend Docker 驗收。
