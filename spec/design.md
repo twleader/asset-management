@@ -13214,3 +13214,10 @@ realtime 回應若顯示同一最新快照 ID 的日期向前推進至台北今�
 SRPP 的財報預警、獲利回吐壓力情境及續抱理由屬報告層；asset-management 本輪只發布其最終審查後 bundle 身分，保持 D-174 與金融 calculator、路由、producer、排程和資料表原狀。唯一來源為 root 凍結的乾淨 `/Users/steven/.codex/worktrees/us-earnings-reporting/SRPP` commit，完整 model/manifest bytes 同步到 classpath decision authority；正式 targets 與所有金融 expected 不變。主22案例 golden 與 insert-only registry SQL 僅由原工具生成，同源 release check 及全部 backend tests 查證；其他 fixtures 只唯讀檢查，漂移先具名回報。
 
 兩 repo 各自 main 遠端驗證完成前不執行 registry SQL／部署；之後只 insert 新 hash（ON CONFLICT DO NOTHING），不更新刪除歷史資料。只從乾淨 asset main 的正式設定 rebuild/recreate business-services，BFF 保持服務。啟動具有原有 analysis self-heal 寄信與 index 外抓風險，必須依重啟當下日期、最早啟用時間／analysis OK 狀態、所有日期 PROCESSING=0、觀察期間無啟用寄送分鐘、十指數 freshness、Fubon radar ETF 成功 coverage（或原設定停用／未 READY）、全 owner 最新快照與到期在途款的 roll no-op，以及其他啟動入口逐項證明會略過；任何未證明入口均維持部署 pending，不能事後才驗副作用。跨日重新核對，不刷新、補抓、改旗標或補造 durable gate。啟動後以原 logs 與前後資料查證無新增相關寄送／補抓。靜態通過、main landing、registry/JAR 身分、正式服務 serve、合法窗口 report GET 是分開的結果，窗口未到或已過保留 `NOT_YET_EXECUTED`。
+
+
+## Task 524：行情五檔固定節點更新（Requirement 197 修訂）
+
+StockAnalysisDialog 的 quoteDetailLoading 仍代表既有單一 book request 進行中；只有尚無 available snapshot 才以整區載入提示取代表格，重新整理按鈕亦僅在尚無可用 snapshot 的查詢顯示 loading。已有可用 snapshot 時，等待自動或手動純 GET 的期間維持原摘要、內外盤及 orderbook DOM；成功後完整替換 quoteDetail reactive snapshot，既有摘要 label 與五檔 level key 維持節點身分，由 Vue patch 只更新差異文字、樣式及量條寬度，不逐欄混接資料來源、不使用每次改變的 key 或重掛載。首次 loading、unavailable 及 catch 錯誤沿原有分支顯示；本修正不新增沿用舊報價的失敗回退。來源／時間／盤中標籤隨 snapshot 同步，null 不補值。
+
+不改 bookRefresh 的 delay=300ms、interval=2000ms、tail 與去重／AbortController／quoteRequestToken／liveGeneration／market+code 身分守門；syncLiveSubscription 與 onOpen 仍清空前標的 snapshot。所有來源頁共用此元件，不新增 BFF 或公開 API、計算或寫入。離線以實際 Vue 渲染及延遲回應驅動 DOM 身分與數值驗證，並沿既有單元／契約測試確認生命週期隔離；實際 frontend Docker 服務完成 rebuild/recreate 後驗證產物與服務。
