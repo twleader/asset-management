@@ -13230,3 +13230,14 @@ StockAnalysisDialog 的 quoteDetailLoading 仍代表既有單一 book request �
 StockAnalysisDialog 自行持有 timer 與 idempotent start/stop 函式；syncLiveSubscription／頁籤切換／可見 catchup 會依目前條件啟用，pauseLiveReads 與卸載必清理。重複事件不可新增 timer；換股先停舊 timer 與 abort 舊 request，再為目前身分啟用。timer 回呼與實際讀取均檢查適用狀態，瀏覽器隱藏時不發 GET；恢復只作 bounded catchup，不補跑隱藏期間所有輪次。保留完整 snapshot assignment、quoteRequestToken／liveGeneration／market+code、Task524 的 available snapshot DOM 及失敗語意。BFF 仍 pure read persisted canonical，兩秒前端讀取不代表 provider 有兩秒新資料。
 
 驗證以假 timer 控制實際 SFC 函式、零 SSE 連續讀至少三輪及 abort/visibility/tab/unmount；瀏覽器使用實際編譯元件與可控延遲回應確認時間／總量連續變動而既有 DOM 不變。真實 2330 的 API 及 PostgreSQL／Redis revision 唯讀取樣作上游證據，不偽稱有登入 session 或以單次 HTTP200代表即時 UI。
+
+
+## Task 526：SSE 最新成交與 canonical 五檔分開呈現
+
+StockAnalysisDialog 既有 onQuote 僅 requestLiveRead，故成交顯示一直讀 quoteDetail.price，最高只能跟上 Yahoo／Fubon canonical book producer。新增獨立 reactive 最新成交 state，onQuote 匹配當前 market/code 且 open/visible 後直接呼叫同一 mergeLiveQuote(current,incoming) 採用一份完整合法報價 tuple；使用 source、updatedAt、tradingDate、quoteStatus、price、priceChange、changePercent，缺值不推算。訂閱與 catchup 只重播 livePriceStream.quotes() 既有 cache，不新增 EventSource 或 HTTP 入口。
+
+UI 在五檔快照區前固定呈現最新成交、provider 原漲跌與漲跌幅、來源及來源時間；不是完整逐筆成交明細，也不保證不同成交必改價。沒有合法當日成交時明示等待／不可用；有 close status 時沿真狀態呈現，不把先前盤中或前一日數值偽裝為當前。quoteDetail summary 首欄由「成交」改標「快照成交」，並明示五檔快照來源／時間，維持原完整 snapshot、book levels、內外盤與總量。兩個 state 不互相寫入，book 晚到不影響 SSE；此為 T526 對舊「整個 dialog 只能單一 snapshot」表述的限縮展示修訂，不改 canonical 五檔任何契約。
+
+pause／close／stock identity switch 清理最新成交；resume/catchup 再從同一 stream 的 validated current-date cache 或新事件填入。日期與 nano time ordering／null comparison／close fence 都使用已存在 mergeLiveQuote，不複製另一套驗證。來源時間沒有 offset 時按台北解析顯示；不以瀏覽器所在時區猜來源。T525 book interval 與 HTTP abort/generation/token 保留，不改其他頁的共用 stream／金融資料。
+
+Dashboard、TradingRadar、WatchStock、SnapshotForm 現有 onQuote 已各自 applyLivePrice/applyPriceUpdate；本次只補共用 dialog 缺少的直接資料投影，使其所有父頁一致。驗證以現有 livePrices.test.js 真 SFC AST fixture 與完整 SFC browser harness，含真共享 transport 的 price-update delivery；唯讀 business SSE／Redis 證據與已登入 BFF UI 分開，不能以橋接測試冒稱拿到使用者 session。

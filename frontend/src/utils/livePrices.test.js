@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc'
-import { reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { createLivePriceStream, createTrailingRefresh, mergeLiveQuote, patchLiveRow } from './livePrices.js'
 import { marketToday, applyEnrichedQuote, isClosePending } from './displayQuote.js'
 import { normalizeIntradaySession } from './intradaySession.js'
@@ -437,11 +437,11 @@ test('SnapshotForm actual handlers preserve dirty/manual fields, gate scope/date
   assert.equal(row.shares, 50); assert.equal(row.investmentCost, 1000); assert.equal(row.dividendRate, 0.04); assert.equal(row.brokerRows[0].shares, 10); stop()
 })
 
-function dialogFixture(clock, api) {
+function dialogFixture(clock, api, stream = null) {
   const props = { modelValue: true, stock: { market: '台股', stockCode: '2330' } }
-  const state = { props, activeTab: { value: 'chart' }, isIntraday: { value: true }, intradayLoading: { value: false }, intradaySession: { value: null }, intradayTicks: { value: [] }, quoteRequestToken: { value: 0 }, quoteDetailLoading: { value: false }, quoteDetail: { value: null }, livePriceStream: { visible: () => clock.visible }, bffApi: { stockAnalysis: api }, createTrailingRefresh: (read, options) => createTrailingRefresh(read, { ...options, ...clock.options }) }
-  const ctx = page('../components/StockAnalysisDialog.vue', ['liveIdentity', 'liveCurrent', 'fetchIntraday', 'fetchQuoteDetail', 'requestLiveRead', 'quoteDetailRefreshEligible', 'stopBookRefreshTimer', 'syncBookRefreshTimer', 'pauseLiveReads', 'intradayRefresh', 'bookRefresh', 'bookRefreshTimer'], { ...state, setInterval: clock.options.setInterval, clearInterval: clock.options.clearInterval },
-    'let liveGeneration = 0, intradayRequest = null, bookRequest = null, intradayController = null, bookController = null;')
+  const state = { props, activeTab: { value: 'chart' }, isIntraday: { value: true }, intradayLoading: { value: false }, intradaySession: { value: null }, intradayTicks: { value: [] }, quoteRequestToken: { value: 0 }, quoteDetailLoading: { value: false }, quoteDetail: { value: null }, latestTrade: { value: null }, livePriceStream: stream ?? { visible: () => clock.visible, quotes: () => [], subscribe: () => () => {} }, bffApi: { stockAnalysis: api }, createTrailingRefresh: (read, options) => createTrailingRefresh(read, { ...options, ...clock.options }) }
+  const ctx = page('../components/StockAnalysisDialog.vue', ['liveIdentity', 'liveCurrent', 'applyLatestTrade', 'replayLatestTrade', 'fetchIntraday', 'fetchQuoteDetail', 'requestLiveRead', 'quoteDetailRefreshEligible', 'stopBookRefreshTimer', 'syncBookRefreshTimer', 'pauseLiveReads', 'syncLiveSubscription', 'intradayRefresh', 'bookRefresh', 'bookRefreshTimer'], { ...state, setInterval: clock.options.setInterval, clearInterval: clock.options.clearInterval },
+    'let liveGeneration = 0, intradayRequest = null, bookRequest = null, intradayController = null, bookController = null, stopLivePrices = null;')
   return { ctx, ...state }
 }
 const session = price => ({ tradingDate: today, ticks: [{ price, time: '10:00:02', volume: 1 }], lastPrice: price })
@@ -531,13 +531,16 @@ test('Dialog quote-detail timer stops and resumes across hidden, tab, stock, clo
 })
 test('quote detail compiled template keeps refresh feedback behind the available-snapshot boundary', () => {
   const file = new URL('../components/StockAnalysisDialog.vue', import.meta.url)
-  const { descriptor } = parse(readFileSync(file, 'utf8'))
+  const dialog = readFileSync(file, 'utf8')
+  const { descriptor } = parse(dialog)
   const fragment = descriptor.template.content.match(/<el-tab-pane(?=[^>]*\bname="quote-detail")[\s\S]*?<\/el-tab-pane>/)?.[0]
   assert.ok(fragment, 'real quote-detail tab template exists')
   const { code, errors } = compileTemplate({ source: fragment, filename: file.pathname, id: 'quote-detail-refresh-contract', compilerOptions: { mode: 'function' } })
   assert.deepEqual(errors, [])
   assert.equal(code.split('_ctx.quoteDetailLoading && !_ctx.quoteDetail?.available').length - 1, 2,
     'button spinner and loading branch both require no available snapshot')
+  assert.ok(fragment.indexOf('class="latest-trade"') < fragment.indexOf('class="quote-detail-head"'), 'latest SSE display remains before the independently loaded book snapshot')
+  assert.match(dialog, /\['快照成交',fmtQuote\(q\.price\)/, 'canonical quote summary keeps its snapshot meaning explicit')
 })
 test('Dialog quote detail real handler deduplicates canonical reads and ignores late failures after stock switch or close', async () => {
   const gate = deferred(), calls = []
@@ -564,6 +567,86 @@ test('Dialog quote detail real handler deduplicates canonical reads and ignores 
     assert.equal(stale.quoteDetail.value, null, 'late rejection cannot restore an unavailable result')
     assert.equal(stale.quoteDetailLoading.value, false)
   }
+})
+
+test('Dialog real SSE handler replays cache and applies only ordered current-stock tuples independently of late book snapshots', async () => {
+  const streamFixture = fixture(), clock = new Timers(), book = deferred()
+  const releaseFeeder = streamFixture.stream.subscribe({})
+  streamFixture.sources[0].open()
+  streamFixture.sources[0].emit(quote({ source: 'FUBON_WS_AGGREGATES', updatedAt: `${today}T10:00:02.345176000` }))
+  const snapshot = { available: true, source: 'YAHOO_TW', sourceTime: `${today}T10:00:02`, price: 100, levels: [{ level: 1, bidPrice: 99 }] }
+  const d = dialogFixture(clock, { getQuoteDetail: () => book.promise }, streamFixture.stream)
+  d.isIntraday.value = false
+  d.ctx.syncLiveSubscription() // Existing open stream invokes catchup; cache replay does not need a book GET.
+  assert.equal(d.latestTrade.value.price, 110)
+  assert.equal(d.latestTrade.value.source, 'FUBON_WS_AGGREGATES')
+  assert.equal(d.latestTrade.value.updatedAt, `${today}T10:00:02.345176000`)
+
+  streamFixture.sources[0].emit(quote({ updatedAt: `${today}T10:00:03.765034000` }))
+  assert.equal(d.latestTrade.value.price, 110, 'same-price event advances its source time without a fabricated price change')
+  assert.equal(d.latestTrade.value.updatedAt, `${today}T10:00:03.765034000`)
+  streamFixture.sources[0].emit(quote({ price: 120, priceChange: 20, changePercent: 20, updatedAt: `${today}T10:00:04` }))
+  assert.equal(d.latestTrade.value.price, 120)
+
+  const current = d.latestTrade.value
+  d.ctx.applyLatestTrade(quote({ price: 115, updatedAt: `${today}T10:00:03` }))
+  d.ctx.applyLatestTrade(quote({ stockCode: '2317', price: 130, updatedAt: `${today}T10:00:05` }))
+  d.ctx.applyLatestTrade(quote({ tradingDate: yesterday, price: 130, updatedAt: `${yesterday}T10:00:05` }))
+  assert.strictEqual(d.latestTrade.value, current, 'out-of-order, wrong-stock and prior-day LIVE tuples are ignored')
+
+  const pendingBook = d.ctx.fetchQuoteDetail(); await flush()
+  assert.equal(d.quoteDetailLoading.value, true)
+  d.ctx.applyLatestTrade(quote({ price: 121, priceChange: 21, changePercent: 21, updatedAt: `${today}T10:00:05` }))
+  book.resolve(snapshot); await pendingBook
+  assert.strictEqual(d.quoteDetail.value, snapshot, 'book remains a complete canonical snapshot')
+  assert.equal(d.latestTrade.value.price, 121, 'late book completion cannot overwrite the independent SSE tuple')
+
+  streamFixture.sources[0].emit(quote({ price: 121, priceChange: null, changePercent: null, updatedAt: `${today}T10:00:06` }))
+  assert.equal(d.latestTrade.value.priceChange, null); assert.equal(d.latestTrade.value.changePercent, null, 'explicit null comparison values remain null')
+  streamFixture.sources[0].emit(quote({ quoteStatus: 'CLOSE_PENDING', price: 121, priceChange: null, changePercent: null, updatedAt: `${today}T10:00:07` }))
+  const closed = d.latestTrade.value
+  d.ctx.applyLatestTrade(quote({ price: 130, updatedAt: `${today}T10:00:08` }))
+  assert.strictEqual(d.latestTrade.value, closed, 'close-pending fence blocks later LIVE events')
+
+  d.ctx.pauseLiveReads(); assert.equal(d.latestTrade.value, null, 'pause clears latest-trade state')
+  d.ctx.replayLatestTrade(); assert.equal(d.latestTrade.value.quoteStatus, 'CLOSE_PENDING', 'visible catchup can restore a legal cached close state')
+  d.props.stock = { market: '台股', stockCode: '2317' }; d.ctx.syncLiveSubscription()
+  assert.equal(d.latestTrade.value, null, 'stock switch clears the prior symbol and cannot replay its cache')
+  d.props.modelValue = false; d.ctx.syncLiveSubscription()
+  assert.equal(d.latestTrade.value, null, 'close clears latest-trade state')
+  d.ctx.pauseLiveReads(); releaseFeeder()
+})
+
+test('Dialog latest-trade presentation never labels a prior close as live and preserves true close status', () => {
+  const latestTrade = ref(null)
+  const ctx = page('../components/StockAnalysisDialog.vue', [
+    'fmtQuote', 'signed', 'latestTradeIsToday', 'latestTradeCanDisplay', 'latestTradeStatusText',
+    'latestTradePrice', 'latestTradeChange', 'latestTradeChangePercent', 'latestTradeSourceLabel', 'latestTradeTime'
+  ], { latestTrade, computed })
+  const value = name => vm.runInContext(`${name}.value`, ctx)
+  assert.equal(value('latestTradeStatusText'), '等待當日即時成交')
+  assert.equal(value('latestTradePrice'), '—')
+
+  latestTrade.value = quote({ source: 'FUBON_WS_AGGREGATES', updatedAt: `${today}T10:00:02.345176000` })
+  assert.equal(value('latestTradeStatusText'), '即時推播')
+  assert.equal(value('latestTradePrice'), '110.00')
+  assert.match(value('latestTradeTime'), /\.345$/, 'timezone-less source time is shown in Taipei with millisecond precision')
+  assert.equal(value('latestTradeSourceLabel'), '富邦即時彙總')
+
+  latestTrade.value = quote({ quoteStatus: 'PREVIOUS_CLOSE', tradingDate: yesterday, price: 100, updatedAt: `${yesterday}T10:00:02` })
+  assert.match(value('latestTradeStatusText'), /前一交易日收盤參考.*等待當日即時成交/)
+  assert.equal(value('latestTradePrice'), '—', 'prior-day price cannot appear as the current latest trade')
+
+  latestTrade.value = quote({ quoteStatus: 'CLOSE_PENDING', price: null, priceChange: null, changePercent: null, updatedAt: `${today}T13:30:01` })
+  assert.equal(value('latestTradeStatusText'), '收盤確認中')
+  assert.equal(value('latestTradePrice'), '—', 'close pending does not retain the earlier live price')
+  latestTrade.value = quote({ quoteStatus: 'CLOSE_PENDING', price: 108, priceChange: -2, changePercent: -1.82, updatedAt: `${today}T13:30:01` })
+  assert.equal(value('latestTradePrice'), '—', 'a close-pending payload cannot expose an unconfirmed non-null price')
+  assert.equal(value('latestTradeChange'), '—')
+  assert.equal(value('latestTradeChangePercent'), '—')
+  latestTrade.value = quote({ quoteStatus: 'VERIFIED_CLOSE', price: 108, priceChange: -2, changePercent: -1.82, updatedAt: `${today}T13:30:02` })
+  assert.equal(value('latestTradeStatusText'), '已驗證收盤')
+  assert.equal(value('latestTradePrice'), '108.00', 'verified close is identified by its true status')
 })
 
 

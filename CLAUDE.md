@@ -511,3 +511,8 @@ Task507取代舊summary的「未收錄參數、指令」文案：新觀測摘要
 ### Requirement 190／Task 508 公開決策摘要來源例外
 
 Task508以獨立選填Event.publicDecision記錄版本化LLM_PUBLIC_SUMMARY_V1公開自述；只能OBSERVATION/UNKNOWN，由collector grant讀Codex真commentary marker或Claude原final result.publicDecisions。它不靠Task504缺少的exporter、不偽造actual工具配對，不讀reasoning／其他自由文字，不證明工具已執行。每筆全部1..32候選、非空白公開短理由≤500、每項opaque refs≤3；擬議參數沿Task501遮蔽／截斷，超額整筆具名拒絕、不漏選項稱完整。理由可在使用者授權的合法scope含金融摘要，僅ADMIN按需明細可讀；Node只帶安全summary，圖／tooltip不含理由、refs或參數。兩軌真入口及既有美盤22-00本輪實際部署，時間／日曆no-op、金融閘門與時限不變，無觀測HTTP等待。Claude遠端device proof不可得具名BLOCKED_REMOTE_PROOF、不阻擋其他已授權工作。observer現1.4.0、金融YAML路由／schema不變，統一Swagger與SRPP新規則hash完整發布、authority/registry/jar驗同身份，下一交易日合法時窗read-only GET尚未執行時記NOT_YET_EXECUTED。
+
+
+### Requirement 197／Task 526 最新成交展示例外
+
+使用者明確要求共用分析視窗的成交價直接沿富邦→Redis→全站共用 SSE 更新。僅限 StockAnalysisDialog 的獨立「最新成交」展示 state 可讀既有 livePriceStream 的 validated tuple 與同一 stream cache，直接顯示 provider 的價格／漲跌／漲跌幅／來源／時間；不新增 SSE、API、vendor I/O 或計算。此 state 與 quoteDetail 完全分開、各標來源時間，原 summary 的成交明示「快照成交」。前述完整單一來源 canonical snapshot 規定繼續約束 quoteDetail／levels／內外盤，不得逐欄混接 SSE，不改公開回應、估值、策略、警示或交易。無當日合法即時資料時明示等待／真 close 狀態，不以五檔快照補裝即時。
