@@ -6444,3 +6444,9 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - [ ] 保留原13個 short-US cases 完整不變，另以凍結 SRPP 的 `test_long_short_term_exit.py` fixture 與實際 `screen` 原函式產生獨立 golden，覆蓋兩檔債券61／119／120日、舊除息、鎖定日起完整資料、缺舊bar、配息衝突、BUY無trigger／有trigger及非交易日鎖定日期。新產生器須明示絕對來源與唯讀 `--check`，記錄 Python 來源 hash；Java 用同一輸入逐欄比對退出狀態、理由、鎖定調整價、股數與凍結狀態，不手改 expected。隔離回歸須驗相對／缺失root、embedded bytes不符、stale hash／case拒絕，以及成功／失敗check的受保護來源與產物零寫入；僅合成fixture日曆可寫系統暫存區。
 - [ ] 通過同一絕對來源的 authority checker、golden／registry 回歸、聚焦 Java parity／authority 測試、獨立架構檢查與 spec-check；正式 targets document、其餘 Java 公式、Swagger、schema、producer 與排程不變。第一階段為離線交付，當時不呼叫金融 API、不執行 SQL、不重建服務、不寄信、不交易；後續發布僅依使用者新增的明確授權執行並留下實際收據。
 - [ ] 第一階段完成 feature 提交、推送與遠端讀回；當時未授權 run-stack，故保留 feature 並具名記錄尚未 main merge。2026-11-02 20:36之後使用者明確要求先登錄規則包、rebuild資產服務、最後兩專案commit／merge／push，本次依此具體順序執行（優先於Task504一般SQL時序），再從乾淨main重建。保留原設定／排程、歷史registry rows與原金融硬閘；只用正式health與安全GET驗部署，越13:30之金融runtime仍NOT_YET_EXECUTED，不以hash／health冒充。
+
+#### Task 536：美股全雷達分析規則包同步發布（延伸 Requirement 193）
+
+- [ ] 以本輪官方檢核通過的 SRPP bundle `17d105ecae3c357b6c19f52a479f70e6f9a81740034969df0b343752cdaad58f` 為唯一來源，將 model／manifest 原始 bytes 同步到 business-services；保留 D-205／policy 2.54.0／model 3.22.0。僅分析宇宙擴為持股加全部美股雷達與明確觀察名單，不更動公式、targets、閘門、Swagger、API 或交易權限。
+- [ ] 原 generator 重產同輸入 golden 與 insert-only registration SQL；正式 policy document 不變；來源、內嵌 artifacts、golden、SQL 與執行中 JAR／registry 均須精確同 hash。歷史 registry rows 不得 UPDATE／DELETE。
+- [ ] 兩個專案均須 commit、no-ff merge、push 及 remote-ref readback；只重建／recreate business-services。金融 runtime acceptance 僅於官方台股交易日 09:05至13:30前唯讀驗證，其他時間記 NOT_YET_EXECUTED，不建立報告包、不寄信、不下單。

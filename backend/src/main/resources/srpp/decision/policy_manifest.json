@@ -8,7 +8,7 @@
     "README.md": "fb673d126801554b515979f95b4d91192f84ce5dae0a44ca5bdf026420dd2599",
     "assumptions/bond_forward_yields.json": "1103936e3b72361ea5080b662560141cf7377ea69a7a13d814e10ad5454b8fce",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "8f3e802edd4ab4060e738fd27e73d90f1750b2821954ed115786e10b39feb69f",
+    "assumptions/daily_runtime_contract.json": "8cd923dcb8d75c2686e69971fd1dbce2eb253d96822c14260474823f3fbf4bc3",
     "assumptions/financial.md": "f19f01bc9110f90d85691e35e740e18073f8d51f8d7a985761d53a4b3a1bceec",
     "assumptions/market.md": "5da360e2cb732f8d03ab3626f4756e5dcd5f1fafb456a7167052a209d26187c8",
     "assumptions/model_inputs.json": "e272c4a75c2081393548f4f05e9693985112dd10a4e3a6f3a056bb4b2bf46ceb",
@@ -39,9 +39,9 @@
     "docs/SHARED_RULES.md": "a68f9af0749a67c36fc8bc107c899c9f8585258d2678df430c0ad44974b4d6db",
     "docs/SHORT_TERM_OPPORTUNITIES.md": "4e5a8f97016f5d83abde6094cda1029dea9bc4029e691342c4a23b5e931b99ec",
     "docs/US_EARNINGS_RISK_REPORT.md": "6c19cba727a5f68723a1cd6abe76573dbbd93774329801d44c8bd2015a8bfb2e",
-    "docs/US_REPORT_EVIDENCE.md": "0b03c839f14d0dc5cfee1b6d4103348950e573d48f4a75351ca3cc1d9f3f7bbc",
+    "docs/US_REPORT_EVIDENCE.md": "4e59826eddcb66ce6eef3ec198a8ee3b4068a688164244ff977b91c50214775b",
     "docs/WEEKLY_MARKET_OUTLOOK_AUTOMATION.md": "fc7117f1c0ed1334143e854028cba85357e9ca74342a0da262e2af60287056a9",
-    "docs/schedule_entries/README.md": "7c478e8d40d9f0806cf1b677c034399f883197ffeeafdac0493272bbdce7ca88",
+    "docs/schedule_entries/README.md": "ff393f12c76a9527de29e1e59f99f975702a370ae138ad2a01965c2da28acdee",
     "docs/schedule_entries/retired/CLAUDE_SCHEDULES_RETIRED.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp--0930.ENTRY.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp--0930.SKILL.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
@@ -50,7 +50,7 @@
     "docs/schedule_entries/srpp-0905-claude.SKILL.md": "f544819e670738458e99f4ac4425b93cbb85dd7c7e6b159d34a78862f72eea11",
     "docs/schedule_entries/srpp-1150-claude.SKILL.md": "b9addb92c659c1bc18e5ed482d440350e150befbcd93a5244a589b665e4b4bc4",
     "docs/schedule_entries/srpp-daily.ENTRY.md": "3ca8930760c5563c5a6268e1d35fbcff15c4b6fead8326ad652de80c01605fce",
-    "docs/schedule_entries/us-22-00.EVIDENCE.md": "ec10d5a76308cd22b9233f53b96e370937c86a8b7e1f678fafb32c77c279bbf7",
+    "docs/schedule_entries/us-22-00.EVIDENCE.md": "893abcafd71827edb4a8de8a078d619e2721d41aa0f4a18f608f3c00271ca83b",
     "docs/schedule_entries/us-22-00.PUBLIC_DECISIONS.md": "5e1354813b6e7c8e724a6367456078cfdf49a071fad057cb4354ed1ab5fde64d",
     "excel/WORKBOOK_SPEC.md": "590d696193e837be9d0efe631c4fbc3167b6335345a3e38f47158ddf72cd101e",
     "montecarlo/MODEL_SPEC.md": "2212bde73445d08e9adec3074eb2209f2101a535754db4776fea1b8c1d8b31fd",
@@ -160,5 +160,5 @@
     "scripts/verify_srpp_report_calculations.py": "b3bb437fca9ac03aadbf0f74cd999a9ad93fc213fd6b54ecf74917ea1e11e8e9",
     "scripts/verify_technical_series.py": "a029382844c195acbcf49a849a9e3113f9b715b17cb5234002b9a5c9c5918c93"
   },
-  "POLICY_BUNDLE_SHA256": "cf3d8955a97672685b7afd370cc10675cee62733dca14dfd0188bd16029d4e22"
+  "POLICY_BUNDLE_SHA256": "17d105ecae3c357b6c19f52a479f70e6f9a81740034969df0b343752cdaad58f"
 }

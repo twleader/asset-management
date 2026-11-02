@@ -13300,3 +13300,7 @@ Task534後續身分發布沿同一流程：SRPP本機新增已結清短線closed
 新增離線 `generate-srpp-long-short-exit-golden.py --srpp-root <absolute> [--check]`，先驗正式 bundle，再使用該來源 `LongShortTermExitTests` 的合成 fixture 與實際 Python screen；所有暫存日曆只寫系統暫存區。輸出獨立 `report-long-short-exit-golden.json`，記錄 source bundle 與計算器／fixture 原文 SHA，不改既有13例。Java 比對相同輸入的 position reference／holding count／股數、exit status／reasons、adjusted locked prices、pending room、core attribution 與 sleeve 凍結；除數字表示容差外，狀態及理由嚴格一致。產生器 `--check` 完整 bytes 比對、失敗非0且零寫入，不重算或手編 expected 掩蓋差異。隔離回歸覆蓋相對／缺失root、embedded bytes不符、stale source hash／case、正反check受保護來源與產物皆零寫入；fixture合成日曆僅可在自有系統暫存目錄建立並清理。
 
 第一階段授權包含規格、來源產物、同一持有期缺陷的 Java 對齊、離線測試與 Git 收尾；當時未授權 registry SQL、Docker rebuild／recreate 或金融 API，故先保留 feature 提交與遠端讀回。2026-11-02 20:36之後，使用者明確要求本次按「登錄→rebuild→最後Git」發布，僅此具體時序優先於Task504一般SQL等待Git規則：原insert-only SQL交易登錄並完整精確讀回新row／歷史rows不變，再以main權威設定於feature只重建business-services，通過正式health、安全GET及JAR／class身分後完成no-ff main merge／push，再從乾淨main重建相同服務。BFF與其他容器保留，原env／flags／排程／feed不改。正式金融runtime驗收仍守09:05≤now<13:30台股交易日時窗，越窗明列NOT_YET_EXECUTED，不以健康檢查、靜態hash或舊run證據替代正式採用。
+
+## Requirement 193／Task 536：美股全雷達分析規則包身分同步
+
+本輪SRPP只修正美股分析宇宙為持股、本輪全部美股雷達與明確觀察名單的聯集；模型原始bytes、公式與正式targets維持。沿用既有 authority 發布鏈：官方 source check → 複製 model／manifest bytes → 原 generator 重產 registration SQL／golden → 離線 authority gate → 聚焦測試 → feature rebuild/recreate 驗收 → 雙專案 no-ff merge／push → 乾淨 main rebuild/recreate → insert-only registry SQL → exact row／JAR readback。既有本輪合法時窗外不得以金融 GET 驗收，runtime採用保持 NOT_YET_EXECUTED。只更新既有資源與固定回歸身分，不新增API、schema、producer、資金或交易能力。
