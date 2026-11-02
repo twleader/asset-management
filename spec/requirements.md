@@ -6456,3 +6456,8 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - [ ] 新hash晚間部署且登錄後，背景producer須對當日已確認台股交易日、已過14:00、exact owner／policy／Swagger／12:00 scope缺少任一consumer包時，實際重新讀取canonical DB/cache並計算發布一次；不複用舊hash包、不偽裝午盤capture、不呼叫vendor／券商／刷新／寄信。正常盤中排程與公式不變。
 - [ ] 收盤初始化保留真實capturedAt及publication-context來源標記，mode=AFTER_CLOSE_INITIALIZATION、date、slot與capture時間受hash保護。兩個consumer的exact scope包都存在即跳過；同scope交易鎖內重查，成功後後續tick／restart不得重算。缺必要來源最多3次嘗試／程序／owner-date-authority，失敗保持503並具名日誌；跨午夜不補前日或提早當日。
 - [ ] 此初始化僅提供真實非可執行診斷結果：原quote freshness／closed／pending等硬閘原樣；若任何leg為ACTIONABLE_FOR_REPORT或有正lots／units／limitPrice／amount，publisher交易須失敗回滾，不得刪改輸出假裝通過。GET維持純讀，可於同交易日晚間讀回新初始化包、核對真實來源與全部12模組，不代表交易／完整金融採納。
+
+#### Task 538：報告保留額度完整驗證的有界資料讀取（延伸 Requirement 187）
+
+- [ ] report reservation capture保留既有owner／日期／slot／跨週跨policy／sharedbase去重查詢與全部envelope/hash校驗，但用交易內PostgreSQL cursor逐列處理，不以List同時載入所有content_jcs。既有生產owner1的959包達7344MiB，不能因背景初始化將數GB字串常駐Javaheap。
+- [ ] 每列仍完整驗證後擷取相同保留額度，不先filter actionable、不省略舊policy／前週、不清零、limit或改budget；SQL與型別／結果語意不變。fetchSize設固定小值、autoCommit=false、callback同一transaction／connection，錯誤整批fail closed並釋放ResultSet／statement／cursor。

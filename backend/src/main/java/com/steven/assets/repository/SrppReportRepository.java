@@ -1,6 +1,10 @@
 package com.steven.assets.repository;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Repository;
 import java.sql.*;
 import java.time.*;
@@ -34,13 +38,28 @@ public class SrppReportRepository {
     public Optional<Package> latest(Scope s, String consumer) {
         return jdbc.query("SELECT * FROM srpp_report_calculation_package WHERE owner_user_id=? AND consumer=? AND trading_date=? AND report_slot=? AND policy_bundle_sha256=? AND swagger_sha256=? AND calculator_version=? AND status='FINAL' ORDER BY published_at DESC,id DESC LIMIT 1", (r,n)->pkg(r), s.owner(), consumer, s.date(), s.slot(), s.policy(), s.swagger(), s.calculator()).stream().findFirst();
     }
-    public List<String> priorReportReservations(long owner, LocalDate from, LocalDate date, String slot) {
+    @Transactional(readOnly=true)
+    public void visitPriorReportReservations(long owner, LocalDate from, LocalDate date, String slot, Consumer<String> visitor) {
         // One consumer copy per shared base. Never discard an earlier actionable revision without an exact fill link.
-        return jdbc.query("SELECT DISTINCT ON (shared_calculation_id) content_jcs FROM srpp_report_calculation_package WHERE owner_user_id=? AND trading_date BETWEEN ? AND ? AND (trading_date<? OR report_slot<?) ORDER BY shared_calculation_id,published_at,id", (r,n)->r.getString(1), owner, from, date, date, slot);
+        visit("SELECT DISTINCT ON (shared_calculation_id) content_jcs FROM srpp_report_calculation_package WHERE owner_user_id=? AND trading_date BETWEEN ? AND ? AND (trading_date<? OR report_slot<?) ORDER BY shared_calculation_id,published_at,id", visitor, owner, from, date, date, slot);
     }
-    public List<String> unlinkedReportReservations(long owner, LocalDate date, String slot) {
+    @Transactional(readOnly=true)
+    public void visitUnlinkedReportReservations(long owner, LocalDate date, String slot, Consumer<String> visitor) {
         // Policy or week changes do not prove that a prior recommendation was consumed.
-        return jdbc.query("SELECT DISTINCT ON (shared_calculation_id) content_jcs FROM srpp_report_calculation_package WHERE owner_user_id=? AND (trading_date<? OR (trading_date=? AND report_slot<?)) ORDER BY shared_calculation_id,published_at,id", (r,n)->r.getString(1), owner, date, date, slot);
+        visit("SELECT DISTINCT ON (shared_calculation_id) content_jcs FROM srpp_report_calculation_package WHERE owner_user_id=? AND (trading_date<? OR (trading_date=? AND report_slot<?)) ORDER BY shared_calculation_id,published_at,id", visitor, owner, date, date, slot);
+    }
+    private void visit(String sql, Consumer<String> visitor, Object... parameters) {
+        Objects.requireNonNull(visitor, "visitor");
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("REPORT_RESERVATION_TRANSACTION_REQUIRED");
+        jdbc.query(connection -> {
+            if (connection.getAutoCommit()) throw new SQLException("REPORT_RESERVATION_CURSOR_REQUIRES_TRANSACTION");
+            PreparedStatement statement=connection.prepareStatement(sql);
+            try {
+                statement.setFetchSize(1);
+                for(int i=0;i<parameters.length;i++)statement.setObject(i+1,parameters[i]);
+                return statement;
+            } catch (SQLException|RuntimeException failure) { statement.close();throw failure; }
+        }, (RowCallbackHandler)row -> visitor.accept(row.getString(1)));
     }
     public void insert(Base b) {
         Scope s=b.scope(); jdbc.update("INSERT INTO srpp_report_calculation_base(id,owner_user_id,trading_date,report_slot,policy_bundle_sha256,swagger_sha256,calculator_version,source_fingerprint_sha256,captured_at,asset_generated_at,asset_snapshot_id,valuation_capture_id,input_jcs,source_vector_jcs,shared_modules_jcs,shared_content_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", b.id(),s.owner(),s.date(),s.slot(),s.policy(),s.swagger(),s.calculator(),b.fingerprint(),Timestamp.from(b.capturedAt()),Timestamp.from(b.assetGeneratedAt()),b.snapshotId(),b.valuationId(),b.input(),b.vector(),b.modules(),b.hash(),Timestamp.from(b.createdAt()));
