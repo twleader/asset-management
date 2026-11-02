@@ -6399,6 +6399,14 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 由原 Ruby 工具重產 insert-only registry SQL、由原 Python generator 重產主 report 22 案例 golden；金融 expected 與 `originalCalculatorHashes` 逐值不變，僅 bundle 欄位更新。formal targets、state-topup／income／payroll／short-US fixtures 預期不變；任何金融差異先停止回報，不得更新 expected 掩蓋。
 - [ ] 兩 repo 各自 feature commit、no-ff main merge、push 與 remote-ref readback 完成後，才可對 registry 執行受追蹤 SQL 的單次 `ON CONFLICT DO NOTHING` insert；舊 rows 不變、不 UPDATE／DELETE、不新增 migration。之後只從乾淨 asset main 的正式設定 rebuild／recreate business-services，重啟前逐項證明啟動期外抓、寄信、資產修改入口皆 no-op。最後以新 hash 對 9090 `report-calculations` 做唯讀 GET 讀回；不 POST、不重跑報告、不寄信、不交易。
 
+### Task 530：SRPP 雷達版本相容與投影驗證修復（既有 187／191／193）
+
+- SRPP 日報來源品質檢查、精確雷達驗證及短線分析必須一致接受已發布的 `EVIDENCE_GATE_V1` 與 `EVIDENCE_GATE_V2`；未知、空白及缺少版本維持不可用，不能以字首判定信任。V2 用於判斷時必須有 officialSma20Verification，其 status 僅接受 CONFIRMED／UNAVAILABLE／NOT_COMPARABLE 且 gateApplied=false；CONFLICT、缺值、未知狀態或 gateApplied=true 均拒絕，避免保留的候選方向繞過上游否決。來源品質驗證可保留真實 CONFLICT 事實，但不能作為通過交易閘的依據。版本相容不解除原 owner、日期、價格、時效、dataComplete、候選方向、actionGateReasons 與交易硬閘。
+- SRPP Python 短線分析採相同封閉版本集合；A1/A2 consumer 以本機已發布 Swagger 原始 bytes 的 SHA-256 驗身分，不再保留另一個會漂移的固定 hash。每次仍依既有 verifier 驗不可變包與回應，舊 hash 或不同 body 不可通過。
+- 缺官方薪資、國泰子帳戶、真委託、雙軌狀態或短線歸屬等資料維持具名缺口；禁止以總持股、合成資料或預設空集合補成 VERIFIED。API 路由、schema、Swagger bytes、投資規則及寄信／券商權限不變。SRPP consumer 程式變更需重新產生 runtime contract、manifest 與規則包身分，連同 backend authority／insert-only registry 及 golden metadata 一致發布。
+
+- Task530 投影 consumer 逐欄依現行 wire 契約驗證：A1/A2 universe 只含 action=BUY／SELL 的包內腿，保留原 module.index，不把 NONE 腿納入；未知 fact 必須 unit=NONE／value=null，明確查詢 universe 外的合法代碼只能回 UNAVAILABLE/null，不可提升成可用。預設無腿的空結果是有效結果，仍驗內容雜湊、coverage、身分與凍結來源。
+
 ### Task 531：009826 建倉腿確定性計算器的 authority 身分發布（Requirements 187／193）
 
 **User Story：** 作為 SRPP 報告讀者，我要 009826 建倉腿的張數由 SRPP 本機確定性計算器產出且兩軌一致，並讓承載該規則的新規則包身分在 9090 登錄，使 `report-calculations` 不因 `POLICY_UNSUPPORTED` 而整輪回退本機計算。
