@@ -11,20 +11,27 @@ import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
 class DashboardBffControllerTest {
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-11T13:05:00Z"), ZoneOffset.UTC);
 
     @Test
     void summaryProjectsLiveAssetsPricesWithoutCallingTheSeparatePricesEndpoint() {
         List<String> requests = new CopyOnWriteArrayList<>();
-        DashboardBffController controller = new DashboardBffController(client(requests), mock(SnapshotEnricher.class),
-                mock(DashboardLookthroughService.class), mock(DashboardPanelService.class));
+        DashboardBffController controller = summaryController(client(requests));
 
         ResponseEntity<DashboardSummaryDto> response = controller.getSummary().block();
 
@@ -43,7 +50,8 @@ class DashboardBffControllerTest {
                         Map.entry("updatedAt", "2026-09-11T13:02:00Z"), Map.entry("closed", false),
                         Map.entry("source", "NASDAQ"), Map.entry("quoteStatus", "LIVE")));
         assertThat(requests).containsExactlyInAnyOrder(
-                "/api/snapshots", "/api/snapshots/history", "/api/market-data/market-status", "/api/market-data/live-assets");
+                "/api/snapshots", "/api/snapshots/history", "/api/market-data/market-status",
+                "/api/market-data/live-assets", "/api/snapshots/15");
         assertThat(requests).noneMatch(path -> path.equals("/api/market-data/prices"));
     }
 
@@ -67,16 +75,54 @@ class DashboardBffControllerTest {
         assertThat(requests).noneMatch(path -> path.equals("/api/market-data/prices"));
     }
 
+    @Test
+    void summaryWithoutSnapshotDoesNotExposeOtherwiseValidLivePrices() {
+        List<String> requests = new CopyOnWriteArrayList<>();
+        DashboardBffController controller = summaryController(client(requests, false));
+
+        ResponseEntity<DashboardSummaryDto> response = controller.getSummary().block();
+
+        assertThat(response).isNotNull();
+        assertThat(response.getBody().getStockPrices()).isEmpty();
+        assertThat(response.getBody().getLatestSnapshotDetail()).isEmpty();
+        assertThat(requests).containsExactlyInAnyOrder("/api/snapshots", "/api/snapshots/history",
+                "/api/market-data/market-status", "/api/market-data/live-assets");
+    }
+
+    private static DashboardBffController summaryController(WebClient client) {
+        SnapshotEnricher enricher = spy(new SnapshotEnricher(client));
+        // This fixture has no completed-close rows; price projection must use the identity-bound live tuple.
+        doReturn(Mono.just(new SnapshotEnricher.SnapshotCloseData(Map.of(), Map.of(), Map.of())))
+                .when(enricher).fetchSnapshotCloseData(anyMap());
+        DashboardLookthroughService lookthrough = new DashboardLookthroughService(client);
+        DashboardPanelService panels = new DashboardPanelService(client, enricher, lookthrough,
+                Duration.ofSeconds(20), Duration.ofSeconds(5), CLOCK);
+        return new DashboardBffController(client, enricher, lookthrough, panels);
+    }
+
     private static WebClient client(List<String> requests) {
+        return client(requests, true);
+    }
+
+    private static WebClient client(List<String> requests, boolean hasSnapshot) {
         return WebClient.builder().baseUrl("http://business")
                 .exchangeFunction(request -> {
                     String path = request.url().getPath();
                     requests.add(path);
                     return switch (path) {
-                        case "/api/snapshots", "/api/snapshots/history" -> json("[]");
+                        case "/api/snapshots" -> json(hasSnapshot ? "[{\"id\":15,\"snapshotDate\":\"2026-09-11\"}]" : "[]");
+                        case "/api/snapshots/history" -> json("[]");
+                        case "/api/snapshots/15" -> json("""
+                                {"id":15,"snapshotDate":"2026-09-11","usdExchangeRate":32,"stocks":[
+                                  {"id":1,"stockCode":"2330","stockName":"台積電","market":"台股","shares":1,
+                                   "investmentCost":1190,"currentValue":1200},
+                                  {"id":2,"stockCode":"AAPL","stockName":"Apple","market":"美股","shares":1,
+                                   "investmentCost":6336,"currentValue":6400}
+                                ]}
+                                """);
                         case "/api/market-data/market-status" -> json("{\"twMarketOpen\":true}");
                         case "/api/market-data/live-assets" -> json("""
-                                {"priceUpdatedAt":"2026-09-11T13:05:00Z","stocks":[
+                                {"snapshotId":15,"snapshotDate":"2026-09-11","priceUpdatedAt":"2026-09-11T13:05:00Z","stocks":[
                                   {"stockCode":"2330","stockName":"台積電","market":"台股","currentPrice":1200,
                                    "previousClose":1190,"priceChange":10,"changePercent":0.84,"tradingDate":"2026-09-11",
                                    "updatedAt":"2026-09-11T01:01:00Z","closed":false,"source":"FUBON","quoteStatus":"LIVE"},
