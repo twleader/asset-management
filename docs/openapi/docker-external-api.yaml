@@ -3730,7 +3730,7 @@ paths:
       operationId: getSrppReportCalculations
       summary: 純讀背景預先計算的12模組不可變日報數值
       description: Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB或Redis寫入/通知/email/券商交易。所有錯誤亦不觸發API
-        error-log ingest；BFF與Nginx背景錯誤tailer為此exact GET具名排除persist，routecatalog只描述能力身份。背景每60秒cached日曆先行，在09:05–12:00與12:00–14:00發布對應slot；來源晚到重試、revision變動新ID，同輸入共享基底只算一次。每個query恰好一次，不接受未知/重複/空值/body/caller
+        error-log ingest；BFF與Nginx背景錯誤tailer為此exact GET具名排除persist，routecatalog只描述能力身份。背景每60秒cached日曆先行，在09:05–12:00與12:00–14:00發布對應slot；來源晚到重試、revision變動新ID，同輸入共享基底只算一次。Task537：同一已確認台股交易日14:00後，若當前owner／policy／Swagger的12:00 scope缺任一consumer包，背景以canonical DB/cache真實capture時間初始化非可執行診斷包；兩consumer皆存在即跳過，鎖內重查，每程序每scope最多3次失敗嘗試。publication-context來源標記AFTER_CLOSE_INITIALIZATION並受input/content hash保護；此模式拒絕actionable或正數量／限價／金額，不改寫計算輸出，不回補前日或09:05，不觸發vendor／券商／刷新。GET可於同日晚間純讀該真實PARTIAL／UNAVAILABLE診斷包，不代表正式金融採納或交易授權。每個query恰好一次，不接受未知/重複/空值/body/caller
         rawInput或建議；ACTIVE owner預設configured-admin，lookup5秒且caller Reactor identity清除。BFF驗全schema、exact
         owner/consumer/hash/clock、source refs、JCS來源原文與input/content hash、coverage、Decimal與positive-leg
         gates。12模組每項品質獨立，未完成公式scope固定NOT_EVALUATED/CALCULATOR_SCOPE_NOT_VERIFIED，不以null補0或聲稱COMPLETE；正式broker

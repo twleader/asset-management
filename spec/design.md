@@ -13304,3 +13304,11 @@ Task534後續身分發布沿同一流程：SRPP本機新增已結清短線closed
 ## Requirement 193／Task 536：美股全雷達分析規則包身分同步
 
 本輪SRPP只修正美股分析宇宙為持股、本輪全部美股雷達與明確觀察名單的聯集；模型原始bytes、公式與正式targets維持。沿用既有 authority 發布鏈：官方 source check → 複製 model／manifest bytes → 原 generator 重產 registration SQL／golden → 離線 authority gate → 聚焦測試 → feature rebuild/recreate 驗收 → 雙專案 no-ff merge／push → 乾淨 main rebuild/recreate → insert-only registry SQL → exact row／JAR readback。既有本輪合法時窗外不得以金融 GET 驗收，runtime採用保持 NOT_YET_EXECUTED。只更新既有資源與固定回歸身分，不新增API、schema、producer、資金或交易能力。
+
+## Task 537：收盤後缺失報告scope的一次背景初始化
+
+目前scheduler.slotFor在14:00後回null，晚間登錄的新hash因此永遠沒有當日FINAL包，純讀GET只能503。保留正常兩個盤中slot；14:00後至午夜增加僅當日12:00缺失scope的背景初始化。先cached台股日曆、authority／registry／Swagger核對，對active snapshot owner以既有owner-date transaction lock重查Codex／Claude exact packages；兩者皆存在即不capture。成功實際走原pure sources與calculators／publisher，不挪用舊base或改capture時鐘，保留既有不可變base與package表。失敗每process／scope最多3次，成功後lookup使後續tick/restart零額外capture。
+
+新增frozen source publication-context，閉合欄位mode、tradingDate、reportSlot、capturedAt；mode僅AFTER_CLOSE_INITIALIZATION，reportSlot12:00，capturedAt與input/facts相同且台北當日14:00後，sourceVector精確引用並保護hash。Envelope validator在發佈／GET均驗此完整性並拒絕任何actionable status或正lots／units／limitPrice／amount（不限欄位是否齊備），保持原計算結果，不事後清零／移除腿。既有盤中包無此來源不受影響。此為診斷包發布不變量，不是放寬或新增投資策略。
+
+API路由／schema保持；OpenAPI description同步背景初始化與晚間純讀診斷邊界，原renderer／identity sync更新managed SRPP feature的Swagger、consumer metadata、runtime與manifest後完整發布新hash；不更動model與公式。新bundle登錄前producer維持停止，登錄後下一分鐘可初始化。使用者本次明確要求修復及實際新hash成功驗證，允許當日晚間讀回該診斷包；原正式金融採用時窗仍不變，不重跑投資報告／POST／交易。

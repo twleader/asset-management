@@ -6450,3 +6450,9 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - [ ] 以本輪官方檢核通過的 SRPP bundle `17d105ecae3c357b6c19f52a479f70e6f9a81740034969df0b343752cdaad58f` 為唯一來源，將 model／manifest 原始 bytes 同步到 business-services；保留 D-205／policy 2.54.0／model 3.22.0。僅分析宇宙擴為持股加全部美股雷達與明確觀察名單，不更動公式、targets、閘門、Swagger、API 或交易權限。
 - [ ] 原 generator 重產同輸入 golden 與 insert-only registration SQL；正式 policy document 不變；來源、內嵌 artifacts、golden、SQL 與執行中 JAR／registry 均須精確同 hash。歷史 registry rows 不得 UPDATE／DELETE。
 - [ ] 兩個專案均須 commit、no-ff merge、push 及 remote-ref readback；只重建／recreate business-services。金融 runtime acceptance 僅於官方台股交易日 09:05至13:30前唯讀驗證，其他時間記 NOT_YET_EXECUTED，不建立報告包、不寄信、不下單。
+
+#### Task 537：新規則包收盤後首次計算結果就緒（延伸 Requirement 187／193）
+
+- [ ] 新hash晚間部署且登錄後，背景producer須對當日已確認台股交易日、已過14:00、exact owner／policy／Swagger／12:00 scope缺少任一consumer包時，實際重新讀取canonical DB/cache並計算發布一次；不複用舊hash包、不偽裝午盤capture、不呼叫vendor／券商／刷新／寄信。正常盤中排程與公式不變。
+- [ ] 收盤初始化保留真實capturedAt及publication-context來源標記，mode=AFTER_CLOSE_INITIALIZATION、date、slot與capture時間受hash保護。兩個consumer的exact scope包都存在即跳過；同scope交易鎖內重查，成功後後續tick／restart不得重算。缺必要來源最多3次嘗試／程序／owner-date-authority，失敗保持503並具名日誌；跨午夜不補前日或提早當日。
+- [ ] 此初始化僅提供真實非可執行診斷結果：原quote freshness／closed／pending等硬閘原樣；若任何leg為ACTIONABLE_FOR_REPORT或有正lots／units／limitPrice／amount，publisher交易須失敗回滾，不得刪改輸出假裝通過。GET維持純讀，可於同交易日晚間讀回新初始化包、核對真實來源與全部12模組，不代表交易／完整金融採納。

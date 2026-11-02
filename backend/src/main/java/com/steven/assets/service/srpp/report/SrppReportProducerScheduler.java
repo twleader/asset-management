@@ -22,7 +22,7 @@ import java.time.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/** Every 60-second tick revisits the active half-open slot; a restart or late source needs no GET trigger. */
+/** Every 60-second tick revisits the active half-open slot; a restart or late source needs no GET trigger. Missing same-day scopes can initialize diagnostic-only after close. */
 @Component
 public class SrppReportProducerScheduler {
     private static final Logger LOG=LoggerFactory.getLogger(SrppReportProducerScheduler.class);
@@ -31,6 +31,8 @@ public class SrppReportProducerScheduler {
     private final DecisionInputCapturePort capture;private final SrppReportExtraCapturePort extras;private final SrppReportConsumerStatePort states;
     private final SrppReportReservationCapture reservations;private final SrppReportPublisher publisher;private final Clock clock;private final SrppReportRepository reportRepository;private final TransactionTemplate transaction;
     private SrppReportFubonCapturePort fubon;
+    private final Map<Scope,Integer> afterCloseAttempts=new HashMap<>();
+    private static final int MAX_AFTER_CLOSE_ATTEMPTS=3;
     @Autowired
     public SrppReportProducerScheduler(MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,
             SrppReportAuthority authority,AppUserRepository users,AssetSnapshotRepository snapshots,DecisionInputCapturePort capture,
@@ -48,25 +50,45 @@ public class SrppReportProducerScheduler {
     public synchronized void produce(){
         ZonedDateTime now=ZonedDateTime.now(clock.withZone(SrppTime.TW_ZONE));Optional<Boolean> open;
         try{open=calendar.isTwTradingDayCachedOnly(now.toLocalDate());}catch(RuntimeException unavailable){return;}
-        if(!Optional.of(true).equals(open))return;String slot=slotFor(now.toLocalTime());if(slot==null)return;
+        if(!Optional.of(true).equals(open))return;
+        boolean afterClose=!now.toLocalTime().isBefore(LocalTime.of(14,0));
+        String slot=afterClose?"12:00":slotFor(now.toLocalTime());if(slot==null)return;
+        afterCloseAttempts.keySet().removeIf(key->!key.date().equals(now.toLocalDate()));
         Optional<String> swaggerHash=swagger.sha256();if(swaggerHash.isEmpty())return;
         Optional<SupportedPolicy> supported=registry.find(authority.decision().policy().bundleHash());if(supported.isEmpty()||!authority.matches(supported.get()))return;
         Set<Long> active=users.findByStatus(AppUser.STATUS_ACTIVE).stream().filter(AppUser::isActive).map(AppUser::getId).collect(Collectors.toSet());
         for(long owner:snapshots.findDistinctOwnerUserIds().stream().filter(active::contains).sorted().toList()){
+            Scope scope=new Scope(owner,now.toLocalDate(),slot,supported.get().bundleHash(),swaggerHash.get(),SrppReportModuleCalculator.VERSION);
             try{
+                if(afterClose&&(packagesReady(scope)||afterCloseAttempts.getOrDefault(scope,0)>=MAX_AFTER_CLOSE_ATTEMPTS))continue;
                 transaction.executeWithoutResult(tx -> {
                 reportRepository.lockOwnerDate(owner,now.toLocalDate());
+                // Another process may have published while this one waited for the owner/date fence.
+                if(afterClose){if(packagesReady(scope))return;afterCloseAttempts.merge(scope,1,Integer::sum);}
                 ObjectNode reportReservations=reservations.readReportSource(owner,now.toLocalDate(),slot,supported.get().bundleHash());
                 Frozen original=capture.capture(owner,new DecisionRequest(null,now.toLocalDate(),slot,supported.get().bundleHash(),swaggerHash.get()),reservations.read(owner,now.toLocalDate(),slot));
                 original=withReportReservations(original,reportReservations);
                 if(fubon!=null)original=SrppReportFubonOverlay.apply(original,fubon.capture(owner,now.toLocalDate(),original.facts().capturedAt()));
                 JsonNode model=authority.model();var extra=extras.capture(owner,now.toLocalDate(),slot,original.facts().capturedAt(),model,original.input().path("sources").path("assets"),original.input().path("sources"));
                 Frozen completed=finishCapture(original,extra.sources(),extra.sourceVector(),clock.instant());
+                if(afterClose)completed=withAfterCloseContext(completed);
                 Map<String,ObjectNode> state=new LinkedHashMap<>();for(String consumer:List.of("Codex","Claude"))state.put(consumer,states.read(owner,consumer,now.toLocalDate(),slot));
-                publisher.publish(new Scope(owner,now.toLocalDate(),slot,supported.get().bundleHash(),swaggerHash.get(),SrppReportModuleCalculator.VERSION),completed,supported.get(),extra.sources(),state,clock.instant());
+                publisher.publish(scope,completed,supported.get(),extra.sources(),state,clock.instant());
                 });
-            }catch(RuntimeException failure){LOG.warn("SRPP report producer skipped owner={} reason={}",owner,failure instanceof SrppReportProblem p?p.code():failure.getClass().getSimpleName());}
+            }catch(RuntimeException failure){LOG.warn("SRPP report producer skipped owner={} mode={} attempt={} reason={}",owner,afterClose?"AFTER_CLOSE_INITIALIZATION":"REGULAR_WINDOW",afterCloseAttempts.getOrDefault(scope,0),failure instanceof SrppReportProblem p?p.code():failure.getClass().getSimpleName());}
         }
+    }
+    private boolean packagesReady(Scope scope){
+        boolean codex=reportRepository.latest(scope,"Codex").isPresent();
+        boolean claude=reportRepository.latest(scope,"Claude").isPresent();return codex&&claude;
+    }
+    static Frozen withAfterCloseContext(Frozen original){
+        Instant at=original.facts().capturedAt();ZonedDateTime local=at.atZone(SrppTime.TW_ZONE);
+        if(!"12:00".equals(original.facts().slot())||!local.toLocalDate().equals(original.facts().date())||local.toLocalTime().isBefore(LocalTime.of(14,0)))throw new SrppReportProblem("UPSTREAM_INVALID");
+        ObjectNode input=original.input(),vector=original.sourceVector();ObjectNode context=input.withObject("sources").putObject("publication-context");
+        context.put("mode","AFTER_CLOSE_INITIALIZATION").put("tradingDate",original.facts().date().toString()).put("reportSlot","12:00").put("capturedAt",at.toString());
+        String hash=SrppJcs.hash(context);vector.putObject("publication-context").put("sourceId","publication-context").put("revision",hash).put("capturedAt",at.toString()).put("sha256",hash).put("coverage","COMPLETE").put("validation","VERIFIED");
+        return new Frozen(original.facts(),input,vector,original.assetSnapshotId(),original.assetGeneratedAt());
     }
     static String slotFor(LocalTime time){if(time.isBefore(LocalTime.of(9,5))||!time.isBefore(LocalTime.of(14,0)))return null;return time.isBefore(LocalTime.NOON)?"09:05":"12:00";}
     static Frozen withReportReservations(Frozen original,ObjectNode reservations){

@@ -128,6 +128,51 @@ class SrppReportRepositoryPostgresTest {
         Map<String,ObjectNode> states=new LinkedHashMap<>();var port=new UnavailableSrppReportConsumerState();for(String c:List.of("Codex","Claude"))states.put(c,port.read(owner,c,date,"12:00"));var saved=publisher.publish(new Scope(owner,date,"12:00",scope.policy(),scope.swagger(),scope.calculator()),frozen,supported(),sources,states,at).getFirst();var envelope=SrppReportEnvelopeValidator.validate(saved.content());int wireBytes=saved.content().getBytes(StandardCharsets.UTF_8).length,inputBytes=envelope.path("inputSnapshot").path("inputBundleJcs").asText().getBytes(StandardCharsets.UTF_8).length;assertThat(wireBytes).isLessThanOrEqualTo(16*1024*1024);
         ObjectNode metrics=JsonNodeFactory.instance.objectNode().put("actualUniverseSymbols",symbols).put("actualDailyRows",daily).put("actualIndicatorPoints",points).put("assetHoldingRows",assets.path("snapshot").path("stocks").size()).put("canonicalInputBytes",inputBytes).put("escapedWirePackageBytes",wireBytes).put("payloadLimitBytes",16*1024*1024).put("fits",true).put("brokerIo",false).put("productionPackageWrites",false).put("qualification","NOT_ASSERTED_CACHE_ONLY_SIZE_MEASUREMENT");java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/task489-actual-source-size-metrics.json"),SrppJcs.canonicalize(metrics));
     }
+
+    @Test void afterCloseInitializationPublishesRealBlockedSnapshotAndGetReplayIsPureAndByteIdentical(){
+        Instant at=DATE.atTime(23,15).atZone(SrppTime.TW_ZONE).toInstant();var closeScope=new Scope(7,DATE,"12:00",scope.policy(),SWAGGER,scope.calculator());
+        var input=SrppReportProducerScheduler.withAfterCloseContext(frozen(7,at,"12:00","real-close"));
+        var saved=publisher.publish(closeScope,input,supported(),extras(),states(7,"12:00"),at).getFirst();var envelope=SrppReportEnvelopeValidator.validate(saved.content());
+        assertThat(envelope.path("inputSnapshot").path("capturedAt").asText()).isEqualTo(at.toString());assertThat(envelope.path("coverage").path("completeCount").asInt()).isLessThan(12);
+        var frozen=SrppJcs.parseStrict(envelope.path("inputSnapshot").path("inputBundleJcs").asText());assertThat(frozen.path("sources").path("publication-context").path("mode").asText()).isEqualTo("AFTER_CLOSE_INITIALIZATION");
+        assertThat(saved.content()).doesNotContain("ACTIONABLE_FOR_REPORT");
+        var owner=mock(CurrentUserContext.class);when(owner.hasUser()).thenReturn(true);when(owner.getStatus()).thenReturn("ACTIVE");when(owner.getEffectiveUserId()).thenReturn(7L);
+        var calendar=mock(MarketDataService.class);when(calendar.isTwTradingDayCachedOnly(DATE)).thenReturn(Optional.of(true));var registry=mock(SrppPolicyRegistryService.class);when(registry.find(scope.policy())).thenReturn(Optional.of(supported()));var swagger=mock(PublishedSwaggerIdentity.class);when(swagger.sha256()).thenReturn(Optional.of(SWAGGER));
+        var service=new SrppReportReadService(owner,calendar,registry,swagger,AUTHORITY,repository,Clock.fixed(at.plusSeconds(1),ZoneOffset.UTC));var query=query("Codex");query.set("reportSlot","12:00");TransactionTemplate read=new TransactionTemplate(manager);read.setReadOnly(true);
+        clearInvocations(calculator);for(int i=0;i<2;i++){String readback=read.execute(t->service.read(query));assertThat(readback).isEqualTo(saved.content());}verifyNoInteractions(calculator);assertThat(count("srpp_report_calculation_base")).isEqualTo(1);assertThat(count("srpp_report_calculation_package")).isEqualTo(2);
+    }
+    @Test void afterCloseExistingQuoteAgeAndClosedFlagsRemainBlockedWithoutOutputRewriting()throws Exception{
+        Instant sourceAt=DATE.atTime(13,0).atZone(SrppTime.TW_ZONE).toInstant(),at=DATE.atTime(23,15).atZone(SrppTime.TW_ZONE).toInstant();
+        var closeScope=new Scope(7,DATE,"12:00",scope.policy(),SWAGGER,scope.calculator());
+        for(boolean closed:List.of(false,true)){
+            var original=qualified("12:00",sourceAt,true);ObjectNode input=original.input();
+            if(closed)input.path("facts").path("symbols").forEach(symbol->((ObjectNode)symbol.path("quote")).put("closed",true));
+            var revised=new com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen(MAPPER.convertValue(input.path("facts"),com.steven.assets.service.srpp.decision.DecisionFacts.Input.class),input,original.sourceVector(),original.assetSnapshotId(),original.assetGeneratedAt());
+            var captured=SrppReportProducerScheduler.finishCapture(revised,JsonNodeFactory.instance.objectNode(),JsonNodeFactory.instance.objectNode(),at);
+            var marked=SrppReportProducerScheduler.withAfterCloseContext(captured);var saved=publisher.publish(closeScope,marked,supported(),extras(),states(7,"12:00"),at).getFirst();
+            var envelope=SrppReportEnvelopeValidator.validate(saved.content());assertThat(saved.content()).doesNotContain("ACTIONABLE_FOR_REPORT");
+            assertThat(envelope.path("modules").get(5).path("data").path("legs")).allSatisfy(leg->assertThat(leg.path("lots").asInt()).isZero());
+            assertThat(envelope.path("inputSnapshot").path("capturedAt").asText()).isEqualTo(at.toString());
+        }
+    }
+    @Test void afterCloseActionableAndPositiveValuesWithoutStatusRollBackWholePublication(){
+        Instant at=DATE.atTime(23,15).atZone(SrppTime.TW_ZONE).toInstant();var closeScope=new Scope(7,DATE,"12:00",scope.policy(),SWAGGER,scope.calculator());
+        for(String key:List.of("status","lots","units","limitPrice","amount")){
+            doAnswer(call->{ArrayNode modules=(ArrayNode)call.callRealMethod();ObjectNode leg=((ObjectNode)modules.get(0).path("data")).withArray("legs").addObject();leg.put(key,key.equals("status")?"ACTIONABLE_FOR_REPORT":"1");return modules;}).when(calculator).shared(any(),any(),any(),any(),any());
+            var input=SrppReportProducerScheduler.withAfterCloseContext(frozen(7,at,"12:00","invalid-"+key));
+            assertThatThrownBy(()->publisher.publish(closeScope,input,supported(),extras(),states(7,"12:00"),at)).isInstanceOf(SrppReportProblem.class);
+            assertThat(count("srpp_report_calculation_base")).isZero();assertThat(count("srpp_report_calculation_package")).isZero();
+        }
+    }
+    @Test void afterCloseMarkerCannotLieAboutCaptureClockOrIncludeUnknownFields(){
+        Instant at=DATE.atTime(23,15).atZone(SrppTime.TW_ZONE).toInstant();var closeScope=new Scope(7,DATE,"12:00",scope.policy(),SWAGGER,scope.calculator());
+        for(String mutation:List.of("clock","extra")){
+            var original=SrppReportProducerScheduler.withAfterCloseContext(frozen(7,at,"12:00","bad-context"));ObjectNode input=original.input();ObjectNode context=(ObjectNode)input.path("sources").path("publication-context");
+            if(mutation.equals("clock"))context.put("capturedAt",at.minusSeconds(1).toString());else context.put("pretendLive",true);
+            var changed=fixtureWithFreshVector(original,input);assertThatThrownBy(()->publisher.publish(closeScope,changed,supported(),extras(),states(7,"12:00"),at)).isInstanceOf(SrppReportProblem.class);
+            assertThat(count("srpp_report_calculation_base")).isZero();assertThat(count("srpp_report_calculation_package")).isZero();
+        }
+    }
     static void completeFixtureSources(ObjectNode sources){sources.remove("symbols");if(!sources.has("report-reservations"))sources.putObject("report-reservations").put("status","UNAVAILABLE");extras().fields().forEachRemaining(e->{if(!e.getKey().equals("symbols")&&!sources.has(e.getKey()))sources.set(e.getKey(),e.getValue());});for(String k:List.of("calendar","ledger","reservations","classifications","fx","bear-window","subaccounts"))if(!sources.has(k))sources.putObject(k).put("status","UNAVAILABLE");for(var c:AUTHORITY.decision().policy().symbols())for(String prefix:List.of("quote","book","radar","daily","dividends","pending","tradability","minute")){String k=prefix+":"+c;if(!sources.has(k))sources.putObject(k).put("status","UNAVAILABLE");}}
     static com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen fixtureWithFreshVector(com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen original,ObjectNode input){ObjectNode vector=JsonNodeFactory.instance.objectNode();input.path("sources").fields().forEachRemaining(e->{JsonNode prior=original.sourceVector().path(e.getKey());boolean unavailable="UNAVAILABLE".equals(e.getValue().path("status").asText());ObjectNode v=vector.putObject(e.getKey());v.put("sourceId",e.getKey()).put("revision",SrppJcs.hash(e.getValue())).put("sha256",SrppJcs.hash(e.getValue())).put("capturedAt",original.facts().capturedAt().toString()).put("coverage",prior.has("coverage")?prior.path("coverage").asText():unavailable?"NONE":"COMPLETE").put("validation",prior.has("validation")?prior.path("validation").asText():unavailable?"UNAVAILABLE":"VERIFIED");});return new com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen(original.facts(),input,vector,original.assetSnapshotId(),original.assetGeneratedAt());}
     static LinkedMultiValueMap<String,String> query(String consumer){var q=new LinkedMultiValueMap<String,String>();q.add("consumer",consumer);q.add("tradingDate",DATE.toString());q.add("reportSlot","09:05");q.add("policyBundleSha256",supported().bundleHash());q.add("swaggerSha256",SWAGGER);return q;}
