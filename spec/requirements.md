@@ -6385,3 +6385,11 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 以既有 mergeLiveQuote 處理亂序、日期／身分、close fence、完整比較欄及 explicit-null；即時 state 在換股／關窗／pause 清理，恢復後只讀合法 cache，不回填前標的。舊 book HTTP 只能改 quoteDetail，不能倒退新 SSE 最新成交。只 patch 差異 DOM、不重建表格或啟用造假閃動。
 - [ ] 保留 T525 兩秒 book 純讀及所有 lifecycle／request guard，不改原其他頁推播、歷史／策略／表單 dirty 行為、Redis writer 或公開金融 API。核對 Dashboard／TradingRadar／WatchStock／SnapshotForm 已直接消費同一共享 SSE；七個來源頁透過共用 dialog 一次生效。
 - [ ] 測試真元件 onQuote/catchup/cache、更新／同價／亂序／昨日／錯股／null／close fence、慢 book response 不覆蓋新成交，與固定 DOM；以真 Redis／business SSE 唯讀接收證明 provider sourceTime 前進，再把實際 SSE 送入真 shared transport 與真 SFC handler 渲染，價格未變時不能假造變價。正式登入鏈缺 session 必明確保留限制；完成 frontend Docker 驗收。
+
+### Task 528：Claude 入口提早收工修正的 authority 身分發布（Requirements 187／193）
+
+**User Story：** 作為 SRPP 報告讀者，我要 Claude 比較軌在 09:05／12:00 不再因「預估讀不完」提早收工，且修正後的新規則包身分已在 9090 登錄，使 `report-calculations` 不因 `POLICY_UNSUPPORTED` 而整輪回退本機計算。
+
+- [ ] 唯一來源為 SRPP 已 push 且遠端讀回一致的 main `26602a98571f2e70b7dcdac221e46b38995de650`（feature `81219a6cb935cc3afdef11d6d8a8413f237003ce`）；SRPP 本輪只改兩份 Claude 入口、`docs/DAILY_TRADING_AUTOMATION.md` §2A 與一個回歸測試，不改投資規則、門檻、金融公式、model_inputs、formal targets、Swagger 或任何 9090 契約。asset-management 只發布其新 bundle 身分：完整 `policy_manifest.json` bytes 同步到 classpath decision authority，`model_inputs.json` 位元組不變（SHA `8ee4eb614a73099455b25d163fce6b675e543e1120963add38d0d7d96f8a8b6d`），新 manifest raw SHA `f9ff141a3bafee78e4b83b752522eac967d5a3369d2b54ebfebd207f5c5a636f`，新 `POLICY_BUNDLE_SHA256` `1880df4d7081b7d2c7d2b2694a4a6ae63151889677ca8df1049c678738b523fd`，Swagger SHA `40819f617271e21b33efbca040134c3024e4915d1d34c735fa3b6a2489d45afe` 不變。
+- [ ] 由原 Ruby 工具重產 insert-only registry SQL、由原 Python generator 重產主 report 22 案例 golden；金融 expected 與 `originalCalculatorHashes` 逐值不變，僅 bundle 欄位更新。formal targets、state-topup／income／payroll／short-US fixtures 預期不變；任何金融差異先停止回報，不得更新 expected 掩蓋。
+- [ ] 兩 repo 各自 feature commit、no-ff main merge、push 與 remote-ref readback 完成後，才可對 registry 執行受追蹤 SQL 的單次 `ON CONFLICT DO NOTHING` insert；舊 rows 不變、不 UPDATE／DELETE、不新增 migration。之後只從乾淨 asset main 的正式設定 rebuild／recreate business-services，重啟前逐項證明啟動期外抓、寄信、資產修改入口皆 no-op。最後以新 hash 對 9090 `report-calculations` 做唯讀 GET 讀回；不 POST、不重跑報告、不寄信、不交易。
