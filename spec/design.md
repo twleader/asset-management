@@ -13241,3 +13241,7 @@ UI 在五檔快照區前固定呈現最新成交、provider 原漲跌與漲跌�
 pause／close／stock identity switch 清理最新成交；resume/catchup 再從同一 stream 的 validated current-date cache 或新事件填入。日期與 nano time ordering／null comparison／close fence 都使用已存在 mergeLiveQuote，不複製另一套驗證。來源時間沒有 offset 時按台北解析顯示；不以瀏覽器所在時區猜來源。T525 book interval 與 HTTP abort/generation/token 保留，不改其他頁的共用 stream／金融資料。
 
 Dashboard、TradingRadar、WatchStock、SnapshotForm 現有 onQuote 已各自 applyLivePrice/applyPriceUpdate；本次只補共用 dialog 缺少的直接資料投影，使其所有父頁一致。驗證以現有 livePrices.test.js 真 SFC AST fixture 與完整 SFC browser harness，含真共享 transport 的 price-update delivery；唯讀 business SSE／Redis 證據與已登入 BFF UI 分開，不能以橋接測試冒稱拿到使用者 session。
+
+### Task 528：Claude 入口提早收工修正的 authority 發布邊界
+
+SRPP 的修正只在日報執行規格與 Claude 入口文字（權威讀取包規模不是停止理由），不影響金融計算與 9090 API 契約。asset-management 本輪只發布最終 bundle 身分：完整 manifest bytes 同步到 classpath decision authority，由原工具重產 insert-only registry SQL 與主 22 案例 golden（僅 bundle 欄位變），formal targets、model_inputs、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash（`ON CONFLICT DO NOTHING`），不更新刪除歷史資料。只從乾淨 asset main 以 run-stack rebuild／recreate business-services，BFF 保持服務；重啟前須依當下日期與設定唯讀證明 analysis self-heal 寄信、index 外抓等啟動期入口皆 no-op，否則不重啟。新 hash 的 `report-calculations` 讀回只在目標交易日台北 09:05 至 13:30 內以唯讀 GET 進行。
