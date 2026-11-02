@@ -324,11 +324,11 @@ class FubonAccountingProjectionPostgresTest {
 
     @Test
     void settlementKeepsSeparateOfficialDaysAndMissingDayNeverClearsFutureRows() {
-        // The current settlement rule requires one same-bank manual cash target with sufficient balance.
+        // Stock settlement requires one same-bank manual securities-account target with sufficient balance.
         tx(() -> {
             AssetSnapshot snapshot = snapshots.findById(snapshotId).orElseThrow();
             snapshot.getDeposits().add(BankDeposit.builder().snapshot(snapshot).bank(fubonBank)
-                    .depositType("活存").currency("TWD").amount(new BigDecimal("2000.00")).build());
+                    .depositType("證券戶").currency("TWD").amount(new BigDecimal("2000.00")).build());
             aggregates.recalculate(snapshot);
             snapshots.saveAndFlush(snapshot);
         });
@@ -366,7 +366,7 @@ class FubonAccountingProjectionPostgresTest {
                     .containsExactly(LocalDate.of(2026, 9, 2));
             assertThat(transit(snapshot, PAYABLE).getFirst().getAmount()).isEqualByComparingTo("-2002");
             assertThat(snapshot.getDeposits().stream()
-                    .filter(row -> "TWD".equals(row.getCurrency()) && "活存".equals(row.getDepositType())
+                    .filter(row -> "TWD".equals(row.getCurrency()) && "證券戶".equals(row.getDepositType())
                             && fubonBank.getId().equals(row.getBank().getId()))
                     .map(BankDeposit::getAmount).toList()).singleElement()
                     .satisfies(amount -> assertThat(amount).isEqualByComparingTo("998"));
