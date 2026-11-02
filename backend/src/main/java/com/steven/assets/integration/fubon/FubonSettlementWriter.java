@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 @Service
 public class FubonSettlementWriter {
@@ -42,6 +43,7 @@ public class FubonSettlementWriter {
     private final AssetSnapshotRepository snapshots;
     private final AssetTransactionRepository transactions;
     private final FubonTransitNoteFormatter noteFormatter;
+    private final FubonPayableLedgerReconciler payableReconciler;
     private final Clock clock;
 
     @Autowired
@@ -66,6 +68,7 @@ public class FubonSettlementWriter {
         this.snapshots = snapshots;
         this.transactions = transactions;
         this.noteFormatter = new FubonTransitNoteFormatter();
+        this.payableReconciler = new FubonPayableLedgerReconciler();
         this.clock = clock;
     }
 
@@ -104,13 +107,23 @@ public class FubonSettlementWriter {
             if (!"AVAILABLE".equals(day.status()) || !day.settlementDate().isAfter(observation.queryDate())) continue;
             if (day.buySettlement().value().signum() != 0) {
                 requireTransitType(PAYABLE, true);
+                Optional<FubonPayableLedgerReconciler.Evidence> evidence = payableReconciler.verify(
+                        expectedOwnerId, day.sourceQueryDate(), day.buySettlement().value(),
+                        transactions.findFubonBuyLedgerForSettlement(expectedOwnerId, day.sourceQueryDate()));
+                if (observation.queryDate().equals(day.sourceQueryDate()) && evidence.isPresent()) {
+                    List<BankDeposit> matched = payableReconciler.matchingManualPayables(snapshot.getDeposits(),
+                            bank.getId(), day.settlementDate(), evidence.orElseThrow());
+                    // BankDeposit equality traverses snapshot; remove only these exact objects.
+                    changed |= snapshot.getDeposits().removeIf(row -> matched.stream().anyMatch(match -> match == row));
+                }
                 changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(),
-                        day.settlementDate(), PAYABLE, day.buySettlement().value(), true);
+                        day.settlementDate(), PAYABLE, day.buySettlement().value(), true,
+                        evidence.map(FubonPayableLedgerReconciler.Evidence::note).orElse(null));
             }
             if (day.sellSettlement().value().signum() != 0) {
                 requireTransitType(RECEIVABLE, false);
                 changed |= projectDirection(snapshot, bank, expectedOwnerId, observation.queryDate(),
-                        day.settlementDate(), RECEIVABLE, day.sellSettlement().value(), false);
+                        day.settlementDate(), RECEIVABLE, day.sellSettlement().value(), false, null);
             }
         }
         if (!changed) {
@@ -138,7 +151,8 @@ public class FubonSettlementWriter {
     }
 
     private boolean projectDirection(AssetSnapshot snapshot, Bank bank, Long expectedOwnerId,
-            LocalDate queryDate, LocalDate processingDate, String type, BigDecimal sourceAmount, boolean payable) {
+            LocalDate queryDate, LocalDate processingDate, String type, BigDecimal sourceAmount, boolean payable,
+            String verifiedNote) {
         BigDecimal amount = FubonAccountingContract.money(sourceAmount);
         if ((payable && amount.signum() >= 0) || (!payable && amount.signum() <= 0)) {
             throw new WriteRejected(FubonSettlementOutcome.SETTLEMENT_FAILED);
@@ -166,12 +180,15 @@ public class FubonSettlementWriter {
                     .snapshot(snapshot).bank(bank).depositType(type).currency(TRANSIT_TWD)
                     .processingDate(processingDate)
                     .amount(amount).originalAmount(null).annualInterestRate(null)
-                    .notes(transitNote(expectedOwnerId, queryDate, type)).source("FUBON_SYNC").build();
+                    .notes(verifiedNote != null ? verifiedNote : transitNote(expectedOwnerId, queryDate, type))
+                    .source("FUBON_SYNC").build();
             snapshot.getDeposits().add(created);
             return true;
         }
         BigDecimal existing = target.getAmount() == null ? null : FubonAccountingContract.money(target.getAmount());
-        String note = transitNote(expectedOwnerId, queryDate, type);
+        String note = verifiedNote != null ? verifiedNote
+                : target.getNotes() != null && !target.getNotes().isBlank() ? target.getNotes()
+                : transitNote(expectedOwnerId, queryDate, type);
         boolean changed = existing == null || existing.compareTo(amount) != 0
                 || !Objects.equals(target.getNotes(), note)
                 || target.getOriginalAmount() != null || target.getAnnualInterestRate() != null;

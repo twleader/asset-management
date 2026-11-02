@@ -144,11 +144,16 @@ class FubonAccountingProjectionPostgresTest {
         clock.set(NOW);
         sqlTrace.stop();
         tx(() -> {
+            entityManager.createNativeQuery("DROP TRIGGER IF EXISTS reject_settlement_commit ON bank_deposit")
+                    .executeUpdate();
+            entityManager.createNativeQuery("DROP FUNCTION IF EXISTS reject_settlement_commit()").executeUpdate();
             entityManager.createNativeQuery("DROP TRIGGER IF EXISTS reject_realized_gain_commit ON realized_gain")
                     .executeUpdate();
             entityManager.createNativeQuery("DROP FUNCTION IF EXISTS reject_realized_gain_commit()").executeUpdate();
             gains.deleteAll();
             gains.flush();
+            assetTransactions.deleteAll();
+            assetTransactions.flush();
             snapshots.deleteAll();
             snapshots.flush();
             transitTypes.deleteAll();
@@ -246,7 +251,7 @@ class FubonAccountingProjectionPostgresTest {
     }
 
     @Test
-    void settlementUpdateRefreshesSyncNoteAndClearsOnlyDerivedRateFields() {
+    void settlementUpdatePreservesExistingNoteWithoutNewVerifiedCodesAndClearsOnlyDerivedRateFields() {
         addTransit(PAYABLE, "-5.00", "TRANSIT_TWD", "10.00", "keep-note", "5.0000");
 
         assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
@@ -255,7 +260,7 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(transit(snapshot, PAYABLE)).hasSize(1);
             BankDeposit target = transit(snapshot, PAYABLE).getFirst();
             assertThat(target.getAmount()).isEqualByComparingTo("-1002.00");
-            assertThat(target.getNotes()).isEqualTo("富邦證券交割款；當日無已同步成交明細");
+            assertThat(target.getNotes()).isEqualTo("keep-note");
             assertThat(target.getAnnualInterestRate()).isNull();
             assertThat(target.getOriginalAmount()).isNull();
         });
@@ -272,6 +277,95 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(target.getAmount()).isEqualByComparingTo("-5.00");
             assertThat(target.getNotes()).isEqualTo("manual-note");
             assertThat(target.getSource()).isEqualTo("MANUAL");
+        });
+    }
+
+    @Test
+    void completeBuyLedgerAtomicallyReplacesManual00881WithOneOfficialPayableAndRepeatsOnce() {
+        prepareRecovery();
+        Long manualId = addRecoveryTransit("-46486", "00881");
+        var result = settlementService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        AtomicReference<Long> officialId = new AtomicReference<>();
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).hasSize(1);
+            var row = transit(snapshot, PAYABLE).getFirst();
+            officialId.set(row.getId());
+            assertThat(row.getId()).isNotEqualTo(manualId);
+            assertThat(row.getAmount()).isEqualByComparingTo("-56586");
+            assertThat(row.getSource()).isEqualTo("FUBON_SYNC");
+            assertThat(row.getNotes()).isEqualTo("富邦證券交割款：00881、009826");
+            assertThat(row.getProcessingDate()).isEqualTo(LocalDate.of(2026, 11, 4));
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-56486");
+        });
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).hasSize(1);
+            assertThat(transit(snapshot, PAYABLE).getFirst().getId()).isEqualTo(officialId.get());
+            assertThat(transit(snapshot, PAYABLE).getFirst().getNotes()).contains("00881", "009826");
+        });
+    }
+
+    @Test
+    void crossDayWithoutNewCompleteLedgerKeepsBothCodesAndOfficialProcessingDate() {
+        prepareRecovery();
+        addRecoveryTransit("-46486", "00881");
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        tx(() -> assetTransactions.deleteAllInBatch());
+        clock.set(Instant.parse("2026-11-03T00:00:30Z"));
+        var yesterday = recoverySettlement();
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(new FubonDtos.SettlementBatch(
+                LocalDate.of(2026, 11, 3), clock.instant().minusSeconds(1), FINGERPRINT, true,
+                yesterday.coverageStatus(), null, yesterday.details())));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> {
+            var row = transit(snapshot, PAYABLE).getFirst();
+            assertThat(row.getNotes()).contains("00881", "009826");
+            assertThat(row.getProcessingDate()).isEqualTo(LocalDate.of(2026, 11, 4));
+        });
+    }
+
+    @Test
+    void incompleteLedgerAndDuplicateOrMismatchedManualRowsRemainUnmanagedWithoutMutation() {
+        prepareRecovery();
+        addRecoveryTransit("-46486", "00881");
+        tx(() -> assetTransactions.deleteAllInBatch());
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.UNMANAGED_TARGET);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getSource()).isEqualTo("MANUAL"));
+        seedRecoveryLedger();
+        addRecoveryTransit("-46486", "00881");
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.UNMANAGED_TARGET);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE)).hasSize(2));
+        tx(() -> {
+            var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().removeIf(row -> PAYABLE.equals(row.getDepositType()));
+            snapshots.saveAndFlush(snapshot);
+        });
+        addRecoveryTransit("-46420", "00881");
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.UNMANAGED_TARGET);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getAmount())
+                .isEqualByComparingTo("-46420"));
+    }
+
+    @Test
+    void deferredSettlementCommitFailureRestoresRemovedManualRowAndAllAggregates() {
+        prepareRecovery();
+        Long manualId = addRecoveryTransit("-46486", "00881");
+        tx(() -> {
+            entityManager.createNativeQuery("CREATE FUNCTION reject_settlement_commit() RETURNS trigger LANGUAGE plpgsql "
+                    + "AS 'BEGIN RAISE EXCEPTION ''test-only deferred rejection''; RETURN NEW; END'").executeUpdate();
+            entityManager.createNativeQuery("CREATE CONSTRAINT TRIGGER reject_settlement_commit AFTER INSERT ON bank_deposit "
+                    + "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_settlement_commit()")
+                    .executeUpdate();
+        });
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.ROLLED_BACK);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).hasSize(1);
+            var row = transit(snapshot, PAYABLE).getFirst();
+            assertThat(row.getId()).isEqualTo(manualId);
+            assertThat(row.getSource()).isEqualTo("MANUAL");
+            assertThat(row.getAmount()).isEqualByComparingTo("-46486");
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-46386");
         });
     }
 
@@ -626,6 +720,56 @@ class FubonAccountingProjectionPostgresTest {
                 .replace("\"totalFee\":\"2\"", "\"totalFee\":\"0\"")
                 .replace("\"totalSettlementAmount\":\"-1002\"", "\"totalSettlementAmount\":\"0\"");
         return read(settlementJson(zero), FubonDtos.SettlementBatch.class);
+    }
+
+    private void prepareRecovery() {
+        clock.set(Instant.parse("2026-11-02T00:00:30Z"));
+        seedRecoveryLedger();
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(recoverySettlement()));
+    }
+
+    private void seedRecoveryLedger() {
+        tx(() -> assetTransactions.saveAllAndFlush(List.of(
+                recoveryBuy("00881", "46.42", "46420", "66"),
+                recoveryBuy("009826", "10.08", "10080", "20"))));
+    }
+
+    private com.steven.assets.model.AssetTransaction recoveryBuy(String code, String price, String amount, String fee) {
+        var row = ledger(ownerId, "買", code, code, "1000", "MANUAL");
+        row.setTradeDate(LocalDate.of(2026, 11, 2));
+        row.setPrice(new BigDecimal(price));
+        row.setAmount(new BigDecimal(amount));
+        row.setFee(new BigDecimal(fee));
+        row.setTransactionTax(BigDecimal.ZERO);
+        return row;
+    }
+
+    private static FubonDtos.SettlementBatch recoverySettlement() {
+        String row = SETTLEMENT_ROW.replace("2026-08-28", "2026-11-02")
+                .replace("2026-09-01", "2026-11-04")
+                .replace("\"buyValue\":\"1000\"", "\"buyValue\":\"56500\"")
+                .replace("\"buyFee\":\"2\"", "\"buyFee\":\"86\"")
+                .replace("\"buySettlement\":\"-1002\"", "\"buySettlement\":\"-56586\"")
+                .replace("\"totalBsValue\":\"1000\"", "\"totalBsValue\":\"56500\"")
+                .replace("\"totalFee\":\"2\"", "\"totalFee\":\"86\"")
+                .replace("\"totalSettlementAmount\":\"-1002\"", "\"totalSettlementAmount\":\"-56586\"");
+        return read(settlementJson(row).replace("2026-08-28", "2026-11-02"), FubonDtos.SettlementBatch.class);
+    }
+
+    private Long addRecoveryTransit(String amount, String code) {
+        AtomicReference<Long> id = new AtomicReference<>();
+        tx(() -> {
+            var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            BankDeposit row = BankDeposit.builder().snapshot(snapshot).bank(fubonBank).depositType(PAYABLE)
+                    .currency("TRANSIT_TWD").amount(new BigDecimal(amount)).notes(code).source("MANUAL")
+                    .processingDate(LocalDate.of(2026, 11, 4)).build();
+            snapshot.getDeposits().add(row);
+            entityManager.persist(row);
+            aggregates.recalculate(snapshot);
+            snapshots.saveAndFlush(snapshot);
+            id.set(row.getId());
+        });
+        return id.get();
     }
 
     private FubonDtos.SettlementBatch settlementWithBothDirections() {

@@ -510,3 +510,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.158.0-independent-market-export-schedules.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.159.0-009826-ledger-cost-recovery.sql
+      relativeToChangelogFile: false

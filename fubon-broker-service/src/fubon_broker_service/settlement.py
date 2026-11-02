@@ -49,7 +49,9 @@ class SettlementService:
             normalized = []
             for row in rows:
                 verify_optional_identity(row, read.account)
-                normalized.append(self._normalize(row, query_date))
+                future_or_placeholder = self._normalize(row, query_date)
+                if future_or_placeholder is not None:
+                    normalized.append(future_or_placeholder)
             seen: set[tuple[str, str | None]] = set()
             settlement_days: set[str] = set()
             for row in normalized:
@@ -72,7 +74,7 @@ class SettlementService:
             raise SettlementError(reason) from None
 
     @staticmethod
-    def _normalize(row: object, query_date: date) -> dict[str, object]:
+    def _normalize(row: object, query_date: date) -> dict[str, object] | None:
         required = ("date", "settlement_date", "currency", *AMOUNT_FIELDS)
         require_fields(row, required)
         source_date = strict_vendor_date(raw_field(row, "date"))
@@ -82,16 +84,21 @@ class SettlementService:
         if all(value is None for value in values.values()):
             return {"status": "NO_DATA_OBSERVED", "sourceQueryDate": source_date.isoformat(),
                     "settlementDate": None, "currency": None, **{wire: None for wire in AMOUNT_FIELDS.values()}}
-        if any(value is None for value in values.values()) or values["currency"] != "TWD":
+        if values["currency"] != "TWD":
             raise ValueError("RECONCILE_FAILED")
         settlement_date = strict_vendor_date(values["settlement_date"])
         if settlement_date < source_date:
+            raise ValueError("RECONCILE_FAILED")
+        # Only future settlement rows belong to this projection. Already-due rows can
+        # contain optional null fees/taxes; they neither invalidate future rows nor
+        # become fabricated NO_DATA_OBSERVED entries.
+        if settlement_date <= query_date:
+            return None
+        if any(value is None for value in values.values()):
             raise ValueError("RECONCILE_FAILED")
         amounts = {wire: signed_integer(values[name]) for name, wire in AMOUNT_FIELDS.items()}
         buy, sell = int(amounts["buySettlement"]), int(amounts["sellSettlement"])
         if buy > 0 or sell < 0 or buy + sell != int(amounts["totalSettlementAmount"]):
             raise ValueError("RECONCILE_FAILED")
-        if settlement_date <= query_date and (buy != 0 or sell != 0):
-            raise ValueError("AMBIGUOUS_SETTLEMENT")
         return {"status": "AVAILABLE", "sourceQueryDate": source_date.isoformat(),
                 "settlementDate": settlement_date.isoformat(), "currency": "TWD", **amounts}

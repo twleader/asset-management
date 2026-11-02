@@ -13267,3 +13267,13 @@ Task530 另修正現行投影 wire 與 consumer 的漂移：沿既有 Java legs 
 SRPP 的修正在 `scripts/execution_policy.py --global-build-009826` 與日報規格（009826 建倉張數上限即預設買量，由已保存的報價、資產、成交紀錄與匯率確定性產出），不影響 9090 金融計算與 API 契約；9090 `GLOBAL_EQUITY_PACE` 仍不輸出 009826 leg，兩軌依 `API_CALCULATION_RULES.md` §2 回退本機計算器。asset-management 本輪只發布最終 bundle 身分：完整 manifest 與 model_inputs bytes 同步到 classpath decision authority（本次 model_inputs 位元組有變，與 t528 不同），由原工具重產 insert-only registry SQL 與兩份 golden（僅 bundle 與 `execution_policy.py` calculator hash 欄位變動），formal targets、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash，不更新刪除歷史 row。部署只重建 business-services，重啟前逐項唯讀證明啟動入口 no-op，並以 image id 前後比對防止被他人覆蓋；`report-calculations` 讀回僅在合法時窗以新 hash 唯讀進行。
 
 Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILABLE/null 後，不對該包外列施行僅適用包內的 OVERHEAT_HIT 推導檢查；包內 overheat 的完整來源／布林規則不變，任何包外數值、receipt 或可用狀態仍拒絕。此為現行 wire 契約一致性修復。
+
+# Task 532：009826 成本補正與可核對的富邦未來交割款
+
+2026-11-02 read-only 證據：009826 1,000 股由庫存建立為 investment_cost=0，手動 ledger id208 為 10080+20 費用，正確成本10100；富邦 API 的 filled_history 回 API KEY 未授權，不能假造 FUBON_SYNC 成交或 projection。交割 SDK 則成功且帳戶綁定明確，包含已到期 2026-11-02 -48168（buy_tax/sell_tax null）、空佔位、未來 2026-11-04 -56586。當日 ledger id207/208 同為富邦買入，含費後46486+10100=56586；既有手動00881待付款原錯列其他銀行，使用者已手動更正為台北富邦銀行。
+
+成本使用 v1.159.0 限縮 data correction，先鎖 owner1 latest snapshot，完整 guard 精確事件、唯一持股、零成本、無額外帳本及券商 projection；獨立 statement 更新持股及重新彙總，保持既有 SnapshotAggregateCalculator 逐筆 TWD rounding 語意。重跑或資料已改變為 no-op；schema不新增，仍重產 schema baseline 並驗 drift。
+
+Python SettlementService 在 account/row identity、必備欄位與合法日期／TWD 檢查後，先剔除 settlementDate <= queryDate 的 out-of-scope 列，再對 future rows 走原 strict amount contract。被剔除列不輸出假空資料，future malformed 仍整批拒絕；不改 internal response shape、public API、Swagger、排程或費稅公式。Java 防線仍拒絕意外輸入的已到期 nonzero。
+
+FubonSettlementWriter 在鎖與 observation freshness 驗證後，以明示 owner native repository query 讀 sourceQueryDate=queryDate 的當日富邦台股TWD買入帳本，避免 internal HTTP tenantFilter 清空查詢。以 pure helper 驗每列、按代號彙總 max(amount, shares*price+fee+tax)；只有整日總額精確等於該 future SDK buySettlement 才有 reconciliation evidence。移除同 settlement date、notes 恰單一代號、amount 恰該代號成本的唯一 MANUAL/null 買股待付款（bank必須同fubon）；多列／錯值／不同銀行／source-owned 候選不移除。原 UNMANAGED_TARGET／AMBIGUOUS_TARGET 保護不移除，任何 fubon scope 衝突仍 rollback。隨後以既有 source-owned key 建立／更新唯一富邦總額，備註可按SDK sourceQueryDate讀同源ledger驗證，不以本地queryDate代替；既有同處理日／類型source列無新完整代號證據時保留原非空notes，只有無證據的新列才用泛用備註，跨日／重跑必保留00881與009826及processingDate。原子重算 totalDeposit/totalAssets。不得以金額相似或代號 substring 猜身份，不清信用卡／賣股／其他日期款。
