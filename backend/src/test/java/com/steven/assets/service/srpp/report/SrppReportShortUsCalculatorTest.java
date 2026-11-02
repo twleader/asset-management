@@ -13,6 +13,46 @@ class SrppReportShortUsCalculatorTest {
     private JsonNode golden()throws Exception{return M.readTree(getClass().getResourceAsStream("/srpp/report-short-us-full-golden.json"));}
     private static void compare(JsonNode actual,JsonNode expected,String path){assertThat(actual).as(path).isNotNull();if(expected.isObject()){for(var e:expected.properties())compare(actual.get(e.getKey()),e.getValue(),path+"."+e.getKey());}else if(expected.isArray()){assertThat(actual.size()).as(path).isEqualTo(expected.size());for(int i=0;i<expected.size();i++)compare(actual.get(i),expected.get(i),path+"["+i+"]");}else if(expected.isNumber()||expected.isTextual()&&expected.asText().matches("-?[0-9]+(?:\\.[0-9]+)?")){assertThat(actual.isNull()).as(path+" actual="+actual).isFalse();assertThat(new BigDecimal(actual.asText()).subtract(new BigDecimal(expected.asText())).abs()).as(path).isLessThan(new BigDecimal("0.00000001"));}else assertThat(actual).as(path).isEqualTo(expected);}
     @Test void originalThirteenSameInputFullScreenAndD186Parity()throws Exception{int count=0;for(JsonNode c:golden().path("cases")){JsonNode actual="short".equals(c.path("kind").asText())?SrppReportShortUsCalculator.screen(c.path("input"),model(),"short_term_opportunity_d171"):SrppReportShortUsCalculator.usCheck(c.path("input"),c.path("date").asText(),new BigDecimal(c.path("total").asText()),model());compare(actual,c.path("expected"),c.path("name").asText());count++;}assertThat(count).isEqualTo(13);}
+    @Test void originalPythonFullHoldingPeriodPositiveAndNegativeParity()throws Exception{
+        JsonNode fixture=M.readTree(getClass().getResourceAsStream("/srpp/report-long-short-exit-golden.json"));
+        assertThat(fixture.path("policyBundleSha256").asText()).isEqualTo(new com.steven.assets.service.srpp.decision.DecisionPolicyAuthority().policy().bundleHash());
+        int count=0;
+        for(JsonNode c:fixture.path("cases")){
+            JsonNode input=c.path("input"),actual=SrppReportShortUsCalculator.screen(input,model(),"bond_short_term_opportunity_d185");
+            compare(actual,c.path("expected"),c.path("name").asText());
+            for(JsonNode row:actual.path("results")){
+                assertThat(row.path("reasons").toString()).as(c.path("name").asText()+" flat range entry gate").contains("\"NO_SUPPORT_PRESSURE_INTERVAL\"");
+                assertThat(row.path("may_recommend_after_daily_gates").asBoolean()).isFalse();
+                assertThat(row.path("share_ceiling_before_funding").asLong()).isZero();
+            }
+            JsonNode position=actual.path("sleeve").path("positions").get(0),locked=input.path("sleeve_ledger").path("positions").get(0);
+            assertThat(position.path("support")).as(c.path("name").asText()+" immutable support").isEqualTo(locked.path("support"));
+            assertThat(position.path("pressure")).as(c.path("name").asText()+" immutable pressure").isEqualTo(locked.path("pressure"));
+            assertThat(position.path("shares").asLong()).as(c.path("name").asText()+" isolated short shares").isEqualTo(1000);
+            assertThat(position.path("exit_share_ceiling").asLong()).isLessThanOrEqualTo(1000);
+            count++;
+        }
+        assertThat(count).isEqualTo(15);
+    }
+    @Test void reversedReferencesAndNonpositiveInputsRemainRejected()throws Exception{
+        JsonNode costs=model().path("execution_policy").path("bond_short_term_opportunity_d185").path("scenario_costs");
+        assertThatThrownBy(()->SrppReportModuleCalculator.shortScenario(new BigDecimal("50"),new BigDecimal("60"),new BigDecimal("45"),new BigDecimal("1000"),costs)).hasMessage("SHORT_REFERENCE_UNVERIFIED");
+        for(int invalid=0;invalid<3;invalid++){
+            BigDecimal price=invalid==0?BigDecimal.ZERO:new BigDecimal("50"),support=invalid==1?BigDecimal.ZERO:new BigDecimal("50"),shares=invalid==2?BigDecimal.ZERO:new BigDecimal("1000");
+            assertThatThrownBy(()->SrppReportModuleCalculator.shortScenario(price,support,new BigDecimal("50"),shares,costs)).hasMessage("SHORT_REFERENCE_UNVERIFIED");
+        }
+    }
+    @Test void fullHoldingPeriodCannotTreatNullSourceAsVerifiedText()throws Exception{
+        JsonNode fixture=M.readTree(getClass().getResourceAsStream("/srpp/report-long-short-exit-golden.json"));
+        JsonNode original=java.util.stream.StreamSupport.stream(fixture.path("cases").spliterator(),false).filter(c->"00679B_120_sessions".equals(c.path("name").asText())).findFirst().orElseThrow().path("input");
+        for(String missing:new String[]{"quote","history"}){
+            ObjectNode input=original.deepCopy();ObjectNode quote=(ObjectNode)input.path("items").get(0).path("quote");
+            if("quote".equals(missing))quote.putNull("source");else((ObjectNode)quote.path("dividendHistory")).putNull("source");
+            JsonNode result=SrppReportShortUsCalculator.screen(input,model(),"bond_short_term_opportunity_d185");
+            assertThat(result.path("sleeve").path("positions").get(0).path("exit_status").asText()).as(missing).isEqualTo("EXIT_BLOCKED");
+            assertThat(result.path("sleeve").path("new_buys_frozen").asBoolean()).as(missing).isTrue();
+        }
+    }
     @Test void attributionUnknownAndConflictingFillNeverBecomeVerifiedEmpty()throws Exception{JsonNode original=golden().path("cases").get(0).path("input");ObjectNode missing=original.deepCopy();missing.remove("sleeve_ledger");assertThat(SrppReportShortUsCalculator.screen(missing,model(),"short_term_opportunity_d171").path("sleeve").path("status").asText()).isEqualTo("無法判定");ObjectNode changed=original.deepCopy();((ObjectNode)changed.path("sleeve_evidence")).put("ledger_sha256","0".repeat(64));assertThat(SrppReportShortUsCalculator.screen(changed,model(),"short_term_opportunity_d171").path("sleeve").path("reason").asText()).isEqualTo("SHORT_TERM_CONFIRMATION_UNVERIFIED");}
     @Test void publicTwModuleHasNoUsIndividualTradeAndUnknownSleeveIsUnavailable()throws Exception{var fixture=SrppReportModuleCalculatorTest.fixture();ObjectNode extra=M.createObjectNode();extra.putObject("us-tactical").put("verified",true).put("sessionApplicable",true).put("ownerUserId",7);JsonNode result=SrppReportShortUsCalculator.calculate(fixture.frozen(),model(),extra);assertThat(result.path("status").asText()).isEqualTo("UNAVAILABLE");assertThat(result.path("data").path("legs")).isEmpty();assertThat(result.path("receipts").toString()).contains("HORIZON_NOT_APPLICABLE");assertThat(result.path("missing").toString()).doesNotContain("CALCULATOR_SCOPE_NOT_VERIFIED");}
     private ObjectNode usFullItem()throws Exception{ObjectNode item=golden().path("cases").get(10).path("input").deepCopy();((ObjectNode)item.path("quote")).put("asOf","2026-09-25T14:00:00Z");ObjectNode radar=(ObjectNode)item.path("radar");radar.put("ruleVersion","US_RULES_V1").put("snapshotVerified",true).put("stale",false).put("indicatorsVerified",true);ObjectNode e=item.putObject("full_evidence");e.put("ownerUserId",7).put("radarDetailSuccessfulReads",1).put("radarListHit",true).put("radarListDetailConsistent",true);

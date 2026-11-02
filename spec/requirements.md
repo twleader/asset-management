@@ -6432,3 +6432,15 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 只修復可由現有正式來源證明的資料映射。國泰／富邦00865B分帳、跨幣別正式掛單、失敗或過期的券商擷取仍具名不可用，不建立假空倉、假委託或假來源。無新API、Swagger、DB schema或券商操作。
 - 同步完整SRPP D-205／2.54.0 model與manifest bytes、原產生器的golden及insert-only registry SQL。所有金融expected差異須逐項對應新授權規則，正式驗收受交易日與09:05–13:30台北時窗限制；越窗僅能記NOT_YET_EXECUTED，不能以health代替report-calculations驗收。
 - 2026-11-02後續帳本確認由SRPP本機處理：00679B／00751B四筆買賣確認為已結清短線、00881五筆買進為核心，使用者當輪確認各券商無未成交委託。已結清歷史只能在真實買賣身分／時間序已核對且淨股數精確零時使用closed_history，不能補造當時未保存的support／pressure、重設活躍持倉或把本輪無委託當永久事實。TWSE 49,000與兩檔過熱只是管理檢查點，006208／009804仍守完成日KD、1.5%回落及原批次，承接VOO仍守原買進門檻。資產管理本次追加只發布新manifest／registry／golden身分，model金融bytes、Java計算程式、formal targets與Swagger不變；本機使用者確認不冒充API尚未具備的正式consumer state／券商來源。
+
+### Task 535：SRPP 買賣邏輯一致性修正的來源身分同步（Requirements 187／193）
+
+**User Story：** 作為 SRPP 維護者，我要將已獨立驗證的買賣邏輯修正同步為可重現的資產專案來源產物，並能辨識離線測試、Git 提交與正式部署的不同狀態。
+
+- [ ] 唯一來源為 `/private/tmp/srpp-logic-consistency-20261102` 經來源負責者確認凍結的最終 bundle；確認前不得同步暫存 hash。保持 D-205／policy 2.54.0／model 3.22.0，完整同步 `model_inputs.json` 與 `policy_manifest.json` 原始 bytes。模型只承接 D-118 舊文字的 3%→1.5% 與 VOO／VT敘述校正，數值與正式 targets 不變；熊市月頻容量順序由 SRPP 原計算器負責。Java 僅對齊同一個長期債券短線退出的完整持有期證據缺陷，不另設金融門檻或啟用缺失的 canonical feed。
+- [ ] 以原 Ruby 工具重產受追蹤 insert-only `d201-registration.sql`，以原 Python generators 重產主 report、state-topup、short-US、income-payroll 產物，所有 Python 執行明示 `-B` 或 `PYTHONDONTWRITEBYTECODE=1`，禁止向 SRPP 寫入 bytecode。既有四組金融 cases 必逐值相同，只接受 bundle 與實際變動計算器的來源 hash 差異；任何其他差異停止回報，不得改 expected 掩蓋。short-US／income-payroll 原工具讀取的絕對 primary SRPP 須先與凍結來源核對同一 commit，或正常 no-ff merge 前後的相同 tree，並逐位元比對所需來源；無法安全同步 primary 時，僅以記憶體來源常數替換作受控後備，記錄原工具 SHA，不改工具內容或來源檔案。
+- [ ] `SrppReportShortUsCalculator.screen` 對鎖定日期早於60日進場窗的既有部位，須從已凍結且經確認的完整交易日日曆、價格與配息資料驗證鎖定日期至當日的持有期。非交易日鎖定日期須保留前一完成日以驗配息，不重設原 support／pressure、entry date、holding sessions 或120日門檻。僅從驗證後、去重且無衝突的配息扣減原鎖定價；缺舊價格、配息衝突／股票股利或日期／來源不完整仍退出阻擋並凍結新買進。只有原退出 trigger 已成立時，BUY反向或非空 actionGateReasons 才施退出否決；沒有trigger的61／119日部位維持HOLD，不因此凍結。未成交賣量與核心／短線股數隔離維持。
+- [ ] 原Python允許最近60日價格相同的觀察列；共用 `shortScenario` 僅將 `pressure==support` 保留為可分析事實，仍拒絕 `pressure<support` 及非正價格／股數，不改費稅或風報比公式。`shortEntryReasons` 的嚴格支撐壓力區間與淨風報比仍擋新買進，回歸須證明等號情境 `NO_SUPPORT_PRESSURE_INTERVAL`、share ceiling=0／mayRecommend=false，同時120日部位可使用原locked45／60和完整持有期證據評估退出。
+- [ ] 保留原13個 short-US cases 完整不變，另以凍結 SRPP 的 `test_long_short_term_exit.py` fixture 與實際 `screen` 原函式產生獨立 golden，覆蓋兩檔債券61／119／120日、舊除息、鎖定日起完整資料、缺舊bar、配息衝突、BUY無trigger／有trigger及非交易日鎖定日期。新產生器須明示絕對來源與唯讀 `--check`，記錄 Python 來源 hash；Java 用同一輸入逐欄比對退出狀態、理由、鎖定調整價、股數與凍結狀態，不手改 expected。隔離回歸須驗相對／缺失root、embedded bytes不符、stale hash／case拒絕，以及成功／失敗check的受保護來源與產物零寫入；僅合成fixture日曆可寫系統暫存區。
+- [ ] 通過同一絕對來源的 authority checker、golden／registry 回歸、聚焦 Java parity／authority 測試、獨立架構檢查與 spec-check；正式 targets document、其餘 Java 公式、Swagger、schema、producer 與排程不變。第一階段為離線交付，當時不呼叫金融 API、不執行 SQL、不重建服務、不寄信、不交易；後續發布僅依使用者新增的明確授權執行並留下實際收據。
+- [ ] 第一階段完成 feature 提交、推送與遠端讀回；當時未授權 run-stack，故保留 feature 並具名記錄尚未 main merge。2026-11-02 20:36之後使用者明確要求先登錄規則包、rebuild資產服務、最後兩專案commit／merge／push，本次依此具體順序執行（優先於Task504一般SQL時序），再從乾淨main重建。保留原設定／排程、歷史registry rows與原金融硬閘；只用正式health與安全GET驗部署，越13:30之金融runtime仍NOT_YET_EXECUTED，不以hash／health冒充。
