@@ -6278,18 +6278,18 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 同一變更交付真正 Codex台股兩個與美盤22-00共三個prompt、Claude本機SKILL與現有遠端保存指令的部署讀回，不能停在producer absent；若Claude遠端裝置綁定缺工具能力，具名BLOCKED_REMOTE_PROOF、保留遠端舊狀態且不阻擋其他可完成工作，不虛稱遠端已部署。變更兩個repo均feature commit、no-ff merge、push與remote readback。observer/YAML/統一Swagger/consumer schema/runtime/新policy hash/backend embedded authority/insert-only registry/jar 必完全一致；下一交易日合法時窗以同一hash只讀GET驗證，時窗未到標 NOT_YET_EXECUTED，不能用健康檢查代替。
 
 
-#### Requirement 150 修訂／Task 510：在途款項到期轉入銀行存款
+#### Requirement 150 修訂／Tasks 510、529：在途款項到期轉入銀行存款
 
-**User Story：**身為資產管理使用者，我希望在途款項於款項處理日移除時，同銀行同幣別的活存同步增加或減少，讓已記錄的待收／待付款轉成已結清存款。
+**User Story：**身為資產管理使用者，我希望在途款項於款項處理日移除時，同銀行同幣別的對應存款同步增加或減少，買賣股票款使用證券戶，其他款項使用活存，讓已記錄的待收／待付款轉成已結清存款。
 
 **相容性修訂：**取代 Task 448 的「只移除、不改活存」行為，保留台北日期、owner/latest、row lock、GET pure read、AUTO 保護與過期表單拒絕邊界。這是本機資產記帳，無銀行／券商外部寫入。
 
 **Acceptance Criteria：**
 - [ ] 所有既有到期入口（最新非未來快照 create、完整 PUT、每日 roll／啟動補跑）共用相同 Service 規則。僅 processingDate 非 null 且 <= 台北今天的 TRANSIT_TWD／TRANSIT_USD 可結清；歷史／未來快照、未到期／null、一般手動刪除或取消在途列不調整存款，不追補已被舊版本刪除的款項。
-- [ ] 結清目標限定同 snapshot、非 null 相同 bank id、同對應幣別的唯一活存：TRANSIT_TWD→TWD／既有產品 code「活存」，TRANSIT_USD→USD／既有產品 code「美元活存」。不得依顯示名稱猜測、自建分類、增建存款列、拆定存、動證券戶或其他銀行；目標 source 必須為 MANUAL（含舊 null source）。完整 PUT 在 locked snapshot 的 collection replacement 前，將來源非 MANUAL/null 的 TWD／活存、USD／美元活存原列納入保護；原樣保留即使 payload 省略，並忽略 exact id 或同 bankId＋depositType 的 payload 碰撞，不能重建降級為 MANUAL。欠缺／重複目標、無銀行、來源管理目標、無有效金額或美元原幣／正匯率不足時保留在途列與存款原值，以具名日誌記錄原因，前端文字說明未能對應時保留。
+- [ ] 結清目標限定同 snapshot、非 null 相同 bank id、同對應幣別的唯一存款。Task 529 取代 Task 510 的全類型限活存／禁止證券戶規則：既有在途類型 code「買股待付款」「賣股待收款」只對應既有產品 code「證券戶」（TRANSIT_TWD→TWD、TRANSIT_USD→USD）；其他在途類型仍對應 TWD／「活存」或 USD／「美元活存」。不能在找不到證券戶時改扣活存，反向亦然；同銀行同幣別有兩種存款時依款項類型選擇，目標類型內仍須唯一。不得依顯示名稱猜測、自建分類、增建存款列、拆定存或動其他銀行；目標 source 必須為 MANUAL（含舊 null source）。完整 PUT 在 locked snapshot 的 collection replacement 前，將來源非 MANUAL/null 的 TWD／活存、USD／美元活存與 TWD 或 USD／證券戶原列納入保護；原樣保留即使 payload 省略，並忽略 exact id 或同 bankId＋depositType 的 payload 碰撞，不能重建降級為 MANUAL。同銀行同產品 code 的證券戶若已有另一幣別的 MANUAL/null 列，正常完整 PUT 必須保留該列的合法更新，不可因廣義 bankId＋depositType 碰撞誤刪。唯一例外放行條件為 payload id 已通過既有歸屬驗證、精確指向該原手動列，bankId／depositType／TWD或USD currency 均與原列相同，且其幣別不同於該 bankId＋depositType 下所有受保護來源列；無 id、新造或更改身分的 payload 維持碰撞拒絕。欠缺／重複目標、無銀行、來源管理目標、無有效金額或美元原幣／正匯率不足時保留在途列與存款原值，以具名日誌記錄原因，前端文字說明未能對應時保留。
 - [ ] 使用已保存的 signed amount 決定方向，待付款扣除、待收款增加。TWD 直接加 signed amount；USD 以 abs(originalAmount) × signed amount 的方向調整目標 originalAmount，再用 snapshot usdExchangeRate 與既有 HALF_UP 整數台幣換算重算目標 amount。目標利率／備註／銀行／類型／source 不變。
-- [ ] 同銀行同幣別同處理日批次淨額入帳，日期由舊到新處理；如果該批次會造成負活存，整批保留、不套 abs、不改其他帳戶。每批先完整驗證、再改目標並移除該批在途列；刪除與目標更新及 aggregates 在同一既有 snapshot row lock／transaction 中原子提交，失敗回滾，重跑不重複調整。結清本身保持 totalDeposit／totalAssets（USD 依原有逐列換算可能有整數捨入差）；利息以調整後活存重算。
-- [ ] 更新在途款項說明，明示待付款扣活存／待收款加活存、同銀行同幣別、無唯一目標／餘額不足會保留；前端只顯示不自行計算。既有 API／DTO／DB schema／9090 Swagger／排程節拍不變。驗證涵蓋兩幣別正負、同日淨額、不同銀行、缺少／重複／來源管理目標、餘額不足、USD 缺匯率／原幣、歷史／未來／null、重跑與 stale id、真 PostgreSQL rollback／row lock／零重複 DML，並完成受影響服務重建與 main 發布。
+- [ ] 同銀行同幣別同目標產品類型同處理日批次淨額入帳，股票與非股票款不可互抵，日期由舊到新處理；如果該批次會造成目標存款負餘額，整批保留、不套 abs、不改其他帳戶。每批先完整驗證、再改目標並移除該批在途列；刪除與目標更新及 aggregates 在同一既有 snapshot row lock／transaction 中原子提交，失敗回滾，重跑不重複調整。結清本身保持 totalDeposit／totalAssets（USD 依原有逐列換算可能有整數捨入差）；利息以調整後存款重算。
+- [ ] 更新在途款項說明，明示買賣股票款扣／加證券戶，其他待付／待收款扣／加活存，同銀行同幣別、無唯一目標／餘額不足會保留；前端只顯示不自行計算。既有 API／DTO／DB schema／9090 Swagger／排程節拍不變。驗證涵蓋兩幣別正負、同日淨額、不同銀行、缺少／重複／來源管理目標、餘額不足、USD 缺匯率／原幣、歷史／未來／null、重跑與 stale id、真 PostgreSQL rollback／row lock／零重複 DML，並完成受影響服務重建與 main 發布。
 
 ## Task 511 修訂：歷年資產與已實現損益多筆獨立匯出排程（Requirements 34／39／69／73）
 

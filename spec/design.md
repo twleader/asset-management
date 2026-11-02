@@ -13134,13 +13134,13 @@ backend/BFF Event選填publicDecision，封閉解碼只對本key允許省略、�
 observer API升1.4.0，金融YAML method/path/schema不變；統一Markdown與PublishedSwaggerIdentity因observer schema改變必重產。SRPP producer規則也變更，所以不能僅metadata refresh；受控Swagger同步須在乾淨managed SRPP feature先完成，之後才改政策入口並重建runtime/manifest新hash，完整同步backend authority/golden/insert-only registry。驗收及部署順序由Task508明定，不放寬現sync工具的dirty/source allowlist。
 
 
-## Requirement 150／Task 510：在途結清與活存原子調整
+## Requirement 150／Tasks 510、529：在途結清與對應存款原子調整
 
-以純 Service helper 規劃並套用每個 bankId／對應幣別／processingDate 批次，AssetService 的既有 create、PUT、roll 到期呼叫共用它。沿用 TransitProcessingDatePolicy 與既有 parent row lock，無新查詢／路由／資料表／排程。所有變動同 transaction：確認目標與完整批次→計算淨變動→更新活存→orphan removal→SnapshotAggregateCalculator.recalculate。GET 保持 pure read，不由 UI 先隱藏列。
+以純 Service helper 規劃並套用每個 bankId／對應幣別／目標產品類型／processingDate 批次，AssetService 的既有 create、PUT、roll 到期呼叫共用它。沿用 TransitProcessingDatePolicy 與既有 parent row lock，無新查詢／路由／資料表／排程。所有變動同 transaction：確認目標與完整批次→計算淨變動→更新對應存款→orphan removal→SnapshotAggregateCalculator.recalculate。GET 保持 pure read，不由 UI 先隱藏列。
 
-目標是同一快照同 bank id 的唯一 TWD「活存」或 USD「美元活存」既有產品 code 列，且 source=MANUAL／legacy null；不是新的業務分類 enum。來源為銀行的真實帳號並未存於此資料模型，因此不推測同銀行多筆活存中的哪一筆。完整 PUT 必在 collection replacement 前捕捉來源非 MANUAL/null 的 TWD／活存、USD／美元活存原列，沿用 AUTO transit preservation pattern：忽略 exact id 與 bankId＋depositType payload 碰撞、原列及非餘額欄位原樣保留，即使 payload 省略也不可移除，以免重建成 MANUAL 消除來源證據。缺目標／多目標／來源管理目標／無銀行／無有效金額時保留整批並記錄具名原因。不建立帳戶、不動定存／證券戶。
+Task 529 取代全在途類型只找活存的限制：既有在途類型 code「買股待付款」「賣股待收款」只對應同一快照同 bank id、相同對應幣別（TWD／USD）的既有「證券戶」產品 code；其他類型只對應 TWD「活存」或 USD「美元活存」。由純 helper 選出目標產品類型並納入 Batch key，同日股票與其他款分開淨額入帳，兩種帳戶同時存在也不得選錯或互相 fallback。目標類型內須唯一且 source=MANUAL／legacy null；不是新的業務分類 enum。來源為銀行的真實帳號並未存於此資料模型，因此不推測同銀行同幣別同類型多筆存款中的哪一筆。完整 PUT 必在 collection replacement 前捕捉來源非 MANUAL/null 的 TWD／活存、USD／美元活存及 TWD 或 USD／證券戶原列，沿用 AUTO transit preservation pattern：忽略 exact id 與 bankId＋depositType payload 碰撞、原列及非餘額欄位原樣保留，即使 payload 省略也不可移除，以免重建成 MANUAL 消除來源證據。同銀行同產品 code 的證券戶若已有另一幣別的 MANUAL/null 列，正常完整 PUT 必須保留該列的合法更新，不可因廣義 bankId＋depositType 碰撞誤刪。唯一例外放行條件為 payload id 已通過既有歸屬驗證、精確指向該原手動列，bankId／depositType／TWD或USD currency 均與原列相同，且其幣別不同於該 bankId＋depositType 下所有受保護來源列；無 id、新造或更改身分的 payload 維持碰撞拒絕。缺目標／多目標／來源管理目標／無銀行／無有效金額時保留整批並記錄具名原因。不建立帳戶、不動定存；只有股票在途款能調整手動證券戶，來源管理的證券戶餘額不能再次加扣。
 
-依處理日期升序，以同日淨額計算。TWD 使用 persisted signed amount；USD 使用 abs(originalAmount) 乘 persisted amount.signum()，每列原幣須可驗證且 snapshot 匯率 >0，目標 originalAmount 不得缺失。新 USD 台幣 amount = 新原幣 × 快照匯率，HALF_UP 到整數，保持原估值慣例。若新活存為負，整批保留，避免現有表單與 normalizeDepositAmount 的 abs 將負餘額轉正。完整驗證後才改 entity，刪除失敗時目標／在途／aggregates 一起 rollback；刪掉的 id 在第二次舊 PUT 仍被既有驗證拒絕。
+依處理日期升序，以同日同目標產品類型淨額計算。TWD 使用 persisted signed amount；USD 使用 abs(originalAmount) 乘 persisted amount.signum()，每列原幣須可驗證且 snapshot 匯率 >0，目標 originalAmount 不得缺失。新 USD 台幣 amount = 新原幣 × 快照匯率，HALF_UP 到整數，保持原估值慣例。若目標存款新餘額為負，整批保留，避免現有表單與 normalizeDepositAmount 的 abs 將負餘額轉正。完整驗證後才改 entity，刪除失敗時目標／在途／aggregates 一起 rollback；刪掉的 id 在第二次舊 PUT 仍被既有驗證拒絕。
 
 未到期、null 日期、非 latest／未來快照均不動；手動取消在途列不代表結清。停機補跑與已是今天的 latest 都走同規則。沒有可靠證據可重建舊版已刪列，因此不補歷史差額。前端僅修訂說明文字，儲存後沿用 canonical detail reload，不新增 API response 欄位或 Swagger identity 變動。
 
