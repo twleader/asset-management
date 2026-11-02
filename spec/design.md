@@ -13245,3 +13245,11 @@ Dashboard、TradingRadar、WatchStock、SnapshotForm 現有 onQuote 已各自 ap
 ### Task 528：Claude 入口提早收工修正的 authority 發布邊界
 
 SRPP 的修正只在日報執行規格與 Claude 入口文字（權威讀取包規模不是停止理由），不影響金融計算與 9090 API 契約。asset-management 本輪只發布最終 bundle 身分：完整 manifest bytes 同步到 classpath decision authority，由原工具重產 insert-only registry SQL 與主 22 案例 golden（僅 bundle 欄位變），formal targets、model_inputs、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash（`ON CONFLICT DO NOTHING`），不更新刪除歷史資料。只從乾淨 asset main 以 run-stack rebuild／recreate business-services，BFF 保持服務；重啟前須依當下日期與設定唯讀證明 analysis self-heal 寄信、index 外抓等啟動期入口皆 no-op，否則不重啟。新 hash 的 `report-calculations` 讀回只在目標交易日台北 09:05 至 13:30 內以唯讀 GET 進行。
+
+### Requirement 13／Task 527：當日分時 session 接收容量
+
+`HistoricalDataHttpAdapter` 目前以 WebClient 預設 256 KiB 上限解析 `GET /internal/intraday-ticks` 的單一 session object；0050 的密集成交序列超過該值時，HTTP 200 仍觸發 `DataBufferLimitException`，`HistoricalDataService` fail-soft 回空 session，造成股票分析顯示無資料。
+
+在 HTTP adapter 內建立只供 `intradaySession` 使用的獨立 WebClient，保留相同 base URL、query 參數與 DTO decoder，將 `maxInMemorySize` 設為有限的 `16 * 1024 * 1024` bytes。一般 client 與全域 codec 保持原值；不使用無限 buffer。解碼後仍交既有 `IntradaySessionResolver` 處理 comparison tuple，完整保留 tick 數量、順序、時間與 BigDecimal 價格。超限或 malformed JSON 維持既有 fail-soft，不得返回部分序列或自行補值。無 controller／DTO／BFF／frontend／producer／Redis／DB／9090 契約變更，也不新增 request-time vendor I/O。
+
+回歸驗證沿用既有 `HistoricalDataIntradaySessionHttpTest` 的真實本地 HTTP server，兩種 readOnly 模式均以超過 2 MiB 的 session 驗證首末 tick、完整數量、價格精度與 reference/comparison；另驗超過 16 MiB 時 fail-soft，以及非 session 查詢仍受預設接收上限約束。部署只重建並 recreate `business-services`，讀取實際 0050 session 驗證非空序列及無 buffer-limit 失敗。

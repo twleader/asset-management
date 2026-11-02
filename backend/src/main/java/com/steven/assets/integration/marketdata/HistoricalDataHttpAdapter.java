@@ -17,14 +17,20 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies;
 
 @Component
 public class HistoricalDataHttpAdapter implements HistoricalDataPort {
+    private static final int INTRADAY_SESSION_MAX_BYTES = 16 * 1024 * 1024;
     private final WebClient client;
+    private final WebClient intradaySessionClient;
     public HistoricalDataHttpAdapter(@Value("${external-materials.base-url:http://external-materials-service:8080}") String externalUrl) {
         this.client = WebClient.builder().baseUrl(externalUrl).build();
+        // Dense trade streams exceed WebClient's 256 KiB default; keep the larger finite cap local.
+        this.intradaySessionClient = client.mutate()
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(INTRADAY_SESSION_MAX_BYTES))
+                .build();
     }
     @Override
     @SuppressWarnings("unchecked")
     public IntradaySourceSessionDto intradaySession(String stockCode, String market, LocalDate date, boolean readOnly) {
-        return client.get()
+        return intradaySessionClient.get()
                     .uri(uriBuilder -> {
                         uriBuilder.path("/internal/intraday-ticks")
                                 .queryParam("code", stockCode)
