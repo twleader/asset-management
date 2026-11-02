@@ -28,7 +28,8 @@ final class TransitBankSettlement {
                 .filter(row -> TransitProcessingDatePolicy.isDue(row.getCurrency(), row.getProcessingDate(), today))
                 .sorted(Comparator.comparing(BankDeposit::getProcessingDate))
                 .forEach(row -> batches.computeIfAbsent(new Batch(bankId(row),
-                        "TRANSIT_USD".equals(row.getCurrency()) ? "USD" : "TWD", row.getProcessingDate()),
+                        "TRANSIT_USD".equals(row.getCurrency()) ? "USD" : "TWD",
+                        targetDepositType(row), row.getProcessingDate()),
                         ignored -> new ArrayList<>()).add(row));
         Set<BankDeposit> settled = Collections.newSetFromMap(new IdentityHashMap<>());
         for (var entry : batches.entrySet()) {
@@ -36,8 +37,8 @@ final class TransitBankSettlement {
             List<BankDeposit> rows = entry.getValue();
             String reason = apply(snapshot, batch, rows);
             if (reason == null) settled.addAll(rows);
-            else log.warn("在途入帳保留 snapshot={} bank={} currency={} processingDate={} reason={}",
-                    snapshot.getId(), batch.bankId(), batch.currency(), batch.date(), reason);
+            else log.warn("在途入帳保留 snapshot={} bank={} currency={} targetType={} processingDate={} reason={}",
+                    snapshot.getId(), batch.bankId(), batch.currency(), batch.targetType(), batch.date(), reason);
         }
         // Entity 的 Lombok equals 會走回 snapshot；使用物件 identity 避免遞迴及誤刪同值列。
         return snapshot.getDeposits().removeIf(settled::contains);
@@ -46,15 +47,14 @@ final class TransitBankSettlement {
     /** 全批驗證完成後才修改目標；任一失敗不會消耗任何在途列。 */
     private static String apply(AssetSnapshot snapshot, Batch batch, List<BankDeposit> rows) {
         if (batch.bankId() == null) return "MISSING_BANK";
-        String type = "USD".equals(batch.currency()) ? "美元活存" : "活存";
         List<BankDeposit> targets = snapshot.getDeposits().stream()
                 .filter(row -> Objects.equals(batch.bankId(), bankId(row))
-                        && batch.currency().equals(row.getCurrency()) && type.equals(row.getDepositType()))
+                        && batch.currency().equals(row.getCurrency()) && batch.targetType().equals(row.getDepositType()))
                 .toList();
         if (targets.isEmpty()) return "MISSING_TARGET";
         if (targets.size() != 1) return "DUPLICATE_TARGET";
         BankDeposit target = targets.getFirst();
-        if (isSourceManagedCash(target)) return "SOURCE_MANAGED_TARGET";
+        if (isSourceManagedSettlementTarget(target)) return "SOURCE_MANAGED_TARGET";
         if (target.getAmount() == null || rows.stream().anyMatch(row -> row.getAmount() == null)) {
             return "MISSING_AMOUNT";
         }
@@ -85,9 +85,18 @@ final class TransitBankSettlement {
         return null;
     }
 
-    static boolean isSourceManagedCash(BankDeposit row) {
+    private static String targetDepositType(BankDeposit row) {
+        if ("買股待付款".equals(row.getDepositType()) || "賣股待收款".equals(row.getDepositType())) {
+            return "證券戶";
+        }
+        return "TRANSIT_USD".equals(row.getCurrency()) ? "美元活存" : "活存";
+    }
+
+    static boolean isSourceManagedSettlementTarget(BankDeposit row) {
         return row != null && (("TWD".equals(row.getCurrency()) && "活存".equals(row.getDepositType()))
-                || ("USD".equals(row.getCurrency()) && "美元活存".equals(row.getDepositType())))
+                || ("USD".equals(row.getCurrency()) && "美元活存".equals(row.getDepositType()))
+                || (("TWD".equals(row.getCurrency()) || "USD".equals(row.getCurrency()))
+                        && "證券戶".equals(row.getDepositType())))
                 && row.getSource() != null && !"MANUAL".equals(row.getSource());
     }
 
@@ -95,5 +104,5 @@ final class TransitBankSettlement {
         return row.getBank() == null ? null : row.getBank().getId();
     }
 
-    private record Batch(Long bankId, String currency, LocalDate date) {}
+    private record Batch(Long bankId, String currency, String targetType, LocalDate date) {}
 }

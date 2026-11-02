@@ -15,6 +15,95 @@ class TransitBankSettlementTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 10, 25);
 
     @Test
+    void stockPayableUsesSecuritiesBalanceAndSettlesObservedCaseOnlyOnce() {
+        BankDeposit securities = securities(1, "TWD", "63454", null);
+        BankDeposit cash = cash(1, "TWD", "1000", null);
+        var snapshot = snapshot(securities, cash, stockTransit(1, "TWD", "-48168", null, "買股待付款"));
+        assertThat(TransitBankSettlement.settle(snapshot, TODAY)).isTrue();
+        assertThat(securities.getAmount()).isEqualByComparingTo("15286");
+        assertThat(cash.getAmount()).isEqualByComparingTo("1000");
+        assertThat(snapshot.getDeposits()).hasSize(2);
+        assertThat(TransitBankSettlement.settle(snapshot, TODAY)).isFalse();
+        assertThat(securities.getAmount()).isEqualByComparingTo("15286");
+    }
+
+    @Test
+    void stockReceivablesAndPayablesNetTogetherWhileOtherFundsUseCash() {
+        BankDeposit securities = securities(1, "TWD", "5", null);
+        BankDeposit cash = cash(1, "TWD", "100", null);
+        var snapshot = snapshot(cash, securities,
+                stockTransit(1, "TWD", "-20", null, "買股待付款"),
+                stockTransit(1, "TWD", "30", null, "賣股待收款"),
+                transit(1, "TWD", "-7", null, TODAY));
+        assertThat(TransitBankSettlement.settle(snapshot, TODAY)).isTrue();
+        assertThat(securities.getAmount()).isEqualByComparingTo("15");
+        assertThat(cash.getAmount()).isEqualByComparingTo("93");
+        assertThat(snapshot.getDeposits()).hasSize(2);
+    }
+
+    @Test
+    void differentTargetTypesCannotOffsetAnInsufficientBatchInEitherDirection() {
+        for (boolean stockInsufficient : new boolean[]{true, false}) {
+            BankDeposit securities = securities(1, "TWD", "5", null);
+            BankDeposit cash = cash(1, "TWD", "5", null);
+            BankDeposit stock = stockTransit(1, "TWD", stockInsufficient ? "-10" : "20", null,
+                    stockInsufficient ? "買股待付款" : "賣股待收款");
+            BankDeposit other = transit(1, "TWD", stockInsufficient ? "20" : "-10", null, TODAY);
+            var snapshot = snapshot(securities, cash, stock, other);
+            assertThat(TransitBankSettlement.settle(snapshot, TODAY)).isTrue();
+            assertThat(securities.getAmount()).isEqualByComparingTo(stockInsufficient ? "5" : "25");
+            assertThat(cash.getAmount()).isEqualByComparingTo(stockInsufficient ? "25" : "5");
+            assertThat(snapshot.getDeposits()).hasSize(3);
+            assertThat(snapshot.getDeposits().getLast()).isSameAs(stockInsufficient ? stock : other);
+        }
+    }
+
+    @Test
+    void usdStockSettlementUsesOriginalCurrencyAndNeverTouchesCashOrAnotherBank() {
+        BankDeposit securities = securities(1, "USD", "3200", "100");
+        BankDeposit otherBank = securities(2, "USD", "640", "20");
+        BankDeposit cash = cash(1, "USD", "320", "10");
+        var snapshot = snapshot(securities, cash, otherBank,
+                stockTransit(1, "USD", "64", "2", "賣股待收款"),
+                stockTransit(1, "USD", "-1", "5", "買股待付款"),
+                transit(1, "USD", "-32", "1", TODAY));
+        assertThat(TransitBankSettlement.settle(snapshot, TODAY)).isTrue();
+        assertThat(securities.getOriginalAmount()).isEqualByComparingTo("97");
+        assertThat(securities.getAmount()).isEqualByComparingTo("3104");
+        assertThat(cash.getOriginalAmount()).isEqualByComparingTo("9");
+        assertThat(cash.getAmount()).isEqualByComparingTo("288");
+        assertThat(otherBank.getOriginalAmount()).isEqualByComparingTo("20");
+        assertThat(otherBank.getAmount()).isEqualByComparingTo("640");
+    }
+
+    @Test
+    void stockFundsDoNotFallBackToCashFixedAnotherBankOrAnotherCurrency() {
+        BankDeposit cash = cash(1, "TWD", "100", null);
+        BankDeposit fixed = cash(1, "TWD", "200", null);
+        fixed.setDepositType("定存");
+        BankDeposit otherBank = securities(2, "TWD", "300", null);
+        BankDeposit otherCurrency = securities(1, "USD", "3200", "100");
+        assertRetained(snapshot(cash, fixed, otherBank, otherCurrency,
+                stockTransit(1, "TWD", "10", null, "賣股待收款")), cash, "100");
+        assertThat(fixed.getAmount()).isEqualByComparingTo("200");
+        assertThat(otherBank.getAmount()).isEqualByComparingTo("300");
+        assertThat(otherCurrency.getAmount()).isEqualByComparingTo("3200");
+    }
+
+    @Test
+    void duplicateOrSourceManagedSecuritiesTargetsRetainStocksForBothCurrencies() {
+        for (String currency : new String[]{"TWD", "USD"}) {
+            BankDeposit securities = securities(1, currency, "100", "10");
+            assertRetained(snapshot(securities, securities(1, currency, "100", "10"),
+                    stockTransit(1, currency, "10", "1", "賣股待收款")), securities, "100");
+            securities.setSource("FUBON_SYNC");
+            assertRetained(snapshot(securities, stockTransit(1, currency, "-10", "1", "買股待付款")),
+                    securities, "100");
+            assertThat(securities.getOriginalAmount()).isEqualByComparingTo("10");
+        }
+    }
+
+    @Test
     void twdNetsSameDayBeforeCheckingBalanceAndPreservesOtherFields() {
         BankDeposit target = cash(1, "TWD", "100", null);
         target.setAnnualInterestRate(new BigDecimal("1.25"));
@@ -203,6 +292,18 @@ class TransitBankSettlementTest {
         row.setCurrency("TRANSIT_" + currency);
         row.setDepositType("任意既有在途類型"); // 不重新查分類決定 persisted sign
         row.setProcessingDate(date);
+        return row;
+    }
+
+    private BankDeposit securities(long bankId, String currency, String amount, String original) {
+        BankDeposit row = cash(bankId, currency, amount, original);
+        row.setDepositType("證券戶");
+        return row;
+    }
+
+    private BankDeposit stockTransit(long bankId, String currency, String amount, String original, String type) {
+        BankDeposit row = transit(bankId, currency, amount, original, TODAY);
+        row.setDepositType(type);
         return row;
     }
 

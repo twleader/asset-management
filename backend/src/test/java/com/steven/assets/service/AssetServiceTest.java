@@ -226,7 +226,7 @@ class AssetServiceTest {
         BankDeposit future = autoDeposit(11L, today.plusDays(1));
         Bank bank = due.getBank();
         when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
-        var cash = new AssetSnapshotDto.DepositRequest(7L, "活存", new BigDecimal("2000"),
+        var cash = new AssetSnapshotDto.DepositRequest(7L, "證券戶", new BigDecimal("2000"),
                 null, "TWD", new BigDecimal("1.5"), "cash");
         prepareUpdate();
         when(snapshotRepo.findFirstByOwnerUserIdOrderBySnapshotDateDesc(9L)).thenReturn(Optional.of(snapshot));
@@ -265,7 +265,7 @@ class AssetServiceTest {
         when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
         var due = new AssetSnapshotDto.DepositRequest(7L, "賣股待收款", BigDecimal.TEN,
                 null, "TRANSIT_TWD", null, null, null, today);
-        var normal = new AssetSnapshotDto.DepositRequest(7L, "活存", BigDecimal.ONE,
+        var normal = new AssetSnapshotDto.DepositRequest(7L, "證券戶", BigDecimal.ONE,
                 null, "TWD", null, null, null, today);
         when(snapshotRepo.save(any())).thenAnswer(call -> call.getArgument(0));
         var result = service.createSnapshot(new AssetSnapshotDto.CreateSnapshotRequest(
@@ -295,12 +295,14 @@ class AssetServiceTest {
     }
 
     @Test
-    void fullPutProtectsManagedCashOmissionExactIdAndBankTypeCollision() {
-        for (String currency : List.of("TWD", "USD")) {
+    void fullPutProtectsManagedSettlementTargetsOmissionExactIdAndBankTypeCollision() {
+        for (List<String> target : List.of(List.of("TWD", "活存"), List.of("USD", "美元活存"),
+                List.of("TWD", "證券戶"), List.of("USD", "證券戶"))) {
+            String currency = target.getFirst();
             snapshot.getDeposits().clear();
             BankDeposit managed = BankDeposit.builder().id(40L).snapshot(snapshot)
                     .bank(Bank.builder().id(7L).build()).currency(currency)
-                    .depositType("TWD".equals(currency) ? "活存" : "美元活存")
+                    .depositType(target.get(1))
                     .amount(new BigDecimal("100")).originalAmount(BigDecimal.TEN)
                     .source("OTHER_SYNC").notes("source").annualInterestRate(BigDecimal.ONE).build();
             snapshot.getDeposits().add(managed);
@@ -314,6 +316,80 @@ class AssetServiceTest {
             assertThat(managed.getAmount()).isEqualByComparingTo("100");
             assertThat(managed.getSource()).isEqualTo("OTHER_SYNC");
             assertThat(managed.getNotes()).isEqualTo("source");
+            assertThat(managed.getAnnualInterestRate()).isEqualByComparingTo("1");
+            assertThat(managed.getCurrency()).isEqualTo(currency);
+            assertThat(managed.getOriginalAmount()).isEqualByComparingTo("10");
+        }
+        verifyNoInteractions(bankRepo);
+    }
+
+    @Test
+    void fullPutKeepsExistingManualOppositeCurrencySecuritiesSiblingWhileRejectingNewCollisions() {
+        Bank bank = Bank.builder().id(7L).build();
+        for (String managedCurrency : List.of("TWD", "USD")) {
+            String manualCurrency = "TWD".equals(managedCurrency) ? "USD" : "TWD";
+            BankDeposit managed = BankDeposit.builder().id(40L).snapshot(snapshot).bank(bank)
+                    .depositType("證券戶").currency(managedCurrency).amount(new BigDecimal("100"))
+                    .originalAmount(BigDecimal.TEN).source("FUBON_SYNC").notes("source")
+                    .annualInterestRate(BigDecimal.ONE).build();
+            BankDeposit manual = BankDeposit.builder().id(41L).snapshot(snapshot).bank(bank)
+                    .depositType("證券戶").currency(manualCurrency).amount(new BigDecimal("50"))
+                    .originalAmount(new BigDecimal("50")).source("TWD".equals(managedCurrency) ? null : "MANUAL")
+                    .build();
+            snapshot.getDeposits().clear();
+            snapshot.getDeposits().addAll(List.of(managed, manual));
+            prepareUpdate();
+            when(bankRepo.findById(7L)).thenReturn(Optional.of(bank));
+            service.updateSnapshot(1L, request(List.of(
+                    new AssetSnapshotDto.DepositRequest(7L, "證券戶", new BigDecimal("200"),
+                            new BigDecimal("200"), manualCurrency, null, "manual update", 41L, null),
+                    // 來源列的 exact id 即使假裝成手動幣別也不能穿越保護。
+                    new AssetSnapshotDto.DepositRequest(7L, "證券戶", BigDecimal.ONE,
+                            BigDecimal.ONE, manualCurrency, null, "overwrite", 40L, null),
+                    new AssetSnapshotDto.DepositRequest(7L, "證券戶", BigDecimal.ONE,
+                            BigDecimal.ONE, manualCurrency, null, "new collision"))));
+            assertThat(snapshot.getDeposits()).hasSize(2);
+            assertThat(snapshot.getDeposits().getFirst()).isSameAs(managed);
+            assertThat(managed.getCurrency()).isEqualTo(managedCurrency);
+            assertThat(managed.getAmount()).isEqualByComparingTo("100");
+            assertThat(managed.getOriginalAmount()).isEqualByComparingTo("10");
+            assertThat(managed.getSource()).isEqualTo("FUBON_SYNC");
+            assertThat(managed.getNotes()).isEqualTo("source");
+            assertThat(managed.getAnnualInterestRate()).isEqualByComparingTo("1");
+            BankDeposit updated = snapshot.getDeposits().get(1);
+            assertThat(updated.getCurrency()).isEqualTo(manualCurrency);
+            assertThat(updated.getAmount()).isEqualByComparingTo("200");
+            assertThat(updated.getSource()).isEqualTo("MANUAL");
+            assertThat(updated.getNotes()).isEqualTo("manual update");
+        }
+    }
+
+    @Test
+    void fullPutManualSiblingExceptionRejectsCurrencyBankTypeChangesAndAnyProtectedCurrency() {
+        Bank bank = Bank.builder().id(7L).build();
+        for (String attack : List.of("currency", "bank", "type", "protected-currency")) {
+            BankDeposit managed = BankDeposit.builder().id(40L).snapshot(snapshot).bank(bank)
+                    .depositType("證券戶").currency("TWD").amount(new BigDecimal("100"))
+                    .source("FUBON_SYNC").build();
+            BankDeposit manual = BankDeposit.builder().id(41L).snapshot(snapshot).bank(bank)
+                    .depositType("type".equals(attack) ? "美元活存" : "證券戶").currency("USD")
+                    .amount(new BigDecimal("50")).originalAmount(new BigDecimal("50")).source("MANUAL").build();
+            snapshot.getDeposits().clear();
+            snapshot.getDeposits().addAll(List.of(managed, manual));
+            if ("bank".equals(attack) || "protected-currency".equals(attack)) {
+                snapshot.getDeposits().add(BankDeposit.builder().id(42L).snapshot(snapshot)
+                        .bank("bank".equals(attack) ? Bank.builder().id(8L).build() : bank)
+                        .depositType("證券戶").currency("USD").amount(new BigDecimal("300"))
+                        .originalAmount(new BigDecimal("300")).source("FUBON_SYNC").build());
+            }
+            prepareUpdate();
+            service.updateSnapshot(1L, request(List.of(new AssetSnapshotDto.DepositRequest(
+                    "bank".equals(attack) ? 8L : 7L, "證券戶", BigDecimal.ONE, BigDecimal.ONE,
+                    "currency".equals(attack) ? "TWD" : "USD", null, "overwrite", 41L, null))));
+            assertThat(snapshot.getDeposits()).hasSize(
+                    "bank".equals(attack) || "protected-currency".equals(attack) ? 2 : 1);
+            assertThat(snapshot.getDeposits()).allMatch(d -> "FUBON_SYNC".equals(d.getSource()));
+            assertThat(managed.getAmount()).isEqualByComparingTo("100");
         }
         verifyNoInteractions(bankRepo);
     }

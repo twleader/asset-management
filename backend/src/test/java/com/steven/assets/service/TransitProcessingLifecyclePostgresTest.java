@@ -126,7 +126,7 @@ class TransitProcessingLifecyclePostgresTest {
                 .amount(new BigDecimal("100")).originalAmount(new BigDecimal("100")).build();
         BankDeposit usdTransit = manual("20", "TRANSIT_USD", today.minusDays(1));
         usdTransit.setOriginalAmount(new BigDecimal("20"));
-        Long latest = snapshot(OWNER, today, ordinary("1000"), usd, auto("-31", today),
+        Long latest = snapshot(OWNER, today, securities("1000"), usd, auto("-31", today),
                 usdTransit, auto("-40", today.plusDays(1)),
                 manual("-9", "TRANSIT_TWD", null));
         Long other = snapshot(OTHER_OWNER, today, auto("-88", today));
@@ -155,8 +155,31 @@ class TransitProcessingLifecyclePostgresTest {
     }
 
     @Test
+    void observedManualStockPayableSettlesSecuritiesAtomicallyAndSecondRollDoesNotWrite() {
+        BankDeposit payable = manual("-48168", "TRANSIT_TWD", today);
+        payable.setDepositType("買股待付款");
+        Long id = snapshot(OWNER, today, securities("63454"), payable);
+        var before = assets.getSnapshotDetail(id);
+        Long dueId = before.deposits().get(1).id();
+        assertThat(before.totalDeposit()).isEqualByComparingTo("15286");
+        assertThat(assets.rollLatestSnapshotToTodayForOwner(OWNER, today)).isTrue();
+        read(id, snapshot -> {
+            assertThat(snapshot.getDeposits()).singleElement().satisfies(row -> {
+                assertThat(row.getDepositType()).isEqualTo("證券戶");
+                assertThat(row.getAmount()).isEqualByComparingTo("15286");
+            });
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo(before.totalDeposit());
+            assertThat(snapshot.getTotalAssets()).isEqualByComparingTo(before.totalAssets());
+        });
+        assertThat(deposits.existsById(dueId)).isFalse();
+        trace.start();
+        assertThat(assets.rollLatestSnapshotToTodayForOwner(OWNER, today)).isFalse();
+        assertThat(trace.stop()).noneMatch(SqlTrace::isDml);
+    }
+
+    @Test
     void startupRecoveryPathRollsOldLatestAndLeavesFutureSnapshotUntouched() {
-        Long stale = snapshot(OWNER, today.minusDays(3), ordinary("100"), auto("-31", today.minusDays(2)), auto("-40", today.plusDays(1)));
+        Long stale = snapshot(OWNER, today.minusDays(3), securities("100"), auto("-31", today.minusDays(2)), auto("-40", today.plusDays(1)));
         Long future = snapshot(OTHER_OWNER, today.plusDays(1), auto("-88", today));
         assertThat(assets.rollLatestSnapshotToTodayForOwner(OWNER, today)).isTrue();
         assertThat(assets.rollLatestSnapshotToTodayForOwner(OTHER_OWNER, today)).isFalse();
@@ -175,7 +198,7 @@ class TransitProcessingLifecyclePostgresTest {
 
     @Test
     void supplementLegacyAutoExpiresImmediatelyAndStaleFormCannotResurrectIt() {
-        Long id = snapshot(OWNER, today, auto("-31", null), auto("-40", today.plusDays(1)), ordinary("100"));
+        Long id = snapshot(OWNER, today, auto("-31", null), auto("-40", today.plusDays(1)), securities("100"));
         var oldDetail = assets.getSnapshotDetail(id);
         var due = oldDetail.deposits().stream().filter(d -> "AUTO".equals(d.updateMode()) && d.processingDate() == null)
                 .findFirst().orElseThrow();
@@ -196,7 +219,7 @@ class TransitProcessingLifecyclePostgresTest {
 
     @Test
     void foreignDuplicateAndUnknownIdsRejectWholePutBeforeAnyChildMutation() {
-        Long id = snapshot(OWNER, today, auto("-31", null), ordinary("100"));
+        Long id = snapshot(OWNER, today, auto("-31", null), securities("100"));
         Long other = snapshot(OTHER_OWNER, today, auto("-50", null));
         var own = assets.getSnapshotDetail(id);
         Long foreignDeposit = new TransactionTemplate(transactions).execute(status ->
@@ -222,7 +245,7 @@ class TransitProcessingLifecyclePostgresTest {
 
     @Test
     void failingOrphanDeleteRollsBackSupplementNotesAndAggregates() {
-        Long id = snapshot(OWNER, today, auto("-31", null), ordinary("100"));
+        Long id = snapshot(OWNER, today, auto("-31", null), securities("100"));
         var detail = assets.getSnapshotDetail(id);
         tx(() -> {
             entityManager.createNativeQuery("CREATE FUNCTION reject_transit_delete() RETURNS trigger LANGUAGE plpgsql AS $$ "
@@ -251,7 +274,7 @@ class TransitProcessingLifecyclePostgresTest {
         read(historic, s -> assertThat(s.getDeposits()).hasSize(1));
         var due = new AssetSnapshotDto.DepositRequest(bank.getId(), "賣股待收款", BigDecimal.TEN,
                 null, "TRANSIT_TWD", null, null, null, today);
-        var cash = new AssetSnapshotDto.DepositRequest(bank.getId(), "活存", new BigDecimal("100"),
+        var cash = new AssetSnapshotDto.DepositRequest(bank.getId(), "證券戶", new BigDecimal("100"),
                 null, "TWD", null, null);
         var created = assets.createSnapshot(request(today, List.of(due, cash), "current"));
         assertThat(created.totalAssets()).isEqualByComparingTo("110");
@@ -291,15 +314,17 @@ class TransitProcessingLifecyclePostgresTest {
     }
 
     @Test
-    void fullPutCannotDowngradeOrOmitSourceManagedCashForEitherCurrency() {
-        for (String currency : List.of("TWD", "USD")) {
-            BankDeposit managed = "USD".equals(currency)
-                    ? BankDeposit.builder().depositType("美元活存").currency("USD")
-                        .amount(new BigDecimal("100")).originalAmount(new BigDecimal("100")).build()
-                    : ordinary("100");
+    void fullPutCannotDowngradeOrOmitSourceManagedSettlementTargetForEitherCurrency() {
+        for (List<String> target : List.of(List.of("TWD", "活存"), List.of("USD", "美元活存"),
+                List.of("TWD", "證券戶"), List.of("USD", "證券戶"))) {
+            String currency = target.getFirst();
+            BankDeposit managed = BankDeposit.builder().depositType(target.get(1)).currency(currency)
+                    .amount(new BigDecimal("100")).originalAmount(new BigDecimal("100"))
+                    .annualInterestRate(BigDecimal.ONE).build();
             managed.setSource("FUBON_SYNC");
             managed.setNotes("managed cash");
             BankDeposit due = manual("10", "TRANSIT_" + currency, today);
+            if ("證券戶".equals(target.get(1))) due.setDepositType("賣股待收款");
             due.setOriginalAmount(BigDecimal.TEN);
             Long id = snapshot(OWNER, today, managed, due);
             var detail = assets.getSnapshotDetail(id);
@@ -327,6 +352,8 @@ class TransitProcessingLifecyclePostgresTest {
                     assertThat(actual.getAmount()).isEqualByComparingTo("100");
                     assertThat(actual.getNotes()).isEqualTo("managed cash");
                     assertThat(actual.getCurrency()).isEqualTo(currency);
+                    assertThat(actual.getOriginalAmount()).isEqualByComparingTo("100");
+                    assertThat(actual.getAnnualInterestRate()).isEqualByComparingTo("1");
                     assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("110");
                 });
             }
@@ -338,8 +365,84 @@ class TransitProcessingLifecyclePostgresTest {
     }
 
     @Test
+    void fullPutPersistsExactManualOppositeCurrencySiblingAndRejectsNoIdOrManagedIdClones() {
+        for (String managedCurrency : List.of("TWD", "USD")) {
+            String manualCurrency = "TWD".equals(managedCurrency) ? "USD" : "TWD";
+            BankDeposit managed = securities("100");
+            managed.setCurrency(managedCurrency);
+            managed.setOriginalAmount(new BigDecimal("100"));
+            managed.setSource("FUBON_SYNC");
+            managed.setNotes("managed securities");
+            BankDeposit manual = securities("50");
+            manual.setCurrency(manualCurrency);
+            manual.setOriginalAmount(new BigDecimal("50"));
+            manual.setSource("MANUAL");
+            Long id = snapshot(OWNER, today, managed, manual);
+            var detail = assets.getSnapshotDetail(id);
+            Long managedId = detail.deposits().getFirst().id();
+            Long manualId = detail.deposits().get(1).id();
+            assets.updateSnapshot(id, request(today, List.of(
+                    new AssetSnapshotDto.DepositRequest(bank.getId(), "證券戶", new BigDecimal("200"),
+                            new BigDecimal("200"), manualCurrency, null, "manual update", manualId, null),
+                    new AssetSnapshotDto.DepositRequest(bank.getId(), "證券戶", BigDecimal.ONE,
+                            BigDecimal.ONE, manualCurrency, null, "overwrite", managedId, null),
+                    new AssetSnapshotDto.DepositRequest(bank.getId(), "證券戶", BigDecimal.ONE,
+                            BigDecimal.ONE, manualCurrency, null, "new collision")), "updated"));
+            read(id, snapshot -> {
+                assertThat(snapshot.getDeposits()).hasSize(2);
+                var original = snapshot.getDeposits().stream().filter(d -> d.getId().equals(managedId))
+                        .findFirst().orElseThrow();
+                assertThat(original.getCurrency()).isEqualTo(managedCurrency);
+                assertThat(original.getAmount()).isEqualByComparingTo("100");
+                assertThat(original.getOriginalAmount()).isEqualByComparingTo("100");
+                assertThat(original.getSource()).isEqualTo("FUBON_SYNC");
+                assertThat(original.getNotes()).isEqualTo("managed securities");
+                assertThat(original.getAnnualInterestRate()).isEqualByComparingTo("1.5");
+                var updated = snapshot.getDeposits().stream().filter(d -> "MANUAL".equals(d.getSource()))
+                        .findFirst().orElseThrow();
+                assertThat(updated.getCurrency()).isEqualTo(manualCurrency);
+                assertThat(updated.getAmount()).isEqualByComparingTo("200");
+                assertThat(updated.getNotes()).isEqualTo("manual update");
+                assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("300");
+            });
+            tx(() -> { snapshots.deleteById(id); snapshots.flush(); });
+        }
+    }
+
+    @Test
+    void fullPutCannotUseExistingManualIdToChangeIntoProtectedSecuritiesIdentity() {
+        for (String managedCurrency : List.of("TWD", "USD")) {
+            String manualCurrency = "TWD".equals(managedCurrency) ? "USD" : "TWD";
+            for (boolean changeType : List.of(false, true)) {
+                BankDeposit managed = securities("100");
+                managed.setCurrency(managedCurrency);
+                managed.setOriginalAmount(new BigDecimal("100"));
+                managed.setSource("FUBON_SYNC");
+                BankDeposit manual = securities("50");
+                manual.setCurrency(manualCurrency);
+                manual.setOriginalAmount(new BigDecimal("50"));
+                if (changeType) manual.setDepositType("USD".equals(manualCurrency) ? "美元活存" : "活存");
+                Long id = snapshot(OWNER, today, managed, manual);
+                var detail = assets.getSnapshotDetail(id);
+                Long managedId = detail.deposits().getFirst().id();
+                assets.updateSnapshot(id, request(today, List.of(new AssetSnapshotDto.DepositRequest(
+                        bank.getId(), "證券戶", BigDecimal.ONE, BigDecimal.ONE,
+                        changeType ? manualCurrency : managedCurrency, null, "overwrite",
+                        detail.deposits().get(1).id(), null)), "updated"));
+                read(id, snapshot -> assertThat(snapshot.getDeposits()).singleElement().satisfies(row -> {
+                    assertThat(row.getId()).isEqualTo(managedId);
+                    assertThat(row.getAmount()).isEqualByComparingTo("100");
+                    assertThat(row.getCurrency()).isEqualTo(managedCurrency);
+                    assertThat(row.getSource()).isEqualTo("FUBON_SYNC");
+                }));
+                tx(() -> { snapshots.deleteById(id); snapshots.flush(); });
+            }
+        }
+    }
+
+    @Test
     void concurrentRollsWaitOnParentLockAndApplySettlementOnlyOnce() throws Exception {
-        Long id = snapshot(OWNER, today, ordinary("100"), auto("-31", today));
+        Long id = snapshot(OWNER, today, securities("100"), auto("-31", today));
         CountDownLatch firstSettled = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondStarted = new CountDownLatch(1);
@@ -429,6 +532,12 @@ class TransitProcessingLifecyclePostgresTest {
     private BankDeposit manual(String amount, String currency, LocalDate processingDate) {
         return BankDeposit.builder().depositType("其他款項").amount(new BigDecimal(amount)).currency(currency)
                 .source("MANUAL").processingDate(processingDate).build();
+    }
+
+    private BankDeposit securities(String amount) {
+        BankDeposit row = ordinary(amount);
+        row.setDepositType("證券戶");
+        return row;
     }
 
     private BankDeposit ordinary(String amount) {

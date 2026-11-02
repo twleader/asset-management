@@ -309,12 +309,17 @@ public class AssetService {
         snapshot.setUsdExchangeRate(req.usdExchangeRate());
         snapshot.setNotes(req.notes());
 
-        // 富邦唯讀在途款及來源管理活存是 source-owned projection；完整 PUT 不能藉由未含 source 的
+        // 富邦唯讀在途款及來源管理結清目標是 source-owned projection；完整 PUT 不能藉由未含 source 的
         // 管理資產 payload 覆寫、刪除或重建它。identity 固定是 bank id + deposit type，
         // 不看 request 自帶的 currency，避免 UI round-trip 產生第二筆同一 target。
+        // 唯有已驗證原始 id、銀行／類型／幣別不變的另一幣別手動證券戶可正常 round-trip。
         java.util.Set<DepositIdentity> protectedDepositIdentities = snapshot.getDeposits().stream()
                 .filter(AssetService::isProtectedDeposit)
                 .map(AssetService::depositIdentity)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        java.util.Set<DepositCurrencyIdentity> protectedDepositCurrencies = snapshot.getDeposits().stream()
+                .filter(AssetService::isProtectedDeposit)
+                .map(deposit -> new DepositCurrencyIdentity(depositIdentity(deposit), deposit.getCurrency()))
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         supplementManagedProcessingDates(existingDeposits, req.deposits());
         snapshot.getDeposits().removeIf(deposit -> !isProtectedDeposit(deposit));
@@ -325,8 +330,10 @@ public class AssetService {
 
         if (req.deposits() != null) {
             req.deposits().forEach(d -> {
-                if (isProtectedDeposit(existingDeposits.get(d.id()))
-                        || protectedDepositIdentities.contains(new DepositIdentity(d.bankId(), d.depositType()))) {
+                BankDeposit existing = existingDeposits.get(d.id());
+                if (isProtectedDeposit(existing)
+                        || (protectedDepositIdentities.contains(new DepositIdentity(d.bankId(), d.depositType()))
+                            && !isExistingManualSecuritiesSibling(existing, d, protectedDepositCurrencies))) {
                     return;
                 }
                 Bank bank = d.bankId() != null ? bankRepo.findById(d.bankId()).orElse(null) : null;
@@ -1130,11 +1137,22 @@ public class AssetService {
     }
 
     private static boolean isProtectedDeposit(BankDeposit deposit) {
-        return isFubonManagedTransit(deposit) || TransitBankSettlement.isSourceManagedCash(deposit);
+        return isFubonManagedTransit(deposit) || TransitBankSettlement.isSourceManagedSettlementTarget(deposit);
     }
 
     private static DepositIdentity depositIdentity(BankDeposit deposit) {
         return new DepositIdentity(deposit.getBank() == null ? null : deposit.getBank().getId(), deposit.getDepositType());
+    }
+
+    private static boolean isExistingManualSecuritiesSibling(BankDeposit existing,
+            AssetSnapshotDto.DepositRequest request, java.util.Set<DepositCurrencyIdentity> protectedCurrencies) {
+        if (existing == null || existing.getBank() == null || !"證券戶".equals(existing.getDepositType())
+                || (existing.getSource() != null && !"MANUAL".equals(existing.getSource()))
+                || !("TWD".equals(existing.getCurrency()) || "USD".equals(existing.getCurrency()))) return false;
+        DepositIdentity identity = depositIdentity(existing);
+        return identity.equals(new DepositIdentity(request.bankId(), request.depositType()))
+                && existing.getCurrency().equals(request.currency())
+                && !protectedCurrencies.contains(new DepositCurrencyIdentity(identity, existing.getCurrency()));
     }
 
     private static String depositUpdateMode(BankDeposit deposit) {
@@ -1142,6 +1160,7 @@ public class AssetService {
     }
 
     private record DepositIdentity(Long bankId, String depositType) {}
+    private record DepositCurrencyIdentity(DepositIdentity deposit, String currency) {}
 
     /**
      * 查詢交易日的 USD 匯率 (midRate)
