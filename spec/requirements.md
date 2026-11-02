@@ -6406,3 +6406,11 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - 缺官方薪資、國泰子帳戶、真委託、雙軌狀態或短線歸屬等資料維持具名缺口；禁止以總持股、合成資料或預設空集合補成 VERIFIED。API 路由、schema、Swagger bytes、投資規則及寄信／券商權限不變。SRPP consumer 程式變更需重新產生 runtime contract、manifest 與規則包身分，連同 backend authority／insert-only registry 及 golden metadata 一致發布。
 
 - Task530 投影 consumer 逐欄依現行 wire 契約驗證：A1/A2 universe 只含 action=BUY／SELL 的包內腿，保留原 module.index，不把 NONE 腿納入；未知 fact 必須 unit=NONE／value=null，明確查詢 universe 外的合法代碼只能回 UNAVAILABLE/null，不可提升成可用。預設無腿的空結果是有效結果，仍驗內容雜湊、coverage、身分與凍結來源。
+
+### Task 531：009826 建倉腿確定性計算器的 authority 身分發布（Requirements 187／193）
+
+**User Story：** 作為 SRPP 報告讀者，我要 009826 建倉腿的張數由 SRPP 本機確定性計算器產出且兩軌一致，並讓承載該規則的新規則包身分在 9090 登錄，使 `report-calculations` 不因 `POLICY_UNSUPPORTED` 而整輪回退本機計算。
+
+- [ ] 唯一來源為 SRPP 已 push 且遠端讀回一致的 main `3bd5acf655edd09e3caf25e2cc94ce5a68753ab7`（feature `04513e733d0328f75f9fe36cecc89aeb52fc3ca2`）；SRPP 本輪新增 `execution_policy.py --global-build-009826` 與規格文字，不改投資數值、門檻、金融公式、formal targets、Swagger 或任何 9090 契約。asset-management 只發布新 bundle 身分：完整 `policy_manifest.json` 與（位元組有變的）`model_inputs.json` 同步到 classpath decision authority，不得以 `POLICY_BYTES_MISMATCH` 之外的方式繞過工具。
+- [ ] 由原 Ruby 工具重產 insert-only registry SQL，由原 Python generator 重產主 22 案例與 state-topup 兩份 golden；金融 expected 逐值不變，僅 `policyBundleSha256` 與 `originalCalculatorHashes["execution_policy.py"]` 更新。任何其他差異先停止回報。
+- [ ] 兩 repo 各自 feature commit、no-ff main merge、push 與 remote-ref readback 完成後，才可對 registry 單次 `ON CONFLICT DO NOTHING` insert，舊 rows 不變。之後只從乾淨 asset main rebuild／recreate business-services，重啟前逐項證明啟動期外抓、寄信、資產修改入口皆 no-op，前後以 image id 確認未被覆蓋；最後以新 hash 於合法時窗對 `report-calculations` 做唯讀 GET 讀回，不 POST、不重跑報告、不寄信、不交易。9090 計算包仍無 009826 leg，不得宣稱 API 已支援。

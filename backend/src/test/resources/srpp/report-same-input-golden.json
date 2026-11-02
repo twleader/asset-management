@@ -18568,12 +18568,12 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "core_sell_guard.py": "08abb41984eb80f3ff2c1239c1b4630e9f3aa35380dd1d30a42d24ba79aed55f",
-    "execution_policy.py": "af21a834f478a5469561ade378596d943aecd5d48c9d98ff3dcf99ff48e5192f",
+    "execution_policy.py": "f408f8a19f6adf22b6bc74e4715c6aacd318f7253a44110efa24318b4fdf4c5a",
     "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
     "short_term_opportunities.py": "1b5c5f97db2e331970c78b6937954271389a11ae511a4110477ab58114e018f4",
     "strategic_buy_gate.py": "2d8b808f1b5f9619bb39e3f101ac351b2fbc98b8da217e8f5e144974f5cf36bc",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "4dc22408b91c927c08578f7ab6308efd1b86d706c7eb3076b5cf2e7288b430ca",
+  "policyBundleSha256": "a51f8278f558a48449aee5e2ced0a36e04408e033a092b7b5abd10d26475aa9b",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

@@ -13261,3 +13261,7 @@ SRPP report package 來源擷取、精確雷達與短線 calculator 共用一個
 沒有新增 API／schema／DB 表，也沒有讀取新券商或檔案來源。以合成邊界測試涵蓋 V1/V2、未知版本、錯 owner／日期／身分及雷達風險拒絕；以既有來源 golden 驗 Python/Java 輸出一致。正式 runtime 只讀當日合法時窗的 GET，記錄來源 VERIFIED 改善與仍缺的來源，不將 PARTIAL 或 UNAVAILABLE 宣稱為全模組完成。
 
 Task530 另修正現行投影 wire 與 consumer 的漂移：沿既有 Java legs 投影排除 NONE、保留 BUY/SELL（含被阻擋腿）的原 module.index；未知 fact unit 固定 NONE，AVAILABLE 才按各指標驗單位。明確查詢包外代碼允許逐列 UNAVAILABLE，但所有 facts 必須仍為 UNAVAILABLE/null/unit=NONE，不放寬包外事實可用性。無查詢參數時 symbols 必須精確等於凍結的 BUY/SELL 台股 universe，可為空。這些均沿用已發布契約，不修改任何 server schema／Swagger。
+
+### Task 531：009826 建倉腿計算器的 authority 發布邊界
+
+SRPP 的修正在 `scripts/execution_policy.py --global-build-009826` 與日報規格（009826 建倉張數上限即預設買量，由已保存的報價、資產、成交紀錄與匯率確定性產出），不影響 9090 金融計算與 API 契約；9090 `GLOBAL_EQUITY_PACE` 仍不輸出 009826 leg，兩軌依 `API_CALCULATION_RULES.md` §2 回退本機計算器。asset-management 本輪只發布最終 bundle 身分：完整 manifest 與 model_inputs bytes 同步到 classpath decision authority（本次 model_inputs 位元組有變，與 t528 不同），由原工具重產 insert-only registry SQL 與兩份 golden（僅 bundle 與 `execution_policy.py` calculator hash 欄位變動），formal targets、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash，不更新刪除歷史 row。部署只重建 business-services，重啟前逐項唯讀證明啟動入口 no-op，並以 image id 前後比對防止被他人覆蓋；`report-calculations` 讀回僅在合法時窗以新 hash 唯讀進行。
