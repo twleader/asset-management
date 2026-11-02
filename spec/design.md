@@ -13277,3 +13277,10 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 Python SettlementService 在 account/row identity、必備欄位與合法日期／TWD 檢查後，先剔除 settlementDate <= queryDate 的 out-of-scope 列，再對 future rows 走原 strict amount contract。被剔除列不輸出假空資料，future malformed 仍整批拒絕；不改 internal response shape、public API、Swagger、排程或費稅公式。Java 防線仍拒絕意外輸入的已到期 nonzero。
 
 FubonSettlementWriter 在鎖與 observation freshness 驗證後，以明示 owner native repository query 讀 sourceQueryDate=queryDate 的當日富邦台股TWD買入帳本，避免 internal HTTP tenantFilter 清空查詢。以 pure helper 驗每列、按代號彙總 max(amount, shares*price+fee+tax)；只有整日總額精確等於該 future SDK buySettlement 才有 reconciliation evidence。移除同 settlement date、notes 恰單一代號、amount 恰該代號成本的唯一 MANUAL/null 買股待付款（bank必須同fubon）；多列／錯值／不同銀行／source-owned 候選不移除。原 UNMANAGED_TARGET／AMBIGUOUS_TARGET 保護不移除，任何 fubon scope 衝突仍 rollback。隨後以既有 source-owned key 建立／更新唯一富邦總額，備註可按SDK sourceQueryDate讀同源ledger驗證，不以本地queryDate代替；既有同處理日／類型source列無新完整代號證據時保留原非空notes，只有無證據的新列才用泛用備註，跨日／重跑必保留00881與009826及processingDate。原子重算 totalDeposit/totalAssets。不得以金額相似或代號 substring 猜身份，不清信用卡／賣股／其他日期款。
+# Task 534：D-205門檻與可追溯基金分類
+
+DecisionPolicyAuthority從已核對manifest原始bytes的model讀取fund_asset_classifications，建立不可變、無重複的精確fundCode／fundName／assetClass對應；代號及名稱不得空白，assetClass僅接受BOND／STOCK。DecisionInputCaptureAdapter先用既有DB fund_class_override，無明確override才以雙欄精確policy身分配對，將政策列、DB列與resolvedFundClassSources凍結至classifications來源。這使24B2的已知分類不再被錯列為未知，同時保留其他基金真正缺口；估值仍要求全部持股合格TARGET_SESSION_PRICE。
+
+SrppRadarPolicy作為無I/O的共用封閉相容判斷供decision capture與report使用。來源身分／日期／LIVE／dataComplete／時效成立才保存VERIFIED；V2均線衝突不刪原事實，但typed decision evidence保留BLOCKED／UNAVAILABLE，不能繞過否決。SrppReportModuleCalculator.strategicGate僅對policy overheat_required_symbols明列VOO／VT改採position>=block_position且hits>0，其他三類分支保持原式。coreTiming繼續讀policy pullback_fraction，與Python原計算器同輸入核對1.5%邊界。
+
+發布沿既有model／manifest authority、golden產生器、insert-only policy registry與乾淨main stack流程；不重寫歷史包／觀察帳、不觸發producer或vendor I/O。分帳、真掛單與策略歸屬無正式來源時仍fail closed。正式report GET驗收只在台北交易日09:05–13:30進行，其他時段保留NOT_YET_EXECUTED。

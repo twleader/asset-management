@@ -7,6 +7,7 @@ import com.steven.assets.model.*;
 import com.steven.assets.repository.*;
 import com.steven.assets.service.*;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
+import com.steven.assets.srpp.SrppJcs;
 import org.junit.jupiter.api.*;
 import java.math.BigDecimal;
 import java.time.*;
@@ -41,5 +42,51 @@ class DecisionInputCaptureAdapterTest {
         assertThat(f.sourceVector().path("classifications").path("validation").asText()).isEqualTo("UNAVAILABLE");assertThat(f.input().path("sources").path("classifications").path("missing")).extracting(JsonNode::asText).contains("FUND_CLASSIFICATION_UNAVAILABLE:未知分類基金");
     }
     @Test void fxSourceFutureAndFrameAgeCannotPass(){Instant at=Instant.now();var future=new UsdTwdLiveRateService.LiveRate("USD/TWD","USD","TWD",date,new BigDecimal("32"),new BigDecimal("32"),"MEGA_BANK",at,at.plusSeconds(1),"ACTIVE","LIVE");assertThat(DecisionInputCaptureAdapter.fxQualified(future,date,at)).isFalse();var stale=new UsdTwdLiveRateService.LiveRate("USD/TWD","USD","TWD",date,new BigDecimal("32"),new BigDecimal("32"),"MEGA_BANK",at.minusSeconds(7),at.minusSeconds(7),"ACTIVE","LIVE");assertThat(DecisionInputCaptureAdapter.fxQualified(stale,date,at)).isFalse();}
+
+    static final String POLICY_FUND_NAME="施羅德環球收益債券非常避險 (月配)";
+    void usePolicyFundMapping() throws Exception {
+        var current=new DecisionPolicyAuthority();var mapper=new ObjectMapper().findAndRegisterModules();
+        ObjectNode model=(ObjectNode)mapper.readTree(current.modelBytes());model.putArray("fund_asset_classifications").addObject().put("fund_code","24B2").put("fund_name",POLICY_FUND_NAME).put("asset_class","BOND");
+        String bytes=mapper.writeValueAsString(model);ObjectNode manifest=(ObjectNode)mapper.readTree(current.manifestBytes());manifest.withObject("files").put("assumptions/model_inputs.json",SrppJcs.sha256Hex(bytes));manifest.remove("POLICY_BUNDLE_SHA256");manifest.put("POLICY_BUNDLE_SHA256",SrppJcs.hash(manifest));
+        adapter=new DecisionInputCaptureAdapter(assets,prices,market,radar,histories,dividends,ledger,fx,minutes,new DecisionPolicyAuthority(bytes,mapper.writeValueAsString(manifest)),mapper,masters,funds);
+    }
+    AssetSnapshotDto.FundResponse fund(long id,String code,String name){return new AssetSnapshotDto.FundResponse(id,name,code,1L,"fixturebank",BigDecimal.ZERO,new BigDecimal("1000000"),BigDecimal.ONE,null,null,null,null);}
+    void installFunds(List<AssetSnapshotDto.FundResponse> rows){
+        BigDecimal total=rows.stream().map(AssetSnapshotDto.FundResponse::currentValue).reduce(BigDecimal.ZERO,BigDecimal::add);when(snapshot.funds()).thenReturn(rows);when(snapshot.totalFundValue()).thenReturn(total);
+        var live=new StockPriceService.LiveAssetsResponse(9L,date.toString(),new BigDecimal("32"),new BigDecimal("5000000"),total,BigDecimal.ZERO,new BigDecimal("5000000").add(total),List.of(),true,false,false,null);
+        when(assets.getLatestForOwner(7)).thenReturn(new LatestAssetsDto.Response(response.generatedAt(),"CURRENT",true,Map.of(),snapshot,live));
+    }
+    @Test void exactPolicyFundIdentityRestoresCapacityWhenDbOnlyHasBondTerm() throws Exception {
+        usePolicyFundMapping();installFunds(List.of(fund(2L,"24B2",POLICY_FUND_NAME)));when(funds.findAllById(any())).thenReturn(List.of(new FundClassOverride(POLICY_FUND_NAME,null,null,"LONG")));
+        var captured=adapter.capture(7,request(),List.of());JsonNode classifications=captured.input().path("sources").path("classifications");
+        assertThat(captured.facts().bondValue()).isEqualByComparingTo("1000000");assertThat(captured.facts().symbols().get("00719B").valuation().verified()).isTrue();
+        assertThat(classifications.path("resolvedFundClasses").path(POLICY_FUND_NAME).asText()).isEqualTo("BOND");assertThat(classifications.path("resolvedFundClassSources").path("2").asText()).isEqualTo("POLICY_EXACT_IDENTITY");assertThat(classifications.path("policyFundRows").size()).isEqualTo(1);assertThat(classifications.path("fundOverrideRows").get(0).path("assetClass").isNull()).isTrue();assertThat(captured.sourceVector().path("classifications").path("validation").asText()).isEqualTo("VERIFIED");
+    }
+    @Test void explicitDbFundClassWinsOverPolicyAndInvalidOverrideCannotFallBack() throws Exception {
+        usePolicyFundMapping();installFunds(List.of(fund(2L,"24B2",POLICY_FUND_NAME)));when(funds.findAllById(any())).thenReturn(List.of(new FundClassOverride(POLICY_FUND_NAME,"STOCK",null,null)));
+        var captured=adapter.capture(7,request(),List.of());assertThat(captured.facts().bondValue()).isEqualByComparingTo("0");assertThat(captured.facts().symbols().get("00719B").valuation().verified()).isTrue();assertThat(captured.input().path("sources").path("classifications").path("resolvedFundClassSources").path("2").asText()).isEqualTo("DB_OVERRIDE");
+        when(funds.findAllById(any())).thenReturn(List.of(new FundClassOverride(POLICY_FUND_NAME,"UNKNOWN",null,null)));assertThat(adapter.capture(7,request(),List.of()).facts().symbols().get("00719B").valuation().verified()).isFalse();
+    }
+    @Test void wrongCodeWrongNameOrSameNameDifferentHoldingNeverInheritsPolicyClass() throws Exception {
+        usePolicyFundMapping();when(funds.findAllById(any())).thenReturn(List.of());
+        for(var row:List.of(fund(2L,"24B2X",POLICY_FUND_NAME),fund(2L,"24B2",POLICY_FUND_NAME+" "),fund(2L,null,POLICY_FUND_NAME))){installFunds(List.of(row));var captured=adapter.capture(7,request(),List.of());assertThat(captured.facts().symbols().get("00719B").valuation().verified()).isFalse();assertThat(captured.facts().bondValue()).isEqualByComparingTo("0");}
+        installFunds(List.of(fund(2L,"24B2",POLICY_FUND_NAME),fund(3L,"OTHER",POLICY_FUND_NAME)));var captured=adapter.capture(7,request(),List.of());JsonNode classification=captured.input().path("sources").path("classifications");assertThat(captured.facts().symbols().get("00719B").valuation().verified()).isFalse();assertThat(captured.facts().bondValue()).isEqualByComparingTo("1000000");assertThat(classification.path("resolvedFundClasses").has(POLICY_FUND_NAME)).isFalse();assertThat(classification.path("resolvedFundHoldingClasses").has("3")).isFalse();
+    }
+    @Test void captureUsesClosedRadarCompatibilityAndPreservesOfficialVeto() throws Exception {
+        var mapper=new ObjectMapper().findAndRegisterModules();
+        for(String version:List.of("EVIDENCE_GATE_V1","EVIDENCE_GATE_V2","EVIDENCE_GATE_V3")){
+            ObjectNode raw=mapper.createObjectNode();raw.put("ruleVersion",TradingRadarRuleEngine.RULE_VERSION).put("actionPolicyVersion",version).put("generatedAt",Instant.now().minusSeconds(1).toString());ObjectNode stock=raw.putObject("stock");stock.put("stockCode","00719B").put("market","台股").put("asOfDate",date.toString()).put("quoteStatus","LIVE").put("dataComplete",true).put("action","HOLD").put("candidateAction","HOLD");stock.putObject("officialSma20Verification").put("status","CONFIRMED").put("gateApplied",false);
+            when(radar.getStockDetailForOwner(7,"00719B","台股")).thenReturn(mapper.treeToValue(raw,TradingRadarDto.StockDetailResponse.class));var captured=adapter.capture(7,request(),List.of());assertThat(captured.facts().symbols().get("00719B").radar().verified()).isEqualTo(!version.equals("EVIDENCE_GATE_V3"));
+            if(version.equals("EVIDENCE_GATE_V2")){
+                stock.withObject("officialSma20Verification").put("status","CONFLICT");when(radar.getStockDetailForOwner(7,"00719B","台股")).thenReturn(mapper.treeToValue(raw,TradingRadarDto.StockDetailResponse.class));captured=adapter.capture(7,request(),List.of());assertThat(captured.facts().symbols().get("00719B").radar().reason()).isEqualTo("RADAR_OFFICIAL_SMA20_CONFLICT");assertThat(captured.sourceVector().path("radar:00719B").path("validation").asText()).isEqualTo("VERIFIED");
+                stock.remove("officialSma20Verification");when(radar.getStockDetailForOwner(7,"00719B","台股")).thenReturn(mapper.treeToValue(raw,TradingRadarDto.StockDetailResponse.class));assertThat(adapter.capture(7,request(),List.of()).facts().symbols().get("00719B").radar().reason()).isEqualTo("RADAR_V2_OFFICIAL_SMA20_UNVERIFIED");
+            }
+        }
+    }
+    @Test void supportedRadarWithWrongDateOrNonLiveStatusIsUnavailable() throws Exception {
+        var mapper=new ObjectMapper().findAndRegisterModules();ObjectNode raw=mapper.createObjectNode();raw.put("ruleVersion",TradingRadarRuleEngine.RULE_VERSION).put("actionPolicyVersion","EVIDENCE_GATE_V1").put("generatedAt",Instant.now().minusSeconds(1).toString());ObjectNode stock=raw.putObject("stock");stock.put("stockCode","00719B").put("market","台股").put("asOfDate",date.minusDays(1).toString()).put("quoteStatus","LIVE").put("dataComplete",true).put("action","HOLD");
+        when(radar.getStockDetailForOwner(7,"00719B","台股")).thenReturn(mapper.treeToValue(raw,TradingRadarDto.StockDetailResponse.class));assertThat(adapter.capture(7,request(),List.of()).facts().symbols().get("00719B").radar().verified()).isFalse();
+        stock.put("asOfDate",date.toString()).put("quoteStatus","VERIFIED_CLOSE");when(radar.getStockDetailForOwner(7,"00719B","台股")).thenReturn(mapper.treeToValue(raw,TradingRadarDto.StockDetailResponse.class));assertThat(adapter.capture(7,request(),List.of()).facts().symbols().get("00719B").radar().verified()).isFalse();
+    }
 
 }

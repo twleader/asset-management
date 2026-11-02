@@ -15,6 +15,8 @@ import static com.steven.assets.service.srpp.decision.DecisionFacts.*;
 public class DecisionPolicyAuthority {
     private final String modelBytes,manifestBytes;
     private final Policy policy;
+    private final List<FundClassification> fundClassifications;
+    public record FundClassification(String fundCode,String fundName,String assetClass) {}
     public DecisionPolicyAuthority(){this(resource("model_inputs.json"),resource("policy_manifest.json"));}
     DecisionPolicyAuthority(String modelBytes,String manifestBytes){
         this.modelBytes=modelBytes;this.manifestBytes=manifestBytes;
@@ -26,6 +28,15 @@ public class DecisionPolicyAuthority {
             ObjectNode body=((ObjectNode)manifest).deepCopy();body.remove("POLICY_BUNDLE_SHA256");
             if(!bundle.equals(SrppJcs.hash(body))||!modelHash.equals(manifest.path("files").path("assumptions/model_inputs.json").asText()))throw new IllegalArgumentException("POLICY_BYTES_MISMATCH");
             for(String key:List.of("decision","policy_version","model_version"))if(!model.path(key).asText().equals(manifest.path(key).asText()))throw new IllegalArgumentException("POLICY_VERSION_MISMATCH");
+            JsonNode authoredFunds=model.path("fund_asset_classifications");
+            if(!authoredFunds.isMissingNode()&&!authoredFunds.isArray())throw new IllegalArgumentException("POLICY_FUND_CLASSIFICATION_INVALID");
+            List<FundClassification> classifiedFunds=new ArrayList<>();Set<List<String>> identities=new HashSet<>();
+            for(JsonNode row:authoredFunds){
+                JsonNode code=row.get("fund_code"),name=row.get("fund_name"),assetClass=row.get("asset_class");
+                if(!row.isObject()||code==null||!code.isTextual()||code.asText().isBlank()||name==null||!name.isTextual()||name.asText().isBlank()||assetClass==null||!assetClass.isTextual()||!Set.of("BOND","STOCK").contains(assetClass.asText())||!identities.add(List.of(code.asText(),name.asText())))throw new IllegalArgumentException("POLICY_FUND_CLASSIFICATION_INVALID");
+                classifiedFunds.add(new FundClassification(code.asText(),name.asText(),assetClass.asText()));
+            }
+            fundClassifications=List.copyOf(classifiedFunds);
             JsonNode e=model.path("execution_policy"),d=e.path("bond_price_selection_d195"),fund=e.path("stock_purchase_funding_policy_d150"),fresh=e.path("bond_trade_price_policy").path("quote_freshness_policy");
             List<String> symbols=new ArrayList<>();d.path("strategic_symbols").forEach(v->symbols.add(v.asText()));
             Map<String,BigDecimal> targets=new TreeMap<>();symbols.forEach(s->targets.put(s,num(model.path("detailed_target_allocation_2027"),s)));
@@ -39,6 +50,8 @@ public class DecisionPolicyAuthority {
     public Policy policy(){return policy;}
     public String modelBytes(){return modelBytes;}
     public String manifestBytes(){return manifestBytes;}
+    public List<FundClassification> fundClassifications(){return fundClassifications;}
+    public Optional<String> fundAssetClass(String code,String name){return fundClassifications.stream().filter(row->row.fundCode().equals(code)&&row.fundName().equals(name)).map(FundClassification::assetClass).findFirst();}
     private static JsonNode parseModelStrictly(ObjectMapper mapper,String modelBytes)throws Exception{
         // Keep BigDecimal materialization for policy arithmetic, after strict duplicate/trailing-token validation.
         SrppJcs.parseStrict(modelBytes);

@@ -6423,3 +6423,11 @@ Task495 依賴補充：daily_runtime_contract.json 的 source_sha256 同樣納 c
 - [ ] 兩 repo 各自 feature commit、no-ff main merge、push 與 remote-ref readback 完成後，才可對 registry 單次 `ON CONFLICT DO NOTHING` insert，舊 rows 不變。之後只從乾淨 asset main rebuild／recreate business-services，重啟前逐項證明啟動期外抓、寄信、資產修改入口皆 no-op，前後以 image id 確認未被覆蓋；最後以新 hash 於合法時窗對 `report-calculations` 做唯讀 GET 讀回，不 POST、不重跑報告、不寄信、不交易。9090 計算包仍無 009826 leg，不得宣稱 API 已支援。
 
 Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILABLE/null 後，不對該包外列施行僅適用包內的 OVERHEAT_HIT 推導檢查；包內 overheat 的完整來源／布林規則不變，任何包外數值、receipt 或可用狀態仍拒絕。此為現行 wire 契約一致性修復。
+
+### Task 534：SRPP D-205 門檻與已知基金身分的完整驗證（Requirements 187／193 修訂）
+
+- VOO／VT 自主買進僅在除息調整後52週區間位置至少0.90且至少一項既有過熱訊號成立時，由D-188高點閘門禁止；兩檔不再套0.80起的過熱分支。009826、四檔高股息、SGOV及既有券商定期定額例外維持。一般D-174核心減碼回落門檻由3%改為1.5%，高檔觀察、完成日KD與其餘硬閘不變。
+- `model_inputs.json.fund_asset_classifications` 明定的24B2基金只能在快照`fundCode`與`fundName`同時精確吻合時作BOND分類，優先採已存在的DB分類override；不能以名稱關鍵字、部分代號、總持股或空值推定。凍結分類來源須保留policy mapping、override原始列、每檔採用來源及未能分類的缺口。其他未知基金維持`FUND_CLASSIFICATION_UNAVAILABLE`，不擴張成整輪L0失敗。
+- base capture與report calculator共用封閉的EVIDENCE_GATE_V1／V2相容判斷；精確market／symbol／當日／LIVE／dataComplete／時效條件不省略。V2官方均線CONFLICT、gateApplied=true或缺必要欄位仍否決受影響決策，原始衝突事實可保存而不可轉成買賣資格。
+- 只修復可由現有正式來源證明的資料映射。國泰／富邦00865B分帳、跨幣別正式掛單、失敗或過期的券商擷取仍具名不可用，不建立假空倉、假委託或假來源。無新API、Swagger、DB schema或券商操作。
+- 同步完整SRPP D-205／2.54.0 model與manifest bytes、原產生器的golden及insert-only registry SQL。所有金融expected差異須逐項對應新授權規則，正式驗收受交易日與09:05–13:30台北時窗限制；越窗僅能記NOT_YET_EXECUTED，不能以health代替report-calculations驗收。
