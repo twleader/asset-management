@@ -23,19 +23,19 @@ public class SrppReportReservationCapture {
     public List<ObjectNode> read(long owner,LocalDate date,String slot){
         LocalDate from=date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));List<ObjectNode> out=new ArrayList<>();
         for(var run:decisions.reservations(owner,from,date))if(run.date().isBefore(date)||run.slot().compareTo(slot)<0)out.add((ObjectNode)SrppJcs.parseStrict(run.content()));
-        for(String raw:reports.priorReportReservations(owner,from,date,slot)){
+        reports.visitPriorReportReservations(owner,from,date,slot,raw -> {
             JsonNode report=SrppJcs.parseStrict(raw);ObjectNode legacy=JsonNodeFactory.instance.objectNode();legacy.set("identity",report.path("identity"));legacy.put("calculationRunId",report.path("calculationRunId").asText());ArrayNode candidates=legacy.putObject("decision").putArray("candidates");
             for(JsonNode m:report.path("modules"))if("BOND_D130_D195".equals(m.path("moduleId").asText()))for(JsonNode leg:m.path("data").path("legs")){
                 ObjectNode c=JsonNodeFactory.instance.objectNode();c.put("symbol",leg.path("symbol").asText());c.put("strategy",leg.path("strategy").asText());c.put("lots",leg.path("lots").asInt());c.set("amountTwd",leg.has("amount")?leg.path("amount"):leg.path("amountTwd"));candidates.add(c);
             }
             out.add(legacy);
-        }
+        });
         return List.copyOf(out);
     }
     @Transactional(readOnly=true)
     public ObjectNode readReportSource(long owner,LocalDate date,String slot,String currentPolicy){
         ObjectNode source=JsonNodeFactory.instance.objectNode();source.put("ownerUserId",owner);source.put("tradingDate",date.toString());source.put("policyBundleSha256",currentPolicy);source.put("status","VERIFIED");source.put("verified",true);source.put("coverage","COMPLETE");ArrayNode rows=source.putArray("rows");Set<String> seen=new HashSet<>();
-        for(String raw:reports.unlinkedReportReservations(owner,date,slot)){
+        reports.visitUnlinkedReportReservations(owner,date,slot,raw -> {
             JsonNode report=SrppReportEnvelopeValidator.validate(raw),identity=report.path("identity");
             if(identity.path("ownerUserId").asLong()!=owner)throw new SrppReportProblem("UPSTREAM_INVALID");
             for(JsonNode module:report.path("modules")){int index=0;for(JsonNode leg:module.path("data").path("legs")){
@@ -48,7 +48,7 @@ public class SrppReportReservationCapture {
                 row.put("status","ACTIVE");
                 row.putNull("linkedOrderId");row.putNull("linkedFillId");
             }}
-        }
+        });
         ArrayNode missing=source.putArray("missing");
         for(var run:decisions.unlinkedReservations(owner,date,slot)){
             JsonNode content=SrppJcs.parseStrict(run.content()),input=SrppJcs.parseStrict(run.input());ObjectNode hashable=((ObjectNode)content).deepCopy();hashable.remove("decisionContentSha256");

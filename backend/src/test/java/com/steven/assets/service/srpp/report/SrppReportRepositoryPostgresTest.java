@@ -71,7 +71,7 @@ class SrppReportRepositoryPostgresTest {
         java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/task489-report-actionable.json"),first.getFirst().content());
         var blocked=publisher.publish(scope,qualified("09:05",AT.plusSeconds(60),false),supported(),extras(),states(7,"09:05"),AT.plusSeconds(60));
         assertThat(SrppJcs.parseStrict(blocked.getFirst().content()).path("modules").get(5).path("data").path("legs")).allSatisfy(leg->assertThat(leg.path("lots").asInt()).isZero());
-        var decisions=mock(com.steven.assets.repository.SrppDecisionRepository.class);var capture=new SrppReportReservationCapture(decisions,repository);var prior=capture.read(7,DATE,"12:00");assertThat(prior).hasSize(2);int lots=0;for(var run:prior)for(var c:run.path("decision").path("candidates"))lots+=c.path("lots").asInt();assertThat(lots).isEqualTo(4);
+        var decisions=mock(com.steven.assets.repository.SrppDecisionRepository.class);var capture=new SrppReportReservationCapture(decisions,repository);var prior=readTransaction(()->capture.read(7,DATE,"12:00"));assertThat(prior).hasSize(2);int lots=0;for(var run:prior)for(var c:run.path("decision").path("candidates"))lots+=c.path("lots").asInt();assertThat(lots).isEqualTo(4);
     }
     @Test void databaseMicrosecondStorageCannotChangeOriginalNanosecondWireWhenConsumerStateChanges(){
         Instant at=AT.plusNanos(123456789);var first=publisher.publish(scope,frozen(7,at,"09:05","v1"),supported(),extras(),states(7,"09:05"),at);var nextState=states(7,"09:05");nextState.get("Codex").put("revision","different-core-source");var second=publisher.publish(scope,frozen(7,at,"09:05","v1"),supported(),extras(),nextState,at.plusSeconds(1));assertThat(second.getFirst().sharedId()).isEqualTo(first.getFirst().sharedId());assertThat(SrppJcs.parseStrict(second.getFirst().content()).path("inputSnapshot").path("capturedAt").asText()).isEqualTo(at.toString());assertThatThrownBy(()->jdbc.update("DELETE FROM srpp_report_calculation_package WHERE id=?",first.getFirst().id())).isInstanceOf(RuntimeException.class);
@@ -90,11 +90,11 @@ class SrppReportRepositoryPostgresTest {
     }
     @Test void allModuleReservationsDeduplicateConsumersAndRemainAcrossPolicyAndWeekChanges()throws Exception{
         var saved=publisher.publish(scope,qualified("09:05",AT,true),supported(),extras(),states(7,"09:05"),AT).getFirst();
-        var source=new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(7,DATE.plusWeeks(2),"12:00","a".repeat(64));
+        var source=readTransaction(()->new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(7,DATE.plusWeeks(2),"12:00","a".repeat(64)));
         assertThat(source.path("status").asText()).isEqualTo("VERIFIED");assertThat(source.path("rows")).hasSize(2);assertThat(source.path("policyBundleSha256").asText()).isEqualTo("a".repeat(64));
         for(var row:source.path("rows")){assertThat(row.path("policyBundleSha256").asText()).isEqualTo(scope.policy());assertThat(row.path("sharedCalculationId").asText()).isEqualTo(saved.sharedId().toString());assertThat(row.path("linkedOrderId").isNull()).isTrue();assertThat(row.path("linkedFillId").isNull()).isTrue();assertThat(row.path("fees").isTextual()).isTrue();}
-        assertThat(new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(7,DATE,"09:05",scope.policy()).path("rows")).isEmpty();
-        assertThat(new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(8,DATE.plusWeeks(2),"12:00",scope.policy()).path("rows")).isEmpty();
+        assertThat(readTransaction(()->new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(7,DATE,"09:05",scope.policy())).path("rows")).isEmpty();
+        assertThat(readTransaction(()->new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository).readReportSource(8,DATE.plusWeeks(2),"12:00",scope.policy())).path("rows")).isEmpty();
     }
     @Test void substitutedRawAuthorityAndUnverifiedConsumerStateCannotPublish(){
         var original=frozen(7,AT,"09:05","v1");ObjectNode input=original.input();((ObjectNode)input.path("sources").path("policy")).put("rawModelBytes","{}");
@@ -173,6 +173,38 @@ class SrppReportRepositoryPostgresTest {
             assertThat(count("srpp_report_calculation_base")).isZero();assertThat(count("srpp_report_calculation_package")).isZero();
         }
     }
+    @Test void reservationCursorUsesOneRowFetchInsideTransactionVisitsAllHistoryAndClosesAfterFailure()throws Exception{
+        for(int i=0;i<3;i++)publisher.publish(scope,frozen(7,AT.plusSeconds(i),"09:05","cursor-"+i),supported(),extras(),states(7,"09:05"),AT.plusSeconds(i));
+        List<java.sql.Statement> opened=new ArrayList<>();
+        JdbcTemplate observed=new JdbcTemplate(jdbc.getDataSource()){
+            @Override protected void applyStatementSettings(java.sql.Statement statement)throws java.sql.SQLException{
+                super.applyStatementSettings(statement);assertThat(statement.getFetchSize()).isEqualTo(1);assertThat(statement.getConnection().getAutoCommit()).isFalse();opened.add(statement);
+            }
+        };
+        var cursor=new SrppReportRepository(observed);List<String> prior=new ArrayList<>(),all=new ArrayList<>();
+        readTransaction(()->{cursor.visitPriorReportReservations(7,DATE,DATE,"12:00",prior::add);cursor.visitUnlinkedReportReservations(7,DATE.plusWeeks(2),"12:00",all::add);return true;});
+        assertThat(prior).hasSize(3);assertThat(all).containsExactlyElementsOf(prior);
+        List<String> other=new ArrayList<>();readTransaction(()->{cursor.visitUnlinkedReportReservations(8,DATE.plusWeeks(2),"12:00",other::add);return true;});assertThat(other).isEmpty();
+        AtomicInteger visited=new AtomicInteger();assertThatThrownBy(()->readTransaction(()->{cursor.visitUnlinkedReportReservations(7,DATE.plusWeeks(2),"12:00",raw->{if(visited.incrementAndGet()==2)throw new IllegalStateException("callback failure");});return true;})).isInstanceOf(IllegalStateException.class).hasMessage("callback failure");
+        assertThat(visited).hasValue(2);for(var statement:opened)assertThat(statement.isClosed()).isTrue();
+        assertThatThrownBy(()->cursor.visitUnlinkedReportReservations(7,DATE.plusWeeks(2),"12:00",raw->{})).isInstanceOf(IllegalStateException.class).hasMessage("REPORT_RESERVATION_TRANSACTION_REQUIRED");
+        assertThat(count("srpp_report_calculation_package")).isEqualTo(6);
+    }
+    @Test void reservationCaptureRejectsInvalidLaterCursorRowInsteadOfReturningPartialProof()throws Exception{
+        var first=publisher.publish(scope,qualified("09:05",AT,true),supported(),extras(),states(7,"09:05"),AT).getFirst();
+        var capture=new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),repository);
+        var complete=readTransaction(()->capture.readReportSource(7,DATE.plusWeeks(2),"12:00",scope.policy()));assertThat(complete.path("status").asText()).isEqualTo("VERIFIED");assertThat(complete.path("rows")).isNotEmpty();
+        String fingerprint=jdbc.queryForObject("SELECT source_fingerprint_sha256 FROM srpp_report_calculation_base WHERE id=?",String.class,first.sharedId());var original=repository.base(scope,fingerprint).orElseThrow();
+        UUID badId=UUID.fromString("ffffffff-ffff-4fff-8fff-ffffffffffff");repository.insert(new SrppReportRepository.Base(badId,scope,"f".repeat(64),original.capturedAt(),original.assetGeneratedAt(),original.snapshotId(),original.valuationId(),original.input(),original.vector(),original.modules(),original.hash(),original.createdAt()));
+        repository.insert(new SrppReportRepository.Package(UUID.randomUUID(),badId,scope,"Codex","d".repeat(64),"a".repeat(64),"{\"bad\":true}","e".repeat(64),AT));
+        var delegate=spy(repository);AtomicInteger visited=new AtomicInteger();
+        doAnswer(call->{java.util.function.Consumer<String> visitor=call.getArgument(3);repository.visitUnlinkedReportReservations(call.getArgument(0),call.getArgument(1),call.getArgument(2),raw->{visited.incrementAndGet();visitor.accept(raw);});return null;}).when(delegate).visitUnlinkedReportReservations(anyLong(),any(),any(),any());
+        var checked=new SrppReportReservationCapture(mock(com.steven.assets.repository.SrppDecisionRepository.class),delegate);
+        assertThatThrownBy(()->readTransaction(()->checked.readReportSource(7,DATE.plusWeeks(2),"12:00",scope.policy()))).isInstanceOf(SrppReportProblem.class);
+        assertThat(visited).hasValue(2);assertThat(repository.byId(7,first.id())).isPresent();
+        List<String> reread=new ArrayList<>();readTransaction(()->{repository.visitUnlinkedReportReservations(7,DATE.plusWeeks(2),"12:00",reread::add);return true;});assertThat(reread).hasSize(2);
+    }
+    <T> T readTransaction(java.util.function.Supplier<T> work){TransactionTemplate read=new TransactionTemplate(manager);read.setReadOnly(true);return read.execute(tx->work.get());}
     static void completeFixtureSources(ObjectNode sources){sources.remove("symbols");if(!sources.has("report-reservations"))sources.putObject("report-reservations").put("status","UNAVAILABLE");extras().fields().forEachRemaining(e->{if(!e.getKey().equals("symbols")&&!sources.has(e.getKey()))sources.set(e.getKey(),e.getValue());});for(String k:List.of("calendar","ledger","reservations","classifications","fx","bear-window","subaccounts"))if(!sources.has(k))sources.putObject(k).put("status","UNAVAILABLE");for(var c:AUTHORITY.decision().policy().symbols())for(String prefix:List.of("quote","book","radar","daily","dividends","pending","tradability","minute")){String k=prefix+":"+c;if(!sources.has(k))sources.putObject(k).put("status","UNAVAILABLE");}}
     static com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen fixtureWithFreshVector(com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen original,ObjectNode input){ObjectNode vector=JsonNodeFactory.instance.objectNode();input.path("sources").fields().forEachRemaining(e->{JsonNode prior=original.sourceVector().path(e.getKey());boolean unavailable="UNAVAILABLE".equals(e.getValue().path("status").asText());ObjectNode v=vector.putObject(e.getKey());v.put("sourceId",e.getKey()).put("revision",SrppJcs.hash(e.getValue())).put("sha256",SrppJcs.hash(e.getValue())).put("capturedAt",original.facts().capturedAt().toString()).put("coverage",prior.has("coverage")?prior.path("coverage").asText():unavailable?"NONE":"COMPLETE").put("validation",prior.has("validation")?prior.path("validation").asText():unavailable?"UNAVAILABLE":"VERIFIED");});return new com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen(original.facts(),input,vector,original.assetSnapshotId(),original.assetGeneratedAt());}
     static LinkedMultiValueMap<String,String> query(String consumer){var q=new LinkedMultiValueMap<String,String>();q.add("consumer",consumer);q.add("tradingDate",DATE.toString());q.add("reportSlot","09:05");q.add("policyBundleSha256",supported().bundleHash());q.add("swaggerSha256",SWAGGER);return q;}
