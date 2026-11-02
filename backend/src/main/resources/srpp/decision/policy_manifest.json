@@ -7,7 +7,7 @@
     "CHANGELOG.md": "645645002b3fd2587b7e0ec681f2a3935e88e3b4a2f976a9667b4f38e2e589c2",
     "README.md": "1e7fa7455c80ef70331f1907eb64c50fc97865aeb4854b8c14491571c2086f18",
     "assumptions/bond_forward_yields.json": "1103936e3b72361ea5080b662560141cf7377ea69a7a13d814e10ad5454b8fce",
-    "assumptions/daily_runtime_contract.json": "ec254f4e4462e5c2cd28b95e3ff3f151a8ae6404e15702bd53dbf031241c6d69",
+    "assumptions/daily_runtime_contract.json": "22de67ffdacaf5307a1f83e90e0a1d2c151533de214b1f1f61556fcb3fc8da96",
     "assumptions/financial.md": "b8fddff6246276d7b57426d73740072a4fcb9afc42f6a81aabf8a94e58b53203",
     "assumptions/market.md": "71485f4a13f2004f2cf9f440e3454b5bbe9ddf67bb078360ba887fb6d76b5f14",
     "assumptions/model_inputs.json": "8ee4eb614a73099455b25d163fce6b675e543e1120963add38d0d7d96f8a8b6d",
@@ -103,7 +103,7 @@
     "scripts/risk_evidence_evaluator.py": "bb8f3e765480706e575814a5f8c30a9d0d4074a97ebdc3e2a15bb37fecaa9d5e",
     "scripts/scheduled_watchdog.mjs": "c7d51eae83b8d453d1090d166b7c3e0a8554af4c2d4e6f44a3c192333db255b9",
     "scripts/scheduled_watchdog.test.mjs": "579df9e0f03c57899c2864ce532545947bb922318335043d8bcee1f17004be92",
-    "scripts/short_term_opportunities.py": "09230d8f848ab81db5bc6ed348b0eb7f3547c960d18f6b9dfac043da917ce31b",
+    "scripts/short_term_opportunities.py": "1b5c5f97db2e331970c78b6937954271389a11ae511a4110477ab58114e018f4",
     "scripts/short_term_sleeve.py": "f68d202a1e020ba97efbb5d83bc0ab0ad75f4098acf3e242d7b1bcd903311d45",
     "scripts/strategic_buy_gate.py": "2d8b808f1b5f9619bb39e3f101ac351b2fbc98b8da217e8f5e144974f5cf36bc",
     "scripts/swagger_read_packet.py": "a644003c0a92c92da96abca4ea555188a43c19e209cdb74af0e35a7a3ebc4ee2",
@@ -125,7 +125,7 @@
     "scripts/test_risk_evidence_evaluator.py": "69b7e0937df976ad4c53743f19b91632a557a4a74377ff0145a4b580db44ed74",
     "scripts/test_rule_cleanup.py": "bc8a3dd46757f4c5fbe7aeb5f08e408e39ee3b9b919afaa2cfad7ae9a776c23e",
     "scripts/test_shared_policy.py": "0c3424846575a18c1ecf5a02517d5c03b34be4646c806c0a1f8bd7a23893d4df",
-    "scripts/test_short_term_opportunities.py": "2a4c608c9bb1add11dba55df785fe17742109304a04469806830bb6ebcad17dc",
+    "scripts/test_short_term_opportunities.py": "13412b7e9237c9ec4b6e5bb3a4dc98f5c4e2150babc16c78433d0132e5eaf6e9",
     "scripts/test_short_term_sleeve.py": "94986a6416fdbd0a641d07190064c90f03ace5a28118d7a7d5c98fe6f447badf",
     "scripts/test_strategic_buy_gate.py": "154b945226d53a60b46bd0f403a7b9ca6041572b5d3e16617253cc84440ec7d0",
     "scripts/test_swagger_split.py": "0fd7433a85889023f37383aa8b256aaa18e8964def923a1cc72361db24dfe12a",
@@ -136,7 +136,7 @@
     "scripts/test_verify_completed_technicals.py": "a903d7a43c46f49337b266ec12b58ec2d4b4eb40a17ffe31977e0d77f8ff2922",
     "scripts/test_verify_srpp_calculation_api.py": "0b7a5f2849ef0a359b9b0526837f2f709d2eeef3597dde0e40675bd2e2d931ba",
     "scripts/test_verify_srpp_daily_decision.py": "8f00ff43d3ae843931acfd879ac16e56327bdbc61e4609baaf1a0c19985be882",
-    "scripts/test_verify_srpp_projection_api.py": "1f82c23755fb7598d398c0c334971268727f0c61ffed6c2cebcc1b1ce548b15d",
+    "scripts/test_verify_srpp_projection_api.py": "bac9206ae880d65bc1bf339c57132202cd9f4d141b421e1d432016e882a38c09",
     "scripts/test_verify_technical_series.py": "a78f5050869261f6f13b1cd1615c44841369c0df0aae616a51871fc6b0802d24",
     "scripts/transition_ledger.py": "2550ba102327e5642a56b415dd177411d8a5522f314f3164cc1556c18ff7ad6b",
     "scripts/us_earnings_risk.py": "a26af7480a7416d34a23e1a4645322f82b1009706ed09ac4823a410eb3c35980",
@@ -150,9 +150,9 @@
     "scripts/verify_runtime_policy.py": "cb2e875d6780e28cd350c617a8af60764e4c5ce0f8c7ef8e7f4e976d1c429476",
     "scripts/verify_srpp_calculation_api.py": "8cabb4c00568c8aead6c6a96d7dcb8d2dfb5c2a3d2c34e610b55c2b62ee1cf2f",
     "scripts/verify_srpp_daily_decision.py": "f1c27d8add78dac56fef883c04129bf3088199515f2abee899cbf7d5bc071e91",
-    "scripts/verify_srpp_projection_api.py": "32dad1e1b02946c693f10574b0bb0e39c55ded1a074212b3e2e196103d7ffac2",
+    "scripts/verify_srpp_projection_api.py": "dd31d7ffbc9f52598f5bbefd54f76076f9803aae6db3798c6006f91363ffe796",
     "scripts/verify_srpp_report_calculations.py": "b3bb437fca9ac03aadbf0f74cd999a9ad93fc213fd6b54ecf74917ea1e11e8e9",
     "scripts/verify_technical_series.py": "a029382844c195acbcf49a849a9e3113f9b715b17cb5234002b9a5c9c5918c93"
   },
-  "POLICY_BUNDLE_SHA256": "1880df4d7081b7d2c7d2b2694a4a6ae63151889677ca8df1049c678738b523fd"
+  "POLICY_BUNDLE_SHA256": "4dc22408b91c927c08578f7ab6308efd1b86d706c7eb3076b5cf2e7288b430ca"
 }

@@ -13253,3 +13253,11 @@ SRPP 的修正只在日報執行規格與 Claude 入口文字（權威讀取包�
 在 HTTP adapter 內建立只供 `intradaySession` 使用的獨立 WebClient，保留相同 base URL、query 參數與 DTO decoder，將 `maxInMemorySize` 設為有限的 `16 * 1024 * 1024` bytes。一般 client 與全域 codec 保持原值；不使用無限 buffer。解碼後仍交既有 `IntradaySessionResolver` 處理 comparison tuple，完整保留 tick 數量、順序、時間與 BigDecimal 價格。超限或 malformed JSON 維持既有 fail-soft，不得返回部分序列或自行補值。無 controller／DTO／BFF／frontend／producer／Redis／DB／9090 契約變更，也不新增 request-time vendor I/O。
 
 回歸驗證沿用既有 `HistoricalDataIntradaySessionHttpTest` 的真實本地 HTTP server，兩種 readOnly 模式均以超過 2 MiB 的 session 驗證首末 tick、完整數量、價格精度與 reference/comparison；另驗超過 16 MiB 時 fail-soft，以及非 session 查詢仍受預設接收上限約束。部署只重建並 recreate `business-services`，讀取實際 0050 session 驗證非空序列及無 buffer-limit 失敗。
+
+### Task 530：SRPP 9090 可用資料的版本相容
+
+SRPP report package 來源擷取、精確雷達與短線 calculator 共用一個純 Java 封閉版本判斷，僅支援 `EVIDENCE_GATE_V1`、`EVIDENCE_GATE_V2`；來源品質只證明來源身分，交易判斷另外要求 V2 officialSma20Verification 存在、status 為 CONFIRMED／UNAVAILABLE／NOT_COMPARABLE 且 gateApplied 為 boolean false；CONFLICT 與缺值維持拒絕。其餘證據與錯誤處理沿用既有實作。Python 短線來源採同樣的版本集合，保留 actionGateReasons 等既有否決條件。A1/A2 Python verifier 在每次呼叫時以指定專案 root 的已發布 Swagger 原始 bytes 計算 SHA-256，與 caller 身分比對後仍交既有 report verifier 驗 schema、L0、owner、policy、來源及內容雜湊；不重算交易數字。
+
+沒有新增 API／schema／DB 表，也沒有讀取新券商或檔案來源。以合成邊界測試涵蓋 V1/V2、未知版本、錯 owner／日期／身分及雷達風險拒絕；以既有來源 golden 驗 Python/Java 輸出一致。正式 runtime 只讀當日合法時窗的 GET，記錄來源 VERIFIED 改善與仍缺的來源，不將 PARTIAL 或 UNAVAILABLE 宣稱為全模組完成。
+
+Task530 另修正現行投影 wire 與 consumer 的漂移：沿既有 Java legs 投影排除 NONE、保留 BUY/SELL（含被阻擋腿）的原 module.index；未知 fact unit 固定 NONE，AVAILABLE 才按各指標驗單位。明確查詢包外代碼允許逐列 UNAVAILABLE，但所有 facts 必須仍為 UNAVAILABLE/null/unit=NONE，不放寬包外事實可用性。無查詢參數時 symbols 必須精確等於凍結的 BUY/SELL 台股 universe，可為空。這些均沿用已發布契約，不修改任何 server schema／Swagger。
