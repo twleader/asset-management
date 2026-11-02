@@ -13265,3 +13265,5 @@ Task530 另修正現行投影 wire 與 consumer 的漂移：沿既有 Java legs 
 ### Task 531：009826 建倉腿計算器的 authority 發布邊界
 
 SRPP 的修正在 `scripts/execution_policy.py --global-build-009826` 與日報規格（009826 建倉張數上限即預設買量，由已保存的報價、資產、成交紀錄與匯率確定性產出），不影響 9090 金融計算與 API 契約；9090 `GLOBAL_EQUITY_PACE` 仍不輸出 009826 leg，兩軌依 `API_CALCULATION_RULES.md` §2 回退本機計算器。asset-management 本輪只發布最終 bundle 身分：完整 manifest 與 model_inputs bytes 同步到 classpath decision authority（本次 model_inputs 位元組有變，與 t528 不同），由原工具重產 insert-only registry SQL 與兩份 golden（僅 bundle 與 `execution_policy.py` calculator hash 欄位變動），formal targets、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash，不更新刪除歷史 row。部署只重建 business-services，重啟前逐項唯讀證明啟動入口 no-op，並以 image id 前後比對防止被他人覆蓋；`report-calculations` 讀回僅在合法時窗以新 hash 唯讀進行。
+
+Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILABLE/null 後，不對該包外列施行僅適用包內的 OVERHEAT_HIT 推導檢查；包內 overheat 的完整來源／布林規則不變，任何包外數值、receipt 或可用狀態仍拒絕。此為現行 wire 契約一致性修復。

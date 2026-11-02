@@ -263,6 +263,7 @@ final class PublicSrppProjectionService {
             require(FACT_NAMES.get(i).equals(name) && byName.put(name, fact) == null);
             validateFact(fact, outside, captured);
         }
+        if (outside) return;
         JsonNode overheat = byName.get("OVERHEAT_HIT");
         boolean inputs = List.of("K", "D", "RSI5", "BIAS10", "WILLIAMS_R9").stream().allMatch(name -> "AVAILABLE".equals(text(byName.get(name), "status")));
         if (!inputs) require("NOT_EVALUATED".equals(text(overheat, "status")));
