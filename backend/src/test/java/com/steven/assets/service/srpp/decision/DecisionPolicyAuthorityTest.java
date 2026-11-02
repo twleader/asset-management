@@ -25,11 +25,11 @@ class DecisionPolicyAuthorityTest {
             "prerequisites", "observations_pending", "fallback_reason");
 
     @Test
-    void d204AuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
+    void d205AuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
         DecisionPolicyAuthority current = new DecisionPolicyAuthority();
         SrppReportAuthority authority = new SrppReportAuthority(current);
-        assertThat(authority.decision().policy().decision()).isEqualTo("D-204");
-        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.53.0");
+        assertThat(authority.decision().policy().decision()).isEqualTo("D-205");
+        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.54.0");
         assertThat(authority.decision().policy().modelVersion()).isEqualTo("3.22.0");
 
         ObjectNode model = currentModel();
@@ -109,6 +109,16 @@ class DecisionPolicyAuthorityTest {
         assertThat(decision.policy().bundleHash()).matches("[0-9a-f]{64}");
         assertThatThrownBy(() -> new SrppReportAuthority(decision))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void authoredFundMappingRequiresExactTextIdentityKnownClassAndNoDuplicate() throws Exception {
+        for(String invalid:List.of("NULL","WRONG_TYPE","BLANK_CODE","BLANK_NAME","UNKNOWN_CLASS","DUPLICATE")){
+            ObjectNode model=currentModel();ArrayNode rows=model.putArray("fund_asset_classifications");ObjectNode row=rows.addObject().put("fund_code","24B2").put("fund_name","Exact Fund").put("asset_class","BOND");
+            switch(invalid){case "NULL"->model.putNull("fund_asset_classifications");case "WRONG_TYPE"->model.put("fund_asset_classifications","not-array");case "BLANK_CODE"->row.put("fund_code"," ");case "BLANK_NAME"->row.put("fund_name","");case "UNKNOWN_CLASS"->row.put("asset_class","CASH");case "DUPLICATE"->rows.add(row.deepCopy());}
+            assertThatThrownBy(()->selfConsistent(model)).isInstanceOf(IllegalStateException.class);
+        }
+        ObjectNode model=currentModel();model.putArray("fund_asset_classifications").addObject().put("fund_code","24B2").put("fund_name","Exact Fund").put("asset_class","BOND");var authority=selfConsistent(model);assertThat(authority.fundAssetClass("24B2","Exact Fund")).contains("BOND");assertThat(authority.fundAssetClass("24B2","Exact Fund ")).isEmpty();assertThat(authority.fundAssetClass("24B2X","Exact Fund")).isEmpty();assertThat(authority.fundAssetClass(null,"Exact Fund")).isEmpty();assertThatThrownBy(()->authority.fundClassifications().clear()).isInstanceOf(UnsupportedOperationException.class);
     }
 
     private static ObjectNode currentModel() throws Exception {

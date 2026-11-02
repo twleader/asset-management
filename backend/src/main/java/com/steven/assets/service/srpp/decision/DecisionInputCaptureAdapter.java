@@ -7,6 +7,7 @@ import com.steven.assets.model.*;
 import com.steven.assets.repository.*;
 import com.steven.assets.service.*;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
+import com.steven.assets.service.srpp.report.SrppRadarPolicy;
 import com.steven.assets.srpp.SrppJcs;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -53,13 +54,16 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         try{captures=minutes.read(p.symbols(),date,asOf);if(captures==null)captures=Map.of();}catch(RuntimeException ignored){captures=Map.of();}
         ObjectNode input=JsonNodeFactory.instance.objectNode(),vector=JsonNodeFactory.instance.objectNode();
         input.put("schemaVersion",1);input.put("ownerUserId",ownerId);input.put("tradingDate",date.toString());input.put("slot",request.slot());input.put("capturedAt",asOf.toString());ObjectNode sources=input.putObject("sources");
-        ObjectNode classSource=JsonNodeFactory.instance.objectNode();classSource.set("stockMasterRows",json(stockMasters));classSource.set("fundOverrideRows",json(fundClassRows));classSource.set("resolvedStockClasses",json(classifications));classSource.put("classifierVersion","CANONICAL_FUND_OVERRIDE_ONLY_V1");
-        ObjectNode resolvedFunds=classSource.putObject("resolvedFundClasses");ArrayNode classificationMissing=classSource.putArray("missing");
+        ObjectNode classSource=JsonNodeFactory.instance.objectNode();classSource.set("stockMasterRows",json(stockMasters));classSource.set("fundOverrideRows",json(fundClassRows));classSource.set("policyFundRows",json(authority.fundClassifications()));classSource.set("resolvedStockClasses",json(classifications));classSource.put("classifierVersion","CANONICAL_MASTER_AND_POLICY_EXACT_FUND_V2");
+        ObjectNode resolvedFunds=classSource.putObject("resolvedFundClasses"),resolvedFundSources=classSource.putObject("resolvedFundClassSources"),resolvedHoldingFunds=classSource.putObject("resolvedFundHoldingClasses");ArrayNode classificationMissing=classSource.putArray("missing");Set<String> unresolvedFundNames=new HashSet<>();
         for(var fund:a.snapshot().funds()){
             String explicit=fundClasses.get(fund.fundName());
-            if(explicit!=null&&Set.of("BOND","STOCK").contains(explicit.trim().toUpperCase(Locale.ROOT)))resolvedFunds.put(fund.fundName(),explicit.trim().toUpperCase(Locale.ROOT));
-            else classificationMissing.add("FUND_CLASSIFICATION_UNAVAILABLE:"+fund.fundName());
+            boolean hasOverride=explicit!=null&&!explicit.isBlank();String resolved=hasOverride?(Set.of("BOND","STOCK").contains(explicit.trim().toUpperCase(Locale.ROOT))?explicit.trim().toUpperCase(Locale.ROOT):null):authority.fundAssetClass(fund.fundCode(),fund.fundName()).orElse(null);
+            if(resolved!=null){resolvedFunds.put(fund.fundName(),resolved);resolvedHoldingFunds.put(fund.id().toString(),resolved);resolvedFundSources.put(fund.id().toString(),hasOverride?"DB_OVERRIDE":"POLICY_EXACT_IDENTITY");}
+            else {classificationMissing.add("FUND_CLASSIFICATION_UNAVAILABLE:"+fund.fundName());unresolvedFundNames.add(fund.fundName());}
         }
+        // A name-level projection must never classify another holding with the same name and a different identity.
+        unresolvedFundNames.forEach(resolvedFunds::remove);
         source(sources,vector,"classifications",classSource,"canonical-master-overrides",asOf,classificationMissing.isEmpty()?"COMPLETE":"PARTIAL",classificationMissing.isEmpty()?"VERIFIED":"UNAVAILABLE");
         source(sources,vector,"assets",json(a),"snapshot-"+a.snapshot().id(),asOf,"COMPLETE","VERIFIED");
         ObjectNode calendar=JsonNodeFactory.instance.objectNode();calendar.put("tradingDate",date.toString());calendar.put("tw",true);calendar.set("weekCalendar",weekCalendar);ArrayNode sessionRows=calendar.putArray("completedSessions");sessions.forEach(d->sessionRows.add(d.toString()));
@@ -83,8 +87,8 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
             if(!"TARGET_SESSION_PRICE".equals(live.valuationSource()))valuation=false;
         }
         for(var f:a.snapshot().funds()){
-            if(!resolvedFunds.has(f.fundName()))valuation=false;
-            else if("BOND".equals(resolvedFunds.path(f.fundName()).asText()))bond=bond.add(f.currentValue());
+            if(!resolvedHoldingFunds.has(f.id().toString()))valuation=false;
+            else if("BOND".equals(resolvedHoldingFunds.path(f.id().toString()).asText()))bond=bond.add(f.currentValue());
         }
         BigDecimal term=BigDecimal.ZERO,total=BigDecimal.ZERO;
         for(var d:a.snapshot().deposits())if("TWD".equals(d.currency())){
@@ -98,8 +102,9 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
             boolean navIdentity=nav!=null&&c.equals(nav.stockCode())&&"台股".equals(nav.market())&&nav.nav()!=null&&nav.nav().signum()>0&&nav.source()!=null&&!nav.source().isBlank();
             Quote quote=!quoteIdentity?null:new Quote(q.price(),q.previousClose(),exactLots(q.volume()),localDate(q.tradingDate()),quoteTime(q.updatedAt()),q.source(),q.quoteStatus(),q.closed(),!navIdentity?null:nav.premiumDiscountPct(),!navIdentity?null:navDate(nav.navAsOf()));
             QuoteDetailDto.Response b=books.get(c);Book book=book(b,c);
-            var detail=details.get(c);boolean exact=detail!=null&&detail.stock()!=null&&c.equals(detail.stock().stockCode())&&"台股".equals(detail.stock().market())&&TradingRadarRuleEngine.RULE_VERSION.equals(detail.ruleVersion())&&TradingRadarEvidenceGate.ACTION_POLICY_VERSION.equals(detail.actionPolicyVersion())&&detail.stock().dataComplete()&&detail.stock().action()!=null&&radarFresh(detail.generatedAt(),asOf,p.acquisitionMinutes());
-            Evidence rad=new Evidence(exact?"PASS":"UNAVAILABLE",exact?"EXACT_RADAR_CURRENT_READ":"EXACT_RADAR_UNVERIFIED");
+            var detail=details.get(c);JsonNode rawRadar=json(detail);boolean exact=detail!=null&&detail.stock()!=null&&c.equals(detail.stock().stockCode())&&"台股".equals(detail.stock().market())&&TradingRadarRuleEngine.RULE_VERSION.equals(detail.ruleVersion())&&SrppRadarPolicy.supportsVersion(rawRadar)&&date.toString().equals(detail.stock().asOfDate())&&"LIVE".equals(detail.stock().quoteStatus())&&detail.stock().dataComplete()&&detail.stock().action()!=null&&radarFresh(detail.generatedAt(),asOf,p.acquisitionMinutes());
+            String radarFailure=exact?SrppRadarPolicy.decisionFailure(rawRadar):"EXACT_RADAR_UNVERIFIED";
+            Evidence rad=new Evidence(radarFailure==null?"PASS":"UNAVAILABLE",radarFailure==null?"EXACT_RADAR_CURRENT_READ":radarFailure);
             List<Close> closes=hs.get(c).stream().filter(h->sessions.contains(h.getTradingDate())).map(h->new Close(h.getTradingDate(),h.getClosePrice(),prices.isTrustedClose(h))).toList();
             List<Distribution> distributions=ds.get(c).stream().filter(h->h.getExDividendDate()!=null&&h.getExDividendDate().isAfter(date.minusDays(100))&&!h.getExDividendDate().isAfter(date)||h.getExRightsDate()!=null&&h.getExRightsDate().isAfter(date.minusDays(100))&&!h.getExRightsDate().isAfter(date))
                     .map(h->new Distribution(h.getExDividendDate(),h.getExRightsDate(),h.getCashDividend(),h.getStockDividend(),h.getSource())).toList();
