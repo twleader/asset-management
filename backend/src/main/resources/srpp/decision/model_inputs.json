@@ -655,7 +655,12 @@
         "earliest_buy_date": "2026-11-02",
         "earliest_buy_date_requires_tw_true": true,
         "max_lots_per_day": 1,
-        "lot_note": "Whichever binds first: 3 lots per verified Taiwan trading week, 1 lot per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs."
+        "lot_note": "Whichever binds first: 3 lots per verified Taiwan trading week, 1 lot per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs.",
+        "build_clarification": "2026-11-02 clarification of D-143; no cadence number changed.",
+        "tool": "execution_policy.py --global-build-009826",
+        "ceiling_is_default_fill": true,
+        "pace_consumed_only_by_confirmed_fills": true,
+        "pace_state_unverified_lots": 0
       },
       "buy_gate_change": "D-143 retains the \"not high/overbought\" gate for strategic global-equity buying. Building VOO toward its 28.5% target is a strategic build whose opponent is time, not price; the overbought pause is retained. Tactical adds beyond the target are unaffected and still require low/oversold evidence. D-180 note: VOO's actual current weight versus 28.5% must be recomputed from a fresh /api/assets/latest pull; the pre-swap \"1.4% to 28.5%\" progress figure described VT's build and no longer applies.",
       "fx_gate_change": "USD/TWD above 33.00 halves BOTH that month baseline and that month cap (300,000 / 450,000 TWD for VOO; 70,000 / 105,000 TWD for 009826) instead of stopping purchases. A hard stop only defers the exposure and compounds it later. The bond daily cadence keeps its own USD/TWD > 33.00 zero-lot rule unchanged.",

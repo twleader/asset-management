@@ -13253,3 +13253,7 @@ SRPP 的修正只在日報執行規格與 Claude 入口文字（權威讀取包�
 在 HTTP adapter 內建立只供 `intradaySession` 使用的獨立 WebClient，保留相同 base URL、query 參數與 DTO decoder，將 `maxInMemorySize` 設為有限的 `16 * 1024 * 1024` bytes。一般 client 與全域 codec 保持原值；不使用無限 buffer。解碼後仍交既有 `IntradaySessionResolver` 處理 comparison tuple，完整保留 tick 數量、順序、時間與 BigDecimal 價格。超限或 malformed JSON 維持既有 fail-soft，不得返回部分序列或自行補值。無 controller／DTO／BFF／frontend／producer／Redis／DB／9090 契約變更，也不新增 request-time vendor I/O。
 
 回歸驗證沿用既有 `HistoricalDataIntradaySessionHttpTest` 的真實本地 HTTP server，兩種 readOnly 模式均以超過 2 MiB 的 session 驗證首末 tick、完整數量、價格精度與 reference/comparison；另驗超過 16 MiB 時 fail-soft，以及非 session 查詢仍受預設接收上限約束。部署只重建並 recreate `business-services`，讀取實際 0050 session 驗證非空序列及無 buffer-limit 失敗。
+
+### Task 531：009826 建倉腿計算器的 authority 發布邊界
+
+SRPP 的修正在 `scripts/execution_policy.py --global-build-009826` 與日報規格（009826 建倉張數上限即預設買量，由已保存的報價、資產、成交紀錄與匯率確定性產出），不影響 9090 金融計算與 API 契約；9090 `GLOBAL_EQUITY_PACE` 仍不輸出 009826 leg，兩軌依 `API_CALCULATION_RULES.md` §2 回退本機計算器。asset-management 本輪只發布最終 bundle 身分：完整 manifest 與 model_inputs bytes 同步到 classpath decision authority（本次 model_inputs 位元組有變，與 t528 不同），由原工具重產 insert-only registry SQL 與兩份 golden（僅 bundle 與 `execution_policy.py` calculator hash 欄位變動），formal targets、Swagger、schema、producer、排程與資料表不變。兩 repo 各自 main 遠端驗證完成前不執行 registry SQL；之後只 insert 新 hash，不更新刪除歷史 row。部署只重建 business-services，重啟前逐項唯讀證明啟動入口 no-op，並以 image id 前後比對防止被他人覆蓋；`report-calculations` 讀回僅在合法時窗以新 hash 唯讀進行。
