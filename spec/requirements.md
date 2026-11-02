@@ -6431,3 +6431,4 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - base capture與report calculator共用封閉的EVIDENCE_GATE_V1／V2相容判斷；精確market／symbol／當日／LIVE／dataComplete／時效條件不省略。V2官方均線CONFLICT、gateApplied=true或缺必要欄位仍否決受影響決策，原始衝突事實可保存而不可轉成買賣資格。
 - 只修復可由現有正式來源證明的資料映射。國泰／富邦00865B分帳、跨幣別正式掛單、失敗或過期的券商擷取仍具名不可用，不建立假空倉、假委託或假來源。無新API、Swagger、DB schema或券商操作。
 - 同步完整SRPP D-205／2.54.0 model與manifest bytes、原產生器的golden及insert-only registry SQL。所有金融expected差異須逐項對應新授權規則，正式驗收受交易日與09:05–13:30台北時窗限制；越窗僅能記NOT_YET_EXECUTED，不能以health代替report-calculations驗收。
+- 2026-11-02後續帳本確認由SRPP本機處理：00679B／00751B四筆買賣確認為已結清短線、00881五筆買進為核心，使用者當輪確認各券商無未成交委託。已結清歷史只能在真實買賣身分／時間序已核對且淨股數精確零時使用closed_history，不能補造當時未保存的support／pressure、重設活躍持倉或把本輪無委託當永久事實。TWSE 49,000與兩檔過熱只是管理檢查點，006208／009804仍守完成日KD、1.5%回落及原批次，承接VOO仍守原買進門檻。資產管理本次追加只發布新manifest／registry／golden身分，model金融bytes、Java計算程式、formal targets與Swagger不變；本機使用者確認不冒充API尚未具備的正式consumer state／券商來源。
