@@ -13241,3 +13241,12 @@ UI 在五檔快照區前固定呈現最新成交、provider 原漲跌與漲跌�
 pause／close／stock identity switch 清理最新成交；resume/catchup 再從同一 stream 的 validated current-date cache 或新事件填入。日期與 nano time ordering／null comparison／close fence 都使用已存在 mergeLiveQuote，不複製另一套驗證。來源時間沒有 offset 時按台北解析顯示；不以瀏覽器所在時區猜來源。T525 book interval 與 HTTP abort/generation/token 保留，不改其他頁的共用 stream／金融資料。
 
 Dashboard、TradingRadar、WatchStock、SnapshotForm 現有 onQuote 已各自 applyLivePrice/applyPriceUpdate；本次只補共用 dialog 缺少的直接資料投影，使其所有父頁一致。驗證以現有 livePrices.test.js 真 SFC AST fixture 與完整 SFC browser harness，含真共享 transport 的 price-update delivery；唯讀 business SSE／Redis 證據與已登入 BFF UI 分開，不能以橋接測試冒稱拿到使用者 session。
+
+
+### Requirement 13／Task 527：當日分時 session 接收容量
+
+`HistoricalDataHttpAdapter` 目前以 WebClient 預設 256 KiB 上限解析 `GET /internal/intraday-ticks` 的單一 session object；0050 的密集成交序列超過該值時，HTTP 200 仍觸發 `DataBufferLimitException`，`HistoricalDataService` fail-soft 回空 session，造成股票分析顯示無資料。
+
+在 HTTP adapter 內建立只供 `intradaySession` 使用的獨立 WebClient，保留相同 base URL、query 參數與 DTO decoder，將 `maxInMemorySize` 設為有限的 `16 * 1024 * 1024` bytes。一般 client 與全域 codec 保持原值；不使用無限 buffer。解碼後仍交既有 `IntradaySessionResolver` 處理 comparison tuple，完整保留 tick 數量、順序、時間與 BigDecimal 價格。超限或 malformed JSON 維持既有 fail-soft，不得返回部分序列或自行補值。無 controller／DTO／BFF／frontend／producer／Redis／DB／9090 契約變更，也不新增 request-time vendor I/O。
+
+回歸驗證沿用既有 `HistoricalDataIntradaySessionHttpTest` 的真實本地 HTTP server，兩種 readOnly 模式均以超過 2 MiB 的 session 驗證首末 tick、完整數量、價格精度與 reference/comparison；另驗超過 16 MiB 時 fail-soft，以及非 session 查詢仍受預設接收上限約束。部署只重建並 recreate `business-services`，讀取實際 0050 session 驗證非空序列及無 buffer-limit 失敗。

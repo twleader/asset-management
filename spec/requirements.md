@@ -345,6 +345,11 @@
 
 ---
 
+**Requirement 13 補充（Task 527）：大量當日成交資料接收**
+
+- [ ] business 的 `HistoricalDataHttpAdapter.intradaySession` 必須完整解析大於 256 KiB、最多 16 MiB 的 session JSON，涵蓋首次開窗與 `readOnly=true` 更新；保留所有 tick 的順序、時間與 BigDecimal 價格、session reference 與既有 server comparison tuple，不截斷、不抽樣。
+- [ ] 16 MiB 上限只作用於這條 internal session GET 的專用 client，其他 HTTP 查詢與全域 codec 不變；超限或解析失敗仍依既有 fail-soft 回傳不可用 session，不回部分資料、不補造成交。沿用 BFF、cache-only tick 及 reference self-heal 邊界，零新增行情抓取或資料寫入。
+
 ### Requirement 14: 觀察股票清單（由警示條件衍生）
 
 **User Story:** 作為使用者，我希望「觀察清單」即「警示條件」中出現過的去重股票清單，這樣在警示條件設了多筆 0050 條件時，觀察清單就會自動有一筆 0050；不必同時維護兩份名單。
