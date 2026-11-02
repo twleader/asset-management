@@ -18570,10 +18570,10 @@
     "core_sell_guard.py": "11eec360d689a18f70d95daf63ae8e0e498459c1cf080478b8d6799a682ccdc4",
     "execution_policy.py": "f408f8a19f6adf22b6bc74e4715c6aacd318f7253a44110efa24318b4fdf4c5a",
     "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
-    "short_term_opportunities.py": "1b5c5f97db2e331970c78b6937954271389a11ae511a4110477ab58114e018f4",
+    "short_term_opportunities.py": "90877046a3150f5949cd806b08039565279a1f845c1d0341a9fa4445d0f0fabc",
     "strategic_buy_gate.py": "7bfe9d3b6b168335c7cd6b5e8bbc9f9c34a8c775c91b72a18520ef09e26cd6c1",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "85352a31d93bbc1f28246253412b178d389bb0e276e0c9f3e9e5c707d7896948",
+  "policyBundleSha256": "cf3d8955a97672685b7afd370cc10675cee62733dca14dfd0188bd16029d4e22",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

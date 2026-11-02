@@ -13286,3 +13286,17 @@ SrppRadarPolicy作為無I/O的共用封閉相容判斷供decision capture與repo
 發布沿既有model／manifest authority、golden產生器、insert-only policy registry與乾淨main stack流程；不重寫歷史包／觀察帳、不觸發producer或vendor I/O。分帳、真掛單與策略歸屬無正式來源時仍fail closed。正式report GET驗收只在台北交易日09:05–13:30進行，其他時段保留NOT_YET_EXECUTED。
 
 Task534後續身分發布沿同一流程：SRPP本機新增已結清短線closed_history的精確交易／淨零防線及當輪使用者確認後，僅其manifest內容身分改變；model原文SHA `5e2bf2d5c4f947f06d9d5b5729fc7a2f494b206c8d2f512e802201cec1124369`及既有Java class bytes維持。以原Ruby／Python工具重產insert-only SQL與golden身分，金融expected必須逐值不變，再做authority／registry負例與聚焦Java驗證。新增registry row保留全部歷史列，由乾淨main只重建business-services，驗JAR資源、Java classes、普通9090 GET與受保護資料指紋。API不匯入本機ledger或使用者聲明為VERIFIED，也不新增TWSE 49,000交易例外；新hash正式report GET仍受原時窗限制。
+
+### Task 535：邏輯修正的離線 authority 與持有期退出對齊
+
+以 `/private/tmp/srpp-logic-consistency-20261102` 的凍結最終來源為單一 authority，先驗 Claude／Codex daily bundle 及 runtime contract，再同步 model／manifest 完整 bytes。D-205／2.54.0／3.22.0 及所有金融數值不變，model 僅承接舊 D-118 回落文字與 VOO／VT敘述校正；月頻熊市容量順序由 SRPP 原計算器處理。Java 只修同一個長期債券短線退出缺陷，不新增金融規則或啟用 canonical feed。
+
+依既有 Ruby report registration generator 產生 insert-only SQL，四支既有 Python generators 取相同凍結來源 bytes，所有 Python 執行明示 `-B` 或 `PYTHONDONTWRITEBYTECODE=1` 以禁止 SRPP bytecode 寫入；short-US／income-payroll 沒有來源參數，原工具執行前先核對 `/Users/steven/Project/SRPP` 已由來源負責者安全同步至同一 commit，或正常 no-ff merge 前後的相同 tree，且所需 model、scripts、薪資與日曆 bytes 相同。primary 無法安全同步時，才在記憶體替換其固定 SRPP 常數，記錄原工具 SHA 並保持原 `__file__`／ROOT 與生成邏輯。四份 golden 完整 cases 與舊產物逐值相同，允許差異僅為 bundle 與已核對的計算器來源 hash；正式 targets document、Swagger、其餘 Java 公式、API、schema、producer、排程不改。
+
+`SrppReportShortUsCalculator` 現有 `reference_date < reference_start` 直接阻擋，與修復後的 Python 同一缺陷。保留既有60日進場分析；退出改以已凍結 `completedSessions`／calendarVerified／currentSessionVerified 與 quote chart／dividendHistory 純函式驗證完整鎖定持有期。交易日鎖定日期保留當日價格，非交易日鎖定日期保留前一完成日；不得拿不完整日曆或缺舊bar推導通過。只有完整持有期已確認價格與配息才調整原 support／pressure，配息去重且同日異值拒絕，股票股利仍不支援；失敗保留具名 EXIT_BLOCKED 與 new_buys_frozen。方向及非空 actionGateReasons 的退出否決仍只在原 trigger 成立時套用，沒有trigger的61／119日BUY部位維持HOLD／未凍結，不新增方向觸發。原期限、核心／短線歸屬、pending sell room與其餘出場條件維持，不新增 I/O 或來源能力。
+
+本次原Python同輸入fixture最近60日均收50，Java `SrppReportModuleCalculator.shortScenario` 的 `pressure<=support` 前置拒絕會先令持倉列無法判定，阻斷完整持有期退出。僅將此純數學輸入域改為允許 `pressure==support`，仍拒絕反向區間及非正價格／股數；所有費稅、淨上下行與風報比公式原樣。沒有嚴格支撐壓力區間時仍由 `shortEntryReasons` 明確拒絕新買進，淨風報比不足亦維持；新測試證明share ceiling=0、mayRecommend=false與原locked45／60的120日退出可分開判斷，不把等號視為交易資格。
+
+新增離線 `generate-srpp-long-short-exit-golden.py --srpp-root <absolute> [--check]`，先驗正式 bundle，再使用該來源 `LongShortTermExitTests` 的合成 fixture 與實際 Python screen；所有暫存日曆只寫系統暫存區。輸出獨立 `report-long-short-exit-golden.json`，記錄 source bundle 與計算器／fixture 原文 SHA，不改既有13例。Java 比對相同輸入的 position reference／holding count／股數、exit status／reasons、adjusted locked prices、pending room、core attribution 與 sleeve 凍結；除數字表示容差外，狀態及理由嚴格一致。產生器 `--check` 完整 bytes 比對、失敗非0且零寫入，不重算或手編 expected 掩蓋差異。隔離回歸覆蓋相對／缺失root、embedded bytes不符、stale source hash／case、正反check受保護來源與產物皆零寫入；fixture合成日曆僅可在自有系統暫存目錄建立並清理。
+
+本輪授權包含規格、來源產物、同一持有期缺陷的 Java 對齊、離線測試與 Git 收尾；不執行 registry SQL、Docker rebuild／recreate 或金融 API。Java 與 classpath authority 是可執行變更，未完成規定的 run-stack 驗收前保留 feature 提交與遠端讀回，main merge、registry 登錄、JAR／runtime 驗收均明列尚未執行。不得以健康檢查、靜態 hash 或既有 run 的證據替代正式採用。
