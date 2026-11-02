@@ -24,9 +24,28 @@ public final class SrppReportEnvelopeValidator {
             vector.fields().forEachRemaining(e->{JsonNode v=e.getValue();keys(v,Set.of("sourceId","revision","capturedAt","sha256","coverage","validation"));require(e.getKey().equals(text(v,"sourceId"))&&!text(v,"revision").isBlank());hash(v,"sha256");require(!Instant.parse(text(v,"capturedAt")).isAfter(at)&&SrppJcs.hash(sources.path(e.getKey())).equals(v.path("sha256").asText())&&Set.of("COMPLETE","PARTIAL","NONE").contains(text(v,"coverage"))&&Set.of("VERIFIED","UNAVAILABLE").contains(text(v,"validation")));});
             JsonNode modules=n.path("modules");require(modules.isArray()&&modules.size()==12);Set<String> seen=new HashSet<>();Map<String,Integer> counts=new HashMap<>();
             for(JsonNode m:modules){keys(m,Set.of("moduleId","status","formulaVersion","scope","data","missing","reasonCodes","inputRefs","receipts"));String id=text(m,"moduleId"),status=text(m,"status");require(MODULES.contains(id)&&seen.add(id)&&Set.of("COMPLETE","PARTIAL","UNAVAILABLE","NOT_EVALUATED").contains(status)&&!text(m,"formulaVersion").isBlank()&&m.path("data").isObject()&&m.path("missing").isArray()&&m.path("reasonCodes").isArray()&&m.path("inputRefs").isArray()&&m.path("receipts").isArray());counts.merge(status,1,Integer::sum);references(m.path("inputRefs"),vector);require(m.path("scope").isArray());if("COMPLETE".equals(status)){require(m.path("missing").isEmpty());for(JsonNode ref:m.path("inputRefs"))require("VERIFIED".equals(vector.path(ref.asText()).path("validation").asText()));}keys(m.path("data"),Set.of("facts","legs","ranking","eventEvidenceIntegrationStatus"));require("NOT_BOUND".equals(m.path("data").path("eventEvidenceIntegrationStatus").asText()));validateFacts(m.path("data").path("facts"));walkRefs(m.path("receipts"),vector);walkRefs(m.path("data").path("legs"),vector);walkLegs(m.path("data"));}
+            validatePublicationContext(input,snapshot,identity,modules);
             require(seen.equals(MODULES));JsonNode coverage=n.path("coverage");keys(coverage,Set.of("requestedCount","completeCount","partialCount","unavailableCount","notEvaluatedCount"));require(coverage.path("requestedCount").asInt(-1)==12);Map<String,String> fields=Map.of("COMPLETE","completeCount","PARTIAL","partialCount","UNAVAILABLE","unavailableCount","NOT_EVALUATED","notEvaluatedCount");fields.forEach((status,field)->require(coverage.path(field).isIntegralNumber()&&coverage.path(field).asInt(-1)==counts.getOrDefault(status,0)));
             safeJson(n);return n;
         } catch(RuntimeException invalid){if(invalid instanceof SrppReportProblem p)throw p;SrppReportProblem problem=new SrppReportProblem("UPSTREAM_INVALID");problem.initCause(invalid);throw problem;}
+    }
+    private static void validatePublicationContext(JsonNode input,JsonNode snapshot,JsonNode identity,JsonNode modules){
+        JsonNode context=input.path("sources").path("publication-context");if(context.isMissingNode())return;
+        keys(context,Set.of("mode","tradingDate","reportSlot","capturedAt"));
+        require("AFTER_CLOSE_INITIALIZATION".equals(text(context,"mode"))&&"12:00".equals(text(context,"reportSlot"))&&context.path("reportSlot").equals(identity.path("reportSlot"))&&context.path("tradingDate").equals(identity.path("tradingDate")));
+        String captured=text(context,"capturedAt");ZonedDateTime local=Instant.parse(captured).atZone(SrppTime.TW_ZONE);
+        require(captured.equals(text(snapshot,"capturedAt"))&&captured.equals(text(input,"capturedAt"))&&captured.equals(text(input.path("facts"),"capturedAt"))&&local.toLocalDate().toString().equals(text(identity,"tradingDate"))&&!local.toLocalTime().isBefore(LocalTime.of(14,0)));
+        JsonNode receipt=snapshot.path("sourceVector").path("publication-context");require(captured.equals(text(receipt,"capturedAt"))&&"COMPLETE".equals(text(receipt,"coverage"))&&"VERIFIED".equals(text(receipt,"validation")));
+        for(JsonNode module:modules)requireNonExecutable(module.path("data"));
+    }
+    private static void requireNonExecutable(JsonNode n){
+        if(n.isArray()){n.forEach(SrppReportEnvelopeValidator::requireNonExecutable);return;}if(!n.isObject())return;
+        require(!"ACTIONABLE_FOR_REPORT".equals(n.path("status").asText()));
+        // Do not rely on a status field: a partial/malformed recommendation must not hide executable values.
+        for(String key:List.of("lots","units","limitPrice","amount"))if(n.hasNonNull(key)){
+            JsonNode value=n.path(key);require(value.isIntegralNumber()||value.isTextual()&&SrppDecimal.isCanonical(value.asText()));require(new java.math.BigDecimal(value.asText()).signum()==0);
+        }
+        n.forEach(SrppReportEnvelopeValidator::requireNonExecutable);
     }
     private static void references(JsonNode values,JsonNode vector){require(values.isArray());for(JsonNode v:values){require(v.isTextual());if(!vector.has(v.textValue()))throw new IllegalArgumentException("Missing report source reference: "+v.textValue());}}
     private static void validateFacts(JsonNode facts){require(facts.isArray());Set<String> identities=new HashSet<>();for(JsonNode fact:facts){keys(fact,Set.of("name","subject","value","unit","quality","reason"));require(!text(fact,"name").isBlank()&&!text(fact,"unit").isBlank()&&(fact.path("subject").isNull()||fact.path("subject").isTextual())&&identities.add(fact.path("name").asText()+"\u0000"+fact.path("subject").toString()));boolean unknown="UNAVAILABLE".equals(text(fact,"quality"));require(unknown==fact.path("value").isNull());if(unknown)require(fact.path("reason").isTextual());else require("EXACT".equals(fact.path("quality").asText())&&fact.path("value").isTextual()&&SrppDecimal.isCanonical(fact.path("value").asText()));}}
