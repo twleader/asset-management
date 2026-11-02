@@ -1568,7 +1568,7 @@ public class StockAlertService {
     }
 
     /**
-     * 群組版的 {@link #maIndicatorsForLabel}：<b>群組內有任一「MA 百分比且 threshold≠0」的成員</b>
+     * 群組版的 {@link #maIndicatorsForLabel}：<b>群組內有任一 MA 成員（含 threshold=0）</b>
      * 才需要當前均線值供 {@link #buildLabel} 換算觸發價，否則回 null 以省去 {@code computeAll} 查詢
      * （警示頁一次要組整份清單，每個群組都無條件查一次指標會明顯拖慢載入）。
      * 取指標失敗時吞例外回 null（label 退回不含價格），不影響清單載入。
@@ -1577,7 +1577,7 @@ public class StockAlertService {
                                                                             List<StockAlert> members) {
         boolean needsMa = members.stream().anyMatch(m ->
                 ("MA_ABOVE_PCT".equals(m.getAlertType()) || "MA_BELOW_PCT".equals(m.getAlertType()))
-                        && m.getThreshold() != null && m.getThreshold().signum() != 0);
+                        && m.getThreshold() != null);
         if (!needsMa) return null;
         try {
             return indicatorService.computeAll(g.getStockCode(), g.getMarket());
@@ -1588,13 +1588,13 @@ public class StockAlertService {
     }
 
     /**
-     * 僅「MA 百分比且 threshold≠0」的警示才需要當前均線值供 {@link #buildLabel} 換算觸發價；
-     * 其餘類型（PRICE / KD / threshold=0）不需價格，回 null 以省去 {@code computeAll} 查詢。
+     * 所有 MA 警示（含 threshold=0）均需要當前均線值供 {@link #buildLabel} 顯示觸發價；
+     * 其餘類型（PRICE / KD 等）不需均線，回 null 以省去 {@code computeAll} 查詢。
      * 取指標失敗時吞例外回 null（label 退回不含價格），不影響清單載入。
      */
     private TechnicalIndicatorService.FullIndicators maIndicatorsForLabel(StockAlert a) {
         boolean maPct = ("MA_ABOVE_PCT".equals(a.getAlertType()) || "MA_BELOW_PCT".equals(a.getAlertType()))
-                && a.getThreshold() != null && a.getThreshold().signum() != 0;
+                && a.getThreshold() != null;
         if (!maPct) return null;
         try {
             return indicatorService.computeAll(a.getStockCode(), a.getMarket());
@@ -1705,8 +1705,9 @@ public class StockAlertService {
     }
 
     /**
-     * 帶入當前技術指標時，MA 百分比條件（{@code MA_*_PCT} 且 threshold≠0）額外附上換算後的
+     * 帶入當前技術指標時，所有 MA 條件（{@code MA_*_PCT}）額外附上換算後的
      * 觸發價，例如「高於季線 20%（360）」；觸發價 = 對應均線 × (1 ± pct/100)。
+     * threshold=0 時不顯示百分比，直接附對應均線價格，例如「低於月線（55）」。
      * {@code ind} 為 null（呼叫端不需價格）或該均線資料不足時，退回不含價格的純文字。
      * 觀察頁 / 警示頁共用此單一來源，確保兩頁「警示條件」欄口徑一致（同義欄位同一來源）。
      */
@@ -1714,11 +1715,13 @@ public class StockAlertService {
         double thr = a.getThreshold().doubleValue();
         return switch (a.getAlertType()) {
             case "MA_ABOVE_PCT" -> thr == 0
-                    ? String.format("高於%s", maPeriodName(a.getMaPeriod()))
+                    ? String.format("高於%s%s", maPeriodName(a.getMaPeriod()),
+                            maTriggerPriceSuffix(a, ind, thr, true))
                     : String.format("高於%s %.0f%%%s", maPeriodName(a.getMaPeriod()), thr,
                             maTriggerPriceSuffix(a, ind, thr, true));
             case "MA_BELOW_PCT" -> thr == 0
-                    ? String.format("低於%s", maPeriodName(a.getMaPeriod()))
+                    ? String.format("低於%s%s", maPeriodName(a.getMaPeriod()),
+                            maTriggerPriceSuffix(a, ind, thr, false))
                     : String.format("低於%s %.0f%%%s", maPeriodName(a.getMaPeriod()), thr,
                             maTriggerPriceSuffix(a, ind, thr, false));
             case "KD_ABOVE"              -> String.format("K 值高於 %.0f", thr);
