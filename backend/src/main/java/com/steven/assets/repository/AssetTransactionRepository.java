@@ -70,6 +70,19 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
             @Param("tradeDate") LocalDate tradeDate,
             @Param("transactionType") String transactionType);
 
+    /** Explicit owner scope also works on the token-only internal sync path without ownerFilter. */
+    @Query(value = """
+        SELECT * FROM asset_transaction
+        WHERE owner_user_id = :ownerUserId
+          AND trade_date = :tradeDate
+          AND asset_type = '股票' AND market = '台股' AND currency = 'TWD'
+          AND channel = '富邦證券' AND transaction_type = '買'
+          AND source IN ('MANUAL', 'FUBON_SYNC')
+        ORDER BY asset_code ASC NULLS LAST, id ASC
+        """, nativeQuery = true)
+    List<AssetTransaction> findFubonBuyLedgerForSettlement(
+            @Param("ownerUserId") Long ownerUserId, @Param("tradeDate") LocalDate tradeDate);
+
     /**
      * The Fubon batch writer alone calls this inside its transaction. Only the existing
      * owner/filled-no partial unique index is an expected conflict; every other database error

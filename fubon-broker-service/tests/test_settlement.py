@@ -62,19 +62,57 @@ def test_sign_dates_currency_and_total_are_not_guessed(changes):
         service([settlement_row(**changes)]).read()
 
 
-def test_same_or_past_nonzero_and_duplicate_settlement_fail_whole_batch():
-    with pytest.raises(SettlementError,match="AMBIGUOUS_SETTLEMENT"):
-        service([settlement_row(settlement_date="2026/08/28")]).read()
-    with pytest.raises(SettlementError,match="AMBIGUOUS_SETTLEMENT"):
-        service([settlement_row(settlement_date="2026/08/27")]).read()
+@pytest.mark.parametrize("settlement_date", ["2026/08/28", "2026/08/27"])
+def test_same_or_past_nonzero_rows_are_excluded_from_future_projection(settlement_date):
+    result=service([settlement_row(settlement_date=settlement_date)]).read()
+    assert result["details"] == []
+    assert result["coverageStatus"] == "SDK_RANGE_3D_RETURNED_ROWS"
+
+
+def test_duplicate_future_settlement_still_fails_whole_batch():
     with pytest.raises(SettlementError,match="AMBIGUOUS_SETTLEMENT"):
         service([settlement_row(),settlement_row(date="2026/08/28")]).read()
 
 
-def test_same_day_zero_is_valid_observation_without_claiming_a_complete_range():
+def test_same_day_zero_is_excluded_without_claiming_a_complete_range():
     result=service([settlement_row(settlement_date="2026/08/28",buy_settlement=0,total_settlement_amount=0)]).read()
-    assert result["details"][0]["buySettlement"]=="0"
+    assert result["details"] == []
     assert result["coverageStatus"]=="SDK_RANGE_3D_RETURNED_ROWS"
+
+
+def test_due_partial_null_row_does_not_block_future_row_or_become_a_placeholder():
+    due=settlement_row(settlement_date="2026/08/28",buy_tax=None,sell_tax=None)
+    future=settlement_row(date="2026/08/28")
+    result=service([due,future]).read()
+    assert result["details"] == service([future]).read()["details"]
+    assert [row["status"] for row in result["details"]] == ["AVAILABLE"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"date":"2026/08/29"},
+    {"date":"2026/02/30"},
+    {"date":"2026-08-27"},
+    {"settlement_date":"2026-08-28"},
+    {"settlement_date":"2026/08/26"},
+    {"settlement_date":None},
+    {"currency":"USD"},
+    {"currency":None},
+    {"branch_no":"other","account":SELECTED.account_number},
+    {"branch_no":SELECTED.branch_no,"account":"other"},
+    {"branch_no":SELECTED.branch_no},
+])
+def test_due_row_still_requires_valid_identity_dates_and_currency(changes):
+    due=settlement_row(**{"settlement_date":"2026/08/28","buy_tax":None,"sell_tax":None,**changes})
+    with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
+        service([due,settlement_row()]).read()
+
+
+@pytest.mark.parametrize("field", ["date","settlement_date","currency",*AMOUNT_FIELDS])
+def test_due_row_still_requires_every_source_field_to_exist(field):
+    due=settlement_row(settlement_date="2026/08/28",buy_tax=None,sell_tax=None)
+    del due[field]
+    with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
+        service([due,settlement_row()]).read()
 
 
 def test_other_numeric_totals_are_retained_without_invented_fee_formulas():
