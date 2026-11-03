@@ -13321,3 +13321,8 @@ Task537實測background已執行，scheduled-1在SrppReportReservationCapture逐
 ## Task 539：早盤必讀條文恢復修正的 authority 發布
 
 SRPP 日報讀取恢復／停止判定與唯讀守門員修正會改變完整規則包身分。資產端沿既有 `DecisionPolicyAuthority` 的 strict JSON、原始 bytes、JCS、bundle 驗證，以及 `SrppReportAuthority` 十欄語意 gate；不增加版本硬鎖或修改金融演算法。唯一凍結來源是明示 managed SRPP feature worktree，官方 bundle/runtime 檢查通過後才同步 manifest，原工具重產主22案例與 long-short-exit 15案例 golden 的 bundle metadata，以及 insert-only registry SQL；兩份 golden 的全部 cases 與來源 calculator hashes 維持。model、formal targets、公式、Swagger 及所有金融 expected 不變。離線 authority gate 和聚焦測試驗收後，兩 repo 完成 Git 發布；發布 operator 只執行新 hash 的冪等 INSERT，從乾淨 main 重建 business-services 並唯讀回讀精確 registry row 與 JAR 內嵌 authority，不變其他服務或設定。晚間正式金融採用驗收保持 NOT_YET_EXECUTED，不重跑報告或作交易。
+### Task 540：午盤修復的來源身分與診斷讀回
+
+以 `/private/tmp/srpp-noon-consistency-20261103` 通過原 bundle/runtime 檢查後的最後來源為唯一 authority。資產端沿原 Ruby registration generator、Python report／long-short-exit generators、strict authority gate 同步原始 manifest bytes 與來源 hashes；model 完整沿用已合併 SRPP D-206／v2.55.0 新基準，formal policy document 與所有既有金融 cases 保持；authority 測試的來源身分斷言明確同步 D-206／2.55.0／3.22.0，不更動 Java calculator、API／schema／Swagger、producer 或 DB，也不取用其他未合併工作。SRPP report 層的 D-143／D-152 用途回退不能改寫 server 未知掛單為零，兩軌觀察狀態仍 consumer 隔離。
+
+發布先有可重現離線測試／build；使用者已明確指定 Git／registry／main 部署／精確 API 讀回的順序、兩個既有目的地及本輪優先發布，不重問。保留 SRPP main 已合併 D-206，未合併工作不取用。雙 repo Git 落地後才執行已合併的 insert-only SQL 並驗新 row 的 policy_bundle_sha256、formula_version、policy_document、formula_manifest canonical 全文與歷史 rows，再以原正式設定從乾淨 main 只重建 business-services。JAR 全文／config／health 與普通安全 GET 各保留其證明範圍。最終 bundle 的 Codex／Claude report-calculations 純讀 HTTP status/body 另保存：盤中按原正式契約驗採用，晚間僅驗 Task537 非可執行診斷包；503 CONTEXT_NOT_READY 不能當成業務 API 成功。全程不觸發 producer、刷新、寄信或交易。
