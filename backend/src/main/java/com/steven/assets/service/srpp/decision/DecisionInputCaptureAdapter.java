@@ -130,6 +130,7 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         input.set("facts",json(facts));return new Frozen(facts,input,vector,a.snapshot().id(),a.generatedAt().toString());
     }
     private List<LocalDate> previousSessions(LocalDate date,int n){List<LocalDate> dates=new ArrayList<>();for(int i=1;i<=100&&dates.size()<n;i++){LocalDate d=date.minusDays(i);Optional<Boolean>known=market.isTwTradingDayCachedOnly(d);if(known.isEmpty())return List.of();if(known.get())dates.add(d);}Collections.reverse(dates);return List.copyOf(dates);}
+    public static void validateCanonicalAssets(LatestAssetsDto.Response a){validateAssets(a);}
     private static void validateAssets(LatestAssetsDto.Response a){
         if(a==null||a.generatedAt()==null||a.generatedAt().isAfter(Instant.now())||a.snapshot()==null||a.liveAssets()==null||!Objects.equals(a.snapshot().id(),a.liveAssets().snapshotId())||a.snapshot().id()==null||a.snapshot().stocks()==null||a.snapshot().deposits()==null||a.snapshot().funds()==null||a.liveAssets().stocks()==null||a.liveAssets().liveTotalAssets()==null||a.liveAssets().liveTotalAssets().signum()<=0)throw new IllegalArgumentException();
         BigDecimal deposits=BigDecimal.ZERO,funds=BigDecimal.ZERO,stocks=BigDecimal.ZERO,live=BigDecimal.ZERO;Set<Long>ids=new HashSet<>();

@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "apiScope": "US_REPORT_CALCULATIONS",
+  "status": "FINAL",
+  "calculationRunId": "12345678-1234-1234-1234-123456789abc",
+  "identity": {
+    "ownerUserId": 7,
+    "consumer": "Codex",
+    "market": "US",
+    "sessionDate": "2026-11-03",
+    "reportSlot": "US_OPEN_0945",
+    "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "swaggerSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "calculatorVersion": "US_REPORT_CALCULATOR_V1",
+  "capturedAt": "2026-11-03T14:45:00Z",
+  "publishedAt": "2026-11-03T14:45:00Z",
+  "displayReportTime": "22:45",
+  "session": {
+    "timezone": "America/New_York",
+    "open": "2026-11-03T09:30:00-05:00",
+    "close": "2026-11-03T16:00:00-05:00",
+    "calendarVersion": "NYSE_CASH_2026_2028_V1"
+  },
+  "inputBundle": {
+    "ownerUserId": 7,
+    "market": "US",
+    "sessionDate": "2026-11-03",
+    "reportSlot": "US_OPEN_0945",
+    "capturedAt": "2026-11-03T14:45:00Z",
+    "sources": {
+      "assets": {
+        "snapshot": {
+          "id": 1
+        },
+        "generatedAt": "2026-11-03T14:45:00Z"
+      },
+      "policy": {
+        "bundleHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "rawModelBytes": "{}",
+        "rawManifestBytes": "{}",
+        "modelInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "policyManifestSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "swagger": {
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "core-state": {
+        "ownerUserId": 7,
+        "consumer": "Codex",
+        "market": "US",
+        "status": "UNAVAILABLE",
+        "reason": "WATCH_STATE_SOURCE_UNAVAILABLE",
+        "importLedgerSha256": null,
+        "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "ledger": null,
+        "versionVector": {}
+      },
+      "calendar": {
+        "days": [],
+        "session": {}
+      },
+      "universe": {
+        "holdingSymbols": [],
+        "radarSymbols": [],
+        "watchSymbols": [],
+        "symbols": [],
+        "coverage": "PARTIAL",
+        "reasonCodes": [
+          "UNIVERSE_SOURCE_UNAVAILABLE"
+        ]
+      },
+      "market": {
+        "radarList": null,
+        "symbols": []
+      },
+      "us-tactical": {
+        "candidates": [],
+        "trading_date": "2026-11-03",
+        "asof": "2026-11-03T14:45:00Z",
+        "total_assets_twd": null,
+        "session": {},
+        "reasonCodes": [
+          "TACTICAL_LEDGER_UNAVAILABLE"
+        ]
+      }
+    },
+    "stateBefore": {
+      "ownerUserId": 7,
+      "consumer": "Codex",
+      "market": "US",
+      "status": "UNAVAILABLE",
+      "reason": "WATCH_STATE_SOURCE_UNAVAILABLE",
+      "importLedgerSha256": null,
+      "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "ledger": null,
+      "versionVector": {}
+    }
+  },
+  "sourceVector": {
+    "assets": {
+      "sourceId": "assets",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "1184d914f8460b6af2cd4ea508238b71d82d1cb7816cd03ecf1bcacd5759b6e3",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "policy": {
+      "sourceId": "policy",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "2423dcd43d005a45370b1cb4a8ccd4a974deb447a273d444d3cfc7f11a88cb7f",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "swagger": {
+      "sourceId": "swagger",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "b42a19aa08c8eda5b54ff7dedca16546a342bfe20da65c1377403feb7a74a960",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "core-state": {
+      "sourceId": "core-state",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "844af6a7daa7d3ed0f7a56d75a1242349f1159db3e13cb9092ac660717f61a22",
+      "coverage": "NONE",
+      "validation": "UNAVAILABLE"
+    },
+    "calendar": {
+      "sourceId": "calendar",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "1171f081ea06e5da190eaa5611e74c35d50fd109a67e54ef30bf855b59aed18e",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "universe": {
+      "sourceId": "universe",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "caf729f081072be0a8ce0b23cbff4a49109fbc3a7cba25f505db6edac4793825",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "market": {
+      "sourceId": "market",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "7030958f7a1f7838338f351d639e6e71f71f494c35b5b8ac38cbaa3f1e35d65e",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    },
+    "us-tactical": {
+      "sourceId": "us-tactical",
+      "revision": "synthetic-v1",
+      "capturedAt": "2026-11-03T14:45:00Z",
+      "sha256": "8d573f45b7549844c9b096f2b946e5ab992452c2795b1c2d9bea2d4e8d66ac8c",
+      "coverage": "PARTIAL",
+      "validation": "VERIFIED"
+    }
+  },
+  "inputSnapshotSha256": "a379cda0aebbb731bad42a6bd48593ef4aff43dfbe82890e04bf5dcfb493ed1a",
+  "modules": [
+    {
+      "moduleId": "CORE_SELL_GUARD",
+      "coverage": "UNAVAILABLE",
+      "data": {
+        "decision": "D-174",
+        "places_orders": false,
+        "requires_daily_hard_gates": true,
+        "results": [],
+        "reasonCodes": [
+          "WATCH_STATE_SOURCE_UNAVAILABLE"
+        ],
+        "watch_updates": {},
+        "watch_stale_symbols": [],
+        "stateBefore": null,
+        "stateAfter": null,
+        "coverage": "UNAVAILABLE"
+      },
+      "reasonCodes": [
+        "WATCH_STATE_SOURCE_UNAVAILABLE"
+      ],
+      "inputRefs": [
+        "core-state",
+        "market",
+        "policy"
+      ]
+    },
+    {
+      "moduleId": "US_TACTICAL",
+      "coverage": "UNAVAILABLE",
+      "data": {
+        "decision": "D-186",
+        "places_orders": false,
+        "coverage": "UNAVAILABLE",
+        "reasonCodes": [
+          "TACTICAL_LEDGER_UNAVAILABLE"
+        ],
+        "results": []
+      },
+      "reasonCodes": [
+        "TACTICAL_LEDGER_UNAVAILABLE"
+      ],
+      "inputRefs": [
+        "us-tactical",
+        "policy"
+      ]
+    }
+  ],
+  "tradeAuthorization": false,
+  "placesOrders": false,
+  "contentSha256": "54ce52f35a7ac5a18748dc2a1b74eec8b12c4a910f7c2219c664520df3ac288d"
+}

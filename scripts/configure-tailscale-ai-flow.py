@@ -17,7 +17,7 @@ LEGACY = {
     "/api/public/transactions", "/api/public/trading-calendar", "/api/public/commodity-prices",
     "/api/public/srpp/daily-context", "/api/public/srpp/calculation-context", "/api/public/srpp/calculations",
     "/api/public/srpp/market-facts", "/api/public/srpp/completed-technicals", "/api/public/srpp/technical-series",
-    "/api/public/srpp/report-calculations", "/api/public/srpp/event-evidence/capture",
+    "/api/public/srpp/us-report-calculations", "/api/public/srpp/report-calculations", "/api/public/srpp/event-evidence/capture",
     "/api/public/srpp/daily-decision/evaluate", "/api/srpp/daily-report-mail",
 }
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.26.0
+  version: 1.27.0
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十六條精確 method/path pairs：
     二十二條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -4219,6 +4219,394 @@ paths:
                 type: string
                 description: Nginx上游逾時HTML。
               example: "<html><body>504 Gateway Time-out</body></html>"
+  "/api/public/srpp/us-report-calculations":
+    get:
+      tags:
+      - SRPP 美股不可變報告計算
+      operationId: getSrppUsReportCalculations
+      summary: 純讀美股核心賣出擇時與個股戰術計算包
+      description: GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸發、供應商外呼、刷新、寄信或交易，錯誤亦不寫error
+        ingest。每個query只允許單值，未知／重複／空白／body拒絕；不接受caller金融資料。owner lookup沿用5秒與ACTIVE狀態。latest只在當前美東交易日09:45至10:45
+        regular session；固定id同NY日可診斷，正式採用另需入口±300秒、60分鐘停止、五分鐘capture及全部必要來源新鮮度與直接L0。美股使用USD，D108不讀最佳五檔。部分缺口只回退相應範圍且不能解除已驗證BLOCKED；缺觀察marker不可當空帳，D206研究仍LLM。
+      parameters:
+      - name: email
+        in: query
+        required: false
+        schema:
+          type: string
+          description: ACTIVE owner email selector。
+          format: email
+          maxLength: 254
+        description: 選擇owner；省略configured-admin，格式不合法回400；停用／查無／5秒逾時回503。
+        example: selected@example.invalid
+      - name: consumer
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 本軌身分。 值：Codex、Claude。
+          enum:
+          - Codex
+          - Claude
+        description: Codex或Claude，本軌狀態不能借另一軌。
+        example: Codex
+      - name: market
+        in: query
+        required: true
+        schema:
+          const: US
+          type: string
+          description: 唯一市場。 固定 US。
+        description: 固定US，不接受台股或中文市場代碼。
+        example: US
+      - name: sessionDate
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 美東當日交易日期。
+          format: date
+        description: 當前America/New_York ISO日期，非當日400；休市409；日曆未知503。
+        example: '2026-11-03'
+      - name: reportSlot
+        in: query
+        required: true
+        schema:
+          const: US_OPEN_0945
+          type: string
+          description: 邏輯時段。 固定 US_OPEN_0945。
+        description: 固定US_OPEN_0945，台北21:45/22:45僅顯示。
+        example: US_OPEN_0945
+      - name: policyBundleSha256
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        description: 最終精確正式規則包hash；未知／不符409。
+        example: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - name: swaggerSha256
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        description: 已發布Swagger精確hash；不符409 SWAGGER_MISMATCH。
+        example: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      - name: calculationRunId
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 固定計算包UUID。
+          format: uuid
+        description: 省略讀合法時窗latest；同NY日期指定id可時窗外診斷，不是正式採用。
+        example: 12345678-1234-1234-1234-123456789abc
+      responses:
+        '200':
+          description: 讀取已發布的美股計算包；資料品質逐scope揭露。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsReportCalculations"
+                description: 已發布US不可變結果。
+              example:
+                schemaVersion: 1
+                apiScope: US_REPORT_CALCULATIONS
+                status: FINAL
+                calculationRunId: 12345678-1234-1234-1234-123456789abc
+                identity:
+                  ownerUserId: 7
+                  consumer: Codex
+                  market: US
+                  sessionDate: '2026-11-03'
+                  reportSlot: US_OPEN_0945
+                  policyBundleSha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                  swaggerSha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                calculatorVersion: US_REPORT_CALCULATOR_V1
+                capturedAt: '2026-11-03T14:45:00Z'
+                publishedAt: '2026-11-03T14:45:00Z'
+                displayReportTime: '22:45'
+                session:
+                  timezone: America/New_York
+                  open: '2026-11-03T09:30:00-05:00'
+                  close: '2026-11-03T16:00:00-05:00'
+                  calendarVersion: NYSE_CASH_2026_2028_V1
+                inputBundle:
+                  ownerUserId: 7
+                  market: US
+                  sessionDate: '2026-11-03'
+                  reportSlot: US_OPEN_0945
+                  capturedAt: '2026-11-03T14:45:00Z'
+                  sources:
+                    assets:
+                      snapshot:
+                        id: 1
+                      generatedAt: '2026-11-03T14:45:00Z'
+                    policy:
+                      bundleHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                      rawModelBytes: "{}"
+                      rawManifestBytes: "{}"
+                      modelInputsSha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                      policyManifestSha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+                      watchPolicySha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                    swagger:
+                      sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                    core-state:
+                      ownerUserId: 7
+                      consumer: Codex
+                      market: US
+                      status: UNAVAILABLE
+                      reason: WATCH_STATE_SOURCE_UNAVAILABLE
+                      importLedgerSha256:
+                      watchPolicySha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                      ledger:
+                      versionVector: {}
+                    calendar:
+                      days: []
+                      session: {}
+                    universe:
+                      holdingSymbols: []
+                      radarSymbols: []
+                      watchSymbols: []
+                      symbols: []
+                      coverage: PARTIAL
+                      reasonCodes:
+                      - UNIVERSE_SOURCE_UNAVAILABLE
+                    market:
+                      radarList:
+                      symbols: []
+                    us-tactical:
+                      candidates: []
+                      trading_date: '2026-11-03'
+                      asof: '2026-11-03T14:45:00Z'
+                      total_assets_twd:
+                      session: {}
+                      reasonCodes:
+                      - TACTICAL_LEDGER_UNAVAILABLE
+                  stateBefore:
+                    ownerUserId: 7
+                    consumer: Codex
+                    market: US
+                    status: UNAVAILABLE
+                    reason: WATCH_STATE_SOURCE_UNAVAILABLE
+                    importLedgerSha256:
+                    watchPolicySha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+                    ledger:
+                    versionVector: {}
+                sourceVector:
+                  assets:
+                    sourceId: assets
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 1184d914f8460b6af2cd4ea508238b71d82d1cb7816cd03ecf1bcacd5759b6e3
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  policy:
+                    sourceId: policy
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 2423dcd43d005a45370b1cb4a8ccd4a974deb447a273d444d3cfc7f11a88cb7f
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  swagger:
+                    sourceId: swagger
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: b42a19aa08c8eda5b54ff7dedca16546a342bfe20da65c1377403feb7a74a960
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  core-state:
+                    sourceId: core-state
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 844af6a7daa7d3ed0f7a56d75a1242349f1159db3e13cb9092ac660717f61a22
+                    coverage: NONE
+                    validation: UNAVAILABLE
+                  calendar:
+                    sourceId: calendar
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 1171f081ea06e5da190eaa5611e74c35d50fd109a67e54ef30bf855b59aed18e
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  universe:
+                    sourceId: universe
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: caf729f081072be0a8ce0b23cbff4a49109fbc3a7cba25f505db6edac4793825
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  market:
+                    sourceId: market
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 7030958f7a1f7838338f351d639e6e71f71f494c35b5b8ac38cbaa3f1e35d65e
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                  us-tactical:
+                    sourceId: us-tactical
+                    revision: synthetic-v1
+                    capturedAt: '2026-11-03T14:45:00Z'
+                    sha256: 8d573f45b7549844c9b096f2b946e5ab992452c2795b1c2d9bea2d4e8d66ac8c
+                    coverage: PARTIAL
+                    validation: VERIFIED
+                inputSnapshotSha256: a379cda0aebbb731bad42a6bd48593ef4aff43dfbe82890e04bf5dcfb493ed1a
+                modules:
+                - moduleId: CORE_SELL_GUARD
+                  coverage: UNAVAILABLE
+                  data:
+                    decision: D-174
+                    places_orders: false
+                    requires_daily_hard_gates: true
+                    results: []
+                    reasonCodes:
+                    - WATCH_STATE_SOURCE_UNAVAILABLE
+                    watch_updates: {}
+                    watch_stale_symbols: []
+                    stateBefore:
+                    stateAfter:
+                    coverage: UNAVAILABLE
+                  reasonCodes:
+                  - WATCH_STATE_SOURCE_UNAVAILABLE
+                  inputRefs:
+                  - core-state
+                  - market
+                  - policy
+                - moduleId: US_TACTICAL
+                  coverage: UNAVAILABLE
+                  data:
+                    decision: D-186
+                    places_orders: false
+                    coverage: UNAVAILABLE
+                    reasonCodes:
+                    - TACTICAL_LEDGER_UNAVAILABLE
+                    results: []
+                  reasonCodes:
+                  - TACTICAL_LEDGER_UNAVAILABLE
+                  inputRefs:
+                  - us-tactical
+                  - policy
+                tradeAuthorization: false
+                placesOrders: false
+                contentSha256: 54ce52f35a7ac5a18748dc2a1b74eec8b12c4a910f7c2219c664520df3ac288d
+        '400':
+          description: HTTP 400：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '404':
+          description: HTTP 404：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '405':
+          description: HTTP 405：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+            Allow:
+              description: 僅允許唯讀GET。
+              schema:
+                type: string
+                const: GET
+          content:
+            text/html:
+              schema:
+                type: string
+                description: Nginx精確路由的固定安全錯誤本文。
+        '409':
+          description: HTTP 409：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '500':
+          description: HTTP 500：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '502':
+          description: HTTP 502：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '503':
+          description: HTTP 503：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/problem+json:
+              schema:
+                "$ref": "#/components/schemas/SrppUsProblem"
+                description: 具名七欄問題，不觸發error ingest。
+        '504':
+          description: HTTP 504：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。
+          headers:
+            Cache-Control:
+              description: 所有結果只限私人當輪，不快取。
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            text/html:
+              schema:
+                type: string
+                description: Nginx精確路由的固定安全錯誤本文。
 components:
   securitySchemes:
     SrppDailyReportBearer:
@@ -16616,6 +17004,1559 @@ components:
         placesOrders: {description: 固定 false，不會送出任何委託。, type: boolean, const: false}
         receiptRefs: {description: aggregate immutable receipts。, type: array, items: {description: aggregate receipt 參照。, $ref: '#/components/schemas/SrppProjectionReceiptRef'}}
         contentSha256: {description: 移除本欄後整個 response 的 JCS SHA-256。, $ref: '#/components/schemas/SrppSha256'}
+    SrppUsFrozenValue:
+      description: 已捕捉的唯讀來源JSON值；保留null與boolean，數字只允許safe integer，Decimal以canonical string保存。來源內容hash保護，caller不得提交此資料。
+      anyOf:
+      - type: string
+        description: 來源文字或canonical decimal；單位依原始來源。
+      - type: integer
+        minimum: -9007199254740991
+        maximum: 9007199254740991
+        description: 來源safe integer；超界數字改以decimal string保存。
+      - type: boolean
+        description: 已知來源布林；未知值必須null。
+      - type: 'null'
+        description: 來源缺漏或不適用；null不得改為0或false。
+      - type: array
+        description: 原始來源有序陣列。
+        items:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 原始來源陣列元素。
+      - type: object
+        description: 原始來源依欄位名稱保存的typed JSON map；不接受caller輸入。
+        additionalProperties:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 每個原始來源欄位的完整值。
+    SrppUsSourceMap:
+      type: object
+      additionalProperties: false
+      description: 固定八種已發布來源，caller不能提供任何source或任意覆寫數字。
+      required:
+      - assets
+      - policy
+      - swagger
+      - calendar
+      - universe
+      - market
+      - us-tactical
+      - core-state
+      properties:
+        assets:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 同輪直接資產來源原文之Decimal正規化版本；靜態內容獨立L0比對。
+        policy:
+          "$ref": "#/components/schemas/SrppUsPolicySource"
+          description: 正式政策原文與hash。
+        swagger:
+          type: object
+          additionalProperties: false
+          description: 本包凍結的published Swagger身分。
+          required:
+          - sha256
+          properties:
+            sha256:
+              type: string
+              description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+              pattern: "^[0-9a-f]{64}$"
+        calendar:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 完整US逐日日曆與當輪session，來源receipt須VERIFIED。
+        universe:
+          "$ref": "#/components/schemas/SrppUsUniverse"
+          description: 完整合法宇宙，沒有候選與來源缺失分開。
+        market:
+          "$ref": "#/components/schemas/SrppUsMarket"
+          description: 同輪市場證據與已保存歷史；USD是來源契約投影，不代表feed獨立。
+        us-tactical:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 正式來源機械候選與原始八種source receipts；無目標／成本／資金／帳本來源保留缺口。
+        core-state:
+          "$ref": "#/components/schemas/SrppUsStateSource"
+          description: 正式DB獨立帳號／consumer觀察狀態。
+    SrppUsSourceReceipt:
+      type: object
+      additionalProperties: false
+      description: 單一來源封存收據；身分、時間與內容均須獨立驗證。
+      required:
+      - sourceId
+      - revision
+      - capturedAt
+      - sha256
+      - coverage
+      - validation
+      properties:
+        sourceId:
+          type: string
+          description: 唯一來源名稱，必須與source map key相同。
+        revision:
+          type: string
+          description: 來源版本或內容revision；不可空白。
+        capturedAt:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        sha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        coverage:
+          type: string
+          description: 來源覆蓋完整、部分或全無。 值：COMPLETE、PARTIAL、NONE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - NONE
+        validation:
+          type: string
+          description: 來源驗證狀態，不由caller傳入。 值：VERIFIED、UNAVAILABLE。
+          enum:
+          - VERIFIED
+          - UNAVAILABLE
+    SrppUsSourceVector:
+      type: object
+      description: 與凍結sources一對一的來源收據map。
+      additionalProperties:
+        "$ref": "#/components/schemas/SrppUsSourceReceipt"
+        description: 每個來源的版本、時間與內容hash收據。
+    SrppUsIdentity:
+      type: object
+      additionalProperties: false
+      description: 不可變美股包的完整owner、consumer、market、session與政策／契約身分。
+      required:
+      - ownerUserId
+      - consumer
+      - market
+      - sessionDate
+      - reportSlot
+      - policyBundleSha256
+      - swaggerSha256
+      properties:
+        ownerUserId:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          description: 由ACTIVE帳號解析的owner id；非caller金融證據。
+        consumer:
+          type: string
+          description: 觀察狀態隔離的消費端。 值：Codex、Claude。
+          enum:
+          - Codex
+          - Claude
+        market:
+          const: US
+          type: string
+          description: 唯一市場身分。 固定 US。
+        sessionDate:
+          type: string
+          description: America/New_York交易日ISO日期；不是台北報告日期。
+          format: date
+        reportSlot:
+          const: US_OPEN_0945
+          type: string
+          description: 邏輯報告時段，與台北顯示時間分開。 固定 US_OPEN_0945。
+        policyBundleSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        swaggerSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+    SrppUsSession:
+      type: object
+      additionalProperties: false
+      description: 美東當輪regular session實際開收盤，夏冬令及半日市各自正確。
+      required:
+      - timezone
+      - open
+      - close
+      - calendarVersion
+      properties:
+        timezone:
+          const: America/New_York
+          type: string
+          description: 官方交易時區。 固定 America/New_York。
+        open:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        close:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        calendarVersion:
+          type: string
+          description: 已驗證官方日曆版本；含休市及提早收盤證據。
+    SrppUsInputBundle:
+      type: object
+      additionalProperties: false
+      description: 全部確定性計算的凍結輸入；JCS hash不包含LLM公司排名或研究分數。
+      required:
+      - ownerUserId
+      - market
+      - sessionDate
+      - reportSlot
+      - capturedAt
+      - sources
+      - stateBefore
+      properties:
+        ownerUserId:
+          type: integer
+          description: 同identity的ACTIVE owner id。
+        market:
+          const: US
+          type: string
+          description: 本包市場。 固定 US。
+        sessionDate:
+          type: string
+          description: 美東交易日，與identity相同。
+          format: date
+        reportSlot:
+          const: US_OPEN_0945
+          type: string
+          description: 同identity的邏輯時段。 固定 US_OPEN_0945。
+        capturedAt:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        sources:
+          "$ref": "#/components/schemas/SrppUsSourceMap"
+          description: 凍結完整來源，與sourceVector逐一相符。
+        stateBefore:
+          "$ref": "#/components/schemas/SrppUsStateSource"
+          description: 正式DB狀態before與來源map中的core-state相同。
+    SrppUsModule:
+      description: 兩個固定美股scope的閉合結果union，data按moduleId有明確型別。
+      oneOf:
+      - "$ref": "#/components/schemas/SrppUsModuleCore"
+        description: 核心擇時模組。
+      - "$ref": "#/components/schemas/SrppUsModuleTactical"
+        description: 個股戰術模組。
+    SrppUsReportCalculations:
+      type: object
+      additionalProperties: false
+      description: 已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。
+      required:
+      - schemaVersion
+      - apiScope
+      - status
+      - calculationRunId
+      - identity
+      - calculatorVersion
+      - capturedAt
+      - publishedAt
+      - displayReportTime
+      - session
+      - inputBundle
+      - sourceVector
+      - inputSnapshotSha256
+      - modules
+      - tradeAuthorization
+      - placesOrders
+      - contentSha256
+      properties:
+        schemaVersion:
+          const: 1
+          type: integer
+          description: 本契約版本。 固定 1。
+        apiScope:
+          const: US_REPORT_CALCULATIONS
+          type: string
+          description: 美股專用scope。 固定 US_REPORT_CALCULATIONS。
+        status:
+          const: FINAL
+          type: string
+          description: 發布後不變更。 固定 FINAL。
+        calculationRunId:
+          type: string
+          description: 不可變計算包UUID，僅可讀同owner/consumer/scope。
+          format: uuid
+          pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        identity:
+          "$ref": "#/components/schemas/SrppUsIdentity"
+          description: 本包完整隔離身分。
+        calculatorVersion:
+          const: US_REPORT_CALCULATOR_V1
+          type: string
+          description: 確定性計算實作版本。 固定 US_REPORT_CALCULATOR_V1。
+        capturedAt:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        publishedAt:
+          type: string
+          description: 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。
+          format: date-time
+        displayReportTime:
+          type: string
+          description: 台北季節顯示時間；不得用來代替邏輯時段。 值：21:45、22:45。
+          enum:
+          - '21:45'
+          - '22:45'
+        session:
+          "$ref": "#/components/schemas/SrppUsSession"
+          description: 美東當輪session日曆證據。
+        inputBundle:
+          "$ref": "#/components/schemas/SrppUsInputBundle"
+          description: 凍結輸入的明確身分與全部來源。
+        sourceVector:
+          "$ref": "#/components/schemas/SrppUsSourceVector"
+          description: 來源收據與內容hash一對一驗證。
+        inputSnapshotSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        modules:
+          type: array
+          description: 固定兩個美股模組，不複製台股十二模組。
+          items:
+            "$ref": "#/components/schemas/SrppUsModule"
+            description: CORE_SELL_GUARD與US_TACTICAL逐scope結果。
+          minItems: 2
+          maxItems: 2
+        tradeAuthorization:
+          const: false
+          type: boolean
+          description: 只供報告核對，不授權交易。 固定 false。
+        placesOrders:
+          const: false
+          type: boolean
+          description: 本API從不下單。 固定 false。
+        contentSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+    SrppUsProblem:
+      type: object
+      additionalProperties: false
+      description: 純讀新API的七欄RFC9457問題，不保存error-ingest事件。
+      required:
+      - type
+      - title
+      - status
+      - detail
+      - instance
+      - code
+      - retryable
+      properties:
+        type:
+          const: about:blank
+          type: string
+          description: RFC9457 problem類型。 固定 about:blank。
+        title:
+          type: string
+          description: 安全錯誤標題，不含來源原文或個資。
+        status:
+          type: integer
+          enum:
+          - 400
+          - 404
+          - 409
+          - 500
+          - 502
+          - 503
+          description: HTTP狀態400、404、409、500、502、503。
+        detail:
+          type: string
+          description: 安全固定說明，不包含financial payload。
+        instance:
+          const: "/api/public/srpp/us-report-calculations"
+          type: string
+          description: 精確公開路由。 固定 /api/public/srpp/us-report-calculations。
+        code:
+          type: string
+          description: 具名拒絕原因。 值：INVALID_REQUEST、CALCULATION_NOT_FOUND、NON_TRADING_DAY、OUTSIDE_REPORT_WINDOW、POLICY_UNSUPPORTED、SWAGGER_MISMATCH、CONTEXT_IDENTITY_MISMATCH、OWNER_UNAVAILABLE、CALENDAR_UNAVAILABLE、CONTEXT_NOT_READY、UPSTREAM_INVALID、INTERNAL_ERROR。
+          enum:
+          - INVALID_REQUEST
+          - CALCULATION_NOT_FOUND
+          - NON_TRADING_DAY
+          - OUTSIDE_REPORT_WINDOW
+          - POLICY_UNSUPPORTED
+          - SWAGGER_MISMATCH
+          - CONTEXT_IDENTITY_MISMATCH
+          - OWNER_UNAVAILABLE
+          - CALENDAR_UNAVAILABLE
+          - CONTEXT_NOT_READY
+          - UPSTREAM_INVALID
+          - INTERNAL_ERROR
+        retryable:
+          type: boolean
+          description: 來源尚未就緒才可重試；不得刷新或手動觸發producer。
+    SrppUsWatchState:
+      type: object
+      additionalProperties: false
+      description: 同consumer美股觀察狀態，保留武裝與高點歷史；不以bundle hash作穩定觀察指紋。
+      required:
+      - stock_code
+      - market
+      - policy_sha256
+      - armed_date
+      - high_date
+      - basis_date
+      - high_water
+      - evidence_sha256
+      properties:
+        stock_code:
+          type: string
+          description: 美股精確代號。
+        market:
+          const: 美股
+          type: string
+          description: 原Python狀態的市場識別。 固定 美股。
+        policy_sha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        armed_date:
+          type: string
+          description: 原觀察起日，不能重設。
+          format: date
+        high_date:
+          type: string
+          description: 同價基高水位日期，創高時更新。
+          format: date
+        basis_date:
+          type: string
+          description: 現金除息價基日期。
+          format: date
+        high_water:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        evidence_sha256:
+          type: string
+          description: 原Python觀察來源指紋，保留原文。
+        policy_migration:
+          type: object
+          additionalProperties: false
+          description: 已知legacy指紋遷移收據。
+          required:
+          - decision
+          - from
+          - to
+          - original_evidence_sha256
+          - scope
+          properties:
+            decision:
+              const: D-205
+              type: string
+              description: 觀察語意相同的已核准版本銜接。 固定 D-205。
+            from:
+              type: string
+              description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+              pattern: "^[0-9a-f]{64}$"
+            to:
+              type: string
+              description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+              pattern: "^[0-9a-f]{64}$"
+            original_evidence_sha256:
+              type: string
+              description: 銜接前原觀察來源指紋。
+            scope:
+              const: OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION
+              type: string
+              description: 僅遷移觀察，不授權交易。 固定 OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION。
+    SrppUsWatchStates:
+      type: object
+      description: 按美股精確代號索引的狀態map；只有已驗真空帳可為空map。
+      additionalProperties:
+        "$ref": "#/components/schemas/SrppUsWatchState"
+        description: 該股票的原始持續觀察狀態。
+    SrppUsCashEvent:
+      type: object
+      additionalProperties: false
+      description: 原始高水位換價基的已確認現金除息事件。
+      required:
+      - ex_date
+      - cash
+      properties:
+        ex_date:
+          type: string
+          description: 已確認現金除息美東日期。
+          format: date
+        cash:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+    SrppUsCoreResult:
+      type: object
+      additionalProperties: false
+      description: 逐股票D174結果與原始狀態演進；READY僅表示擇時通過。
+      required:
+      - stock_code
+      - decision
+      - status
+      - timing_pass
+      - places_orders
+      - requires_daily_hard_gates
+      - next_state
+      - reason
+      properties:
+        stock_code:
+          type: string
+          description: 本輪精確美股代號。
+        decision:
+          const: D-174
+          type: string
+          description: 既有核心減碼擇時規則。 固定 D-174。
+        status:
+          type: string
+          description: 擇時結果，未驗證不等於確定條件未成立。 值：SELL_TIMING_UNVERIFIED、NOT_ARMED、ARMED_HOLD、WAIT_PULLBACK、SELL_DIRECTION_BLOCKED、CORE_SELL_READY。
+          enum:
+          - SELL_TIMING_UNVERIFIED
+          - NOT_ARMED
+          - ARMED_HOLD
+          - WAIT_PULLBACK
+          - SELL_DIRECTION_BLOCKED
+          - CORE_SELL_READY
+        timing_pass:
+          type: boolean
+          description: 只在CORE_SELL_READY為true；仍非交易授權。
+        places_orders:
+          const: false
+          type: boolean
+          description: 不下單。 固定 false。
+        requires_daily_hard_gates:
+          const: true
+          type: boolean
+          description: 仍需其他賣出硬閘。 固定 true。
+        next_state:
+          description: 已保存觀察狀態或尚未武裝／來源缺漏的null。
+          anyOf:
+          - "$ref": "#/components/schemas/SrppUsWatchState"
+            description: 已驗證同consumer的持續觀察。
+          - type: 'null'
+            description: 沒有可驗證觀察狀態的null。
+        reason:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+        quote_freshness:
+          type: object
+          additionalProperties: false
+          description: 同輪美股成交價時效收據。
+          required:
+          - decision
+          - status
+          - slot
+          - stage
+          - age_minutes
+          - max_age_minutes
+          properties:
+            decision:
+              const: D-108
+              type: string
+              description: 美股不讀最佳五檔。 固定 D-108。
+            status:
+              const: US_REGULAR_LAST_TRADE_5M
+              type: string
+              description: 同regular session最新成交五分鐘檢查。 固定 US_REGULAR_LAST_TRADE_5M。
+            slot:
+              type: string
+              description: 季節台北時段。 值：21:45、22:45。
+              enum:
+              - '21:45'
+              - '22:45'
+            stage:
+              const: final
+              type: string
+              description: 本輪最終價格檢查。 固定 final。
+            age_minutes:
+              description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+              anyOf:
+              - type: string
+                description: Canonical decimal string，正負與單位依欄位。
+                pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+              - type: integer
+                description: safe integer來源值。
+              - type: 'null'
+                description: 此數字無正式來源，保留null。
+            max_age_minutes:
+              description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+              anyOf:
+              - type: string
+                description: Canonical decimal string，正負與單位依欄位。
+                pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+              - type: integer
+                description: safe integer來源值。
+              - type: 'null'
+                description: 此數字無正式來源，保留null。
+        price_basis:
+          const: LAST_TRADE
+          type: string
+          description: 美股回落採最新成交價。 固定 LAST_TRADE。
+        reference_price:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        watch_refreshed:
+          type: boolean
+          description: 價格觀察更新成功才為true，雷達或KD失敗不清除創高。
+        watch_observation:
+          type: object
+          additionalProperties: false
+          description: 價格觀察更新的價基與除息收據。
+          required:
+          - basis_date
+          - trade_authorization
+          - distribution_adjustments
+          properties:
+            basis_date:
+              type: string
+              description: 新價基日期。
+              format: date
+            trade_authorization:
+              const: false
+              type: boolean
+              description: 觀察更新不授權交易。 固定 false。
+            distribution_adjustments:
+              type: array
+              description: 完整窗口現金除息，不含假定為零的缺漏資料。
+              items:
+                "$ref": "#/components/schemas/SrppUsCashEvent"
+                description: 單一已驗證現金除息事件。
+        week52_position:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        overheat_hits:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        overheat_watch:
+          type: boolean
+          description: 首次武裝條件目前是否達成；不是賣出觸發。
+        armed_date:
+          type: string
+          description: 保留首次武裝日期。
+          format: date
+        high_water:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        high_date:
+          type: string
+          description: 當前高點美東日期。
+          format: date
+        distribution_adjustments:
+          type: array
+          description: 完整窗口現金除息，不含假定為零的缺漏資料。
+          items:
+            "$ref": "#/components/schemas/SrppUsCashEvent"
+            description: 單一已驗證現金除息事件。
+        kd_dates:
+          type: array
+          description: 轉弱確認三個完成日日期。
+          items:
+            type: string
+            description: 已完成美股交易日，不能使用盤中bar。
+            format: date
+        completed_k:
+          type: array
+          description: 三個完成日K，使用同一原始序列。
+          items:
+            description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+            anyOf:
+            - type: string
+              description: Canonical decimal string，正負與單位依欄位。
+              pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            - type: integer
+              description: safe integer來源值。
+            - type: 'null'
+              description: 此數字無正式來源，保留null。
+        completed_d:
+          type: array
+          description: 同日完成D，不混雷達還原序列。
+          items:
+            description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+            anyOf:
+            - type: string
+              description: Canonical decimal string，正負與單位依欄位。
+              pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            - type: integer
+              description: safe integer來源值。
+            - type: 'null'
+              description: 此數字無正式來源，保留null。
+        pullback_pct:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        required_pullback_pct:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        trend_reversal:
+          type: boolean
+          description: 完成日兩日K下降且即時KD未恢復的確認。
+    SrppUsWatchUpdate:
+      type: object
+      additionalProperties: false
+      description: 逐檔觀察更新覆蓋，未評估或缺價格保留舊高水位。
+      required:
+      - status
+      - basis_date
+      - reason
+      properties:
+        status:
+          type: string
+          description: 有效價格觀察是否實際更新。 值：UPDATED、NOT_UPDATED。
+          enum:
+          - UPDATED
+          - NOT_UPDATED
+        basis_date:
+          type: string
+          description: 保留或新價基日期。
+          format: date
+        reason:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+    SrppUsCoreData:
+      type: object
+      additionalProperties: false
+      description: 核心擇時資料；缺匯入狀態不能改旗標成COMPLETE。
+      required:
+      - decision
+      - places_orders
+      - requires_daily_hard_gates
+      - results
+      - reasonCodes
+      - watch_updates
+      - watch_stale_symbols
+      - stateBefore
+      - stateAfter
+      - coverage
+      properties:
+        decision:
+          const: D-174
+          type: string
+          description: 原核心擇時規則。 固定 D-174。
+        places_orders:
+          const: false
+          type: boolean
+          description: 不下單。 固定 false。
+        requires_daily_hard_gates:
+          const: true
+          type: boolean
+          description: 仍需其他硬閘。 固定 true。
+        results:
+          type: array
+          description: 完整核心賣方結果；合法無候選可空。
+          items:
+            "$ref": "#/components/schemas/SrppUsCoreResult"
+            description: 逐檔核心賣出擇時與觀察。
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        watch_updates:
+          type: object
+          description: 所有保留觀察逐檔更新狀態。
+          additionalProperties:
+            "$ref": "#/components/schemas/SrppUsWatchUpdate"
+            description: 當輪觀察更新收據。
+        watch_stale_symbols:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        stateBefore:
+          description: 已驗證完整states map；移轉來源不可用時為null，不是空帳。
+          anyOf:
+          - "$ref": "#/components/schemas/SrppUsWatchStates"
+            description: 同consumer股票狀態map。
+          - type: 'null'
+            description: 移轉來源缺失的null，必須UNAVAILABLE。
+        stateAfter:
+          description: 已驗證完整states map；移轉來源不可用時為null，不是空帳。
+          anyOf:
+          - "$ref": "#/components/schemas/SrppUsWatchStates"
+            description: 同consumer股票狀態map。
+          - type: 'null'
+            description: 移轉來源缺失的null，必須UNAVAILABLE。
+        coverage:
+          type: string
+          description: 狀態／來源完整性，與等待結果分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+    SrppUsTacticalResult:
+      type: object
+      additionalProperties: false
+      description: 逐檔D186機械、正式來源缺口及保守阻擋；沒有合法數量不填0。
+      required:
+      - stock_code
+      - trading_date
+      - decision
+      - places_orders
+      - status
+      - missingSources
+      - reasons
+      - reference_basis
+      - quote_as_of
+      - allowed_limit_range
+      - mechanicalCoverage
+      - coverage
+      - reference_price
+      - recommended_limit_price
+      - checked_limit_price
+      - net_profit_space_pct
+      - max_notional_twd
+      - units
+      - amount_usd
+      - fees_usd
+      - settlement_twd
+      - sourceRefs
+      - checks
+      - blockingReasons
+      - gateEvidence
+      properties:
+        stock_code:
+          type: string
+          description: 精確美股代號。
+        trading_date:
+          type: string
+          description: 本輪美東交易日。
+          format: date
+        decision:
+          const: D-186
+          type: string
+          description: 既有美股戰術機械檢查。 固定 D-186。
+        places_orders:
+          const: false
+          type: boolean
+          description: 不下單。 固定 false。
+        status:
+          type: string
+          description: 僅必要機械條件，仍需LLM論點與最後硬閘。 值：NO_EXECUTABLE_ORDER、PASS_FOR_REPORT_REVIEW。
+          enum:
+          - NO_EXECUTABLE_ORDER
+          - PASS_FOR_REPORT_REVIEW
+        missingSources:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        reasons:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        reference_basis:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+        quote_as_of:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+        allowed_limit_range:
+          description: 即時基準±0.5%範圍；無行情為null。
+          anyOf:
+          - type: array
+            description: 上下限兩個確定性價格。
+            items:
+              description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+              anyOf:
+              - type: string
+                description: Canonical decimal string，正負與單位依欄位。
+                pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+              - type: integer
+                description: safe integer來源值。
+              - type: 'null'
+                description: 此數字無正式來源，保留null。
+            minItems: 2
+            maxItems: 2
+          - type: 'null'
+            description: 無有效即時基準，範圍未知。
+        mechanicalCoverage:
+          type: string
+          description: D186數值證據完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        coverage:
+          type: string
+          description: 正式來源及全部共用條件完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reference_price:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        recommended_limit_price:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        checked_limit_price:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        net_profit_space_pct:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        max_notional_twd:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        units:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        amount_usd:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        fees_usd:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        settlement_twd:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        sourceRefs:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        checks:
+          type: array
+          description: 固定八種來源的查核收據。
+          items:
+            type: object
+            additionalProperties: false
+            description: 一個正式來源的規則查核收據。
+            required:
+            - sourceRef
+            - status
+            - reason
+            properties:
+              sourceRef:
+                type: string
+                description: 正式來源ID。
+              status:
+                type: string
+                description: 逐來源規則驗證狀態。 值：UNAVAILABLE、NOT_EVALUATED、PASS、BLOCKED。
+                enum:
+                - UNAVAILABLE
+                - NOT_EVALUATED
+                - PASS
+                - BLOCKED
+              reason:
+                type: string
+                description: 缺口或有效阻擋具名原因。
+        actual_size_net_profit_space_pct:
+          description: 確定性數字，canonical Decimal string或safe integer；未知為null。
+          anyOf:
+          - type: string
+            description: Canonical decimal string，正負與單位依欄位。
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          - type: integer
+            description: safe integer來源值。
+          - type: 'null'
+            description: 此數字無正式來源，保留null。
+        blockingReasons:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        gateEvidence:
+          type: array
+          description: 逐gate獨立檢核，一條有效阻擋不因另一來源缺漏消失。
+          items:
+            "$ref": "#/components/schemas/SrppUsGateEvidence"
+            description: 一條已有來源支持的既有規則查核。
+    SrppUsTacticalData:
+      type: object
+      additionalProperties: false
+      description: 美股戰術資料；公司研究與排名仍由LLM，無新增分數。
+      required:
+      - decision
+      - places_orders
+      - results
+      - reasonCodes
+      - coverage
+      properties:
+        decision:
+          const: D-186
+          type: string
+          description: 既有個股戰術機械檢查。 固定 D-186。
+        places_orders:
+          const: false
+          type: boolean
+          description: 不下單。 固定 false。
+        results:
+          type: array
+          description: 全部候選逐檔結果；來源缺失不能冒充沒有候選。
+          items:
+            "$ref": "#/components/schemas/SrppUsTacticalResult"
+            description: 單一候選的正式來源與機械結果。
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        coverage:
+          type: string
+          description: 資料完整性與有效阻擋各自保留。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+    SrppUsModuleCore:
+      type: object
+      additionalProperties: false
+      description: 美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。
+      required:
+      - moduleId
+      - coverage
+      - data
+      - reasonCodes
+      - inputRefs
+      properties:
+        moduleId:
+          const: CORE_SELL_GUARD
+          type: string
+          description: 固定模組識別。 固定 CORE_SELL_GUARD。
+        coverage:
+          type: string
+          description: 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        data:
+          "$ref": "#/components/schemas/SrppUsCoreData"
+          description: 本scope完整閉合輸出。
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        inputRefs:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+    SrppUsModuleTactical:
+      type: object
+      additionalProperties: false
+      description: 美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。
+      required:
+      - moduleId
+      - coverage
+      - data
+      - reasonCodes
+      - inputRefs
+      properties:
+        moduleId:
+          const: US_TACTICAL
+          type: string
+          description: 固定模組識別。 固定 US_TACTICAL。
+        coverage:
+          type: string
+          description: 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        data:
+          "$ref": "#/components/schemas/SrppUsTacticalData"
+          description: 本scope完整閉合輸出。
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        inputRefs:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+    SrppUsGateEvidence:
+      type: object
+      additionalProperties: false
+      description: 逐條有效阻擋的來源收據；missingSources不能冒充BLOCKED。
+      required:
+      - gateId
+      - status
+      - reasons
+      - sourceRefs
+      properties:
+        gateId:
+          type: string
+          description: 既有規則的具名gate識別。
+        status:
+          type: string
+          description: 有效通過、阻擋或來源不可用。 值：PASS、BLOCKED、UNAVAILABLE。
+          enum:
+          - PASS
+          - BLOCKED
+          - UNAVAILABLE
+        reasons:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        sourceRefs:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+    SrppUsLedger:
+      type: object
+      additionalProperties: false
+      description: 經原始來源與owner證據鏈驗證的移轉ledger。
+      required:
+      - decision
+      - consumer
+      - states
+      properties:
+        decision:
+          const: D-174
+          type: string
+          description: 原觀察規則。 固定 D-174。
+        consumer:
+          type: string
+          description: 本軌觀察，不可借帳。 值：Codex、Claude。
+          enum:
+          - Codex
+          - Claude
+        states:
+          "$ref": "#/components/schemas/SrppUsWatchStates"
+          description: 完整保留的逐股觀察。
+    SrppUsStateSource:
+      type: object
+      additionalProperties: false
+      description: 正式DB狀態擷取，包含owner／consumer／移轉marker；缺狀態不因COMPLETE旗標而可用。
+      required:
+      - ownerUserId
+      - consumer
+      - market
+      - status
+      - reason
+      - importLedgerSha256
+      - watchPolicySha256
+      - ledger
+      - versionVector
+      properties:
+        ownerUserId:
+          type: integer
+          description: 與包identity相同的owner。
+        consumer:
+          type: string
+          description: 按consumer隔離的正式觀察。 值：Codex、Claude。
+          enum:
+          - Codex
+          - Claude
+        market:
+          const: US
+          type: string
+          description: 資料庫市場scope。 固定 US。
+        status:
+          type: string
+          description: 移轉marker與狀態來源驗證。 值：VERIFIED、UNAVAILABLE。
+          enum:
+          - VERIFIED
+          - UNAVAILABLE
+        reason:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+        importLedgerSha256:
+          description: 已驗真原ledger bytes hash；來源缺失為null。
+          anyOf:
+          - type: string
+            description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+            pattern: "^[0-9a-f]{64}$"
+          - type: 'null'
+            description: 原始ledger缺失，禁止當空帳。
+        watchPolicySha256:
+          description: 已匯入穩定觀察指紋；移轉來源缺失為null。
+          anyOf:
+          - type: string
+            description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+            pattern: "^[0-9a-f]{64}$"
+          - type: 'null'
+            description: 尚無可驗證觀察政策身分。
+        ledger:
+          description: 已驗真ledger或來源不可用null。
+          anyOf:
+          - "$ref": "#/components/schemas/SrppUsLedger"
+            description: 完整本軌已驗證ledger。
+          - type: 'null'
+            description: 移轉來源不可用，沒有空帳推定。
+        versionVector:
+          type: object
+          description: 資料庫逐代號樂觀版本map，原子更新與去重使用。
+          additionalProperties:
+            type: integer
+            description: 非負版本號，隨有效觀察更新。
+            minimum: 0
+    SrppUsPolicySource:
+      type: object
+      additionalProperties: false
+      description: 精確政策原文與穩定觀察指紋，不能以整份bundle代替觀察指紋。
+      required:
+      - bundleHash
+      - rawModelBytes
+      - rawManifestBytes
+      - modelInputsSha256
+      - policyManifestSha256
+      - watchPolicySha256
+      properties:
+        bundleHash:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        rawModelBytes:
+          type: string
+          description: 與SRPP當前model_inputs.json逐位元相同的原文。
+        rawManifestBytes:
+          type: string
+          description: 與SRPP當前policy_manifest.json逐位元相同的原文。
+        modelInputsSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        policyManifestSha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+        watchPolicySha256:
+          type: string
+          description: 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。
+          pattern: "^[0-9a-f]{64}$"
+    SrppUsUniverse:
+      type: object
+      additionalProperties: false
+      description: 正持有、全量本輪雷達與可驗證明確觀察的去重聯集，資料不足不刪列。
+      required:
+      - holdingSymbols
+      - radarSymbols
+      - watchSymbols
+      - symbols
+      - coverage
+      - reasonCodes
+      properties:
+        holdingSymbols:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        radarSymbols:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        watchSymbols:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        symbols:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        coverage:
+          type: string
+          description: 合法宇宙來源覆蓋。 值：COMPLETE、PARTIAL、UNAVAILABLE。
+          enum:
+          - COMPLETE
+          - PARTIAL
+          - UNAVAILABLE
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+    SrppUsMarketSymbol:
+      type: object
+      additionalProperties: false
+      description: 宇宙每檔的完整凍結證據與具名缺口，不取最佳五檔。
+      required:
+      - stockCode
+      - quote
+      - radar
+      - coreDirection
+      - historyTrusted
+      - reasonCodes
+      - priceHistory
+      properties:
+        stockCode:
+          type: string
+          description: 精確美股代號。
+        quote:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 完整無五檔行情；currency=USD按已驗market=美股來源契約投影，不是獨立feed驗證；同regular／LIVE／closed=false及時間另核。
+        radar:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 本輪一次精確detail原文或null，與selector／時間／版本另核。
+        coreDirection:
+          description: 具名文字；不適用或來源缺漏為null。
+          anyOf:
+          - type: string
+            description: 具名來源、依據或原因文字。
+          - type: 'null'
+            description: 原因或來源尚未取得時的null。
+        historyTrusted:
+          type: boolean
+          description: 已保存完成日與除息來源的可信度，不等於擇時通過。
+        reasonCodes:
+          type: array
+          description: 唯一具名識別清單。
+          items:
+            type: string
+            description: 具名原因或來源識別；不以空字串代替缺資料。
+          uniqueItems: true
+        priceHistory:
+          type: array
+          description: 與同quote.chart.series.daily.dates逐日完整對齊的canonical DB來源；每筆日期嚴格早於sessionDate，不補當日live或缺列，缺來源保留空陣列。
+          items:
+            "$ref": "#/components/schemas/SrppUsPriceHistoryRow"
+            description: 一個真實DB完成日的代號／市場／日期／OHLC與來源，不以旗標代替原始記錄。
+    SrppUsMarket:
+      type: object
+      additionalProperties: false
+      description: 當輪持股、雷達與觀察聯集的既有正式來源，只讀DB／Redis。
+      required:
+      - radarList
+      - symbols
+      properties:
+        radarList:
+          "$ref": "#/components/schemas/SrppUsFrozenValue"
+          description: 本輪完整雷達清單原文，未成功來源時null。
+        symbols:
+          type: array
+          description: 宇宙全量逐檔證據，不限持股或前幾名。
+          items:
+            "$ref": "#/components/schemas/SrppUsMarketSymbol"
+            description: 每個合法分析標的完整來源或缺口。
+    SrppUsPriceHistoryRow:
+      type: object
+      additionalProperties: false
+      description: 完成日stock_price_history的最小canonical來源投影；hash保護原始來源，逐日OHLC須與chart完全相符。
+      required:
+      - symbol
+      - market
+      - tradingDate
+      - open
+      - high
+      - low
+      - close
+      - closeSource
+      properties:
+        symbol:
+          type: string
+          description: 同market row的精確股票代號。
+        market:
+          type: string
+          const: 美股
+          description: DB市場固定美股。
+        tradingDate:
+          type: string
+          format: date
+          description: 已完成美東交易日，嚴格早於包sessionDate。
+        open:
+          description: DB原始OHLC價格，canonical decimal string；未保存為null，不填零。
+          anyOf:
+          - type: string
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            description: 完整canonical decimal string，不四捨五入以掩蓋chart差異。
+          - type: 'null'
+            description: DB未保存的價格，保留null。
+        high:
+          description: DB原始OHLC價格，canonical decimal string；未保存為null，不填零。
+          anyOf:
+          - type: string
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            description: 完整canonical decimal string，不四捨五入以掩蓋chart差異。
+          - type: 'null'
+            description: DB未保存的價格，保留null。
+        low:
+          description: DB原始OHLC價格，canonical decimal string；未保存為null，不填零。
+          anyOf:
+          - type: string
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            description: 完整canonical decimal string，不四捨五入以掩蓋chart差異。
+          - type: 'null'
+            description: DB未保存的價格，保留null。
+        close:
+          description: DB原始OHLC價格，canonical decimal string；未保存為null，不填零。
+          anyOf:
+          - type: string
+            pattern: "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            description: 完整canonical decimal string，不四捨五入以掩蓋chart差異。
+          - type: 'null'
+            description: DB未保存的價格，保留null。
+        closeSource:
+          description: DB持久化收盤來源；null或空白均不可驗真，不由historyTrusted旗標補足。
+          anyOf:
+          - type: string
+            description: 原有持久化來源名稱，需非空白才可採用。
+          - type: 'null'
+            description: 原始來源缺失，保持null。
   responses:
     NginxBadGateway:
       description: HTTP 502 Bad Gateway response class；Nginx 無法連接或取得 upstream 回應時回傳。body 是 `text/html` 的 `NginxErrorHtml` item，不是 JSON ProblemDetail；gateway 不攔截、不改寫成 JSON 或空 200。

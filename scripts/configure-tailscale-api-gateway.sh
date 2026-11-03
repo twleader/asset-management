@@ -27,6 +27,7 @@ readonly -a SERVE_PATHS=(
   '/api/public/srpp/market-facts'
   '/api/public/srpp/completed-technicals'
   '/api/public/srpp/technical-series'
+  '/api/public/srpp/us-report-calculations'
   '/api/public/srpp/report-calculations'
   '/api/public/srpp/order-plan'
   '/api/public/srpp/symbol-rule-facts'
@@ -214,6 +215,7 @@ expected = {
     "/api/public/srpp/calculations": "http://127.0.0.1:9090/api/public/srpp/calculations",
     "/api/public/srpp/market-facts": "http://127.0.0.1:9090/api/public/srpp/market-facts",
     "/api/public/srpp/completed-technicals": "http://127.0.0.1:9090/api/public/srpp/completed-technicals",
+    "/api/public/srpp/us-report-calculations": "http://127.0.0.1:9090/api/public/srpp/us-report-calculations",
     "/api/public/srpp/report-calculations": "http://127.0.0.1:9090/api/public/srpp/report-calculations",
     "/api/public/srpp/order-plan": "http://127.0.0.1:9090/api/public/srpp/order-plan",
     "/api/public/srpp/symbol-rule-facts": "http://127.0.0.1:9090/api/public/srpp/symbol-rule-facts",
@@ -577,6 +579,11 @@ report_probe_json="$work_dir/srpp-report-calculations-query.json"
 report_probe_headers="$work_dir/srpp-report-calculations-query.headers"
 get_400_json "$LOCAL_BASE/api/public/srpp/report-calculations?unexpected=1" \
   "$report_probe_json" '本機 SRPP 不可變報告計算包 query gate' "$report_probe_headers"
+
+us_report_probe_json="$work_dir/srpp-us-report-query.json"
+us_report_probe_headers="$work_dir/srpp-us-report-query.headers"
+get_400_json "$LOCAL_BASE/api/public/srpp/us-report-calculations?unexpected=1" \
+  "$us_report_probe_json" '本機 SRPP 美股計算 query gate' "$us_report_probe_headers"
 
 series_probe_json="$work_dir/srpp-technical-series-query.json"
 series_probe_headers="$work_dir/srpp-technical-series-query.headers"

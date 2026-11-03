@@ -382,12 +382,12 @@ changeset，照它去斷言 schema 會把原本正確的說成錯的（Task 148�
 - **9090／Tailscale 同步鐵則：**凡掛載到 Nginx `api-gateway:9090` 的 API，都必須在同一變更中
   掛載到 Tailscale Serve HTTPS `:9090` 的同名 exact path；新增、修改或移除 9090 路由時，必須同步
   更新 Tailscale 設定腳本與回歸測試，禁止存在只供 loopback 9090 使用、未掛到 Tailscale 的 API。
-- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛現行 26 個 exact path handlers（金融 26 個
+- Tailscale Serve 只以 path-scoped HTTPS `:9090` 掛現行 27 個 exact path handlers（金融 27 個
   method/path pairs 加觀測 POST；寄信 POST 與其 GET child 共用 handler）。禁止 root／`/api/` proxy、Funnel、自簽憑證與另一層 OAuth proxy。
 - 每一條掛載到 9090 的 API 都必須在 `docs/openapi/docker-external-api.yaml` 提供完整、可驗證的
   OpenAPI 3 契約；路徑、HTTP method、參數、成功與錯誤回應、所有可達巢狀 schema、必填／nullable
   語意與安全邊界都不得省略。Gateway allowlist 與 OpenAPI paths 必須由自動化 contract test 雙向比對，
-  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；現行集合是金融 26（22 GET／4 POST）加觀測 1（POST），共 27 個 method/path pairs。每次 9090 API 變更必須由它重產本專案 `docs/openapi/9090-api-swagger.md` 與 business-services classpath resource `backend/src/main/resources/srpp/9090-api-swagger.md`（已發布 Swagger 身分，Task 484）的位元組一致 Markdown。只有明示 `--srpp-root <absolute managed feature worktree>` 時，renderer 才可寫第三份 `docs/9090 Port API Swagger.md`；預設與 `--asset-only`（包括 `--check`）絕不讀寫 SRPP，禁止拿 primary checkout 或 main 當 target。跨 repo 的 renderer → sync → renderer `--check` → sync `--check` 順序、僅允許的 dirty 產物與 hash/registry/runtime gate 以 Task504 發布段為準；改 YAML 後還必須重建 `business-services`，否則 SRPP 的 capture／evaluate 會因 Swagger 身分不符回 409 `SWAGGER_MISMATCH`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
+  禁止先上線再留下缺漏或過期 Swagger。YAML 是機器契約唯一來源；現行集合依 Requirement 199／Task 542 為金融 27（23 GET／4 POST）加觀測 1（POST），共 28 個 method/path pairs。每次 9090 API 變更必須由它重產本專案 `docs/openapi/9090-api-swagger.md` 與 business-services classpath resource `backend/src/main/resources/srpp/9090-api-swagger.md`（已發布 Swagger 身分，Task 484）的位元組一致 Markdown。只有明示 `--srpp-root <absolute managed feature worktree>` 時，renderer 才可寫第三份 `docs/9090 Port API Swagger.md`；預設與 `--asset-only`（包括 `--check`）絕不讀寫 SRPP，禁止拿 primary checkout 或 main 當 target。跨 repo 的 renderer → sync → renderer `--check` → sync `--check` 順序、僅允許的 dirty 產物與 hash/registry/runtime gate 以 Task504 發布段為準；改 YAML 後還必須重建 `business-services`，否則 SRPP 的 capture／evaluate 會因 Swagger 身分不符回 409 `SWAGGER_MISMATCH`，文件需描述每一 API 用途、輸入／輸出與所有 class attribute 的用途。
 
 ### 從任一 worktree 重建 Docker 服務前，先比對該 worktree 的 `.env` 與 main 的 `.env`
 
@@ -445,7 +445,7 @@ cd frontend
 
 | 文件 | 說明 |
 |------|------|
-| `spec/requirements.md` | User Stories + Acceptance Criteria（191 個 Requirements；最新編號為 198，136–140 間為並行 worktree 保留跳號） |
+| `spec/requirements.md` | User Stories + Acceptance Criteria（192 個 Requirements；最新編號為 199，136–140 間為並行 worktree 保留跳號） |
 | `spec/design.md` | 架構圖、ERD、API 端點、關鍵業務邏輯 |
 | `spec/tasks.md` | 任務索引（Task 1–228、264–267、269–292、297–309、311–342、344–390、393–398、409–410、416、429、464）＋尚未歸檔的 Task 201 起區段；Task 229–263、268、293–296、417、459、460 以各自自足任務檔為準，不追加至索引。 |
 | `spec/tasks/README.md` | 自足任務檔規範（新任務寫這裡，不再追加 `tasks.md`） |
@@ -516,3 +516,12 @@ Task508以獨立選填Event.publicDecision記錄版本化LLM_PUBLIC_SUMMARY_V1�
 ### Requirement 197／Task 526 最新成交展示例外
 
 使用者明確要求共用分析視窗的成交價直接沿富邦→Redis→全站共用 SSE 更新。僅限 StockAnalysisDialog 的獨立「最新成交」展示 state 可讀既有 livePriceStream 的 validated tuple 與同一 stream cache，直接顯示 provider 的價格／漲跌／漲跌幅／來源／時間；不新增 SSE、API、vendor I/O 或計算。此 state 與 quoteDetail 完全分開、各標來源時間，原 summary 的成交明示「快照成交」。前述完整單一來源 canonical snapshot 規定繼續約束 quoteDetail／levels／內外盤，不得逐欄混接 SSE，不改公開回應、估值、策略、警示或交易。無當日合法即時資料時明示等待／真 close 狀態，不以五檔快照補裝即時。
+
+
+### Requirement 199／Task 542 美股 SRPP 計算修訂
+
+本條新增 exact `GET /api/public/srpp/us-report-calculations`，優先於前述歷史 route 計數；現行金融27＋觀測1為28 method/path pairs，Tailscale因寄信GET/POST共用handler而為27 handlers。gateway、BFF、Tailscale及frontend拒絕規則與OpenAPI須同步，沒有新公網入口。
+
+美股包使用NY sessionDate與US_OPEN_0945邏輯時段，僅CORE_SELL_GUARD、US_TACTICAL兩模組；既有台股接口與十二模組不變。GET只讀不可變包，美股觀察狀態僅資產端背景流程寫入，缺移轉證據不可當空帳；SRPP本機US寫入路徑拒絕，後備限已驗DB狀態與同證據唯讀。缺來源與有效BLOCKED分開，不能後備解除已驗阻擋，所有交易權限仍false。
+
+本輪使用者指定正式順序：兩專案feature commit、main no-ff merge／push並核對remote，接著insert-only registry、乾淨main rebuild／recreate必要服務，最後從SRPP實機以精確新hash回讀。前置測試／離線build不替換正式容器；發布後重產schema.sql。時窗外US API讀回僅診斷，不代替合法排程採用，也不手動啟動producer、重跑報告、寄信或交易。

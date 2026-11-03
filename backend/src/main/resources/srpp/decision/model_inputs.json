@@ -1599,6 +1599,25 @@
           "adoption_scope": "FROZEN_EVIDENCE_ONLY",
           "requires_explicit_stock_codes": true
         }
+      },
+      "us_report_calculations": {
+        "route": "/api/public/srpp/us-report-calculations",
+        "method": "GET",
+        "api_scope": "US_REPORT_CALCULATIONS",
+        "logical_report_slot": "US_OPEN_0945",
+        "calculator_version": "US_REPORT_CALCULATOR_V1",
+        "consumer_verifier": "scripts/verify_srpp_us_report_calculations.py",
+        "client": "scripts/us_report_api.py",
+        "enabled_for_us_reports": true,
+        "adoption_status": "ENABLED_TRIAL_RUNTIME_PENDING",
+        "modules": [
+          "CORE_SELL_GUARD",
+          "US_TACTICAL"
+        ],
+        "database_single_writer": true,
+        "local_us_watch_writes": false,
+        "requires_independent_direct_l0": true,
+        "trade_authorization": false
       }
     },
     "schedule_runtime_policy": {

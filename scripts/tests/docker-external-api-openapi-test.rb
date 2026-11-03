@@ -45,6 +45,7 @@ MANIFEST = {
   ['GET', '/api/public/srpp/market-facts'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/completed-technicals'] => %w[200 400 405 502 504],
   ['GET', '/api/public/srpp/technical-series'] => %w[200 400 405 502 504],
+  ['GET', '/api/public/srpp/us-report-calculations'] => %w[200 400 404 405 409 500 502 503 504],
   ['GET', '/api/public/srpp/report-calculations'] => %w[200 400 404 405 409 502 503 504],
   ['GET', '/api/public/srpp/order-plan'] => %w[200 400 404 405 409 502 503 504],
   ['GET', '/api/public/srpp/symbol-rule-facts'] => %w[200 400 404 405 409 502 503 504],
@@ -74,6 +75,7 @@ OPERATION_IDS = {
   ['GET', '/api/public/srpp/market-facts'] => 'getSrppMarketFacts',
   ['GET', '/api/public/srpp/completed-technicals'] => 'getSrppCompletedTechnicals',
   ['GET', '/api/public/srpp/technical-series'] => 'getSrppTechnicalSeries',
+  ['GET', '/api/public/srpp/us-report-calculations'] => 'getSrppUsReportCalculations',
   ['GET', '/api/public/srpp/report-calculations'] => 'getSrppReportCalculations',
   ['GET', '/api/public/srpp/order-plan'] => 'getSrppOrderPlan',
   ['GET', '/api/public/srpp/symbol-rule-facts'] => 'getSrppSymbolRuleFacts',
@@ -240,7 +242,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.26.0', 'Task 497 後 OpenAPI info.version 必須為 1.26.0')
+assert!(document.dig('info', 'version') == '1.27.0', 'Task 497 後 OpenAPI info.version 必須為 1.26.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -287,7 +289,7 @@ gateway_set = nginx_routes.map { |path, method| [method, path] }.to_set
 openapi_set = openapi_routes.keys.to_set
 observation_pair = ["POST", "/api/srpp/ai-flow/events"]
 assert!(gateway_set == MANIFEST.keys.to_set | Set[observation_pair],
-        "api-gateway allowlist 與金融26+觀測1 union manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
+        "api-gateway allowlist 與金融27+觀測1 union manifest 不同\ngateway=#{gateway_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 assert!(openapi_set == MANIFEST.keys.to_set,
         "OpenAPI paths 與二十六路 manifest 不同\nopenapi=#{openapi_set.to_a.sort}\nmanifest=#{MANIFEST.keys.sort}")
 
@@ -1082,8 +1084,8 @@ assert!(facts_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497
         'Task497 A2 example 的 contentSha256 必須由 sealed body 的 JCS 實際重算')
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 231,
-        "全量 strict audit 預期 231 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 259,
+        "全量 strict audit 預期 259 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1184,7 +1186,7 @@ assert!(swagger_copies.map { |copy| Digest::SHA256.file(copy).hexdigest }.uniq.l
         "9090 Swagger Markdown 各份必須位元組一致：#{swagger_copies.join(', ')}")
 
 assert!(frontend_nginx_app.include?('daily-report-mail/[A-Za-z0-9]'), 'frontend 必須 deny SRPP mail key regex path')
-puts 'PASS: 9090 gateway/OpenAPI 二十六條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
+puts 'PASS: 9090 gateway/OpenAPI 二十七條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整'
 
 # Task487/488: closed intraday metadata and immutable SRPP receipt schemas.
 %w[StockDecision TradingRadarListStock].each do |name|
@@ -1210,7 +1212,7 @@ assert!(observation.fetch('paths').keys == ['/api/srpp/ai-flow/events'], '觀測
 observer_op = observation.dig('paths', '/api/srpp/ai-flow/events', 'post')
 assert!(observer_op && observation.dig('paths', '/api/srpp/ai-flow/events').keys == ['post'], '觀測只宣告POST')
 assert!(!operation_ids.include?(observer_op.fetch('operationId')), '跨文件operationId不可重複')
-assert!(gateway_set.size == 27 && gateway_set.count { |method, _| method == 'GET' } == 22 && gateway_set.count { |method, _| method == 'POST' } == 5, 'union必須27 pairs /22GET/5POST')
+assert!(gateway_set.size == 28 && gateway_set.count { |method, _| method == 'GET' } == 23 && gateway_set.count { |method, _| method == 'POST' } == 5, 'union必須28 pairs /23GET/5POST')
 walk(observation) { |node| resolve_ref(observation, node['$ref']) if node.is_a?(Hash) && node.key?('$ref') }
 observation.dig('components', 'schemas').each do |name, schema|
   assert!(schema.fetch('additionalProperties') == false, "#{name}: 觀測DTO必須閉合")
@@ -1297,9 +1299,16 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(document.dig('info', 'version') == '1.26.0', 'Task497 金融 YAML 必須升為1.26.0')
+assert!(document.dig('info', 'version') == '1.27.0', 'Task497 金融 YAML 必須升為1.26.0')
 unified_markdown = File.read(swagger_copies.first)
-assert!(unified_markdown.include?('| 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整27pairs')
+assert!(unified_markdown.include?('| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整28pairs')
 assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')
 assert!(system('ruby', File.join(ROOT, 'scripts/render-ai-flow-openapi-docs.rb'), '--check'), '獨立觀測renderer parity')
-puts 'PASS: 金融26+觀測1獨立契約/union27/strict schemas/US雙向identity條件/統一文件發布身份'
+puts 'PASS: 金融27+觀測1獨立契約/union28/strict schemas/US雙向identity條件/統一文件發布身份'
+
+# Task542: independently exported US contract mirrors must preserve exact bytes.
+us_schema_json, us_schema_status = IO.popen(['ruby', File.join(ROOT, 'scripts/export-srpp-us-consumer-schema.rb')], &:read).then { |out| [out, $?.success?] }
+assert!(us_schema_status, 'US consumer schema exporter succeeds')
+%w[spec/fixtures/srpp_us_report_calculations_schema.json bff/src/main/resources/srpp/us-report-schema.json].each do |rel|
+  assert!(File.binread(File.join(ROOT,rel))==us_schema_json.b, 'US consumer/BFF schema exact bytes differ: '+rel)
+end

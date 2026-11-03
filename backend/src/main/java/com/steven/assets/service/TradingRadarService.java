@@ -621,6 +621,17 @@ public class TradingRadarService {
 
     /** Fixed-clock test seam; HTTP callers cannot choose the decision instant. */
     TradingRadarDto.ListResponse getList(Instant decisionInstant) {
+        return getList(decisionInstant, null);
+    }
+
+    /** Owner-explicit background pure read; never saves an export or notification snapshot. */
+    @Transactional(readOnly = true)
+    public TradingRadarDto.ListResponse getListForOwner(long ownerId) {
+        if (ownerId <= 0) throw new IllegalArgumentException("ownerId");
+        return getList(Instant.now(), ownerId);
+    }
+
+    private TradingRadarDto.ListResponse getList(Instant decisionInstant, Long ownerId) {
         TradingRadarMarketContextService.Resolved context = marketContextService.resolve(decisionInstant);
         // First-screen rendering uses only a pre-existing calendar snapshot.
         // A miss remains incomplete/stale and must never refresh the holiday proxy.
@@ -628,8 +639,8 @@ public class TradingRadarService {
         MarketState usMarket = buildUsMarket(decisionInstant);
         Map<String, Target> targets = new LinkedHashMap<>();
         Set<String> skippedNonTw = new HashSet<>();
-        loadLatestHoldings(targets, skippedNonTw, null);
-        loadWatchList(targets, skippedNonTw, null);
+        loadLatestHoldings(targets, skippedNonTw, ownerId);
+        loadWatchList(targets, skippedNonTw, ownerId);
         List<Target> eligibleTargets = targets.values().stream().filter(this::isSupportedTarget).toList();
         List<TradingRadarDto.ListStock> stocks = assembleListStocks(eligibleTargets, decisionInstant, twMarket, usMarket);
         return new TradingRadarDto.ListResponse(TradingRadarRuleEngine.RULE_VERSION,

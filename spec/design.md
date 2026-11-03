@@ -13326,3 +13326,26 @@ SRPP 日報讀取恢復／停止判定與唯讀守門員修正會改變完整規
 以 `/private/tmp/srpp-noon-consistency-20261103` 通過原 bundle/runtime 檢查後的最後來源為唯一 authority。資產端沿原 Ruby registration generator、Python report／long-short-exit generators、strict authority gate 同步原始 manifest bytes 與來源 hashes；model 完整沿用已合併 SRPP D-206／v2.55.0 新基準，formal policy document 與所有既有金融 cases 保持；authority 測試的來源身分斷言明確同步 D-206／2.55.0／3.22.0，不更動 Java calculator、API／schema／Swagger、producer 或 DB，也不取用其他未合併工作。SRPP report 層的 D-143／D-152 用途回退不能改寫 server 未知掛單為零，兩軌觀察狀態仍 consumer 隔離。
 
 發布先有可重現離線測試／build；使用者已明確指定 Git／registry／main 部署／精確 API 讀回的順序、兩個既有目的地及本輪優先發布，不重問。保留 SRPP main 已合併 D-206，未合併工作不取用。雙 repo Git 落地後才執行已合併的 insert-only SQL 並驗新 row 的 policy_bundle_sha256、formula_version、policy_document、formula_manifest canonical 全文與歷史 rows，再以原正式設定從乾淨 main 只重建 business-services。JAR 全文／config／health 與普通安全 GET 各保留其證明範圍。最終 bundle 的 Codex／Claude report-calculations 純讀 HTTP status/body 另保存：盤中按原正式契約驗採用，晚間僅驗 Task537 非可執行診斷包；503 CONTEXT_NOT_READY 不能當成業務 API 成功。全程不觸發 producer、刷新、寄信或交易。
+## Requirement 199／Task 542：美股 SRPP 計算架構
+
+新增獨立 US scope，保留台股 report-calculations 原資料形狀。HTTP controller 只委派 read service；read service 僅注入 owner／registry／Swagger／日曆與唯讀 repository，無 producer/capture/calculator/writer依賴。BFF沿用 configured-admin／email ACTIVE selector、清除 caller identity、顯式 tenant headers及五秒timeout，驗證完整包後原bytes回傳。
+
+Query：`email?`, `consumer`, `market=US`, `sessionDate`（NY日期）, `reportSlot=US_OPEN_0945`, `policyBundleSha256`, `swaggerSha256`, `calculationRunId?`。400 INVALID_REQUEST；404 CALCULATION_NOT_FOUND；409 NON_TRADING_DAY／OUTSIDE_REPORT_WINDOW／POLICY_UNSUPPORTED／SWAGGER_MISMATCH／CONTEXT_IDENTITY_MISMATCH；503 OWNER_UNAVAILABLE／CALENDAR_UNAVAILABLE／CONTEXT_NOT_READY；502 UPSTREAM_INVALID；500 INTERNAL_ERROR。RFC9457七欄、instance為新exact路由，private,no-store。
+
+latest GET限當前NY日期09:45≤now<10:45且regular session；固定runId限當前NY日期但可在時窗外診斷，不改不可變包或覆寫其狀態。consumer採用另要求本輪合法入口及原60分鐘上限、包capture／本輪assets／必要即時價格時間≤本輪asof且各不超五分鐘；完成日bar、舊觀察、配息及公司季報依原日期／完整性／版本，不套五分鐘歷史門檻。GET返回舊包並不授權採用；任何檢核失敗僅回退對應scope。非當前NY sessionDate回400；休市回NON_TRADING_DAY，未知官方年份回CALENDAR_UNAVAILABLE。
+
+Envelope至少包含 schemaVersion=1、apiScope=US_REPORT_CALCULATIONS、status=FINAL、calculationRunId、identity（ownerUserId、consumer、market、sessionDate、reportSlot、policyBundleSha256、swaggerSha256）、calculatorVersion、capturedAt／publishedAt、displayReportTime、session（timezone/open/close）、inputBundle、sourceVector、inputSnapshotSha256、contentSha256、modules（固定CORE_SELL_GUARD、US_TACTICAL）、tradeAuthorization=false。內容hash採既有SrppJcs，排除contentSha256本欄；input hash保護凍結輸入及stateBefore，不納consumer名稱以假裝跨軌等價；兩軌state不同即不同hash。每筆來源原文hash與捕獲時間對應sourceVector；必要證據缺失保留具名原因。各模組有資料coverage與逐檔狀態，不混淆無候選與來源不可用。具體閉合欄位以新OpenAPI與跨語言verifier共同測試固定。
+
+背景 US scheduler 使用 America/New_York ZonedDateTime與cache/local-only正式市場來源；每分鐘tick於NY09:40至10:45之半開視窗並與regular session取交集，ApplicationReady可檢查時窗但不接受人工HTTP觸發。09:45前預備包不供09:45前報告採用；NY09:45為邏輯時段，顯示台北21:45或22:45。官方美股日曆的可驗證年份及提早收盤資料須有來源／版本；未知日期拒絕，跨年先前完成日亦受覆蓋檢核。各市場估值日期由各自calendar定義；不得要求台股日期等於NY session。
+
+capture port 由 business唯讀現有資產、Redis即時價、stock_price_history完成日、配息與全量雷達構成；business不得外呼供應商、不得request-time補抓。精確detail每標的一次、全量宇宙無截斷。尚無正式來源的獨立feed、公司合理價／情境、實際費稅、策略帳本／pending及資金桶由typed缺口表示，不由布林verified或client輸入產生COMPLETE。
+
+US觀察移轉採離線operator工具：輸入現有原始ledger與同軌anchor input/result，核對原始input hash、原result、legacy policy穩定語意及ledger identity，產生私人insert-only migration資料；可驗真的空帳須有歷史結果證據。缺Claude帳保留UNAVAILABLE，不生成空狀態。DB import marker與逐股票current state分離；current state用(owner,consumer,US,symbol)唯一鍵與版本；append-only transition含before/after、兩端hash、source fingerprint、calculatorVersion、import引用。包與transition為具名歷史稽核snapshot例外，必須保留衍生值供不可變重現。producer先鎖owner/consumer/US，來源指紋重複直接沿用，不重套除息或增加版本；狀態與transition與publication同交易提交。保留未納本輪／缺價證據的舊state與stale原因。
+
+移轉另須原同輪report-facts、record_report_inputs的input receipt、原assets及正式DB snapshot owner讀回收據。工具重算事實指紋，確認assets與core states/results精確同源，對原assets做L0；snapshotId與資料庫ownerUserId精確吻合，SQL INSERT SELECT再次要求asset_snapshot(id,owner_user_id)相同。僅給owner參數或把兩份無關檔放同目錄不足；缺任一鏈維持migration UNAVAILABLE。私人原文及SQL不進公開repo。
+
+核心純計算器對照Python，使用其原始quote/chart/dividend/radar格式並區分價格觀察及擇時閘門。D-174穩定指紋使用Python sort_keys JSON（含其空白與數字語義），不可混用JCS；包內hash仍用JCS。戰術純計算器共用既有D-186價格／成本／上限元件，但重新核對NY日期／來源證據及null；不移植舊台股時段驗證、不把missing company/sleeve當0。結果無交易權限且不提供LLM研究分數。
+
+SRPP caller新增獨立US verifier／scope採用，讀同owner直接L0、本輪完整宇宙、精確identity與來源內容hash；有效BLOCKED持續有效。US本機core guard停寫，僅使用已驗證DB包中的stateBefore進行同來源唯讀缺口計算；缺狀態不能恢復本機獨立帳。原入口±300秒、日曆no-op、60分鐘、草稿／郵件／交易權限不變。Python修正只限NY日期與官方regular close判斷、缺狀態與單一寫入者，不改Accepted門檻。
+
+既有22-00 automation證據片段必須由已合併的us-22-00.EVIDENCE原文同步，使用App automation工具，保存舊／新prompt hash與讀回比對；只改此片段，不改rrule/status/model/停止/權限。原prompt內「執行core guard並保存US帳」亦需被同DB狀態唯讀描述取代；驗證不得殘留能造成US雙寫的入口。
