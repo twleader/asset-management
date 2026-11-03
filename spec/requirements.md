@@ -6461,3 +6461,10 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 
 - [ ] report reservation capture保留既有owner／日期／slot／跨週跨policy／sharedbase去重查詢與全部envelope/hash校驗，但用交易內PostgreSQL cursor逐列處理，不以List同時載入所有content_jcs。既有生產owner1的959包達7344MiB，不能因背景初始化將數GB字串常駐Javaheap。
 - [ ] 每列仍完整驗證後擷取相同保留額度，不先filter actionable、不省略舊policy／前週、不清零、limit或改budget；SQL與型別／結果語意不變。fetchSize設固定小值、autoCommit=false、callback同一transaction／connection，錯誤整批fail closed並釋放ResultSet／statement／cursor。
+
+
+#### Task 539：台股早盤讀取恢復修正的規則包身分發布（延伸 Requirements 187／193）
+
+- [ ] 唯一來源為 `/private/tmp/srpp-morning-report-fix-20261103` 經來源負責者確認凍結、官方 bundle 與 runtime 檢核通過的最終 bytes。SRPP 只修復必讀條文單批輸出、實際截斷的恢復／停止判定與唯讀守門員查核，不改投資規則、模型金融內容、公式、targets、Swagger、9090 schema 或交易權限；確認前不得同步暫存 hash。
+- [ ] 完整同步 manifest bytes 至 business-services authority，以原 Ruby／Python 工具重產 insert-only registry SQL、主 report 22 案例與 long-short-exit 15 案例 golden。兩份 golden 僅允許 bundle 身分變化；model、formal policy document、公式、全部金融 expected、來源 calculator hashes 與其餘 fixtures 須逐位元不變。任一非預期差異即停止查因，不能更新 expected 掩蓋。
+- [ ] 各 repo 完成 feature commit、no-ff merge、push 與遠端讀回後才執行 insert-only 登錄；歷史 registry rows 不更新／刪除。服務只重建／recreate business-services，保留部署設定及其他容器，唯讀回讀精確 registry row 與執行 JAR authority。台股正式金融 runtime 驗收僅於官方交易日 09:05–13:30 前進行；本次晚間不重跑報告、不寄信、不交易，正式 runtime 記 NOT_YET_EXECUTED。
