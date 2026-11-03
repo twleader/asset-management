@@ -13316,3 +13316,8 @@ API路由／schema保持；OpenAPI description同步背景初始化與晚間純�
 ## Task 538：以JDBC cursor完整串流歷史reservation來源
 
 Task537實測background已執行，scheduled-1在SrppReportReservationCapture逐包嚴格校驗；owner1有959distinctbase、7344MiB，原JdbcTemplate List<String>同時materialize全部巨大包。將priorReportReservations及unlinkedReportReservations改為repository交易內RowCallbackHandler逐列visitor、PostgreSQL fetchSize=1；capture只保留原本需要的小型legacy projection／reservation rows。保留exact SQL WHERE、DISTINCT ON、sort、owner/date/slot和所有原validator，不變任何金融或API語意；不新增schema／Swagger／規則包hash。cursor只在既有或read-only transaction內使用，callback不可逸出transaction；無外部I/O。測試真實Postgres cursor／autoCommit／fetchSize、完整正負reservation等價、後段壞包仍整體拒絕與資源回收。
+
+
+## Task 539：早盤必讀條文恢復修正的 authority 發布
+
+SRPP 日報讀取恢復／停止判定與唯讀守門員修正會改變完整規則包身分。資產端沿既有 `DecisionPolicyAuthority` 的 strict JSON、原始 bytes、JCS、bundle 驗證，以及 `SrppReportAuthority` 十欄語意 gate；不增加版本硬鎖或修改金融演算法。唯一凍結來源是明示 managed SRPP feature worktree，官方 bundle/runtime 檢查通過後才同步 manifest，原工具重產主22案例與 long-short-exit 15案例 golden 的 bundle metadata，以及 insert-only registry SQL；兩份 golden 的全部 cases 與來源 calculator hashes 維持。model、formal targets、公式、Swagger 及所有金融 expected 不變。離線 authority gate 和聚焦測試驗收後，兩 repo 完成 Git 發布；發布 operator 只執行新 hash 的冪等 INSERT，從乾淨 main 重建 business-services 並唯讀回讀精確 registry row 與 JAR 內嵌 authority，不變其他服務或設定。晚間正式金融採用驗收保持 NOT_YET_EXECUTED，不重跑報告或作交易。
