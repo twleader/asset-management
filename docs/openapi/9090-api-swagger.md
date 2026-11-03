@@ -7,9 +7,9 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.26.0` |
+| 契約版本 | `1.27.0` |
 | AI 流程觀測契約版本 | `1.4.0` |
-| 對外路徑 | 27 條：22 個 `GET`、5 個 `POST` |
+| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
 | 應用層 security | `[]`；實際邊界為 loopback 或獲准 Tailscale identity，非公網服務。 |
 
@@ -17,7 +17,7 @@
 
 ### 金融來源說明
 
-以下引用金融 YAML 的 26 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 27 個 API，操作層憑證以各路由的授權章節為準。
+以下引用金融 YAML 的 27 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 28 個 API，操作層憑證以各路由的授權章節為準。
 
 > 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十六條精確 method/path pairs：
 > 二十二條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -111,7 +111,8 @@
 | 24 | `GET` | `/api/public/srpp/order-plan` | `getSrppOrderPlan` | 從不可變報告包投影 fail-closed 決策計畫 | 200 application/json: SrppOrderPlanResponse |
 | 25 | `GET` | `/api/public/srpp/symbol-rule-facts` | `getSrppSymbolRuleFacts` | 從不可變包讀取逐檔 frozen 規則事實 | 200 application/json: SrppSymbolRuleFactsResponse |
 | 26 | `GET` | `/api/public/srpp/report-calculations` | `getSrppReportCalculations` | 純讀背景預先計算的12模組不可變日報數值 | 200 application/json: SrppReportCalculations |
-| 27 | `POST` | `/api/srpp/ai-flow/events` | `recordSrppAiFlowEvents` | 記錄雙軌AI公開執行事件 | 200 application/json: AiFlowAck<br>201 application/json: AiFlowAck |
+| 27 | `GET` | `/api/public/srpp/us-report-calculations` | `getSrppUsReportCalculations` | 純讀美股核心賣出擇時與個股戰術計算包 | 200 application/json: SrppUsReportCalculations |
+| 28 | `POST` | `/api/srpp/ai-flow/events` | `recordSrppAiFlowEvents` | 記錄雙軌AI公開執行事件 | 200 application/json: AiFlowAck<br>201 application/json: AiFlowAck |
 
 ## 路由詳情
 
@@ -9681,7 +9682,484 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
 }
 ```
 
-### 27. `POST /api/srpp/ai-flow/events`
+### 27. `GET /api/public/srpp/us-report-calculations`
+
+GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸發、供應商外呼、刷新、寄信或交易，錯誤亦不寫error ingest。每個query只允許單值，未知／重複／空白／body拒絕；不接受caller金融資料。owner lookup沿用5秒與ACTIVE狀態。latest只在當前美東交易日09:45至10:45 regular session；固定id同NY日可診斷，正式採用另需入口±300秒、60分鐘停止、五分鐘capture及全部必要來源新鮮度與直接L0。美股使用USD，D108不讀最佳五檔。部分缺口只回退相應範圍且不能解除已驗證BLOCKED；缺觀察marker不可當空帳，D206研究仍LLM。
+
+#### 授權
+
+```json
+[
+
+]
+```
+
+#### 參數
+
+| 名稱 | 位置 | 必填 | 型別 | 限制／範例 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `email` | `query` | 否 | `string (email)` | example: `selected@example.invalid` | 選擇owner；省略configured-admin，格式不合法回400；停用／查無／5秒逾時回503。 |
+| `consumer` | `query` | 是 | `string` | enum: `Codex`, `Claude`<br>example: `Codex` | Codex或Claude，本軌狀態不能借另一軌。 |
+| `market` | `query` | 是 | `string` | enum: `US`<br>example: `US` | 固定US，不接受台股或中文市場代碼。 |
+| `sessionDate` | `query` | 是 | `string (date)` | example: `2026-11-03` | 當前America/New_York ISO日期，非當日400；休市409；日曆未知503。 |
+| `reportSlot` | `query` | 是 | `string` | enum: `US_OPEN_0945`<br>example: `US_OPEN_0945` | 固定US_OPEN_0945，台北21:45/22:45僅顯示。 |
+| `policyBundleSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` | 最終精確正式規則包hash；未知／不符409。 |
+| `swaggerSha256` | `query` | 是 | `string` | pattern: `^[0-9a-f]{64}$`<br>example: `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb` | 已發布Swagger精確hash；不符409 SWAGGER_MISMATCH。 |
+| `calculationRunId` | `query` | 否 | `string (uuid)` | example: `12345678-1234-1234-1234-123456789abc` | 省略讀合法時窗latest；同NY日期指定id可時窗外診斷，不是正式採用。 |
+
+#### Responses
+
+| Status | Content／schema | 說明 |
+| --- | --- | --- |
+| `200` | application/json: SrppUsReportCalculations | 讀取已發布的美股計算包；資料品質逐scope揭露。 |
+| `400` | application/problem+json: SrppUsProblem | HTTP 400：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `404` | application/problem+json: SrppUsProblem | HTTP 404：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `405` | text/html: string | HTTP 405：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `409` | application/problem+json: SrppUsProblem | HTTP 409：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `500` | application/problem+json: SrppUsProblem | HTTP 500：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `502` | application/problem+json: SrppUsProblem | HTTP 502：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `503` | application/problem+json: SrppUsProblem | HTTP 503：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+| `504` | text/html: string | HTTP 504：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。 |
+
+完整回應契約（包含 headers、media types 與 examples）：
+
+```json
+{
+  "200": {
+    "description": "讀取已發布的美股計算包；資料品質逐scope揭露。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsReportCalculations",
+          "description": "已發布US不可變結果。"
+        },
+        "example": {
+          "schemaVersion": 1,
+          "apiScope": "US_REPORT_CALCULATIONS",
+          "status": "FINAL",
+          "calculationRunId": "12345678-1234-1234-1234-123456789abc",
+          "identity": {
+            "ownerUserId": 7,
+            "consumer": "Codex",
+            "market": "US",
+            "sessionDate": "2026-11-03",
+            "reportSlot": "US_OPEN_0945",
+            "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "swaggerSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "calculatorVersion": "US_REPORT_CALCULATOR_V1",
+          "capturedAt": "2026-11-03T14:45:00Z",
+          "publishedAt": "2026-11-03T14:45:00Z",
+          "displayReportTime": "22:45",
+          "session": {
+            "timezone": "America/New_York",
+            "open": "2026-11-03T09:30:00-05:00",
+            "close": "2026-11-03T16:00:00-05:00",
+            "calendarVersion": "NYSE_CASH_2026_2028_V1"
+          },
+          "inputBundle": {
+            "ownerUserId": 7,
+            "market": "US",
+            "sessionDate": "2026-11-03",
+            "reportSlot": "US_OPEN_0945",
+            "capturedAt": "2026-11-03T14:45:00Z",
+            "sources": {
+              "assets": {
+                "snapshot": {
+                  "id": 1
+                },
+                "generatedAt": "2026-11-03T14:45:00Z"
+              },
+              "policy": {
+                "bundleHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "rawModelBytes": "{}",
+                "rawManifestBytes": "{}",
+                "modelInputsSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "policyManifestSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              },
+              "swagger": {
+                "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "core-state": {
+                "ownerUserId": 7,
+                "consumer": "Codex",
+                "market": "US",
+                "status": "UNAVAILABLE",
+                "reason": "WATCH_STATE_SOURCE_UNAVAILABLE",
+                "importLedgerSha256": null,
+                "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "ledger": null,
+                "versionVector": {
+                }
+              },
+              "calendar": {
+                "days": [
+
+                ],
+                "session": {
+                }
+              },
+              "universe": {
+                "holdingSymbols": [
+
+                ],
+                "radarSymbols": [
+
+                ],
+                "watchSymbols": [
+
+                ],
+                "symbols": [
+
+                ],
+                "coverage": "PARTIAL",
+                "reasonCodes": [
+                  "UNIVERSE_SOURCE_UNAVAILABLE"
+                ]
+              },
+              "market": {
+                "radarList": null,
+                "symbols": [
+
+                ]
+              },
+              "us-tactical": {
+                "candidates": [
+
+                ],
+                "trading_date": "2026-11-03",
+                "asof": "2026-11-03T14:45:00Z",
+                "total_assets_twd": null,
+                "session": {
+                },
+                "reasonCodes": [
+                  "TACTICAL_LEDGER_UNAVAILABLE"
+                ]
+              }
+            },
+            "stateBefore": {
+              "ownerUserId": 7,
+              "consumer": "Codex",
+              "market": "US",
+              "status": "UNAVAILABLE",
+              "reason": "WATCH_STATE_SOURCE_UNAVAILABLE",
+              "importLedgerSha256": null,
+              "watchPolicySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "ledger": null,
+              "versionVector": {
+              }
+            }
+          },
+          "sourceVector": {
+            "assets": {
+              "sourceId": "assets",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "1184d914f8460b6af2cd4ea508238b71d82d1cb7816cd03ecf1bcacd5759b6e3",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "policy": {
+              "sourceId": "policy",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "2423dcd43d005a45370b1cb4a8ccd4a974deb447a273d444d3cfc7f11a88cb7f",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "swagger": {
+              "sourceId": "swagger",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "b42a19aa08c8eda5b54ff7dedca16546a342bfe20da65c1377403feb7a74a960",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "core-state": {
+              "sourceId": "core-state",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "844af6a7daa7d3ed0f7a56d75a1242349f1159db3e13cb9092ac660717f61a22",
+              "coverage": "NONE",
+              "validation": "UNAVAILABLE"
+            },
+            "calendar": {
+              "sourceId": "calendar",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "1171f081ea06e5da190eaa5611e74c35d50fd109a67e54ef30bf855b59aed18e",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "universe": {
+              "sourceId": "universe",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "caf729f081072be0a8ce0b23cbff4a49109fbc3a7cba25f505db6edac4793825",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "market": {
+              "sourceId": "market",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "7030958f7a1f7838338f351d639e6e71f71f494c35b5b8ac38cbaa3f1e35d65e",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            },
+            "us-tactical": {
+              "sourceId": "us-tactical",
+              "revision": "synthetic-v1",
+              "capturedAt": "2026-11-03T14:45:00Z",
+              "sha256": "8d573f45b7549844c9b096f2b946e5ab992452c2795b1c2d9bea2d4e8d66ac8c",
+              "coverage": "PARTIAL",
+              "validation": "VERIFIED"
+            }
+          },
+          "inputSnapshotSha256": "a379cda0aebbb731bad42a6bd48593ef4aff43dfbe82890e04bf5dcfb493ed1a",
+          "modules": [
+            {
+              "moduleId": "CORE_SELL_GUARD",
+              "coverage": "UNAVAILABLE",
+              "data": {
+                "decision": "D-174",
+                "places_orders": false,
+                "requires_daily_hard_gates": true,
+                "results": [
+
+                ],
+                "reasonCodes": [
+                  "WATCH_STATE_SOURCE_UNAVAILABLE"
+                ],
+                "watch_updates": {
+                },
+                "watch_stale_symbols": [
+
+                ],
+                "stateBefore": null,
+                "stateAfter": null,
+                "coverage": "UNAVAILABLE"
+              },
+              "reasonCodes": [
+                "WATCH_STATE_SOURCE_UNAVAILABLE"
+              ],
+              "inputRefs": [
+                "core-state",
+                "market",
+                "policy"
+              ]
+            },
+            {
+              "moduleId": "US_TACTICAL",
+              "coverage": "UNAVAILABLE",
+              "data": {
+                "decision": "D-186",
+                "places_orders": false,
+                "coverage": "UNAVAILABLE",
+                "reasonCodes": [
+                  "TACTICAL_LEDGER_UNAVAILABLE"
+                ],
+                "results": [
+
+                ]
+              },
+              "reasonCodes": [
+                "TACTICAL_LEDGER_UNAVAILABLE"
+              ],
+              "inputRefs": [
+                "us-tactical",
+                "policy"
+              ]
+            }
+          ],
+          "tradeAuthorization": false,
+          "placesOrders": false,
+          "contentSha256": "54ce52f35a7ac5a18748dc2a1b74eec8b12c4a910f7c2219c664520df3ac288d"
+        }
+      }
+    }
+  },
+  "400": {
+    "description": "HTTP 400：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "404": {
+    "description": "HTTP 404：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "405": {
+    "description": "HTTP 405：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      },
+      "Allow": {
+        "description": "僅允許唯讀GET。",
+        "schema": {
+          "type": "string",
+          "const": "GET"
+        }
+      }
+    },
+    "content": {
+      "text/html": {
+        "schema": {
+          "type": "string",
+          "description": "Nginx精確路由的固定安全錯誤本文。"
+        }
+      }
+    }
+  },
+  "409": {
+    "description": "HTTP 409：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "500": {
+    "description": "HTTP 500：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "502": {
+    "description": "HTTP 502：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "503": {
+    "description": "HTTP 503：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "application/problem+json": {
+        "schema": {
+          "$ref": "#/components/schemas/SrppUsProblem",
+          "description": "具名七欄問題，不觸發error ingest。"
+        }
+      }
+    }
+  },
+  "504": {
+    "description": "HTTP 504：具名拒絕或上游尚未就緒；GET不觸發計算／刷新。",
+    "headers": {
+      "Cache-Control": {
+        "description": "所有結果只限私人當輪，不快取。",
+        "schema": {
+          "type": "string",
+          "const": "private, no-store"
+        }
+      }
+    },
+    "content": {
+      "text/html": {
+        "schema": {
+          "type": "string",
+          "description": "Nginx精確路由的固定安全錯誤本文。"
+        }
+      }
+    }
+  }
+}
+```
+
+### 28. `POST /api/srpp/ai-flow/events`
 
 唯一exact POST，非POST405，descendant/matrix404。專用三token非空且互異；Codex/Claude schedule token只准自身consumer/SCHEDULE_EVENTS，collector只准Codex/CODEX_ROLLOUT或Claude/CLAUDE_ARTIFACT。choiceSet僅限collector的Codex/CODEX_ROLLOUT，其他grant或來源403且零寫入。授權在owner/DB/error-ingest I/O前；整條ingress所有結果不觸發API error ingestion。caller owner/email/headers不能override configured-admin。schema任何深度duplicate/unknown拒絕；1..100事件、256KiB、stable UUID，全batch atomic；相同內容replay，異內容409，無parent409，cycle400。新run未來日期400，90日外410且零寫入。sender是獨立背景工作，現有LLM流程不逐步call或等待。title／summary仍禁止私人思考鏈、原commands/env/token/帳戶/持股/金額/完整API/MIME並採allowlist；唯使用者2026-10-18授權的公開工具START事件可在toolCall.parameters保存原始參數，collector僅以[REDACTED]最佳努力遮蔽憑證樣式、上限16384 Unicode code point，且不收工具輸出。task_complete/final只表示執行結束，verifiedReportOutcome仍UNCONFIRMED。
 
@@ -33213,6 +33691,2708 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 | `placesOrders` | 是 | `boolean` | 否 |  | 固定 false，不會送出任何委託。 |
 | `receiptRefs` | 是 | `array of SrppProjectionReceiptRef` | 否 | items: SrppProjectionReceiptRef<br>items 說明: aggregate receipt 參照。 | aggregate immutable receipts。 |
 | `contentSha256` | 是 | `SrppSha256` | 否 |  | 移除本欄後整個 response 的 JCS SHA-256。 |
+
+### `SrppUsFrozenValue`
+
+已捕捉的唯讀來源JSON值；保留null與boolean，數字只允許safe integer，Decimal以canonical string保存。來源內容hash保護，caller不得提交此資料。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "已捕捉的唯讀來源JSON值；保留null與boolean，數字只允許safe integer，Decimal以canonical string保存。來源內容hash保護，caller不得提交此資料。",
+  "anyOf": [
+    {
+      "type": "string",
+      "description": "來源文字或canonical decimal；單位依原始來源。"
+    },
+    {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "來源safe integer；超界數字改以decimal string保存。"
+    },
+    {
+      "type": "boolean",
+      "description": "已知來源布林；未知值必須null。"
+    },
+    {
+      "type": "null",
+      "description": "來源缺漏或不適用；null不得改為0或false。"
+    },
+    {
+      "type": "array",
+      "description": "原始來源有序陣列。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsFrozenValue",
+        "description": "原始來源陣列元素。"
+      }
+    },
+    {
+      "type": "object",
+      "description": "原始來源依欄位名稱保存的typed JSON map；不接受caller輸入。",
+      "additionalProperties": {
+        "$ref": "#/components/schemas/SrppUsFrozenValue",
+        "description": "每個原始來源欄位的完整值。"
+      }
+    }
+  ]
+}
+```
+
+型別：`string | integer | boolean | null | array of SrppUsFrozenValue | object`。
+
+### `SrppUsSourceMap`
+
+固定八種已發布來源，caller不能提供任何source或任意覆寫數字。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "固定八種已發布來源，caller不能提供任何source或任意覆寫數字。",
+  "required": [
+    "assets",
+    "policy",
+    "swagger",
+    "calendar",
+    "universe",
+    "market",
+    "us-tactical",
+    "core-state"
+  ],
+  "properties": {
+    "assets": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "同輪直接資產來源原文之Decimal正規化版本；靜態內容獨立L0比對。"
+    },
+    "policy": {
+      "$ref": "#/components/schemas/SrppUsPolicySource",
+      "description": "正式政策原文與hash。"
+    },
+    "swagger": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "本包凍結的published Swagger身分。",
+      "required": [
+        "sha256"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "calendar": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "完整US逐日日曆與當輪session，來源receipt須VERIFIED。"
+    },
+    "universe": {
+      "$ref": "#/components/schemas/SrppUsUniverse",
+      "description": "完整合法宇宙，沒有候選與來源缺失分開。"
+    },
+    "market": {
+      "$ref": "#/components/schemas/SrppUsMarket",
+      "description": "同輪市場證據與已保存歷史；USD是來源契約投影，不代表feed獨立。"
+    },
+    "us-tactical": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "正式來源機械候選與原始八種source receipts；無目標／成本／資金／帳本來源保留缺口。"
+    },
+    "core-state": {
+      "$ref": "#/components/schemas/SrppUsStateSource",
+      "description": "正式DB獨立帳號／consumer觀察狀態。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `assets` | 是 | `SrppUsFrozenValue` | 否 |  | 同輪直接資產來源原文之Decimal正規化版本；靜態內容獨立L0比對。 |
+| `policy` | 是 | `SrppUsPolicySource` | 否 |  | 正式政策原文與hash。 |
+| `swagger` | 是 | `object` | 否 |  | 本包凍結的published Swagger身分。 |
+| `calendar` | 是 | `SrppUsFrozenValue` | 否 |  | 完整US逐日日曆與當輪session，來源receipt須VERIFIED。 |
+| `universe` | 是 | `SrppUsUniverse` | 否 |  | 完整合法宇宙，沒有候選與來源缺失分開。 |
+| `market` | 是 | `SrppUsMarket` | 否 |  | 同輪市場證據與已保存歷史；USD是來源契約投影，不代表feed獨立。 |
+| `us-tactical` | 是 | `SrppUsFrozenValue` | 否 |  | 正式來源機械候選與原始八種source receipts；無目標／成本／資金／帳本來源保留缺口。 |
+| `core-state` | 是 | `SrppUsStateSource` | 否 |  | 正式DB獨立帳號／consumer觀察狀態。 |
+
+### `SrppUsSourceReceipt`
+
+單一來源封存收據；身分、時間與內容均須獨立驗證。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "單一來源封存收據；身分、時間與內容均須獨立驗證。",
+  "required": [
+    "sourceId",
+    "revision",
+    "capturedAt",
+    "sha256",
+    "coverage",
+    "validation"
+  ],
+  "properties": {
+    "sourceId": {
+      "type": "string",
+      "description": "唯一來源名稱，必須與source map key相同。"
+    },
+    "revision": {
+      "type": "string",
+      "description": "來源版本或內容revision；不可空白。"
+    },
+    "capturedAt": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "coverage": {
+      "type": "string",
+      "description": "來源覆蓋完整、部分或全無。 值：COMPLETE、PARTIAL、NONE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "NONE"
+      ]
+    },
+    "validation": {
+      "type": "string",
+      "description": "來源驗證狀態，不由caller傳入。 值：VERIFIED、UNAVAILABLE。",
+      "enum": [
+        "VERIFIED",
+        "UNAVAILABLE"
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `sourceId` | 是 | `string` | 否 |  | 唯一來源名稱，必須與source map key相同。 |
+| `revision` | 是 | `string` | 否 |  | 來源版本或內容revision；不可空白。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `sha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `NONE` | 來源覆蓋完整、部分或全無。 值：COMPLETE、PARTIAL、NONE。 |
+| `validation` | 是 | `string` | 否 | enum: `VERIFIED`, `UNAVAILABLE` | 來源驗證狀態，不由caller傳入。 值：VERIFIED、UNAVAILABLE。 |
+
+### `SrppUsSourceVector`
+
+與凍結sources一對一的來源收據map。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "description": "與凍結sources一對一的來源收據map。",
+  "additionalProperties": {
+    "$ref": "#/components/schemas/SrppUsSourceReceipt",
+    "description": "每個來源的版本、時間與內容hash收據。"
+  }
+}
+```
+
+型別：`object`。
+
+### `SrppUsIdentity`
+
+不可變美股包的完整owner、consumer、market、session與政策／契約身分。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "不可變美股包的完整owner、consumer、market、session與政策／契約身分。",
+  "required": [
+    "ownerUserId",
+    "consumer",
+    "market",
+    "sessionDate",
+    "reportSlot",
+    "policyBundleSha256",
+    "swaggerSha256"
+  ],
+  "properties": {
+    "ownerUserId": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "由ACTIVE帳號解析的owner id；非caller金融證據。"
+    },
+    "consumer": {
+      "type": "string",
+      "description": "觀察狀態隔離的消費端。 值：Codex、Claude。",
+      "enum": [
+        "Codex",
+        "Claude"
+      ]
+    },
+    "market": {
+      "const": "US",
+      "type": "string",
+      "description": "唯一市場身分。 固定 US。"
+    },
+    "sessionDate": {
+      "type": "string",
+      "description": "America/New_York交易日ISO日期；不是台北報告日期。",
+      "format": "date"
+    },
+    "reportSlot": {
+      "const": "US_OPEN_0945",
+      "type": "string",
+      "description": "邏輯報告時段，與台北顯示時間分開。 固定 US_OPEN_0945。"
+    },
+    "policyBundleSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "swaggerSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerUserId` | 是 | `integer` | 否 | minimum: 1<br>maximum: 9007199254740991 | 由ACTIVE帳號解析的owner id；非caller金融證據。 |
+| `consumer` | 是 | `string` | 否 | enum: `Codex`, `Claude` | 觀察狀態隔離的消費端。 值：Codex、Claude。 |
+| `market` | 是 | `string` | 否 | enum: `US` | 唯一市場身分。 固定 US。 |
+| `sessionDate` | 是 | `string (date)` | 否 | format: date | America/New_York交易日ISO日期；不是台北報告日期。 |
+| `reportSlot` | 是 | `string` | 否 | enum: `US_OPEN_0945` | 邏輯報告時段，與台北顯示時間分開。 固定 US_OPEN_0945。 |
+| `policyBundleSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `swaggerSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+
+### `SrppUsSession`
+
+美東當輪regular session實際開收盤，夏冬令及半日市各自正確。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "美東當輪regular session實際開收盤，夏冬令及半日市各自正確。",
+  "required": [
+    "timezone",
+    "open",
+    "close",
+    "calendarVersion"
+  ],
+  "properties": {
+    "timezone": {
+      "const": "America/New_York",
+      "type": "string",
+      "description": "官方交易時區。 固定 America/New_York。"
+    },
+    "open": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "close": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "calendarVersion": {
+      "type": "string",
+      "description": "已驗證官方日曆版本；含休市及提早收盤證據。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `timezone` | 是 | `string` | 否 | enum: `America/New_York` | 官方交易時區。 固定 America/New_York。 |
+| `open` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `close` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `calendarVersion` | 是 | `string` | 否 |  | 已驗證官方日曆版本；含休市及提早收盤證據。 |
+
+### `SrppUsInputBundle`
+
+全部確定性計算的凍結輸入；JCS hash不包含LLM公司排名或研究分數。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "全部確定性計算的凍結輸入；JCS hash不包含LLM公司排名或研究分數。",
+  "required": [
+    "ownerUserId",
+    "market",
+    "sessionDate",
+    "reportSlot",
+    "capturedAt",
+    "sources",
+    "stateBefore"
+  ],
+  "properties": {
+    "ownerUserId": {
+      "type": "integer",
+      "description": "同identity的ACTIVE owner id。"
+    },
+    "market": {
+      "const": "US",
+      "type": "string",
+      "description": "本包市場。 固定 US。"
+    },
+    "sessionDate": {
+      "type": "string",
+      "description": "美東交易日，與identity相同。",
+      "format": "date"
+    },
+    "reportSlot": {
+      "const": "US_OPEN_0945",
+      "type": "string",
+      "description": "同identity的邏輯時段。 固定 US_OPEN_0945。"
+    },
+    "capturedAt": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "sources": {
+      "$ref": "#/components/schemas/SrppUsSourceMap",
+      "description": "凍結完整來源，與sourceVector逐一相符。"
+    },
+    "stateBefore": {
+      "$ref": "#/components/schemas/SrppUsStateSource",
+      "description": "正式DB狀態before與來源map中的core-state相同。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerUserId` | 是 | `integer` | 否 |  | 同identity的ACTIVE owner id。 |
+| `market` | 是 | `string` | 否 | enum: `US` | 本包市場。 固定 US。 |
+| `sessionDate` | 是 | `string (date)` | 否 | format: date | 美東交易日，與identity相同。 |
+| `reportSlot` | 是 | `string` | 否 | enum: `US_OPEN_0945` | 同identity的邏輯時段。 固定 US_OPEN_0945。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `sources` | 是 | `SrppUsSourceMap` | 否 |  | 凍結完整來源，與sourceVector逐一相符。 |
+| `stateBefore` | 是 | `SrppUsStateSource` | 否 |  | 正式DB狀態before與來源map中的core-state相同。 |
+
+### `SrppUsModule`
+
+兩個固定美股scope的閉合結果union，data按moduleId有明確型別。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "description": "兩個固定美股scope的閉合結果union，data按moduleId有明確型別。",
+  "oneOf": [
+    {
+      "$ref": "#/components/schemas/SrppUsModuleCore",
+      "description": "核心擇時模組。"
+    },
+    {
+      "$ref": "#/components/schemas/SrppUsModuleTactical",
+      "description": "個股戰術模組。"
+    }
+  ]
+}
+```
+
+型別：`schema`。
+
+### `SrppUsReportCalculations`
+
+已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。",
+  "required": [
+    "schemaVersion",
+    "apiScope",
+    "status",
+    "calculationRunId",
+    "identity",
+    "calculatorVersion",
+    "capturedAt",
+    "publishedAt",
+    "displayReportTime",
+    "session",
+    "inputBundle",
+    "sourceVector",
+    "inputSnapshotSha256",
+    "modules",
+    "tradeAuthorization",
+    "placesOrders",
+    "contentSha256"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "type": "integer",
+      "description": "本契約版本。 固定 1。"
+    },
+    "apiScope": {
+      "const": "US_REPORT_CALCULATIONS",
+      "type": "string",
+      "description": "美股專用scope。 固定 US_REPORT_CALCULATIONS。"
+    },
+    "status": {
+      "const": "FINAL",
+      "type": "string",
+      "description": "發布後不變更。 固定 FINAL。"
+    },
+    "calculationRunId": {
+      "type": "string",
+      "description": "不可變計算包UUID，僅可讀同owner/consumer/scope。",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "identity": {
+      "$ref": "#/components/schemas/SrppUsIdentity",
+      "description": "本包完整隔離身分。"
+    },
+    "calculatorVersion": {
+      "const": "US_REPORT_CALCULATOR_V1",
+      "type": "string",
+      "description": "確定性計算實作版本。 固定 US_REPORT_CALCULATOR_V1。"
+    },
+    "capturedAt": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "publishedAt": {
+      "type": "string",
+      "description": "具有UTC offset的真實來源時刻；不得位於擷取時刻之後。",
+      "format": "date-time"
+    },
+    "displayReportTime": {
+      "type": "string",
+      "description": "台北季節顯示時間；不得用來代替邏輯時段。 值：21:45、22:45。",
+      "enum": [
+        "21:45",
+        "22:45"
+      ]
+    },
+    "session": {
+      "$ref": "#/components/schemas/SrppUsSession",
+      "description": "美東當輪session日曆證據。"
+    },
+    "inputBundle": {
+      "$ref": "#/components/schemas/SrppUsInputBundle",
+      "description": "凍結輸入的明確身分與全部來源。"
+    },
+    "sourceVector": {
+      "$ref": "#/components/schemas/SrppUsSourceVector",
+      "description": "來源收據與內容hash一對一驗證。"
+    },
+    "inputSnapshotSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "modules": {
+      "type": "array",
+      "description": "固定兩個美股模組，不複製台股十二模組。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsModule",
+        "description": "CORE_SELL_GUARD與US_TACTICAL逐scope結果。"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "tradeAuthorization": {
+      "const": false,
+      "type": "boolean",
+      "description": "只供報告核對，不授權交易。 固定 false。"
+    },
+    "placesOrders": {
+      "const": false,
+      "type": "boolean",
+      "description": "本API從不下單。 固定 false。"
+    },
+    "contentSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `schemaVersion` | 是 | `integer` | 否 | enum: `1` | 本契約版本。 固定 1。 |
+| `apiScope` | 是 | `string` | 否 | enum: `US_REPORT_CALCULATIONS` | 美股專用scope。 固定 US_REPORT_CALCULATIONS。 |
+| `status` | 是 | `string` | 否 | enum: `FINAL` | 發布後不變更。 固定 FINAL。 |
+| `calculationRunId` | 是 | `string (uuid)` | 否 | format: uuid<br>pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ | 不可變計算包UUID，僅可讀同owner/consumer/scope。 |
+| `identity` | 是 | `SrppUsIdentity` | 否 |  | 本包完整隔離身分。 |
+| `calculatorVersion` | 是 | `string` | 否 | enum: `US_REPORT_CALCULATOR_V1` | 確定性計算實作版本。 固定 US_REPORT_CALCULATOR_V1。 |
+| `capturedAt` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `publishedAt` | 是 | `string (date-time)` | 否 | format: date-time | 具有UTC offset的真實來源時刻；不得位於擷取時刻之後。 |
+| `displayReportTime` | 是 | `string` | 否 | enum: `21:45`, `22:45` | 台北季節顯示時間；不得用來代替邏輯時段。 值：21:45、22:45。 |
+| `session` | 是 | `SrppUsSession` | 否 |  | 美東當輪session日曆證據。 |
+| `inputBundle` | 是 | `SrppUsInputBundle` | 否 |  | 凍結輸入的明確身分與全部來源。 |
+| `sourceVector` | 是 | `SrppUsSourceVector` | 否 |  | 來源收據與內容hash一對一驗證。 |
+| `inputSnapshotSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `modules` | 是 | `array of SrppUsModule` | 否 | minItems: 2<br>maxItems: 2<br>items: SrppUsModule<br>items 說明: CORE_SELL_GUARD與US_TACTICAL逐scope結果。 | 固定兩個美股模組，不複製台股十二模組。 |
+| `tradeAuthorization` | 是 | `boolean` | 否 |  | 只供報告核對，不授權交易。 固定 false。 |
+| `placesOrders` | 是 | `boolean` | 否 |  | 本API從不下單。 固定 false。 |
+| `contentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+
+### `SrppUsProblem`
+
+純讀新API的七欄RFC9457問題，不保存error-ingest事件。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "純讀新API的七欄RFC9457問題，不保存error-ingest事件。",
+  "required": [
+    "type",
+    "title",
+    "status",
+    "detail",
+    "instance",
+    "code",
+    "retryable"
+  ],
+  "properties": {
+    "type": {
+      "const": "about:blank",
+      "type": "string",
+      "description": "RFC9457 problem類型。 固定 about:blank。"
+    },
+    "title": {
+      "type": "string",
+      "description": "安全錯誤標題，不含來源原文或個資。"
+    },
+    "status": {
+      "type": "integer",
+      "enum": [
+        400,
+        404,
+        409,
+        500,
+        502,
+        503
+      ],
+      "description": "HTTP狀態400、404、409、500、502、503。"
+    },
+    "detail": {
+      "type": "string",
+      "description": "安全固定說明，不包含financial payload。"
+    },
+    "instance": {
+      "const": "/api/public/srpp/us-report-calculations",
+      "type": "string",
+      "description": "精確公開路由。 固定 /api/public/srpp/us-report-calculations。"
+    },
+    "code": {
+      "type": "string",
+      "description": "具名拒絕原因。 值：INVALID_REQUEST、CALCULATION_NOT_FOUND、NON_TRADING_DAY、OUTSIDE_REPORT_WINDOW、POLICY_UNSUPPORTED、SWAGGER_MISMATCH、CONTEXT_IDENTITY_MISMATCH、OWNER_UNAVAILABLE、CALENDAR_UNAVAILABLE、CONTEXT_NOT_READY、UPSTREAM_INVALID、INTERNAL_ERROR。",
+      "enum": [
+        "INVALID_REQUEST",
+        "CALCULATION_NOT_FOUND",
+        "NON_TRADING_DAY",
+        "OUTSIDE_REPORT_WINDOW",
+        "POLICY_UNSUPPORTED",
+        "SWAGGER_MISMATCH",
+        "CONTEXT_IDENTITY_MISMATCH",
+        "OWNER_UNAVAILABLE",
+        "CALENDAR_UNAVAILABLE",
+        "CONTEXT_NOT_READY",
+        "UPSTREAM_INVALID",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "來源尚未就緒才可重試；不得刷新或手動觸發producer。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `type` | 是 | `string` | 否 | enum: `about:blank` | RFC9457 problem類型。 固定 about:blank。 |
+| `title` | 是 | `string` | 否 |  | 安全錯誤標題，不含來源原文或個資。 |
+| `status` | 是 | `integer` | 否 | enum: `400`, `404`, `409`, `500`, `502`, `503` | HTTP狀態400、404、409、500、502、503。 |
+| `detail` | 是 | `string` | 否 |  | 安全固定說明，不包含financial payload。 |
+| `instance` | 是 | `string` | 否 | enum: `/api/public/srpp/us-report-calculations` | 精確公開路由。 固定 /api/public/srpp/us-report-calculations。 |
+| `code` | 是 | `string` | 否 | enum: `INVALID_REQUEST`, `CALCULATION_NOT_FOUND`, `NON_TRADING_DAY`, `OUTSIDE_REPORT_WINDOW`, `POLICY_UNSUPPORTED`, `SWAGGER_MISMATCH`, `CONTEXT_IDENTITY_MISMATCH`, `OWNER_UNAVAILABLE`, `CALENDAR_UNAVAILABLE`, `CONTEXT_NOT_READY`, `UPSTREAM_INVALID`, `INTERNAL_ERROR` | 具名拒絕原因。 值：INVALID_REQUEST、CALCULATION_NOT_FOUND、NON_TRADING_DAY、OUTSIDE_REPORT_WINDOW、POLICY_UNSUPPORTED、SWAGGER_MISMATCH、CONTEXT_IDENTITY_MISMATCH、OWNER_UNAVAILABLE、CALENDAR_UNAVAILABLE、CONTEXT_NOT_READY、UPSTREAM_INVALID、INTERNAL_ERROR。 |
+| `retryable` | 是 | `boolean` | 否 |  | 來源尚未就緒才可重試；不得刷新或手動觸發producer。 |
+
+### `SrppUsWatchState`
+
+同consumer美股觀察狀態，保留武裝與高點歷史；不以bundle hash作穩定觀察指紋。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "同consumer美股觀察狀態，保留武裝與高點歷史；不以bundle hash作穩定觀察指紋。",
+  "required": [
+    "stock_code",
+    "market",
+    "policy_sha256",
+    "armed_date",
+    "high_date",
+    "basis_date",
+    "high_water",
+    "evidence_sha256"
+  ],
+  "properties": {
+    "stock_code": {
+      "type": "string",
+      "description": "美股精確代號。"
+    },
+    "market": {
+      "const": "美股",
+      "type": "string",
+      "description": "原Python狀態的市場識別。 固定 美股。"
+    },
+    "policy_sha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "armed_date": {
+      "type": "string",
+      "description": "原觀察起日，不能重設。",
+      "format": "date"
+    },
+    "high_date": {
+      "type": "string",
+      "description": "同價基高水位日期，創高時更新。",
+      "format": "date"
+    },
+    "basis_date": {
+      "type": "string",
+      "description": "現金除息價基日期。",
+      "format": "date"
+    },
+    "high_water": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "evidence_sha256": {
+      "type": "string",
+      "description": "原Python觀察來源指紋，保留原文。"
+    },
+    "policy_migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "已知legacy指紋遷移收據。",
+      "required": [
+        "decision",
+        "from",
+        "to",
+        "original_evidence_sha256",
+        "scope"
+      ],
+      "properties": {
+        "decision": {
+          "const": "D-205",
+          "type": "string",
+          "description": "觀察語意相同的已核准版本銜接。 固定 D-205。"
+        },
+        "from": {
+          "type": "string",
+          "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "to": {
+          "type": "string",
+          "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "original_evidence_sha256": {
+          "type": "string",
+          "description": "銜接前原觀察來源指紋。"
+        },
+        "scope": {
+          "const": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION",
+          "type": "string",
+          "description": "僅遷移觀察，不授權交易。 固定 OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION。"
+        }
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stock_code` | 是 | `string` | 否 |  | 美股精確代號。 |
+| `market` | 是 | `string` | 否 | enum: `美股` | 原Python狀態的市場識別。 固定 美股。 |
+| `policy_sha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `armed_date` | 是 | `string (date)` | 否 | format: date | 原觀察起日，不能重設。 |
+| `high_date` | 是 | `string (date)` | 否 | format: date | 同價基高水位日期，創高時更新。 |
+| `basis_date` | 是 | `string (date)` | 否 | format: date | 現金除息價基日期。 |
+| `high_water` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `evidence_sha256` | 是 | `string` | 否 |  | 原Python觀察來源指紋，保留原文。 |
+| `policy_migration` | 否 | `object` | 否 |  | 已知legacy指紋遷移收據。 |
+
+### `SrppUsWatchStates`
+
+按美股精確代號索引的狀態map；只有已驗真空帳可為空map。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "description": "按美股精確代號索引的狀態map；只有已驗真空帳可為空map。",
+  "additionalProperties": {
+    "$ref": "#/components/schemas/SrppUsWatchState",
+    "description": "該股票的原始持續觀察狀態。"
+  }
+}
+```
+
+型別：`object`。
+
+### `SrppUsCashEvent`
+
+原始高水位換價基的已確認現金除息事件。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "原始高水位換價基的已確認現金除息事件。",
+  "required": [
+    "ex_date",
+    "cash"
+  ],
+  "properties": {
+    "ex_date": {
+      "type": "string",
+      "description": "已確認現金除息美東日期。",
+      "format": "date"
+    },
+    "cash": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ex_date` | 是 | `string (date)` | 否 | format: date | 已確認現金除息美東日期。 |
+| `cash` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+
+### `SrppUsCoreResult`
+
+逐股票D174結果與原始狀態演進；READY僅表示擇時通過。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "逐股票D174結果與原始狀態演進；READY僅表示擇時通過。",
+  "required": [
+    "stock_code",
+    "decision",
+    "status",
+    "timing_pass",
+    "places_orders",
+    "requires_daily_hard_gates",
+    "next_state",
+    "reason"
+  ],
+  "properties": {
+    "stock_code": {
+      "type": "string",
+      "description": "本輪精確美股代號。"
+    },
+    "decision": {
+      "const": "D-174",
+      "type": "string",
+      "description": "既有核心減碼擇時規則。 固定 D-174。"
+    },
+    "status": {
+      "type": "string",
+      "description": "擇時結果，未驗證不等於確定條件未成立。 值：SELL_TIMING_UNVERIFIED、NOT_ARMED、ARMED_HOLD、WAIT_PULLBACK、SELL_DIRECTION_BLOCKED、CORE_SELL_READY。",
+      "enum": [
+        "SELL_TIMING_UNVERIFIED",
+        "NOT_ARMED",
+        "ARMED_HOLD",
+        "WAIT_PULLBACK",
+        "SELL_DIRECTION_BLOCKED",
+        "CORE_SELL_READY"
+      ]
+    },
+    "timing_pass": {
+      "type": "boolean",
+      "description": "只在CORE_SELL_READY為true；仍非交易授權。"
+    },
+    "places_orders": {
+      "const": false,
+      "type": "boolean",
+      "description": "不下單。 固定 false。"
+    },
+    "requires_daily_hard_gates": {
+      "const": true,
+      "type": "boolean",
+      "description": "仍需其他賣出硬閘。 固定 true。"
+    },
+    "next_state": {
+      "description": "已保存觀察狀態或尚未武裝／來源缺漏的null。",
+      "anyOf": [
+        {
+          "$ref": "#/components/schemas/SrppUsWatchState",
+          "description": "已驗證同consumer的持續觀察。"
+        },
+        {
+          "type": "null",
+          "description": "沒有可驗證觀察狀態的null。"
+        }
+      ]
+    },
+    "reason": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    },
+    "quote_freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "同輪美股成交價時效收據。",
+      "required": [
+        "decision",
+        "status",
+        "slot",
+        "stage",
+        "age_minutes",
+        "max_age_minutes"
+      ],
+      "properties": {
+        "decision": {
+          "const": "D-108",
+          "type": "string",
+          "description": "美股不讀最佳五檔。 固定 D-108。"
+        },
+        "status": {
+          "const": "US_REGULAR_LAST_TRADE_5M",
+          "type": "string",
+          "description": "同regular session最新成交五分鐘檢查。 固定 US_REGULAR_LAST_TRADE_5M。"
+        },
+        "slot": {
+          "type": "string",
+          "description": "季節台北時段。 值：21:45、22:45。",
+          "enum": [
+            "21:45",
+            "22:45"
+          ]
+        },
+        "stage": {
+          "const": "final",
+          "type": "string",
+          "description": "本輪最終價格檢查。 固定 final。"
+        },
+        "age_minutes": {
+          "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Canonical decimal string，正負與單位依欄位。",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            {
+              "type": "integer",
+              "description": "safe integer來源值。"
+            },
+            {
+              "type": "null",
+              "description": "此數字無正式來源，保留null。"
+            }
+          ]
+        },
+        "max_age_minutes": {
+          "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Canonical decimal string，正負與單位依欄位。",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+            },
+            {
+              "type": "integer",
+              "description": "safe integer來源值。"
+            },
+            {
+              "type": "null",
+              "description": "此數字無正式來源，保留null。"
+            }
+          ]
+        }
+      }
+    },
+    "price_basis": {
+      "const": "LAST_TRADE",
+      "type": "string",
+      "description": "美股回落採最新成交價。 固定 LAST_TRADE。"
+    },
+    "reference_price": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "watch_refreshed": {
+      "type": "boolean",
+      "description": "價格觀察更新成功才為true，雷達或KD失敗不清除創高。"
+    },
+    "watch_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "價格觀察更新的價基與除息收據。",
+      "required": [
+        "basis_date",
+        "trade_authorization",
+        "distribution_adjustments"
+      ],
+      "properties": {
+        "basis_date": {
+          "type": "string",
+          "description": "新價基日期。",
+          "format": "date"
+        },
+        "trade_authorization": {
+          "const": false,
+          "type": "boolean",
+          "description": "觀察更新不授權交易。 固定 false。"
+        },
+        "distribution_adjustments": {
+          "type": "array",
+          "description": "完整窗口現金除息，不含假定為零的缺漏資料。",
+          "items": {
+            "$ref": "#/components/schemas/SrppUsCashEvent",
+            "description": "單一已驗證現金除息事件。"
+          }
+        }
+      }
+    },
+    "week52_position": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "overheat_hits": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "overheat_watch": {
+      "type": "boolean",
+      "description": "首次武裝條件目前是否達成；不是賣出觸發。"
+    },
+    "armed_date": {
+      "type": "string",
+      "description": "保留首次武裝日期。",
+      "format": "date"
+    },
+    "high_water": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "high_date": {
+      "type": "string",
+      "description": "當前高點美東日期。",
+      "format": "date"
+    },
+    "distribution_adjustments": {
+      "type": "array",
+      "description": "完整窗口現金除息，不含假定為零的缺漏資料。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsCashEvent",
+        "description": "單一已驗證現金除息事件。"
+      }
+    },
+    "kd_dates": {
+      "type": "array",
+      "description": "轉弱確認三個完成日日期。",
+      "items": {
+        "type": "string",
+        "description": "已完成美股交易日，不能使用盤中bar。",
+        "format": "date"
+      }
+    },
+    "completed_k": {
+      "type": "array",
+      "description": "三個完成日K，使用同一原始序列。",
+      "items": {
+        "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "Canonical decimal string，正負與單位依欄位。",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          },
+          {
+            "type": "integer",
+            "description": "safe integer來源值。"
+          },
+          {
+            "type": "null",
+            "description": "此數字無正式來源，保留null。"
+          }
+        ]
+      }
+    },
+    "completed_d": {
+      "type": "array",
+      "description": "同日完成D，不混雷達還原序列。",
+      "items": {
+        "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "Canonical decimal string，正負與單位依欄位。",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+          },
+          {
+            "type": "integer",
+            "description": "safe integer來源值。"
+          },
+          {
+            "type": "null",
+            "description": "此數字無正式來源，保留null。"
+          }
+        ]
+      }
+    },
+    "pullback_pct": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "required_pullback_pct": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "trend_reversal": {
+      "type": "boolean",
+      "description": "完成日兩日K下降且即時KD未恢復的確認。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stock_code` | 是 | `string` | 否 |  | 本輪精確美股代號。 |
+| `decision` | 是 | `string` | 否 | enum: `D-174` | 既有核心減碼擇時規則。 固定 D-174。 |
+| `status` | 是 | `string` | 否 | enum: `SELL_TIMING_UNVERIFIED`, `NOT_ARMED`, `ARMED_HOLD`, `WAIT_PULLBACK`, `SELL_DIRECTION_BLOCKED`, `CORE_SELL_READY` | 擇時結果，未驗證不等於確定條件未成立。 值：SELL_TIMING_UNVERIFIED、NOT_ARMED、ARMED_HOLD、WAIT_PULLBACK、SELL_DIRECTION_BLOCKED、CORE_SELL_READY。 |
+| `timing_pass` | 是 | `boolean` | 否 |  | 只在CORE_SELL_READY為true；仍非交易授權。 |
+| `places_orders` | 是 | `boolean` | 否 |  | 不下單。 固定 false。 |
+| `requires_daily_hard_gates` | 是 | `boolean` | 否 | enum: `true` | 仍需其他賣出硬閘。 固定 true。 |
+| `next_state` | 是 | `SrppUsWatchState | null` | 是 |  | 已保存觀察狀態或尚未武裝／來源缺漏的null。 |
+| `reason` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+| `quote_freshness` | 否 | `object` | 否 |  | 同輪美股成交價時效收據。 |
+| `price_basis` | 否 | `string` | 否 | enum: `LAST_TRADE` | 美股回落採最新成交價。 固定 LAST_TRADE。 |
+| `reference_price` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `watch_refreshed` | 否 | `boolean` | 否 |  | 價格觀察更新成功才為true，雷達或KD失敗不清除創高。 |
+| `watch_observation` | 否 | `object` | 否 |  | 價格觀察更新的價基與除息收據。 |
+| `week52_position` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `overheat_hits` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `overheat_watch` | 否 | `boolean` | 否 |  | 首次武裝條件目前是否達成；不是賣出觸發。 |
+| `armed_date` | 否 | `string (date)` | 否 | format: date | 保留首次武裝日期。 |
+| `high_water` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `high_date` | 否 | `string (date)` | 否 | format: date | 當前高點美東日期。 |
+| `distribution_adjustments` | 否 | `array of SrppUsCashEvent` | 否 | items: SrppUsCashEvent<br>items 說明: 單一已驗證現金除息事件。 | 完整窗口現金除息，不含假定為零的缺漏資料。 |
+| `kd_dates` | 否 | `array of string (date)` | 否 | items: string (date)<br>items 說明: 已完成美股交易日，不能使用盤中bar。 | 轉弱確認三個完成日日期。 |
+| `completed_k` | 否 | `array of string | integer | null` | 否 | items: string \| integer \| null<br>items 說明: 確定性數字，canonical Decimal string或safe integer；未知為null。 | 三個完成日K，使用同一原始序列。 |
+| `completed_d` | 否 | `array of string | integer | null` | 否 | items: string \| integer \| null<br>items 說明: 確定性數字，canonical Decimal string或safe integer；未知為null。 | 同日完成D，不混雷達還原序列。 |
+| `pullback_pct` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `required_pullback_pct` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `trend_reversal` | 否 | `boolean` | 否 |  | 完成日兩日K下降且即時KD未恢復的確認。 |
+
+### `SrppUsWatchUpdate`
+
+逐檔觀察更新覆蓋，未評估或缺價格保留舊高水位。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "逐檔觀察更新覆蓋，未評估或缺價格保留舊高水位。",
+  "required": [
+    "status",
+    "basis_date",
+    "reason"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "有效價格觀察是否實際更新。 值：UPDATED、NOT_UPDATED。",
+      "enum": [
+        "UPDATED",
+        "NOT_UPDATED"
+      ]
+    },
+    "basis_date": {
+      "type": "string",
+      "description": "保留或新價基日期。",
+      "format": "date"
+    },
+    "reason": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `status` | 是 | `string` | 否 | enum: `UPDATED`, `NOT_UPDATED` | 有效價格觀察是否實際更新。 值：UPDATED、NOT_UPDATED。 |
+| `basis_date` | 是 | `string (date)` | 否 | format: date | 保留或新價基日期。 |
+| `reason` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+
+### `SrppUsCoreData`
+
+核心擇時資料；缺匯入狀態不能改旗標成COMPLETE。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "核心擇時資料；缺匯入狀態不能改旗標成COMPLETE。",
+  "required": [
+    "decision",
+    "places_orders",
+    "requires_daily_hard_gates",
+    "results",
+    "reasonCodes",
+    "watch_updates",
+    "watch_stale_symbols",
+    "stateBefore",
+    "stateAfter",
+    "coverage"
+  ],
+  "properties": {
+    "decision": {
+      "const": "D-174",
+      "type": "string",
+      "description": "原核心擇時規則。 固定 D-174。"
+    },
+    "places_orders": {
+      "const": false,
+      "type": "boolean",
+      "description": "不下單。 固定 false。"
+    },
+    "requires_daily_hard_gates": {
+      "const": true,
+      "type": "boolean",
+      "description": "仍需其他硬閘。 固定 true。"
+    },
+    "results": {
+      "type": "array",
+      "description": "完整核心賣方結果；合法無候選可空。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsCoreResult",
+        "description": "逐檔核心賣出擇時與觀察。"
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "watch_updates": {
+      "type": "object",
+      "description": "所有保留觀察逐檔更新狀態。",
+      "additionalProperties": {
+        "$ref": "#/components/schemas/SrppUsWatchUpdate",
+        "description": "當輪觀察更新收據。"
+      }
+    },
+    "watch_stale_symbols": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "stateBefore": {
+      "description": "已驗證完整states map；移轉來源不可用時為null，不是空帳。",
+      "anyOf": [
+        {
+          "$ref": "#/components/schemas/SrppUsWatchStates",
+          "description": "同consumer股票狀態map。"
+        },
+        {
+          "type": "null",
+          "description": "移轉來源缺失的null，必須UNAVAILABLE。"
+        }
+      ]
+    },
+    "stateAfter": {
+      "description": "已驗證完整states map；移轉來源不可用時為null，不是空帳。",
+      "anyOf": [
+        {
+          "$ref": "#/components/schemas/SrppUsWatchStates",
+          "description": "同consumer股票狀態map。"
+        },
+        {
+          "type": "null",
+          "description": "移轉來源缺失的null，必須UNAVAILABLE。"
+        }
+      ]
+    },
+    "coverage": {
+      "type": "string",
+      "description": "狀態／來源完整性，與等待結果分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `decision` | 是 | `string` | 否 | enum: `D-174` | 原核心擇時規則。 固定 D-174。 |
+| `places_orders` | 是 | `boolean` | 否 |  | 不下單。 固定 false。 |
+| `requires_daily_hard_gates` | 是 | `boolean` | 否 | enum: `true` | 仍需其他硬閘。 固定 true。 |
+| `results` | 是 | `array of SrppUsCoreResult` | 否 | items: SrppUsCoreResult<br>items 說明: 逐檔核心賣出擇時與觀察。 | 完整核心賣方結果；合法無候選可空。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `watch_updates` | 是 | `object` | 否 |  | 所有保留觀察逐檔更新狀態。 |
+| `watch_stale_symbols` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `stateBefore` | 是 | `SrppUsWatchStates | null` | 是 |  | 已驗證完整states map；移轉來源不可用時為null，不是空帳。 |
+| `stateAfter` | 是 | `SrppUsWatchStates | null` | 是 |  | 已驗證完整states map；移轉來源不可用時為null，不是空帳。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 狀態／來源完整性，與等待結果分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+
+### `SrppUsTacticalResult`
+
+逐檔D186機械、正式來源缺口及保守阻擋；沒有合法數量不填0。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "逐檔D186機械、正式來源缺口及保守阻擋；沒有合法數量不填0。",
+  "required": [
+    "stock_code",
+    "trading_date",
+    "decision",
+    "places_orders",
+    "status",
+    "missingSources",
+    "reasons",
+    "reference_basis",
+    "quote_as_of",
+    "allowed_limit_range",
+    "mechanicalCoverage",
+    "coverage",
+    "reference_price",
+    "recommended_limit_price",
+    "checked_limit_price",
+    "net_profit_space_pct",
+    "max_notional_twd",
+    "units",
+    "amount_usd",
+    "fees_usd",
+    "settlement_twd",
+    "sourceRefs",
+    "checks",
+    "blockingReasons",
+    "gateEvidence"
+  ],
+  "properties": {
+    "stock_code": {
+      "type": "string",
+      "description": "精確美股代號。"
+    },
+    "trading_date": {
+      "type": "string",
+      "description": "本輪美東交易日。",
+      "format": "date"
+    },
+    "decision": {
+      "const": "D-186",
+      "type": "string",
+      "description": "既有美股戰術機械檢查。 固定 D-186。"
+    },
+    "places_orders": {
+      "const": false,
+      "type": "boolean",
+      "description": "不下單。 固定 false。"
+    },
+    "status": {
+      "type": "string",
+      "description": "僅必要機械條件，仍需LLM論點與最後硬閘。 值：NO_EXECUTABLE_ORDER、PASS_FOR_REPORT_REVIEW。",
+      "enum": [
+        "NO_EXECUTABLE_ORDER",
+        "PASS_FOR_REPORT_REVIEW"
+      ]
+    },
+    "missingSources": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "reasons": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "reference_basis": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    },
+    "quote_as_of": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    },
+    "allowed_limit_range": {
+      "description": "即時基準±0.5%範圍；無行情為null。",
+      "anyOf": [
+        {
+          "type": "array",
+          "description": "上下限兩個確定性價格。",
+          "items": {
+            "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Canonical decimal string，正負與單位依欄位。",
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+              },
+              {
+                "type": "integer",
+                "description": "safe integer來源值。"
+              },
+              {
+                "type": "null",
+                "description": "此數字無正式來源，保留null。"
+              }
+            ]
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "null",
+          "description": "無有效即時基準，範圍未知。"
+        }
+      ]
+    },
+    "mechanicalCoverage": {
+      "type": "string",
+      "description": "D186數值證據完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "coverage": {
+      "type": "string",
+      "description": "正式來源及全部共用條件完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "reference_price": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "recommended_limit_price": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "checked_limit_price": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "net_profit_space_pct": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "max_notional_twd": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "units": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "amount_usd": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "fees_usd": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "settlement_twd": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "sourceRefs": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "checks": {
+      "type": "array",
+      "description": "固定八種來源的查核收據。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "一個正式來源的規則查核收據。",
+        "required": [
+          "sourceRef",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "sourceRef": {
+            "type": "string",
+            "description": "正式來源ID。"
+          },
+          "status": {
+            "type": "string",
+            "description": "逐來源規則驗證狀態。 值：UNAVAILABLE、NOT_EVALUATED、PASS、BLOCKED。",
+            "enum": [
+              "UNAVAILABLE",
+              "NOT_EVALUATED",
+              "PASS",
+              "BLOCKED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "缺口或有效阻擋具名原因。"
+          }
+        }
+      }
+    },
+    "actual_size_net_profit_space_pct": {
+      "description": "確定性數字，canonical Decimal string或safe integer；未知為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "Canonical decimal string，正負與單位依欄位。",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+        },
+        {
+          "type": "integer",
+          "description": "safe integer來源值。"
+        },
+        {
+          "type": "null",
+          "description": "此數字無正式來源，保留null。"
+        }
+      ]
+    },
+    "blockingReasons": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "gateEvidence": {
+      "type": "array",
+      "description": "逐gate獨立檢核，一條有效阻擋不因另一來源缺漏消失。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsGateEvidence",
+        "description": "一條已有來源支持的既有規則查核。"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stock_code` | 是 | `string` | 否 |  | 精確美股代號。 |
+| `trading_date` | 是 | `string (date)` | 否 | format: date | 本輪美東交易日。 |
+| `decision` | 是 | `string` | 否 | enum: `D-186` | 既有美股戰術機械檢查。 固定 D-186。 |
+| `places_orders` | 是 | `boolean` | 否 |  | 不下單。 固定 false。 |
+| `status` | 是 | `string` | 否 | enum: `NO_EXECUTABLE_ORDER`, `PASS_FOR_REPORT_REVIEW` | 僅必要機械條件，仍需LLM論點與最後硬閘。 值：NO_EXECUTABLE_ORDER、PASS_FOR_REPORT_REVIEW。 |
+| `missingSources` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `reasons` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `reference_basis` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+| `quote_as_of` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+| `allowed_limit_range` | 是 | `array of string | integer | null | null` | 是 |  | 即時基準±0.5%範圍；無行情為null。 |
+| `mechanicalCoverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | D186數值證據完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 正式來源及全部共用條件完整性。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `reference_price` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `recommended_limit_price` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `checked_limit_price` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `net_profit_space_pct` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `max_notional_twd` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `units` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `amount_usd` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `fees_usd` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `settlement_twd` | 是 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `sourceRefs` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `checks` | 是 | `array of object` | 否 | items: object<br>items 說明: 一個正式來源的規則查核收據。 | 固定八種來源的查核收據。 |
+| `actual_size_net_profit_space_pct` | 否 | `string | integer | null` | 是 |  | 確定性數字，canonical Decimal string或safe integer；未知為null。 |
+| `blockingReasons` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `gateEvidence` | 是 | `array of SrppUsGateEvidence` | 否 | items: SrppUsGateEvidence<br>items 說明: 一條已有來源支持的既有規則查核。 | 逐gate獨立檢核，一條有效阻擋不因另一來源缺漏消失。 |
+
+### `SrppUsTacticalData`
+
+美股戰術資料；公司研究與排名仍由LLM，無新增分數。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "美股戰術資料；公司研究與排名仍由LLM，無新增分數。",
+  "required": [
+    "decision",
+    "places_orders",
+    "results",
+    "reasonCodes",
+    "coverage"
+  ],
+  "properties": {
+    "decision": {
+      "const": "D-186",
+      "type": "string",
+      "description": "既有個股戰術機械檢查。 固定 D-186。"
+    },
+    "places_orders": {
+      "const": false,
+      "type": "boolean",
+      "description": "不下單。 固定 false。"
+    },
+    "results": {
+      "type": "array",
+      "description": "全部候選逐檔結果；來源缺失不能冒充沒有候選。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsTacticalResult",
+        "description": "單一候選的正式來源與機械結果。"
+      }
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "coverage": {
+      "type": "string",
+      "description": "資料完整性與有效阻擋各自保留。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `decision` | 是 | `string` | 否 | enum: `D-186` | 既有個股戰術機械檢查。 固定 D-186。 |
+| `places_orders` | 是 | `boolean` | 否 |  | 不下單。 固定 false。 |
+| `results` | 是 | `array of SrppUsTacticalResult` | 否 | items: SrppUsTacticalResult<br>items 說明: 單一候選的正式來源與機械結果。 | 全部候選逐檔結果；來源缺失不能冒充沒有候選。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 資料完整性與有效阻擋各自保留。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+
+### `SrppUsModuleCore`
+
+美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。",
+  "required": [
+    "moduleId",
+    "coverage",
+    "data",
+    "reasonCodes",
+    "inputRefs"
+  ],
+  "properties": {
+    "moduleId": {
+      "const": "CORE_SELL_GUARD",
+      "type": "string",
+      "description": "固定模組識別。 固定 CORE_SELL_GUARD。"
+    },
+    "coverage": {
+      "type": "string",
+      "description": "完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "data": {
+      "$ref": "#/components/schemas/SrppUsCoreData",
+      "description": "本scope完整閉合輸出。"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "inputRefs": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `moduleId` | 是 | `string` | 否 | enum: `CORE_SELL_GUARD` | 固定模組識別。 固定 CORE_SELL_GUARD。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `data` | 是 | `SrppUsCoreData` | 否 |  | 本scope完整閉合輸出。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `inputRefs` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+
+### `SrppUsModuleTactical`
+
+美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "美股範圍計算結果；CORE_SELL_READY僅為擇時通過，D206研究與最後判斷仍由LLM。",
+  "required": [
+    "moduleId",
+    "coverage",
+    "data",
+    "reasonCodes",
+    "inputRefs"
+  ],
+  "properties": {
+    "moduleId": {
+      "const": "US_TACTICAL",
+      "type": "string",
+      "description": "固定模組識別。 固定 US_TACTICAL。"
+    },
+    "coverage": {
+      "type": "string",
+      "description": "完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "data": {
+      "$ref": "#/components/schemas/SrppUsTacticalData",
+      "description": "本scope完整閉合輸出。"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "inputRefs": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `moduleId` | 是 | `string` | 否 | enum: `US_TACTICAL` | 固定模組識別。 固定 US_TACTICAL。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `data` | 是 | `SrppUsTacticalData` | 否 |  | 本scope完整閉合輸出。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `inputRefs` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+
+### `SrppUsGateEvidence`
+
+逐條有效阻擋的來源收據；missingSources不能冒充BLOCKED。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "逐條有效阻擋的來源收據；missingSources不能冒充BLOCKED。",
+  "required": [
+    "gateId",
+    "status",
+    "reasons",
+    "sourceRefs"
+  ],
+  "properties": {
+    "gateId": {
+      "type": "string",
+      "description": "既有規則的具名gate識別。"
+    },
+    "status": {
+      "type": "string",
+      "description": "有效通過、阻擋或來源不可用。 值：PASS、BLOCKED、UNAVAILABLE。",
+      "enum": [
+        "PASS",
+        "BLOCKED",
+        "UNAVAILABLE"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "sourceRefs": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `gateId` | 是 | `string` | 否 |  | 既有規則的具名gate識別。 |
+| `status` | 是 | `string` | 否 | enum: `PASS`, `BLOCKED`, `UNAVAILABLE` | 有效通過、阻擋或來源不可用。 值：PASS、BLOCKED、UNAVAILABLE。 |
+| `reasons` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `sourceRefs` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+
+### `SrppUsLedger`
+
+經原始來源與owner證據鏈驗證的移轉ledger。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "經原始來源與owner證據鏈驗證的移轉ledger。",
+  "required": [
+    "decision",
+    "consumer",
+    "states"
+  ],
+  "properties": {
+    "decision": {
+      "const": "D-174",
+      "type": "string",
+      "description": "原觀察規則。 固定 D-174。"
+    },
+    "consumer": {
+      "type": "string",
+      "description": "本軌觀察，不可借帳。 值：Codex、Claude。",
+      "enum": [
+        "Codex",
+        "Claude"
+      ]
+    },
+    "states": {
+      "$ref": "#/components/schemas/SrppUsWatchStates",
+      "description": "完整保留的逐股觀察。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `decision` | 是 | `string` | 否 | enum: `D-174` | 原觀察規則。 固定 D-174。 |
+| `consumer` | 是 | `string` | 否 | enum: `Codex`, `Claude` | 本軌觀察，不可借帳。 值：Codex、Claude。 |
+| `states` | 是 | `SrppUsWatchStates` | 否 |  | 完整保留的逐股觀察。 |
+
+### `SrppUsStateSource`
+
+正式DB狀態擷取，包含owner／consumer／移轉marker；缺狀態不因COMPLETE旗標而可用。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "正式DB狀態擷取，包含owner／consumer／移轉marker；缺狀態不因COMPLETE旗標而可用。",
+  "required": [
+    "ownerUserId",
+    "consumer",
+    "market",
+    "status",
+    "reason",
+    "importLedgerSha256",
+    "watchPolicySha256",
+    "ledger",
+    "versionVector"
+  ],
+  "properties": {
+    "ownerUserId": {
+      "type": "integer",
+      "description": "與包identity相同的owner。"
+    },
+    "consumer": {
+      "type": "string",
+      "description": "按consumer隔離的正式觀察。 值：Codex、Claude。",
+      "enum": [
+        "Codex",
+        "Claude"
+      ]
+    },
+    "market": {
+      "const": "US",
+      "type": "string",
+      "description": "資料庫市場scope。 固定 US。"
+    },
+    "status": {
+      "type": "string",
+      "description": "移轉marker與狀態來源驗證。 值：VERIFIED、UNAVAILABLE。",
+      "enum": [
+        "VERIFIED",
+        "UNAVAILABLE"
+      ]
+    },
+    "reason": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    },
+    "importLedgerSha256": {
+      "description": "已驗真原ledger bytes hash；來源缺失為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null",
+          "description": "原始ledger缺失，禁止當空帳。"
+        }
+      ]
+    },
+    "watchPolicySha256": {
+      "description": "已匯入穩定觀察指紋；移轉來源缺失為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null",
+          "description": "尚無可驗證觀察政策身分。"
+        }
+      ]
+    },
+    "ledger": {
+      "description": "已驗真ledger或來源不可用null。",
+      "anyOf": [
+        {
+          "$ref": "#/components/schemas/SrppUsLedger",
+          "description": "完整本軌已驗證ledger。"
+        },
+        {
+          "type": "null",
+          "description": "移轉來源不可用，沒有空帳推定。"
+        }
+      ]
+    },
+    "versionVector": {
+      "type": "object",
+      "description": "資料庫逐代號樂觀版本map，原子更新與去重使用。",
+      "additionalProperties": {
+        "type": "integer",
+        "description": "非負版本號，隨有效觀察更新。",
+        "minimum": 0
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `ownerUserId` | 是 | `integer` | 否 |  | 與包identity相同的owner。 |
+| `consumer` | 是 | `string` | 否 | enum: `Codex`, `Claude` | 按consumer隔離的正式觀察。 值：Codex、Claude。 |
+| `market` | 是 | `string` | 否 | enum: `US` | 資料庫市場scope。 固定 US。 |
+| `status` | 是 | `string` | 否 | enum: `VERIFIED`, `UNAVAILABLE` | 移轉marker與狀態來源驗證。 值：VERIFIED、UNAVAILABLE。 |
+| `reason` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+| `importLedgerSha256` | 是 | `string | null` | 是 |  | 已驗真原ledger bytes hash；來源缺失為null。 |
+| `watchPolicySha256` | 是 | `string | null` | 是 |  | 已匯入穩定觀察指紋；移轉來源缺失為null。 |
+| `ledger` | 是 | `SrppUsLedger | null` | 是 |  | 已驗真ledger或來源不可用null。 |
+| `versionVector` | 是 | `object` | 否 |  | 資料庫逐代號樂觀版本map，原子更新與去重使用。 |
+
+### `SrppUsPolicySource`
+
+精確政策原文與穩定觀察指紋，不能以整份bundle代替觀察指紋。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "精確政策原文與穩定觀察指紋，不能以整份bundle代替觀察指紋。",
+  "required": [
+    "bundleHash",
+    "rawModelBytes",
+    "rawManifestBytes",
+    "modelInputsSha256",
+    "policyManifestSha256",
+    "watchPolicySha256"
+  ],
+  "properties": {
+    "bundleHash": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "rawModelBytes": {
+      "type": "string",
+      "description": "與SRPP當前model_inputs.json逐位元相同的原文。"
+    },
+    "rawManifestBytes": {
+      "type": "string",
+      "description": "與SRPP當前policy_manifest.json逐位元相同的原文。"
+    },
+    "modelInputsSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "policyManifestSha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "watchPolicySha256": {
+      "type": "string",
+      "description": "完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `bundleHash` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `rawModelBytes` | 是 | `string` | 否 |  | 與SRPP當前model_inputs.json逐位元相同的原文。 |
+| `rawManifestBytes` | 是 | `string` | 否 |  | 與SRPP當前policy_manifest.json逐位元相同的原文。 |
+| `modelInputsSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `policyManifestSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+| `watchPolicySha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
+
+### `SrppUsUniverse`
+
+正持有、全量本輪雷達與可驗證明確觀察的去重聯集，資料不足不刪列。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "正持有、全量本輪雷達與可驗證明確觀察的去重聯集，資料不足不刪列。",
+  "required": [
+    "holdingSymbols",
+    "radarSymbols",
+    "watchSymbols",
+    "symbols",
+    "coverage",
+    "reasonCodes"
+  ],
+  "properties": {
+    "holdingSymbols": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "radarSymbols": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "watchSymbols": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "symbols": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "coverage": {
+      "type": "string",
+      "description": "合法宇宙來源覆蓋。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `holdingSymbols` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `radarSymbols` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `watchSymbols` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `symbols` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 合法宇宙來源覆蓋。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+
+### `SrppUsMarketSymbol`
+
+宇宙每檔的完整凍結證據與具名缺口，不取最佳五檔。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "宇宙每檔的完整凍結證據與具名缺口，不取最佳五檔。",
+  "required": [
+    "stockCode",
+    "quote",
+    "radar",
+    "coreDirection",
+    "historyTrusted",
+    "reasonCodes",
+    "priceHistory"
+  ],
+  "properties": {
+    "stockCode": {
+      "type": "string",
+      "description": "精確美股代號。"
+    },
+    "quote": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "完整無五檔行情；currency=USD按已驗market=美股來源契約投影，不是獨立feed驗證；同regular／LIVE／closed=false及時間另核。"
+    },
+    "radar": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "本輪一次精確detail原文或null，與selector／時間／版本另核。"
+    },
+    "coreDirection": {
+      "description": "具名文字；不適用或來源缺漏為null。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "具名來源、依據或原因文字。"
+        },
+        {
+          "type": "null",
+          "description": "原因或來源尚未取得時的null。"
+        }
+      ]
+    },
+    "historyTrusted": {
+      "type": "boolean",
+      "description": "已保存完成日與除息來源的可信度，不等於擇時通過。"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "priceHistory": {
+      "type": "array",
+      "description": "與同quote.chart.series.daily.dates逐日完整對齊的canonical DB來源；每筆日期嚴格早於sessionDate，不補當日live或缺列，缺來源保留空陣列。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsPriceHistoryRow",
+        "description": "一個真實DB完成日的代號／市場／日期／OHLC與來源，不以旗標代替原始記錄。"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `stockCode` | 是 | `string` | 否 |  | 精確美股代號。 |
+| `quote` | 是 | `SrppUsFrozenValue` | 否 |  | 完整無五檔行情；currency=USD按已驗market=美股來源契約投影，不是獨立feed驗證；同regular／LIVE／closed=false及時間另核。 |
+| `radar` | 是 | `SrppUsFrozenValue` | 否 |  | 本輪一次精確detail原文或null，與selector／時間／版本另核。 |
+| `coreDirection` | 是 | `string | null` | 是 |  | 具名文字；不適用或來源缺漏為null。 |
+| `historyTrusted` | 是 | `boolean` | 否 |  | 已保存完成日與除息來源的可信度，不等於擇時通過。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `priceHistory` | 是 | `array of SrppUsPriceHistoryRow` | 否 | items: SrppUsPriceHistoryRow<br>items 說明: 一個真實DB完成日的代號／市場／日期／OHLC與來源，不以旗標代替原始記錄。 | 與同quote.chart.series.daily.dates逐日完整對齊的canonical DB來源；每筆日期嚴格早於sessionDate，不補當日live或缺列，缺來源保留空陣列。 |
+
+### `SrppUsMarket`
+
+當輪持股、雷達與觀察聯集的既有正式來源，只讀DB／Redis。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "當輪持股、雷達與觀察聯集的既有正式來源，只讀DB／Redis。",
+  "required": [
+    "radarList",
+    "symbols"
+  ],
+  "properties": {
+    "radarList": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "本輪完整雷達清單原文，未成功來源時null。"
+    },
+    "symbols": {
+      "type": "array",
+      "description": "宇宙全量逐檔證據，不限持股或前幾名。",
+      "items": {
+        "$ref": "#/components/schemas/SrppUsMarketSymbol",
+        "description": "每個合法分析標的完整來源或缺口。"
+      }
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `radarList` | 是 | `SrppUsFrozenValue` | 否 |  | 本輪完整雷達清單原文，未成功來源時null。 |
+| `symbols` | 是 | `array of SrppUsMarketSymbol` | 否 | items: SrppUsMarketSymbol<br>items 說明: 每個合法分析標的完整來源或缺口。 | 宇宙全量逐檔證據，不限持股或前幾名。 |
+
+### `SrppUsPriceHistoryRow`
+
+完成日stock_price_history的最小canonical來源投影；hash保護原始來源，逐日OHLC須與chart完全相符。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "完成日stock_price_history的最小canonical來源投影；hash保護原始來源，逐日OHLC須與chart完全相符。",
+  "required": [
+    "symbol",
+    "market",
+    "tradingDate",
+    "open",
+    "high",
+    "low",
+    "close",
+    "closeSource"
+  ],
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "同market row的精確股票代號。"
+    },
+    "market": {
+      "type": "string",
+      "const": "美股",
+      "description": "DB市場固定美股。"
+    },
+    "tradingDate": {
+      "type": "string",
+      "format": "date",
+      "description": "已完成美東交易日，嚴格早於包sessionDate。"
+    },
+    "open": {
+      "description": "DB原始OHLC價格，canonical decimal string；未保存為null，不填零。",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "description": "完整canonical decimal string，不四捨五入以掩蓋chart差異。"
+        },
+        {
+          "type": "null",
+          "description": "DB未保存的價格，保留null。"
+        }
+      ]
+    },
+    "high": {
+      "description": "DB原始OHLC價格，canonical decimal string；未保存為null，不填零。",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "description": "完整canonical decimal string，不四捨五入以掩蓋chart差異。"
+        },
+        {
+          "type": "null",
+          "description": "DB未保存的價格，保留null。"
+        }
+      ]
+    },
+    "low": {
+      "description": "DB原始OHLC價格，canonical decimal string；未保存為null，不填零。",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "description": "完整canonical decimal string，不四捨五入以掩蓋chart差異。"
+        },
+        {
+          "type": "null",
+          "description": "DB未保存的價格，保留null。"
+        }
+      ]
+    },
+    "close": {
+      "description": "DB原始OHLC價格，canonical decimal string；未保存為null，不填零。",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "description": "完整canonical decimal string，不四捨五入以掩蓋chart差異。"
+        },
+        {
+          "type": "null",
+          "description": "DB未保存的價格，保留null。"
+        }
+      ]
+    },
+    "closeSource": {
+      "description": "DB持久化收盤來源；null或空白均不可驗真，不由historyTrusted旗標補足。",
+      "anyOf": [
+        {
+          "type": "string",
+          "description": "原有持久化來源名稱，需非空白才可採用。"
+        },
+        {
+          "type": "null",
+          "description": "原始來源缺失，保持null。"
+        }
+      ]
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `symbol` | 是 | `string` | 否 |  | 同market row的精確股票代號。 |
+| `market` | 是 | `string` | 否 | enum: `美股` | DB市場固定美股。 |
+| `tradingDate` | 是 | `string (date)` | 否 | format: date | 已完成美東交易日，嚴格早於包sessionDate。 |
+| `open` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
+| `high` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
+| `low` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
+| `close` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
+| `closeSource` | 是 | `string | null` | 是 |  | DB持久化收盤來源；null或空白均不可驗真，不由historyTrusted旗標補足。 |
 
 ### `AiFlowOperation`
 

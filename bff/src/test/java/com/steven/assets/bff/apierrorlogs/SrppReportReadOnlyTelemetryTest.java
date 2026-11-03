@@ -17,6 +17,7 @@ class SrppReportReadOnlyTelemetryTest {
   new NginxGatewayFailureLogTailer(log.toString(),ingest,new ApiErrorLogDiagnosticRenderer(""),
           Clock.fixed(Instant.parse("2026-10-09T01:05:00Z"), ZoneOffset.UTC)).tail();
   verifyNoInteractions(ingest);
+  assertThat(OpenApiRouteCatalog.isReadOnlyReport("GET","/api/public/srpp/us-report-calculations")).isTrue();
   assertThat(OpenApiRouteCatalog.ROUTES).containsKey("GET /api/public/srpp/report-calculations");
   assertThat(OpenApiRouteCatalog.isReadOnlyReport("GET","/api/public/srpp/report-calculations")).isTrue();
   assertThat(OpenApiRouteCatalog.isReadOnlyReport("GET","/api/public/srpp/calculations")).isFalse();

@@ -15,7 +15,7 @@ public final class OpenApiRouteCatalog {
     public record Operation(String key, String name) {}
     /** Task 489: even rejected report GETs perform no error-log ingest/write. */
     public static boolean isReadOnlyReport(String method, String path) {
-        return "GET".equals(method) && Set.of("/api/public/srpp/report-calculations", "/api/public/srpp/order-plan", "/api/public/srpp/symbol-rule-facts").contains(path);
+        return "GET".equals(method) && Set.of("/api/public/srpp/us-report-calculations", "/api/public/srpp/report-calculations", "/api/public/srpp/order-plan", "/api/public/srpp/symbol-rule-facts").contains(path);
     }
     /** Task 492: 觀測 ingress 的所有結果都不產生 error ingestion。 */
     public static boolean isObservationIngress(String method, String path) {
@@ -23,6 +23,7 @@ public final class OpenApiRouteCatalog {
     }
     public static final Map<String, Operation> ROUTES = Map.ofEntries(
       Map.entry("POST /api/srpp/ai-flow/events",new Operation("OPEN_SRPP_AI_FLOW_EVENTS","AI 判斷流程紀錄")),
+      Map.entry("GET /api/public/srpp/us-report-calculations",new Operation("OPEN_SRPP_US_REPORT_CALCULATIONS","SRPP 美股不可變報告計算包")),
       Map.entry("GET /api/public/srpp/report-calculations",new Operation("OPEN_SRPP_REPORT_CALCULATIONS","SRPP 不可變報告計算包")),
       Map.entry("GET /api/public/srpp/order-plan",new Operation("OPEN_SRPP_ORDER_PLAN","SRPP fail-closed 決策投影")),
       Map.entry("GET /api/public/srpp/symbol-rule-facts",new Operation("OPEN_SRPP_SYMBOL_RULE_FACTS","SRPP 凍結逐檔規則事實")),

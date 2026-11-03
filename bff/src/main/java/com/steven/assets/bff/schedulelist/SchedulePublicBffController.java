@@ -66,8 +66,11 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（76 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
+    /** 全系統排程清單（77 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
+            new ScheduledJobDto(BUSINESS, "SRPP", "SRPP 美股不可變報告計算包發布",
+                    "America/New_York 交易日 09:40–10:45且regular session內，每分鐘只讀既有正式資產、完整美股雷達與持久行情；同交易更新各consumer美股觀察及發布不可變包。GET不觸發計算或寫入，缺移轉狀態不當空帳",
+                    "每分鐘（美東交易日09:40–10:45，依srpp.us-report-producer-cron可配置）", "0 * * * * *", NYC),
             new ScheduledJobDto(BUSINESS, "SRPP", "富邦官方委託與庫存不可變來源",
                     "先驗 cached 台股日曆與 ACTIVE configured owner，只在 09:00–14:00 單飛唯讀官方委託及庫存；完整成功空集合才是所選富邦帳號零掛單，最新失敗不回退舊成功，GET 不觸發同步",
                     "每分鐘（交易日 09:00–14:00，依 fubon.srpp-source-cron 可配置）", "0 * * * * *", TPE),

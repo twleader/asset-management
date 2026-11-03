@@ -103,6 +103,7 @@ public class SecurityConfig {
                                 "/api/public/srpp/completed-technicals",
                                 "/api/public/srpp/technical-series",
                                 "/api/public/srpp/report-calculations",
+                                "/api/public/srpp/us-report-calculations",
                                 "/api/public/srpp/order-plan",
                                 "/api/public/srpp/symbol-rule-facts").permitAll()
                         // Requirement 71：公開觸發重新搜尋，第六條 Nginx 9090 路由，唯一有寫入副作用的匿名端點；

@@ -16,9 +16,9 @@ class UnifiedSwaggerRendererTest < Minitest::Test
     union = unified_document(@financial, @observation)
     content = render(union)
     assert_equal before, Marshal.dump([@financial, @observation])
-    assert_equal 27, union['paths'].values.sum(&:length)
-    assert_includes content, '| 契約版本 | `1.26.0` |'
-    assert_includes content, '| AI 流程觀測契約版本 | `1.3.0` |'
+    assert_equal 28, union['paths'].values.sum(&:length)
+    assert_includes content, '| 契約版本 | `1.27.0` |'
+    assert_includes content, "| AI 流程觀測契約版本 | `#{@observation.dig('info', 'version')}` |"
     [@financial, @observation].each do |source|
       source['paths'].each do |path, methods|
         methods.each do |method, operation|
