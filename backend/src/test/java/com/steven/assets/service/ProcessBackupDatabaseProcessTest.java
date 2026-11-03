@@ -59,7 +59,7 @@ class ProcessBackupDatabaseProcessTest {
     }
 
     @Test
-    void dumpCommandExcludesExactlyTheFourDataTablesAndKeepsEveryOtherFlag() {
+    void dumpCommandExcludesExactlyTheSixDataTablesAndKeepsEveryOtherFlag() {
         CapturingStarter starter = new CapturingStarter();
         ProcessBackupDatabaseProcess process = process(starter);
 
@@ -79,7 +79,9 @@ class ProcessBackupDatabaseProcessTest {
                 "--exclude-table-data=public.ai_flow_run",
                 "--exclude-table-data=public.ai_flow_event",
                 "--exclude-table-data=public.srpp_report_calculation_package",
-                "--exclude-table-data=public.srpp_report_calculation_base");
+                "--exclude-table-data=public.srpp_report_calculation_base",
+                "--exclude-table-data=public.srpp_us_report_package",
+                "--exclude-table-data=public.srpp_us_watch_transition");
     }
 
     @Test
