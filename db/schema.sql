@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：113 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：117 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -187,6 +187,22 @@ CREATE FUNCTION public.guard_fubon_historical_daily_candle_immutable() RETURNS t
     AS $$
 BEGIN
     RAISE EXCEPTION 'fubon_historical_daily_candle is immutable';
+END;
+$$;
+
+
+--
+-- Name: guard_srpp_us_watch_version(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_srpp_us_watch_version() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+ IF TG_OP='DELETE' OR NEW.version<>OLD.version+1 OR NEW.owner_user_id<>OLD.owner_user_id OR NEW.consumer<>OLD.consumer OR NEW.market<>OLD.market OR NEW.symbol<>OLD.symbol THEN
+  RAISE EXCEPTION 'US_WATCH_VERSION_OR_IDENTITY_CONFLICT';
+ END IF;
+ RETURN NEW;
 END;
 $$;
 
@@ -2440,6 +2456,109 @@ CREATE TABLE public.srpp_report_calculation_package (
 
 
 --
+-- Name: srpp_us_report_package; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_us_report_package (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    consumer character varying(16) NOT NULL,
+    market character varying(2) NOT NULL,
+    session_date date NOT NULL,
+    report_slot character varying(24) NOT NULL,
+    policy_bundle_sha256 character(64) NOT NULL,
+    swagger_sha256 character(64) NOT NULL,
+    calculator_version character varying(96) NOT NULL,
+    source_fingerprint_sha256 character(64) NOT NULL,
+    input_snapshot_sha256 character(64) NOT NULL,
+    content_sha256 character(64) NOT NULL,
+    content_jcs text NOT NULL,
+    published_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_us_report_package_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Codex'::character varying, 'Claude'::character varying])::text[]))),
+    CONSTRAINT srpp_us_report_package_content_jcs_check CHECK ((length(content_jcs) > 2)),
+    CONSTRAINT srpp_us_report_package_content_sha256_check CHECK ((content_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_report_package_input_snapshot_sha256_check CHECK ((input_snapshot_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_report_package_market_check CHECK (((market)::text = 'US'::text)),
+    CONSTRAINT srpp_us_report_package_owner_user_id_check CHECK (((owner_user_id >= 1) AND (owner_user_id <= '9007199254740991'::bigint))),
+    CONSTRAINT srpp_us_report_package_policy_bundle_sha256_check CHECK ((policy_bundle_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_report_package_report_slot_check CHECK (((report_slot)::text = 'US_OPEN_0945'::text)),
+    CONSTRAINT srpp_us_report_package_source_fingerprint_sha256_check CHECK ((source_fingerprint_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_report_package_swagger_sha256_check CHECK ((swagger_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: srpp_us_watch_import; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_us_watch_import (
+    owner_user_id bigint NOT NULL,
+    consumer character varying(16) NOT NULL,
+    market character varying(2) NOT NULL,
+    ledger_sha256 character(64) NOT NULL,
+    watch_policy_sha256 character(64) NOT NULL,
+    evidence_jcs text NOT NULL,
+    imported_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_us_watch_import_consumer_check CHECK (((consumer)::text = ANY ((ARRAY['Codex'::character varying, 'Claude'::character varying])::text[]))),
+    CONSTRAINT srpp_us_watch_import_evidence_jcs_check CHECK ((length(evidence_jcs) > 2)),
+    CONSTRAINT srpp_us_watch_import_ledger_sha256_check CHECK ((ledger_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_watch_import_market_check CHECK (((market)::text = 'US'::text)),
+    CONSTRAINT srpp_us_watch_import_owner_user_id_check CHECK (((owner_user_id >= 1) AND (owner_user_id <= '9007199254740991'::bigint))),
+    CONSTRAINT srpp_us_watch_import_watch_policy_sha256_check CHECK ((watch_policy_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+--
+-- Name: srpp_us_watch_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_us_watch_state (
+    owner_user_id bigint NOT NULL,
+    consumer character varying(16) NOT NULL,
+    market character varying(2) NOT NULL,
+    symbol character varying(20) NOT NULL,
+    version bigint NOT NULL,
+    state_jcs text NOT NULL,
+    state_sha256 character(64) NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_us_watch_state_market_check CHECK (((market)::text = 'US'::text)),
+    CONSTRAINT srpp_us_watch_state_state_jcs_check CHECK ((length(state_jcs) > 2)),
+    CONSTRAINT srpp_us_watch_state_state_sha256_check CHECK ((state_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_watch_state_symbol_check CHECK ((length((symbol)::text) > 0)),
+    CONSTRAINT srpp_us_watch_state_version_check CHECK (((version >= 1) AND (version <= '9007199254740991'::bigint)))
+);
+
+
+--
+-- Name: srpp_us_watch_transition; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_us_watch_transition (
+    id uuid NOT NULL,
+    package_id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    consumer character varying(16) NOT NULL,
+    market character varying(2) NOT NULL,
+    symbol character varying(20) NOT NULL,
+    version_before bigint NOT NULL,
+    version_after bigint NOT NULL,
+    state_before_jcs text NOT NULL,
+    state_after_jcs text NOT NULL,
+    state_before_sha256 character(64) NOT NULL,
+    state_after_sha256 character(64) NOT NULL,
+    source_fingerprint_sha256 character(64) NOT NULL,
+    calculator_version character varying(96) NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_us_watch_transition_check CHECK (((version_after >= version_before) AND (version_after <= (version_before + 1)))),
+    CONSTRAINT srpp_us_watch_transition_market_check CHECK (((market)::text = 'US'::text)),
+    CONSTRAINT srpp_us_watch_transition_source_fingerprint_sha256_check CHECK ((source_fingerprint_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_watch_transition_state_after_sha256_check CHECK ((state_after_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_watch_transition_state_before_sha256_check CHECK ((state_before_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT srpp_us_watch_transition_version_before_check CHECK ((version_before >= 0))
+);
+
+
+--
 -- Name: stock; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4622,6 +4741,62 @@ ALTER TABLE ONLY public.srpp_report_calculation_package
 
 
 --
+-- Name: srpp_us_report_package srpp_us_report_package_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_report_package
+    ADD CONSTRAINT srpp_us_report_package_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_us_report_package srpp_us_report_source_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_report_package
+    ADD CONSTRAINT srpp_us_report_source_uq UNIQUE (owner_user_id, consumer, market, session_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version, source_fingerprint_sha256);
+
+
+--
+-- Name: srpp_us_report_package srpp_us_report_tenant_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_report_package
+    ADD CONSTRAINT srpp_us_report_tenant_uq UNIQUE (id, owner_user_id, consumer, market);
+
+
+--
+-- Name: srpp_us_watch_import srpp_us_watch_import_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_import
+    ADD CONSTRAINT srpp_us_watch_import_pkey PRIMARY KEY (owner_user_id, consumer, market);
+
+
+--
+-- Name: srpp_us_watch_state srpp_us_watch_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_state
+    ADD CONSTRAINT srpp_us_watch_state_pkey PRIMARY KEY (owner_user_id, consumer, market, symbol);
+
+
+--
+-- Name: srpp_us_watch_transition srpp_us_watch_transition_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_transition
+    ADD CONSTRAINT srpp_us_watch_transition_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_us_watch_transition srpp_us_watch_transition_source_uq; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_transition
+    ADD CONSTRAINT srpp_us_watch_transition_source_uq UNIQUE (owner_user_id, consumer, market, symbol, source_fingerprint_sha256, calculator_version);
+
+
+--
 -- Name: stock_alert_export_setting stock_alert_export_setting_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5597,6 +5772,13 @@ CREATE INDEX idx_srpp_report_package_latest ON public.srpp_report_calculation_pa
 
 
 --
+-- Name: idx_srpp_us_report_latest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_srpp_us_report_latest ON public.srpp_us_report_package USING btree (owner_user_id, consumer, market, session_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version, published_at DESC, id DESC);
+
+
+--
 -- Name: idx_stock_alert_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -5895,6 +6077,34 @@ CREATE TRIGGER trg_srpp_report_base_no_update BEFORE DELETE OR UPDATE ON public.
 --
 
 CREATE TRIGGER trg_srpp_report_package_no_update BEFORE DELETE OR UPDATE ON public.srpp_report_calculation_package FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_us_report_package trg_srpp_us_report_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_us_report_immutable BEFORE DELETE OR UPDATE ON public.srpp_us_report_package FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_us_watch_transition trg_srpp_us_transition_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_us_transition_immutable BEFORE DELETE OR UPDATE ON public.srpp_us_watch_transition FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_us_watch_import trg_srpp_us_watch_import_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_us_watch_import_immutable BEFORE DELETE OR UPDATE ON public.srpp_us_watch_import FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_us_watch_state trg_srpp_us_watch_version; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_srpp_us_watch_version BEFORE DELETE OR UPDATE ON public.srpp_us_watch_state FOR EACH ROW EXECUTE FUNCTION public.guard_srpp_us_watch_version();
 
 
 --
@@ -6302,6 +6512,46 @@ ALTER TABLE ONLY public.srpp_report_calculation_package
 
 ALTER TABLE ONLY public.srpp_report_calculation_package
     ADD CONSTRAINT srpp_report_package_base_identity_fk FOREIGN KEY (shared_calculation_id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version) REFERENCES public.srpp_report_calculation_base(id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version);
+
+
+--
+-- Name: srpp_us_report_package srpp_us_report_package_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_report_package
+    ADD CONSTRAINT srpp_us_report_package_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_us_report_package srpp_us_report_package_policy_bundle_sha256_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_report_package
+    ADD CONSTRAINT srpp_us_report_package_policy_bundle_sha256_fkey FOREIGN KEY (policy_bundle_sha256) REFERENCES public.srpp_policy_registry(policy_bundle_sha256);
+
+
+--
+-- Name: srpp_us_watch_import srpp_us_watch_import_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_import
+    ADD CONSTRAINT srpp_us_watch_import_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_us_watch_state srpp_us_watch_state_owner_user_id_consumer_market_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_state
+    ADD CONSTRAINT srpp_us_watch_state_owner_user_id_consumer_market_fkey FOREIGN KEY (owner_user_id, consumer, market) REFERENCES public.srpp_us_watch_import(owner_user_id, consumer, market);
+
+
+--
+-- Name: srpp_us_watch_transition srpp_us_watch_transition_package_id_owner_user_id_consumer_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_us_watch_transition
+    ADD CONSTRAINT srpp_us_watch_transition_package_id_owner_user_id_consumer_fkey FOREIGN KEY (package_id, owner_user_id, consumer, market) REFERENCES public.srpp_us_report_package(id, owner_user_id, consumer, market);
 
 
 --
