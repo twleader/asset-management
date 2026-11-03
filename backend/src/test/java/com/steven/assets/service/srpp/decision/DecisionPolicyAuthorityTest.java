@@ -25,11 +25,11 @@ class DecisionPolicyAuthorityTest {
             "prerequisites", "observations_pending", "fallback_reason");
 
     @Test
-    void d205AuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
+    void currentAuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
         DecisionPolicyAuthority current = new DecisionPolicyAuthority();
         SrppReportAuthority authority = new SrppReportAuthority(current);
-        assertThat(authority.decision().policy().decision()).isEqualTo("D-205");
-        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.54.0");
+        assertThat(authority.decision().policy().decision()).isEqualTo("D-206");
+        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.55.0");
         assertThat(authority.decision().policy().modelVersion()).isEqualTo("3.22.0");
 
         ObjectNode model = currentModel();
