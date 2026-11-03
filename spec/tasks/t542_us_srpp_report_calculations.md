@@ -24,6 +24,7 @@
 - [ ] 542.12 移轉owner須同輪report-facts+input receipt綁定原assets及core states/results、工具重算事實指紋並對原assets做L0，正式DB snapshotId→ownerUserId收據吻合；SQL再次WHERE asset_snapshot(id,owner_user_id)核對，不能只憑operator owner參數。缺鏈維持不可用，私人來源與SQL不提交公開repo。
 - [ ] 542.13 latest GET只在當前NY日期09:45至10:45且regular；同NY日期fixed runId可時窗外診斷，原包不變、不表示可採用。consumer本輪採用須入口time gate及60分鐘上限、capture和全部必要價格來源距本輪asof各不超五分鐘且無未來時間，舊包過期僅回退受影響scope。非當前NY日期400、休市409、未知日曆503。測試09:40包不得於10:44當fresh。
 - [ ] 542.14 用App automation工具同步實際22-00 prompt的美股證據片段並readback exact bytes/hash；將原US本機寫帳描述改API優先／同DB凍結狀態唯讀後備。保留原rrule/status/model、季節±300秒time gate、日曆no-op、原停止、Gmail及交易權限原文；不能只更新docs宣稱已接入。
+- [ ] 542.15 沿用現行Drive資料庫備份邊界：`ProcessBackupDatabaseProcess` 的原四個exclude-table-data不變，再加 `public.srpp_us_report_package` 與依賴package的 `public.srpp_us_watch_transition`。全部schema及canonical `srpp_us_watch_import`／`srpp_us_watch_state` 資料保留，不能新增凍結財務原文上傳或因懸空外鍵使還原失敗。只改必要排除與測試，不改排程／目的地／憑證，也不手動觸發正式備份／上傳。先獨立spec審查，再實作；以隔離PG dump/restore證明四US表schema皆在、package/transition無data、canonical import/state仍在且還原成功。
 
 ## 驗證
 

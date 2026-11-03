@@ -21,16 +21,20 @@ final class ProcessBackupDatabaseProcess implements BackupDatabaseProcess {
     static final long RESTORE_TIMEOUT_SECONDS = 900;
     static final long VALIDATE_TIMEOUT_SECONDS = 300;
 
-    /** Drive 備份 pg_dump 排除 data 的完整限定表名（Requirement 192／Task 498；schema 與 trigger 仍會備份）。 */
+    /** Drive data exclusions: Tasks 498/542. Schema/triggers and canonical US import/state remain backed up. */
     static final String EXCLUDED_DATA_AI_FLOW_RUN = "public.ai_flow_run";
     static final String EXCLUDED_DATA_AI_FLOW_EVENT = "public.ai_flow_event";
     static final String EXCLUDED_DATA_SRPP_REPORT_PACKAGE = "public.srpp_report_calculation_package";
     static final String EXCLUDED_DATA_SRPP_REPORT_BASE = "public.srpp_report_calculation_base";
+    static final String EXCLUDED_DATA_SRPP_US_REPORT_PACKAGE = "public.srpp_us_report_package";
+    static final String EXCLUDED_DATA_SRPP_US_WATCH_TRANSITION = "public.srpp_us_watch_transition";
     static final List<String> EXCLUDED_DATA_TABLES = List.of(
             EXCLUDED_DATA_AI_FLOW_RUN,
             EXCLUDED_DATA_AI_FLOW_EVENT,
             EXCLUDED_DATA_SRPP_REPORT_PACKAGE,
-            EXCLUDED_DATA_SRPP_REPORT_BASE);
+            EXCLUDED_DATA_SRPP_REPORT_BASE,
+            EXCLUDED_DATA_SRPP_US_REPORT_PACKAGE,
+            EXCLUDED_DATA_SRPP_US_WATCH_TRANSITION);
 
     private static final AtomicBoolean PROCESS_CLEANUP_UNSAFE = new AtomicBoolean();
 

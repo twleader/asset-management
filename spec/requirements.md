@@ -6488,4 +6488,5 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 戰術沿用 D-181 主／備援路徑、同向雷達、牛市急跌止穩／RISK_OFF、D-185至少15%扣成本空間、D-186即時限價、0.25%／0.75%／2%上限、資金底線、國泰台幣帳戶、費稅、成交去重與出場期限。以 us_tactical_order_check.py 同輸入比對；目標／成本／帳本／資金等無正式來源時逐項列缺口，不接受 GET caller 傳數字繞過。D-206公司研究、論點、排序與採納／等待／否決保留LLM判讀。
 - 同步 gateway、BFF、Tailscale、frontend exact／matrix拒絕、完整OpenAPI、Swagger mirrors及SRPP verifier；不新增公網入口、廣泛路由、寄信或券商交易能力。SRPP只逐scope採用驗證成功API，不能以後備解除有效BLOCKED。
 - 實際22-00 App prompt的美股證據片段須同步部署與readback；其原季節／±300秒入口、日曆no-op、停止時間、Gmail與交易權限維持原文。原本機US寫帳指令改成API優先與同DB狀態唯讀後備，不能只改文件而留舊prompt。
+- 例行資料庫備份沿用SRPP衍生包不匯出資料的邊界：另排除 `public.srpp_us_report_package` 與依賴它的 `public.srpp_us_watch_transition` 資料，仍保留全部schema及canonical `srpp_us_watch_import`／`srpp_us_watch_state` 資料。既有四表排除不變；不得新增完整凍結財務原文上傳，也不得讓還原因transition指向已排除package而外鍵失敗。
 - 發布依兩專案 feature commit→main no-ff merge／push／remote readback→insert-only registry→乾淨main rebuild／recreate→SRPP實機精確hash讀回。HTTP原文與獨立驗證收據只存私人位置；公開repo僅去識別摘要。診斷不等於正式排程，時窗不符明列 NOT_YET_EXECUTED，不偽造時鐘／啟動producer／重跑報告。

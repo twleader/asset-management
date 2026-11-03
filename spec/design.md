@@ -13344,6 +13344,8 @@ US觀察移轉採離線operator工具：輸入現有原始ledger與同軌anchor 
 
 移轉另須原同輪report-facts、record_report_inputs的input receipt、原assets及正式DB snapshot owner讀回收據。工具重算事實指紋，確認assets與core states/results精確同源，對原assets做L0；snapshotId與資料庫ownerUserId精確吻合，SQL INSERT SELECT再次要求asset_snapshot(id,owner_user_id)相同。僅給owner參數或把兩份無關檔放同目錄不足；缺任一鏈維持migration UNAVAILABLE。私人原文及SQL不進公開repo。
 
+例行Drive資料庫備份的既有 `ProcessBackupDatabaseProcess` 在原四個 `--exclude-table-data` 之外，追加 `public.srpp_us_report_package` 與 `public.srpp_us_watch_transition`。後者引用前者的外鍵，因此兩個衍生報告／稽核表一併只留schema，不將凍結財務原文新增至上傳。canonical import／current state與其他原有金融資料仍依既有授權備份，保留可還原的觀察起日與高水位；不改備份排程、目的地或憑證，不實際觸發備份／上傳。以隔離PG匯出／還原證明兩排除表資料為空、schema存在、canonical狀態保留且無懸空外鍵。
+
 核心純計算器對照Python，使用其原始quote/chart/dividend/radar格式並區分價格觀察及擇時閘門。D-174穩定指紋使用Python sort_keys JSON（含其空白與數字語義），不可混用JCS；包內hash仍用JCS。戰術純計算器共用既有D-186價格／成本／上限元件，但重新核對NY日期／來源證據及null；不移植舊台股時段驗證、不把missing company/sleeve當0。結果無交易權限且不提供LLM研究分數。
 
 SRPP caller新增獨立US verifier／scope採用，讀同owner直接L0、本輪完整宇宙、精確identity與來源內容hash；有效BLOCKED持續有效。US本機core guard停寫，僅使用已驗證DB包中的stateBefore進行同來源唯讀缺口計算；缺狀態不能恢復本機獨立帳。原入口±300秒、日曆no-op、60分鐘、草稿／郵件／交易權限不變。Python修正只限NY日期與官方regular close判斷、缺狀態與單一寫入者，不改Accepted門檻。
