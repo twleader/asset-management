@@ -9,7 +9,7 @@ import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.UserAdminService;
-import com.steven.assets.service.BrokerFilledTradeCostProjector;
+import com.steven.assets.service.HoldingCostSnapshot;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,32 +39,17 @@ public class FubonInventoryWriter {
     private final UserAdminService userAdminService;
     private final FubonSyncFreshness freshness;
     private final Clock clock;
-    private final BrokerFilledTradeCostProjector costProjector;
-
-    public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
-            BrokerRepository brokerRepository,
-            SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness) {
-        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator,
-                userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE), null);
-    }
-
     @Autowired
     public FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
             BrokerRepository brokerRepository, SnapshotAggregateCalculator aggregateCalculator,
-            UserAdminService userAdminService, FubonSyncFreshness freshness, BrokerFilledTradeCostProjector costProjector) {
-        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator, userAdminService, freshness,
-                Clock.system(FubonInventorySyncService.TW_ZONE), costProjector);
+            UserAdminService userAdminService, FubonSyncFreshness freshness) {
+        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator,
+                userAdminService, freshness, Clock.system(FubonInventorySyncService.TW_ZONE));
     }
 
     FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
-            BrokerRepository brokerRepository,
-            SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService, FubonSyncFreshness freshness, Clock clock) {
-        this(mutationLock, snapshotRepository, brokerRepository, aggregateCalculator, userAdminService, freshness, clock, null);
-    }
-
-    FubonInventoryWriter(AssetSnapshotMutationLock mutationLock, AssetSnapshotRepository snapshotRepository,
-            BrokerRepository brokerRepository, SnapshotAggregateCalculator aggregateCalculator, UserAdminService userAdminService,
-            FubonSyncFreshness freshness, Clock clock, BrokerFilledTradeCostProjector costProjector) {
+            BrokerRepository brokerRepository, SnapshotAggregateCalculator aggregateCalculator,
+            UserAdminService userAdminService, FubonSyncFreshness freshness, Clock clock) {
         this.mutationLock = mutationLock;
         this.snapshotRepository = snapshotRepository;
         this.brokerRepository = brokerRepository;
@@ -72,7 +57,6 @@ public class FubonInventoryWriter {
         this.userAdminService = userAdminService;
         this.freshness = freshness;
         this.clock = clock;
-        this.costProjector = costProjector;
     }
 
     @Transactional
@@ -126,9 +110,8 @@ public class FubonInventoryWriter {
         for (PreparedPosition position : sorted) {
             validatePrepared(position);
             BigDecimal shares = BigDecimal.valueOf(position.shares());
-            // Inventory valuation is not a ledger basis. Preserve an existing manual cost; a
-            // first broker row starts at zero and may consume only verified pending buys.
-            BigDecimal investmentCost = BigDecimal.ZERO.setScale(2);
+            // The verified broker inventory mean is the cost authority, independent of fill-history access.
+            BigDecimal investmentCost = checkedMoney(position.costPrice().multiply(shares));
             BigDecimal currentValue = checkedMoney(position.actualPrice().multiply(shares));
             List<StockHolding> old = oldScope.getOrDefault(position.stockCode(), List.of());
 
@@ -138,7 +121,6 @@ public class FubonInventoryWriter {
             java.time.LocalDate previousTransactionDate = null;
             if (old.size() == 1) {
                 StockHolding previous = old.getFirst();
-                investmentCost = previous.getInvestmentCost();
                 previousTransactionDate = previous.getTransactionDate();
                 displayOrder = previous.getDisplayOrder();
                 if (isPositiveRate(previous.getDividendRate())) {
@@ -179,7 +161,6 @@ public class FubonInventoryWriter {
                     .displayOrder(displayOrder)
                     .build();
             snapshot.getStocks().add(replacement);
-            if (costProjector != null) costProjector.consumePendingBuys(snapshot, broker, replacement);
         }
 
         aggregateCalculator.recalculate(snapshot);
@@ -189,7 +170,7 @@ public class FubonInventoryWriter {
                 @Override public void beforeCommit(boolean readOnly) { requireCurrentDate(queryDate); }
             });
         }
-        return new CommitResult(snapshot.getId(), sorted.size(), emptyConfirmed);
+        return new CommitResult(snapshot.getId(), sorted.size(), emptyConfirmed, HoldingCostSnapshot.capture(snapshot));
     }
 
     private void requireCurrentDate(LocalDate queryDate) {
@@ -243,7 +224,11 @@ public class FubonInventoryWriter {
             BigDecimal actualPrice,
             String stockName) {}
 
-    public record CommitResult(Long snapshotId, int replaceCount, boolean emptyCleared) {}
+    public record CommitResult(Long snapshotId, int replaceCount, boolean emptyCleared, HoldingCostSnapshot costs) {
+        public CommitResult(Long snapshotId, int replaceCount, boolean emptyCleared) {
+            this(snapshotId, replaceCount, emptyCleared, null);
+        }
+    }
 
     public static class CommitRejected extends RuntimeException {
         private final String reason;

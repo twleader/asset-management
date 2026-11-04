@@ -7,6 +7,7 @@ import com.steven.assets.repository.AssetSnapshotRepository;
 import com.steven.assets.repository.BrokerRepository;
 import com.steven.assets.repository.StockRepository;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.HoldingCostCachePort;
 import com.steven.assets.service.UserAdminService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +53,7 @@ public class FubonInventorySyncService {
     private final FubonOutcomeCounters counters;
     private final Clock clock;
     private final boolean inventoryEnabled;
+    private final HoldingCostCachePort holdingCostCache;
 
     @Autowired
     public FubonInventorySyncService(
@@ -64,9 +66,10 @@ public class FubonInventorySyncService {
             StockRepository stockRepository,
             FubonInventoryWriter writer,
             FubonOutcomeCounters counters,
-            @org.springframework.beans.factory.annotation.Value("${fubon.inventory-sync-enabled:false}") boolean inventoryEnabled) {
+            @org.springframework.beans.factory.annotation.Value("${fubon.inventory-sync-enabled:false}") boolean inventoryEnabled,
+            HoldingCostCachePort holdingCostCache) {
         this(configState, brokerClient, marketDataService, userAdminService, snapshotRepository,
-                brokerRepository, stockRepository, writer, counters, Clock.system(TW_ZONE), inventoryEnabled);
+                brokerRepository, stockRepository, writer, counters, Clock.system(TW_ZONE), inventoryEnabled, holdingCostCache);
     }
 
     FubonInventorySyncService(
@@ -89,6 +92,16 @@ public class FubonInventorySyncService {
             UserAdminService userAdminService, AssetSnapshotRepository snapshotRepository, BrokerRepository brokerRepository,
             StockRepository stockRepository, FubonInventoryWriter writer, FubonOutcomeCounters counters, Clock clock,
             boolean inventoryEnabled) {
+        this(configState, brokerClient, marketDataService, userAdminService, snapshotRepository, brokerRepository,
+                stockRepository, writer, counters, clock, inventoryEnabled, HoldingCostCachePort.disabled());
+    }
+
+    FubonInventorySyncService(
+            FubonConfigState configState, FubonBrokerClient brokerClient, MarketDataService marketDataService,
+            UserAdminService userAdminService, AssetSnapshotRepository snapshotRepository, BrokerRepository brokerRepository,
+            StockRepository stockRepository, FubonInventoryWriter writer, FubonOutcomeCounters counters, Clock clock,
+            boolean inventoryEnabled, HoldingCostCachePort holdingCostCache) {
+        this.holdingCostCache = holdingCostCache;
         this.configState = configState;
         this.brokerClient = brokerClient;
         this.marketDataService = marketDataService;
@@ -250,9 +263,12 @@ public class FubonInventorySyncService {
             FubonInventoryWriter.CommitResult committed = writer.replace(
                     preflight.ownerUserId(), preflight.snapshotId(), expectedDate,
                     preflight.positions(), portfolio.emptyConfirmed());
-            FubonOutcome outcome = committed.emptyCleared()
-                    ? FubonOutcome.EMPTY_CLEARED
-                    : FubonOutcome.SUCCESS;
+            // replace() has returned through its transaction proxy, so commit failures never publish a cache.
+            boolean cacheUpdated;
+            try { cacheUpdated = holdingCostCache.publish(committed.costs()); }
+            catch (RuntimeException unavailable) { cacheUpdated = false; }
+            FubonOutcome outcome = !cacheUpdated ? FubonOutcome.CACHE_UPDATE_FAILED
+                    : committed.emptyCleared() ? FubonOutcome.EMPTY_CLEARED : FubonOutcome.SUCCESS;
             return finish(outcome, false, portfolio.batchId(), portfolio.positions().size(),
                     committed.replaceCount(), committed.snapshotId(), reasonFor(outcome), portfolio.fingerprint());
         } catch (FubonInventoryWriter.CommitRejected rejected) {
@@ -421,6 +437,7 @@ public class FubonInventorySyncService {
             case ACCOUNTING_FAILED -> "ACCOUNTING_ADAPTER_FAILURE";
             case SUCCESS -> "SYNC_COMMITTED";
             case EMPTY_CLEARED -> "EMPTY_SCOPE_CLEARED";
+            case CACHE_UPDATE_FAILED -> "DB_COMMITTED_CACHE_UPDATE_FAILED";
             case BROKER_MISSING -> "BROKER_MISSING";
             case NO_TODAY_SNAPSHOT -> "NO_TODAY_SNAPSHOT";
             case ROLLED_BACK -> "TRANSACTION_ROLLED_BACK";

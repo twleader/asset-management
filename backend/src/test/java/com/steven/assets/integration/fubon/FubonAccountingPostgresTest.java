@@ -71,6 +71,7 @@ class FubonAccountingPostgresTest {
         properties.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
+    @MockitoBean com.steven.assets.service.HoldingCostCachePort holdingCostCache;
     @MockitoBean FubonConfigState configState;
     @MockitoBean FubonBrokerClient brokerClient;
     @MockitoBean MarketDataService marketDataService;

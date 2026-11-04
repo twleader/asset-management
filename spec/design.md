@@ -7064,6 +7064,8 @@ footprint 影響可忽略：每 owner 每時間點每日一筆，對 per-owner 5
 
 ### Requirement 154／Task 436：最新快照的可對帳台股成本回填
 
+> **Task 544 現況覆寫：**下列 Task 436／Requirement 90／138 的富邦成本保留、首次零值、成交 projection 建立／消費是歷史設計，現由文件末段「Task 544：富邦庫存成本與 Redis 鏡像」取代；generic projector 與既有歷史資料不刪改。
+
 `LedgerStockCostReconciliationService` 是 business-services 的 owner-scoped、無外部 I/O service。它只處理 latest snapshot 的唯一 `(stock_code, market=台股, currency=TWD)` holding，且這次 historic correction 有意只接受全買入 ledger：同 owner、`asset_type=股票`、同 code／market／TWD、`trade_date <= snapshotDate`、至少一筆，全部 transaction type 為 `買`，每列數值合法，`sum(shares)` 精確等於 holding shares。每筆成本為 `max(amount, shares×price+coalesce(fee,0)+coalesce(transactionTax,0))`，全精度加總、最後 HALF_UP scale 2；任何賣出、未知 type、null／負／overflow、多 broker holding、quantity mismatch 或無交易都 fail closed。這不猜測有手動基準的舊賣出資料；`current_value`、metadata、ledger、realized gain 和歷史快照不得變。
 
 Liquibase `v1.131.0-ledger-backed-tw-stock-cost.sql` 實作同一個「全買入」候選條件，使用 PostgreSQL numeric 全精度 `GREATEST`/`SUM`、最後 `round(…,2)`，結果先以 `NUMERIC(20,2)` 上限 gate，再更新已變更 row；已套用該 changeset 的環境由 `v1.134.0-ledger-stock-cost-aggregate-rounding.sql` 對同一候選重算 aggregate：每個 holding 個別以 `SnapshotAggregateCalculator` 的 TWD/美元匯率規則 HALF_UP 至整數後才 sum，不能總和後才 round。PostgreSQL integration test 必以同一 fixture 比對 Java calculator、migration cost 和 aggregate，含小數 per-row rounding。這些 migration 是 idempotent data correction；但新增的 fill projection table 是 schema migration，`db/schema.sql` 必再生。
@@ -13357,3 +13359,17 @@ SRPP caller新增獨立US verifier／scope採用，讀同owner直接L0、本輪�
 修復發生於 SRPP consumer 的郵件檢核、實際時鐘進度收據及 Claude 入口；資產端服務只承接最終 manifest bytes 與 insert-only 註冊身分，不新增 API／schema／資料表或金融計算。model_inputs.json、正式 target policy document、formula manifest 及 golden 金融輸出與 calculator hashes逐值不變；兩份 golden 僅更換 policy bundle metadata。以既有 Python authority checker／golden generator 與 Ruby registration generator產製及檢核，Java authority gate保持原樣。
 
 正式部署順序為兩repo feature commit→main no-ff merge→push／remote-ref核對→已合併SQL登錄與四欄完整readback→乾淨asset main僅business-services rebuild／recreate→執行JAR manifest/model/Swagger/SQL全文比對→SRPP主機9090及精確hash report-calculations診斷。診斷HTTP與正式盤中採用分開；來源或時窗不足不能宣稱正式採用。保留原服務設定、歷史registry及其他容器；不觸發報告、producer、通知或交易。
+
+### Task 544：富邦庫存成本與 Redis 鏡像（Requirements 90／154／179）
+
+本節優先覆寫富邦 inventory 在 §4.5 及 Task 436／138 中保留人工成本、首次零成本與消費 pending projection 的描述。`FubonInventoryWriter` 在既有 owner-latest 鎖與交易內，以已驗證 `costPrice.multiply(shares).setScale(2, HALF_UP)` 寫入既有 `investment_cost`，以同一 `checkedMoney` 精度界線拒絕溢位；均價原始精度不先 round，aggregate 同交易更新。新舊 row、同股數均價修正與重複同步均直接採來源總成本；不加 DB 欄位／migration，成本均價在既有畫面由總成本除股數顯示。保留交易日期、順序與配息 metadata 的既有規則。
+
+`FubonTradeWriter` 的 native insert 與帳本去重保留，但移除新增成本 projection 的路徑；`FubonInventoryWriter` 移除 `consumePendingBuys` 路徑。`broker_filled_trade_cost_projection` 的既有資料、狀態與 generic projector 不變，富邦舊 pending 凍結、不再消費；新成交先到、庫存先到或成交日後補匯均不影響已同步成本。沒有新增 status、來源或 broker 呼叫，無交易副作用。
+
+新增小範圍 `HoldingCostCachePort` 與 Redis adapter，只服務富邦台股 TWD 成本鏡像。DTO 使用不可變 record，含 `schemaVersion=1`、`ownerId`、`snapshotId`、`snapshotDate` 與全部符合 scope 的 entries；entry 欄位固定為 `holdingId,brokerId,stockCode,market,currency,shares,investmentCost`，依 `(brokerId,stockCode,holdingId)` 排序。Decimal 以 `stripTrailingZeros().toPlainString()` 正規化，零固定 `0`；使用固定上述欄位順序、無空白 UTF-8 JSON 的 SHA-256（小寫十六進位）作內容身份。key 精確為 `fubon:holding-cost:{ownerId}:{snapshotId}:{sha256}`，值為同一 canonical JSON、TTL=36 小時。SHA 不含行情／全帳戶資料／證券帳號／憑證；key 雖不含證券帳號，仍是 private owner-scoped 金融資料，不對 global/no-tenant 行情回傳。
+
+writer 在 `saveAndFlush` 後、交易仍有效時捕捉已分配 holdingId 的不可變 DTO，不讓提交後 callback 持有 entity 或 lazy collection。由交易提交完成後的 orchestration 或 transaction synchronization 發佈同一 DTO；DB commit failure／rollback／跨日拒絕時零 Redis 寫入。同步服務不得在 DB 交易內或重新向券商查詢後才構造 cache。提交後 cache 寫失敗回覆具名 `CACHE_UPDATE_FAILED`（reason=`DB_COMMITTED_CACHE_UPDATE_FAILED`），保留 replacedCount／snapshotId，DB 不 rollback；下次正常或 manual 同步可修復。這只延伸既有 internal sync 結果，不新增 API／BFF／9090 路由或 Swagger 身份。
+
+`AssetService.toDetailResponse` 從已載入 DB entity 建立相同內容身份，再透過 port 純讀唯一 key；adapter 嚴格驗 root／entry schema、owner／snapshot／日期、排序／完整集合與所有數值 identity，與 DB canonical bytes 相同才返回成本。命中時 snapshot detail 的富邦 `investmentCost` 使用鏡像值（必等於 DB），總成本／損益／其餘欄位仍來自同次 DB 內容。cache 缺失、格式錯、Redis 失敗或手動 save 後內容不同，直接回 DB，不補寫 Redis、不外呼、不讀其他 key。新舊 callback 以內容定址無互相覆寫問題；手動成本／股數改變、日期 roll、row replace、另一 owner 或同股多券商都不會命中舊內容。這是現有成本的 cache 投影，不是另一個持久化成本權威。
+
+Requirement 179 的手動 save 路徑維持現況，可改合法 shares／investmentCost／transactionDate；下一次成功 inventory 以券商股數與成本覆寫前兩者並保留交易日期。驗證涵蓋 DB 原子性、source-owned 最新鎖競爭、cache 純讀 fallback／跨 owner／manual mismatch／逆序發佈及成交不重複累加；不改 generic price cache、歷史 radar snapshot、immutable report package、SRPP 規則或 consumer 契約。

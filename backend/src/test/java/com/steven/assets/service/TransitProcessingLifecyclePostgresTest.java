@@ -80,6 +80,7 @@ class TransitProcessingLifecyclePostgresTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
+    @MockitoBean com.steven.assets.service.HoldingCostCachePort holdingCostCache;
     @MockitoBean MarketDataService marketDataService;
     @MockitoBean StockMasterService stockMasterService;
     @MockitoBean FundNavService fundNavService;

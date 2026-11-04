@@ -44,6 +44,7 @@ public class AssetService {
     private final AssetSnapshotMutationLock snapshotMutationLock;
     private final SnapshotAggregateCalculator aggregateCalculator;
     private final SnapshotStockScopeOwnershipPort stockScopeOwnershipPort;
+    private final HoldingCostCachePort holdingCostCache;
 
     /**
      * 算 FundHolding currentValue：若 units 非空 → 嘗試 NAV(basedate) × FX(basedate) 自動算
@@ -1088,12 +1089,22 @@ public class AssetService {
         BigDecimal snapshotUsdRate = s.getUsdExchangeRate() != null
                 ? s.getUsdExchangeRate() : BigDecimal.ONE;
 
+        java.util.Map<Long, BigDecimal> mirroredCosts = java.util.Map.of();
+        try {
+            if (holdingCostCache != null) mirroredCosts = holdingCostCache.readMatching(HoldingCostSnapshot.capture(s));
+        } catch (RuntimeException unavailable) {
+            // Missing/invalid cache is never authoritative over this already-loaded database snapshot.
+            log.debug("Holding cost mirror unavailable for snapshot={}", s.getId());
+        }
+        final java.util.Map<Long, BigDecimal> costs = mirroredCosts == null ? java.util.Map.of() : mirroredCosts;
         List<AssetSnapshotDto.StockResponse> stocks = s.getStocks().stream()
                 .sorted(java.util.Comparator.comparing(
                     st -> st.getDisplayOrder() != null ? st.getDisplayOrder() : Integer.MAX_VALUE))
                 .map(st -> {
                     // investmentCostTwd：USD 幣別須乘有效匯率換算台幣，供匯總顯示用（與 recalcTotals 同一 helper）
                     BigDecimal rawCost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;
+                    BigDecimal mirrored = st.getId() == null ? null : costs.get(st.getId());
+                    if (HoldingCostSnapshot.inScope(st) && mirrored != null && mirrored.compareTo(rawCost) == 0) rawCost = mirrored;
                     BigDecimal investmentCostTwd = stockInvestmentCostTwd(st, snapshotUsdRate);
                     // 損益 / 損益率一律以「台幣現值 − 台幣成本」計算；美股 rawCost 為美元，不可直接相減
                     BigDecimal cvTwd = st.getCurrentValue() != null ? st.getCurrentValue() : BigDecimal.ZERO;
