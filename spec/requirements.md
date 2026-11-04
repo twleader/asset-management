@@ -6509,3 +6509,12 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 資產端唯一來源為 `/private/tmp/srpp-claude-appendix-recovery-20261104` 經驗證並凍結的最終來源。只同步 manifest 與既有 generator 的 registry SQL／golden 身分；model、formal targets、formula manifest、全部金融 expected 及 calculator hashes 均保持不變。不得改 Java、API、Swagger、producer 或權限。
 - 兩專案先 feature commit、main no-ff merge、push 與 remote-ref 讀回，再從已合併 SQL 執行 insert-only registry；舊 row 全文保持。隨後只從乾淨 asset main 及原正式設定 rebuild／recreate business-services，讀回 JAR 與 registry 精確身分及來源 bytes，其他服務保持。
 - 從 SRPP 主機保存最終 hash 的 9090 實際唯讀 HTTP 收據，包含 report-calculations 的診斷回應與契約／身分驗證。時窗外或缺當輪正式證據時僅算診斷，正式日報採用記 NOT_YET_EXECUTED；不得觸發 producer、補做早盤、建立／更改草稿、寄信或交易。
+
+
+### Requirements 187／193 補充：Claude 精簡內嵌傳輸與未完成附錄規則的 authority 發布（Task 545）
+
+使用者要求修正 2026-11-04 Claude 早盤與午盤都沒有附錄、午盤核心只有純文字的問題，接著完整發布規則包。根因是 Claude 的 Gmail 工具必須把整份 HTML 內嵌在單次 create_draft，體積直接決定耗時與上下文。SRPP 僅限 renderer 新增 Claude 預設的精簡 HTML（全部文字節點、表格結構與純文字不變；省略 td 行內樣式，th 保留檢核所需的背景與深色字但去掉 border／padding，表格以 border／cellpadding 屬性呈現，同一個郵件檢核）及共用規格的傳輸、未完成附錄與 Gmail 轉址說明；核心建立即凍結、既有日曆／L0／來源／時限與投資規則維持。
+
+- 資產端唯一來源為 `/Users/steven/Project/SRPP/.claude/worktrees/claude-appendix-report-issue-9efbee`（SRPP commit `2662c0570d66cc73d61af823268b043b0711e4b3`，bundle `a157b7676e8efdd4f42c65aec4e8cfe03470f9942c4de85404d6c094d3eaa6c7`）經驗證並凍結的最終來源。只同步 manifest 與既有 generator 的 registry SQL／golden 身分；model、formal targets、formula manifest、全部金融 expected 及 calculator hashes 均保持不變。不得改 Java、API、Swagger、producer 或權限。
+- 兩專案先 feature commit、main no-ff merge、push 與 remote-ref 讀回，再從已合併 SQL 執行 insert-only registry；舊 row 全文保持。隨後只從乾淨 asset main 及原正式設定 rebuild／recreate business-services，讀回 JAR 與 registry 精確身分及來源 bytes，其他服務保持。
+- 從 SRPP 主機保存最終 hash 的 9090 實際唯讀 HTTP 收據，包含 report-calculations 的診斷回應與契約／身分驗證。時窗外或缺當輪正式證據時僅算診斷，正式日報採用記 NOT_YET_EXECUTED；不得觸發 producer、補做報告、建立／更改草稿、寄信或交易。
