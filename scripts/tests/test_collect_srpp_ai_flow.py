@@ -651,6 +651,22 @@ class TerminalFailureTests(Fixture):
         self.assertEqual(["task-complete-failure"], [event["stepId"] for event in second[0]["events"] if event["stepId"] == "task-complete-failure"])
         self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
 
+    def test_today_priority_reconciles_from_current_store_without_normal_discovery(self):
+        created = int(dt.datetime.combine(TODAY, dt.time(9, 5), c.TAIPEI).timestamp() * 1000)
+        record, state_path, state, trace, _ = self.priority_record("priority-current-store", created)
+        self.legacy_ack(state)
+        self.seed_priority_sqlite([(record, trace, created)])
+        root = self.home / ".codex/sqlite"
+        (root / "codex-dev.db").rename(root / "codex.db")
+        frozen_events = c.canonical(state["turns"][TURN]["events"])
+        envelopes, selected = self.collector.collect_terminal_failure_priority(c.ReadBudget(runs=25))
+        self.assertEqual(record["thread"], selected)
+        self.assertEqual(["task-complete-failure"], [event["stepId"] for event in envelopes[0]["events"] if event["stepId"] == "task-complete-failure"])
+        updated = c.strict_json(state_path.read_bytes())
+        self.assertEqual(frozen_events, c.canonical([event for event in updated["turns"][TURN]["events"] if event["stepId"] != "task-complete-failure"]))
+        self.assertFalse((self.store.root / "sources/codex-discovery.json").exists())
+        self.assertFalse((root / "codex-dev.db").exists())
+
     def test_priority_state_budget_exhaustion_keeps_frozen_state_and_emits_nothing(self):
         created = int(dt.datetime.combine(TODAY, dt.time(9, 5), c.TAIPEI).timestamp() * 1000)
         record, state_path, _, trace, _ = self.priority_record("priority-budget", created)
@@ -1228,6 +1244,163 @@ class MarketSessionDiscoveryTests(Fixture):
                 threads.execute("INSERT INTO threads VALUES(?,?)", (thread, str(path)))
                 records.append((thread, automation, stamp, path))
         return records
+
+    def current_store(self, records, *, move=False):
+        root = self.home / ".codex"
+        path = root / "sqlite/codex.db"
+        with contextlib.closing(sqlite3.connect(path)) as app:
+            app.execute("CREATE TABLE automation_runs(thread_id TEXT PRIMARY KEY,automation_id TEXT,created_at INTEGER)")
+            app.executemany("INSERT INTO automation_runs VALUES(?,?,?)", [record[:3] for record in records])
+            app.commit()
+        if move:
+            with contextlib.closing(sqlite3.connect(root / "sqlite/codex-dev.db")) as app:
+                app.executemany("DELETE FROM automation_runs WHERE thread_id=?", [(record[0],) for record in records])
+                app.commit()
+        return path
+
+    def test_current_app_store_alone_discovers_without_creating_legacy_store(self):
+        sources = self.seed_sources(3)
+        root = self.home / ".codex/sqlite"
+        current = root / "codex.db"
+        (root / "codex-dev.db").rename(current)
+        before = current.read_bytes()
+        records = self.collector.codex_runs(dt.date(2026, 10, 8))
+        self.assertEqual([source[0] for source in sources], [record["thread"] for record in records])
+        self.assertEqual(before, current.read_bytes())
+        self.assertFalse((root / "codex-dev.db").exists())
+
+    def test_legacy_app_store_alone_does_not_create_current_store(self):
+        sources = self.seed_sources(3)
+        self.assertEqual([source[0] for source in sources], [record["thread"] for record in self.collector.codex_runs(dt.date(2026, 10, 8))])
+        self.assertFalse((self.home / ".codex/sqlite/codex.db").exists())
+
+    def test_two_stores_keep_separate_dates_in_the_same_90_day_window(self):
+        sources = self.seed_sources(2)
+        self.current_store(sources[:1], move=True)
+        previous = int(dt.datetime.combine(dt.date(2026, 10, 7), dt.time(12), c.TAIPEI).timestamp() * 1000)
+        with contextlib.closing(sqlite3.connect(self.home / ".codex/sqlite/codex-dev.db")) as app:
+            app.execute("UPDATE automation_runs SET created_at=?", (previous,))
+            app.commit()
+        self.assertEqual([sources[0][0]], [record["thread"] for record in self.collector.codex_runs(dt.date(2026, 10, 8))])
+        self.assertEqual([sources[1][0]], [record["thread"] for record in self.collector.codex_runs(dt.date(2026, 10, 7))])
+        self.assertEqual([source[0] for source in sources], [record["thread"] for record in self.collector.codex_runs(None)])
+
+    def test_two_stores_have_one_global_page_cursor_and_only_wrap_together(self):
+        sources = self.seed_sources(63)
+        self.current_store(sources[::2], move=True)
+        paths = [self.home / ".codex/sqlite" / name for name in ("codex.db", "codex-dev.db")]
+        before = [path.read_bytes() for path in paths]
+        for expected in (sources[:25], sources[25:50], sources[50:], sources[:25]):
+            self.assertEqual([source[0] for source in expected], self.collect_threads()[0])
+        self.assertEqual(before, [path.read_bytes() for path in paths])
+        # The independent priority page also returns one global set of at most 25.
+        self.store.today = dt.date(2026, 10, 8)
+        budget = c.ReadBudget()
+        priority = self.collector.terminal_failure_priority_records(budget, budget.start + 2.5)
+        self.assertEqual([source[0] for source in sources[:25]], [record["thread"] for record in priority])
+
+    def test_identical_cross_store_rows_deduplicate_and_keep_frozen_event_identity(self):
+        sources = self.seed_sources(3)
+        record = self.collector.codex_runs(dt.date(2026, 10, 8))[0]
+        before = self.collector.scan_codex(record, c.ReadBudget())[0]
+        self.current_store(sources)
+        records = self.collector.codex_runs(dt.date(2026, 10, 8))
+        self.assertEqual(3, len(records))
+        after = self.collector.scan_codex(records[0], c.ReadBudget())[0]
+        self.assertEqual(before["run"], after["run"])
+        self.assertEqual([event["eventId"] for event in before["events"]], [event["eventId"] for event in after["events"]])
+
+    def test_identity_conflicts_outside_page_date_or_allowlist_fail_closed_without_cursors(self):
+        sources = self.seed_sources(3)
+        current = self.current_store([])
+        self.store.today = dt.date(2026, 10, 8)
+        for automation, created in ((sources[0][1], sources[0][2] - 60_000),
+                                    (sources[0][1], sources[0][2] - 86_400_000),
+                                    ("not-an-observed-task", sources[0][2])):
+            with self.subTest(automation=automation, created=created):
+                with contextlib.closing(sqlite3.connect(current)) as app:
+                    app.execute("DELETE FROM automation_runs")
+                    app.execute("INSERT INTO automation_runs VALUES(?,?,?)", (sources[0][0], automation, created))
+                    app.commit()
+                self.assertEqual([], self.collector.codex_runs(dt.date(2026, 10, 8), max_runs=1))
+                budget = c.ReadBudget()
+                self.assertEqual([], self.collector.terminal_failure_priority_records(budget, budget.start + 2.5))
+                result = self.collector.collect(consumer="Codex")
+                self.assertEqual([], result["runs"])
+                self.assertEqual(0, result["queuedEvents"])
+                self.assertIn("CODEX_SOURCE_IDENTITY_CONFLICT", result["errors"])
+                self.assertFalse((self.store.root / "sources/codex-discovery.json").exists())
+                self.assertFalse((self.store.root / "sources/terminal-failure-priority.json").exists())
+                self.assertEqual([], list((self.store.root / "pending").glob("*.json")))
+
+    def test_invalid_current_store_never_falls_back_to_valid_legacy(self):
+        self.seed_sources(1)
+        current = self.home / ".codex/sqlite/codex.db"
+        cases = ("malformed", "schema", "symlink", "dangling-symlink", "directory")
+        for case in cases:
+            with self.subTest(case=case):
+                if case == "malformed":
+                    current.write_bytes(b"not a sqlite database")
+                elif case == "schema":
+                    with contextlib.closing(sqlite3.connect(current)) as app:
+                        app.execute("CREATE TABLE unrelated(id TEXT)")
+                elif case == "symlink":
+                    current.symlink_to(current.with_name("codex-dev.db"))
+                elif case == "dangling-symlink":
+                    current.symlink_to(current.with_name("missing.db"))
+                else:
+                    current.mkdir()
+                self.assertEqual([], self.collector.codex_runs(dt.date(2026, 10, 8)))
+                budget = c.ReadBudget()
+                self.assertEqual([], self.collector.terminal_failure_priority_records(budget, budget.start + 2.5))
+                if case == "directory":
+                    current.rmdir()
+                else:
+                    current.unlink()
+
+    def test_invalid_attached_legacy_store_never_falls_back_to_valid_current(self):
+        sources = self.seed_sources(1)
+        self.current_store(sources)
+        legacy = self.home / ".codex/sqlite/codex-dev.db"
+        legacy.write_bytes(b"not a sqlite database")
+        self.assertEqual([], self.collector.codex_runs(dt.date(2026, 10, 8)))
+        budget = c.ReadBudget()
+        self.assertEqual([], self.collector.terminal_failure_priority_records(budget, budget.start + 2.5))
+
+    def test_both_app_stores_are_readonly_including_the_attachment(self):
+        sources = self.seed_sources(1)
+        self.current_store(sources)
+        with c.codex_automation_sources(self.home / ".codex") as (app, schemas):
+            self.assertEqual(1, app.execute("PRAGMA query_only").fetchone()[0])
+            self.assertEqual(2, len(schemas))
+            for query_only in (True, False):
+                if not query_only:
+                    app.execute("PRAGMA query_only=OFF")
+                for schema in schemas:
+                    with self.assertRaises(sqlite3.OperationalError):
+                        app.execute("DELETE FROM " + schema + ".automation_runs")
+
+    def test_missing_app_stores_do_not_create_a_database_or_sqlite_directory(self):
+        root = self.home / ".codex/sqlite"
+        self.assertFalse(root.exists())
+        self.assertEqual([], self.collector.codex_runs(dt.date(2026, 10, 8)))
+        self.assertIn("CODEX_SOURCE_UNAVAILABLE", self.collector.errors)
+        self.assertFalse(root.exists())
+
+    def test_current_store_dry_run_does_not_write_state_or_sources(self):
+        sources = self.seed_sources(3)
+        self.current_store(sources, move=True)
+        paths = [self.home / ".codex/sqlite" / name for name in ("codex.db", "codex-dev.db")]
+        before = [path.read_bytes() for path in paths]
+        state = self.home / "dry-run-state"
+        store = c.Store(state, TODAY, dry_run=True)
+        try:
+            result = c.Collector(self.home, store).collect(day=dt.date(2026, 10, 8), consumer="Codex")
+            self.assertEqual(3, len(result["runs"]))
+            self.assertFalse(state.exists())
+            self.assertEqual(before, [path.read_bytes() for path in paths])
+        finally:
+            store.close()
 
     def collect_threads(self, collector=None, budget=None):
         collector = collector or self.collector
