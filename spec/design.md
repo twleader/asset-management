@@ -13373,3 +13373,10 @@ writer 在 `saveAndFlush` 後、交易仍有效時捕捉已分配 holdingId 的�
 `AssetService.toDetailResponse` 從已載入 DB entity 建立相同內容身份，再透過 port 純讀唯一 key；adapter 嚴格驗 root／entry schema、owner／snapshot／日期、排序／完整集合與所有數值 identity，與 DB canonical bytes 相同才返回成本。命中時 snapshot detail 的富邦 `investmentCost` 使用鏡像值（必等於 DB），總成本／損益／其餘欄位仍來自同次 DB 內容。cache 缺失、格式錯、Redis 失敗或手動 save 後內容不同，直接回 DB，不補寫 Redis、不外呼、不讀其他 key。新舊 callback 以內容定址無互相覆寫問題；手動成本／股數改變、日期 roll、row replace、另一 owner 或同股多券商都不會命中舊內容。這是現有成本的 cache 投影，不是另一個持久化成本權威。
 
 Requirement 179 的手動 save 路徑維持現況，可改合法 shares／investmentCost／transactionDate；下一次成功 inventory 以券商股數與成本覆寫前兩者並保留交易日期。驗證涵蓋 DB 原子性、source-owned 最新鎖競爭、cache 純讀 fallback／跨 owner／manual mismatch／逆序發佈及成交不重複累加；不改 generic price cache、歷史 radar snapshot、immutable report package、SRPP 規則或 consumer 契約。
+
+
+### Task 545：Claude 精簡內嵌傳輸與未完成附錄規則的 authority 身分
+
+修復發生於 SRPP consumer 的郵件 renderer 輸出格式、共用規格及兩個 Claude 入口；資產端服務只承接最終 manifest bytes 與 insert-only 註冊身分，不新增 API／schema／資料表或金融計算。model_inputs.json、正式 target policy document、formula manifest 及 golden 金融輸出與 calculator hashes 逐值不變；兩份 golden 僅更換 policy bundle metadata。以既有 Python authority checker／golden generator 與 Ruby registration generator 產製及檢核。
+
+正式部署順序為兩 repo feature commit→main no-ff merge→push／remote-ref 核對→已合併 SQL 登錄與四欄完整 readback→乾淨 asset main 僅 business-services rebuild／recreate（重啟當下唯讀證明所有啟動入口 no-op，含 analysis／index／各匯出排程今日已完成／配息回補停用／台美備份／snapshot／在途款，並避開執行中的匯出；部署後以有界健康與安全 GET 觀察，BFF 不自動重啟）→執行 JAR manifest／model／Swagger／SQL 全文比對→SRPP 主機 9090 及精確 hash report-calculations 診斷。診斷 HTTP 與正式盤中採用分開；來源或時窗不足不能宣稱正式採用。保留原服務設定、歷史 registry 及其他容器；不觸發報告、producer、通知或交易。
