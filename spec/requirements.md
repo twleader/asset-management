@@ -6527,3 +6527,20 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 本次資產端只同步最終 model／manifest 原始 bytes，以原 generator 重產兩份 report golden 與 insert-only SQL，並以來源 authority gate 與既有 Java 測試查核。正式 targets、formula manifest、現有 API／schema／Swagger 及未涉及的金融輸出維持；新調節由 SRPP 報告端確定性工具執行並保存 base／delta／final，既有不可變計算包維持原值，不假稱既有 API 已有新 scope。不得以變更 expected 掩蓋不相干差異。
 - 雙專案 feature commit、main no-ff merge、push 並讀回遠端；insert-only registry 逐欄讀回並確認舊 rows 未改寫；從乾淨 main 與原正式設定僅 rebuild／recreate business-services，核對 JAR authority bytes、環境／掛載及其他容器。部署前須唯讀證明啟動入口不會補寄信或外抓；原內部 producer 自然發布衍生包可觀察，不手動觸發。
 - 登錄後立即以精確新 hash 從 SRPP 主機讀取 report-calculations 並保留實際 HTTP；部署後再獨立驗證成功回應。503 CONTEXT_NOT_READY 只代表尚未接受該 hash，健康或日曆不能替代。正式當輪採用另受合法交易日、時窗、完整來源與直接 L0 約束；不足時記 NOT_YET_EXECUTED，不補做報告、不建草稿、不寄信、不下單。
+
+
+#### Task 548：年度配息統計（延伸 Requirement 94）
+
+**User Story:** 作為登入使用者，我希望在資產管理選單開啟「年度配息統計」，按各次現金除息事件與當時持股估算可領的稅前股息。
+
+- [ ] 新增 `/annual-dividends` 頁與本頁專屬 `GET /api/bff/annual-dividends/summary?year=YYYY&market=...`，後者只呼叫 `GET /api/annual-dividends`。year 未帶預設台北當年，允許 1900–2100；market 未帶或空字串代表全部，非空值須為既有 market_type.code。只讀登入 owner 的快照與股票交易，不接受 caller owner/email，不經公開 9090、不改 SRPP 或背景抓取。
+- [ ] 年度為現金除息日曆年，不使用盈餘歸屬 year 當除息年；發放日僅另列，不以已過發放日推稱入帳。查已保存 ACTIVE 股利事件，以 `(market, stockCode, exDividendDate)` 為同次現金事件；完全相同現金金額去重，同日不同金額視為衝突、不擅選或相加。無除息日的年度彙總、只有配股、未知金額、取消事件不計入現金總額。缺日期/金額的可見缺口須呈現，不能以零掩蓋。
+- [ ] 股票宇宙為 owner 截至今日快照持有過及截至今日股票交易有過的 `(market, code)` 聯集，跨券商同股數相加；不只看最新持股，以保留已賣出股票。基金不包含。台股股利以 TWD、美股以 USD 分列；其他市場保留明細、幣別與金額未知，不從持股成本幣別推論或混合原幣加總。
+- [ ] 每次事件截止日為除息日前一日；歷史事件（除息日≤台北今日）取不晚於截止日的最新 owner 快照，合計該股股數後，加上 `(快照日, 截止日]` 股票交易買股、減去賣股。快照同日交易不重加、除息日交易不納入；股數單位是股而非張，保留零股與小數。無基準快照、缺股數、未知交易方向、負股數或中途負庫存時數量/金額為 null 並給原因；不得拿較晚快照/現持股回填歷史，也不假設 ledger 從零完整。
+- [ ] 未來已公告事件取截至台北今日最新快照，再計入其後至今日已記錄股票交易，明標「維持目前持股預估」；不推算未公告配息、不把去年度股利複製到今年。歷史重建明標「歷史持股推估」並揭露快照日及交易筆數，手動/同步 ledger 並無完整性證明，所有金額皆估算，不聲稱股東名簿或券商已確認。遇重建區間存在配股/拆併股不可由現有 ledger 證實時，揭露未校正公司行動風險，不自動產生額外股數。
+- [ ] 稅前預估＝股數×每股現金股利，以 BigDecimal 計算，逐事件 HALF_UP 至原幣小數2位再加總；不扣稅、補充保費、匯費或匯率換算。分幣別顯示歷史事件估算、未來事件估算及合計，另列無法計算數與缺股利資料股票數；有缺口時總額明稱「可計算項目小計」。零股數可計算為0但明細可保留。
+- [ ] 本頁顯示年度、市場、重新載入、幣別摘要、事件表與資料缺口/計算依據說明；Loading、錯誤與空資料不同，請求切換防止舊回應蓋掉新年度。前端只 render BFF 結果與格式化，無金融運算/跨頁 BFF 呼叫，唯讀 GET 不刷新/投影/同步股利或寫任何衍生資料。
+
+功能權限整合：DataInitializer.seedAppFeatures 以既有 insert-if-missing 慣例加入 `/annual-dividends`（資產管理／年度配息統計，enabledForUser=true）；保留其他功能設定，不改既有角色權限。新路由沿現有登入/功能可見性守門。
+
+選單固定放在「交易紀錄」與「資產配置建議」之間（使用者指定）；權限主檔排序亦須一致。
