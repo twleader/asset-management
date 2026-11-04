@@ -13351,3 +13351,9 @@ US觀察移轉採離線operator工具：輸入現有原始ledger與同軌anchor 
 SRPP caller新增獨立US verifier／scope採用，讀同owner直接L0、本輪完整宇宙、精確identity與來源內容hash；有效BLOCKED持續有效。US本機core guard停寫，僅使用已驗證DB包中的stateBefore進行同來源唯讀缺口計算；缺狀態不能恢復本機獨立帳。原入口±300秒、日曆no-op、60分鐘、草稿／郵件／交易權限不變。Python修正只限NY日期與官方regular close判斷、缺狀態與單一寫入者，不改Accepted門檻。
 
 既有22-00 automation證據片段必須由已合併的us-22-00.EVIDENCE原文同步，使用App automation工具，保存舊／新prompt hash與讀回比對；只改此片段，不改rrule/status/model/停止/權限。原prompt內「執行core guard並保存US帳」亦需被同DB狀態唯讀描述取代；驗證不得殘留能造成US雙寫的入口。
+
+### Task 543：Claude 附錄續作與 Gmail 數字檢核修復的 authority 身分
+
+修復發生於 SRPP consumer 的郵件檢核、實際時鐘進度收據及 Claude 入口；資產端服務只承接最終 manifest bytes 與 insert-only 註冊身分，不新增 API／schema／資料表或金融計算。model_inputs.json、正式 target policy document、formula manifest 及 golden 金融輸出與 calculator hashes逐值不變；兩份 golden 僅更換 policy bundle metadata。以既有 Python authority checker／golden generator 與 Ruby registration generator產製及檢核，Java authority gate保持原樣。
+
+正式部署順序為兩repo feature commit→main no-ff merge→push／remote-ref核對→已合併SQL登錄與四欄完整readback→乾淨asset main僅business-services rebuild／recreate→執行JAR manifest/model/Swagger/SQL全文比對→SRPP主機9090及精確hash report-calculations診斷。診斷HTTP與正式盤中採用分開；來源或時窗不足不能宣稱正式採用。保留原服務設定、歷史registry及其他容器；不觸發報告、producer、通知或交易。

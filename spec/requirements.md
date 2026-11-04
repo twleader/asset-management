@@ -6490,3 +6490,11 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 實際22-00 App prompt的美股證據片段須同步部署與readback；其原季節／±300秒入口、日曆no-op、停止時間、Gmail與交易權限維持原文。原本機US寫帳指令改成API優先與同DB狀態唯讀後備，不能只改文件而留舊prompt。
 - 例行資料庫備份沿用SRPP衍生包不匯出資料的邊界：另排除 `public.srpp_us_report_package` 與依賴它的 `public.srpp_us_watch_transition` 資料，仍保留全部schema及canonical `srpp_us_watch_import`／`srpp_us_watch_state` 資料。既有四表排除不變；不得新增完整凍結財務原文上傳，也不得讓還原因transition指向已排除package而外鍵失敗。
 - 發布依兩專案 feature commit→main no-ff merge／push／remote readback→insert-only registry→乾淨main rebuild／recreate→SRPP實機精確hash讀回。HTTP原文與獨立驗證收據只存私人位置；公開repo僅去識別摘要。診斷不等於正式排程，時窗不符明列 NOT_YET_EXECUTED，不偽造時鐘／啟動producer／重跑報告。
+
+### Requirements 187／193 補充：Claude 附錄續作與郵件檢核修復的 authority 發布（Task 543）
+
+使用者要求修正 2026-11-04 Claude 早盤在第27分鐘以時間預算提早停止附錄，以及 Gmail 轉址追蹤參數被誤算為報告數字的問題，接著完整發布規則包。SRPP 僅限已知 Gmail 轉址包裝正規化、真正數字差異仍拒絕，並以實際時鐘收據協助原60分鐘內續作附錄；核心建立即凍結、既有日曆／L0／來源／時限與投資規則維持。發布前另補齊既有staged檢查漏列的精確美股schema檔案，不放寬來源選擇或驗證。
+
+- 資產端唯一來源為 `/private/tmp/srpp-claude-appendix-recovery-20261104` 經驗證並凍結的最終來源。只同步 manifest 與既有 generator 的 registry SQL／golden 身分；model、formal targets、formula manifest、全部金融 expected 及 calculator hashes 均保持不變。不得改 Java、API、Swagger、producer 或權限。
+- 兩專案先 feature commit、main no-ff merge、push 與 remote-ref 讀回，再從已合併 SQL 執行 insert-only registry；舊 row 全文保持。隨後只從乾淨 asset main 及原正式設定 rebuild／recreate business-services，讀回 JAR 與 registry 精確身分及來源 bytes，其他服務保持。
+- 從 SRPP 主機保存最終 hash 的 9090 實際唯讀 HTTP 收據，包含 report-calculations 的診斷回應與契約／身分驗證。時窗外或缺當輪正式證據時僅算診斷，正式日報採用記 NOT_YET_EXECUTED；不得觸發 producer、補做早盤、建立／更改草稿、寄信或交易。
