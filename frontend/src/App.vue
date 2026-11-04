@@ -253,6 +253,7 @@ const rawMenuItems = [
       { path: '/history', title: '歷年資產管理', icon: 'TrendCharts' },
       { path: '/realized-gains', title: '已實現損益', icon: 'Money' },
       { path: '/transactions', title: '交易紀錄', icon: 'Tickets' },
+      { path: '/annual-dividends', title: '年度配息統計', icon: 'Coin' },
       { path: '/asset-allocation-advice', title: '資產配置建議', icon: 'Compass' },
       { path: '/payment-accounts', title: '自動代繳', icon: 'Tickets' }
     ]

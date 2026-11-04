@@ -57,6 +57,12 @@ const router = createRouter({
       meta: { title: '交易紀錄', icon: 'Tickets' }
     },
     {
+      path: '/annual-dividends',
+      name: 'AnnualDividends',
+      component: () => import('@/views/AnnualDividendsView.vue'),
+      meta: { title: '年度配息統計', icon: 'Coin' }
+    },
+    {
       path: '/trading-calendar',
       name: 'TradingCalendar',
       component: () => import('@/views/TradingCalendarView.vue'),

@@ -101,8 +101,9 @@ public class DataInitializer implements ApplicationRunner {
             new FeatureSeed("資產管理", "/history", "歷年資產管理", 1),
             new FeatureSeed("資產管理", "/realized-gains", "已實現損益", 2),
             new FeatureSeed("資產管理", "/transactions", "交易紀錄", 3),
-            new FeatureSeed("資產管理", "/asset-allocation-advice", "資產配置建議", 4),
-            new FeatureSeed("資產管理", "/payment-accounts", "自動代繳", 5),
+            new FeatureSeed("資產管理", "/annual-dividends", "年度配息統計", 4),
+            new FeatureSeed("資產管理", "/asset-allocation-advice", "資產配置建議", 5),
+            new FeatureSeed("資產管理", "/payment-accounts", "自動代繳", 6),
             new FeatureSeed("股市綜合分析", "/gdp-twse", "股市大盤查詢", 6),
             new FeatureSeed("股市綜合分析", "/performance-comparison", "績效比較", 7),
             new FeatureSeed("股市綜合分析", "/today-market-analysis", "今日股市分析", 8),
@@ -137,6 +138,15 @@ public class DataInitializer implements ApplicationRunner {
                 log.info("初始化功能項目: {}", s.displayName());
             }
         }
+        // Shift only the two known previous defaults; never reset role visibility or custom ordering.
+        moveAnnualDividendDefaultOrder("/asset-allocation-advice", 4, 5);
+        moveAnnualDividendDefaultOrder("/payment-accounts", 5, 6);
+    }
+
+    private void moveAnnualDividendDefaultOrder(String code, int previous, int current) {
+        appFeatureRepo.findByCode(code).filter(feature -> "資產管理".equals(feature.getMenuGroup())
+                        && Integer.valueOf(previous).equals(feature.getSortOrder()))
+                .ifPresent(feature -> { feature.setSortOrder(current); appFeatureRepo.save(feature); });
     }
 
     private void seedStockStyles() {

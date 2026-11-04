@@ -226,6 +226,18 @@ export const bffApi = {
     browseGdriveExportDir: (subpath = '') => api.get('/bff/transaction/export/browse-gdrive', { params: { subpath }, skipErrorToast: true })
   },
 
+  // AnnualDividends（年度配息統計）：只讀本頁 summary，市場與年度由後端套用。
+  annualDividends: {
+    summary: ({ year, market, signal } = {}) => api.get('/bff/annual-dividends/summary', {
+      params: {
+        ...(year == null ? {} : { year }),
+        ...(market ? { market } : {})
+      },
+      signal,
+      skipErrorToast: true
+    })
+  },
+
   // CommodityPrice（公開資訊 → 油價金價）
   commodityPrice: {
     // 開頁載入：BFF 先 refresh 再回近十年三序列，故 timeout 放寬

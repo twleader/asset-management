@@ -13387,3 +13387,20 @@ Requirement 179 的手動 save 路徑維持現況，可改合法 shares／invest
 SRPP 的 D-207 以已驗證的台美政經互動 −2..+2 分，對已合格的可選股票 BUY／獲利 SELL 做每分 5%、最多 10% 的後置數量調節；BUY 同向、獲利 SELL 反向。離散變動單位先對 `base_units * abs(score) * 0.05` 向下取整，並以原已驗證容量裁切；固定量、必要退出、硬閘與原限價維持。報告保留原始計算包及 base／delta／final 審計證據，取整或上限導致無變化時明示原因。此機制不聲稱預測勝率或最佳權重。
 
 資產端沿用現有 DecisionPolicyAuthority／SrppReportAuthority 及不可變包讀取路徑，僅更新其 model／manifest authority 與 generator 產物。新數量調節不新增 API scope、資料表、producer、外部 I/O 或 broker 寫入；SRPP 以具名範圍缺口採用本機確定性工具，不覆寫 API 的機械原值。正式 target projection／formula manifest 與兩份 golden 未涉及的金融輸出必須保持一致；若新 source metadata 會影響 golden 需逐項說明。發布時保留來源／部署／registry／HTTP 各自證據，不以其中一種代替其他驗收。
+
+
+## Task 548：年度配息統計
+
+新增 authenticated SPA `/annual-dividends` → `bff/annualdividends/AnnualDividendsBffController` 的 `GET /api/bff/annual-dividends/summary` → business `GET /api/annual-dividends` → service → read repository。Controller 只收發/委派；BFF 使用現有 tenant-aware WebClient 及原錯誤回應傳播。business service 呼叫 TenantGuard，所有私人 SQL 顯式 owner 條件；股利/股票主檔為 global facts。DTO 為 immutable records；不增 schema/排程/外部 I/O/9090 endpoint，不使用會投影或 cold-sync 的 DividendHistoryService.findFromDb。
+
+以 Requirement 94 補充為本次獨立「已公告事件配息估算」契約，與既有 snapshot.estimatedAnnualDividend 的年化預估不是同義值，不修改或重算後者。year=除息日期年度、1900–2100、缺省台北當年；market optional，驗證既有 market_type.code。資料層將 owner 快照（含 stocks）與 owner 股票 ledger 投影為中立不可變值，純 calculator 不依賴 HTTP/JPA，可以不啟 Spring/DB 單測。避免逐事件重讀，單次載入所需 owner timeline/事件，排序穩定（除息日、market、code）。
+
+事件以 ACTIVE 現金除息日分組；同股同日金額一致合併，金額衝突/日期缺失/金額缺失列為 unavailable，年度彙總不與明細加算。股票宇宙為截至今日 owner snapshots 與股票 ledger 聯集，含已賣出，基金排除。年份只用 exDividendDate，日期缺失的資料僅按其 year 作缺口提示。不能因 event.year 與 exDividendDate.year 不同漏掉事件。
+
+持股截止為 exDividendDate.minusDays(1)，未來事件截止為台北今日。選不晚於截止的最新 snapshot，合計多券商該股股數，加減其後至截止的股票 ledger。無 baseline 不算；不存在該股的完整快照存量可作0，但後續無效方向/數量或任一排序交易日收盤負庫存需 fail closed。每日先彙總淨股數避免同日買賣順序無法辨別；快照日交易不重複。歷史均為歷史持股推估，未來均為維持目前持股預估；不主張 ledger 完整、稅後金額、實際入帳或真正 record date。stock_dividend_history 沒有 record_date，UI 應明示以除息日前持股作資格估算，不能冒稱有官方配息基準日資料。公司行動風險明示且不自造 split/bonus shares。
+
+回傳 summary 包含 selectedYear/asOfDate/availableYears（owner timeline 年份與當年/事件除息年，倒序）/markets（既有設定）/currencyTotals（currency/historicalEstimate/futureEstimate/total）/rows/gaps/unavailableCount。rows 含 code/name/market/currency/exDividendDate/cashPaymentDate/cashDividend/shares/estimatedCash/basisSnapshotDate/transactionCount/holdingBasis/reason/source；可無資料欄位保持 null。holdingBasis 與 reason 是固定計算結果碼而非可管理業務分類。金額 BigDecimal 逐事件 HALF_UP scale2，分幣別加總，無外匯換算；美股即使成本以TWD存仍以USD股利呈現。未知市場 currency=null、estimatedCash=null。前端只格式化與 render，年度/市場篩選交給後端；GET 全程 read-only，不保存計算值。
+
+功能權限整合：DataInitializer.seedAppFeatures 以既有 insert-if-missing 慣例加入 `/annual-dividends`（資產管理／年度配息統計，enabledForUser=true）；保留其他功能設定，不改既有角色權限。新路由沿現有登入/功能可見性守門。
+
+選單固定放在「交易紀錄」與「資產配置建議」之間（使用者指定）；權限主檔排序亦須一致。
