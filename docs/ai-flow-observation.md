@@ -10,6 +10,10 @@
 
 Codex只接受三個已查證的exact排程ID：`codex-srpp-09-30`→台股早盤09:05、`codex-srpp`→台股午盤12:00、`22-00`→美股22:00；不納入`22-00-2`守門員、`srpp-codex`週日展望或名稱相似的工具。時段是planned reportSlot，提前、手動補跑或跨午夜仍保留原排程時段，actual startedAt另取公開START。reportDate始終取automation.created_at的台北日期，同thread後續turn保持該日期，不換算成美國交易日期或依DST重標。查詢period=ALL涵蓋四個slot，MORNING只09:05、NOON含12:00與歷史11:40、US只22:00；不重寫舊台股JSON、UUID或歷史11:40。新增22:00只允許Codex＋22-00，台股既有producer相容範圍保留。
 
+Codex app 的排程來源同時支援 `.codex/sqlite/codex.db` 與舊版 `codex-dev.db`；兩檔歷史可能分開，正常探索與當日 terminal priority 共同唯讀查詢固定兩檔的聯集。每個存在的檔案均須通過路徑、一般檔及必要 schema 驗證；只缺其中一檔合法，但壞檔、無法讀取或 symlink（包含斷鏈）不得靜默改讀另一檔。SQLite 以明示 `mode=ro` 的 ATTACH／UNION 先去重，再施全域排序及 LIMIT，候選總量仍最多本輪上限（priority 為25），全體走到底才一起 wrap。候選 thread 在每個來源都另按 thread_id 查驗 automation_id／created_at，包含頁外、日期外或非 allowlist 的同 thread；不一致時固定回報 `CODEX_SOURCE_IDENTITY_CONFLICT`，不推進 cursor、不建立觀測。DB 檔名不參與 run／event 身份，原 state、ACK 與 immutable 事件保持。
+
+2026-11-04 的缺漏原因是 app 已將新排程記在 `codex.db`，舊收集器仍固定讀 `codex-dev.db`。修正版只需從乾淨 main 重新啟動原 observer LaunchAgent；沒有 Docker image 內程式變更。補收須保留原 state／ACK，使用正常背景探索或既有 `--once --date <日期> --consumer Codex` 解析原始來源，再由獨立 sender 確認持久化 ACK；不得刪 state、使用 `--replay` 或人工組造事件。若手動執行這兩個既有程序，先暫停原 observer，再依序收集、傳送與恢復同一 job，避免並行 sender 爭用 pending。補收紀錄不代表報告已驗證成功。
+
 Claude 只收集本機明確 scheduledTaskId／cliSessionId metadata，以及具有 consumer、日期、slot 的結果文件。沒有可讀 raw trace 就顯示「詳細紀錄不可讀」。獨立 artifact 無 exact app link 顯示「無法連結執行」，自報 COMPLETED 也不等於報告已驗證。metadata未明示午盤slot時不以 task 名字猜成12:00或11:40。相近時間、檔名及相鄰timing文件都不用於拼接身份。
 
 Claude每日美股的exact ID與可讀來源尚未查證（`CLAUDE_US_SOURCE_UNVERIFIED`），選美股可合法回傳空紀錄，不建立虛構run、artifact或terminal；這也不代表遠端沒有排程。本次不改Claude遠端排程或接入方式。

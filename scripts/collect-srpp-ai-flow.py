@@ -502,6 +502,65 @@ def readonly_db(path: pathlib.Path, root: pathlib.Path, table: str, fields: set[
         connection.close()
 
 
+@contextlib.contextmanager
+def codex_automation_sources(root: pathlib.Path):
+    """Only the two known app stores; one read-only snapshot covers both generations."""
+    paths = []
+    for filename in ("codex.db", "codex-dev.db"):
+        # Validate even missing paths so a dangling link is not mistaken for an absent store.
+        path = safe_source(root / "sqlite" / filename, root, exists=False)
+        try:
+            metadata = path.stat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ObservationError("SOURCE_NOT_REGULAR")
+        paths.append(path)
+    if not paths:
+        raise ObservationError("CODEX_SOURCE_UNAVAILABLE")
+    fields = {"thread_id", "automation_id", "created_at"}
+    with readonly_db(paths[0], root, "automation_runs", fields) as app:
+        schemas = ["main"]
+        for number, path in enumerate(paths[1:], 1):
+            schema = "codex_source_" + str(number)
+            app.execute("ATTACH DATABASE ? AS " + schema, (path.as_uri() + "?mode=ro",))
+            actual = {row[1] for row in app.execute("PRAGMA " + schema + ".table_info(automation_runs)")}
+            if not fields <= actual:
+                raise ObservationError("SOURCE_SCHEMA_UNAVAILABLE")
+            schemas.append(schema)
+        # Keep candidate selection and cross-store identity checks in the same snapshot.
+        app.execute("BEGIN")
+        yield app, schemas
+
+
+def codex_automation_rows(root: pathlib.Path, start: int, end: int, limit: int,
+                          after_created=None, after_thread=None) -> list[tuple]:
+    """Global bounded page/wrap; never pick a generation by filename age or row recency."""
+    placeholders = ",".join("?" for _ in CODEX_TASKS)
+    predicate = f"automation_id IN ({placeholders}) AND created_at >= ? AND created_at < ?"
+    with codex_automation_sources(root) as (app, schemas):
+        union = " UNION ".join("SELECT thread_id, automation_id, created_at FROM " + schema
+                               + ".automation_runs WHERE " + predicate for schema in schemas)
+        select = "WITH candidates AS (" + union + ") SELECT DISTINCT thread_id, automation_id, created_at FROM candidates"
+        suffix = " ORDER BY created_at DESC, thread_id LIMIT ?"
+        parameters = (*CODEX_TASKS, start, end) * len(schemas)
+        rows = []
+        if after_created is not None:
+            rows = app.execute(select + " WHERE created_at < ? OR (created_at = ? AND thread_id > ?)" + suffix,
+                               (*parameters, after_created, after_created, after_thread, limit)).fetchall()
+        if not rows:
+            rows = app.execute(select + suffix, (*parameters, limit)).fetchall()
+        for thread, automation, created in rows:
+            # Do not filter this verification by date, cursor or automation allowlist: a
+            # second store may disagree outside the selected page or date window.
+            for schema in schemas:
+                matches = app.execute("SELECT automation_id, created_at FROM " + schema
+                                      + ".automation_runs WHERE thread_id=? LIMIT 2", (thread,)).fetchall()
+                if len(matches) > 1 or any(match != (automation, created) for match in matches):
+                    raise ObservationError("CODEX_SOURCE_IDENTITY_CONFLICT")
+        return rows
+
+
 def event(source_id: str, identity: str, sequence: int, step: str, kind: str,
           timestamp: Any, title: str, summary: str, *, status="UNKNOWN", operation=None,
           parents=(), relation=None, reason=None, refs=(), outcome=None, attempt=1) -> dict:
@@ -1503,19 +1562,8 @@ class Collector:
             discovery = self.store.load("codex-discovery") if day is None else {}
             after_created, after_thread = discovery.get("createdAt"), discovery.get("threadId")
             has_cursor = type(after_created) is int and start <= after_created < end and isinstance(after_thread, str) and OPAQUE.fullmatch(after_thread)
-            placeholders = ",".join("?" for _ in CODEX_TASKS)
-            select = f"SELECT thread_id, automation_id, created_at FROM automation_runs WHERE automation_id IN ({placeholders}) AND created_at >= ? AND created_at < ?"
-            suffix = " ORDER BY created_at DESC, thread_id LIMIT ?"
-            with readonly_db(root / "sqlite/codex-dev.db", root, "automation_runs", {"thread_id", "automation_id", "created_at"}) as app:
-                parameters = (*CODEX_TASKS, start, end)
-                if has_cursor:
-                    records = app.execute(select + " AND (created_at < ? OR (created_at = ? AND thread_id > ?))" + suffix,
-                                          (*parameters, after_created, after_created, after_thread, max_runs)).fetchall()
-                    if not records:
-                        # 一輪最多一頁，不一次載入90日歷史；走到底後於下一頁wrap。
-                        records = app.execute(select + suffix, (*parameters, max_runs)).fetchall()
-                else:
-                    records = app.execute(select + suffix, (*parameters, max_runs)).fetchall()
+            records = codex_automation_rows(root, start, end, max_runs,
+                                            after_created if has_cursor else None, after_thread if has_cursor else None)
             with readonly_db(root / "state_5.sqlite", root, "threads", {"id", "rollout_path"}) as threads:
                 result = []
                 for thread, automation, created in records:
@@ -1808,18 +1856,8 @@ class Collector:
                       and isinstance(thread, str) and OPAQUE.fullmatch(thread) is not None)
         try:
             root = self.home / ".codex"
-            placeholders = ",".join("?" for _ in CODEX_TASKS)
-            select = f"SELECT thread_id, automation_id, created_at FROM automation_runs WHERE automation_id IN ({placeholders}) AND created_at >= ? AND created_at < ?"
-            suffix = " ORDER BY created_at DESC, thread_id LIMIT 25"
-            with readonly_db(root / "sqlite/codex-dev.db", root, "automation_runs", {"thread_id", "automation_id", "created_at"}) as app:
-                parameters = (*CODEX_TASKS, start, end)
-                if has_cursor:
-                    rows = app.execute(select + " AND (created_at < ? OR (created_at = ? AND thread_id > ?))" + suffix,
-                                       (*parameters, created, created, thread)).fetchall()
-                    if not rows:
-                        rows = app.execute(select + suffix, parameters).fetchall()
-                else:
-                    rows = app.execute(select + suffix, parameters).fetchall()
+            rows = codex_automation_rows(root, start, end, 25,
+                                         created if has_cursor else None, thread if has_cursor else None)
             with readonly_db(root / "state_5.sqlite", root, "threads", {"id", "rollout_path"}) as threads:
                 result = []
                 for thread_id, automation, created_at in rows:
@@ -1830,8 +1868,8 @@ class Collector:
                                    "slot": CODEX_TASKS[automation], "path": match[0] if match else None,
                                    "priorityCreatedAt": created_at})
                 return result
-        except (sqlite3.Error, OSError, ObservationError):
-            self.note_error("TERMINAL_FAILURE_PRIORITY_UNAVAILABLE")
+        except (sqlite3.Error, OSError, ObservationError) as exc:
+            self.note_error(str(exc) if isinstance(exc, ObservationError) else "TERMINAL_FAILURE_PRIORITY_UNAVAILABLE")
             return []
 
     def advance_terminal_failure_priority(self, record: dict):
