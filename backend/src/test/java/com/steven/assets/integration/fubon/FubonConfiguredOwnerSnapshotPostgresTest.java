@@ -7,6 +7,7 @@ import com.steven.assets.security.CurrentUserFilter;
 import com.steven.assets.security.TenantFilterAspect;
 import com.steven.assets.service.AssetSnapshotMutationLock;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.HoldingCostCachePort;
 import com.steven.assets.service.SnapshotAggregateCalculator;
 import com.steven.assets.service.StockMasterService;
 import com.steven.assets.service.UserAdminService;
@@ -80,6 +81,7 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
         properties.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
+    @MockitoBean HoldingCostCachePort holdingCostCache;
     @MockitoBean FubonConfigState configState;
     @MockitoBean FubonBrokerClient brokerClient;
     @MockitoBean MarketDataService marketData;
@@ -111,7 +113,7 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
     private BrokerEntity otherBroker;
 
     @BeforeEach void seed() {
-        RequestContextHolder.resetRequestAttributes(); trace.stop(); reset(mutationLock, brokerClient, configState, calculator); clock.set(NOW);
+        RequestContextHolder.resetRequestAttributes(); trace.stop(); reset(mutationLock, brokerClient, configState, calculator, holdingCostCache); clock.set(NOW);
         tx(() -> {
             snapshots.deleteAll(); snapshots.flush(); banks.deleteAll(); brokers.deleteAll(); depositTypes.deleteAll(); users.deleteAll(); em.flush();
             ownerId = users.saveAndFlush(AppUser.builder().email("snapshot-test@example.invalid")
@@ -131,6 +133,17 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
             snapshot.getStocks().add(holding(snapshot, otherBroker, "0050", "50"));
             calculator.recalculate(snapshot); snapshotId = snapshots.saveAndFlush(snapshot).getId();
             otherSnapshotId = snapshots.saveAndFlush(AssetSnapshot.builder().ownerUserId(otherOwnerId).snapshotDate(DATE).build()).getId();
+        });
+        when(holdingCostCache.publish(any())).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            com.steven.assets.service.HoldingCostSnapshot committed = call.getArgument(0);
+            assertThat(committed.ownerId()).isEqualTo(ownerId);
+            tx(() -> {
+                em.clear();
+                assertThat(com.steven.assets.service.HoldingCostSnapshot.capture(snapshots.findById(snapshotId).orElseThrow()).canonicalJson())
+                        .isEqualTo(committed.canonicalJson());
+            });
+            return true;
         });
         when(configState.snapshot()).thenReturn(new FubonConfigState.Snapshot(FubonConfigState.State.READY, "synthetic", "READY"));
         when(marketData.isTwTradingDayKnown(DATE)).thenReturn(Optional.of(true));
@@ -296,11 +309,95 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
         doAnswer(call -> { call.callRealMethod(); clock.set(NOW.plusSeconds(86400)); return null; })
                 .when(calculator).recalculate(any());
         assertThat(inventoryService.syncManual(false).outcome()).isEqualTo(FubonOutcome.ROLLED_BACK);
+        org.mockito.Mockito.verify(holdingCostCache, org.mockito.Mockito.never()).publish(any());
         tx(() -> { em.clear(); var snapshot = snapshots.findById(snapshotId).orElseThrow();
             assertThat(snapshot.getStocks().stream().filter(s -> s.getBroker().getCode().equals("fubon"))
                     .findFirst().orElseThrow().getShares()).isEqualByComparingTo("1");
             assertThat(snapshot.getTotalStockValue()).isEqualByComparingTo("70");
             assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("190"); });
+    }
+
+    @Test void committedInventoryCostSurvivesCacheFailureAndTheNextSyncRepairsIt() {
+        org.mockito.Mockito.doReturn(false).when(holdingCostCache).publish(any());
+        var result = inventoryService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonOutcome.CACHE_UPDATE_FAILED);
+        assertThat(result.reason()).isEqualTo("DB_COMMITTED_CACHE_UPDATE_FAILED");
+        assertThat(result.replaceCount()).isEqualTo(1);
+        assertThat(result.snapshotId()).isEqualTo(snapshotId);
+        tx(() -> {
+            em.clear();
+            assertThat(snapshots.findById(snapshotId).orElseThrow().getStocks().stream()
+                    .filter(stock -> stock.getBroker().getCode().equals("fubon")).findFirst().orElseThrow().getInvestmentCost())
+                    .isEqualByComparingTo("37.04");
+        });
+        org.mockito.Mockito.doReturn(true).when(holdingCostCache).publish(any());
+        assertThat(inventoryService.syncManual(false).outcome()).isEqualTo(FubonOutcome.SUCCESS);
+        tx(() -> {
+            em.clear();
+            assertThat(snapshots.findById(snapshotId).orElseThrow().getStocks().stream()
+                    .filter(stock -> stock.getBroker().getCode().equals("fubon")).findFirst().orElseThrow().getInvestmentCost())
+                    .isEqualByComparingTo("37.04");
+        });
+    }
+
+    @Test void legacyPendingBuyIsFrozenAcrossRepeatedInventoryCostReplacement() {
+        var transactionId = new java.util.concurrent.atomic.AtomicReference<Long>();
+        var projectionId = new java.util.concurrent.atomic.AtomicReference<Long>();
+        tx(() -> {
+            var trade = AssetTransaction.builder().ownerUserId(ownerId).transactionType("買").assetType("股票")
+                    .assetCode("2330").assetName("台積電").market("台股").currency("TWD").tradeDate(DATE)
+                    .shares(BigDecimal.ONE).price(new BigDecimal("999")).amount(new BigDecimal("999.00"))
+                    .source("FUBON_SYNC").brokerFilledNo("LEGACY-PENDING").build();
+            em.persist(trade); em.flush(); transactionId.set(trade.getId());
+            var projection = BrokerFilledTradeCostProjection.builder().ownerUserId(ownerId)
+                    .broker(brokers.findById(fubonBroker.getId()).orElseThrow()).brokerFilledNo("LEGACY-PENDING")
+                    .assetTransactionId(trade.getId()).stockCode("2330").market("台股").currency("TWD")
+                    .transactionType("買").tradeDate(DATE).shares(BigDecimal.ONE).buyCost(new BigDecimal("999.00"))
+                    .status("PENDING").build();
+            em.persist(projection); em.flush(); projectionId.set(projection.getId());
+        });
+        try {
+            assertThat(inventoryService.syncManual(false).outcome()).isEqualTo(FubonOutcome.SUCCESS);
+            assertThat(inventoryService.syncManual(false).outcome()).isEqualTo(FubonOutcome.SUCCESS);
+            tx(() -> {
+                em.clear();
+                assertThat(em.find(BrokerFilledTradeCostProjection.class, projectionId.get()).getStatus()).isEqualTo("PENDING");
+                assertThat(em.find(BrokerFilledTradeCostProjection.class, projectionId.get()).getBuyCost()).isEqualByComparingTo("999");
+                assertThat(snapshots.findById(snapshotId).orElseThrow().getStocks().stream()
+                        .filter(stock -> stock.getBroker().getCode().equals("fubon")).findFirst().orElseThrow().getInvestmentCost())
+                        .isEqualByComparingTo("37.04");
+            });
+        } finally {
+            tx(() -> {
+                em.remove(em.find(BrokerFilledTradeCostProjection.class, projectionId.get())); em.flush();
+                em.remove(em.find(AssetTransaction.class, transactionId.get()));
+            });
+        }
+    }
+
+    @Test void deferredCommitFailureNeverPublishesCostsAndKeepsPreviousInventory() {
+        tx(() -> {
+            em.createNativeQuery("CREATE OR REPLACE FUNCTION reject_inventory_commit() RETURNS trigger LANGUAGE plpgsql AS "
+                    + "'BEGIN RAISE EXCEPTION ''synthetic deferred cost rejection''; RETURN NEW; END'").executeUpdate();
+            em.createNativeQuery("CREATE CONSTRAINT TRIGGER reject_inventory_commit AFTER INSERT ON stock_holding "
+                    + "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.investment_cost = 37.04) "
+                    + "EXECUTE FUNCTION reject_inventory_commit()").executeUpdate();
+        });
+        try {
+            assertThat(inventoryService.syncManual(false).outcome()).isEqualTo(FubonOutcome.ROLLED_BACK);
+            org.mockito.Mockito.verify(holdingCostCache, org.mockito.Mockito.never()).publish(any());
+            tx(() -> {
+                em.clear();
+                assertThat(snapshots.findById(snapshotId).orElseThrow().getStocks().stream()
+                        .filter(stock -> stock.getBroker().getCode().equals("fubon")).findFirst().orElseThrow().getInvestmentCost())
+                        .isEqualByComparingTo("20");
+            });
+        } finally {
+            tx(() -> {
+                em.createNativeQuery("DROP TRIGGER IF EXISTS reject_inventory_commit ON stock_holding").executeUpdate();
+                em.createNativeQuery("DROP FUNCTION IF EXISTS reject_inventory_commit()").executeUpdate();
+            });
+        }
     }
 
     private void inRequest(Long headerOwner, Runnable body) {
@@ -366,8 +463,8 @@ class FubonConfiguredOwnerSnapshotPostgresTest {
             return new FubonInventoryWriter(lock, snapshots, brokers, calculator, users, freshness, clock);
         }
         @Bean FubonInventorySyncService inventoryService(FubonConfigState config, FubonBrokerClient client, MarketDataService marketData,
-                UserAdminService users, AssetSnapshotRepository snapshots, BrokerRepository brokers, StockRepository stocks, FubonInventoryWriter writer, MutableClock clock) {
-            return new FubonInventorySyncService(config, client, marketData, users, snapshots, brokers, stocks, writer, new FubonOutcomeCounters(), clock);
+                UserAdminService users, AssetSnapshotRepository snapshots, BrokerRepository brokers, StockRepository stocks, FubonInventoryWriter writer, MutableClock clock, HoldingCostCachePort holdingCostCache) {
+            return new FubonInventorySyncService(config, client, marketData, users, snapshots, brokers, stocks, writer, new FubonOutcomeCounters(), clock, true, holdingCostCache);
         }
     }
 }

@@ -5454,6 +5454,17 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **資料庫與畫面同源。** 快照明細與既有 Dashboard／BFF consumer 繼續讀 `stock_holding.investment_cost`，不新增平行 display-only 成本欄位或前端重新計算。`StockHolding.getProfit()` 的既有 `currentValue - investmentCost` 公式不變；回填後畫面自然顯示正確損益與成本。新增 projection table 的 Liquibase 與 `db/schema.sql` 必同步，並通過 schema drift test。
 - [ ] **同步中的手動成本基準仍可更正。** 實際 `SOURCE_OWNED` 富邦台股 scope 的完整 snapshot PUT 仍保護來源擁有的 shares、currentValue、交易欄位、幣別、配息 metadata、broker、代號與列存在性；每一個 locked row 只在 payload **恰有一筆**精確命中既有 `(broker_id, stock_code, market=台股, currency=TWD)` 的 candidate 時，才評估使用者提供的 `investmentCost`。合法值為可儲存於 `NUMERIC(20,2)` 的非負 decimal（`0` 允許，scale ≤ 2）；它是唯一可更新欄位，並立刻以既有 aggregate calculator 重算 totals。candidate 為零或多筆、身份不精確匹配、null、負值、scale/precision overflow 時，該 source row 零 mutation（不使整個 PUT rollback）。這個成本-only path 不新增 API／DTO／broker write，且後續新 broker 買入投影從該手動值繼續累加。
 
+#### Task 544 補充：富邦庫存成本均價為持股成本來源
+
+使用者於 2026-11-04 明確要求把富邦庫存回傳的成本均價更新至資料庫及 Redis。本補充優先取代本 Requirement、Requirement 90／138／179 與歷史 Task 436 中「庫存保留舊成本／首次成本為零／依券商成交累加」的富邦成本規則；不改其他券商或手動交易 CRUD。
+
+- [ ] 富邦已通過既有帳戶、日期、股數守恆、數值與行情驗證的每筆庫存，以 `costPrice × shares` 全精度乘法、最後 `HALF_UP` 至二位寫入唯一 `stock_holding.investment_cost NUMERIC(20,2)`。來源均價不得預先四捨五入；乘積溢位整批 rollback。首次持股、股數異動、股數相同但均價變動、重複同步均依同一規則覆寫，不保留舊成本、不以行情或缺失成交作替代。均價由既有成本／股數投影，不新增可導出的 DB 均價欄位；aggregate 在同一交易重算。
+- [ ] `FubonTradeWriter` 仍只新增已驗證成交帳本，但停止建立或呼叫成本 projection；inventory writer 停止消費 `PENDING`。既有 projection 歷史列及其 `APPLIED`／`PENDING`／skip 狀態原樣保留、凍結，不重新解釋為新成本或補造交易。因此任意 inventory／成交先後、重跑、日後補匯成交皆不會在來源成本上重複加總。provider-neutral projector 的其他入口與未來券商契約不在本次變更範圍。
+- [ ] Redis 新增僅此富邦持股成本的 owner／snapshot／內容定址鏡像，由 inventory 交易內捕捉不可變 DTO，僅在交易成功提交後寫入。key 為 `fubon:holding-cost:{ownerId}:{snapshotId}:{sha256}`，TTL 36 小時；SHA-256 涵蓋 schemaVersion、owner、snapshotId、snapshotDate 及依 `(brokerId,stockCode,holdingId)` 排序的完整富邦台股 TWD entries，每列涵蓋 holdingId、brokerId、stockCode、market、currency、shares、investmentCost。Decimal 以 `stripTrailingZeros().toPlainString()` 正規化（零為 `0`），canonical JSON 固定欄位順序、UTF-8 無多餘空白。不同交易內容的 key 不同，延遲寫入不能覆寫新內容，舊 key 只由 TTL 清理；禁止改 `price:*`、全域 key 或既有 immutable radar／SRPP 快照。
+- [ ] `AssetService` 的既有 snapshot detail 投影必須實際透過抽象 port 讀取上述成本 cache；只在 key 和 payload 的 owner／snapshot／日期／完整 entries 與該次已載入 PostgreSQL entity 的 identity／內容全部吻合時採用，否則回 DB 成本。純讀請求不寫 Redis、不觸發券商；其他券商及歷史非吻合資料不套用。無法讀取／壞格式／跨 owner／資料不符均回 DB，不得以舊 cache 覆蓋已提交 DB 或手動修改。
+- [ ] DB rollback、commit failure 或跨日拒絕時不寫 Redis。提交後 Redis 寫入失敗不得假裝 DB rollback：同步回覆明示 DB 已提交、cache 更新失敗，保留實際 replacedCount／snapshotId；重試相同庫存可安全覆寫 DB 並修復 Redis。cache 寫入與讀取錯誤均不能讓已提交 DB 消失或使成本變為零。
+- [ ] Requirement 179 的手動存檔仍接受股數、成本與交易日期；手動修改使舊內容定址 cache 不再命中。後續成功富邦庫存同步以來源股數及來源均價覆寫手動股數／成本、保留手動交易日期；不改其餘欄位保留規則、owner／lock／日曆／排程／券商唯讀邊界。部署後可使用已存在的受保護 manual inventory sync，取得同日真來源並核對 DB、Redis 與既有資產讀取；不放寬既有驗證、不啟動報告／寄信／交易。
+
 #### Task 532 補充：009826 成本補正與富邦交割款啟用
 
 - [ ] **受限成本補正。** 以 insert-once、可重播不重複修改的 Liquibase v1.159.0 data correction，僅修 owner 1、最新快照日期 2026-11-02、唯一富邦台股 TWD 009826 1,000 股且成本為 0 的持股。同 owner／股票／009826／台股／TWD／不晚於快照日的完整 ledger 必恰為已保存的手動買入 id 208：2026-11-02、channel 富邦證券、shares=1000、price=10.08、amount=10080、fee=20、tax=0；無額外同 scope ledger 或任何已建立的該股券商成本投影。依既有買入公式回填 10,100.00，同交易另個 SQL statement 以逐筆換匯後四捨五入規則重算 total_stock_cost，避免 PostgreSQL 同 statement snapshot 讀到舊成本。不同 owner／日期／券商／股數、非零成本、其他 ledger／projection 均保留原狀；不改交易、現值、股數、配息、歷史快照或銀行款項。不把庫存均價當成本、不擴大手動 ledger CRUD 的副作用。

@@ -161,20 +161,14 @@ class FubonTradeWriterPostgresTest {
             assertThat(row.getTransactionTax()).isNull(); assertThat(row.getExchangeRate()).isNull();
             assertThat(row.getNotes()).isNull(); assertThat(row.getSource()).isEqualTo("FUBON_SYNC");
         }
-        assertThat(costProjections.findAll()).hasSize(2)
-                .allSatisfy(projection -> assertThat(projection.getStatus())
-                        .isEqualTo(BrokerFilledTradeCostProjector.SKIPPED_NO_PRETRADE_BASIS));
+        assertThat(costProjections.findAll()).isEmpty();
     }
 
-    @Test void newFubonBuyCreatesExactlyOnePendingCostProjectionWhenNoHoldingExists() {
+    @Test void newFubonBuyAndDuplicateFillDoNotCreateCostProjection() {
         writer.insert(ownerId, brokerId, List.of(prepared("F-BUY")));
-
-        assertThat(costProjections.findAll()).singleElement().satisfies(projection -> {
-            assertThat(projection.getBrokerFilledNo()).isEqualTo("F-BUY");
-            assertThat(projection.getAssetTransactionId()).isEqualTo(ledger.findAll().getFirst().getId());
-            assertThat(projection.getBuyCost()).isEqualByComparingTo("37.04");
-            assertThat(projection.getStatus()).isEqualTo(BrokerFilledTradeCostProjector.PENDING);
-        });
+        writer.insert(ownerId, brokerId, List.of(prepared("F-BUY")));
+        assertThat(ledger.findAll()).hasSize(1);
+        assertThat(costProjections.findAll()).isEmpty();
     }
 
     @Test void laterNonDuplicateConstraintFailureRollsBackTheEarlierInsert() {

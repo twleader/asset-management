@@ -14,5 +14,6 @@ public enum FubonOutcome {
     DRY_RUN,
     SUCCESS,
     EMPTY_CLEARED,
+    CACHE_UPDATE_FAILED,
     ROLLED_BACK
 }

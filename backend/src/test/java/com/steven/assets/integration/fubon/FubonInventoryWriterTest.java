@@ -60,6 +60,11 @@ class FubonInventoryWriterTest {
         lenient().when(userAdminService.configuredAdmin()).thenReturn(Optional.of(AppUser.builder()
                 .id(9L).role(AppUser.ROLE_ADMIN).status(AppUser.STATUS_ACTIVE).build()));
         lenient().when(brokerRepository.findByCode("fubon")).thenReturn(Optional.of(fubon));
+        lenient().when(snapshotRepository.saveAndFlush(snapshot)).thenAnswer(call -> {
+            long id = 100;
+            for (StockHolding holding : snapshot.getStocks()) if (holding.getId() == null) holding.setId(id++);
+            return snapshot;
+        });
     }
 
     @Test
@@ -78,7 +83,7 @@ class FubonInventoryWriterTest {
         StockHolding mapped = snapshot.getStocks().stream()
                 .filter(row -> "2330".equals(row.getStockCode())).findFirst().orElseThrow();
         assertThat(mapped.getShares()).isEqualByComparingTo("3");
-        assertThat(mapped.getInvestmentCost()).isEqualByComparingTo("20.00");
+        assertThat(mapped.getInvestmentCost()).isEqualByComparingTo("37.04");
         assertThat(mapped.getCurrentValue()).isEqualByComparingTo("60.00");
         assertThat(mapped.getDividendRate()).isEqualByComparingTo("0.05");
         assertThat(mapped.getEstimatedDividend()).isEqualByComparingTo("3");
@@ -127,12 +132,12 @@ class FubonInventoryWriterTest {
     }
 
     @Test
-    void firstInventoryRowStartsAtZeroAndCurrentValueOverflowRollsBackBeforeSave() {
+    void firstInventoryRowUsesSourceCostAndCurrentValueOverflowRollsBackBeforeSave() {
         writer.replace(9L, 7L, snapshot.getSnapshotDate(),
                 List.of(new FubonInventoryWriter.PreparedPosition(
                         "2330", 1, new BigDecimal("999999999999999999.99"), BigDecimal.ONE, "台積電")), false);
         assertThat(snapshot.getStocks().getFirst().getInvestmentCost())
-                .isEqualByComparingTo("0.00");
+                .isEqualByComparingTo("999999999999999999.99");
 
         snapshot.getStocks().clear();
         assertThatThrownBy(() -> writer.replace(9L, 7L, snapshot.getSnapshotDate(),
@@ -141,6 +146,32 @@ class FubonInventoryWriterTest {
                 .isInstanceOf(FubonInventoryWriter.CommitRejected.class)
                 .hasMessage("MONEY_PRECISION_EXCEEDED");
         verify(snapshotRepository).saveAndFlush(snapshot);
+    }
+
+    @Test
+    void repeatedInventoryAndUnchangedQuantityMeanCorrectionReplaceRatherThanAccumulateCost() {
+        var first = new FubonInventoryWriter.PreparedPosition("009826", 2000, new BigDecimal("10.06"), new BigDecimal("10.03"), "貝萊德世界股票");
+        writer.replace(9L, 7L, snapshot.getSnapshotDate(), List.of(first), false);
+        writer.replace(9L, 7L, snapshot.getSnapshotDate(), List.of(first), false);
+        assertThat(snapshot.getStocks().getFirst().getInvestmentCost()).isEqualByComparingTo("20120");
+        snapshot.getStocks().getFirst().setTransactionDate(LocalDate.of(2026, 8, 20));
+        var corrected = new FubonInventoryWriter.PreparedPosition("009826", 2000, new BigDecimal("10.0612345"), new BigDecimal("10.03"), "貝萊德世界股票");
+        var committed = writer.replace(9L, 7L, snapshot.getSnapshotDate(), List.of(corrected), false);
+        assertThat(snapshot.getStocks().getFirst().getInvestmentCost()).isEqualByComparingTo("20122.47");
+        assertThat(snapshot.getStocks().getFirst().getTransactionDate()).isEqualTo(LocalDate.of(2026, 8, 20));
+        assertThat(snapshot.getTotalStockCost()).isEqualByComparingTo("20122");
+        assertThat(committed.costs().entries().getFirst().investmentCost()).isEqualByComparingTo("20122.47");
+        snapshot.getStocks().getFirst().setInvestmentCost(BigDecimal.ONE);
+        assertThat(committed.costs().entries().getFirst().investmentCost()).isEqualByComparingTo("20122.47");
+    }
+
+    @Test
+    void legalOperandsWhoseCostProductOverflowsAreRejectedBeforePersistence() {
+        assertThatThrownBy(() -> writer.replace(9L, 7L, snapshot.getSnapshotDate(),
+                List.of(new FubonInventoryWriter.PreparedPosition("2330", 9_999_999_999L,
+                        new BigDecimal("1000000000"), BigDecimal.ONE, "台積電")), false))
+                .isInstanceOf(FubonInventoryWriter.CommitRejected.class).hasMessage("MONEY_PRECISION_EXCEEDED");
+        verify(snapshotRepository, never()).saveAndFlush(snapshot);
     }
 
     @Test

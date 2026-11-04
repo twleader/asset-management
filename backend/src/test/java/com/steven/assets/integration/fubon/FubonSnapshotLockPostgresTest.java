@@ -100,6 +100,7 @@ class FubonSnapshotLockPostgresTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
+    @MockitoBean com.steven.assets.service.HoldingCostCachePort holdingCostCache;
     @MockitoBean MarketDataService marketDataService;
     @MockitoBean FundNavService fundNavService;
     @MockitoBean FundDividendService fundDividendService;
@@ -267,13 +268,13 @@ class FubonSnapshotLockPostgresTest {
     @Test
     void fubonLockFirstThenFullUpdatePreservesNewFubonAndFullUpdateNonFubon() throws Exception {
         runRace(true);
-        assertFinalRaceState();
+        assertFinalRaceState("1.00");
     }
 
     @Test
     void fullUpdateLockFirstThenFubonReplacePreservesBothScopesAndTotals() throws Exception {
         runRace(false);
-        assertFinalRaceState();
+        assertFinalRaceState("37.04");
     }
 
     @Test
@@ -444,7 +445,7 @@ class FubonSnapshotLockPostgresTest {
         manualFullUpdate(TODAY, "2330", "3", "1", "1", "STALE", TODAY.minusDays(1));
     }
 
-    private void assertFinalRaceState() {
+    private void assertFinalRaceState(String expectedCost) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             entityManager.clear();
             AssetSnapshot finalSnapshot = snapshotRepository.findById(snapshotId).orElseThrow();
@@ -453,7 +454,7 @@ class FubonSnapshotLockPostgresTest {
             StockHolding finalOther = holdingForBroker(finalSnapshot, "other");
             assertThat(finalFubon.getStockCode()).isEqualTo("2330");
             assertThat(finalFubon.getShares()).isEqualByComparingTo("3");
-            assertThat(finalFubon.getInvestmentCost()).isEqualByComparingTo("1.00");
+            assertThat(finalFubon.getInvestmentCost()).isEqualByComparingTo(expectedCost);
             assertThat(finalFubon.getCurrentValue()).isEqualByComparingTo("60.00");
             assertThat(finalOther.getStockCode()).isEqualTo("0056");
             assertThat(finalOther.getCurrentValue()).isEqualByComparingTo("80");
