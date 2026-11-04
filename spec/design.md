@@ -13380,3 +13380,10 @@ Requirement 179 的手動 save 路徑維持現況，可改合法 shares／invest
 修復發生於 SRPP consumer 的郵件 renderer 輸出格式、共用規格及兩個 Claude 入口；資產端服務只承接最終 manifest bytes 與 insert-only 註冊身分，不新增 API／schema／資料表或金融計算。model_inputs.json、正式 target policy document、formula manifest 及 golden 金融輸出與 calculator hashes 逐值不變；兩份 golden 僅更換 policy bundle metadata。以既有 Python authority checker／golden generator 與 Ruby registration generator 產製及檢核。
 
 正式部署順序為兩 repo feature commit→main no-ff merge→push／remote-ref 核對→已合併 SQL 登錄與四欄完整 readback→乾淨 asset main 僅 business-services rebuild／recreate（重啟當下唯讀證明所有啟動入口 no-op，含 analysis／index／各匯出排程今日已完成／配息回補停用／台美備份／snapshot／在途款，並避開執行中的匯出；部署後以有界健康與安全 GET 觀察，BFF 不自動重啟）→執行 JAR manifest／model／Swagger／SQL 全文比對→SRPP 主機 9090 及精確 hash report-calculations 診斷。診斷 HTTP 與正式盤中採用分開；來源或時窗不足不能宣稱正式採用。保留原服務設定、歷史 registry 及其他容器；不觸發報告、producer、通知或交易。
+
+
+### Requirements 187／193：D-207 台美政經交易量調節 authority（Task 547）
+
+SRPP 的 D-207 以已驗證的台美政經互動 −2..+2 分，對已合格的可選股票 BUY／獲利 SELL 做每分 5%、最多 10% 的後置數量調節；BUY 同向、獲利 SELL 反向。離散變動單位先對 `base_units * abs(score) * 0.05` 向下取整，並以原已驗證容量裁切；固定量、必要退出、硬閘與原限價維持。報告保留原始計算包及 base／delta／final 審計證據，取整或上限導致無變化時明示原因。此機制不聲稱預測勝率或最佳權重。
+
+資產端沿用現有 DecisionPolicyAuthority／SrppReportAuthority 及不可變包讀取路徑，僅更新其 model／manifest authority 與 generator 產物。新數量調節不新增 API scope、資料表、producer、外部 I/O 或 broker 寫入；SRPP 以具名範圍缺口採用本機確定性工具，不覆寫 API 的機械原值。正式 target projection／formula manifest 與兩份 golden 未涉及的金融輸出必須保持一致；若新 source metadata 會影響 golden 需逐項說明。發布時保留來源／部署／registry／HTTP 各自證據，不以其中一種代替其他驗收。

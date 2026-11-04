@@ -6518,3 +6518,12 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 - 資產端唯一來源為 `/Users/steven/Project/SRPP/.claude/worktrees/claude-appendix-report-issue-9efbee`（SRPP commit `2662c0570d66cc73d61af823268b043b0711e4b3`，bundle `a157b7676e8efdd4f42c65aec4e8cfe03470f9942c4de85404d6c094d3eaa6c7`）經驗證並凍結的最終來源。只同步 manifest 與既有 generator 的 registry SQL／golden 身分；model、formal targets、formula manifest、全部金融 expected 及 calculator hashes 均保持不變。不得改 Java、API、Swagger、producer 或權限。
 - 兩專案先 feature commit、main no-ff merge、push 與 remote-ref 讀回，再從已合併 SQL 執行 insert-only registry；舊 row 全文保持。隨後只從乾淨 asset main 及原正式設定 rebuild／recreate business-services，讀回 JAR 與 registry 精確身分及來源 bytes，其他服務保持。
 - 從 SRPP 主機保存最終 hash 的 9090 實際唯讀 HTTP 收據，包含 report-calculations 的診斷回應與契約／身分驗證。時窗外或缺當輪正式證據時僅算診斷，正式日報採用記 NOT_YET_EXECUTED；不得觸發 producer、補做報告、建立／更改草稿、寄信或交易。
+
+### Requirements 187／193 補充：台美政經低權重交易量調節的 authority 發布（Task 547）
+
+使用者要求台美政經評分以較低比重實際影響買賣建議。本次唯一政策來源為 `/private/tmp/srpp-politics-decision-20261104` 經獨立審查及正式來源檢查的 D-207／政策 v2.56.0／模型 v3.22.0。凍結後才讀取完整 bundle、model、manifest 與 Swagger hash，不預填或手改 hash。
+
+- 只讓已驗證的「台美政經互動」−2 至 +2 分調節原本已合格的可選股票買進及獲利賣出量，每分 5%、最多 10%；買進同向、獲利賣出反向。以原始可交易單位計算 `floor(base_units * abs(score) * 0.05)`，避免整張取整把小量買進變成零。仍受原資金、部位、共享容量及可賣股數上限約束；未評或來源不足維持原量。限價、候選資格、固定量機制、必要減碼／論點失效／期限退出不受這項調節。兩個跨市場走勢分項及固定六項風險不混入新權重。
+- 本次資產端只同步最終 model／manifest 原始 bytes，以原 generator 重產兩份 report golden 與 insert-only SQL，並以來源 authority gate 與既有 Java 測試查核。正式 targets、formula manifest、現有 API／schema／Swagger 及未涉及的金融輸出維持；新調節由 SRPP 報告端確定性工具執行並保存 base／delta／final，既有不可變計算包維持原值，不假稱既有 API 已有新 scope。不得以變更 expected 掩蓋不相干差異。
+- 雙專案 feature commit、main no-ff merge、push 並讀回遠端；insert-only registry 逐欄讀回並確認舊 rows 未改寫；從乾淨 main 與原正式設定僅 rebuild／recreate business-services，核對 JAR authority bytes、環境／掛載及其他容器。部署前須唯讀證明啟動入口不會補寄信或外抓；原內部 producer 自然發布衍生包可觀察，不手動觸發。
+- 登錄後立即以精確新 hash 從 SRPP 主機讀取 report-calculations 並保留實際 HTTP；部署後再獨立驗證成功回應。503 CONTEXT_NOT_READY 只代表尚未接受該 hash，健康或日曆不能替代。正式當輪採用另受合法交易日、時窗、完整來源與直接 L0 約束；不足時記 NOT_YET_EXECUTED，不補做報告、不建草稿、不寄信、不下單。
