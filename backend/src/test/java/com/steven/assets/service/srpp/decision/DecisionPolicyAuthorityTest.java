@@ -28,8 +28,8 @@ class DecisionPolicyAuthorityTest {
     void currentAuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
         DecisionPolicyAuthority current = new DecisionPolicyAuthority();
         SrppReportAuthority authority = new SrppReportAuthority(current);
-        assertThat(authority.decision().policy().decision()).isEqualTo("D-207");
-        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.56.0");
+        assertThat(authority.decision().policy().decision()).isEqualTo("D-208");
+        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.57.0");
         assertThat(authority.decision().policy().modelVersion()).isEqualTo("3.22.0");
 
         ObjectNode model = currentModel();

@@ -13404,3 +13404,21 @@ SRPP 的 D-207 以已驗證的台美政經互動 −2..+2 分，對已合格的�
 功能權限整合：DataInitializer.seedAppFeatures 以既有 insert-if-missing 慣例加入 `/annual-dividends`（資產管理／年度配息統計，enabledForUser=true）；保留其他功能設定，不改既有角色權限。新路由沿現有登入/功能可見性守門。
 
 選單固定放在「交易紀錄」與「資產配置建議」之間（使用者指定）；權限主檔排序亦須一致。
+
+
+### Task 549：00919低檔減碼保護及跨專案authority
+
+SRPP D-208新增僅台股00919的一般D-174執行保護：原始最近完成日日K、D及當輪精確雷達日K、D四值均須有效且嚴格大於50，並通過既有低檔／超賣／反彈反向檢查。任一<=50或證據缺漏只封鎖該筆；高水位更新／觀察歷史與consumer隔離保留。這是保守門檻，不保證辨識最低點；原具名必要退出獨立路徑、US、其他代號及買進不變。
+
+資產端的台股 `SrppReportModuleCalculator.calculateCore` 只讀凍結body及consumer state，`coreTiming`在原擇時結果通過前套用同源政策的新gate。共用guard讀同一model數值及缺口／阻擋碼；不能另寫Java硬編門檻或把低檔缺值補0。published envelope／facts／receipt形狀維持；只改00919 timingPass及具名reason，不產生下單或新增API。獨立 `srpp/us/UsCoreSellCalculator` 不改。Java／Python同輸入golden補00919邊界與缺值案例，另保留原其他代號案例；不以手改expected掩蓋差異。新執行門檻與watch arming identity分離，既有觀察不因bundle更新失效。
+
+authority及registry沿現有 `DecisionPolicyAuthority`／`SrppReportAuthority` strict JSON／bytes／JCS檢核，同步最終SRPP model／manifest；正式policy document只由原canonical targets projection產生，配比不變時bytes維持。原Ruby generator產出INSERT ON CONFLICT DO NOTHING；原Pythongolden工具顯式指定同一SRPProot。source／runtime／bundle、formula／Swagger及所有金融輸出差異逐項可查證，不手改身分字串。
+
+正式發布以使用者既有完整發布授權及本輪 `srpp-policy-release` 技能的發布順序步驟3至5為準：雙repo Git落地後才registry四欄全文／歷史row核對、立即新hashGET，再從乾淨main僅business-services build/recreate及JAR全文/readback。這是對Task504任務舊段feature先serve、main重建後才SQL順序的明示取代，不將新順序誤稱Task504原文。部署前唯讀證明原startup補寄／外抓／匯出／備份／快照／在途款無需補跑，保留原.env、掛載、BFF及其他容器，避免跨入已啟用工作分鐘；無法核對就保留失敗並處理，不以改設定隱藏。維護HTTP、health、部署與正式金融採用分開記錄。
+
+
+D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_point_sell_protection_d208`，decision=`D-208`、enabled=true、symbols=[00919]、market=台股、minimum_kd_exclusive=50；其他低檔數值為rsi5_at_or_below=30、wr9_at_or_above=80、bias10_at_or_below=-8、week52_position_at_or_below=0.15。blocked_radar_states固定為BUY_CANDIDATE／ADD_CANDIDATE／LOW／LOW_WATCH／OVERSOLD／OVERSOLD_WATCH／REBOUND_WATCH／ENTRY_WATCH。任一數值低檔條件、股票本身timingState／counterTrendState／action／candidateAction命中集合，或timingLabel／counterTrendLabel／reasons出現「低檔」「超賣」「反彈觀察」均封鎖；不是搜尋全市場敘述。KD／RSI／WR域0..100、position域0..1、BIAS有限，數值缺漏／型別不合法皆不可驗證。Java使用source同欄位，有效低檔值回reason=`D208_LOW_POINT_SELL_BLOCKED`及timingPass=false。D208新增設定／附加技術證據缺口沿既有局部Gap(reason=`D208_LOW_POINT_EVIDENCE_UNVERIFIED`)處理；原KD／數值／來源驗證失敗保留原具名Gap。`calculateCore` catchGap只記module missing／UNAVAILABLE，該檔不輸出timingPass fact或PASS receipt，不能宣稱已回false JSON。這與Python timing_pass=false在「不得執行」語意等價，golden分別驗有效值的timingPass／reason parity及缺值的Java Gap／module無PASS、Pythonfalse，兩者不是JSON逐值相等。不新增envelope欄位。四值中任一=50仍封鎖，值全部>50尚需其他低檔及原D174條件。
+
+保留觀察fingerprint：Python已有四欄decision／scope／arming／non_distributing_symbols穩定指紋；Java台股原本驗整份policy的歷史相容雜湊，加入執行欄位不能讓舊state全部失效。Java只接受同四欄穩定指紋、當前完整policy精確指紋，以及去除這個新執行欄位後的原完整policy精確指紋；不得接受任意字串或只憑symbol放行。測試保留舊高水位與scope／arming遭竄改仍拒絕；不改寫來源state。
+
+公式身分：registry的ASSET_MGMT_SRPP_V2 manifest僅描述assets／allocation／cashIncome／funding／completedTechnicals，沒有D174 scope，本輪不改該五項公式。報告十二模組共同的SRPP_REPORT_CALCULATIONS_V1為既有計算族／wire契約身分，保持以免擴大到無關scope及schema；D208實際語意變更由新bundle、完整modelInputsSha256／policyManifestSha256、CORE_SELL_GUARD具名D208 scope及derived同輸入golden綁定，不冒稱00919金融輸出不變。

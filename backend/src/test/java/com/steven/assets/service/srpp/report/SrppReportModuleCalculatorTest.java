@@ -16,7 +16,14 @@ class SrppReportModuleCalculatorTest {
     static JsonNode model() throws Exception{return MAPPER.readTree(new DecisionPolicyAuthority().modelBytes());}
     @Test void originalSRPPGoldenAllMigratedPureFormulaScopes()throws Exception{
         JsonNode model=model(),golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));assertThat(golden.path("policyBundleSha256").asText()).isEqualTo(new DecisionPolicyAuthority().policy().bundleHash());assertThat(golden.path("originalCalculatorHashes").size()).isEqualTo(7);int count=0;
-        for(JsonNode c:golden.path("cases")){JsonNode actual;String kind=c.path("kind").asText();LocalDate date=LocalDate.parse(c.path("date").asText("2026-09-22"));JsonNode e=model.path("execution_policy");switch(kind){
+        for(JsonNode c:golden.path("cases")){JsonNode actual;String kind=c.path("kind").asText();LocalDate date=LocalDate.parse(c.path("date").asText("2026-09-22"));JsonNode e=model.path("execution_policy");
+            if ("core_unavailable".equals(kind)) {
+                assertThat(c.path("expected").path("timingPass").asBoolean()).isFalse();
+                assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(c.path("body"), c.path("state"), date, e.path("core_sell_guard_d174")))
+                    .as(c.path("name").asText()).isInstanceOf(IllegalArgumentException.class);
+                count++; continue;
+            }
+            switch(kind){
             case "topup" -> actual=SrppReportModuleCalculator.topupTier(c.path("body"),date,e.path("daily_topup_tier_policy"));
             case "strategic" -> actual=SrppReportModuleCalculator.strategicGate(c.path("body"),date,e.path("strategic_buy_high_gate_d188"));
             case "core" -> actual=SrppReportModuleCalculator.coreTiming(c.path("body"),c.path("state"),date,e.path("core_sell_guard_d174"));
@@ -27,7 +34,7 @@ class SrppReportModuleCalculatorTest {
             case "regime" -> actual=SrppReportModuleCalculator.regimeCapacity(c.path("live"),e.path("dynamic_allocation_policy_d141"),e.path("stock_purchase_funding_policy_d150"),n(c.get("total")),n(c.get("cash")),n(c.get("bonds")),n(c.get("equity")),n(c.get("inflation")));
             default -> throw new AssertionError(kind);
         }for(var expected:c.path("expected").properties()){JsonNode value=actual.get(expected.getKey());assertThat(value).as(kind+":"+expected.getKey()).isNotNull();if(expected.getValue().isBoolean()||expected.getValue().isArray()||expected.getKey().equals("reason"))assertThat(value).isEqualTo(expected.getValue());else assertThat(n(value).subtract(n(expected.getValue())).abs()).as(kind+":"+expected.getKey()).isLessThan(new BigDecimal("0.000000000001"));}count++;}
-        assertThat(count).isEqualTo(22);
+        assertThat(count).isEqualTo(57);
     }
     @Test void formalTargetsAndRegistryArtifactUseExactCurrentAuthorityBytes()throws Exception{JsonNode model=model();JsonNode artifact=SrppJcs.parseStrict(new String(getClass().getResourceAsStream("/srpp/report/d201-policy-document.json").readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));assertThat(SrppReportModuleCalculator.registryDocument(model)).isEqualTo(artifact);assertThat(SrppReportModuleCalculator.formalTargets(model).path("00865B").asText()).isEqualTo("0.063333333333");assertThat(SrppReportModuleCalculator.targetAllocationSha256(model)).matches("[a-f0-9]{64}");assertThat(SrppPolicyDocument.parse(SrppJcs.canonicalize(artifact)).targets()).hasSize(18);}
     @Test void unknownCoreStateAndCrossConsumerStateCannotBecomeComplete()throws Exception{FrozenFixture fixture=fixture();JsonNode model=model();for(JsonNode state:List.of(NullNode.instance,MAPPER.readTree("{\"verified\":true,\"ownerUserId\":7,\"consumer\":\"Claude\",\"items\":[]}"))){ObjectNode result=SrppReportModuleCalculator.calculateCore(fixture.frozen,model,state,"Codex");assertThat(result.path("status").asText()).isEqualTo("UNAVAILABLE");assertThat(result.path("missing").toString()).contains("CONSUMER_CORE_STATE_UNAVAILABLE");}}
@@ -70,6 +77,87 @@ class SrppReportModuleCalculatorTest {
     @Test void d205CorePullbackBoundaryIsOnePointFivePercent() throws Exception {
         JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));JsonNode c=java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false).filter(row->row.path("kind").asText().equals("core")&&row.path("expected").path("timingPass").asBoolean()).findFirst().orElseThrow();JsonNode policy=model().path("execution_policy").path("core_sell_guard_d174");assertThat(n(policy.get("pullback_fraction"))).isEqualByComparingTo("0.015");ObjectNode body=c.path("body").deepCopy();BigDecimal high=n(c.path("expected").path("highWater"));((ObjectNode)body.path("book").path("levels").get(0)).put("bidPrice",high.multiply(new BigDecimal("0.985")).toPlainString());assertThat(SrppReportModuleCalculator.coreTiming(body,c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("timingPass").asBoolean()).isTrue();((ObjectNode)body.path("book").path("levels").get(0)).put("bidPrice",high.multiply(new BigDecimal("0.985001")).toPlainString());assertThat(SrppReportModuleCalculator.coreTiming(body,c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("reason").asText()).isEqualTo("HIGH_WATER_PULLBACK_NOT_MET");
     }
+    @Test void d208RetainsStableAndPreExecutionGateWatchIdentityWithoutAcceptingUnknownPolicies() throws Exception {
+        JsonNode c = d208Case("above_midpoint_original_gates_pass");
+        ObjectNode policy = model().path("execution_policy").path("core_sell_guard_d174").deepCopy();
+        ObjectNode stable = MAPPER.createObjectNode();
+        for (String key : List.of("decision", "scope", "arming", "non_distributing_symbols")) stable.set(key, policy.get(key));
+        ObjectNode prior = policy.deepCopy(); prior.remove("low_point_sell_protection_d208");
+        for (JsonNode hashPolicy : List.of(stable, prior)) {
+            ObjectNode state = c.path("state").deepCopy();
+            state.put("policy_sha256", com.steven.assets.service.srpp.us.UsPythonJson.hash(hashPolicy));
+            ObjectNode before = state.deepCopy();
+            JsonNode actual = SrppReportModuleCalculator.coreTiming(c.path("body"), state, LocalDate.parse(c.path("date").asText()), policy);
+            assertThat(actual.path("timingPass").asBoolean()).isTrue();
+            assertThat(actual.path("highWater").asText()).isEqualTo("100");
+            assertThat(state).isEqualTo(before);
+            ObjectNode tampered = policy.deepCopy(); tampered.put("arming", "UNVERIFIED_REPLACEMENT");
+            assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(c.path("body"), state, LocalDate.parse(c.path("date").asText()), tampered))
+                .hasMessageContaining("WATCH_STATE_UNVERIFIED");
+        }
+    }
+
+    @Test void d208PublishedModuleCannotTurnLowOrMissingEvidenceIntoPass() throws Exception {
+        JsonNode c = d208Case("live_k_50");
+        ObjectNode module = d208Module(c.path("body"), c.path("state"));
+        assertThat(module.path("status").asText()).isEqualTo("COMPLETE");
+        assertThat(module.path("scope").toString()).contains("D208_00919_LOW_POINT_SELL_PROTECTION");
+        assertThat(fact(module, "timingPass", "00919").path("value").asText()).isEqualTo("0");
+        assertThat(module.path("receipts").toString()).contains("D208_LOW_POINT_SELL_BLOCKED");
+        ObjectNode missing = c.path("body").deepCopy();
+        ((ObjectNode) missing.path("radar").path("stock").path("extendedIndicators")).remove("rsi5");
+        JsonNode unavailable = d208Module(missing, c.path("state"));
+        assertThat(unavailable.path("status").asText()).isEqualTo("UNAVAILABLE");
+        assertThat(unavailable.path("missing").toString()).contains("D208_LOW_POINT_EVIDENCE_UNVERIFIED:00919");
+        assertThat(unavailable.path("data").path("facts").isEmpty()).isTrue();
+        assertThat(unavailable.path("receipts").isEmpty()).isTrue();
+        for (String key : List.of("timingState", "counterTrendState")) {
+            for (JsonNode malformed : List.of(MAPPER.createObjectNode(), MAPPER.createArrayNode())) {
+                ObjectNode malformedBody = d208Case("above_midpoint_original_gates_pass").path("body").deepCopy();
+                ((ObjectNode)malformedBody.path("radar").path("stock")).set(key, malformed);
+                JsonNode invalid = d208Module(malformedBody, c.path("state"));
+                assertThat(invalid.path("status").asText()).isEqualTo("UNAVAILABLE");
+                assertThat(invalid.path("missing").toString()).contains("D208_LOW_POINT_EVIDENCE_UNVERIFIED:00919");
+                assertThat(invalid.path("data").path("facts").isEmpty()).isTrue();
+                assertThat(invalid.path("receipts").isEmpty()).isTrue();
+            }
+        }
+    }
+
+    @Test void d208InvalidFieldsAndPolicyCannotBeReplacedWithZeroOrAnEmergencyFlag() throws Exception {
+        JsonNode c = d208Case("above_midpoint_original_gates_pass");
+        JsonNode policy = model().path("execution_policy").path("core_sell_guard_d174");
+        for (JsonNode value : List.of(NullNode.instance, BooleanNode.TRUE, TextNode.valueOf("NaN"), TextNode.valueOf("Infinity"))) {
+            ObjectNode body = c.path("body").deepCopy();
+            ((ObjectNode)body.path("radar").path("stock")).set("kValue", value);
+            assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(body, c.path("state"), LocalDate.parse(c.path("date").asText()), policy))
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        ObjectNode body = d208Case("live_k_50").path("body").deepCopy();
+        body.put("mandatoryRiskExit", true).put("bypassLowPointGuard", true);
+        assertThat(SrppReportModuleCalculator.coreTiming(body, c.path("state"), LocalDate.parse(c.path("date").asText()), policy).path("timingPass").asBoolean()).isFalse();
+    }
+
+    private JsonNode d208Case(String suffix) throws Exception {
+        JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));
+        return java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false)
+            .filter(value -> ("D208_" + suffix).equals(value.path("name").asText())).findFirst().orElseThrow();
+    }
+
+    private ObjectNode d208Module(JsonNode body, JsonNode state) throws Exception {
+        FrozenFixture base = fixture(); Input old = base.frozen.facts(); ObjectNode input = base.frozen.input();
+        ((ObjectNode)input.path("sources")).set("market:台股:00919", body);
+        ((ArrayNode)input.path("sources").path("assets").path("liveAssets").path("stocks")).addObject()
+            .put("stockCode", "00919").put("market", "台股").put("liveValue", "50000");
+        LocalDate date=LocalDate.parse(body.path("quote").path("tradingDate").asText());
+        Instant at=date.atTime(9,40).atZone(ZoneId.of("Asia/Taipei")).toInstant();
+        Input facts=new Input(date,"09:05",at,old.sessions(),old.totalAssets(),old.totalDeposits(),old.termDeposits(),old.bondValue(),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),old.subaccounts(),old.emergencyValue());
+        var frozen=new DecisionInputCapturePort.Frozen(facts,input,base.frozen.sourceVector(),1,at.toString());
+        ObjectNode wrapper=MAPPER.createObjectNode(); wrapper.put("verified",true).put("ownerUserId",7).put("consumer","Codex");
+        ObjectNode item=wrapper.putArray("items").addObject(); item.put("stock_code","00919").put("market","台股").set("state",state);
+        return SrppReportModuleCalculator.calculateCore(frozen,model(),wrapper,"Codex");
+    }
+
     record FrozenFixture(DecisionInputCapturePort.Frozen frozen,Policy policy,SupportedPolicy registered){}
     static FrozenFixture fixture()throws Exception{Policy p=new DecisionPolicyAuthority().policy();LocalDate date=LocalDate.parse("2026-10-08");Instant at=Instant.parse("2026-10-08T04:00:00Z");Evidence pass=new Evidence("PASS","ISOLATED_OFFICIAL_EVIDENCE_FIXTURE");List<LocalDate>sessions=java.util.stream.IntStream.rangeClosed(1,20).mapToObj(i->date.minusDays(21-i)).toList();Map<String,Symbol>symbols=new TreeMap<>();ObjectNode sources=MAPPER.createObjectNode();for(String code:p.symbols()){BigDecimal price=new BigDecimal(code.equals("00865B")?"9.8":code.equals("00719B")?"9.85":"9.9");Quote q=new Quote(price,BigDecimal.TEN,100L,date,at,"FUBON","LIVE",false,BigDecimal.ZERO,date);List<Level>levels=new ArrayList<>();for(int i=0;i<5;i++)levels.add(new Level(price.subtract(new BigDecimal("0.01").multiply(BigDecimal.valueOf(i+1))),10,price.add(new BigDecimal("0.01").multiply(BigDecimal.valueOf(i+1))),10));symbols.put(code,new Symbol(code,q,new Book("FUBON_BOOKS",date,at,at,levels,true),sessions.stream().map(d->new Close(d,BigDecimal.TEN,true)).toList(),List.of(),true,BigDecimal.ZERO,pass,pass,pass,pass,pass,"HOLD","HOLD",pass));for(String kind:List.of("quote","book","radar","daily","dividends","pending","tradability","minute"))sources.putObject(kind+":"+code).put("isolatedFixture",true);}
         ObjectNode assets=MAPPER.createObjectNode(),snapshot=assets.putObject("snapshot"),live=assets.putObject("liveAssets");snapshot.put("id",1);snapshot.put("snapshotDate",date.toString());live.put("snapshotId",1);live.put("snapshotDate",date.toString());for(ObjectNode n:List.of(snapshot,live)){n.put("totalDeposit","5000000");n.put("totalFundValue","0");}snapshot.put("totalStockValue","15000000");snapshot.put("totalAssets","20000000");live.put("liveStockValue","15000000");live.put("liveTotalAssets","20000000");ArrayNode deposits=snapshot.putArray("deposits");for(int i=0;i<2;i++){ObjectNode d=deposits.addObject();d.put("id",i+1);d.put("bankId",1);d.put("currency","TWD");d.put("depositType",i==0?"TERM":"DEMAND");d.put("amount",i==0?"1000000":"4000000");d.put("originalAmount",i==0?"1000000":"4000000");d.put("estimatedAnnualInterest","0");d.put("annualInterestRate","0");}snapshot.putArray("funds");ObjectNode holding=snapshot.putArray("stocks").addObject();holding.put("id",1);holding.put("stockCode","0050");holding.put("market","台股");holding.put("shares","1000");holding.put("currentValue","15000000");holding.put("estimatedDividend","0");ObjectNode item=live.putArray("stocks").addObject();item.put("holdingId",1);item.put("stockCode","0050");item.put("market","台股");item.put("shares","1000");item.put("liveValue","15000000");assets.put("generatedAt",at.toString());assets.put("targetPriceComplete",true);sources.set("assets",assets);sources.putObject("classifications").putObject("resolvedStockClasses").put("0050:台股","STOCK");sources.putArray("ledger");sources.putArray("reservations");for(String id:List.of("policy","calendar","subaccounts","fx","bear-window"))sources.putObject(id).put("isolatedFixture",true);ObjectNode reportReservations=sources.putObject("report-reservations");reportReservations.put("verified",true).put("ownerUserId",7).put("tradingDate",date.toString()).put("policyBundleSha256",p.bundleHash()).put("coverage","COMPLETE").putArray("rows");ObjectNode reportState=sources.putObject("topup-state");reportState.put("verified",true).put("ownerUserId",7).put("tradingDate",date.toString()).put("policyBundleSha256",p.bundleHash());reportState.putObject("pending").put("verified",true).put("coverage","COMPLETE").putArray("orders");sources.withObject("policy").put("bundleHash",p.bundleHash());ObjectNode input=MAPPER.createObjectNode();input.put("ownerUserId",7);input.set("sources",sources);

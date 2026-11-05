@@ -6544,3 +6544,19 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 功能權限整合：DataInitializer.seedAppFeatures 以既有 insert-if-missing 慣例加入 `/annual-dividends`（資產管理／年度配息統計，enabledForUser=true）；保留其他功能設定，不改既有角色權限。新路由沿現有登入/功能可見性守門。
 
 選單固定放在「交易紀錄」與「資產配置建議」之間（使用者指定）；權限主檔排序亦須一致。
+
+
+### Requirements 187／193：00919 低檔減碼保護 authority（Task 549）
+
+使用者於2026-11-05要求修改規則，避免00919在低檔賣出。唯一政策來源為 managed SRPP feature `/Users/steven/.codex/worktrees/00919-low-sell-guard/SRPP` 經獨立審查、正式 policy/runtime 檢查後凍結的 D-208 authority；凍結前不預填 bundle、版本或來源 hash。這是新增的保守執行門檻，未經回測證明最佳，不能宣稱保證避開最低點或提高報酬。
+
+- 台股00919的一般 D-174 核心減碼／退出，在原擇時條件之外，最近一個完成交易日原始日線 K、D及當輪精確雷達日線 kValue、dValue四值均須為0至100的有效有限數值且嚴格大於50；任一值小於或等於50不得通過。缺值、來源日期／可比性不可核對、已有低檔／超賣／反彈反向訊號時，該筆 fail closed，不能以舊高水位、超標、政經調量或人工旗標放行。高水位、觀察起日及consumer隔離保留；不新增緊急退出捷徑，不改原具名必要風險退出的獨立路徑，不擴及其他標的或美股。
+- 目前台股 `SrppReportModuleCalculator.calculateCore/coreTiming` 會產出 `timingPass` 擇時事實與 D174 收據，因此必須由同一已凍結政策欄位執行等價的00919 gate；不得只更新文件／bundle而讓Java仍PASS。既有API路由／schema及模組集合不變，不新增SELL leg或交易權限；US calculator不套用台股條件。觀察指紋不因新執行門檻清空／重建。
+- 對四值50邊界、稍高於50、單項低檔、缺值／錯誤型別、其他標的不受影響及原高水位保存的來源回歸，需有Java／Python同輸入golden與聚焦測試。2026-11-05早盤留存資料的回放只屬歷史離線證據，不改寫原報告、觀察帳或不可變包。
+- 同步原始model／manifest bytes、既有generator的正式targets投影、insert-only registration SQL與受影響golden，從最終來源讀回實際hash；targets、未授權公式、Swagger、owner範圍及producer／排程不改。新hash只能新增registry row，歷史row不更新、不刪除。
+- 本輪採使用者既有跨專案完整發布授權及 `srpp-policy-release` 技能「發布順序」步驟3至5：兩repo完成各自feature commit、main no-ff merge、push及remote-ref readback後，才執行已合併SQL及四欄全文讀回，立即以新hash唯讀GET業務API保存真實HTTP／body；再從乾淨asset main及正式設定僅重建／recreate必要服務，核對JAR authority與新hash業務API。Task504任務舊段曾描述feature先serve及main重建後才SQL，本輪明示以後來的完整發布技能順序為準，不把舊Task504文字冒稱同一順序。正式日報採用仍須合法入口、完整required_reads、直接L0及獨立verifier；維護readback不冒充採用，不觸發報告、refresh、寄信、producer或交易。
+
+
+D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_point_sell_protection_d208`，decision=`D-208`、enabled=true、symbols=[00919]、market=台股、minimum_kd_exclusive=50；其他低檔數值為rsi5_at_or_below=30、wr9_at_or_above=80、bias10_at_or_below=-8、week52_position_at_or_below=0.15。blocked_radar_states固定為BUY_CANDIDATE／ADD_CANDIDATE／LOW／LOW_WATCH／OVERSOLD／OVERSOLD_WATCH／REBOUND_WATCH／ENTRY_WATCH。任一數值低檔條件、股票本身timingState／counterTrendState／action／candidateAction命中集合，或timingLabel／counterTrendLabel／reasons出現「低檔」「超賣」「反彈觀察」均封鎖；不是搜尋全市場敘述。KD／RSI／WR域0..100、position域0..1、BIAS有限，數值缺漏／型別不合法皆不可驗證。Java使用source同欄位，有效低檔值回reason=`D208_LOW_POINT_SELL_BLOCKED`及timingPass=false。D208新增設定／附加技術證據缺口沿既有局部Gap(reason=`D208_LOW_POINT_EVIDENCE_UNVERIFIED`)處理；原KD／數值／來源驗證失敗保留原具名Gap。`calculateCore` catchGap只記module missing／UNAVAILABLE，該檔不輸出timingPass fact或PASS receipt，不能宣稱已回false JSON。這與Python timing_pass=false在「不得執行」語意等價，golden分別驗有效值的timingPass／reason parity及缺值的Java Gap／module無PASS、Pythonfalse，兩者不是JSON逐值相等。不新增envelope欄位。四值中任一=50仍封鎖，值全部>50尚需其他低檔及原D174條件。
+
+保留觀察fingerprint：Python已有四欄decision／scope／arming／non_distributing_symbols穩定指紋；Java台股原本驗整份policy的歷史相容雜湊，加入執行欄位不能讓舊state全部失效。Java只接受同四欄穩定指紋、當前完整policy精確指紋，以及去除這個新執行欄位後的原完整policy精確指紋；不得接受任意字串或只憑symbol放行。測試保留舊高水位與scope／arming遭竄改仍拒絕；不改寫來源state。
