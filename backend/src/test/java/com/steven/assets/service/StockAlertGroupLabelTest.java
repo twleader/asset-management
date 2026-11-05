@@ -161,6 +161,48 @@ class StockAlertGroupLabelTest {
                 null, null, null, null, null, TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
     }
 
+    private static List<double[]> week52Rows(double high, double low) {
+        return java.util.stream.IntStream.range(0, 240).mapToObj(i -> new double[]{high, low}).toList();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0,80", "25,90", "50,100", "100,120", "33.333,93.33"})
+    void week52ThresholdUsesRequestedPercent(String percent, String expected) {
+        var range = StockAlertService.week52Range(new BigDecimal("100"), week52Rows(120, 80));
+        assertEquals(new BigDecimal(expected).setScale(2),
+                StockAlertService.week52ThresholdPrice(range, new BigDecimal(percent)));
+    }
+
+    @Test
+    void week52RangeIncludesCurrentExtremesAndLast240Only() {
+        assertEquals(new BigDecimal("140.00"), StockAlertService.week52ThresholdPrice(
+                StockAlertService.week52Range(new BigDecimal("200"), week52Rows(120, 80)), new BigDecimal("50")));
+        assertEquals(new BigDecimal("80.00"), StockAlertService.week52ThresholdPrice(
+                StockAlertService.week52Range(new BigDecimal("40"), week52Rows(120, 80)), new BigDecimal("50")));
+        var rows = new java.util.ArrayList<double[]>();
+        rows.add(new double[]{999, 1}); rows.addAll(week52Rows(120, 80));
+        assertEquals(new BigDecimal("100.00"), StockAlertService.week52ThresholdPrice(
+                StockAlertService.week52Range(new BigDecimal("100"), rows), new BigDecimal("50")));
+    }
+
+    @Test
+    void week52UnavailableAndIndexUnitsAreExplicit() {
+        var a = member("POS52W_BELOW", null, "50"); a.setStockCode("0000"); a.setMarket("台股");
+        var range = StockAlertService.week52Range(new BigDecimal("100"), week52Rows(120, 80));
+        assertEquals("52 週位置低於 50%（100 點）", StockAlertService.buildLabel(a, null, range));
+        a.setStockCode("0050");
+        assertEquals("52 週位置低於 50%（100）", StockAlertService.buildLabel(a, null, range));
+        assertEquals("52 週位置低於 50%", StockAlertService.buildLabel(a));
+        for (BigDecimal current : java.util.Arrays.asList(null, BigDecimal.ZERO, new BigDecimal("-1"), new BigDecimal("1e1000"))) {
+            assertEquals("52 週位置低於 50%（價位資料不足）", StockAlertService.buildLabel(a, null,
+                    StockAlertService.week52Range(current, week52Rows(120, 80))));
+        }
+        for (var history : List.of(week52Rows(100, 100), week52Rows(Double.NaN, 80), week52Rows(120, 80).subList(0, 239))) {
+            assertEquals(StockAlertService.Week52Range.UNAVAILABLE,
+                    StockAlertService.week52Range(new BigDecimal("100"), history));
+        }
+    }
+
     @Nested
     @ExtendWith(MockitoExtension.class)
     class ResponseMapping {
@@ -168,6 +210,8 @@ class StockAlertGroupLabelTest {
         @Mock StockPriceHistoryRepository historyRepo;
         @Mock StockRepository stockMasterRepo;
         @Mock TechnicalIndicatorService indicatorService;
+        @Mock PriceQueryService priceQuery;
+        @Mock com.steven.assets.repository.TwseIndexDailyHistoryRepository twseIndexHistoryRepo;
         @Mock StockAlertRecipientRepository recipientLinkRepo;
         @Mock StockAlertGroupRepository groupRepo;
         @Mock StockAlertGroupRecipientRepository groupRecipientRepo;
@@ -188,6 +232,62 @@ class StockAlertGroupLabelTest {
             StockAlertGroup group = StockAlertGroup.builder().id(20L).stockCode("0050").market("台股").build();
             when(groupRepo.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(group));
             when(alertRepo.findByGroupIdOrderByDisplayOrderAsc(20L)).thenReturn(members);
+        }
+
+        private PriceQueryService.LivePrice quote(String price) {
+            return new PriceQueryService.LivePrice("0050", null, "台股", new BigDecimal(price),
+                    null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        private List<com.steven.assets.model.StockPriceHistory> completedRows() {
+            return java.util.stream.IntStream.rangeClosed(1, 240).mapToObj(i ->
+                    com.steven.assets.model.StockPriceHistory.builder().stockCode("0050").market("台股")
+                            .tradingDate(com.steven.assets.util.MarketZones.today("台股").minusDays(i))
+                            .highPrice(new BigDecimal("120")).lowPrice(new BigDecimal("80"))
+                            .closePrice(new BigDecimal("100")).build()).toList();
+        }
+
+        @Test
+        void week52SingleAndCompoundMappingSharePricesAcrossMemberLabels() {
+            when(alertRepo.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(single("POS52W_BELOW", null, "50")));
+            var above = single("POS52W_ABOVE", null, "25");
+            var below = single("POS52W_BELOW", null, "50");
+            groupWith(List.of(above, below, member("KD_K_GT_D", null, "0")));
+            when(priceQuery.getLive("0050", "台股")).thenReturn(java.util.Optional.of(quote("100")));
+            when(historyRepo.findRecentN("0050", "台股", 241)).thenReturn(completedRows());
+            var response = service.findAll();
+            assertEquals("52 週位置低於 50%（100）", response.get(0).conditionLabel());
+            assertEquals("52 週位置高於 25%（90） 且 52 週位置低於 50%（100） 且 K 值大於 D 值", response.get(1).conditionLabel());
+            assertEquals(List.of("52 週位置高於 25%（90）", "52 週位置低於 50%（100）", "K 值大於 D 值"),
+                    response.get(1).conditions().stream().map(c -> c.label()).toList());
+            verify(priceQuery, org.mockito.Mockito.times(2)).getLive("0050", "台股");
+            verify(historyRepo, org.mockito.Mockito.times(2)).findRecentN("0050", "台股", 241);
+            verifyNoInteractions(indicatorService, twseIndexHistoryRepo);
+        }
+
+        @Test
+        void week52ReadFailureKeepsListReadable() {
+            when(alertRepo.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(single("POS52W_BELOW", null, "50")));
+            when(priceQuery.getLive("0050", "台股")).thenThrow(new IllegalStateException("unavailable"));
+            assertEquals("52 週位置低於 50%（價位資料不足）", service.findAll().getFirst().conditionLabel());
+        }
+
+        @Test
+        void week52IndexReadsOnlyIndexHistory() {
+            var a = single("POS52W_BELOW", null, "50"); a.setStockCode("0000");
+            when(alertRepo.findAllByOrderByDisplayOrderAsc()).thenReturn(List.of(a));
+            when(priceQuery.getLive("0000", "台股")).thenReturn(java.util.Optional.of(quote("100")));
+            var rows = java.util.stream.IntStream.rangeClosed(1, 240).mapToObj(i -> {
+                var row = new com.steven.assets.model.TwseIndexDailyHistory();
+                row.setTradingDate(com.steven.assets.util.MarketZones.today("台股").minusDays(i));
+                row.setHighPoint(new BigDecimal("120")); row.setLowPoint(new BigDecimal("80"));
+                row.setClosePoint(new BigDecimal("100")); return row;
+            }).toList();
+            when(twseIndexHistoryRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(rows);
+            assertEquals("52 週位置低於 50%（100 點）", service.findAll().getFirst().conditionLabel());
+            verify(twseIndexHistoryRepo).findTopNByOrderByTradingDateDesc(241);
+            verify(historyRepo, org.mockito.Mockito.never()).findRecentN(org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt());
         }
 
         @Test
@@ -225,7 +325,7 @@ class StockAlertGroupLabelTest {
 
             assertEquals(List.of("股價高於 100", "K 值低於 15 且 股價低於 90"),
                     response.stream().map(r -> r.conditionLabel()).toList());
-            verifyNoInteractions(indicatorService);
+            verifyNoInteractions(indicatorService, priceQuery, twseIndexHistoryRepo);
         }
 
         @Test

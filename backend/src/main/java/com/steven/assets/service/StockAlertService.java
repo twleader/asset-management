@@ -1517,7 +1517,8 @@ public class StockAlertService {
                 .lastTriggeredKdValue(fresh ? a.getLastTriggeredKdValue() : null)
                 .lastTriggeredDValue(fresh ? a.getLastTriggeredDValue() : null)
                 .createdAt(a.getCreatedAt())
-                .conditionLabel(buildLabel(a, maIndicatorsForLabel(a)))
+                .conditionLabel(buildLabel(a, maIndicatorsForLabel(a),
+                        week52RangeForLabel(a.getStockCode(), a.getMarket(), List.of(a))))
                 .kind("SINGLE")   // Task 253：前端據此把編輯 / 刪除 / 啟停分派到單一條件端點
                 .build();
     }
@@ -1537,6 +1538,7 @@ public class StockAlertService {
         boolean fresh = g.getLastTriggeredAt() != null
                 && (cutoff == null || !g.getLastTriggeredAt().isBefore(cutoff));
         TechnicalIndicatorService.FullIndicators ind = groupIndicatorsForLabel(g, members);
+        Week52Range range = week52RangeForLabel(g.getStockCode(), g.getMarket(), members);
         return StockAlertDto.Response.builder()
                 .id(g.getId())
                 .stockCode(g.getStockCode())
@@ -1551,13 +1553,63 @@ public class StockAlertService {
                 .lastTriggeredKdValue(fresh ? g.getLastTriggeredKdValue() : null)
                 .lastTriggeredDValue(fresh ? g.getLastTriggeredDValue() : null)
                 .createdAt(g.getCreatedAt())
-                .conditionLabel(buildGroupLabel(members, ind))
+                .conditionLabel(String.join(" 且 ", members.stream().map(m -> buildLabel(m, ind, range)).toList()))
                 .kind("GROUP")
                 .conditions(members.stream()
                         .map(m -> new StockAlertDto.ConditionItem(
-                                m.getAlertType(), m.getMaPeriod(), m.getThreshold(), buildLabel(m, ind)))
+                                m.getAlertType(), m.getMaPeriod(), m.getThreshold(), buildLabel(m, ind, range)))
                         .toList())
                 .build();
+    }
+
+    /** 僅供目前清單使用的區間；null 欄位代表曾嘗試載入但資料不足。 */
+    record Week52Range(BigDecimal low, BigDecimal high) {
+        static final Week52Range UNAVAILABLE = new Week52Range(null, null);
+    }
+
+    private Week52Range week52RangeForLabel(String code, String market, List<StockAlert> conditions) {
+        if (conditions.stream().noneMatch(a -> "POS52W_ABOVE".equals(a.getAlertType())
+                || "POS52W_BELOW".equals(a.getAlertType()))) return null;
+        try {
+            BigDecimal current = priceQuery.getLive(code, market).map(PriceQueryService.LivePrice::price).orElse(null);
+            return week52Range(current, loadCompletedHighLowAsc(code, market));
+        } catch (Exception e) {
+            log.warn("警示 52 週門檻價位讀取失敗 {} {}: {}", market, code, e.getMessage());
+            return Week52Range.UNAVAILABLE;
+        }
+    }
+
+    /** 與 week52Position 同口徑：最後 240 根未還原完成 K ＋現價。 */
+    static Week52Range week52Range(BigDecimal current, List<double[]> history) {
+        if (current == null || current.signum() <= 0 || !Double.isFinite(current.doubleValue())
+                || history == null || history.size() < WEEK52_BARS) return Week52Range.UNAVAILABLE;
+        BigDecimal low = current;
+        BigDecimal high = current;
+        for (double[] row : history.subList(history.size() - WEEK52_BARS, history.size())) {
+            if (row == null || row.length < 2 || !Double.isFinite(row[0]) || !Double.isFinite(row[1])
+                    || row[0] <= 0 || row[1] <= 0) return Week52Range.UNAVAILABLE;
+            low = low.min(BigDecimal.valueOf(row[0])).min(BigDecimal.valueOf(row[1]));
+            high = high.max(BigDecimal.valueOf(row[0])).max(BigDecimal.valueOf(row[1]));
+        }
+        return high.compareTo(low) > 0 ? new Week52Range(low, high) : Week52Range.UNAVAILABLE;
+    }
+
+    static BigDecimal week52ThresholdPrice(Week52Range range, BigDecimal percent) {
+        if (range == null || range.low() == null || range.high() == null || percent == null
+                || percent.signum() < 0 || percent.compareTo(BigDecimal.valueOf(100)) > 0) return null;
+        return range.low().add(range.high().subtract(range.low()).multiply(percent).movePointLeft(2))
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    static String buildLabel(StockAlert alert, TechnicalIndicatorService.FullIndicators indicators,
+                             Week52Range range) {
+        String label = buildLabel(alert, indicators);
+        if (range == null || !("POS52W_ABOVE".equals(alert.getAlertType())
+                || "POS52W_BELOW".equals(alert.getAlertType()))) return label;
+        BigDecimal price = week52ThresholdPrice(range, alert.getThreshold());
+        if (price == null) return label + "（價位資料不足）";
+        String unit = "0000".equals(alert.getStockCode()) && "台股".equals(alert.getMarket()) ? " 點" : "";
+        return label + "（" + plain(price) + unit + "）";
     }
 
     /** 股名：{@code 0000}+台股是大盤特例（不進 stock 主檔），其餘查主檔、查無則退回代號。 */
