@@ -13476,3 +13476,10 @@ Task552來源額度與重複抓取修訂：股利FinMind鏈共用同一既有身
 Task552 Quota補充實作契約：可新增DividendFinMindTransport純來源adapter及typed DatasetResponse/failure reason；DividendFetchResult additive nullable capturedAt加舊constructor相容，僅真HTTP回應帶實際capture。cache命中保留同capture，persister使用原capture作observedAt且先驗不得晚於clock.now，避免重播假新HTTP；sourceAvailableAt另保留原語意，不拿capture冒充官方首次公告。請求被cooldown本機短路則明示COOLDOWN/未外呼，不捏造該證券HTTP402，該內部失敗觀測用本機now。原actualUrl/capturedAt/metadata於快取不可改；TTL不滑動，fixed striped locks有界。有效Retry-After即使超15分鐘亦不可截短，local5→10→15分鐘只為內部保守backoff。queue generation/compare-remove防10年舊retry刪掉較新11年需求；24h自首次入隊起不延長，滿額/逾期有明確失敗紀錄而非靜默消失。
 
 Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生的COOLDOWN皆可入quota-related queue；後者始終標本機未外呼/無實際HTTP status，不假稱該股402。反例須以第一股真402、後續多股COOLDOWN、恢復後同原授權scope全部補抓驗證。DividendUpcomingScopeClient.UpcomingScope亦以舊constructor相容增nullable capturedAt；transport→parser/storageGroups→fetchProviderUpcomingScope→router/provider fallback→最終DividendFetchResult全程保留原capture，不以sourceAvailableAt替代。fake Clock以T0 historical真HTTP、T1 future命中cache穿越完整router後仍observedAt=T0，反證不得變成T1新HTTP。
+
+
+# Task 553：未來交割的方向稅額可未知
+
+本節限縮取代 Task394／Task532 future row 的 partial-null 拒絕規則：Python `SettlementService` 仍 require 所有原始 key 存在，僅 `buy_tax`、`sell_tax` 的 explicit None 以 JSON null 傳遞；其他十個 AMOUNT_FIELDS 仍 required signed exact integer，方向稅額非 null 也經相同 parser。Java `FubonDtos.SettlementDay` 保持 immutable record 與原欄位，在兩個 nullable creator properties 上明示 required key；`FubonAccountingContract` 分別驗證十個 required amount 及兩個非 null 稅額，不能將 null 丟入非 null collection 或當零。完整 placeholder 仍要求全部 amount 為 null；available row 必須保留原日期／幣別／source-pair 與 settlement-day 唯一、direction sign、總額及 freshness／explicit binding 防線。
+
+`FubonSettlementWriter` 繼續只使用 source settlement 金額，完全不從方向稅額重算含費金額；按 processingDate 的身份與原 lock／transaction／source-managed/no-op 契約不變。真案例形狀：sourceQueryDate=2026-11-04、settlementDate=2026-11-06、buySettlement=-10040、sellSettlement=0、totalSettlementAmount=-10040、buyTax=null、sellTax=null；另一列2026-11-05→2026-11-09為-43181、taxes 0。合計-53221，兩列日期與既有代號備註保留。本次不新增 API／DB 欄位，不修改 Task406 延後來源報表、公開 JSON、金融 Swagger、SRPP、flags 或 cron。

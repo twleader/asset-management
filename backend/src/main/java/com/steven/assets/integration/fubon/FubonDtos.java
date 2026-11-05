@@ -1,5 +1,6 @@
 package com.steven.assets.integration.fubon;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 import java.time.Instant;
@@ -140,10 +141,12 @@ public final class FubonDtos {
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyValue,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyFee,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buySettlement,
+            @JsonProperty(value = "buyTax", required = true)
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal buyTax,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellValue,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellFee,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellSettlement,
+            @JsonProperty(value = "sellTax", required = true)
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal sellTax,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalBsValue,
             @JsonDeserialize(using = CanonicalFubonDecimal.SignedDeserializer.class) CanonicalFubonDecimal totalFee,

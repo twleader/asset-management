@@ -827,3 +827,20 @@ def test_etf_failure_does_not_change_the_exact_thirteen_counter_keys_seen_by_oth
     for response in (holdings, after, portfolio):
         assert response.json()["counters"]["QUOTE_FAILED"] == 1
     assert holdings.json()["holdings"][1]["reason"] == "ETF_HOLDINGS_FAILED"
+
+
+def test_settlement_route_preserves_explicit_unknown_direction_taxes(tmp_path):
+    from accounting_fixtures import NOW, AccountingGateway, settlement_data, settlement_row
+    from fubon_broker_service.settlement import SettlementService
+
+    raw = settlement_row(buy_tax=None, sell_tax=None)
+    service = SettlementService(AccountingGateway(settlement_data([raw])), now=lambda: NOW)
+    application = create_app(ready_config(tmp_path), Gateway(), Portfolio(), Quotes(), Trades(),
+                             settlement_service=service)
+    with TestClient(application) as client:
+        response = client.post("/internal/settlement/read", headers={"X-Internal-Service-Token": TOKEN})
+    assert response.status_code == 200
+    row = response.json()["details"][0]
+    assert "buyTax" in row and row["buyTax"] is None
+    assert "sellTax" in row and row["sellTax"] is None
+    assert row["buySettlement"] == "-1002"

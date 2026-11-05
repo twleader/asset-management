@@ -42,15 +42,20 @@ def test_empty_and_all_none_placeholder_are_observations_not_zero_or_complete():
 @pytest.mark.parametrize("field", [*AMOUNT_FIELDS,"currency","settlement_date"])
 def test_partial_null_or_missing_field_is_not_a_placeholder(field):
     raw=settlement_row(); raw[field]=None
-    with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
-        service([raw]).read()
+    if field in {"buy_tax", "sell_tax"}:
+        row = service([raw]).read()["details"][0]
+        assert row[AMOUNT_FIELDS[field]] is None
+        assert row["buySettlement"] == "-1002"
+    else:
+        with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
+            service([raw]).read()
     del raw[field]
     with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
         service([raw]).read()
 
 
 @pytest.mark.parametrize("field", list(AMOUNT_FIELDS))
-@pytest.mark.parametrize("bad", [True,"1e4","0.1",10**20])
+@pytest.mark.parametrize("bad", [True,0.0,1.5,"1e4","0.1",10**20])
 def test_every_amount_requires_an_exact_bounded_integer(field,bad):
     with pytest.raises(SettlementError,match="RECONCILE_FAILED"):
         service([settlement_row(**{field:bad})]).read()
@@ -171,3 +176,31 @@ def test_cross_day_response_is_rejected():
     times=iter([datetime(2026,8,28,15,59,59,tzinfo=UTC),datetime(2026,8,28,16,0,0,tzinfo=UTC)])
     with pytest.raises(SettlementError,match="STALE_QUERY"):
         SettlementService(AccountingGateway(settlement_data([])),now=lambda:next(times)).read()
+
+
+def test_future_unknown_direction_taxes_preserve_both_days_and_source_amounts():
+    first = settlement_row(date="2026/08/27", settlement_date="2026/08/31",
+                           buy_value=10020, buy_fee=20, buy_settlement=-10040,
+                           buy_tax=None, sell_tax=None, total_bs_value=10020,
+                           total_fee=20, total_settlement_amount=-10040)
+    second = settlement_row(date="2026/08/28", settlement_date="2026/09/01",
+                            buy_value=43120, buy_fee=61, buy_settlement=-43181,
+                            total_bs_value=43120, total_fee=61, total_settlement_amount=-43181)
+    rows = service([first, second]).read()["details"]
+    assert [(row["settlementDate"], row["buySettlement"], row["buyTax"], row["sellTax"])
+            for row in rows] == [("2026-08-31", "-10040", None, None),
+                                ("2026-09-01", "-43181", "0", "0")]
+    assert sum(int(row["buySettlement"]) for row in rows) == -53221
+    assert service([first, second]).read()["coverageStatus"] == "SDK_RANGE_3D_RETURNED_ROWS"
+    with pytest.raises(SettlementError, match="AMBIGUOUS_SETTLEMENT"):
+        service([first, {**second, "settlement_date": first["settlement_date"]}]).read()
+
+
+@pytest.mark.parametrize("changes", [
+    {"buy_settlement": None}, {"sell_settlement": None}, {"total_settlement_amount": None},
+    {"buy_settlement": 10040}, {"sell_settlement": -1}, {"total_settlement_amount": -1},
+    {"currency": "USD"}, {"branch_no": "other", "account": SELECTED.account_number},
+])
+def test_unknown_taxes_do_not_bypass_required_amount_identity_or_reconciliation(changes):
+    with pytest.raises(SettlementError, match="RECONCILE_FAILED"):
+        service([settlement_row(buy_tax=None, sell_tax=None, **changes)]).read()

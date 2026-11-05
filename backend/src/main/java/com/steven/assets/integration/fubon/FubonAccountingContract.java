@@ -48,7 +48,14 @@ final class FubonAccountingContract {
             require(row.settlementDate() != null && !row.settlementDate().isBefore(row.sourceQueryDate()),
                     "INVALID_SETTLEMENT_DATE");
             require(settlementDays.add(row.settlementDate()), "AMBIGUOUS_SETTLEMENT");
-            for (CanonicalFubonDecimal amount : amounts) decimal(amount, true, true);
+            // Direction taxes may be explicitly unknown. They are never used to
+            // derive settlement money; every other source amount remains required.
+            CanonicalFubonDecimal[] requiredAmounts = {row.buyValue(), row.buyFee(), row.buySettlement(),
+                    row.sellValue(), row.sellFee(), row.sellSettlement(), row.totalBsValue(),
+                    row.totalFee(), row.totalTax(), row.totalSettlementAmount()};
+            for (CanonicalFubonDecimal amount : requiredAmounts) decimal(amount, true, true);
+            if (row.buyTax() != null) decimal(row.buyTax(), true, true);
+            if (row.sellTax() != null) decimal(row.sellTax(), true, true);
             BigDecimal buy = row.buySettlement().value();
             BigDecimal sell = row.sellSettlement().value();
             require(buy.signum() <= 0 && sell.signum() >= 0
