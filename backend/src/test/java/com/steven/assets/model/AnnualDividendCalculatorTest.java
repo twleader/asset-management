@@ -178,4 +178,18 @@ class AnnualDividendCalculatorTest {
         assertThat(out.unavailableCount()).isEqualTo(1);
         assertThat(AnnualDividendCalculator.calculate(f, 2026, "美股", TODAY).rows()).hasSize(2);
     }
+
+    @Test void dailyBaselineIsMarketScopedWinsSameDateAndDoesNotDoubleApplySameDayLedger() {
+        var legacy=new Snapshot(date("2026-06-01"),List.of(new Position(TW.code(),TW.market(),n("999")),new Position(US.code(),US.market(),n("7"))));
+        var daily=new Snapshot(date("2026-06-01"),List.of(new Position(TW.code(),TW.market(),n("100"))),"台股");
+        var f=new Facts(List.of(TW,US),List.of(daily,legacy),
+                List.of(trade("2026-06-01","買","50"),trade("2026-06-02","賣","10")),
+                List.of(event(1,"2026-06-05","2"),new Event(2,US.code(),US.market(),2026,date("2026-06-05"),null,null,n("1"),null,"fixture")),List.of());
+        var out=calculate(f);
+        assertThat(out.rows()).filteredOn(r->r.market().equals("台股")).singleElement().satisfies(r->assertThat(r.shares()).isEqualByComparingTo("90"));
+        assertThat(out.rows()).filteredOn(r->r.market().equals("美股")).singleElement().satisfies(r->assertThat(r.shares()).isEqualByComparingTo("7"));
+        var empty=new Facts(f.securities(),List.of(legacy,new Snapshot(date("2026-06-04"),List.of(),"台股")),List.of(),f.events(),f.markets());
+        assertThat(calculate(empty).rows()).filteredOn(r->r.market().equals("台股")).singleElement().satisfies(r->assertThat(r.shares()).isZero());
+        assertThat(calculate(empty).rows()).filteredOn(r->r.market().equals("美股")).singleElement().satisfies(r->assertThat(r.shares()).isEqualByComparingTo("7"));
+    }
 }

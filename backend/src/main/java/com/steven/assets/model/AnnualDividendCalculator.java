@@ -129,7 +129,8 @@ public final class AnnualDividendCalculator {
 
     private static Holding holding(Facts facts, Security security, LocalDate cutoff) {
         Snapshot baseline = facts.snapshots().stream().filter(s -> !s.date().isAfter(cutoff))
-                .max(Comparator.comparing(Snapshot::date)).orElse(null);
+                .filter(s -> s.market() == null || s.market().equals(security.market()))
+                .max(Comparator.comparing(Snapshot::date).thenComparing(s -> s.market() != null)).orElse(null);
         if (baseline == null) return new Holding(null, null, 0, "缺少截止日前的持股快照，無法由交易紀錄從零推算");
         List<Trade> trades = facts.trades().stream().filter(t -> same(security, t.code(), t.market())
                 && t.date().isAfter(baseline.date()) && !t.date().isAfter(cutoff)).toList();

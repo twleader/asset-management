@@ -24,8 +24,10 @@ class JdbcAnnualDividendReadRepositoryTest {
 
     @BeforeEach void setup() {
         jdbc = new JdbcTemplate(new DriverManagerDataSource(PG.getJdbcUrl(), PG.getUsername(), PG.getPassword()));
-        for (String table : new String[]{"asset_snapshot", "stock_holding", "asset_transaction", "stock_dividend_history", "market_type", "stock"})
+        for (String table : new String[]{"daily_inventory_position", "daily_inventory_snapshot", "asset_snapshot", "stock_holding", "asset_transaction", "stock_dividend_history", "market_type", "stock"})
             jdbc.execute("DROP TABLE IF EXISTS " + table);
+        jdbc.execute("CREATE TABLE daily_inventory_snapshot(id BIGINT PRIMARY KEY,owner_user_id BIGINT,market TEXT,trading_date DATE)");
+        jdbc.execute("CREATE TABLE daily_inventory_position(id BIGINT PRIMARY KEY,snapshot_id BIGINT,stock_code TEXT,shares NUMERIC(15,5))");
         jdbc.execute("CREATE TABLE asset_snapshot(id BIGINT PRIMARY KEY,owner_user_id BIGINT,snapshot_date DATE)");
         jdbc.execute("CREATE TABLE stock_holding(id BIGINT PRIMARY KEY,snapshot_id BIGINT,stock_code TEXT,market TEXT,shares NUMERIC(15,5))");
         jdbc.execute("CREATE TABLE asset_transaction(id BIGINT PRIMARY KEY,owner_user_id BIGINT,asset_code TEXT,market TEXT,asset_name TEXT,asset_type TEXT,trade_date DATE,transaction_type TEXT,shares NUMERIC(15,5))");
@@ -103,5 +105,17 @@ class JdbcAnnualDividendReadRepositoryTest {
         assertThat(service.summary("2026", "", java.util.List.of(commonKey)).rows()).extracting(Row::code).containsOnly("0050");
         context.setEffectiveUserId(1L);
         assertThat(service.summary("2026", "", java.util.List.of(commonKey)).rows()).extracting(Row::code).containsOnly("0050");
+    }
+
+    @Test void permanentDailySymbolsSurviveMutableSourceDeletionAndEmptyMarketStaysScopedToOwner() {
+        jdbc.update("INSERT INTO daily_inventory_snapshot VALUES(101,1,'台股','2026-06-01'),(102,1,'美股','2026-06-02'),(201,2,'台股','2026-06-02')");
+        jdbc.update("INSERT INTO daily_inventory_position VALUES(1,101,'ARCHIVED',2.12345),(2,201,'OTHERSECRET',999)");
+        var one=repository.load(1,TODAY);
+        assertThat(one.securities()).extracting(Security::code).contains("ARCHIVED").doesNotContain("OTHERSECRET");
+        assertThat(one.snapshots()).filteredOn(s->"台股".equals(s.market())).singleElement().satisfies(s->{
+            assertThat(s.date()).isEqualTo(LocalDate.of(2026,6,1));assertThat(s.positions().getFirst().shares()).isEqualByComparingTo("2.12345");
+        });
+        assertThat(one.snapshots()).filteredOn(s->"美股".equals(s.market())).singleElement().satisfies(s->assertThat(s.positions()).isEmpty());
+        assertThat(repository.load(3,TODAY).snapshots()).isEmpty();
     }
 }

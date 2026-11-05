@@ -12,7 +12,9 @@ public final class AnnualDividendData {
     public record StockOption(String key, String code, String name, String market) {}
     public record Market(String code, String displayName) {}
     public record Position(String code, String market, BigDecimal shares) {}
-    public record Snapshot(LocalDate date, List<Position> positions) {
+    public record Snapshot(LocalDate date, List<Position> positions, String market) {
+        /** null market retains legacy all-market snapshots; daily history is explicitly market scoped. */
+        public Snapshot(LocalDate date, List<Position> positions) { this(date, positions, null); }
         public Snapshot { positions = List.copyOf(positions); }
     }
     public record Trade(String code, String market, LocalDate date,

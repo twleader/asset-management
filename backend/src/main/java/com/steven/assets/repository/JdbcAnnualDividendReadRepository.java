@@ -22,6 +22,10 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                 UNION
                 SELECT t.asset_code AS code, t.market FROM asset_transaction t
                  WHERE t.owner_user_id=? AND t.trade_date<=? AND t.asset_type='股票'
+                UNION
+                SELECT p.stock_code AS code, s.market FROM daily_inventory_snapshot s
+                  JOIN daily_inventory_position p ON p.snapshot_id=s.id
+                 WHERE s.owner_user_id=? AND s.trading_date<=?
             )
             """;
 
@@ -38,7 +42,7 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                  WHERE o.code IS NOT NULL AND TRIM(o.code)<>'' AND o.market IS NOT NULL
                  ORDER BY o.market, o.code
                 """, (rs, n) -> new Security(rs.getString("code"), rs.getString("name"), rs.getString("market")),
-                ownerId, asOfDate, ownerId, asOfDate, ownerId, asOfDate);
+                ownerId, asOfDate, ownerId, asOfDate, ownerId, asOfDate, ownerId, asOfDate);
         Map<LocalDate, List<Position>> positions = new LinkedHashMap<>();
         jdbc.query("""
                 SELECT s.snapshot_date, h.stock_code, h.market, h.shares
@@ -51,7 +55,27 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                     if (rs.getString("stock_code") != null)
                         items.add(new Position(rs.getString("stock_code"), rs.getString("market"), rs.getBigDecimal("shares")));
                 }, ownerId, asOfDate);
-        List<Snapshot> snapshots = positions.entrySet().stream().map(e -> new Snapshot(e.getKey(), e.getValue())).toList();
+        List<Snapshot> snapshots = new ArrayList<>(positions.entrySet().stream()
+                .map(e -> new Snapshot(e.getKey(), e.getValue())).toList());
+        // Header LEFT JOIN retains EMPTY as a real zero baseline only for its own market.
+        Map<Long, List<Position>> dailyPositions = new LinkedHashMap<>();
+        Map<Long, LocalDate> dailyDates = new LinkedHashMap<>();
+        Map<Long, String> dailyMarkets = new LinkedHashMap<>();
+        jdbc.query("""
+                SELECT s.id,s.trading_date,s.market,p.stock_code,p.shares
+                  FROM daily_inventory_snapshot s LEFT JOIN daily_inventory_position p ON p.snapshot_id=s.id
+                 WHERE s.owner_user_id=? AND s.trading_date<=?
+                 ORDER BY s.trading_date,s.market,p.id
+                """, rs -> {
+                    long id = rs.getLong("id");
+                    dailyDates.put(id, rs.getObject("trading_date", LocalDate.class));
+                    dailyMarkets.put(id, rs.getString("market"));
+                    var items = dailyPositions.computeIfAbsent(id, ignored -> new ArrayList<>());
+                    if (rs.getString("stock_code") != null)
+                        items.add(new Position(rs.getString("stock_code"), rs.getString("market"), rs.getBigDecimal("shares")));
+                }, ownerId, asOfDate);
+        dailyPositions.forEach((id, items) -> snapshots.add(new Snapshot(dailyDates.get(id), items, dailyMarkets.get(id))));
+        snapshots.sort(Comparator.comparing(Snapshot::date).thenComparing(s -> s.market() != null));
         List<Trade> trades = jdbc.query("""
                 SELECT asset_code, market, trade_date, transaction_type, shares
                   FROM asset_transaction
