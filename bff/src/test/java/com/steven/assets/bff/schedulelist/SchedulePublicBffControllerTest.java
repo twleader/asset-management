@@ -24,12 +24,20 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 36 個業務、44 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 37 個業務、44 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(81);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(36);
+        assertThat(jobs()).hasSize(82);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(37);
         assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(44);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test void dailyInventoryDescribesMarketClosePlusSixHoursAndPermanentHistory() {
+        assertThat(jobs()).filteredOn(j -> "每日台美股庫存歷史保存".equals(j.name())).singleElement().satisfies(job -> {
+            assertThat(job.cron()).isEqualTo("0 * * * * *");
+            assertThat(job.zone()).isEqualTo("Asia/Taipei");
+            assertThat(job.description()).contains("19:30", "22:00", "19:00", "永久", "交易日期", "不補造歷史");
+        });
     }
 
     @Test void dividendQuotaRetryIsBoundedTechnicalMaintenanceOnly() {

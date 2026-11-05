@@ -519,3 +519,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.161.0-dividend-canonical-facts.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.162.0-daily-inventory-history.sql
+      relativeToChangelogFile: false

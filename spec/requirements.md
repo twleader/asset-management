@@ -6615,3 +6615,15 @@ Task552來源額度與重複抓取修訂：股利FinMind鏈共用同一既有身
 Task552 Quota補充實作契約：可新增DividendFinMindTransport純來源adapter及typed DatasetResponse/failure reason；DividendFetchResult additive nullable capturedAt加舊constructor相容，僅真HTTP回應帶實際capture。cache命中保留同capture，persister使用原capture作observedAt且先驗不得晚於clock.now，避免重播假新HTTP；sourceAvailableAt另保留原語意，不拿capture冒充官方首次公告。請求被cooldown本機短路則明示COOLDOWN/未外呼，不捏造該證券HTTP402，該內部失敗觀測用本機now。原actualUrl/capturedAt/metadata於快取不可改；TTL不滑動，fixed striped locks有界。有效Retry-After即使超15分鐘亦不可截短，local5→10→15分鐘只為內部保守backoff。queue generation/compare-remove防10年舊retry刪掉較新11年需求；24h自首次入隊起不延長，滿額/逾期有明確失敗紀錄而非靜默消失。
 
 Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生的COOLDOWN皆可入quota-related queue；後者始終標本機未外呼/無實際HTTP status，不假稱該股402。反例須以第一股真402、後續多股COOLDOWN、恢復後同原授權scope全部補抓驗證。DividendUpcomingScopeClient.UpcomingScope亦以舊constructor相容增nullable capturedAt；transport→parser/storageGroups→fetchProviderUpcomingScope→router/provider fallback→最終DividendFetchResult全程保留原capture，不以sourceAvailableAt替代。fake Clock以T0 historical真HTTP、T1 future命中cache穿越完整router後仍observedAt=T0，反證不得變成T1新HTTP。
+
+
+#### Task 555：交易日收盤六小時後永久保存每日台美股庫存（延伸 Requirement 94）
+
+**User Story:** 作為使用者，我希望每日台股與美股庫存都有可回查的歷史，讓年度配息能用較接近除息時點的股數，且不因最新快照改寫而遺失。
+
+- [ ] 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份永久、不可變的系統庫存歷史。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
+- [ ] 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、無刪除保留期限。
+- [ ] 保存來源是系統既有最新asset_snapshot與stock_holding，並非新增券商查詢，也不聲稱券商剛同步／收盤成交庫存。來源快照日期不得晚於當下台北日期；保存source_snapshot_id/date及captured_at、scheduled_at、session_close_at。保留owner/market/trading_date獨立header與每筆原始明細：source_holding_id、stock_code、broker_id(nullable)、shares numeric(15,5)、investment_cost numeric(20,2)、currency varchar(3) nullable、transaction_exchange_rate numeric(10,4) nullable；不存即時行情payload、衍生損益或整包JSON。系統無更細券商帳號欄位，不捏造帳號。此為具名歷史快照正規化例外：原資料後續可能改寫，必須保留當時股數與成本。
+- [ ] 每個owner各自transaction，第一個DB操作經AssetSnapshotMutationLock鎖該owner latest root，再讀該owner持股。每次取得root鎖後重新讀Clock.instant，重新驗證仍在該market交易日期的close+6h至午夜窗口，captured_at必須用此真時間；等待鎖跨午夜時不寫header。鎖後重新查該owner latest ID，若等待期間新latest已提交而ID不同，退出本次交易，交下次tick重判，不把已過時root當latest。測試必覆蓋等待鎖跨午夜及等待期間建立新latest兩個反例。header/所有明細原子提交；header唯一(owner_user_id,market,trading_date)、明細唯一(header_id,source_holding_id)，防多實例／重啟重複。成功header與明細資料庫trigger拒絕UPDATE/DELETE；FK不得因來源快照/持股被改刪而令歷史消失，source ids是歷史識別值。無來源快照、未來快照或股數/成本格式無效則不產生成功header並記明錯誤；某owner失敗不阻擋其他owner或另一市場。來源存在而該市場無明細，保存EMPTY header以區分已確認的系統零庫存與未保存；其餘SAVED。各市場只存自身列。
+- [ ] 年度配息既有純讀repository納入每日歷史symbols與完整market-scoped基準（含EMPTY），同日優先每日歷史、不同日選截止日前最新適用市場基準，之後才套用嚴格較晚交易日的ledger；台股基準不代表美股零庫存。既有asset_snapshot仍為全市場fallback，不重複加總兩份來源、不修改既有配息算式、原幣隔離／資料不足語意或UI回應欄位。歷史sold-out股票即使目前庫存刪除仍可由每日歷史進分析範圍。來源仍為系統庫存推估，不提升為實際入帳。
+- [ ] 同步SchedulePublicBffController.JOBS與排程清單測試，列明每分鐘檢查、台股19:30／美股NY22:00（提前19:00），不可顯示成每分鐘新增快照。既有SnapshotDateRollScheduler與latest估值不變。無券商寫入／交易、無新9090/SRPP API、無SRPP政策/排程變更。DB備份沿既有一般金融資料保留，不新增排除。
