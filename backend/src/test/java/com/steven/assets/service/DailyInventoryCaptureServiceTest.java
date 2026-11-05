@@ -72,8 +72,24 @@ class DailyInventoryCaptureServiceTest {
         when(calendar.dueSession(anyString(),any())).thenReturn(Optional.of(TW));
         when(sources.findDistinctOwnerUserIds()).thenReturn(List.of(1L,2L));
         when(captures.capture(eq(1L),any())).thenThrow(new IllegalStateException());
-        new DailyInventoryScheduler(calendar,sources,captures,clock).tick();
+        new DailyInventoryScheduler(calendar,sources,captures,history,clock).tick();
         verify(captures,times(2)).capture(2L,TW);
         verify(calendar).dueSession(eq("美股"),any());
+    }
+
+    @Test void retentionRunsOnFirstTickBeforeHolidayOrUnavailableCalendarAndFailureDoesNotBlockCapture() {
+        var calendar=mock(DailyInventoryCalendarPort.class);var captures=mock(DailyInventoryCaptureService.class);
+        when(clock.instant()).thenReturn(Instant.parse("2026-11-06T01:00:00Z"));
+        when(calendar.dueSession(eq("台股"),any())).thenThrow(new IllegalStateException());
+        when(calendar.dueSession(eq("美股"),any())).thenReturn(Optional.empty());
+        var scheduler=new DailyInventoryScheduler(calendar,sources,captures,history,clock);
+        scheduler.tick();
+        var order=inOrder(history,calendar);order.verify(history).deleteExpired();
+        order.verify(calendar).dueSession(eq("台股"),any());order.verify(calendar).dueSession(eq("美股"),any());
+        verifyNoInteractions(captures,sources);
+        when(history.deleteExpired()).thenThrow(new IllegalStateException());
+        when(calendar.dueSession(eq("台股"),any())).thenReturn(Optional.of(TW));
+        when(sources.findDistinctOwnerUserIds()).thenReturn(List.of(2L));
+        scheduler.tick();verify(captures).capture(2L,TW);verify(history,times(2)).deleteExpired();
     }
 }

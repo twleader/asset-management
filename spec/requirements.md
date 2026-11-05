@@ -6621,9 +6621,22 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 
 **User Story:** 作為使用者，我希望每日台股與美股庫存都有可回查的歷史，讓年度配息能用較接近除息時點的股數，且不因最新快照改寫而遺失。
 
-- [ ] 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份永久、不可變的系統庫存歷史。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
-- [ ] 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、無刪除保留期限。
+- [ ] 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
+- [ ] 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、保留期限及過期刪除依Task556修訂。
 - [ ] 保存來源是系統既有最新asset_snapshot與stock_holding，並非新增券商查詢，也不聲稱券商剛同步／收盤成交庫存。來源快照日期不得晚於當下台北日期；保存source_snapshot_id/date及captured_at、scheduled_at、session_close_at。保留owner/market/trading_date獨立header與每筆原始明細：source_holding_id、stock_code、broker_id(nullable)、shares numeric(15,5)、investment_cost numeric(20,2)、currency varchar(3) nullable、transaction_exchange_rate numeric(10,4) nullable；不存即時行情payload、衍生損益或整包JSON。系統無更細券商帳號欄位，不捏造帳號。此為具名歷史快照正規化例外：原資料後續可能改寫，必須保留當時股數與成本。
 - [ ] 每個owner各自transaction，第一個DB操作經AssetSnapshotMutationLock鎖該owner latest root，再讀該owner持股。每次取得root鎖後重新讀Clock.instant，重新驗證仍在該market交易日期的close+6h至午夜窗口，captured_at必須用此真時間；等待鎖跨午夜時不寫header。鎖後重新查該owner latest ID，若等待期間新latest已提交而ID不同，退出本次交易，交下次tick重判，不把已過時root當latest。測試必覆蓋等待鎖跨午夜及等待期間建立新latest兩個反例。header/所有明細原子提交；header唯一(owner_user_id,market,trading_date)、明細唯一(header_id,source_holding_id)，防多實例／重啟重複。成功header與明細資料庫trigger拒絕UPDATE/DELETE；FK不得因來源快照/持股被改刪而令歷史消失，source ids是歷史識別值。無來源快照、未來快照或股數/成本格式無效則不產生成功header並記明錯誤；某owner失敗不阻擋其他owner或另一市場。來源存在而該市場無明細，保存EMPTY header以區分已確認的系統零庫存與未保存；其餘SAVED。各市場只存自身列。
 - [ ] 年度配息既有純讀repository納入每日歷史symbols與完整market-scoped基準（含EMPTY），同日優先每日歷史、不同日選截止日前最新適用市場基準，之後才套用嚴格較晚交易日的ledger；台股基準不代表美股零庫存。既有asset_snapshot仍為全市場fallback，不重複加總兩份來源、不修改既有配息算式、原幣隔離／資料不足語意或UI回應欄位。歷史sold-out股票即使目前庫存刪除仍可由每日歷史進分析範圍。來源仍為系統庫存推估，不提升為實際入帳。
 - [ ] 同步SchedulePublicBffController.JOBS與排程清單測試，列明每分鐘檢查、台股19:30／美股NY22:00（提前19:00），不可顯示成每分鐘新增快照。既有SnapshotDateRollScheduler與latest估值不變。無券商寫入／交易、無新9090/SRPP API、無SRPP政策/排程變更。DB備份沿既有一般金融資料保留，不新增排除。
+
+
+#### Task 556：每日庫存最多保留5.5年（延伸 Requirement 94）
+
+**User Story:** 作為使用者，我希望每日庫存只保留最近5.5年，限制持續累積的資料量，同時保留期間內的庫存與股息計算仍可核對。
+
+- [ ] 本修訂依使用者「最多存5.5年」指示，僅針對daily_inventory_snapshot與daily_inventory_position，取代Task555永久保留與一律拒絕DELETE。5.5年明確定義為66個曆月：按market「台股」Asia/Taipei、「美股」America/New_York各自當地今日計算cutoff=localToday.minusMonths(66)，trading_date>=cutoff保留，<cutoff過期；邊界當日包含。月末／閏年依曆法月底截短，不以365*5.5天或美台共用日期代替。
+- [ ] 沿既有DailyInventoryScheduler每分鐘tick，先獨立呼叫retention清理再做市場日曆與close+6h保存判斷；清理不依賴交易日、有效日曆、到點窗口或owner目前是否還有來源快照，包含休市、午夜後與重啟首tick。清理失敗記錄明確錯誤但不阻擋合法新日庫存保存；下tick重試。SAVED與EMPTY header皆依同一cutoff到期。
+- [ ] 一次REQUIRES_NEW交易先鎖住當下判定已過期的header（按id固定順序），再刪除其positions、再刪除同組header；任何失敗整組rollback，不能留下半份有效資料或清到未過期。清理只命中這兩表，不刪舊asset_snapshot、stock_holding、asset_transaction、股利、SRPP或其他資料。未過期仍拒絕UPDATE/DELETE，所有UPDATE無論是否過期都拒絕；不新增任意日期清理／手動清理endpoint。
+- [ ] 新增incremental migration v1.163.0-daily-inventory-retention.sql，不修改已發布v1.162.0。DB新增daily_inventory_retention_cutoff(market text, at timestamptz)純計算函式，按上述兩市場明確時區回傳date；未知market或null fail closed。DB row trigger對header INSERT與child INSERT必用statement_timestamp()計算真實市場cutoff，拒絕過期header重灌與對過期header補child；header DELETE只准當時已過期者，child DELETE只准parent已過期者，UPDATE一律拒絕。不可透過session變數／客戶端日期繞過；guard使用真DB時鐘，純函式可傳測試時間不等於guard可被覆寫。
+- [ ] 清理adapter於同一交易先取得DB statement_timestamp()作本輪選取截止時間，鎖定已過期header後只刪其固定id集合，不使用caller傳入cutoff。即使跨午夜，較舊輪次cutoff只可能少清不會刪未過期資料；trigger每個statement仍以當時真DB時間覆核。DB與JVM時鐘差異不放寬guard。
+- [ ] 年度配息純讀的daily symbol scope與daily基準兩條SQL，皆加trading_date>=daily_inventory_retention_cutoff(market,statement_timestamp())，即使清理落後也不讀／使用過期每日庫存。呼叫端asOfDate仍為原查詢上界，不能用來延長保留期限。保留原舊asset_snapshot與ledger fallback；已清理的每日資料缺席不是EMPTY、不當零，無其他基準維持資料不足。DTO/BFF/UI及配息算式不改，既有stock master/ledger名稱查詢不改。
+- [ ] 修改既有排程文案為「最多保留5.5年（66個曆月），過期每分鐘清理」，保留台股19:30、美股NY22:00／提前19:00保存時機，JOBS仍82筆、不新增@Scheduled工作或新頁面。資料庫備份政策不變，備份中的舊副本不聲稱已被此線上清理同步移除；現行schema的一般INSERT/COPY會拒絕過期資料，但完整schema+data復原不宣稱由guard阻擋（復原可能重建舊schema/trigger）。復原後須確認現行migration已套用，再由首tick清除過期；現行annual讀路徑立即排除過期。此任務不新增restore/backup改造或備份檔清理功能。
