@@ -29,6 +29,33 @@ class AnnualDividendCalculatorTest {
     }
     private static Calculation calculate(Facts facts) { return AnnualDividendCalculator.calculate(facts, 2026, "", TODAY); }
 
+    @Test void stockKeySeparatelyEncodesUtf8ComponentsWithoutPaddingAndNeverCollidesAcrossMarkets() {
+        String key = AnnualDividendCalculator.stockKey("台股", "A.B/C");
+        assertThat(key).doesNotContain("=").matches("[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+");
+        String[] parts = key.split("\\.");
+        assertThat(new String(java.util.Base64.getUrlDecoder().decode(parts[0]), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("台股");
+        assertThat(new String(java.util.Base64.getUrlDecoder().decode(parts[1]), java.nio.charset.StandardCharsets.UTF_8)).isEqualTo("A.B/C");
+        assertThat(key).isNotEqualTo(AnnualDividendCalculator.stockKey("美股", "A.B/C"));
+    }
+
+    @Test void stockIntersectionUsesAlreadyRoundedAmountsAndPreservesUnknownAndEmptySemantics() {
+        var first = new Row("ABC", "known", "台股", "TWD", date("2026-06-01"), null, n("0.333333"), n("3"), n("1.00"),
+                date("2026-01-01"), 0, "HISTORICAL_ESTIMATE", null, "official");
+        var unknown = new Row("XYZ", "unknown", "美股", "USD", date("2026-06-01"), null, null, null, null,
+                null, 0, "HISTORICAL_ESTIMATE", "未知", "official");
+        var gap = new Gap("GAP", "gap", "台股", "缺公告");
+        var base = new Calculation(List.of(first, unknown), List.of(gap), List.of(new CurrencyTotal("TWD", n("1.00"), n("0.00"), n("1.00"))), 2);
+        var selected = AnnualDividendCalculator.filterByStockKeys(base, java.util.Set.of(AnnualDividendCalculator.stockKey("台股", "ABC")), TODAY);
+        assertThat(selected.rows().getFirst()).isSameAs(first);
+        assertThat(selected.currencyTotals().getFirst().total()).isEqualByComparingTo("1.00");
+        assertThat(selected.unavailableCount()).isZero();
+        var missing = AnnualDividendCalculator.filterByStockKeys(base, java.util.Set.of(AnnualDividendCalculator.stockKey("美股", "XYZ")), TODAY);
+        assertThat(missing.rows()).containsExactly(unknown);
+        assertThat(missing.currencyTotals()).isEmpty();
+        assertThat(missing.unavailableCount()).isEqualTo(1);
+        assertThat(AnnualDividendCalculator.filterByStockKeys(base, java.util.Set.of(), TODAY)).isSameAs(base);
+    }
+
     @Test void combinesBrokersAndAdjustsOnlyAfterSnapshotBeforeExDate() {
         var out = calculate(facts(List.of(snapshot("2026-06-01", "1000", "500")),
                 List.of(trade("2026-06-01", "買", "999"), trade("2026-06-02", "買", "100"),

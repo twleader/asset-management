@@ -6578,3 +6578,12 @@ D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_poin
 同輸入golden由原Python工具產生，既有57case中00919新增高檔門檻造成的expected差異須逐項說明；不得宣稱所有舊57案輸出不變。新增完成D／即時D各79.99／80／80.01邊界、K78D82與即時K75D81的K低於80正例，以及即時K>=D／完成日K回升／原閘不通過反例。00919以外原22case、15long-short退出、targets、registry formula與Swagger須保持原值，新增或變更來源hash應有因果說明。最終來源由root確認凍結後才同步model／manifest、原generator SQL與golden；source變動即撤銷舊驗收重產，不手填hash。
 
 發布沿已接受Task549及現行srpp-policy-release具體步驟：雙repo各feature commit→main no-ff merge→push／remote-ref readback→已合併insert-only SQL及四欄全文／既有32列不變核對→立即新hash業務GET→乾淨asset main原正式設定僅business-services build/recreate→JAR五authority與實際changed class／設定／其他容器及新hash業務readback。這是現行鏈，不冒稱舊Task504原文。可做離線建置在前，不提前替換正式服務；不觸發producer、報告、refresh、Gmail或交易，合法正式採用與維護診斷分開。
+
+
+#### Task 551：年度配息的年度／市場／股票篩選（延伸 Requirement 94）
+
+- [ ] 年度配息統計頁提供明確的「年度」「市場」「股票」標籤；市場沿設定主檔的 code/displayName，可選全部／台股／美股及其他既有市場。股票可搜尋代號或名稱、多選、清除；清除＝該年度與市場全部股票。三條件取交集，明細、資料缺口、待確認數與各原幣小計同步依選取結果計算，不能只隱藏明細而維持全體小計。
+- [ ] 沿既有 `GET /api/bff/annual-dividends/summary` → `GET /api/annual-dividends`，新增可重複的 optional `stock` query。其值為 response `stockOptions[].key` 的原樣 opaque key：`base64url(UTF8(market),無padding) + '.' + base64url(UTF8(code),無padding)`；以市場＋代號辨識，不讓跨市場同代號互相混入。不帶stock仍沿舊行為；空白或不在目前owner／年度／市場股票選項的key回400，重複相同key去重；year/market仍只准單值，未知query、owner/email仍400。
+- [ ] response additive新增 `stockOptions:[{key,code,name,market}]` 與 `selectedStockKeys:string[]`。選項由套用年度、市場但尚未套用股票篩選的 rows/gaps 股票聯集產生，含缺資料股票，market/code去重且穩定排序；選股票時不能令選項縮成只剩已選股票。key只作範圍選擇，不承載租戶授權；選項仍限登入owner，無跨owner lookup或外抓。
+- [ ] 後端一次純讀與計算後，以共用純邏輯套用股票集合並重新彙總，不複製既有配息算式。前端只渲染摘要與明細／選項，不自行做金融聚合或資料列篩選；股票下拉搜尋文字只過濾選項顯示。切換年度或市場先清除股票選取再載入新選項；選股票/清除都重新查本頁BFF，既有取消與序號防護涵蓋全部條件，舊回應不得蓋掉新篩選。
+- [ ] 保留原本稅前推估、歷史持股／未來維持持股、衝突與未知值、原幣隔離及唯讀邊界。無schema／9090／SRPP變更；完成獨立審查、測試、run-stack驗收與commit/no-ff merge/push。

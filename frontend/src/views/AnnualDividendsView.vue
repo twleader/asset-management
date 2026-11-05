@@ -7,28 +7,58 @@
       </div>
 
       <div class="filters" aria-label="年度配息統計篩選條件">
-        <el-select
-          v-model="selectedYear"
-          class="year-select"
-          aria-label="年度"
-          placeholder="年度"
-          :disabled="loading && yearOptions.length === 0"
-          @change="loadSummary"
-        >
-          <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
-        </el-select>
-        <el-select
-          v-model="selectedMarket"
-          class="market-select"
-          aria-label="市場"
-          placeholder="全部市場"
-          :disabled="loading && marketOptions.length === 0"
-          @change="loadSummary"
-        >
-          <el-option label="全部市場" value="" />
-          <el-option v-for="market in marketOptions" :key="market.code" :label="market.displayName" :value="market.code" />
-        </el-select>
-        <el-button type="primary" :loading="loading" @click="loadSummary">重新載入</el-button>
+        <div class="filter-field">
+          <span id="annual-dividend-year-label" class="filter-label">年度</span>
+          <el-select
+            v-model="selectedYear"
+            class="year-select"
+            aria-labelledby="annual-dividend-year-label"
+            placeholder="選擇年度"
+            :disabled="loading && yearOptions.length === 0"
+            @change="onYearOrMarketChange"
+          >
+            <el-option v-for="year in yearOptions" :key="year" :label="`${year} 年`" :value="year" />
+          </el-select>
+        </div>
+        <div class="filter-field">
+          <span id="annual-dividend-market-label" class="filter-label">市場</span>
+          <el-select
+            v-model="selectedMarket"
+            class="market-select"
+            aria-labelledby="annual-dividend-market-label"
+            placeholder="全部市場"
+            :disabled="loading && marketOptions.length === 0"
+            @change="onYearOrMarketChange"
+          >
+            <el-option label="全部市場" value="" />
+            <el-option v-for="market in marketOptions" :key="market.code" :label="market.displayName" :value="market.code" />
+          </el-select>
+        </div>
+        <div class="filter-field stock-filter-field">
+          <span id="annual-dividend-stock-label" class="filter-label">股票</span>
+          <el-select
+            v-model="selectedStockKeys"
+            class="stock-select"
+            aria-labelledby="annual-dividend-stock-label"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            :max-collapse-tags="2"
+            :reserve-keyword="false"
+            placeholder="全部股票"
+            :disabled="loading && stockOptions.length === 0"
+            @change="loadSummary"
+          >
+            <el-option
+              v-for="stock in stockOptions"
+              :key="stock.key"
+              :label="stockOptionLabel(stock)"
+              :value="stock.key"
+            />
+          </el-select>
+        </div>
+        <el-button class="reload-button" type="primary" :loading="loading" @click="loadSummary">重新載入</el-button>
       </div>
     </header>
 
@@ -198,6 +228,8 @@ const selectedMarket = ref('')
 const summary = ref(null)
 const yearOptions = ref([])
 const marketOptions = ref([])
+const stockOptions = ref([])
+const selectedStockKeys = ref([])
 const loading = ref(false)
 const loadError = ref('')
 
@@ -249,10 +281,20 @@ function marketLabel(code) {
   return marketOptions.value.find(market => market.code === code)?.displayName || code
 }
 
+function stockOptionLabel(stock) {
+  return `${stock.code || '代號未提供'} · ${stock.name || '名稱未提供'} · ${marketLabel(stock.market)}`
+}
+
 function holdingBasisLabel(value) {
   if (value === 'HISTORICAL_ESTIMATE') return '歷史持股推估'
   if (value === 'FUTURE_ESTIMATE') return '維持目前持股預估'
   return '—'
+}
+
+function onYearOrMarketChange() {
+  selectedStockKeys.value = []
+  stockOptions.value = []
+  loadSummary()
 }
 
 async function loadSummary() {
@@ -269,6 +311,7 @@ async function loadSummary() {
     const result = await bffApi.annualDividends.summary({
       year: selectedYear.value,
       market: selectedMarket.value,
+      selectedStockKeys: selectedStockKeys.value,
       signal: controller.signal
     })
     if (currentRequest !== requestSequence) return
@@ -276,6 +319,8 @@ async function loadSummary() {
     summary.value = result
     yearOptions.value = result?.availableYears || []
     marketOptions.value = result?.markets || []
+    stockOptions.value = result?.stockOptions || []
+    selectedStockKeys.value = result?.selectedStockKeys || []
     if (selectedYear.value == null && result?.selectedYear != null) {
       selectedYear.value = result.selectedYear
     }
@@ -336,12 +381,25 @@ onUnmounted(() => {
 
 .filters {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
   min-width: 0;
   max-width: 100%;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.filter-label {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .year-select {
@@ -354,6 +412,17 @@ onUnmounted(() => {
   width: 170px;
   min-width: 0;
   max-width: 100%;
+}
+
+.stock-filter-field,
+.stock-select {
+  width: 285px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.reload-button {
+  flex: 0 0 auto;
 }
 
 .estimate-note,
@@ -478,15 +547,23 @@ onUnmounted(() => {
     justify-content: flex-start;
   }
 
-  .year-select {
-    flex: 1 1 110px;
+  .filter-field {
+    flex: 1 1 130px;
   }
 
-  .market-select {
-    flex: 1 1 145px;
+  .stock-filter-field {
+    flex: 1 1 100%;
+    width: 100%;
   }
 
-  .filters :deep(.el-button) {
+  .year-select,
+  .market-select,
+  .stock-select {
+    flex: 0 1 auto;
+    width: 100%;
+  }
+
+  .filters :deep(.reload-button) {
     flex: 1 0 100%;
   }
 }
