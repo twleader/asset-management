@@ -34,14 +34,14 @@ class DividendFetchWindowAnchorTest {
     @Test
     void blindSpotEventWithinLast6DaysIsNoLongerDropped() throws Exception {
         String primary = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-24","StockEarningsDistribution":0.4,"StockStatutorySurplus":0.0,
                    "StockExDividendTradingDate":"2026-08-18",
                    "CashEarningsDistribution":0.0,"CashStatutorySurplus":0.0,
                    "CashExDividendTradingDate":"","CashDividendPaymentDate":"","StockDividendPaymentDate":""}
                 ]}
                 """;
-        String resultTable = "{\"data\":[]}";
+        String resultTable = "{\"status\":200,\"data\":[]}";
         List<String> capturedUris = new ArrayList<>();
         HttpClient client = capturingHistoryClient(primary, resultTable, capturedUris);
         DividendFetchClient fetcher = new DividendFetchClient("", null, CLOCK, client);
@@ -62,14 +62,14 @@ class DividendFetchWindowAnchorTest {
     @Test
     void futureEventIsExcludedFromHistoricalFetch() throws Exception {
         String primary = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-09-20","StockEarningsDistribution":0.5,"StockStatutorySurplus":0.0,
                    "StockExDividendTradingDate":"2026-09-15",
                    "CashEarningsDistribution":0.0,"CashStatutorySurplus":0.0,
                    "CashExDividendTradingDate":"","CashDividendPaymentDate":"","StockDividendPaymentDate":""}
                 ]}
                 """;
-        String resultTable = "{\"data\":[]}";
+        String resultTable = "{\"status\":200,\"data\":[]}";
         HttpClient client = capturingHistoryClient(primary, resultTable, new ArrayList<>());
         DividendFetchClient fetcher = new DividendFetchClient("", null, CLOCK, client);
 
@@ -85,14 +85,14 @@ class DividendFetchWindowAnchorTest {
     void eventBeforeLowerBoundIsExcluded() throws Exception {
         // years=10, today=2026-08-23 → from = 2016-08-23；此列早於 from。
         String primary = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2015-01-10","StockEarningsDistribution":0.5,"StockStatutorySurplus":0.0,
                    "StockExDividendTradingDate":"2015-01-05",
                    "CashEarningsDistribution":0.0,"CashStatutorySurplus":0.0,
                    "CashExDividendTradingDate":"","CashDividendPaymentDate":"","StockDividendPaymentDate":""}
                 ]}
                 """;
-        String resultTable = "{\"data\":[]}";
+        String resultTable = "{\"status\":200,\"data\":[]}";
         HttpClient client = capturingHistoryClient(primary, resultTable, new ArrayList<>());
         DividendFetchClient fetcher = new DividendFetchClient("", null, CLOCK, client);
 
@@ -109,9 +109,9 @@ class DividendFetchWindowAnchorTest {
 
     @Test
     void fallbackTableFiltersByOwnDateColumn() throws Exception {
-        String primary = "{\"data\":[]}";
+        String primary = "{\"status\":200,\"data\":[]}";
         String resultTable = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-18","stock_and_cache_dividend":0.4,"stock_or_cache_dividend":"息"},
                   {"date":"2026-09-15","stock_and_cache_dividend":0.5,"stock_or_cache_dividend":"息"},
                   {"date":"2015-01-01","stock_and_cache_dividend":0.6,"stock_or_cache_dividend":"息"}
@@ -190,14 +190,14 @@ class DividendFetchWindowAnchorTest {
     @Test
     void rowWithoutAnyResolvableExDateIsExcludedFromHistoricalFetch() throws Exception {
         String primary = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-20","StockEarningsDistribution":0.4,"StockStatutorySurplus":0.0,
                    "StockExDividendTradingDate":"",
                    "CashEarningsDistribution":0.0,"CashStatutorySurplus":0.0,
                    "CashExDividendTradingDate":"","CashDividendPaymentDate":"","StockDividendPaymentDate":""}
                 ]}
                 """;
-        String resultTable = "{\"data\":[]}";
+        String resultTable = "{\"status\":200,\"data\":[]}";
         HttpClient client = capturingHistoryClient(primary, resultTable, new ArrayList<>());
         DividendFetchClient fetcher = new DividendFetchClient("", null, CLOCK, client);
 
@@ -211,8 +211,8 @@ class DividendFetchWindowAnchorTest {
 
     @Test
     void auditDisclosureUrlMatchesActualRequestQueryParams() throws Exception {
-        String primary = "{\"data\":[]}";
-        String resultTable = "{\"data\":[]}";
+        String primary = "{\"status\":200,\"data\":[]}";
+        String resultTable = "{\"status\":200,\"data\":[]}";
         List<String> capturedUris = new ArrayList<>();
         HttpClient client = capturingHistoryClient(primary, resultTable, capturedUris);
         DividendFetchClient fetcher = new DividendFetchClient("", null, CLOCK, client);

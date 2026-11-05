@@ -6587,3 +6587,25 @@ D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_poin
 - [ ] response additive新增 `stockOptions:[{key,code,name,market}]` 與 `selectedStockKeys:string[]`。選項由套用年度、市場但尚未套用股票篩選的 rows/gaps 股票聯集產生，含缺資料股票，market/code去重且穩定排序；選股票時不能令選項縮成只剩已選股票。key只作範圍選擇，不承載租戶授權；選項仍限登入owner，無跨owner lookup或外抓。
 - [ ] 後端一次純讀與計算後，以共用純邏輯套用股票集合並重新彙總，不複製既有配息算式。前端只渲染摘要與明細／選項，不自行做金融聚合或資料列篩選；股票下拉搜尋文字只過濾選項顯示。切換年度或市場先清除股票選取再載入新選項；選股票/清除都重新查本頁BFF，既有取消與序號防護涵蓋全部條件，舊回應不得蓋掉新篩選。
 - [ ] 保留原本稅前推估、歷史持股／未來維持持股、衝突與未知值、原幣隔離及唯讀邊界。無schema／9090／SRPP變更；完成獨立審查、測試、run-stack驗收與commit/no-ff merge/push。
+
+
+#### Task 552：全股票股利來源口徑、精度與事件投影根治（延伸 Requirements 94／99）
+
+- [ ] 修正全股票共用資料鏈，不做2330例外、不以epsilon/MAX/MIN猜選。FinMind主表保留原始十進位現金/股票分項；Result只允許純現金「息／除息」，任何含權或未知型不得當現金。同instrument成功的NASDAQ stocks或etf擇一，另一assetclass不適用不代表所選來源失敗；不再把Yahoo split-adjusted與NASDAQ nominal相加。所有新事件須明示正常化版本、單一dataset與amount basis；舊immutable evidence/hash/既有SRPP包保持。
+- [ ] 以精確十進位端到端保存每股金額（NUMERIC(30,18)，12位整數/18位小數），超出可精確表示範圍拒絕，不靜默捨入；Yahoo fallback只有取得有效splits後能精確還原成事件當日nominal才可用，否則保持不可用。不得由金額比值推拆分。
+- [ ] current-state以instrument＋實際作用日作穩定身分，不含金額或發放日。每個來源新完整日期集合先保留真實components，再按現金除息日／股票除權日各自彙總；跨來源不concat，同來源revision取最新合格集合，來源順位按具名原始dataset而非小數位。真多分配需上游component/type身分證明，無法區分revision與component保持UNRESOLVED。不明舊值不當0；superseded原列保留而不冒稱金融撤回。
+- [ ] 歷史正事件只要求自身在原scope、knownAt不晚於決策且作用日已發生，不再要求歷史snapshot涵蓋今天；PARTIAL缺席不取消歷史。未來已知正事件僅在共用展示read port純讀，標示未來範圍未證完整，不灌入金融ACTIVE history，不提高45日COMPLETE決策閘。HTTP日期本身不能證明官方日曆整段完整。
+- [ ] 年度配息與股利歷史共用canonical展示資料，GET零投影/回填/外抓；history年度摘要由後端產生，未知金額顯示—，不再逐來源重複加總。公開quotes、還原／再投入、SRPP新capture等共同入口不得把UNRESOLVED/明示LEGACY當無事件或verified，使用既有不可用路徑。已發布金融Swagger/schema/路由與歷史不可變包不改。
+- [ ] 有界背景投影新observations；受控preview/planToken/apply原子且冪等，先全67檔dry-run和來源核對，再只重取公開market facts並修mutable投影。區分不配息/代號錯誤/未公告/來源失敗，不以空陣列當零。驗收含全股票coverage、13股重複、6股今年衝突、歷史漏投/未來公告、真同日多分配與並行舊writer；完成run-stack、schema重產、commit/no-ff merge/push。
+
+- [ ] Task552修訂/撤回必有可驗component關聯，日期移動原子處置兩日；PARTIAL缺席不撤回。維護計畫重送只有證據與target未變且已完全落地才成功零寫入，真新revision回409。舊啟動key migration不改immutable；Fubon未知stock與TW未證完整future不得假稱complete，Yahoo split查詢失敗不等於無拆股。
+
+- [ ] Task552歷史legacy缺欄只可由完整V2 FinMind主表補證：保留同日同額既有ACTIVE正現金、以明示0補其未知stock，須有一致legacy CANCELLED形狀且無任何已知分項/日期矛盾；全部取消原列不動，不推定取消原因，不適用無ACTIVE/canonical撤回/金額微差/未知來源/未來事件。不得按股票特判、以null當0或放寬撤回規則。
+
+Task552最終排程驗收基準：完成 CanonicalDividendProjectionPoller.poll 與 DividendPersister.retryPendingQuota 後，SchedulePublicBffController.JOBS 共81筆（business36、external44、BFF1），以現行清單與測試逐筆核對；此數字取代Task487等較早歷史計數。60秒只為技術投影poll，不新增投資或寄信排程。
+
+Task552來源額度與重複抓取修訂：股利FinMind鏈共用同一既有身份的有界成功dataset快取（TTL5分鐘、最多256個dataset/code），相同dataset/證券且原request起點不晚於新起點才可重用；保存原HTTP URL/抓取時刻，未證完整的資料不提升complete。historical已取得的不含end限制原始集合可供同輪future範圍解析，避免重打；同dataset/code in-flight序列化，warmup/cron/manual/upcoming共用。HTTP402且body明示Requests reach the upper limit才分類QUOTA_EXHAUSTED，所有股利FinMind請求共用內部5至15分鐘有界退避，Retry-After有效值須尊重；這不是宣告供應商reset時間，不能去token/換身份/IP繞限額。quota後不立即改打Result/future，失敗不快取成成功、不當empty/0/COMPLETE。DividendPersister.retryPendingQuota每60秒只檢查先前相同授權code/market/years的quota缺口queue（memory、最多2000股、同股合併較大years、最多24小時）；未到退避時間/queue空零HTTP與DB，恢復時先單probe、每輪最多10股，無新市場宇宙。非quota錯誤不進此自動重試；合法empty或轉為schema/身分等非quota結果即停止quota重試但保留其真實品質與失敗，不能把清queue當金融成功。記憶體queue非durable，不新增表；重啟依既有warmup，未處理history-only缺口需重新明確請求。驗收必讀historical狀態/dateGroupsComplete/error/event counts，不以外層HTTP200或新V2觀測當刷新成功。來源失敗/額度不足保持未知；只對原61支援股票缺口補抓，不重新掃全部/不手動觸發其他推導。新增一個EXTERNAL技術retry後，最終81 jobs=business36/external44/BFF1；取代本Task較早80筆計數。原金融公開DTO/Swagger與SRPP政策不變。
+
+Task552 Quota補充實作契約：可新增DividendFinMindTransport純來源adapter及typed DatasetResponse/failure reason；DividendFetchResult additive nullable capturedAt加舊constructor相容，僅真HTTP回應帶實際capture。cache命中保留同capture，persister使用原capture作observedAt且先驗不得晚於clock.now，避免重播假新HTTP；sourceAvailableAt另保留原語意，不拿capture冒充官方首次公告。請求被cooldown本機短路則明示COOLDOWN/未外呼，不捏造該證券HTTP402，該內部失敗觀測用本機now。原actualUrl/capturedAt/metadata於快取不可改；TTL不滑動，fixed striped locks有界。有效Retry-After即使超15分鐘亦不可截短，local5→10→15分鐘只為內部保守backoff。queue generation/compare-remove防10年舊retry刪掉較新11年需求；24h自首次入隊起不延長，滿額/逾期有明確失敗紀錄而非靜默消失。
+
+Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生的COOLDOWN皆可入quota-related queue；後者始終標本機未外呼/無實際HTTP status，不假稱該股402。反例須以第一股真402、後續多股COOLDOWN、恢復後同原授權scope全部補抓驗證。DividendUpcomingScopeClient.UpcomingScope亦以舊constructor相容增nullable capturedAt；transport→parser/storageGroups→fetchProviderUpcomingScope→router/provider fallback→最終DividendFetchResult全程保留原capture，不以sourceAvailableAt替代。fake Clock以T0 historical真HTTP、T1 future命中cache穿越完整router後仍observedAt=T0，反證不得變成T1新HTTP。

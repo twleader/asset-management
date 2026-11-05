@@ -43,6 +43,8 @@ public class DividendCurrentStateProjectionService {
     @Transactional
     public boolean cancelEventById(String code, String market, long id) {
         if (code == null || market == null) return false;
+        repository.lockSymbol(code, market);
+        if (repository.canonicalManaged(code, market)) return false;
         boolean exists = repository.findActiveEventDetails(code, market).stream()
                 .anyMatch(row -> row.id() == id);
         if (!exists) return false;
@@ -53,6 +55,8 @@ public class DividendCurrentStateProjectionService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean projectOne(String code, String market, Instant decisionInstant) {
         if (code == null || market == null || decisionInstant == null) return false;
+        repository.lockSymbol(code, market);
+        if (repository.canonicalManaged(code, market)) return false;
         // Self-heal before consulting any snapshot: duplicate ACTIVE rows created by
         // the former strict identity converge on every read path, even when no
         // snapshot evidence exists for the symbol at all.

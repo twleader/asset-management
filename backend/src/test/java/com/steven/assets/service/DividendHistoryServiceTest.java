@@ -1,164 +1,52 @@
 package com.steven.assets.service;
 
-import com.steven.assets.model.StockDividendHistory;
-import com.steven.assets.repository.StockDividendHistoryRepository;
-import com.sun.net.httpserver.HttpServer;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import com.steven.assets.model.CanonicalDividend.*;
 import org.junit.jupiter.api.Test;
-import org.springframework.dao.DataAccessResourceFailureException;
-
-import java.io.IOException;
 import java.math.BigDecimal;
-import java.net.InetSocketAddress;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import java.time.*;
+import java.util.*;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class DividendHistoryServiceTest {
-
-    private final StockDividendHistoryRepository repo = mock(StockDividendHistoryRepository.class);
-    private final DividendCurrentStateProjectionService projection =
-            mock(DividendCurrentStateProjectionService.class);
-
-    private HttpServer syncServer;
-    private AtomicInteger syncCalls;
-    private DividendHistoryService service;
-
-    @BeforeEach
-    void setUp() throws IOException {
-        syncCalls = new AtomicInteger();
-        syncServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        syncServer.createContext("/internal/dividend/sync", exchange -> {
-            syncCalls.incrementAndGet();
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
-        });
-        syncServer.start();
-        service = new DividendHistoryService(repo, projection,
-                new com.steven.assets.integration.marketdata.DividendSyncHttpAdapter("http://127.0.0.1:" + syncServer.getAddress().getPort()));
+    @Test void bothGetPathsOnlyReadCanonicalPortAndPreservePrecisionQualityAndSafeEnrichment(){
+        var port=mock(CanonicalDividendDisplayReadPort.class);var key=new Key("2330","台股");
+        var day=new Day(LocalDate.of(2026,3,17),new BigDecimal("6.00003573"),BigDecimal.ZERO,LocalDate.of(2026,4,9),null,
+                "FinMind[TaiwanStockDividend]",1L,1L,Instant.parse("2026-11-04T09:00:00Z"),"RESOLVED",null,"key",true,false,
+                new BigDecimal(".60000357"),new BigDecimal("1000"),0);
+        when(port.read(eq(List.of(key)),any())).thenReturn(Map.of(key,new Display("2330","台股",List.of(day))));
+        var service=new DividendHistoryService(port);
+        for(var result:List.of(service.findFromDb("2330","台股",10),service.findFromDbReadOnly("2330","台股",10))){
+            assertThat(result.quality()).isEqualTo("RESOLVED");assertThat(result.rows().getFirst().cashDividend()).isEqualByComparingTo("6.00003573");
+            assertThat(result.rows().getFirst().previousClose()).isEqualByComparingTo("1000");assertThat(result.rows().getFirst().fillDays()).isZero();
+            assertThat(result.annualSummaries().getFirst().cashDividend()).isEqualByComparingTo("6.00003573");
+            assertThat(result.annualSummaries().getFirst().yieldPct()).isEqualByComparingTo(".600004");
+        }
+        verify(port,times(2)).read(eq(List.of(key)),any());verifyNoMoreInteractions(port);
+    }
+    @Test void unknownAndUndatedKeepYearTotalsUnknownAndSourcesAreNotFirstRow(){
+        var port=mock(CanonicalDividendDisplayReadPort.class);var key=new Key("X","台股");
+        var one=new Day(LocalDate.of(2026,1,1),BigDecimal.ONE,BigDecimal.ZERO,null,null,"sourceA",1L,1L,Instant.now(),"RESOLVED",null,"a",true,false);
+        var two=new Day(LocalDate.of(2026,2,1),null,null,null,null,"sourceB",null,null,null,"UNRESOLVED","來源無法核對","b",false,false);
+        when(port.read(eq(List.of(key)),any())).thenReturn(Map.of(key,new Display("X","台股",List.of(one,two),List.of(new Undated(2026,"sourceC","缺日期")))));
+        var result=new DividendHistoryService(port).findFromDb("X","台股",10);
+        assertThat(result.quality()).isEqualTo("UNRESOLVED");assertThat(result.rows()).hasSize(3);assertThat(result.annualSummaries().getFirst().cashDividend()).isNull();
+        assertThat(result.annualSummaries().getFirst().unavailableCount()).isEqualTo(2);assertThat(result.source()).contains("sourceA","sourceB");
+    }
+    @Test void emptyIsUnknownAndReadFailuresDoNotBecomeZero(){
+        var port=mock(CanonicalDividendDisplayReadPort.class);when(port.read(any(),any())).thenReturn(Map.of());
+        var service=new DividendHistoryService(port);assertThat(service.findFromDb("X","台股",10).quality()).isEqualTo("UNRESOLVED");
+        when(port.read(any(),any())).thenThrow(new IllegalStateException("unavailable"));
+        assertThatThrownBy(()->service.findFromDb("X","台股",10)).isInstanceOf(IllegalStateException.class);
+    }    @Test void usRowsAndAnnualYieldNeverExposeUnknownSplitPriceBasis() {
+        var port=mock(CanonicalDividendDisplayReadPort.class);var key=new Key("AAPL","美股");
+        var day=new Day(LocalDate.of(2026,3,17),new BigDecimal(".82"),BigDecimal.ZERO,null,null,"NASDAQ.stocks",1L,1L,Instant.now(),"RESOLVED",null,"key",true,false,new BigDecimal("1.6"),new BigDecimal("50"),0);
+        when(port.read(eq(List.of(key)),any())).thenReturn(Map.of(key,new Display("AAPL","美股",List.of(day))));
+        var result=new DividendHistoryService(port).findFromDb("AAPL","美股",10);
+        assertThat(result.rows().getFirst().cashDividend()).isEqualByComparingTo(".82");assertThat(result.rows().getFirst().yieldPct()).isNull();
+        assertThat(result.rows().getFirst().previousClose()).isNull();assertThat(result.rows().getFirst().fillDays()).isNull();assertThat(result.annualSummaries().getFirst().yieldPct()).isNull();
+        assertThat(result.annualSummaries().getFirst().cashDividend()).isEqualByComparingTo(".82");
     }
 
-    @AfterEach
-    void tearDown() {
-        if (syncServer != null) syncServer.stop(0);
-    }
-
-    @Test
-    void pureReadNeverEnrichesOrProjectsAndFailuresStayIndependent() {
-        DividendCashEnrichmentService enrichment = mock(DividendCashEnrichmentService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(service, "enrichmentService", enrichment);
-        when(repo.findByStockSinceYear(eq("0056"), eq("台股"), anyInt()))
-                .thenReturn(List.of(history("0056", "台股", "TWSE")));
-        service.findFromDbReadOnly("0056", "台股", 10);
-        org.mockito.Mockito.verifyNoInteractions(enrichment, projection);
-        assertThat(syncCalls).hasValue(0);
-        when(projection.projectOne(eq("0056"), eq("台股"), any(Instant.class)))
-                .thenThrow(new IllegalStateException("projection fixture"));
-        org.mockito.Mockito.doThrow(new IllegalStateException("enrichment fixture"))
-                .when(enrichment).enrich(eq("0056"), eq("台股"), any(Instant.class));
-        assertThat(service.findFromDb("0056", "台股", 10).rows()).hasSize(1);
-        verify(enrichment).enrich(eq("0056"), eq("台股"), any(Instant.class));
-        assertThat(syncCalls).hasValue(0);
-    }
-
-    @Test
-    void firstProjectionFailureFallsBackToExistingHistoryRows() {
-        StockDividendHistory existing = history("0056", "台股", "TWSE");
-        when(projection.projectOne(eq("0056"), eq("台股"), any(Instant.class)))
-                .thenThrow(new IllegalStateException("projection unavailable"));
-        when(repo.findByStockSinceYear(eq("0056"), eq("台股"), anyInt()))
-                .thenReturn(List.of(existing));
-
-        var result = service.findFromDb("0056", "台股", 10);
-
-        assertThat(result.rows()).hasSize(1);
-        assertThat(result.rows().getFirst().cashDividend()).isEqualByComparingTo("1.25");
-        assertThat(result.source()).isEqualTo("TWSE");
-        assertThat(result.message()).isNull();
-        assertThat(syncCalls).hasValue(0);
-        verify(projection, times(1)).projectOne(
-                eq("0056"), eq("台股"), any(Instant.class));
-        verify(repo, times(1)).findByStockSinceYear(eq("0056"), eq("台股"), anyInt());
-    }
-
-    @Test
-    void historyRepositoryFailureAfterSyncPropagatesInsteadOfBecomingAnEmptyResult() {
-        var failure = new DataAccessResourceFailureException("history unavailable");
-        when(repo.findByStockSinceYear(eq("0056"), eq("台股"), anyInt()))
-                .thenReturn(List.of())
-                .thenThrow(failure);
-
-        assertThatThrownBy(() -> service.findFromDb("0056", "台股", 10))
-                .isSameAs(failure);
-
-        assertThat(syncCalls).hasValue(1);
-        verify(projection, times(2)).projectOne(
-                eq("0056"), eq("台股"), any(Instant.class));
-        verify(repo, times(2)).findByStockSinceYear(eq("0056"), eq("台股"), anyInt());
-    }
-
-    @Test
-    void emptyHistoryAfterSuccessfulSyncAndSecondProjectionReturnsSuccessfulEmptyResult() {
-        when(repo.findByStockSinceYear(eq("COIN"), eq("美股"), anyInt()))
-                .thenReturn(List.of())
-                .thenReturn(List.of());
-
-        var result = service.findFromDb("COIN", "美股", 10);
-
-        assertThat(result.stockCode()).isEqualTo("COIN");
-        assertThat(result.market()).isEqualTo("美股");
-        assertThat(result.rows()).isEmpty();
-        assertThat(result.message()).isEqualTo("查無資料");
-        assertThat(result.source()).isNull();
-        assertThat(syncCalls).hasValue(1);
-        verify(projection, times(2)).projectOne(
-                eq("COIN"), eq("美股"), any(Instant.class));
-        verify(repo, times(2)).findByStockSinceYear(eq("COIN"), eq("美股"), anyInt());
-    }
-
-    @Test
-    void secondProjectionFailureStillFallsBackToTheSecondHistoryQuery() {
-        StockDividendHistory synced = history("0056", "台股", "FinMind");
-        when(projection.projectOne(eq("0056"), eq("台股"), any(Instant.class)))
-                .thenReturn(false)
-                .thenThrow(new IllegalStateException("second projection unavailable"));
-        when(repo.findByStockSinceYear(eq("0056"), eq("台股"), anyInt()))
-                .thenReturn(List.of())
-                .thenReturn(List.of(synced));
-
-        var result = service.findFromDb("0056", "台股", 10);
-
-        assertThat(result.rows()).hasSize(1);
-        assertThat(result.source()).isEqualTo("FinMind");
-        assertThat(result.message()).isNull();
-        assertThat(syncCalls).hasValue(1);
-        verify(projection, times(2)).projectOne(
-                eq("0056"), eq("台股"), any(Instant.class));
-        verify(repo, times(2)).findByStockSinceYear(eq("0056"), eq("台股"), anyInt());
-    }
-
-    private static StockDividendHistory history(String code, String market, String source) {
-        return StockDividendHistory.builder()
-                .stockCode(code)
-                .market(market)
-                .year(2026)
-                .cashDividend(new BigDecimal("1.25"))
-                .stockDividend(BigDecimal.ZERO)
-                .exDividendDate(LocalDate.of(2026, 7, 21))
-                .source(source)
-                .eventStatus("ACTIVE")
-                .build();
-    }
 }

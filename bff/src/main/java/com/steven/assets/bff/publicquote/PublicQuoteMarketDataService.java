@@ -1,5 +1,7 @@
 package com.steven.assets.bff.publicquote;
 
+import com.steven.assets.bff.common.CanonicalDividendTransport;
+
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.ChartMarketData;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DataStatus;
 import com.steven.assets.bff.publicquote.PublicQuoteMarketDataDto.DetailedLatestQuote;
@@ -465,7 +467,7 @@ public class PublicQuoteMarketDataService {
                         .queryParam("years", 10)
                         .build())
                 .retrieve()
-                .bodyToMono(DividendHistory.class)
+                .bodyToMono(CanonicalDividendTransport.History.class)
                 .map(this::normalizeDividendHistory)
                 .timeout(dividendsTimeout)
                 .switchIfEmpty(Mono.error(new IllegalStateException("dividend body unavailable")));
@@ -741,43 +743,45 @@ public class PublicQuoteMarketDataService {
 
     /**
      * 將既有 readonly 股利 child 正規化一次後，同一 instance 同時掛在 nested 與 direct field。
-     * 現金殖利率永遠以該 row 的前收計算；年度殖利率則以 anchor date 由新到舊第一筆有前收的
-     * row 為唯一候選，候選非正值即 null，不能往較舊 row 尋找正值。
+     * 台股現金殖利率以該 row 的前收計算；年度殖利率以 anchor date 由新到舊第一筆有前收的
+     * row 為唯一候選，候選非正值即 null。美股缺少歷史價格與 nominal 股利的 split basis 證據，
+     * 保留配息金額，但不得從前收推導殖利率或透傳無法證明基準的舊殖利率。
      */
-    private DividendHistory normalizeDividendHistory(DividendHistory source) {
+    private DividendHistory normalizeDividendHistory(CanonicalDividendTransport.History source) {
+        if(!CanonicalDividendTransport.financial(source))
+            return new DividendHistory(source.stockCode(),source.market(),null,
+                    "股利資料未完成canonical驗證，暫不可採用",List.of(),List.of());
+        boolean comparablePriceBasis = !"美股".equals(source.market());
         List<PublicQuoteMarketDataDto.DividendRow> rows = source.rows().stream()
-                .map(this::normalizeDividendRow)
+                .map(row -> new PublicQuoteMarketDataDto.DividendRow(
+                        row.year(), row.cashDividend(), row.stockDividend(), row.exDividendDate(),
+                        comparablePriceBasis ? row.yieldPct() : null,
+                        row.cashPaymentDate(), row.stockPaymentDate(), row.fillDays(), row.previousClose(),
+                        row.exRightsDate(), comparablePriceBasis ? cashYieldPct(row.cashDividend(),row.previousClose()) : null))
                 .toList();
         return new DividendHistory(source.stockCode(), source.market(), source.source(), source.message(), rows,
-                annualDividendSummaries(rows));
-    }
-
-    private PublicQuoteMarketDataDto.DividendRow normalizeDividendRow(
-            PublicQuoteMarketDataDto.DividendRow row) {
-        return new PublicQuoteMarketDataDto.DividendRow(
-                row.year(), row.cashDividend(), row.stockDividend(), row.exDividendDate(), row.yieldPct(),
-                row.cashPaymentDate(), row.stockPaymentDate(), row.fillDays(), row.previousClose(),
-                row.exRightsDate(), cashYieldPct(row.cashDividend(), row.previousClose()));
+                annualDividendSummaries(rows, comparablePriceBasis));
     }
 
     private List<PublicQuoteMarketDataDto.AnnualDividendSummary> annualDividendSummaries(
-            List<PublicQuoteMarketDataDto.DividendRow> rows) {
+            List<PublicQuoteMarketDataDto.DividendRow> rows, boolean comparablePriceBasis) {
         Map<Integer, List<IndexedDividendRow>> byYear = new LinkedHashMap<>();
         for (int index = 0; index < rows.size(); index++) {
             PublicQuoteMarketDataDto.DividendRow row = rows.get(index);
-            if (row.year() != null) {
-                byYear.computeIfAbsent(row.year(), ignored -> new ArrayList<>())
+            LocalDate effectiveDate=anchorDate(row);
+            if (!effectiveDate.equals(LocalDate.MIN)) {
+                byYear.computeIfAbsent(effectiveDate.getYear(), ignored -> new ArrayList<>())
                         .add(new IndexedDividendRow(index, row));
             }
         }
         return byYear.entrySet().stream()
                 .sorted(Map.Entry.<Integer, List<IndexedDividendRow>>comparingByKey(Comparator.reverseOrder()))
-                .map(entry -> annualDividendSummary(entry.getKey(), entry.getValue()))
+                .map(entry -> annualDividendSummary(entry.getKey(), entry.getValue(), comparablePriceBasis))
                 .toList();
     }
 
     private PublicQuoteMarketDataDto.AnnualDividendSummary annualDividendSummary(
-            Integer year, List<IndexedDividendRow> entries) {
+            Integer year, List<IndexedDividendRow> entries, boolean comparablePriceBasis) {
         BigDecimal cashDividend = entries.stream()
                 .map(entry -> zeroIfNull(entry.row().cashDividend()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -790,9 +794,8 @@ public class PublicQuoteMarketDataService {
                 .map(IndexedDividendRow::row)
                 .filter(row -> row.previousClose() != null)
                 .findFirst();
-        BigDecimal cashYieldPct = yieldCandidate
-                .map(row -> cashYieldPct(cashDividend, row.previousClose()))
-                .orElse(null);
+        BigDecimal cashYieldPct = comparablePriceBasis ? yieldCandidate
+                .map(row -> cashYieldPct(cashDividend, row.previousClose())).orElse(null) : null;
         return new PublicQuoteMarketDataDto.AnnualDividendSummary(
                 year, cashDividend, stockDividend, cashYieldPct);
     }

@@ -44,7 +44,8 @@ class StockDividendHistoryExRightsQueryTest {
 
         assertThat(hql)
                 .as("BETWEEN 必須套在錨定日上，否則純配股事件（除息日 null）整批消失")
-                .contains(ANCHOR + " BETWEEN :fromDate AND :toDate");
+                .contains("COALESCE(h.canonicalDate, " + ANCHOR + ") BETWEEN :fromDate AND :toDate")
+                .contains("h.exDividendDate IS NULL AND h.exRightsDate IS NULL", "h.year BETWEEN year(:fromDate) AND year(:toDate)");
         assertThat(hql)
                 .as("ORDER BY 同樣要用錨定日，否則排序鍵與過濾鍵不一致")
                 .contains("ORDER BY " + ANCHOR + " ASC, h.id ASC");

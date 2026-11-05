@@ -66,8 +66,11 @@ public class SchedulePublicBffController {
     private static final String NYC = "America/New_York";
     private static final String LON = "Europe/London";
 
-    /** 全系統排程清單（77 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
+    /** 全系統排程清單（81 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
+            new ScheduledJobDto(BUSINESS, "資料維護", "股利canonical投影",
+                    "CanonicalDividendProjectionPoller.poll：每輪最多100股，只讀已保存股利證據更新canonical投影；DIVIDEND_CANONICAL_PROJECTION_ENABLED預設false，未驗證事件維持未知，不外抓、不發布投資報告",
+                    "每60秒（啟用後；失敗backoff）", "fixedDelay=60000", TPE),
             new ScheduledJobDto(BUSINESS, "SRPP", "SRPP 美股不可變報告計算包發布",
                     "America/New_York 交易日 09:40–10:45且regular session內，每分鐘只讀既有正式資產、完整美股雷達與持久行情；同交易更新各consumer美股觀察及發布不可變包。GET不觸發計算或寫入，缺移轉狀態不當空帳",
                     "每分鐘（美東交易日09:40–10:45，依srpp.us-report-producer-cron可配置）", "0 * * * * *", NYC),
@@ -299,6 +302,10 @@ public class SchedulePublicBffController {
             new ScheduledJobDto(EXTERNAL, "股利", "股票配息同步",
                     "每交易日同步股票配息資料入庫",
                     "交易日 17:00", "0 0 17 * * MON-FRI", TPE),
+            new ScheduledJobDto(EXTERNAL, "股利", "股票配息配額缺口補抓",
+                    "DividendPersister.retryPendingQuota：僅重試先前已授權的股利quota缺口；memory佇列最多2000股、24小時，"
+                            + "每輪最多10股，尊重FinMind共享退避；空佇列或未到期零HTTP/DB，不新增投資、報告或寄信排程",
+                    "每60秒技術檢查", "fixedDelay=60000", TPE),
             new ScheduledJobDto(EXTERNAL, "ETF 透視", "ETF 透視成份股回補",
                     "每日重算 ETF 透視前 10 大成份股，並補齊持有美股完成日及有界歷史缺欄",
                     "每日 18:30", "0 30 18 * * *", TPE),
@@ -328,7 +335,7 @@ public class SchedulePublicBffController {
                     "每 15 秒", "fixedDelay=15000ms", "")
     );
 
-    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（76 筆靜態資料）。 */
+    /** GET /api/bff/schedule-list —— 回傳全系統排程清單（81 筆靜態資料）。 */
     @GetMapping
     public List<ScheduledJobDto> list() {
         return JOBS;

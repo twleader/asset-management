@@ -93,6 +93,7 @@ public final class AnnualDividendCalculator {
     private static Row estimate(Facts facts, Security security, LocalDate exDate,
                                 List<Event> events, LocalDate today) {
         List<String> reasons = new ArrayList<>();
+        events.stream().map(Event::reason).filter(Objects::nonNull).distinct().forEach(reasons::add);
         Set<String> amounts = new HashSet<>();
         for (Event e : events) amounts.add(e.cashDividend() == null ? "UNKNOWN"
                 : e.cashDividend().stripTrailingZeros().toPlainString());

@@ -26,6 +26,19 @@ import static org.mockito.Mockito.when;
 class DividendSnapshotAppendOnlyTest {
 
     @Test
+    void syncYearsDefaultsToTenAllowsElevenAndRejectsInvalidBeforeProviderIo() {
+        var client=mock(com.steven.assets.externalmaterials.client.DividendFetchClient.class);
+        var source=mock(StockSourceQuery.class); var store=mock(DividendSnapshotStore.class);
+        var persister=new DividendPersister(client,source,store);
+        assertThatThrownBy(()->persister.syncOne("2330","台股",0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(()->persister.syncOne("2330","台股",21)).isInstanceOf(IllegalArgumentException.class);
+        org.mockito.Mockito.verifyNoInteractions(client,source,store);
+        persister.syncOne("2330","台股"); persister.syncOne("2330","台股",11);
+        verify(client).fetchObservations("2330","台股",10);
+        verify(client).fetchObservations("2330","台股",11);
+    }
+
+    @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void verifiedFetchPersistsObservationWithoutTouchingCurrentStateTable() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
@@ -221,7 +234,7 @@ class DividendSnapshotAppendOnlyTest {
         ArgumentCaptor<Object[]> eventArgs = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).update(startsWith("INSERT INTO stock_dividend_snapshot_event "
                         + "(snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,cash_dividend,"
-                        + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at)"),
+                        + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at,upstream_component_id)"),
                 eventArgs.capture());
         // 欄位順序：snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,...
         assertThat(eventArgs.getValue()[3]).isNull();

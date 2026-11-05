@@ -20,9 +20,19 @@ public final class DividendData {
             String exDividendDate,        // ISO YYYY-MM-DD or null
             String exRightsDate,          // ISO YYYY-MM-DD or null
             String cashPaymentDate,       // ISO or null
-            String stockPaymentDate       // ISO or null
-    ) {}
+            String stockPaymentDate,      // ISO or null
+            String upstreamComponentId
+    ) {
+        public DividendEvent(Integer year, BigDecimal cashDividend, BigDecimal stockDividend,
+                             String exDividendDate, String exRightsDate, String cashPaymentDate, String stockPaymentDate) {
+            this(year, cashDividend, stockDividend, exDividendDate, exRightsDate, cashPaymentDate, stockPaymentDate, null);
+        }
+    }
     public enum FetchStatus { COMPLETE, EMPTY_COMPLETE, PARTIAL, FAILED }
+    public enum SourceFailureKind {
+        NONE, QUOTA_EXHAUSTED, COOLDOWN, HTTP_ERROR, SCHEMA_ERROR, TRANSPORT_ERROR;
+        public boolean quotaRelated() { return this == QUOTA_EXHAUSTED || this == COOLDOWN; }
+    }
     /**
      * Typed fetch observation。空事件只有在 provider 明確成功完成整段 scope 時才是
      * {@link FetchStatus#EMPTY_COMPLETE}；例外／timeout 不得再與成功查無事件混成同一結果。
@@ -35,7 +45,32 @@ public final class DividendData {
             LocalDate scopeTo,
             Instant sourceAvailableAt,
             String errorReason,
-            List<String> sourceUrls) {
+            List<String> sourceUrls,
+            int normalizerVersion,
+            String amountBasis,
+            boolean dateGroupsComplete,
+            Instant capturedAt,
+            SourceFailureKind failureKind) {
+        public DividendFetchResult(String source, List<DividendEvent> events, FetchStatus status,
+                                   LocalDate scopeFrom, LocalDate scopeTo, Instant sourceAvailableAt,
+                                   String errorReason, List<String> sourceUrls, int normalizerVersion,
+                                   String amountBasis, boolean dateGroupsComplete) {
+            this(source, events, status, scopeFrom, scopeTo, sourceAvailableAt, errorReason,
+                    sourceUrls, normalizerVersion, amountBasis, dateGroupsComplete, null, SourceFailureKind.NONE);
+        }
+        public DividendFetchResult(String source, List<DividendEvent> events, FetchStatus status,
+                                   LocalDate scopeFrom, LocalDate scopeTo, Instant sourceAvailableAt,
+                                   String errorReason, List<String> sourceUrls, int normalizerVersion,
+                                   String amountBasis, boolean dateGroupsComplete, Instant capturedAt) {
+            this(source, events, status, scopeFrom, scopeTo, sourceAvailableAt, errorReason,
+                    sourceUrls, normalizerVersion, amountBasis, dateGroupsComplete, capturedAt, SourceFailureKind.NONE);
+        }
+        public DividendFetchResult(String source, List<DividendEvent> events, FetchStatus status,
+                                   LocalDate scopeFrom, LocalDate scopeTo, Instant sourceAvailableAt,
+                                   String errorReason, List<String> sourceUrls) {
+            this(source, events, status, scopeFrom, scopeTo, sourceAvailableAt, errorReason,
+                    sourceUrls, 1, "LEGACY_UNVERIFIED", false);
+        }
         public DividendFetchResult(String source, List<DividendEvent> events,
                                    FetchStatus status, LocalDate scopeFrom, LocalDate scopeTo,
                                    Instant sourceAvailableAt, String errorReason) {
@@ -43,6 +78,7 @@ public final class DividendData {
         }
 
         public DividendFetchResult {
+            failureKind = failureKind == null ? SourceFailureKind.NONE : failureKind;
             events = events == null ? List.of() : List.copyOf(events);
             sourceUrls = sourceUrls == null ? List.of() : sourceUrls.stream()
                     .filter(url -> url != null && !url.isBlank()).distinct().toList();

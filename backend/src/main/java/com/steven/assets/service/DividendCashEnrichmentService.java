@@ -27,6 +27,9 @@ public class DividendCashEnrichmentService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void enrich(String code, String market, Instant now) {
+        // Persisted US price rows have no verified split/nominal basis metadata.
+        if (isUsMarket(market)) return;
+        events.lockSymbol(code,market);
         List<DividendCurrentStateRepository.ActiveEventDetail> active = events.findActiveEventDetails(code, market);
         List<DividendCurrentStateRepository.ActiveEventDetail> candidates = active.stream().filter(e -> e.exDividendDate() != null && positive(e.cashDividend())
                         && (e.previousClose() == null || e.yieldPct() == null || e.fillDays() == null)).toList();
@@ -60,6 +63,8 @@ public class DividendCashEnrichmentService {
             events.fillMissingCashEnrichment(code, market, event, basis, yield, fill);
         }
     }
+
+    static boolean isUsMarket(String market) { return "美股".equals(market) || "US".equalsIgnoreCase(market); }
 
     /** The prior close already includes actions on that session; actions after it may change the price basis. */
     private static boolean unverifiedActionInComparison(DividendCurrentStateRepository.ActiveEventDetail event,

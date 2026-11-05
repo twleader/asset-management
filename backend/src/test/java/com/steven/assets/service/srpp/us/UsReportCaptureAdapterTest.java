@@ -14,6 +14,34 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class UsReportCaptureAdapterTest {
+    @Test void positiveLegacySourceAndUnexplainedEmptyHistoryStayUnavailableInNewCapture(){
+        var assets=mock(LatestAssetsService.class);when(assets.getLatestForOwner(7)).thenReturn(SrppReportFixtures.MAPPER.convertValue(assets(),LatestAssetsDto.Response.class));
+        var radar=mock(TradingRadarService.class);ObjectNode list=JsonNodeFactory.instance.objectNode();list.putArray("stocks");
+        when(radar.getListForOwner(7)).thenReturn(SrppReportFixtures.MAPPER.convertValue(list,TradingRadarDto.ListResponse.class));
+        var prices=mock(PriceQueryService.class);var key=new PriceQueryService.PriceKey("GOOGL","美股");
+        var live=new PriceQueryService.LivePrice("GOOGL","Google","美股",java.math.BigDecimal.TEN,java.math.BigDecimal.TEN,
+                null,null,null,null,null,null,null,100L,DAY.toString(),AT.toString(),false,"NASDAQ","LIVE");
+        when(prices.getLiveBatch(anySet(),anyMap())).thenReturn(Map.of(key,Optional.of(live)));
+        var dividends=mock(StockDividendHistoryRepository.class);var swagger=mock(PublishedSwaggerIdentity.class);
+        when(swagger.sha256()).thenReturn(Optional.of(SWAGGER));
+        var adapter=new UsReportCaptureAdapter(assets,prices,radar,mock(StockPriceHistoryRepository.class),dividends,
+                mock(TechnicalIndicatorService.class),calendar(),AUTHORITY,swagger,SrppReportFixtures.MAPPER,Clock.fixed(AT,ZoneOffset.UTC));
+        for(String quality:List.of("EMPTY","LEGACY","RESOLVED")){
+            when(dividends.findByStockSinceYear(eq("GOOGL"),eq("美股"),anyInt())).thenReturn(!"EMPTY".equals(quality)?List.of(
+                    com.steven.assets.model.StockDividendHistory.builder().stockCode("GOOGL").market("美股")
+                            .id(1L).canonicalDate(DAY.minusDays(10)).exDividendDate(DAY.minusDays(10)).sourceSnapshotId(1L)
+                            .source("NASDAQ").cashDividend(java.math.BigDecimal.ONE).stockDividend(java.math.BigDecimal.ZERO)
+                            .resolutionStatus(quality).build()):List.of());
+            var capture=adapter.capture(7,DAY,Set.of(),null);
+            var rows=capture.sources().path("market").path("symbols");
+            var google=java.util.stream.StreamSupport.stream(rows.spliterator(),false).filter(n->"GOOGL".equals(n.path("stockCode").asText())).findFirst().orElseThrow();
+            var distribution=google.path("quote").path("dividendHistory");
+            assertThat(distribution.path("source").isNull()).isTrue();
+            assertThat(distribution.path("message").asText()).isEqualTo("RESOLVED".equals(quality)
+                    ?"US_DIVIDEND_PRICE_BASIS_UNVERIFIED":"CANONICAL_DIVIDEND_HISTORY_UNVERIFIED");
+            assertThat(distribution.path("rows")).isEmpty();
+        }
+    }
     @Test void nonNullStaleOrFutureAssetsCannotSupplyMoneyOrHoldingMembership(){for(Instant generated:List.of(AT.minusSeconds(301),AT.plusSeconds(1))){ObjectNode source=assets();source.put("generatedAt",generated.toString());var f=captureWithClock(source,Clock.fixed(AT,ZoneOffset.UTC));assertThat(f.sources().path("assets").isNull()).isTrue();assertThat(f.sourceVector().path("assets").path("validation").asText()).isEqualTo("UNAVAILABLE");assertThat(f.sources().path("us-tactical").path("total_assets_twd").isNull()).isTrue();assertThat(f.sources().path("universe").path("holdingSymbols")).isEmpty();assertThat(f.sources().path("universe").path("reasonCodes")).extracting(n->n.asText()).contains("ASSETS_CURRENT_ROUND_STALE");}}
     @Test void assetsAreRecheckedAtCaptureEndAndFiveMinuteBoundaryRemainsInclusive(){for(long seconds:List.of(300L,301L)){var calls=new java.util.concurrent.atomic.AtomicInteger();Clock clock=new Clock(){public ZoneId getZone(){return ZoneOffset.UTC;}public Clock withZone(ZoneId zone){return this;}public Instant instant(){return calls.getAndIncrement()==0?AT:AT.plusSeconds(seconds);}};var f=captureWithClock(assets(),clock);if(seconds==300){assertThat(f.sources().path("assets").isNull()).isFalse();assertThat(f.sources().path("universe").path("holdingSymbols")).extracting(n->n.asText()).containsExactly("GOOGL");}else{assertThat(f.sources().path("assets").isNull()).isTrue();assertThat(f.sourceVector().path("assets").path("coverage").asText()).isEqualTo("NONE");assertThat(f.sources().path("market").path("symbols")).isEmpty();assertThat(f.sources().path("us-tactical").path("candidates")).isEmpty();assertThat(f.sources().path("us-tactical").path("total_assets_twd").isNull()).isTrue();assertThat(f.sources().path("universe").path("symbols")).isEmpty();assertThat(f.sources().path("universe").path("reasonCodes")).extracting(n->n.asText()).contains("ASSETS_CURRENT_ROUND_STALE");}}}
     private static UsReportCapturePort.Frozen captureWithClock(ObjectNode source,Clock clock){var assets=mock(LatestAssetsService.class);when(assets.getLatestForOwner(7)).thenReturn(SrppReportFixtures.MAPPER.convertValue(source,LatestAssetsDto.Response.class));var radar=mock(TradingRadarService.class);ObjectNode list=JsonNodeFactory.instance.objectNode();list.putArray("stocks");when(radar.getListForOwner(7)).thenReturn(SrppReportFixtures.MAPPER.convertValue(list,TradingRadarDto.ListResponse.class));var prices=mock(PriceQueryService.class);when(prices.getLiveBatch(anySet(),anyMap())).thenReturn(Map.of());var history=mock(StockPriceHistoryRepository.class);when(history.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(any(),any(),any(),any())).thenReturn(List.of());var swagger=mock(PublishedSwaggerIdentity.class);when(swagger.sha256()).thenReturn(Optional.of(SWAGGER));var adapter=new UsReportCaptureAdapter(assets,prices,radar,history,mock(StockDividendHistoryRepository.class),mock(TechnicalIndicatorService.class),calendar(),AUTHORITY,swagger,SrppReportFixtures.MAPPER,clock);return adapter.capture(7,DAY,Set.of(),null);}

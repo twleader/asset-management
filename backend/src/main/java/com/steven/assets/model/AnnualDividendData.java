@@ -19,7 +19,12 @@ public final class AnnualDividendData {
                         String direction, BigDecimal shares) {}
     public record Event(long id, String code, String market, int year,
                         LocalDate exDividendDate, LocalDate exRightsDate, LocalDate cashPaymentDate,
-                        BigDecimal cashDividend, BigDecimal stockDividend, String source) {}
+                        BigDecimal cashDividend, BigDecimal stockDividend, String source, String quality, String reason) {
+        public Event(long id,String code,String market,int year,LocalDate exDividendDate,LocalDate exRightsDate,
+                     LocalDate cashPaymentDate,BigDecimal cashDividend,BigDecimal stockDividend,String source){
+            this(id,code,market,year,exDividendDate,exRightsDate,cashPaymentDate,cashDividend,stockDividend,source,null,null);
+        }
+    }
     public record Facts(List<Security> securities, List<Snapshot> snapshots,
                         List<Trade> trades, List<Event> events, List<Market> markets) {
         public Facts {

@@ -24,12 +24,27 @@ class SchedulePublicBffControllerTest {
     }
 
     @Test
-    @DisplayName("排程清單完整列出 34 個業務、43 個外部行情與 1 個 BFF 閘道觀測工作")
+    @DisplayName("排程清單完整列出 36 個業務、44 個外部行情與 1 個 BFF 閘道觀測工作")
     void 項目數正確() {
-        assertThat(jobs()).hasSize(78);
-        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(34);
-        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(43);
+        assertThat(jobs()).hasSize(81);
+        assertThat(jobs()).filteredOn(j -> "業務服務".equals(j.service())).hasSize(36);
+        assertThat(jobs()).filteredOn(j -> "外部行情服務".equals(j.service())).hasSize(44);
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
+    }
+
+    @Test void dividendQuotaRetryIsBoundedTechnicalMaintenanceOnly() {
+        assertThat(jobs()).filteredOn(j->"股票配息配額缺口補抓".equals(j.name())).singleElement().satisfies(job->{
+            assertThat(job.service()).isEqualTo("外部行情服務");
+            assertThat(job.cron()).isEqualTo("fixedDelay=60000");
+            assertThat(job.description()).contains("DividendPersister.retryPendingQuota", "2000", "24小時", "最多10股", "零HTTP/DB", "不新增投資");
+        });
+    }
+
+    @Test void canonicalDividendProjectionIsGatedTechnicalMaintenance(){
+        assertThat(jobs()).filteredOn(j->"股利canonical投影".equals(j.name())).singleElement().satisfies(job->{
+            assertThat(job.cron()).isEqualTo("fixedDelay=60000");
+            assertThat(job.description()).contains("CanonicalDividendProjectionPoller.poll","最多100股","預設false","不外抓");
+        });
     }
 
     @Test

@@ -202,6 +202,7 @@ services:
       # --no-deps --force-recreate business-services」觸發回補（up 不吃 -e）。
       # 回補完成後不需要移除，關著的旗標不改變任何行為。
       DIVIDEND_BACKFILL_ENABLED: ${DIVIDEND_BACKFILL_ENABLED:-false}
+      DIVIDEND_CANONICAL_PROJECTION_ENABLED: ${DIVIDEND_CANONICAL_PROJECTION_ENABLED:-false}
       DIVIDEND_BACKFILL_BATCH_SIZE: ${DIVIDEND_BACKFILL_BATCH_SIZE:-10}
       DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS: ${DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS:-5000}
       # Task 361.4a-0：同一組 passthrough 缺 STATE_DIR 會讓回補靜默續用上次的 ledger 帳、

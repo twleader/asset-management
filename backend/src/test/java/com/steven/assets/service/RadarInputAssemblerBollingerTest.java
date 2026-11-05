@@ -105,7 +105,8 @@ class RadarInputAssemblerBollingerTest {
         var rows = linearRows(260, 360);
         var event = StockDividendHistory.builder().stockCode("2330").market("台股").year(2026)
                 .exDividendDate(rows.get(8).getTradingDate()).cashDividend(new BigDecimal("5"))
-                .stockDividend(BigDecimal.ZERO).build();
+                .stockDividend(BigDecimal.ZERO).id(1L).canonicalDate(rows.get(8).getTradingDate())
+                .sourceSnapshotId(1L).resolutionStatus("RESOLVED").build();
         var observed = assembler.assemble(rows, List.of(event), false, 260, 241, rows.getFirst().getClosePrice());
         var expected = RadarInputAssembler.completedBollinger(observed.adjustedRowsDesc(), 0);
         assertThat(observed.bollinger()).isEqualTo(expected);

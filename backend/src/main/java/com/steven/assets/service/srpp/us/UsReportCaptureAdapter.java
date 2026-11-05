@@ -63,7 +63,23 @@ public class UsReportCaptureAdapter implements UsReportCapturePort {
                 ObjectNode daily=chart.putObject("series").putObject("daily");for(String field:List.of("dates","opens","highs","lows","closes","volumes","k","d","rsi5","bias10","wr9"))daily.putArray(field);
                 Map<LocalDate,TechnicalIndicatorService.IndicatorPoint> points=new HashMap<>();try{indicators.indicatorSeries(code,"美股",date.minusYears(2),date.minusDays(1)).forEach(p->points.put(p.tradingDate(),p));}catch(RuntimeException absent){rowGaps.add("US_COMPLETED_KD_SOURCE_UNAVAILABLE");}
                 for(var h:hs){((ArrayNode)daily.path("dates")).add(h.getTradingDate().toString());number(daily,"opens",h.getOpenPrice());number(daily,"highs",h.getHighPrice());number(daily,"lows",h.getLowPrice());number(daily,"closes",h.getClosePrice());((ArrayNode)daily.path("volumes")).add(h.getVolume()==null?NullNode.instance:J.numberNode(h.getVolume()));var p=points.get(h.getTradingDate());number(daily,"k",p==null?null:p.k());number(daily,"d",p==null?null:p.d());number(daily,"rsi5",p==null?null:p.rsi5());number(daily,"bias10",p==null?null:p.bias10());number(daily,"wr9",p==null?null:p.wr9());}
-                var events=dividends.findByStockSinceYear(code,"美股",date.getYear()-2);ObjectNode distribution=quote.putObject("dividendHistory").put("stockCode",code).put("market","美股");ArrayNode eventRows=distribution.putArray("rows");events.forEach(e->eventRows.add(mapper.valueToTree(e)));SortedSet<String> eventSources=new TreeSet<>();events.stream().map(StockDividendHistory::getSource).filter(Objects::nonNull).filter(s->!s.isBlank()).forEach(eventSources::add);if(eventSources.isEmpty()){distribution.putNull("source").put("message","查無資料");}else distribution.put("source",String.join("|",eventSources)).putNull("message");
+                var events=dividends.findByStockSinceYear(code,"美股",date.getYear()-2);
+                var dividendQuality=CanonicalDividendFinancialFacts.assess(events);
+                boolean comparable=true;try{CanonicalDividendFinancialFacts.assess(events,date.minusYears(2),date).requireComparablePriceBasis();}
+                catch(com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable unavailable){comparable=false;}
+                ObjectNode distribution=quote.putObject("dividendHistory").put("stockCode",code).put("market","美股");
+                ArrayNode eventRows=distribution.putArray("rows");SortedSet<String> eventSources=new TreeSet<>();
+                boolean nonDistributing=false;for(JsonNode declared:policy.path("non_distributing_symbols"))if(code.equals(declared.asText()))nonDistributing=true;
+                if(!dividendQuality.available()||!comparable||events.isEmpty()&&!nonDistributing){
+                    distribution.putNull("source").put("message",dividendQuality.available()&&!comparable
+                            ?"US_DIVIDEND_PRICE_BASIS_UNVERIFIED":"CANONICAL_DIVIDEND_HISTORY_UNVERIFIED");
+                    rowGaps.add("US_DISTRIBUTION_HISTORY_UNVERIFIED");
+                }else{
+                    events.forEach(e->eventRows.add(mapper.valueToTree(e)));
+                    events.stream().map(StockDividendHistory::getSource).filter(Objects::nonNull).filter(s->!s.isBlank()).forEach(eventSources::add);
+                    if(eventSources.isEmpty()){distribution.putNull("source").put("message",events.isEmpty()?"查無資料":"CANONICAL_DIVIDEND_SOURCE_UNAVAILABLE");}
+                    else distribution.put("source",String.join("|",eventSources)).putNull("message");
+                }
                 row.set("quote",quote);
             }
             String direction=direction(code,asset,model);if(direction==null)row.putNull("coreDirection");else row.put("coreDirection",direction);

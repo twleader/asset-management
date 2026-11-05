@@ -45,22 +45,31 @@ class JdbcAnnualDividendReadRepositoryTest {
         Facts one = repository.load(1, TODAY);
         assertThat(one.securities()).extracting(Security::code).containsExactly("0050", "SOLD");
         assertThat(one.securities()).filteredOn(s -> s.code().equals("SOLD")).extracting(Security::name).containsExactly("已賣出股票");
-        assertThat(one.events()).extracting(Event::id).containsExactly(1L, 5L);
+        assertThat(one.events()).isEmpty();
         assertThat(one.trades()).hasSize(2);
         assertThat(one.snapshots()).hasSize(2);
         assertThat(one.snapshots().getLast().positions()).isEmpty();
-        var first = AnnualDividendCalculator.calculate(one, 2026, "", TODAY).rows().stream().filter(r -> r.code().equals("0050")).findFirst().orElseThrow();
+        var first = AnnualDividendCalculator.calculate(withPublicEvent(one), 2026, "", TODAY).rows().stream().filter(r -> r.code().equals("0050")).findFirst().orElseThrow();
         assertThat(first.shares()).isEqualByComparingTo("120");
         assertThat(first.estimatedCash()).isEqualByComparingTo("240.00");
         var two = repository.load(2, TODAY);
         assertThat(two.securities()).extracting(Security::code).containsExactly("0050", "OTHER", "PRIVATE");
         assertThat(two.trades()).hasSize(2);
-        var second = AnnualDividendCalculator.calculate(two, 2026, "", TODAY).rows().stream().filter(r -> r.code().equals("0050")).findFirst().orElseThrow();
+        var second = AnnualDividendCalculator.calculate(withPublicEvent(two), 2026, "", TODAY).rows().stream().filter(r -> r.code().equals("0050")).findFirst().orElseThrow();
         assertThat(second.shares()).isEqualByComparingTo("10499");
         assertThat(repository.load(3, TODAY).securities()).isEmpty();
         assertThat(repository.load(3, TODAY).events()).isEmpty();
     }
 
+    private static Facts withPublicEvent(Facts facts){
+        return new Facts(facts.securities(),facts.snapshots(),facts.trades(),java.util.List.of(
+            new Event(1,"0050","台股",2026,LocalDate.of(2026,6,5),null,null,new java.math.BigDecimal("2"),java.math.BigDecimal.ZERO,"fixture-primary")),facts.markets());
+    }
+    @Test void ownerRepositoryDoesNotReadGlobalDividendFacts(){
+        jdbc.execute("DROP TABLE stock_dividend_history");
+        assertThat(repository.load(1,TODAY).securities()).hasSize(2);
+        assertThat(repository.load(1,TODAY).events()).isEmpty();
+    }
     @Test void repositoryIsReadOnlyAndEmptyBaselineRemainsARealZeroSnapshot() {
         var before = jdbc.queryForList("SELECT * FROM stock_dividend_history ORDER BY id");
         Facts one = repository.load(1, TODAY);
@@ -73,7 +82,13 @@ class JdbcAnnualDividendReadRepositoryTest {
     @Test void anotherOwnersExclusiveStockKeyCannotSelectOrExposeTheirPrivateFacts() {
         var context = new CurrentUserContext();
         context.setEffectiveUserId(1L);
-        var service = new AnnualDividendService(new TenantGuard(context), repository);
+        com.steven.assets.service.CanonicalDividendDisplayReadPort display=(keys,asOf)->{
+            java.util.Map<com.steven.assets.model.CanonicalDividend.Key,com.steven.assets.model.CanonicalDividend.Display> result=new java.util.HashMap<>();
+            for(var key:keys)result.put(key,new com.steven.assets.model.CanonicalDividend.Display(key.code(),key.market(),java.util.List.of(
+                new com.steven.assets.model.CanonicalDividend.Day(LocalDate.of(2026,6,5),new java.math.BigDecimal("2"),java.math.BigDecimal.ZERO,null,null,"fixture-primary",1L,1L,asOf,"RESOLVED",null,"fixture-key",true,false))));
+            return result;
+        };
+        var service = new AnnualDividendService(new TenantGuard(context), repository,display);
         var ownerOne = service.summary("2026", "");
         assertThat(ownerOne.stockOptions()).extracting(StockOption::code).doesNotContain("PRIVATE", "OTHER");
         String privateKey = AnnualDividendCalculator.stockKey("台股", "PRIVATE");

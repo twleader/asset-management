@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
  * Task 363／Requirement 99：FinMind {@code TaiwanStockDividendResult}（fallback 表）的
  * 「權」型列（{@code stock_or_cache_dividend} 含「權」不含「息」）已知
  * {@code stock_and_cache_dividend} 存的是除權參考價落差、不是配股率（見任務檔 t363
- * 背景段落實測），一律不得再解析為 {@code DividendEvent}。本測試涵蓋歷史落地
+ * 背景段落實測），不得解析為正額現金或配股率（可保留未知日期組）。本測試涵蓋歷史落地
  * （{@code fetchTwDividendResult}，經公開入口 {@code fetchObservations}）與 upcoming
  * scope（{@code parseFinMindResultRows}，經公開入口 {@code fetchProviderUpcomingScope}）
  * 兩條路徑，兩者皆為 private，一律經公開入口進入。
@@ -34,9 +34,9 @@ class DividendFallbackStockExclusionTest {
 
     @Test
     void fallbackStockTypeRowProducesNoEventInHistoricalFetch() throws Exception {
-        String primary = "{\"data\":[]}";
+        String primary = "{\"status\":200,\"data\":[]}";
         String resultTable = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-18","stock_and_cache_dividend":2.6269,"stock_or_cache_dividend":"權"}
                 ]}
                 """;
@@ -44,7 +44,7 @@ class DividendFallbackStockExclusionTest {
                 "", null, CLOCK, historyClient(primary, resultTable));
 
         var observations = client.fetchObservations("2885", "台股", 10);
-        var events = observations.get(0).events();
+        var events = observations.stream().flatMap(observation -> observation.events().stream()).toList();
 
         assertThat(events).noneMatch(e -> e.stockDividend() != null && e.stockDividend().signum() > 0);
     }
@@ -53,9 +53,9 @@ class DividendFallbackStockExclusionTest {
 
     @Test
     void fallbackCashTypeRowStillParsesNormallyAlongsideExcludedStockRow() throws Exception {
-        String primary = "{\"data\":[]}";
+        String primary = "{\"status\":200,\"data\":[]}";
         String resultTable = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-18","stock_and_cache_dividend":2.6269,"stock_or_cache_dividend":"權"},
                   {"date":"2026-07-21","stock_and_cache_dividend":1.8,"stock_or_cache_dividend":"息"}
                 ]}
@@ -64,7 +64,7 @@ class DividendFallbackStockExclusionTest {
                 "", null, CLOCK, historyClient(primary, resultTable));
 
         var observations = client.fetchObservations("2885", "台股", 10);
-        var events = observations.get(0).events();
+        var events = observations.stream().flatMap(observation -> observation.events().stream()).toList();
 
         assertThat(events).noneMatch(e -> e.stockDividend() != null && e.stockDividend().signum() > 0);
         assertThat(events).anySatisfy(e -> {
@@ -79,7 +79,7 @@ class DividendFallbackStockExclusionTest {
     @Test
     void mergeKeepsOnlyPrimaryTableStockDividendWhenFallbackHasMatchingAnchorDate() throws Exception {
         String primary = """
-                {"data":[
+                {"status":200,"data":[
                   {"StockEarningsDistribution":0.4,"StockStatutorySurplus":0.0,
                    "StockExDividendTradingDate":"2026-08-18",
                    "CashEarningsDistribution":0.0,"CashStatutorySurplus":0.0,
@@ -87,7 +87,7 @@ class DividendFallbackStockExclusionTest {
                 ]}
                 """;
         String resultTable = """
-                {"data":[
+                {"status":200,"data":[
                   {"date":"2026-08-18","stock_and_cache_dividend":2.6269,"stock_or_cache_dividend":"權"}
                 ]}
                 """;
@@ -95,7 +95,7 @@ class DividendFallbackStockExclusionTest {
                 "", null, CLOCK, historyClient(primary, resultTable));
 
         var observations = client.fetchObservations("2885", "台股", 10);
-        var events = observations.get(0).events();
+        var events = observations.stream().flatMap(observation -> observation.events().stream()).toList();
 
         assertThat(events).hasSize(1);
         assertThat(events.get(0).stockDividend()).isEqualByComparingTo("0.4000");
@@ -119,7 +119,7 @@ class DividendFallbackStockExclusionTest {
 
         var scope = client.fetchProviderUpcomingScope("2885", "台股", from, to);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events())
                 .noneMatch(e -> e.stockDividend() != null && e.stockDividend().signum() > 0);
     }
@@ -139,7 +139,7 @@ class DividendFallbackStockExclusionTest {
 
         var scope = client.fetchProviderUpcomingScope("2885", "台股", from, to);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).singleElement().satisfies(e -> {
             assertThat(e.cashDividend()).isEqualByComparingTo("1.8");
             assertThat(e.exDividendDate()).isEqualTo(TODAY.toString());

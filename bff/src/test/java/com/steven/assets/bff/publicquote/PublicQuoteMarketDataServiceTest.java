@@ -429,12 +429,12 @@ class PublicQuoteMarketDataServiceTest {
                 request -> ok(rawQuote("2330", "台股", "2026-08-24")),
                 request -> {
                     if ("/internal/public-market-data/dividends-readonly-result".equals(request.url().getPath())) {
-                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"source\":\"DB\",\"message\":null,\"rows\":["
-                                + "{\"year\":2026,\"cashDividend\":1,\"stockDividend\":0,\"exDividendDate\":\"2026-08-18\",\"previousClose\":null},"
-                                + "{\"year\":2026,\"cashDividend\":0.66,\"stockDividend\":0,\"exDividendDate\":\"2026-05-19\",\"previousClose\":27.80},"
-                                + "{\"year\":2026,\"cashDividend\":0.42,\"stockDividend\":0.10,\"exDividendDate\":null,\"exRightsDate\":\"2026-02-26\",\"previousClose\":24},"
-                                + "{\"year\":2025,\"cashDividend\":0.40,\"stockDividend\":0,\"exDividendDate\":\"2025-11-18\",\"previousClose\":0},"
-                                + "{\"year\":2025,\"cashDividend\":0.50,\"stockDividend\":0,\"exDividendDate\":\"2025-05-19\",\"previousClose\":20}]}");
+                        return ok("{\"stockCode\":\"2330\",\"market\":\"台股\",\"source\":\"DB\",\"message\":null,\"quality\":\"RESOLVED\",\"rows\":["
+                                + "{\"quality\":\"RESOLVED\",\"year\":2026,\"cashDividend\":1,\"stockDividend\":0,\"exDividendDate\":\"2026-08-18\",\"previousClose\":null},"
+                                + "{\"quality\":\"RESOLVED\",\"year\":2026,\"cashDividend\":0.66,\"stockDividend\":0,\"exDividendDate\":\"2026-05-19\",\"previousClose\":27.80},"
+                                + "{\"quality\":\"RESOLVED\",\"year\":2026,\"cashDividend\":0.42,\"stockDividend\":0.10,\"exDividendDate\":\"2026-02-26\",\"exRightsDate\":\"2026-02-26\",\"previousClose\":24},"
+                                + "{\"quality\":\"RESOLVED\",\"year\":2025,\"cashDividend\":0.40,\"stockDividend\":0,\"exDividendDate\":\"2025-11-18\",\"previousClose\":0},"
+                                + "{\"quality\":\"RESOLVED\",\"year\":2025,\"cashDividend\":0.50,\"stockDividend\":0,\"exDividendDate\":\"2025-05-19\",\"previousClose\":20}]}");
                     }
                     return marketResponse(request);
                 });
@@ -518,7 +518,7 @@ class PublicQuoteMarketDataServiceTest {
                     + "\"weight\":1.5,\"shares\":12}]}");
             case "/internal/public-market-data/dividends-readonly-result" -> ok("{"
                     + "\"stockCode\":\"2330\",\"market\":\"台股\",\"source\":\"DB\",\"message\":null,"
-                    + "\"rows\":[{\"year\":2025,\"cashDividend\":5,\"stockDividend\":0,"
+                    + "\"quality\":\"RESOLVED\",\"rows\":[{\"quality\":\"RESOLVED\",\"year\":2025,\"cashDividend\":5,\"stockDividend\":0,"
                     + "\"exDividendDate\":\"2025-06-20\",\"yieldPct\":1,"
                     + "\"cashPaymentDate\":\"2025-07-15\",\"stockPaymentDate\":null,"
                     + "\"fillDays\":25,\"previousClose\":500,\"exRightsDate\":\"2025-07-01\"}]}");

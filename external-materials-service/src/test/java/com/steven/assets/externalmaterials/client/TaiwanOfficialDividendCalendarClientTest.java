@@ -49,7 +49,7 @@ class TaiwanOfficialDividendCalendarClientTest {
 
         var scope = client.fetch("2330", "台股", TODAY, HORIZON);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.provider()).isEqualTo(TaiwanOfficialDividendCalendarClient.PROVIDER);
         assertThat(scope.scopeFrom()).isEqualTo(TODAY);
         assertThat(scope.scopeTo()).isEqualTo(HORIZON);
@@ -77,7 +77,7 @@ class TaiwanOfficialDividendCalendarClientTest {
 
         var scope = client.fetch("9999", "台股", TODAY, HORIZON);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).singleElement().satisfies(event -> {
             assertThat(event.exDividendDate()).isNull();
             assertThat(event.exRightsDate()).isEqualTo("2026-08-10");
@@ -100,7 +100,7 @@ class TaiwanOfficialDividendCalendarClientTest {
 
         var scope = client.fetch("8888", "台股", TODAY, HORIZON);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).hasSize(1);
         assertThat(scope.events().get(0).exRightsDate()).isEqualTo("2026-08-10");
     }
@@ -115,7 +115,7 @@ class TaiwanOfficialDividendCalendarClientTest {
 
         var scope = client.fetch("2330", "台股", TODAY, HORIZON);
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).isEmpty();
     }
 

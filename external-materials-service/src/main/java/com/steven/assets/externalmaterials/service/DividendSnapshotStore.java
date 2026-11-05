@@ -1,6 +1,7 @@
 package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.model.marketdata.DividendData;
+import com.steven.assets.externalmaterials.model.marketdata.DividendNormalization;
 import com.steven.assets.externalmaterials.model.marketdata.DividendEvidenceData.PersistResult;
 import com.steven.assets.externalmaterials.service.port.DividendEvidencePort;
 import java.math.BigDecimal;
@@ -52,26 +53,37 @@ public class DividendSnapshotStore implements DividendEvidencePort {
         }
         String provider = fetched.source() == null || fetched.source().isBlank()
                 ? "UNKNOWN" : fetched.source().trim();
+        if (fetched.normalizerVersion() != 1 && fetched.normalizerVersion() != 2)
+            throw new IllegalArgumentException("DIVIDEND_NORMALIZER_UNSUPPORTED");
+        if (fetched.normalizerVersion() == 2 && !DividendNormalization.NOMINAL.equals(fetched.amountBasis()))
+            throw new IllegalArgumentException("DIVIDEND_BASIS_UNSUPPORTED");
+        for (var event : fetched.events()) {
+            DividendNormalization.exact(event.cashDividend());
+            DividendNormalization.exact(event.stockDividend());
+        }
+        if (fetched.dateGroupsComplete() && !DividendNormalization.completeComponents(fetched.events()))
+            throw new IllegalArgumentException("DIVIDEND_COMPONENTS_INCOMPLETE");
         String sourceManifest = sourceManifest(fetched.sourceUrls());
-        String contentHash = canonicalContentHash(fetched.events());
+        String contentHash = canonicalContentHash(fetched);
         Long snapshotId = jdbc.query(
                 "SELECT id FROM stock_dividend_snapshot WHERE stock_code=? AND market=? AND provider=? "
-                        + "AND scope_from=? AND scope_to=? AND content_hash=?",
+                        + "AND scope_from=? AND scope_to=? AND content_hash=? AND normalizer_version=? AND amount_basis=?",
                 ps -> {
                     ps.setString(1, code); ps.setString(2, market); ps.setString(3, provider);
                     ps.setObject(4, from); ps.setObject(5, to); ps.setString(6, contentHash);
+                    ps.setInt(7, fetched.normalizerVersion()); ps.setString(8, fetched.amountBasis());
                 }, rs -> rs.next() ? rs.getLong(1) : null);
         if (snapshotId == null) {
                     snapshotId = jdbc.queryForObject(
                     "INSERT INTO stock_dividend_snapshot "
-                            + "(stock_code,market,provider,scope_from,scope_to,source_url,content_hash) "
-                            + "VALUES (?,?,?,?,?,?,?) RETURNING id",
+                            + "(stock_code,market,provider,scope_from,scope_to,source_url,content_hash,normalizer_version,amount_basis,date_groups_complete) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id",
                     Long.class, code, market, provider, from, to,
                     // Keep the provider label in `provider`; source_url stores only
                     // the endpoint manifest (one URL per line) when available.
-                    sourceManifest, contentHash);
+                    sourceManifest, contentHash, fetched.normalizerVersion(), fetched.amountBasis(), fetched.dateGroupsComplete());
             if (snapshotId == null) return new PersistResult(0, contentHash, false, "FAILED_SNAPSHOT");
-            appendEvents(snapshotId, fetched.events(), fetched.sourceAvailableAt());
+            appendEvents(snapshotId, fetched);
         } else {
             // Equal content hash is not enough to trust an old row: a previous
             // attempt may have inserted the snapshot but failed halfway through
@@ -80,13 +92,13 @@ public class DividendSnapshotStore implements DividendEvidencePort {
             Integer storedEventCount = jdbc.queryForObject(
                     "SELECT COUNT(*) FROM stock_dividend_snapshot_event WHERE snapshot_id=?",
                     Integer.class, snapshotId);
-            int expectedEventCount = distinctCanonicalEvents(fetched.events()).size();
+            int expectedEventCount = distinctEvents(fetched).size();
             if (storedEventCount != null && storedEventCount > expectedEventCount) {
                 return new PersistResult(snapshotId, contentHash, false,
                         "FAILED_SNAPSHOT_EVENT_COUNT_MISMATCH");
             }
             if (storedEventCount != null && storedEventCount < expectedEventCount) {
-                appendEvents(snapshotId, fetched.events(), fetched.sourceAvailableAt());
+                appendEvents(snapshotId, fetched);
                 Integer repairedCount = jdbc.queryForObject(
                         "SELECT COUNT(*) FROM stock_dividend_snapshot_event WHERE snapshot_id=?",
                         Integer.class, snapshotId);
@@ -108,21 +120,24 @@ public class DividendSnapshotStore implements DividendEvidencePort {
         return new PersistResult(snapshotId, contentHash, complete, fetched.status().name());
     }
 
-    private void appendEvents(long snapshotId, List<DividendData.DividendEvent> events,
-                              Instant sourceAvailableAt) {
-        if (events == null) return;
-        for (DividendData.DividendEvent event : distinctCanonicalEvents(events)) {
-            String key = canonicalEventHash(event);
+    private void appendEvents(long snapshotId, DividendData.DividendFetchResult fetched) {
+        java.util.Map<String, Integer> unidentifiedOccurrences = new java.util.HashMap<>();
+        for (DividendData.DividendEvent event : distinctEvents(fetched)) {
+            String key = eventHash(event, fetched);
+            if (fetched.normalizerVersion() == 2 && event.upstreamComponentId() == null) {
+                String canonical = canonicalV2(event, fetched);
+                key = sha256(canonical + "|UNIDENTIFIED_OCCURRENCE|" + unidentifiedOccurrences.merge(canonical, 1, Integer::sum));
+            }
             // 357.3a-0：ex_rights_date 緊接 ex_dividend_date 之後同步寫入；只改
             // canonicalEvent()（雜湊輸入）不改這裡的 INSERT 會讓雜湊算對但值仍寫不進去。
             jdbc.update("INSERT INTO stock_dividend_snapshot_event "
                             + "(snapshot_id,event_key,year,ex_dividend_date,ex_rights_date,cash_dividend,"
-                            + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at) "
-                            + "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,event_key) DO NOTHING",
+                            + "stock_dividend,cash_payment_date,stock_payment_date,source_available_at,upstream_component_id) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT (snapshot_id,event_key) DO NOTHING",
                     snapshotId, key, event.year(), parse(event.exDividendDate()),
                     parse(event.exRightsDate()), event.cashDividend(),
                     event.stockDividend(), parse(event.cashPaymentDate()), parse(event.stockPaymentDate()),
-                    toTimestamp(sourceAvailableAt));
+                    toTimestamp(fetched.sourceAvailableAt()), event.upstreamComponentId());
         }
     }
 
@@ -183,6 +198,33 @@ public class DividendSnapshotStore implements DividendEvidencePort {
         distinctCanonicalEvents(events).stream().map(DividendSnapshotStore::canonicalEvent)
                 .sorted(Comparator.naturalOrder()).forEach(canonical::add);
         return sha256(String.join("\n", canonical));
+    }
+
+    /** V1 helper above stays byte-for-byte compatible; V2 binds its explicit normalizer and component set. */
+    public static String canonicalContentHash(DividendData.DividendFetchResult fetched) {
+        if (fetched.normalizerVersion() == 1) return canonicalContentHash(fetched.events());
+        String header = "DIVIDEND_SNAPSHOT_V2|" + fetched.normalizerVersion() + "|" + fetched.amountBasis()
+                + "|" + fetched.dateGroupsComplete();
+        List<String> events = distinctEvents(fetched).stream()
+                .map(event -> canonicalV2(event, fetched)).sorted().toList();
+        return sha256(header + "\n" + String.join("\n", events));
+    }
+
+    public static String eventHash(DividendData.DividendEvent event, DividendData.DividendFetchResult fetched) {
+        return fetched.normalizerVersion() == 1 ? canonicalEventHash(event) : sha256(canonicalV2(event, fetched));
+    }
+
+    private static String canonicalV2(DividendData.DividendEvent event, DividendData.DividendFetchResult fetched) {
+        String id = event.upstreamComponentId();
+        return "DIVIDEND_EVENT_V2|" + fetched.normalizerVersion() + "|" + fetched.amountBasis() + "|"
+                + (id == null ? "NULL" : id.length() + ":" + id) + "|" + canonicalEvent(event);
+    }
+
+    private static List<DividendData.DividendEvent> distinctEvents(DividendData.DividendFetchResult fetched) {
+        if (fetched.normalizerVersion() == 1) return distinctCanonicalEvents(fetched.events());
+        Set<String> seen = new HashSet<>();
+        return fetched.events().stream().filter(event -> event != null
+                && (event.upstreamComponentId() == null || seen.add(canonicalV2(event, fetched)))).toList();
     }
 
     public static String canonicalEventHash(DividendData.DividendEvent event) {

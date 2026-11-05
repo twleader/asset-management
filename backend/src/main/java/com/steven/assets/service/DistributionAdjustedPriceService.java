@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.StockDividendHistory;
+import com.steven.assets.model.CanonicalDividendFinancialGuard;
 import com.steven.assets.model.StockPriceHistory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -95,21 +96,21 @@ public class DistributionAdjustedPriceService {
         var firstDate = rowsAsc.get(0).getTradingDate();
         var lastDate = rowsAsc.get(rowsAsc.size() - 1).getTradingDate();
 
-        // 分割偵測先於除權息的 early-return：無配息紀錄的標的（如 2327）同樣必須被還原。
-        List<FactorEvent> events = new ArrayList<>(detectSplits(rowsAsc, rawEvents));
-
-        if (rawEvents != null) {
-            // Task 357／357.4a-3：validEvent() 放寬後純配股事件的 getExDividendDate()
-            // 為 null，區間過濾／排序改用 anchorDate；套用日期與因子拆分規則見
-            // addFactorEvents()（357.4a：現金套除息日、股票套除權日，兩者皆有且不同時
-            // 拆兩筆，不得合併或只取其一）。
-            rawEvents.stream()
-                    .filter(this::validEvent)
-                    .sorted(Comparator.comparing(
-                                    StockDividendHistory::anchorDate,
-                                    Comparator.nullsLast(Comparator.naturalOrder()))
-                            .thenComparing(e -> e.getId() == null ? Long.MAX_VALUE : e.getId()))
-                    .forEach(e -> addFactorEvents(events, e, firstDate, lastDate, rowsAsc));
+        var canonical = CanonicalDividendFinancialFacts.assess(rawEvents, firstDate, lastDate);
+        canonical.requireComparablePriceBasis();
+        // Canonical cash/stock amounts for the same effective date form one factor.
+        // Multiplying per-row factors would add an artificial cash cross term.
+        List<FactorEvent> events = new ArrayList<>(detectSplits(rowsAsc, canonical.events()));
+        for (CanonicalDividendFinancialGuard.EffectiveEvent event : canonical.events()) {
+            BigDecimal stock = event.stock().divide(STOCK_PAR_VALUE, SCALE, RoundingMode.HALF_UP);
+            BigDecimal close = closeOn(rowsAsc, event.date());
+            BigDecimal cash = event.cash().signum() > 0 && close != null && close.signum() > 0
+                    ? event.cash().divide(close, SCALE, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            if (event.cash().signum() > 0 && (close == null || close.signum() <= 0))
+                throw new CanonicalDividendFinancialGuard.Unavailable("DIVIDEND_EFFECTIVE_CLOSE_UNAVAILABLE");
+            if (event.cash().signum() > 0 || event.stock().signum() > 0)
+                events.add(new FactorEvent(event.date(), BigDecimal.ONE.add(stock).add(cash),
+                        BigDecimal.ONE.add(stock), false));
         }
         if (events.isEmpty()) {
             return new Adjustment(List.copyOf(rowsDesc), false);
@@ -181,7 +182,7 @@ public class DistributionAdjustedPriceService {
      * （0050 為 3.966）含當日真實漲跌，用它還原會把真實價格變動也一併抹掉。</p>
      */
     private List<FactorEvent> detectSplits(
-            List<StockPriceHistory> rowsAsc, List<StockDividendHistory> rawEvents) {
+            List<StockPriceHistory> rowsAsc, List<CanonicalDividendFinancialGuard.EffectiveEvent> rawEvents) {
         List<FactorEvent> out = new ArrayList<>();
         for (int i = 1; i < rowsAsc.size(); i++) {
             BigDecimal prevClose = rowsAsc.get(i - 1).getClosePrice();
@@ -222,14 +223,14 @@ public class DistributionAdjustedPriceService {
     }
 
     /** 該日（或前一交易日）是否已有股票股利事件可解釋這個跳空。 */
-    private boolean hasStockDividendOn(List<StockDividendHistory> rawEvents, LocalDate date) {
+    private boolean hasStockDividendOn(List<CanonicalDividendFinancialGuard.EffectiveEvent> rawEvents, LocalDate date) {
         if (rawEvents == null) return false;
-        for (StockDividendHistory e : rawEvents) {
+        for (CanonicalDividendFinancialGuard.EffectiveEvent e : rawEvents) {
             if (e == null) continue;
-            if (!positive(e.getStockDividend())) continue;
+            if (!positive(e.stock())) continue;
             // Task 357／357.4a-2：改判除權日（股票股利真正的基準日），只配股事件的
             // exDividendDate 會是 null；沒有除權日時退回 anchorDate 保底。
-            LocalDate exRights = e.getExRightsDate() != null ? e.getExRightsDate() : e.anchorDate();
+            LocalDate exRights = e.date();
             if (exRights == null) continue;
             // 容一個交易日的誤差：除權日與價格跳空日在來源資料中偶有一日之差。
             if (!exRights.isBefore(date.minusDays(1)) && !exRights.isAfter(date.plusDays(1))) {
@@ -261,80 +262,6 @@ public class DistributionAdjustedPriceService {
             found = row.getClosePrice();
         }
         return found;
-    }
-
-    /**
-     * Task 357／357.4a-3：改用 anchorDate（{@link StockDividendHistory#anchorDate()}）
-     * 判斷事件是否存在——放寬 {@code getExDividendDate() != null} 後，純配股事件必須
-     * 靠除權日才通過，否則 357.3d-1 的回補結果會在這裡被整批擋掉。
-     */
-    private boolean validEvent(StockDividendHistory event) {
-        return event != null
-                && event.anchorDate() != null
-                && (positive(event.getCashDividend()) || positive(event.getStockDividend()));
-    }
-
-    /**
-     * 把一筆 {@link StockDividendHistory} 事件展開成套用日期已定的 {@link FactorEvent}。
-     *
-     * <p>357.4a 定義：現金股利套用 {@code exDividendDate}，股票股利套用
-     * {@code exRightsDate}；某一方缺值時退回 anchorDate。<b>兩者皆有值且不同時</b>拆成
-     * 兩筆獨立事件（現金一筆、股票一筆），不得合併或只取其一——這是本任務存在的理由
-     * 本身（除權日有時與除息日不同）。兩者相同（含只有一方有值、fallback 到同一個
-     * anchorDate 的情形）時維持原本「一事件一日期」的合併因子，逐位不變既有回歸。</p>
-     */
-    private void addFactorEvents(List<FactorEvent> events, StockDividendHistory e,
-            LocalDate firstDate, LocalDate lastDate, List<StockPriceHistory> rowsAsc) {
-        LocalDate anchor = e.anchorDate();
-        LocalDate cashDate = e.getExDividendDate() != null ? e.getExDividendDate() : anchor;
-        LocalDate rightsDate = e.getExRightsDate() != null ? e.getExRightsDate() : anchor;
-        boolean splitDates = e.getExDividendDate() != null && e.getExRightsDate() != null
-                && !e.getExDividendDate().equals(e.getExRightsDate());
-        if (splitDates) {
-            if (positive(e.getCashDividend()) && withinWindow(cashDate, firstDate, lastDate)) {
-                events.add(new FactorEvent(cashDate,
-                        BigDecimal.ONE.add(cashFactor(e, closeOn(rowsAsc, cashDate))),
-                        BigDecimal.ONE, false));
-            }
-            if (positive(e.getStockDividend()) && withinWindow(rightsDate, firstDate, lastDate)) {
-                events.add(new FactorEvent(rightsDate,
-                        BigDecimal.ONE.add(stockFactor(e)), stockShareGrowth(e), false));
-            }
-            return;
-        }
-        LocalDate date = cashDate != null ? cashDate : rightsDate;
-        if (!withinWindow(date, firstDate, lastDate)) return;
-        events.add(new FactorEvent(date, dividendFactor(e, closeOn(rowsAsc, date)),
-                stockShareGrowth(e), false));
-    }
-
-    private static boolean withinWindow(LocalDate date, LocalDate firstDate, LocalDate lastDate) {
-        return date != null && !date.isBefore(firstDate) && !date.isAfter(lastDate);
-    }
-
-    private BigDecimal stockFactor(StockDividendHistory event) {
-        return positive(event.getStockDividend())
-                ? event.getStockDividend().divide(STOCK_PAR_VALUE, SCALE, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-    }
-
-    private BigDecimal cashFactor(StockDividendHistory event, BigDecimal eventDayClose) {
-        return positive(event.getCashDividend())
-                && eventDayClose != null && eventDayClose.signum() > 0
-                ? event.getCashDividend().divide(eventDayClose, SCALE, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-    }
-
-    private BigDecimal dividendFactor(StockDividendHistory event, BigDecimal eventDayClose) {
-        return BigDecimal.ONE.add(stockFactor(event)).add(cashFactor(event, eventDayClose));
-    }
-
-    /** 股票股利造成的股數成長；現金股利不改變股數。 */
-    private BigDecimal stockShareGrowth(StockDividendHistory event) {
-        return positive(event.getStockDividend())
-                ? BigDecimal.ONE.add(event.getStockDividend()
-                        .divide(STOCK_PAR_VALUE, SCALE, RoundingMode.HALF_UP))
-                : BigDecimal.ONE;
     }
 
     private boolean positive(BigDecimal value) {

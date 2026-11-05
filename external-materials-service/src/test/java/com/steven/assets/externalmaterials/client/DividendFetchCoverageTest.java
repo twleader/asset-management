@@ -23,8 +23,8 @@ class DividendFetchCoverageTest {
     private static final Instant NOW = Instant.parse("2026-08-09T12:00:00Z");
     private static final LocalDate TODAY = LocalDate.of(2026, 8, 9);
     private static final String NASDAQ_HISTORY = """
-            {"data":{"dividends":{"rows":[
-              {"exOrEffDate":"08/01/2026","amount":"$0.25","paymentDate":"08/07/2026"}
+            {"status":{"rCode":200},"data":{"dividends":{"rows":[
+              {"exOrEffDate":"08/01/2026","amount":"$0.25","paymentDate":"08/07/2026","type":"Cash","declarationDate":"07/20/2026"}
             ]}}}
             """;
 
@@ -45,7 +45,7 @@ class DividendFetchCoverageTest {
         assertThat(observations).hasSize(2);
         assertThat(observations.get(0).status())
                 .isEqualTo(DividendData.FetchStatus.PARTIAL);
-        assertThat(observations.get(0).source()).isEqualTo("NASDAQ");
+        assertThat(observations.get(0).source()).isEqualTo("NASDAQ.stocks");
         assertThat(observations.get(0).events())
                 .extracting(DividendData.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-01");
@@ -77,7 +77,7 @@ class DividendFetchCoverageTest {
                 DividendUpcomingScopeClient.UpcomingScope.unavailable(
                         "台股尚無可證明完整 upcoming scope 的 provider");
         DividendFetchClient client = new DividendFetchClient(
-                "", upcoming, Clock.fixed(NOW, ZoneOffset.UTC), historyClient("{\"data\":[]}"));
+                "", upcoming, Clock.fixed(NOW, ZoneOffset.UTC), historyClient("{\"status\":200,\"data\":[]}"));
 
         var observations = client.fetchObservations("2330", "台股", 10);
 
@@ -134,7 +134,7 @@ class DividendFetchCoverageTest {
         };
         DividendFetchClient tw = new DividendFetchClient(
                 "", twUpcoming, Clock.fixed(taipeiHalfPastMidnight, ZoneOffset.UTC),
-                historyClient("{\"data\":[]}"));
+                historyClient("{\"status\":200,\"data\":[]}"));
 
         var twObservations = tw.fetchObservations("2330", "台股", 10);
 
@@ -178,11 +178,11 @@ class DividendFetchCoverageTest {
         var scope = client.fetchProviderUpcomingScope("2330", "台股", TODAY,
                 TODAY.plusDays(45));
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.provider()).contains("FinMind");
         assertThat(scope.events()).extracting(DividendData.DividendEvent::exDividendDate)
                 .containsExactly("2026-08-10");
-        assertThat(scope.covers(TODAY, TODAY.plusDays(45))).isTrue();
+        assertThat(scope.covers(TODAY, TODAY.plusDays(45))).isFalse();
     }
 
     @Test
@@ -242,12 +242,13 @@ class DividendFetchCoverageTest {
 
         assertThat(scope.complete()).isFalse();
         assertThat(scope.covers(TODAY, TODAY.plusDays(45))).isFalse();
-        assertThat(scope.errorReason()).contains("row malformed");
+        assertThat(scope.dateGroupsComplete()).isFalse();
+        assertThat(scope.events()).allMatch(e -> e.cashDividend() == null);
     }
 
     @Test
     void usNasdaqHistoryAndYahooEmptyAreEvidenceOnlyNotCompleteEmptyScope() throws Exception {
-        String nasdaqEmpty = "{\"data\":{\"dividends\":{\"rows\":[]}}}";
+        String nasdaqEmpty = "{\"status\":{\"rCode\":200},\"data\":{\"dividends\":{\"rows\":[]}}}";
         String yahooEmpty = "{\"chart\":{\"error\":null,\"result\":[{\"events\":{\"dividends\":{}}}]}}";
         DividendFetchClient fetcher = new DividendFetchClient(
                 "", null, Clock.fixed(NOW, ZoneOffset.UTC),
@@ -317,7 +318,7 @@ class DividendFetchCoverageTest {
         var scope = client.fetchProviderUpcomingScope("2881", "台股",
                 TODAY.minusDays(30), TODAY.plusDays(15));
 
-        assertThat(scope.complete()).isTrue();
+        assertThat(scope.complete()).isFalse();
         assertThat(scope.events()).singleElement().satisfies(e -> {
             assertThat(e.exDividendDate()).isNull();
             assertThat(e.exRightsDate()).isEqualTo("2026-08-20");
@@ -347,7 +348,7 @@ class DividendFetchCoverageTest {
         // Task 363／Requirement 99：TaiwanStockDividendResult 的 stock_or_cache_dividend
         // 含「權」不含「息」的列，其 stock_and_cache_dividend 存的其實是除權參考價落差、
         // 不是配股率（見任務檔 t363 背景段落實測），一律不得再解析為 DividendEvent。
-        // 修正前本測試斷言該列會落 exRightsDate；修正後改斷言完全不產生事件，在歷史
+        // 修正前本測試斷言該列會落 exRightsDate；修正後改斷言保留未知日期組，但不得產生正額現金或配股率，在歷史
         // （fetchTw／fetchTwDividendResult）與 upcoming（fetchFinMindUpcomingScope／
         // parseFinMindResultRows）兩條路徑皆須驗證。
         String emptyPrimary = "{\"status\":200,\"msg\":\"Success\",\"data\":[]}";
@@ -360,13 +361,19 @@ class DividendFetchCoverageTest {
                 "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
         var observations = historicalClient.fetchObservations("00751B", "台股", 10);
         assertThat(observations.get(0).events())
-                .noneMatch(e -> "2026-06-15".equals(e.exRightsDate()));
+                .allSatisfy(e -> {
+                    assertThat(e.cashDividend()).isNull();
+                    assertThat(e.stockDividend()).isNull();
+                });
 
         DividendFetchClient upcomingClient = new DividendFetchClient(
                 "", null, Clock.fixed(NOW, ZoneOffset.UTC), historyClient(emptyPrimary, resultBody));
         var scope = upcomingClient.fetchProviderUpcomingScope(
                 "00751B", "台股", LocalDate.of(2026, 6, 1), LocalDate.of(2026, 7, 16));
-        assertThat(scope.events()).noneMatch(e -> "2026-06-15".equals(e.exRightsDate()));
+        assertThat(scope.events()).allSatisfy(e -> {
+                    assertThat(e.cashDividend()).isNull();
+                    assertThat(e.stockDividend()).isNull();
+                });
     }
 
     @Test

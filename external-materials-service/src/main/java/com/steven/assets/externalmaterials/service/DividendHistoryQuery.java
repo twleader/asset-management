@@ -20,7 +20,7 @@ import java.util.List;
  *
  * <p><b>必須過濾 {@code event_status='ACTIVE'}。</b>來源撤回的權息事件會被標成
  * {@code 'CANCELLED'} 而不是刪除（欄位由 changeset {@code v1.94.0-radar-event-observations.sql}
- * 追加，只有這兩個值）；不濾就會把已撤回的配息算進殖利率。backend 的兩個讀取端
+ * 追加）；不濾就會把已撤回或已取代的配息算進殖利率。backend 的讀取端
  * （{@code JdbcDividendCurrentStateRepository}、{@code StockDividendHistoryRepository}）都有濾。</p>
  */
 @Component
@@ -29,22 +29,28 @@ public class DividendHistoryQuery {
 
     private final JdbcTemplate jdbc;
 
-    /**
-     * 一筆現金股利事件。{@code eventKey}／{@code source} 一併帶出，是因為 Task 334.3 規定
-     * 「同一除息日多值」時必須<b>先試這兩欄能否確定性判別</b>、比值啟發式只是 fallback。
-     */
+    /** Canonical nominal cash; priceBasisVerified requires independent price-basis evidence. */
     public record CashDividendEvent(
-            LocalDate exDividendDate, BigDecimal cashDividend, String eventKey, String source) {}
+            LocalDate exDividendDate, BigDecimal cashDividend, String eventKey, String source, boolean priceBasisVerified) {
+        public CashDividendEvent(LocalDate date, BigDecimal cash, String key, String source) {
+            this(date, cash, key, source, false);
+        }
+    }
 
-    /** 該標的在該市場全部 ACTIVE 且有除息日與現金股利的事件，依除息日由舊到新。 */
+    /** 全部 ACTIVE 日期組；未驗證金額保留 null 缺口，不當作零或靜默排除。 */
     public List<CashDividendEvent> activeCashDividends(String stockCode, String market) {
         if (stockCode == null || stockCode.isBlank() || market == null) return List.of();
         return jdbc.query("""
-                SELECT ex_dividend_date, cash_dividend, event_key, source
-                FROM stock_dividend_history
-                WHERE stock_code=? AND market=? AND event_status='ACTIVE'
-                  AND ex_dividend_date IS NOT NULL AND cash_dividend IS NOT NULL
-                ORDER BY ex_dividend_date
+                SELECT COALESCE(h.canonical_date,h.ex_dividend_date,h.ex_rights_date),
+                       CASE WHEN h.resolution_status='RESOLVED' AND h.canonical_date IS NOT NULL
+                              AND h.source_snapshot_id IS NOT NULL AND s.normalizer_version=2
+                              AND s.amount_basis='NOMINAL_PER_EX_DATE' AND s.date_groups_complete=true
+                            THEN h.cash_dividend ELSE NULL END AS cash_dividend,
+                       h.event_key, h.source
+                FROM stock_dividend_history h
+                LEFT JOIN stock_dividend_snapshot s ON s.id=h.source_snapshot_id
+                WHERE h.stock_code=? AND h.market=? AND h.event_status='ACTIVE'
+                ORDER BY COALESCE(h.canonical_date,h.ex_dividend_date,h.ex_rights_date)
                 """, (rs, ignored) -> new CashDividendEvent(
                 rs.getObject(1, LocalDate.class), rs.getBigDecimal(2),
                 rs.getString(3), rs.getString(4)),

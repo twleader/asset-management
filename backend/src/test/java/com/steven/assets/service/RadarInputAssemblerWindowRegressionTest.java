@@ -432,6 +432,8 @@ class RadarInputAssemblerWindowRegressionTest {
         event.setMarket("台股");
         event.setExDividendDate(date);
         event.setCashDividend(new BigDecimal("2.00"));
+        event.setId(1L);event.setCanonicalDate(date);event.setSourceSnapshotId(1L);
+        event.setResolutionStatus("RESOLVED");event.setStockDividend(BigDecimal.ZERO);
         return List.of(event);
     }
 

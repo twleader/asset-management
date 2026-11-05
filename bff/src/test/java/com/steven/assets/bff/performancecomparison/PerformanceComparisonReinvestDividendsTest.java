@@ -59,7 +59,7 @@ class PerformanceComparisonReinvestDividendsTest {
                  {"tradingDate":"2024-12-01","closePrice":95}]
                 """;
         String dividendJson = """
-                [{"exDividendDate":null,"exRightsDate":"2024-06-01","cashDividend":0,"stockDividend":1.0}]
+                [{"quality":"RESOLVED","exDividendDate":null,"exRightsDate":"2024-06-01","cashDividend":0,"stockDividend":1.0}]
                 """;
 
         Map<String, Object> series = firstSeries(stubClient(stockJson, dividendJson));
@@ -85,7 +85,7 @@ class PerformanceComparisonReinvestDividendsTest {
                  {"tradingDate":"2024-12-01","closePrice":95}]
                 """;
         String dividendJson = """
-                [{"exDividendDate":"2024-03-01","exRightsDate":"2024-06-01","cashDividend":5,"stockDividend":1.0}]
+                [{"quality":"RESOLVED","exDividendDate":"2024-03-01","exRightsDate":"2024-06-01","cashDividend":5,"stockDividend":1.0}]
                 """;
 
         Map<String, Object> series = firstSeries(stubClient(stockJson, dividendJson));
