@@ -16961,7 +16961,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "0050"
       }
     },
@@ -17194,7 +17194,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "0050"
       }
     },
@@ -17415,8 +17415,8 @@
       "expected": {
         "highWater": "100",
         "pullbackPct": "3",
-        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
-        "timingPass": true
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
       },
       "kind": "core",
       "name": "D208_above_midpoint_original_gates_pass",
@@ -17427,7 +17427,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -17660,7 +17660,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -17893,7 +17893,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -18114,8 +18114,8 @@
       "expected": {
         "highWater": "100",
         "pullbackPct": "3",
-        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
-        "timingPass": true
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
       },
       "kind": "core",
       "name": "D208_completed_k_50.01",
@@ -18126,7 +18126,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -18359,7 +18359,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -18592,7 +18592,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -18813,8 +18813,8 @@
       "expected": {
         "highWater": "100",
         "pullbackPct": "3",
-        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
-        "timingPass": true
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
       },
       "kind": "core",
       "name": "D208_completed_d_50.01",
@@ -18825,7 +18825,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -19058,7 +19058,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -19291,7 +19291,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -19512,8 +19512,8 @@
       "expected": {
         "highWater": "100",
         "pullbackPct": "3",
-        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
-        "timingPass": true
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
       },
       "kind": "core",
       "name": "D208_live_k_50.01",
@@ -19524,7 +19524,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -19757,7 +19757,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -19990,7 +19990,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -20211,8 +20211,8 @@
       "expected": {
         "highWater": "100",
         "pullbackPct": "3",
-        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
-        "timingPass": true
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
       },
       "kind": "core",
       "name": "D208_live_d_50.01",
@@ -20223,7 +20223,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -20456,7 +20456,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -20689,7 +20689,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -20922,7 +20922,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -21155,7 +21155,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -21389,7 +21389,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -21623,7 +21623,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -21856,7 +21856,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -22089,7 +22089,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -22325,7 +22325,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -22559,7 +22559,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -22793,7 +22793,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -23023,7 +23023,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -23253,7 +23253,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -23483,7 +23483,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -23713,7 +23713,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -23943,7 +23943,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -24174,7 +24174,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -24406,7 +24406,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -24638,7 +24638,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -24870,7 +24870,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -25102,7 +25102,7 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -25334,7 +25334,3730 @@
         "high_date": "2026-09-10",
         "high_water": 100,
         "market": "台股",
-        "policy_sha256": "c60564ea745ee137f371e420dbd80c773f8987e5fbcf5bfb5d2f32f777fbc59a",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_high_zone_k_below_80_original_gates_pass",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": "79.99",
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_completed_d_79.99",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 80,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_completed_d_80",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": "80.01",
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_completed_d_80.01",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": "79.99",
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "D209_HIGH_ZONE_SELL_BLOCKED",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_live_d_79.99",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 80,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_live_d_80",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": "80.01",
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_live_d_80.01",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 80,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 80,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "CONFIRMED_REVERSAL_AND_PULLBACK",
+        "timingPass": true
+      },
+      "kind": "core",
+      "name": "D209_both_d_exactly_80",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 81,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "WAIT_CONFIRMED_TREND_REVERSAL",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_live_k_81_not_below_d",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 82,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "WAIT_CONFIRMED_TREND_REVERSAL",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_live_k_82_not_below_d",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 82,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "WAIT_CONFIRMED_TREND_REVERSAL",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_completed_k_equal_d",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 77,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "3",
+        "reason": "WAIT_CONFIRMED_TREND_REVERSAL",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_completed_k_rising",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 99
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 99,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "100",
+        "pullbackPct": "1",
+        "reason": "HIGH_WATER_PULLBACK_NOT_MET",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_pullback_below_existing_minimum",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 101,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "highWater": "101",
+        "pullbackPct": "3.9603960396039604",
+        "reason": "WAIT_CONFIRMED_TREND_REVERSAL",
+        "timingPass": false
+      },
+      "kind": "core",
+      "name": "D209_new_high_still_waits_original_confirmation",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": null,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dValue": 81,
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "reason": "COMPLETED_KD_OR_OHLC_UNVERIFIED",
+        "timingPass": false
+      },
+      "kind": "core_unavailable",
+      "name": "D209_completed_d_missing",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
+        "stock_code": "00919"
+      }
+    },
+    {
+      "body": {
+        "book": {
+          "levels": [
+            {
+              "bidPrice": 97
+            }
+          ]
+        },
+        "calendarVerified": true,
+        "completedSessions": [
+          "2026-09-07",
+          "2026-09-08",
+          "2026-09-09",
+          "2026-09-10",
+          "2026-09-11",
+          "2026-09-14",
+          "2026-09-15",
+          "2026-09-16",
+          "2026-09-17",
+          "2026-09-18",
+          "2026-09-21"
+        ],
+        "daily": [
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-07",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-08",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-09",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-10",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-11",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-14",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-15",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-16",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-17",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-18",
+            "trusted": true
+          },
+          {
+            "closePrice": 98,
+            "highPrice": 99,
+            "lowPrice": 96,
+            "tradingDate": "2026-09-21",
+            "trusted": true
+          }
+        ],
+        "dividends": [
+          {
+            "cashDividend": "0.6",
+            "exDividendDate": "2026-07-21",
+            "market": "台股",
+            "source": "FUBON_SDK",
+            "stockCode": "00919"
+          }
+        ],
+        "indicators": [
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-07"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-08"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-09"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-10"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-11"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-14"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-15"
+          },
+          {
+            "d": 75,
+            "k": 80,
+            "tradingDate": "2026-09-16"
+          },
+          {
+            "d": 88,
+            "k": 90,
+            "tradingDate": "2026-09-17"
+          },
+          {
+            "d": 85,
+            "k": 84,
+            "tradingDate": "2026-09-18"
+          },
+          {
+            "d": 82,
+            "k": 78,
+            "tradingDate": "2026-09-21"
+          }
+        ],
+        "market": "台股",
+        "nav": {
+          "premiumDiscountPct": 0
+        },
+        "quote": {
+          "bidLevels": [
+            {
+              "price": 97,
+              "size": 20
+            }
+          ],
+          "closed": false,
+          "highPrice": 99,
+          "market": "台股",
+          "price": 97,
+          "quoteStatus": "LIVE",
+          "source": "FUBON_WS_AGGREGATES",
+          "stockCode": "00919",
+          "tradingDate": "2026-09-22",
+          "updatedAt": "2026-09-22T09:38:00+08:00"
+        },
+        "radar": {
+          "actionPolicyVersion": "EVIDENCE_GATE_V1",
+          "generatedAt": "2026-09-22T09:15:00+08:00",
+          "ruleVersion": "TW_RULES_V20",
+          "stock": {
+            "action": "HOLD",
+            "asOfDate": "2026-09-22",
+            "candidateAction": "HOLD",
+            "dataComplete": true,
+            "extendedIndicators": {
+              "bias10": 2,
+              "rsi5": 60,
+              "wr9": 30
+            },
+            "kValue": 75,
+            "market": "台股",
+            "quoteStatus": "LIVE",
+            "stockCode": "00919",
+            "week52Position": "0.9"
+          }
+        },
+        "symbol": "00919"
+      },
+      "date": "2026-09-22",
+      "expected": {
+        "reason": "RADAR_INDICATORS_UNVERIFIED",
+        "timingPass": false
+      },
+      "kind": "core_unavailable",
+      "name": "D209_live_d_missing",
+      "state": {
+        "armed_date": "2026-09-10",
+        "basis_date": "2026-09-22",
+        "evidence_sha256": "prior-verified-evidence",
+        "high_date": "2026-09-10",
+        "high_water": 100,
+        "market": "台股",
+        "policy_sha256": "355330e2c9ed95f165a60e0f43a282e0a4a10d9d81c34682352a91f289db7e40",
         "stock_code": "00919"
       }
     },
@@ -26707,13 +30430,13 @@
   ],
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
-    "core_sell_guard.py": "00bd19af0703df268657379b7689be529cdca50af763bd08ae8c9778b0c0abc3",
+    "core_sell_guard.py": "3e630eac140af09bc857bf3857ba43eb669fcb3ede375793bcc5cfef69c1ebeb",
     "execution_policy.py": "366981949ab214ec7463ca25d08875e92a12c11a0fc8c9d0b4f0fb3c32439afd",
     "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
     "short_term_opportunities.py": "90877046a3150f5949cd806b08039565279a1f845c1d0341a9fa4445d0f0fabc",
     "strategic_buy_gate.py": "7bfe9d3b6b168335c7cd6b5e8bbc9f9c34a8c775c91b72a18520ef09e26cd6c1",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "9bea48401bf05c360b05fe83272a72a247680fd228e47eaaee059cb2865b5603",
+  "policyBundleSha256": "930d076f49ef25d495b4a355e95754e85bd8be4dfa39b2c4490c298f3f10d707",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

@@ -175,6 +175,40 @@ for field in ('timingState','counterTrendState'):
  for malformed in ({},[]):
   add_d208(field+'_malformed_'+('object' if isinstance(malformed,dict) else 'array'),
            lambda bundle,field=field,malformed=malformed:bundle['items'][0]['radar']['stock'].__setitem__(field,malformed))
+# Retain D208 market/observation inputs above; authority hashes advance and
+# D209 legitimately changes some 00919 verdicts. New cases use the original calculator.
+def add_d209(name,change=lambda bundle: None):
+ bundle,state=d208_fixture();item=bundle['items'][0];daily=item['quote']['marketData']['chart']['series']['daily']
+ daily['k'][-3:]=[90,84,78];daily['d'][-3:]=[88,85,82]
+ item['radar']['stock'].update(kValue=75,dValue=81)
+ change(bundle);r=tc.run_one(bundle,state);missing=r['status']=='SELL_TIMING_UNVERIFIED'
+ expected={'timingPass':r['timing_pass'],'reason':r['reason']}
+ if not missing:expected.update(highWater=r['high_water'],pullbackPct=r['pullback_pct'])
+ elif r['timing_pass']:raise SystemExit('D209_MISSING_EVIDENCE_CANNOT_PASS')
+ cases.append({'kind':'core_unavailable' if missing else 'core','name':'D209_'+name,
+               'date':bundle['trading_date'],'body':body(item['quote'],item['radar']),
+               'state':state,'expected':expected})
+
+add_d209('high_zone_k_below_80_original_gates_pass')
+for field in ('completed_d','live_d'):
+ for value in (79.99,80,80.01):
+  def set_d(bundle,field=field,value=value):
+   item=bundle['items'][0]
+   if field=='completed_d':item['quote']['marketData']['chart']['series']['daily']['d'][-1]=value
+   else:item['radar']['stock']['dValue']=value
+  add_d209(field+'_'+str(value),set_d)
+def both_d_80(bundle):
+ bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'][-1]=80
+ bundle['items'][0]['radar']['stock']['dValue']=80
+add_d209('both_d_exactly_80',both_d_80)
+for value in (81,82):
+ add_d209('live_k_'+str(value)+'_not_below_d',lambda bundle,value=value:bundle['items'][0]['radar']['stock'].__setitem__('kValue',value))
+add_d209('completed_k_equal_d',lambda bundle:bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['k'].__setitem__(-1,82))
+add_d209('completed_k_rising',lambda bundle:bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['k'].__setitem__(slice(-3,None),[90,77,78]))
+add_d209('pullback_below_existing_minimum',lambda bundle:bundle['items'][0]['quote']['bidLevels'][0].__setitem__('price',99))
+add_d209('new_high_still_waits_original_confirmation',lambda bundle:bundle['items'][0]['quote'].__setitem__('highPrice',101))
+add_d209('completed_d_missing',lambda bundle:bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'].__setitem__(-1,None))
+add_d209('live_d_missing',lambda bundle:bundle['items'][0]['radar']['stock'].pop('dValue'))
 ShortTermOpportunitiesTests.setUpClass();st=ShortTermOpportunitiesTests()
 for policy_key,code in [('short_term_opportunity_d171','00881'),('bond_short_term_opportunity_d185','00679B')]:
  bundle=st.fixture();item=bundle['items'][0];item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=item['quote']['dividendHistory']['stockCode']=code

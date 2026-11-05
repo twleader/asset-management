@@ -6565,3 +6565,16 @@ D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_poin
 00919 scope相容性修復：`CORE_SELL_GUARD.scope` 必須嚴格維持唯一值陣列 `["D174_CONSUMER_ISOLATED_HIGH_WATER_AND_KD"]`，不得因00919而追加D208標記或放寬原SRPP consumer。來源 `verify_srpp_report_calculations.py` 的 `SCOPES`、`adoptable_fact` 與package scope_ok皆採完整陣列相等；追加第二值會使同模組既有事實無法採用。D208語意已由同一9bea48401bf05c360b05fe83272a72a247680fd228e47eaaee059cb2865b5603 bundle／model bytes、57casegolden及D208 receipt reason綁定，不需要新scope。本次只移除資產端額外scope append並修正Java exact-list斷言；不改SRPP verifier、model、manifest、SQL、57casegolden或金融門檻。
 
 新增 `scripts/tests/srpp-core-scope-consumer-test.py` 作跨語言field-adoption契約回歸：Java現有public calculateCore合成測試可在明示 `-Dsrpp.core.scope.exportDir=<暫存目錄>` 時輸出其真實模組JSON；平常不寫檔。Python測試以必要的 `SRPP_RELEASE_WORKTREE` 與 `SRPP_CORE_SCOPE_FIXTURE` 顯式指定唯讀來源與此輸出，核對verifier bytes等於來源manifest列管hash後，直接呼叫原verifier的SCOPES／adoptable_fact。以明示合成VERIFIED sourceVector和持股binding證明canonical scope的代表highWater與timingPass=0事實可採用；額外scope及來源缺失維持拒絕。這只是離線欄位契約測試，不宣稱完整API envelope／L0／正式採用驗收。原57case金融輸出、00919低檔false與其餘標的／US不變，重新跑focused Java、authority與package並由另一agent審完整diff；重新落地asset main後才部署，不再新增registry row或修改已登錄內容。
+
+
+### Requirements 187／193：00919高檔D值轉弱減碼authority（Task 550）
+
+使用者於2026-11-05進一步要求00919在高檔區確認K轉弱後才一般減碼：最近完成交易日原始日D及當輪精確雷達日dValue皆須>=80（含80），K可低於80；仍須保留D-208四個K／D>50與其他低檔／超賣阻擋，以及既有D-174原高檔觀察、完成日K連降、最新完成K<D且D下降、下降日在高點後、即時K<D及1.5%回落等全部條件。D>=80只解除新增保護，不產生單獨賣出資格；缺證據只封鎖該筆，保留高水位與consumer隔離，不變更其他代號、US、買進或原具名必要退出獨立路徑。
+
+唯一來源為 `/Users/steven/.codex/worktrees/00919-high-zone-turn/SRPP` 經獨立審查及policy/runtime檢查後凍結的D-209／政策v2.58.0／模型v3.22.0。資產端台股coreTiming必須採用同源 `core_sell_guard_d174.high_zone_reversal_d209` 設定；minimum_d_inclusive=80、k_may_be_below_80=true，原D208設定物件完全保持。執行順序為原價格觀察／完成日KD驗證→D208→D209→原D174確認，D<80具名 `D209_HIGH_ZONE_SELL_BLOCKED`，新增設定等缺口具名 `D209_HIGH_ZONE_EVIDENCE_UNVERIFIED`；原先的資料缺口保留原Gap。有效阻擋回timingPass=false，新增缺口沿既有局部Gap→module missing／UNAVAILABLE且無該檔PASS／timingPass fact，不將它稱為false JSON。
+
+台股Java保留四欄穩定watch指紋、當前完整policy指紋、只去除新D209鍵的原D208完整policy指紋，以及再去除D208鍵的pre-D208完整policy指紋；不接受保留D209卻去除D208的未發布組合或任意hash，不改寫原state。published CORE_SELL_GUARD.scope嚴格維持單一canonical D174值，新語意由bundle／完整model hash及D209 receipt reason綁定，絕不追加D209 scope或放寬原consumer。保留Java真實模組→原Pythonadoptable_fact三項欄位契約回歸，明示合成binding不等於正式採用。
+
+同輸入golden由原Python工具產生，既有57case中00919新增高檔門檻造成的expected差異須逐項說明；不得宣稱所有舊57案輸出不變。新增完成D／即時D各79.99／80／80.01邊界、K78D82與即時K75D81的K低於80正例，以及即時K>=D／完成日K回升／原閘不通過反例。00919以外原22case、15long-short退出、targets、registry formula與Swagger須保持原值，新增或變更來源hash應有因果說明。最終來源由root確認凍結後才同步model／manifest、原generator SQL與golden；source變動即撤銷舊驗收重產，不手填hash。
+
+發布沿已接受Task549及現行srpp-policy-release具體步驟：雙repo各feature commit→main no-ff merge→push／remote-ref readback→已合併insert-only SQL及四欄全文／既有32列不變核對→立即新hash業務GET→乾淨asset main原正式設定僅business-services build/recreate→JAR五authority與實際changed class／設定／其他容器及新hash業務readback。這是現行鏈，不冒稱舊Task504原文。可做離線建置在前，不提前替換正式服務；不觸發producer、報告、refresh、Gmail或交易，合法正式採用與維護診斷分開。
