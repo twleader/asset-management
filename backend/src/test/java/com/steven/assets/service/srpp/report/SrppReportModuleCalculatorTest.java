@@ -101,9 +101,22 @@ class SrppReportModuleCalculatorTest {
         JsonNode c = d208Case("live_k_50");
         ObjectNode module = d208Module(c.path("body"), c.path("state"));
         assertThat(module.path("status").asText()).isEqualTo("COMPLETE");
-        assertThat(module.path("scope").toString()).contains("D208_00919_LOW_POINT_SELL_PROTECTION");
+        assertThat(module.path("scope")).isEqualTo(MAPPER.readTree("[\"D174_CONSUMER_ISOLATED_HIGH_WATER_AND_KD\"]"));
         assertThat(fact(module, "timingPass", "00919").path("value").asText()).isEqualTo("0");
         assertThat(module.path("receipts").toString()).contains("D208_LOW_POINT_SELL_BLOCKED");
+        // Explicit opt-in export for the original Python consumer's field-binding
+        // regression. This synthetic module is not an actual API/adoption receipt.
+        String exportDirectory = System.getProperty("srpp.core.scope.exportDir");
+        if (exportDirectory != null) {
+            java.nio.file.Path directory = java.nio.file.Path.of(exportDirectory);
+            assertThat(directory.isAbsolute()).isTrue();
+            java.nio.file.Files.createDirectories(directory);
+            ObjectNode fixture = MAPPER.createObjectNode();
+            fixture.put("testScope", "SYNTHETIC_OFFLINE_FIELD_ADOPTION_CONTRACT_ONLY");
+            fixture.put("policyBundleSha256", new DecisionPolicyAuthority().policy().bundleHash());
+            fixture.set("module", module);
+            java.nio.file.Files.writeString(directory.resolve("core-scope-consumer.json"), MAPPER.writeValueAsString(fixture));
+        }
         ObjectNode missing = c.path("body").deepCopy();
         ((ObjectNode) missing.path("radar").path("stock").path("extendedIndicators")).remove("rsi5");
         JsonNode unavailable = d208Module(missing, c.path("state"));

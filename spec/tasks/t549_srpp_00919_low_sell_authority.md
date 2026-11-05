@@ -22,7 +22,12 @@ D-208凍結契約：設定位於 `execution_policy.core_sell_guard_d174.low_poin
 
 保留觀察fingerprint：Python已有四欄decision／scope／arming／non_distributing_symbols穩定指紋；Java台股原本驗整份policy的歷史相容雜湊，加入執行欄位不能讓舊state全部失效。Java只接受同四欄穩定指紋、當前完整policy精確指紋，以及去除這個新執行欄位後的原完整policy精確指紋；不得接受任意字串或只憑symbol放行。測試保留舊高水位與scope／arming遭竄改仍拒絕；不改寫來源state。
 
-公式身分：registry的ASSET_MGMT_SRPP_V2 manifest僅描述assets／allocation／cashIncome／funding／completedTechnicals，沒有D174 scope，本輪不改該五項公式。報告十二模組共同的SRPP_REPORT_CALCULATIONS_V1為既有計算族／wire契約身分，保持以免擴大到無關scope及schema；D208實際語意變更由新bundle、完整modelInputsSha256／policyManifestSha256、CORE_SELL_GUARD具名D208 scope及derived同輸入golden綁定，不冒稱00919金融輸出不變。
+公式身分：registry的ASSET_MGMT_SRPP_V2 manifest僅描述assets／allocation／cashIncome／funding／completedTechnicals，沒有D174 scope，本輪不改該五項公式。報告十二模組共同的SRPP_REPORT_CALCULATIONS_V1為既有計算族／wire契約身分，保持以免擴大到無關scope及schema；D208實際語意變更由新bundle、完整modelInputsSha256／policyManifestSha256、CORE_SELL_GUARD既有canonical scope內的具名D208 receipt reason及derived同輸入golden綁定，不冒稱00919金融輸出不變。
+
+
+00919 scope相容性修復：`CORE_SELL_GUARD.scope` 必須嚴格維持唯一值陣列 `["D174_CONSUMER_ISOLATED_HIGH_WATER_AND_KD"]`，不得因00919而追加D208標記或放寬原SRPP consumer。來源 `verify_srpp_report_calculations.py` 的 `SCOPES`、`adoptable_fact` 與package scope_ok皆採完整陣列相等；追加第二值會使同模組既有事實無法採用。D208語意已由同一9bea48401bf05c360b05fe83272a72a247680fd228e47eaaee059cb2865b5603 bundle／model bytes、57casegolden及D208 receipt reason綁定，不需要新scope。本次只移除資產端額外scope append並修正Java exact-list斷言；不改SRPP verifier、model、manifest、SQL、57casegolden或金融門檻。
+
+新增 `scripts/tests/srpp-core-scope-consumer-test.py` 作跨語言field-adoption契約回歸：Java現有public calculateCore合成測試可在明示 `-Dsrpp.core.scope.exportDir=<暫存目錄>` 時輸出其真實模組JSON；平常不寫檔。Python測試以必要的 `SRPP_RELEASE_WORKTREE` 與 `SRPP_CORE_SCOPE_FIXTURE` 顯式指定唯讀來源與此輸出，核對verifier bytes等於來源manifest列管hash後，直接呼叫原verifier的SCOPES／adoptable_fact。以明示合成VERIFIED sourceVector和持股binding證明canonical scope的代表highWater與timingPass=0事實可採用；額外scope及來源缺失維持拒絕。這只是離線欄位契約測試，不宣稱完整API envelope／L0／正式採用驗收。原57case金融輸出、00919低檔false與其餘標的／US不變，重新跑focused Java、authority與package並由另一agent審完整diff；重新落地asset main後才部署，不再新增registry row或修改已登錄內容。
 
 ## 驗證
 
@@ -34,10 +39,11 @@ python3 -B scripts/generate-srpp-long-short-exit-golden.py --srpp-root /Users/st
 ruby scripts/tests/srpp-policy-register-test.rb
 ruby scripts/tests/srpp-report-policy-register-test.rb
 SRPP_RELEASE_WORKTREE=/Users/steven/.codex/worktrees/00919-low-sell-guard/SRPP python3 -B scripts/tests/check-srpp-report-authority-test.py
-/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -Dtest=SrppReportModuleCalculatorTest,DecisionPolicyAuthorityTest,DailyDecisionCalculatorTest,SrppReportShortUsCalculatorTest test
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -Dtest=SrppReportModuleCalculatorTest,DecisionPolicyAuthorityTest,DailyDecisionCalculatorTest,SrppReportShortUsCalculatorTest -Dsrpp.core.scope.exportDir=/private/tmp/00919-low-sell-authority-20261105/scope-r3 test
 /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DskipTests package
 ruby scripts/render-9090-openapi-docs.rb --check --srpp-root /Users/steven/.codex/worktrees/00919-low-sell-guard/SRPP
 python3 -B scripts/sync-srpp-swagger-identity.py --check --srpp-root /Users/steven/.codex/worktrees/00919-low-sell-guard/SRPP
+SRPP_RELEASE_WORKTREE=/Users/steven/.codex/worktrees/00919-low-sell-guard/SRPP SRPP_CORE_SCOPE_FIXTURE=/private/tmp/00919-low-sell-authority-20261105/scope-r3/core-scope-consumer.json python3 -B scripts/tests/srpp-core-scope-consumer-test.py
 git diff --check
 ```
 
