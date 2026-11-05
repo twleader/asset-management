@@ -12,6 +12,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AnnualDividendBffControllerTest {
+    @Test void everyStockValueIncludingDuplicateIsForwardedAsRepeatedStockWithoutBrackets() {
+        List<ClientRequest> requests = new ArrayList<>();
+        WebClient client = WebClient.builder().baseUrl("http://business")
+                .exchangeFunction(request -> { requests.add(request); return Mono.just(ClientResponse.create(HttpStatus.OK)
+                        .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE).body("{\"rows\":[]}").build()); }).build();
+        WebTestClient.bindToController(new AnnualDividendBffController(client)).build().get()
+                .uri("/api/bff/annual-dividends/summary?year=2026&stock=opaque.first&stock=opaque.second&stock=opaque.first")
+                .exchange().expectStatus().isOk();
+        assertThat(requests).singleElement().satisfies(request -> assertThat(request.url().getQuery())
+                .isEqualTo("year=2026&stock=opaque.first&stock=opaque.second&stock=opaque.first"));
+    }
     @Test void exactPagePathForwardsOnlyYearAndMarketWithStandardTenantClient() {
         List<ClientRequest> requests = new ArrayList<>();
         WebClient client = WebClient.builder().baseUrl("http://business")
@@ -46,7 +57,7 @@ class AnnualDividendBffControllerTest {
             calls.incrementAndGet(); return Mono.error(new AssertionError("must reject before business"));
         }).build();
         WebTestClient http = WebTestClient.bindToController(new AnnualDividendBffController(client)).build();
-        for (String query : List.of("email=another@example.com", "owner=2", "extra=x", "year=2026&year=2025", "market=台股&market=美股"))
+        for (String query : List.of("email=another@example.com", "owner=2", "extra=x", "year=2026&year=2025", "market=台股&market=美股", "stock[]=opaque.first"))
             http.get().uri("/api/bff/annual-dividends/summary?" + query).exchange().expectStatus().isBadRequest();
         assertThat(calls).hasValue(0);
     }

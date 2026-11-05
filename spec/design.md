@@ -13440,3 +13440,12 @@ Java watch相容只接受四欄decision／scope／arming／non_distributing_symb
 CORE_SELL_GUARD.scope必須保留 `["D174_CONSUMER_ISOLATED_HIGH_WATER_AND_KD"]`，不追加D209標記。新版本以model／manifest與bundle精確身分及原shape內D209 receipt reason綁定；SRPP原verifier的SCOPES／adoptable_fact不放寬。既有Java actual public-module合成export及原Python3項field-binding回歸保持，不能當完整API採用；golden由唯一來源原工具產生，新增D80邊界與K<80正例、原條件否決及缺值案例。舊57案的00919可能因新門檻由PASS轉BLOCK；保留原輸入及逐項因果，不硬改expected掩蓋差異。其他22案及15退出案、targets與formula維持。
 
 registry ASSET_MGMT_SRPP_V2不含此D174 scope，report十二模組共同SRPP_REPORT_CALCULATIONS_V1維持既有wire／族身分；不為單檔門檻改其他scope或Swagger。最終model／manifest來自root確認的D209凍結來源，僅其後由原工具重產formal targets、insert-only SQL及golden。新bundle新增row保留原32列，無DB schema或producer變更。發布採Task549已接受的雙repoGit→registry→立即精確hashGET→乾淨main-only部署鏈；部署前重核既有startup工作不需補跑且避開活動正式報告，保留原設定／8個其他容器，不手動producer／報告／mail／refresh／交易。health、JAR、HTTP與正式採用各自記錄證明範圍。
+
+
+## Task 551：年度配息股票篩選
+
+擴充既有本頁 summary GET，year/market既有單值驗證維持，只有stock允許多值。Controller作query shape驗證後委派Service；BFF沿tenant-aware WebClient原樣轉送全部stock值，不能只傳第一值。stock為opaque市場/代號key，算法=無padding Base64 URL encoding UTF8市場與代號分別編碼後以'.'連接；不解析成caller owner、不新增資料來源或外部I/O。
+
+Service讀既有owner Facts一次並算年度/市場全集，從尚未套股票條件的rows/gaps聯集產生immutable StockOption(key,code,name,market)，依market/code排序去重；selectedStockKeys是驗證過且去重後的穩定key清單。不在此scope或空白key回400。既有year/market未帶預設、舊客戶端未帶stock結果不變（只加stockOptions/selectedStockKeys欄）。選取股票集合為聯集，再和年度/市場取交集。共用純calculator彙總入口供全集與篩選集重用，過濾rows和gaps後重新計currencyTotals及unavailableCount；不複寫事件股數/四捨五入算式，不重複讀Repository。無金額時保留空幣別摘要，不產生虛構零總額。
+
+AnnualDividendsView保留年度/市場，顯示標籤、新增可搜尋多選股票（label含code/name/market，value只用server key）。frontend API wrapper用重複stock參數（不能是Axios預設stock[]），year/market change清空股票選取後查詢；stock change/clear重新查詢；server回傳stockOptions不隨已選股票收窄。搜尋選項文字是UI呈現，不屬前端金融資料篩選。原請求取消＋序號機制涵蓋所有條件。多條件選單寬度需適應桌面/窄視窗，保留選單原位置。只更新backend/bff/frontend，無DB schema、9090 OpenAPI或SRPP權限改動。

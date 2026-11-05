@@ -18,12 +18,14 @@ public class AnnualDividendBffController {
 
     @GetMapping("/summary")
     public Mono<ResponseEntity<byte[]>> summary(@RequestParam MultiValueMap<String, String> query) {
-        if (query.entrySet().stream().anyMatch(e -> !Set.of("year", "market").contains(e.getKey()) || e.getValue().size() != 1))
+        if (query.entrySet().stream().anyMatch(e -> !Set.of("year", "market", "stock").contains(e.getKey())
+                || e.getValue() == null || e.getValue().isEmpty()
+                || (!"stock".equals(e.getKey()) && e.getValue().size() != 1)))
             return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"detail\":\"僅接受單一年度與市場參數，不接受指定使用者\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                    .body("{\"detail\":\"僅接受單一年度、市場與可多選股票參數，不接受指定使用者\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         return businessServicesClient.get().uri(uri -> {
             var builder = uri.path("/api/annual-dividends");
-            query.forEach((key, values) -> builder.queryParam(key, values.getFirst()));
+            query.forEach((key, values) -> builder.queryParam(key, values));
             return builder.build();
         }).exchangeToMono(response -> response.toEntity(byte[].class));
     }

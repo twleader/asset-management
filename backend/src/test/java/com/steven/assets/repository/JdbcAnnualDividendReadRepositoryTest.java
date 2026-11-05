@@ -9,6 +9,9 @@ import java.time.LocalDate;
 import static org.assertj.core.api.Assertions.*;
 import com.steven.assets.model.AnnualDividendCalculator;
 import com.steven.assets.model.AnnualDividendData.*;
+import com.steven.assets.service.AnnualDividendService;
+import com.steven.assets.security.CurrentUserContext;
+import com.steven.assets.security.TenantGuard;
 
 /** Exercises the actual owner predicates against PostgreSQL, including shared symbols and empty snapshots. */
 @Testcontainers
@@ -65,5 +68,25 @@ class JdbcAnnualDividendReadRepositoryTest {
         assertThat(one.snapshots().getLast().positions()).isEmpty();
         assertThat(jdbc.queryForList("SELECT * FROM stock_dividend_history ORDER BY id")).isEqualTo(before);
         assertThatThrownBy(() -> repository.load(-1, TODAY)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void anotherOwnersExclusiveStockKeyCannotSelectOrExposeTheirPrivateFacts() {
+        var context = new CurrentUserContext();
+        context.setEffectiveUserId(1L);
+        var service = new AnnualDividendService(new TenantGuard(context), repository);
+        var ownerOne = service.summary("2026", "");
+        assertThat(ownerOne.stockOptions()).extracting(StockOption::code).doesNotContain("PRIVATE", "OTHER");
+        String privateKey = AnnualDividendCalculator.stockKey("台股", "PRIVATE");
+        assertThatThrownBy(() -> service.summary("2026", "", java.util.List.of(privateKey)))
+                .isInstanceOf(IllegalArgumentException.class);
+        context.setEffectiveUserId(2L);
+        var ownerTwo = service.summary("2026", "", java.util.List.of(privateKey));
+        assertThat(ownerTwo.selectedStockKeys()).containsExactly(privateKey);
+        assertThat(ownerTwo.rows()).extracting(Row::code).containsOnly("PRIVATE");
+        // The identity of a symbol shared by both owners is legitimately usable by either owner.
+        String commonKey = AnnualDividendCalculator.stockKey("台股", "0050");
+        assertThat(service.summary("2026", "", java.util.List.of(commonKey)).rows()).extracting(Row::code).containsOnly("0050");
+        context.setEffectiveUserId(1L);
+        assertThat(service.summary("2026", "", java.util.List.of(commonKey)).rows()).extracting(Row::code).containsOnly("0050");
     }
 }

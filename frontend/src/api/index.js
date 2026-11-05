@@ -228,11 +228,14 @@ export const bffApi = {
 
   // AnnualDividends（年度配息統計）：只讀本頁 summary，市場與年度由後端套用。
   annualDividends: {
-    summary: ({ year, market, signal } = {}) => api.get('/bff/annual-dividends/summary', {
+    summary: ({ year, market, selectedStockKeys = [], signal } = {}) => api.get('/bff/annual-dividends/summary', {
       params: {
         ...(year == null ? {} : { year }),
-        ...(market ? { market } : {})
+        ...(market ? { market } : {}),
+        ...(selectedStockKeys.length ? { stock: selectedStockKeys } : {})
       },
+      // GET stock=a&stock=b；保留 opaque key，不解析或改寫。
+      paramsSerializer: { indexes: null },
       signal,
       skipErrorToast: true
     })

@@ -9,6 +9,7 @@ public final class AnnualDividendData {
     private AnnualDividendData() {}
 
     public record Security(String code, String name, String market) {}
+    public record StockOption(String key, String code, String name, String market) {}
     public record Market(String code, String displayName) {}
     public record Position(String code, String market, BigDecimal shares) {}
     public record Snapshot(LocalDate date, List<Position> positions) {

@@ -2,6 +2,7 @@ package com.steven.assets.model;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -43,6 +44,36 @@ public final class AnnualDividendCalculator {
             }
         }
         rows.sort(Comparator.comparing(Row::exDividendDate).thenComparing(Row::market).thenComparing(Row::code));
+        return summarize(rows, gaps, today);
+    }
+
+    /** Reuse the original totals for both the whole result and a stock intersection. */
+    public static Calculation filterByStockKeys(Calculation calculation, Set<String> selectedKeys, LocalDate today) {
+        if (selectedKeys.isEmpty()) return calculation;
+        return summarize(calculation.rows().stream()
+                        .filter(row -> selectedKeys.contains(stockKey(row.market(), row.code()))).toList(),
+                calculation.gaps().stream()
+                        .filter(gap -> selectedKeys.contains(stockKey(gap.market(), gap.code()))).toList(), today);
+    }
+
+    /** Options come from the year/market result before applying any stock selection. */
+    public static List<StockOption> stockOptions(Calculation calculation) {
+        Map<String, StockOption> options = new LinkedHashMap<>();
+        calculation.rows().forEach(row -> options.putIfAbsent(stockKey(row.market(), row.code()),
+                new StockOption(stockKey(row.market(), row.code()), row.code(), row.name(), row.market())));
+        calculation.gaps().forEach(gap -> options.putIfAbsent(stockKey(gap.market(), gap.code()),
+                new StockOption(stockKey(gap.market(), gap.code()), gap.code(), gap.name(), gap.market())));
+        return options.values().stream().sorted(Comparator.comparing(StockOption::market).thenComparing(StockOption::code)).toList();
+    }
+
+    /** An identity only, never a tenant authorization token. Each component is encoded separately. */
+    public static String stockKey(String market, String code) {
+        var encoder = Base64.getUrlEncoder().withoutPadding();
+        return encoder.encodeToString(market.getBytes(StandardCharsets.UTF_8)) + "."
+                + encoder.encodeToString(code.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static Calculation summarize(List<Row> rows, List<Gap> gaps, LocalDate today) {
         Map<String, BigDecimal[]> totals = new TreeMap<>();
         gaps = new ArrayList<>(new LinkedHashSet<>(gaps));
         int unavailable = gaps.size();

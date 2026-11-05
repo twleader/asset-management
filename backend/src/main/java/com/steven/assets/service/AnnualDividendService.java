@@ -29,6 +29,11 @@ public class AnnualDividendService {
 
     @Transactional(readOnly = true)
     public AnnualDividendSummary summary(String requestedYear, String requestedMarket) {
+        return summary(requestedYear, requestedMarket, List.of());
+    }
+
+    @Transactional(readOnly = true)
+    public AnnualDividendSummary summary(String requestedYear, String requestedMarket, List<String> requestedStocks) {
         Long owner = tenantGuard.requireCurrentUserId();
         if (owner == null || owner <= 0) throw new UnauthenticatedException();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of("Asia/Taipei")));
@@ -49,7 +54,18 @@ public class AnnualDividendService {
         facts.trades().forEach(t -> years.add(t.date().getYear()));
         facts.events().forEach(e -> { if (e.exDividendDate() != null) years.add(e.exDividendDate().getYear()); });
         var calculated = AnnualDividendCalculator.calculate(facts, year, market, today);
+        var stockOptions = AnnualDividendCalculator.stockOptions(calculated);
+        Set<String> allowedKeys = new HashSet<>();
+        stockOptions.forEach(option -> allowedKeys.add(option.key()));
+        Set<String> selectedKeys = new TreeSet<>();
+        for (String key : requestedStocks == null ? List.<String>of() : requestedStocks) {
+            if (key == null || key.isBlank() || !allowedKeys.contains(key))
+                throw new IllegalArgumentException("股票選項不在目前年度、市場或使用者範圍內");
+            selectedKeys.add(key);
+        }
+        calculated = AnnualDividendCalculator.filterByStockKeys(calculated, selectedKeys, today);
         return new AnnualDividendSummary(year, today, years.stream().filter(y -> y >= 1900 && y <= 2100).toList(),
-                facts.markets(), calculated.currencyTotals(), calculated.rows(), calculated.gaps(), calculated.unavailableCount());
+                facts.markets(), calculated.currencyTotals(), calculated.rows(), calculated.gaps(), calculated.unavailableCount(),
+                stockOptions, List.copyOf(selectedKeys));
     }
 }
