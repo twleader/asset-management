@@ -471,6 +471,57 @@ class FubonAccountingProjectionPostgresTest {
     }
 
     @Test
+    void unknownDirectionTaxesKeepTwoOfficialPayablesAndExistingNotesIdempotently() {
+        addTransit(PAYABLE, "-10040.00", "TRANSIT_TWD", null,
+                "富邦證券交割款：009826", null);
+        AtomicReference<List<Long>> originalIds = new AtomicReference<>();
+        tx(() -> {
+            var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            var second = BankDeposit.builder().snapshot(snapshot).bank(fubonBank).depositType(PAYABLE)
+                    .currency("TRANSIT_TWD").amount(new BigDecimal("-43181.00"))
+                    .notes("富邦證券交割款：00881").source("FUBON_SYNC")
+                    .processingDate(LocalDate.of(2026, 9, 2)).build();
+            snapshot.getDeposits().add(second);
+            aggregates.recalculate(snapshot);
+            snapshots.saveAndFlush(snapshot);
+        });
+        readSnapshot(snapshot -> originalIds.set(transit(snapshot, PAYABLE).stream()
+                .map(BankDeposit::getId).toList()));
+        String first = SETTLEMENT_ROW.replace("1000", "10020").replace("\"buyFee\":\"2\"", "\"buyFee\":\"20\"")
+                .replace("\"totalFee\":\"2\"", "\"totalFee\":\"20\"").replace("-1002", "-10040")
+                .replace("\"buyTax\":\"0\"", "\"buyTax\":null")
+                .replace("\"sellTax\":\"0\"", "\"sellTax\":null")
+                .replace("sourceQueryDate\":\"2026-08-28", "sourceQueryDate\":\"2026-08-27");
+        String second = SETTLEMENT_ROW.replace("2026-09-01", "2026-09-02")
+                .replace("1000", "43120").replace("\"buyFee\":\"2\"", "\"buyFee\":\"61\"")
+                .replace("\"totalFee\":\"2\"", "\"totalFee\":\"61\"").replace("-1002", "-43181");
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(first + "," + second), FubonDtos.SettlementBatch.class)));
+        clearInvocations(aggregates);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            sqlTrace.start();
+            var result = settlementService.syncManual(false);
+            assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+            assertThat(result.payableAmount()).isEqualByComparingTo("-53221");
+            assertThat(result.receivableAmount()).isEqualByComparingTo("0");
+            assertThat(result.rowCount()).isEqualTo(2);
+            assertThat(sqlTrace.stop()).noneMatch(sql -> sql.startsWith("insert") || sql.startsWith("update")
+                    || sql.startsWith("delete"));
+        }
+        verify(aggregates, never()).recalculate(any());
+        readSnapshot(snapshot -> {
+            assertThat(snapshot.getDeposits()).hasSize(3);
+            var payables = transit(snapshot, PAYABLE);
+            assertThat(payables).extracting(BankDeposit::getId).containsExactlyInAnyOrderElementsOf(originalIds.get());
+            assertThat(payables).extracting(BankDeposit::getNotes)
+                    .containsExactlyInAnyOrder("富邦證券交割款：009826", "富邦證券交割款：00881");
+            assertThat(payables).extracting(BankDeposit::getProcessingDate)
+                    .containsExactlyInAnyOrder(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2));
+            assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-53121");
+        });
+    }
+
+    @Test
     void settlementLegacyNullDateFailsClosedEvenWhenAmountsMatch() {
         addTransit(PAYABLE, "-1002.00", "TRANSIT_TWD", null, "legacy", null);
         tx(() -> transit(snapshots.findById(snapshotId).orElseThrow(), PAYABLE).getFirst().setProcessingDate(null));

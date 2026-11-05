@@ -4945,6 +4945,11 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 - [ ] **入口與排程。** manual route 預設 dry-run、四個 Taipei cron 保留、flag false 時零 owner／SDK 存取。BFF inventory 將本列標已串接、描述 SDK 回傳 future in-transit projection，不說完整結算帳。dry-run 執行同一驗證但零 DB lock／寫入。
 - [ ] **測試先證明拒絕與原子性。** fake SDK／PostgreSQL 必測 strict binding、zero preserve、create/update、same-data no-write、owner race、dry-run、rollback、aggregate；全程 `FUBON_ENABLED=false`，不做真人 SDK 或 non-dry-run manual POST。
 
+#### Task 553 補充：未來交割列的未知方向稅額
+
+- [ ] **僅放寬明示未知的方向稅額。** 取代本需求及 Task532 對 future partial-null 一律拒絕的規則，只有 `buy_tax`／`sell_tax`（內部 JSON `buyTax`／`sellTax`）可明示 null，輸出與 Java immutable DTO 保留 null，絕不補零、估算或從總額反推。兩欄的 key 必須存在，缺 key 仍拒絕；非 null 仍須 canonical signed exact integer、precision≤20，布林、浮點、科學記號及溢位拒絕。其他十個金額、日期、幣別、identity、freshness、重複與 buySettlement≤0／sellSettlement≥0／兩方向之和等於 totalSettlementAmount 的原檢核不變；全 optional null placeholder 與已到期列排除規則不變。
+- [ ] **投影只使用已驗證交割金額。** 未知方向稅額不影響來源完整的 buySettlement／sellSettlement；按來源 settlementDate 分列、同日同方向冪等更新、保留缺新證據的既有 notes 與其他存款／帳本。例：未來兩日來源 -10,040 與 -43,181，第一列兩方向稅額 null，必能同步合計 -53,221 且不重複建列。維持 SDK 回傳列不等於完整未交割帳，不擴張 public API、SRPP 契約、排程或券商寫入權限。
+
 ### Requirement 130／Task 395：已實現損益查詢——依富邦淨損益冪等新增
 
 **User Story：**我希望每天四個時段把富邦回報的現股賣出已實現淨損益更新到資料庫，並在資料已存在時完全略過，避免重複列或覆寫手動資料。

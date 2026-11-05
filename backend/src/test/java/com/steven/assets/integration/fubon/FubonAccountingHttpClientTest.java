@@ -119,6 +119,48 @@ class FubonAccountingHttpClientTest {
         assertThat(result.body().details().getFirst().status()).isEqualTo("NO_DATA_OBSERVED");
         assertThat(result.body().details().getFirst().totalSettlementAmount()).isNull();
     }
+    @ParameterizedTest
+    @ValueSource(strings = {"buyTax", "sellTax", "both"})
+    void explicitUnknownDirectionTaxesRemainNullAndDoNotChangeMoney(String field) {
+        String row = SETTLEMENT_ROW;
+        if (!field.equals("sellTax")) row = row.replace("\"buyTax\":\"0\"", "\"buyTax\":null");
+        if (!field.equals("buyTax")) row = row.replace("\"sellTax\":\"0\"", "\"sellTax\":null");
+        response = settlementJson(row);
+        var result = client.readSettlement();
+        assertThat(result.success()).isTrue();
+        var day = result.body().details().getFirst();
+        if (!field.equals("sellTax")) assertThat(day.buyTax()).isNull();
+        if (!field.equals("buyTax")) assertThat(day.sellTax()).isNull();
+        assertThat(FubonAccountingContract.settlementProjection(result.body()).payableAmount())
+                .isEqualByComparingTo("-1002");
+    }
+
+    static Stream<String> invalidDirectionTaxes() {
+        return Stream.of("buyTax", "sellTax").flatMap(field -> Stream.concat(
+                Stream.of("false", "0", "0.0", "\"0.0\"", "\"1e3\"", "\"100000000000000000000\"")
+                        .map(value -> settlementJson(SETTLEMENT_ROW.replace("\"" + field + "\":\"0\"",
+                                "\"" + field + "\":" + value))),
+                Stream.of(settlementJson(SETTLEMENT_ROW.replace("\"" + field + "\":\"0\",", "")),
+                        settlementJson(NO_DATA_ROW.replace("\"" + field + "\":null,", "")))));
+    }
+
+    @ParameterizedTest @MethodSource("invalidDirectionTaxes")
+    void unknownTaxAllowanceNeverAcceptsMissingOrMalformedTax(String json) {
+        response = json;
+        assertThat(client.readSettlement().success()).isFalse();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"buyValue", "buyFee", "buySettlement", "sellValue", "sellFee",
+            "sellSettlement", "totalBsValue", "totalFee", "totalTax", "totalSettlementAmount"})
+    void requiredAmountsStayRequiredWithUnknownDirectionTaxes(String field) {
+        String row = SETTLEMENT_ROW.replace("\"buyTax\":\"0\"", "\"buyTax\":null")
+                .replace("\"sellTax\":\"0\"", "\"sellTax\":null")
+                .replaceAll("\"" + field + "\":\"[^\"]*\"", "\"" + field + "\":null");
+        response = settlementJson(row);
+        assertThat(client.readSettlement().success()).isFalse();
+    }
+
     static Stream<String> invalidSettlement() {
         return Stream.of(
                 settlementJson(SETTLEMENT_ROW.replace("\"buyFee\":\"2\"", "\"buyFee\":null")),

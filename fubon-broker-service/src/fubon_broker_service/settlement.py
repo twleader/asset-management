@@ -94,9 +94,12 @@ class SettlementService:
         # become fabricated NO_DATA_OBSERVED entries.
         if settlement_date <= query_date:
             return None
-        if any(value is None for value in values.values()):
+        if any(value is None for name, value in values.items() if name not in {"buy_tax", "sell_tax"}):
             raise ValueError("RECONCILE_FAILED")
-        amounts = {wire: signed_integer(values[name]) for name, wire in AMOUNT_FIELDS.items()}
+        # Unknown direction taxes are retained as null; the source settlement
+        # amounts already define the payable/receivable and are never recomputed.
+        amounts = {wire: None if values[name] is None else signed_integer(values[name])
+                   for name, wire in AMOUNT_FIELDS.items()}
         buy, sell = int(amounts["buySettlement"]), int(amounts["sellSettlement"])
         if buy > 0 or sell < 0 or buy + sell != int(amounts["totalSettlementAmount"]):
             raise ValueError("RECONCILE_FAILED")
