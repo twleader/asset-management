@@ -35,4 +35,29 @@ public class JdbcDailyInventoryHistoryRepository implements DailyInventoryHistor
                 p.currency(), p.transactionExchangeRate());
         return true;
     }
+
+    @Override @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int deleteExpired() {
+        // Never accept a caller-provided date: DB guards and selection use authoritative DB time.
+        var at = jdbc.queryForObject("SELECT statement_timestamp()", java.time.OffsetDateTime.class);
+        var ids = jdbc.query("""
+                SELECT id FROM daily_inventory_snapshot
+                 WHERE (market='台股' AND trading_date<daily_inventory_retention_cutoff('台股',?))
+                    OR (market='美股' AND trading_date<daily_inventory_retention_cutoff('美股',?))
+                 ORDER BY id FOR UPDATE
+                """, (rs, n) -> rs.getLong(1), at, at);
+        if (ids.isEmpty()) return 0;
+        // A fixed, already-locked ID set keeps children and EMPTY/SAVED headers in one transaction.
+        Long[] values = ids.toArray(Long[]::new);
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            var array = connection.createArrayOf("bigint", values);
+            try (var child = connection.prepareStatement("DELETE FROM daily_inventory_position WHERE snapshot_id=ANY(?)");
+                 var parent = connection.prepareStatement("DELETE FROM daily_inventory_snapshot WHERE id=ANY(?)")) {
+                child.setArray(1, array); child.executeUpdate();
+                parent.setArray(1, array); parent.executeUpdate();
+            } finally { array.free(); }
+            return null;
+        });
+        return ids.size();
+    }
 }

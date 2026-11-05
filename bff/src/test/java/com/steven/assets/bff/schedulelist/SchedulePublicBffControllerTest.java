@@ -32,11 +32,11 @@ class SchedulePublicBffControllerTest {
         assertThat(jobs()).filteredOn(j -> "BFF 閘道觀測服務".equals(j.service())).hasSize(1);
     }
 
-    @Test void dailyInventoryDescribesMarketClosePlusSixHoursAndPermanentHistory() {
+    @Test void dailyInventoryDescribesMarketClosePlusSixHoursAndBoundedHistory() {
         assertThat(jobs()).filteredOn(j -> "每日台美股庫存歷史保存".equals(j.name())).singleElement().satisfies(job -> {
             assertThat(job.cron()).isEqualTo("0 * * * * *");
             assertThat(job.zone()).isEqualTo("Asia/Taipei");
-            assertThat(job.description()).contains("19:30", "22:00", "19:00", "永久", "交易日期", "不補造歷史");
+            assertThat(job.description()).contains("19:30", "22:00", "19:00", "5.5年", "66個曆月", "過期每分鐘清理", "清理不限交易日", "交易日期", "不補造歷史");
         });
     }
 

@@ -26,6 +26,7 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                 SELECT p.stock_code AS code, s.market FROM daily_inventory_snapshot s
                   JOIN daily_inventory_position p ON p.snapshot_id=s.id
                  WHERE s.owner_user_id=? AND s.trading_date<=?
+                   AND s.trading_date>=daily_inventory_retention_cutoff(s.market,statement_timestamp())
             )
             """;
 
@@ -65,6 +66,7 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                 SELECT s.id,s.trading_date,s.market,p.stock_code,p.shares
                   FROM daily_inventory_snapshot s LEFT JOIN daily_inventory_position p ON p.snapshot_id=s.id
                  WHERE s.owner_user_id=? AND s.trading_date<=?
+                   AND s.trading_date>=daily_inventory_retention_cutoff(s.market,statement_timestamp())
                  ORDER BY s.trading_date,s.market,p.id
                 """, rs -> {
                     long id = rs.getLong("id");
