@@ -378,36 +378,24 @@ class UsValuationDerivationServiceTest {
      * 是正確值 0.175 的兩倍且不會報錯。
      */
     @Test
-    void sameDayDuplicateDividendsAreResolvedByPrecisionSplitRatioOrFailClosed() {
-        // ① 型態一：同一筆、兩個精度（QQQ 從未分割），比值 1.0004 → 只計一次、取有效位數較多者
-        UsValuationDerivationService.DividendSeries qqq =
-                UsValuationDerivationService.resolveDividends("QQQ", List.of(
-                        dividend("2023-03-20", "0.472000"), dividend("2023-03-20", "0.472200")));
-        assertThat(qqq.unresolved()).isEmpty();
-        assertThat(qqq.resolved().get(LocalDate.of(2023, 3, 20))).isEqualByComparingTo("0.472200");
+    void resolvedNominalCashWithoutIndependentCloseBasisStillCannotProduceYield() {
+        var nominal=UsValuationDerivationService.resolveDividends("AAPL",List.of(
+                new DividendHistoryQuery.CashDividendEvent(LocalDate.of(2026,3,1),bd("6"),"canonical","NASDAQ.stocks")));
+        assertThat(UsValuationDerivationService.dividendYieldPct(LocalDate.of(2026,7,1),bd("100"),nominal)).isNull();
+    }
 
-        List<DividendHistoryQuery.CashDividendEvent> avgo = List.of(
-                dividend("2017-12-18", "0.175000"), dividend("2017-12-18", "1.750000"),  // 比值 10
-                dividend("2018-03-21", "0.350000"), dividend("2018-03-21", "1.750000"),  // 比值 5（反例）
-                dividend("2018-06-19", "0.350000"), dividend("2018-06-19", "1.750000"),  // 比值 5
-                dividend("2018-09-18", "0.175000"), dividend("2018-09-18", "1.750000"),  // 比值 10
-                dividend("2023-06-21", "0.460000"), dividend("2023-06-21", "4.600000")); // 比值 10
-        UsValuationDerivationService.DividendSeries resolved =
-                UsValuationDerivationService.resolveDividends("AVGO", avgo);
-
-        // ② 型態二：比值 10 與該標的眾數一致 → 只計較小值（已還原基準）一次
-        assertThat(resolved.resolved().get(LocalDate.of(2023, 6, 21))).isEqualByComparingTo("0.460000");
-        assertThat(resolved.resolved().get(LocalDate.of(2017, 12, 18))).isEqualByComparingTo("0.175000");
-        // ③ 比值 5 與眾數 10 不一致 → fail closed，該除息日不可解
-        assertThat(resolved.unresolved()).contains(LocalDate.of(2018, 3, 21), LocalDate.of(2018, 6, 19));
-        assertThat(resolved.resolved()).doesNotContainKey(LocalDate.of(2018, 3, 21));
-
-        // 不可解的除息日落在視窗內 → 該交易日的殖利率一律 null（少算，不混基準）
-        assertThat(UsValuationDerivationService.dividendYieldPct(
-                LocalDate.of(2018, 4, 2), bd("100.00"), resolved)).isNull();
-        // 視窗滑過該日之後才恢復計算
-        assertThat(UsValuationDerivationService.dividendYieldPct(
-                LocalDate.of(2023, 6, 30), bd("100.00"), resolved)).isEqualByComparingTo("0.4600");
+    @Test
+    void unverifiedPrecisionOrSplitRatioAlternativesFailClosedInsteadOfGuessing() {
+        var series = UsValuationDerivationService.resolveDividends("AAPL", List.of(
+                dividend("2020-08-07", "0.82"), dividend("2020-08-07", "0.205"),
+                dividend("2023-03-20", "0.472000"), dividend("2023-03-20", "0.472200")));
+        assertThat(series.resolved()).isEmpty();
+        assertThat(series.unresolved()).containsExactly(LocalDate.of(2020,8,7), LocalDate.of(2023,3,20));
+        assertThat(UsValuationDerivationService.dividendYieldPct(LocalDate.of(2023,6,30), bd("100"), series)).isNull();
+        var unknown = UsValuationDerivationService.resolveDividends("AAPL", List.of(
+                new DividendHistoryQuery.CashDividendEvent(LocalDate.of(2026,3,1),null,"key","source"),
+                dividend("2026-06-01", "1")));
+        assertThat(UsValuationDerivationService.dividendYieldPct(LocalDate.of(2026,7,1), bd("100"),unknown)).isNull();
     }
 
     /**
@@ -786,7 +774,7 @@ class UsValuationDerivationServiceTest {
         // 實查結果：同一除息日的兩列 event_key 是逐列不同的雜湊、source 兩列完全相同，
         // 兩欄都無法確定性區分重複列，故比值規則是實際採用的路徑。
         return new DividendHistoryQuery.CashDividendEvent(
-                LocalDate.parse(exDate), bd(amount), "hash-" + exDate + "-" + amount, "NASDAQ+Yahoo Finance");
+                LocalDate.parse(exDate), bd(amount), "hash-" + exDate + "-" + amount, "SAME_BASIS_TEST_FIXTURE", true);
     }
 
     private static List<StockMarketData.ClosePoint> closes(String from, String to, String price) {

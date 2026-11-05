@@ -1,6 +1,7 @@
 package com.steven.assets.model;
 
 import jakarta.persistence.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -29,10 +30,10 @@ public class StockDividendHistory {
     @Column(name = "year", nullable = false)
     private Integer year;
 
-    @Column(name = "cash_dividend")
+    @Column(name = "cash_dividend", precision = 30, scale = 18)
     private BigDecimal cashDividend;
 
-    @Column(name = "stock_dividend")
+    @Column(name = "stock_dividend", precision = 30, scale = 18)
     private BigDecimal stockDividend;
 
     @Column(name = "ex_dividend_date")
@@ -70,6 +71,22 @@ public class StockDividendHistory {
 
     @Column(name = "event_status", nullable = false, length = 16)
     private String eventStatus;
+
+    @JsonIgnore
+    @Column(name = "canonical_date")
+    private LocalDate canonicalDate;
+
+    @JsonIgnore
+    @Column(name = "source_snapshot_id")
+    private Long sourceSnapshotId;
+
+    @JsonIgnore
+    @Column(name = "resolution_status", nullable = false, length = 16)
+    private String resolutionStatus;
+
+    @JsonIgnore
+    @Column(name = "resolution_reason")
+    private String resolutionReason;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;

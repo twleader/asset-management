@@ -1,5 +1,7 @@
 package com.steven.assets.bff.performancecomparison;
 
+import com.steven.assets.bff.common.CanonicalDividendTransport;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +49,9 @@ public class PerformanceComparisonBffController {
     private final WebClient businessServicesClient;
 
     private static final ParameterizedTypeReference<List<Map<String, Object>>> LIST_MAP =
+            new ParameterizedTypeReference<>() {};
+
+    private static final ParameterizedTypeReference<List<CanonicalDividendTransport.Row>> DIVIDEND_ROWS =
             new ParameterizedTypeReference<>() {};
 
     /** 可比較的大盤基準白名單（us-daily-index GET 不驗 code，故由 BFF 守門）。 */
@@ -281,7 +286,7 @@ public class PerformanceComparisonBffController {
      * </ul>
      */
     private Mono<SeriesRaw> fetchStockSeries(Target t, LocalDate from, LocalDate to, boolean dividend) {
-        Mono<TreeMap<String, BigDecimal>> closesMono = fetchStockCloses(t, from, to);
+        Mono<TreeMap<String, BigDecimal>> closesMono = fetchStockCloses(t, from, to).cache();
         if (!dividend) {
             return closesMono.map(closes -> new SeriesRaw(t, closes, false));
         }
@@ -289,11 +294,11 @@ public class PerformanceComparisonBffController {
         // 英股 stock_dividend_history 無資料（抓取端未實作）→ 空 → 退回原始價並標 priceOnly=true。
         // （不臆測英股為累積型：配息型 LSE ETF 如 VUSA.L 原始價不含息，硬當含息會低估且誤標。）
         int years = to.getYear() - from.getYear() + 2;   // 涵蓋區間（多留 2 年緩衝）
-        Mono<List<Map<String, Object>>> divsMono = fetchDividends(t.code(), t.market(), years);
+        Mono<List<CanonicalDividendTransport.Row>> divsMono = fetchDividends(t.code(), t.market(), years);
         return Mono.zip(closesMono, divsMono)
                 .map(tuple -> {
                     TreeMap<String, BigDecimal> closes = tuple.getT1();
-                    List<Map<String, Object>> divs = tuple.getT2();
+                    List<CanonicalDividendTransport.Row> divs = tuple.getT2();
                     if (divs.isEmpty()) {
                         // 無股利資料。已查證累積型台股 ETF（收盤已含息、價=含息報酬）→ priceOnly=false；
                         // 其餘（配息型資料缺口 / 本就不配息個股如 AMZN）→ 保守標記純價格 priceOnly=true。
@@ -301,8 +306,9 @@ public class PerformanceComparisonBffController {
                                 && ACCUMULATING_TW_ETFS.contains(t.code());
                         return new SeriesRaw(t, closes, !accumulating);
                     }
-                    return new SeriesRaw(t, reinvestDividends(closes, divs, to), false);
-                });
+                    try { return new SeriesRaw(t, reinvestDividends(closes, divs, to, t.market()), false); }
+                    catch (IllegalArgumentException unresolved) { return new SeriesRaw(t, closes, true); }
+                }).onErrorResume(unavailable -> closesMono.map(closes -> new SeriesRaw(t, closes, true)));
     }
 
     /** 抓個股區間日線 → date→closePrice TreeMap；timeout + 降級。 */
@@ -320,17 +326,16 @@ public class PerformanceComparisonBffController {
                 .map(rows -> toTree(rows, "closePrice"));
     }
 
-    /** 純讀 stock_dividend_history（絕不觸發 cold-cache 寫副作用）；失敗 → 空陣列（視同無股利）。 */
-    private Mono<List<Map<String, Object>>> fetchDividends(String code, String market, int years) {
+    /** 純讀股利；讀取失敗由呼叫端回既有 priceOnly，不當成成功查無事件。 */
+    private Mono<List<CanonicalDividendTransport.Row>> fetchDividends(String code, String market, int years) {
         return businessServicesClient.get()
                 .uri(uri -> uri.path("/api/market-data/dividends-readonly")
                         .queryParam("code", code)
                         .queryParam("market", market)
                         .queryParam("years", years)
                         .build())
-                .retrieve().bodyToMono(LIST_MAP)
-                .timeout(Duration.ofSeconds(8))
-                .onErrorReturn(Collections.emptyList());
+                .retrieve().bodyToMono(DIVIDEND_ROWS)
+                .timeout(Duration.ofSeconds(8));
     }
 
     /** rows → date(ISO 字串)→close TreeMap（忽略缺欄或非數值列）。 */
@@ -367,33 +372,15 @@ public class PerformanceComparisonBffController {
      * @param today  今日（套用日期需 &lt;= today）
      */
     private TreeMap<String, BigDecimal> reinvestDividends(
-            TreeMap<String, BigDecimal> closes, List<Map<String, Object>> divs, LocalDate today) {
+            TreeMap<String, BigDecimal> closes, List<CanonicalDividendTransport.Row> divs, LocalDate today, String market) {
         if (closes.isEmpty()) return closes;
         String firstKey = closes.firstKey();
-        String todayIso = today.toString();
 
-        // anchorDate!=null 且套用日期<=today 且>=區間首日，依套用日期升冪。
-        List<ExDiv> ex = new ArrayList<>();
-        for (Map<String, Object> d : divs) {
-            String exDividendDate = asString(d.get("exDividendDate"));
-            String exRightsDate = asString(d.get("exRightsDate"));
-            BigDecimal cash = toBigDecimal(d.get("cashDividend"));
-            BigDecimal stock = toBigDecimal(d.get("stockDividend"));
-            boolean hasCash = cash != null && cash.signum() > 0;
-            boolean hasStock = stock != null && stock.signum() > 0;
-            boolean splitDates = exDividendDate != null && !exDividendDate.isBlank()
-                    && exRightsDate != null && !exRightsDate.isBlank()
-                    && !exDividendDate.equals(exRightsDate);
-            if (hasCash && hasStock && splitDates) {
-                addExDivIfInRange(ex, exDividendDate, cash, null, todayIso, firstKey);
-                addExDivIfInRange(ex, exRightsDate, null, stock, todayIso, firstKey);
-                continue;
-            }
-            String applyDate = exDividendDate != null && !exDividendDate.isBlank()
-                    ? exDividendDate : exRightsDate;
-            addExDivIfInRange(ex, applyDate, cash, stock, todayIso, firstKey);
-        }
-        ex.sort(Comparator.comparing(ExDiv::exDate));
+        var amounts=CanonicalDividendTransport.dailyAmountsFromRows(divs,LocalDate.parse(firstKey),today);
+        // Historical US closes do not carry split-range/basis proof, even when their provider is known.
+        if("美股".equals(market)&&!amounts.isEmpty())throw new IllegalArgumentException("US_DIVIDEND_PRICE_BASIS_UNVERIFIED");
+        List<ExDiv> ex = amounts
+                .stream().map(event->new ExDiv(event.date().toString(),event.cash(),event.stock())).toList();
 
         BigDecimal shares = BigDecimal.ONE;
         int di = 0;
@@ -416,31 +403,8 @@ public class PerformanceComparisonBffController {
         return adj;
     }
 
-    /** 缺日期或不在再投入區間內一律不加入（Task 357：日期換成 anchorDate 語意的呼叫端自行決定）。 */
-    private static void addExDivIfInRange(List<ExDiv> ex, String date, BigDecimal cash,
-            BigDecimal stock, String todayIso, String firstKey) {
-        if (date == null || date.isBlank()) return;
-        if (date.compareTo(todayIso) > 0) return;
-        if (date.compareTo(firstKey) < 0) return;
-        ex.add(new ExDiv(date, cash, stock));
-    }
-
     private static BigDecimal nz(BigDecimal x) {
         return x == null ? BigDecimal.ZERO : x;
-    }
-
-    /** 寬鬆數值解析：null／非數值 → null。 */
-    private static BigDecimal toBigDecimal(Object o) {
-        if (o == null) return null;
-        try {
-            return new BigDecimal(o.toString());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private static String asString(Object o) {
-        return o == null ? null : o.toString();
     }
 
     // ─────────────────────────── 正規化 ───────────────────────────

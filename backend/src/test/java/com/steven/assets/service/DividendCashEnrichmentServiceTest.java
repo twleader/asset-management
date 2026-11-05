@@ -36,6 +36,10 @@ class DividendCashEnrichmentServiceTest {
         when(prices.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc("2330","台股",ex.minusDays(20),ex))
                 .thenReturn(List.of(row(ex.minusDays(1),"100"),row(ex,close)));
     }
+    @Test void usUnknownPriceBasisCannotGenerateEnrichmentOrReadAnyPriceEvidence() {
+        service.enrich("AAPL","美股",completed);service.enrich("AAPL","US",completed);
+        verifyNoInteractions(events,prices,calendar);
+    }
     @Test void sameDayHitAndDifferentRightsPreservesCashDateBasis() {
         var event = event(null,null,null,ex.minusDays(7)); fixture(event,"101");
         service.enrich("2330","台股",completed);

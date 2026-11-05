@@ -151,6 +151,9 @@ public interface DividendCurrentStateRepository {
         }
     }
 
+    default void lockSymbol(String code, String market) {}
+    default boolean canonicalManaged(String code, String market) { return false; }
+
     Optional<Snapshot> findLatestComplete(
             String code, String market, Instant decisionInstant,
             LocalDate requiredFrom, LocalDate requiredTo);

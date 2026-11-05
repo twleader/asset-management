@@ -196,6 +196,8 @@ class BacktestServiceTest {
         e.setExDividendDate(exDate);
         e.setCashDividend(BigDecimal.valueOf(cash));
         e.setYear(exDate.getYear());
+        e.setId(1L);e.setCanonicalDate(exDate);e.setSourceSnapshotId(1L);
+        e.setResolutionStatus("RESOLVED");e.setStockDividend(BigDecimal.ZERO);
         return e;
     }
 

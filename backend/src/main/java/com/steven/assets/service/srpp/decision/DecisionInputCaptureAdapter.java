@@ -106,9 +106,10 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
             String radarFailure=exact?SrppRadarPolicy.decisionFailure(rawRadar):"EXACT_RADAR_UNVERIFIED";
             Evidence rad=new Evidence(radarFailure==null?"PASS":"UNAVAILABLE",radarFailure==null?"EXACT_RADAR_CURRENT_READ":radarFailure);
             List<Close> closes=hs.get(c).stream().filter(h->sessions.contains(h.getTradingDate())).map(h->new Close(h.getTradingDate(),h.getClosePrice(),prices.isTrustedClose(h))).toList();
-            List<Distribution> distributions=ds.get(c).stream().filter(h->h.getExDividendDate()!=null&&h.getExDividendDate().isAfter(date.minusDays(100))&&!h.getExDividendDate().isAfter(date)||h.getExRightsDate()!=null&&h.getExRightsDate().isAfter(date.minusDays(100))&&!h.getExRightsDate().isAfter(date))
+            boolean canonicalDividends=CanonicalDividendFinancialFacts.verified(ds.get(c));
+            List<Distribution> distributions=(canonicalDividends?ds.get(c):List.<StockDividendHistory>of()).stream().filter(h->h.getExDividendDate()!=null&&h.getExDividendDate().isAfter(date.minusDays(100))&&!h.getExDividendDate().isAfter(date)||h.getExRightsDate()!=null&&h.getExRightsDate().isAfter(date.minusDays(100))&&!h.getExRightsDate().isAfter(date))
                     .map(h->new Distribution(h.getExDividendDate(),h.getExRightsDate(),h.getCashDividend(),h.getStockDividend(),h.getSource())).toList();
-            boolean distributionVerified=p.nonDistributing().contains(c)||!ds.get(c).isEmpty()&&ds.get(c).stream().allMatch(h->h.getSource()!=null&&!h.getSource().isBlank());
+            boolean distributionVerified=p.nonDistributing().contains(c)&&ds.get(c).isEmpty()||canonicalDividends;
             Evidence pending=new Evidence("UNAVAILABLE","00865B".equals(c)?"SUBACCOUNT_UNVERIFIED":"PENDING_ORDERS_UNAVAILABLE");
             Evidence position="00865B".equals(c)?subaccounts:new Evidence("PASS","CANONICAL_POSITION_OR_VERIFIED_SNAPSHOT_ZERO");
             Evidence tradability=new Evidence("UNAVAILABLE","TRADABILITY_SOURCE_UNAVAILABLE");

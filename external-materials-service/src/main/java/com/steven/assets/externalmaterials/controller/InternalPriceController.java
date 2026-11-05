@@ -85,9 +85,11 @@ public class InternalPriceController {
      * 抓單檔股利並 append immutable snapshot evidence，回傳 observation 事件筆數。
      */
     @PostMapping("/dividend/sync")
-    public Map<String, Object> syncDividend(@RequestParam String code, @RequestParam String market) {
-        int n = dividendPersister.syncOne(code, market);
-        return Map.of("written", n);
+    public DividendPersister.SyncResult syncDividend(@RequestParam String code, @RequestParam String market,
+                                           @RequestParam(defaultValue = "10") int years) {
+        if (years < 1 || years > 20) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "years must be 1..20");
+        return dividendPersister.syncOneDetailed(code, market, years);
     }
 
     /**

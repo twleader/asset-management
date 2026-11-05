@@ -21,6 +21,17 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
 
     private final JdbcTemplate jdbc;
 
+    @Override public void lockSymbol(String code, String market) {
+        jdbc.queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?,0)) IS NULL",Boolean.class,
+                "DIVIDEND_CANONICAL|"+market+"|"+code);
+    }
+    @Override public boolean canonicalManaged(String code,String market) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM stock_dividend_history WHERE stock_code=? AND market=? AND canonical_date IS NOT NULL)",Boolean.class,code,market));
+    }
+    private boolean protectedDate(String code,String market,LocalDate date) {
+        return date!=null && Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM stock_dividend_history WHERE stock_code=? AND market=? AND canonical_date=?)",Boolean.class,code,market,date));
+    }
+
     @Override
     public Optional<Snapshot> findLatestComplete(
             String code, String market, Instant decisionInstant,
@@ -171,6 +182,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
             Integer fillDays) {
         CurrentRow current = readCurrentRow(id);
         if (current == null) return;
+        lockSymbol(current.stockCode(),current.market());
+        if(protectedDate(current.stockCode(),current.market(),com.steven.assets.model.DividendDates.anchorDate(current.exDividendDate(),current.exRightsDate()))) return;
         deleteCancelledTupleTwins(current.stockCode(), current.market(), id, current.year(),
                 current.exDividendDate(), current.cashDividend(), current.stockDividend(),
                 cashPaymentDate, stockPaymentDate, eventKey, current.exRightsDate());
@@ -198,6 +211,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
     private void upsertEvent(
             String code, String market, String provider, ProjectedEvent event,
             boolean reviveCancelled) {
+        lockSymbol(code,market);
+        if(protectedDate(code,market,event.anchorDate())) return;
         List<Long> ids = findMatchingIds(code, market, event);
         if (ids.isEmpty()) {
             // Not even the relaxed segment matched, so no existing row shares this
@@ -218,6 +233,8 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
         long targetId = ids.getFirst();
         CurrentRow current = readCurrentRow(targetId);
         if (current == null) return;
+        lockSymbol(current.stockCode(),current.market());
+        if(protectedDate(current.stockCode(),current.market(),com.steven.assets.model.DividendDates.anchorDate(current.exDividendDate(),current.exRightsDate()))) return;
         // Read-then-write: payment dates are announcement metadata, so a source that
         // omits them must not erase dates an earlier source already published.
         // Amounts, source and event_key follow the incoming event.  ex_dividend_date
@@ -256,6 +273,10 @@ public class JdbcDividendCurrentStateRepository implements DividendCurrentStateR
 
     @Override
     public void cancelActiveEvent(long id) {
+        CurrentRow current=readCurrentRow(id);
+        if(current==null)return;
+        lockSymbol(current.stockCode(),current.market());
+        if(protectedDate(current.stockCode(),current.market(),com.steven.assets.model.DividendDates.anchorDate(current.exDividendDate(),current.exRightsDate())))return;
         jdbc.update("UPDATE stock_dividend_history SET event_status='CANCELLED', updated_at=NOW() "
                 + "WHERE id=? AND event_status='ACTIVE'", id);
     }

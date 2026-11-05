@@ -60,17 +60,7 @@ public class JdbcAnnualDividendReadRepository implements AnnualDividendReadRepos
                 """, (rs, n) -> new Trade(rs.getString("asset_code"), rs.getString("market"),
                         rs.getObject("trade_date", LocalDate.class), rs.getString("transaction_type"), rs.getBigDecimal("shares")),
                 ownerId, asOfDate);
-        List<Event> events = jdbc.query(SCOPE + """
-                SELECT d.id, d.stock_code, d.market, d.year, d.ex_dividend_date, d.ex_rights_date,
-                       d.cash_payment_date, d.cash_dividend, d.stock_dividend, d.source
-                  FROM stock_dividend_history d JOIN owned_symbols o ON o.code=d.stock_code AND o.market=d.market
-                 WHERE d.event_status='ACTIVE'
-                 ORDER BY d.ex_dividend_date, d.id
-                """, (rs, n) -> new Event(rs.getLong("id"), rs.getString("stock_code"), rs.getString("market"),
-                        rs.getInt("year"), rs.getObject("ex_dividend_date", LocalDate.class), rs.getObject("ex_rights_date", LocalDate.class),
-                        rs.getObject("cash_payment_date", LocalDate.class), rs.getBigDecimal("cash_dividend"),
-                        rs.getBigDecimal("stock_dividend"), rs.getString("source")),
-                ownerId, asOfDate, ownerId, asOfDate);
+        List<Event> events = List.of();
         List<Market> markets = jdbc.query("SELECT code, display_name FROM market_type ORDER BY sort_order, code",
                 (rs, n) -> new Market(rs.getString("code"), rs.getString("display_name")));
         return new Facts(securities, snapshots, trades, events, markets);

@@ -130,17 +130,21 @@ public class JdbcTradingRadarListBatchRepository implements TradingRadarListBatc
         List<Object> args = pairArguments(keys);
         args.add(min);
         args.add(max);
+        args.add(min.getYear());
+        args.add(max.getYear());
         List<StockDividendHistory> rows = jdbc.query("""
                 WITH requested(stock_code, market) AS (VALUES %s)
                 SELECT h.id, h.stock_code, h.market, h.year, h.cash_dividend, h.stock_dividend,
                        h.ex_dividend_date, h.ex_rights_date, h.yield_pct, h.cash_payment_date,
                        h.stock_payment_date, h.fill_days, h.previous_close, h.source, h.event_key,
-                       h.event_status, h.updated_at
+                       h.event_status, h.updated_at, h.canonical_date, h.source_snapshot_id,
+                       h.resolution_status, h.resolution_reason
                 FROM stock_dividend_history h
                 JOIN requested r ON r.stock_code=h.stock_code AND r.market=h.market
-                WHERE LEAST(h.ex_dividend_date, h.ex_rights_date) BETWEEN ? AND ?
+                WHERE (COALESCE(h.canonical_date, LEAST(h.ex_dividend_date, h.ex_rights_date)) BETWEEN ? AND ?
+                    OR (h.canonical_date IS NULL AND h.ex_dividend_date IS NULL AND h.ex_rights_date IS NULL
+                        AND h.year BETWEEN ? AND ?))
                   AND h.event_status='ACTIVE'
-                  AND (COALESCE(h.cash_dividend, 0)>0 OR COALESCE(h.stock_dividend, 0)>0)
                 ORDER BY h.market ASC, h.stock_code ASC,
                          LEAST(h.ex_dividend_date, h.ex_rights_date) ASC, h.id ASC
                 """.formatted(values(keys.size())), this::dividend, args.toArray());
@@ -150,8 +154,9 @@ public class JdbcTradingRadarListBatchRepository implements TradingRadarListBatc
             List<StockPriceHistory> prices = safePrices.getOrDefault(key, List.of());
             LocalDate from = prices.isEmpty() ? null : prices.getLast().getTradingDate();
             LocalDate to = prices.isEmpty() ? null : prices.getFirst().getTradingDate();
-            LocalDate anchor = row.anchorDate();
-            if (from != null && to != null && anchor != null && !anchor.isBefore(from) && !anchor.isAfter(to)) {
+            LocalDate anchor = row.getCanonicalDate() == null ? row.anchorDate() : row.getCanonicalDate();
+            if (from != null && to != null && (anchor != null && !anchor.isBefore(from) && !anchor.isAfter(to)
+                    || anchor == null && row.getYear() != null && row.getYear() >= from.getYear() && row.getYear() <= to.getYear())) {
                 out.computeIfAbsent(key, ignored -> new ArrayList<>()).add(row);
             }
         }
@@ -196,7 +201,10 @@ public class JdbcTradingRadarListBatchRepository implements TradingRadarListBatc
                 .stockPaymentDate(rs.getObject("stock_payment_date", LocalDate.class)).fillDays((Integer) rs.getObject("fill_days"))
                 .previousClose(rs.getBigDecimal("previous_close")).source(rs.getString("source"))
                 .eventKey(rs.getString("event_key")).eventStatus(rs.getString("event_status"))
-                .updatedAt(rs.getObject("updated_at", java.time.LocalDateTime.class)).build();
+                .updatedAt(rs.getObject("updated_at", java.time.LocalDateTime.class))
+                .canonicalDate(rs.getObject("canonical_date", LocalDate.class))
+                .sourceSnapshotId(rs.getObject("source_snapshot_id", Long.class))
+                .resolutionStatus(rs.getString("resolution_status")).resolutionReason(rs.getString("resolution_reason")).build();
     }
 
     private EtfNavObservation etfNavObservation(ResultSet rs, int ignored) throws SQLException {

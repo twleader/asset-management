@@ -197,17 +197,14 @@ public class HistoricalBondYieldBetaEvidenceAdapter implements BondYieldBetaEvid
 
         LocalDate from = prices.getFirst().getTradingDate();
         LocalDate to = prices.getLast().getTradingDate();
-        // Task 357／357.3d-1b：改用 anchorDate，理由同 BacktestService.eventsWithin()——
-        // repository 層的 findAdjustmentEvents 之外，這裡是獨立的二次過濾。
-        List<StockDividendHistory> events = history.events().stream()
-                .filter(event -> event != null && event.anchorDate() != null
-                        && !event.anchorDate().isBefore(from)
-                        && !event.anchorDate().isAfter(to))
-                .toList();
+        List<StockDividendHistory> events = CanonicalDividendFinancialFacts.within(history.events(), from, to);
         List<StockPriceHistory> desc = new ArrayList<>(prices);
         desc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
-        List<StockPriceHistory> adjustedDesc = adjustedPriceService
-                .adjust(desc, events == null ? List.of() : events).rowsDesc();
+        List<StockPriceHistory> adjustedDesc;
+        try { adjustedDesc = adjustedPriceService.adjust(desc, events).rowsDesc(); }
+        catch (com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable unavailable) {
+            return Evidence.empty();
+        }
         List<StockPriceHistory> adjusted = new ArrayList<>(adjustedDesc);
         adjusted.sort(Comparator.comparing(StockPriceHistory::getTradingDate));
 

@@ -26,7 +26,7 @@ def test_once_per_date_batch_exact_radar_intersection_and_partial_coverage():
     selected = result["rows"][1]
     assert selected["symbol"] == "2330" and selected["status"] == "PARTIAL" and selected["usable"]
     assert selected["events"] == [{"date": "2026-08-28", "exchange": "TWSE", "dividendType": "息",
-                                   "year": 2026, "cashDividend": "2.750000", "stockDividend": None,
+                                   "year": 2026, "cashDividend": "2.75", "stockDividend": None,
                                    "exDividendDate": "2026-08-28", "exRightsDate": None,
                                    "cashPaymentDate": None, "stockPaymentDate": None}]
 
@@ -42,9 +42,11 @@ def test_stock_dividend_units_are_never_invented_and_cash_is_retained():
     assert stock["events"] == [] and not stock["usable"]
 
 
-@pytest.mark.parametrize("cash,expected", [("1.2345675", "1.234568"), (0.1, "0.100000"),
-                                           ("999999999999.999999", "999999999999.999999")])
-def test_cash_rounding_is_explicit_half_up_six_places(cash, expected):
+@pytest.mark.parametrize("cash,expected", [("1.2345675", "1.2345675"), (0.1, "0.1"),
+                                           ("6.00003573", "6.00003573"),
+                                           ("0.000000000000000001", "0.000000000000000001"),
+                                           ("999999999999.999999999999999999", "999999999999.999999999999999999")])
+def test_cash_is_preserved_exactly_with_twelve_integer_eighteen_fractional_places(cash, expected):
     result, _ = read([dividend_row(cashDividend=cash)])
     assert result["rows"][0]["events"][0]["cashDividend"] == expected
 
@@ -52,7 +54,7 @@ def test_cash_rounding_is_explicit_half_up_six_places(cash, expected):
 @pytest.mark.parametrize("changes", [
     {"cashDividend": True}, {"cashDividend": -1}, {"cashDividend": "NaN"},
     {"cashDividend": float("inf")}, {"cashDividend": "1e2"}, {"cashDividend": None},
-    {"cashDividend": "999999999999.9999995"}, {"cashDividend": "1000000000000"},
+    {"cashDividend": "0.1234567890123456789"}, {"cashDividend": "1000000000000"},
     {"stockDividendShares": -1}, {"stockDividendShares": True},
     {"date": "20260828"}, {"date": "2026/08/28"}, {"date": "2026-02-30"},
     {"date": "2026-10-13"}, {"date": "2025-10-11"}, {"exchange": "NYSE"},
@@ -70,11 +72,11 @@ def test_duplicate_event_is_not_silently_deduplicated_and_latest_bad_does_not_hi
     assert result["rows"][0]["status"] == "FAILED"
 
 
-def test_zero_and_rounding_to_zero_are_not_empty_complete():
+def test_zero_stays_partial_and_small_positive_cash_is_not_rounded_away():
     zero, _ = read([dividend_row(cashDividend=0)])
     tiny, _ = read([dividend_row(cashDividend="0.00000001")])
     assert zero["rows"][0]["status"] == "PARTIAL" and zero["rows"][0]["events"] == []
-    assert tiny["rows"][0]["reason"] == "DIVIDEND_ROUNDED_TO_ZERO"
+    assert tiny["rows"][0]["events"][0]["cashDividend"] == "0.00000001"
 
 
 @pytest.mark.parametrize("data", [[None], [{}], [{"symbol": None}], [{"symbol": ""}], "bad", None])

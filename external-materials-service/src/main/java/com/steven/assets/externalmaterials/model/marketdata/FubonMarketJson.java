@@ -139,7 +139,7 @@ public final class FubonMarketJson {
             String type = text(event.get("dividendType"));
             if (!Set.of("息", "權息").contains(type) || !anchor.equals(date(event.get("exDividendDate"))))
                 throw invalid();
-            BigDecimal cash = decimal(text(event.get("cashDividend")), 18, 6, true);
+            BigDecimal cash = DividendNormalization.exact(decimal(text(event.get("cashDividend")), 30, 18, true));
             nil(event.get("stockDividend")); nil(event.get("cashPaymentDate")); nil(event.get("stockPaymentDate"));
             String rights = null;
             if ("權息".equals(type)) {
@@ -147,7 +147,9 @@ public final class FubonMarketJson {
                         || !"STOCK_DIVIDEND_UNIT_UNVERIFIED".equals(reason)) throw invalid();
                 rights = anchor.toString();
             } else nil(event.get("exRightsDate"));
-            output.add(new DividendEvent(anchor.getYear(), cash, null, anchor.toString(), rights, null, null));
+            output.add(new DividendEvent(anchor.getYear(), cash, rights == null ? BigDecimal.ZERO : null,
+                    anchor.toString(), rights, null, null,
+                    DividendNormalization.componentId("FUBON_SDK", symbol, anchor.toString(), type)));
         }
         return new DividendRow(symbol, status, usable, reason, output);
     }

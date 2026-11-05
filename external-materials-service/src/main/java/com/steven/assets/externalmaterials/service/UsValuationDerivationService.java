@@ -115,8 +115,7 @@ import org.springframework.stereotype.Component;
  * 等於對整個虧損區段靜默放行）。</p>
  *
  * <h2>門檻取值誠實登記</h2>
- * <p>{@link #BASIS_CHANGE_MIN_RATIO}（1.8）、股利去重的 {@link #DIVIDEND_PRECISION_MAX_RATIO}（1.01）與
- * {@link #SPLIT_RATIO_TOLERANCE}（0.10）<b>皆無回測量測依據，為判斷性取值</b>，比照
+ * <p>{@link #BASIS_CHANGE_MIN_RATIO}（1.8）為推導股數基準變動的判斷性取值，無回測量測依據，比照
  * {@code spec/requirements.md} 既有的「無量測依據門檻清單」體例。取 1.8 而非所比照的
  * {@code DistributionAdjustedPriceService.SPLIT_FORWARD_MIN = 2.0}，是留餘裕給 EPS 只有兩位小數造成的
  * 推導股數雜訊（該餘裕隨 EPS 絕對值變動，EPS 落在 ±0.0x 時可達 ±25%，這也是非正 EPS 直接判為變動點的
@@ -143,12 +142,6 @@ public class UsValuationDerivationService {
 
     /** 單季推導股數相鄰比值達此倍數即視為每股基準變動點（判斷性取值，無回測依據）。 */
     static final BigDecimal BASIS_CHANGE_MIN_RATIO = new BigDecimal("1.8");
-    /** 同一除息日兩個金額的比值在此以內視為「同一筆、兩個精度」（判斷性取值，無回測依據）。 */
-    static final BigDecimal DIVIDEND_PRECISION_MAX_RATIO = new BigDecimal("1.01");
-    /** 型態二判定對「該標的還原倍數眾數」的相對容差（判斷性取值，無回測依據）。 */
-    static final BigDecimal SPLIT_RATIO_TOLERANCE = new BigDecimal("0.10");
-    /** 還原倍數眾數至少要有這麼多個不同除息日支持，否則視為不可解（避免單票眾數自我驗證）。 */
-    static final int MIN_SPLIT_RATIO_SUPPORT = 2;
 
     static final int DIVIDEND_LOOKBACK_DAYS = 365;
     /** 每輪一律重算最近這麼多個交易日（收盤價會被 18:00 ET 的 FinMind 校正事後覆寫）。 */
@@ -491,79 +484,29 @@ public class UsValuationDerivationService {
             NavigableSet<LocalDate> unresolved,
             LocalDate earliestExDate) {}
 
-    /**
-     * 現金股利去重（Task 334.3）。<b>直接加總會同時 double count 與混基準</b>，使分割前區間的殖利率
-     * 偏高約一個數量級。
-     *
-     * <p><b>先試確定性判別欄位、再退回比值啟發式（規則 0）</b>：本任務動工時已對運行中資料庫實查
-     * {@code event_key} 與 {@code source}——同一除息日的兩列 {@code event_key} 是<b>逐列不同的雜湊</b>
-     * （由金額本身參與計算，故必然不同、無法用來配對），{@code source} 則<b>兩列完全相同</b>
-     * （美股重複列一律為 {@code NASDAQ+Yahoo Finance}）。兩欄皆無法確定性區分，因此比值規則是實際採用的
-     * 路徑而非 fallback。（{@code previous_close} 同樣不可用：實測非 null 的那一列帶的是<b>未還原</b>的
-     * 金額配上<b>已還原</b>的價格，列內兩欄基準本身就不一致。）</p>
-     *
-     * <p>規則：以除息日分組，對同組相異 {@code cash_dividend} 依序判斷</p>
-     * <ol>
-     *   <li>最大／最小比值 ≤ {@link #DIVIDEND_PRECISION_MAX_RATIO} → 型態一（同一筆、兩個精度），
-     *       取有效位數較多者、只計一次，<b>不 fail closed</b>（單純的來源精度差不該讓整日殖利率消失）。</li>
-     *   <li>比值 ≥ {@link #BASIS_CHANGE_MIN_RATIO} → 型態二候選（同一筆、兩個每股基準）。取該標的全部
-     *       「可解出的還原倍數」比值之<b>眾數 m</b>，{@code |ratio − m| / m ≤}
-     *       {@link #SPLIT_RATIO_TOLERANCE} 才判為型態二、取較小值。<b>單看「取最小值」會出錯</b>：
-     *       AVGO 僅有的一次分割是 10:1，但 2018-03-21／2018-06-19 兩列比值是 5，取最小值會採 0.35，
-     *       是正確值 0.175 的兩倍且不會報錯——這正是要做鄰近一致檢查的原因。</li>
-     *   <li>其餘一律 {@code null}（fail closed）並記 DEBUG。<b>不得</b>任選一列、不得直接加總、
-     *       不得用 MAX／MIN 之類未說明理由的啟發式。</li>
-     * </ol>
-     *
-     * <p><b>規則 3 會誤殺一種合法情形，這是刻意的取捨</b>：changeset
-     * {@code v1.98.0-radar-dividend-same-day-amounts.sql} 註記同一除息日可以承載多筆不同金額的合法
-     * 分配；本規則會把它一併判成不可解而寫 {@code null}（少算殖利率、偏保守），而不是冒險相加。</p>
-     *
-     * <p><b>眾數的取樣母體限定為「≥ {@link #BASIS_CHANGE_MIN_RATIO} 的比值」</b>：≤ 1.01 的比值在規則 1
-     * 已被認定為同一金額的精度差、本質不是還原倍數，讓它進入眾數會讓精度雜訊主導「該標的的還原倍數
-     * 基準」（例如 QQQ 全部 36 組重複都是精度差）。</p>
-     */
+    /** Consume only the canonical per-date cash amount; unknowns never become zero or ratio guesses. */
     static DividendSeries resolveDividends(
             String stockCode, List<DividendHistoryQuery.CashDividendEvent> events) {
         TreeMap<LocalDate, BigDecimal> resolved = new TreeMap<>();
         TreeSet<LocalDate> unresolved = new TreeSet<>();
         TreeMap<LocalDate, TreeSet<BigDecimal>> byExDate = new TreeMap<>();
-        for (DividendHistoryQuery.CashDividendEvent event : events == null ? List.<DividendHistoryQuery.CashDividendEvent>of() : events) {
-            if (event == null || event.exDividendDate() == null || event.cashDividend() == null) continue;
-            byExDate.computeIfAbsent(event.exDividendDate(), key -> new TreeSet<>()).add(event.cashDividend());
+        for (var event : events == null ? List.<DividendHistoryQuery.CashDividendEvent>of() : events) {
+            // Canonical cash is nominal at ex-date; stored historical closes may have been split adjusted.
+            // Neither the quarterly-share gate nor amount ratios prove a common per-share basis.
+            if (event != null && !event.priceBasisVerified()) unresolved.add(LocalDate.MIN);
+            if (event == null || event.exDividendDate() == null) {
+                unresolved.add(LocalDate.MIN);
+                continue;
+            }
+            var amounts = byExDate.computeIfAbsent(event.exDividendDate(), ignored -> new TreeSet<>());
+            if (event.cashDividend() == null || event.cashDividend().signum() < 0) unresolved.add(event.exDividendDate());
+            else amounts.add(event.cashDividend());
         }
-        if (byExDate.isEmpty()) return new DividendSeries(resolved, unresolved, null);
-
-        BigDecimal mode = splitRatioMode(byExDate);
-        for (Map.Entry<LocalDate, TreeSet<BigDecimal>> entry : byExDate.entrySet()) {
-            LocalDate exDate = entry.getKey();
-            TreeSet<BigDecimal> values = entry.getValue();
-            if (values.size() == 1) {
-                resolved.put(exDate, values.first());
-                continue;
-            }
-            BigDecimal ratio = distinctRatio(values);
-            if (ratio == null) {
-                unresolved.add(exDate);
-                log.debug("股利去重失敗（比值不可解）{} {}：{}", stockCode, exDate, values);
-                continue;
-            }
-            if (ratio.compareTo(DIVIDEND_PRECISION_MAX_RATIO) <= 0) {
-                resolved.put(exDate, mostPreciseValue(values));
-                continue;
-            }
-            if (ratio.compareTo(BASIS_CHANGE_MIN_RATIO) >= 0 && mode != null
-                    && relativeDistance(ratio, mode).compareTo(SPLIT_RATIO_TOLERANCE) <= 0) {
-                resolved.put(exDate, values.first());
-                log.debug("股利去重判為每股基準重複 {} {}：比值 {}、眾數 {}、採 {}",
-                        stockCode, exDate, ratio, mode, values.first());
-                continue;
-            }
-            unresolved.add(exDate);
-            log.debug("股利去重失敗（比值 {} 與眾數 {} 不一致）{} {}：{}",
-                    ratio, mode, stockCode, exDate, values);
+        for (var entry : byExDate.entrySet()) {
+            if (entry.getValue().size() != 1 || unresolved.contains(entry.getKey())) unresolved.add(entry.getKey());
+            else resolved.put(entry.getKey(), entry.getValue().first());
         }
-        return new DividendSeries(resolved, unresolved, byExDate.firstKey());
+        return new DividendSeries(resolved, unresolved, byExDate.isEmpty() ? null : byExDate.firstKey());
     }
 
     /**
@@ -573,7 +516,8 @@ public class UsValuationDerivationService {
      * 無除息 → {@code 0}（代表已停配滿一年）；視窗內有任何無法去重的除息日 → {@code null}（fail closed）。</p>
      */
     static BigDecimal dividendYieldPct(LocalDate day, BigDecimal close, DividendSeries series) {
-        if (series.earliestExDate() == null || series.earliestExDate().isAfter(day)) return null;
+        if (series.unresolved().contains(LocalDate.MIN)
+                || series.earliestExDate() == null || series.earliestExDate().isAfter(day)) return null;
         LocalDate from = day.minusDays(DIVIDEND_LOOKBACK_DAYS);
         if (!series.unresolved().subSet(from, false, day, true).isEmpty()) return null;
         BigDecimal total = BigDecimal.ZERO;
@@ -620,62 +564,6 @@ public class UsValuationDerivationService {
             total = total.add(value);
         }
         return total;
-    }
-
-    /**
-     * 眾數母體只取 ≥ {@link #BASIS_CHANGE_MIN_RATIO} 的比值；同票數時取較大的比值（決定性）。
-     *
-     * <p><b>眾數必須由至少 {@value #MIN_SPLIT_RATIO_SUPPORT} 個不同除息日支持，否則回 {@code null}</b>：
-     * 只有一票時眾數必然等於那一組自己的比值，{@code |ratio − mode| / mode} 恆為 0、必定通過，變成自我驗證
-     * （fail open）——同日兩筆<b>合法但不同金額</b>的分配（例如常配 0.91 ＋ 同日特別配 3.00，比值 3.3）會被
-     * 判成「每股基準重複」而只計較小者，殖利率少算特別配的部分且沒有任何告警。這與規則 3 白紙黑字的
-     * fail-closed 取捨（「寧可缺值也不要混基準」）直接相反，故此處要求至少兩個獨立除息日佐證；不足時落到
-     * 規則 3 寫 {@code null}。</p>
-     */
-    private static BigDecimal splitRatioMode(Map<LocalDate, TreeSet<BigDecimal>> byExDate) {
-        Map<BigDecimal, Integer> counts = new TreeMap<>();
-        for (TreeSet<BigDecimal> values : byExDate.values()) {
-            BigDecimal ratio = distinctRatio(values);
-            if (ratio == null || ratio.compareTo(BASIS_CHANGE_MIN_RATIO) < 0) continue;
-            counts.merge(ratio.setScale(2, RoundingMode.HALF_UP), 1, Integer::sum);
-        }
-        BigDecimal mode = null;
-        int best = 0;
-        for (Map.Entry<BigDecimal, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() > best
-                    || (entry.getValue() == best && mode != null && entry.getKey().compareTo(mode) > 0)) {
-                mode = entry.getKey();
-                best = entry.getValue();
-            }
-        }
-        return best >= MIN_SPLIT_RATIO_SUPPORT ? mode : null;
-    }
-
-    /** 同組相異金額的 max/min；不足兩個相異值或最小值非正時回 {@code null}。 */
-    private static BigDecimal distinctRatio(TreeSet<BigDecimal> values) {
-        if (values.size() < 2) return null;
-        BigDecimal min = values.first();
-        if (min.signum() <= 0) return null;
-        return values.last().divide(min, RATIO_SCALE, RoundingMode.HALF_UP);
-    }
-
-    /** 「有效位數較多者」＝去掉尾端零後小數位數最多者；同位數時取較大值（決定性）。 */
-    private static BigDecimal mostPreciseValue(TreeSet<BigDecimal> values) {
-        BigDecimal best = null;
-        for (BigDecimal value : values) {
-            if (best == null) {
-                best = value;
-                continue;
-            }
-            int bestScale = best.stripTrailingZeros().scale();
-            int scale = value.stripTrailingZeros().scale();
-            if (scale > bestScale || (scale == bestScale && value.compareTo(best) > 0)) best = value;
-        }
-        return best;
-    }
-
-    private static BigDecimal relativeDistance(BigDecimal ratio, BigDecimal mode) {
-        return ratio.subtract(mode).abs().divide(mode, RATIO_SCALE, RoundingMode.HALF_UP);
     }
 
     private static BigDecimal ratio(BigDecimal left, BigDecimal right) {

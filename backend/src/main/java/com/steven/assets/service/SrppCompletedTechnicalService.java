@@ -1,6 +1,7 @@
 package com.steven.assets.service;
 
 import com.steven.assets.model.StockPriceHistory;
+import com.steven.assets.model.CanonicalDividendFinancialGuard;
 import com.steven.assets.repository.StockDividendHistoryRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -64,7 +65,13 @@ public class SrppCompletedTechnicalService {
         var events = dividends.findAdjustmentEvents(code, market, historyStart, asOf);
         var desc = new ArrayList<>(rows);
         Collections.reverse(desc);
-        var adjusted = adjustments.adjust(desc, events);
+        DistributionAdjustedPriceService.Adjustment adjusted;
+        try { adjusted = adjustments.adjust(desc, events); }
+        catch (CanonicalDividendFinancialGuard.Unavailable unavailable) {
+            return new LoadedSymbol(new SymbolFacts(code, market, "UNAVAILABLE", asOf, historyStart,
+                    rows.size(), "UNAVAILABLE", List.of(), null, null,
+                    List.of("DIVIDEND_HISTORY_UNVERIFIED", unavailable.getMessage())), List.copyOf(rows), List.of());
+        }
         List<StockPriceHistory> adjustedAsc = new ArrayList<>(adjusted.rowsDesc());
         Collections.reverse(adjustedAsc);
         var result = SrppCompletedTechnicalCalculator.calculate(adjustedAsc, asOf);

@@ -1,147 +1,63 @@
 package com.steven.assets.service;
 
-import com.steven.assets.service.port.DividendSyncPort;
-import com.steven.assets.model.marketdata.MarketDataResults;
-import com.steven.assets.model.StockDividendHistory;
+import com.steven.assets.model.CanonicalDividend.*;
+import com.steven.assets.model.marketdata.MarketDataResults.*;
 import com.steven.assets.repository.StockDividendHistoryRepository;
-import com.steven.assets.model.marketdata.MarketDataResults.DividendHistoryResult;
-import com.steven.assets.model.marketdata.MarketDataResults.DividendRow;
-import lombok.extern.slf4j.Slf4j;
+import com.steven.assets.service.port.DividendSyncPort;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.*;
+import java.util.*;
 
-import java.time.Year;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-
-/**
- * 股利歷史只讀 service。
- *
- * external-materials-service 每日 17:00 TW cron 只追加 immutable dividend evidence；
- * backend 在讀取前把最新、完整且涵蓋未來 45 日的 snapshot 投影至 stock_dividend_history。
- * DB 沒資料時，呼叫 external-materials-service 的 /internal/dividend/sync 同步觸發抓取
- * （供 cold-cache fallback），再由 backend 重做一次投影。
- */
-@Slf4j
+/** Shared display projection. Both legacy method names are now strictly read-only. */
 @Service
 public class DividendHistoryService {
-
-    private static final int RETAIN_YEARS = 10;
-
-    private final StockDividendHistoryRepository repo;
-    private final DividendCurrentStateProjectionService projectionService;
-    private final DividendSyncPort external;
-
-    @org.springframework.beans.factory.annotation.Autowired
-    private DividendCashEnrichmentService enrichmentService;
-
-    public DividendHistoryService(StockDividendHistoryRepository repo,
-                                  DividendCurrentStateProjectionService projectionService,
-                                  DividendSyncPort external) {
-        this.repo = repo;
-        this.projectionService = projectionService;
-        this.external = external;
+    private final CanonicalDividendDisplayReadPort display;
+    @Autowired public DividendHistoryService(CanonicalDividendDisplayReadPort display){this.display=display;}
+    /** Source-compatible construction only; production always injects the canonical read port. */
+    public DividendHistoryService(StockDividendHistoryRepository repository,DividendCurrentStateProjectionService ignored,DividendSyncPort unused){
+        this((keys,asOf)->{
+            Map<Key,Display> out=new HashMap<>();
+            for(Key key:keys){List<Day> days=repository.findByStockSinceYear(key.code(),key.market(),1900).stream()
+                .filter(r->r.anchorDate()!=null).map(r->new Day(r.anchorDate(),null,null,null,null,r.getSource(),null,null,null,
+                    "UNRESOLVED","舊資料未驗證",r.getEventKey(),false,false)).toList();out.put(key,new Display(key.code(),key.market(),days));}
+            return out;
+        });
     }
-
-    /** 從 DB 讀股利歷史；DB 沒資料時 fallback 觸發 external-materials-service 同步。 */
-    @Transactional
-    public DividendHistoryResult findFromDb(String code, String market, int years) {
-        projectFailSoft(code, market);
-        int sinceYear = Year.now().getValue() - years;
-        List<StockDividendHistory> rows = repo.findByStockSinceYear(code, market, sinceYear);
-        if (rows.isEmpty()) {
-            // cold cache：請 external-materials-service 抓一次，等回應後重新讀 DB
-            boolean synced = false;
-            try {
-                external.sync(code, market);
-                synced = true;
-            } catch (RuntimeException e) {
-                log.warn("觸發 external-materials-service /internal/dividend/sync 失敗: {}", e.getMessage());
-            }
-            if (synced) {
-                projectFailSoft(code, market);
-                rows = repo.findByStockSinceYear(code, market, sinceYear);
-            }
-            if (rows.isEmpty()) {
-                return new DividendHistoryResult(code, market, null, "查無資料", List.of());
-            }
+    @Transactional(readOnly=true) public DividendHistoryResult findFromDb(String code,String market,int years){return findFromDbReadOnly(code,market,years);}
+    @Transactional(readOnly=true) public DividendHistoryResult findFromDbReadOnly(String code,String market,int years){
+        if(years<1||years>20)throw new IllegalArgumentException("股利查詢年數須為1至20");
+        Instant now=Instant.now();int since=now.atZone(ZoneId.of("Asia/Taipei")).getYear()-years;
+        Key key=new Key(code,market);Display result=display.read(List.of(key),now).get(key);
+        List<Day> days=result==null?List.of():result.days().stream().filter(d->d.date().getYear()>=since&&!d.withdrawn())
+            .sorted(Comparator.comparing(Day::date).reversed()).toList();
+        List<DividendRow> rows=new ArrayList<>(days.stream().map(d->new DividendRow(d.date().getYear(),d.cash(),d.stock(),
+            d.cash()!=null&&d.cash().signum()==0&&d.stock()!=null&&d.stock().signum()>0?null:d.date().toString(),DividendCashEnrichmentService.isUsMarket(market)?null:d.yieldPct(),
+            d.cashPayment()==null?null:d.cashPayment().toString(),d.stockPayment()==null?null:d.stockPayment().toString(),DividendCashEnrichmentService.isUsMarket(market)?null:d.fillDays(),DividendCashEnrichmentService.isUsMarket(market)?null:d.previousClose(),
+            d.stock()!=null&&d.stock().signum()>0?d.date().toString():null,d.resolution(),d.reason(),d.source(),d.observedAt()==null?null:d.observedAt().toString())).toList());
+        if(result!=null)for(var missing:result.undated()) if(missing.year()!=null&&missing.year()>=since)rows.add(new DividendRow(missing.year(),null,null,null,null,null,null,null,null,null,"UNRESOLVED",missing.reason(),missing.source(),null));
+        Map<Integer,List<Day>> byYear=new TreeMap<>(Comparator.reverseOrder());days.forEach(d->byYear.computeIfAbsent(d.date().getYear(),x->new ArrayList<>()).add(d));
+        List<DividendAnnualSummary> summaries=new ArrayList<>();
+        for(var entry:byYear.entrySet()){
+            List<Day> items=entry.getValue();int unknown=(int)items.stream().filter(d->d.cash()==null||d.stock()==null||"UNRESOLVED".equals(d.resolution())).count();
+            String quality=unknown>0?"UNRESOLVED":items.stream().anyMatch(d->"FUTURE_PARTIAL".equals(d.resolution()))?"FUTURE_PARTIAL":"RESOLVED";
+            BigDecimal cash=unknown>0?null:items.stream().map(Day::cash).reduce(BigDecimal.ZERO,BigDecimal::add);
+            BigDecimal stock=unknown>0?null:items.stream().map(Day::stock).reduce(BigDecimal.ZERO,BigDecimal::add);
+            BigDecimal previous=items.stream().map(Day::previousClose).filter(v->v!=null&&v.signum()>0).findFirst().orElse(null);
+            BigDecimal yield=!DividendCashEnrichmentService.isUsMarket(market)&&cash!=null&&previous!=null?cash.multiply(BigDecimal.valueOf(100)).divide(previous,6,RoundingMode.HALF_UP):null;
+            summaries.add(new DividendAnnualSummary(entry.getKey(),cash,stock,yield,items.size(),unknown,quality));
         }
-        List<DividendRow> out = new ArrayList<>(rows.size());
-        for (StockDividendHistory h : rows) {
-            out.add(new DividendRow(
-                    h.getYear(),
-                    h.getCashDividend(),
-                    h.getStockDividend(),
-                    h.getExDividendDate() != null ? h.getExDividendDate().toString() : null,
-                    h.getYieldPct(),
-                    h.getCashPaymentDate() != null ? h.getCashPaymentDate().toString() : null,
-                    h.getStockPaymentDate() != null ? h.getStockPaymentDate().toString() : null,
-                    h.getFillDays(),
-                    h.getPreviousClose(),
-                    h.getExRightsDate() != null ? h.getExRightsDate().toString() : null
-            ));
+        if(result!=null)for(var missing:result.undated()) if(missing.year()!=null&&missing.year()>=since){
+            var old=summaries.stream().filter(x->x.year().equals(missing.year())).findFirst().orElse(null);
+            if(old!=null)summaries.remove(old);
+            summaries.add(new DividendAnnualSummary(missing.year(),null,null,null,old==null?1:old.eventCount()+1,old==null?1:old.unavailableCount()+1,"UNRESOLVED"));
         }
-        // Task 357：次要排序鍵改用 anchorDate，否則純配股事件（exDividendDate 為
-        // null）排序退化成空字串、被推到同年度所有列的最前面（顯示順序瑕疵）。
-        out.sort(Comparator
-                .comparing(DividendRow::year, Comparator.reverseOrder())
-                .thenComparing(r -> anchorDate(r) == null ? "" : anchorDate(r), Comparator.reverseOrder()));
-        String source = rows.get(0).getSource();
-        return new DividendHistoryResult(code, market, source, null, out);
-    }
-
-    /** anchorDate = exDividendDate ?? exRightsDate（Task 357），皆為 ISO 字串或 null。 */
-    private static String anchorDate(DividendRow row) {
-        return row.exDividendDate() != null ? row.exDividendDate() : row.exRightsDate();
-    }
-
-    private void projectFailSoft(String code, String market) {
-        try {
-            projectionService.projectOne(code, market, Instant.now());
-        } catch (RuntimeException e) {
-            log.warn("股利 current-state 投影失敗：{} {}: {}", market, code, e.getMessage());
-        }
-        try {
-            if (enrichmentService != null) enrichmentService.enrich(code, market, Instant.now());
-        } catch (RuntimeException e) {
-            log.warn("股利現金資訊回填失敗：{} {}: {}", market, code, e.getMessage());
-        }
-    }
-
-    /**
-     * 純讀股利歷史（績效比較頁 Requirement 33）：與 {@link #findFromDb} 同樣讀 stock_dividend_history、
-     * 產出同樣的 DividendRow 清單，但**移除 cold-cache sync 副作用**——DB 沒資料就回空清單，
-     * 絕不觸發 external-materials-service /internal/dividend/sync 寫入。故意不加 @Transactional / readOnly。
-     */
-    public DividendHistoryResult findFromDbReadOnly(String code, String market, int years) {
-        int sinceYear = Year.now().getValue() - years;
-        List<StockDividendHistory> rows = repo.findByStockSinceYear(code, market, sinceYear);
-        if (rows.isEmpty()) {
-            return new DividendHistoryResult(code, market, null, "查無資料", List.of());
-        }
-        List<DividendRow> out = new ArrayList<>(rows.size());
-        for (StockDividendHistory h : rows) {
-            out.add(new DividendRow(
-                    h.getYear(),
-                    h.getCashDividend(),
-                    h.getStockDividend(),
-                    h.getExDividendDate() != null ? h.getExDividendDate().toString() : null,
-                    h.getYieldPct(),
-                    h.getCashPaymentDate() != null ? h.getCashPaymentDate().toString() : null,
-                    h.getStockPaymentDate() != null ? h.getStockPaymentDate().toString() : null,
-                    h.getFillDays(),
-                    h.getPreviousClose(),
-                    h.getExRightsDate() != null ? h.getExRightsDate().toString() : null
-            ));
-        }
-        // Task 357：次要排序鍵改用 anchorDate，否則純配股事件（exDividendDate 為
-        // null）排序退化成空字串、被推到同年度所有列的最前面（顯示順序瑕疵）。
-        out.sort(Comparator
-                .comparing(DividendRow::year, Comparator.reverseOrder())
-                .thenComparing(r -> anchorDate(r) == null ? "" : anchorDate(r), Comparator.reverseOrder()));
-        String source = rows.get(0).getSource();
-        return new DividendHistoryResult(code, market, source, null, out);
+        summaries.sort(Comparator.comparing(DividendAnnualSummary::year).reversed());
+        String quality=rows.isEmpty()||summaries.stream().anyMatch(y->"UNRESOLVED".equals(y.quality()))?"UNRESOLVED":summaries.stream().anyMatch(y->"FUTURE_PARTIAL".equals(y.quality()))?"FUTURE_PARTIAL":"RESOLVED";
+        String source=rows.stream().map(DividendRow::source).filter(Objects::nonNull).distinct().sorted().reduce((a,b)->a+"、"+b).orElse(null);
+        return new DividendHistoryResult(code,market,source,rows.isEmpty()?"尚無可驗證的配息資料":null,rows,summaries,quality);
     }
 }

@@ -191,6 +191,26 @@ class FubonScheduledMarketClientTest {
         assertThatThrownBy(() -> client(200).dividends(List.of("2330", "2317"), DAY)).hasMessage("DIVIDEND_SCHEMA_INVALID");
         assertThatThrownBy(() -> client(200).dividends(List.of(), DAY)).hasMessage("INVALID_REQUEST");
     }
+    @Test void dividendWireKeepsEighteenDigitsAndRejectsOverflowWithoutRounding() {
+        String template="""
+                {"queryDate":"2026-08-28","observedAt":"2026-08-28T05:40:00Z","scopeFrom":"2025-10-12",
+                 "scopeTo":"2026-10-12","provider":"FUBON_SDK","rows":[
+                  {"symbol":"2330","status":"PARTIAL","usable":true,"reason":null,"events":[
+                    {"date":"2026-09-15","exchange":"TWSE","dividendType":"息","year":2026,"cashDividend":"%s",
+                     "stockDividend":null,"exDividendDate":"2026-09-15","exRightsDate":null,
+                     "cashPaymentDate":null,"stockPaymentDate":null}]}]}
+                """;
+        for (String cash : List.of("6.00003573","0.000000000000000001","999999999999.999999999999999999")) {
+            response.set(template.formatted(cash));
+            var event=client(200).dividends(List.of("2330"),DAY).rows().getFirst().events().getFirst();
+            assertThat(event.cashDividend()).isEqualByComparingTo(cash);
+            assertThat(event.stockDividend()).isEqualByComparingTo("0");
+        }
+        for (String cash : List.of("1000000000000","0.0000000000000000001")) {
+            response.set(template.formatted(cash));
+            assertThat(client(200).dividends(List.of("2330"),DAY).rows().getFirst().status()).isEqualTo("FAILED");
+        }
+    }
     @Test void real429StopsRunAndRawReasonNeverEscapes() {
         response.set("{\"secret\":\"fake-do-not-echo\"}");
         assertThatThrownBy(() -> client(429).technical("2330", DAY))

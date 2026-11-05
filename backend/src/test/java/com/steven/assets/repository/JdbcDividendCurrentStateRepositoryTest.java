@@ -45,9 +45,15 @@ class JdbcDividendCurrentStateRepositoryTest {
     }
 
     @Test
-    void cancellationIsAnExplicitAtomicOperation() {
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void cancellationIsAnExplicitAtomicOperation() throws Exception {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
 
+        ResultSet row=mock(ResultSet.class);
+        when(row.getString("stock_code")).thenReturn("2330");when(row.getString("market")).thenReturn("台股");
+        when(row.getObject("year",Integer.class)).thenReturn(2026);
+        when(row.getObject("ex_dividend_date",LocalDate.class)).thenReturn(LocalDate.of(2026,3,17));
+        when(jdbc.query(contains("WHERE id=?"),any(RowMapper.class),eq(7L))).thenAnswer(call->{RowMapper mapper=call.getArgument(1);return List.of(mapper.mapRow(row,0));});
         new JdbcDividendCurrentStateRepository(jdbc).cancelActiveEvent(7L);
 
         verify(jdbc).update(contains("event_status='CANCELLED'"), eq(7L));

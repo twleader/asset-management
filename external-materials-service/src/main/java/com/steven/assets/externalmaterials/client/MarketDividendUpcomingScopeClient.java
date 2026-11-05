@@ -51,12 +51,18 @@ public class MarketDividendUpcomingScopeClient implements DividendUpcomingScopeC
         UpcomingScope providerScope = fallback == null
                 ? UpcomingScope.unavailable("FinMind/Yahoo provider fallback 未設定")
                 : fallback.fetchProviderUpcomingScope(stockCode, market, from, to);
+        if (official != null && official.dateGroupsComplete() && !official.events().isEmpty()) return official;
         if (providerScope != null && providerScope.complete()) return providerScope;
+        if (providerScope != null && providerScope.dateGroupsComplete() && !providerScope.events().isEmpty()) return providerScope;
         if (official != null && !official.events().isEmpty()) return official;
         if (providerScope != null && !providerScope.events().isEmpty()) return providerScope;
         String officialReason = official == null ? "official adapter 未回結果" : official.errorReason();
         String fallbackReason = providerScope == null ? "provider fallback 未回結果" : providerScope.errorReason();
-        return UpcomingScope.unavailable(joinReasons(officialReason, fallbackReason));
+        UpcomingScope retained = providerScope != null && providerScope.provider() != null ? providerScope : official;
+        if (retained == null) return UpcomingScope.unavailable(joinReasons(officialReason, fallbackReason));
+        return new UpcomingScope(retained.provider(), retained.scopeFrom(), retained.scopeTo(), retained.sourceAvailableAt(),
+                false, retained.events(), joinReasons(officialReason, fallbackReason), retained.sourceUrls(),
+                retained.normalizerVersion(), retained.amountBasis(), retained.dateGroupsComplete(), retained.capturedAt(), retained.failureKind());
     }
 
     private static String joinReasons(String first, String second) {

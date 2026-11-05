@@ -2,6 +2,7 @@ package com.steven.assets.externalmaterials.service;
 
 import com.steven.assets.externalmaterials.model.marketdata.DividendData.DividendFetchResult;
 import com.steven.assets.externalmaterials.model.marketdata.DividendData.FetchStatus;
+import com.steven.assets.externalmaterials.model.marketdata.DividendNormalization;
 import com.steven.assets.externalmaterials.service.port.DividendEvidencePort;
 import java.time.LocalDate;
 import java.util.List;
@@ -74,7 +75,9 @@ public class FubonDividendEvidenceSyncService {
                 if (!dryRun) {
                     var written = store.record(row.symbol(), MARKET,
                             new DividendFetchResult(PROVIDER, row.events(), rowFailed ? FetchStatus.FAILED : FetchStatus.PARTIAL,
-                                    batch.scopeFrom(), batch.scopeTo(), null, row.reason(), List.of()), batch.observedAt());
+                                    batch.scopeFrom(), batch.scopeTo(), null, row.reason(), List.of(),
+                                    DividendNormalization.VERSION, DividendNormalization.NOMINAL,
+                                    !rowFailed && row.reason() == null && DividendNormalization.completeComponents(row.events())), batch.observedAt());
                     if (written.complete() || !"PARTIAL".equals(written.status()) && !rowFailed) {
                         failed++; continue;
                     }

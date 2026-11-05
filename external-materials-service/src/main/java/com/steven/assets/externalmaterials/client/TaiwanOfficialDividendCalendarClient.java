@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.model.DividendDates;
 import com.steven.assets.externalmaterials.model.marketdata.DividendData;
+import com.steven.assets.externalmaterials.model.marketdata.DividendNormalization;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -69,7 +70,8 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
 
     TaiwanOfficialDividendCalendarClient(HttpClient http, ObjectMapper mapper, Clock clock) {
         this.http = http;
-        this.mapper = mapper;
+        this.mapper = mapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
         this.clock = clock;
     }
 
@@ -90,14 +92,17 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             if (previous != null && now.isBefore(previous.expiresAt())) return previous;
             ScopeResult loaded = loadScope(officialAsOf);
             Duration ttl = loaded.complete() ? SUCCESS_CACHE_TTL : FAILURE_CACHE_TTL;
-            return new CachedScope(loaded, now.plus(ttl));
+            return new CachedScope(loaded, now.plus(ttl), loaded.complete() ? clock.instant() : null);
         });
         ScopeResult result = cached.result();
         if (!result.complete()) return UpcomingScope.unavailable(result.errorReason());
         List<DividendData.DividendEvent> events = selectTarget(
                 stockCode, from, to, result.events());
+        boolean groupsComplete = DividendNormalization.completeComponents(events)
+                && events.stream().allMatch(event -> event.cashDividend() != null && event.stockDividend() != null);
         return new UpcomingScope(PROVIDER, from, to, result.sourceAvailableAt(),
-                true, events, null, List.of(TWSE_URL, TPEX_URL));
+                false, events, "HTTP日期只能證明此份公告快照時間，未證明未來45日公告完整性", List.of(TWSE_URL, TPEX_URL),
+                DividendNormalization.VERSION, DividendNormalization.NOMINAL, groupsComplete, cached.capturedAt());
     }
 
     private ScopeResult loadScope(LocalDate officialAsOf) {
@@ -159,7 +164,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             BigDecimal stock = stockDividend(row, "StockDividendRatio", "TWSE");
             BigDecimal cash = optionalDecimal(row, "CashDividend", "TWSE");
             if (kind.contains("息") || positive(stock)) {
-                events.add(new OfficialEvent(code, toEvent(date, cash, stock, kind)));
+                events.add(new OfficialEvent(code, toEvent(code, "TWSE", date, cash, stock, kind)));
             }
         }
         return List.copyOf(events);
@@ -176,7 +181,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             BigDecimal stock = stockDividend(row, "StockDividendRatio", "TPEx");
             BigDecimal cash = optionalDecimal(row, "CashDividend", "TPEx");
             if (kind.contains("息") || positive(stock)) {
-                events.add(new OfficialEvent(code, toEvent(date, cash, stock, kind)));
+                events.add(new OfficialEvent(code, toEvent(code, "TPEX", date, cash, stock, kind)));
             }
         }
         return List.copyOf(events);
@@ -191,18 +196,21 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
      * exDividendDate，是除權日被誤標成除息日的原始缺陷之一。
      */
     private static DividendData.DividendEvent toEvent(
-            LocalDate date, BigDecimal cash, BigDecimal stock, String kind) {
+            String code, String source, LocalDate date, BigDecimal cash, BigDecimal stock, String kind) {
         String iso = date.toString();
+        String component = DividendNormalization.componentId(source, code, iso, kind);
+        if (!kind.contains("權")) stock = BigDecimal.ZERO;
+        if (!kind.contains("息")) cash = BigDecimal.ZERO;
         if (positive(cash) && positive(stock)) {
             return new DividendData.DividendEvent(
-                    date.getYear(), cash, stock, iso, iso, null, null);
+                    date.getYear(), cash, stock, iso, iso, null, null, component);
         }
         if (kind != null && kind.contains("息")) {
             return new DividendData.DividendEvent(
-                    date.getYear(), cash, stock, iso, null, null, null);
+                    date.getYear(), cash, stock, iso, null, null, null, component);
         }
         return new DividendData.DividendEvent(
-                date.getYear(), cash, stock, null, iso, null, null);
+                date.getYear(), cash, stock, null, iso, null, null, component);
     }
 
     @SafeVarargs
@@ -269,7 +277,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
 
     private static BigDecimal stockDividend(JsonNode row, String field, String source) {
         BigDecimal ratio = optionalDecimal(row, field, source);
-        return ratio == null ? null : ratio.multiply(STOCK_PAR_VALUE);
+        return ratio == null ? null : DividendNormalization.exact(ratio.multiply(STOCK_PAR_VALUE));
     }
 
     private static BigDecimal optionalDecimal(JsonNode row, String field, String source) {
@@ -281,7 +289,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
             return null;
         }
         try {
-            return new BigDecimal(text);
+            return DividendNormalization.exact(new BigDecimal(text));
         } catch (NumberFormatException e) {
             throw new IllegalStateException(source + " 數值不可解析 " + field);
         }
@@ -325,7 +333,7 @@ public class TaiwanOfficialDividendCalendarClient implements DividendUpcomingSco
         boolean complete() { return errorReason == null && sourceAvailableAt != null; }
     }
 
-    private record CachedScope(ScopeResult result, Instant expiresAt) {}
+    private record CachedScope(ScopeResult result, Instant expiresAt, Instant capturedAt) {}
 
     @FunctionalInterface
     private interface BodyParser {

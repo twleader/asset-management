@@ -97,4 +97,41 @@ class MarketDividendUpcomingScopeClientTest {
         assertThat(router.fetch("VOO", "美股", from, to)).isSameAs(yahooScope);
         verify(fallback).fetchProviderUpcomingScope("VOO", "美股", from, to);
     }
+    @Test
+    void partialOfficialPositiveWinsWithoutConcatenationOrPromotionToComplete() {
+        var us=mock(NasdaqDividendCalendarClient.class); var tw=mock(TaiwanOfficialDividendCalendarClient.class);
+        org.springframework.beans.factory.ObjectProvider<DividendFetchClient> provider=mock();
+        var fallback=mock(DividendFetchClient.class);
+        LocalDate from=LocalDate.of(2026,11,5), to=from.plusDays(45);
+        var event=new DividendData.DividendEvent(2026,new java.math.BigDecimal("7"),java.math.BigDecimal.ZERO,"2026-12-10",null,"2027-01-07",null,"official-id");
+        var official=new DividendUpcomingScopeClient.UpcomingScope("TWSE",from,to,null,false,List.of(event),"not complete",List.of(),2,"NOMINAL_PER_EX_DATE",true);
+        var emptyComplete=new DividendUpcomingScopeClient.UpcomingScope("fallback",from,to,java.time.Instant.now(),true,List.of(),null);
+        when(tw.fetch("2330","台股",from,to)).thenReturn(official);
+        when(provider.getIfAvailable()).thenReturn(fallback);
+        when(fallback.fetchProviderUpcomingScope("2330","台股",from,to)).thenReturn(emptyComplete);
+        var actual=new MarketDividendUpcomingScopeClient(us,tw,provider).fetch("2330","台股",from,to);
+        assertThat(actual).isSameAs(official); assertThat(actual.complete()).isFalse();
+        assertThat(actual.events()).containsExactly(event);
+    }
+    @Test
+    void partialFallbackPositiveAndEmptyCoverageKeepTheirSourceEvidence() {
+        var us=mock(NasdaqDividendCalendarClient.class); var tw=mock(TaiwanOfficialDividendCalendarClient.class);
+        org.springframework.beans.factory.ObjectProvider<DividendFetchClient> provider=mock();
+        var fallback=mock(DividendFetchClient.class);
+        LocalDate from=LocalDate.of(2026,11,5), to=from.plusDays(45);
+        var official=new DividendUpcomingScopeClient.UpcomingScope("TWSE",from,to,null,false,List.of(),"official partial",List.of(),2,"NOMINAL_PER_EX_DATE",true);
+        var event=new DividendData.DividendEvent(2026,new java.math.BigDecimal("7"),java.math.BigDecimal.ZERO,"2026-12-10",null,null,null,"fallback-id");
+        var positive=new DividendUpcomingScopeClient.UpcomingScope("FinMind[TaiwanStockDividend]",from,to,null,false,List.of(event),"fallback partial",List.of(),2,"NOMINAL_PER_EX_DATE",true);
+        var empty=new DividendUpcomingScopeClient.UpcomingScope("FinMind[TaiwanStockDividend]",from,to,null,false,List.of(),"fallback partial",List.of(),2,"NOMINAL_PER_EX_DATE",true);
+        when(tw.fetch("2330","台股",from,to)).thenReturn(official);
+        when(provider.getIfAvailable()).thenReturn(fallback);
+        when(fallback.fetchProviderUpcomingScope("2330","台股",from,to)).thenReturn(positive,empty);
+        var router=new MarketDividendUpcomingScopeClient(us,tw,provider);
+        assertThat(router.fetch("2330","台股",from,to)).isSameAs(positive);
+        var retained=router.fetch("2330","台股",from,to);
+        assertThat(retained.provider()).isEqualTo(empty.provider()); assertThat(retained.complete()).isFalse();
+        assertThat(retained.scopeFrom()).isEqualTo(from);
+        assertThat(retained.errorReason()).contains("official partial","fallback partial");
+    }
+
 }

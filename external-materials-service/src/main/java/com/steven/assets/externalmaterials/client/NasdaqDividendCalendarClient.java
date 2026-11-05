@@ -3,8 +3,8 @@ package com.steven.assets.externalmaterials.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.steven.assets.externalmaterials.model.marketdata.DividendData;
+import com.steven.assets.externalmaterials.model.marketdata.DividendNormalization;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -60,7 +60,8 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
 
     NasdaqDividendCalendarClient(HttpClient http, ObjectMapper mapper, Clock clock) {
         this.http = http;
-        this.mapper = mapper;
+        this.mapper = mapper.copy().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .setNodeFactory(com.fasterxml.jackson.databind.node.JsonNodeFactory.withExactBigDecimals(true));
         this.clock = clock;
     }
 
@@ -91,7 +92,9 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
         return new UpcomingScope("NASDAQ_DIVIDEND_CALENDAR", from, to,
                 calendar.fetchedAt(), true, events, null,
                 java.util.stream.IntStream.rangeClosed(0, (int) ChronoUnit.DAYS.between(from, to))
-                        .mapToObj(i -> URL + from.plusDays(i)).toList());
+                        .mapToObj(i -> URL + from.plusDays(i)).toList(),
+                DividendNormalization.VERSION, DividendNormalization.NOMINAL,
+                DividendNormalization.completeComponents(events), calendar.fetchedAt());
     }
 
     private ScopeCalendar load(LocalDate from, LocalDate to) {
@@ -143,6 +146,9 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
             for (JsonNode row : rows) {
                 String symbol = row.path("symbol").asText("").trim().toUpperCase(Locale.ROOT);
                 LocalDate exDate = parseDate(row.path("dividend_Ex_Date").asText(null));
+                String type = row.path("dividend_Type").asText("");
+                if (!java.util.Set.of("Cash", "Special Cash").contains(type))
+                    return DayCalendar.failed("Nasdaq calendar cash unit/type unverified date=" + requested);
                 BigDecimal amount = decimal(row.get("dividend_Rate"));
                 if (symbol.isBlank() || exDate == null || !exDate.equals(requested)
                         || amount == null || amount.signum() <= 0) {
@@ -151,8 +157,11 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
                 LocalDate payment = parseDate(row.path("payment_Date").asText(null));
                 // US-only：Nasdaq dividend_Rate 只有現金股利，exRightsDate 恆 null。
                 events.add(new SymbolEvent(symbol, new DividendData.DividendEvent(
-                        exDate.getYear(), amount.setScale(4, RoundingMode.HALF_UP), BigDecimal.ZERO,
-                        exDate.toString(), null, payment == null ? null : payment.toString(), null)));
+                        exDate.getYear(), amount, BigDecimal.ZERO,
+                        exDate.toString(), null, payment == null ? null : payment.toString(), null,
+                        DividendNormalization.componentId("NASDAQ_CALENDAR", symbol,
+                                exDate.toString(), row.path("dividend_Type").asText("CASH"),
+                                payment == null ? "PAYMENT_UNANNOUNCED" : payment.toString()))));
             }
             return DayCalendar.complete(events);
         } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -162,7 +171,7 @@ public class NasdaqDividendCalendarClient implements DividendUpcomingScopeClient
 
     private static BigDecimal decimal(JsonNode node) {
         if (node == null || node.isNull()) return null;
-        try { return new BigDecimal(node.asText()); }
+        try { return DividendNormalization.exact(new BigDecimal(node.asText())); }
         catch (RuntimeException e) { return null; }
     }
 

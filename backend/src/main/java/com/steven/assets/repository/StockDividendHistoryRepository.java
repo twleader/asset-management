@@ -44,9 +44,10 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
     @Query("""
         SELECT h FROM StockDividendHistory h
         WHERE h.stockCode = :code AND h.market = :market
-          AND LEAST(h.exDividendDate, h.exRightsDate) BETWEEN :fromDate AND :toDate
+          AND ((COALESCE(h.canonicalDate, LEAST(h.exDividendDate, h.exRightsDate)) BETWEEN :fromDate AND :toDate)
+               OR (h.canonicalDate IS NULL AND h.exDividendDate IS NULL AND h.exRightsDate IS NULL
+                   AND h.year BETWEEN year(:fromDate) AND year(:toDate)))
           AND h.eventStatus = 'ACTIVE'
-          AND (COALESCE(h.cashDividend, 0) > 0 OR COALESCE(h.stockDividend, 0) > 0)
         ORDER BY LEAST(h.exDividendDate, h.exRightsDate) ASC, h.id ASC
         """)
     List<StockDividendHistory> findAdjustmentEvents(

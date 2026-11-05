@@ -41,7 +41,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(new BigDecimal("10.00"))
                 .build();
 
-        var adjusted = service.adjust(raw, List.of(dividend));
+        var adjusted = service.adjust(raw, canonical(dividend));
 
         assertTrue(adjusted.adjusted());
         assertEquals(0, new BigDecimal("91.00").compareTo(adjusted.rowsDesc().get(0).getClosePrice()));
@@ -77,7 +77,7 @@ class DistributionAdjustedPriceServiceTest {
                 .stockDividend(BigDecimal.ONE)
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(dividend));
+        var adjusted = service.adjust(rows, canonical(dividend));
 
         assertTrue(adjusted.adjusted());
         assertEquals(0, new BigDecimal("100.00").compareTo(adjusted.rowsDesc().get(0).getClosePrice()));
@@ -114,7 +114,7 @@ class DistributionAdjustedPriceServiceTest {
                 .id(20L).stockCode("00751B").market("台股")
                 .exDividendDate(exDate).cashDividend(BigDecimal.TEN).build();
 
-        var adjusted = service.adjust(rows, List.of(dividend));
+        var adjusted = service.adjust(rows, canonical(dividend));
 
         assertTrue(adjusted.adjusted());
         assertEquals(120L, adjusted.rowsDesc().get(0).getVolume());
@@ -238,7 +238,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(new BigDecimal("5.00"))
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(dividend));
+        var adjusted = service.adjust(rows, canonical(dividend));
 
         assertTrue(adjusted.adjusted());
         // 最新價不動；分割前的 200 先 ÷4 得 50，再乘上除息因子 45/50 得 45。
@@ -264,7 +264,7 @@ class DistributionAdjustedPriceServiceTest {
                 .stockDividend(BigDecimal.TEN)   // 配股 10 元 → 1:1，價格腰斬
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(stockDividend));
+        var adjusted = service.adjust(rows, canonical(stockDividend));
 
         assertTrue(adjusted.adjusted());
         assertEquals(0, new BigDecimal("50.00").compareTo(adjusted.rowsDesc().get(0).getClosePrice()));
@@ -342,7 +342,7 @@ class DistributionAdjustedPriceServiceTest {
                 .id(31L).stockCode("00751B").market("台股")
                 .exDividendDate(exDate).cashDividend(new BigDecimal("5.00")).build();
 
-        var adjusted = service.adjust(rows, List.of(dividend));
+        var adjusted = service.adjust(rows, canonical(dividend));
 
         assertTrue(adjusted.adjusted());
         assertEquals(List.of(splitDate, exDate), adjusted.appliedEventDates(),
@@ -391,7 +391,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(BigDecimal.ZERO).stockDividend(new BigDecimal("2.690500"))
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(pureStock));
+        var adjusted = service.adjust(rows, canonical(pureStock));
 
         assertTrue(adjusted.adjusted());
         assertEquals(List.of(exRights), adjusted.appliedEventDates());
@@ -424,7 +424,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(new BigDecimal("2.00")).stockDividend(new BigDecimal("1.00"))
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(event));
+        var adjusted = service.adjust(rows, canonical(event));
 
         assertTrue(adjusted.adjusted());
         assertEquals(List.of(exDividend, exRights), adjusted.appliedEventDates(),
@@ -448,7 +448,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(new BigDecimal("2.00")).stockDividend(new BigDecimal("1.00"))
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(event));
+        var adjusted = service.adjust(rows, canonical(event));
 
         assertTrue(adjusted.adjusted());
         assertEquals(List.of(sameDate), adjusted.appliedEventDates(),
@@ -473,7 +473,7 @@ class DistributionAdjustedPriceServiceTest {
                 .cashDividend(BigDecimal.ZERO).stockDividend(new BigDecimal("10.00"))
                 .build();
 
-        var adjusted = service.adjust(rows, List.of(pureStock));
+        var adjusted = service.adjust(rows, canonical(pureStock));
 
         // 若被誤判為分割，appliedEventDates 會多出一筆 detectSplits 產生的事件；
         // 純配股 10 元＝1:1 換股，dividendFactor 應為 2（面額 10），與分割的 canonical 2
@@ -481,6 +481,24 @@ class DistributionAdjustedPriceServiceTest {
         assertTrue(adjusted.adjusted());
         assertEquals(List.of(jumpDate), adjusted.appliedEventDates(),
                 "跳空已由股票股利（除權日）解釋，不得再被 detectSplits 認定為分割");
+    }
+
+    /** Existing arithmetic fixtures now describe V2 canonical rows, already split by effective date. */
+    private static List<StockDividendHistory> canonical(StockDividendHistory event) {
+        BigDecimal cash=event.getCashDividend()==null?BigDecimal.ZERO:event.getCashDividend();
+        BigDecimal stock=event.getStockDividend()==null?BigDecimal.ZERO:event.getStockDividend();
+        LocalDate cashDate=event.getExDividendDate(),stockDate=event.getExRightsDate()==null?cashDate:event.getExRightsDate();
+        if(cash.signum()==0)cashDate=stockDate;
+        if(stock.signum()==0)stockDate=cashDate;
+        if(java.util.Objects.equals(cashDate,stockDate))return List.of(canonicalRow(event,event.getId(),cashDate,cash,stock));
+        return List.of(canonicalRow(event,event.getId()*10,cashDate,cash,BigDecimal.ZERO),
+                canonicalRow(event,event.getId()*10+1,stockDate,BigDecimal.ZERO,stock));
+    }
+    private static StockDividendHistory canonicalRow(StockDividendHistory original,Long id,LocalDate date,BigDecimal cash,BigDecimal stock){
+        return StockDividendHistory.builder().id(id).stockCode(original.getStockCode()).market(original.getMarket())
+                .year(date.getYear()).canonicalDate(date).exDividendDate(cash.signum()>0?date:null)
+                .exRightsDate(stock.signum()>0?date:null).cashDividend(cash).stockDividend(stock)
+                .sourceSnapshotId(1L).source("VERIFIED_FIXTURE").resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
     }
 
     private StockPriceHistory row(LocalDate date, BigDecimal close) {

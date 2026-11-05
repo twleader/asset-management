@@ -16,10 +16,15 @@ public class AnnualDividendService {
     private final TenantGuard tenantGuard;
     private final AnnualDividendReadRepository repository;
     private final Clock clock;
+    private CanonicalDividendDisplayReadPort display;
 
     @Autowired
-    public AnnualDividendService(TenantGuard tenantGuard, AnnualDividendReadRepository repository) {
+    public AnnualDividendService(TenantGuard tenantGuard, AnnualDividendReadRepository repository, CanonicalDividendDisplayReadPort display) {
         this(tenantGuard, repository, Clock.system(ZoneId.of("Asia/Taipei")));
+        this.display=display;
+    }
+    public AnnualDividendService(TenantGuard tenantGuard, AnnualDividendReadRepository repository) {
+        this(tenantGuard,repository,Clock.system(ZoneId.of("Asia/Taipei")));
     }
     AnnualDividendService(TenantGuard tenantGuard, AnnualDividendReadRepository repository, Clock clock) {
         this.tenantGuard = tenantGuard;
@@ -44,6 +49,21 @@ public class AnnualDividendService {
         }
         if (year < 1900 || year > 2100) throw new IllegalArgumentException("年度須為1900至2100");
         var facts = repository.load(owner, today);
+        if(display!=null){
+            var keys=facts.securities().stream().map(s->new com.steven.assets.model.CanonicalDividend.Key(s.code(),s.market())).toList();
+            var shared=display.read(keys,clock.instant());
+            var events=new java.util.ArrayList<com.steven.assets.model.AnnualDividendData.Event>();
+            long sequence=0;
+            for(var security:facts.securities()){
+                var value=shared.get(new com.steven.assets.model.CanonicalDividend.Key(security.code(),security.market()));
+                if(value==null)continue;
+                for(var missing:value.undated())if(missing.year()!=null)events.add(new com.steven.assets.model.AnnualDividendData.Event(++sequence,security.code(),security.market(),missing.year(),null,null,null,null,null,missing.source(),"UNRESOLVED",missing.reason()));
+                for(var day:value.days())events.add(new com.steven.assets.model.AnnualDividendData.Event(++sequence,security.code(),security.market(),day.date().getYear(),
+                    day.cash()!=null&&day.cash().signum()==0&&day.stock()!=null&&day.stock().signum()>0?null:day.date(),
+                    day.stock()!=null&&day.stock().signum()>0?day.date():null,day.cashPayment(),day.cash(),day.stock(),day.source(),day.resolution(),day.reason()));
+            }
+            facts=new com.steven.assets.model.AnnualDividendData.Facts(facts.securities(),facts.snapshots(),facts.trades(),events,facts.markets());
+        }
         String market = requestedMarket == null ? "" : requestedMarket;
         if (!market.isEmpty() && facts.markets().stream().noneMatch(m -> m.code().equals(market)))
             throw new IllegalArgumentException("市場代碼不存在");

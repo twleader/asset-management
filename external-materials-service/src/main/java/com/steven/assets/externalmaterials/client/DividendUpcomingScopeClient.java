@@ -20,7 +20,33 @@ public interface DividendUpcomingScopeClient {
             boolean complete,
             List<DividendData.DividendEvent> events,
             String errorReason,
-            List<String> sourceUrls) {
+            List<String> sourceUrls,
+            int normalizerVersion,
+            String amountBasis,
+            boolean dateGroupsComplete,
+            Instant capturedAt,
+            DividendData.SourceFailureKind failureKind) {
+        public UpcomingScope(String provider, LocalDate scopeFrom, LocalDate scopeTo,
+                             Instant sourceAvailableAt, boolean complete, List<DividendData.DividendEvent> events,
+                             String errorReason, List<String> sourceUrls, int normalizerVersion,
+                             String amountBasis, boolean dateGroupsComplete) {
+            this(provider, scopeFrom, scopeTo, sourceAvailableAt, complete, events, errorReason, sourceUrls,
+                    normalizerVersion, amountBasis, dateGroupsComplete, null, DividendData.SourceFailureKind.NONE);
+        }
+        public UpcomingScope(String provider, LocalDate scopeFrom, LocalDate scopeTo,
+                             Instant sourceAvailableAt, boolean complete, List<DividendData.DividendEvent> events,
+                             String errorReason, List<String> sourceUrls, int normalizerVersion,
+                             String amountBasis, boolean dateGroupsComplete, Instant capturedAt) {
+            this(provider, scopeFrom, scopeTo, sourceAvailableAt, complete, events, errorReason, sourceUrls,
+                    normalizerVersion, amountBasis, dateGroupsComplete, capturedAt, DividendData.SourceFailureKind.NONE);
+        }
+
+        public UpcomingScope(String provider, LocalDate scopeFrom, LocalDate scopeTo,
+                             Instant sourceAvailableAt, boolean complete,
+                             List<DividendData.DividendEvent> events, String errorReason, List<String> sourceUrls) {
+            this(provider, scopeFrom, scopeTo, sourceAvailableAt, complete, events, errorReason,
+                    sourceUrls, 1, "LEGACY_UNVERIFIED", false);
+        }
 
         public UpcomingScope(String provider, LocalDate scopeFrom, LocalDate scopeTo,
                              Instant sourceAvailableAt, boolean complete,
@@ -31,6 +57,7 @@ public interface DividendUpcomingScopeClient {
         }
 
         public UpcomingScope {
+            failureKind = failureKind == null ? DividendData.SourceFailureKind.NONE : failureKind;
             events = events == null ? List.of() : List.copyOf(events);
             sourceUrls = sourceUrls == null ? List.of() : sourceUrls.stream()
                     .filter(url -> url != null && !url.isBlank()).distinct().toList();

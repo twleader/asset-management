@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+from decimal import Decimal, InvalidOperation
 
 from .normalization import (
     TAIPEI, canonical_number, decimal_value, instant, observed_at, stock_codes,
@@ -80,22 +80,16 @@ class DividendService:
                 if cash_raw is None and "息" in kind:
                     raise ValueError("DIVIDEND_SCHEMA_INVALID")
                 cash = decimal_value(cash_raw) if cash_raw is not None else Decimal(0)
-                if cash < 0 or cash.adjusted() > 12:
+                if cash < 0 or cash.adjusted() >= 12:
                     raise ValueError("DIVIDEND_SCHEMA_INVALID")
-                with localcontext() as context:
-                    context.prec = 40
-                    rounded = cash.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-                if len(rounded.as_tuple().digits) > 18:
-                    raise ValueError("DIVIDEND_SCHEMA_INVALID")
+                exact_cash = canonical_number(cash, precision=30, scale=18, nonnegative=True)
                 if "權" in kind:
                     reason = "STOCK_DIVIDEND_UNIT_UNVERIFIED"
-                if "息" not in kind or rounded <= 0:
-                    if cash > 0 and rounded == 0 and reason is None:
-                        reason = "DIVIDEND_ROUNDED_TO_ZERO"
+                if "息" not in kind or cash <= 0:
                     continue
                 date_text = event_date.isoformat()
                 events.append({"date": date_text, "exchange": row["exchange"], "dividendType": kind,
-                               "year": event_date.year, "cashDividend": format(rounded, "f"),
+                               "year": event_date.year, "cashDividend": exact_cash,
                                "stockDividend": None, "exDividendDate": date_text,
                                "exRightsDate": date_text if "權" in kind else None,
                                "cashPaymentDate": None, "stockPaymentDate": None})

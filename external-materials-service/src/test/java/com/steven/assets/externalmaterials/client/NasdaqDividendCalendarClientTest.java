@@ -37,7 +37,7 @@ class NasdaqDividendCalendarClientTest {
     void rowParsesOnlyWhenExDateMatchesRequestedCalendarDay() {
         var day = client.parseDay(LocalDate.of(2026, 8, 10), """
                 {"data":{"calendar":{"asOf":"Mon, Aug 10, 2026","rows":[{
-                  "symbol":"AAPL","dividend_Ex_Date":"8/10/2026","payment_Date":"8/13/2026",
+                  "symbol":"AAPL","dividend_Type":"Cash","dividend_Ex_Date":"8/10/2026","payment_Date":"8/13/2026",
                   "dividend_Rate":0.27}]}},"status":{"rCode":200}}
                 """);
 
@@ -57,7 +57,7 @@ class NasdaqDividendCalendarClientTest {
                 """);
         var malformed = client.parseDay(LocalDate.of(2026, 8, 10), """
                 {"data":{"calendar":{"asOf":"Mon, Aug 10, 2026","rows":[{
-                  "symbol":"AAPL","dividend_Ex_Date":"8/10/2026","dividend_Rate":"N/A"}]}},
+                  "symbol":"AAPL","dividend_Type":"Cash","dividend_Ex_Date":"8/10/2026","dividend_Rate":"N/A"}]}},
                  "status":{"rCode":200}}
                 """);
 
@@ -84,4 +84,15 @@ class NasdaqDividendCalendarClientTest {
         assertThat(second.complete()).isFalse();
         verify(http, times(1)).send(any(), any());
     }
+    @Test
+    void numericStockAmountOrMissingTypeCannotProveCashCalendar() {
+        for (String type : java.util.List.of("Stock", "Split", "Unknown", "")) {
+            var day=client.parseDay(LocalDate.of(2026,8,10), """
+                {"data":{"calendar":{"asOf":"Mon, Aug 10, 2026","rows":[{
+                "symbol":"AAPL","dividend_Type":"%s","dividend_Ex_Date":"8/10/2026","dividend_Rate":4}]}},"status":{"rCode":200}}
+                """.formatted(type));
+            assertThat(day.complete()).isFalse(); assertThat(day.events()).isEmpty();
+        }
+    }
+
 }

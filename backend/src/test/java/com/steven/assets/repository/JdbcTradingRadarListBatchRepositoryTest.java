@@ -113,6 +113,23 @@ class JdbcTradingRadarListBatchRepositoryTest {
                 new TradingRadarListBatchRepository.Key("X", null)), 500)).isEmpty();
     }
 
+    @Test void unknownAndUndatedActiveDividendFactsReachGuardInsteadOfBeingFilteredIntoAnEmptySet(){
+        jdbc.execute("DROP TABLE IF EXISTS stock_dividend_history");
+        jdbc.execute("CREATE TABLE stock_dividend_history(id BIGINT, stock_code TEXT, market TEXT, year INT, cash_dividend NUMERIC(30,18), stock_dividend NUMERIC(30,18), ex_dividend_date DATE, ex_rights_date DATE, yield_pct NUMERIC, cash_payment_date DATE, stock_payment_date DATE, fill_days INT, previous_close NUMERIC, source TEXT, event_key TEXT, event_status TEXT, updated_at TIMESTAMP, canonical_date DATE, source_snapshot_id BIGINT, resolution_status TEXT, resolution_reason TEXT)");
+        for(int id=1;id<=5;id++)jdbc.update("INSERT INTO stock_dividend_history(id,stock_code,market,year,event_status,resolution_status,canonical_date,ex_dividend_date,source_snapshot_id,cash_dividend,stock_dividend) VALUES (?,'SAME','台股',2026,?,?,?,?,?, ?,?)",
+                id,id==5?"SUPERSEDED":"ACTIVE",id==1?"LEGACY":id==2?"RESOLVED":"UNRESOLVED",
+                id==4?null:LocalDate.parse("2026-09-23"),id==4?null:LocalDate.parse("2026-09-23"),id==2?7L:null,
+                id==2?new BigDecimal("6.000035730000000001"):null,id==2?BigDecimal.ZERO:null);
+        var key=new TradingRadarListBatchRepository.Key("SAME","台股");
+        var result=repository.findAdjustmentEvents(List.of(key),java.util.Map.of(key,prices("SAME","台股",3,1))).get(key);
+        assertThat(result).extracting(com.steven.assets.model.StockDividendHistory::getId).containsExactly(1L,2L,3L,4L);
+        assertThat(result).filteredOn(x->Long.valueOf(2).equals(x.getId())).singleElement().satisfies(x->{
+            assertThat(x.getCashDividend()).isEqualByComparingTo("6.000035730000000001");
+            assertThat(x.getResolutionStatus()).isEqualTo("RESOLVED");assertThat(x.getSourceSnapshotId()).isEqualTo(7L);
+        });
+        assertThat(com.steven.assets.service.CanonicalDividendFinancialFacts.assess(result).available()).isFalse();
+    }
+
     private static List<StockPriceHistory> prices(String code, String market, int count, long idStart) {
         List<StockPriceHistory> rows = new ArrayList<>();
         for (int i = 0; i < count; i++) {

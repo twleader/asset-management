@@ -146,37 +146,47 @@
           <el-icon class="is-loading" size="36"><Loading /></el-icon>
           <div>載入股利資料中…</div>
         </div>
-        <div v-else-if="!dividendHistory.rows?.length" class="analysis-empty">
+        <div v-else-if="!dividendHistory.rows?.length && !dividendHistory.annualSummaries?.length" class="analysis-empty">
           {{ dividendHistory.message || '查無股利資料' }}
         </div>
         <template v-else>
-          <div style="margin-bottom:8px;color:#64748b;font-size:12px">
-            資料來源：{{ dividendHistory.source }}
+          <div class="dividend-history-meta">
+            整體資料狀態：{{ dividendQualityLabel(dividendHistory.quality) }}
           </div>
           <el-table :data="dividendDisplayRows" size="small" border max-height="500" style="width:100%"
             :row-class-name="dividendRowClass">
             <el-table-column label="年度" width="80" align="center">
               <template #default="{ row }">
-                <span v-if="row.isYearSummary" style="font-weight:700">{{ row.year }}</span>
-                <span v-else>{{ row.year }}</span>
+                <span v-if="row.isYearSummary" style="font-weight:700">{{ row.year ?? '—' }}</span>
+                <span v-else>{{ row.year ?? '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="現金股利" width="100" align="right">
-              <template #default="{ row }">${{ Number(row.cashDividend || 0).toFixed(4) }}</template>
+            <el-table-column label="現金股利" width="140" align="right">
+              <template #default="{ row }">
+                <span class="dividend-decimal" :title="dividendRawValue(row.cashDividend)">
+                  {{ row.cashDividend == null ? '—' : `$${formatDividendDecimal(row.cashDividend)}` }}
+                </span>
+              </template>
             </el-table-column>
-            <el-table-column label="股票股利" width="100" align="right">
-              <template #default="{ row }">{{ Number(row.stockDividend || 0).toFixed(4) }}</template>
+            <el-table-column label="股票股利" width="135" align="right">
+              <template #default="{ row }">
+                <span class="dividend-decimal" :title="dividendRawValue(row.stockDividend)">{{ formatDividendDecimal(row.stockDividend) }}</span>
+              </template>
             </el-table-column>
             <el-table-column label="現金殖利率" width="110" align="right">
               <template #default="{ row }">
-                <span v-if="row.yieldPct != null">{{ row.yieldPct.toFixed(2) }}%</span>
+                <span v-if="row.yieldPct != null" :title="`${dividendRawValue(row.yieldPct)}%`">
+                  {{ formatDividendDecimal(row.yieldPct) }}%
+                </span>
                 <span v-else style="color:#94a3b8">—</span>
               </template>
             </el-table-column>
             <el-table-column label="除息日昨收價" width="120" align="right">
               <template #default="{ row }">
                 <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
-                <span v-else-if="row.previousClose != null">${{ Number(row.previousClose).toFixed(2) }}</span>
+                <span v-else-if="row.previousClose != null" :title="dividendRawValue(row.previousClose)">
+                  ${{ formatDividendDecimal(row.previousClose) }}
+                </span>
                 <span v-else style="color:#94a3b8">—</span>
               </template>
             </el-table-column>
@@ -209,7 +219,37 @@
                 <span v-if="row.isYearSummary" style="color:#94a3b8">—</span>
                 <span v-else-if="row.fillDays === 0" style="color:#16a34a">當日</span>
                 <span v-else-if="row.fillDays != null">{{ row.fillDays }} 天</span>
-                <span v-else style="color:#94a3b8">尚未填息</span>
+                <span v-else style="color:#94a3b8">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="資料品質／依據" min-width="220">
+              <template #default="{ row }">
+                <el-tooltip placement="top" effect="light">
+                  <template #content>
+                    <div>品質：{{ dividendQualityLabel(row.quality) }}<span v-if="row.quality">（{{ row.quality }}）</span></div>
+                    <div>原因：{{ dividendReasonLabel(row.quality, row.reason) }}</div>
+                    <div>來源：{{ row.isYearSummary ? '請查看各事件列' : (row.source || '未標示') }}</div>
+                    <div>觀測時間：{{ row.isYearSummary ? '逐筆事件各自標示' : (row.observedAt || '—') }}</div>
+                    <template v-if="row.isYearSummary">
+                      <div>事件數：{{ row.eventCount == null ? '—' : row.eventCount }}</div>
+                      <div>待確認數：{{ row.unavailableCount == null ? '—' : row.unavailableCount }}</div>
+                    </template>
+                  </template>
+                  <div class="dividend-evidence-cell">
+                    <el-tag size="small" :type="dividendQualityType(row.quality)">
+                      {{ dividendQualityLabel(row.quality) }}
+                    </el-tag>
+                    <span v-if="row.isYearSummary" class="dividend-evidence-detail">
+                      事件 {{ row.eventCount == null ? '—' : row.eventCount }} 筆 · 待確認 {{ row.unavailableCount == null ? '—' : row.unavailableCount }} 筆
+                    </span>
+                    <span v-else class="dividend-evidence-detail">
+                      {{ dividendReasonLabel(row.quality, row.reason) }}
+                    </span>
+                    <span class="dividend-evidence-source">
+                      {{ row.isYearSummary ? '各事件來源／時間請看明細' : `${row.source || '來源未標示'} · ${row.observedAt || '時間未提供'}` }}
+                    </span>
+                  </div>
+                </el-tooltip>
               </template>
             </el-table-column>
           </el-table>
@@ -635,50 +675,72 @@ const quoteLevels = computed(() => Array.from({length:5},(_,i)=>quoteDetail.valu
 const bookWidth = (key,row) => { const m=Math.max(0,...quoteLevels.value.map(x=>Number(x[key]??0))); return m ? `${100*Number(row[key]??0)/m}%` : '0%' }
 const bidWidth = row => bookWidth('bidVolumeLots',row); const askWidth = row => bookWidth('askVolumeLots',row)
 
-// 股利歷史：將原始事件依年度分組，年度小計列插在每年事件之上
+// 股利歷史只依後端年度摘要順序分組供展示；不推導殖利率或年度金融數值。
 const dividendDisplayRows = computed(() => {
-  const rows = dividendHistory.value.rows || []
-  if (!rows.length) return []
-  // 為每筆事件附上 yieldPct（以除息日昨收價為分母）
-  const enriched = rows.map(r => {
-    const cash = Number(r.cashDividend || 0)
-    const prev = r.previousClose != null ? Number(r.previousClose) : null
-    return {
-      ...r,
-      isYearSummary: false,
-      yieldPct: prev && prev > 0 ? (cash / prev) * 100 : null
-    }
-  })
-  // 依年度（除息日年）分組；年度新→舊
+  const rows = Array.isArray(dividendHistory.value.rows) ? dividendHistory.value.rows : []
+  const summaries = Array.isArray(dividendHistory.value.annualSummaries) ? dividendHistory.value.annualSummaries : []
   const byYear = new Map()
-  for (const r of enriched) {
-    const y = r.year
-    if (y == null) continue
-    if (!byYear.has(y)) byYear.set(y, [])
-    byYear.get(y).push(r)
+  const keyFor = year => year == null ? '__missing_year__' : String(year)
+  for (const row of rows) {
+    const key = keyFor(row?.year)
+    if (!byYear.has(key)) byYear.set(key, [])
+    byYear.get(key).push(row)
   }
-  const years = [...byYear.keys()].sort((a, b) => b - a)
+
   const out = []
-  for (const y of years) {
-    const items = byYear.get(y)
-    const totalCash = items.reduce((s, r) => s + Number(r.cashDividend || 0), 0)
-    const totalStock = items.reduce((s, r) => s + Number(r.stockDividend || 0), 0)
-    // 年度殖利率：以該年最近一次除息事件的昨收價為分母（與 Yahoo 顯示口徑一致）
-    const firstWithPrev = items.find(r => r.previousClose != null)
-    const yearYield = firstWithPrev && Number(firstWithPrev.previousClose) > 0
-      ? (totalCash / Number(firstWithPrev.previousClose)) * 100
-      : null
-    out.push({
-      isYearSummary: true,
-      year: y,
-      cashDividend: totalCash,
-      stockDividend: totalStock,
-      yieldPct: yearYield
-    })
-    out.push(...items)
+  for (const summary of summaries) {
+    const key = keyFor(summary?.year)
+    out.push({ ...summary, isYearSummary: true })
+    out.push(...(byYear.get(key) || []).map(row => ({ ...row, isYearSummary: false })))
+    byYear.delete(key)
   }
+
+  // 若個別 row 沒有對應的年度摘要，保留 row 原始出現順序並照實顯示。
+  for (const items of byYear.values()) {
+    out.push(...items.map(row => ({ ...row, isYearSummary: false })))
+  }
+
   return out
 })
+
+function formatDividendDecimal(value) {
+  if (value == null || value === '') return '—'
+  const raw = String(value)
+  const match = raw.match(/^(-?)(\d+)(?:\.(\d+))?$/)
+  if (!match) return raw
+  const [, sign, integer, fraction = ''] = match
+  const groupedInteger = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `${sign}${groupedInteger}${fraction ? `.${fraction}` : ''}`
+}
+
+function dividendRawValue(value) {
+  return value == null || value === '' ? '—' : String(value)
+}
+
+function dividendQualityLabel(quality) {
+  if (quality === 'RESOLVED') return '已驗證'
+  if (quality === 'FUTURE_PARTIAL') return '已公告估算／未證全年完整'
+  if (quality === 'UNRESOLVED') return '待確認'
+  return '品質未提供'
+}
+
+function dividendQualityType(quality) {
+  if (quality === 'RESOLVED') return 'success'
+  if (quality === 'FUTURE_PARTIAL') return 'warning'
+  if (quality === 'UNRESOLVED') return 'danger'
+  return 'info'
+}
+
+function dividendReasonLabel(quality, reason) {
+  const value = reason == null ? '' : String(reason).trim()
+  if (value) {
+    if (/^[A-Z0-9_.:-]+$/.test(value)) return `資料尚待核對（${value}）`
+    return value
+  }
+  if (quality === 'FUTURE_PARTIAL') return '已公告估算／未證全年完整'
+  if (quality === 'UNRESOLVED') return '金額或作用日尚無法確認'
+  return '—'
+}
 
 function dividendRowClass({ row }) {
   return row.isYearSummary ? 'dividend-year-summary' : ''
@@ -1293,6 +1355,11 @@ const chartOption = computed(() => {
 <style scoped>
 .analysis-loading { display:flex;flex-direction:column;align-items:center;gap:12px;padding:60px 0;color:#64748b;font-size:14px }
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
+.dividend-decimal { display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle }
+.dividend-history-meta { margin-bottom:8px;color:#64748b;font-size:12px }
+.dividend-evidence-cell { display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0 }
+.dividend-evidence-detail,.dividend-evidence-source { max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#475569 }
+.dividend-evidence-source { color:#64748b }
 /* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
    和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
 .analysis-meta    { display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;padding-right:96px }

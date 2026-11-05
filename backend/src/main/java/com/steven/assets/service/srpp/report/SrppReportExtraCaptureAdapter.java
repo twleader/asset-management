@@ -32,13 +32,18 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
         for(String key:universe){String m=key.substring(0,key.indexOf(':')),code=key.substring(key.indexOf(':')+1);ObjectNode body=JsonNodeFactory.instance.objectNode();body.put("market",m);body.put("symbol",code);body.put("volumeUnit","SHARES");
             boolean reuse="台股".equals(m)&&reused.contains(code)&&frozenSources.has("daily:"+code);
             if(reuse){JsonNode q=frozenSources.path("quote:"+code);body.set("quote",q.path("rawQuote"));body.set("nav",q.path("rawNav"));body.set("book",frozenSources.path("book:"+code));body.set("radar",frozenSources.path("radar:"+code));body.set("dividends",frozenSources.path("dividends:"+code));body.set("daily",frozenSources.path("daily:"+code).deepCopy());for(JsonNode row:body.path("daily")){if(row instanceof ObjectNode object){boolean trusted=false;try{trusted=prices.isTrustedClose(mapper.treeToValue(row,StockPriceHistory.class));}catch(Exception invalid){}object.put("trusted",trusted);}}body.set("indicators",JsonNodeFactory.instance.arrayNode());}
+            if(reuse){var currentDividends=dividends.findByStockSinceYear(code,m,date.getYear()-2);
+                if(!financialDividends(currentDividends,model,code,date)
+                        ||!json(currentDividends).equals(body.path("dividends")))body.putNull("dividends");}
             List<StockPriceHistory> rows=reuse?List.of():history.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code,m,date.minusDays(730),date.minusDays(1));
             if(!reuse){ArrayNode daily=body.putArray("daily");for(var row:rows){ObjectNode n=(ObjectNode)json(row);n.put("trusted",prices.isTrustedClose(row));daily.add(n);}
             try{body.set("quote",json(prices.getLiveBatch(Set.of(new PriceQueryService.PriceKey(code,m)),Map.of(new PriceQueryService.PriceKey(code,m),rows)).getOrDefault(new PriceQueryService.PriceKey(code,m),Optional.empty()).orElse(null)));}catch(RuntimeException absent){body.putNull("quote");}
             try{body.set("nav",json(prices.getEtfNav(code,m).orElse(null)));}catch(RuntimeException absent){body.putNull("nav");}
             if("台股".equals(m))try{body.set("book",json(market.getQuoteDetail(code,m)));}catch(RuntimeException absent){body.putNull("book");}else body.putNull("book");
             try{body.set("radar",json(radar.getStockDetailForOwner(ownerId,code,m)));}catch(RuntimeException absent){body.putNull("radar");}
-            body.set("dividends",json(dividends.findByStockSinceYear(code,m,date.getYear()-2)));
+            var dividendRows=dividends.findByStockSinceYear(code,m,date.getYear()-2);
+            if(financialDividends(dividendRows,model,code,date))body.set("dividends",json(dividendRows));
+            else body.putNull("dividends");
             // Existing business indicator-series computes from canonical persisted rows; no vendor IO.
             try{body.set("indicators",json(indicators.indicatorSeries(code,m,date.minusDays(730),date.minusDays(1))));}catch(RuntimeException absent){body.set("indicators",JsonNodeFactory.instance.arrayNode());}
             }
@@ -53,10 +58,19 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
     public static SourceQuality assess(JsonNode body,LocalDate date,Instant at){
         String symbol=body.path("symbol").asText(),market=body.path("market").asText();JsonNode quote=body.path("quote"),radar=body.path("radar"),stock=radar.path("stock");
         boolean known=body.path("calendarVerified").asBoolean()&&body.path("completedSessions").isArray()&&!body.path("completedSessions").isEmpty()&&body.path("daily").isArray()&&!body.path("daily").isEmpty();
-        boolean valid=known&&!symbol.isBlank()&&Set.of("台股","美股").contains(market)&&symbol.equals(quote.path("stockCode").asText())&&market.equals(quote.path("market").asText())&&!quote.path("source").asText().isBlank()&&Set.of("LIVE","VERIFIED_CLOSE").contains(quote.path("quoteStatus").asText())&&positive(quote.path("price"))&&quote.path("closed").isBoolean()&&validTime(quote.path("updatedAt").asText(),at)&&date.toString().equals(quote.path("tradingDate").asText())&&symbol.equals(stock.path("stockCode").asText())&&market.equals(stock.path("market").asText())&&date.toString().equals(stock.path("asOfDate").asText())&&stock.path("dataComplete").asBoolean()&&!radar.path("ruleVersion").asText().isBlank()&&SrppRadarPolicy.supportsVersion(radar)&&validTime(radar.path("generatedAt").asText(),at);
+        boolean valid=known&&body.path("dividends").isArray()&&!symbol.isBlank()&&Set.of("台股","美股").contains(market)&&symbol.equals(quote.path("stockCode").asText())&&market.equals(quote.path("market").asText())&&!quote.path("source").asText().isBlank()&&Set.of("LIVE","VERIFIED_CLOSE").contains(quote.path("quoteStatus").asText())&&positive(quote.path("price"))&&quote.path("closed").isBoolean()&&validTime(quote.path("updatedAt").asText(),at)&&date.toString().equals(quote.path("tradingDate").asText())&&symbol.equals(stock.path("stockCode").asText())&&market.equals(stock.path("market").asText())&&date.toString().equals(stock.path("asOfDate").asText())&&stock.path("dataComplete").asBoolean()&&!radar.path("ruleVersion").asText().isBlank()&&SrppRadarPolicy.supportsVersion(radar)&&validTime(radar.path("generatedAt").asText(),at);
         Set<String> sessionDates=new HashSet<>(),dailyDates=new HashSet<>();try{for(JsonNode session:body.path("completedSessions")){String day=session.asText();valid&=LocalDate.parse(day).isBefore(date)&&sessionDates.add(day);}for(JsonNode row:body.path("daily")){String day=row.path("tradingDate").asText();valid&=LocalDate.parse(day).isBefore(date)&&dailyDates.add(day)&&row.path("trusted").isBoolean()&&positive(row.path("closePrice"));if(row.hasNonNull("stockCode"))valid&=symbol.equals(row.path("stockCode").asText());if(row.hasNonNull("market"))valid&=market.equals(row.path("market").asText());}}catch(RuntimeException malformed){valid=false;}
         boolean complete=valid&&body.path("lookbackComplete").asBoolean(true)&&dailyDates.containsAll(sessionDates)&&body.path("dividends").isArray()&&body.path("indicators").isArray()&&!body.path("indicators").isEmpty();if("台股".equals(market))complete&=body.path("book").path("available").asBoolean()&&body.path("book").path("levels").size()==5&&positive(body.path("nav").path("nav"));
         return new SourceQuality(!known?"NONE":complete?"COMPLETE":"PARTIAL",valid?"VERIFIED":"UNAVAILABLE");
+    }
+    private static boolean financialDividends(List<com.steven.assets.model.StockDividendHistory> rows,JsonNode model,String code,LocalDate date){
+        if(rows==null||!CanonicalDividendFinancialFacts.assess(rows).available())return false;
+        try{CanonicalDividendFinancialFacts.assess(rows,date.minusDays(730),date).requireComparablePriceBasis();}
+        catch(com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable unavailable){return false;}
+        if(!rows.isEmpty())return true;
+        for(String rule:List.of("daily_topup_tier_policy","short_term_opportunity_d171","bond_short_term_opportunity_d185","core_sell_guard_d174","strategic_buy_high_gate_d188"))
+            for(JsonNode symbol:model.path("execution_policy").path(rule).path("non_distributing_symbols"))if(code.equals(symbol.asText()))return true;
+        return false;
     }
     private static boolean positive(JsonNode n){try{return new java.math.BigDecimal(n.asText()).signum()>0;}catch(RuntimeException absent){return false;}}
     private static boolean validTime(String time,Instant at){try{Instant value;try{value=Instant.parse(time);}catch(DateTimeException ignored){value=LocalDateTime.parse(time).atZone(ZoneId.of("Asia/Taipei")).toInstant();}return !value.isAfter(at);}catch(DateTimeException absent){return false;}}

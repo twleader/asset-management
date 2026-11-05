@@ -2883,8 +2883,8 @@ CREATE TABLE public.stock_dividend_history (
     stock_code character varying(20) NOT NULL,
     market character varying(20) NOT NULL,
     year integer NOT NULL,
-    cash_dividend numeric(15,6),
-    stock_dividend numeric(15,6),
+    cash_dividend numeric(30,18),
+    stock_dividend numeric(30,18),
     ex_dividend_date date,
     yield_pct numeric(10,4),
     cash_payment_date date,
@@ -2895,7 +2895,11 @@ CREATE TABLE public.stock_dividend_history (
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
     event_status character varying(16) DEFAULT 'ACTIVE'::character varying NOT NULL,
     event_key character varying(64),
-    ex_rights_date date
+    ex_rights_date date,
+    canonical_date date,
+    source_snapshot_id bigint,
+    resolution_status character varying(16) DEFAULT 'LEGACY'::character varying NOT NULL,
+    resolution_reason text
 );
 
 
@@ -2938,7 +2942,10 @@ CREATE TABLE public.stock_dividend_snapshot (
     scope_to date NOT NULL,
     source_url text,
     content_hash character varying(64) NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    normalizer_version integer DEFAULT 1 NOT NULL,
+    amount_basis character varying(32) DEFAULT 'LEGACY_UNVERIFIED'::character varying NOT NULL,
+    date_groups_complete boolean DEFAULT false NOT NULL
 );
 
 
@@ -2952,12 +2959,13 @@ CREATE TABLE public.stock_dividend_snapshot_event (
     event_key character varying(64) NOT NULL,
     year integer,
     ex_dividend_date date,
-    cash_dividend numeric(18,6),
-    stock_dividend numeric(18,6),
+    cash_dividend numeric(30,18),
+    stock_dividend numeric(30,18),
     cash_payment_date date,
     stock_payment_date date,
     source_available_at timestamp with time zone,
-    ex_rights_date date
+    ex_rights_date date,
+    upstream_component_id character varying(128)
 );
 
 
@@ -5947,6 +5955,13 @@ CREATE UNIQUE INDEX uq_api_error_log_dedupe_key ON public.api_error_log USING bt
 
 
 --
+-- Name: uq_dividend_canonical_active_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_dividend_canonical_active_date ON public.stock_dividend_history USING btree (market, stock_code, canonical_date) WHERE (((event_status)::text = 'ACTIVE'::text) AND (canonical_date IS NOT NULL));
+
+
+--
 -- Name: uq_realized_gain_fubon_sync_occurrence; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6184,6 +6199,14 @@ ALTER TABLE ONLY public.stock_holding
 
 ALTER TABLE ONLY public.asset_snapshot
     ADD CONSTRAINT fk_asset_snapshot_owner FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: stock_dividend_history fk_dividend_history_source_snapshot; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.stock_dividend_history
+    ADD CONSTRAINT fk_dividend_history_source_snapshot FOREIGN KEY (source_snapshot_id) REFERENCES public.stock_dividend_snapshot(id);
 
 
 --
