@@ -124,6 +124,57 @@ CoreSellGuardTests.setUpClass();tc=CoreSellGuardTests()
 for bid in (97,97.01):
  bundle,state=tc.fixture();bundle['items'][0]['quote']['bidLevels'][0]['price']=bid
  r=tc.run_one(bundle,state);cases.append({'kind':'core','date':bundle['trading_date'],'body':body(bundle['items'][0]['quote'],bundle['items'][0]['radar']),'state':state,'expected':{'highWater':r['high_water'],'pullbackPct':r['pullback_pct'],'trendReversal':r['trend_reversal'],'timingPass':r['timing_pass'],'reason':r['reason']}})
+# D208 cases execute the original source calculator. They are synthetic offline
+# evidence, never a replayed live recommendation or a replacement observation.
+def d208_fixture():
+ bundle,state=tc.fixture();item=bundle['items'][0]
+ item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=state['stock_code']='00919'
+ item['quote']['dividendHistory']['stockCode']='00919'
+ return bundle,state
+
+def add_d208(name,change=lambda bundle: None):
+ bundle,state=d208_fixture();change(bundle);item=bundle['items'][0]
+ r=tc.run_one(bundle,state)
+ missing=r['status']=='SELL_TIMING_UNVERIFIED'
+ expected={'timingPass':r['timing_pass'],'reason':r['reason']}
+ if missing:
+  if r['timing_pass']: raise SystemExit('D208_MISSING_EVIDENCE_CANNOT_PASS')
+ else:
+  expected.update(highWater=r['high_water'],pullbackPct=r['pullback_pct'])
+ cases.append({'kind':'core_unavailable' if missing else 'core','name':'D208_'+name,
+               'date':bundle['trading_date'],'body':body(item['quote'],item['radar']),
+               'state':state,'expected':expected})
+
+add_d208('above_midpoint_original_gates_pass')
+for field in ('completed_k','completed_d','live_k','live_d'):
+ for value in (49.99,50,50.01):
+  def set_kd(bundle,field=field,value=value):
+   item=bundle['items'][0];daily=item['quote']['marketData']['chart']['series']['daily'];stock=item['radar']['stock']
+   if field.startswith('completed_'):
+    key=field[-1];daily[key][-1]=value
+    if key=='d':daily['k'][-1]=50.001
+   else:
+    stock['kValue' if field=='live_k' else 'dValue']=value
+    if field=='live_d':stock['kValue']=50.001
+  add_d208(field+'_'+str(value),set_kd)
+for field,value in [('rsi5',30),('wr9',80),('bias10',-8),('week52Position',.15)]:
+ def set_low(bundle,field=field,value=value):
+  stock=bundle['items'][0]['radar']['stock'];target=stock if field=='week52Position' else stock['extendedIndicators'];target[field]=value
+ add_d208(field+'_low_boundary',set_low)
+for field,value in [('timingState','LOW'),('counterTrendState','OVERSOLD_WATCH'),('action','BUY_CANDIDATE'),('candidateAction','ADD_CANDIDATE')]:
+ add_d208(field+'_conflict',lambda bundle,field=field,value=value:bundle['items'][0]['radar']['stock'].__setitem__(field,value))
+for field,value in [('reasons',['RSI 位於低檔，價格位置有利逢低觀察。']),('timingLabel','超賣'),('counterTrendLabel','反彈觀察')]:
+ add_d208(field+'_technical_conflict',lambda bundle,field=field,value=value:bundle['items'][0]['radar']['stock'].__setitem__(field,value))
+for field in ('rsi5','wr9','bias10','week52Position','kValue'):
+ def remove_evidence(bundle,field=field):
+  stock=bundle['items'][0]['radar']['stock'];target=stock if field in ('week52Position','kValue') else stock['extendedIndicators'];target.pop(field)
+ add_d208(field+'_missing',remove_evidence)
+add_d208('completed_d_missing',lambda bundle:bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'].__setitem__(-1,None))
+add_d208('malformed_technical_reasons',lambda bundle:bundle['items'][0]['radar']['stock'].__setitem__('reasons',{}))
+for field in ('timingState','counterTrendState'):
+ for malformed in ({},[]):
+  add_d208(field+'_malformed_'+('object' if isinstance(malformed,dict) else 'array'),
+           lambda bundle,field=field,malformed=malformed:bundle['items'][0]['radar']['stock'].__setitem__(field,malformed))
 ShortTermOpportunitiesTests.setUpClass();st=ShortTermOpportunitiesTests()
 for policy_key,code in [('short_term_opportunity_d171','00881'),('bond_short_term_opportunity_d185','00679B')]:
  bundle=st.fixture();item=bundle['items'][0];item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=item['quote']['dividendHistory']['stockCode']=code
