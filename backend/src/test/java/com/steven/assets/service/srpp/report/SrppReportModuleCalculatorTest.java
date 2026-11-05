@@ -34,7 +34,7 @@ class SrppReportModuleCalculatorTest {
             case "regime" -> actual=SrppReportModuleCalculator.regimeCapacity(c.path("live"),e.path("dynamic_allocation_policy_d141"),e.path("stock_purchase_funding_policy_d150"),n(c.get("total")),n(c.get("cash")),n(c.get("bonds")),n(c.get("equity")),n(c.get("inflation")));
             default -> throw new AssertionError(kind);
         }for(var expected:c.path("expected").properties()){JsonNode value=actual.get(expected.getKey());assertThat(value).as(kind+":"+expected.getKey()).isNotNull();if(expected.getValue().isBoolean()||expected.getValue().isArray()||expected.getKey().equals("reason"))assertThat(value).isEqualTo(expected.getValue());else assertThat(n(value).subtract(n(expected.getValue())).abs()).as(kind+":"+expected.getKey()).isLessThan(new BigDecimal("0.000000000001"));}count++;}
-        assertThat(count).isEqualTo(57);
+        assertThat(count).isEqualTo(73);
     }
     @Test void formalTargetsAndRegistryArtifactUseExactCurrentAuthorityBytes()throws Exception{JsonNode model=model();JsonNode artifact=SrppJcs.parseStrict(new String(getClass().getResourceAsStream("/srpp/report/d201-policy-document.json").readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));assertThat(SrppReportModuleCalculator.registryDocument(model)).isEqualTo(artifact);assertThat(SrppReportModuleCalculator.formalTargets(model).path("00865B").asText()).isEqualTo("0.063333333333");assertThat(SrppReportModuleCalculator.targetAllocationSha256(model)).matches("[a-f0-9]{64}");assertThat(SrppPolicyDocument.parse(SrppJcs.canonicalize(artifact)).targets()).hasSize(18);}
     @Test void unknownCoreStateAndCrossConsumerStateCannotBecomeComplete()throws Exception{FrozenFixture fixture=fixture();JsonNode model=model();for(JsonNode state:List.of(NullNode.instance,MAPPER.readTree("{\"verified\":true,\"ownerUserId\":7,\"consumer\":\"Claude\",\"items\":[]}"))){ObjectNode result=SrppReportModuleCalculator.calculateCore(fixture.frozen,model,state,"Codex");assertThat(result.path("status").asText()).isEqualTo("UNAVAILABLE");assertThat(result.path("missing").toString()).contains("CONSUMER_CORE_STATE_UNAVAILABLE");}}
@@ -78,12 +78,13 @@ class SrppReportModuleCalculatorTest {
         JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));JsonNode c=java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false).filter(row->row.path("kind").asText().equals("core")&&row.path("expected").path("timingPass").asBoolean()).findFirst().orElseThrow();JsonNode policy=model().path("execution_policy").path("core_sell_guard_d174");assertThat(n(policy.get("pullback_fraction"))).isEqualByComparingTo("0.015");ObjectNode body=c.path("body").deepCopy();BigDecimal high=n(c.path("expected").path("highWater"));((ObjectNode)body.path("book").path("levels").get(0)).put("bidPrice",high.multiply(new BigDecimal("0.985")).toPlainString());assertThat(SrppReportModuleCalculator.coreTiming(body,c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("timingPass").asBoolean()).isTrue();((ObjectNode)body.path("book").path("levels").get(0)).put("bidPrice",high.multiply(new BigDecimal("0.985001")).toPlainString());assertThat(SrppReportModuleCalculator.coreTiming(body,c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("reason").asText()).isEqualTo("HIGH_WATER_PULLBACK_NOT_MET");
     }
     @Test void d208RetainsStableAndPreExecutionGateWatchIdentityWithoutAcceptingUnknownPolicies() throws Exception {
-        JsonNode c = d208Case("above_midpoint_original_gates_pass");
+        JsonNode c = d209Case("high_zone_k_below_80_original_gates_pass");
         ObjectNode policy = model().path("execution_policy").path("core_sell_guard_d174").deepCopy();
         ObjectNode stable = MAPPER.createObjectNode();
         for (String key : List.of("decision", "scope", "arming", "non_distributing_symbols")) stable.set(key, policy.get(key));
-        ObjectNode prior = policy.deepCopy(); prior.remove("low_point_sell_protection_d208");
-        for (JsonNode hashPolicy : List.of(stable, prior)) {
+        ObjectNode priorD208 = policy.deepCopy(); priorD208.remove("high_zone_reversal_d209");
+        ObjectNode prior = priorD208.deepCopy(); prior.remove("low_point_sell_protection_d208");
+        for (JsonNode hashPolicy : List.of(stable, priorD208, prior)) {
             ObjectNode state = c.path("state").deepCopy();
             state.put("policy_sha256", com.steven.assets.service.srpp.us.UsPythonJson.hash(hashPolicy));
             ObjectNode before = state.deepCopy();
@@ -95,6 +96,11 @@ class SrppReportModuleCalculatorTest {
             assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(c.path("body"), state, LocalDate.parse(c.path("date").asText()), tampered))
                 .hasMessageContaining("WATCH_STATE_UNVERIFIED");
         }
+        ObjectNode neverPublished = policy.deepCopy(); neverPublished.remove("low_point_sell_protection_d208");
+        ObjectNode state = c.path("state").deepCopy();
+        state.put("policy_sha256", com.steven.assets.service.srpp.us.UsPythonJson.hash(neverPublished));
+        assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(c.path("body"), state, LocalDate.parse(c.path("date").asText()), policy))
+            .hasMessageContaining("WATCH_STATE_UNVERIFIED");
     }
 
     @Test void d208PublishedModuleCannotTurnLowOrMissingEvidenceIntoPass() throws Exception {
@@ -155,6 +161,44 @@ class SrppReportModuleCalculatorTest {
         JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));
         return java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false)
             .filter(value -> ("D208_" + suffix).equals(value.path("name").asText())).findFirst().orElseThrow();
+    }
+
+    private JsonNode d209Case(String suffix) throws Exception {
+        JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));
+        return java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false)
+            .filter(value -> ("D209_" + suffix).equals(value.path("name").asText())).findFirst().orElseThrow();
+    }
+
+    @Test void d209InclusiveHighZoneAllowsKBelow80ButStillRequiresOriginalReversal() throws Exception {
+        JsonNode policy=model().path("execution_policy").path("core_sell_guard_d174");
+        for (String suffix : List.of("high_zone_k_below_80_original_gates_pass", "completed_d_80", "live_d_80", "both_d_exactly_80")) {
+            JsonNode c=d209Case(suffix);
+            assertThat(SrppReportModuleCalculator.coreTiming(c.path("body"),c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("timingPass").asBoolean())
+                .as(suffix).isTrue();
+        }
+        for (String suffix : List.of("completed_d_79.99", "live_d_79.99")) {
+            JsonNode c=d209Case(suffix);
+            assertThat(SrppReportModuleCalculator.coreTiming(c.path("body"),c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("reason").asText())
+                .as(suffix).isEqualTo("D209_HIGH_ZONE_SELL_BLOCKED");
+        }
+        for (String suffix : List.of("live_k_81_not_below_d", "live_k_82_not_below_d", "completed_k_equal_d", "completed_k_rising")) {
+            JsonNode c=d209Case(suffix);
+            assertThat(SrppReportModuleCalculator.coreTiming(c.path("body"),c.path("state"),LocalDate.parse(c.path("date").asText()),policy).path("timingPass").asBoolean())
+                .as(suffix).isFalse();
+        }
+    }
+
+    @Test void d209MissingPolicyFailsClosedWhileRetainedWatchAndD208StayIntact() throws Exception {
+        JsonNode c=d209Case("high_zone_k_below_80_original_gates_pass");
+        ObjectNode policy=model().path("execution_policy").path("core_sell_guard_d174").deepCopy(),stable=MAPPER.createObjectNode();
+        for (String key : List.of("decision","scope","arming","non_distributing_symbols")) stable.set(key,policy.get(key));
+        ObjectNode state=c.path("state").deepCopy();state.put("policy_sha256",com.steven.assets.service.srpp.us.UsPythonJson.hash(stable));
+        ObjectNode before=state.deepCopy();JsonNode lowPoint=policy.path("low_point_sell_protection_d208").deepCopy();
+        policy.remove("high_zone_reversal_d209");
+        assertThatThrownBy(() -> SrppReportModuleCalculator.coreTiming(c.path("body"),state,LocalDate.parse(c.path("date").asText()),policy))
+            .hasMessageContaining("D209_HIGH_ZONE_EVIDENCE_UNVERIFIED");
+        assertThat(state).isEqualTo(before);
+        assertThat(policy.path("low_point_sell_protection_d208")).isEqualTo(lowPoint);
     }
 
     private ObjectNode d208Module(JsonNode body, JsonNode state) throws Exception {

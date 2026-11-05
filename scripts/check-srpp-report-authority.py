@@ -131,7 +131,7 @@ def validate_golden(golden: object, bundle: str) -> None:
         raise ReleaseFailure("GOLDEN_SCHEMA_INVALID")
     if golden.get("policyBundleSha256") != bundle:
         raise ReleaseFailure("GOLDEN_BUNDLE_MISMATCH")
-    if not isinstance(golden.get("cases"), list) or len(golden["cases"]) != 57:
+    if not isinstance(golden.get("cases"), list) or len(golden["cases"]) != 73:
         raise ReleaseFailure("GOLDEN_CASE_COUNT_INVALID")
 
 
@@ -142,7 +142,7 @@ def verify_golden(srpp_root: Path, bundle: str) -> None:
         ROOT,
         "GOLDEN_GENERATOR",
     )
-    if "57 original-calculator parity cases match" not in output:
+    if "73 original-calculator parity cases match" not in output:
         raise ReleaseFailure("GOLDEN_GENERATOR_OUTPUT_INVALID")
     validate_golden(parse_json((ROOT / GOLDEN_PATH).read_bytes(), "GOLDEN"), bundle)
 
