@@ -244,7 +244,7 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(target.getAnnualInterestRate()).isNull();
             assertThat(target.getSource()).isEqualTo("FUBON_SYNC");
             assertThat(target.getProcessingDate()).isEqualTo(LocalDate.of(2026, 9, 1));
-            assertThat(target.getNotes()).isEqualTo("富邦證券交割款；當日無已同步成交明細");
+            assertThat(target.getNotes()).isEqualTo("富邦證券淨交割款；交易日 2026-08-28；交割日 2026-09-01");
             assertThat(snapshot.getDeposits()).hasSize(2);
             assertThat(transit(snapshot, RECEIVABLE)).isEmpty();
             assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-902.00");
@@ -295,7 +295,7 @@ class FubonAccountingProjectionPostgresTest {
             assertThat(row.getId()).isNotEqualTo(manualId);
             assertThat(row.getAmount()).isEqualByComparingTo("-56586");
             assertThat(row.getSource()).isEqualTo("FUBON_SYNC");
-            assertThat(row.getNotes()).isEqualTo("富邦證券交割款：00881、009826");
+            assertThat(row.getNotes()).isEqualTo("富邦證券已記錄成交：買 00881、009826；淨付 56586");
             assertThat(row.getProcessingDate()).isEqualTo(LocalDate.of(2026, 11, 4));
             assertThat(snapshot.getTotalDeposit()).isEqualByComparingTo("-56486");
         });
@@ -371,7 +371,7 @@ class FubonAccountingProjectionPostgresTest {
     }
 
     @Test
-    void settlementNoteUsesOnlySameOwnerSameDateFubonBuyLedgerRows() {
+    void incompleteOrMismatchedLedgerCannotClaimSettlementNoteEvidence() {
         tx(() -> assetTransactions.saveAllAndFlush(List.of(
                 ledger(ownerId, "買", "00719B", "元大美債1-3", "1000", "FUBON_SYNC"),
                 ledger(ownerId, "賣", "2885", "元大金", "1000", "FUBON_SYNC"),
@@ -380,7 +380,7 @@ class FubonAccountingProjectionPostgresTest {
         assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
 
         readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getNotes())
-                .isEqualTo("富邦證券當日已同步成交：買入 元大美債1-3（00719B）1 張"));
+                .isEqualTo("富邦證券淨交割款；交易日 2026-08-28；交割日 2026-09-01"));
     }
 
     @Test
@@ -399,6 +399,168 @@ class FubonAccountingProjectionPostgresTest {
         assertThat(sqlTrace.stop()).noneMatch(sql -> sql.startsWith("insert") || sql.startsWith("update"));
         readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE).getFirst().getNotes())
                 .isEqualTo("富邦證券交割款；當日無已同步成交明細"));
+    }
+
+    @Test
+    void officialMixedNetReplacesGrossRowsKeepsOtherDayAndRefreshesManualLedgerNoteIdempotently() {
+        String row = netRow("-1002", "500", "-502");
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(row), FubonDtos.SettlementBatch.class)));
+        Long payableId = addTransit(PAYABLE, "-1002", "TRANSIT_TWD", null, "generic", null);
+        addTransit(RECEIVABLE, "500", "TRANSIT_TWD", null, "generic", null);
+        tx(() -> {
+            var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().add(BankDeposit.builder().snapshot(snapshot).bank(fubonBank)
+                    .depositType(PAYABLE).currency("TRANSIT_TWD").amount(new BigDecimal("-43181"))
+                    .processingDate(DATE.plusDays(6)).notes("prior day").source("FUBON_SYNC").build());
+            assetTransactions.saveAllAndFlush(List.of(noteLedger("買", "00881", "1000", "2", "0"),
+                    noteLedger("賣", "00881", "500", "0", "0")));
+            snapshots.saveAndFlush(snapshot);
+        });
+        var result = settlementService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(result.payableAmount()).isEqualByComparingTo("-502");
+        assertThat(result.receivableAmount()).isZero();
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, RECEIVABLE)).isEmpty();
+            assertThat(transit(snapshot, PAYABLE)).hasSize(2);
+            var net = transit(snapshot, PAYABLE).stream().filter(r -> r.getId().equals(payableId)).findFirst().orElseThrow();
+            assertThat(net.getAmount()).isEqualByComparingTo("-502");
+            assertThat(net.getNotes()).isEqualTo("富邦證券已記錄成交：買 00881；賣 00881；淨付 502");
+            assertThat(transit(snapshot, PAYABLE).stream().filter(r -> r.getNotes().equals("prior day")))
+                    .singleElement().satisfies(r -> assertThat(r.getAmount()).isEqualByComparingTo("-43181"));
+        });
+        clearInvocations(aggregates);
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        verify(aggregates, never()).recalculate(any());
+    }
+
+    @Test
+    void mixedNetReceivableAndNetZeroReplaceOnlySameDateSourceOwnedRows() {
+        addTransit(PAYABLE, "-1002", "TRANSIT_TWD", null, "old", null);
+        addTransit(RECEIVABLE, "1500", "TRANSIT_TWD", null, "old", null);
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(netRow("-1002", "1500", "498")), FubonDtos.SettlementBatch.class)));
+        var result = settlementService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(result.payableAmount()).isZero();
+        assertThat(result.receivableAmount()).isEqualByComparingTo("498");
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).isEmpty();
+            assertThat(transit(snapshot, RECEIVABLE)).singleElement()
+                    .satisfies(r -> assertThat(r.getAmount()).isEqualByComparingTo("498"));
+        });
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(netRow("-1002", "1002", "0")), FubonDtos.SettlementBatch.class)));
+        result = settlementService.syncManual(false);
+        assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(result.payableAmount()).isZero();
+        assertThat(result.receivableAmount()).isZero();
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).isEmpty();
+            assertThat(transit(snapshot, RECEIVABLE)).isEmpty();
+            assertThat(snapshot.getDeposits()).hasSize(1);
+            assertThat(snapshot.getDeposits().getFirst().getAmount()).isEqualByComparingTo("100");
+        });
+    }
+
+    @Test
+    void mixedNetCanHandoverGrossManualBuyOnlyAfterBothDirectionGuardsPass() {
+        tx(() -> assetTransactions.saveAndFlush(noteLedger("買", "00881", "1000", "2", "0")));
+        Long manual = addTransit(PAYABLE, "-1002", "TRANSIT_TWD", null, "00881", null, "MANUAL");
+        Long conflicting = addTransit(RECEIVABLE, "500", "TRANSIT_TWD", null, "manual", null, "MANUAL");
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlementWithBothDirections()));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.UNMANAGED_TARGET);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE)).singleElement()
+                .satisfies(r -> assertThat(r.getId()).isEqualTo(manual)));
+        tx(() -> {
+            var snapshot = snapshots.findById(snapshotId).orElseThrow();
+            snapshot.getDeposits().removeIf(r -> conflicting.equals(r.getId()));
+            snapshots.saveAndFlush(snapshot);
+        });
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE)).singleElement().satisfies(r -> {
+            assertThat(r.getId()).isNotEqualTo(manual);
+            assertThat(r.getAmount()).isEqualByComparingTo("-502");
+            assertThat(r.getSource()).isEqualTo("FUBON_SYNC");
+        }));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> assertThat(transit(snapshot, PAYABLE)).hasSize(1));
+    }
+
+    @Test
+    void matchedManualIsNotDeletedWhenOppositeDirectionHasInvalidCurrencyNullDateOrDuplicate() {
+        tx(() -> assetTransactions.saveAndFlush(noteLedger("買", "00881", "1000", "2", "0")));
+        Long manual = addTransit(PAYABLE, "-1002", "TRANSIT_TWD", null, "00881", null, "MANUAL");
+        addTransit(RECEIVABLE, "500", "USD", null, "bad", null);
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlementWithBothDirections()));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        tx(() -> {
+            var row = transit(snapshots.findById(snapshotId).orElseThrow(), RECEIVABLE).getFirst();
+            row.setCurrency("TRANSIT_TWD");
+            row.setProcessingDate(null);
+        });
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        tx(() -> transit(snapshots.findById(snapshotId).orElseThrow(), RECEIVABLE).getFirst()
+                .setProcessingDate(LocalDate.of(2026, 9, 1)));
+        addTransit(RECEIVABLE, "1", "TRANSIT_TWD", null, "duplicate", null);
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.AMBIGUOUS_TARGET);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).singleElement().satisfies(r -> {
+                assertThat(r.getId()).isEqualTo(manual);
+                assertThat(r.getAmount()).isEqualByComparingTo("-1002");
+                assertThat(r.getSource()).isEqualTo("MANUAL");
+            });
+            assertThat(transit(snapshot, RECEIVABLE)).hasSize(2);
+        });
+    }
+
+    @Test
+    void netRowDeletionRollsBackWhenAggregateWriteFails() {
+        addTransit(PAYABLE, "-1002", "TRANSIT_TWD", null, "buy", null);
+        addTransit(RECEIVABLE, "500", "TRANSIT_TWD", null, "sell", null);
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlementWithBothDirections()));
+        doThrow(new IllegalStateException("test-only aggregate failure")).when(aggregates).recalculate(any());
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.ROLLED_BACK);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).singleElement()
+                    .satisfies(r -> assertThat(r.getAmount()).isEqualByComparingTo("-1002"));
+            assertThat(transit(snapshot, RECEIVABLE)).singleElement()
+                    .satisfies(r -> assertThat(r.getAmount()).isEqualByComparingTo("500"));
+        });
+    }
+
+    @Test
+    void sellOnlyOfficialRowProducesSingleReceivable() {
+        String row = netRow("0", "500", "500")
+                .replace("\"buyValue\":\"1000\"", "\"buyValue\":\"0\"")
+                .replace("\"buyFee\":\"2\"", "\"buyFee\":\"0\"")
+                .replace("\"totalFee\":\"2\"", "\"totalFee\":\"0\"")
+                .replace("\"totalBsValue\":\"1500\"", "\"totalBsValue\":\"500\"");
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(
+                read(settlementJson(row), FubonDtos.SettlementBatch.class)));
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        readSnapshot(snapshot -> {
+            assertThat(transit(snapshot, PAYABLE)).isEmpty();
+            assertThat(transit(snapshot, RECEIVABLE)).singleElement()
+                    .satisfies(r -> assertThat(r.getAmount()).isEqualByComparingTo("500"));
+        });
+    }
+
+    private com.steven.assets.model.AssetTransaction noteLedger(String direction, String code,
+            String amount, String fee, String tax) {
+        var row = ledger(ownerId, direction, code, code, amount, "MANUAL");
+        row.setFee(new BigDecimal(fee));
+        row.setTransactionTax(new BigDecimal(tax));
+        return row;
+    }
+
+    private static String netRow(String buy, String sell, String total) {
+        return SETTLEMENT_ROW.replace("\"buySettlement\":\"-1002\"", "\"buySettlement\":\"" + buy + "\"")
+                .replace("\"sellValue\":\"0\"", "\"sellValue\":\"" + sell + "\"")
+                .replace("\"sellSettlement\":\"0\"", "\"sellSettlement\":\"" + sell + "\"")
+                .replace("\"totalBsValue\":\"1000\"", "\"totalBsValue\":\"" + new BigDecimal("1000").add(new BigDecimal(sell)) + "\"")
+                .replace("\"totalSettlementAmount\":\"-1002\"", "\"totalSettlementAmount\":\"" + total + "\"");
     }
 
     @Test
@@ -848,6 +1010,7 @@ class FubonAccountingProjectionPostgresTest {
                     .annualInterestRate(rate == null ? null : new BigDecimal(rate))
                     .originalAmount(original == null ? null : new BigDecimal(original)).source(source).build();
             snapshot.getDeposits().add(deposit);
+            entityManager.persist(deposit);
             aggregates.recalculate(snapshot);
             snapshots.saveAndFlush(snapshot);
             id.set(deposit.getId());
