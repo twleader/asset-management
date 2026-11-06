@@ -13520,3 +13520,8 @@ AnnualDividendData.Snapshot additive market nullable欄位並保留兩參數cons
 DailyInventoryHistoryRepository擴充deleteExpired()，JdbcDailyInventoryHistoryRepository以獨立REQUIRES_NEW交易實作；DailyInventoryScheduler.tick在任何calendar呼叫前先呼叫該抽象，catch/log後繼續原保存流程。SQL固定雙市場時區、66 months唯一數值存於DB函式；清理、guard與annual read均共用該函式。無新增表／欄位；只有函式、兩表trigger增量替換，以及以market/trading_date/id建立清理索引（owner/market/date原唯一鍵保留）。以兩個明確market分支各自使用constant-market cutoff（避免對每列market函式造成全表掃描），先以DB時間查詢SELECT id ... ORDER BY id FOR UPDATE，再以鎖定id集合先child後header刪除；返回header刪除數供安全日誌，禁止記錄庫存明細。
 
 Guard函式辨識TG_TABLE_NAME與TG_OP，snapshot以NEW或OLD的market/trading_date判定；position以NEW/OLD.snapshot_id查parent，未知parent fail closed。INSERT時父必存在且在期間內；DELETE時父必存在且過期；UPDATE始終raise。清理過期資料不受狀態SAVED/EMPTY影響，parent與child FK維持無cascade（刪除順序顯式）。pg_dump schema重產須包含新函式與trigger，舊v1.162.0bytes維持不變。
+
+
+### Task 557：股利區間日期參數型別
+
+`StockDividendHistoryRepository.findAdjustmentEvents` 維持既有四參數與 Spring Data JPQL，將年度 fallback 的兩個 YEAR 輸入先 CAST 為 LocalDate（SQL DATE），令 PostgreSQL 能決定 EXTRACT overload，不依賴 JDBC unknown 參數推導。canonicalDate／LEAST 日期區間、三日期皆空才按年、ACTIVE 與股票市場篩選及原排序完全保留；不新增 I/O／儲存或外部呼叫。以隔離 PostgreSQL + Hibernate + Spring Data repository 實際執行驗證，補足只解析 HQL 無法捕捉 DB overload 的缺口。

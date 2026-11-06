@@ -26,12 +26,13 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
     List<StockDividendHistory> findByStockSinceYear(String code, String market, int sinceYear);
 
     /**
-     * 交易雷達還原權息用的區間事件；排除年度彙總列與零值事件。
+     * 交易雷達還原權息用的區間事件；保留未知金額與無日期年度列供證據判讀。
      *
      * <p>Task 357：區間比較改用 anchorDate = {@code LEAST(exDividendDate,
      * exRightsDate)}——純配股事件的 exDividendDate 為 null，裸欄位 BETWEEN 對 NULL
-     * 恆為 UNKNOWN、等同隱性排除。兩欄皆空的年度彙總列仍然被排除（{@code LEAST} 為
-     * {@code null} 時 {@code BETWEEN} 不成立）。</p>
+     * 恆為 UNKNOWN、等同隱性排除。Task 552 以 canonicalDate 優先，三個日期皆空者按年度納入；
+     * 不以金額過濾未知事件。Task 557 在 YEAR 前明示日期型別，
+     * 避免 PostgreSQL 無法判定 unknown 參數的 EXTRACT overload。</p>
      *
      * <p><b>用 {@code LEAST} 而非 {@code COALESCE}。</b>PostgreSQL 的 {@code LEAST} 忽略
      * {@code NULL}、全 {@code NULL} 才回 {@code NULL}，與 Java 端
@@ -46,7 +47,7 @@ public interface StockDividendHistoryRepository extends JpaRepository<StockDivid
         WHERE h.stockCode = :code AND h.market = :market
           AND ((COALESCE(h.canonicalDate, LEAST(h.exDividendDate, h.exRightsDate)) BETWEEN :fromDate AND :toDate)
                OR (h.canonicalDate IS NULL AND h.exDividendDate IS NULL AND h.exRightsDate IS NULL
-                   AND h.year BETWEEN year(:fromDate) AND year(:toDate)))
+                   AND h.year BETWEEN year(cast(:fromDate as LocalDate)) AND year(cast(:toDate as LocalDate))))
           AND h.eventStatus = 'ACTIVE'
         ORDER BY LEAST(h.exDividendDate, h.exRightsDate) ASC, h.id ASC
         """)

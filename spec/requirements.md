@@ -6640,3 +6640,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 清理adapter於同一交易先取得DB statement_timestamp()作本輪選取截止時間，鎖定已過期header後只刪其固定id集合，不使用caller傳入cutoff。即使跨午夜，較舊輪次cutoff只可能少清不會刪未過期資料；trigger每個statement仍以當時真DB時間覆核。DB與JVM時鐘差異不放寬guard。
 - [ ] 年度配息純讀的daily symbol scope與daily基準兩條SQL，皆加trading_date>=daily_inventory_retention_cutoff(market,statement_timestamp())，即使清理落後也不讀／使用過期每日庫存。呼叫端asOfDate仍為原查詢上界，不能用來延長保留期限。保留原舊asset_snapshot與ledger fallback；已清理的每日資料缺席不是EMPTY、不當零，無其他基準維持資料不足。DTO/BFF/UI及配息算式不改，既有stock master/ledger名稱查詢不改。
 - [ ] 修改既有排程文案為「最多保留5.5年（66個曆月），過期每分鐘清理」，保留台股19:30、美股NY22:00／提前19:00保存時機，JOBS仍82筆、不新增@Scheduled工作或新頁面。資料庫備份政策不變，備份中的舊副本不聲稱已被此線上清理同步移除；現行schema的一般INSERT/COPY會拒絕過期資料，但完整schema+data復原不宣稱由guard阻擋（復原可能重建舊schema/trigger）。復原後須確認現行migration已套用，再由首tick清除過期；現行annual讀路徑立即排除過期。此任務不新增restore/backup改造或備份檔清理功能。
+
+
+#### Task 557：交易雷達股利區間查詢 PostgreSQL 日期型別修復（延伸 Requirements 94／99）
+
+- [ ] 交易雷達讀取股利區間時，PostgreSQL 必須能明確判定起訖日期參數型別，避免 `extract(unknown, unknown)` 的 SQLState 42725 導致列表與單股 API 回 502。保留 `findAdjustmentEvents(code, market, fromDate, toDate)` 四參數介面，於查詢 YEAR 運算前明示轉為日期型別。
+- [ ] 保留 Task552 現行事件選取：ACTIVE、股票與市場精確匹配；canonicalDate 優先，否則取除息／除權較早日，閉區間包含起訖；只有三個日期全空者才依起訖年份閉區間保留。不得重新加回現金／配股非零過濾，以免缺資料事件被靜默忽略。不改評分、投資規則、API 契約、資料或排程。
+- [ ] 回歸驗證必在隔離的真 PostgreSQL 執行 production Spring Data repository；包含跨年、起訖邊界、canonical 優先、純除權、全空日期年度列、區間外／取消／其他股票市場排除，以及同交易內成功後續查詢。重建 business-services 並實測既有 9090 列表與台／美股單股純讀 API。
