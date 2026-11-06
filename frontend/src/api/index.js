@@ -206,6 +206,7 @@ export const bffApi = {
 
   // Transaction（交易紀錄：手動買賣流水帳，Requirement 49 / Task t237、t238）
   transaction: {
+    classification: (params) => api.get('/bff/transaction/classification', { params, skipErrorToast: true }),
     list:        () => api.get('/bff/transaction'),
     lookupName:  (params) => api.get('/bff/transaction/lookup-name', { params, skipErrorToast: true }),  // 輸入代號自動帶股名，轉呼同一支 business /api/stock-alerts/lookup-name
     // Task 251：依交易日期查匯率（轉呼同一支 business /api/market-data/exchange-rate/on-date）

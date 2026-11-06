@@ -80,9 +80,9 @@
             <el-tag :type="row.transactionType === '買' ? 'danger' : 'success'" size="small">{{ row.transactionType }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="資產類型" width="80" align="center">
+        <el-table-column label="資產類別" width="80" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.assetType === '基金' ? 'warning' : 'primary'" size="small" effect="plain">{{ row.assetType }}</el-tag>
+            <el-tag size="small" effect="plain">{{ categoryLabel(row.effectiveAssetClass) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="tradeDate" label="交易日期" width="105" />
@@ -312,10 +312,18 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="資產類型" prop="assetType">
-              <el-select v-model="txForm.assetType" style="width:100%">
-                <el-option v-for="t in ASSET_TYPES" :key="t" :value="t" :label="t" />
+            <el-form-item label="資產類別">
+              <el-select :model-value="classDraft.selected" @change="classificationDraft.change"
+                :disabled="!auth.isAdmin || classDraft.loading || !!classDraft.error || !classDraft.assignable"
+                :loading="classDraft.loading" style="width:100%">
+                <el-option label="自動（規則）" value="" />
+                <el-option v-for="c in assignableCategories" :key="c.code" :value="c.code" :label="c.displayName" />
+                <el-option v-if="classDraft.selected && !assignableCategories.some(c => c.code === classDraft.selected)"
+                  :value="classDraft.selected" :label="categoryLabel(classDraft.selected)" disabled />
               </el-select>
+              <small>與資產類別歸類共用，套用至所有同標的持股。</small>
+              <small v-if="classDraft.error" style="color:var(--el-color-danger)">{{ classDraft.error }}</small>
+              <small v-else-if="!classDraft.loading && !classDraft.assignable">此標的可記錄交易；指定分類須先有有效主檔。</small>
             </el-form-item>
           </el-col>
         </el-row>
@@ -329,6 +337,8 @@
           <el-col :span="12">
             <el-form-item label="資產名稱" prop="assetName">
               <el-input v-model="txForm.assetName" />
+              <el-checkbox :model-value="txForm.assetType === '基金'"
+                @change="value => txForm.assetType = value ? '基金' : '股票'">基金交易</el-checkbox>
             </el-form-item>
           </el-col>
         </el-row>
@@ -450,9 +460,12 @@ import { filterByYearAndMarket, buildStockOptions, filterByStock, filterByTransa
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import { createClassificationDraft } from '@/utils/transactionClassificationDraft'
 
 const TX_TYPES = ['買', '賣']
-const ASSET_TYPES = ['股票', '基金']
+const categories = ref([])
+const assignableCategories = computed(() => categories.value.filter(c => c.code !== 'CASH'))
+const categoryLabel = code => categories.value.find(c => c.code === code)?.displayName || code || '—'
 
 const summaries = ref([])
 const marketOptions = ref([])   // { code, label }
@@ -486,7 +499,6 @@ const dirTreeProps = { label: 'name', isLeaf: 'leaf' }
 
 const rules = {
   transactionType: [{ required: true, message: '請選擇交易類型', trigger: 'change' }],
-  assetType: [{ required: true, message: '請選擇資產類型', trigger: 'change' }],
   assetName: [{ required: true, message: '請輸入資產名稱', trigger: 'blur' }],
   tradeDate: [{ required: true, message: '請選擇交易日期', trigger: 'change' }],
   amountStr: [{ required: true, message: '請輸入成交金額', trigger: 'blur' }]
@@ -505,6 +517,18 @@ const txForm = reactive({
 watch(() => txForm.market, (m) => {
   txForm.currency = defaultCurrency(m)
 })
+
+const classDraft = reactive({ selected: '', baseline: '', effective: null, assignable: false, loading: false, error: '' })
+const classificationDraft = createClassificationDraft(classDraft, params => bffApi.transaction.classification(params))
+const classificationIdentity = () => ({
+  assetType: txForm.assetType, assetCode: txForm.assetCode || null,
+  market: txForm.market || null, assetName: txForm.assetName || null
+})
+watch(() => [dialogVisible.value, txForm.assetType, txForm.assetCode, txForm.market,
+  txForm.assetType === '基金' ? txForm.assetName : ''], ([visible]) => {
+  if (visible) classificationDraft.load(classificationIdentity())
+  else classificationDraft.invalidate()
+}, { flush: 'sync' })
 
 // Parse / format helpers（比照 RealizedGainView）
 const parseNum = (s) => {
@@ -544,9 +568,13 @@ const autoFillAssetName = async () => {
   if (txForm.assetType !== '股票') return          // 基金不查主檔
   if (txForm.assetName && txForm.assetName.trim()) return   // 已有名稱不覆寫（使用者手填優先）
   try {
-    const res = await bffApi.transaction.lookupName({ code, market: txForm.market })
+    const market = txForm.market
+    const res = await bffApi.transaction.lookupName({ code, market })
     const name = res?.stockName || res?.name
-    if (name) txForm.assetName = name
+    if (name && txForm.assetType === '股票' && txForm.assetCode === code && txForm.market === market) {
+      txForm.assetName = name
+      if (dialogVisible.value) classificationDraft.refreshAfterMasterLookup(classificationIdentity())
+    }
   } catch (e) {
     /* 查無或錯誤靜默，由使用者手填 */
   }
@@ -610,6 +638,7 @@ const computedAmountTwd = computed(() => {
 async function load() {
   const data = await bffApi.transaction.list()
   summaries.value = data.summaries ?? []
+  categories.value = data.categories ?? []
   marketOptions.value = (data.markets ?? []).map(m => ({ code: m.code, label: m.displayName || m.code }))
   brokerOptions.value = (data.brokers ?? []).map(b => b.displayName)
 }
@@ -721,6 +750,10 @@ const openEditDialog = (row) => {
 }
 
 const submit = async () => {
+  if (classDraft.loading) { ElMessage.warning('資產類別載入中，請稍候'); return }
+  let assetClassChange
+  try { assetClassChange = classificationDraft.payload() }
+  catch (error) { ElMessage.error(error.message); return }
   const ok = await formRef.value.validate().catch(() => false)
   if (!ok) return
   saving.value = true
@@ -747,7 +780,8 @@ const submit = async () => {
       amount: parseNum(txForm.amountStr),
       fee, transactionTax,
       exchangeRate,
-      notes: txForm.notes || null
+      notes: txForm.notes || null,
+      ...(assetClassChange === undefined ? {} : { assetClassChange })
     }
     if (editingId.value) {
       await bffApi.transaction.update(editingId.value, payload)

@@ -50,11 +50,13 @@ public class TransactionBffController {
         return Mono.zip(
                 businessServicesClient.get().uri("/api/asset-transactions").retrieve().bodyToMono(LIST_MAP),
                 businessServicesClient.get().uri("/api/settings/market-types").retrieve().bodyToMono(LIST_MAP),
-                businessServicesClient.get().uri("/api/settings/brokers").retrieve().bodyToMono(LIST_MAP)
+                businessServicesClient.get().uri("/api/settings/brokers").retrieve().bodyToMono(LIST_MAP),
+                businessServicesClient.get().uri("/api/settings/asset-classes").retrieve().bodyToMono(LIST_MAP)
         ).map(t -> {
             Map<String, Object> body = new java.util.HashMap<>();
             body.put("summaries", t.getT1());
             body.put("markets", t.getT2());
+            body.put("categories", t.getT4());
             body.put("brokers", t.getT3().stream()
                     .filter(b -> Boolean.TRUE.equals(b.get("active")))
                     .toList());
@@ -105,15 +107,30 @@ public class TransactionBffController {
 
     @PostMapping
     public Mono<ResponseEntity<Map<String, Object>>> create(@RequestBody Map<String, Object> body) {
-        return businessServicesClient.post().uri("/api/asset-transactions")
-                .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+        return relay(businessServicesClient.post().uri("/api/asset-transactions").bodyValue(body));
     }
 
     @PutMapping("/{id}")
     public Mono<ResponseEntity<Map<String, Object>>> update(@PathVariable Long id,
                                                             @RequestBody Map<String, Object> body) {
-        return businessServicesClient.put().uri("/api/asset-transactions/{id}", id)
-                .bodyValue(body).retrieve().bodyToMono(MAP).map(ResponseEntity::ok);
+        return relay(businessServicesClient.put().uri("/api/asset-transactions/{id}", id).bodyValue(body));
+    }
+
+    @GetMapping("/classification")
+    public Mono<ResponseEntity<Map<String, Object>>> classification(@RequestParam String assetType,
+            @RequestParam(required = false) String assetCode, @RequestParam(required = false) String market,
+            @RequestParam(required = false) String assetName) {
+        return relay(businessServicesClient.get().uri(builder -> builder.path("/api/asset-transactions/classification")
+                .queryParam("assetType", assetType)
+                .queryParamIfPresent("assetCode", java.util.Optional.ofNullable(assetCode))
+                .queryParamIfPresent("market", java.util.Optional.ofNullable(market))
+                .queryParamIfPresent("assetName", java.util.Optional.ofNullable(assetName)).build()));
+    }
+
+    private Mono<ResponseEntity<Map<String, Object>>> relay(WebClient.RequestHeadersSpec<?> request) {
+        return request.exchangeToMono(response -> response.bodyToMono(MAP).defaultIfEmpty(Map.of())
+                .map(body -> ResponseEntity.status(response.statusCode())
+                        .contentType(response.headers().contentType().orElse(MediaType.APPLICATION_JSON)).body(body)));
     }
 
     @DeleteMapping("/{id}")
