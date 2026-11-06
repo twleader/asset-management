@@ -4,11 +4,11 @@
   "policy_version": "2.58.0",
   "model_version": "3.22.0",
   "files": {
-    "CHANGELOG.md": "f96e711c7590f4693914f04fe6c21accb035fed8cfc8e2e234d56fe8d854e670",
+    "CHANGELOG.md": "f77064837bf0d4a1c5cc5e66b7eeb7b45b316fe3951ac3ba16c43bcb0f505048",
     "README.md": "d7a9ef57fd4dd295bd747d148764410ab3f3c1938377d5cb49a113bc9c344719",
     "assumptions/bond_forward_yields.json": "1103936e3b72361ea5080b662560141cf7377ea69a7a13d814e10ad5454b8fce",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "d97435b372b0048dc9f1659de494fdb05a858ea21515872ec25ddc118dd9c914",
+    "assumptions/daily_runtime_contract.json": "a8715a1576408b6f5d449edbedc44921b1d97ba4245b1145f010e5bf878ffa9a",
     "assumptions/financial.md": "27f7aee24bafd1efaf384ee10addc4f7bbb4326852d9d84fc8e2658d481d48b9",
     "assumptions/market.md": "7dd48661a0b04dbaab5999ada122b2f16b7c0fbd997faaa15386dcf513990efd",
     "assumptions/model_inputs.json": "89e31c563f66d481ba924e414ec772da7551f4eae1e996f1cb78cd8b99e476c3",
@@ -26,9 +26,9 @@
     "docs/CORE_SELL_GUARD.md": "ef5a648900d126f28ff845133eeda1431af99d972c6857883c51b487d0fee4e2",
     "docs/CURRENT_PLAN.md": "8b9a48482a1b1f568437c53436ad7b74a2b58442dc2c13e6013f50ef7a570c8d",
     "docs/D107_LAYERED_SWAGGER_PROPOSAL.md": "a53252d72d02719a7e651c11f2e97d0a7cc45f50ff47deacb8db98e38a8c2ccf",
-    "docs/DAILY_TRADING_AUTOMATION.md": "0f94f28f47a0551630c5c742a6a50dce07262f92459b00e8eed60f5897c35ae0",
-    "docs/DATA_FETCH_RULES.md": "6e06777d50e30a73fe93ec0a7100134b1863a74678105ca49f7b45580ccb92e9",
-    "docs/DECISION_LOG.md": "edbcda7087c502ba6d748a06a826741b7f4a6515aff1e25fb8b889a72c7b98c6",
+    "docs/DAILY_TRADING_AUTOMATION.md": "792392c1c666b3c5d00b657718427ddab3a2aa337ce8f67ad124d7e7d68f0487",
+    "docs/DATA_FETCH_RULES.md": "3a93fc3755e8aaf878bc0889639700f5d9a1cba1b7ab7219c56daa59e43397d8",
+    "docs/DECISION_LOG.md": "4fa09e56a659eb970f54126d605d2476aedde6b11382503d1a06f7cc3da3a37a",
     "docs/EMAIL_CORE_TEMPLATE_SAMPLE.html": "ee5bbe7d0d405ae128600cdd3fd8e6bc359483c273cc7834dece0aa708b51a9d",
     "docs/EMAIL_HTML_STYLE.md": "daba848018072cb03ea32d776a2cf6adbfe02cc67f10332ee598a370b2c21147",
     "docs/EMAIL_TEMPLATE_SAMPLE.html": "1f6776a65549ff3f720bb2ad114ee59dbd7699886b7756d1aea2d01c0accf969",
@@ -51,9 +51,9 @@
     "docs/schedule_entries/retired/claude-srpp--0930.SKILL.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp-12-10.ENTRY.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp-12-10.SKILL.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
-    "docs/schedule_entries/srpp-0905-claude.SKILL.md": "d08dfb8e19ced30962f743db8c45b3c6a0d4f1ab25f81c1f8c0aafa5e1edffbc",
-    "docs/schedule_entries/srpp-1150-claude.SKILL.md": "a3202518968f04a94494ff276dca5ac8de3b7df16364833141a2f29e81079c87",
-    "docs/schedule_entries/srpp-daily.ENTRY.md": "6e1725e0912510b6de3c623bd11f127ee599b7b6cf490a65a94e361473462319",
+    "docs/schedule_entries/srpp-0905-claude.SKILL.md": "f3dc6ac35be820d0f9253470af88f1d6290a2c3a3ee39e0c073d1e16ec3213aa",
+    "docs/schedule_entries/srpp-1150-claude.SKILL.md": "5f4a50a0872e440294b96c19af818ee15ce0ca8108da8b172a789aab24a231d1",
+    "docs/schedule_entries/srpp-daily.ENTRY.md": "1729e67dbfdf6af35b7775db81dd895331e8115ebe0f395079791398f65e8d2b",
     "docs/schedule_entries/srpp-watchdog.ENTRY.md": "908db57ba8a9e85dda7c932e43a0f2f9f25271093e9cf2295a6216ea9ce1ccd1",
     "docs/schedule_entries/us-22-00.EVIDENCE.md": "bdf2543f4c6e738b957e6d8f562fad94f72ac15f46cc4c767073e268c7bb3be2",
     "docs/schedule_entries/us-22-00.PUBLIC_DECISIONS.md": "5e1354813b6e7c8e724a6367456078cfdf49a071fad057cb4354ed1ab5fde64d",
@@ -178,5 +178,5 @@
     "scripts/verify_srpp_us_report_calculations.py": "12e90bd96e2802bd49110f931c5f955033dac52776cfb92e71ba68b77f428ae6",
     "scripts/verify_technical_series.py": "a029382844c195acbcf49a849a9e3113f9b715b17cb5234002b9a5c9c5918c93"
   },
-  "POLICY_BUNDLE_SHA256": "930d076f49ef25d495b4a355e95754e85bd8be4dfa39b2c4490c298f3f10d707"
+  "POLICY_BUNDLE_SHA256": "e932a1bcd39ee3a44623bb4498b2fdb134705a57b6654df19a75a241b024757a"
 }

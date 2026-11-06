@@ -13525,3 +13525,10 @@ Guard函式辨識TG_TABLE_NAME與TG_OP，snapshot以NEW或OLD的market/trading_d
 ### Task 557：股利區間日期參數型別
 
 `StockDividendHistoryRepository.findAdjustmentEvents` 維持既有四參數與 Spring Data JPQL，將年度 fallback 的兩個 YEAR 輸入先 CAST 為 LocalDate（SQL DATE），令 PostgreSQL 能決定 EXTRACT overload，不依賴 JDBC unknown 參數推導。canonicalDate／LEAST 日期區間、三日期皆空才按年、ACTIVE 與股票市場篩選及原排序完全保留；不新增 I/O／儲存或外部呼叫。以隔離 PostgreSQL + Hibernate + Spring Data repository 實際執行驗證，補足只解析 HQL 無法捕捉 DB overload 的缺口。
+
+
+### Task 558：API 請求核對文字更新與精確 authority 發布
+
+本輪只改 SRPP 共用操作規格與四個臺股入口，要求實際 method／server／完整 path／參數逐項對照當輪已讀 Swagger，腳本每個不同範本核對後才批次展開，404 保留收據並分辨執行錯路由與契約的無資料。沒有新機器攔截器、API、DTO、DB schema 或金融計算變動。文字來源改變需以原工具重產 runtime／policy manifest，凍結後同步 embedded model／manifest、正式 policy document、兩份 goldens 與 insert-only registration SQL；除 bundle 身分外，model／金融結果／formula／Swagger 維持。
+
+發布先完成獨立審查、離線 authority／calculator parity／build，等活動報告結束後才兩 repo commit→no-ff main merge→push及精確 refs 讀回，接著登錄 SQL 與四欄全文／舊 rows readback，再從正式 main 設定 build／recreate business-services、驗 JAR bytes 與同 hash 業務 GET。Codex prompt 由 App 工具更新既有早午排程且其他欄位不變；Claude host skill 複製正本，remote device 證據另列。這是現行跨專案發布鏈的窄幅 metadata 更新，不授權 producer／報告／Gmail／刷新或交易；時窗外金融業務驗收標 NOT_YET_EXECUTED。
