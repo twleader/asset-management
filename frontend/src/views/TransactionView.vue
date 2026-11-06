@@ -82,7 +82,9 @@
         </el-table-column>
         <el-table-column label="資產類別" width="80" align="center">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ categoryLabel(row.effectiveAssetClass) }}</el-tag>
+            <el-tag :color="categoryColor(row.effectiveAssetClass)" size="small" effect="dark" style="border:none">
+              {{ categoryLabel(row.effectiveAssetClass) }}
+            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="tradeDate" label="交易日期" width="105" />
@@ -466,6 +468,7 @@ const TX_TYPES = ['買', '賣']
 const categories = ref([])
 const assignableCategories = computed(() => categories.value.filter(c => c.code !== 'CASH'))
 const categoryLabel = code => categories.value.find(c => c.code === code)?.displayName || code || '—'
+const categoryColor = code => ({ CASH: '#3b82f6', BOND: '#14b8a6', STOCK: '#f59e0b' })[code] || '#94a3b8'
 
 const summaries = ref([])
 const marketOptions = ref([])   // { code, label }
