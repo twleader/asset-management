@@ -6647,3 +6647,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 交易雷達讀取股利區間時，PostgreSQL 必須能明確判定起訖日期參數型別，避免 `extract(unknown, unknown)` 的 SQLState 42725 導致列表與單股 API 回 502。保留 `findAdjustmentEvents(code, market, fromDate, toDate)` 四參數介面，於查詢 YEAR 運算前明示轉為日期型別。
 - [ ] 保留 Task552 現行事件選取：ACTIVE、股票與市場精確匹配；canonicalDate 優先，否則取除息／除權較早日，閉區間包含起訖；只有三個日期全空者才依起訖年份閉區間保留。不得重新加回現金／配股非零過濾，以免缺資料事件被靜默忽略。不改評分、投資規則、API 契約、資料或排程。
 - [ ] 回歸驗證必在隔離的真 PostgreSQL 執行 production Spring Data repository；包含跨年、起訖邊界、canonical 優先、純除權、全空日期年度列、區間外／取消／其他股票市場排除，以及同交易內成功後續查詢。重建 business-services 並實測既有 9090 列表與台／美股單股純讀 API。
+
+
+### Requirements 171／187／193：API 請求核對文字更新的 authority 發布（Task 558）
+
+- [ ] SRPP 依使用者要求澄清 Swagger 與實際請求的 method／server／完整 path／參數核對、先檢查請求範本再批次展開及 404 收據處理；四個臺股入口引用共用要求。這是操作文字要求，不新增執行器、機器攔截器、全域 L0、API、金融公式或 35／40／60 分鐘時限；D-209／v2.58.0／模型 v3.22.0 保持。
+- [ ] 只由凍結且檢核成功的 SRPP 來源重產 runtime／manifest，同步資產管理 embedded authority、原 generator 的正式 document／goldens／insert-only SQL；金融輸出、model bytes、formula manifest 與 Swagger bytes 保持。兩 repo 各 commit／no-ff merge／push、精確 remote-ref readback 後才執行 registry insert-only，讀回四欄全文並驗舊 rows 不變；從乾淨 main 重建 business-services，驗 JAR bytes 與精確 hash 的唯讀業務 GET，無合法時窗則記 NOT_YET_EXECUTED。
+- [ ] 正式來源、入口、registry 與服務切換須等當輪活動報告結束，不能令它混版；Codex 兩個既有排程只更新 prompt，其他欄位原樣。Claude host skill 同步不冒稱 remote device 已更新。無手動報告、producer、刷新、Gmail 或券商動作；未來實際日報遵循文字仍需另驗，不以文字或部署成功保證零誤用。
