@@ -11,6 +11,48 @@ class SrppReportShortUsCalculatorTest {
     private static final ObjectMapper M=new ObjectMapper();
     private static JsonNode model()throws Exception{return SrppReportModuleCalculatorTest.model();}
     private JsonNode golden()throws Exception{return M.readTree(getClass().getResourceAsStream("/srpp/report-short-us-full-golden.json"));}
+    private ObjectNode d210Body(String price)throws Exception{
+        ObjectNode body=M.createObjectNode();body.put("symbol","00881");body.putObject("quote").put("price",price);
+        ObjectNode stock=golden().path("cases").get(0).path("input").path("items").get(0).path("radar").path("stock").deepCopy();
+        stock.put("monthlyMa","101").put("weeklyMa","102");body.putObject("radar").set("stock",stock);return body;
+    }
+    private static ObjectNode d210Scenario(ObjectNode body,JsonNode policy,String pressure){
+        return SrppReportModuleCalculator.shortScenario(new BigDecimal(body.path("quote").path("price").asText()),new BigDecimal("100"),new BigDecimal(pressure),new BigDecimal("1000"),policy.path("scenario_costs"));
+    }
+    @Test void d210EquityReboundUsesExactThreePercentBeforeDisplayRounding()throws Exception{
+        JsonNode policy=model().path("execution_policy").path("short_term_opportunity_d171");
+        assertThat(new BigDecimal(policy.path("minimum_rebound_pct").asText())).isEqualByComparingTo("3");
+        for(String price:new String[]{"102.9999","102.99999","103","103.00001","105"}){
+            ObjectNode body=d210Body(price),scenario=d210Scenario(body,policy,"130");
+            var reasons=SrppReportModuleCalculator.shortEntryReasons(body,scenario,policy);
+            if(new BigDecimal(price).compareTo(new BigDecimal("103"))<0)assertThat(reasons).as(price).containsExactly("REBOUND_NOT_CONFIRMED");
+            else assertThat(reasons).as(price).isEmpty();
+            if(price.equals("102.99999"))assertThat(new BigDecimal(scenario.path("reboundPct").asText())).isEqualByComparingTo("3");
+        }
+    }
+    @Test void d210ThreePercentStillRequiresOriginalTrendRewardAndRadarGates()throws Exception{
+        JsonNode policy=model().path("execution_policy").path("short_term_opportunity_d171");
+        for(String gate:new String[]{"monthlyMa","weeklyMa","kValue","monthlyConfirmation","shortAction","rewardRisk"}){
+            ObjectNode body=d210Body("103"),stock=(ObjectNode)body.path("radar").path("stock");
+            switch(gate){
+                case "monthlyMa","weeklyMa" -> stock.put(gate,"104");
+                case "kValue" -> stock.put(gate,"45");
+                case "monthlyConfirmation" -> stock.put(gate,"BELOW");
+                case "shortAction" -> stock.put(gate,"WAIT");
+                default -> { }
+            }
+            ObjectNode scenario=d210Scenario(body,policy,gate.equals("rewardRisk")?"104":"130");
+            String reason=gate.equals("rewardRisk")?"NET_REWARD_RISK_INSUFFICIENT":gate.equals("shortAction")?"RADAR_WAIT_OR_CONFLICT":"REBOUND_NOT_CONFIRMED";
+            assertThat(SrppReportModuleCalculator.shortEntryReasons(body,scenario,policy)).as(gate).contains(reason);
+        }
+    }
+    @Test void d210DoesNotChangeBondReboundOrUsNetProfitThresholds()throws Exception{
+        JsonNode policies=model().path("execution_policy"),bond=policies.path("bond_short_term_opportunity_d185");
+        assertThat(new BigDecimal(bond.path("minimum_rebound_pct").asText())).isEqualByComparingTo("5");
+        assertThat(new BigDecimal(policies.path("us_megacap_tactical_policy_d133").path("minimum_profit_space_d185").path("minimum_pct").asText())).isEqualByComparingTo("15");
+        ObjectNode body=d210Body("104.99999"),scenario=d210Scenario(body,bond,"130");
+        assertThat(SrppReportModuleCalculator.shortEntryReasons(body,scenario,bond)).doesNotContain("REBOUND_NOT_CONFIRMED");
+    }
     private static void compare(JsonNode actual,JsonNode expected,String path){assertThat(actual).as(path).isNotNull();if(expected.isObject()){for(var e:expected.properties())compare(actual.get(e.getKey()),e.getValue(),path+"."+e.getKey());}else if(expected.isArray()){assertThat(actual.size()).as(path).isEqualTo(expected.size());for(int i=0;i<expected.size();i++)compare(actual.get(i),expected.get(i),path+"["+i+"]");}else if(expected.isNumber()||expected.isTextual()&&expected.asText().matches("-?[0-9]+(?:\\.[0-9]+)?")){assertThat(actual.isNull()).as(path+" actual="+actual).isFalse();assertThat(new BigDecimal(actual.asText()).subtract(new BigDecimal(expected.asText())).abs()).as(path).isLessThan(new BigDecimal("0.00000001"));}else assertThat(actual).as(path).isEqualTo(expected);}
     @Test void originalThirteenSameInputFullScreenAndD186Parity()throws Exception{int count=0;for(JsonNode c:golden().path("cases")){JsonNode actual="short".equals(c.path("kind").asText())?SrppReportShortUsCalculator.screen(c.path("input"),model(),"short_term_opportunity_d171"):SrppReportShortUsCalculator.usCheck(c.path("input"),c.path("date").asText(),new BigDecimal(c.path("total").asText()),model());compare(actual,c.path("expected"),c.path("name").asText());count++;}assertThat(count).isEqualTo(13);}
     @Test void originalPythonFullHoldingPeriodPositiveAndNegativeParity()throws Exception{

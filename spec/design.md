@@ -13546,3 +13546,10 @@ FubonAccountingContract.settlementProjection 對每個有效未來列直接按 t
 交易API新增GET /api/asset-transactions/classification（assetType、assetCode、market、assetName）返回override/effective/assignable；BFF新增同頁GET /api/bff/transaction/classification代理，list聚合另取既有/api/settings/asset-classes為categories。瀏覽器只呼叫transaction BFF。create/update/classification的400/403/404原狀態與ProblemDetail須穿透BFF；不將業務拒絕改成200或500。分類寫權限在business service內檢查CurrentUserContext.isAdmin，保留tenant owner驗證，不以客戶端disabled保護取代後端guard。
 
 UI原assetType下拉換成assetClassOverride草稿，名稱旁基金交易checkbox保留商品種類。身份變更以遞增request序號淘汰過期分類回應；loading/error時不可提交分類變更，無法載入不得猜自動後覆寫全域設定。UI提供共用影響提示，普通USER分類唯讀但原交易可儲存。新增重置／編輯載入必初始化分類baseline/dirty，cancel只清本地。列表用backend effective欄與DB categories渲染，未知分類顯示原code或—，不再把基金當資產類別。分類選項及可寫code完全沿用既有分類頁：DB存在非CASH皆可（含inactive），不新增active條件、不改settings行為；legacyCASH只允許原樣保留。明確分類寫入不接受空code/空name/未知stock/CASH/不存在category/0000，400回應保留使用者表單。
+
+
+### Task 561 台股股票短線 3% 門檻發布
+
+既有 `SrppReportModuleCalculator.shortEntryReasons` 從傳入 policy 的 `minimum_rebound_pct` 讀取 BigDecimal，`SrppReportShortUsCalculator.screen` 選用 equity `short_term_opportunity_d171` 或 bond `bond_short_term_opportunity_d185` 原政策鍵。這次同步 equity 值 8.0→3.0，並僅對 ledger.strategy=SHORT_TERM_D173 修正入選比較：以 BigDecimal 原始 price*100 與 support*(100+minimum_rebound_pct) 交叉相乘直接比較，不讓已捨入的顯示 reboundPct 放行 2.99999% 等未達標值；輸出四位小數與債券原 comparator 均保留。價格反彈 `(price/support-1)*100` 仍為原計算口徑，恰好門檻允許，低於門檻加入 REBOUND_NOT_CONFIRMED。其他原 reasons、reconcile／capacity／execution-gate 路徑不變；5% 債券與 15% US 值保留。邊界回歸使用正式 embedded model，以合格雷達與支撐／壓力情境隔離門檻，同時保留原均線／KD／風報比／方向反例。
+
+凍結 SRPP model／manifest 後用原 generators 產出 authority、formal targets policy document、goldens 與 insert-only SQL；只因新 bundle 引起的 golden identity 變動照原工具更新，禁止手改 expected。既有 ASSET_MGMT_SRPP_V2／SRPP_REPORT_CALCULATIONS_V1 與 formula manifest、Swagger 全文不變。不新增 endpoint、DB schema、producer 或 scheduler。雙 repo 落地後 registry 四欄與歷史 rows 核對，再由正式 main build／recreate business-services，保留其他容器與設定；JAR bytes 與精確新 hash 業務 GET 為部署證據，正式報告採用仍受合法時間、完整 required_reads、同 owner L0 與 verifier 限制。
