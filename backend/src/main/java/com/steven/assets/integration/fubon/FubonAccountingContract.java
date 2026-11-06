@@ -115,8 +115,9 @@ final class FubonAccountingContract {
         for (FubonDtos.SettlementDay row : body.details()) {
             if (!"AVAILABLE".equals(row.status()) || !row.settlementDate().isAfter(body.queryDate())) continue;
             futureRows++;
-            payable = payable.add(row.buySettlement().value());
-            receivable = receivable.add(row.sellSettlement().value());
+            BigDecimal net = row.totalSettlementAmount().value();
+            if (net.signum() < 0) payable = payable.add(net);
+            if (net.signum() > 0) receivable = receivable.add(net);
         }
         return new SettlementProjection(money(payable), money(receivable), futureRows);
     }

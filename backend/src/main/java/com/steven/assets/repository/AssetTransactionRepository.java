@@ -83,6 +83,18 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
     List<AssetTransaction> findFubonBuyLedgerForSettlement(
             @Param("ownerUserId") Long ownerUserId, @Param("tradeDate") LocalDate tradeDate);
 
+    /** Source-day ledger evidence for settlement notes, explicitly scoped for internal sync. */
+    @Query(value = """
+        SELECT * FROM asset_transaction
+        WHERE owner_user_id = :ownerUserId AND trade_date = :tradeDate
+          AND asset_type = '股票' AND market = '台股' AND currency = 'TWD'
+          AND channel = '富邦證券' AND transaction_type IN ('買', '賣')
+          AND source IN ('MANUAL', 'FUBON_SYNC')
+        ORDER BY asset_code ASC NULLS LAST, id ASC
+        """, nativeQuery = true)
+    List<AssetTransaction> findFubonLedgerForSettlementNote(
+            @Param("ownerUserId") Long ownerUserId, @Param("tradeDate") LocalDate tradeDate);
+
     /**
      * The Fubon batch writer alone calls this inside its transaction. Only the existing
      * owner/filled-no partial unique index is an expected conflict; every other database error

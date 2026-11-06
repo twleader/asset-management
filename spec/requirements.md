@@ -6654,3 +6654,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] SRPP 依使用者要求澄清 Swagger 與實際請求的 method／server／完整 path／參數核對、先檢查請求範本再批次展開及 404 收據處理；四個臺股入口引用共用要求。這是操作文字要求，不新增執行器、機器攔截器、全域 L0、API、金融公式或 35／40／60 分鐘時限；D-209／v2.58.0／模型 v3.22.0 保持。
 - [ ] 只由凍結且檢核成功的 SRPP 來源重產 runtime／manifest，同步資產管理 embedded authority、原 generator 的正式 document／goldens／insert-only SQL；金融輸出、model bytes、formula manifest 與 Swagger bytes 保持。兩 repo 各 commit／no-ff merge／push、精確 remote-ref readback 後才執行 registry insert-only，讀回四欄全文並驗舊 rows 不變；從乾淨 main 重建 business-services，驗 JAR bytes 與精確 hash 的唯讀業務 GET，無合法時窗則記 NOT_YET_EXECUTED。
 - [ ] 正式來源、入口、registry 與服務切換須等當輪活動報告結束，不能令它混版；Codex 兩個既有排程只更新 prompt，其他欄位原樣。Claude host skill 同步不冒稱 remote device 已更新。無手動報告、producer、刷新、Gmail 或券商動作；未來實際日報遵循文字仍需另驗，不以文字或部署成功保證零誤用。
+
+### Requirements 129 補充：富邦同日淨交割在途款（Task 559）
+
+- [ ] 對已通過原帳戶、owner、freshness、幣別、完整金額、符號、日期與重複驗證的 future AVAILABLE SDK row，以其 `totalSettlementAmount` 直接投影同一 owner／富邦 bank／官方 settlementDate 的淨交割：負值為單筆買股待付款、正值為單筆賣股待收款；各方向 summary 亦按淨額分類。不得從本地 ledger 計算替代 SDK total。此規則取代先前逐日 buySettlement/sellSettlement 分開投影，避免當沖分列造成待付高估及實際入帳先後問題。
+- [ ] 同一完整來源列的 buySettlement<0 或 sellSettlement>0 時，原子更新／建立目標淨額並移除同 bank／settlementDate 的另一方向 FUBON_SYNC 列；兩方向皆非零且 total=0 時移除該日兩方向 FUBON_SYNC 列。兩方向皆0、missing row、placeholder 不清款。其他處理日、owner、銀行、存款及 ledger 不變。先純計算既有完整 gross-buy 證據下精確可銜接的 matchedManual 集合（sourceQueryDate=queryDate 及原 bank/date/唯一金額條件），不先刪除。既有 wrong currency、null date、同日 duplicate、manual collision guard 保留，必在刪改前檢查兩方向，guard 僅排除這個精確 matchedManual 集合；全部通過後才原子移除 matchedManual 與反方向 AUTO 並投影 net；其餘 MANUAL 仍拒絕。失敗 rollback，不可繞過 guard 靜默刪除。
+- [ ] 備註讀取 SDK sourceQueryDate 的本地富邦台股股票 TWD 買賣 ledger，可含 MANUAL／FUBON_SYNC，但只能描述為已記錄成交。僅完整且與來源買賣成交金額、手續費、稅費及方向交割金額逐項對帳一致時，才可替換既有 generic note；以 sorted distinct 代號標明買／賣及淨交割，不宣稱任一同日買賣就是已確認當沖。證據不全或不符則保留原非空 note，新列用來源日及交割日 generic note，不能稱沒有已同步明細。note長度<=200，過長用明確摘要。手動待付銜接仍依既有完整 gross-buy 證據及原日期/owner/bank/金額條件，不能用 net錯配手動列。
+- [ ] 使用者 2026-11-06 的修正只允許既有 settlement-sync 讀取官方 SDK、更新本系統在途列及衍生摘要；不改券商委託、成交記錄、銀行存款、排程、flags、公開API/Swagger或SRPP。部署後 dry-run與正式同步兩次並讀回。當下官方及DB成交SELL價格40.80，與截圖40.88不同，只呈報差異不擅改。
