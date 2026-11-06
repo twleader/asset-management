@@ -5,6 +5,7 @@ import com.steven.assets.model.AssetTransaction;
 import com.steven.assets.repository.AssetTransactionRepository;
 import com.steven.assets.security.TenantGuard;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -34,6 +35,13 @@ class AssetTransactionServiceTest {
 
     @Mock private AssetTransactionRepository txRepo;
     @Mock private TenantGuard tenantGuard;
+    @Mock private TransactionAssetClassService classification;
+
+    @BeforeEach
+    void classificationProjection() {
+        when(classification.resolve(any(), any())).thenReturn(
+                new TransactionAssetClassService.Classification(null, "STOCK", false));
+    }
 
     @InjectMocks private AssetTransactionService service;
 

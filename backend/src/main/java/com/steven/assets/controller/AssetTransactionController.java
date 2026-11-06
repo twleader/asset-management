@@ -3,6 +3,7 @@ package com.steven.assets.controller;
 import com.steven.assets.dto.AssetTransactionDto;
 import com.steven.assets.service.AssetTransactionService;
 import com.steven.assets.service.ExcelExportService;
+import com.steven.assets.service.TransactionAssetClassService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
@@ -31,6 +32,14 @@ public class AssetTransactionController {
 
     private final AssetTransactionService service;
     private final ExcelExportService excelExportService;
+    private final TransactionAssetClassService classification;
+
+    @GetMapping("/classification")
+    public TransactionAssetClassService.Classification classification(@RequestParam String assetType,
+            @RequestParam(required = false) String assetCode, @RequestParam(required = false) String market,
+            @RequestParam(required = false) String assetName) {
+        return classification.lookup(assetType, assetCode, market, assetName);
+    }
 
     @GetMapping
     public List<AssetTransactionDto.YearSummaryResponse> getAll() {

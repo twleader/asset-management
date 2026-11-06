@@ -34,6 +34,7 @@ public class AssetTransactionService {
 
     private final AssetTransactionRepository txRepo;
     private final TenantGuard tenantGuard;
+    private final TransactionAssetClassService classification;
 
     @Transactional
     public AssetTransactionDto.AssetTransactionResponse createAssetTransaction(
@@ -56,7 +57,8 @@ public class AssetTransactionService {
                 .exchangeRate(req.exchangeRate())
                 .notes(req.notes())
                 .build();
-        return toResponse(txRepo.save(tx));
+        classification.apply(tx, req.assetClassChange());
+        return toResponse(txRepo.save(tx), classification.context(List.of(tx)));
     }
 
     @Transactional
@@ -83,7 +85,8 @@ public class AssetTransactionService {
         tx.setExchangeRate(req.exchangeRate());
         tx.setNotes(req.notes());
 
-        return toResponse(txRepo.save(tx));
+        classification.apply(tx, req.assetClassChange());
+        return toResponse(txRepo.save(tx), classification.context(List.of(tx)));
     }
 
     @Transactional
@@ -100,8 +103,10 @@ public class AssetTransactionService {
         // TreeMap 逆序：年度新到舊
         TreeMap<Integer, List<AssetTransactionDto.AssetTransactionResponse>> byYear =
                 new TreeMap<>(java.util.Comparator.reverseOrder());
-        for (AssetTransaction tx : txRepo.findAllByOrderByTradeDateDesc()) {
-            AssetTransactionDto.AssetTransactionResponse r = toResponse(tx);
+        List<AssetTransaction> transactions = txRepo.findAllByOrderByTradeDateDesc();
+        var context = classification.context(transactions);
+        for (AssetTransaction tx : transactions) {
+            AssetTransactionDto.AssetTransactionResponse r = toResponse(tx, context);
             byYear.computeIfAbsent(r.year(), k -> new ArrayList<>()).add(r);
         }
 
@@ -129,7 +134,9 @@ public class AssetTransactionService {
     }
 
     /** 統一算 amountTwd／year。 */
-    private AssetTransactionDto.AssetTransactionResponse toResponse(AssetTransaction tx) {
+    private AssetTransactionDto.AssetTransactionResponse toResponse(AssetTransaction tx,
+            TransactionAssetClassService.Context context) {
+        var category = classification.resolve(tx, context);
         BigDecimal amountTwd = tx.getAmount();
         if ("USD".equals(tx.getCurrency()) && tx.getExchangeRate() != null && tx.getAmount() != null) {
             amountTwd = tx.getAmount().multiply(tx.getExchangeRate());
@@ -152,6 +159,6 @@ public class AssetTransactionService {
                 tx.getExchangeRate(),
                 tx.getNotes(),
                 amountTwd,
-                tx.getYear());
+                tx.getYear(), category.assetClassOverride(), category.effectiveAssetClass(), category.assetClassAssignable());
     }
 }

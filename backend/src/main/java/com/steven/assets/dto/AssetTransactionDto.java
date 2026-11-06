@@ -22,6 +22,8 @@ import java.util.List;
  */
 public class AssetTransactionDto {
 
+    public record AssetClassChange(String assetClass) {}
+
     /** 新增／編輯共用。 */
     public record CreateAssetTransactionRequest(
             @NotNull String transactionType,
@@ -40,8 +42,17 @@ public class AssetTransactionDto {
             /** 證交稅（選填，原幣）。語意同 fee；不依交易類型設限（英股印花稅課在買進）。 */
             @PositiveOrZero BigDecimal transactionTax,
             BigDecimal exchangeRate,
-            String notes
-    ) {}
+            String notes,
+            AssetClassChange assetClassChange
+    ) {
+        public CreateAssetTransactionRequest(String transactionType, String assetType, String assetName,
+                String assetCode, String market, String currency, String channel, LocalDate tradeDate,
+                BigDecimal shares, BigDecimal price, BigDecimal amount, BigDecimal fee,
+                BigDecimal transactionTax, BigDecimal exchangeRate, String notes) {
+            this(transactionType, assetType, assetName, assetCode, market, currency, channel, tradeDate,
+                    shares, price, amount, fee, transactionTax, exchangeRate, notes, null);
+        }
+    }
 
     public record AssetTransactionResponse(
             Long id,
@@ -62,7 +73,10 @@ public class AssetTransactionDto {
             String notes,
             /** 台幣成交金額（currency=USD 且 exchangeRate 非 null 時＝amount×exchangeRate，否則＝amount） */
             BigDecimal amountTwd,
-            Integer year
+            Integer year,
+            String assetClassOverride,
+            String effectiveAssetClass,
+            boolean assetClassAssignable
     ) {}
 
     public record YearSummaryResponse(
