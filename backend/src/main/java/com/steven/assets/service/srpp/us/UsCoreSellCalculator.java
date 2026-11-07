@@ -1,6 +1,7 @@
 package com.steven.assets.service.srpp.us;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.steven.assets.service.srpp.OrdinaryEquitySellGate;
 import com.fasterxml.jackson.databind.node.*;
 import java.math.*;
 import java.time.*;
@@ -34,7 +35,10 @@ public final class UsCoreSellCalculator {
             && !armed.isAfter(high) && !high.isAfter(basis) && !basis.isAfter(date(day)) && !state.path("evidence_sha256").asText().isBlank(), "WATCH_STATE_UNVERIFIED");
         String target = watchPolicyFingerprint(policy), source = state.path("policy_sha256").asText();
         if (!target.equals(source)) {
-            require(UsPythonJson.hash(policy).equals(source) || LEGACY_SEMANTICS.equals(target) && LEGACY.contains(source), "WATCH_STATE_UNVERIFIED");
+            ObjectNode previous = policy.deepCopy(); previous.remove("ordinary_equity_high_sell_d211");
+            ObjectNode priorD208 = previous.deepCopy(); priorD208.remove("high_zone_reversal_d209");
+            require(UsPythonJson.hash(policy).equals(source) || UsPythonJson.hash(previous).equals(source)
+                || UsPythonJson.hash(priorD208).equals(source) || LEGACY_SEMANTICS.equals(target) && LEGACY.contains(source), "WATCH_STATE_UNVERIFIED");
             state.put("policy_sha256", target);
             state.putObject("policy_migration").put("decision", "D-205").put("from", source).put("to", target)
                 .put("original_evidence_sha256", state.path("evidence_sha256").asText()).put("scope", "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION");
@@ -122,6 +126,10 @@ public final class UsCoreSellCalculator {
             for (String date : confirmation) { int index = indexOf(daily.path("dates"), date); dates.add(date); kvals.add(daily.path("k").get(index)); dvals.add(daily.path("d").get(index)); }
             BigDecimal high = n(state.get("high_water")), pullback = high.subtract(n(quote.get("price"))).divide(high, MC), threshold = n(policy.get("pullback_fraction"));
             out.put("pullback_pct", pullback.multiply(HUNDRED).doubleValue()).put("required_pullback_pct", threshold.multiply(HUNDRED).doubleValue());
+            String protection;
+            try { protection = OrdinaryEquitySellGate.reason(code, "美股", policy, ks.get(2), ds.get(2), stock); }
+            catch (IllegalArgumentException missing) { throw new Gap(missing.getMessage()); }
+            if (protection != null) { out.put("status", "SELL_DIRECTION_BLOCKED").put("reason", protection); return out; }
             require(events.stream().noneMatch(event -> event.cash().signum() > 0 && event.date().compareTo(expected.getFirst()) > 0), "KD_CORPORATE_ACTION_BASIS_UNVERIFIED");
             boolean afterHigh = confirmation.get(1).compareTo(state.path("high_date").asText()) > 0;
             boolean weak = ks.get(0).compareTo(ks.get(1)) > 0 && ks.get(1).compareTo(ks.get(2)) > 0 && ks.get(2).compareTo(ds.get(2)) < 0 && ds.get(2).compareTo(ds.get(1)) < 0;

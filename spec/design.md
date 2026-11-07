@@ -13574,3 +13574,15 @@ SRPP來源文件澄清「政府正式公告／授權啟動安定市場任務」�
 完整明細模式（`includeFullDetail`）另在 `risks`、`shortRisks`、`swingRisks` 各加一句揭露，字面以 `TradingRadarService` 內單一具名常數為準，格式為「美股配息資料或還原價基尚未驗證，技術指標暫不提供（原因：<Unavailable message>）。 」（句尾帶一個空白，沿 `missingFx` 的既有句尾風格）：package-private `static final String` 只存字首「美股配息資料或還原價基尚未驗證，技術指標暫不提供」，原因與句尾由方法組裝，測試以字首常數 `contains` 比對，不在多處手寫字串。列表模式不帶 risks。
 
 下游對 `Prepared.EMPTY` 已 null-safe（`technicalContextFingerprint` 對空基準不含任何價列；`assembler.calculate` 對 `prepared.empty()` 回 `Assembled.EMPTY`）。`RadarTechnicalResolver` 對非台股走 market-local 路徑；`listEntry == null` 的完整路徑（匯出、`evaluateForNotification`）在無新鮮快取時既有的最佳努力 market-local 快取寫入行為不變，會寫入全 null 指標、綁定空基準 fingerprint 的快照，因 fingerprint 不含任何價列而不與非空價基碰撞；列表與 `getStockEvaluation` 走 read-only 路徑不寫。本任務不新增寫入程式碼與外部呼叫，不改 `stock_price_history`／`stock_dividend_history`、DTO 或 Guard；執行期上這些美股原本提前拋例外而從未走到 market-local 快取，修正後在完整路徑（HTTP 單股明細、公開 9090 `today`／`stock`、匯出、`evaluateForNotification`）會開始執行既有的最佳努力寫入。新分支可達的必要條件是 `acceptedPrice.available()`：缺完成收盤價時 `AcceptedPrice.missing` 的三份序列皆空，`prepareTechnicalBasis` 於 `combined` 為空處直接回 `Prepared.EMPTY`、不經 `adjust`，所以不會把「真的沒有收盤價」誤救成有價。僅限美股：台股目前零案例，刻意保守不擴大。SRPP 美股 capture 內嵌的 radar 這些美股由失敗列變成「有價、`NO_TRADE`、`dataComplete=false`」，下游閘門（要求 `dataComplete==true`，部分另要 `LIVE`）結論不變。
+
+### Task 566 現金先買與台美普通股票高檔賣出
+
+D211新增正式來源 `execution_policy.cash_first_rotation_d211`，取消現金出資買腿對同輪賣方READY與配對ID的依賴；既有已交割換股專用準備金FIFO與第21交易日規則仍只管理該專用款，不能綁住其他合規現金。FUNDING_CAPACITY原計算只以已交割幣別資金扣待付／已確認買款與費用／通膨保護底線，排除待收；不依賴CORE_SELL_GUARD結果。ROTATION_AND_REGIME_CAPACITY仍只輸出容量與準備金，不新增無來源買腿或重分配器。買點、個別／群組／全股票上限、額度等仍由原獨立閘門檢核。
+
+新增純計算共用 `OrdinaryEquitySellGate`，由台股 `SrppReportModuleCalculator.coreTiming` 與美股 `UsCoreSellCalculator.evaluate` 在已驗高水位更新及完成KD取值之後、原D174轉弱／回落判斷之前呼叫。來源 `core_sell_guard_d174.ordinary_equity_high_sell_d211` 精確列D211/enabled、台美市場、六檔既有債券排除（00679B／00697B／00719B／00751B／00865B／SGOV）、四KD>50與兩D≥80門檻及重用原D208/D209政策鍵；不接受caller自行宣稱例外。00919仍由原D208/D209判斷，理由與receipt不改。
+
+D211先核四KD與RSI5／反向WR9／BIAS10／52週位置及雷達動作／技術標籤低檔反證，再核完成D及即時D≥80；K可<80。有效反證回D211_LOW_POINT_SELL_BLOCKED或D211_HIGH_ZONE_SELL_BLOCKED，缺設定／證據局部UNVERIFIED，不能推定為PASS。原觀察四欄hash保持；full-policy相容只允許當前、刪除D211所得精確已發布D210、再刪D209所得已發布D208及原核對legacy集合，未知或未發布組合拒絕。
+
+美股新閘門採內部計算，以既有closed SrppUsCoreResult.status／timing_pass／reason回傳，不能新增low_point_sell_protection／high_zone_reversal屬性。PythonUS公開投影同樣省略兩項內部proof，但獨立驗證器仍用同凍結quote／radar／DBstate執行原evaluate並逐欄比較；不能藉投影省略略過新增閘門。台股明細proof及核心／附錄原始輸入重播保持。policy bundle而非新scope綁定D211語意，既有API／OpenAPI／Swagger identity與formula family維持。
+
+原Python產生同輸入golden（原市場輸入保留、新D211案例另加）並核Java逐欄結果；FUNDING_CAPACITY以無賣方READY、SELL未成交、待收／待付、保留買款及定存底線正反例驗證獨立資金語意。正式來源凍結後同步authority原bytes／原targets投影／原Rubyinsert-onlySQL及原generatorgoldens，離線測試build與獨立審查後走雙repo落地→registry四欄及舊rows→正式main僅business-services rebuild／recreate→JAR全文與effective設定→SRPP host精確新hash業務讀回。時窗外不宣稱正式採用，不新造行情或觸發producer／報告／交易。

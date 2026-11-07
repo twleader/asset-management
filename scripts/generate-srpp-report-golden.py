@@ -121,13 +121,18 @@ for price in (100.655,100.37):
  q=sg.sgov(price);r=evaluate_test_strategic('SGOV',q,q['tradingDate'],model['execution_policy']['strategic_buy_high_gate_d188'])
  cases.append({'kind':'strategic','date':q['tradingDate'],'body':body(q),'expected':{'averageExDividendClose':r['average_ex_dividend_close'],'eligible':r['status']=='NOT_HIGH_BUY_ALLOWED','reason':r['reasons'][0] if r['reasons'] else 'STRATEGIC_PRICE_GATE_PASSED'}})
 CoreSellGuardTests.setUpClass();tc=CoreSellGuardTests()
+def legacy_core_fixture():
+ bundle,state=tc.fixture();item=bundle['items'][0]
+ item['quote']['marketData']['chart']['series']['daily']['d']=[75]*9+[74,70]
+ item['radar']['stock']['dValue']=70
+ return bundle,state
 for bid in (97,97.01):
- bundle,state=tc.fixture();bundle['items'][0]['quote']['bidLevels'][0]['price']=bid
- r=tc.run_one(bundle,state);cases.append({'kind':'core','date':bundle['trading_date'],'body':body(bundle['items'][0]['quote'],bundle['items'][0]['radar']),'state':state,'expected':{'highWater':r['high_water'],'pullbackPct':r['pullback_pct'],'trendReversal':r['trend_reversal'],'timingPass':r['timing_pass'],'reason':r['reason']}})
+ bundle,state=legacy_core_fixture();bundle['items'][0]['quote']['bidLevels'][0]['price']=bid
+ r=tc.run_one(bundle,state);cases.append({'kind':'core','date':bundle['trading_date'],'body':body(bundle['items'][0]['quote'],bundle['items'][0]['radar']),'state':state,'expected':{'highWater':r['high_water'],'pullbackPct':r['pullback_pct'],**({'trendReversal':r['trend_reversal']} if 'trend_reversal' in r else {}),'timingPass':r['timing_pass'],'reason':r['reason']}})
 # D208 cases execute the original source calculator. They are synthetic offline
 # evidence, never a replayed live recommendation or a replacement observation.
 def d208_fixture():
- bundle,state=tc.fixture();item=bundle['items'][0]
+ bundle,state=legacy_core_fixture();item=bundle['items'][0]
  item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=state['stock_code']='00919'
  item['quote']['dividendHistory']['stockCode']='00919'
  return bundle,state
@@ -209,6 +214,43 @@ add_d209('pullback_below_existing_minimum',lambda bundle:bundle['items'][0]['quo
 add_d209('new_high_still_waits_original_confirmation',lambda bundle:bundle['items'][0]['quote'].__setitem__('highPrice',101))
 add_d209('completed_d_missing',lambda bundle:bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'].__setitem__(-1,None))
 add_d209('live_d_missing',lambda bundle:bundle['items'][0]['radar']['stock'].pop('dValue'))
+# D211 adds necessary ordinary-equity gates; original market cases above stay unchanged.
+def add_d211(name,change=lambda bundle,state: None):
+ bundle,state=tc.fixture();change(bundle,state);item=bundle['items'][0];r=tc.run_one(bundle,state)
+ missing=r['status']=='SELL_TIMING_UNVERIFIED';expected={'timingPass':r['timing_pass'],'reason':r['reason']}
+ if not missing:expected.update(highWater=r['high_water'],pullbackPct=r['pullback_pct'])
+ cases.append({'kind':'core_unavailable' if missing else 'core','name':'D211_'+name,'date':bundle['trading_date'],
+               'body':body(item['quote'],item['radar']),'state':state,'expected':expected})
+add_d211('high_zone_ready')
+for field in ('completed_k','completed_d','live_k','live_d'):
+ for value in (49.99,50,50.01):
+  def change(bundle,state,field=field,value=value):
+   item=bundle['items'][0]
+   if field.startswith('completed_'):item['quote']['marketData']['chart']['series']['daily'][field[-1]][-1]=value
+   else:item['radar']['stock']['kValue' if field=='live_k' else 'dValue']=value
+  add_d211(field+'_'+str(value),change)
+for field in ('completed_d','live_d'):
+ for value in (79.99,80,80.01):
+  def change(bundle,state,field=field,value=value):
+   if field=='completed_d':bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'][-1]=value
+   else:bundle['items'][0]['radar']['stock']['dValue']=value
+  add_d211('high_zone_'+field+'_'+str(value),change)
+for field,value in [('rsi5',30),('wr9',80),('bias10',-8),('week52Position',.15)]:
+ def change(bundle,state,field=field,value=value):
+  stock=bundle['items'][0]['radar']['stock'];target=stock if field=='week52Position' else stock['extendedIndicators'];target[field]=value
+ add_d211(field+'_low_boundary',change)
+for field,value in [('timingState','LOW'),('reasons',['超賣']),('counterTrendLabel','反彈觀察')]:
+ add_d211(field+'_low',lambda bundle,state,field=field,value=value:bundle['items'][0]['radar']['stock'].__setitem__(field,value))
+for field in ('kValue','dValue','rsi5','wr9','bias10','week52Position'):
+ def change(bundle,state,field=field):
+  stock=bundle['items'][0]['radar']['stock'];(stock if field in ('kValue','dValue','week52Position') else stock['extendedIndicators']).pop(field)
+ add_d211(field+'_missing',change)
+for code in ('00679B','00697B','00719B','00751B','00865B','SGOV'):
+ def change(bundle,state,code=code):
+  item=bundle['items'][0];item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=state['stock_code']=code
+  item['quote']['dividendHistory']['stockCode']=code
+  item['quote']['marketData']['chart']['series']['daily']['d']=[75]*9+[74,70];item['radar']['stock']['dValue']=70
+ add_d211(code+'_bond_excluded',change)
 ShortTermOpportunitiesTests.setUpClass();st=ShortTermOpportunitiesTests()
 for policy_key,code in [('short_term_opportunity_d171','00881'),('bond_short_term_opportunity_d185','00679B')]:
  bundle=st.fixture();item=bundle['items'][0];item['stock_code']=item['quote']['stockCode']=item['radar']['stock']['stockCode']=item['quote']['dividendHistory']['stockCode']=code
