@@ -13589,3 +13589,16 @@ price-only 與走勢圖 `GET /api/market-data/indicators/series` 同為未還原
 偏差與下游：未還原價在除息日下跌，使近期 K／D 與價位對均線偏低；`week52Position` 因 52 週前價格未還原而持續偏低（VOO 最多 0.071、VT 最多 0.096），除息後 15 日退避不涵蓋它與週K。`UsReportCaptureAdapter` 內嵌雷達列表與單股明細至美股報告來源，`SrppOrchestratedReadService`（market-facts）與每日排程匯出檔也讀雷達列且沒有 price-only 標記；Java 計算器仍因 `dividendHistory.source` 為 null 與 tactical `formalSources` 為空而不產出可執行單，但「核心賣出」未啟動分支（`NOT_ARMED／OVERHEAT_WATCH_NOT_MET`）會成為新增的乾淨判決。LLM 編排層的 `per_symbol_radar_gate_d150` 將看到方向訊號。本任務不修改任何 SRPP 程式、model、prompt 或 Swagger。
 
 已知限制（Task 565）：除息後退避只依庫內已收錄的配息事件；事件進庫前（Yahoo 來源約晚半日以上）除息當根起數根不退避；列表路徑事件上界取 DB 最新完成列、完整明細路徑含 live 列，兩者在除息日盤中可能暫時不一致。事件有效日一律用 `getCanonicalDate()`（非 null）否則 `StockDividendHistory.anchorDate()`，與 `findAdjustmentEvents` 的 `COALESCE(canonical_date, LEAST(ex, rights))` 語意一致；有效日晚於序列最新列的事件不退避；`events` 為 null 時拋 `Unavailable`（與 `CanonicalDividendFinancialGuard.assess(null)` 的 fail-closed 一致）。`TradingRadarService` 的兩次嘗試（還原、price-only）留在 `prepareTechnicalBasis` 內，回傳 `{Prepared, priceOnly, reason}` 小 record，避免重建 `combined` 或重讀事件。
+
+
+### Task 566 現金先買與台美普通股票高檔賣出
+
+D211新增正式來源 `execution_policy.cash_first_rotation_d211`，取消現金出資買腿對同輪賣方READY與配對ID的依賴；既有已交割換股專用準備金FIFO與第21交易日規則仍只管理該專用款，不能綁住其他合規現金。FUNDING_CAPACITY原計算只以已交割幣別資金扣待付／已確認買款與費用／通膨保護底線，排除待收；不依賴CORE_SELL_GUARD結果。ROTATION_AND_REGIME_CAPACITY仍只輸出容量與準備金，不新增無來源買腿或重分配器。買點、個別／群組／全股票上限、額度等仍由原獨立閘門檢核。
+
+新增純計算共用 `OrdinaryEquitySellGate`，由台股 `SrppReportModuleCalculator.coreTiming` 與美股 `UsCoreSellCalculator.evaluate` 在已驗高水位更新及完成KD取值之後、原D174轉弱／回落判斷之前呼叫。來源 `core_sell_guard_d174.ordinary_equity_high_sell_d211` 精確列D211/enabled、台美市場、六檔既有債券排除（00679B／00697B／00719B／00751B／00865B／SGOV）、四KD>50與兩D≥80門檻及重用原D208/D209政策鍵；不接受caller自行宣稱例外。00919仍由原D208/D209判斷，理由與receipt不改。
+
+D211先核四KD與RSI5／反向WR9／BIAS10／52週位置及雷達動作／技術標籤低檔反證，再核完成D及即時D≥80；K可<80。有效反證回D211_LOW_POINT_SELL_BLOCKED或D211_HIGH_ZONE_SELL_BLOCKED，缺設定／證據局部UNVERIFIED，不能推定為PASS。原觀察四欄hash保持；full-policy相容只允許當前、刪除D211所得精確已發布D210、再刪D209所得已發布D208及原核對legacy集合，未知或未發布組合拒絕。
+
+美股新閘門採內部計算，以既有closed SrppUsCoreResult.status／timing_pass／reason回傳，不能新增low_point_sell_protection／high_zone_reversal屬性。PythonUS公開投影同樣省略兩項內部proof，但獨立驗證器仍用同凍結quote／radar／DBstate執行原evaluate並逐欄比較；不能藉投影省略略過新增閘門。台股明細proof及核心／附錄原始輸入重播保持。policy bundle而非新scope綁定D211語意，既有API／OpenAPI／Swagger identity與formula family維持。
+
+原Python產生同輸入golden（原市場輸入保留、新D211案例另加）並核Java逐欄結果；FUNDING_CAPACITY以無賣方READY、SELL未成交、待收／待付、保留買款及定存底線正反例驗證獨立資金語意。正式來源凍結後同步authority原bytes／原targets投影／原Rubyinsert-onlySQL及原generatorgoldens，離線測試build與獨立審查後走雙repo落地→registry四欄及舊rows→正式main僅business-services rebuild／recreate→JAR全文與effective設定→SRPP host精確新hash業務讀回。時窗外不宣稱正式採用，不新造行情或觸發producer／報告／交易。
