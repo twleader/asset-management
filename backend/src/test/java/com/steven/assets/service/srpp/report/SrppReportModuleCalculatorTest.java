@@ -34,9 +34,61 @@ class SrppReportModuleCalculatorTest {
             case "regime" -> actual=SrppReportModuleCalculator.regimeCapacity(c.path("live"),e.path("dynamic_allocation_policy_d141"),e.path("stock_purchase_funding_policy_d150"),n(c.get("total")),n(c.get("cash")),n(c.get("bonds")),n(c.get("equity")),n(c.get("inflation")));
             default -> throw new AssertionError(kind);
         }for(var expected:c.path("expected").properties()){JsonNode value=actual.get(expected.getKey());assertThat(value).as(kind+":"+expected.getKey()).isNotNull();if(expected.getValue().isBoolean()||expected.getValue().isArray()||expected.getKey().equals("reason"))assertThat(value).isEqualTo(expected.getValue());else assertThat(n(value).subtract(n(expected.getValue())).abs()).as(kind+":"+expected.getKey()).isLessThan(new BigDecimal("0.000000000001"));}count++;}
-        assertThat(count).isEqualTo(73);
+        assertThat(count).isEqualTo(111);
     }
     @Test void formalTargetsAndRegistryArtifactUseExactCurrentAuthorityBytes()throws Exception{JsonNode model=model();JsonNode artifact=SrppJcs.parseStrict(new String(getClass().getResourceAsStream("/srpp/report/d201-policy-document.json").readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));assertThat(SrppReportModuleCalculator.registryDocument(model)).isEqualTo(artifact);assertThat(SrppReportModuleCalculator.formalTargets(model).path("00865B").asText()).isEqualTo("0.063333333333");assertThat(SrppReportModuleCalculator.targetAllocationSha256(model)).matches("[a-f0-9]{64}");assertThat(SrppPolicyDocument.parse(SrppJcs.canonicalize(artifact)).targets()).hasSize(18);}
+    @Test void d211ScopeCannotBeBypassedWithMissingOrUnknownMarket() throws Exception {
+        JsonNode all=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));
+        JsonNode c=java.util.stream.StreamSupport.stream(all.path("cases").spliterator(),false)
+            .filter(v->"D211_high_zone_live_d_79.99".equals(v.path("name").asText())).findFirst().orElseThrow();
+        JsonNode policy=model().path("execution_policy").path("core_sell_guard_d174");
+        for(String identity:List.of("missing","英股")) {
+            ObjectNode body=c.path("body").deepCopy();
+            for(ObjectNode node:List.of(body,(ObjectNode)body.path("quote"),(ObjectNode)body.path("radar").path("stock"))) {
+                if(identity.equals("missing"))node.remove("market");else node.put("market",identity);
+            }
+            assertThatThrownBy(()->SrppReportModuleCalculator.coreTiming(body,c.path("state"),LocalDate.parse(c.path("date").asText()),policy))
+                .hasMessage("EXACT_SELECTOR_MISMATCH");
+        }
+        ObjectNode invalidPolicy=policy.deepCopy();invalidPolicy.remove("ordinary_equity_high_sell_d211");
+        assertThatThrownBy(()->SrppReportModuleCalculator.coreTiming(c.path("body"),c.path("state"),LocalDate.parse(c.path("date").asText()),invalidPolicy))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+    @Test void settledCashCapacityDoesNotRequireAReadySellerAndProtectsFloors() throws Exception {
+        FrozenFixture base=fixture(); JsonNode model=model(); ObjectNode input=base.frozen.input().deepCopy();
+        ObjectNode sources=(ObjectNode)input.path("sources");
+        ((ArrayNode)sources.path("report-reservations").path("rows")).addObject().put("reservationId","buy-r1")
+            .put("action","BUY").put("status","ACTIVE").put("currency","TWD").put("amount","100000").put("fees","100");
+        ((ArrayNode)sources.path("topup-state").path("pending").path("orders")).addObject().put("orderId","buy-p1")
+            .put("side","BUY").put("market","台股").put("currency","TWD").put("remainingShares","1000").put("limitPrice","100").put("remainingFees","100");
+        var frozen=new DecisionInputCapturePort.Frozen(base.frozen.facts(),input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());
+        JsonNode unavailableSeller=SrppReportModuleCalculator.calculateCore(frozen,model,NullNode.instance,"Codex");
+        assertThat(unavailableSeller.path("status").asText()).isEqualTo("UNAVAILABLE");
+        JsonNode funding=SrppReportModuleCalculator.calculateShared(frozen,base.policy,model,base.registered,MAPPER.createObjectNode()).get(2);
+        BigDecimal floor=base.policy.totalFloor().multiply(DailyDecisionCalculator.inflation(base.policy,base.frozen.facts().date()));
+        BigDecimal expected=new BigDecimal("5000000").subtract(new BigDecimal("200200")).subtract(floor);
+        assertThat(expected).isPositive(); assertThat(n(fact(funding,"deployableCapacity","TWD").path("value"))).isEqualByComparingTo(expected);
+        ((ArrayNode)sources.path("topup-state").path("pending").path("orders")).addObject().put("orderId","sell-p1")
+            .put("side","SELL").put("market","台股").put("currency","TWD").put("remainingShares","100000").put("limitPrice","1000");
+        var withUnfilledSeller=new DecisionInputCapturePort.Frozen(base.frozen.facts(),input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());
+        JsonNode unchanged=SrppReportModuleCalculator.calculateShared(withUnfilledSeller,base.policy,model,base.registered,MAPPER.createObjectNode()).get(2);
+        assertThat(fact(unchanged,"deployableCapacity","TWD")).isEqualTo(fact(funding,"deployableCapacity","TWD"));
+        // A verified future receivable is excluded from deployable cash even when it is large.
+        ObjectNode receiver=((ArrayNode)sources.path("assets").path("snapshot").path("deposits")).addObject();
+        receiver.put("id",3).put("bankId",1).put("currency","TRANSIT_TWD").put("depositType","TRANSIT").put("amount","1000000").put("originalAmount","1000000").put("estimatedAnnualInterest","0");
+        for(JsonNode n:List.of(sources.path("assets").path("snapshot"),sources.path("assets").path("liveAssets"))) {
+            ((ObjectNode)n).put("totalDeposit","6000000").put(n.has("liveTotalAssets")?"liveTotalAssets":"totalAssets","21000000");
+        }
+        var withReceivable=new DecisionInputCapturePort.Frozen(base.frozen.facts(),input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());
+        JsonNode excluded=SrppReportModuleCalculator.calculateShared(withReceivable,base.policy,model,base.registered,MAPPER.createObjectNode()).get(2);
+        assertThat(n(fact(excluded,"deployableCapacity","TWD").path("value"))).isEqualByComparingTo(expected);
+        assertThat(fact(excluded,"excludedReceivable","TWD").path("value").asText()).isEqualTo("1000000");
+        Input old=base.frozen.facts(); Input protectedInput=new Input(old.date(),old.slot(),old.capturedAt(),old.sessions(),old.totalAssets(),old.totalDeposits(),
+            BigDecimal.ZERO,old.bondValue(),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),old.subaccounts(),old.emergencyValue());
+        var protectedFrozen=new DecisionInputCapturePort.Frozen(protectedInput,input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());
+        JsonNode blocked=SrppReportModuleCalculator.calculateShared(protectedFrozen,base.policy,model,base.registered,MAPPER.createObjectNode()).get(2);
+        assertThat(fact(blocked,"deployableCapacity","TWD").path("value").asText()).isEqualTo("0");
+    }
     @Test void unknownCoreStateAndCrossConsumerStateCannotBecomeComplete()throws Exception{FrozenFixture fixture=fixture();JsonNode model=model();for(JsonNode state:List.of(NullNode.instance,MAPPER.readTree("{\"verified\":true,\"ownerUserId\":7,\"consumer\":\"Claude\",\"items\":[]}"))){ObjectNode result=SrppReportModuleCalculator.calculateCore(fixture.frozen,model,state,"Codex");assertThat(result.path("status").asText()).isEqualTo("UNAVAILABLE");assertThat(result.path("missing").toString()).contains("CONSUMER_CORE_STATE_UNAVAILABLE");}}
     @Test void twelveModulePublishedShapeContainsTrueActionableBondFixtureAndUnknownSources()throws Exception{FrozenFixture fixture=fixture();JsonNode model=model();ArrayNode shared=SrppReportModuleCalculator.calculateShared(fixture.frozen,fixture.policy,model,fixture.registered,MAPPER.readTree("{}"));ObjectNode core=SrppReportModuleCalculator.calculateCore(fixture.frozen,model,NullNode.instance,"Codex");ArrayNode all=SrppReportModuleCalculator.compose(shared,core);assertThat(all).hasSize(12);assertThat(all.get(5).path("data").path("legs").get(0).path("lots").asInt()).isEqualTo(2);assertThat(all.get(5).path("data").path("legs").get(0).path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(all.get(3).path("status").asText()).isEqualTo("PARTIAL");assertThat(all.get(4).path("status").asText()).isEqualTo("UNAVAILABLE");SrppJcs.canonicalize(all);for(JsonNode module:all){assertThat(module.path("scope").isArray()).isTrue();for(JsonNode leg:module.path("data").path("legs"))if(leg.path("status").asText().equals("BLOCKED")){assertThat(leg.path("limitPrice").isNull()).isTrue();assertThat(leg.path("amount").isNull()).isTrue();}}}
     @Test void lowerTargetBandAndBrokerSubaccountUnknownRemainLocalized()throws Exception{FrozenFixture fixture=fixture();ArrayNode shared=SrppReportModuleCalculator.calculateShared(fixture.frozen,fixture.policy,model(),fixture.registered,MAPPER.readTree("{}"));JsonNode allocation=shared.get(1);BigDecimal factor=DailyDecisionCalculator.inflation(fixture.policy,fixture.frozen.facts().date()),weight=fixture.policy.totalFloor().multiply(factor).divide(fixture.frozen.facts().totalAssets(),MathContext.DECIMAL128);JsonNode target=fact(allocation,"bondTarget",null);assertThat(n(target.path("value"))).isEqualByComparingTo(new BigDecimal("0.28").min(BigDecimal.ONE.subtract(weight).subtract(new BigDecimal("0.55"))).max(BigDecimal.ZERO));}
@@ -82,9 +134,10 @@ class SrppReportModuleCalculatorTest {
         ObjectNode policy = model().path("execution_policy").path("core_sell_guard_d174").deepCopy();
         ObjectNode stable = MAPPER.createObjectNode();
         for (String key : List.of("decision", "scope", "arming", "non_distributing_symbols")) stable.set(key, policy.get(key));
-        ObjectNode priorD208 = policy.deepCopy(); priorD208.remove("high_zone_reversal_d209");
+        ObjectNode priorD210 = policy.deepCopy(); priorD210.remove("ordinary_equity_high_sell_d211");
+        ObjectNode priorD208 = priorD210.deepCopy(); priorD208.remove("high_zone_reversal_d209");
         ObjectNode prior = priorD208.deepCopy(); prior.remove("low_point_sell_protection_d208");
-        for (JsonNode hashPolicy : List.of(stable, priorD208, prior)) {
+        for (JsonNode hashPolicy : List.of(stable, priorD210, priorD208, prior)) {
             ObjectNode state = c.path("state").deepCopy();
             state.put("policy_sha256", com.steven.assets.service.srpp.us.UsPythonJson.hash(hashPolicy));
             ObjectNode before = state.deepCopy();

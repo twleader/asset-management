@@ -30,6 +30,11 @@ def generate(root):
         expected, after = core.screen(current, policy, states, root)
         cases.append({'name': name, 'input': current, 'ledger': {'decision': 'D-174', 'consumer': 'Codex', 'states': states},
                       'expected': expected, 'stateAfter': after})
+    add('D211_high_zone_ready')
+    high_bundle = copy.deepcopy(bundle)
+    # Freeze the original 18 market scenarios; the formerly ready low-D case now blocks.
+    bundle['items'][0]['quote']['marketData']['chart']['series']['daily']['d'] = [75]*9+[74,70]
+    bundle['items'][0]['radar']['stock']['dValue'] = 70
     add('ready')
     add('not-armed', retained=False)
     def arm(b, s):
@@ -72,6 +77,40 @@ def generate(root):
         s['basis_date'] = day
     add('early-close-before-1300', early_close)
     add('early-close-after-1300-rejected', lambda b, s: early_close(b, s, True))
+    bundle = high_bundle
+    for field in ('completed_k', 'completed_d', 'live_k', 'live_d'):
+        for value in (49.99, 50, 50.01):
+            def kd(b, s, field=field, value=value):
+                item = b['items'][0]
+                if field.startswith('completed_'):
+                    item['quote']['marketData']['chart']['series']['daily'][field[-1]][-1] = value
+                else:
+                    item['radar']['stock']['kValue' if field == 'live_k' else 'dValue'] = value
+            add('D211_' + field + '_' + str(value), kd)
+    for field in ('completed_d', 'live_d'):
+        for value in (79.99, 80, 80.01):
+            def high_d(b, s, field=field, value=value):
+                if field == 'completed_d': b['items'][0]['quote']['marketData']['chart']['series']['daily']['d'][-1] = value
+                else: b['items'][0]['radar']['stock']['dValue'] = value
+            add('D211_high_zone_' + field + '_' + str(value), high_d)
+    for field, value in [('rsi5', 30), ('wr9', 80), ('bias10', -8), ('week52Position', .15)]:
+        def low(b, s, field=field, value=value):
+            stock = b['items'][0]['radar']['stock']
+            (stock if field == 'week52Position' else stock['extendedIndicators'])[field] = value
+        add('D211_' + field + '_low', low)
+    for field, value in [('timingState', 'LOW'), ('reasons', ['超賣']), ('counterTrendLabel', '反彈觀察')]:
+        add('D211_' + field + '_low', lambda b, s, field=field, value=value: b['items'][0]['radar']['stock'].__setitem__(field, value))
+    for field in ('kValue', 'dValue', 'rsi5', 'wr9', 'bias10', 'week52Position'):
+        def missing(b, s, field=field):
+            stock = b['items'][0]['radar']['stock']
+            (stock if field in ('kValue', 'dValue', 'week52Position') else stock['extendedIndicators']).pop(field)
+        add('D211_' + field + '_missing', missing)
+    def bond(b, s):
+        item = b['items'][0]; item['stock_code'] = item['quote']['stockCode'] = item['radar']['stock']['stockCode'] = s['stock_code'] = 'SGOV'
+        item['quote']['dividendHistory']['stockCode'] = 'SGOV'
+        item['quote']['marketData']['chart']['series']['daily']['d'] = [75]*9+[74,70]
+        item['radar']['stock']['dValue'] = 70
+    add('D211_SGOV_bond_excluded', bond)
     item = {'stock_code': 'SYNTH', 'qualification_path': 'RADAR',
             'quote': {'stockCode': 'SYNTH', 'market': '美股', 'currency': 'USD', 'closed': False,
                       'tradingDate': '2026-10-26', 'quoteStatus': 'LIVE', 'source': 'SYNTHETIC_FEED',
