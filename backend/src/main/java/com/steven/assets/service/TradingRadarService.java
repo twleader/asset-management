@@ -4,6 +4,7 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.dto.TradingRadarPanelDto;
 import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.CanonicalDividendFinancialGuard;
 import com.steven.assets.model.EtfNavObservation;
 import com.steven.assets.model.Stock;
 import com.steven.assets.repository.EtfNavHistoryRepository;
@@ -63,6 +64,15 @@ public class TradingRadarService {
     private static final String US_MARKET = "美股";
     private static final String TAIEX_CODE = "0000";
     private static final String IXIC_CODE = "IXIC";
+
+    /**
+     * 美股配息資料或還原價基尚未驗證時，完整明細三軌 risks 的揭露句字首（Task 564）。
+     *
+     * <p>package-private 是刻意的：同套件測試以此常數 {@code contains} 比對，不在多處手寫字串。
+     * 完整句由 {@link #usDividendBasisUnverifiedRisk(String)} 組成「字首＋（原因：…）。 」。</p>
+     */
+    static final String US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX =
+            "美股配息資料或還原價基尚未驗證，技術指標暫不提供";
 
     private static final String TWD = "TWD";
     private static final Pattern STOCK_CODE_SELECTOR = Pattern.compile("^[A-Za-z0-9.\\-]{1,12}$");
@@ -1572,8 +1582,25 @@ public class TradingRadarService {
             // 當成完成收盤 K 餵進 MA／BIAS）；更早的歷史列則<b>不看 closeSource</b>，
             // 白名單只界定 verified 收盤，不得拿來裁掉技術序列。
             BigDecimal price = acceptedPrice.value();
-            RadarInputAssembler.Prepared technicalBasis = prepareTechnicalBasis(target, acceptedPrice,
-                    listEntry == null ? null : listEntry.adjustmentEvents());
+            // Task 564：美股視窗內有配息事件時，adjust 會因「沒有美股歷史價的拆股／價基證明」而拋
+            // CanonicalDividendFinancialGuard.Unavailable（守門決定本身保留，不可拿名目配息硬還原）。
+            // 但這只代表「技術基準不可用」，不代表已驗證的完成收盤價也不可用——收盤價出自上面的
+            // AcceptedPrice（RadarObservationResolver，Task 319），與還原價基無關。故美股在此改用
+            // Prepared.EMPTY：MA／KD／確認欄位全缺值、規則引擎 complete() 早退為三軌 NO_TRADE，
+            // 價格與 quoteStatus 照 AcceptedPrice 原樣輸出。絕不改用未還原價補算任何指標。
+            // 只認例外型別、不比對訊息字串（UNVERIFIED 與 CANONICAL_DIVIDEND_UNRESOLVED 兩種都要救）；
+            // 台股的 Unavailable 與美股的其他例外原樣重拋，仍走下方整體 catch 的 DecisionCore.failed。
+            RadarInputAssembler.Prepared technicalBasis;
+            String usDividendBasisUnavailableReason = null;
+            try {
+                technicalBasis = prepareTechnicalBasis(target, acceptedPrice,
+                        listEntry == null ? null : listEntry.adjustmentEvents());
+            } catch (CanonicalDividendFinancialGuard.Unavailable unavailable) {
+                if (!US_MARKET.equals(target.market())) throw unavailable;
+                technicalBasis = RadarInputAssembler.Prepared.EMPTY;
+                usDividendBasisUnavailableReason = unavailable.getMessage() == null
+                        ? "UNSPECIFIED" : unavailable.getMessage();
+            }
             String technicalFingerprint = technicalContextFingerprint(target, acceptedPrice, technicalBasis);
             // A fresh local snapshot is selected before `calculate`, so both
             // daily and weekly computeFromSeries calls are skipped on a valid
@@ -1809,6 +1836,12 @@ public class TradingRadarService {
                     risks.add(missingFx);
                     shortRisks.add(missingFx);
                     swingRisks.add(missingFx);
+                }
+                if (usDividendBasisUnavailableReason != null) {
+                    String basisRisk = usDividendBasisUnverifiedRisk(usDividendBasisUnavailableReason);
+                    risks.add(basisRisk);
+                    shortRisks.add(basisRisk);
+                    swingRisks.add(basisRisk);
                 }
             }
 
@@ -2184,6 +2217,11 @@ public class TradingRadarService {
     private static LocalDate sessionDate(DecisionClock clock) {
         return clock == null || clock.sessions() == null
                 ? null : clock.sessions().targetCompletedSession();
+    }
+
+    /** Task 564：字首＋原因碼＋句尾一個空白（與既有風險句風格一致）。 */
+    private static String usDividendBasisUnverifiedRisk(String reason) {
+        return US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX + "（原因：" + reason + "）。 ";
     }
 
     /**

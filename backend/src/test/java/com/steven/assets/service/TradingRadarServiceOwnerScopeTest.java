@@ -2,6 +2,7 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.model.AssetSnapshot;
+import com.steven.assets.model.CanonicalDividendFinancialGuard;
 import com.steven.assets.model.Stock;
 import com.steven.assets.model.StockHolding;
 import com.steven.assets.model.StockPriceHistory;
@@ -34,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -345,6 +347,57 @@ class TradingRadarServiceOwnerScopeTest {
                 .collect(java.util.stream.Collectors.toMap(TradingRadarDto.ListStock::market,
                         TradingRadarDto.ListStock::stockName)))
                 .containsExactlyInAnyOrderEntriesOf(Map.of("台股", "台灣同碼", "美股", "美股同碼"));
+    }
+
+    /**
+     * Task 564：使用者實際看到橘字「收盤價待補」的是列表路徑。美股視窗內有配息事件使 adjust 拋 Unavailable 時，
+     * 列表列必須保留已驗證的完成收盤價（VERIFIED_CLOSE），三軌動作維持 NO_TRADE（技術基準缺值，fail-closed）。
+     * 固定時鐘 2026-08-10T21:00:00Z＝美東 17:00，美股完成日為 2026-08-10。
+     */
+    @Test
+    void 列表路徑_美股配息價基未驗證時保留完成收盤價且三軌NO_TRADE() {
+        stubCommon();
+        java.time.Instant decisionInstant = java.time.Instant.parse("2026-08-10T21:00:00Z");
+        LocalDate completed = LocalDate.of(2026, 8, 10);
+        Stock asml = Stock.builder().code("ASML").market("美股").name("ASML Holding").build();
+        AssetSnapshot snapshot = AssetSnapshot.builder().stocks(List.of(
+                StockHolding.builder().stockCode("ASML").market("美股").shares(BigDecimal.ONE).build())).build();
+        when(snapshotRepo.findLatestWithStocks()).thenReturn(Optional.of(snapshot));
+        List<StockPriceHistory> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            BigDecimal close = new BigDecimal("200.00").subtract(new BigDecimal("0.10").multiply(BigDecimal.valueOf(i)));
+            rows.add(StockPriceHistory.builder().stockCode("ASML").market("美股")
+                    .tradingDate(completed.minusDays(i)).openPrice(close).highPrice(close)
+                    .lowPrice(close).closePrice(close).volume(1_000L + i).build());
+        }
+        // 列表路徑的 adjustmentEvents 已由 preloader 備妥；此處以 stub 讓 adjust 對美股配息拋 Unavailable。
+        doThrow(new CanonicalDividendFinancialGuard.Unavailable("US_DIVIDEND_PRICE_BASIS_UNVERIFIED"))
+                .when(adjustedPriceService).adjust(anyList(), anyList());
+        TradingRadarListBatchPreloader.Entry entry = new TradingRadarListBatchPreloader.Entry(
+                Optional.of(asml), rows, Optional.empty(), Optional.empty(), List.of(),
+                DividendEventEvidenceResolver.Resolution.MISSING,
+                FundamentalAnalysisService.Resolved.unavailable(false),
+                BondYieldBetaResolver.Result.notApplicable(null), null,
+                TradingRadarMarketContextService.FxContext.EMPTY,
+                TradingRadarMarketFeatureResolver.Evidence.empty("美股", java.time.Instant.EPOCH, "test"),
+                completed, List.of());
+        when(listBatchPreloader.preload(any(), any(), any(), any(), any(), anyInt()))
+                .thenReturn(new TradingRadarListBatchPreloader.Context(Map.of(
+                        new TradingRadarListBatchPreloader.Key("ASML", "美股"), entry)));
+
+        TradingRadarDto.ListResponse response = newService().getList(decisionInstant);
+
+        verify(adjustedPriceService).adjust(anyList(), anyList());
+        assertThat(response.stocks()).hasSize(1);
+        TradingRadarDto.ListStock stock = response.stocks().get(0);
+        assertThat(stock.stockCode()).isEqualTo("ASML");
+        assertThat(stock.price()).isEqualByComparingTo("200.00");
+        assertThat(stock.quoteStatus()).isEqualTo("VERIFIED_CLOSE");
+        assertThat(stock.action()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE.name());
+        assertThat(stock.shortAction()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE.name());
+        assertThat(stock.swingAction()).isEqualTo(TradingRadarRuleEngine.Action.NO_TRADE.name());
+        assertThat(stock.monthlyMa()).isNull();
+        assertThat(stock.kValue()).isNull();
     }
 
     private void stubEligibleUnion() {
