@@ -13558,3 +13558,10 @@ UI原assetType下拉換成assetClassOverride草稿，名稱旁基金交易checkb
 ### Task 562 國安基金政策訊號解讀與authority發布
 
 SRPP來源文件澄清「政府正式公告／授權啟動安定市場任務」已構成重要政策支持及視情況擇機護盤的訊號，不以公開成交／金額為認列前提；成交事實另按公開可驗證資料解讀，缺漏為未知。LLM仍依既有D204／D207證據、方向與幅度規範解讀，不新增固定分數、bottom保證、選舉因果或交易例外。此為prose-only政策維護；資產Java計算器、model、formula、formal targets、Swagger與API不變。原SRPP工具凍結新bundle後，同步embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden，核對除bundle身分外完全相同。使用者明示完整發布鏈：離線驗證→雙repoGit落地→registry exact row及舊rows全文核對→乾淨正式main build／recreate business-services→JAR authority與SRPP host精確hash業務讀回；沒有合法日報時窗時不冒稱正式採用。
+
+
+### Task 563：觀察頁共用 52 週條件價位
+
+觀察頁 `WatchStockService` 的一般股票及台股大盤 response 於取得當次 alerts 後，僅在存在 POS52W 成員時建立一次 `Week52Range`；單一條件與所有群組共用該範圍。現價明確由 `PriceQueryService.getLive` 取得，不使用可能含收盤後備的觀察頁展示價。完成高低序列共用 `StockAlertService.loadCompletedHighLowAsc` 的 package-private static overload（注入的 stock／twse history repository 由呼叫者傳入），原 instance wrapper 與觸發評估保留原行為；兩頁共用相同來源、240 根視窗與市場今日排除。WatchStockService 不新增對 StockAlertService 的 instance 注入，維持 static 共用與現有服務依賴方向。
+
+範圍及價位純函式沿用 Task 554 的 `Week52Range`、`week52Range`、`week52ThresholdPrice`、三參數 `buildLabel`，並新增帶 range 的 `buildGroupLabel` overload。觀察頁只變更既有 `conditions[].label` 字串，複合 AND、排序、active／triggered 旗標、MA／KD、報價欄位與 frontend render 不變。區間為最後240根未還原完成日K（stock_price_history；台股0000為twse_index_daily_history，高低缺值以收盤代入）與 getLive 現價共同高低，價位 low+(high-low)*threshold/100，BigDecimal四捨五入2位去尾零，大盤加「 點」。不足240根、現價無效、區間無寬度或查詢失敗回「（價位資料不足）」；沒有POS52W不新增getLive／高低歷史讀取。此為Task554未涵蓋觀察頁的具名後續延伸，不改沒有range的舊static label overload、通知／匯出歷史、觸發規則、DTO、BFF、API、DB、9090或SRPP。
