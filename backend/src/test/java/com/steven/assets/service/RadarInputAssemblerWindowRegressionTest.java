@@ -289,6 +289,96 @@ class RadarInputAssemblerWindowRegressionTest {
                 null);
     }
 
+    // ─────────── Task 565：price-only 價基與一般 prepare 共用同一份組裝 ───────────
+
+    /**
+     * 連續列、無事件時，{@code preparePriceOnly} 與 {@code prepare(..., List.of(), ...)} 的 {@link
+     * RadarInputAssembler.Prepared} 逐欄相同：price-only 只換價基來源，日K 契約視窗、完成收盤、週K 聚合
+     * 都走同一個 private 組裝，不得分叉。盤中（含 live 列）與收盤後各驗一次。
+     */
+    @Test
+    void preparePriceOnlyMatchesPrepareFieldByFieldWhenThereAreNoEvents() {
+        for (boolean liveAdded : new boolean[] {false, true}) {
+            List<StockPriceHistory> combined = new ArrayList<>(rowsDesc(LONG_WINDOW_ROWS));
+            if (liveAdded) combined.add(0, liveRow());
+            BigDecimal price = combined.get(liveAdded ? 1 : 0).getClosePrice();
+            RadarInputAssembler assembler = assembler();
+
+            RadarInputAssembler.Prepared normal = assembler.prepare(
+                    combined, List.of(), liveAdded, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price);
+            RadarInputAssembler.Prepared priceOnly = assembler.preparePriceOnly(
+                    combined, List.of(), liveAdded, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price);
+
+            assertThat(priceOnly.adjustedRowsDesc()).as("liveAdded=" + liveAdded).isEqualTo(normal.adjustedRowsDesc());
+            assertThat(priceOnly.dailyContractRowsDesc()).isEqualTo(normal.dailyContractRowsDesc());
+            assertThat(priceOnly.completedCloses()).isEqualTo(normal.completedCloses());
+            assertThat(priceOnly.distributionAdjusted()).isFalse();
+            assertThat(priceOnly.weeklyDistributionAdjusted()).isFalse();
+            assertThat(priceOnly.distributionAdjusted()).isEqualTo(normal.distributionAdjusted());
+            assertThat(priceOnly.weeklyDistributionAdjusted()).isEqualTo(normal.weeklyDistributionAdjusted());
+            assertThat(priceOnly.firstCompletedIndex()).isEqualTo(normal.firstCompletedIndex());
+            assertThat(priceOnly.indicatorRows()).isEqualTo(normal.indicatorRows());
+            assertThat(priceOnly.previousAdjustedClose()).isEqualTo(normal.previousAdjustedClose());
+            assertThat(priceOnly.price()).isEqualTo(normal.price());
+            assertThat(priceOnly.weeklyBarsDesc()).isEqualTo(normal.weeklyBarsDesc());
+            assertThat(priceOnly.weeklySeriesDesc()).isEqualTo(normal.weeklySeriesDesc());
+            assertThat(priceOnly).isEqualTo(normal);
+            // 日K 與週K 共用同一份長視窗（Task 356.4c）：週K 有足夠完成週，且日K 契約視窗被截在 241(+live) 列。
+            assertThat(priceOnly.weeklyBarsDesc().size()).isGreaterThanOrEqualTo(RadarInputAssembler.MIN_COMPLETED_WEEKS);
+            assertThat(priceOnly.adjustedRowsDesc()).hasSize(LONG_WINDOW_ROWS + (liveAdded ? 1 : 0));
+            assertThat(priceOnly.dailyContractRowsDesc()).hasSize(DAILY_CONTRACT_ROWS + (liveAdded ? 1 : 0));
+            // 指標公式照舊：同一份 Prepared 算出的 Assembled 也逐欄相同。
+            assertThat(assembler.calculate(priceOnly)).usingRecursiveComparison()
+                    .isEqualTo(assembler.calculate(normal));
+        }
+    }
+
+    @Test
+    void preparePriceOnlyReturnsEmptyForNullOrEmptyInputLikePrepare() {
+        RadarInputAssembler assembler = assembler();
+        BigDecimal price = new BigDecimal("100");
+        assertThat(assembler.preparePriceOnly(null, List.of(), false, 0, DAILY_CONTRACT_ROWS, price))
+                .isSameAs(RadarInputAssembler.Prepared.EMPTY);
+        assertThat(assembler.preparePriceOnly(List.of(), List.of(), false, 0, DAILY_CONTRACT_ROWS, price))
+                .isSameAs(RadarInputAssembler.Prepared.EMPTY);
+    }
+
+    @Test
+    void preparePriceOnlyThrowsUnavailableOnAPriceBasisBreak() {
+        List<StockPriceHistory> combined = new ArrayList<>(rowsDesc(LONG_WINDOW_ROWS));
+        // 第 100 列（含）以前的舊列放大 2.5 倍：模擬沒有被還原的分割，斷層出現在第 99、100 列之間。
+        for (int i = 100; i < combined.size(); i++) {
+            StockPriceHistory old = combined.get(i);
+            BigDecimal scaled = old.getClosePrice().multiply(new BigDecimal("2.5"));
+            combined.set(i, StockPriceHistory.builder().stockCode(old.getStockCode()).market(old.getMarket())
+                    .tradingDate(old.getTradingDate()).openPrice(scaled).highPrice(scaled).lowPrice(scaled)
+                    .closePrice(scaled).volume(old.getVolume()).build());
+        }
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> assembler().preparePriceOnly(
+                        combined, List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS,
+                        combined.get(0).getClosePrice()))
+                .isInstanceOf(com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable.class)
+                .hasMessage("US_PRICE_ONLY_BASIS_BREAK:" + combined.get(99).getTradingDate());
+    }
+
+    @Test
+    void preparePriceOnlyThrowsUnavailableWhenAnExDividendSitsInsideTheLastFifteenBars() {
+        List<StockPriceHistory> combined = rowsDesc(LONG_WINDOW_ROWS);
+        RadarInputAssembler assembler = assembler();
+        BigDecimal price = combined.get(0).getClosePrice();
+
+        // 第 14 個索引＝含除息日當根的第 15 根 → 退避；第 15 個索引＝第 16 根 → 通過。
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> assembler.preparePriceOnly(
+                        combined, exDividend(14), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price))
+                .isInstanceOf(com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable.class)
+                .hasMessage("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + combined.get(14).getTradingDate());
+        RadarInputAssembler.Prepared outside = assembler.preparePriceOnly(
+                combined, exDividend(15), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price);
+        assertThat(outside.distributionAdjusted()).as("price-only 永遠不宣稱已使用還原權息價").isFalse();
+        assertThat(outside.adjustedRowsDesc()).isEqualTo(combined);
+    }
+
     // ───────────────────────── 兩臂比對 ─────────────────────────
 
     private record Arms(

@@ -483,6 +483,261 @@ class DistributionAdjustedPriceServiceTest {
                 "跳空已由股票股利（除權日）解釋，不得再被 detectSplits 認定為分割");
     }
 
+    // ─── Task 565：detectSplits 抽出共用比值 helper 後，門檻邊界與既有輸出逐位不變 ───────────
+
+    /** 邊界特徵測試（重構前後皆綠）：比值恰 2.0 與恰 0.5 仍是疑似分割，1.99 與 0.51 不是。 */
+    @Test
+    void detectSplitsBoundaryRatiosAreUnchangedByTheSharedHelper() {
+        LocalDate day = LocalDate.of(2026, 3, 2);
+        var forwardAtTwo = service.adjust(List.of(
+                row(day, new BigDecimal("50.00")), row(day.minusDays(1), new BigDecimal("100.00"))), List.of());
+        assertTrue(forwardAtTwo.adjusted(), "100 → 50（比值 2.0）是 2:1 分割");
+        assertEquals(0, new BigDecimal("50.00").compareTo(forwardAtTwo.rowsDesc().get(1).getClosePrice()));
+
+        var reverseAtHalf = service.adjust(List.of(
+                row(day, new BigDecimal("100.00")), row(day.minusDays(1), new BigDecimal("50.00"))), List.of());
+        assertTrue(reverseAtHalf.adjusted(), "50 → 100（比值 0.5）是 1:2 反向分割");
+
+        assertFalse(service.adjust(List.of(
+                row(day, new BigDecimal("50.25")), row(day.minusDays(1), new BigDecimal("100.00"))), List.of())
+                .adjusted(), "比值 1.99 不是分割");
+        assertFalse(service.adjust(List.of(
+                row(day, new BigDecimal("100.00")), row(day.minusDays(1), new BigDecimal("51.00"))), List.of())
+                .adjusted(), "比值 0.51 不是分割");
+    }
+
+    // ─── Task 565：美股 price-only 價基（priceOnlyBasis） ──────────────────────────────
+
+    private static final LocalDate PO_NEWEST = LocalDate.of(2026, 8, 10);
+
+    /** 降序連續（逐日）收盤序列，最新一列 {@link #PO_NEWEST}；相鄰變動 0.01，遠離分割門檻。 */
+    private List<StockPriceHistory> poContinuousRowsDesc(int count) {
+        List<StockPriceHistory> rows = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            rows.add(row(PO_NEWEST.minusDays(i),
+                    new BigDecimal("100.00").subtract(new BigDecimal("0.01").multiply(BigDecimal.valueOf(i)))));
+        }
+        return rows;
+    }
+
+    private static StockDividendHistory poEvent(LocalDate canonicalDate, String cash, String stock) {
+        return StockDividendHistory.builder()
+                .id(901L).stockCode("VOO").market("美股").year(2026)
+                .canonicalDate(canonicalDate)
+                .exDividendDate(canonicalDate)
+                .cashDividend(cash == null ? null : new BigDecimal(cash))
+                .stockDividend(stock == null ? null : new BigDecimal(stock))
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+    }
+
+    private static String poUnavailableMessage(Runnable action) {
+        return org.junit.jupiter.api.Assertions.assertThrows(
+                com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable.class, action::run).getMessage();
+    }
+
+    @Test
+    void priceOnlyBasisReturnsAnEmptyUnadjustedResultForNullOrEmptyRows() {
+        for (List<StockPriceHistory> rows : java.util.Arrays.<List<StockPriceHistory>>asList(null, List.of())) {
+            var result = service.priceOnlyBasis(rows, List.of());
+            assertTrue(result.rowsDesc().isEmpty());
+            assertFalse(result.adjusted());
+            assertTrue(result.appliedEventDates().isEmpty());
+        }
+    }
+
+    @Test
+    void priceOnlyBasisKeepsAContinuousSeriesUnscaledAndDoesNotMutateTheInput() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(60);
+        List<StockPriceHistory> before = new ArrayList<>(rows);
+
+        var result = service.priceOnlyBasis(rows, List.of());
+
+        assertFalse(result.adjusted(), "price-only 不還原，adjusted 恆為 false");
+        assertEquals(before, result.rowsDesc());
+        assertEquals(before, rows, "不得改動輸入序列");
+        for (int i = 0; i < rows.size(); i++) {
+            org.junit.jupiter.api.Assertions.assertSame(rows.get(i), result.rowsDesc().get(i),
+                    "原列副本：不得縮放任何價格（縮放會把 scale 4 變成 scale 8 的新列）");
+        }
+        org.junit.jupiter.api.Assertions.assertNotSame(rows, result.rowsDesc());
+    }
+
+    @Test
+    void priceOnlyBasisRejectsAGapOfExactlyTwoAndExactlyOneHalfButNotJustInsideTheBand() {
+        LocalDate day = PO_NEWEST;
+        String forward = poUnavailableMessage(() -> service.priceOnlyBasis(List.of(
+                row(day, new BigDecimal("50.00")), row(day.minusDays(1), new BigDecimal("100.00"))), List.of()));
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + day, forward, "前收 ÷ 後收恰 2.0；日期取後一列");
+
+        String reverse = poUnavailableMessage(() -> service.priceOnlyBasis(List.of(
+                row(day, new BigDecimal("100.00")), row(day.minusDays(1), new BigDecimal("50.00"))), List.of()));
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + day, reverse, "前收 ÷ 後收恰 0.5；日期取後一列");
+
+        // 門檻內側：1.99 與 0.51 通過（不放寬也不收緊 detectSplits 的門檻）。
+        assertFalse(service.priceOnlyBasis(List.of(
+                row(day, new BigDecimal("50.25")), row(day.minusDays(1), new BigDecimal("100.00"))), List.of())
+                .adjusted());
+        assertFalse(service.priceOnlyBasis(List.of(
+                row(day, new BigDecimal("100.00")), row(day.minusDays(1), new BigDecimal("51.00"))), List.of())
+                .adjusted());
+    }
+
+    @Test
+    void priceOnlyBasisRejectsANonStandardRatioToo() {
+        // 2.3 不接近 {2,3,4,5,10}：detectSplits 只 warn 不還原，price-only 沒有能力還原 → 一律放棄。
+        LocalDate day = PO_NEWEST;
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + day, poUnavailableMessage(() -> service.priceOnlyBasis(List.of(
+                row(day, new BigDecimal("100.00")), row(day.minusDays(1), new BigDecimal("230.00"))), List.of())));
+    }
+
+    @Test
+    void priceOnlyBasisReportsTheDateOfTheLaterRowOfTheBreakingPairInTheMiddleOfTheSeries() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(50);
+        // 第 20 列（含）以前的舊列全部放大 2.5 倍：斷層出現在第 19、20 列之間，後一列＝第 19 列。
+        List<StockPriceHistory> broken = new ArrayList<>(rows.subList(0, 20));
+        for (int i = 20; i < rows.size(); i++) {
+            broken.add(row(rows.get(i).getTradingDate(), rows.get(i).getClosePrice().multiply(new BigDecimal("2.5"))));
+        }
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + rows.get(19).getTradingDate(),
+                poUnavailableMessage(() -> service.priceOnlyBasis(broken, List.of())));
+    }
+
+    @Test
+    void priceOnlyBasisDoesNotApplyTheStockDividendExemptionThatDetectSplitsHas() {
+        LocalDate day = PO_NEWEST;
+        StockDividendHistory stockDividend = StockDividendHistory.builder()
+                .id(902L).stockCode("X").market("美股").year(2026).canonicalDate(day).exRightsDate(day)
+                .cashDividend(BigDecimal.ZERO).stockDividend(BigDecimal.TEN)
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+        List<StockPriceHistory> rows = List.of(
+                row(day, new BigDecimal("50.00")), row(day.minusDays(1), new BigDecimal("100.00")));
+
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + day,
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(stockDividend))),
+                "adjust 會以股票股利解釋這個跳空，price-only 沒有還原能力，不得套用該豁免");
+    }
+
+    @Test
+    void priceOnlyBasisSkipsPairsWithANullOrNonPositiveClose() {
+        LocalDate day = PO_NEWEST;
+        for (BigDecimal hole : new BigDecimal[] {BigDecimal.ZERO, null}) {
+            var result = service.priceOnlyBasis(List.of(
+                    row(day, new BigDecimal("50.00")),
+                    row(day.minusDays(1), hole),
+                    row(day.minusDays(2), new BigDecimal("50.00"))), List.of());
+            assertFalse(result.adjusted());
+            assertEquals(3, result.rowsDesc().size(), "缺值列被跳過、不誤拋，也不被移除");
+        }
+    }
+
+    @Test
+    void priceOnlyBasisCooldownThrowsOnTheFifteenthBarFromTheExDividendDayAndPassesOnTheSixteenth() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(40);
+        LocalDate fifteenthBar = PO_NEWEST.minusDays(14);   // 含除息日當根共 15 根
+        LocalDate sixteenthBar = PO_NEWEST.minusDays(15);   // 共 16 根
+
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + fifteenthBar,
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(poEvent(fifteenthBar, "1.50", "0")))));
+        assertFalse(service.priceOnlyBasis(rows, List.of(poEvent(sixteenthBar, "1.50", "0"))).adjusted());
+        // 除息日恰為最新一列（只有 1 根）也要退避。
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + PO_NEWEST,
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(poEvent(PO_NEWEST, "1.50", "0")))));
+        assertEquals(15, DistributionAdjustedPriceService.US_PRICE_ONLY_EX_DIVIDEND_COOLDOWN_BARS);
+    }
+
+    @Test
+    void priceOnlyBasisUsesTheLatestEffectiveDateWhenThereAreSeveralEvents() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(60);
+        StockDividendHistory old = poEvent(PO_NEWEST.minusDays(40), "1.00", "0");
+        StockDividendHistory recent = poEvent(PO_NEWEST.minusDays(5), "1.00", "0");
+
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + PO_NEWEST.minusDays(5),
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(old, recent))));
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + PO_NEWEST.minusDays(5),
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(recent, old))),
+                "事件順序不影響結果");
+        assertFalse(service.priceOnlyBasis(rows, List.of(old, poEvent(PO_NEWEST.minusDays(30), "1.00", "0")))
+                .adjusted(), "全部事件都在最近 15 根之外才通過");
+    }
+
+    @Test
+    void priceOnlyBasisFallsBackToAnchorDateWhenCanonicalDateIsNullAndPrefersCanonicalDateOtherwise() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(60);
+        // canonicalDate 為 null：有效日＝anchorDate()＝除息日與除權日較早者。
+        StockDividendHistory exDividendOnly = StockDividendHistory.builder()
+                .id(903L).stockCode("VOO").market("美股").year(2026)
+                .exDividendDate(PO_NEWEST.minusDays(3)).cashDividend(new BigDecimal("1.00"))
+                .stockDividend(BigDecimal.ZERO).resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + PO_NEWEST.minusDays(3),
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(exDividendOnly))));
+
+        StockDividendHistory earlierRights = StockDividendHistory.builder()
+                .id(904L).stockCode("VOO").market("美股").year(2026)
+                .exDividendDate(PO_NEWEST.minusDays(3)).exRightsDate(PO_NEWEST.minusDays(30))
+                .cashDividend(new BigDecimal("1.00")).stockDividend(BigDecimal.ZERO)
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+        assertFalse(service.priceOnlyBasis(rows, List.of(earlierRights)).adjusted(),
+                "anchorDate 取較早者（除權日 30 天前）→ 在 15 根之外 → 通過");
+
+        // canonicalDate 非 null 時優先採用，即使除息日較近。
+        StockDividendHistory canonicalWins = poEvent(PO_NEWEST.minusDays(30), "1.00", "0");
+        canonicalWins.setExDividendDate(PO_NEWEST.minusDays(2));
+        assertFalse(service.priceOnlyBasis(rows, List.of(canonicalWins)).adjusted());
+    }
+
+    @Test
+    void priceOnlyBasisDoesNotCooldownForAFutureEvent() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(40);
+        assertFalse(service.priceOnlyBasis(rows, List.of(poEvent(PO_NEWEST.plusDays(3), "1.00", "0"))).adjusted(),
+                "有效日晚於序列最新列（尚未發生）不退避");
+    }
+
+    @Test
+    void priceOnlyBasisFailsClosedWhenEventsAreNull() {
+        assertEquals("DIVIDEND_FACTS_MISSING",
+                poUnavailableMessage(() -> service.priceOnlyBasis(poContinuousRowsDesc(40), null)));
+    }
+
+    @Test
+    void priceOnlyBasisIgnoresAnEventWhoseCashAndStockAreBothZero() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(40);
+        assertFalse(service.priceOnlyBasis(rows, List.of(poEvent(PO_NEWEST.minusDays(2), "0", "0"))).adjusted());
+        // 無日期且金額皆為 0：同樣忽略，不拋日期無法證明。
+        StockDividendHistory undatedZero = StockDividendHistory.builder().id(905L).stockCode("VOO").market("美股")
+                .year(2026).cashDividend(BigDecimal.ZERO).stockDividend(BigDecimal.ZERO)
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+        assertFalse(service.priceOnlyBasis(rows, List.of(undatedZero)).adjusted());
+    }
+
+    @Test
+    void priceOnlyBasisTreatsAnUnresolvedEventWithNullAmountsAsAnExDividendInsideTheWindow() {
+        List<StockPriceHistory> rows = poContinuousRowsDesc(40);
+        StockDividendHistory unresolved = poEvent(PO_NEWEST.minusDays(4), null, null);
+        unresolved.setResolutionStatus("UNRESOLVED");
+
+        assertEquals("US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + PO_NEWEST.minusDays(4),
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(unresolved))),
+                "金額未知＝無法證明沒有除息，仍須退避");
+    }
+
+    @Test
+    void priceOnlyBasisFailsClosedForAnEventWithNoDateAtAll() {
+        StockDividendHistory undated = StockDividendHistory.builder().id(906L).stockCode("VOO").market("美股")
+                .year(2026).cashDividend(new BigDecimal("1.00")).stockDividend(BigDecimal.ZERO)
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+        assertEquals("US_PRICE_ONLY_EX_DIVIDEND_DATE_UNVERIFIED",
+                poUnavailableMessage(() -> service.priceOnlyBasis(poContinuousRowsDesc(40), List.of(undated))));
+    }
+
+    @Test
+    void priceOnlyBasisChecksThePriceBasisBreakBeforeTheCooldown() {
+        LocalDate day = PO_NEWEST;
+        List<StockPriceHistory> rows = List.of(
+                row(day, new BigDecimal("50.00")), row(day.minusDays(1), new BigDecimal("100.00")));
+        assertEquals("US_PRICE_ONLY_BASIS_BREAK:" + day,
+                poUnavailableMessage(() -> service.priceOnlyBasis(rows, List.of(poEvent(day, "1.00", "0")))));
+    }
+
     /** Existing arithmetic fixtures now describe V2 canonical rows, already split by effective date. */
     private static List<StockDividendHistory> canonical(StockDividendHistory event) {
         BigDecimal cash=event.getCashDividend()==null?BigDecimal.ZERO:event.getCashDividend();

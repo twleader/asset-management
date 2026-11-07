@@ -290,8 +290,40 @@ public class RadarInputAssembler {
         // Task 356.4c：長視窗只查一次、只還原一次，日K 與週K 共用這一份還原結果。
         // 不得改為兩次查詢或兩次還原——兩份長度不同的序列各自跑分割偵測啟發式，結果可能分歧，
         // 會讓日K 與週K 在同一筆決策中用上兩種價基（既有鐵則明文禁止）。
-        DistributionAdjustedPriceService.Adjustment adjustment =
-                adjustedPriceService.adjust(new ArrayList<>(combinedDesc), events);
+        return prepareFrom(adjustedPriceService.adjust(new ArrayList<>(combinedDesc), events),
+                liveAdded, completedRowCount, dailyContractRows, price);
+    }
+
+    /**
+     * 美股 price-only 價基組裝（Task 565）：與 {@link #prepare} 共用同一份組裝，唯一差別是價基來自
+     * {@link DistributionAdjustedPriceService#priceOnlyBasis}（不還原、原列副本、{@code adjusted=false}）。
+     *
+     * <p>價基斷層、除息後退避或日期無法證明時，{@code priceOnlyBasis} 拋
+     * {@link com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable}，本方法原樣上拋，
+     * 由呼叫端決定退回「技術指標不可用」。維持 Task 356.4c：日K 與週K 共用這一份長視窗、一次處理，
+     * 呼叫端不得為 price-only 另行重建序列或重讀事件。</p>
+     */
+    public Prepared preparePriceOnly(
+            List<StockPriceHistory> combinedDesc,
+            List<StockDividendHistory> events,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price) {
+
+        if (combinedDesc == null || combinedDesc.isEmpty()) return Prepared.EMPTY;
+
+        return prepareFrom(adjustedPriceService.priceOnlyBasis(new ArrayList<>(combinedDesc), events),
+                liveAdded, completedRowCount, dailyContractRows, price);
+    }
+
+    /** {@link #prepare} 與 {@link #preparePriceOnly} 共用：吃已決定的價基，切出日K 契約視窗與週K 聚合。 */
+    private Prepared prepareFrom(
+            DistributionAdjustedPriceService.Adjustment adjustment,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price) {
         List<StockPriceHistory> adjustedRows = adjustment.rowsDesc();
         // 日K 契約視窗：完成列 + live K（若有）。凡是「沒有自帶列數上限」的既有計算都必須吃這一份，
         // 否則會被長視窗靜默改值且不會有任何編譯錯誤或執行期例外。

@@ -35,6 +35,15 @@ public class DistributionAdjustedPriceService {
     /** 單日漲幅 ≥ 100% 才視為疑似反向分割（Task 265）。 */
     private static final double SPLIT_REVERSE_MAX = 0.5;
     /**
+     * 美股 price-only 路徑的除息後退避根數（Task 565）：序列最近這麼多根（含除息日當根）內
+     * 若有配息事件的有效日，price-only 不成立、整組技術指標退回不可用。
+     *
+     * <p><b>判斷性取值，依據離線實證（Task 565.7）</b>：未做配息還原的收盤價在除息日向下跳一格，
+     * KD 要約 14～15 個交易日才讓缺口退出視窗。此數字只涵蓋「缺口仍在視窗內」的時段，
+     * <b>不涵蓋</b> 52 週位置的持續性偏低；不得於任何文案宣稱它能提高準確度。</p>
+     */
+    static final int US_PRICE_ONLY_EX_DIVIDEND_COOLDOWN_BARS = 15;
+    /**
      * 二次驗證的相對誤差容差。
      *
      * <p><b>不得放寬到 ±15% 之類的小值。</b>實測全台股序列中 ±15% 以上的跳空共 21 筆，其中僅 2 筆
@@ -173,6 +182,108 @@ public class DistributionAdjustedPriceService {
     }
 
     /**
+     * 美股 price-only 價基（Task 565）：不還原、直接以庫內<b>未做配息還原</b>的完成收盤列計算技術指標。
+     *
+     * <p>用於 {@link #adjust} 因「沒有美股歷史價的拆股／價基證明」而拋
+     * {@link CanonicalDividendFinancialGuard.Unavailable} 的非債券美股。本方法<b>不改輸入、不縮放任何價格</b>，
+     * 回傳的是原列副本、{@code adjusted=false}；它只負責把「price-only 可以成立」的條件寫死，
+     * 任一條件不成立一律拋 {@link CanonicalDividendFinancialGuard.Unavailable}（fail-closed，
+     * 由呼叫端退回 Task 564 的技術指標不可用路徑）：</p>
+     * <ol>
+     *   <li><b>價基斷層</b>：依日期升序，相鄰兩列都有正收盤時「前收 ÷ 後收」≥ {@link #SPLIT_FORWARD_MIN}
+     *       或 ≤ {@link #SPLIT_REVERSE_MAX} 即拋 {@code US_PRICE_ONLY_BASIS_BREAK:<後一列交易日>}。
+     *       不論是否接近標準分割比例、不套股票股利豁免、不放寬也不收緊 {@link #detectSplits} 的門檻——
+     *       price-only 沒有能力還原分割，疑似分割一律放棄。</li>
+     *   <li><b>除息後退避</b>：事件有效日（{@code canonicalDate}，否則 {@code anchorDate()}）落在序列最近
+     *       {@value #US_PRICE_ONLY_EX_DIVIDEND_COOLDOWN_BARS} 根（含除息日當根）內即拋
+     *       {@code US_PRICE_ONLY_RECENT_EX_DIVIDEND:<有效日>}；多個事件取最晚的有效日。
+     *       金額 null 的 UNRESOLVED 事件同樣觸發（無法證明沒有除息）；現金與股票股利皆為 0 的事件忽略；
+     *       有效日晚於序列最新列的未來事件不退避；沒有任何日期者無法證明，拋
+     *       {@code US_PRICE_ONLY_EX_DIVIDEND_DATE_UNVERIFIED}。</li>
+     * </ol>
+     *
+     * @param events 該序列日期區間內的配息事件；{@code null} 與 {@code CanonicalDividendFinancialGuard.assess(null)}
+     *               一致地拋 {@code DIVIDEND_FACTS_MISSING}，空清單視為無事件。
+     */
+    public Adjustment priceOnlyBasis(
+            List<StockPriceHistory> rowsDesc,
+            List<StockDividendHistory> events) {
+        if (rowsDesc == null || rowsDesc.isEmpty()) {
+            return new Adjustment(List.of(), false);
+        }
+
+        List<StockPriceHistory> rowsAsc = new ArrayList<>(rowsDesc);
+        rowsAsc.sort(Comparator.comparing(StockPriceHistory::getTradingDate));
+
+        for (int i = 1; i < rowsAsc.size(); i++) {
+            double ratio = adjacentCloseRatio(rowsAsc.get(i - 1), rowsAsc.get(i));
+            if (!Double.isNaN(ratio) && exceedsSplitBand(ratio)) {
+                throw new CanonicalDividendFinancialGuard.Unavailable(
+                        "US_PRICE_ONLY_BASIS_BREAK:" + rowsAsc.get(i).getTradingDate());
+            }
+        }
+
+        if (events == null) {
+            throw new CanonicalDividendFinancialGuard.Unavailable("DIVIDEND_FACTS_MISSING");
+        }
+        LocalDate newestRowDate = rowsAsc.get(rowsAsc.size() - 1).getTradingDate();
+        LocalDate latestEffective = null;
+        for (StockDividendHistory event : events) {
+            if (event == null) {
+                throw new CanonicalDividendFinancialGuard.Unavailable("DIVIDEND_FACT_MISSING");
+            }
+            boolean provablyNoDistribution = event.getCashDividend() != null && event.getStockDividend() != null
+                    && event.getCashDividend().signum() == 0 && event.getStockDividend().signum() == 0;
+            if (provablyNoDistribution) continue;
+            // 有效日與 findAdjustmentEvents 的 COALESCE(canonical_date, LEAST(ex, rights)) 同義；
+            // anchorDate() 是 StockDividendHistory 既有的唯一 min 實作，不在此另寫一份。
+            LocalDate effective = event.getCanonicalDate() != null
+                    ? event.getCanonicalDate() : event.anchorDate();
+            if (effective == null) {
+                throw new CanonicalDividendFinancialGuard.Unavailable(
+                        "US_PRICE_ONLY_EX_DIVIDEND_DATE_UNVERIFIED");
+            }
+            if (effective.isAfter(newestRowDate)) continue;
+            if (latestEffective == null || effective.isAfter(latestEffective)) latestEffective = effective;
+        }
+        if (latestEffective != null) {
+            int barsSinceExDividend = 0;
+            for (int i = rowsAsc.size() - 1; i >= 0
+                    && !rowsAsc.get(i).getTradingDate().isBefore(latestEffective); i--) {
+                barsSinceExDividend++;
+            }
+            if (barsSinceExDividend >= 1 && barsSinceExDividend <= US_PRICE_ONLY_EX_DIVIDEND_COOLDOWN_BARS) {
+                throw new CanonicalDividendFinancialGuard.Unavailable(
+                        "US_PRICE_ONLY_RECENT_EX_DIVIDEND:" + latestEffective);
+            }
+        }
+        return new Adjustment(List.copyOf(rowsDesc), false);
+    }
+
+    /**
+     * 相鄰兩列「前收 ÷ 後收」；任一側收盤為 null 或非正時回 {@link Double#NaN}（呼叫端一律跳過該對）。
+     *
+     * <p>{@link #detectSplits} 與 {@link #priceOnlyBasis} 共用這一份算法，避免兩處對「疑似分割跳空」的
+     * 定義各自漂移。非正收盤一律跳過（除以零與誤判的縱深防禦）。Task 279 前實測台股有 175 筆
+     * 這種列（來源對「當日無整股成交」不發布 OHLC、FinMind 序列化為 0.0），
+     * 已全數刪除、且 stock_price_history.close_price 已有 CHECK (close_price > 0)，
+     * 故現在應恆為 0 筆；此判斷保留，不依賴上游守門。</p>
+     */
+    private static double adjacentCloseRatio(StockPriceHistory previous, StockPriceHistory next) {
+        BigDecimal prevClose = previous.getClosePrice();
+        BigDecimal close = next.getClosePrice();
+        if (prevClose == null || close == null || prevClose.signum() <= 0 || close.signum() <= 0) {
+            return Double.NaN;
+        }
+        return prevClose.doubleValue() / close.doubleValue();
+    }
+
+    /** 比值落在 [{@link #SPLIT_FORWARD_MIN}, ∞) 或 (0, {@link #SPLIT_REVERSE_MAX}] 才是疑似分割跳空。 */
+    private static boolean exceedsSplitBand(double ratio) {
+        return !(ratio < SPLIT_FORWARD_MIN && ratio > SPLIT_REVERSE_MAX);
+    }
+
+    /**
      * 以相鄰收盤的比例偵測股票分割（Task 265）。
      *
      * <p>回傳的 {@code priceGrowth} 與 {@code shareGrowth} 都是事件後／事件前比例：分割日之前的價格
@@ -185,17 +296,10 @@ public class DistributionAdjustedPriceService {
             List<StockPriceHistory> rowsAsc, List<CanonicalDividendFinancialGuard.EffectiveEvent> rawEvents) {
         List<FactorEvent> out = new ArrayList<>();
         for (int i = 1; i < rowsAsc.size(); i++) {
-            BigDecimal prevClose = rowsAsc.get(i - 1).getClosePrice();
-            BigDecimal close = rowsAsc.get(i).getClosePrice();
-            // 非正收盤一律跳過（除以零與誤判的縱深防禦）。Task 279 前實測台股有 175 筆
-            // 這種列（來源對「當日無整股成交」不發布 OHLC、FinMind 序列化為 0.0），
-            // 已全數刪除、且 stock_price_history.close_price 已有 CHECK (close_price > 0)，
-            // 故現在應恆為 0 筆；此判斷保留，不依賴上游守門。
-            if (prevClose == null || close == null || prevClose.signum() <= 0 || close.signum() <= 0) {
-                continue;
-            }
-            double ratio = prevClose.doubleValue() / close.doubleValue();
-            if (ratio < SPLIT_FORWARD_MIN && ratio > SPLIT_REVERSE_MAX) continue;
+            // 非正收盤一律跳過的縱深防禦與比值算法抽到 adjacentCloseRatio（Task 565：與 priceOnlyBasis 共用）。
+            double ratio = adjacentCloseRatio(rowsAsc.get(i - 1), rowsAsc.get(i));
+            if (Double.isNaN(ratio)) continue;
+            if (!exceedsSplitBand(ratio)) continue;
 
             // 大額股票股利（如配股 10 元＝1:1）同樣使價格腰斬，ratio ≈ 2.0 會被誤認為 2:1 分割。
             // 若不排除，該事件會被 dividendFactor 與 detectSplits 各計一次、price/share growth 被乘成 4 倍，
