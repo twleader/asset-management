@@ -6676,3 +6676,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 以 SRPP 凍結的原始 model／manifest bytes 同步 embedded authority，原 generator 重產兩份既有 report golden 與 insert-only registration SQL；若第三份 short-US golden 依舊來源僅因門檻產生 expected 變動，也須由原 generator 重產而非手改。正式 targets projection／formula manifest／Swagger／API／排程維持既有契約，未經使用者授權不新增金融條件。Java 既有短線 comparator 讀 model 參數，不新增第二個門檻常數。
 - [ ] 台股股票 SHORT_TERM_D173 的入選比較使用未捨入原始價與支撐的精確十進位交叉乘積 `price*100 >= support*(100+minimum_rebound_pct)`，避免顯示四捨五入將未達門檻者放行；reboundPct 顯示仍保留原四位，債券比較行為不改。Java 與 Python 確定性邊界驗證至少涵蓋支撐100／現價102.99999（顯示3%但原值2.99999%）仍等待、恰好 3% 通過反彈條件、介於 3% 與 8% 可通過反彈條件，且任一原均線／KD／風報比或雷達閘門不符仍阻擋。通過反彈條件不等於全部交易資格通過。獨立 spec／architecture 審查、authority／golden parity、registry generator 回歸與 backend package 必須通過。
 - [ ] 兩 repo commit／no-ff merge／push／remote-ref 讀回後才由 release operator 執行已合併 insert-only SQL；精確核新 bundle 的 registry 四欄全文與舊 rows 不變。之後從正式 main 設定僅 build／recreate business-services，驗 running JAR authority bytes 與 SRPP 相同，再以新 hash 呼叫 9090 業務 GET 並保存原始狀態。非合法報告時窗只做維護診斷、不冒稱正式日報採用，不重跑報告／寄信／刷新／交易。
+
+
+### SRPP 政策證據解讀補充：國安基金正式授權訊號（Task 562，延伸既有需求187）
+
+- [ ] 政府正式公告／授權國安基金啟動安定市場任務，即可認列為重要政策支持與將視情況擇機護盤的訊號；不得要求公開實際成交或金額才承認政策訊號。實際進場時點、成交與金額沒有公開可驗證證據時維持未知，不將授權解讀為已成交；不固定加分、不保證底部、不推定選舉因果，不新增交易權限或豁免任何既有金融閘門。
+- [ ] 這次是SRPP解讀文字澄清，D210／policy2.59.0／model3.22.0維持；model_inputs、calculation scripts、Java計算器、formula manifest、formal targets及Swagger全文不變。只以原工具重產新bundle，資產端同步manifest精確bytes與由原generator產生的SQL／golden身分；golden金融輸出與calculator hashes必須保持。
+- [ ] 完成獨立spec／architecture審查及離線authority／generator／Java／package驗收，雙repo各commit／no-ff merge／push與精確remote讀回後才執行已合併insert-only registry；新hash四欄全文相符、舊rows不變，再以正式main設定只build／recreate business-services並驗JAR bytes、原設定與其他容器保持。從SRPP實機做精確hash業務唯讀讀回，時窗外只記診斷結果與正式採用NOT_YET_EXECUTED，不重跑報告、寄信、刷新或交易。

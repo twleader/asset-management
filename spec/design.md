@@ -13553,3 +13553,8 @@ UI原assetType下拉換成assetClassOverride草稿，名稱旁基金交易checkb
 既有 `SrppReportModuleCalculator.shortEntryReasons` 從傳入 policy 的 `minimum_rebound_pct` 讀取 BigDecimal，`SrppReportShortUsCalculator.screen` 選用 equity `short_term_opportunity_d171` 或 bond `bond_short_term_opportunity_d185` 原政策鍵。這次同步 equity 值 8.0→3.0，並僅對 ledger.strategy=SHORT_TERM_D173 修正入選比較：以 BigDecimal 原始 price*100 與 support*(100+minimum_rebound_pct) 交叉相乘直接比較，不讓已捨入的顯示 reboundPct 放行 2.99999% 等未達標值；輸出四位小數與債券原 comparator 均保留。價格反彈 `(price/support-1)*100` 仍為原計算口徑，恰好門檻允許，低於門檻加入 REBOUND_NOT_CONFIRMED。其他原 reasons、reconcile／capacity／execution-gate 路徑不變；5% 債券與 15% US 值保留。邊界回歸使用正式 embedded model，以合格雷達與支撐／壓力情境隔離門檻，同時保留原均線／KD／風報比／方向反例。
 
 凍結 SRPP model／manifest 後用原 generators 產出 authority、formal targets policy document、goldens 與 insert-only SQL；只因新 bundle 引起的 golden identity 變動照原工具更新，禁止手改 expected。既有 ASSET_MGMT_SRPP_V2／SRPP_REPORT_CALCULATIONS_V1 與 formula manifest、Swagger 全文不變。不新增 endpoint、DB schema、producer 或 scheduler。雙 repo 落地後 registry 四欄與歷史 rows 核對，再由正式 main build／recreate business-services，保留其他容器與設定；JAR bytes 與精確新 hash 業務 GET 為部署證據，正式報告採用仍受合法時間、完整 required_reads、同 owner L0 與 verifier 限制。
+
+
+### Task 562 國安基金政策訊號解讀與authority發布
+
+SRPP來源文件澄清「政府正式公告／授權啟動安定市場任務」已構成重要政策支持及視情況擇機護盤的訊號，不以公開成交／金額為認列前提；成交事實另按公開可驗證資料解讀，缺漏為未知。LLM仍依既有D204／D207證據、方向與幅度規範解讀，不新增固定分數、bottom保證、選舉因果或交易例外。此為prose-only政策維護；資產Java計算器、model、formula、formal targets、Swagger與API不變。原SRPP工具凍結新bundle後，同步embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden，核對除bundle身分外完全相同。使用者明示完整發布鏈：離線驗證→雙repoGit落地→registry exact row及舊rows全文核對→乾淨正式main build／recreate business-services→JAR authority與SRPP host精確hash業務讀回；沒有合法日報時窗時不冒稱正式採用。
