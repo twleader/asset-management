@@ -74,6 +74,17 @@ public class TradingRadarService {
     static final String US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX =
             "美股配息資料或還原價基尚未驗證，技術指標暫不提供";
 
+    /**
+     * 美股技術指標改以<b>未做配息還原</b>的完成收盤價計算（price-only）時，完整明細三軌 risks 的揭露句字首（Task 565）。
+     *
+     * <p>與 {@link #US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX} 互不為子字串、互斥出現：price-only 成立時只出現本句，
+     * 退回「技術指標不可用」時只出現 Task 564 句。完整句由 {@link #usPriceOnlyTechnicalRisk(String)} 組成，
+     * 不得聲稱已使用還原權息價（{@code distributionAdjusted} 本來就為 false）。package-private 同 Task 564：
+     * 同套件測試以此常數 {@code contains} 比對，不在多處手寫字串。</p>
+     */
+    static final String US_PRICE_ONLY_TECHNICAL_RISK_PREFIX =
+            "美股配息還原價基尚未驗證，技術指標以未做配息還原的收盤價計算";
+
     private static final String TWD = "TWD";
     private static final Pattern STOCK_CODE_SELECTOR = Pattern.compile("^[A-Za-z0-9.\\-]{1,12}$");
     private static final Pattern MARKET_SELECTOR = Pattern.compile("^[\\p{L}0-9]{1,10}$");
@@ -1585,22 +1596,20 @@ public class TradingRadarService {
             // Task 564：美股視窗內有配息事件時，adjust 會因「沒有美股歷史價的拆股／價基證明」而拋
             // CanonicalDividendFinancialGuard.Unavailable（守門決定本身保留，不可拿名目配息硬還原）。
             // 但這只代表「技術基準不可用」，不代表已驗證的完成收盤價也不可用——收盤價出自上面的
-            // AcceptedPrice（RadarObservationResolver，Task 319），與還原價基無關。故美股在此改用
+            // AcceptedPrice（RadarObservationResolver，Task 319），與還原價基無關。故美股在無法取得技術基準時改用
             // Prepared.EMPTY：MA／KD／確認欄位全缺值、規則引擎 complete() 早退為三軌 NO_TRADE，
-            // 價格與 quoteStatus 照 AcceptedPrice 原樣輸出。絕不改用未還原價補算任何指標。
+            // 價格與 quoteStatus 照 AcceptedPrice 原樣輸出。
             // 只認例外型別、不比對訊息字串（UNVERIFIED 與 CANONICAL_DIVIDEND_UNRESOLVED 兩種都要救）；
             // 台股的 Unavailable 與美股的其他例外原樣重拋，仍走下方整體 catch 的 DecisionCore.failed。
-            RadarInputAssembler.Prepared technicalBasis;
-            String usDividendBasisUnavailableReason = null;
-            try {
-                technicalBasis = prepareTechnicalBasis(target, acceptedPrice,
-                        listEntry == null ? null : listEntry.adjustmentEvents());
-            } catch (CanonicalDividendFinancialGuard.Unavailable unavailable) {
-                if (!US_MARKET.equals(target.market())) throw unavailable;
-                technicalBasis = RadarInputAssembler.Prepared.EMPTY;
-                usDividendBasisUnavailableReason = unavailable.getMessage() == null
-                        ? "UNSPECIFIED" : unavailable.getMessage();
-            }
+            // Task 565：非債券美股在 Task 564 的「首次還原不可用」之後，改試 price-only（直接以庫內未做配息
+            // 還原的完成收盤列算技術指標）；價基斷層、除息後 15 根退避、日期無法證明、債券則仍退回
+            // Prepared.EMPTY。兩次嘗試共用 prepareTechnicalBasis 內同一份 combined 與同一份事件清單
+            // （事件只讀一次），結果以 TechnicalBasis 互斥表示「price-only」與「退回不可用」，不得改用任何其他價基補算指標。
+            TechnicalBasis technicalPlan = prepareTechnicalBasis(target, acceptedPrice,
+                    listEntry == null ? null : listEntry.adjustmentEvents(), profile.bond());
+            RadarInputAssembler.Prepared technicalBasis = technicalPlan.prepared();
+            String usDividendBasisUnavailableReason = technicalPlan.unavailableReason();
+            String usPriceOnlyReason = technicalPlan.priceOnlyReason();
             String technicalFingerprint = technicalContextFingerprint(target, acceptedPrice, technicalBasis);
             // A fresh local snapshot is selected before `calculate`, so both
             // daily and weekly computeFromSeries calls are skipped on a valid
@@ -1842,6 +1851,12 @@ public class TradingRadarService {
                     risks.add(basisRisk);
                     shortRisks.add(basisRisk);
                     swingRisks.add(basisRisk);
+                }
+                if (usPriceOnlyReason != null) {
+                    String priceOnlyRisk = usPriceOnlyTechnicalRisk(usPriceOnlyReason);
+                    risks.add(priceOnlyRisk);
+                    shortRisks.add(priceOnlyRisk);
+                    swingRisks.add(priceOnlyRisk);
                 }
             }
 
@@ -2225,21 +2240,70 @@ public class TradingRadarService {
     }
 
     /**
-     * 組裝技術面欄位。**實際邏輯全在 {@link RadarInputAssembler}**，本方法只負責 production 專屬的
-     * 「當日 live K 併入」與事件查詢；回測走同一支 assembler，故兩者不可能漂移（Task 273 的 273.2b）。
+     * Task 565：字首＋偏差說明＋原因碼＋句尾一個空白。原因碼是首次還原不可用的訊息（price-only 成立的原因）。
+     * 只據實說明偏差來源，不使用「略有偏差」之類淡化措辭，也不聲稱已使用還原權息價。
      */
-    private RadarInputAssembler.Prepared prepareTechnicalBasis(
-            Target target,
-            RadarObservationResolver.AcceptedPrice acceptedPrice) {
-        return prepareTechnicalBasis(target, acceptedPrice, null);
+    private static String usPriceOnlyTechnicalRisk(String reason) {
+        return US_PRICE_ONLY_TECHNICAL_RISK_PREFIX
+                + "，除息缺口與 52 週位置可能使均線、KD 與高檔判定偏差（原因：" + reason + "）。 ";
     }
 
-    /** List context already owns the exact-pair adjustment window; never reread it in evaluation. */
-    private RadarInputAssembler.Prepared prepareTechnicalBasis(
+    /**
+     * 技術價基的決定結果（Task 565）。{@code priceOnly} 與「退回不可用」互斥表示，不用兩個獨立 boolean：
+     * <ul>
+     *   <li>正常還原成功：{@code priceOnly=false}、{@code reason=null}。</li>
+     *   <li>price-only 成立：{@code priceOnly=true}，{@code reason} 為首次還原不可用的訊息。</li>
+     *   <li>退回不可用（{@code prepared=EMPTY}）：{@code priceOnly=false}，{@code reason} 為最終不可用的訊息。</li>
+     * </ul>
+     */
+    private record TechnicalBasis(RadarInputAssembler.Prepared prepared, boolean priceOnly, String reason) {
+        static TechnicalBasis adjusted(RadarInputAssembler.Prepared prepared) {
+            return new TechnicalBasis(prepared, false, null);
+        }
+
+        static TechnicalBasis priceOnly(RadarInputAssembler.Prepared prepared, String firstReason) {
+            return new TechnicalBasis(prepared, true, firstReason);
+        }
+
+        static TechnicalBasis unavailable(String reason) {
+            return new TechnicalBasis(RadarInputAssembler.Prepared.EMPTY, false, reason);
+        }
+
+        /** 退回 Task 564「技術指標不可用」時的原因碼；其餘情形為 null。 */
+        String unavailableReason() {
+            return priceOnly ? null : reason;
+        }
+
+        /** price-only 成立時的原因碼（首次還原不可用的訊息）；其餘情形為 null。 */
+        String priceOnlyReason() {
+            return priceOnly ? reason : null;
+        }
+    }
+
+    private static String unavailableMessage(CanonicalDividendFinancialGuard.Unavailable unavailable) {
+        return unavailable.getMessage() == null ? "UNSPECIFIED" : unavailable.getMessage();
+    }
+
+    /**
+     * 組裝技術面欄位。**實際邏輯全在 {@link RadarInputAssembler}**，本方法只負責 production 專屬的
+     * 「當日 live K 併入」與事件查詢；回測走同一支 assembler，故兩者不可能漂移（Task 273 的 273.2b）。
+     *
+     * <p>List context already owns the exact-pair adjustment window; never reread it in evaluation.</p>
+     *
+     * <p><b>Task 565：兩次嘗試必須留在本方法內。</b>事件範圍 {@code [fromDate,toDate]} 取自這裡才建出的
+     * {@code combined}（含 live 列），事件只讀一次、{@code combined} 只建一次，首次還原與 price-only
+     * 共用同一份，不得為了第二次嘗試重建序列或重讀事件。非美股的 {@code Unavailable} 原樣重拋；
+     * price-only 路徑中 {@code Unavailable} 以外的例外（例如 NPE）也原樣上拋，由呼叫端整列失敗。</p>
+     *
+     * @param bond 標的是否為債券（{@code profile.bond()}）：債券的配息缺口占價格區間比例大
+     *             （SGOV 單次配息約占 9 日高低區間 208%），不得 price-only，首次不可用即退回不可用。
+     */
+    private TechnicalBasis prepareTechnicalBasis(
             Target target,
             RadarObservationResolver.AcceptedPrice acceptedPrice,
-            List<StockDividendHistory> batchAdjustmentEvents) {
-        if (acceptedPrice == null) return RadarInputAssembler.Prepared.EMPTY;
+            List<StockDividendHistory> batchAdjustmentEvents,
+            boolean bond) {
+        if (acceptedPrice == null) return TechnicalBasis.adjusted(RadarInputAssembler.Prepared.EMPTY);
         // 技術序列一律取 indicatorSeriesRows（Task 319.3）：verifiedCompletedRows 帶著台股
         // provenance 白名單，那是 accepted price／quoteStatus 的判準，拿來當 MA／KD 的歷史序列
         // 會讓 close_source 為 null 的歷史列（Task 290 明定不回填）整批消失。
@@ -2257,22 +2321,35 @@ public class TradingRadarService {
         if (liveAdded) {
             combined.add(0, liveRow(target, liveOpt.orElseThrow()));
         }
-        if (combined.isEmpty()) return RadarInputAssembler.Prepared.EMPTY;
+        if (combined.isEmpty()) return TechnicalBasis.adjusted(RadarInputAssembler.Prepared.EMPTY);
 
         LocalDate fromDate = combined.get(combined.size() - 1).getTradingDate();
         LocalDate toDate = combined.get(0).getTradingDate();
-        return assembler.prepare(
-                combined,
-                batchAdjustmentEvents == null
-                        ? dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate)
-                        : batchAdjustmentEvents,
-                liveAdded,
-                // Task 356.4d-3：completedRowCount 仍是「日K 契約的完成列數」（上限 241），
-                // 不得因為 combined 改成長序列就順手改傳長序列長度——那會讓 completedCloses
-                // 由 ≤241 變成 ~499，撞上擴窗逐位不變的回歸斷言。
-                completedRows.size(),
-                RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS,
-                acceptedPrice.value());
+        // 事件只讀一次（全檔唯一的 findAdjustmentEvents 呼叫點）：首次還原與 price-only 共用這一份。
+        List<StockDividendHistory> events = batchAdjustmentEvents == null
+                ? dividendHistoryRepo.findAdjustmentEvents(target.code(), target.market(), fromDate, toDate)
+                : batchAdjustmentEvents;
+        // Task 356.4d-3：completedRowCount 仍是「日K 契約的完成列數」（上限 241），
+        // 不得因為 combined 改成長序列就順手改傳長序列長度——那會讓 completedCloses
+        // 由 ≤241 變成 ~499，撞上擴窗逐位不變的回歸斷言。
+        int completedRowCount = completedRows.size();
+        try {
+            return TechnicalBasis.adjusted(assembler.prepare(
+                    combined, events, liveAdded, completedRowCount,
+                    RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS, acceptedPrice.value()));
+        } catch (CanonicalDividendFinancialGuard.Unavailable unavailable) {
+            if (!US_MARKET.equals(target.market())) throw unavailable;
+            String firstReason = unavailableMessage(unavailable);
+            if (bond) return TechnicalBasis.unavailable(firstReason);
+            try {
+                return TechnicalBasis.priceOnly(assembler.preparePriceOnly(
+                        combined, events, liveAdded, completedRowCount,
+                        RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS, acceptedPrice.value()), firstReason);
+            } catch (CanonicalDividendFinancialGuard.Unavailable priceOnlyUnavailable) {
+                // 價基斷層、除息後退避或日期無法證明：退回 Task 564 路徑，原因碼改為本次訊息。
+                return TechnicalBasis.unavailable(unavailableMessage(priceOnlyUnavailable));
+            }
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ import com.steven.assets.dto.TradingRadarDto;
 import com.steven.assets.dto.TreasuryYieldDto;
 import com.steven.assets.model.CanonicalDividendFinancialGuard;
 import com.steven.assets.model.Stock;
+import com.steven.assets.model.StockDividendHistory;
 import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.model.TwseIndexDailyHistory;
 import com.steven.assets.model.UsIndexDailyHistory;
@@ -34,6 +35,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,8 +44,10 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -907,15 +911,98 @@ class TradingRadarUsStockEngineTest {
         return lines != null && lines.stream().anyMatch(line -> line != null && line.contains(needle));
     }
 
-    /** (a)(b) 共用：adjust 拋 Unavailable(reason) → 保留完成收盤價，技術欄位缺值，三軌 NO_TRADE，三軌 risks 揭露。 */
-    private void assertUsDividendBasisUnavailableKeepsClose(String code, String reason) {
-        stubUsStock564(code, stockRows564(code, "美股", COMPLETED_2026_08_10, 241, null));
+    // ─────────── Task 565：非債券美股改以未做配息還原的收盤價（price-only）恢復技術指標 ───────────
+
+    private static final String PRICE_ONLY_BREAK_PREFIX = "US_PRICE_ONLY_BASIS_BREAK:";
+    private static final String PRICE_ONLY_RECENT_EX_DIVIDEND_PREFIX = "US_PRICE_ONLY_RECENT_EX_DIVIDEND:";
+
+    /** 固定 fixture：恰 241 根連續完成日 K（60 個完成週約需 420 列日曆日，241 根不會觸發週K 的 computeFromSeries）。 */
+    private static List<StockPriceHistory> usRows565(String code) {
+        return stockRows564(code, "美股", COMPLETED_2026_08_10, 241, null);
+    }
+
+    /** 美股現金配息事件（有效日 {@code canonicalDate}）；price-only 只看有效日與金額是否皆為 0。 */
+    private static StockDividendHistory usDividendEvent565(String code, LocalDate canonicalDate) {
+        return StockDividendHistory.builder()
+                .id(565L).stockCode(code).market("美股").year(canonicalDate.getYear())
+                .canonicalDate(canonicalDate).exDividendDate(canonicalDate)
+                .cashDividend(new BigDecimal("1.50")).stockDividend(BigDecimal.ZERO)
+                .resolutionStatus("RESOLVED").eventStatus("ACTIVE").build();
+    }
+
+    /**
+     * Task 565 共用：{@code adjust} 拋 Unavailable(adjustReason)、{@code priceOnlyBasis} 為<b>真實呼叫</b>
+     * （{@code adjustedPriceService} 是 @Mock，不明寫 thenCallRealMethod 會回 null 而 NPE 被外層 catch
+     * 吞成整列失敗；若只 thenAnswer 回傳原列，斷言會變同義反覆）。事件由 {@code findAdjustmentEvents} 回傳，
+     * 且整個流程只准讀一次。
+     */
+    private TradingRadarDto.StockDecision evaluateUsWithRealPriceOnly(
+            String code, List<StockPriceHistory> rows, String adjustReason,
+            List<StockDividendHistory> events) {
+        stubUsStock564(code, rows);
         when(adjustedPriceService.adjust(anyList(), anyList()))
-                .thenThrow(new CanonicalDividendFinancialGuard.Unavailable(reason));
+                .thenThrow(new CanonicalDividendFinancialGuard.Unavailable(adjustReason));
+        when(adjustedPriceService.priceOnlyBasis(anyList(), anyList())).thenCallRealMethod();
+        when(dividendHistoryRepo.findAdjustmentEvents(eq(code), eq("美股"), any(LocalDate.class), any(LocalDate.class)))
+                .thenReturn(events);
+        // lenient：退回不可用的案例絕不應該呼叫序列指標（由 assertUsTechnicalUnavailableKeepsClose 以 never() 驗證）。
+        lenient().when(indicatorService.computeFromSeries(anyList())).thenReturn(US_RISK_ON_IND);
+        return decisionOf(newService(), code);
+    }
 
-        TradingRadarDto.StockDecision decision = decisionOf(newService(), code);
-
+    /** price-only 成立：技術指標恢復、真評估、揭露 price-only 句，且沒有退回 Task 564 的「暫不提供」句。 */
+    @SuppressWarnings("unchecked")
+    private void assertUsPriceOnlyRestored(
+            String code, List<StockPriceHistory> rows, TradingRadarDto.StockDecision decision, String adjustReason) {
         verify(adjustedPriceService).adjust(anyList(), anyList());
+        verify(adjustedPriceService).priceOnlyBasis(anyList(), anyList());
+        verify(dividendHistoryRepo, times(1))
+                .findAdjustmentEvents(eq(code), eq("美股"), any(LocalDate.class), any(LocalDate.class));
+        assertFalse(anyContains(decision.risks(), WHOLE_ROW_FAILURE_RISK), "不是整列失敗：" + decision.risks());
+        assertNotNull(decision.price());
+        assertEquals(0, new BigDecimal("200.00").compareTo(decision.price()), "價格不變");
+        assertEquals("VERIFIED_CLOSE", decision.quoteStatus(), "quoteStatus 不變");
+        assertEquals(COMPLETED_2026_08_10.toString(), decision.asOfDate());
+        // 真評估以 dataComplete 判斷（NO_TRADE 只出自資料不完整），不以 action != NO_TRADE 另行推論。
+        assertTrue(decision.dataComplete(), "price-only 成立時規則引擎 complete() 必須為真：" + decision.risks());
+        assertNotNull(decision.changePercent(), "ruleChangePercent 由 price-only 序列的前收而來");
+        assertNotEquals("UNAVAILABLE", decision.monthlyConfirmation());
+        assertNotEquals("UNAVAILABLE", decision.quarterlyConfirmation());
+        assertNotEquals("UNAVAILABLE", decision.annualConfirmation());
+        assertNotNull(decision.monthlyMa());
+        assertNotNull(decision.quarterlyMa());
+        assertNotNull(decision.annualMa());
+        assertNotNull(decision.kValue());
+        assertNotNull(decision.dValue());
+        assertFalse(decision.distributionAdjusted(), "price-only 沒有還原，不得宣稱已使用還原權息價");
+        // 日K 那次 computeFromSeries 收到的是 fixture 前 240 列、逐值相同（priceOnlyBasis 為真實呼叫，序列被改動就會失敗）。
+        ArgumentCaptor<List<StockPriceHistory>> series = ArgumentCaptor.forClass(List.class);
+        verify(indicatorService, atLeastOnce()).computeFromSeries(series.capture());
+        List<StockPriceHistory> daily = series.getAllValues().get(0);
+        assertEquals(240, daily.size());
+        for (int i = 0; i < 240; i++) {
+            assertEquals(rows.get(i).getTradingDate(), daily.get(i).getTradingDate());
+            assertEquals(0, rows.get(i).getClosePrice().compareTo(daily.get(i).getClosePrice()),
+                    "第 " + i + " 列收盤不得被改動");
+        }
+        // 三軌揭露：含 price-only 字首與首次還原不可用的原因碼，且不含 Task 564 句。
+        String expected = TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX
+                + "，除息缺口與 52 週位置可能使均線、KD 與高檔判定偏差（原因：" + adjustReason + "）。 ";
+        for (List<String> risks : List.of(decision.risks(), decision.shortRisks(), decision.swingRisks())) {
+            assertTrue(anyContains(risks, TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX), "risks：" + risks);
+            assertTrue(anyContains(risks, "（原因：" + adjustReason + "）"), "risks：" + risks);
+            assertFalse(anyContains(risks, TradingRadarService.US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX));
+        }
+        assertTrue(decision.risks().contains(expected), "完整句（句尾一個空白）：" + decision.risks());
+        assertTrue(decision.shortRisks().contains(expected));
+        assertTrue(decision.swingRisks().contains(expected));
+    }
+
+    /**
+     * 退回 Task 564「技術指標不可用」：保留完成收盤價，技術欄位缺值，三軌 NO_TRADE，三軌 risks 以 Task 564 句揭露，
+     * 且沒有 price-only 句；序列指標一律沒被呼叫。{@code reasonCode} 是最終不可用的原因碼。
+     */
+    private void assertUsTechnicalUnavailableKeepsClose(TradingRadarDto.StockDecision decision, String reasonCode) {
         assertNotNull(decision.price(), "已驗證的完成收盤價必須保留，不得因技術基準不可用而丟掉：" + decision.risks());
         assertEquals(0, new BigDecimal("200.00").compareTo(decision.price()));
         assertEquals("VERIFIED_CLOSE", decision.quoteStatus());
@@ -935,10 +1022,13 @@ class TradingRadarUsStockEngineTest {
         assertNull(decision.dValue());
         assertFalse(anyContains(decision.risks(), WHOLE_ROW_FAILURE_RISK), "不是整列失敗");
         String expectedSentence = TradingRadarService.US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX
-                + "（原因：" + reason + "）。 ";
+                + "（原因：" + reasonCode + "）。 ";
         assertTrue(decision.risks().contains(expectedSentence), "1月~6月 軌須揭露：" + decision.risks());
         assertTrue(decision.shortRisks().contains(expectedSentence), "一周軌須揭露：" + decision.shortRisks());
         assertTrue(decision.swingRisks().contains(expectedSentence), "1周~1月 軌須揭露：" + decision.swingRisks());
+        assertFalse(anyContains(decision.risks(), TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX));
+        assertFalse(anyContains(decision.shortRisks(), TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX));
+        assertFalse(anyContains(decision.swingRisks(), TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX));
         // 不得改用未還原價／未驗證價基算任何指標：序列指標一律沒被呼叫。
         verify(indicatorService, never()).computeFromSeries(anyList());
         // NO_TRADE 必須歸因於技術基準缺值而非大盤：餵進引擎的 regime 是健康的 RISK_ON。
@@ -949,14 +1039,72 @@ class TradingRadarUsStockEngineTest {
     }
 
     @Test
-    void 美股配息價基未驗證時雷達保留完成收盤價並揭露技術指標暫不提供_UNVERIFIED() {
-        assertUsDividendBasisUnavailableKeepsClose("ASML", UNVERIFIED_BASIS_REASON);
+    void 非債券美股配息價基未驗證時改用price_only恢復技術指標_UNVERIFIED() {
+        List<StockPriceHistory> rows = usRows565("MSFT");
+        TradingRadarDto.StockDecision decision = evaluateUsWithRealPriceOnly("MSFT", rows, UNVERIFIED_BASIS_REASON,
+                List.of(usDividendEvent565("MSFT", COMPLETED_2026_08_10.minusDays(60))));
+
+        assertUsPriceOnlyRestored("MSFT", rows, decision, UNVERIFIED_BASIS_REASON);
     }
 
     @Test
-    void 美股正配息列未解決時雷達同樣保留完成收盤價_SGOV型UNRESOLVED() {
+    void 非債券美股正配息列未解決時同樣改用price_only恢復技術指標_UNRESOLVED() {
         // 不比對訊息字串：另一種 Unavailable 原因碼同樣要救，且原因碼原樣進揭露句。
-        assertUsDividendBasisUnavailableKeepsClose("SGOV", UNRESOLVED_DIVIDEND_REASON);
+        List<StockPriceHistory> rows = usRows565("MSFT");
+        TradingRadarDto.StockDecision decision = evaluateUsWithRealPriceOnly("MSFT", rows, UNRESOLVED_DIVIDEND_REASON,
+                List.of(usDividendEvent565("MSFT", COMPLETED_2026_08_10.minusDays(60))));
+
+        assertUsPriceOnlyRestored("MSFT", rows, decision, UNRESOLVED_DIVIDEND_REASON);
+    }
+
+    @Test
+    void 債券型SGOV正配息列未解決時仍退回不可用_不嘗試price_only() {
+        // AssetClassifier 債券名單含 SGOV：配息缺口占 9 日高低區間約 208%，price-only 對債券不成立。
+        stubUsStock564("SGOV", usRows565("SGOV"));
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenThrow(new CanonicalDividendFinancialGuard.Unavailable(UNRESOLVED_DIVIDEND_REASON));
+
+        TradingRadarDto.StockDecision decision = decisionOf(newService(), "SGOV");
+
+        verify(adjustedPriceService).adjust(anyList(), anyList());
+        verify(adjustedPriceService, never()).priceOnlyBasis(anyList(), anyList());
+        assertUsTechnicalUnavailableKeepsClose(decision, UNRESOLVED_DIVIDEND_REASON);
+    }
+
+    @Test
+    void 非債券美股價基斷層時price_only不成立_退回不可用並揭露斷層原因碼() {
+        List<StockPriceHistory> rows = usRows565("MSFT");
+        // 第 100 列（含）以前的舊列放大 2.5 倍：模擬沒有被還原的分割，斷層出現在第 99、100 列之間。
+        for (int i = 100; i < rows.size(); i++) {
+            StockPriceHistory old = rows.get(i);
+            BigDecimal scaled = old.getClosePrice().multiply(new BigDecimal("2.5"));
+            old.setOpenPrice(scaled);
+            old.setHighPrice(scaled);
+            old.setLowPrice(scaled);
+            old.setClosePrice(scaled);
+        }
+        String breakReason = PRICE_ONLY_BREAK_PREFIX + rows.get(99).getTradingDate();
+
+        TradingRadarDto.StockDecision decision = evaluateUsWithRealPriceOnly(
+                "MSFT", rows, UNVERIFIED_BASIS_REASON, List.of());
+
+        verify(adjustedPriceService).priceOnlyBasis(anyList(), anyList());
+        assertUsTechnicalUnavailableKeepsClose(decision, breakReason);
+    }
+
+    @Test
+    void 非債券美股除息日落在最近15根內時price_only不成立_退回不可用並揭露退避原因碼() {
+        List<StockPriceHistory> rows = usRows565("MSFT");
+        LocalDate recentExDate = rows.get(10).getTradingDate();   // 含除息日當根共 11 根
+        String cooldownReason = PRICE_ONLY_RECENT_EX_DIVIDEND_PREFIX + recentExDate;
+
+        TradingRadarDto.StockDecision decision = evaluateUsWithRealPriceOnly(
+                "MSFT", rows, UNVERIFIED_BASIS_REASON, List.of(usDividendEvent565("MSFT", recentExDate)));
+
+        verify(adjustedPriceService).priceOnlyBasis(anyList(), anyList());
+        assertUsTechnicalUnavailableKeepsClose(decision, cooldownReason);
+        assertFalse(anyContains(decision.risks(), UNVERIFIED_BASIS_REASON),
+                "退回時原因碼改為 price-only 這次的訊息，不是首次還原不可用的訊息");
     }
 
     @Test
@@ -1046,5 +1194,54 @@ class TradingRadarUsStockEngineTest {
         // Unavailable 是 final 類別並繼承 IllegalStateException；若實作把 catch 寫成 IllegalStateException，
         // 這個純 ISE 會被誤救。
         assertUsOtherExceptionStillFailsWholeRow(new IllegalStateException("probe"));
+    }
+
+    private void assertUsPriceOnlyOtherExceptionStillFailsWholeRow(RuntimeException probe) {
+        // Task 565 (E)：price-only 路徑中 Unavailable 以外的例外（NPE、IAE、純 ISE…）原樣上拋、整列失敗，
+        // 與 Task 564 (f) 探針一致；不得被「price-only 不成立就退回」的 catch 吞掉。
+        stubUsStock564("MSFT", usRows565("MSFT"));
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenThrow(new CanonicalDividendFinancialGuard.Unavailable(UNVERIFIED_BASIS_REASON));
+        when(adjustedPriceService.priceOnlyBasis(anyList(), anyList())).thenThrow(probe);
+
+        TradingRadarDto.StockDecision decision = decisionOf(newService(), "MSFT");
+
+        verify(adjustedPriceService).adjust(anyList(), anyList());
+        verify(adjustedPriceService).priceOnlyBasis(anyList(), anyList());
+        assertTrue(decision.risks().contains(WHOLE_ROW_FAILURE_RISK),
+                probe.getClass().getSimpleName() + " 必須仍整列失敗：" + decision.risks());
+        assertFalse(anyContains(decision.risks(), TradingRadarService.US_DIVIDEND_BASIS_UNVERIFIED_RISK_PREFIX));
+        assertFalse(anyContains(decision.risks(), TradingRadarService.US_PRICE_ONLY_TECHNICAL_RISK_PREFIX));
+        assertEquals("CLOSE_PENDING", decision.quoteStatus());
+        assertNull(decision.price());
+    }
+
+    @Test
+    void 美股price_only路徑拋IllegalArgumentException時仍整列失敗() {
+        assertUsPriceOnlyOtherExceptionStillFailsWholeRow(new IllegalArgumentException("probe"));
+    }
+
+    @Test
+    void 美股price_only路徑拋純IllegalStateException時仍整列失敗() {
+        assertUsPriceOnlyOtherExceptionStillFailsWholeRow(new IllegalStateException("probe"));
+    }
+
+    @Test
+    void 台股adjust拋Unavailable時不嘗試price_only() {
+        // 台股行為完全不變：Unavailable 原樣重拋整列失敗，且 priceOnlyBasis 從未被呼叫。
+        stubBaseline();
+        stubDivergentRegimes();
+        when(priceHistoryRepo.findRecentN("2330", "台股", 500))
+                .thenReturn(stockRows564("2330", "台股", COMPLETED_2026_08_10, 241, "TWSE_MI_INDEX"));
+        when(alertRepo.findDistinctStockCodeMarket())
+                .thenReturn(List.<Object[]>of(new Object[]{"2330", "台股"}));
+        when(adjustedPriceService.adjust(anyList(), anyList()))
+                .thenThrow(new CanonicalDividendFinancialGuard.Unavailable(UNRESOLVED_DIVIDEND_REASON));
+
+        TradingRadarDto.StockDecision decision = decisionOf(newService(), "2330");
+
+        verify(adjustedPriceService, never()).priceOnlyBasis(anyList(), anyList());
+        assertTrue(decision.risks().contains(WHOLE_ROW_FAILURE_RISK));
+        assertNull(decision.price());
     }
 }

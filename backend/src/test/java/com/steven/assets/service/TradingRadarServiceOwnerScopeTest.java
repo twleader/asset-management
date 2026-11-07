@@ -373,6 +373,9 @@ class TradingRadarServiceOwnerScopeTest {
         // 列表路徑的 adjustmentEvents 已由 preloader 備妥；此處以 stub 讓 adjust 對美股配息拋 Unavailable。
         doThrow(new CanonicalDividendFinancialGuard.Unavailable("US_DIVIDEND_PRICE_BASIS_UNVERIFIED"))
                 .when(adjustedPriceService).adjust(anyList(), anyList());
+        // Task 565：非債券美股在首次還原不可用後改試 price-only。adjustedPriceService 是 @Mock，必須明寫
+        // thenCallRealMethod，偵測與退避邏輯才會真的執行（不 stub 會回 null 而 NPE 被吞成整列失敗）。
+        when(adjustedPriceService.priceOnlyBasis(anyList(), anyList())).thenCallRealMethod();
         TradingRadarListBatchPreloader.Entry entry = new TradingRadarListBatchPreloader.Entry(
                 Optional.of(asml), rows, Optional.empty(), Optional.empty(), List.of(),
                 DividendEventEvidenceResolver.Resolution.MISSING,
@@ -388,6 +391,13 @@ class TradingRadarServiceOwnerScopeTest {
         TradingRadarDto.ListResponse response = newService().getList(decisionInstant);
 
         verify(adjustedPriceService).adjust(anyList(), anyList());
+        // Task 565：此案只驗「列表路徑的 price-only 接線」，且斷言必須能與 Task 564 的 Prepared.EMPTY 路徑區分：
+        // price-only 恰被嘗試一次，事件取自 preloader entry（列表路徑不得再讀一次 findAdjustmentEvents）。
+        // 30 列 fixture 下 MA240 不可用、computeFromSeries 未 stub，complete() 必為 false，所以 action 仍是 NO_TRADE
+        // 屬預期；技術指標真正被算出來的端到端斷言在 TradingRadarUsStockEngineTest，不在此宣稱 kValue 非 null。
+        verify(adjustedPriceService).priceOnlyBasis(anyList(), anyList());
+        verify(dividendHistoryRepo, never()).findAdjustmentEvents(
+                anyString(), anyString(), any(LocalDate.class), any(LocalDate.class));
         assertThat(response.stocks()).hasSize(1);
         TradingRadarDto.ListStock stock = response.stocks().get(0);
         assertThat(stock.stockCode()).isEqualTo("ASML");
