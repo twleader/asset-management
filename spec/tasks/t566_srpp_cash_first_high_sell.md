@@ -37,10 +37,22 @@ git diff --check
 
 ## 完成報告
 
-離線實作與驗收已完成，尚未commit／merge／push、正式登錄或部署。使用者已明確授權略過Task565共享檔案等待，本輪append-only保留原工作；完整spec經作者以外審查及機械檢查BLOCK0／CHECK0，實作另經獨立arch／正確性審查，最終critical0／major0／minor0。審查找到的台股市場身分缺漏可繞過問題已修正：coreTiming要求body／quote／radar三份market皆精確台股，再以權威台股呼叫共同閘門；缺／錯市場回歸通過。未更動公開API／Swagger／schema、原公式家族、債券與戰術規則或交易權限。
+離線實作與驗收、雙專案commit／no-ff merge／push、正式insert-only登錄與business-services部署已完成。主機連線驗收為PARTIAL：日曆與指數通過，台股報價HTTP200但空陣列，未通過非空條件；正式日報採用仍為NOT_YET_EXECUTED。使用者已明確授權略過Task565共享檔案等待，本輪append-only保留原工作；完整spec經作者以外審查及機械檢查BLOCK0／CHECK0，實作另經獨立arch／正確性審查，最終critical0／major0／minor0。審查找到的台股市場身分缺漏可繞過問題已修正：coreTiming要求body／quote／radar三份market皆精確台股，再以權威台股呼叫共同閘門；缺／錯市場回歸通過。未更動公開API／Swagger／schema、原公式家族、債券與戰術規則或交易權限。
 
 凍結來源D211／policy2.60.0／model3.22.0，bundle `bedb78fffc74ea38b04f848676d53448e27cc30e0c0fb7b459b3aeb8ec438254`，model bytes SHA `64e3f9fc86208191cbf4492b43da4eb9a2ecfc426bffd7e886b81a4fe54a0c06`，manifest bytes SHA `8ff60d6bdf4e35309dfb3c540de529e60efe5ea191a965fba8d5c9d4020fcdcc`；五份離線JAR authority逐位元相符。新增共同Java OrdinaryEquitySellGate與TW／US原計算器銜接，高水位及原確認保留；US結果維持closed shape，以status／reason表達阻擋，原Python verifier從實際Java publisher合成包重算及精確比較PASS，僅DIAGNOSTIC／formal_report_adoption=false。
 
 75項Java（含隔離Testcontainers publisher 11項）、13項Ruby（307 assertions）、4項authority負向與5項exit-generator回歸、authority／golden檢查及backend package通過。111項TW same-input、51項US core＋9項US tactical及15項long-short由原Python產生；原73TW市場body與18US input逐值保留，其中2項TW、9項US原擇時結果依新D211閘門合法改為阻擋；US tactical全文不變，不宣稱所有金融結果或計算器hash維持。首次funding測試失敗為Frozen defensive-copy導致測試新增待收未進入新input，已重建Frozen修正測試並保留失敗log，沒有放寬任何資金閘門。實際資金回歸證明無賣方READY仍有正的獨立已交割容量；未成交SELL、待收不增額度，定存低於底線為0。這是容量測試，不聲稱整個合成組合具可執行股票單。
 
-本輪收據在 `/Users/steven/Project/SRPP/data/output/diagnostics/2026-11-07-cash-first-high-sell-release/`，核心為 `asset-offline-validation.json`、`asset-golden-comparison.json`、`asset-us-synthetic-independent-verifier.json`與完整測試logs。正式566.7由root協調後續Git／registry／部署及精確hash業務讀回；本段不宣稱正式報告採用或交易。此完成報告／566.1–566.6勾選只回填既有實作證據，未改功能契約，依CLAUDE明文「只是回填任務完成報告」例外處理。
+本輪收據在 `/Users/steven/Project/SRPP/data/output/diagnostics/2026-11-07-cash-first-high-sell-release/`，核心為 `asset-offline-validation.json`、`asset-golden-comparison.json`、`asset-us-synthetic-independent-verifier.json`與完整測試logs。566.7已完成Git／registry／部署及精確hash業務API診斷；報價非空驗收未通過、正式日報採用未執行，故566.7保留未完成勾選並明列剩餘驗收，不把PARTIAL寫成PASS。本段不宣稱正式報告採用或交易。此完成報告／566.1–566.6勾選只回填既有實作證據，未改功能契約，依CLAUDE明文「只是回填任務完成報告」例外處理。
+
+
+### 566.7 發布與主機診斷紀錄（2026-11-08 台北）
+
+- SRPP feature `e86182e3a21f4d07dd274fe0b1630cb6789d5d4a`、main no-ff `25e10b769056649952e3c4f632dbc2bbadf060d2`；asset feature `9a342c1bec74b4eb163fed599ab7b6bfe65d52e4`、程式發布main no-ff `983d01ddb740b62c83e76d0f17491987366be82c`。兩者均push並精確核對remote refs。實際SRPP日報checkout已安全fast-forward，原未追蹤檔保留。
+- 從已合併受追蹤原generator SQL insert-only登錄新bundle，registry由36增至37筆；policy_bundle_sha256、formula_version、policy_document與formula_manifest全文逐值相符，全部原36筆（含registered_at）未變。formula_version為`ASSET_MGMT_SRPP_V2`。
+- 乾淨asset main與原正式設定僅build／force-recreate business-services。container `5b5ea8e1f8ec5d82fcee1f6bafb9c492a5e2f5854be36cf21aa40f3f0d036cc1`，image `sha256:d27278200a3dcd959a6606ed758c1fdb5f1e595a496006c87c0c5d47cdbcc6e6`，healthy。運行JAR SHA `c33a6cccaf40f62e6c6dac004f0d4068a03c6295287aaaf6b26817c464ee8b45`；model／manifest／Swagger／SQL／formal五份authority原bytes精確相符，D211三個類別存在。47個environment鍵、3個mount與正式設定一致，其他8個container ID／image均保留。BFF無重啟即可從9090讀TWSE/1m HTTP200、21筆收盤。
+- 主機`verify_9090`：日曆HTTP200、TW AVAILABLE、365日；TWSE日線HTTP200、21筆；台股quotes HTTP200但`[]`，非空檢核FAIL，整體連線驗收PARTIAL，未放寬檢核。唯讀Redis檢查台股price:index不存在（SCARD0、EXISTS0、TTL−2），0050 price key亦不存在；同輪美股index15筆、英股4筆仍存在。PriceCacheReader只讀Redis，miss不補DB；writer原設定24小時TTL，index亦依Lua EXPIRE相同TTL，週日缺台股cache與週末過期相符，但無歷史TTL前態收據，不能稱為已證明歷史過期。行情reader／writer與BFF quote程式本輪零變更，external-materials容器未替換。
+- 精確新bundle＋既有Swagger的業務GET：台股`tradingDate=2026-11-08, reportSlot=09:05`於台北00:04回HTTP400 `INVALID_REQUEST`，既有BFF時鐘閘門在slot之前即拒絕，並未取得業務計算包；美股`sessionDate=2026-11-07, US_OPEN_0945`回HTTP409 `NON_TRADING_DAY`。兩者都是實際已保存診斷回應，不能稱為成功API金融採納或正式日報實跑。正式採用維持`NOT_YET_EXECUTED`，待合法交易日／時窗與完整required_reads、L0及獨立verifier。
+- 主要收據：`operator-git.json`、`operator-merged-authority.json`、`operator-registry.json`、`operator-registry-exact-row.json`、`operator-deployment.json`、`operator-jar-authority.json`、`9090-connectivity.json`、`business-api-exact-hash-readback.json`、`operator-readonly-diagnosis.json`。前置Ruby loader錯誤在DB寫入前發生並留收據，以明確絕對require有界修正後一次登錄成功。未刷新行情／Redis、人工啟動producer、重跑報告、建立草稿、寄信或交易。
+
+本次僅回填此任務文件的真實發布證據與剩餘驗收；不改程式／authority／SQL／金融規則。文件收尾另走feature commit與main no-ff merge／push；因運行資源bytes不變，保留已驗證image，不為文件收尾重複build／recreate。
