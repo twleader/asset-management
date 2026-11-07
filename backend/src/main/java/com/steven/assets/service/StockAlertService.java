@@ -960,6 +960,13 @@ public class StockAlertService {
      * 高／低缺值以收盤代；三者皆缺的列略過。
      */
     private List<double[]> loadCompletedHighLowAsc(String code, String market) {
+        return loadCompletedHighLowAsc(code, market, historyRepo, twseIndexHistoryRepo);
+    }
+
+    /** 當前清單共用的唯讀載入；呼叫者供應同一組 repository，不需服務間 instance 依賴。 */
+    static List<double[]> loadCompletedHighLowAsc(String code, String market,
+                                                 StockPriceHistoryRepository historyRepo,
+                                                 TwseIndexDailyHistoryRepository twseIndexHistoryRepo) {
         LocalDate today = ZonedDateTime.now(MarketZones.resolve(market)).toLocalDate();
         List<double[]> desc = new ArrayList<>(WEEK52_BARS);
         if ("0000".equals(code) && "台股".equals(market)) {
@@ -1810,8 +1817,15 @@ public class StockAlertService {
      */
     public static String buildGroupLabel(List<StockAlert> members,
                                          TechnicalIndicatorService.FullIndicators ind) {
+        return buildGroupLabel(members, ind, null);
+    }
+
+    /** 目前清單可傳同次區間；舊 overload 不帶範圍，歷史通知／匯出文案維持原樣。 */
+    static String buildGroupLabel(List<StockAlert> members,
+                                  TechnicalIndicatorService.FullIndicators ind,
+                                  Week52Range range) {
         if (members == null || members.isEmpty()) return "";
-        List<String> labels = members.stream().map(m -> buildLabel(m, ind)).toList();
+        List<String> labels = members.stream().map(m -> buildLabel(m, ind, range)).toList();
         return String.join(" 且 ", labels);
     }
 

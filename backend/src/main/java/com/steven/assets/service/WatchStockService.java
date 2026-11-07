@@ -8,6 +8,7 @@ import com.steven.assets.repository.StockAlertGroupRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
 import com.steven.assets.repository.StockRepository;
+import com.steven.assets.repository.TwseIndexDailyHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,7 @@ public class WatchStockService {
     private final StockRepository stockMasterRepo;
     private final TechnicalIndicatorService indicatorService;
     private final TaiexDisplayPriceService taiexDisplayPriceService;
+    private final TwseIndexDailyHistoryRepository twseIndexHistoryRepo;
 
     private static boolean isTaiex(String code, String market) {
         return TAIEX_INDEX_CODE.equals(code) && "台股".equals(market);
@@ -203,7 +205,7 @@ public class WatchStockService {
         // 不論警示是否設定／觸發，皆計算當前的月線(MA20)、季線(MA60)、年線(MA240)、KD；
         // 「警示條件」欄 MA% 條件的觸發價換算亦共用同一份即時均線值（同義欄位同一來源）
         TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
-        List<WatchStockDto.Condition> conditions = buildConditions(alerts, groups, cutoff, ind);
+        List<WatchStockDto.Condition> conditions = buildConditions(alerts, groups, cutoff, ind, week52RangeForLabels(code, market, alerts));
 
         // 警示彙總：取該股最近一筆觸發（獨立條件與群組一起比），且只顯示最後交易日（或當日）及前一日內的觸發
         LastAlert last = lastAlert(alerts, groups, cutoff);
@@ -280,7 +282,7 @@ public class WatchStockService {
         java.time.LocalDateTime cutoff = recentTradingDayCutoff(market, StockAlertService.FRESHNESS_TRADING_DAYS);
         // 先算指標：MA 欄與「警示條件」欄 MA% 觸發價共用同一份即時均線值（同義欄位同一來源）
         TechnicalIndicatorService.FullIndicators ind = indicatorService.computeAll(code, market);
-        List<WatchStockDto.Condition> conditions = buildConditions(alerts, groups, cutoff, ind);
+        List<WatchStockDto.Condition> conditions = buildConditions(alerts, groups, cutoff, ind, week52RangeForLabels(code, market, alerts));
 
         LastAlert last = lastAlert(alerts, groups, cutoff);
 
@@ -326,7 +328,8 @@ public class WatchStockService {
     private static List<WatchStockDto.Condition> buildConditions(List<StockAlert> alerts,
                                                                  List<StockAlertGroup> groups,
                                                                  LocalDateTime cutoff,
-                                                                 TechnicalIndicatorService.FullIndicators ind) {
+                                                                 TechnicalIndicatorService.FullIndicators ind,
+                                                                 StockAlertService.Week52Range range) {
         List<OrderedCondition> merged = new ArrayList<>();
 
         for (StockAlert a : alerts) {
@@ -334,7 +337,7 @@ public class WatchStockService {
             merged.add(new OrderedCondition(
                     a.getDisplayOrder() != null ? a.getDisplayOrder() : 0,
                     new WatchStockDto.Condition(
-                            StockAlertService.buildLabel(a, ind),
+                            StockAlertService.buildLabel(a, ind, range),
                             Boolean.TRUE.equals(a.getActive()),
                             triggeredWithin(a.getLastTriggeredAt(), cutoff),
                             false)));
@@ -354,7 +357,7 @@ public class WatchStockService {
                 merged.add(new OrderedCondition(
                         g.getDisplayOrder() != null ? g.getDisplayOrder() : 0,
                         new WatchStockDto.Condition(
-                                StockAlertService.buildGroupLabel(members, ind),
+                                StockAlertService.buildGroupLabel(members, ind, range),
                                 Boolean.TRUE.equals(g.getActive()),
                                 triggeredWithin(g.getLastTriggeredAt(), cutoff),
                                 true)));   // 前端據此掛「複合」標籤（251.22）
@@ -363,6 +366,22 @@ public class WatchStockService {
 
         merged.sort(Comparator.comparingInt(OrderedCondition::order));
         return merged.stream().map(OrderedCondition::condition).toList();
+    }
+
+    /** 當次股票列僅為 POS52W 載入一次；單條與所有群組共用，與警示清單同口徑。 */
+    private StockAlertService.Week52Range week52RangeForLabels(String code, String market,
+                                                             List<StockAlert> alerts) {
+        if (alerts.stream().noneMatch(a -> "POS52W_ABOVE".equals(a.getAlertType())
+                || "POS52W_BELOW".equals(a.getAlertType()))) return null;
+        try {
+            BigDecimal current = priceQuery.getLive(code, market)
+                    .map(PriceQueryService.LivePrice::price).orElse(null);
+            return StockAlertService.week52Range(current, StockAlertService.loadCompletedHighLowAsc(
+                    code, market, historyRepo, twseIndexHistoryRepo));
+        } catch (Exception e) {
+            log.warn("觀察清單 52 週門檻價位讀取失敗 {} {}: {}", market, code, e.getMessage());
+            return StockAlertService.Week52Range.UNAVAILABLE;
+        }
     }
 
     /** 獨立條件與群組合併成同一個 displayOrder 排序空間的暫存單元（排完即丟，不外流）。 */

@@ -2,6 +2,9 @@ package com.steven.assets.service;
 
 import com.steven.assets.dto.WatchStockDto;
 import com.steven.assets.model.TwseIndexDailyHistory;
+import com.steven.assets.model.StockAlert;
+import com.steven.assets.model.StockAlertGroup;
+import com.steven.assets.model.StockPriceHistory;
 import com.steven.assets.repository.StockAlertGroupRepository;
 import com.steven.assets.repository.StockAlertRepository;
 import com.steven.assets.repository.StockPriceHistoryRepository;
@@ -15,12 +18,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * 觀察清單 `0000` 台股大盤那一列的報價來源（Task 263，Requirement 14 修訂）。
@@ -53,7 +57,7 @@ class WatchStockTaiexIntradayTest {
     void setUp() {
         service = new WatchStockService(alertRepo, groupRepo, priceQuery, historyRepo,
                 stockMasterRepo, indicatorService,
-                new TaiexDisplayPriceService(priceQuery, twseDailyRepo));
+                new TaiexDisplayPriceService(priceQuery, twseDailyRepo), twseDailyRepo);
         when(priceQuery.displaySession("台股")).thenReturn(new PriceQueryService.DisplaySession(
                 PriceQueryService.DisplayPhase.OPEN, TODAY, TODAY));
         // toIndexResponse 必然走到 computeAll；未 stub 的 mock 回 null，builder 的 ind.monthlyMa() 會 NPE
@@ -263,4 +267,125 @@ class WatchStockTaiexIntradayTest {
         assertThat(r.tradingDate()).isEqualTo(TODAY.minusDays(4).toString());
         assertThat(r.previousClose()).isEqualByComparingTo("43654.84");
     }
+    // Task 563：目前觀察列的 52 週門檻價位（不涉及觸發與通知）。
+    private void ordinaryStock() {
+        reset(alertRepo, priceQuery, indicatorService);
+        List<Object[]> keys = new ArrayList<>();
+        keys.add(new Object[]{"VOO", "美股"});
+        when(alertRepo.findDistinctStockCodeMarket()).thenReturn(keys);
+        when(indicatorService.computeAll("VOO", "美股")).thenReturn(
+                new TechnicalIndicatorService.FullIndicators(new BigDecimal("701.60"),
+                        new BigDecimal("704.33"), null, null, null, null, null, null,
+                        TechnicalIndicatorService.ExtendedIndicators.EMPTY, null));
+    }
+
+    private StockAlert condition(String type, String threshold, Long group, int order, Integer period) {
+        return StockAlert.builder().stockCode("VOO").market("美股").alertType(type)
+                .threshold(new BigDecimal(threshold)).groupId(group).displayOrder(order)
+                .maPeriod(period).active(true).build();
+    }
+
+    private List<StockPriceHistory> stockRange(int count) {
+        return java.util.stream.IntStream.range(0, count).mapToObj(i -> StockPriceHistory.builder()
+                .stockCode("VOO").market("美股").tradingDate(TODAY.minusDays(i + 2))
+                .closePrice(new BigDecimal("600")).highPrice(new BigDecimal("700"))
+                .lowPrice(new BigDecimal("500")).build()).toList();
+    }
+
+    private void liveAndHistory(List<StockPriceHistory> history) {
+        // 展示價刻意為另一個價格；門檻只准用 getLive 的 600，不能以展示價 900 擴大區間。
+        when(priceQuery.getDisplayPrice("VOO", "美股")).thenReturn(Optional.of(
+                live(TODAY.toString(), "900", "900", "900", "900")));
+        when(priceQuery.getLive("VOO", "美股")).thenReturn(Optional.of(
+                live(TODAY.toString(), "600", null, null, null)));
+        when(historyRepo.findRecentN("VOO", "美股", 241)).thenReturn(history);
+    }
+
+    @Test
+    void 觀察頁_60百分比完整複合條件與單條多群組共用一次區間() {
+        ordinaryStock();
+        liveAndHistory(stockRange(240));
+        List<StockAlert> alerts = List.of(
+                condition("POS52W_ABOVE", "50", null, 0, null),
+                condition("POS52W_BELOW", "60", 10L, 14, null),
+                condition("MA_BELOW_PCT", "5", 10L, 10, 60),
+                condition("KD_D_BELOW", "15", 10L, 11, null),
+                condition("KD_K_GT_D", "0", 10L, 12, null),
+                condition("MA_BELOW_PCT", "5", 10L, 13, 20),
+                condition("POS52W_ABOVE", "100", 20L, 20, null));
+        when(alertRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(alerts);
+        when(groupRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(List.of(
+                StockAlertGroup.builder().id(20L).displayOrder(20).active(true).build(),
+                StockAlertGroup.builder().id(10L).displayOrder(10).active(false)
+                        .lastTriggeredAt(LocalDateTime.now()).build()));
+        WatchStockDto.Response response = findAllFirst();
+        assertThat(response.conditions()).hasSize(3);
+        assertThat(response.conditions().get(0).label()).isEqualTo("52 週位置高於 50%（600）");
+        assertThat(response.conditions().get(1).label()).isEqualTo(
+                "低於季線 5%（669.11） 且 D 值低於 15 且 K 值大於 D 值 且 低於月線 5%（666.52） 且 52 週位置低於 60%（620）");
+        assertThat(response.conditions().get(1).active()).isFalse();
+        assertThat(response.conditions().get(1).triggered()).isTrue();
+        assertThat(response.conditions().get(1).group()).isTrue();
+        assertThat(response.conditions().get(2).label()).isEqualTo("52 週位置高於 100%（700）");
+        verify(priceQuery).getLive("VOO", "美股");
+        verify(historyRepo).findRecentN("VOO", "美股", 241);
+        verifyNoInteractions(twseDailyRepo);
+    }
+
+    @Test
+    void 觀察頁_沒有52週條件不額外讀現價與高低() {
+        ordinaryStock();
+        when(alertRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(
+                List.of(condition("KD_D_BELOW", "15", null, 0, null)));
+        assertThat(findAllFirst().conditions().get(0).label()).isEqualTo("D 值低於 15");
+        verify(priceQuery, never()).getLive(anyString(), anyString());
+        verify(historyRepo, never()).findRecentN("VOO", "美股", 241);
+    }
+
+    @Test
+    void 觀察頁_52週歷史不足明示資料不足() {
+        ordinaryStock();
+        liveAndHistory(stockRange(239));
+        when(alertRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(
+                List.of(condition("POS52W_BELOW", "60", null, 0, null)));
+        assertThat(findAllFirst().conditions().get(0).label()).isEqualTo("52 週位置低於 60%（價位資料不足）");
+    }
+
+    @Test
+    void 觀察頁_52週現價缺失不借用展示價() {
+        ordinaryStock();
+        when(historyRepo.findRecentN("VOO", "美股", 2)).thenReturn(List.of());
+        when(historyRepo.findRecentN("VOO", "美股", 241)).thenReturn(stockRange(240));
+        when(alertRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(
+                List.of(condition("POS52W_BELOW", "60", null, 0, null)));
+        assertThat(findAllFirst().conditions().get(0).label()).endsWith("（價位資料不足）");
+    }
+
+    @Test
+    void 觀察頁_52週查詢失敗保留其他條件與整列() {
+        ordinaryStock();
+        when(priceQuery.getLive("VOO", "美股")).thenThrow(new IllegalStateException("unavailable"));
+        when(alertRepo.findByStockCodeAndMarket("VOO", "美股")).thenReturn(List.of(
+                condition("POS52W_BELOW", "60", null, 0, null),
+                condition("KD_D_BELOW", "15", null, 1, null)));
+        assertThat(findAllFirst().conditions()).extracting(WatchStockDto.Condition::label)
+                .containsExactly("52 週位置低於 60%（價位資料不足）", "D 值低於 15");
+    }
+
+    @Test
+    void 觀察大盤_52週門檻使用大盤歷史並加點數() {
+        List<TwseIndexDailyHistory> history = java.util.stream.IntStream.range(0, 240)
+                .mapToObj(i -> row(TODAY.minusDays(i + 2), "40000", "40000", "50000", "30000")).toList();
+        when(twseDailyRepo.findTop60ByOrderByTradingDateDesc()).thenReturn(List.of());
+        when(twseDailyRepo.findTopNByOrderByTradingDateDesc(241)).thenReturn(history);
+        when(priceQuery.getLive("0000", "台股")).thenReturn(Optional.of(
+                live(TODAY.toString(), "40000", null, null, null)));
+        StockAlert a = condition("POS52W_BELOW", "60", null, 0, null);
+        a.setStockCode("0000"); a.setMarket("台股");
+        when(alertRepo.findByStockCodeAndMarket("0000", "台股")).thenReturn(List.of(a));
+        assertThat(findAllFirst().conditions().get(0).label()).isEqualTo("52 週位置低於 60%（42000 點）");
+        verify(twseDailyRepo).findTopNByOrderByTradingDateDesc(241);
+        verify(historyRepo, never()).findRecentN(anyString(), anyString(), eq(241));
+    }
+
 }
