@@ -13602,3 +13602,7 @@ D211先核四KD與RSI5／反向WR9／BIAS10／52週位置及雷達動作／技�
 美股新閘門採內部計算，以既有closed SrppUsCoreResult.status／timing_pass／reason回傳，不能新增low_point_sell_protection／high_zone_reversal屬性。PythonUS公開投影同樣省略兩項內部proof，但獨立驗證器仍用同凍結quote／radar／DBstate執行原evaluate並逐欄比較；不能藉投影省略略過新增閘門。台股明細proof及核心／附錄原始輸入重播保持。policy bundle而非新scope綁定D211語意，既有API／OpenAPI／Swagger identity與formula family維持。
 
 原Python產生同輸入golden（原市場輸入保留、新D211案例另加）並核Java逐欄結果；FUNDING_CAPACITY以無賣方READY、SELL未成交、待收／待付、保留買款及定存底線正反例驗證獨立資金語意。正式來源凍結後同步authority原bytes／原targets投影／原Rubyinsert-onlySQL及原generatorgoldens，離線測試build與獨立審查後走雙repo落地→registry四欄及舊rows→正式main僅business-services rebuild／recreate→JAR全文與effective設定→SRPP host精確新hash業務讀回。時窗外不宣稱正式採用，不新造行情或觸發producer／報告／交易。
+
+### Task 567 美股09:35啟動規則包身分發布
+
+SRPP來源只澄清美股報告啟動時段與API發布窗的銜接邊界，並讓`political_decision_overlay.py`與`report_evidence_guard.py`的報告標籤集合同時接受21:35／22:35與舊21:45／22:45；`core_sell_guard.py`不動，其美股CLI仍以`--us-package`後備且`slot`須等於包的displayReportTime。資產Java計算器、API、DTO、DB、排程、model、formula、formal targets與Swagger不變，`us-report-calculations`仍以`US_OPEN_0945`、21:45／22:45顯示列舉與NY09:45發布窗為伺服器契約；Java標籤集合與伺服器自產的displayReportTime一致，不同步放寬是刻意的。原SRPP工具凍結新bundle後，同步embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden，逐項核對差異只有bundle身分，calculator hashes與其他golden位元組不變。使用者明示完整發布鏈：離線驗證→雙repoGit落地→registry exact row及舊rows全文核對→乾淨正式main build／recreate business-services→JAR全文與SRPP host精確hash業務讀回；沒有合法日報時窗時不冒稱正式採用，也不宣稱09:35起跑已能採用API。
