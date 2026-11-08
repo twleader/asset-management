@@ -6495,14 +6495,14 @@ Task530 投影驗證補充：BFF 已逐欄確認包外十二 facts 皆 UNAVAILAB
 
 - 新增 exact `GET /api/public/srpp/us-report-calculations`；GET 僅讀已發布包，不更新狀態、不計算、不刷新、不呼叫供應商或 producer。原台股路由、十二模組及資料形狀不變。
 - query 僅接受單值 `email`（選填 ACTIVE owner）、`consumer=Codex|Claude`、`market=US`、`sessionDate=YYYY-MM-DD`（America/New_York）、`reportSlot=US_OPEN_0945`、`policyBundleSha256`、`swaggerSha256`、`calculationRunId`（選填 UUID）。未知／重複／空白 query、body、錯市場或格式回 400。固定 run id 只能讀同 owner／consumer／市場／session／slot／policy／Swagger 的包。
-- 邏輯時段 US_OPEN_0945 與台北顯示時間分開；沿用 NY09:45 的夏令21:45／冬令22:45入口及±300秒一次判定，不改既有 automation 排程與停止條件。背景發布自 NY09:40 至09:45後原60分鐘報告上限內且必須仍在 regular session；不得在時窗外為驗收手動啟動。regular session 按 NY09:30 至官方收盤，含已驗證半日市13:00；未知年份日曆 fail closed。NY日期、夏冬令、台北跨日與各市場完成日不得套用台股午盤。
+- 邏輯時段 US_OPEN_0945 與台北顯示時間分開；沿用 NY09:45 的夏令21:45／冬令22:45入口（入口已由 Task 567 改為 NY09:35）及±300秒一次判定，不改既有 automation 排程與停止條件。背景發布自 NY09:35（Task 568自09:40提前）至10:45之原60分鐘報告上限內且必須仍在 regular session；不得在時窗外為驗收手動啟動。regular session 按 NY09:30 至官方收盤，含已驗證半日市13:00；未知年份日曆 fail closed。NY日期、夏冬令、台北跨日與各市場完成日不得套用台股午盤。
 - 包至少有 `CORE_SELL_GUARD`、`US_TACTICAL`；資料可用性 COMPLETE／PARTIAL／UNAVAILABLE 與有效決策 NOT_ARMED／等待／BLOCKED／無候選分離。缺來源保持 null 及具名原因，不能補0／false或只改 verified 旗標。CORE_SELL_READY 僅擇時通過，tradeAuthorization 永遠 false。
 - 本輪資產須可直接L0對帳，每市場估值日按自身交易日；分析宇宙為正持有美股＋本輪全部美股雷達＋可驗證明確觀察股，保留資格與覆蓋缺口、不截前幾名。報價為 USD、同一 regular session、具名來源及五分鐘內；獨立交叉價格／feed獨立性／價差證據缺失具名不可用，D-108不要求或讀美股五檔。
 - 資產端按 owner、consumer、市場與股票保存 D-174 狀態。先驗真既有兩軌 ledger／anchor、保留觀察起日、高水位／高點日／價基／證據與原檔hash；缺帳與損壞不能當空帳。穩定指紋按 Python core_sell_guard 的 decision/scope/arming/non_distributing_symbols 與 Python原序列化計算，不得用 bundle hash 或 JCS 代替。未知舊指紋拒絕；僅原允許的 legacy policy 可銜接。
 - 首次武裝、完成日／本輪創高、現金除息調整、最近三完成日KD與本輪雷達恢復、原1.5%邊界須與同版 Python 等價；合格價格更新先於雷達／KD判斷，雷達／KD不過不清高水位。每次以交易鎖／版本防護原子保存 stateBefore／stateAfter／來源指紋／calculator版本，重複來源冪等、不可變包不覆寫。
 - 切換後資產端是美股觀察唯一寫入者；SRPP本機後備只能採同一已驗證 DB 狀態的凍結輸出且唯讀，不再寫本機US ledger；台股不移轉。沒有可驗證狀態時維持不可用。
 - 移轉owner不可由參數自稱：須同輪report-facts與input receipt綁定原assets及core結果、原assets通L0，再由正式DB精確snapshotId→ownerUserId收據綁定；匯入SQL於DB再次核對snapshot owner。證據不足只保留不可用。
-- GET latest只在NY09:45至10:45且regular session內；同NY日期固定runId可在其他時間唯讀診斷，包bytes不變並不代表可採用。consumer採用時獨立核對本輪time gate、包capture、本輪assets與必要即時價格距本輪asof各不超過五分鐘、當日session與直接L0，過期只回退對應用途，不能將09:40包沿用至10:44。完成日bar、舊觀察、配息及季報各依其原日期／完整性／版本規則，不強加五分鐘歷史資料門檻。
+- GET latest只在NY09:35至10:45（Task 568自09:45提前）且regular session內；同NY日期固定runId可在其他時間唯讀診斷，包bytes不變並不代表可採用。consumer採用時獨立核對本輪time gate、包capture、本輪assets與必要即時價格距本輪asof各不超過五分鐘、當日session與直接L0，過期只回退對應用途，不能將09:35包沿用至10:44。完成日bar、舊觀察、配息及季報各依其原日期／完整性／版本規則，不強加五分鐘歷史資料門檻。
 - 戰術沿用 D-181 主／備援路徑、同向雷達、牛市急跌止穩／RISK_OFF、D-185至少15%扣成本空間、D-186即時限價、0.25%／0.75%／2%上限、資金底線、國泰台幣帳戶、費稅、成交去重與出場期限。以 us_tactical_order_check.py 同輸入比對；目標／成本／帳本／資金等無正式來源時逐項列缺口，不接受 GET caller 傳數字繞過。D-206公司研究、論點、排序與採納／等待／否決保留LLM判讀。
 - 同步 gateway、BFF、Tailscale、frontend exact／matrix拒絕、完整OpenAPI、Swagger mirrors及SRPP verifier；不新增公網入口、廣泛路由、寄信或券商交易能力。SRPP只逐scope採用驗證成功API，不能以後備解除有效BLOCKED。
 - 實際22-00 App prompt的美股證據片段須同步部署與readback；其原季節／±300秒入口、日曆no-op、停止時間、Gmail與交易權限維持原文。原本機US寫帳指令改成API優先與同DB狀態唯讀後備，不能只改文件而留舊prompt。
@@ -6723,3 +6723,11 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 標籤分兩種：報告主旨、資料目錄與證據身分用21:35／22:35，`political_decision_overlay.py`與`report_evidence_guard.py`同時接受舊21:45／22:45；`core_sell_guard.py`的美股CLI只有`--us-package`後備，`slot`必須等於已驗證包的displayReportTime（21:45／22:45），該腳本與其calculator hash不變。Java標籤集合維持21:45／22:45是刻意的，因其由伺服器自產。
 - [ ] 09:35起跑的報告若到API步驟時實際驗證時間早於NY09:45，視為發布窗未開的API具名缺口（尚無可採用的已驗證包，NY09:40起的預備包不供09:45前報告採用，核心賣方本機後備亦不可用），不等待、不重試；已在窗內則照原契約採用。日後調整發布窗與顯示時間是獨立的資產端變更，完成並重建前不得假設。
 - [ ] 完成獨立spec／architecture審查及離線authority／generator／Java／package驗收，雙repo各commit／no-ff merge／push與精確remote讀回後才執行已合併insert-only registry；新hash四欄全文相符、舊rows不變，再以正式main設定只build／recreate business-services並驗JAR bytes、原設定與其他容器保持。從SRPP實機做精確hash業務唯讀讀回，時窗外只記診斷結果與正式採用NOT_YET_EXECUTED，不重跑報告、寄信、刷新或交易。
+
+### SRPP 美股背景發布與latest讀取窗提前至美東09:35（Task 568，延伸Requirement 199並取代Task 567維持原窗口的敘述）
+
+- [ ] 美股背景發布與`latest`讀取窗同自NY09:35起至10:45止（與regular session取交集，半開區間），取代Requirement 199原「背景發布自NY09:40」「latest只在NY09:45至10:45」及Task 567第1個條目「背景發布自NY09:40、latest發布窗NY09:45至10:45、…Swagger與schema鏡像、驗證器下限…全部維持」中的窗口、Swagger（只改`latest`窗口那一句描述，schema只改`x-swagger-sha256` metadata）與SRPP驗證器下限（改為NY09:35），以及第3個條目「早於NY09:45」「NY09:40起的預備包」的敘述；`displayReportTime`列舉21:45／22:45、`reportSlot`與公式家族仍維持，對齊使用者2026-11-08起Codex美股報告NY09:35（台北夏令21:35／冬令22:35）啟動。producer每分鐘tick、cron、America/New_York時區、官方日曆fail closed、未知年份拒絕、`NON_TRADING_DAY`／`CALENDAR_UNAVAILABLE`語意全部不變。
+- [ ] `reportSlot=US_OPEN_0945`、`displayReportTime`（夏令21:45／冬令22:45）、Swagger與schema的標籤列舉、BFF validator、兩個Java計算器的slot集合、`core_sell_guard.py`及其calculator hash、model、formula、formal targets全部維持；它們是伺服器固定標籤，不代表窗口起點。5分鐘行情新鮮度（D-108）、regular session、LIVE、USD、價差、可賣股數、所有賣方規則與分數常數一律不變，不新增開盤初段保護；`tradeAuthorization`與`placesOrders`恆為false。consumer端仍須通過五分鐘capture與必要來源新鮮度、同owner直接L0及完整硬閘才可採用。
+- [ ] 窗前呼叫仍回`409 OUTSIDE_REPORT_WINDOW`；NY09:35當分鐘第一包尚未發布回`503 CONTEXT_NOT_READY`；兩者在consumer端皆為API具名缺口，不等待、不重試、不解除已驗證BLOCKED。固定runId診斷、不可變包與其bytes不變；已發布的NY09:40以後的包仍通過新的capture下限（只放寬，不收緊）。
+- [ ] Swagger只更新`latest`窗口那一句描述（NY09:35至10:45），經Task 504受控鏈（renderer→identity sync→兩個check）產生新Swagger SHA-256與新policy bundle，三份鏡像位元組一致；SRPP verifier的讀取窗下限同為NY09:35並有邊界測試，SRPP文件同步；BFF排程清單說明文字同步為09:35–10:45。
+- [ ] 發布：使用者明示當晚（2026-11-08，非交易日）依序離線驗收（作者以外spec／arch審查、全量Java測試、authority／golden／Ruby）→雙repoGit落地與remote讀回→insert-only registry（新hash四欄全文相符、舊rows不變）→乾淨正式main只build／recreate `business-services`與`bff`（先以唯讀SQL證明`business-services`啟動入口皆為no-op）→JAR全文核對→最後才快轉日報實際使用的SRPP工作區。正式窗內的真實200讀回待下一交易日（2026-11-09台北22:35實跑，NY09:35起）；在此之前只記診斷與邊界測試結果，正式採用為NOT_YET_EXECUTED，不手動觸發producer、報告、寄信、刷新或交易。

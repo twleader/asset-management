@@ -28,8 +28,8 @@ public final class UsReportCalendar {
         if(known==null||known.isEmpty())throw new UsReportProblem("CALENDAR_UNAVAILABLE");return known.get();
     }
     public Session session(LocalDate date){if(!trading(date))throw new UsReportProblem("NON_TRADING_DAY");return new Session(date,date.atTime(9,30).atZone(NY).toInstant(),date.atTime(EARLY_CLOSE.contains(date)?LocalTime.of(13,0):LocalTime.of(16,0)).atZone(NY).toInstant());}
-    public boolean producerWindow(Instant at){ZonedDateTime ny=at.atZone(NY);LocalTime t=ny.toLocalTime();return !t.isBefore(LocalTime.of(9,40))&&t.isBefore(LocalTime.of(10,45))&&session(ny.toLocalDate()).contains(at);}
-    public boolean reportWindow(Instant at){ZonedDateTime ny=at.atZone(NY);LocalTime t=ny.toLocalTime();return !t.isBefore(LocalTime.of(9,45))&&t.isBefore(LocalTime.of(10,45))&&session(ny.toLocalDate()).contains(at);}
+    public boolean producerWindow(Instant at){ZonedDateTime ny=at.atZone(NY);LocalTime t=ny.toLocalTime();return !t.isBefore(LocalTime.of(9,35))&&t.isBefore(LocalTime.of(10,45))&&session(ny.toLocalDate()).contains(at);}
+    public boolean reportWindow(Instant at){ZonedDateTime ny=at.atZone(NY);LocalTime t=ny.toLocalTime();return !t.isBefore(LocalTime.of(9,35))&&t.isBefore(LocalTime.of(10,45))&&session(ny.toLocalDate()).contains(at);}
     public String displayTime(LocalDate session){return session.atTime(9,45).atZone(NY).withZoneSameInstant(TPE).toLocalTime().toString();}
     public ArrayNode days(LocalDate from,LocalDate through){if(from==null||through==null||from.isAfter(through)||from.plusYears(4).isBefore(through))throw new UsReportProblem("CALENDAR_UNAVAILABLE");ArrayNode rows=JsonNodeFactory.instance.arrayNode();for(LocalDate d=from;!d.isAfter(through);d=d.plusDays(1))rows.addObject().put("date",d.toString()).put("us",trading(d));return rows;}
     /** Existing per-market authority; Taiwan holidays are cache-only, so a miss cannot become a date. */

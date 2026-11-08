@@ -4226,7 +4226,7 @@ paths:
       operationId: getSrppUsReportCalculations
       summary: 純讀美股核心賣出擇時與個股戰術計算包
       description: GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸發、供應商外呼、刷新、寄信或交易，錯誤亦不寫error
-        ingest。每個query只允許單值，未知／重複／空白／body拒絕；不接受caller金融資料。owner lookup沿用5秒與ACTIVE狀態。latest只在當前美東交易日09:45至10:45
+        ingest。每個query只允許單值，未知／重複／空白／body拒絕；不接受caller金融資料。owner lookup沿用5秒與ACTIVE狀態。latest只在當前美東交易日09:35至10:45
         regular session；固定id同NY日可診斷，正式採用另需入口±300秒、60分鐘停止、五分鐘capture及全部必要來源新鮮度與直接L0。美股使用USD，D108不讀最佳五檔。部分缺口只回退相應範圍且不能解除已驗證BLOCKED；缺觀察marker不可當空帳，D206研究仍LLM。
       parameters:
       - name: email
