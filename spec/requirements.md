@@ -6716,3 +6716,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] D211／policy2.60.0／model3.22.0沿用D208／D209已接受高檔條件，適用00919以外台美普通股票D174一般減碼、零目標退出、換股與TIMEBOX_EXIT：最近完成日及同輪即時K/D四值須>50，無RSI5≤30、反向W%R9≥80、BIAS10≤−8、52週位置≤0.15及雷達低檔／超賣／反彈反證；再要求完成日D與即時D皆≥80（含80），K可低於80。仍須原D174轉弱、K<D、高水位後下降與1.5%同價基回落等。缺資料局部等待，目標或期限不能豁免。00919原D208／D209及原因保留；既有六檔債券與具名緊急／獨立戰術退出維持各自原規則，不新增自由例外。
 - [ ] 台股coreTiming與美股UsCoreSellCalculator執行相同D211必要閘門，先保留已驗觀察與高水位。四欄觀察身分穩定，舊完整政策只接受精確已發布前版；不清帳或任意擴大允許的hash。US公開結果保留原closed schema，只以既有status／timing_pass／reason表達D211；Python獨立verifier從凍結原始證據及state重算全部D211條件並逐值比較，不因省略內部proof欄位而略過驗真。TW原證據重播與明細保持，API／Swagger／公式家族／交易權限不變。
 - [ ] 由原Python產生含50／80邊界、所有低檔反證、缺資料、原高檔正例及債券反例goldens，Java逐值parity；保留既有golden市場輸入並明列新規則使舊PASS變BLOCK的案例。真實FUNDING_CAPACITY合成回歸須證明無賣方READY仍有獨立正容量，未成交SELL及待收款不增額度，定存不足時0；不將局部容量證據稱為完整可執行股票買單。完成作者以外spec／arch審查、離線authority／測試／package後，雙repo各commit／no-ff main merge／push與remote讀回，才insert-only登錄與正式main部署／JAR逐位元核對及精確新hash業務GET。時窗外僅診斷、正式日報採用NOT_YET_EXECUTED，不人工觸發報告／producer／刷新／Gmail或交易。
+
+### SRPP 美股報告提前至美東09:35的政策文字與標籤補充（Task 567，延伸既有需求187／193／199）
+
+- [ ] Codex既有美股報告入口由美東09:45提前為09:35（台北夏令21:35／冬令22:35，±300秒一次判定與60分鐘停止條件不變），取代Requirement 199中「NY09:45入口」的敘述；邏輯時段US_OPEN_0945、背景發布自NY09:40、latest發布窗NY09:45至10:45、displayReportTime列舉21:45／22:45、Swagger與schema鏡像、驗證器下限與公式家族全部維持。新標籤不得成為另一個交易時段，不放寬5分鐘行情時效、regular session、LIVE、USD、價差及任何既有金融閘門。
+- [ ] 標籤分兩種：報告主旨、資料目錄與證據身分用21:35／22:35，`political_decision_overlay.py`與`report_evidence_guard.py`同時接受舊21:45／22:45；`core_sell_guard.py`的美股CLI只有`--us-package`後備，`slot`必須等於已驗證包的displayReportTime（21:45／22:45），該腳本與其calculator hash不變。Java標籤集合維持21:45／22:45是刻意的，因其由伺服器自產。
+- [ ] 09:35起跑的報告若到API步驟時實際驗證時間早於NY09:45，視為發布窗未開的API具名缺口（尚無可採用的已驗證包，NY09:40起的預備包不供09:45前報告採用，核心賣方本機後備亦不可用），不等待、不重試；已在窗內則照原契約採用。日後調整發布窗與顯示時間是獨立的資產端變更，完成並重建前不得假設。
+- [ ] 完成獨立spec／architecture審查及離線authority／generator／Java／package驗收，雙repo各commit／no-ff merge／push與精確remote讀回後才執行已合併insert-only registry；新hash四欄全文相符、舊rows不變，再以正式main設定只build／recreate business-services並驗JAR bytes、原設定與其他容器保持。從SRPP實機做精確hash業務唯讀讀回，時窗外只記診斷結果與正式採用NOT_YET_EXECUTED，不重跑報告、寄信、刷新或交易。
