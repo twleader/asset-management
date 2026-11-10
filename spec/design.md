@@ -13614,3 +13614,7 @@ SRPP來源只澄清美股報告啟動時段與API發布窗的銜接邊界，並�
 行為矩陣（NY交易日、regular session內）：09:35前呼叫`latest`回`409 OUTSIDE_REPORT_WINDOW`；09:35起、當分鐘第一包尚未發布回`503 CONTEXT_NOT_READY`；包發布後回200。固定runId路徑、非交易日`NON_TRADING_DAY`與日曆`CALENDAR_UNAVAILABLE`不變。BFF `SchedulePublicBffController`排程清單的兩處說明字串由09:40–10:45改為09:35–10:45，cron與時區不變。
 
 文件與規則包：SRPP verifier的NY讀取窗下限、`docs/US_REPORT_EVIDENCE.md`與`docs/schedule_entries/README.md`同步；Swagger只改`latest`窗口那一句，經Task 504受控鏈重算Swagger SHA-256與policy bundle，後續embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden全部改綁最後一版，逐項核對差異只有bundle與Swagger身分，calculator hashes與金融expected不變。使用者明示當晚（非交易日）完整發布：離線驗收→雙repoGit落地→registry exact row→乾淨main只重建`business-services`與`bff`→JAR全文→SRPP實機診斷讀回→最後快轉日報實際使用的SRPP工作區；窗內真實200讀回待2026-11-09台北22:35實跑，之前不冒稱正式採用，也不手動啟動producer或重跑報告。
+
+### Task 569 Claude軌9090入口固定Tailscale規則包身分發布
+
+SRPP來源只把Claude比較軌的9090入口由「loopback→Tailscale→Mac端瀏覽器」三段探測改為固定Tailscale（`DATA_FETCH_RULES`規則一之二），消除該軌每輪必然的loopback connection refused失敗紀錄；Mac端瀏覽器入口整體退役；Codex軌維持loopback→Tailscale兩段，全部欄位門檻、時限、交易規則不變；雷達（規則二之一）、報價順序總結與規則二段寫死的「三個入口皆失敗」改為該軌適用的全部入口。資產Java計算器、API、DTO、DB、排程、model、formula、formal targets與Swagger不變。原SRPP工具凍結新bundle後，同步embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden，逐項核對差異只有bundle身分，calculator hashes與其他golden位元組不變。完整發布鏈：離線驗證→雙repoGit落地→registry insert-only四欄全文讀回→乾淨正式main只build／recreate `business-services`（先以唯讀SQL證明啟動入口皆為no-op，並避開各匯出排程分鐘、台股12:00至13:10報告與守門員期間及今晚美股報告窗）→JAR全文核對→最後才快轉日報實際使用的SRPP工作區。新hash的正式採用待下一個合法時窗，記NOT_YET_EXECUTED。

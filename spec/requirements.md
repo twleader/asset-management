@@ -6731,3 +6731,9 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 窗前呼叫仍回`409 OUTSIDE_REPORT_WINDOW`；NY09:35當分鐘第一包尚未發布回`503 CONTEXT_NOT_READY`；兩者在consumer端皆為API具名缺口，不等待、不重試、不解除已驗證BLOCKED。固定runId診斷、不可變包與其bytes不變；已發布的NY09:40以後的包仍通過新的capture下限（只放寬，不收緊）。
 - [ ] Swagger只更新`latest`窗口那一句描述（NY09:35至10:45），經Task 504受控鏈（renderer→identity sync→兩個check）產生新Swagger SHA-256與新policy bundle，三份鏡像位元組一致；SRPP verifier的讀取窗下限同為NY09:35並有邊界測試，SRPP文件同步；BFF排程清單說明文字同步為09:35–10:45。
 - [ ] 發布：使用者明示當晚（2026-11-08，非交易日）依序離線驗收（作者以外spec／arch審查、全量Java測試、authority／golden／Ruby）→雙repoGit落地與remote讀回→insert-only registry（新hash四欄全文相符、舊rows不變）→乾淨正式main只build／recreate `business-services`與`bff`（先以唯讀SQL證明`business-services`啟動入口皆為no-op）→JAR全文核對→最後才快轉日報實際使用的SRPP工作區。正式窗內的真實200讀回待下一交易日（2026-11-09台北22:35實跑，NY09:35起）；在此之前只記診斷與邊界測試結果，正式採用為NOT_YET_EXECUTED，不手動觸發producer、報告、寄信、刷新或交易。
+
+### SRPP Claude比較軌9090入口固定Tailscale（Task 569，延伸既有需求187／193／199）
+
+- [ ] Claude比較軌（`srpp-0905-claude`、`srpp-1150-claude`）的9090入口固定為SRPP `DATA_FETCH_RULES`規則一之二的Tailscale curl，不探測`127.0.0.1:9090`、不開Mac端瀏覽器（Mac端瀏覽器入口整體退役）；Codex軌（行程在Mac本機）維持loopback→Tailscale兩段。入口只是同一gateway的transport，不是獨立來源，不放寬任何欄位門檻、35／40／60分鐘時限或既有金融閘門；Tailscale連線失敗、502、504或逾時依規則一之四第6點處理，不得改走其他入口。
+- [ ] 這是規則包文字與身分的同步：9090任何API、資產端Java計算器、DTO、DB、排程、model、formula、formal targets與Swagger不變。已存的Claude遠端routine指令需裝置綁定proof才能更新，不宣稱已更新；以SRPP共用規格新文字為準。
+- [ ] 完成獨立spec審查及離線authority／generator／Java／package驗收，雙repo各commit／no-ff merge／push與精確remote讀回後才執行已合併insert-only registry；新hash四欄全文相符、舊rows不變，再以正式main設定只build／recreate business-services並驗JAR bytes、原設定與其他容器保持；之後才快轉日報實際使用的SRPP工作區。新hash的正式採用依Task 504：仍在交易日09:05至13:30內且registry與JAR已讀回才做唯讀GET讀回，否則記NOT_YET_EXECUTED。
