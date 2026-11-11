@@ -14,7 +14,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -62,6 +66,21 @@ public class ClosePersister {
     public record TwCloseReconciliation(int expected, int verified, List<String> missingCodes) {
         public TwCloseReconciliation {
             missingCodes = List.copyOf(missingCodes);
+        }
+    }
+
+    /**
+     * 台股官方收盤歷史區間對帳結果（Task 572）。{@code daysWithTrusted}／{@code rowsTrusted} 為對帳後
+     * 具可信來源（{@code hasTrustedTwClose}）的代號計數，不是本次實際寫入列數；重跑時數值不變。
+     */
+    public record TwCloseRangeReconciliation(LocalDate from, LocalDate to, int tradingDays,
+                                             int daysWithTrusted, int rowsTrusted,
+                                             Map<LocalDate, List<String>> missingByDate,
+                                             boolean interrupted) {
+        public TwCloseRangeReconciliation {
+            LinkedHashMap<LocalDate, List<String>> copy = new LinkedHashMap<>();
+            missingByDate.forEach((date, codes) -> copy.put(date, List.copyOf(codes)));
+            missingByDate = Collections.unmodifiableMap(copy);
         }
     }
 
@@ -203,6 +222,49 @@ public class ClosePersister {
             return;
         }
         reconcileTwOfficialClose(today);
+    }
+
+    /**
+     * 台股官方收盤歷史區間對帳（Task 572）：逐交易日重用 {@link #reconcileTwOfficialClose(LocalDate, boolean)}
+     * 且一律 {@code publishLatest=false}，把持股日線換成 TWSE MI_INDEX 官方收盤與 {@code close_source}。
+     * 今日列仍獨佔給排程對帳；逐日間隔 3 秒避免 TWSE 限流；單日失敗不中斷整批。
+     */
+    public TwCloseRangeReconciliation reconcileTwOfficialCloseRange(LocalDate from, LocalDate to) {
+        if (from == null || to == null) throw new IllegalArgumentException("from 與 to 必填");
+        if (from.isAfter(to)) throw new IllegalArgumentException("from 不得晚於 to（from=" + from + ", to=" + to + "）");
+        LocalDate today = LocalDate.now(timeSource.withZone(MarketClock.TW_ZONE));
+        if (!to.isBefore(today)) throw new IllegalArgumentException("to 必須早於台北今日 " + today + "（今日列由排程對帳）");
+        if (ChronoUnit.DAYS.between(from, to) >= 400) throw new IllegalArgumentException("區間最多 400 個日曆日");
+
+        int tradingDays = 0, daysWithTrusted = 0, rowsTrusted = 0;
+        LinkedHashMap<LocalDate, List<String>> missingByDate = new LinkedHashMap<>();
+        boolean interrupted = false;
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            if (!calendar.isTwTradingDay(d)) continue;
+            if (tradingDays > 0) {
+                try {
+                    sleeper.sleep(3_000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.warn("台股官方收盤區間對帳被中斷，停止於 {} 之前", d);
+                    interrupted = true;
+                    break;
+                }
+            }
+            tradingDays++;
+            try {
+                TwCloseReconciliation r = reconcileTwOfficialClose(d, false);
+                if (r.verified() > 0) daysWithTrusted++;
+                rowsTrusted += r.verified();
+                if (!r.missingCodes().isEmpty()) missingByDate.put(d, r.missingCodes().stream().sorted().toList());
+            } catch (RuntimeException e) {
+                log.warn("台股官方收盤區間對帳 {} 失敗（不中斷整批）: {}", d, e.getMessage());
+                missingByDate.put(d, List.of("ERROR: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
+            }
+        }
+        log.info("台股官方收盤區間對帳完成 {} ~ {}：交易日 {}、具可信來源日 {}、可信代號 {}、缺檔日 {}、中斷 {}",
+                from, to, tradingDays, daysWithTrusted, rowsTrusted, missingByDate.size(), interrupted);
+        return new TwCloseRangeReconciliation(from, to, tradingDays, daysWithTrusted, rowsTrusted, missingByDate, interrupted);
     }
 
     public TwCloseReconciliation reconcileTwOfficialClose(LocalDate targetDate) {
