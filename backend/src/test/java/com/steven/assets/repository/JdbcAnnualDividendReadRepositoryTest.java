@@ -40,12 +40,17 @@ class JdbcAnnualDividendReadRepositoryTest {
         jdbc.update("INSERT INTO stock_holding VALUES(1,11,'0050','台股',100),(2,21,'0050','台股',9999),(3,21,'OTHER','台股',900),(4,13,'FUTURE','台股',300)");
         jdbc.update("INSERT INTO asset_transaction VALUES(1,1,'0050','台股','owner1','股票','2026-02-01','買',20),(2,2,'0050','台股','owner2','股票','2026-02-01','買',500),(3,2,'PRIVATE','台股','secret','股票','2026-02-01','買',10),(4,1,'FUND','台股','fund','基金','2026-02-01','買',10),(5,1,'TOMORROW','台股','future','股票','2026-11-05','買',10),(6,1,'SOLD','台股','已賣出股票','股票','2026-02-01','賣',10)");
         jdbc.update("INSERT INTO stock_dividend_history VALUES(1,'0050','台股',2025,'2026-06-05',NULL,'2026-07-01',2,0,'official','ACTIVE'),(2,'0050','台股',2026,'2026-06-05',NULL,'2026-07-01',99,0,'old','CANCELLED'),(3,'OTHER','台股',2026,'2026-06-05',NULL,NULL,2,0,'official','ACTIVE'),(4,'PRIVATE','台股',2026,'2026-06-05',NULL,NULL,2,0,'official','ACTIVE'),(5,'SOLD','台股',2026,'2026-06-05',NULL,NULL,2,0,'official','ACTIVE')");
-        // Seed expired history under the old schema, then install the real retention migration.
-        jdbc.update("INSERT INTO daily_inventory_snapshot VALUES(901,1,'台股',(((statement_timestamp() AT TIME ZONE 'Asia/Taipei')::date-INTERVAL '66 months')::date-1))");
+        // Seed expired history under the old schema, then install the real retention migrations in release order.
+        jdbc.update("INSERT INTO daily_inventory_snapshot VALUES(901,1,'台股',(((statement_timestamp() AT TIME ZONE 'Asia/Taipei')::date-INTERVAL '42 months')::date-1))");
         jdbc.update("INSERT INTO daily_inventory_position VALUES(901,901,'EXPIRED_ONLY',99999),(902,901,'0050',99999)");
-        try (var in=getClass().getResourceAsStream("/db/changelog/changes/v1.163.0-daily-inventory-retention.sql")) {
-            jdbc.execute(new String(java.util.Objects.requireNonNull(in).readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));
-        } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        // Between 42 and 66 months: live under v1.163.0 alone, expired once v1.164.0 is applied.
+        jdbc.update("INSERT INTO daily_inventory_snapshot VALUES(903,1,'台股',((statement_timestamp() AT TIME ZONE 'Asia/Taipei')::date-INTERVAL '50 months')::date)");
+        jdbc.update("INSERT INTO daily_inventory_position VALUES(903,903,'BETWEEN_ONLY',77777),(904,903,'0050',77777)");
+        for (String migration : new String[]{"v1.163.0-daily-inventory-retention.sql", "v1.164.0-daily-inventory-retention-42-months.sql"}) {
+            try (var in=getClass().getResourceAsStream("/db/changelog/changes/"+migration)) {
+                jdbc.execute(new String(java.util.Objects.requireNonNull(in).readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
         repository = new JdbcAnnualDividendReadRepository(jdbc);
     }
 
@@ -126,9 +131,9 @@ class JdbcAnnualDividendReadRepositoryTest {
     }
 
     @Test void expiredRowsStillPhysicallyPresentAreExcludedWithoutBecomingEmptyOrSuppressingLegacyFallback() {
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM daily_inventory_snapshot WHERE id=901",Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM daily_inventory_snapshot WHERE id IN (901,903)",Integer.class)).isEqualTo(2);
         var facts=repository.load(1,TODAY);
-        assertThat(facts.securities()).extracting(Security::code).doesNotContain("EXPIRED_ONLY");
+        assertThat(facts.securities()).extracting(Security::code).doesNotContain("EXPIRED_ONLY","BETWEEN_ONLY");
         assertThat(facts.snapshots()).noneMatch(s->"台股".equals(s.market()));
         var estimated=AnnualDividendCalculator.calculate(withPublicEvent(facts),2026,"",TODAY).rows().stream()
                 .filter(r->r.code().equals("0050")).findFirst().orElseThrow();

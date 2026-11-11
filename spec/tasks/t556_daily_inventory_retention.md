@@ -4,6 +4,8 @@
 **前置任務:** t555（每日台美股庫存已發布）
 **Liquibase changeset:** v1.163.0-daily-inventory-retention.sql
 
+**後續修訂：** Task571將66個曆月改為42個曆月（3.5年），只替換cutoff函式interval與排程文案；歷史驗收紀錄保留當時結果。
+
 ## 背景
 
 使用者將每日庫存保留策略從原先永久改為「最多存5.5年」。目前daily兩表trigger完全禁止DELETE，必須使用新的incremental migration限縮不可變規則，只放行已過期資料；不修改已發布migration。

@@ -13492,7 +13492,7 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 ### Task 555：市場分離的每日庫存歷史
 
 
-- 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
+- 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月；Task571再修訂為42個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
 - 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、保留期限及過期刪除依Task556修訂。
 - 保存來源是系統既有最新asset_snapshot與stock_holding，並非新增券商查詢，也不聲稱券商剛同步／收盤成交庫存。來源快照日期不得晚於當下台北日期；保存source_snapshot_id/date及captured_at、scheduled_at、session_close_at。保留owner/market/trading_date獨立header與每筆原始明細：source_holding_id、stock_code、broker_id(nullable)、shares numeric(15,5)、investment_cost numeric(20,2)、currency varchar(3) nullable、transaction_exchange_rate numeric(10,4) nullable；不存即時行情payload、衍生損益或整包JSON。系統無更細券商帳號欄位，不捏造帳號。此為具名歷史快照正規化例外：原資料後續可能改寫，必須保留當時股數與成本。
 - 每個owner各自transaction，第一個DB操作經AssetSnapshotMutationLock鎖該owner latest root，再讀該owner持股。每次取得root鎖後重新讀Clock.instant，重新驗證仍在該market交易日期的close+6h至午夜窗口，captured_at必須用此真時間；等待鎖跨午夜時不寫header。鎖後重新查該owner latest ID，若等待期間新latest已提交而ID不同，退出本次交易，交下次tick重判，不把已過時root當latest。測試必覆蓋等待鎖跨午夜及等待期間建立新latest兩個反例。header/所有明細原子提交；header唯一(owner_user_id,market,trading_date)、明細唯一(header_id,source_holding_id)，防多實例／重啟重複。成功header與明細資料庫trigger拒絕UPDATE/DELETE；FK不得因來源快照/持股被改刪而令歷史消失，source ids是歷史識別值。無來源快照、未來快照或股數/成本格式無效則不產生成功header並記明錯誤；某owner失敗不阻擋其他owner或另一市場。來源存在而該市場無明細，保存EMPTY header以區分已確認的系統零庫存與未保存；其餘SAVED。各市場只存自身列。
@@ -13508,6 +13508,8 @@ AnnualDividendData.Snapshot additive market nullable欄位並保留兩參數cons
 
 ### Task 556：每日庫存66個曆月保留與過期清理
 
+> **後續修訂：** Task571將期限改為42個曆月（3.5年），僅改cutoff函式interval與排程文案。
+
 
 - [ ] 本修訂依使用者「最多存5.5年」指示，僅針對daily_inventory_snapshot與daily_inventory_position，取代Task555永久保留與一律拒絕DELETE。5.5年明確定義為66個曆月：按market「台股」Asia/Taipei、「美股」America/New_York各自當地今日計算cutoff=localToday.minusMonths(66)，trading_date>=cutoff保留，<cutoff過期；邊界當日包含。月末／閏年依曆法月底截短，不以365*5.5天或美台共用日期代替。
 - [ ] 沿既有DailyInventoryScheduler每分鐘tick，先獨立呼叫retention清理再做市場日曆與close+6h保存判斷；清理不依賴交易日、有效日曆、到點窗口或owner目前是否還有來源快照，包含休市、午夜後與重啟首tick。清理失敗記錄明確錯誤但不阻擋合法新日庫存保存；下tick重試。SAVED與EMPTY header皆依同一cutoff到期。
@@ -13521,6 +13523,14 @@ DailyInventoryHistoryRepository擴充deleteExpired()，JdbcDailyInventoryHistory
 
 Guard函式辨識TG_TABLE_NAME與TG_OP，snapshot以NEW或OLD的market/trading_date判定；position以NEW/OLD.snapshot_id查parent，未知parent fail closed。INSERT時父必存在且在期間內；DELETE時父必存在且過期；UPDATE始終raise。清理過期資料不受狀態SAVED/EMPTY影響，parent與child FK維持無cascade（刪除順序顯式）。pg_dump schema重產須包含新函式與trigger，舊v1.162.0bytes維持不變。
 
+
+### Task 571：每日庫存保留期42個曆月
+
+新增Liquibase changeset v1.164.0-daily-inventory-retention-42-months.sql（formatted sql，splitStatements:false），唯一內容是以相同簽章 `CREATE OR REPLACE FUNCTION daily_inventory_retention_cutoff(p_market TEXT,p_at TIMESTAMPTZ) RETURNS DATE LANGUAGE plpgsql STABLE`，保留原null／未知market以ERRCODE 23514拒絕與台股Asia/Taipei、美股America/New_York當地日期換算，只把 `INTERVAL '66 months'` 改為 `INTERVAL '42 months'`。可安全重跑；master changelog於v1.163.0之後include。
+
+由於guard_daily_inventory_retention trigger、JdbcDailyInventoryHistoryRepository.deleteExpired()與JdbcAnnualDividendReadRepository兩條daily SQL皆於執行時呼叫此函式，Java production程式不變；42至66個月間資料於下一tick由既有原子清理移除，trigger同時拒絕其重灌。SchedulePublicBffController.JOBS中每日庫存項目文案改為「最多保留3.5年（42個曆月），過期每分鐘清理」，數量仍82。db/schema.sql依檔頭指令重產（只預期函式本體的interval差異，表數不變）。
+
+Task556原66個曆月設計自此被取代，其餘清理、guard與讀取排除語意沿用。
 
 ### Task 557：股利區間日期參數型別
 

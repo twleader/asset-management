@@ -6622,7 +6622,7 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 
 **User Story:** 作為使用者，我希望每日台股與美股庫存都有可回查的歷史，讓年度配息能用較接近除息時點的股數，且不因最新快照改寫而遺失。
 
-- [ ] 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
+- [ ] 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月；Task571再修訂為42個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
 - [ ] 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、保留期限及過期刪除依Task556修訂。
 - [ ] 保存來源是系統既有最新asset_snapshot與stock_holding，並非新增券商查詢，也不聲稱券商剛同步／收盤成交庫存。來源快照日期不得晚於當下台北日期；保存source_snapshot_id/date及captured_at、scheduled_at、session_close_at。保留owner/market/trading_date獨立header與每筆原始明細：source_holding_id、stock_code、broker_id(nullable)、shares numeric(15,5)、investment_cost numeric(20,2)、currency varchar(3) nullable、transaction_exchange_rate numeric(10,4) nullable；不存即時行情payload、衍生損益或整包JSON。系統無更細券商帳號欄位，不捏造帳號。此為具名歷史快照正規化例外：原資料後續可能改寫，必須保留當時股數與成本。
 - [ ] 每個owner各自transaction，第一個DB操作經AssetSnapshotMutationLock鎖該owner latest root，再讀該owner持股。每次取得root鎖後重新讀Clock.instant，重新驗證仍在該market交易日期的close+6h至午夜窗口，captured_at必須用此真時間；等待鎖跨午夜時不寫header。鎖後重新查該owner latest ID，若等待期間新latest已提交而ID不同，退出本次交易，交下次tick重判，不把已過時root當latest。測試必覆蓋等待鎖跨午夜及等待期間建立新latest兩個反例。header/所有明細原子提交；header唯一(owner_user_id,market,trading_date)、明細唯一(header_id,source_holding_id)，防多實例／重啟重複。成功header與明細資料庫trigger拒絕UPDATE/DELETE；FK不得因來源快照/持股被改刪而令歷史消失，source ids是歷史識別值。無來源快照、未來快照或股數/成本格式無效則不產生成功header並記明錯誤；某owner失敗不阻擋其他owner或另一市場。來源存在而該市場無明細，保存EMPTY header以區分已確認的系統零庫存與未保存；其餘SAVED。各市場只存自身列。
@@ -6631,6 +6631,8 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 
 
 #### Task 556：每日庫存最多保留5.5年（延伸 Requirement 94）
+
+> **後續修訂：** Task571將保留期縮短為3.5年（42個曆月），本節66個曆月與文案已被取代，其餘機制沿用。
 
 **User Story:** 作為使用者，我希望每日庫存只保留最近5.5年，限制持續累積的資料量，同時保留期間內的庫存與股息計算仍可核對。
 
@@ -6642,6 +6644,15 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 年度配息純讀的daily symbol scope與daily基準兩條SQL，皆加trading_date>=daily_inventory_retention_cutoff(market,statement_timestamp())，即使清理落後也不讀／使用過期每日庫存。呼叫端asOfDate仍為原查詢上界，不能用來延長保留期限。保留原舊asset_snapshot與ledger fallback；已清理的每日資料缺席不是EMPTY、不當零，無其他基準維持資料不足。DTO/BFF/UI及配息算式不改，既有stock master/ledger名稱查詢不改。
 - [ ] 修改既有排程文案為「最多保留5.5年（66個曆月），過期每分鐘清理」，保留台股19:30、美股NY22:00／提前19:00保存時機，JOBS仍82筆、不新增@Scheduled工作或新頁面。資料庫備份政策不變，備份中的舊副本不聲稱已被此線上清理同步移除；現行schema的一般INSERT/COPY會拒絕過期資料，但完整schema+data復原不宣稱由guard阻擋（復原可能重建舊schema/trigger）。復原後須確認現行migration已套用，再由首tick清除過期；現行annual讀路徑立即排除過期。此任務不新增restore/backup改造或備份檔清理功能。
 
+
+#### Task 571：每日庫存保留期改為3.5年（延伸 Requirement 94）
+
+**User Story:** 作為使用者，我記錄每日庫存是為了精確推算配息（除息日前一日實際持股），我希望每日庫存只保留最近3.5年，超過的自動刪除。
+
+- [ ] 本修訂依使用者2026-11-11「只要記3.5年，超過的刪除」指示，取代Task556的66個曆月：3.5年明確定義為**42個曆月**，僅針對daily_inventory_snapshot與daily_inventory_position。按market「台股」Asia/Taipei、「美股」America/New_York各自當地今日計算cutoff=localToday.minusMonths(42)，trading_date>=cutoff保留、<cutoff過期，邊界當日包含；月末／閏年依曆法月底截短，不以365*3.5天代替。
+- [ ] 只以新的incremental migration v1.164.0-daily-inventory-retention-42-months.sql `CREATE OR REPLACE` 既有 daily_inventory_retention_cutoff(text,timestamptz)，函式簽章、未知market／null fail closed、STABLE、兩市場時區不變；不修改已發布v1.162.0／v1.163.0。guard trigger、清理adapter（REQUIRES_NEW、DB statement_timestamp、固定id集合原子刪除）、DailyInventoryScheduler每分鐘先清再存、年度配息兩條daily讀取SQL全都既有地呼叫同一函式，故不改其程式，自動套用42個月。
+- [ ] 縮短期限後，介於42與66個月之間的資料成為過期：下一個tick原子清除，且trigger自此拒絕該區間日期的重新寫入（該區間不再視為未過期）。正式資料最早為2026-11-05，套用當下無資料會被刪除；不刪舊asset_snapshot、stock_holding、asset_transaction、股利或其他資料，也不改每日保存時點、份數、來源或年度配息算式。手動年度asset_snapshot（2020起）不在此保留範圍，使用者已明確選擇保留。
+- [ ] 同步SchedulePublicBffController.JOBS文案為「最多保留3.5年（42個曆月），過期每分鐘清理」，JOBS仍82筆、不新增@Scheduled工作、API、頁面或9090路由。DB備份政策不變，備份中舊副本不聲稱同步刪除。不涉及券商寫入／交易。
 
 #### Task 557：交易雷達股利區間查詢 PostgreSQL 日期型別修復（延伸 Requirements 94／99）
 

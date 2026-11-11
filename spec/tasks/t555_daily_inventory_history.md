@@ -4,7 +4,7 @@
 **前置任務:** t548、t552（已在main；本任務不修改股利來源）
 **Liquibase changeset:** v1.162.0-daily-inventory-history.sql
 
-**後續修訂：** Task556將本任務原「永久保留／一律禁止DELETE」限縮為最多66個曆月；未過期仍不可變，只有過期daily兩表允許原子清理。歷史驗收紀錄保留當時結果。
+**後續修訂：** Task556將本任務原「永久保留／一律禁止DELETE」限縮為最多66個曆月；未過期仍不可變，只有過期daily兩表允許原子清理。Task571再改為42個曆月（3.5年）。歷史驗收紀錄保留當時結果。
 
 ## 背景
 
@@ -13,7 +13,7 @@
 ## 要做什麼
 
 
-- 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
+- 每個有資產快照的 owner，其台股與美股在各自交易日一般交易收盤後 **6 小時**，保存一份不可變的系統庫存歷史（Task556修訂：最多保留66個曆月；Task571再修訂為42個曆月）。台股 Asia/Taipei 13:30→19:30；美股 America/New_York 正常16:00→22:00、提前13:00→19:00，沿既有 UsReportCalendar 的 session.close／EARLY_CLOSE 與2026–2028明確涵蓋範圍，不另造提前收盤規則。區域時區自動處理DST；美股歸美國交易日期，不歸台灣次日。
 - 新增每分鐘tick（0 * * * * *，Asia/Taipei），依權威交易日曆與各市場當日close+6h到當地午夜前的窗口執行；到點前、休市、未知日曆／US覆蓋外日期不得存檔，不以星期猜測。延遲／重啟可在同一市場當日剩餘窗口補存，實際captured_at如實保留；跨當地午夜不以目前庫存補造過去日期。無歷史回填、無任意手動觸發端點、保留期限及過期刪除依Task556修訂。
 - 保存來源是系統既有最新asset_snapshot與stock_holding，並非新增券商查詢，也不聲稱券商剛同步／收盤成交庫存。來源快照日期不得晚於當下台北日期；保存source_snapshot_id/date及captured_at、scheduled_at、session_close_at。保留owner/market/trading_date獨立header與每筆原始明細：source_holding_id、stock_code、broker_id(nullable)、shares numeric(15,5)、investment_cost numeric(20,2)、currency varchar(3) nullable、transaction_exchange_rate numeric(10,4) nullable；不存即時行情payload、衍生損益或整包JSON。系統無更細券商帳號欄位，不捏造帳號。此為具名歷史快照正規化例外：原資料後續可能改寫，必須保留當時股數與成本。
 - 每個owner各自transaction，第一個DB操作經AssetSnapshotMutationLock鎖該owner latest root，再讀該owner持股。每次取得root鎖後重新讀Clock.instant，重新驗證仍在該market交易日期的close+6h至午夜窗口，captured_at必須用此真時間；等待鎖跨午夜時不寫header。鎖後重新查該owner latest ID，若等待期間新latest已提交而ID不同，退出本次交易，交下次tick重判，不把已過時root當latest。測試必覆蓋等待鎖跨午夜及等待期間建立新latest兩個反例。header/所有明細原子提交；header唯一(owner_user_id,market,trading_date)、明細唯一(header_id,source_holding_id)，防多實例／重啟重複。成功header與明細資料庫trigger拒絕UPDATE/DELETE；FK不得因來源快照/持股被改刪而令歷史消失，source ids是歷史識別值。無來源快照、未來快照或股數/成本格式無效則不產生成功header並記明錯誤；某owner失敗不阻擋其他owner或另一市場。來源存在而該市場無明細，保存EMPTY header以區分已確認的系統零庫存與未保存；其餘SAVED。各市場只存自身列。
