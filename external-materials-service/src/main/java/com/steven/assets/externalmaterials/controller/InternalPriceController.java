@@ -176,6 +176,19 @@ public class InternalPriceController {
         return Map.of("verified", ok);
     }
 
+    /** 台股官方收盤歷史區間對帳（Task 572）：把持股日線換成 TWSE MI_INDEX 官方收盤與來源。維護用，同步執行。 */
+    @PostMapping("/close/reconcile-tw-range")
+    public ClosePersister.TwCloseRangeReconciliation reconcileTwRange(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        try {
+            return closePersister.reconcileTwOfficialCloseRange(from, to);
+        } catch (IllegalArgumentException e) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
     /** 手動觸發 FinMind 校正當日美股收盤價（同 18:00 ET 排程）。 */
     @PostMapping("/close/verify-us")
     public Map<String, Object> verifyUsClose() {
