@@ -13618,3 +13618,10 @@ SRPP來源只澄清美股報告啟動時段與API發布窗的銜接邊界，並�
 ### Task 569 Claude軌9090入口固定Tailscale規則包身分發布
 
 SRPP來源只把Claude比較軌的9090入口由「loopback→Tailscale→Mac端瀏覽器」三段探測改為固定Tailscale（`DATA_FETCH_RULES`規則一之二），消除該軌每輪必然的loopback connection refused失敗紀錄；Mac端瀏覽器入口整體退役；Codex軌維持loopback→Tailscale兩段，全部欄位門檻、時限、交易規則不變；雷達（規則二之一）、報價順序總結與規則二段寫死的「三個入口皆失敗」改為該軌適用的全部入口。資產Java計算器、API、DTO、DB、排程、model、formula、formal targets與Swagger不變。原SRPP工具凍結新bundle後，同步embedded manifest、原Ruby產insert-only SQL、原Python產兩份golden，逐項核對差異只有bundle身分，calculator hashes與其他golden位元組不變。完整發布鏈：離線驗證→雙repoGit落地→registry insert-only四欄全文讀回→乾淨正式main只build／recreate `business-services`（先以唯讀SQL證明啟動入口皆為no-op，並避開各匯出排程分鐘、台股12:00至13:10報告與守門員期間及今晚美股報告窗）→JAR全文核對→最後才快轉日報實際使用的SRPP工作區。新hash的正式採用待下一個合法時窗，記NOT_YET_EXECUTED。
+
+
+### Task 570 六項風險證據採認一致性規則包發布
+
+本輪SRPP model只有`execution_policy.risk_score_evidence_policy`文字改變，明示先讀同輪窗口內許可來源再判未評；聯準會指引、域外衝突與半導體適用證據的取用按原rubric判讀，來源存在不自動證明分級，真正缺證據／矛盾／不可比仍保持EVIDENCE_INSUFFICIENT。009826通用資金API用途缺口仍由既有確定性D-152買後檢查處理，不能把有效BLOCKED改成本機PASS。兩消費者各自採納／等待／否決，不強制同分或買進。
+
+資產端只更新embedded model與manifest，保留model3.22.0／policy2.60.0／D211、既有formula manifest與targets投影；原Ruby完整stdout產生insert-only registration SQL，原Python重產兩份report golden。所有calculator來源bytes與golden金融結果維持，只允許來源文字／metadata／bundle身分差異，不更改Java、API、schema、Swagger、排程或權限。獨立審查及離線驗收後依序雙repo落地與remote讀回→已合併SQL登錄四欄及舊rows核對→正式main原設定只重建／recreate business-services→JAR全文與其他容器核對→安全同步SRPP實際工作區並從host做三個唯讀GET維護驗收；一般連線通過不代表正式日報採用，未自然實跑前仍記NOT_YET_EXECUTED。
