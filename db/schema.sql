@@ -86,7 +86,7 @@ BEGIN
     WHEN '美股' THEN local_today := (p_at AT TIME ZONE 'America/New_York')::DATE;
     ELSE RAISE EXCEPTION 'daily inventory retention market unavailable' USING ERRCODE='23514';
   END CASE;
-  RETURN (local_today - INTERVAL '66 months')::DATE;
+  RETURN (local_today - INTERVAL '42 months')::DATE;
 END;
 $$;
 

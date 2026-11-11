@@ -69,7 +69,7 @@ public class SchedulePublicBffController {
     /** 全系統排程清單（82 筆）。順序刻意先業務服務、再外部行情服務、再 BFF 閘道觀測服務，前端再依 category 分組。 */
     private static final List<ScheduledJobDto> JOBS = List.of(
             new ScheduledJobDto(BUSINESS, "資產快照", "每日台美股庫存歷史保存",
-                    "每分鐘檢查權威交易日曆；各市場一般交易收盤六小時後保存每位使用者的系統庫存一次，台股19:30、美股紐約22:00（提前收盤日19:00），依市場交易日期歸檔，最多保留5.5年（66個曆月），過期每分鐘清理；清理不限交易日，無日曆或跨當地午夜不補造歷史",
+                    "每分鐘檢查權威交易日曆；各市場一般交易收盤六小時後保存每位使用者的系統庫存一次，台股19:30、美股紐約22:00（提前收盤日19:00），依市場交易日期歸檔，最多保留3.5年（42個曆月），過期每分鐘清理；清理不限交易日，無日曆或跨當地午夜不補造歷史",
                     "每分鐘檢查；交易日收盤後6小時保存一次", "0 * * * * *", TPE),
             new ScheduledJobDto(BUSINESS, "資料維護", "股利canonical投影",
                     "CanonicalDividendProjectionPoller.poll：每輪最多100股，只讀已保存股利證據更新canonical投影；DIVIDEND_CANONICAL_PROJECTION_ENABLED預設false，未驗證事件維持未知，不外抓、不發布投資報告",

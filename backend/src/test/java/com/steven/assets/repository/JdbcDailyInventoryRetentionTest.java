@@ -34,9 +34,10 @@ class JdbcDailyInventoryRetentionTest {
             jdbc.execute(new String(Objects.requireNonNull(in).readAllBytes(),StandardCharsets.UTF_8));
         }
     }
-    void retention() throws Exception {migration("v1.163.0-daily-inventory-retention.sql");}
+    void retention() throws Exception {sixtySixMonthRetention();migration("v1.164.0-daily-inventory-retention-42-months.sql");}
+    void sixtySixMonthRetention() throws Exception {migration("v1.163.0-daily-inventory-retention.sql");}
     ZoneId zone(String market){return ZoneId.of("台股".equals(market)?"Asia/Taipei":"America/New_York");}
-    LocalDate cutoff(String market){return dbAt.atZone(zone(market)).toLocalDate().minusMonths(66);}
+    LocalDate cutoff(String market){return dbAt.atZone(zone(market)).toLocalDate().minusMonths(42);}
     Capture capture(long owner,String market,LocalDate day,boolean empty) {
         var close=day.atTime("台股".equals(market)?LocalTime.of(13,30):LocalTime.of(16,0)).atZone(zone(market)).toInstant();
         var s=new Session(market,day,zone(market),close);
@@ -47,14 +48,30 @@ class JdbcDailyInventoryRetentionTest {
     int purge(){return Objects.requireNonNull(tx.execute(status->repository.deleteExpired()));}
     int count(String table){return jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Integer.class);}
     LocalDate policy(String market,String at){return jdbc.queryForObject("SELECT daily_inventory_retention_cutoff(?,?::timestamptz)",LocalDate.class,market,at);}
-    @Test void sixtySixCalendarMonthsUseMonthEndLeapYearAndEachMarketsLocalDate() throws Exception {
+    @Test void fortyTwoCalendarMonthsUseMonthEndLeapYearAndEachMarketsLocalDate() throws Exception {
         retention();retention();
-        assertThat(policy("台股","2026-08-31T04:00:00Z")).isEqualTo(LocalDate.of(2021,2,28));
-        assertThat(policy("台股","2025-08-31T04:00:00Z")).isEqualTo(LocalDate.of(2020,2,29));
-        assertThat(policy("台股","2026-11-06T02:00:00Z")).isEqualTo(LocalDate.of(2021,5,6));
-        assertThat(policy("美股","2026-11-06T02:00:00Z")).isEqualTo(LocalDate.of(2021,5,5));
+        assertThat(policy("台股","2026-08-31T04:00:00Z")).isEqualTo(LocalDate.of(2023,2,28));
+        assertThat(policy("台股","2025-08-31T04:00:00Z")).isEqualTo(LocalDate.of(2022,2,28));
+        assertThat(policy("台股","2027-08-31T04:00:00Z")).isEqualTo(LocalDate.of(2024,2,29));
+        assertThat(policy("台股","2026-11-06T02:00:00Z")).isEqualTo(LocalDate.of(2023,5,6));
+        assertThat(policy("美股","2026-11-06T02:00:00Z")).isEqualTo(LocalDate.of(2023,5,5));
         assertThatThrownBy(()->policy("UNKNOWN","2026-11-06T02:00:00Z")).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
         assertThatThrownBy(()->policy("台股",null)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+    @Test void fortyTwoMonthMigrationExpiresHistoryRetainedUnderSixtySixMonthRule() throws Exception {
+        sixtySixMonthRetention();
+        LocalDate between=dbAt.atZone(zone("台股")).toLocalDate().minusMonths(50);
+        // Both rows are live under the old 66-month rule, so the production guard accepts them.
+        save(capture(1,"台股",between,false));
+        save(capture(1,"台股",cutoff("台股"),false));
+        assertThat(purge()).isZero();
+        assertThat(count("daily_inventory_snapshot")).isEqualTo(2);assertThat(count("daily_inventory_position")).isEqualTo(2);
+        migration("v1.164.0-daily-inventory-retention-42-months.sql");
+        assertThat(purge()).isEqualTo(1);assertThat(purge()).isZero();
+        assertThat(count("daily_inventory_snapshot")).isEqualTo(1);assertThat(count("daily_inventory_position")).isEqualTo(1);
+        assertThat(jdbc.queryForList("SELECT trading_date FROM daily_inventory_snapshot",LocalDate.class)).containsExactly(cutoff("台股"));
+        assertThatThrownBy(()->save(capture(2,"台股",between,false)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class).hasMessageContaining("expired");
     }
     @Test void purgeRemovesExpiredChildrenAndEmptyHeadersOnlyAndIncludesBoundary() throws Exception {
         save(capture(1,"台股",cutoff("台股").minusDays(1),false));
