@@ -6737,3 +6737,10 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] Claude比較軌（`srpp-0905-claude`、`srpp-1150-claude`）的9090入口固定為SRPP `DATA_FETCH_RULES`規則一之二的Tailscale curl，不探測`127.0.0.1:9090`、不開Mac端瀏覽器（Mac端瀏覽器入口整體退役）；Codex軌（行程在Mac本機）維持loopback→Tailscale兩段。入口只是同一gateway的transport，不是獨立來源，不放寬任何欄位門檻、35／40／60分鐘時限或既有金融閘門；Tailscale連線失敗、502、504或逾時依規則一之四第6點處理，不得改走其他入口。
 - [ ] 這是規則包文字與身分的同步：9090任何API、資產端Java計算器、DTO、DB、排程、model、formula、formal targets與Swagger不變。已存的Claude遠端routine指令需裝置綁定proof才能更新，不宣稱已更新；以SRPP共用規格新文字為準。
 - [ ] 完成獨立spec審查及離線authority／generator／Java／package驗收，雙repo各commit／no-ff merge／push與精確remote讀回後才執行已合併insert-only registry；新hash四欄全文相符、舊rows不變，再以正式main設定只build／recreate business-services並驗JAR bytes、原設定與其他容器保持；之後才快轉日報實際使用的SRPP工作區。新hash的正式採用依Task 504：仍在交易日09:05至13:30內且registry與JAR已讀回才做唯讀GET讀回，否則記NOT_YET_EXECUTED。
+
+
+### SRPP 六項風險證據採認一致性規則發布（Task 570，延伸既有需求187／193／199）
+
+- [ ] 以受控SRPP feature凍結的本輪來源同步authority：只澄清六項風險判未評前先檢視同輪窗口內許可來源、聯準會含最新指引、地緣含域外衝突與半導體不強求全部子指標；資料仍須支持分級，真正矛盾／不可比／缺值保持未評。009826資金API用途缺口沿既有確定性D-152買後檢查，同輪直接資產、輸入輸出、買後兩餘額與底線必須保存；不以通用PARTIAL替代檢查失敗，不以本機解除有效BLOCKED，不自填PASS。
+- [ ] model僅修改`execution_policy.risk_score_evidence_policy`文字；分數與最低已評4項、單項3分、總分8分、審慎5至7分門檻、金融公式、formal targets、API／DTO／DB／Swagger、時限、排程與交易權限全部不變。資產端同步精確model／manifest bytes，以原generator產生insert-only SQL及兩份report golden；policy document仍是原targets投影，全部golden金融輸出及calculator hashes不變，不手改expected。
+- [ ] 作者以外spec／arch審查與離線authority／generator／Java／package驗收完成後，雙repo各feature commit／main no-ff merge／push及精確remote讀回，再從已合併SQL登錄；核新hash四欄全文、舊rows不變，乾淨正式main與原設定只build／force-recreate business-services，核運行JAR authority bytes及其他容器保持。安全同步日報SRPP工作區並保留原有未追蹤資料；由SRPP實機跑9090日曆／TWSE／台股報價三GET維護檢查。正式日報採用尚未執行時維持NOT_YET_EXECUTED，既有合法時窗／required_reads／同owner直接L0／獨立verifier不變，不重跑報告、刷新、寄信或交易。
