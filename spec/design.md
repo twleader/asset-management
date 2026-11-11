@@ -13638,3 +13638,9 @@ SRPP來源只把Claude比較軌的9090入口由「loopback→Tailscale→Mac端�
 本輪SRPP model只有`execution_policy.risk_score_evidence_policy`文字改變，明示先讀同輪窗口內許可來源再判未評；聯準會指引、域外衝突與半導體適用證據的取用按原rubric判讀，來源存在不自動證明分級，真正缺證據／矛盾／不可比仍保持EVIDENCE_INSUFFICIENT。009826通用資金API用途缺口仍由既有確定性D-152買後檢查處理，不能把有效BLOCKED改成本機PASS。兩消費者各自採納／等待／否決，不強制同分或買進。
 
 資產端只更新embedded model與manifest，保留model3.22.0／policy2.60.0／D211、既有formula manifest與targets投影；原Ruby完整stdout產生insert-only registration SQL，原Python重產兩份report golden。所有calculator來源bytes與golden金融結果維持，只允許來源文字／metadata／bundle身分差異，不更改Java、API、schema、Swagger、排程或權限。獨立審查及離線驗收後依序雙repo落地與remote讀回→已合併SQL登錄四欄及舊rows核對→正式main原設定只重建／recreate business-services→JAR全文與其他容器核對→安全同步SRPP實際工作區並從host做三個唯讀GET維護驗收；一般連線通過不代表正式日報採用，未自然實跑前仍記NOT_YET_EXECUTED。
+
+### Task 573 D-212 AI循環牛市修正低接與台積電曝險豁免規則包發布
+
+SRPP新增`bull_correction_dip_d212`政策區塊與本機確定性計算器`scripts/correction_dip.py`：依具名、有日期的三項AI循環硬訊號判定PRESENT／NOT_PRESENT／UNVERIFIED，NOT_PRESENT時回撤15%開修正窗口並計算前重後輕批次；PRESENT／UNVERIFIED維持D-202熊市窗口與D-141階梯；另輸出台積電曝險豁免狀態與適用上限。資產端9090既不判定這些窗口，也不需要新計算：`SrppReportStateCalculator.validateRungs`讀取的`bear_ladder_d141`與`OrdinaryEquitySellGate`讀取的D-211區塊皆保持原值。
+
+資產端只更新embedded model與manifest、原Ruby產生的insert-only registration SQL及兩份report golden的`policyBundleSha256`（calculator hashes不變，因本輪SRPP改動的scripts不在generator hash清單內），並將`DecisionPolicyAuthorityTest`的現行決策／版本斷言改為D-212／2.61.0；formula manifest、targets投影、Java計算、API、schema、Swagger、排程與權限不變。落地、登錄與重建順序同Task 570，但雙repo推送與部署延至台北時間13:30之後，避免當日09:05／12:00日報在新舊hash之間切換。
