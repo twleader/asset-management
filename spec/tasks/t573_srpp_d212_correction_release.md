@@ -41,3 +41,16 @@ git diff --check
 ```
 
 雙repo落地及registry驗證後，在乾淨正式資產main執行`docker compose -p asset-management build business-services`及`docker compose -p asset-management up -d --no-deps --force-recreate business-services`；project須先由運行標籤證實。從SRPP實機執行`python3 /Users/steven/.claude/skills/srpp-policy-release/scripts/verify_9090.py --srpp-root /Users/steven/Project/SRPP --expected-bundle 326e18dfaa441e9090c065aa971adec087768832aa57d4e27b378efdec1cda7f --output /Users/steven/Project/SRPP/reports/d212-correction-release-2026-11-12/9090-connectivity.json`。本輪不動Liquibase或schema。
+
+## 完成報告
+
+2026-11-12完成本輪全部階段；**正式日報採用為NOT_YET_EXECUTED**（待下一個合法交易時窗的實際日報）。以下只回填實際狀態，不修改已審核的需求、約束或步驟。
+
+- **審查。** spec第一輪獨立審查major2／minor4（漏三支Python回歸、golden允許範圍過寬等），全部修正後由第二支新審查者複審critical0／major0，剩2項措辭minor亦已修正並記錄`spec-review-pass`（d419c09b7360）。實作後獨立diff-scoped架構審查critical0／major0／minor0並記錄`arch-review-pass`（6795f32a4d7e）。
+- **離線驗收。** authority gate PASS；report／long-short／state-topup golden check 111／15／22案相符；Ruby 8＋5項、Python authority／long-short／state-topup三支皆OK；focused Java七類95項0 failures／errors／skips；backend package成功；`git diff --check`通過。兩份golden只有`policyBundleSha256`一行改變，正式產物與審查前scratch試算逐位元相同（scratch已移除）。
+- **落地。** SRPP main `4d4140ae63d6d292a1c4be09bf390726cf394019`（feature `428d439`）、資產main `4858158d0d6ee46d350198e6549a683e5c65c494`（feature `b8c61d9b`），均以`--no-ff`合併並以`ls-remote`精確讀回；推送於台北13:37後，當日09:05／12:00日報均以舊hash完成FINAL。
+- **登錄。** 從已合併main受追蹤SQL以單一交易insert-only登錄；登錄前41列全文不變、新增1列，四欄與SQL原文一致。
+- **部署。** 預檢有效env47鍵／mounts／network／restart一致、`DIVIDEND_BACKFILL_ENABLED=false`、今日analysis OK、三owner快照為今日、當日已到期匯出皆已執行。今日07:00美股備份上傳結果未定，比照t570既有使用者核准，允許重啟時自然補跑：13:40:33開始、13:41:56上傳並索引完成，其後例行輪替。只build並force-recreate `business-services`（image `sha256:dc81ede2…`，container `ccf33264…`），約20秒healthy，其他容器不變；運行JAR內model／manifest／swagger／registration SQL／policy document與合併來源逐位元相同。index／analysis／snapshot self-heal皆no-op。
+- **SRPP與9090。** JAR驗證後立即以`--ff-only`將`/Users/steven/Project/SRPP`同步至`4d4140a`（只有未追蹤資料，保留）；讀完Swagger目錄及三路由詳情後，由SRPP host執行`verify_9090.py`：日曆AVAILABLE（365日）、TWSE日線21筆、台股報價40筆皆PASS。新bundle於14:00前由既有排程自然產生12:00時段診斷包各1份，未手動觸發，不視為日報採用。
+
+收據位於`/Users/steven/Project/SRPP/reports/d212-correction-release-2026-11-12/`（`deployment-preflight.json`、`registry-before.jsonl`、`registry-after.jsonl`、`image-build.log`、`recreate.log`、`containers-before.txt`、`containers-after.txt`、`9090-connectivity.json`）。
