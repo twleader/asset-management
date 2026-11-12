@@ -1,6 +1,6 @@
 {
   "model_version": "3.22.0",
-  "policy_version": "2.60.0",
+  "policy_version": "2.61.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -683,7 +683,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes for anything already reconciled; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-211",
+      "decision": "D-212",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -973,7 +973,7 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-211",
+      "decision": "D-212",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
@@ -1042,7 +1042,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-211",
+    "decision": "D-212",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -1075,7 +1075,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-211",
+      "decision": "D-212",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1431,7 +1431,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-211",
+      "decision": "D-212",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1482,7 +1482,7 @@
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-211",
+        "decision": "D-212",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1510,7 +1510,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-211",
+      "decision": "D-212",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1774,7 +1774,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-211",
+      "current_entry_rule_decision": "D-212",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1911,7 +1911,7 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-211",
+      "decision": "D-212",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
@@ -2258,7 +2258,7 @@
       ]
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-211",
+      "decision": "D-212",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
@@ -2285,7 +2285,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B 6.333333% target. If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-211",
+        "decision": "D-212",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2359,6 +2359,148 @@
       "count_unfilled_sale_proceeds": false,
       "preserve_protected_cash_and_capacity": true,
       "rule": "Evaluate eligible below-target low-price buys independently of seller readiness using verified settled unrestricted cash after protected balances, pending buys, earmarks and costs. Do not require a paired seller or borrow against future unfilled sales. Retain all existing buy-price, radar, regime, quota, target, group and portfolio limits. If cash or capacity is insufficient, wait rather than sell ordinary equities at lows. Sell ordinary equity core positions only in the qualified D-211 high-zone reversal; targets, deadlines and rotation do not override it. Report cash-funded buys and deferred sells separately; link future confirmed sales only for audit, never duplicate cash."
+    },
+    "bull_correction_dip_d212": {
+      "decision": "D-212",
+      "enabled": true,
+      "window_name": "REBALANCE_CORRECTION_WINDOW",
+      "tactical_id": "TACTICAL_CORRECTION_ID",
+      "calculator": "scripts/correction_dip.py",
+      "benchmark_policy": "execution_policy_overrides.retirement_countercyclical_rebalancing.regime_benchmark_d202",
+      "drawdown_basis": "Per market, the D-202 benchmark's latest completed close versus its 24-month highest completed close (TWSE capitalization-weighted index for Taiwan-listed legs, S&P 500 for VOO); each leg uses only its own market (D-203).",
+      "open_drawdown": 0.15,
+      "close_drawdown": 0.1,
+      "requires_ma200_or_risk_off": false,
+      "d202_bear_drawdown": 0.2,
+      "ladder": [
+        {
+          "drawdown": 0.15,
+          "share_of_window_budget": 0.3
+        },
+        {
+          "drawdown": 0.2,
+          "share_of_window_budget": 0.25
+        },
+        {
+          "drawdown": 0.25,
+          "share_of_window_budget": 0.2
+        },
+        {
+          "drawdown": 0.3,
+          "share_of_window_budget": 0.15
+        },
+        {
+          "drawdown": 0.35,
+          "share_of_window_budget": 0.1
+        }
+      ],
+      "cooldown_sessions": 5,
+      "later_batch_must_exceed_prior": false,
+      "partial_fill_consumes_batch": true,
+      "living_reserve_deployable_twd_2026_real": 0,
+      "post_buy_term_deposit_floor_twd_2026_real": 800000,
+      "post_buy_total_twd_deposit_floor_twd_2026_real": 3050000,
+      "bond_sale_max_share": 0.6666666666666666,
+      "total_bond_floor": 0.1,
+      "equity_cap": 0.6,
+      "deep_drawdown": 0.3,
+      "deep_equity_cap": 0.7,
+      "purchase_order": "execution_policy.dynamic_allocation_policy_d141.bear_stock_purchase_order_d143",
+      "window_caps": "Same as the D-141 bear window: global equity group up to 50%, VOO up to 42%; the 12% high-dividend cap is never relaxed.",
+      "rotation_precedence": "Same as D-141 bear_precedence_over_rotation: rotation buying pauses and deadlines extend while the correction window is active.",
+      "ai_cycle_break": {
+        "status_values": [
+          "PRESENT",
+          "NOT_PRESENT",
+          "UNVERIFIED"
+        ],
+        "minimum_signals_present": 2,
+        "signal_validity_days": 183,
+        "maximum_source_age_days": 120,
+        "signals": {
+          "HYPERSCALER_CAPEX_CUT": {
+            "companies": [
+              "MSFT",
+              "GOOGL",
+              "AMZN",
+              "META"
+            ],
+            "minimum_companies_cut": 2,
+            "definition": "At least two of the four lower their forward capital-expenditure guidance versus their own prior guidance in an official earnings release, call or filing."
+          },
+          "TSMC_AI_GUIDANCE_CUT": {
+            "definition": "TSMC lowers its full-year revenue growth guidance or its AI-accelerator revenue growth guidance versus its own prior guidance in an official release, call or filing."
+          },
+          "NVIDIA_GUIDANCE_BELOW_ACTUAL": {
+            "definition": "NVIDIA's next-quarter revenue guidance midpoint is below the revenue it just reported for the current quarter, per its official release."
+          }
+        },
+        "evidence": "Each check needs a named official or primary source, its publication date and the event date. A present signal stays active for 183 days from its event date. NOT_PRESENT requires all three checks verified with sources no older than 120 days; otherwise UNVERIFIED.",
+        "unverified_action": "APPLY_D202_BEAR_RULES"
+      },
+      "routing": "AI-cycle NOT_PRESENT: a market drawdown of at least 15% opens the correction window regardless of MA200 or RISK_OFF, and the D-141 bear ladder is not used. PRESENT or UNVERIFIED: the unchanged D-202 bear window and D-141 ladder (20% start, 8/12/20/25/35) apply; a 15-20% drawdown opens nothing. A status change closes the other window for new batches; filled positions are kept.",
+      "funding_rule": "Correction batches never use the TWD 2,250,000 living reserve: post-buy all-bank TWD deposits must stay at least the daily elapsed-time indexed 2026-08-real TWD 3,050,000 (800,000 emergency term deposits plus the full 2,250,000 living reserve), with the 800,000 term-deposit floor unchanged; up to two-thirds of eligible bond ETFs may be sold while total bonds stay at least 10%. The window budget is locked once at opening and split 30/25/20/15/10.",
+      "model_scope": "Model v3.22.0 base excludes tactical timing and cannot simulate the AI-cycle evidence; a research sensitivity (research/dip_buying) is not a formal result.",
+      "tsmc_exposure_waiver": {
+        "decision": "D-212",
+        "condition": "Active unless the D-212 AI-cycle break is PRESENT or TSMC competitor catch-up is PRESENT. UNVERIFIED evidence keeps the waiver active (Steven's explicit choice).",
+        "catch_up": {
+          "status_values": [
+            "PRESENT",
+            "NOT_PRESENT",
+            "UNVERIFIED"
+          ],
+          "competitive_events": [
+            "MAJOR_CUSTOMER_SHIFT",
+            "COMPETITOR_VOLUME_WIN"
+          ],
+          "price_confirmation": "TSMC_PRICE_DROP_ATTRIBUTED",
+          "minimum_price_drop": 0.1,
+          "signal_validity_days": 183,
+          "maximum_source_age_days": 120,
+          "definitions": {
+            "MAJOR_CUSTOMER_SHIFT": "A major TSMC customer (NVIDIA, Apple, AMD, Broadcom, Qualcomm or another top-10 TSMC customer) moves a flagship AI or main product at the leading-edge node to Samsung or Intel volume production, confirmed by an official or primary source.",
+            "COMPETITOR_VOLUME_WIN": "Intel or Samsung reaches a leading-edge node comparable to TSMC's current leading node and wins a large customer order that enters volume production, confirmed by an official or primary source.",
+            "TSMC_PRICE_DROP_ATTRIBUTED": "TSMC (2330) completed close falls more than 10% below the completed close before the competitive event, computed from two verified closes, with a named dated source attributing the move to that event."
+          },
+          "rule": "PRESENT only when (MAJOR_CUSTOMER_SHIFT or COMPETITOR_VOLUME_WIN) is active AND TSMC_PRICE_DROP_ATTRIBUTED holds. Rumours without volume production, or an event the market does not confirm with a 10% attributed drop, are NOT_PRESENT."
+        },
+        "effects_when_active": {
+          "code_2330_clearing": "PAUSED",
+          "code_2330_new_buys": "PROHIBITED",
+          "caps_pct": {
+            "0050": 10,
+            "00881": 6
+          },
+          "targets_pct_unchanged": {
+            "0050": 5,
+            "00881": 3
+          },
+          "voo_0050_ratio": [
+            1,
+            1
+          ]
+        },
+        "effects_when_inactive": {
+          "code_2330_clearing": "ACTIVE",
+          "code_2330_new_buys": "PROHIBITED",
+          "caps_pct": {
+            "0050": 6,
+            "00881": 3
+          },
+          "targets_pct_unchanged": {
+            "0050": 5,
+            "00881": 3
+          },
+          "voo_0050_ratio": [
+            4,
+            1
+          ]
+        },
+        "deadline_rule": "While the waiver is active the 2330 D-132 management deadline (2027-06-15) and TIMEBOX_EXIT are suspended; when it ends, the deadline is extended by the number of calendar days the waiver was active. 2330 still may not be bought back.",
+        "end_of_waiver_rule": "When the waiver ends, holdings above the restored 0050 6% / 00881 3% caps are never sold at lows; trims follow D-211 qualified high-zone reversal only.",
+        "scope": "Applies to the D-143/D-180 bear and D-212 correction purchase order (VOO:0050 legs) and to 0050/00881 allocation capacity; other caps, the global equity group, the 55% equity target and the high-dividend 12% cap are unchanged. The static target_allocation_2027.csv upper bounds remain the waiver-inactive values."
+      }
     }
   },
   "major_illness_events": {
@@ -2410,7 +2552,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-211",
+  "decision": "D-212",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2431,7 +2573,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-211",
+    "decision": "D-212",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,

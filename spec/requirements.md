@@ -6764,3 +6764,9 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] **邊界：** `from`、`to` 必填且 `from <= to`；`to` 必須早於台北今日（今日列仍獨佔給排程對帳）；`DAYS.between(from,to) < 400`（含頭尾最多 400 個日曆日），超過回 HTTP 400；參數錯誤一律在本端點內轉 `ResponseStatusException(BAD_REQUEST)`，不新增全域錯誤處理。逐日之間節流至少 3 秒，避免 TWSE 限流；單日失敗（含 TWSE 非 `OK`、日期不符、TPEx 來源只提供當日而查無）不中斷整批。冪等、可重跑。
 - [ ] **回應：** 同步回傳不可變摘要：`from`、`to`、`tradingDays`（區間交易日數）、`daysWithTrusted`（對帳後至少一個代號具可信來源的日數）、`rowsTrusted`（所有日加總的具可信來源代號數；非本次寫入列數，重跑不變）、`missingByDate`（日期 → 該日缺檔代號；TWSE 當日無資料時表現為全部代號缺檔）、`interrupted`（執行緒被中斷而提前停止）。
 - [ ] **不動範圍：** 不改 `isTrustedClose` 可信來源集合、不放寬 SRPP 252 日閘門、不改 Task 290 排程與 16:00 FinMind fallback、不新增排程、DB schema、business-services／BFF proxy、前端或 9090 路由。上櫃債券 ETF（如 00679B、00719B）因 TPEx OpenAPI 只提供當日，無法由本入口回補，維持現況並於回應缺檔清單中可見。
+
+### SRPP D-212 AI循環牛市修正低接與台積電曝險豁免規則發布（Task 573，延伸既有需求187／193／199）
+
+- [ ] 以受控SRPP feature凍結的本輪來源同步authority：model新增`execution_policy.bull_correction_dip_d212`（AI循環三項硬訊號判定、15%修正窗口、前重後輕五批、不動用生活費，以及台積電曝險豁免），policy升2.61.0、頂層及12個巢狀現行決策標記升D-212（巢狀標記Java不比對；頂層decision只做model／manifest一致性核對）；新判定由SRPP本機`scripts/correction_dip.py`執行，9090不判定修正窗口或豁免。
+- [ ] `bear_ladder_d141`、`bear_stock_purchase_order_d143`、D-211兩個區塊的`decision`、formal targets、formula manifest、model3.22.0、Java計算、API／DTO／DB／Swagger、時限、排程與交易權限全部不變。資產端同步精確model／manifest bytes，以原generator產生insert-only SQL及兩份report golden；兩份golden只允許`policyBundleSha256`改變，金融輸出與`originalCalculatorHashes`不變，不手改expected；`DecisionPolicyAuthorityTest`的決策／版本斷言更新為D-212／2.61.0。
+- [ ] 作者以外spec／arch審查與離線authority／generator／Java／package驗收完成後，於台北時間13:30之後雙repo各feature commit／main no-ff merge／push及精確remote讀回，再從已合併SQL登錄；核新hash四欄全文、舊rows不變，乾淨正式main與原設定只build／force-recreate business-services，核運行JAR authority bytes及其他容器保持。安全同步日報SRPP工作區；由SRPP實機跑9090日曆／TWSE／台股報價三GET維護檢查。正式日報採用尚未執行時維持NOT_YET_EXECUTED。
