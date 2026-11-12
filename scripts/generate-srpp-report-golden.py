@@ -261,7 +261,8 @@ for target in (125,115.3):
  item=ut.candidate();item['target_price']=target;r=ut.run_one(item);item['quote']['market']='美股'
  cases.append({'kind':'us','date':'2026-09-25','total':20000000,'item':item,'expected':{'referencePrice':r['reference_price'],'limitPrice':r['checked_limit_price'],'netProfitSpacePct':r['net_profit_space_pct'],'maximumNotional':r['max_notional_twd']}})
 cfg=model['execution_policy_overrides']['global_equity_build_cadence_d141']
-for fx,spent,prior,week,month,last,price in ((32,100000,0,0,0,100,100),(34,400000,100000,1,5,100,99),(32,900000,0,0,0,100,100)):
+cap=cfg['VOO']['monthly_cap_twd']
+for fx,spent,prior,week,month,last,price in ((32,100000,0,0,0,100,100),(34,cap//2-50000,100000,1,5,100,99),(32,cap,0,0,0,100,100)):
  c=ep.GlobalEquityCadence(cfg,1);c.begin(dt.date(2026,9,22),fx,week=39,day=22);c.spent['VOO'][0]=spent;c.previous_shortfall['VOO'][0]=prior;c.voo_week_batches[0]=week;c.voo_month_batches[0]=month;c.last_voo_fill_price[0]=last
  state={'verified':True,'halved':False,'VOO':{'spent':spent,'previousShortfall':prior,'weekBatches':week,'monthBatches':month,'lastFillPrice':last}}
  cases.append({'kind':'pace','code':'VOO','fx':fx,'price':price,'state':state,'expected':{'remaining':float(c.room('VOO')[0]),'discretionaryBudget':float(c.voo_budget(price)[0])}})
