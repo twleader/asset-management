@@ -728,6 +728,41 @@ class TradingRadarV13ActionPolicyTest {
                 .isEqualTo(TradingRadarRuleEngine.Action.WATCH);
     }
 
+    @Test
+    void candidateBuySafetyUsesItsOwnInclusiveChaseAndBiasThresholds() {
+        RuleParameters wide = RuleParameters.v13BuyGateCandidate(
+                "BUYGATE_916", new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("9"), new BigDecimal("16"));
+
+        var justBelow = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "15.999999999999999999"),
+                "8.999999999999999999");
+        var atChase = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "15"), "9");
+        var aboveChase = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "15"), "9.000000000000000001");
+        var atBias = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "16"), "7");
+        var aboveBias = withCompletedChangePercent(
+                withBias(strongCandidateInput(false), "16.000000000000000001"), "7");
+
+        var candidateBelow = engine.evaluateCandidate(justBelow, wide,
+                contextWithConfidence(new BigDecimal("0.75")));
+        assertThat(candidateBelow.action()).isEqualTo(TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+        for (var input : List.of(atChase, aboveChase, atBias, aboveBias)) {
+            var result = engine.evaluateCandidate(input, wide,
+                    contextWithConfidence(new BigDecimal("0.75")));
+            assertThat(result.action()).isNotIn(TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                    TradingRadarRuleEngine.Action.ADD_CANDIDATE);
+            assertThat(result.risks()).anyMatch(text -> text.contains("買方安全閘門關閉"));
+        }
+        // The candidate's 9/16 cutoffs are observably wider than production's 8/15.
+        var production = engine.evaluateStock(justBelow);
+        assertThat(production.action()).isNotIn(TradingRadarRuleEngine.Action.BUY_CANDIDATE,
+                TradingRadarRuleEngine.Action.ADD_CANDIDATE);
+    }
+
     /** 乖離 13：正式路徑（15）允許買進且 timing 仍回報 OVERBOUGHT；5／12 候選仍否決。 */
     @Test
     void widerOverboughtBiasCandidateAllowsBuyWithoutChangingReportedTimingState() {

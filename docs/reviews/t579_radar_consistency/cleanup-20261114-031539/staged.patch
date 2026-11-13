@@ -1,0 +1,1256 @@
+diff --git a/backend/src/main/java/com/steven/assets/service/BacktestService.java b/backend/src/main/java/com/steven/assets/service/BacktestService.java
+index ce139222..c9d31218 100644
+--- a/backend/src/main/java/com/steven/assets/service/BacktestService.java
++++ b/backend/src/main/java/com/steven/assets/service/BacktestService.java
+@@ -74,6 +74,9 @@ import java.util.stream.Collectors;
+ @Transactional(readOnly = true)
+ public class BacktestService {
+ 
++    /** This historical baseline excludes V23's production-only position/turning-point policy. */
++    static final String LEGACY_BASELINE_RULE_VERSION = "TW_RULES_V22";
++
+     private static final String TW_MARKET = "台股";
+     private static final String TAIEX_CODE = "0000";
+     private static final String TWD = "TWD";
+@@ -678,7 +681,7 @@ public class BacktestService {
+                 : null;
+ 
+         return new BacktestDto.Response(
+-                TradingRadarRuleEngine.RULE_VERSION,
++                LEGACY_BASELINE_RULE_VERSION,
+                 dataFrom,
+                 dataTo,
+                 runs.size(),
+@@ -1067,6 +1070,8 @@ public class BacktestService {
+                 List.copyOf(failures),
+                 List.of(
+                         "主要樣本固定使用 adjustedOpen[t+1] 到 adjustedOpen[t+1+h]；h 為完整持有 session 數。",
++                        "baseline樣本為 " + LEGACY_BASELINE_RULE_VERSION
++                                + "，不含V23 production位置轉折policy；productionRuleVersion僅揭露現行版本，不代表V23已回測。",
+                         "CLOSE_FALLBACK_SENSITIVITY 是獨立敏感度，未進 calibration、holdout promotion 或主要樣本。",
+                         "cutoff 與 walk-forward 由 market/horizon 跨標的全域可成交日期建立，晚上市標的不另切自身 70%。",
+                         "candidate 以同一份 as-of StockInput 重跑完整 V13 engine；selector 只看 calibration，再以 untouched holdout/fold gate 判定。",
+@@ -4403,6 +4408,8 @@ public class BacktestService {
+         int dirty = runs.stream().mapToInt(r -> r.coverage().nonPositiveRows()).sum();
+         List<String> out = new ArrayList<>(List.of(
+                 "本輸出為「歷史上此條件成立後的報酬分布」，不是預測。",
++                "歷史baseline為 " + LEGACY_BASELINE_RULE_VERSION
++                        + "，不含V23 production位置轉折policy，不能作為V23已回測盈利的證據。",
+                 "刻意不輸出 p 值與信賴區間：樣本嚴重自相關（連續多日同一訊號成立），古典檢定前提不成立。",
+                 "已剔除 close_price <= 0 的髒列共 " + dirty + " 列（既有資料品質問題，另立任務處理）。",
+                 "有 " + etfPremiumMissing + " 檔 ETF 在整段回測期間完全沒有折溢價資料；"
+diff --git a/backend/src/main/java/com/steven/assets/service/RadarTurningPointPolicy.java b/backend/src/main/java/com/steven/assets/service/RadarTurningPointPolicy.java
+new file mode 100644
+index 00000000..2d586206
+--- /dev/null
++++ b/backend/src/main/java/com/steven/assets/service/RadarTurningPointPolicy.java
+@@ -0,0 +1,252 @@
++package com.steven.assets.service;
++
++import com.steven.assets.model.StockPriceHistory;
++
++import java.math.BigDecimal;
++import java.math.RoundingMode;
++import java.time.LocalDate;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Objects;
++
++import static com.steven.assets.service.TradingRadarRuleEngine.Action;
++
++/**
++ * V23 production action policy, evaluated before every existing evidence/final-action veto.
++ * Scores and the legacy engine's technical disclosures are intentionally unchanged.
++ * All windows and thresholds are judgmental starting values, not calibrated profitability claims.
++ * No clock, IO, mutable entity retention or use of an incomplete/live candle.
++ */
++public final class RadarTurningPointPolicy {
++    private static final BigDecimal HUNDRED = new BigDecimal("100");
++    private static final BigDecimal LOW = new BigDecimal("20");
++    private static final BigDecimal HIGH = new BigDecimal("80");
++    private static final BigDecimal TOUCH = new BigDecimal("1.01");
++    private static final BigDecimal REBOUND = new BigDecimal("1.03");
++    private static final BigDecimal BREAK = new BigDecimal("0.99");
++    private static final Scale SHORT = new Scale("一周／完成日K", 240, 5, 20, 5, 5, 5);
++    private static final Scale SWING = new Scale("1周~1月／完成日K", 240, 10, 60, 5, 10, 20);
++    private static final Scale MEDIUM = new Scale("1月~6月／完成週K", 52, 4, 20, 2, 4, 10);
++    private static final String PREFIX = "V23位置轉折：";
++
++    private RadarTurningPointPolicy() {}
++
++    private record Scale(String label, int position, int recent, int trend, int trendOffset,
++                         int confirmation, int support) {
++        int required() {
++            return Math.max(position, Math.max(trend + trendOffset,
++                    Math.max(confirmation + 1, Math.max(support + 2, Math.max(recent, 4)))));
++        }
++    }
++
++    private record Bar(LocalDate date, BigDecimal close, BigDecimal high, BigDecimal low, Long volume) {}
++    private record Decision(Action action, List<String> reasons, List<String> risks) {}
++    private record Range(BigDecimal min, BigDecimal span) {
++        boolean low(BigDecimal close) {
++            return close.subtract(min).multiply(HUNDRED).compareTo(span.multiply(LOW)) <= 0;
++        }
++        boolean high(BigDecimal close) {
++            return close.subtract(min).multiply(HUNDRED).compareTo(span.multiply(HIGH)) >= 0;
++        }
++        String display(BigDecimal close) {
++            return close.subtract(min).multiply(HUNDRED).divide(span, 2, RoundingMode.HALF_UP).toPlainString();
++        }
++    }
++
++    public static TradingRadarRuleEngine.StockResult apply(
++            TradingRadarRuleEngine.StockResult baseline, RadarInputAssembler.Prepared prepared,
++            boolean held, boolean regularBuySafe, boolean trialBuySafe) {
++        Objects.requireNonNull(baseline, "baseline");
++        Decision shortTerm = decide(baseline.shortAction(), baseline.shortReasons(), baseline.shortRisks(),
++                daily(prepared, SHORT.required()), SHORT, held, regularBuySafe, trialBuySafe);
++        Decision swing = decide(baseline.swingAction(), baseline.swingReasons(), baseline.swingRisks(),
++                daily(prepared, SWING.required()), SWING, held, regularBuySafe, trialBuySafe);
++        Decision medium = decide(baseline.action(), baseline.reasons(), baseline.risks(),
++                weekly(prepared, MEDIUM.required()), MEDIUM, held, regularBuySafe, trialBuySafe);
++        return new TradingRadarRuleEngine.StockResult(
++                baseline.score(), medium.action(), baseline.counterTrend(), medium.reasons(), medium.risks(),
++                baseline.kdHeat(), baseline.timingState(), baseline.kdDeadCross(), baseline.longTermBroken(),
++                baseline.shortScore(), shortTerm.action(), shortTerm.reasons(), shortTerm.risks(),
++                group(medium.action()) != group(shortTerm.action()) || group(medium.action()) != group(swing.action()),
++                baseline.profitTakingConfirmed(), baseline.normalizedBias(), baseline.shortNormalizedBias(),
++                baseline.swingScore(), swing.action(), swing.reasons(), swing.risks());
++    }
++
++    private static Decision decide(Action original, List<String> originalReasons, List<String> originalRisks,
++                                   List<Bar> bars, Scale scale, boolean held,
++                                   boolean regularBuySafe, boolean trialBuySafe) {
++        if (original == Action.NO_TRADE || original == null) {
++            return new Decision(Action.NO_TRADE, copy(originalReasons), copy(originalRisks));
++        }
++        List<String> reasons = new ArrayList<>();
++        List<String> risks = new ArrayList<>();
++        for (String value : copy(originalReasons)) {
++            if (legacyActionText(value)) risks.add("舊基礎引擎狀態（不作V23動作依據）：" + value);
++            else reasons.add(value);
++        }
++        for (String value : copy(originalRisks)) {
++            risks.add(legacyActionText(value) ? "舊基礎引擎提醒（本版動作另判）：" + value : value);
++        }
++        if (!valid(bars, scale.required())) {
++            risks.add(PREFIX + scale.label() + "所需完成K不足或日期／OHLC無效，不產生新交易候選。 ");
++            return finish(cautious(held), reasons, risks);
++        }
++        BigDecimal min = bars.getFirst().close(), max = min;
++        for (int i = 1; i < scale.position(); i++) {
++            min = min.min(bars.get(i).close());
++            max = max.max(bars.get(i).close());
++        }
++        if (min.compareTo(max) == 0) {
++            risks.add(PREFIX + scale.label() + "收盤區間沒有變化，位置無法判定，不產生新交易候選。 ");
++            return finish(cautious(held), reasons, risks);
++        }
++        Range range = new Range(min, max.subtract(min));
++        BigDecimal current = bars.getFirst().close(), prior = bars.get(1).close();
++        BigDecimal currentSum = sum(bars, 0, scale.trend());
++        int priceVsTrend = current.multiply(BigDecimal.valueOf(scale.trend())).compareTo(currentSum);
++        int slope = currentSum.compareTo(sum(bars, scale.trendOffset(), scale.trend()));
++        String trend = priceVsTrend > 0 && slope > 0 ? "向上" : priceVsTrend < 0 && slope < 0 ? "向下" : "盤整";
++        reasons.add(PREFIX + scale.label() + "，近" + scale.position() + "根完成K收盤區間位置 "
++                + range.display(current) + "%、趨勢" + trend + "；位置不是合理價值估計。 ");
++
++        BigDecimal support = establishedBrokenSupport(bars, scale.support());
++        if (support != null) {
++            risks.add(PREFIX + scale.label() + "已反覆測試並反彈的支撐 " + support.toPlainString()
++                    + "，最新兩根完成收盤均跌破支撐下方1%緩衝且續弱；屬確認破位風險退出，即使低檔也不覆蓋此條件。 ");
++            risks.add(PREFIX + "支撐與緩衝為判斷性初值，不保證止損效果，也不預測後續漲跌。 ");
++            return finish(held ? Action.EXIT_CANDIDATE : Action.AVOID, reasons, risks);
++        }
++        boolean recentHigh = false, recentLow = false;
++        for (int i = 0; i < scale.recent(); i++) {
++            recentHigh |= range.high(bars.get(i).close());
++            recentLow |= range.low(bars.get(i).close());
++        }
++        boolean weakened = current.compareTo(prior) < 0
++                && belowAverage(bars, 0, scale.confirmation())
++                && belowAverage(bars, 1, scale.confirmation())
++                && bars.getFirst().high().compareTo(bars.get(1).high()) < 0;
++        if (recentHigh && !range.low(current) && weakened) {
++            reasons.add(PREFIX + scale.label() + "近期曾處高檔，兩根完成收盤各自跌破確認均線，且高點與收盤降低，形成高檔轉弱候選。 ");
++            risks.add(PREFIX + "高檔轉弱條件為判斷性初值，不代表已獲利或預測後續下跌。 ");
++            return finish(held ? Action.REDUCE_CANDIDATE : Action.AVOID, reasons, risks);
++        }
++        boolean stabilized = bars.getFirst().low().compareTo(bars.get(1).low()) > 0
++                && bars.get(1).low().compareTo(bars.get(2).low()) >= 0
++                && current.compareTo(prior.max(bars.get(2).close()).max(bars.get(3).close())) > 0
++                && !belowOrAtAverage(bars, 0, scale.confirmation());
++        if (recentLow && !range.high(current) && stabilized) {
++            if (trialBuySafe) {
++                reasons.add(PREFIX + scale.label() + "近期曾處低檔，低點抬高且完成收盤突破前三根收盤與確認均線，可評估分批試單。 ");
++                risks.add(PREFIX + "僅限小額分批試單；RISK_OFF僅允許此試單例外，下降趨勢仍可能延續，不保證反彈。 ");
++                return finish(Action.TRIAL_BUY, reasons, risks);
++            }
++            risks.add(PREFIX + scale.label() + "雖有低檔止穩形狀，買方安全條件尚未通過，維持風險觀察。 ");
++        }
++        if (range.low(current)) {
++            risks.add(PREFIX + scale.label() + "目前位於低檔但未通過止穩試單確認，只列風險觀察；不因低分直接減碼，也不因跌深直接買進。 ");
++            return finish(cautious(held), reasons, risks);
++        }
++        if (original == Action.BUY_CANDIDATE || original == Action.ADD_CANDIDATE) {
++            if (regularBuySafe && !"向下".equals(trend) && !range.high(current))
++                return finish(original, reasons, risks);
++            risks.add(PREFIX + scale.label() + "原買方候選未通過安全／趨勢／位置條件，暫緩買進。 ");
++            return finish(cautious(held), reasons, risks);
++        }
++        if (original == Action.TRIAL_BUY || sell(original)) {
++            risks.add(PREFIX + scale.label() + "原分數引擎候選未獲本軌位置轉折確認，改為風險觀察。 ");
++            return finish(cautious(held), reasons, risks);
++        }
++        return finish(original, reasons, risks);
++    }
++
++    private static BigDecimal establishedBrokenSupport(List<Bar> bars, int lookback) {
++        BigDecimal support = bars.get(2).low();
++        for (int i = 3; i < lookback + 2; i++) support = support.min(bars.get(i).low());
++        BigDecimal breakPrice = support.multiply(BREAK);
++        if (bars.getFirst().close().compareTo(breakPrice) >= 0
++                || bars.get(1).close().compareTo(breakPrice) >= 0
++                || bars.getFirst().close().compareTo(bars.get(1).close()) >= 0) return null;
++        for (int recent = 2; recent < lookback + 2; recent++) {
++            if (bars.get(recent).low().compareTo(support.multiply(TOUCH)) > 0) continue;
++            for (int older = recent + 3; older < lookback + 2; older++) {
++                if (bars.get(older).low().compareTo(support.multiply(TOUCH)) > 0) continue;
++                for (int between = recent + 1; between < older; between++) {
++                    if (bars.get(between).close().compareTo(support.multiply(REBOUND)) >= 0) return support;
++                }
++            }
++        }
++        return null;
++    }
++
++    private static List<Bar> daily(RadarInputAssembler.Prepared prepared, int required) {
++        if (prepared == null || prepared.dailyContractRowsDesc() == null
++                || prepared.firstCompletedIndex() < 0 || prepared.firstCompletedIndex() > 1) return List.of();
++        int start = prepared.firstCompletedIndex();
++        if (prepared.dailyContractRowsDesc().size() - start < required) return List.of();
++        List<Bar> out = new ArrayList<>(required);
++        for (int i = start; i < start + required; i++) {
++            StockPriceHistory row = prepared.dailyContractRowsDesc().get(i);
++            out.add(row == null ? new Bar(null, null, null, null, null)
++                    : new Bar(row.getTradingDate(), row.getClosePrice(), row.getHighPrice(), row.getLowPrice(), row.getVolume()));
++        }
++        return List.copyOf(out);
++    }
++
++    private static List<Bar> weekly(RadarInputAssembler.Prepared prepared, int required) {
++        if (prepared == null || prepared.weeklyBarsDesc() == null || prepared.weeklyBarsDesc().size() < required)
++            return List.of();
++        List<Bar> out = new ArrayList<>(required);
++        for (int i = 0; i < required; i++) {
++            WeeklyBarAggregator.WeeklyBar row = prepared.weeklyBarsDesc().get(i);
++            out.add(row == null ? new Bar(null, null, null, null, null)
++                    : new Bar(row.weekEndDate(), row.close(), row.high(), row.low(), row.volume()));
++        }
++        return List.copyOf(out);
++    }
++
++    private static boolean valid(List<Bar> bars, int required) {
++        if (bars.size() < required) return false;
++        LocalDate previous = null;
++        for (Bar bar : bars) {
++            if (bar.date() == null || previous != null && !bar.date().isBefore(previous)
++                    || !positive(bar.close()) || !positive(bar.high()) || !positive(bar.low())
++                    || bar.low().compareTo(bar.close()) > 0 || bar.high().compareTo(bar.close()) < 0) return false;
++            previous = bar.date();
++        }
++        return true;
++    }
++    private static boolean positive(BigDecimal value) { return value != null && value.signum() > 0; }
++    private static BigDecimal sum(List<Bar> bars, int start, int count) {
++        BigDecimal total = BigDecimal.ZERO;
++        for (int i = start; i < start + count; i++) total = total.add(bars.get(i).close());
++        return total;
++    }
++    private static boolean belowAverage(List<Bar> bars, int start, int count) {
++        return bars.get(start).close().multiply(BigDecimal.valueOf(count)).compareTo(sum(bars, start, count)) < 0;
++    }
++    private static boolean belowOrAtAverage(List<Bar> bars, int start, int count) {
++        return bars.get(start).close().multiply(BigDecimal.valueOf(count)).compareTo(sum(bars, start, count)) <= 0;
++    }
++    private static Action cautious(boolean held) { return held ? Action.HOLD_CAUTION : Action.WAIT; }
++    private static boolean sell(Action action) {
++        return action == Action.REDUCE_CANDIDATE || action == Action.EXIT_CANDIDATE || action == Action.AVOID;
++    }
++    private static int group(Action action) {
++        if (action == null || action == Action.NO_TRADE) return 4;
++        return switch (action) {
++            case BUY_CANDIDATE, ADD_CANDIDATE, TRIAL_BUY -> 1;
++            case HOLD, WATCH, HOLD_CAUTION, WAIT -> 2;
++            case REDUCE_CANDIDATE, EXIT_CANDIDATE, AVOID -> 3;
++            case NO_TRADE -> 4;
++        };
++    }
++    private static List<String> copy(List<String> values) { return values == null ? List.of() : List.copyOf(values); }
++    private static Decision finish(Action action, List<String> reasons, List<String> risks) {
++        return new Decision(action, List.copyOf(reasons), List.copyOf(risks));
++    }
++    private static boolean legacyActionText(String value) {
++        return value.contains("獲利了結獲得確認") || value.contains("此位置不建議追殺出場")
++                || value.contains("V11 的極端超賣保護") || value.startsWith("逆勢試單的本質")
++                || value.contains("本訊號只限小額試單");
++    }
++}
+diff --git a/backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java b/backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java
+index fe5580e5..e4f90139 100644
+--- a/backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java
++++ b/backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java
+@@ -60,7 +60,8 @@ public class TradingRadarRuleEngine {
+      */
+     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
+     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
+-    public static final String RULE_VERSION = "TW_RULES_V22";
++    /** V23 changes production actions after baseline scoring; legacy engine/candidate entry points stay frozen. */
++    public static final String RULE_VERSION = "TW_RULES_V23";
+ 
+     /**
+      * 三軌持有期（Task 356.1a）。
+@@ -3117,6 +3118,29 @@ public class TradingRadarRuleEngine {
+         return mapped;
+     }
+ 
++    /**
++     * Shared buy-side safety for V23 production turning-point candidates.
++     * NO_TRADE is preserved separately by the policy; a trial may bypass RISK_OFF and
++     * MA20/60 positioning, but never missing data, stale market, heat, FX, premium,
++     * chase or deteriorating fundamentals. Legacy scoring and its trial rules stay frozen.
++     */
++    boolean turningPointBuyAllowed(StockInput input, boolean trial) {
++        if (!complete(input) || input.price().signum() <= 0
++                || input.completedChangePercent() == null
++                || input.completedChangePercent().signum() < 0
++                || input.completedChangePercent().compareTo(BigDecimal.valueOf(PRODUCTION_CHASED_MOVE_PCT)) >= 0
++                || kdHeatOf(input) == KdHeat.OVERHEATED
++                || fundamentalDeteriorating(input)) return false;
++        if (input.fxPercentile() != null
++                && input.fxPercentile().compareTo(BigDecimal.valueOf(FX_EXPENSIVE_PCT)) >= 0) return false;
++        if (input.etfPremiumPct() != null
++                && input.etfPremiumPct().compareTo(BigDecimal.valueOf(ETF_PREMIUM_EXPENSIVE)) >= 0) return false;
++        if (input.ma60BiasPercent() != null
++                && input.ma60BiasPercent().compareTo(BigDecimal.valueOf(PRODUCTION_BUYGATE_BIAS_PCT)) >= 0) return false;
++        return !equityMarketApplies(input) || !input.marketStale()
++                && (trial || input.marketRegime() != MarketRegime.RISK_OFF);
++    }
++
+     /**
+      * 長期結構已完全破壞：年線兩日跌破<b>且</b>位於 52 週區間最低段。
+      *
+diff --git a/backend/src/main/java/com/steven/assets/service/TradingRadarService.java b/backend/src/main/java/com/steven/assets/service/TradingRadarService.java
+index b210b403..94b935f9 100644
+--- a/backend/src/main/java/com/steven/assets/service/TradingRadarService.java
++++ b/backend/src/main/java/com/steven/assets/service/TradingRadarService.java
+@@ -1404,7 +1404,7 @@ public class TradingRadarService {
+                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
+                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
+                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
+-                            // 同步升版；現行 production 版號為 TW_RULES_V22（完成收盤基準與短線盤中K確認）。
++                            // 同步升版；現行 production 版號為 TW_RULES_V23（完成K位置轉折候選）。
+                             //
+                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
+                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
+@@ -1712,8 +1712,7 @@ public class TradingRadarService {
+             // The strict profile is re-resolved after as-of valuation selection;
+             // use its currency/provenance for both the evidence gate and output.
+             currency = profile.underlyingCurrency();
+-            TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
+-                    new TradingRadarRuleEngine.StockInput(
++            TradingRadarRuleEngine.StockInput stockInput = new TradingRadarRuleEngine.StockInput(
+                             target.held(),
+                             price,
+                             ruleChangePercent,
+@@ -1746,7 +1745,11 @@ public class TradingRadarService {
+                             // 兩者與 DTO 揭露欄（toDailyCandleDto／toWeeklyDto）同源，皆取自這一份
+                             // Assembled，不得為了接線再算第二次。
+                             technical.dailyCandle(),
+-                            resolvedWeekly, technical.bollinger()));
++                            resolvedWeekly, technical.bollinger());
++            TradingRadarRuleEngine.StockResult result = RadarTurningPointPolicy.apply(
++                    ruleEngine.evaluateStock(stockInput), technicalBasis, target.held(),
++                    ruleEngine.turningPointBuyAllowed(stockInput, false),
++                    ruleEngine.turningPointBuyAllowed(stockInput, true));
+             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
+                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
+                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
+@@ -1789,9 +1792,9 @@ public class TradingRadarService {
+                             decisionClock != null && decisionClock.authoritative()
+                                     ? sessionDate(decisionClock)
+                                     : marketSummary == null ? null : parseLocalDate(marketSummary.asOfDate()));
+-            // V12 score/candidate/parameters stay unchanged. TW_RULES_V22 adds only the final
+-            // action passes through the deterministic safety policy, at this single construction
+-            // point shared by page, snapshot/export and evaluateForNotification.
++            // V23 preserves baseline scores/parameters and forms candidates from completed-K
++            // position/turning points above. Every candidate still passes this evidence gate,
++            // SHORT minute confirmation and the later official SMA20 veto.
+             // Task 356.9b：gate 擴為三軌；既有兩軌的 gate 行為逐位不變，swing 軌套用同一組
+             // buy 降級與 risk-evidence 判定（不得只讓其中兩軌通過閘門）。
+             TradingRadarEvidenceGate.GatedActions gated = TradingRadarEvidenceGate.apply(
+diff --git a/backend/src/test/java/com/steven/assets/service/BacktestServiceTest.java b/backend/src/test/java/com/steven/assets/service/BacktestServiceTest.java
+index 55ae4a9b..cd94d62b 100644
+--- a/backend/src/test/java/com/steven/assets/service/BacktestServiceTest.java
++++ b/backend/src/test/java/com/steven/assets/service/BacktestServiceTest.java
+@@ -923,9 +923,10 @@ class BacktestServiceTest {
+     // ─────────────────────────── (i) 回歸 ───────────────────────────
+ 
+     @Test
+-    @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V22")
++    @DisplayName("Task575：legacy baseline維持V22，production位置轉折為V23")
+     void ruleVersionIsV18() {
+-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V22");
++        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V23");
++        assertThat(BacktestService.LEGACY_BASELINE_RULE_VERSION).isEqualTo("TW_RULES_V22");
+     }
+ 
+     @Test
+@@ -939,6 +940,7 @@ class BacktestServiceTest {
+ 
+         assertThat(response.v13()).isNull();
+         assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V22");
++        assertThat(response.notes()).anyMatch(s -> s.contains("不含V23") && s.contains("不能作為"));
+         assertThat(response.results()).isNotEmpty();
+     }
+ 
+@@ -954,7 +956,8 @@ class BacktestServiceTest {
+ 
+         assertThat(response.v13()).isNotNull();
+         BacktestDto.V13Report v13 = response.v13();
+-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V22");
++        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V23");
++        assertThat(v13.notes()).anyMatch(s -> s.contains("baseline樣本為 TW_RULES_V22") && s.contains("不含V23"));
+         assertThat(v13.productionPromoted()).isFalse();
+         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
+         assertThat(v13.promotedCandidateCount()).isZero();
+diff --git a/backend/src/test/java/com/steven/assets/service/RadarTurningPointBuySafetyTest.java b/backend/src/test/java/com/steven/assets/service/RadarTurningPointBuySafetyTest.java
+new file mode 100644
+index 00000000..1219b517
+--- /dev/null
++++ b/backend/src/test/java/com/steven/assets/service/RadarTurningPointBuySafetyTest.java
+@@ -0,0 +1,94 @@
++package com.steven.assets.service;
++
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++import java.util.function.Consumer;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class RadarTurningPointBuySafetyTest {
++    private final TradingRadarRuleEngine engine = new TradingRadarRuleEngine();
++
++    @Test void trialDoesNotRequireMa20Ma60OrAnnualRecoveryButStillUsesCompleteInput() {
++        assertThat(engine.turningPointBuyAllowed(input(x -> {}), true)).isTrue();
++        assertThat(engine.turningPointBuyAllowed(input(x -> x.k = null), true)).isFalse();
++        assertThat(engine.turningPointBuyAllowed(null, true)).isFalse();
++    }
++
++    @Test void riskOffExceptionIsOnlyForTrialAndNeverBypassesStaleEquityMarket() {
++        var riskOff = input(x -> x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF);
++        assertThat(engine.turningPointBuyAllowed(riskOff, false)).isFalse();
++        assertThat(engine.turningPointBuyAllowed(riskOff, true)).isTrue();
++        var stale = input(x -> {x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF; x.stale = true;});
++        assertThat(engine.turningPointBuyAllowed(stale, false)).isFalse();
++        assertThat(engine.turningPointBuyAllowed(stale, true)).isFalse();
++        var bond = input(x -> { x.type = TradingRadarRuleEngine.InstrumentType.BOND;
++            x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF; x.stale = true;});
++        assertThat(engine.turningPointBuyAllowed(bond, false)).isTrue();
++        assertThat(engine.turningPointBuyAllowed(bond, true)).isTrue();
++    }
++
++    @Test void fxPremiumChaseAndPositiveBiasBoundariesCannotBeBypassedByTrial() {
++        for (boolean trial : new boolean[]{false, true}) {
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.fx = bd("90")), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.premium = bd("3")), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.move = bd("8")), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.bias = bd("15")), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> {x.fx = bd("89.999999999999999999");
++                x.premium = bd("2.999999999999999999"); x.move = bd("7.999999999999999999");
++                x.bias = bd("14.999999999999999999");}), trial)).isTrue();
++        }
++    }
++
++    @Test void fallingMissingOrInvalidMarketDataCannotCreateNewBuys() {
++        for (boolean trial : new boolean[]{false, true}) {
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.move = bd("-0.01")), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.move = null), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.price = BigDecimal.ZERO), trial)).isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.regime = TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE), trial))
++                    .isFalse();
++            assertThat(engine.turningPointBuyAllowed(input(x -> x.move = BigDecimal.ZERO), trial)).isTrue();
++        }
++    }
++
++    @Test void heatUsesExistingBoundariesAndNarrowBandException() {
++        assertThat(engine.turningPointBuyAllowed(input(x -> {x.k=bd("85"); x.d=bd("75");}), true)).isTrue();
++        assertThat(engine.turningPointBuyAllowed(input(x -> {x.k=bd("85.01"); x.d=bd("70");}), true)).isFalse();
++        assertThat(engine.turningPointBuyAllowed(input(x -> {x.k=bd("81"); x.d=bd("80");}), true)).isFalse();
++        assertThat(engine.turningPointBuyAllowed(input(x -> {x.k=bd("100"); x.d=bd("100"); x.band=bd("1.99");}), true))
++                .isTrue();
++        assertThat(engine.turningPointBuyAllowed(input(x -> {x.k=bd("100"); x.d=bd("100"); x.band=bd("2");}), true))
++                .isFalse();
++    }
++
++    @Test void deterioratingFundamentalsBlockBothBuyModes() {
++        for (boolean trial : new boolean[]{false, true}) {
++            var severe = input(x -> x.fundamental = new TradingRadarRuleEngine.FundamentalInput(
++                    true, -.8, -.8, 0.0, 0.0, 0.0, false, false));
++            assertThat(engine.turningPointBuyAllowed(severe, trial)).isFalse();
++            var loss = input(x -> x.fundamental = new TradingRadarRuleEngine.FundamentalInput(
++                    true, -.5, null, null, null, null, true, false));
++            assertThat(engine.turningPointBuyAllowed(loss, trial)).isFalse();
++        }
++    }
++
++    private static TradingRadarRuleEngine.StockInput input(Consumer<Fixture> change) {
++        Fixture x = new Fixture(); change.accept(x);
++        return new TradingRadarRuleEngine.StockInput(true, x.price, BigDecimal.ONE, x.move,
++                new TradingRadarRuleEngine.Indicators(bd("110"), bd("120"), bd("130"), x.k, x.d),
++                bd("40"), bd("45"), TradingRadarRuleEngine.Confirmation.BELOW,
++                TradingRadarRuleEngine.Confirmation.BELOW, TradingRadarRuleEngine.Confirmation.BELOW,
++                x.type, x.regime, x.stale, x.fx, x.bias, null, bd("-5"), bd("10"), x.band,
++                x.premium, null, bd("95"), null, BigDecimal.ONE, x.fundamental, null, null, null);
++    }
++    private static class Fixture {
++        BigDecimal price=bd("100"), move=BigDecimal.ONE, k=bd("40"), d=bd("35"), band=bd("5");
++        BigDecimal fx, premium, bias=bd("-5");
++        boolean stale;
++        TradingRadarRuleEngine.InstrumentType type=TradingRadarRuleEngine.InstrumentType.EQUITY;
++        TradingRadarRuleEngine.MarketRegime regime=TradingRadarRuleEngine.MarketRegime.NEUTRAL;
++        TradingRadarRuleEngine.FundamentalInput fundamental;
++    }
++    private static BigDecimal bd(String value) { return new BigDecimal(value); }
++}
+diff --git a/backend/src/test/java/com/steven/assets/service/RadarTurningPointPolicyTest.java b/backend/src/test/java/com/steven/assets/service/RadarTurningPointPolicyTest.java
+new file mode 100644
+index 00000000..98ea1d5e
+--- /dev/null
++++ b/backend/src/test/java/com/steven/assets/service/RadarTurningPointPolicyTest.java
+@@ -0,0 +1,397 @@
++package com.steven.assets.service;
++
++import com.steven.assets.dto.TradingRadarDto;
++import com.steven.assets.model.StockPriceHistory;
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++import java.time.LocalDate;
++import java.util.ArrayList;
++import java.util.EnumMap;
++import java.util.List;
++
++import static com.steven.assets.service.TradingRadarRuleEngine.Action;
++import static org.assertj.core.api.Assertions.assertThat;
++
++class RadarTurningPointPolicyTest {
++    private static final LocalDate DATE = LocalDate.of(2026, 11, 12);
++
++    @Test void lowScoresAloneNeverProduceSellOnAnyTrack() {
++        var result = apply(baseline(Action.EXIT_CANDIDATE), falling(240, 1), falling(52, 7), true, true, true);
++        assertThat(result.action()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.score()).isEqualTo(10);
++        assertThat(result.shortScore()).isEqualTo(12);
++        assertThat(result.swingScore()).isEqualTo(11);
++        assertThat(result.risks()).anyMatch(s -> s.contains("不因低分直接減碼"));
++        assertThat(result.reasons()).anyMatch(s -> s.contains("完成週K"));
++        assertThat(result.shortReasons()).anyMatch(s -> s.contains("一周／完成日K"));
++        assertThat(result.swingReasons()).anyMatch(s -> s.contains("1周~1月／完成日K"));
++    }
++
++    @Test void lowWeakOrFlatTrendCannotRetainAnOldAddCandidate() {
++        var daily = rows(240, 1, "84", "85", "84", "85", "84", "85");
++        var result = apply(baseline(Action.ADD_CANDIDATE), daily, rows(52, 7, "84", "85", "84"),
++                true, true, true);
++        assertThat(result.action()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++    }
++
++    @Test void continuingNewLowsWithoutTestedReboundSupportAreNotRiskExits() {
++        var result = apply(baseline(Action.EXIT_CANDIDATE), falling(240, 1), falling(52, 7), false, false, false);
++        assertThat(result.action()).isEqualTo(Action.WAIT);
++        assertThat(result.shortAction()).isEqualTo(Action.WAIT);
++        assertThat(result.swingAction()).isEqualTo(Action.WAIT);
++    }
++
++    @Test void recentHighCanTurnWeakAfterItHasAlreadyLeftTheHighZone() {
++        var result = apply(baseline(Action.HOLD), highTurn(240, 1), highTurn(52, 7), true, true, true);
++        assertThat(result.action()).isEqualTo(Action.REDUCE_CANDIDATE);
++        assertThat(result.shortAction()).isEqualTo(Action.REDUCE_CANDIDATE);
++        assertThat(result.swingAction()).isEqualTo(Action.REDUCE_CANDIDATE);
++        assertThat(result.reasons()).anyMatch(s -> s.contains("近期曾處高檔"));
++        assertThat(result.profitTakingConfirmed()).isFalse();
++        assertThat(result.reasons()).noneMatch(s -> s.contains("獲利了結獲得確認"));
++    }
++
++    @Test void highAndStillStrongIsHeldRatherThanAutomaticallySoldOrChased() {
++        var rising = rows(240, 1, "120", "119", "118", "117", "116", "115");
++        var weekly = rows(52, 7, "120", "119", "118", "117", "116", "115");
++        var held = apply(baseline(Action.HOLD), rising, weekly, true, true, true);
++        assertThat(held.action()).isEqualTo(Action.HOLD);
++        assertThat(held.shortAction()).isEqualTo(Action.HOLD);
++        assertThat(held.swingAction()).isEqualTo(Action.HOLD);
++        var add = apply(baseline(Action.ADD_CANDIDATE), rising, weekly, true, true, true);
++        assertThat(add.action()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(add.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(add.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++    }
++
++    @Test void verifiedSupportBreakOverridesLowZoneButNotRequiredEvidenceGate() {
++        var result = apply(baseline(Action.HOLD), supportBreak(240, 1), supportBreak(52, 7), true, true, true);
++        assertThat(result.action()).isEqualTo(Action.EXIT_CANDIDATE);
++        assertThat(result.shortAction()).isEqualTo(Action.EXIT_CANDIDATE);
++        assertThat(result.swingAction()).isEqualTo(Action.EXIT_CANDIDATE);
++        assertThat(result.risks()).anyMatch(s -> s.contains("即使低檔") && s.contains("1%"));
++        var gated = TradingRadarEvidenceGate.apply(result.action(), result.shortAction(), result.swingAction(),
++                true, equityProfile(), TradingRadarEvidenceConfidenceResolver.Evidence.EMPTY);
++        assertThat(gated.mediumAction()).isEqualTo(Action.HOLD);
++        assertThat(gated.shortAction()).isEqualTo(Action.HOLD);
++        assertThat(gated.swingAction()).isEqualTo(Action.HOLD);
++        assertThat(gated.candidateMediumAction()).isEqualTo(Action.EXIT_CANDIDATE);
++    }
++
++    @Test void touchesWithoutInterveningThreePercentReboundAreNotEstablishedSupport() {
++        var daily = supportBreak(240, 1);
++        for (int i = 3; i <= 5; i++) set(daily, i, "81", "82", "80");
++        var weekly = supportBreak(52, 7);
++        for (int i = 3; i <= 5; i++) set(weekly, i, "81", "82", "80");
++        var result = apply(baseline(Action.HOLD), daily, weekly, true, false, false);
++        assertThat(result.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.action()).isEqualTo(Action.HOLD_CAUTION);
++    }
++
++    @Test void exactlyOnePercentBelowSupportIsNotStrictlyBelowTheBreakBuffer() {
++        var daily = supportBreak(240, 1);
++        set(daily, 1, "79.20", "80", "79");
++        var result = apply(baseline(Action.HOLD), daily, rows(52, 7), true, false, false);
++        assertThat(result.shortAction()).isNotEqualTo(Action.EXIT_CANDIDATE);
++        assertThat(result.swingAction()).isNotEqualTo(Action.EXIT_CANDIDATE);
++        set(daily, 0, "79.20", "80", "79");
++        assertThat(apply(baseline(Action.HOLD), daily, rows(52, 7), true, false, false).shortAction())
++                .isNotEqualTo(Action.EXIT_CANDIDATE);
++    }
++
++    @Test void supportTouchAndInterveningReboundUseExactInclusiveBoundaries() {
++        var daily = supportBreak(240, 1);
++        set(daily, 6, "81", "82", "80.80");
++        for (int i = 3; i <= 5; i++) set(daily, i, "82.40", "83", "81.5");
++        var exact = apply(baseline(Action.HOLD), daily, List.of(), true, false, false);
++        assertThat(exact.shortAction()).isEqualTo(Action.EXIT_CANDIDATE);
++        daily.get(6).setLowPrice(new BigDecimal("80.800000000000000001"));
++        assertThat(apply(baseline(Action.HOLD), daily, List.of(), true, false, false).shortAction())
++                .isNotEqualTo(Action.EXIT_CANDIDATE);
++        daily.get(6).setLowPrice(new BigDecimal("80.80"));
++        for (int i = 3; i <= 5; i++) daily.get(i).setClosePrice(new BigDecimal("82.399999999999999999"));
++        assertThat(apply(baseline(Action.HOLD), daily, List.of(), true, false, false).shortAction())
++                .isNotEqualTo(Action.EXIT_CANDIDATE);
++    }
++
++    @Test void confirmedLowRecoveryCreatesOnlyTrialEvenWhenOldScoreWasWeak() {
++        var result = recoveryResult(true);
++        assertThat(result.action()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(result.shortAction()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(result.swingAction()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(result.risks()).anyMatch(s -> s.contains("小額分批"));
++        assertThat(result.score()).isEqualTo(10);
++        var refused = recoveryResult(false);
++        assertThat(refused.action()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(refused.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(refused.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++    }
++
++    @Test void aNewTrialStillPassesEvidenceMinuteAndOfficialSmaVetoes() {
++        var result = recoveryResult(true);
++        var blocked = TradingRadarEvidenceGate.apply(result.action(), result.shortAction(), result.swingAction(),
++                false, equityProfile(), TradingRadarEvidenceConfidenceResolver.Evidence.EMPTY);
++        assertThat(blocked.mediumAction()).isEqualTo(Action.WATCH);
++        assertThat(blocked.shortAction()).isEqualTo(Action.WATCH);
++        assertThat(blocked.swingAction()).isEqualTo(Action.WATCH);
++        var open = TradingRadarEvidenceGate.apply(result.action(), result.shortAction(), result.swingAction(),
++                false, equityProfile(), completeEvidence());
++        assertThat(open.shortAction()).isEqualTo(Action.TRIAL_BUY);
++        var minuteBlocked = RadarIntradayCandlePolicy.apply(open, new RadarIntradayCandlePolicy.Confirmation(
++                "WAIT", "FIVE_MINUTE_NOT_RISING", DATE, null, null, null, null, null), false);
++        assertThat(minuteBlocked.shortAction()).isEqualTo(Action.WATCH);
++        assertThat(minuteBlocked.mediumAction()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(minuteBlocked.swingAction()).isEqualTo(Action.TRIAL_BUY);
++        var conflict = new TradingRadarDto.OfficialSma20Verification("CONFLICT", DATE.toString(),
++                "DIFFERENT", new BigDecimal("90"), new BigDecimal("91"), BigDecimal.ONE, true);
++        var finalGate = RadarOfficialSma20Gate.apply(minuteBlocked, conflict, false);
++        assertThat(finalGate.mediumAction()).isEqualTo(Action.WATCH);
++        assertThat(finalGate.swingAction()).isEqualTo(Action.WATCH);
++        assertThat(finalGate.shortAction()).isEqualTo(Action.WATCH);
++        assertThat(finalGate.candidateShortAction()).isEqualTo(Action.TRIAL_BUY);
++    }
++
++    @Test void lowRecoveryNeedsHigherLowsAndBreakOfAllThreePriorCloses() {
++        for (int index : List.of(0, 1, 2, 3)) {
++            var daily = recovery(240, 1);
++            if (index == 0) daily.getFirst().setLowPrice(daily.get(1).getLowPrice());
++            if (index == 1) daily.get(1).setLowPrice(new BigDecimal("82"));
++            if (index >= 2) set(daily, index, "86", "87", "83");
++            var result = apply(baseline(Action.ADD_CANDIDATE), daily, rows(52, 7), true, true, true);
++            assertThat(result.shortAction()).as("failed recovery condition %s", index).isEqualTo(Action.HOLD_CAUTION);
++        }
++    }
++
++    @Test void exactTwentyPercentIsLowButAnUnroundedValueJustAboveTwentyIsNot() {
++        var exact = rows(240, 1, "88", "89", "88", "89");
++        assertThat(apply(baseline(Action.HOLD), exact, rows(52, 7), true, false, false).shortAction())
++                .isEqualTo(Action.HOLD_CAUTION);
++        exact.getFirst().setClosePrice(new BigDecimal("88.000000000000000001"));
++        assertThat(apply(baseline(Action.HOLD), exact, rows(52, 7), true, false, false).shortAction())
++                .isEqualTo(Action.HOLD);
++    }
++
++    @Test void exactEightyPercentBlocksAnOldBuyButAnUnroundedValueBelowItDoesNot() {
++        var exact = rows(240, 1, "112", "111", "110", "109", "108");
++        assertThat(apply(baseline(Action.ADD_CANDIDATE), exact, rows(52, 7), true, true, false).shortAction())
++                .isEqualTo(Action.HOLD_CAUTION);
++        exact.getFirst().setClosePrice(new BigDecimal("111.999999999999999999"));
++        assertThat(apply(baseline(Action.ADD_CANDIDATE), exact, rows(52, 7), true, true, false).shortAction())
++                .isEqualTo(Action.ADD_CANDIDATE);
++    }
++
++    @Test void incompleteFlatOrDirtyDataNeverResurrectsCandidatesOrImprovesNeutralActions() {
++        List<List<StockPriceHistory>> bad = new ArrayList<>();
++        bad.add(rows(239, 1));
++        var flat = rows(240, 1);
++        flat.forEach(row -> setValue(row, "100", "101", "99")); bad.add(flat);
++        var duplicate = recovery(240, 1); duplicate.get(1).setTradingDate(DATE); bad.add(duplicate);
++        var unordered = recovery(240, 1); unordered.get(5).setTradingDate(DATE.plusDays(1)); bad.add(unordered);
++        var noDate = recovery(240, 1); noDate.get(5).setTradingDate(null); bad.add(noDate);
++        var nullHigh = recovery(240, 1); nullHigh.get(5).setHighPrice(null); bad.add(nullHigh);
++        var wrongLow = recovery(240, 1); wrongLow.getFirst().setLowPrice(new BigDecimal("1000")); bad.add(wrongLow);
++        var zero = recovery(240, 1); zero.get(5).setClosePrice(BigDecimal.ZERO); bad.add(zero);
++        for (var daily : bad) {
++            var result = apply(baseline(Action.ADD_CANDIDATE), daily, List.of(), true, true, true);
++            assertThat(result.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++            assertThat(result.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++            assertThat(result.action()).isEqualTo(Action.HOLD_CAUTION);
++        }
++        var missing = RadarTurningPointPolicy.apply(baseline(Action.HOLD), null, false, true, true);
++        assertThat(missing.shortAction()).isEqualTo(Action.WAIT);
++        assertThat(missing.action()).isEqualTo(Action.WAIT);
++    }
++
++    @Test void unavailableOldNoTradeIsNeverRevivedEvenByPerfectRecovery() {
++        var result = apply(baseline(Action.NO_TRADE), recovery(240, 1), recovery(52, 7), false, true, true);
++        assertThat(result.action()).isEqualTo(Action.NO_TRADE);
++        assertThat(result.shortAction()).isEqualTo(Action.NO_TRADE);
++        assertThat(result.swingAction()).isEqualTo(Action.NO_TRADE);
++        assertThat(result.horizonConflict()).isFalse();
++    }
++
++    @Test void dailyAndWeeklyHorizonsAndTheirMessagesRemainIndependent() {
++        var result = apply(baseline(Action.HOLD), highTurn(240, 1), recovery(52, 7), true, true, true);
++        assertThat(result.action()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(result.shortAction()).isEqualTo(Action.REDUCE_CANDIDATE);
++        assertThat(result.swingAction()).isEqualTo(Action.REDUCE_CANDIDATE);
++        assertThat(result.horizonConflict()).isTrue();
++        assertThat(result.reasons()).noneMatch(s -> s.contains("近期曾處高檔"));
++        assertThat(result.shortReasons()).noneMatch(s -> s.contains("近期曾處低檔"));
++    }
++
++    @Test void shortRecoveryCannotStandInForTheSlowerSwingConfirmation() {
++        var daily = rows(240, 1, "86", "85", "84", "83", "82", "81", "80");
++        var result = apply(baseline(Action.HOLD), daily, List.of(), true, true, true);
++        assertThat(result.shortAction()).isEqualTo(Action.TRIAL_BUY);
++        assertThat(result.swingAction()).isEqualTo(Action.HOLD_CAUTION);
++        assertThat(result.horizonConflict()).isTrue();
++        assertThat(result.shortReasons()).anyMatch(s -> s.contains("可評估分批試單"));
++        assertThat(result.swingReasons()).noneMatch(s -> s.contains("可評估分批試單"));
++    }
++
++    @Test void invalidWeeklyHistoryDoesNotDisableValidCompletedDailyRecovery() {
++        for (boolean duplicate : new boolean[]{false, true}) {
++            var weekly = recovery(52, 7);
++            if (duplicate) weekly.get(1).setTradingDate(weekly.getFirst().getTradingDate());
++            else weekly.get(5).setHighPrice(null);
++            var result = apply(baseline(Action.HOLD), recovery(240, 1), weekly, true, true, true);
++            assertThat(result.action()).isEqualTo(Action.HOLD_CAUTION);
++            assertThat(result.shortAction()).isEqualTo(Action.TRIAL_BUY);
++            assertThat(result.swingAction()).isEqualTo(Action.TRIAL_BUY);
++            assertThat(result.risks()).anyMatch(s -> s.contains("日期／OHLC無效"));
++            assertThat(result.shortRisks()).noneMatch(s -> s.contains("日期／OHLC無效"));
++        }
++    }
++
++    @Test void twoSupportTouchesMustBeSeparatedByAtLeastThreeBars() {
++        var daily = supportBreak(240, 1);
++        set(daily, 4, "81", "82", "80");
++        set(daily, 6, "100", "101", "99");
++        var result = apply(baseline(Action.HOLD), daily, List.of(), true, false, false);
++        assertThat(result.shortAction()).isEqualTo(Action.HOLD_CAUTION);
++        set(daily, 5, "81", "82", "80");
++        result = apply(baseline(Action.HOLD), daily, List.of(), true, false, false);
++        assertThat(result.shortAction()).isEqualTo(Action.EXIT_CANDIDATE);
++    }
++
++    @Test void onlyOneCloseBelowItsOwnConfirmationAverageDoesNotReduce() {
++        var daily = rows(240, 1, "95", "115", "114", "113", "112", "111", "110", "109", "108", "107");
++        var result = apply(baseline(Action.HOLD), daily, List.of(), true, true, true);
++        assertThat(result.shortAction()).isEqualTo(Action.HOLD);
++        assertThat(result.swingAction()).isEqualTo(Action.HOLD);
++    }
++
++    @Test void liveCandleAndUnusedOlderTailCannotPolluteCompletedKDecision() {
++        var completed = recovery(240, 1);
++        var noLive = RadarTurningPointPolicy.apply(baseline(Action.HOLD), prepared(completed, List.of(), 0),
++                true, true, true);
++        var withLive = new ArrayList<>(completed);
++        var live = row(DATE.plusDays(1), "1000", "1200", "800");
++        withLive.addFirst(live);
++        withLive.add(row(DATE.minusYears(10), "0", "0", "0"));
++        var first = RadarTurningPointPolicy.apply(baseline(Action.HOLD), prepared(withLive, List.of(), 1),
++                true, true, true);
++        live.setClosePrice(new BigDecimal("1"));
++        var second = RadarTurningPointPolicy.apply(baseline(Action.HOLD), prepared(withLive, List.of(), 1),
++                true, true, true);
++        assertThat(first).isEqualTo(second).isEqualTo(noLive);
++    }
++
++    @Test void historicalReplayIsAsOfSliceOnlyAndDoesNotReadTheFuturePrefix() {
++        var historical = highTurn(240, 1);
++        var later = new ArrayList<>(historical);
++        later.addFirst(row(DATE.plusDays(1), "180", "200", "170"));
++        var expected = apply(baseline(Action.HOLD), historical, List.of(), true, true, true);
++        var replay = apply(baseline(Action.HOLD), later.subList(1, later.size()), List.of(), true, true, true);
++        assertThat(replay).isEqualTo(expected);
++    }
++
++    @Test void legacyDecisionNarrativeIsMarkedButActualTechnicalFactsAndMetadataRemain() {
++        var b = baseline(Action.EXIT_CANDIDATE);
++        var original = new TradingRadarRuleEngine.StockResult(b.score(), b.action(), b.counterTrend(),
++                List.of("最新價位於季線之下。", "已達極端超賣（KD 深度超賣且明顯低於季線），此位置不建議追殺出場。"),
++                List.of("長期結構仍偏弱，但 V11 的極端超賣保護不再因年線破壞而失效，避免低點殺出。"),
++                b.kdHeat(), b.timingState(), true, true, b.shortScore(), b.shortAction(), b.shortReasons(),
++                b.shortRisks(), false, true, null, null, b.swingScore(), b.swingAction(), b.swingReasons(), b.swingRisks());
++        var result = apply(original, supportBreak(240, 1), supportBreak(52, 7), true, true, true);
++        assertThat(result.action()).isEqualTo(Action.EXIT_CANDIDATE);
++        assertThat(result.profitTakingConfirmed()).isTrue();
++        assertThat(result.kdDeadCross()).isTrue();
++        assertThat(result.longTermBroken()).isTrue();
++        assertThat(result.counterTrend()).isEqualTo(original.counterTrend());
++        assertThat(result.reasons()).contains("最新價位於季線之下。");
++        assertThat(result.reasons()).noneMatch(s -> s.contains("不建議追殺出場"));
++        assertThat(result.risks()).anyMatch(s -> s.startsWith("舊基礎引擎狀態"));
++        assertThat(result.risks()).anyMatch(s -> s.startsWith("舊基礎引擎提醒"));
++    }
++
++    static TradingRadarRuleEngine.StockResult baseline(Action action) {
++        return new TradingRadarRuleEngine.StockResult(10, action,
++                new TradingRadarRuleEngine.CounterTrendResult(TradingRadarRuleEngine.CounterTrendState.NONE,
++                        List.of(), List.of()), List.of("原技術事實"), List.of("原風險"),
++                TradingRadarRuleEngine.KdHeat.NORMAL, TradingRadarRuleEngine.TimingState.NEUTRAL,
++                false, false, 12, action, List.of(), List.of(), false, false,
++                null, null, 11, action, List.of(), List.of());
++    }
++
++    private static TradingRadarRuleEngine.StockResult recoveryResult(boolean safe) {
++        return apply(baseline(Action.EXIT_CANDIDATE), recovery(240, 1), recovery(52, 7), true, true, safe);
++    }
++    private static TradingRadarRuleEngine.StockResult apply(TradingRadarRuleEngine.StockResult baseline,
++            List<StockPriceHistory> daily, List<StockPriceHistory> weekly,
++            boolean held, boolean regularSafe, boolean trialSafe) {
++        return RadarTurningPointPolicy.apply(baseline, prepared(daily, weekly, 0), held, regularSafe, trialSafe);
++    }
++    static RadarInputAssembler.Prepared prepared(List<StockPriceHistory> daily, List<StockPriceHistory> weekly, int start) {
++        var bars = weekly.stream().map(row -> new WeeklyBarAggregator.WeeklyBar(row.getTradingDate(),
++                row.getClosePrice(), row.getHighPrice(), row.getLowPrice(), row.getClosePrice(), row.getVolume())).toList();
++        return new RadarInputAssembler.Prepared(daily, daily, false, false, List.of(), null,
++                start, daily.size(), null, bars, List.of());
++    }
++    private static List<StockPriceHistory> recovery(int count, int step) {
++        return rows(count, step, "86", "85", "84", "83", "82", "81", "80", "80", "80", "80");
++    }
++    private static List<StockPriceHistory> highTurn(int count, int step) {
++        return rows(count, step, "95", "97", "115", "116", "114", "110", "108", "106", "104", "102");
++    }
++    private static List<StockPriceHistory> supportBreak(int count, int step) {
++        var values = rows(count, step, "77", "78", "81", "85", "86", "84", "81");
++        set(values, 2, "81", "82", "80");
++        set(values, 6, "81", "82", "80");
++        return values;
++    }
++    private static List<StockPriceHistory> falling(int count, int step) {
++        List<StockPriceHistory> out = new ArrayList<>();
++        for (int i = 0; i < count; i++) {
++            BigDecimal close = new BigDecimal("80").add(new BigDecimal(i));
++            out.add(row(DATE.minusDays((long) i * step), close.toPlainString(),
++                    close.add(BigDecimal.ONE).toPlainString(), close.subtract(BigDecimal.ONE).toPlainString()));
++        }
++        return out;
++    }
++    static List<StockPriceHistory> rows(int count, int step, String... prefix) {
++        List<StockPriceHistory> out = new ArrayList<>();
++        for (int i = 0; i < count; i++) out.add(row(DATE.minusDays((long) i * step), "100", "101", "99"));
++        if (count > 40) {
++            set(out, count / 2, "80", "81", "79");
++            set(out, count / 2 + 10, "120", "121", "119");
++        }
++        for (int i = 0; i < prefix.length; i++) {
++            BigDecimal close = new BigDecimal(prefix[i]);
++            set(out, i, prefix[i], close.add(BigDecimal.ONE).toPlainString(), close.subtract(BigDecimal.ONE).toPlainString());
++        }
++        return out;
++    }
++    private static StockPriceHistory row(LocalDate date, String close, String high, String low) {
++        return StockPriceHistory.builder().stockCode("0050").market("台股").tradingDate(date)
++                .openPrice(new BigDecimal(close)).closePrice(new BigDecimal(close))
++                .highPrice(new BigDecimal(high)).lowPrice(new BigDecimal(low)).volume(1_000_000L).build();
++    }
++    private static void set(List<StockPriceHistory> rows, int at, String close, String high, String low) {
++        setValue(rows.get(at), close, high, low);
++    }
++    private static void setValue(StockPriceHistory row, String close, String high, String low) {
++        row.setClosePrice(new BigDecimal(close)); row.setHighPrice(new BigDecimal(high)); row.setLowPrice(new BigDecimal(low));
++    }
++    private static TradingRadarAssetProfileResolver.AssetProfile equityProfile() {
++        return TradingRadarAssetProfileResolver.resolve("0050", "台股", "元大台灣50", null, null,
++                null, null, null, null);
++    }
++    private static TradingRadarEvidenceConfidenceResolver.Evidence completeEvidence() {
++        var groups = new EnumMap<TradingRadarEvidenceConfidenceResolver.Group,
++                TradingRadarEvidenceConfidenceResolver.GroupEvidence>(TradingRadarEvidenceConfidenceResolver.Group.class);
++        for (var group : TradingRadarEvidenceConfidenceResolver.Group.values()) groups.put(group,
++                new TradingRadarEvidenceConfidenceResolver.GroupEvidence(group, List.of(),
++                        1, 1, 1, true, true, true, true, true, true, 1, false, false));
++        var risk = new TradingRadarEvidenceConfidenceResolver.Risk(20, 1, List.of());
++        return new TradingRadarEvidenceConfidenceResolver.Evidence(groups, 100, 100, 100,
++                risk, risk, risk, List.of());
++    }
++}
+diff --git a/backend/src/test/java/com/steven/assets/service/TradingRadarNotificationServiceTest.java b/backend/src/test/java/com/steven/assets/service/TradingRadarNotificationServiceTest.java
+index 675675bd..12515a59 100644
+--- a/backend/src/test/java/com/steven/assets/service/TradingRadarNotificationServiceTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TradingRadarNotificationServiceTest.java
+@@ -254,7 +254,7 @@ class TradingRadarNotificationServiceTest {
+         service.queueEvaluation(STOCK_CODE, MARKET);
+         service.flushEvaluations();
+ 
+-        assertEquals("TW_RULES_V22", setting.getRuleVersion());
++        assertEquals("TW_RULES_V23", setting.getRuleVersion());
+         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+         assertEquals(originalOwner, setting.getOwnerUserId());
+         assertEquals(originalActive, setting.getActive());
+@@ -266,12 +266,25 @@ class TradingRadarNotificationServiceTest {
+         verify(settingRepo).save(setting);
+     }
+ 
++    @Test void task575V22ToV23RebuildsBaselineWithoutFirstTransitionEmail() {
++        setting.setRuleVersion("TW_RULES_V22");
++        setting.setLastAction("BUY_CANDIDATE");
++        service.queueEvaluation(STOCK_CODE, MARKET);
++        service.flushEvaluations();
++        assertEquals("TW_RULES_V23", setting.getRuleVersion());
++        assertEquals("EXIT_CANDIDATE", setting.getLastAction());
++        assertTrue(setting.getInitialized());
++        verify(dispatcher, never()).enqueue(any(), any(), any());
++        verify(stateRepo, never()).findBySettingId(any());
++        verify(settingRepo).save(setting);
++    }
++
+     @Test void task487V21ToV22RebuildsBaselineWithoutFirstTransitionEmail() {
+         setting.setRuleVersion("TW_RULES_V21");
+         setting.setLastAction("BUY_CANDIDATE");
+         service.queueEvaluation(STOCK_CODE, MARKET);
+         service.flushEvaluations();
+-        assertEquals("TW_RULES_V22", setting.getRuleVersion());
++        assertEquals("TW_RULES_V23", setting.getRuleVersion());
+         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
+         assertTrue(setting.getInitialized());
+         verify(dispatcher, never()).enqueue(any(), any(), any());
+diff --git a/backend/src/test/java/com/steven/assets/service/TradingRadarPanelServiceTest.java b/backend/src/test/java/com/steven/assets/service/TradingRadarPanelServiceTest.java
+index 05b1d2b5..7ec787e1 100644
+--- a/backend/src/test/java/com/steven/assets/service/TradingRadarPanelServiceTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TradingRadarPanelServiceTest.java
+@@ -44,7 +44,7 @@ class TradingRadarPanelServiceTest {
+         });
+         assertThat(tw.data().skippedNonTwStocks()).isEqualTo(1);
+         assertThat(us.data().skippedNonTwStocks()).isEqualTo(1);
+-        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V22");
++        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V23");
+         assertThat(tw.generatedAt()).isEqualTo("2026-09-23T16:00+08:00");
+         assertThat(tw.actionPolicyVersion()).isEqualTo(baseline.actionPolicyVersion());
+     }
+diff --git a/backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java b/backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java
+index 150b90d4..96693851 100644
+--- a/backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java
+@@ -590,7 +590,7 @@ class TradingRadarRuleEngineTest {
+      */
+     @Test
+     void ruleVersion_isV18() {
+-        assertEquals("TW_RULES_V22", TradingRadarRuleEngine.RULE_VERSION);
++        assertEquals("TW_RULES_V23", TradingRadarRuleEngine.RULE_VERSION);
+     }
+ 
+     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
+diff --git a/backend/src/test/java/com/steven/assets/service/TradingRadarStockWeeklyWiringTest.java b/backend/src/test/java/com/steven/assets/service/TradingRadarStockWeeklyWiringTest.java
+index 31779bf5..e1216d21 100644
+--- a/backend/src/test/java/com/steven/assets/service/TradingRadarStockWeeklyWiringTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TradingRadarStockWeeklyWiringTest.java
+@@ -142,6 +142,29 @@ class TradingRadarStockWeeklyWiringTest {
+         assertThat(input.weekly().osc()).isNotNull();
+     }
+ 
++    @Test
++    @DisplayName("575：真實service在evidence gate前以完成K位置轉折替代低分SELL候選")
++    void productionAppliesTurningPolicyBeforePublishingAnyCandidate() {
++        stubBaseline();
++        stubLongSeries();
++        TradingRadarService service = newService();
++        Mockito.doReturn(RadarTurningPointPolicyTest.baseline(TradingRadarRuleEngine.Action.EXIT_CANDIDATE))
++                .when(ruleEngine).evaluateStock(any(TradingRadarRuleEngine.StockInput.class));
++
++        TradingRadarDto.StockDecision row = service.assembleAt(AFTER_CLOSE).stocks().stream()
++                .filter(candidate -> CODE.equals(candidate.stockCode())).findFirst().orElseThrow();
++
++        assertThat(row.score()).isEqualTo(10);
++        assertThat(row.shortCandidateAction()).isEqualTo("WAIT");
++        assertThat(row.swingCandidateAction()).isEqualTo("WAIT");
++        assertThat(row.shortAction()).isEqualTo("WAIT");
++        assertThat(row.swingAction()).isEqualTo("WAIT");
++        assertThat(row.shortRisks()).anyMatch(s -> s.startsWith("V23位置轉折：") && s.contains("不因低分直接減碼"));
++        assertThat(row.swingRisks()).anyMatch(s -> s.startsWith("V23位置轉折：") && s.contains("不因低分直接減碼"));
++        assertThat(row.shortReasons()).anyMatch(s -> s.contains("完成日K") && s.contains("收盤區間位置"));
++        captureStockInput();
++    }
++
+     @Test
+     @DisplayName("Task408：個股組裝 fail-soft 時仍保留設定頁等價分類，不以 strict profile 代替")
+     void incompleteCurrentRowRetainsSettingsEquivalentClassification() {
+diff --git a/backend/src/test/java/com/steven/assets/service/TradingRadarUsStockEngineTest.java b/backend/src/test/java/com/steven/assets/service/TradingRadarUsStockEngineTest.java
+index 523a27d5..b095e32b 100644
+--- a/backend/src/test/java/com/steven/assets/service/TradingRadarUsStockEngineTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TradingRadarUsStockEngineTest.java
+@@ -378,14 +378,24 @@ class TradingRadarUsStockEngineTest {
+         Instant decisionInstant = Instant.parse("2026-08-10T21:00:00Z");
+         LocalDate completedSession = LocalDate.of(2026, 8, 10);
+         List<UsIndexDailyHistory> indexRows = usUpRowsAt(completedSession);
++        // V23 requires actual completed-K exit evidence, not a mocked low-score SELL.
++        // Daily support 80 was tested at offsets 2/6 with a rebound; the two latest
++        // completed weeks (Sunday offsets 1/8) close at 78/79 below tested weekly
++        // support 80 (weekly offsets 2/6, daily offsets 15/43). 500 rows also provide
++        // the full 52-week position window. The independent beta gate must still veto.
+         List<StockPriceHistory> stockRows = new ArrayList<>();
+-        for (int i = 0; i < indexRows.size(); i++) {
+-            UsIndexDailyHistory row = indexRows.get(i);
++        for (int i = 0; i < 500; i++) {
++            BigDecimal close = BigDecimal.valueOf(switch (i) {
++                case 0 -> 77; case 1 -> 78; case 2, 6, 15, 43 -> 81;
++                case 3 -> 85; case 4 -> 86; case 5 -> 84; case 8 -> 79;
++                case 250 -> 80; case 300 -> 120; default -> 100;
++            });
++            BigDecimal low = Set.of(2, 6, 15, 43).contains(i)
++                    ? new BigDecimal("80") : close.subtract(BigDecimal.ONE);
+             stockRows.add(StockPriceHistory.builder()
+-                    .stockCode("TLT").market("美股").tradingDate(row.getTradingDate())
+-                    .openPrice(row.getClosePoint()).highPrice(row.getHighPoint())
+-                    .lowPrice(row.getLowPoint()).closePrice(row.getClosePoint())
+-                    .volume(1_000_000L + i).build());
++                    .stockCode("TLT").market("美股").tradingDate(completedSession.minusDays(i))
++                    .openPrice(close).highPrice(close.add(BigDecimal.ONE))
++                    .lowPrice(low).closePrice(close).volume(1_000_000L + i).build());
+         }
+         when(priceHistoryRepo.findRecentN("TLT", "美股", 500)).thenReturn(stockRows);
+         when(stockRepo.findByCodeAndMarket("TLT", "美股")).thenReturn(Optional.of(
+diff --git a/backend/src/test/java/com/steven/assets/service/TreasuryYieldServiceTest.java b/backend/src/test/java/com/steven/assets/service/TreasuryYieldServiceTest.java
+index 92515308..90d7ccaa 100644
+--- a/backend/src/test/java/com/steven/assets/service/TreasuryYieldServiceTest.java
++++ b/backend/src/test/java/com/steven/assets/service/TreasuryYieldServiceTest.java
+@@ -206,7 +206,7 @@ class TreasuryYieldServiceTest {
+      */
+     @Test
+     void productionRuleVersion升V18而v12Default仍為回測baseline標籤() {
+-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V22");
++        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V23");
+         assertThat(RuleParameters.v12Default().ruleVersion()).isEqualTo("TW_RULES_V12");
+         assertThat(TradingRadarRuleEngine.RULE_VERSION).isNotEqualTo(RuleParameters.V13_VERSION);
+         assertThat(RuleParameters.v12Default().ruleVersion()).isNotEqualTo(RuleParameters.V13_VERSION);
+diff --git a/frontend/src/utils/openApiContract.test.js b/frontend/src/utils/openApiContract.test.js
+index 3459fe28..b885dcd7 100644
+--- a/frontend/src/utils/openApiContract.test.js
++++ b/frontend/src/utils/openApiContract.test.js
+@@ -48,7 +48,7 @@ test('缺少必要結構時 fail closed', () => {
+   )
+ })
+ 
+-test('金融 26 路與觀測 1 路分開解析，union 精確為 27 個 method/path', () => {
++test('金融 27 路與觀測 1 路分開解析，union 精確為 28 個 method/path', () => {
+   // 每份契約各自解析自己的 components；不把獨立 OpenAPI component namespace 合併。
+   const financialYaml = readFileSync(new URL('../../../docs/openapi/docker-external-api.yaml', import.meta.url), 'utf8')
+   const observationYaml = readFileSync(new URL('../../../docs/openapi/ai-flow-observation-api.yaml', import.meta.url), 'utf8')
+@@ -64,7 +64,7 @@ test('金融 26 路與觀測 1 路分開解析，union 精確為 27 個 method/p
+   const observationPaths = new Set(observation.operations.map(operation => operation.path))
+   const operationIds = [...financial.operations, ...observation.operations].map(operation => operation.operationId)
+ 
+-  assert.equal(entries.length, 26)
++  assert.equal(entries.length, 27)
+   assert.deepEqual(entries, [
+     'GET /api/assets/latest',
+     'GET /api/public/commodity-prices',
+@@ -81,6 +81,7 @@ test('金融 26 路與觀測 1 路分開解析，union 精確為 27 個 method/p
+     'GET /api/public/srpp/report-calculations',
+     'GET /api/public/srpp/symbol-rule-facts',
+     'GET /api/public/srpp/technical-series',
++    'GET /api/public/srpp/us-report-calculations',
+     'GET /api/public/trading-calendar',
+     'GET /api/public/trading-radar/stock',
+     'GET /api/public/trading-radar/today',
+@@ -95,8 +96,8 @@ test('金融 26 路與觀測 1 路分開解析，union 精確為 27 個 method/p
+   ])
+   assert.deepEqual(observationEntries, ['POST /api/srpp/ai-flow/events'])
+   assert.equal([...financialPaths].filter(path => observationPaths.has(path)).length, 0)
+-  assert.equal(entries.length + observationEntries.length, 27)
+-  assert.equal(new Set(operationIds).size, 27)
++  assert.equal(entries.length + observationEntries.length, 28)
++  assert.equal(new Set(operationIds).size, 28)
+ })
+ 
+ test('切換 OpenAPI 文件會先清除舊契約並忽略較晚返回的舊請求', async () => {
+diff --git a/frontend/src/views/TradingRadarView.vue b/frontend/src/views/TradingRadarView.vue
+index f1c1668c..cca17b67 100644
+--- a/frontend/src/views/TradingRadarView.vue
++++ b/frontend/src/views/TradingRadarView.vue
+@@ -1167,7 +1167,7 @@
+       :closable="false"
+       show-icon
+       title="規則式決策輔助，不是獲利保證"
+-      description="評分只比較市場上的相對位置，不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史自上線後累積；缺值權重會重分配，因此不同標的的分數組成可能不同。系統不保證獲利、不會自動下單；資料不足時以「今日不交易」為準。一周、1周~1月、1月~6月三軌分數不是獲利機率或報酬預測；TW_RULES_V17 與 TW_RULES_V18 為不同規則版本，分數不可直接比較。V18 是訊號分類與閱讀改善，不代表任何獲利保證。"
++      description="三軌分數只供參考；各持有期候選動作另依完成K的位置與轉折判斷，低分不等於賣出。評分不納入成本價、可用資金、配置或其他個人理財需求。財報、估值與產業歷史資料持續累積；缺值時權重會重分配，因此不同標的的分數組成可能不同。必要證據不足時採保守處理。分數與動作都不是獲利機率或報酬預測；系統不保證獲利、不會自動下單。"
+     />
+ 
+     <el-card shadow="never" class="sched-card">
+@@ -2385,20 +2385,19 @@ function timingEffect(state) {
+ function timingHint(row) {
+   switch (row.timingState) {
+     case 'EXTREME_OVERBOUGHT':
+-      return 'KD 已達過熱且明顯偏離季線；只有 KD 死叉、MACD 轉弱、下跌爆量三類證據至少兩項成立，才確認獲利了結。'
++      return 'KD／季線過熱標記只描述技術狀態，不直接代表賣出；各持有期是否減碼，依近期高檔與完成K轉弱判斷。'
+     case 'OVERBOUGHT':
+-      return '短線偏貴。其中 KD 過熱與 ETF 溢價過高會關閉買進閘門；單純的季線乖離偏高只反映在分數，不關閉閘門。'
++      return '這是短線熱度標記，不代表估值昂貴；實際候選仍須檢查各持有期的價格位置、轉折與安全條件。'
+     case 'OVERSOLD':
+-      return '短線偏便宜（KD 偏低或明顯低於季線）。'
++      return 'KD 偏低或價格低於季線只描述技術狀態，不代表估值便宜，也不表示已止穩。'
+     case 'EXTREME_OVERSOLD':
+-      return '已深度超跌，此位置不建議追殺出場；即使長期結構偏弱，V11 仍保留低檔保護並另列風險。'
++      return 'KD／季線深度超賣標記不等於各持有期都處於低檔；低分不直接觸發賣出，但先前建立的支撐經完成K確認跌破時，仍可能構成風險退出，詳見各持有期風險說明。'
+     default:
+       return ''
+   }
+ }
+-const trialBuyHint = '長線結構明確向上（年線之上且乖離足夠）、短線深度超賣並剛出現低檔黃金交叉、'
+-  + '且最近完成日已止跌。本質是接刀——僅適合小額分批、非全額進場；'
+-  + '長線判斷失準時虧損可能持續擴大。'
++const trialBuyHint = '各持有期需由完成K確認曾處低檔、之後形成較高低點並突破整理，且通過安全與證據檢查，才會列為試單。'
++  + '採小額分批，不是全額進場；價格仍可能續跌，低檔也不代表估值便宜或保證反彈。'
+ 
+ function actionType(action) {
+   // 分批試單刻意不與順勢買進共用配色：前者是接刀、後者是順勢，風險結構不同。
+diff --git a/spec/design.md b/spec/design.md
+index b33e7380..e82dc743 100644
+--- a/spec/design.md
++++ b/spec/design.md
+@@ -13648,3 +13648,21 @@ SRPP新增`bull_correction_dip_d212`政策區塊與本機確定性計算器`scri
+ ### Task 574 D-213 VOO建倉加速與D-214目標配置調整規則包發布
+ 
+ SRPP把`global_equity_build_cadence_d141.VOO`改為2026-11-13至2027-05-31每月基準NT$900,000、上限NT$1,350,000、每批NT$225,000，其餘D-143／D-180條件不變。9090的`GLOBAL_EQUITY_PACE`模組（`SrppReportModuleCalculator.paceCapacity`）與`SrppReportStateCalculator.paceAdvance`（跨月`previousShortfall`讀`monthly_baseline_twd`）原本就從registered model讀取這些參數，因此資產端不改Java計算；只更新embedded model與manifest、原Ruby產生的insert-only registration SQL、三份golden（兩份report golden的`policyBundleSha256`；三份的`execution_policy.py` calculator hash〔SRPP僅改該檔docstring〕及state-topup的`transition_ledger.py` hash〔改讀model配置〕；以及依新VOO節奏由原SRPP計算器重算的pace／state案例值），並把report golden generator的VOO pace案例寫死spent（400000／900000）改由model月上限推導（減半上限−50,000、全額上限），以及state-topup generator `reserveDeployment`案例寫死的`monthlyRoom` 900000改由model的VOO月上限推導、overdue調為2,000,000，使月上限仍實際約束，並將`DecisionPolicyAuthorityTest`的現行決策／版本斷言改為D-214／2.62.0。同輪D-214調整正式目標（009826 2.5%、VOO 27%、VT 2.5%、0050 10%、00881 4.53%、00865B 2.5%、00719B 19.97%），報告模組從embedded model的`detailed_target_allocation_2027`讀正式目標、`SrppReportAuthority`要求registered policy document等於其投影，Java未寫死目標，故以原投影`expected_formal_document`重產`d201-policy-document.json`並隨SQL登錄；另`SrppReportModuleCalculator`的`bondTarget`（讀債券`strategic_target`與`normal_equity_target`）、`UsReportCaptureAdapter.direction`（讀VOO／VT上限帶）、`DailyDecisionCalculator`債券每日決策（讀00865B／00719B／00697B目標）與台股短線`SrppReportShortUsCalculator.screen`的`core_cap`（讀台股標的正式目標，本輪可見差異為00881）皆隨model值改變，Java計算不改；兩處Java測試的寫死期望（00865B正式目標、bondTarget算式的0.28／0.55）同步為新值，美股短線golden以可指定SRPP來源的原產生器重產（僅00881的core_allocation_full因core_cap讀正式目標、由3%改為4.53%而由true變false）。formula manifest、API、schema、Swagger、排程與權限不變。落地、登錄與重建順序同Task 573，雙repo推送與部署在台北時間13:15之後、21:25匯出前進行。
++
++## 今日交易雷達三軌位置與完成K轉折（Task 575，修訂既有需求43／93／117）
++
++本節為V23 production動作契約，優先於上述歷史分數映射、profit-taking動作與極端超賣一律擋賣規則；原基礎分數、counterTrend、timingState與profitTakingConfirmed仍是歷史基礎引擎的技術揭露。production在共享buildStock的baseline結果後、證據解析及所有否決之前套用RadarTurningPointPolicy。舊BacktestService／V13不採新policy，baseline身份固定V22，不能當V23績效證據。
++
++- 575.1 新增純計算RadarTurningPointPolicy。只作用production共享buildStock的baseline StockResult之後、EvidenceConfidenceResolver及EvidenceGate之前。輸入同一次RadarInputAssembler.Prepared、原StockResult、held與由原StockInput經引擎helper集中算出的regularBuySafe／trialBuySafe（primitive boolean），不讀時鐘、DB、網路、持股成本、不新增API/DTO/schema/分類、不寫資料。保留原23因子分數、counterTrend、timingState、profitTakingConfirmed（仍為舊極端高檔判定，不能拿來代表新policy已觸發）、provenance。三軌action/reasons/risks及horizonConflict依新policy更新。升RULE_VERSION至TW_RULES_V23，既有通知基準升版首輪只重建不寄信。
++- 575.2 完成序列：SHORT/SWING只讀Prepared.dailyContractRowsDesc從firstCompletedIndex起；MEDIUM只讀Prepared.weeklyBarsDesc，排除live與未完成週。轉成內部immutable Bar(date,close,high,low,volume)，必須日期非null且嚴格降序、close/high/low正值且low<=close<=high；任何所需視窗壞列/重日/亂序不跳列補齊，該軌不產生新交易。當下provider overlay或live價格不參與本policy歷史轉折。零成交量不冒充正量。copy不可保留mutable entity參照。
++- 575.3 各軌參數（全部判斷性初值、非經回測校準）：SHORT日K：位置240根、近期高低檔5根、趨勢SMA20及5根前SMA20、確認均線SMA5、支撐回看5根；SWING日K：位置240、近期10、趨勢SMA60及5根前SMA60、確認SMA10、支撐20；MEDIUM完成週K：位置52、近期4、趨勢SMA20及2根前SMA20、確認SMA4、支撐10。每軌只使用其最大所需前綴視窗並驗證，缺足根數/flat range則不可產生新BUY/TRIAL/SELL，舊NO_TRADE不復活，其他動作在缺資料時一律降為持有者HOLD_CAUTION/未持有WAIT，不得因缺值變樂觀。
++- 575.4 位置只描述收盤價在本軌位置視窗的區間，不冒稱既有OHLC的week52Position：P(c)=100*(c-min(close窗口))/(max-min)，低檔P<=20、高檔P>=80，最近N根（含當根）的高低檔以同一決策時點位置窗口作共同參考。trend UP=當根close>SMA且SMA>其offset前SMA；DOWN為兩者均小於；其餘盤整。各軌reasons至少揭露位置百分比、尺度、趨勢；任何低檔/缺值/被擋/退出的警示放risks。
++- 575.5 優先序：NO_TRADE保持；資料不足保守；明確支撐退出；高檔轉弱減碼；低檔止穩試單；原買方通過新限制；其餘觀察/續抱。原score低分直接賣出路徑在production不再有效。新賣出只能由以下兩種具名證據產生，不能因舊SELL或AVOID保留賣出。無新訊號時舊REDUCE/EXIT/AVOID降為HOLD_CAUTION/WAIT。其他原中性動作保持；當根P<=20且未通過575.8（含安全helper否決）時，一律固定HOLD_CAUTION/WAIT，原BUY/ADD也不得保留，不論trend為DOWN或盤整或UP。
++- 575.6 支撐退出（優先且低檔保護不蓋掉）：凍結support=min(low of bars[2..L+1])；該L根中至少兩次low<=support*1.01、且索引相隔>=3，且兩次觸及之間至少一根close>=support*1.03，代表已有支撐反覆測試與反彈，避免緩跌反覆創低冒充支撐。最新兩根close均嚴格<support*.99且最新close<前根close，才是確認跌破。不得把一般連續創低或低分當退出。持有EXIT_CANDIDATE，未持有AVOID；risks明列支撐值、1%緩衝、兩根完成收盤、尺度、即使低檔仍觸發；不稱保證止損或獲利。後續SELL證據閘門不變。
++- 575.7 高檔減碼：最近N根曾P>=80、當根P>20（低檔不追殺）、close0<close1、兩根close各自跌破各自SMA(M)（第0根用0..M-1、第1根用1..M）、且當根high<前根high，才REDUCE_CANDIDATE/AVOID。不要求當下KD仍超買，單純高檔、KD死叉、分數低、負MACD不夠。reasons寫近期高檔與完成K轉弱，risks寫判斷性及非預測；不得聲稱已獲利（未讀成本）。
++- 575.8 低檔止穩試單：最近N根曾P<=20、當根P<80，low0>low1且low1>=low2、close0>max(close1..3)、close0>SMA(M)，及集中買方安全helper通過，才TRIAL_BUY（不直接BUY/ADD、不強求站回MA20/60或年線）。無條件成立只揭露低檔觀察不承諾反彈。TRIAL在RISK_OFF允許，但股票marketStale仍擋、必列小額分批及趨勢可能續跌風險。低檔不是估值便宜，position不可當fair value。
++- 575.9 集中helper在TradingRadarRuleEngine重用既有常數/基本面判定：非NO_TRADE、complete input、非KD過熱、FX分位<90或不適用、ETF溢價<3%或非ETF、完成日漲幅可得且0<=漲幅<8%、季線正乖離<15%（可得時）、無fundamentalDeteriorating、股票非marketStale；一般BUY/ADD另擋RISK_OFF、試單可例外。原買方動作還須trend非DOWN、當根位置<80；原TRIAL也須符合本輪575.8，否則HOLD_CAUTION/WAIT。nullable FX/premium適用/缺值由既有EvidenceGate驗，不以零補值。新trial比舊trial增加FX與追價限制是刻意保守收緊，不宣稱完全複製舊trial。
++- 575.10 EvidenceGate→SHORT intraday gate→OfficialSma20 gate順序及權限不變，任何新候選都不能繞過。新理由只進匹配軌、缺證據訊息只進risks；同一policy共享頁面/compact today/stock/快照/匯出/通知，候選和最終動作不能各用一版；不新增持久化衍生欄位。移除或明確標記與新動作相反的baseline『獲利了結獲得確認／極端超賣不建議出場』動作判決文案，不清空真實風險/技術事實。profitTakingConfirmed公開欄位原語意不變。
++- 575.11 舊BacktestService與V13 candidate校準不採用新production policy，清楚標註歷史baseline結果不代表V23已驗證盈利。新增純policy測試用同一Prepared可重播，逐視窗截斷禁止未來資訊。測試與回測驗證先驗行為一致性，不以合成案例宣稱真實報酬；若無可用真實資料，費用/滑價與out-of-sample收益驗證明記未執行。
++
++- 575.12 BacktestService舊baseline報表ruleVersion固定揭露TW_RULES_V22（新增LEGACY_BASELINE_RULE_VERSION集中常數），notes明說不含V23位置轉折policy；V13Report.productionRuleVersion仍如實為V23，但notes區分baseline樣本為V22，不宣稱V23已回測。FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION維持固定TW_RULES_V22|FUBON_OVERLAY_V1：其公開description是固定值契約，不能視為歷史範例；本輪技術輸入公式與參數未變，freshLocal只重用原有indicators／weekly／weeklyIndicators且原fingerprint／freshness驗證保持。V23 policy每次由當次Prepared重新判斷，不讀快取actions；因此不需失效技術快取，不改金融Swagger或SRPP identity。
+diff --git a/spec/requirements.md b/spec/requirements.md
+index 42e057a9..060ee33a 100644
+--- a/spec/requirements.md
++++ b/spec/requirements.md
+@@ -6776,3 +6776,12 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生
+ - [ ] 以受控SRPP feature凍結的本輪來源同步authority：model的VOO建倉節奏改為2026-11-13至2027-05-31每月基準900,000、上限1,350,000、每批225,000（新增說明鍵`pace_decision`、`pace_rule_d213`），policy升2.62.0、頂層及12個巢狀現行決策標記升D-214（`pace_decision`為D-213）；同輪D-214調整正式目標（009826 2.5%、VOO 27%、VT 2.5%、0050 10%、00881 4.53%、00865B 2.5%、00719B 19.97%），9090依registered policy document採用；`bull_correction_dip_d212`維持D-212、D-211兩區塊維持D-211；9090 `GLOBAL_EQUITY_PACE`依registered model自動採用新參數，不改Java計算。
+ - [ ] 009826節奏、FX減半門檻、第二批條件、formula manifest、model3.22.0、API／DTO／DB／Swagger、時限、排程與交易權限全部不變。資產端同步精確model／manifest bytes，以原投影重產policy document、以原generator產生insert-only SQL及三份report／state golden，並以可指定SRPP來源的原產生器重產short-us golden（僅00881的core_allocation_full因正式目標4.53%由true變false）；兩處Java測試寫死期望（00865B正式目標、bondTarget的0.28／0.55）同步為新值；三份report／state golden只允許bundle hash、`execution_policy.py`與state-topup `transition_ledger.py` calculator hash及VOO節奏推導值改變（report golden generator僅把VOO pace案例的spent改由model月上限推導，state-topup generator僅將reserveDeployment案例的月上限改由model推導並調高overdue），不手改expected；`DecisionPolicyAuthorityTest`的決策／版本斷言更新為D-214／2.62.0。
+ - [ ] 作者以外spec／arch審查與離線authority／generator／Java／package驗收完成後，於台北時間13:15之後雙repo各feature commit／main no-ff merge／push及精確remote讀回，再從已合併SQL登錄；核新hash四欄全文、舊rows不變，乾淨正式main與原設定只build／force-recreate business-services，核運行JAR authority bytes及其他容器保持。安全同步日報SRPP工作區；由SRPP實機跑9090日曆／TWSE／台股報價三GET維護檢查。正式日報採用尚未執行時維持NOT_YET_EXECUTED。
++
++### 今日交易雷達三軌位置與完成K轉折（Task 575，修訂既有需求43／93／117）
++
++**User Story:** 作為使用交易雷達的投資人，我希望系統區分「目前偏弱」與「此時適合賣出」，以各持有期的完成K位置與轉折產生候選，不因長期下跌而在低檔僅憑低分減碼。
++
++- [ ] production V23保留既有23因子分數作參考，取消低分直接SELL；新增純位置／趨勢／轉折policy，SHORT／SWING用完成日K，MEDIUM用完成週K。只有「已建立支撐確認跌破」或「近期高檔後確認轉弱」可產生SELL，低檔本身與KD死叉均不夠；前者是具名風險退出，可優先於低檔保護。此修訂優先於本檔舊動作映射與極端超賣一律擋賣規則，舊baseline／V13離線入口保持歷史行為。
++- [ ] 低檔弱勢只列風險觀察；低檔止穩突破且買方安全helper與後續證據閘門均通過才TRIAL_BUY。高檔強勢不因單純高檔減碼，也不追價；原一般買方還須trend非DOWN與當根位置<80。各軌位置窗口／確認條件／嚴格邊界以本次設計與自足任務完整定義，全部門檻為判斷性初值，未宣稱報酬改善。
++- [ ] 僅用同次Prepared既有完成還原序列，排除live／未完成週，壞列／缺值不跳列補齊、不復活NO_TRADE。原EvidenceGate→SHORT分鐘確認→官方SMA20保守否決完整保留；各軌理由風險分開，candidate與final走同一policy。無新API／DTO／DB／排程／下單路徑，不改SRPP規則包或Swagger。
++- [ ] RULE_VERSION升V23、通知首輪重建不寄信，技術輸入與快取版本維持V22固定契約，V23動作每次由當次完成序列重新判斷。公開profitTakingConfirmed保持舊極端高檔判定語意，不代表新policy觸發或已獲利。舊BacktestService baseline明列V22且不含新policy，V13 productionRuleVersion如實為V23；不得拿歷史baseline成果宣稱V23已回測有效。
+diff --git a/spec/tasks/t575_radar_turning_point_policy.md b/spec/tasks/t575_radar_turning_point_policy.md
+new file mode 100644
+index 00000000..ffcd87fd
+--- /dev/null
++++ b/spec/tasks/t575_radar_turning_point_policy.md
+@@ -0,0 +1,48 @@
++# [t575] 交易雷達依位置與完成K轉折決定三軌候選
++
++**對應 Requirements:** Requirement 43（今日交易雷達）、Requirement 93（三軌持有期）、Requirement 117（證據診斷）
++**前置任務:** 無
++**Liquibase changeset:** 無
++
++## 背景
++
++production現行V22的分數低於40直接成為REDUCE/EXIT，僅極端超賣會覆寫，造成長期跌低或KD小幅回升又出現減碼；獲利了結要求當下仍極端超買，可能在真正轉弱時錯過。使用者授權改成先位置、再轉折、最後動作；本輪不宣稱盈利改善。
++
++## 要做什麼
++
++- [x] 575.1 新增純計算RadarTurningPointPolicy。只作用production共享buildStock的baseline StockResult之後、EvidenceConfidenceResolver及EvidenceGate之前。輸入同一次RadarInputAssembler.Prepared、原StockResult、held與由原StockInput經引擎helper集中算出的regularBuySafe／trialBuySafe（primitive boolean），不讀時鐘、DB、網路、持股成本、不新增API/DTO/schema/分類、不寫資料。保留原23因子分數、counterTrend、timingState、profitTakingConfirmed（仍為舊極端高檔判定，不能拿來代表新policy已觸發）、provenance。三軌action/reasons/risks及horizonConflict依新policy更新。升RULE_VERSION至TW_RULES_V23，既有通知基準升版首輪只重建不寄信。
++- [x] 575.2 完成序列：SHORT/SWING只讀Prepared.dailyContractRowsDesc從firstCompletedIndex起；MEDIUM只讀Prepared.weeklyBarsDesc，排除live與未完成週。轉成內部immutable Bar(date,close,high,low,volume)，必須日期非null且嚴格降序、close/high/low正值且low<=close<=high；任何所需視窗壞列/重日/亂序不跳列補齊，該軌不產生新交易。當下provider overlay或live價格不參與本policy歷史轉折。零成交量不冒充正量。copy不可保留mutable entity參照。
++- [x] 575.3 各軌參數（全部判斷性初值、非經回測校準）：SHORT日K：位置240根、近期高低檔5根、趨勢SMA20及5根前SMA20、確認均線SMA5、支撐回看5根；SWING日K：位置240、近期10、趨勢SMA60及5根前SMA60、確認SMA10、支撐20；MEDIUM完成週K：位置52、近期4、趨勢SMA20及2根前SMA20、確認SMA4、支撐10。每軌只使用其最大所需前綴視窗並驗證，缺足根數/flat range則不可產生新BUY/TRIAL/SELL，舊NO_TRADE不復活，其他動作在缺資料時一律降為持有者HOLD_CAUTION/未持有WAIT，不得因缺值變樂觀。
++- [x] 575.4 位置只描述收盤價在本軌位置視窗的區間，不冒稱既有OHLC的week52Position：P(c)=100*(c-min(close窗口))/(max-min)，低檔P<=20、高檔P>=80，最近N根（含當根）的高低檔以同一決策時點位置窗口作共同參考。trend UP=當根close>SMA且SMA>其offset前SMA；DOWN為兩者均小於；其餘盤整。各軌reasons至少揭露位置百分比、尺度、趨勢；任何低檔/缺值/被擋/退出的警示放risks。
++- [x] 575.5 優先序：NO_TRADE保持；資料不足保守；明確支撐退出；高檔轉弱減碼；低檔止穩試單；原買方通過新限制；其餘觀察/續抱。原score低分直接賣出路徑在production不再有效。新賣出只能由以下兩種具名證據產生，不能因舊SELL或AVOID保留賣出。無新訊號時舊REDUCE/EXIT/AVOID降為HOLD_CAUTION/WAIT。其他原中性動作保持；當根P<=20且未通過575.8（含安全helper否決）時，一律固定HOLD_CAUTION/WAIT，原BUY/ADD也不得保留，不論trend為DOWN或盤整或UP。
++- [x] 575.6 支撐退出（優先且低檔保護不蓋掉）：凍結support=min(low of bars[2..L+1])；該L根中至少兩次low<=support*1.01、且索引相隔>=3，且兩次觸及之間至少一根close>=support*1.03，代表已有支撐反覆測試與反彈，避免緩跌反覆創低冒充支撐。最新兩根close均嚴格<support*.99且最新close<前根close，才是確認跌破。不得把一般連續創低或低分當退出。持有EXIT_CANDIDATE，未持有AVOID；risks明列支撐值、1%緩衝、兩根完成收盤、尺度、即使低檔仍觸發；不稱保證止損或獲利。後續SELL證據閘門不變。
++- [x] 575.7 高檔減碼：最近N根曾P>=80、當根P>20（低檔不追殺）、close0<close1、兩根close各自跌破各自SMA(M)（第0根用0..M-1、第1根用1..M）、且當根high<前根high，才REDUCE_CANDIDATE/AVOID。不要求當下KD仍超買，單純高檔、KD死叉、分數低、負MACD不夠。reasons寫近期高檔與完成K轉弱，risks寫判斷性及非預測；不得聲稱已獲利（未讀成本）。
++- [x] 575.8 低檔止穩試單：最近N根曾P<=20、當根P<80，low0>low1且low1>=low2、close0>max(close1..3)、close0>SMA(M)，及集中買方安全helper通過，才TRIAL_BUY（不直接BUY/ADD、不強求站回MA20/60或年線）。無條件成立只揭露低檔觀察不承諾反彈。TRIAL在RISK_OFF允許，但股票marketStale仍擋、必列小額分批及趨勢可能續跌風險。低檔不是估值便宜，position不可當fair value。
++- [x] 575.9 集中helper在TradingRadarRuleEngine重用既有常數/基本面判定：非NO_TRADE、complete input、非KD過熱、FX分位<90或不適用、ETF溢價<3%或非ETF、完成日漲幅可得且0<=漲幅<8%、季線正乖離<15%（可得時）、無fundamentalDeteriorating、股票非marketStale；一般BUY/ADD另擋RISK_OFF、試單可例外。原買方動作還須trend非DOWN、當根位置<80；原TRIAL也須符合本輪575.8，否則HOLD_CAUTION/WAIT。nullable FX/premium適用/缺值由既有EvidenceGate驗，不以零補值。新trial比舊trial增加FX與追價限制是刻意保守收緊，不宣稱完全複製舊trial。
++- [x] 575.10 EvidenceGate→SHORT intraday gate→OfficialSma20 gate順序及權限不變，任何新候選都不能繞過。新理由只進匹配軌、缺證據訊息只進risks；同一policy共享頁面/compact today/stock/快照/匯出/通知，候選和最終動作不能各用一版；不新增持久化衍生欄位。移除或明確標記與新動作相反的baseline『獲利了結獲得確認／極端超賣不建議出場』動作判決文案，不清空真實風險/技術事實。profitTakingConfirmed公開欄位原語意不變。
++- [x] 575.11 舊BacktestService與V13 candidate校準不採用新production policy，清楚標註歷史baseline結果不代表V23已驗證盈利。新增純policy測試用同一Prepared可重播，逐視窗截斷禁止未來資訊。測試與回測驗證先驗行為一致性，不以合成案例宣稱真實報酬；若無可用真實資料，費用/滑價與out-of-sample收益驗證明記未執行。
++
++- [x] 575.12 BacktestService舊baseline報表ruleVersion固定揭露TW_RULES_V22（新增LEGACY_BASELINE_RULE_VERSION集中常數），notes明說不含V23位置轉折policy；V13Report.productionRuleVersion仍如實為V23，但notes區分baseline樣本為V22，不宣稱V23已回測。FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION維持固定TW_RULES_V22|FUBON_OVERLAY_V1：其公開description是固定值契約，不能視為歷史範例；本輪技術輸入公式與參數未變，freshLocal只重用原有indicators／weekly／weeklyIndicators且原fingerprint／freshness驗證保持。V23 policy每次由當次Prepared重新判斷，不讀快取actions；因此不需失效技術快取，不改金融Swagger或SRPP identity。
++
++## 驗證
++
++新增獨立位置轉折policy單元測試涵蓋三軌低分不直接賣、低檔弱勢、近期高檔離開後轉弱、強勢高檔不賣、反覆支撐確認跌破可低檔退出、一般連續創低不誤退出、低檔止穩trial及每項買方否決、缺值/flat/重日/亂序/壞OHLC/邊界嚴格不等式、日週與live污染隔離、NO_TRADE、只改matching horizon理由。整合測試證明buildStock套policy且EvidenceGate/SHORT分鐘/官方SMA20仍能否決、通知版本首輪不寄信。執行：
++
++```bash
++bash scripts/spec-check.sh
++/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -Dtest='TradingRadar*Test,Radar*Test,BacktestServiceTest,TreasuryYieldServiceTest,FubonRadar*Test' test
++```
++
++驗收需依run-stack核正確來源與main部署設定後，只build/recreate business-services，安全GET核回應與JAR包含V23/新類；Docker存取被拒則記未完成，不宣稱上線、不繞過權限、不merge。依使用者要求，完成後以Claude Opus 5.5、requested effort high審查本次完整規格與實作，修正後複審（最多三輪），保留原始JSON；沒有模型/輸出證據不得宣稱完成。
++
++## 完成報告
++
++離線實作完成，正式交付仍有明確阻礙，未宣稱上線：
++
++- 實作：新增RadarTurningPointPolicy；在TradingRadarService共享組裝點套用、TradingRadarRuleEngine集中買方安全資格，Fubon技術來源與快取身份維持V22固定公開契約，V23動作從當次完成序列重算；BacktestService baseline標示V22並揭露未採用新policy。保留原分數／公開技術欄位及所有後續閘門。
++- 驗證：必需Java測試69 suites／671 tests，0 failure／0 error／0 skipped；含新policy24項、買方安全6項、真實service接線與V22→V23通知首輪不寄信。前端完整172項通過，Vite最終production build通過；JDK25編譯通過。Mockito以標準啟動時javaagent與java.awt.headless=true適應本環境，沒有放寬受測規則或權限。
++- 頁面文字：說明低分不直接賣出、各軌完成K判斷、低檔試單及具名支撐退出，不再宣稱試單必須站上年線或超賣一律禁止退出。驗證時發現既有OpenAPI前端測試仍宣稱金融26／union27；只同步靜態expected到現行金融27／union28並納入既有US路由，兩份YAML及Swagger bytes完全未改。
++- Claude指定審查：CLI登入與參數已確認，請求claude-opus-5-5／high，但首輪回應is_error=true、modelUsage={}，API ENOTFOUND，未取得有效審查。實作前Codex獨立spec審查不替代使用者指定的完工Opus審查；完工後仍須重試並如實記錄。
++- 部署／Git：Docker socket拒絕存取，不能build/recreate或驗收runtime；原repo Git中繼資料禁止寫入，不能在原repo建worktree／提交／合併／推送。依專案規範未達runtime驗收不得merge。所有實作在獨立clone，原共享規格另有D213 session未提交，未覆蓋其內容；本次產出以完整patch及審查材料供後續安全落地。
++- 收益驗證：沒有以真實持倉歷史執行含費用／滑價的out-of-sample收益測試；合成情境只驗證規則，不代表提高報酬或避免所有損失。
++

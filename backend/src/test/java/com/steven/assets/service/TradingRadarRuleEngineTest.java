@@ -605,7 +605,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -1809,10 +1809,12 @@ class TradingRadarRuleEngineTest {
         TradingRadarRuleEngine.MarketRegime regime = TradingRadarRuleEngine.MarketRegime.NEUTRAL;
         boolean stale = false;
         String ma60Bias = "-5";
+        String ma60BiasPercentile = null;
         String ma240Bias = "-18";
         String week52 = "0.60";
         String band = null;
         String etfPremium = null;
+        String fxPercentile = null;
         String osc = "-1";
         String volumeRatio = "1.0";
         TradingRadarRuleEngine.FundamentalInput fundamental =
@@ -1828,7 +1830,7 @@ class TradingRadarRuleEngineTest {
                     held, bd(price), bd(completed), bd(completed),
                     new TradingRadarRuleEngine.Indicators(bd(ma20), bd(ma60), bd(ma240), bd(k), bd(d)),
                     bd(prevK), bd(prevD), c20, c60, c240, type, regime, stale,
-                    null, bd(ma60Bias), null, bd(ma240Bias), bd(week52), bd(band),
+                    bd(fxPercentile), bd(ma60Bias), bd(ma60BiasPercentile), bd(ma240Bias), bd(week52), bd(band),
                     bd(etfPremium), null, null,
                     new TradingRadarRuleEngine.ExtendedIndicators(
                             new BigDecimal("50"), null, null, null, null, null, null, bd(osc),
@@ -1967,10 +1969,322 @@ class TradingRadarRuleEngineTest {
         }).build());
 
         assertEquals(TradingRadarRuleEngine.TimingState.OVERBOUGHT, overbought.timingState());
-        for (var result : List.of(narrow, fundamental, premium, stale, overbought)) {
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, narrow.action(), "窄幅 KD 是 setup 不成立");
+        for (var result : List.of(fundamental, premium, stale, overbought)) {
             assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.action());
             assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.shortAction());
             assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.swingAction());
+            assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, result.action());
+            assertTrue(result.risks().stream().anyMatch(r -> r.contains("買方安全閘門關閉")), result.risks().toString());
+        }
+        assertTrue(fundamental.risks().stream().anyMatch(r -> r.contains("基本面多項惡化")));
+        assertTrue(premium.risks().stream().anyMatch(r -> r.contains("ETF 溢價達昂貴門檻")));
+        assertTrue(stale.risks().stream().anyMatch(r -> r.contains("大盤資料 stale")));
+        assertTrue(overbought.risks().stream().anyMatch(r -> r.contains("KD 過熱")));
+    }
+
+    @Test
+    void v26_bothTrialSetupsShareBuySafetyAcrossHeldStateAndAllHorizons() {
+        for (boolean longTrial : new boolean[]{true, false}) {
+            for (boolean held : new boolean[]{true, false}) {
+                for (String blocker : List.of("kd", "fx", "premium", "chase", "bias", "fundamental", "stale")) {
+                    V23Stock fixture = longTrial
+                            ? new V23Stock().set(s -> {
+                                s.held = held; s.price = "120"; s.completed = "1";
+                                s.ma20 = "125"; s.ma60 = "130"; s.ma240 = "100";
+                                s.k = "15"; s.d = "14"; s.prevK = "12"; s.prevD = "16";
+                                s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+                                s.ma60Bias = "-5"; s.ma240Bias = "20"; s.week52 = "0.70";
+                            })
+                            : reboundStock(held).set(s -> s.week52 = "0.20");
+                    fixture.set(s -> {
+                        switch (blocker) {
+                            case "kd" -> { s.k = "90"; s.d = "85"; }
+                            case "fx" -> s.fxPercentile = "90";
+                            case "premium" -> s.etfPremium = "3";
+                            case "chase" -> s.completed = "8";
+                            case "bias" -> s.ma60Bias = "15";
+                            case "fundamental" -> s.fundamental = new TradingRadarRuleEngine.FundamentalInput(
+                                    true, -0.9, -0.9, null, null, null, false);
+                            case "stale" -> s.stale = true;
+                            default -> throw new IllegalArgumentException(blocker);
+                        }
+                    });
+                    var input = fixture.build();
+                    input = withCompletedKd(input,
+                            longTrial ? "15" : "35", longTrial ? "14" : "30",
+                            longTrial ? "12" : "28", longTrial ? "16" : "31");
+                    var result = engine.evaluateStock(input);
+                    var expected = held ? TradingRadarRuleEngine.Action.HOLD_CAUTION
+                            : TradingRadarRuleEngine.Action.WAIT;
+                    for (var action : actions(result)) {
+                        assertEquals(expected, action,
+                                "longTrial=" + longTrial + ", held=" + held + ", blocker=" + blocker);
+                        assertFalse(isBuyOrTrial(action));
+                        assertFalse(isSell(action));
+                    }
+                    assertTrue(result.risks().stream().anyMatch(r -> r.contains("買方安全閘門關閉")),
+                            "longTrial=" + longTrial + ", held=" + held + ", blocker=" + blocker
+                                    + ", risks=" + result.risks());
+                }
+            }
+        }
+    }
+
+    @Test
+    void v26_productionAndCandidateBuySafetyThresholdsAreInclusiveAtEveryHorizon() {
+        // Each triplet is one representable decimal immediately below, at, and above
+        // the gate.  The completed-day KD snapshot remains the stable long-trial setup;
+        // current KD, FX, premium, day move and bias vary independently.
+        List<List<String>> productionBoundaryTriples = List.of(
+                List.of("84.999999", "85", "85.000001"),
+                List.of("89.999999", "90", "90.000001"),
+                List.of("2.999999", "3", "3.000001"),
+                List.of("7.999999", "8", "8.000001"),
+                List.of("14.999999", "15", "15.000001"));
+        String[] blockerNames = {"KD 過熱", "FX 位於昂貴區", "ETF 溢價達昂貴門檻",
+                "追漲門檻", "正乖離達本次買方門檻"};
+        for (int axis = 0; axis < productionBoundaryTriples.size(); axis++) {
+            final int axisIndex = axis;
+            for (int offset = 0; offset < 3; offset++) {
+                String value = productionBoundaryTriples.get(axis).get(offset);
+                V23Stock fixture = new V23Stock().set(s -> {
+                    s.held = false; s.price = "120"; s.completed = "1";
+                    s.ma20 = "125"; s.ma60 = "130"; s.ma240 = "100";
+                    s.k = "70"; s.d = "70"; s.prevK = "12"; s.prevD = "16";
+                    s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+                    s.ma60Bias = "0"; s.ma240Bias = "20"; s.week52 = "0.70";
+                });
+                fixture.set(s -> {
+                    switch (axisIndex) {
+                        case 0 -> s.k = value;
+                        case 1 -> s.fxPercentile = value;
+                        case 2 -> s.etfPremium = value;
+                        case 3 -> s.completed = value;
+                        case 4 -> s.ma60Bias = value;
+                        default -> throw new IllegalArgumentException("axis=" + axisIndex);
+                    }
+                });
+                var input = withCompletedKd(fixture.build(), "15", "14", "12", "16");
+                var result = engine.evaluateStock(input);
+                // KD retains its V25 strict-overheat rule (>85), while the numeric
+                // buy-side cutoffs for FX/premium/chase/bias are inclusive (>=).
+                boolean blocked = axis == 0 ? offset == 2 : offset > 0;
+                for (var action : actions(result)) {
+                    assertEquals(blocked ? TradingRadarRuleEngine.Action.WAIT
+                                    : TradingRadarRuleEngine.Action.TRIAL_BUY,
+                            action, "production axis=" + blockerNames[axis] + ", value=" + value);
+                }
+                    assertEquals(blocked, result.risks().stream().anyMatch(r -> r.contains(blockerNames[axisIndex])),
+                        "production axis=" + blockerNames[axis] + ", value=" + value
+                                + ", risks=" + result.risks());
+            }
+        }
+
+        for (int offset = 0; offset < 3; offset++) {
+            String dValue = List.of("79.999999", "80", "80.000001").get(offset);
+            var input = withCompletedKd(new V23Stock().set(s -> {
+                s.held = false;
+                s.price = "120"; s.completed = "1";
+                s.ma20 = "125"; s.ma60 = "130"; s.ma240 = "100";
+                s.k = "80"; s.d = dValue; s.prevK = "12"; s.prevD = "16";
+                s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+                s.ma60Bias = "0"; s.ma240Bias = "20"; s.week52 = "0.70";
+            }).build(), "15", "14", "12", "16");
+            var result = engine.evaluateStock(input);
+            var expected = offset == 2 ? TradingRadarRuleEngine.Action.WAIT
+                    : TradingRadarRuleEngine.Action.TRIAL_BUY;
+            for (var action : actions(result)) {
+                assertEquals(expected, action, "KD mean boundary d=" + dValue);
+            }
+            assertEquals(offset == 2, result.risks().stream().anyMatch(r -> r.contains("KD 過熱")));
+        }
+
+    }
+
+    private V23Stock v26TrialFixture(boolean longTrial, boolean held) {
+        return longTrial ? new V23Stock().set(s -> {
+            s.held = held; s.price = "120"; s.completed = "1";
+            s.ma20 = "125"; s.ma60 = "130"; s.ma240 = "100";
+            s.k = "70"; s.d = "65"; s.prevK = "12"; s.prevD = "16";
+            s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.ma60Bias = "0"; s.ma240Bias = "20"; s.week52 = "0.70";
+        }) : reboundStock(held).set(s -> {
+            s.k = "70"; s.d = "65"; s.ma60Bias = "0"; s.week52 = "0.20";
+        });
+    }
+
+    private TradingRadarRuleEngine.StockInput v26CompletedSetup(V23Stock fixture, boolean longTrial) {
+        return withCompletedKd(fixture.build(), longTrial ? "15" : "35", longTrial ? "14" : "30",
+                longTrial ? "12" : "28", longTrial ? "16" : "31");
+    }
+
+    @Test
+    void v26_allTrialNumericBoundariesApplyToBothSetupsAndOwnershipStates() {
+        String[][] boundaries = {{"89.999999", "90", "90.000001"},
+                {"2.999999", "3", "3.000001"},
+                {"7.999999", "8", "8.000001"},
+                {"14.999999", "15", "15.000001"}};
+        for (boolean longTrial : new boolean[]{true, false}) {
+            for (boolean held : new boolean[]{true, false}) {
+                for (int axis = 0; axis < boundaries.length; axis++) {
+                    for (int offset = 0; offset < 3; offset++) {
+                        var fixture = v26TrialFixture(longTrial, held);
+                        String value = boundaries[axis][offset];
+                        switch (axis) {
+                            case 0 -> fixture.fxPercentile = value;
+                            case 1 -> fixture.etfPremium = value;
+                            case 2 -> fixture.completed = value;
+                            case 3 -> fixture.ma60Bias = value;
+                            default -> throw new IllegalArgumentException();
+                        }
+                        var result = engine.evaluateStock(v26CompletedSetup(fixture, longTrial));
+                        var expected = offset == 0 && (longTrial || axis != 3) ? TradingRadarRuleEngine.Action.TRIAL_BUY
+                                : held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+                        for (var action : actions(result)) assertEquals(expected, action,
+                                "setup=" + longTrial + ", held=" + held + ", axis=" + axis + ", value=" + value);
+                        for (var risks : List.of(result.risks(), result.shortRisks(), result.swingRisks())) {
+                            assertEquals(offset > 0, risks.stream().anyMatch(r -> r.contains("買方安全閘門關閉")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void v26_candidateTrialCutoffsRemainTrackScopedAndPreserveScores() {
+        var parameters = RuleParameters.v13BuyGateCandidate("V26_TRIAL_916",
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("9"), new BigDecimal("16"));
+        var context = new TradingRadarRuleEngine.CandidateContext(true, true, BigDecimal.ONE,
+                BigDecimal.ZERO, BigDecimal.ZERO, null, null, new BigDecimal("0.02"));
+        for (boolean longTrial : new boolean[]{true, false}) {
+            for (boolean held : new boolean[]{true, false}) {
+                for (boolean chase : new boolean[]{true, false}) {
+                    String[] values = chase
+                            ? new String[]{"8.999999999999999999", "9", "9.000000000000000001"}
+                            : new String[]{"15.999999999999999999", "16", "16.000000000000000001"};
+                    for (int offset = 0; offset < values.length; offset++) {
+                        var fixture = v26TrialFixture(longTrial, held);
+                        if (chase) fixture.completed = values[offset]; else fixture.ma60Bias = values[offset];
+                        var input = v26CompletedSetup(fixture, longTrial);
+                        var production = engine.evaluateStock(input);
+                        var result = engine.evaluateCandidate(input, parameters, context);
+                        var blocked = held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+                        var expected = offset == 0 && (longTrial || chase) ? TradingRadarRuleEngine.Action.TRIAL_BUY : blocked;
+                        assertEquals(expected, result.action(), "candidate medium " + values[offset]);
+                        assertEquals(expected, result.shortAction(), "candidate short " + values[offset]);
+                        // SWING has no calibrated candidate parameters and must remain production.
+                        assertEquals(blocked, result.swingAction());
+                        assertEquals(production.swingAction(), result.swingAction());
+                        assertEquals(production.score(), result.score());
+                        assertEquals(production.shortScore(), result.shortScore());
+                        assertEquals(production.swingScore(), result.swingScore());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void v26_reboundRetainsItsExistingTwelvePercentTimingVeto() {
+        var parameters = RuleParameters.v13BuyGateCandidate("V26_REBOUND_916",
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new RuleParameters.ActionThresholds(75, 55, 40, 25),
+                new BigDecimal("9"), new BigDecimal("16"));
+        var context = new TradingRadarRuleEngine.CandidateContext(true, true, BigDecimal.ONE,
+                BigDecimal.ZERO, BigDecimal.ZERO, null, null, new BigDecimal("0.02"));
+        for (boolean held : new boolean[]{true, false}) {
+            for (String bias : List.of("11.999999", "12", "12.000001")) {
+                var fixture = v26TrialFixture(false, held);
+                fixture.ma60Bias = bias;
+                var input = v26CompletedSetup(fixture, false);
+                for (var result : List.of(engine.evaluateStock(input), engine.evaluateCandidate(input, parameters, context))) {
+                    boolean blocked = new BigDecimal(bias).compareTo(new BigDecimal("12")) >= 0;
+                    var expected = blocked
+                            ? held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT
+                            : TradingRadarRuleEngine.Action.TRIAL_BUY;
+                    for (var action : actions(result)) assertEquals(expected, action, bias);
+                    for (var risks : List.of(result.risks(), result.shortRisks(), result.swingRisks())) {
+                        assertEquals(blocked, risks.stream().anyMatch(r -> r.contains("跌深反彈既有超買否決")));
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void v26_reboundKeepsLegacyConservativeTimingRoundingWhileSharedPremiumGateIsDecimalExact() {
+        // Existing timingOf uses double and rounds this decimal up to the 3% timing
+        // threshold. Keep that conservative rebound veto; do not change scoring/timing
+        // as part of the shared BigDecimal safety fix. Long-trial eligibility uses the
+        // exact shared cutoff and demonstrates that the shared gate does not round up.
+        for (boolean held : new boolean[]{true, false}) {
+            for (boolean longTrial : new boolean[]{true, false}) {
+                var fixture = v26TrialFixture(longTrial, held);
+                fixture.etfPremium = "2.999999999999999999";
+                var result = engine.evaluateStock(v26CompletedSetup(fixture, longTrial));
+                assertEquals(TradingRadarRuleEngine.TimingState.OVERBOUGHT, result.timingState());
+                var expected = longTrial ? TradingRadarRuleEngine.Action.TRIAL_BUY
+                        : held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+                for (var action : actions(result)) assertEquals(expected, action);
+                for (var risks : List.of(result.risks(), result.shortRisks(), result.swingRisks())) {
+                    assertFalse(risks.stream().anyMatch(r -> r.contains("ETF 溢價達昂貴門檻")));
+                    assertEquals(!longTrial, risks.stream().anyMatch(r -> r.contains("跌深反彈既有超買否決")));
+                }
+            }
+        }
+    }
+
+    @Test
+    void v26_etfPremiumAloneDoesNotAuthorizeLowZoneSell() {
+        var baseInput = new V23Stock().set(s -> s.week52 = "0.20").build();
+        var premiumInput = new V23Stock().set(s -> {
+            s.week52 = "0.20";
+            s.etfPremium = "3";
+        }).build();
+        var base = engine.evaluateStock(baseInput);
+        var premium = engine.evaluateStock(premiumInput);
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, base.action());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, premium.action());
+        assertEquals(base.shortAction(), premium.shortAction());
+        assertEquals(base.swingAction(), premium.swingAction());
+        assertTrue(premium.risks().stream().anyMatch(r -> r.contains("ETF 溢價達昂貴門檻")));
+    }
+
+    @Test
+    void v26_priceBiasStillAllowsLegalHighZoneReduction() {
+        var stock = engine.evaluateStock(new V23Stock().set(s -> {
+            s.week52 = "0.20";
+            s.ma60Bias = "12";
+            s.prevK = "50";
+            s.prevD = "45";
+        }).build());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
+        assertTrue(stock.score() < 40);
+    }
+
+    @Test
+    void v26_extremeOversoldPriorityStillPreventsBiasHighSell() {
+        for (boolean held : new boolean[]{true, false}) {
+            var stock = engine.evaluateStock(new V23Stock().set(s -> {
+                s.held = held;
+                s.week52 = "0.20";
+                s.ma60Bias = "15";
+                s.ma60BiasPercentile = "1";
+                s.k = "15";
+                s.d = "14";
+                s.prevK = "12";
+                s.prevD = "16";
+            }).build());
+            assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD, stock.timingState());
+            var expected = held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+            for (var action : actions(stock)) {
+                assertEquals(expected, action);
+                assertFalse(isSell(action));
+            }
         }
     }
 
@@ -2264,7 +2578,7 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v24_ruleVersion() {
-        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 577／Requirement 202：完成 K 結構確認（TW_RULES_V25）═══════════════════════════
@@ -2529,6 +2843,6 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v25_ruleVersion() {
-        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
     }
 }

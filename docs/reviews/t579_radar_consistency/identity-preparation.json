@@ -1,0 +1,11 @@
+{
+  "report-same-input-golden.json": "only policyBundleSha256 changed; all calculator hashes and outputs identical",
+  "report-long-short-exit-golden.json": "only policyBundleSha256 changed; all calculator hashes and outputs identical",
+  "registration.sql": "only bundle hash changed; existing INSERT-only generator output",
+  "bundle": "f7a62749eab93a9531aa4c0968985defd9863706f920f981a8ed9f2751537a07",
+  "swagger": "30b4920d589b9077cd67510f695a37991a1d848d07ebff73ddb3a61256223418",
+  "manifest_sha256": "07aac13361520906a2abe24dff26cbbb9cda5465016b6b8f6cba310ed29e97fd",
+  "offline_calendar_source": "/Users/steven/Project/SRPP/data/input/交易日曆_2026.json",
+  "offline_calendar_sha256": "72036069d020890bc2560c9ada6eaf7108d641427b195d5f0f0810224eed981a",
+  "checks": "renderer/sync/renderer-check/sync-check/Codex-daily/runtime/authority/state-topup PASS; generated111+15 parity outputs"
+}

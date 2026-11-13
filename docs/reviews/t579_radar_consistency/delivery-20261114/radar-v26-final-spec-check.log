@@ -1,0 +1,14 @@
+════ spec-check ════
+base: main (42bace14)  head: codex/radar-v26-delivery-20261114
+變更檔數: 33（含未追蹤新檔）
+
+PASS: 9090 OpenAPI Markdown mirrors are byte-identical and current
+PASS: 9090 gateway/OpenAPI 二十七條 parity、response manifest、parameters、examples、strict schemas 與 generated docs 完整
+PASS: AI 觀測 OpenAPI Markdown 與來源一致；未寫入任何金融或 SRPP 檔案
+PASS: 金融27+觀測1獨立契約/union28/strict schemas/US雙向identity條件/統一文件發布身份
+PASS: db/schema.sql（去除專案檔頭後）逐位元等於 asset-postgres 此刻的 pg_dump 輸出
+      表數：119 張（檔頭宣告一致）
+
+════ 結果 ════
+BLOCK: 0   CHECK: 0
+→ 機械檢查通過（不代表 spec 正確，仍須跑對抗式審查）。

@@ -1,0 +1,901 @@
+{
+  "backend": {
+    "suiteCount": 96,
+    "totals": {
+      "tests": 876,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "suites": [
+      {
+        "name": "com.steven.assets.client.ExternalRadarIntradayCandleClientTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.client.ExternalTreasuryYieldClientTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.controller.InternalBacktestControllerV13Test",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.controller.TradingRadarBlogControllerTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.controller.TradingRadarControllerCurrentTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.controller.TradingRadarPanelControllerTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.controller.TreasuryYieldControllerSecurityTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.dto.TradingRadarDtoRadarEvidenceTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.dto.TradingRadarOpenApiSchemaContractTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.dto.TradingRadarSnapshotRoundTripTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.repository.JdbcTradingRadarListBatchRepositoryTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.repository.JdbcTreasuryYieldBatchRepositoryTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.BacktestServiceTest",
+        "tests": 39,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.BacktestWeeklyWiringTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.FubonRadarCompatibilityManifestTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.JdbcRadarTechnicalFactRepositoryTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.PublicTradingRadarProjectionServiceTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarBacktestExecutionTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarCompletedStructureTest",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerBollingerTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerLocalSnapshotReuseTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerVolatilityTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerVolumeTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerWeeklyTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarInputAssemblerWindowRegressionTest",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarIntradayCandleAbReplayTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarIntradayCandlePolicyTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarIntradayTechnicalCacheDocumentTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarManualExportDualFormatTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarObservationResolverTest",
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarOfficialSma20DecisionTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarTechnicalResolverFreshnessTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarTechnicalResolverFubonOverlayTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarTechnicalResolverNonTwLocalTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarTechnicalResolverPortIsolationTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RadarWalkForwardPlanTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RedisRadarTechnicalCacheRepositoryRedisIntegrationTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.RedisRadarTechnicalCacheRepositoryTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarAssetProfileResolverTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarBlogSettingsServiceTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarBollingerCalculationTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarCalibrationSelectorTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarCandleComponentsTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarDistributionDisclosureTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarEvidenceConfidenceResolverTest",
+        "tests": 23,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarEvidenceGateTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarExportScheduleServiceTest",
+        "tests": 23,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarExportServiceTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarIndicatorSeriesProvenanceTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarListBatchPreloaderFailSoftTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarLivePremiumRuleIsolationTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketContextServiceTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketFeaturePortTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketFeatureResolverTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketFreshnessTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketInputCrossMarketFlagTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarMarketWeeklyWiringTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarNotificationMarketBatchTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarNotificationServiceTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarNotificationSettingServiceTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarNotificationTransitionTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarPanelServiceTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarPremiumResolverTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarRefreshJobServiceTest",
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarRefreshServiceTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarRuleEngineTest",
+        "tests": 113,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarServiceOwnerScopeTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarSettingsClassificationResolverTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarSnapshotStoreTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarStockWeeklyWiringTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarThreeHorizonEngineTest",
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarThreeHorizonWeightTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarTreasuryRateObservationTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarUsMarketVolumeWiringTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarUsStockEngineTest",
+        "tests": 35,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarV13ActionPolicyTest",
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TradingRadarV13PromotionRegistryTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TreasuryYieldCalendarWiringTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.TreasuryYieldServiceTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.export.TradingRadarDualFormatTest",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.decision.DecisionPolicyAuthorityTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppOptionalRadarTransactionPostgresTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppRadarPolicyCompatibilityTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportBondReservationTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportBuildIdentityTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportExtraCaptureAdapterTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportFingerprintTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportFubonCaptureTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportIncomePayrollCalculatorTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportProducerSchedulerTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportReadServiceTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportRepositoryPostgresTest",
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1,
+        "skippedTests": [
+          {
+            "name": "existingReadOnlyCanonicalMarketFrameFitsActualEscapedWireLimit",
+            "reason": "System property [srpp.report.size-probe] does not exist"
+          }
+        ]
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportReservationCaptureTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest",
+        "tests": 13,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.service.srpp.report.SrppReportStateTopupCalculatorTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      }
+    ]
+  },
+  "bff": {
+    "suiteCount": 13,
+    "totals": {
+      "tests": 151,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "suites": [
+      {
+        "name": "com.steven.assets.bff.config.PublicTradingRadarConfiguredAdminContextTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.config.PublicTradingRadarSecurityTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.config.TradingRadarPanelTenantRelayTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.publicapi.TradingRadarBollingerStrictContractTest",
+        "tests": 29,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.publicapi.TradingRadarIntradayCandleStrictContractTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.publicapi.TradingRadarIntradayTechnicalStrictContractTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.publicapi.TradingRadarOfficialSma20StrictContractTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.PublicTradingRadarControllerTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.PublicTradingRadarExceptionAdviceTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.PublicTradingRadarSelectorTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.TradingRadarIntradayCandlePayloadTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.TradingRadarListDetailRouteTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      },
+      {
+        "name": "com.steven.assets.bff.tradingradar.TradingRadarPanelServiceTest",
+        "tests": 86,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "skippedTests": []
+      }
+    ]
+  }
+}
