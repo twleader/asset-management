@@ -1,0 +1,160 @@
+{
+  "task": "t581",
+  "recordedAtTaipei": "2026-11-14T05:09:45.972284+08:00",
+  "status": "RELEASE_DEPLOYMENT_VERIFIED",
+  "ruleVersion": "TW_RULES_V27",
+  "identity": {
+    "policyBundleSha256": "26848f0b6f62ea7481448be99817f3fc697c47d17d350d7fac06b7be855b5b7c",
+    "swaggerSha256": "106f112f489f13f03ac228e4f1fd6b036225b0daefa3c82be3db57481b631a4b",
+    "manifestFileSha256": "d080fa5c55b186f63b26072aa0439e8d52ae4ec49f0defeb41398724a28d8fac",
+    "modelSha256": "89148de05d594eff541a760cbd60a53752221a9b719089829ee8be06f40da75d"
+  },
+  "codeGit": {
+    "assetFeature": "a57bee5030f709436defd15739c99895125b953a",
+    "assetMainMerge": "cd04d8c03076268f6d5b748816fd1d4af8d8cf82",
+    "srppFeature": "1a6eb2cb8d88eac1014b4020cc63dd4b87748c9f",
+    "srppMainMerge": "95b12035d03143f92e25f4b7b045fd069b3d1eb0",
+    "fourRemoteRefsExactAtCodeRelease": true,
+    "bothMainMergesNoFf": true
+  },
+  "validation": {
+    "specReview": "PASS round1",
+    "functionalReview": "PASS round1",
+    "architectureReview": "PASS round1; critical=0 major=0 minor=0",
+    "reviewedSourceHashPrefix": "981a32697a1f",
+    "backendTests": 898,
+    "backendFailures": 0,
+    "backendErrors": 0,
+    "backendSkipped": 1,
+    "backendSkipReason": "existing opt-in size probe",
+    "bffTests": 151,
+    "bffFailures": 0,
+    "bffErrors": 0,
+    "versionTransitionBaselineEmailCount": 0,
+    "specCheckBlock": 0,
+    "specCheckCheck": 0,
+    "offlinePackage": "PASS"
+  },
+  "registry": {
+    "formulaVersion": "ASSET_MGMT_SRPP_V2",
+    "rowsBefore": 47,
+    "rowsAfter": 48,
+    "historicalRowsPreserved": true,
+    "fourFieldsFullTextExact": true,
+    "insertOnly": true
+  },
+  "runtime": {
+    "businessImage": "sha256:ad5dd487865f7abb14a20c7d6e4b0eacb6a46aa4db2d2fc4c3d7708e6caa8454",
+    "businessContainer": "6cddf927eeee1d3df494c7513d17abd49089d69b814cb496faf9555368638617",
+    "businessHealth": "healthy",
+    "finalImagePinStable": true,
+    "otherContainersUnchanged": 8,
+    "bffRestarted": false,
+    "effectiveConfigKeysEqual": 47,
+    "mountsVerified": 3,
+    "classBytesVerified": 7,
+    "resourcesVerified": 5,
+    "resourceBytesSameAsMergedSource": true,
+    "todayRows": 36,
+    "finalActionConflictMismatches": 0,
+    "strongLabelCount": 1,
+    "analysisUniverseExpanded": false
+  },
+  "naturalPublicMarketExamples": [
+    {
+      "stockCode": "00881",
+      "market": "台股",
+      "price": "44.8000",
+      "mediumAction": "ADD_CANDIDATE",
+      "mediumLabel": "積極分批加碼候選",
+      "shortAction": "HOLD_CAUTION",
+      "swingAction": "HOLD_CAUTION",
+      "horizonConflict": true,
+      "strongLabel": true,
+      "deepDrawdownEvidence": {
+        "market": "台股",
+        "stockCode": "00881",
+        "windowStart": "2025-11-14",
+        "completedAsOfDate": "2026-11-13",
+        "high": "57.9500",
+        "highDate": "2026-06-23",
+        "referencePrice": "44.8000",
+        "drawdownPercentDisplay": "22.7",
+        "threshold": "20",
+        "priceBasis": "TW_SPLIT_STOCK_PRICE",
+        "exactThresholdSatisfied": true
+      }
+    },
+    {
+      "stockCode": "NVDA",
+      "market": "美股",
+      "price": "163.0150",
+      "mediumAction": "HOLD_CAUTION",
+      "mediumLabel": "續抱但提高警戒",
+      "shortAction": "HOLD_CAUTION",
+      "swingAction": "HOLD_CAUTION",
+      "horizonConflict": false,
+      "strongLabel": false,
+      "deepDrawdownEvidence": {
+        "market": "美股",
+        "stockCode": "NVDA",
+        "windowStart": "2025-11-14",
+        "completedAsOfDate": "2026-11-13",
+        "high": "243.3700",
+        "highDate": "2026-10-06",
+        "referencePrice": "163.0150",
+        "drawdownPercentDisplay": "33.0",
+        "threshold": "30",
+        "priceBasis": "STORED_PRICE_ONLY",
+        "exactThresholdSatisfied": true
+      },
+      "retainedBlockers": [
+        "FX_EXPENSIVE",
+        "MARKET_STALE"
+      ]
+    }
+  ],
+  "maintenanceGetChecks": [
+    {
+      "purpose": "calendar",
+      "path": "/api/public/trading-calendar",
+      "httpStatus": 200,
+      "status": "PASS",
+      "rows": 365,
+      "availability": "AVAILABLE"
+    },
+    {
+      "purpose": "index",
+      "path": "/api/public/market-index",
+      "httpStatus": 200,
+      "status": "PASS",
+      "rows": 21
+    },
+    {
+      "purpose": "quotes",
+      "path": "/api/quotes",
+      "httpStatus": 200,
+      "status": "PASS",
+      "rows": 40,
+      "positivePriceRows": 40
+    }
+  ],
+  "exactHashBusinessReadback": {
+    "method": "GET",
+    "path": "/api/public/srpp/us-report-calculations",
+    "checkedAtNewYork": "2026-11-13T16:09:45.972284-05:00",
+    "httpStatus": 409,
+    "errorCode": "OUTSIDE_REPORT_WINDOW",
+    "interpretation": "OUTSIDE_REPORT_WINDOW_DIAGNOSTIC_ONLY",
+    "formalUsReportAdoption": "NOT_YET_EXECUTED",
+    "formalTwReportAdoption": "NOT_YET_EXECUTED",
+    "nextTwTradingDate": "2026-11-16"
+  },
+  "completionOnlyRecord": {
+    "taskSpecificationSemanticsUnchanged": true,
+    "newSpecPassClaimed": false,
+    "executionResourcesChanged": false,
+    "rebuildForThisRecord": false
+  },
+  "noManualProducerReportMailOrTrade": true
+}
