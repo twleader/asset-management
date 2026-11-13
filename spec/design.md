@@ -13667,3 +13667,12 @@ SRPP把`global_equity_build_cadence_d141.VOO`改為2026-11-13至2027-05-31每月
 - `RadarInputAssembler.Assembled` 新增 `completedKd`：`liveAdded=false` 時取 `indicators` 的 k/d/previousK/previousD；`liveAdded=true` 時以排除盤中列的完成日序列（`adjustedRowsDesc` 自 `firstCompleted` 起、同 `indicatorRows` 長度上限）呼叫同一 `TechnicalIndicatorService.computeFromSeries` 求得。快取（cachedIndicators）路徑同樣由完成日序列本地計算，不讀盤中值。
 - `qualifiesForTrialBuy`、`qualifiesForReboundBuy`、`uptrendEndConfirmed`（含其 dead-cross 判定）改讀 `completedKd`；任一欄 null → false。其餘 K/D 使用點不變。
 - `RULE_VERSION`=`TW_RULES_V24`、`DECISION_INPUT_VERSION`=`TW_RULES_V24|FUBON_OVERLAY_V1`；OpenAPI 1.27.2 只改版號字串，經 renderer 與 Task 504 SRPP 身分鏈發布。
+
+### Requirement 202／Task 577：完成 K 結構確認（TW_RULES_V25）
+
+- 新增純函數類 `RadarCompletedStructure`（無時鐘、無 IO、不可變），輸入完成日 K 降序列與「過濾前」完成週 K 降序列，輸出 `TradingRadarRuleEngine.StructureFacts(HorizonStructure shortTerm, HorizonStructure swing, HorizonStructure medium)`；`HorizonStructure(Status status, boolean weakened, boolean stabilized, boolean supportBroken, BigDecimal support, LocalDate asOf, int confirmationPeriod, BigDecimal confirmationSma, String unavailableReason)`，`Status ∈ {AVAILABLE, UNAVAILABLE, NOT_EVALUATED}`。
+- `StockInput` 正典建構式尾端新增 `StructureFacts structure`（第 30 元件）。相容建構式（含 V24 的 29 參數）傳 `StructureFacts.NOT_EVALUATED`：該狀態下結構條件視為**不參與**（維持 V24 行為），僅供既有單元測試；production（`TradingRadarService`）與 `BacktestService` 必須顯式傳入 AVAILABLE／UNAVAILABLE 的實算結果，並以測試釘住。
+- `RadarInputAssembler.Assembled` 新增 `structure`，由 `Prepared.dailyContractRowsDesc` 自 `firstCompletedIndex` 起與過濾前完成週序列計算；`Prepared` 另攜帶上游剔除列的日期診斷（`RadarObservationResolver` 與 `BacktestService` 組裝時記錄），結構視窗日期區間內有剔除列或相鄰 K 間距過大即 UNAVAILABLE。
+- 結構條件使原試單或原賣出受阻時直接回傳 `HOLD_CAUTION`（持有）／`WAIT`（未持有），不再落入後續映射。
+- `actionFor` 新增 `Horizon` 參數（由 `evaluateHorizon` 傳入）；賣出閘門與兩條試單條件依該軌 `HorizonStructure` 加嚴（UNAVAILABLE → 不賣、不試單），`supportBroken` 只加 risks。
+- 版號 V25、OpenAPI 1.27.3，經 renderer 與 SRPP 受控鏈發布。

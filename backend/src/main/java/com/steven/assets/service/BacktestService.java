@@ -715,6 +715,9 @@ public class BacktestService {
         List<StockPriceHistory> rows = raw.stream()
                 .filter(r -> r.getClosePrice() != null && r.getClosePrice().signum() > 0)
                 .toList();
+        // Task 577.4a：只記錄剔除列的交易日（不改上方過濾），供完成 K 結構判定辨識視窗內被剔除的列。
+        Set<LocalDate> droppedDates = droppedCloseDates(raw);
+        boolean droppedUndated = droppedUndatedCloseRow(raw);
         int nonPositive = raw.size() - rows.size();
         if (rows.size() <= WARMUP) {
             return new CodeRun(coverage(code, rows, nonPositive, rows.size(), 0, 0, "EQUITY"),
@@ -788,7 +791,8 @@ public class BacktestService {
             // （241），不得因為 WINDOW 放大成 500 就順手傳 windowDesc.size()。
             RadarInputAssembler.Assembled a = assembler.assemble(
                     windowDesc, events, false,
-                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price);
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price,
+                    droppedDates, droppedUndated);
 
             java.time.Instant decisionInstant = signalInstant(date);
             TradingRadarPremiumResolver.DecisionObservation premiumObservation =
@@ -881,7 +885,25 @@ public class BacktestService {
                 a.dailyCandle(),
                 a.weekly(), a.bollinger(),
                 // Task 576：回測序列本就不含盤中列，完成日 KD 快照由完成日 indicators 推得並顯式傳入。
-                completedKd(a)));
+                completedKd(a),
+                // Task 577：完成 K 結構事實與 production 同一 RadarCompletedStructure.evaluate（經 assembler）。
+                a.structure()));
+    }
+
+    /** 回測過濾剔除（收盤 null 或非正）列的交易日（Task 577.4a）；只記錄、不改過濾。 */
+    private static Set<LocalDate> droppedCloseDates(List<StockPriceHistory> raw) {
+        if (raw == null) return Set.of();
+        return raw.stream()
+                .filter(r -> r != null && r.getTradingDate() != null
+                        && (r.getClosePrice() == null || r.getClosePrice().signum() <= 0))
+                .map(StockPriceHistory::getTradingDate)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** 回測過濾是否剔除過日期為 null 的列（Task 577.4a）。 */
+    private static boolean droppedUndatedCloseRow(List<StockPriceHistory> raw) {
+        return raw != null && raw.stream().anyMatch(r -> r != null && r.getTradingDate() == null
+                && (r.getClosePrice() == null || r.getClosePrice().signum() <= 0));
     }
 
     /** 回測的完成日 KD 快照：序列不含盤中列，直接取完成日 indicators 的四值（Task 576）。 */
@@ -1155,6 +1177,9 @@ public class BacktestService {
         List<StockPriceHistory> rows = raw.stream()
                 .filter(row -> row.getClosePrice() != null && row.getClosePrice().signum() > 0)
                 .toList();
+        // Task 577.4a：同 runOne，只記錄剔除列的交易日。
+        Set<LocalDate> droppedDates = droppedCloseDates(raw);
+        boolean droppedUndated = droppedUndatedCloseRow(raw);
         if (rows.size() <= WARMUP) {
             failures.add(market + "/" + code + ":INSUFFICIENT_WARMUP[rows=" + rows.size() + "]");
             return;
@@ -1261,7 +1286,8 @@ public class BacktestService {
             BigDecimal price = windowDesc.get(0).getClosePrice();
             RadarInputAssembler.Assembled assembled = assembler.assemble(
                     windowDesc, windowEvents, false,
-                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price);
+                    Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price,
+                    droppedDates, droppedUndated);
             TradingRadarRuleEngine.MarketRegime regime = regimes.getOrDefault(
                     signalDate, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
             TradingRadarMarketContextService.FxContext fx = fxSeries == null
@@ -3100,7 +3126,7 @@ public class BacktestService {
                 assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental,
                 // Task 356.13a-2：V13 candidate 回測路徑同樣必須接上日K 棒與週K，否則 promotion
                 // 稽核比較的是「有週K 的 production」與「沒有週K 的回測」，兩者根本不同一組規則。
-                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a));
+                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a), a.structure());
     }
 
     private TradingRadarRuleEngine.CandidateContext v13Context(
