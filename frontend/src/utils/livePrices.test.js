@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { parse, compileScript, compileTemplate } from 'vue/compiler-sfc'
 import { computed, reactive, ref, watch } from 'vue'
 import { createLivePriceStream, createTrailingRefresh, mergeLiveQuote, patchLiveRow } from './livePrices.js'
+import { createDashboardPanelLoader } from './dashboardPanelLoader.js'
 import { marketToday, applyEnrichedQuote, isClosePending } from './displayQuote.js'
 import { normalizeIntradaySession } from './intradaySession.js'
 import { dashboardLiveIdentityMatches, isDashboardLivePriceEligible, isDashboardSnapshotRollover } from './dashboardLivePriceEligibility.js'
@@ -35,15 +36,16 @@ class Timers {
     this.time = target; await flush()
   }
 }
-function fixture({ todayForMarket } = {}) {
+function fixture({ todayForMarket, clock = new Timers(), maxQuotes = 3 } = {}) {
   const sources = [], events = new Set()
   const document = { hidden: false, addEventListener: (_, fn) => events.add(fn), removeEventListener: (_, fn) => events.delete(fn) }
-  const stream = createLivePriceStream({ document, maxQuotes: 3, ...(todayForMarket ? { marketToday: todayForMarket } : {}), connect() {
+  const stream = createLivePriceStream({ document, maxQuotes, setTimer: clock.options.setTimer, clearTimer: clock.options.clearTimer,
+    ...(todayForMarket ? { marketToday: todayForMarket } : {}), connect() {
     const handlers = {}
     const source = { readyState: 0, closeCount: 0, addEventListener: (name, cb) => { handlers[name] = cb }, close() { this.closeCount++; this.readyState = 2 }, open() { this.readyState = 1; this.onopen?.() }, emit(value) { handlers['price-update']({ data: JSON.stringify(value) }) }, fail() { this.readyState = 2; this.onerror?.() } }
     sources.push(source); return source
   } })
-  return { stream, sources, events, hide(hidden) { document.hidden = hidden; for (const fn of events) fn() } }
+  return { stream, sources, events, clock, hide(hidden) { document.hidden = hidden; for (const fn of events) fn() } }
 }
 
 // Parse the real SFC script and execute its actual declarations, rather than a copied handler.
@@ -60,23 +62,127 @@ function page(file, names, globals = {}, extra = '') {
   return context
 }
 
-test('one shared authenticated source, new consumer catchup, reconnect, visibility and final cleanup', () => {
-  const f = fixture(); let a = 0, b = 0, opened = 0, paused = 0
+function dashboardPage(clock, names, globals = {}) {
+  return page('../views/DashboardView.vue', names, {
+    createTrailingRefresh: (read, options) => createTrailingRefresh(read, { ...options, ...clock.options }),
+    setInterval: clock.options.setInterval, clearInterval: clock.options.clearInterval,
+    ...globals
+  }, 'let orderSaveTimer = null, priceStream = null, valuationTimer = null, trendTimer = null, trendResumeSnapshotId = null, statusInFlight = false, statusController = null, rolloverController = null, rolloverAttemptedScope = null;')
+}
+
+test('one shared authenticated source, new consumer catchup, reconnect, visibility and final cleanup', async () => {
+  const f = fixture(); let a = 0, b = 0, opened = 0, paused = 0, latest
   const stopA = f.stream.subscribe({ onQuote: () => a++, onCatchup: () => opened++, onPause: () => paused++ })
   f.sources[0].open()
   const stopB = f.stream.subscribe({ onQuote: () => b++, onCatchup: () => opened++ })
   assert.equal(opened, 2); assert.equal(f.sources.length, 1)
-  f.sources[0].emit(quote()); assert.equal(a, 1); assert.equal(b, 1)
+  f.sources[0].emit(quote()); assert.equal(a, 0); assert.equal(b, 0)
+  await f.clock.tick(499); assert.equal(a, 0); assert.equal(b, 0)
+  f.sources[0].emit(quote({ price: 111, updatedAt: `${today}T10:00:03` }))
+  await f.clock.tick(1); assert.equal(a, 1); assert.equal(b, 1)
+  latest = f.stream.quotes()[0]; assert.equal(latest.price, 111)
   f.sources[0].open(); assert.equal(opened, 4)
   f.hide(true); assert.equal(paused, 1); assert.equal(f.sources[0].closeCount, 1)
   f.hide(false); assert.equal(f.sources.length, 2)
   stopA(); assert.equal(f.sources[1].closeCount, 0)
   stopB(); assert.equal(f.sources[1].closeCount, 1); assert.equal(f.events.size, 0); assert.equal(f.stream.quotes().length, 0)
 })
-test('permanent CLOSED never rebuilds automatically or on visibility/new active consumer', () => {
-  const f = fixture(); const stop = f.stream.subscribe({}); f.sources[0].fail()
+test('permanent CLOSED clears pending timer and never rebuilds automatically or on visibility/new active consumer', async () => {
+  const f = fixture(); let delivered = 0
+  const stop = f.stream.subscribe({ onQuote: () => delivered++ }); f.sources[0].emit(quote()); f.sources[0].fail()
+  await f.clock.tick(500); assert.equal(delivered, 0); assert.equal(f.clock.tasks.size, 0)
   f.hide(true); f.hide(false); const stop2 = f.stream.subscribe({})
   assert.equal(f.sources.length, 1); stop(); stop2()
+})
+test('SSE cache advances immediately while each fixed 500ms window coalesces per symbol without starvation', async () => {
+  const clock = new Timers(), f = fixture({ clock, maxQuotes: 10 }), received = []
+  const stop = f.stream.subscribe({ onQuote: q => received.push({ at: clock.time, quote: q }) })
+  f.sources[0].emit(quote())
+  await clock.tick(200)
+  f.sources[0].emit(quote({ price: 112, updatedAt: `${today}T10:00:03` }))
+  f.sources[0].emit(quote({ market: '台股', stockCode: '2317', price: 90, updatedAt: `${today}T10:00:03` }))
+  assert.equal(f.stream.quotes().find(q => q.stockCode === '2330').price, 112, 'canonical cache updates before listeners')
+  await clock.tick(299); assert.equal(received.length, 0)
+  await clock.tick(1)
+  assert.deepEqual(received.map(x => [x.at, x.quote.stockCode, x.quote.price]), [
+    [500, '2330', 112], [500, '2317', 90]
+  ])
+
+  for (let i = 0; i < 10; i++) {
+    f.sources[0].emit(quote({ price: 120 + i, updatedAt: `${today}T10:00:${String(i + 4).padStart(2, '0')}` }))
+    await clock.tick(100)
+  }
+  assert.deepEqual(received.slice(2).map(x => x.at), [1000, 1500])
+  assert.equal(received.at(-1).quote.price, 129, 'the final tuple in the last window is delivered')
+  stop()
+})
+test('HTTP overlay and newer cache tuple win over an older pending SSE notification', async () => {
+  const clock = new Timers(), f = fixture({ clock }), received = []
+  const stop = f.stream.subscribe({ onQuote: q => received.push(q) })
+  f.sources[0].emit(quote({ price: 110, updatedAt: `${today}T10:00:02` }))
+  const http = quote({ price: 120, updatedAt: `${today}T10:00:04`, source: 'HTTP' })
+  f.stream.overlay(http)
+  f.sources[0].emit(quote({ price: 115, updatedAt: `${today}T10:00:03` }))
+  await clock.tick(500)
+  assert.equal(received.length, 1)
+  assert.equal(received[0].price, 120)
+  assert.equal(received[0].source, 'HTTP')
+  stop()
+})
+test('a reentrant HTTP overlay for a later key is emitted from the latest shared cache tuple', async () => {
+  const clock = new Timers(), f = fixture({ clock }), received = []
+  const newer = quote({ stockCode: '2317', price: 120, updatedAt: `${today}T10:00:05`, source: 'HTTP' })
+  const stop = f.stream.subscribe({ onQuote: q => {
+    received.push([q.stockCode, q.price])
+    if (q.stockCode === '2330') f.stream.overlay(newer)
+  } })
+  f.sources[0].emit(quote({ stockCode: '2330' }))
+  f.sources[0].emit(quote({ stockCode: '2317', price: 90 }))
+  await clock.tick(500)
+  assert.deepEqual(received, [['2330', 110], ['2317', 120]])
+  stop()
+})
+test('cache eviction removes pending keys and a flush never broadcasts an evicted tuple', async () => {
+  const clock = new Timers(), f = fixture({ clock, maxQuotes: 2 }), received = []
+  const stop = f.stream.subscribe({ onQuote: q => received.push(q.stockCode) })
+  for (const stockCode of ['1', '2', '3']) f.sources[0].emit(quote({ stockCode }))
+  assert.deepEqual(f.stream.quotes().map(q => q.stockCode), ['2', '3'])
+  await clock.tick(500)
+  assert.deepEqual(received, ['2', '3'])
+  stop()
+})
+test('flush checks live subscriptions and visibility after each listener callback', async () => {
+  const clock = new Timers(), f = fixture({ clock })
+  let removed = 0, stopB
+  const stopA = f.stream.subscribe({ onQuote: () => stopB() })
+  stopB = f.stream.subscribe({ onQuote: () => removed++ })
+  f.sources[0].emit(quote())
+  await clock.tick(500)
+  assert.equal(removed, 0, 'a callback cannot deliver to a listener it unsubscribed')
+  stopA(); stopB()
+
+  const hiddenClock = new Timers(), hidden = fixture({ clock: hiddenClock })
+  let second = 0
+  const hideA = hidden.stream.subscribe({ onQuote: () => hidden.hide(true) })
+  const hideB = hidden.stream.subscribe({ onQuote: () => second++ })
+  hidden.sources[0].emit(quote())
+  await hiddenClock.tick(500)
+  assert.equal(second, 0, 'a callback that hides the tab stops the current flush')
+  assert.equal(hiddenClock.tasks.size, 0)
+  hideA(); hideB()
+})
+test('hidden visibility clears queued notifications and timer; catchup owns recovery', async () => {
+  const clock = new Timers(), f = fixture({ clock }); let delivered = 0, catchups = 0
+  const stop = f.stream.subscribe({ onQuote: () => delivered++, onCatchup: () => catchups++ })
+  f.sources[0].emit(quote())
+  f.hide(true)
+  assert.equal(clock.tasks.size, 0)
+  await clock.tick(500)
+  assert.equal(delivered, 0)
+  f.hide(false)
+  assert.equal(catchups, 1)
+  assert.equal(delivered, 0)
+  stop()
 })
 test('closed statuses, market dates, identity, finite tuples, out-of-order SSE and HTTP overlay never regress', () => {
   const current = quote()
@@ -300,7 +406,7 @@ test('Dashboard rollover SFC reload is bounded and late metadata cannot jump awa
     isMounted: true, snapshots, selectedSnapshotId, allocationTab: { value: 'category' },
     bffApi: { dashboard: { snapshots: options => { calls.push(options); return gate.promise } } },
     panelLoader: { select: id => { selections.push(id); return Promise.resolve() } }
-  }, 'let rolloverController = null, rolloverAttemptedScope = null, statusController = null, orderSaveTimer = null;')
+  }, 'let rolloverController = null, rolloverAttemptedScope = null, statusController = null, trendResumeSnapshotId = null, orderSaveTimer = null;')
   const first = ctx.refreshLatestSnapshotForRollover(15, '2026-10-30')
   ctx.refreshLatestSnapshotForRollover(15, '2026-10-30')
   assert.equal(calls.length, 1)
@@ -310,6 +416,212 @@ test('Dashboard rollover SFC reload is bounded and late metadata cannot jump awa
   assert.deepEqual(snapshots.value, [original])
   assert.deepEqual(selections, [14])
   assert.equal(calls[0].signal.aborted, true)
+})
+
+test('Dashboard SFC shares quote, catchup and five-second valuation triggers while trend stays independent at sixty seconds', async () => {
+  const clock = new Timers(), streamFixture = fixture({ clock }), firstRead = deferred(), realtimeStarts = [], trendStarts = []
+  const snapshot = { id: 15, snapshotDate: today }, liveAssets = { snapshotId: 15, snapshotDate: today }
+  const panelNames = ['kpis', 'allocation', 'stock-values', 'holdings', 'trend']
+  const panels = Object.fromEntries(panelNames.map((panel, i) => [panel, {
+    data: { data: { snapshot, liveAssets, marketStatus: {} }, history: [] }, generation: i + 1,
+    loading: false, context: panel === 'allocation' ? { tab: 'category' } : {}
+  }]))
+  const livePrices = Object.fromEntries(['kpis', 'allocation', 'stock-values', 'holdings'].map(panel => [panel, { '台股_2330': older() }]))
+  let activeRealtime = 0, maxActiveRealtime = 0
+  const ctx = dashboardPage(clock, [
+    'valuationRefresh', 'trendRefresh', 'startBackgroundTimers', 'pauseBackgroundReads', 'resumeBackgroundReads',
+    'refreshTrend', 'refreshMarketStatus', 'applyLivePrice', 'openPriceStream'
+  ], {
+    isMounted: true, livePriceStream: streamFixture.stream, livePrices, panels,
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, latest: { value: snapshot },
+    livePanelRefreshScope: new Map(), allocationTab: { value: 'category' },
+    panelData: panel => panels[panel]?.data?.data ?? null,
+    panelLoader: {
+      update: () => true,
+      cancel: () => true,
+      run(panel) { if (panel === 'trend') trendStarts.push(clock.time); return Promise.resolve(null) }
+    },
+    bffApi: { dashboard: { realtime() {
+      realtimeStarts.push(clock.time)
+      activeRealtime++; maxActiveRealtime = Math.max(maxActiveRealtime, activeRealtime)
+      const result = realtimeStarts.length === 1 ? firstRead.promise : Promise.resolve({})
+      return result.finally(() => { activeRealtime-- })
+    } } },
+    isDashboardLivePriceEligible: () => true,
+    dashboardLiveIdentityMatches: () => false,
+    isDashboardSnapshotRollover: () => false,
+    refreshLatestSnapshotForRollover: () => assert.fail('no rollover expected')
+  })
+
+  ctx.openPriceStream()
+  streamFixture.sources[0].open()
+  await clock.tick(0)
+  assert.deepEqual(realtimeStarts, [0])
+  assert.deepEqual(trendStarts, [0])
+
+  streamFixture.sources[0].emit(quote({ price: 111, updatedAt: `${today}T10:00:03` }))
+  await clock.tick(500)
+  await clock.tick(4500)
+  assert.deepEqual(realtimeStarts, [0], 'SSE and the five-second tick leave one pending request while busy')
+  assert.deepEqual(trendStarts, [0], 'SSE and valuation do not read trend')
+  firstRead.resolve({})
+  await flush()
+  await clock.tick(0)
+  assert.deepEqual(realtimeStarts, [0, 5000])
+  assert.equal(maxActiveRealtime, 1)
+  await clock.tick(55000)
+  assert.equal(trendStarts.at(-1), 60000, 'the independent trend period fires at sixty seconds')
+  assert.deepEqual(trendStarts, [0, 60000])
+  assert.ok(realtimeStarts.every((at, i) => i === 0 || at - realtimeStarts[i - 1] >= 5000))
+
+  streamFixture.hide(true)
+  assert.equal(clock.intervalCount(), 0, 'hidden cleanup stops both interval timers')
+  assert.equal(clock.tasks.size, 0)
+})
+
+test('Dashboard hidden initial trend read resumes once and a late abort-ignoring response is fenced', async () => {
+  const clock = new Timers(), f = fixture({ clock }), requests = []
+  const loader = createDashboardPanelLoader({
+    panelNames: ['trend'],
+    request(_panel, request) { const d = deferred(); requests.push({ ...d, request }); return d.promise }
+  })
+  const initial = loader.select(15)
+  const snapshot = { id: 15, snapshotDate: today }
+  const ctx = dashboardPage(clock, [
+    'valuationRefresh', 'trendRefresh', 'startBackgroundTimers', 'pauseBackgroundReads', 'resumeBackgroundReads',
+    'refreshTrend', 'refreshMarketStatus', 'applyLivePrice', 'openPriceStream'
+  ], {
+    isMounted: true, livePriceStream: f.stream, livePrices: {}, panels: loader.states, panelLoader: loader,
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, latest: { value: snapshot },
+    bffApi: { dashboard: { realtime: async () => ({}) } },
+    isDashboardSnapshotRollover: () => false,
+    panelData: panel => loader.states[panel]?.data?.data ?? null
+  })
+
+  ctx.openPriceStream()
+  f.hide(true)
+  assert.equal(requests[0].request.signal.aborted, true)
+  assert.equal(loader.states.trend.loading, false)
+  f.hide(false)
+  assert.equal(requests.length, 2, 'visible catchup makes exactly one initial retry for the cancelled read')
+  assert.equal(loader.states.trend.loading, true)
+
+  requests[0].resolve({ data: { snapshot } })
+  await initial
+  assert.equal(loader.states.trend.data, null)
+  assert.equal(loader.states.trend.loading, true)
+  requests[1].resolve({ data: { snapshot, history: [{ id: 'visible' }] } })
+  await flush()
+  assert.equal(loader.states.trend.data.data.history[0].id, 'visible')
+  assert.equal(requests.length, 2)
+  f.hide(true)
+  assert.equal(clock.intervalCount(), 0)
+})
+
+test('Dashboard manual snapshot selection clears a hidden trend resume scope and still loads every panel', async () => {
+  const clock = new Timers(), f = fixture({ clock }), requests = []
+  const loader = createDashboardPanelLoader({
+    panelNames: ['kpis', 'trend'],
+    request(panel, request) { const d = deferred(); requests.push({ panel, ...d, request }); return d.promise }
+  })
+  const initial = loader.select(15)
+  const snapshot = { id: 15, snapshotDate: today }, selectedSnapshotId = { value: 15 }
+  const ctx = dashboardPage(clock, [
+    'valuationRefresh', 'trendRefresh', 'startBackgroundTimers', 'pauseBackgroundReads', 'resumeBackgroundReads',
+    'refreshTrend', 'refreshMarketStatus', 'applyLivePrice', 'openPriceStream', 'onSnapshotChange'
+  ], {
+    isMounted: true, livePriceStream: f.stream, livePrices: {}, panels: loader.states, panelLoader: loader,
+    selectedSnapshotId, snapshots: { value: [snapshot] }, latest: { value: snapshot }, allocationTab: { value: 'category' },
+    bffApi: { dashboard: { realtime: async () => ({}) } },
+    isDashboardSnapshotRollover: () => false,
+    panelData: panel => loader.states[panel]?.data?.data ?? null
+  })
+  ctx.openPriceStream()
+  f.hide(true)
+  assert.equal(requests[1].request.signal.aborted, true)
+  ctx.onSnapshotChange(14)
+  assert.deepEqual(requests.slice(2).map(item => [item.panel, item.request.snapshotId]), [['kpis', 14], ['trend', 14]])
+  f.hide(false)
+  assert.equal(requests.length, 4, 'catchup does not retry the new snapshot a second time')
+
+  requests[3].resolve({ snapshotId: 14, data: { snapshot: { id: 14 } } })
+  requests[2].resolve({ snapshotId: 14, data: { snapshot: { id: 14 } } })
+  await flush()
+  requests[0].resolve({ snapshotId: 15, data: { snapshot } })
+  requests[1].resolve({ snapshotId: 15, data: { snapshot } })
+  await initial
+  assert.equal(loader.states.trend.data.snapshotId, 14, 'the old snapshot response cannot replace the manual selection')
+  f.hide(true)
+})
+
+test('Dashboard ordinary first-trend errors wait for user retry instead of visibility retry', async () => {
+  const clock = new Timers(), f = fixture({ clock }); let calls = 0
+  const loader = createDashboardPanelLoader({ panelNames: ['trend'], request: async () => { calls++; throw new Error('offline') } })
+  await loader.select(15)
+  assert.match(loader.states.trend.error.message, /offline/)
+  const snapshot = { id: 15, snapshotDate: today }
+  const ctx = dashboardPage(clock, [
+    'valuationRefresh', 'trendRefresh', 'startBackgroundTimers', 'pauseBackgroundReads', 'resumeBackgroundReads',
+    'refreshTrend', 'refreshMarketStatus', 'applyLivePrice', 'openPriceStream'
+  ], {
+    isMounted: true, livePriceStream: f.stream, livePrices: {}, panels: loader.states, panelLoader: loader,
+    selectedSnapshotId: { value: 15 }, snapshots: { value: [snapshot] }, latest: { value: snapshot },
+    bffApi: { dashboard: { realtime: async () => ({}) } },
+    isDashboardSnapshotRollover: () => false,
+    panelData: panel => loader.states[panel]?.data?.data ?? null
+  })
+  ctx.openPriceStream(); f.hide(true); f.hide(false)
+  await flush()
+  assert.equal(calls, 1, 'ordinary errors are not retried without user action')
+  f.hide(true)
+})
+
+test('Dashboard realtime rollover skips trend after a recent trend refresh', async () => {
+  const clock = new Timers(), trendReads = [], selects = []
+  const oldSnapshot = { id: 15, snapshotDate: '2026-11-13' }, nextSnapshot = { id: 15, snapshotDate: '2026-11-14' }
+  const liveAssets = { snapshotId: 15, snapshotDate: '2026-11-14' }
+  const panelNames = ['kpis', 'allocation', 'trend', 'deposits', 'stock-values', 'holdings', 'funds']
+  const loader = createDashboardPanelLoader({ panelNames, request(panel, { snapshotId }) {
+    if (panel === 'trend') trendReads.push(clock.time)
+    return { snapshotId, data: { snapshot: oldSnapshot, liveAssets, marketStatus: {} } }
+  } })
+  await loader.select(15)
+  const panelLoader = {
+    states: loader.states,
+    update: loader.update,
+    run: loader.run,
+    cancel: loader.cancel,
+    select(id, contexts, options) { selects.push({ id, contexts, options }); return loader.select(id, contexts, options) }
+  }
+  const snapshots = { value: [oldSnapshot] }
+  const ctx = dashboardPage(clock, [
+    'valuationRefresh', 'trendRefresh', 'startBackgroundTimers', 'pauseBackgroundReads', 'refreshTrend', 'refreshMarketStatus',
+    'refreshLatestSnapshotForRollover'
+  ], {
+    isMounted: true, livePriceStream: { visible: () => true },
+    livePrices: Object.fromEntries(panelNames.filter(panel => panel !== 'trend').map(panel => [panel, {}])),
+    panels: loader.states, panelLoader, selectedSnapshotId: { value: 15 }, snapshots, latest: { value: oldSnapshot },
+    allocationTab: { value: 'category' }, livePanelRefreshScope: new Map(),
+    panelData: panel => loader.states[panel]?.data?.data ?? null,
+    bffApi: { dashboard: { realtime: async () => ({ liveAssets }), snapshots: async () => [nextSnapshot] } },
+    isDashboardSnapshotRollover: snapshot => snapshot?.id === 15 && snapshot.snapshotDate === '2026-11-13'
+      && liveAssets.snapshotId === 15 && liveAssets.snapshotDate === '2026-11-14',
+    dashboardLiveIdentityMatches: () => false
+  })
+  vm.runInContext('trendRefresh.request()', ctx)
+  await clock.tick(0)
+  const trendGeneration = loader.states.trend.generation, trendData = loader.states.trend.data
+  ctx.startBackgroundTimers()
+  await clock.tick(5000)
+  await flush()
+  assert.deepEqual(trendReads, [0, 0], 'only initial and the earlier scheduled trend read ran')
+  assert.equal(selects.length, 1)
+  assert.deepEqual(JSON.parse(JSON.stringify(selects[0].options)), { excludePanels: ['trend'] })
+  assert.equal(loader.states.trend.generation, trendGeneration)
+  assert.strictEqual(loader.states.trend.data, trendData)
+  assert.equal(clock.time, 5000)
+  ctx.pauseBackgroundReads()
+  assert.equal(clock.intervalCount(), 0)
 })
 
 test('Dashboard realtime restores unavailable live projection once and leaves look-through allocation tab untouched', async () => {
@@ -570,7 +882,7 @@ test('Dialog quote detail real handler deduplicates canonical reads and ignores 
 })
 
 test('Dialog real SSE handler replays cache and applies only ordered current-stock tuples independently of late book snapshots', async () => {
-  const streamFixture = fixture(), clock = new Timers(), book = deferred()
+  const clock = new Timers(), streamFixture = fixture({ clock }), book = deferred()
   const releaseFeeder = streamFixture.stream.subscribe({})
   streamFixture.sources[0].open()
   streamFixture.sources[0].emit(quote({ source: 'FUBON_WS_AGGREGATES', updatedAt: `${today}T10:00:02.345176000` }))
@@ -583,9 +895,11 @@ test('Dialog real SSE handler replays cache and applies only ordered current-sto
   assert.equal(d.latestTrade.value.updatedAt, `${today}T10:00:02.345176000`)
 
   streamFixture.sources[0].emit(quote({ updatedAt: `${today}T10:00:03.765034000` }))
+  await clock.tick(500)
   assert.equal(d.latestTrade.value.price, 110, 'same-price event advances its source time without a fabricated price change')
   assert.equal(d.latestTrade.value.updatedAt, `${today}T10:00:03.765034000`)
   streamFixture.sources[0].emit(quote({ price: 120, priceChange: 20, changePercent: 20, updatedAt: `${today}T10:00:04` }))
+  await clock.tick(500)
   assert.equal(d.latestTrade.value.price, 120)
 
   const current = d.latestTrade.value
@@ -602,8 +916,10 @@ test('Dialog real SSE handler replays cache and applies only ordered current-sto
   assert.equal(d.latestTrade.value.price, 121, 'late book completion cannot overwrite the independent SSE tuple')
 
   streamFixture.sources[0].emit(quote({ price: 121, priceChange: null, changePercent: null, updatedAt: `${today}T10:00:06` }))
+  await clock.tick(500)
   assert.equal(d.latestTrade.value.priceChange, null); assert.equal(d.latestTrade.value.changePercent, null, 'explicit null comparison values remain null')
   streamFixture.sources[0].emit(quote({ quoteStatus: 'CLOSE_PENDING', price: 121, priceChange: null, changePercent: null, updatedAt: `${today}T10:00:07` }))
+  await clock.tick(500)
   const closed = d.latestTrade.value
   d.ctx.applyLatestTrade(quote({ price: 130, updatedAt: `${today}T10:00:08` }))
   assert.strictEqual(d.latestTrade.value, closed, 'close-pending fence blocks later LIVE events')
@@ -656,14 +972,14 @@ test('nanosecond source ordering and offset normalization retain exact newest qu
   assert.equal(mergeLiveQuote(current, quote({ updatedAt: `${today}T02:00:02.123455000Z`, price: 1 })), current)
   assert.equal(mergeLiveQuote(current, quote({ updatedAt: `${today}T10:00:02.123457000`, price: 120 })).price, 120)
 })
-test('queued events from disposed/hidden transport cannot enter a new connection', () => {
+test('queued events from disposed/hidden transport cannot enter a new connection', async () => {
   const f = fixture(); let delivered = 0, caught = 0
   const stop = f.stream.subscribe({ onQuote: () => delivered++, onCatchup: () => caught++ })
   f.sources[0].open(); f.hide(true); f.hide(false)
   const before = caught
   f.sources[0].emit(quote()); f.sources[0].open()
   assert.equal(delivered, 0); assert.equal(caught, before)
-  f.sources[1].emit(quote()); assert.equal(delivered, 1); stop()
+  f.sources[1].emit(quote()); await f.clock.tick(500); assert.equal(delivered, 1); stop()
 })
 test('Radar real HTTP pending and verified close preserve unknown comparison without zero', () => {
   const row = { ...older() }

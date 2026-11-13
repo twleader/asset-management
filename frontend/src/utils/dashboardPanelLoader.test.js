@@ -157,6 +157,54 @@ test('A 的晚到成功不會覆寫已完成的 B 或離頁後資料', async () 
   assert.equal(loader.states.allocation.data, null)
 })
 
+test('select 可略過指定 panel 且不改其 generation、資料、context 或 controller', async () => {
+  const calls = []
+  const loader = createDashboardPanelLoader({
+    panelNames: ['kpis', 'trend'],
+    request(panel, { snapshotId, context }) { calls.push({ panel, snapshotId, context }); return { panel, snapshotId, data: {} } }
+  })
+  await loader.select(15)
+  const trend = loader.states.trend
+  const before = { data: trend.data, generation: trend.generation, context: trend.context, controller: trend.controller }
+  await loader.select(15, {}, { excludePanels: ['trend'] })
+  assert.deepEqual(calls.map(call => call.panel), ['kpis', 'trend', 'kpis'])
+  assert.strictEqual(trend.data, before.data)
+  assert.equal(trend.generation, before.generation)
+  assert.strictEqual(trend.context, before.context)
+  assert.strictEqual(trend.controller, before.controller)
+
+  await loader.select(14)
+  assert.deepEqual(calls.slice(-2).map(call => [call.panel, call.snapshotId]), [['kpis', 14], ['trend', 14]],
+    'the default/manual selection still loads every panel')
+})
+
+test('cancel preserves complete panel data and fences a late response that ignores abort', async () => {
+  const pending = []; let requests = 0
+  const loader = createDashboardPanelLoader({
+    panelNames: ['trend'],
+    request(_panel, request) {
+      if (requests++ === 0) return { history: ['complete'] }
+      const d = deferred(); pending.push({ ...d, request }); return d.promise
+    }
+  })
+  await loader.select(15)
+  const state = loader.states.trend, previous = state.data
+  const late = loader.run('trend', { preserve: true })
+  const request = pending[0].request, generation = state.generation
+  assert.equal(state.loading, true)
+  assert.equal(loader.cancel('trend'), true)
+  assert.equal(request.signal.aborted, true)
+  assert.equal(state.generation, generation + 1)
+  assert.equal(state.loading, false)
+  assert.strictEqual(state.data, previous)
+
+  pending[0].resolve({ history: ['late'] })
+  await late
+  assert.strictEqual(state.data, previous)
+  assert.equal(state.loading, false)
+  assert.equal(state.error, null)
+})
+
 test('所有 Dashboard ECharts option 都關閉初次與更新動畫', async () => {
   const source = await readFile(new URL('../views/DashboardView.vue', import.meta.url), 'utf8')
   for (const option of ['pieOption', 'assetClassPieOption', 'twStockPieOption', 'usStockPieOption', 'trendOption', 'bankOption', 'fundBarOption', 'stockBarOption']) {

@@ -13676,3 +13676,14 @@ SRPP把`global_equity_build_cadence_d141.VOO`改為2026-11-13至2027-05-31每月
 - 結構條件使原試單或原賣出受阻時直接回傳 `HOLD_CAUTION`（持有）／`WAIT`（未持有），不再落入後續映射。
 - `actionFor` 新增 `Horizon` 參數（由 `evaluateHorizon` 傳入）；賣出閘門與兩條試單條件依該軌 `HorizonStructure` 加嚴（UNAVAILABLE → 不賣、不試單），`supportBroken` 只加 risks。
 - 版號 V25、OpenAPI 1.27.3，經 renderer 與 SRPP 受控鏈發布。
+
+
+### Task 578：共用行情通知合併與 Dashboard 刷新節奏
+
+延伸 Requirement 197；transport 仍為單一登入 SSE。`createLivePriceStream` 收到事件後立即以原 `mergeLiveQuote` 驗證／比較並更新 latest cache；pending 只保存 market＋stockCode key，與 cache 同樣受 maxQuotes（預設 1000）限制。第一個待送事件設 500ms timer，窗口內不延後 timer；flush 取目前 canonical cache tuple，逐標的通知目前仍訂閱的 listener，clear pending 後連續新事件再開窗口。HTTP overlay 仍立即合併 cache，因此 flush 不重播過期 tuple；cache eviction 同時移除對應 pending。隱藏、永久 CLOSED 或零訂閱時清 timer/pending；原 onPause/onCatchup、來源 reference fence、奈秒 comparator 與 close fence 保留。timer 可注入以固定時鐘測試。
+
+Dashboard 所有自動估值觸發（匹配 SSE、onCatchup、5 秒週期）一律進同一 `createTrailingRefresh`，interval=5000，單一 in-flight 與有界 pending，不讓週期直接繞過節流呼叫 realtime。資料依舊只由 `/api/bff/dashboard/realtime` 回應，snapshot identity、panel generations、metadata rollover 與市場日期 eligibility 保留 main 的身份／日期守門；同 ID rollover 的 panelLoader.select 使用可選 excludePanels=['trend']，預設仍全載，用以只重載快照相關 panels，trend 資料／generation 不動且不 request 其 scheduler；不自行計算估值。初始 panel、手動重試及快照選擇維持原流程。
+
+Trend 自初始 panel 載入後，另用 interval=60000 的 trailing refresh 和 60 秒 timer；onCatchup 可請求一次，不與估值或 onQuote 相連。背景 read 只在該 panel 已有完整資料且未 loading 時用 `panelLoader.run('trend', {preserve:true})`，等待完成後才允許下一筆，失敗保留資料。隱藏／卸載清兩組週期與 pending，估值 AbortController 取消；趨勢經 panel loader 的取消入口同時遞增 generation、abort controller、清 loading，阻止不理 abort 的 late response 提交。換快照沿原 select generation fence，不新增 API/BFF 或服務變更。
+
+Task 578 取消補載：若隱藏時 trend 正在首屏／換快照讀取、data=null，取消前記錄一次 resume 旗標；恢復可見若仍無 data 且未 loading，直接補載一次首屏（不受背景60秒限制），再清旗標。一般error不設此旗標、不自動無限重試；已有資料時僅走背景scheduler。測試需涵蓋初始／換快照途中隱藏、resume後舊請求晚回，以及trend剛讀5秒後realtime發現同ID跨日仍不讀trend。

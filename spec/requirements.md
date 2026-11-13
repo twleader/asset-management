@@ -6835,3 +6835,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] **線上與回測一致：** 結構判定為純函數，由 `RadarInputAssembler` 與 `BacktestService` 以同一實作、同一輸入定義求值後傳入引擎；production 與回測都必須以正典建構式顯式傳入，相容建構式（單元測試用）的語意需明載並以測試釘住 production 不走相容路徑。
 - [ ] **版本與契約：** `RULE_VERSION`=`TW_RULES_V25`、`DECISION_INPUT_VERSION`=`TW_RULES_V25|FUBON_OVERLAY_V1`；OpenAPI 只改版號字串、`info.version` 1.27.2 → 1.27.3；重產 Swagger 鏡像並依 Task 504 受控鏈與 SRPP 一併發布（`/srpp-policy-release`）。通知升版只重建 baseline。不新增 API／DB／排程／券商 I/O，只呈現建議、不下單。
 - [ ] **誠實揭露：** 結構門檻為判斷性初值、未經回測校準；這些條件彼此高度相關，不是多份獨立證據；只會讓試單與減碼更少、更晚，不宣稱提升獲利。另一 session 的 `claude/radar-v23-t575` 分支不合併，由本需求取代。
+
+
+### Task 578：SSE 前端合併更新與儀表板刷新分離（Requirement 197 修訂）
+
+**User Story：** 作為長時間開啟儀表板的使用者，我要連續行情不造成每筆重繪或重讀整張趨勢圖，同時保留最後一筆合法報價與最新估值。
+
+**Acceptance Criteria：**
+
+- [ ] 共用 SSE 每筆先通過既有日期／身分／狀態／奈秒時序守門並立即更新有界 cache；對訂閱者的 onQuote 通知改為每個固定 500ms 窗口依 market＋stockCode 合併，同標的一個窗口最多通知一次，以當時 cache 中最新合法完整 tuple 通知。不同標的各自保留；連續事件不可讓 flush 飢餓；HTTP overlay 較新資料不可被窗口內舊事件蓋回。未結束的最後窗口仍須送出。
+- [ ] 暫停可見性／永久 CLOSED／最後訂閱者離開時清除 pending 與 timer；取消訂閱者不接收遲到通知，重新可見以既有 pure-read catchup 回補。cache 與 pending 均受既有最多 1000 標的限制，不新增 EventSource、request-time provider I/O 或後端／Redis／DB 寫入。
+- [ ] 儀表板初始 panel 載入之外，估值由既有 dashboard realtime BFF 讀取；可見時每 5 秒排程，SSE、重連及週期觸發共用同一個排程器，兩次背景讀取開始至少相距 5000ms、同時最多一筆、忙碌時只保留一次 pending；失敗保留前次完整資料，隱藏／離頁取消排程並 abort 估值請求。初始載入、使用者明確重試／換快照不受背景節流限制。
+- [ ] 趨勢圖首屏仍由獨立 panel 載入；背景刷新改由獨立 60 秒週期及可見性恢復／重連的有界 catchup，透過既有 dashboard trend BFF 完整替換，兩次背景趨勢讀取開始至少相距 60000ms、不得重疊。SSE 報價與 5 秒估值函式不得呼叫趨勢讀取。趨勢失敗保留完整舊圖；隱藏／離頁停止趨勢排程，進行中的趨勢讀取取消且晚回應不得提交；換快照仍由原 panel generation 保護。若首屏／換快照的 trend 因隱藏而取消且尚無 data，記錄僅限該次取消的 resume 旗標，恢復可見時補載一次首屏（不受 60 秒背景節流）；一般首屏失敗仍由使用者重試，不得無限重試。
+- [ ] 完整保留 main 的跨日修正：最新 snapshot/liveAssets 身分與日期相符、台北今日或市場當地今日、夏／冬令跨日、同 ID 日期推進的 bounded metadata/panel 重讀（只重載快照相關 panels，略過 trend 且不改其 generation／資料；不觸發 trend scheduler）、官方收盤／歷史／future／HTTP 晚回應保護。不改金融計算、策略、五檔、公開 API／Swagger、broker、資料 schema。固定時鐘測試需驗合併、尾端、cache 界限、取消、5 秒估值、60 秒獨立趨勢與原跨日回歸；部署只重建 frontend，非交易時不注入正式行情，實際盤中全鏈驗收未執行時如實標示。

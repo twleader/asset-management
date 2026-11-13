@@ -75,10 +75,11 @@ export function createDashboardPanelLoader({ panelNames, request, stateFactory =
     }
   }
 
-  function select(nextSnapshotId, contexts = {}) {
+  function select(nextSnapshotId, contexts = {}, { excludePanels = [] } = {}) {
     const changed = snapshotId !== nextSnapshotId
     snapshotId = nextSnapshotId
-    return Promise.allSettled(panelNames.map(panel => run(panel, {
+    const excluded = new Set(excludePanels)
+    return Promise.allSettled(panelNames.filter(panel => !excluded.has(panel)).map(panel => run(panel, {
       context: contexts[panel] ?? {},
       // 同一快照的背景更新維持已完成的圖；切換快照則先清空。
       preserve: !changed
@@ -88,6 +89,17 @@ export function createDashboardPanelLoader({ panelNames, request, stateFactory =
   function retry(panel) {
     const state = states[panel]
     return state ? run(panel, { context: state.context, preserve: state.data != null }) : Promise.resolve(null)
+  }
+
+  // Cancel one panel without discarding its last complete payload. Advancing
+  // generation before abort also fences requests that ignore AbortSignal.
+  function cancel(panel) {
+    const state = states[panel]
+    if (!state || disposed) return false
+    state.generation += 1
+    abort(state)
+    state.loading = false
+    return true
   }
 
   // 背景輪詢只能更新開始輪詢時已完成、且之後未被切換或重試的面板。
@@ -112,6 +124,7 @@ export function createDashboardPanelLoader({ panelNames, request, stateFactory =
     select,
     run,
     retry,
+    cancel,
     update,
     dispose,
     get snapshotId() { return snapshotId }

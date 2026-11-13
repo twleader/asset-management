@@ -497,8 +497,11 @@ const marketStatusAvailable = computed(() =>
 const latest = computed(() => snapshots.value.find(s => s.id === selectedSnapshotId.value) ?? null)
 
 let priceStream = null
-let statusTimer = null
-const valuationRefresh = createTrailingRefresh(refreshMarketStatus, { interval: 1000 })
+let valuationTimer = null
+let trendTimer = null
+let trendResumeSnapshotId = null
+const valuationRefresh = createTrailingRefresh(refreshMarketStatus, { interval: 5000 })
+const trendRefresh = createTrailingRefresh(refreshTrend, { interval: 60000 })
 let statusInFlight = false
 let isMounted = false
 let metadataController = null
@@ -526,7 +529,7 @@ async function loadSnapshots() {
       // 每個 panel 在自己的 request 完成時立即提交，不等待其它 panel。
       panelLoader.select(id, { allocation: { tab: allocationTab.value } })
       if (!priceStream) openPriceStream()
-      if (!statusTimer && livePriceStream.visible()) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
+      startBackgroundTimers()
     }
   } catch (error) {
     if (isMounted && metadataController === controller && !controller.signal.aborted) metadataError.value = error
@@ -551,7 +554,9 @@ onUnmounted(() => {
   rolloverController?.abort()
   if (priceStream) { priceStream(); priceStream = null }
   valuationRefresh.dispose()
-  if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+  trendRefresh.dispose()
+  if (valuationTimer) { clearInterval(valuationTimer); valuationTimer = null }
+  if (trendTimer) { clearInterval(trendTimer); trendTimer = null }
   if (orderSaveTimer) { clearTimeout(orderSaveTimer); orderSaveTimer = null }
   if (stockSortable) { stockSortable.destroy(); stockSortable = null }
 })
@@ -578,6 +583,46 @@ function applyLivePrice(p) {
   if (matched) valuationRefresh.request()
 }
 
+function startBackgroundTimers() {
+  if (!isMounted || !livePriceStream.visible()) return
+  if (!valuationTimer) valuationTimer = setInterval(() => valuationRefresh.request(), 5000)
+  if (!trendTimer) trendTimer = setInterval(() => trendRefresh.request(), 60000)
+}
+
+function pauseBackgroundReads() {
+  valuationRefresh.cancel()
+  trendRefresh.cancel()
+  statusController?.abort()
+  if (valuationTimer) { clearInterval(valuationTimer); valuationTimer = null }
+  if (trendTimer) { clearInterval(trendTimer); trendTimer = null }
+
+  const trend = panels.trend
+  if (trend.loading && trend.data == null) trendResumeSnapshotId = selectedSnapshotId.value
+  panelLoader.cancel('trend')
+}
+
+function resumeBackgroundReads() {
+  startBackgroundTimers()
+  valuationRefresh.request()
+
+  const trend = panels.trend
+  const resumeInitial = trendResumeSnapshotId != null && trendResumeSnapshotId === selectedSnapshotId.value
+  trendResumeSnapshotId = null
+  if (resumeInitial && trend.data == null && !trend.loading) {
+    // This is the one initial-load recovery for a read cancelled by hiding.
+    // Ordinary panel errors never set the resume scope and remain user-retried.
+    panelLoader.run('trend', { context: trend.context ?? {}, preserve: false })
+  } else if (trend.data != null && !trend.loading) {
+    trendRefresh.request()
+  }
+}
+
+function refreshTrend() {
+  const trend = panels.trend
+  if (!isMounted || !livePriceStream.visible() || trend.data == null || trend.loading) return null
+  return panelLoader.run('trend', { context: trend.context ?? {}, preserve: true })
+}
+
 function refreshPanelForLive(panel, snapshotId, liveDate) {
   if (!isMounted || snapshotId == null || !liveDate || snapshotId !== selectedSnapshotId.value
       || snapshotId !== snapshots.value[0]?.id) return
@@ -601,7 +646,7 @@ function refreshLatestSnapshotForRollover(snapshotId, liveDate) {
         || snapshots.value[0]?.id !== snapshotId || metadata?.[0]?.id !== snapshotId) return null
     snapshots.value = metadata ?? []
     // Re-fetch the full panel payloads; never mutate a stale snapshot's date locally.
-    return panelLoader.select(snapshotId, { allocation: { tab: allocationTab.value } })
+    return panelLoader.select(snapshotId, { allocation: { tab: allocationTab.value } }, { excludePanels: ['trend'] })
   }).catch(() => null).finally(() => {
     if (rolloverController === controller) rolloverController = null
   })
@@ -610,14 +655,8 @@ function openPriceStream() {
   priceStream?.()
   priceStream = livePriceStream.subscribe({
     onQuote: applyLivePrice,
-    onCatchup: () => {
-      valuationRefresh.request()
-      if (!statusTimer) statusTimer = setInterval(refreshMarketStatus, 60 * 1000)
-    },
-    onPause: () => {
-      valuationRefresh.cancel(); statusController?.abort()
-      if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
-    }
+    onCatchup: resumeBackgroundReads,
+    onPause: pauseBackgroundReads
   })
 }
 
@@ -629,8 +668,6 @@ async function refreshMarketStatus() {
   const selectedId = selectedSnapshotId.value
   const latestId = snapshots.value[0]?.id
   const generations = Object.fromEntries(Object.keys(livePrices).map(panel => [panel, panels[panel].generation]))
-  // 趨勢圖的即時估值也由自己的 BFF 完整更新；失敗保留上一份完整圖。
-  if (panels.trend.data && !panels.trend.loading) panelLoader.run('trend', { preserve: true })
   try {
     const data = await bffApi.dashboard.realtime({ signal: controller.signal })
     if (!isMounted || !livePriceStream.visible() || controller.signal.aborted || selectedSnapshotId.value !== selectedId) return
@@ -689,6 +726,9 @@ async function refreshMarketStatus() {
 
 function onSnapshotChange(id) {
   if (id == null) return
+  // A hidden-tab cancellation is scoped to the snapshot whose initial read was
+  // interrupted. An explicit user selection starts its own full panel load.
+  trendResumeSnapshotId = null
   statusController?.abort()
   rolloverController?.abort()
   rolloverController = null
