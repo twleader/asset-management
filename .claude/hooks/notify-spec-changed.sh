@@ -80,8 +80,9 @@ cat >&2 <<'EOF'
 
     /spec-review
 
-流程：scripts/spec-check.sh 取機械證據 → 派唯讀 spec-auditor 查證
-      → 修完 critical／major → bash .claude/hooks/spec-review-pass.sh 記錄通過
+流程：scripts/spec-check.sh 取機械證據 → scripts/codex-review.sh spec 交 Codex 唯讀查證
+      → Claude 每輪修完 critical／major → Codex 複審（最多審三輪，第 3 輪的問題也修完）
+      → bash .claude/hooks/spec-review-pass.sh 記錄通過
 
 在記錄通過之前，對 backend/** ／ bff/** ／ external-materials-service/** ／
 frontend/src/views/*.vue ／ frontend/src/router/** ／ db/changelog/** 的寫入

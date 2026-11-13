@@ -16,7 +16,7 @@
 #
 # 為什麼 hook 不直接叫 arch-auditor：hook 是 shell 指令，叫不到 Agent tool。
 # 唯一的替代是在這裡跑 headless `claude -p`，但那會讓每次存檔都同步卡住數分鐘，
-# 不可接受。故改為提示模型自己派 subagent。（與 notify-spec-changed 同樣的取捨。）
+# 不可接受。故改為提示模型自己以 scripts/codex-review.sh 交 Codex 審查。（與 notify-spec-changed 同樣的取捨。）
 #
 # 每個「實作碼變髒」的週期只提示一次（避免連改十個檔就被唸十次）；
 # 由 arch-review-pass.sh 記錄查證完成時清除，下一輪再變髒才會重新提示。
@@ -97,7 +97,11 @@ printf '%s\n' "$current" > "$NOTIFIED"
 cat >&2 <<'EOF'
 ◆ 實作程式碼已變更，commit 前請跑架構符規查證
 
-    用 Agent tool 派 subagent_type: arch-auditor（唯讀，不會改你的檔案）
+    交 Codex 審查（gpt-6.1-sol／high，唯讀；判準 .claude/agents/arch-auditor.md）：
+    bash scripts/codex-review.sh arch <材料檔> <輪次> <scratchpad> [前一輪處理紀錄]
+    （不要再用 Agent tool 派 arch-auditor subagent——為節省 Claude 用量）
+
+有 critical／major → Claude 每輪都修完再交 Codex 複審；最多審三輪，第 3 輪的問題也修完即結束。
 
 它是 diff-scoped 的——**必須**把本次變更的完整 diff 餵給它，否則它會退化成
 全樹掃描，把既有技術債整包倒出來（main 上光 controller 直接注入 Repository
@@ -108,9 +112,9 @@ cat >&2 <<'EOF'
     git diff -- .                     # 未 commit 的
     git ls-files --others --exclude-standard    # 未追蹤新檔（diff 看不到）
 
-一併告訴它「這次想達成什麼」，讓它能區分「違反架構」與「這版還沒寫完」。
+以上全部寫進材料檔，並一併說明「這次想達成什麼」，讓它能區分「違反架構」與「這版還沒寫完」。
 
-查證完、critical／major 修完後記錄：
+Codex 給 VERDICT: PASS、或第 3 輪問題修完後記錄：
 
     bash .claude/hooks/arch-review-pass.sh
 
