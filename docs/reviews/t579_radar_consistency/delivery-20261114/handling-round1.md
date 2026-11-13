@@ -1,0 +1,1 @@
+Major1：正式worktree只含spec，新spec-check BLOCK0 CHECK0，先前BLOCK來自未審試作。Task579.5已明訂同步Ruby兩處斷言及錯誤訊息並核renderer，將於實作後驗零BLOCK。Major2：Task579驗證段已改依Task504/542離線驗收→雙repo落地remote→registry→乾淨main部署→runtime驗收。補明完成日止跌/收紅屬形態，長線>=0反彈>0不放寬。

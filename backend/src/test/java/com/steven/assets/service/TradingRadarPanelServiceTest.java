@@ -44,7 +44,7 @@ class TradingRadarPanelServiceTest {
         });
         assertThat(tw.data().skippedNonTwStocks()).isEqualTo(1);
         assertThat(us.data().skippedNonTwStocks()).isEqualTo(1);
-        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V25");
+        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V26");
         assertThat(tw.generatedAt()).isEqualTo("2026-09-23T16:00+08:00");
         assertThat(tw.actionPolicyVersion()).isEqualTo(baseline.actionPolicyVersion());
     }

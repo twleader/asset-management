@@ -13687,3 +13687,12 @@ Dashboard 所有自動估值觸發（匹配 SSE、onCatchup、5 秒週期）一�
 Trend 自初始 panel 載入後，另用 interval=60000 的 trailing refresh 和 60 秒 timer；onCatchup 可請求一次，不與估值或 onQuote 相連。背景 read 只在該 panel 已有完整資料且未 loading 時用 `panelLoader.run('trend', {preserve:true})`，等待完成後才允許下一筆，失敗保留資料。隱藏／卸載清兩組週期與 pending，估值 AbortController 取消；趨勢經 panel loader 的取消入口同時遞增 generation、abort controller、清 loading，阻止不理 abort 的 late response 提交。換快照沿原 select generation fence，不新增 API/BFF 或服務變更。
 
 Task 578 取消補載：若隱藏時 trend 正在首屏／換快照讀取、data=null，取消前記錄一次 resume 旗標；恢復可見若仍無 data 且未 loading，直接補載一次首屏（不受背景60秒限制），再清旗標。一般error不設此旗標、不自動無限重試；已有資料時僅走背景scheduler。測試需涵蓋初始／換快照途中隱藏、resume後舊請求晚回，以及trend剛讀5秒後realtime發現同ID跨日仍不讀trend。
+
+
+### Task 579／Requirement 203：V26 共用買方安全與價格高檔
+
+`TradingRadarRuleEngine.actionFor` 在試單優先分支前求得共用買方安全判定，輸入沿用 StockInput、該軌 TimingState 與既有 production/candidate 追漲、正乖離門檻。共用判定排除 KD 過熱、FX 昂貴、ETF 溢價過高、完成日缺值／下跌／追漲、超買與基本面惡化；兩種試單資格成立但安全受阻時立即回 HOLD_CAUTION/WAIT，將具名阻擋原因寫入當軌 risks。一般 buyGate 在共用安全外仍要求市場非 RISK_OFF 且新鮮、MA20/60 ABOVE；試單原 RISK_OFF／均線例外維持，stale 仍拒絕。
+
+highZone 不從混合原因 TimingState.OVERBOUGHT 推斷高價，改直接讀價格位置（week52>=0.75）、KD 過熱、ma60Bias>=BIAS_HIGH。故相同價格事實只改 ETF 溢價不會放行賣出；timingOf 顯示本身不變。完成日 5% 計分提醒標示「已反映於分數」，不與現行 8% production 買方硬閘門混淆。
+
+V26 是動作契約修正，不更改得分、StockInput、DTO 欄位、資料來源、路由、DB、排程或自動交易邊界。公開版本範例隨 V26 升 OpenAPI 1.27.4；Swagger 身分變動須依既有 Task504 發布鏈更新 SRPP 消費端 metadata／bundle hash、authority 與 insert-only registry 後，才可部署；未完成不得宣稱上線。保留高分續抱與 V25 完成 K 結構策略。舊 radar-v23-t575 有用的完成 K 判斷已由 V25 吸收，本輪只採其共用買方安全思路，不合併其舊資料接線或低檔破位出場。

@@ -1,0 +1,8 @@
+{
+  "staged_sha256": "c53b58e875baaa86236924212d4194dc9576fc72cfe21e8d854c15d5aff0db45",
+  "unstaged_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "status": "M  backend/src/main/java/com/steven/assets/service/BacktestService.java\nA  backend/src/main/java/com/steven/assets/service/RadarTurningPointPolicy.java\nM  backend/src/main/java/com/steven/assets/service/TradingRadarRuleEngine.java\nM  backend/src/main/java/com/steven/assets/service/TradingRadarService.java\nM  backend/src/test/java/com/steven/assets/service/BacktestServiceTest.java\nA  backend/src/test/java/com/steven/assets/service/RadarTurningPointBuySafetyTest.java\nA  backend/src/test/java/com/steven/assets/service/RadarTurningPointPolicyTest.java\nM  backend/src/test/java/com/steven/assets/service/TradingRadarNotificationServiceTest.java\nM  backend/src/test/java/com/steven/assets/service/TradingRadarPanelServiceTest.java\nM  backend/src/test/java/com/steven/assets/service/TradingRadarRuleEngineTest.java\nM  backend/src/test/java/com/steven/assets/service/TradingRadarStockWeeklyWiringTest.java\nM  backend/src/test/java/com/steven/assets/service/TradingRadarUsStockEngineTest.java\nM  backend/src/test/java/com/steven/assets/service/TreasuryYieldServiceTest.java\nM  frontend/src/utils/openApiContract.test.js\nM  frontend/src/views/TradingRadarView.vue\nM  spec/design.md\nM  spec/requirements.md\nA  spec/tasks/t575_radar_turning_point_policy.md\n",
+  "head": "33deca49bed25f706d4bdf9e30c41595d2a60bb7",
+  "unmerged_commits": "",
+  "untracked": ""
+}

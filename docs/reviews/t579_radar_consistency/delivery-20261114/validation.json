@@ -1,0 +1,58 @@
+{
+  "jdk": "openjdk version \"25.0.3\" 2026-04-21 LTS\nOpenJDK Runtime Environment Temurin-25.0.3+9 (build 25.0.3+9-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.3+9 (build 25.0.3+9-LTS, mixed mode, sharing)",
+  "commands": [
+    "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true -Dtest='*Radar*,*Backtest*,*RuleParameters*,*OpenApi*,*TreasuryYield*,*Assembler*,*Structure*' test",
+    "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true -Dtest='TradingRadarRuleEngineTest,*DecisionPolicyAuthority*,*SrppReport*,*SrppState*,*SrppUs*' test",
+    "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true -Dtest=TradingRadarRuleEngineTest test",
+    "JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-25.jdk/Contents/Home /usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f bff/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true -Dtest='*TradingRadar*' test",
+    "ruby scripts/render-9090-openapi-docs.rb --check --asset-only",
+    "ruby scripts/tests/docker-external-api-openapi-test.rb",
+    "ruby scripts/tests/unified-9090-openapi-renderer-test.rb",
+    "git diff --check"
+  ],
+  "aggregation": "Latest result per suite, deduplicated across broad radar, authority follow-up, final engine runs. First broad run had one new precision test failure; subsequent runs replaced the affected suite.",
+  "totals": {
+    "backend": {
+      "suiteCount": 96,
+      "tests": 876,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "bff": {
+      "suiteCount": 13,
+      "tests": 151,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "initialFailure": {
+    "test": "TradingRadarRuleEngineTest.v26_allTrialNumericBoundariesApplyToBothSetupsAndOwnershipStates",
+    "case": "rebound held premium=2.999999999999999999 expected TRIAL_BUY but HOLD_CAUTION",
+    "cause": "Existing timingOf double conversion rounds premium to 3 and produces OVERBOUGHT; preserved rebound-only timing veto is conservative. Shared BigDecimal gate does not reject this input.",
+    "resolution": "Production matrix uses six-decimal below/equal/above values. Original precision counterexample retained explicitly in v26_reboundKeepsLegacyConservativeTimingRoundingWhileSharedPremiumGateIsDecimalExact, including long-trial control that remains TRIAL_BUY. No timingOf or score formula change."
+  },
+  "coverage": [
+    "Both trial setups and held/unheld states; all three action tracks.",
+    "Production numeric FX/premium/chase/bias below/equal/above with same-horizon risk assertions. KD strict >85 and mean >80 existing boundaries preserved.",
+    "Candidate custom 9/16 cutoffs for MEDIUM/SHORT; SWING must remain production 8/15 baseline. Rebound retains existing OVERBOUGHT (12 timing bias) veto.",
+    "RISK_OFF trial exception, narrow KD exception, stale rejection, fundamentals veto, low-zone premium-only control, legal high-zone reduction, extreme-oversold priority, V25 completed-K and evidence regression suites.",
+    "Candidate/production score equality assertions in v26_candidateTrialCutoffsRemainTrackScopedAndPreserveScores. Existing deterministic score and weight tests pass."
+  ],
+  "scoreWeightDiffEvidence": {
+    "artifact": "engine-validation-diff.patch",
+    "claim": "Engine diff touches version, chase-risk copy, trial qualification/safety/action mapping, highZone and safety helpers only. computeFactors, factor contribution formulas, score accumulation, action thresholds and RuleParameters.java unchanged; chase contribution numeric formula is unchanged, only its explanatory risk string changes."
+  },
+  "ruby": {
+    "openapiContract": "PASS",
+    "unifiedRenderer": {
+      "runs": 5,
+      "assertions": 655,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "status": "OFFLINE_TESTS_PASS; no deployment or commit performed by implementation agent"
+}

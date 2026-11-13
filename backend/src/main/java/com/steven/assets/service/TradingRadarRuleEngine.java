@@ -76,7 +76,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V25";
+    public static final String RULE_VERSION = "TW_RULES_V26";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -2839,7 +2839,7 @@ public class TradingRadarRuleEngine {
         if (completedChangePercent == null) return null;
         double value = clampUnit(-completedChangePercent.doubleValue() / 5.0);
         if (completedChangePercent.compareTo(BigDecimal.valueOf(5)) >= 0) {
-            risks.add("完成日漲幅達 5% 以上，避免追高。 ");
+            risks.add("完成日漲幅達 5% 以上，追漲風險已反映於分數；實際買方硬閘門依設定門檻判斷。 ");
         } else if (completedChangePercent.signum() < 0) {
             reasons.add("完成日價格回落，位置成本相對降低；仍須等待止跌才可買進。 ");
         }
@@ -3199,7 +3199,7 @@ public class TradingRadarRuleEngine {
     /**
      * 分批試單：長線結構明確向上、短線深度超賣且剛轉強、且已止跌。
      *
-     * <p>六項條件全數滿足才成立，任一不足即回 false。刻意嚴格——這條路徑繞過了
+     * <p>形態條件全數滿足才成立，任一不足即回 false；安全否決另由共用買方閘門處理。刻意嚴格——這條路徑繞過了
      * 「站上均線」的順勢要求，本質是接刀，寧可錯過也不要誤發。</p>
      */
     private boolean qualifiesForTrialBuy(StockInput input) {
@@ -3210,13 +3210,8 @@ public class TradingRadarRuleEngine {
         BigDecimal d = completedD(input);
         if (price == null || ma240 == null || k == null || d == null) return false;
         if (ma240.signum() <= 0) return false;
-        // 基本面多項惡化時不主動接刀；這只擋買，不引發賣出。
-        if (fundamentalDeteriorating(input)) return false;
         // 0. 窄幅標的的 KD 在雜訊上飽和，深度超賣條件失去意義（Task 264）。
         if (narrowKdBand(input)) return false;
-        // 0b. ETF 溢價過高時不進場——這是「為同一籃資產多付錢」，與追高同性質。
-        if (input.etfPremiumPct() != null
-                && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE) return false;
 
         // 1. 長線結構明確向上：年線之上且乖離足夠（僅 price > ma240 在多頭市場幾乎全數成立，
         //    無篩選力；加上乖離門檻才能排除貼著年線者與 KD 近乎雜訊的低波動標的）。
@@ -3237,14 +3232,10 @@ public class TradingRadarRuleEngine {
         // 5. 止跌：用最近一根完成日 K，不可用盤中漲跌幅（零交叉會讓狀態逐 tick 翻轉）。
         BigDecimal stability = input.completedChangePercent();
         if (stability == null || stability.signum() < 0) return false;
-        // 6. 大盤閘門：只擋 stale，不再擋 RISK_OFF（Task 264；債券沿用既有豁免）。
-        //    推翻 Task 226 的理由：使用者明確要求「股市急跌時應建議買入」，而急跌時 regime 必為
-        //    RISK_OFF，原封鎖使該需求在結構上不可能滿足；且它與 evaluateCounterTrend() 既有的
-        //    「大盤仍為 RISK_OFF，只限小額試單」文案自相矛盾。
-        //    保留 stale 封鎖：那是「資料不新鮮」的技術狀態、不是市場判斷，看不見大盤真實狀況時不得放行。
-        //    安全邊界由條件 1 的年線乖離承擔：大盤急跌＋個股長線完好＝錯殺＝買點；
-        //    個股自身跌破年線＝長線已壞＝不主動接刀。
-        return !equityMarketApplies(input) || !input.marketStale();
+        // Market freshness, fundamentals and ETF premium are common buy-side safety
+        // checks. Keep them out of setup qualification so a valid reversal setup that
+        // is blocked cannot fall through into an unrelated sell action without a reason.
+        return true;
     }
 
     /**
@@ -3265,11 +3256,17 @@ public class TradingRadarRuleEngine {
         // Task 577：該軌完成 K 結構事實；只加嚴、不放寬。NOT_EVALUATED 維持 V24 行為。
         HorizonStructure hs = structureOf(input, horizon);
         discloseStructure(hs, horizon, reasons, risks);
+        List<String> buySafetyBlockers = buySafetyBlockers(input, timing,
+                chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
         if (qualifiesForTrialBuy(input)) {
+            discloseBuySafetyBlockers(buySafetyBlockers, risks);
             if (structureBlocksTrial(hs)) {
                 reasons.add(trialBlockedReason(hs, horizon));
+                return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            }
+            if (!buySafetyBlockers.isEmpty()) {
                 return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
             }
             risks.add("逆勢試單的本質是接刀，僅適合小額分批；長線判斷失準時虧損可能持續擴大。 ");
@@ -3281,8 +3278,18 @@ public class TradingRadarRuleEngine {
 
         // Task 575：跌深後出現反彈 → 分批試單候選（大盤 RISK_OFF 不否決，只揭露）。
         if (qualifiesForReboundBuy(input, timing)) {
+            discloseBuySafetyBlockers(buySafetyBlockers, risks);
+            // Preserve the pre-V26 rebound-only veto. OVERBOUGHT can be caused by
+            // BIAS_HIGH (12%), which is distinct from the ordinary/candidate buy cutoff.
+            if (timing == TimingState.OVERBOUGHT || timing == TimingState.EXTREME_OVERBOUGHT) {
+                risks.add("跌深反彈既有超買否決，試單安全閘門關閉；此判定與一般買方正乖離門檻不同。 ");
+                return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            }
             if (structureBlocksTrial(hs)) {
                 reasons.add(trialBlockedReason(hs, horizon));
+                return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            }
+            if (!buySafetyBlockers.isEmpty()) {
                 return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
             }
             reasons.add("已跌深（" + deepDropDescription(input, timing)
@@ -3312,48 +3319,14 @@ public class TradingRadarRuleEngine {
             reasons.add("已達極端高檔且有轉弱跡象，但短線仍呈 K>D，尚未確認主升段結束，暫不建議減碼。 ");
         }
 
-        // 大盤 stale 時一律關閉買進閘門（債券不套大盤閘門，故不受影響）。
+        // 大盤 stale／RISK_OFF 僅關閉一般買進；trial 對 RISK_OFF 的既有例外保留。
         boolean marketAllowsBuy = !equityMarketApplies(input)
                 || (input.marketRegime() != MarketRegime.RISK_OFF && !input.marketStale());
-
-        // KD 過熱、換匯過貴、ETF 溢價過高採「否決」而非「扣分」：三者都是進場時機問題，
-        // 不是標的品質問題。一檔長期結構完好的標的不該因為短線過熱就被判減碼，但也不該在過熱時被建議買進。
-        boolean kdOverheated = kdHeatOf(input) == KdHeat.OVERHEATED;
-        boolean fxExpensive = input.fxPercentile() != null
-                && input.fxPercentile().doubleValue() >= FX_EXPENSIVE_PCT;
-        boolean premiumExpensive = input.etfPremiumPct() != null
-                && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE;
-        boolean stillFalling = input.completedChangePercent() == null
-                || input.completedChangePercent().signum() < 0;
-        boolean chasedDailyMove = input.completedChangePercent() != null
-                && input.completedChangePercent().compareTo(chasedDailyMoveThresholdPct) >= 0;
-        // Task 446：中檔乖離否決改用可校準的 buyGateOverboughtBiasPct，但刻意不讓 timingOf() 的
-        // BIAS_HIGH 本身可校準（見 446.7）。EXTREME_OVERSOLD 排除條件是正確性關鍵，不可省略——
-        // timingOf() 是先中先返回的優先權階梯，一檔股票的分位路徑可能已鎖定 EXTREME_OVERSOLD，
-        // 即使其原始 ma60BiasPercent() 絕對值仍 >= buyGateOverboughtBiasPct（高動能股短線拉回，
-        // 自身歷史乖離分位極低、但當前乖離絕對值仍不小，與 AMD 案例同一類型），也不得因為這個
-        // 新否決條件被誤判為 overbought。
-        boolean midTierOverboughtForBuyGate = kdOverheated
-                || premiumExpensive
-                || (input.ma60BiasPercent() != null
-                    && input.ma60BiasPercent().doubleValue() >= buyGateOverboughtBiasPct.doubleValue());
-        boolean overbought = timing == TimingState.EXTREME_OVERBOUGHT
-                || (timing != TimingState.EXTREME_OVERSOLD && midTierOverboughtForBuyGate);
-        boolean fundamentalsBlockBuy = fundamentalDeteriorating(input);
-        if (fundamentalsBlockBuy) {
-            risks.add("基本面多項惡化，三軌的買進／加碼／試單閘門關閉；本條件不直接產生賣出。 ");
-        }
-
         boolean buyGate = marketAllowsBuy
                 && input.ma20Confirmation() == Confirmation.ABOVE
                 && input.ma60Confirmation() == Confirmation.ABOVE
-                && !kdOverheated
-                && !fxExpensive
-                && !premiumExpensive
-                && !stillFalling
-                && !chasedDailyMove
-                && !overbought
-                && !fundamentalsBlockBuy;
+                && buySafetyBlockers.isEmpty();
+        discloseBuySafetyBlockers(buySafetyBlockers, risks);
         if (score >= thresholds.buy() && buyGate) {
             return input.held() ? Action.ADD_CANDIDATE : Action.BUY_CANDIDATE;
         }
@@ -3374,7 +3347,7 @@ public class TradingRadarRuleEngine {
         }
         // ── Task 575 賣出閘門（高賣低買）：減碼／出場只在仍處高檔區且主升段結束確認時輸出。
         if ((mapped == Action.REDUCE_CANDIDATE || mapped == Action.EXIT_CANDIDATE)
-                && !(highZone(input, timing) && uptrendEndConfirmed(input))) {
+                && !(highZone(input) && uptrendEndConfirmed(input))) {
             reasons.add("尚未符合『主升段結束』條件（需仍在高檔區且轉弱確認、K≤D），依高賣低買原則不在回檔位置建議減碼。 ");
             if (input.ma240Confirmation() == Confirmation.BELOW) {
                 risks.add("年線已兩日跌破，長期結構轉弱；本雷達依高賣低買原則不在低檔給減碼，是否停損請自行評估。 ");
@@ -3461,13 +3434,16 @@ public class TradingRadarRuleEngine {
     }
 
     /**
-     * 高檔區（Task 575）：52 週相對位置 ≥ {@link #SELL_HIGH_ZONE_W52}，或時機為超買／極端超買。
+     * 高檔區（Task 579）：52 週相對位置 ≥ {@link #SELL_HIGH_ZONE_W52}、KD 過熱或季線乖離 ≥ BIAS_HIGH。
+     * ETF 溢價與其他非價格時機不得單獨授權賣出。
      * {@code week52Position} 為 null 時該項不算高檔。
      */
-    private boolean highZone(StockInput input, TimingState timing) {
+    private boolean highZone(StockInput input) {
         if (input.week52Position() != null
                 && input.week52Position().doubleValue() >= SELL_HIGH_ZONE_W52) return true;
-        return timing == TimingState.OVERBOUGHT || timing == TimingState.EXTREME_OVERBOUGHT;
+        if (kdHeatOf(input) == KdHeat.OVERHEATED) return true;
+        return input.ma60BiasPercent() != null
+                && input.ma60BiasPercent().doubleValue() >= BIAS_HIGH;
     }
 
     /**
@@ -3523,7 +3499,7 @@ public class TradingRadarRuleEngine {
 
     /**
      * 跌深反彈試單（Task 575／Requirement 200）：跌深、最近完成日收紅、K 上升且 K>D，
-     * 並通過窄幅 KD、基本面惡化、ETF 溢價、大盤 stale 與超買否決。大盤 RISK_OFF 不否決。
+     * 窄幅 KD 不成立；共用買方安全閘門另處理基本面、溢價、大盤 stale 與超買否決。大盤 RISK_OFF 不否決。
      * 使用者原則，無回測依據。
      */
     private boolean qualifiesForReboundBuy(StockInput input, TimingState timing) {
@@ -3536,11 +3512,58 @@ public class TradingRadarRuleEngine {
         BigDecimal previousK = completedPreviousK(input);
         if (k == null || d == null || previousK == null || completedPreviousD(input) == null) return false;
         if (k.compareTo(previousK) <= 0 || k.compareTo(d) <= 0) return false;
-        if (narrowKdBand(input) || fundamentalDeteriorating(input)) return false;
-        if (input.etfPremiumPct() != null
-                && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE) return false;
-        if (equityMarketApplies(input) && input.marketStale()) return false;
-        return timing != TimingState.OVERBOUGHT && timing != TimingState.EXTREME_OVERBOUGHT;
+        if (narrowKdBand(input)) return false;
+        return true;
+    }
+
+    /**
+     * Shared adverse buy-side conditions for production and candidate actions.
+     * Trial qualification establishes the setup only; this method applies the
+     * same safety conditions used by the ordinary BUY/ADD gate.  Market regime
+     * and MA20/MA60 are deliberately absent so trials retain their documented
+     * RISK_OFF and moving-average exceptions.
+     */
+    private List<String> buySafetyBlockers(StockInput input, TimingState timing,
+                                           BigDecimal chasedDailyMoveThresholdPct,
+                                           BigDecimal buyGateOverboughtBiasPct) {
+        List<String> blockers = new ArrayList<>();
+        boolean kdOverheated = kdHeatOf(input) == KdHeat.OVERHEATED;
+        boolean fxExpensive = input.fxPercentile() != null
+                && input.fxPercentile().compareTo(BigDecimal.valueOf(FX_EXPENSIVE_PCT)) >= 0;
+        boolean premiumExpensive = input.etfPremiumPct() != null
+                && input.etfPremiumPct().compareTo(BigDecimal.valueOf(ETF_PREMIUM_EXPENSIVE)) >= 0;
+        BigDecimal completedChange = input.completedChangePercent();
+        boolean stillFalling = completedChange == null || completedChange.signum() < 0;
+        boolean chasedDailyMove = completedChange != null
+                && completedChange.compareTo(chasedDailyMoveThresholdPct) >= 0;
+        boolean biasOverbought = input.ma60BiasPercent() != null
+                && input.ma60BiasPercent().compareTo(buyGateOverboughtBiasPct) >= 0;
+        // Preserve the Task 446 priority exception: an extreme oversold timing
+        // classification is never converted to overbought by absolute bias.
+        boolean equityMarketStale = equityMarketApplies(input) && input.marketStale();
+
+        if (kdOverheated) blockers.add("KD 過熱，買方安全閘門關閉。 ");
+        if (fxExpensive) blockers.add("FX 位於昂貴區，換匯成本偏高，買方安全閘門關閉。 ");
+        if (premiumExpensive) blockers.add("ETF 溢價達昂貴門檻，買方安全閘門關閉。 ");
+        if (stillFalling) blockers.add("完成日漲跌缺值或收黑，買方安全閘門關閉。 ");
+        if (chasedDailyMove) blockers.add("完成日漲幅達本次追漲門檻，買方安全閘門關閉。 ");
+        if (biasOverbought && timing != TimingState.EXTREME_OVERSOLD) {
+            blockers.add("季線正乖離達本次買方門檻，買方安全閘門關閉。 ");
+        }
+        if (timing == TimingState.EXTREME_OVERBOUGHT) {
+            blockers.add("既有時序判定為極端超買，買方安全閘門關閉。 ");
+        }
+        if (fundamentalDeteriorating(input)) {
+            blockers.add("基本面多項惡化，三軌買方安全閘門關閉；本條件不直接產生賣出。 ");
+        }
+        if (equityMarketStale) blockers.add("大盤資料 stale，買方安全閘門關閉。 ");
+        return List.copyOf(blockers);
+    }
+
+    private static void discloseBuySafetyBlockers(List<String> blockers, List<String> risks) {
+        for (String blocker : blockers) {
+            if (!risks.contains(blocker)) risks.add(blocker);
+        }
     }
 
     // ── Task 576：完成日 KD 快照讀取（只供三個轉折判定使用） ─────────────────────────
