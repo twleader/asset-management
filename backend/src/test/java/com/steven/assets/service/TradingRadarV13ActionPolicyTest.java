@@ -750,9 +750,17 @@ class TradingRadarV13ActionPolicyTest {
      */
     @Test
     void extremeOversoldPriorityExclusionPreventsWrongfulBuyGateVetoAtDefaultBias() {
+        // Task 575（V23）：原 fixture prevK=10（K 14 上升且 K>D、完成日收紅、EXTREME_OVERSOLD＝跌深）
+        // 會先命中「跌深反彈試單」（優先序在 buyGate 之前，Requirement 200）而回 TRIAL_BUY。
+        var reboundFirst = engine.evaluateStock(withKd(
+                withBiasAndPercentile(strongCandidateInput(false), "15", "1"),
+                "14", "10", "10", "12"));
+        assertThat(reboundFirst.action()).isEqualTo(TradingRadarRuleEngine.Action.TRIAL_BUY);
+        // 本測試要驗的是 buyGate 的 EXTREME_OVERSOLD 優先權排除，故改 prevK=15（K 未上升）
+        // 使跌深反彈不成立、落到原 buyGate 路徑。
         var input = withKd(
                 withBiasAndPercentile(strongCandidateInput(false), "15", "1"),
-                "14", "10", "10", "12");
+                "14", "10", "15", "12");
 
         var production = engine.evaluateStock(input);
         var candidateResult = engine.evaluateCandidate(input,
@@ -794,7 +802,10 @@ class TradingRadarV13ActionPolicyTest {
                 TradingRadarRuleEngine.Confirmation.BELOW,
                 TradingRadarRuleEngine.InstrumentType.EQUITY,
                 TradingRadarRuleEngine.MarketRegime.NEUTRAL, false,
-                null, bd("0"), null, bd("0"), bd("0.5"), bd("5"),
+                // Task 575：week52Position 由 0.5 改 0.85——V23 賣出閘門要求高檔區＋主升段結束才輸出
+                // 減碼／出場；本 fixture 用來測 V13 sigma gate 對「持有者賣出動作」的處理，
+                // 因此須讓基礎動作仍是賣出（K≤D＋死叉＋OSC<0＋MA20 BELOW 已滿足轉弱確認）。
+                null, bd("0"), null, bd("0"), bd("0.85"), bd("5"),
                 null, null, bd("100"), extended("-1"), bd("1.6"),
                 TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE);
     }

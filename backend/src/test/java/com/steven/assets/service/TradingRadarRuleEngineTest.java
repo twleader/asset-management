@@ -149,7 +149,11 @@ class TradingRadarRuleEngineTest {
         // 三分量平均 (−1.0 + 0.535 + 1.0)/3 = +0.178333。**分數上升** 33 → 37，
         // 正是 360.7g 對 K<D 標的的預期方向（深度超賣不再被當成超買扣分）。
         assertEquals(37, stock.score());
-        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
+        // V23（Task 575／Requirement 200）：009804 正是根因案例——非高檔區（week52Position null、
+        // 時機 OVERSOLD）的回檔不得建議減碼，賣出閘門降為 HOLD_CAUTION；K 18.5 < prevK 24 未反彈，
+        // 也不成立跌深反彈試單。
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("主升段結束")));
         assertEquals(TradingRadarRuleEngine.CounterTrendState.OVERSOLD_WATCH,
                 stock.counterTrend().state());
         assertTrue(stock.counterTrend().risks().stream()
@@ -376,7 +380,17 @@ class TradingRadarRuleEngineTest {
         var hugging = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "98.5", "0.3",
                 TradingRadarRuleEngine.Confirmation.ABOVE,
                 TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
-        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, hugging.action());
+        // V23（Task 575）：本 fixture K 15>D 14、K 上升、完成日收紅且 KD 超賣（跌深），改由
+        // 「跌深反彈試單」輸出 TRIAL_BUY（Requirement 200）；既有長線試單路徑仍不得成立。
+        assertNotTrialBuyPath(hugging);
+    }
+
+    /** 既有長線試單（qualifiesForTrialBuy）未成立：若為 TRIAL_BUY 必為跌深反彈路徑。 */
+    private void assertNotTrialBuyPath(TradingRadarRuleEngine.StockResult result) {
+        assertTrue(result.risks().stream().noneMatch(r -> r.contains("逆勢試單的本質是接刀")));
+        if (result.action() == TradingRadarRuleEngine.Action.TRIAL_BUY) {
+            assertTrue(result.reasons().stream().anyMatch(r -> r.contains("已跌深")));
+        }
     }
 
     @Test
@@ -384,7 +398,8 @@ class TradingRadarRuleEngineTest {
         var unconfirmed = engine.evaluateStock(trialBuyStock("15", "14", "12", "16", "80", "0.3",
                 TradingRadarRuleEngine.Confirmation.MIXED,
                 TradingRadarRuleEngine.MarketRegime.NEUTRAL, false));
-        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, unconfirmed.action());
+        // V23（Task 575）：同上，改由跌深反彈路徑輸出；既有長線試單路徑不成立。
+        assertNotTrialBuyPath(unconfirmed);
     }
 
     /**
@@ -590,7 +605,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V22", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V23", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -1771,5 +1786,313 @@ class TradingRadarRuleEngineTest {
         List<BigDecimal> values = new ArrayList<>();
         for (int i = 0; i < size; i++) values.add(BigDecimal.valueOf(start + i));
         return values;
+    }
+
+    // ═══ Task 575／Requirement 200：高賣低買（TW_RULES_V23）═══════════════════════════
+
+    /** V23 測試用可變 fixture：預設為「價格在三條均線之下、三條均線兩日 BELOW」的弱勢持股。 */
+    private static final class V23Stock {
+        boolean held = true;
+        String price = "90";
+        String completed = "-0.5";
+        String ma20 = "100";
+        String ma60 = "105";
+        String ma240 = "110";
+        String k = "40";
+        String d = "45";
+        String prevK = "42";
+        String prevD = "44";
+        TradingRadarRuleEngine.Confirmation c20 = TradingRadarRuleEngine.Confirmation.BELOW;
+        TradingRadarRuleEngine.Confirmation c60 = TradingRadarRuleEngine.Confirmation.BELOW;
+        TradingRadarRuleEngine.Confirmation c240 = TradingRadarRuleEngine.Confirmation.BELOW;
+        TradingRadarRuleEngine.InstrumentType type = TradingRadarRuleEngine.InstrumentType.EQUITY;
+        TradingRadarRuleEngine.MarketRegime regime = TradingRadarRuleEngine.MarketRegime.NEUTRAL;
+        boolean stale = false;
+        String ma60Bias = "-5";
+        String ma240Bias = "-18";
+        String week52 = "0.60";
+        String band = null;
+        String etfPremium = null;
+        String osc = "-1";
+        String volumeRatio = "1.0";
+        TradingRadarRuleEngine.FundamentalInput fundamental =
+                TradingRadarRuleEngine.FundamentalInput.NOT_APPLICABLE;
+
+        V23Stock set(java.util.function.Consumer<V23Stock> mutator) {
+            mutator.accept(this);
+            return this;
+        }
+
+        TradingRadarRuleEngine.StockInput build() {
+            return new TradingRadarRuleEngine.StockInput(
+                    held, bd(price), bd(completed), bd(completed),
+                    new TradingRadarRuleEngine.Indicators(bd(ma20), bd(ma60), bd(ma240), bd(k), bd(d)),
+                    bd(prevK), bd(prevD), c20, c60, c240, type, regime, stale,
+                    null, bd(ma60Bias), null, bd(ma240Bias), bd(week52), bd(band),
+                    bd(etfPremium), null, null,
+                    new TradingRadarRuleEngine.ExtendedIndicators(
+                            new BigDecimal("50"), null, null, null, null, null, null, bd(osc),
+                            new BigDecimal("50"), new BigDecimal("50"),
+                            new BigDecimal("-1"), new BigDecimal("-1"), new BigDecimal("0"),
+                            new BigDecimal("50")),
+                    bd(volumeRatio), fundamental);
+        }
+
+        private static BigDecimal bd(String value) {
+            return value == null ? null : new BigDecimal(value);
+        }
+    }
+
+    private static boolean isSell(TradingRadarRuleEngine.Action action) {
+        return action == TradingRadarRuleEngine.Action.REDUCE_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.EXIT_CANDIDATE;
+    }
+
+    private static final String SELL_GATE_REASON = "尚未符合『主升段結束』條件";
+    private static final String STOP_LOSS_SELF_ASSESS = "是否停損請自行評估";
+
+    @Test
+    void v23_pullbackOutsideHighZone_downgradesSellToHoldCaution() {
+        var stock = engine.evaluateStock(new V23Stock().build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.NEUTRAL, stock.timingState());
+        assertTrue(stock.score() < 40, "fixture 必須落在減碼／出場分數區，實得 " + stock.score());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains(SELL_GATE_REASON)));
+    }
+
+    @Test
+    void v23_highZoneWithConfirmedWeakening_allowsReduce() {
+        // week52 0.85（高檔區）、K 40 ≤ D 45、前一期 K 50 > D 45（死叉）＋ MA20 BELOW＋OSC<0。
+        var stock = engine.evaluateStock(new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.prevK = "50";
+            s.prevD = "45";
+        }).build());
+
+        assertTrue(stock.kdDeadCross());
+        assertTrue(stock.score() >= 25 && stock.score() < 40, "fixture 必須落在減碼區，實得 " + stock.score());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
+        assertTrue(stock.reasons().stream().noneMatch(r -> r.contains(SELL_GATE_REASON)));
+    }
+
+    @Test
+    void v23_highZoneButKAboveD_neverSells() {
+        var stock = engine.evaluateStock(new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.k = "46";
+            s.d = "45";
+            s.prevK = "40";
+            s.prevD = "45";
+        }).build());
+
+        assertTrue(stock.score() < 40, "fixture 必須落在減碼／出場分數區，實得 " + stock.score());
+        assertFalse(isSell(stock.action()));
+        assertFalse(isSell(stock.shortAction()));
+        assertFalse(isSell(stock.swingAction()));
+    }
+
+    @Test
+    void v23_nullWeek52AndNeutralTiming_exitZoneDoesNotSell() {
+        var stock = engine.evaluateStock(new V23Stock().set(s -> {
+            s.week52 = null;
+            s.price = "80";
+            s.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF;
+            s.completed = "-2";
+            s.volumeRatio = "1.5";
+        }).build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.NEUTRAL, stock.timingState());
+        assertTrue(stock.score() < 25, "fixture 必須落在出場分數區，實得 " + stock.score());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains(SELL_GATE_REASON)));
+    }
+
+    /** 跌深（季線乖離 −10%）＋完成日 +1.2%＋K 35 > prevK 28 且 K > D 30。 */
+    private V23Stock reboundStock(boolean held) {
+        return new V23Stock().set(s -> {
+            s.held = held;
+            s.ma60Bias = "-10";
+            s.completed = "1.2";
+            s.k = "35";
+            s.d = "30";
+            s.prevK = "28";
+            s.prevD = "31";
+        });
+    }
+
+    @Test
+    void v23_deepDropRebound_isTrialBuyForHeldAndNotHeld() {
+        for (boolean held : new boolean[] {true, false}) {
+            var stock = engine.evaluateStock(reboundStock(held).build());
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.action(), "held=" + held);
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.shortAction(), "held=" + held);
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.swingAction(), "held=" + held);
+            assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("已跌深（季線乖離 -10.0%")
+                    && r.contains("出現反彈")));
+            assertTrue(stock.risks().stream().anyMatch(r -> r.contains("跌深反彈試單本質是接刀")));
+            // 年線兩日 BELOW → 另揭露試單應更小額。
+            assertTrue(stock.risks().stream().anyMatch(r -> r.contains("試單應更小額")));
+            assertTrue(stock.risks().stream().noneMatch(r -> r.contains("大盤為 RISK_OFF")));
+        }
+    }
+
+    @Test
+    void v23_deepDropWithoutRebound_isNotTrialBuy() {
+        var red = engine.evaluateStock(reboundStock(true).set(s -> s.completed = "-0.3").build());
+        var flatCompleted = engine.evaluateStock(reboundStock(true).set(s -> s.completed = "0").build());
+        var kBelowD = engine.evaluateStock(reboundStock(true).set(s -> { s.k = "29"; s.prevK = "25"; }).build());
+        var kNotRising = engine.evaluateStock(reboundStock(true).set(s -> s.prevK = "35").build());
+
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, red.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, flatCompleted.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, kBelowD.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, kNotRising.action());
+    }
+
+    @Test
+    void v23_reboundBuyVetoes_eachBlockTrialBuy() {
+        var narrow = engine.evaluateStock(reboundStock(true).set(s -> s.band = "1.5").build());
+        var fundamental = engine.evaluateStock(reboundStock(true).set(s -> s.fundamental =
+                new TradingRadarRuleEngine.FundamentalInput(true, -0.9, -0.9, null, null, null, false)).build());
+        var premium = engine.evaluateStock(reboundStock(true).set(s -> s.etfPremium = "3.0").build());
+        var stale = engine.evaluateStock(reboundStock(true).set(s -> s.stale = true).build());
+        // 時機 OVERBOUGHT（K 過熱）而 52 週低檔仍屬跌深。
+        var overbought = engine.evaluateStock(reboundStock(true).set(s -> {
+            s.ma60Bias = "0";
+            s.week52 = "0.20";
+            s.k = "90";
+            s.d = "85";
+            s.prevK = "80";
+        }).build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.OVERBOUGHT, overbought.timingState());
+        for (var result : List.of(narrow, fundamental, premium, stale, overbought)) {
+            assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.action());
+            assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.shortAction());
+            assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, result.swingAction());
+        }
+    }
+
+    @Test
+    void v23_riskOffDoesNotVetoReboundBuyButIsDisclosed() {
+        var stock = engine.evaluateStock(reboundStock(true).set(s ->
+                s.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF).build());
+
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.action());
+        assertTrue(stock.risks().stream().anyMatch(r -> r.contains("大盤為 RISK_OFF，本訊號只限小額試單")));
+    }
+
+    @Test
+    void v23_sellGateBlockedWithAnnualBelow_disclosesStopLossSelfAssessment() {
+        var below = engine.evaluateStock(new V23Stock().build());
+        var above = engine.evaluateStock(new V23Stock().set(s -> s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE).build());
+
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, below.action());
+        assertTrue(below.risks().stream().anyMatch(r -> r.contains(STOP_LOSS_SELF_ASSESS)));
+        if (above.action() == TradingRadarRuleEngine.Action.HOLD_CAUTION) {
+            assertTrue(above.risks().stream().noneMatch(r -> r.contains(STOP_LOSS_SELF_ASSESS)));
+        }
+    }
+
+    @Test
+    void v23_notHeldAvoid_becomesWaitOnlyInDeepDropZone() {
+        var deep = engine.evaluateStock(new V23Stock().set(s -> {
+            s.held = false;
+            s.ma60Bias = "-10";
+        }).build());
+        var notDeep = engine.evaluateStock(new V23Stock().set(s -> s.held = false).build());
+
+        assertTrue(deep.score() < 40 && notDeep.score() < 40);
+        assertEquals(TradingRadarRuleEngine.Action.WAIT, deep.action());
+        assertEquals(TradingRadarRuleEngine.Action.AVOID, notDeep.action());
+    }
+
+    @Test
+    void v23_sellGateAppliesToAllThreeHorizons() {
+        var stock = engine.evaluateStock(new V23Stock().build());
+
+        assertTrue(stock.score() < 40 && stock.shortScore() < 40 && stock.swingScore() < 40,
+                "三軌都必須落在減碼／出場分數區：" + stock.score() + "/" + stock.shortScore() + "/" + stock.swingScore());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.shortAction());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.swingAction());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains(SELL_GATE_REASON)));
+        assertTrue(stock.shortReasons().stream().anyMatch(r -> r.contains(SELL_GATE_REASON)));
+        assertTrue(stock.swingReasons().stream().anyMatch(r -> r.contains(SELL_GATE_REASON)));
+    }
+
+    @Test
+    void v23_extremeOversoldBranchWinsOverHighZoneOverlap() {
+        var stock = engine.evaluateStock(new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.k = "8";
+            s.d = "12";
+            s.prevK = "10";
+            s.prevD = "11";
+            s.ma60Bias = "-25";
+            s.price = "80";
+            s.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF;
+        }).build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERSOLD, stock.timingState());
+        assertTrue(stock.score() < 25, "fixture 必須落在出場分數區，實得 " + stock.score());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, stock.action());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("已達極端超賣")));
+        // 極端超賣分支優先：不再疊加賣出閘門文案。
+        assertTrue(stock.reasons().stream().noneMatch(r -> r.contains(SELL_GATE_REASON)));
+    }
+
+    /** 極端超買（K 過熱、季線乖離 25%）、OSC<0、完成日下跌且量比 1.3 的持股。 */
+    private V23Stock profitTakingStock() {
+        return new V23Stock().set(s -> {
+            s.price = "125";
+            s.ma20 = "110";
+            s.ma60 = "100";
+            s.ma240 = "90";
+            s.c20 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.c60 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.ma60Bias = "25";
+            s.ma240Bias = "38.9";
+            s.week52 = "0.95";
+            s.k = "90";
+            s.d = "85";
+            s.prevK = "88";
+            s.prevD = "80";
+            s.completed = "-1";
+            s.volumeRatio = "1.3";
+        });
+    }
+
+    @Test
+    void v23_profitTakingWithKAboveD_doesNotReduceOnAnyHorizon() {
+        var stock = engine.evaluateStock(profitTakingStock().build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, stock.timingState());
+        assertTrue(stock.profitTakingConfirmed(), "profitTakingConfirmed 計算與 DTO 語意不變");
+        assertFalse(stock.kdDeadCross());
+        assertFalse(isSell(stock.action()));
+        assertFalse(isSell(stock.shortAction()));
+        assertFalse(isSell(stock.swingAction()));
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("尚未確認主升段結束")));
+    }
+
+    @Test
+    void v23_profitTakingWithDeadCross_reduces() {
+        var stock = engine.evaluateStock(profitTakingStock().set(s -> {
+            s.k = "84";
+            s.d = "86";
+            s.prevK = "88";
+            s.prevD = "85";
+        }).build());
+
+        assertEquals(TradingRadarRuleEngine.TimingState.EXTREME_OVERBOUGHT, stock.timingState());
+        assertTrue(stock.profitTakingConfirmed());
+        assertTrue(stock.kdDeadCross());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.action());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.shortAction());
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.swingAction());
+        assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("獲利了結獲得確認")));
     }
 }
