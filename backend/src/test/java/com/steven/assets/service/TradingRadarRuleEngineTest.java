@@ -18,6 +18,31 @@ class TradingRadarRuleEngineTest {
     private final TradingRadarRuleEngine engine = new TradingRadarRuleEngine();
 
     @Test
+    void horizonConflictSharesFourGroupsAndPreservesUnknownAndMissingSwingSemantics() {
+        var groups = new TradingRadarRuleEngine.Action[][] {
+                {TradingRadarRuleEngine.Action.BUY_CANDIDATE, TradingRadarRuleEngine.Action.ADD_CANDIDATE,
+                        TradingRadarRuleEngine.Action.TRIAL_BUY},
+                {TradingRadarRuleEngine.Action.HOLD, TradingRadarRuleEngine.Action.WATCH,
+                        TradingRadarRuleEngine.Action.HOLD_CAUTION, TradingRadarRuleEngine.Action.WAIT},
+                {TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, TradingRadarRuleEngine.Action.EXIT_CANDIDATE,
+                        TradingRadarRuleEngine.Action.AVOID},
+                {TradingRadarRuleEngine.Action.NO_TRADE, null}
+        };
+        for (int mediumGroup = 0; mediumGroup < groups.length; mediumGroup++) {
+            for (int swingGroup = 0; swingGroup < groups.length; swingGroup++) {
+                for (int shortGroup = 0; shortGroup < groups.length; shortGroup++) {
+                    for (var medium : groups[mediumGroup]) for (var swing : groups[swingGroup])
+                        for (var shortTerm : groups[shortGroup]) {
+                            assertEquals(mediumGroup != swingGroup || mediumGroup != shortGroup,
+                                    TradingRadarRuleEngine.horizonConflict(medium, swing, shortTerm),
+                                    () -> "MEDIUM=" + medium + ", SWING=" + swing + ", SHORT=" + shortTerm);
+                        }
+                }
+            }
+        }
+    }
+
+    @Test
     void confirmation_requiresPeriodPlusOneRows() {
         assertEquals(TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 engine.confirm(closesDescending(20, 100), 20));
