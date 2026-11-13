@@ -13660,3 +13660,10 @@ SRPP把`global_equity_build_cadence_d141.VOO`改為2026-11-13至2027-05-31每月
 - `qualifiesForReboundBuy`＝`deepDrop` 且 `completedChangePercent > 0` 且 `K > previousK` 且 `K > D`，排除 narrow KD band、基本面惡化、ETF 溢價 ≥3%、股票類大盤 stale、時機超買、必要欄位缺值；RISK_OFF 僅揭露。回傳 `TRIAL_BUY`。
 - 所有判定僅讀既有 `StockInput` 欄位，不新增輸入欄位（避免 record 相容建構式靜默 null）；常數具名、無回測依據（使用者原則）。三軌共用同一 `actionFor()`；分數、權重、門檻、`timingOf()`、EVIDENCE_GATE_V2、V13 機制不變。
 - `RULE_VERSION`=`TW_RULES_V23`、`DECISION_INPUT_VERSION`=`TW_RULES_V23|FUBON_OVERLAY_V1`；OpenAPI 1.27.1 只改版號範例／描述，經 renderer 與 Task 504 SRPP 身分鏈發布。
+
+### Requirement 201／Task 576：轉折判定讀完成日 KD 快照（TW_RULES_V24）
+
+- `TradingRadarRuleEngine` 新增不可變 `record CompletedKd(BigDecimal k, BigDecimal d, BigDecimal previousK, BigDecimal previousD)`，`StockInput` 正典建構式尾端新增 `CompletedKd completedKd`。既有相容建構式（回測／測試的完成日輸入）以 `new CompletedKd(indicators.k(), indicators.d(), previousK, previousD)` 推得；production（`TradingRadarService` 唯一建構點）與 `BacktestService` 一律以正典建構式顯式傳入。
+- `RadarInputAssembler.Assembled` 新增 `completedKd`：`liveAdded=false` 時取 `indicators` 的 k/d/previousK/previousD；`liveAdded=true` 時以排除盤中列的完成日序列（`adjustedRowsDesc` 自 `firstCompleted` 起、同 `indicatorRows` 長度上限）呼叫同一 `TechnicalIndicatorService.computeFromSeries` 求得。快取（cachedIndicators）路徑同樣由完成日序列本地計算，不讀盤中值。
+- `qualifiesForTrialBuy`、`qualifiesForReboundBuy`、`uptrendEndConfirmed`（含其 dead-cross 判定）改讀 `completedKd`；任一欄 null → false。其餘 K/D 使用點不變。
+- `RULE_VERSION`=`TW_RULES_V24`、`DECISION_INPUT_VERSION`=`TW_RULES_V24|FUBON_OVERLAY_V1`；OpenAPI 1.27.2 只改版號字串，經 renderer 與 Task 504 SRPP 身分鏈發布。

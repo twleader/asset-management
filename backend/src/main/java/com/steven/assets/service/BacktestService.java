@@ -879,7 +879,17 @@ public class BacktestService {
                 // 會靜默命中 Task 356 之前的相容建構式（不會編譯失敗），五個新因子在回測中恆為
                 // 缺值並重分配權重 → 356.13b 量到的是一組沒有週K 的規則，回測是空跑。
                 a.dailyCandle(),
-                a.weekly(), a.bollinger()));
+                a.weekly(), a.bollinger(),
+                // Task 576：回測序列本就不含盤中列，完成日 KD 快照由完成日 indicators 推得並顯式傳入。
+                completedKd(a)));
+    }
+
+    /** 回測的完成日 KD 快照：序列不含盤中列，直接取完成日 indicators 的四值（Task 576）。 */
+    private static TradingRadarRuleEngine.CompletedKd completedKd(RadarInputAssembler.Assembled a) {
+        TechnicalIndicatorService.FullIndicators ind = a.indicators();
+        return ind == null
+                ? new TradingRadarRuleEngine.CompletedKd(null, null, null, null)
+                : new TradingRadarRuleEngine.CompletedKd(ind.k(), ind.d(), ind.previousK(), ind.previousD());
     }
 
     // ─────────────────────────── Task 308 可成交報告 ───────────────────────────
@@ -3090,7 +3100,7 @@ public class BacktestService {
                 assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental,
                 // Task 356.13a-2：V13 candidate 回測路徑同樣必須接上日K 棒與週K，否則 promotion
                 // 稽核比較的是「有週K 的 production」與「沒有週K 的回測」，兩者根本不同一組規則。
-                a.dailyCandle(), a.weekly(), a.bollinger());
+                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a));
     }
 
     private TradingRadarRuleEngine.CandidateContext v13Context(

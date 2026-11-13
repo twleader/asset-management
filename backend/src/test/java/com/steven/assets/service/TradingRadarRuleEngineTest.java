@@ -605,7 +605,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V23", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V24", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -1788,7 +1788,7 @@ class TradingRadarRuleEngineTest {
         return values;
     }
 
-    // ═══ Task 575／Requirement 200：高賣低買（TW_RULES_V23）═══════════════════════════
+    // ═══ Task 575／Requirement 200：高賣低買（V23）═══════════════════════════
 
     /** V23 測試用可變 fixture：預設為「價格在三條均線之下、三條均線兩日 BELOW」的弱勢持股。 */
     private static final class V23Stock {
@@ -2094,5 +2094,176 @@ class TradingRadarRuleEngineTest {
         assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.shortAction());
         assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, stock.swingAction());
         assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("獲利了結獲得確認")));
+    }
+
+    // ═══ Task 576／Requirement 201：轉折判定改讀完成日 KD 快照（TW_RULES_V24）═══════════════
+
+    /** 以既有輸入的 28 個欄位＋顯式完成日 KD 快照走 29 參數正典建構式（模擬盤中：indicators 為即時 KD）。 */
+    private static TradingRadarRuleEngine.StockInput withCompletedKd(
+            TradingRadarRuleEngine.StockInput in, String k, String d, String prevK, String prevD) {
+        return new TradingRadarRuleEngine.StockInput(
+                in.held(), in.price(), in.changePercent(), in.completedChangePercent(), in.indicators(),
+                in.previousK(), in.previousD(), in.ma20Confirmation(), in.ma60Confirmation(),
+                in.ma240Confirmation(), in.instrumentType(), in.marketRegime(), in.marketStale(),
+                in.fxPercentile(), in.ma60BiasPercent(), in.ma60BiasPercentile(), in.ma240BiasPercent(),
+                in.week52Position(), in.kdBandWidthPercent(), in.etfPremiumPct(), in.etfPremiumPercentile(),
+                in.weeklyMa(), in.extendedIndicators(), in.volumeRatio(), in.fundamental(),
+                in.dailyCandle(), in.weekly(), in.bollinger(),
+                new TradingRadarRuleEngine.CompletedKd(dec(k), dec(d), dec(prevK), dec(prevD)));
+    }
+
+    private static BigDecimal dec(String value) {
+        return value == null ? null : new BigDecimal(value);
+    }
+
+    /** Codex 反例：完成日 +0.98%、52 週位置 0.136（跌深）；盤中 K/D=45.93/45.06、前一期（昨日完成）43.89/44.63。 */
+    private V23Stock codexCounterExample() {
+        return new V23Stock().set(s -> {
+            s.held = false;
+            s.completed = "0.98";
+            s.week52 = "0.136";
+            s.k = "45.93";
+            s.d = "45.06";
+            s.prevK = "43.89";
+            s.prevD = "44.63";
+        });
+    }
+
+    @Test
+    void v24_codexCounterExample_intradayCrossDoesNotTriggerTrialBuy() {
+        var base = codexCounterExample().build();
+        // 對照：V23 相容推導（把盤中 KD 當完成日）會輸出 TRIAL_BUY——這正是要修的缺陷。
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, engine.evaluateStock(base).action());
+
+        // 完成日快照：最近完成日 K/D=43.89/44.63（未交叉）、前一完成日 K≤D。
+        var stock = engine.evaluateStock(withCompletedKd(base, "43.89", "44.63", "42.10", "44.20"));
+
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.shortAction());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.swingAction());
+    }
+
+    @Test
+    void v24_completedSnapshotRebound_isTrialBuyEvenWhenIntradayKBelowD() {
+        // 盤中 K/D=29/31（K≤D），完成日快照 K 35 > D 30 且 K 由 28 上升。
+        var base = reboundStock(true).set(s -> { s.k = "29"; s.d = "31"; s.prevK = "35"; s.prevD = "30"; }).build();
+        var stock = engine.evaluateStock(withCompletedKd(base, "35", "30", "28", "31"));
+
+        assertEquals(TradingRadarRuleEngine.TimingState.NEUTRAL, stock.timingState());
+        assertEquals(TradingRadarRuleEngine.KdHeat.NORMAL, stock.kdHeat());
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.action());
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.shortAction());
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.swingAction());
+    }
+
+    @Test
+    void v24_intradayOverboughtStillVetoesCompletedSnapshotRebound() {
+        // 完成日 K/D=79/77、前一期 78/76（K 上升且 K>D）、52 週位置 0.2；盤中 K/D=86/80 → OVERBOUGHT。
+        var base = reboundStock(true).set(s -> {
+            s.ma60Bias = "0";
+            s.week52 = "0.2";
+            s.k = "86";
+            s.d = "80";
+            s.prevK = "79";
+            s.prevD = "77";
+        }).build();
+        var stock = engine.evaluateStock(withCompletedKd(base, "79", "77", "78", "76"));
+
+        assertEquals(TradingRadarRuleEngine.TimingState.OVERBOUGHT, stock.timingState());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.action());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.shortAction());
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stock.swingAction());
+    }
+
+    @Test
+    void v24_longTermTrialBuy_readsCompletedSnapshotNotIntradayCross() {
+        // 盤中 K 15 > D 14、前一期 12 ≤ 16（盤中交叉）；完成日快照 K 12 < D 16、前一期 11 ≤ 15（未交叉）。
+        var intradayCross = trialBuyStock("15", "14", "12", "16", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.MarketRegime.NEUTRAL, false);
+        var blocked = engine.evaluateStock(withCompletedKd(intradayCross, "12", "16", "11", "15"));
+        assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, blocked.action());
+        assertTrue(blocked.risks().stream().noneMatch(r -> r.contains("逆勢試單的本質是接刀")));
+
+        // 反之：盤中 K≤D，但完成日快照為低檔黃金交叉 → 長線試單成立。
+        var intradayNoCross = trialBuyStock("12", "16", "15", "14", "80", "0.3",
+                TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.MarketRegime.NEUTRAL, false);
+        var fired = engine.evaluateStock(withCompletedKd(intradayNoCross, "15", "14", "12", "16"));
+        assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, fired.action());
+        assertTrue(fired.risks().stream().anyMatch(r -> r.contains("逆勢試單的本質是接刀")));
+    }
+
+    @Test
+    void v24_sellGate_readsCompletedSnapshotForKdAndDeadCross() {
+        // 高檔區；盤中 K 40 ≤ D 45 且盤中死叉（前一期 50>45），但完成日快照 K 50 > D 45 → 不得減碼／出場。
+        var intradayWeak = new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.prevK = "50";
+            s.prevD = "45";
+        }).build();
+        var held = engine.evaluateStock(withCompletedKd(intradayWeak, "50", "45", "48", "46"));
+        assertFalse(isSell(held.action()));
+        assertFalse(isSell(held.shortAction()));
+        assertFalse(isSell(held.swingAction()));
+
+        // 反之：盤中 K 46 > D 45，但完成日 K 40 ≤ D 45＋完成日死叉＋MA20 BELOW → 可減碼。
+        var intradayStrong = new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.k = "46";
+            s.d = "45";
+            s.prevK = "40";
+            s.prevD = "45";
+        }).build();
+        var reduce = engine.evaluateStock(withCompletedKd(intradayStrong, "40", "45", "50", "45"));
+        assertTrue(reduce.score() < 40, "fixture 必須落在減碼／出場分數區，實得 " + reduce.score());
+        assertTrue(isSell(reduce.action()), "實得 " + reduce.action());
+    }
+
+    @Test
+    void v24_nullSnapshotField_neverTrialBuysNorReleasesSell() {
+        var rebound = reboundStock(true).build();
+        var weakening = new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.prevK = "50";
+            s.prevD = "45";
+        }).build();
+        String[][] partial = {
+                {null, "30", "28", "31"}, {"35", null, "28", "31"},
+                {"35", "30", null, "31"}, {"35", "30", "28", null}};
+        String[][] partialWeak = {
+                {null, "45", "50", "45"}, {"40", null, "50", "45"},
+                {"40", "45", null, "45"}, {"40", "45", "50", null}};
+        for (int i = 0; i < partial.length; i++) {
+            String[] p = partial[i];
+            var buy = engine.evaluateStock(withCompletedKd(rebound, p[0], p[1], p[2], p[3]));
+            assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, buy.action(), "null 欄位 #" + i);
+            String[] w = partialWeak[i];
+            var sell = engine.evaluateStock(withCompletedKd(weakening, w[0], w[1], w[2], w[3]));
+            assertTrue(sell.score() < 40, "fixture 必須落在減碼／出場分數區，實得 " + sell.score());
+            assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, sell.action(), "null 欄位 #" + i);
+        }
+    }
+
+    @Test
+    void v24_compatConstructorDerivesSnapshotFromIndicatorsAndPreviousKd() {
+        var compat = reboundStock(true).build();
+        assertEquals(new TradingRadarRuleEngine.CompletedKd(
+                new BigDecimal("35"), new BigDecimal("30"), new BigDecimal("28"), new BigDecimal("31")),
+                compat.completedKd());
+        var noIndicators = new TradingRadarRuleEngine.StockInput(
+                true, new BigDecimal("100"), null, null, null, new BigDecimal("1"), new BigDecimal("2"),
+                TradingRadarRuleEngine.Confirmation.UNAVAILABLE, TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
+                TradingRadarRuleEngine.Confirmation.UNAVAILABLE, TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.MarketRegime.NEUTRAL, false, null, null, null, null, null, null, null);
+        assertNotNull(noIndicators.completedKd(), "相容建構式不得傳 null 快照");
+        assertEquals(new TradingRadarRuleEngine.CompletedKd(null, null, new BigDecimal("1"), new BigDecimal("2")),
+                noIndicators.completedKd());
+        // 顯式傳入等值快照與相容推導的結果逐欄相同。
+        var explicit = withCompletedKd(compat, "35", "30", "28", "31");
+        assertEquals(engine.evaluateStock(compat), engine.evaluateStock(explicit));
+    }
+
+    @Test
+    void v24_ruleVersion() {
+        assertEquals("TW_RULES_V24", TradingRadarRuleEngine.RULE_VERSION);
     }
 }

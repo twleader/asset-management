@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.27.1` |
+| 契約版本 | `1.27.2` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -2462,7 +2462,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
           "synthetic": {
             "summary": "去識別化、無實際持倉的合成範例",
             "value": {
-              "ruleVersion": "TW_RULES_V23",
+              "ruleVersion": "TW_RULES_V24",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -2681,7 +2681,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
         "examples": {
           "synthetic": {
             "value": {
-              "ruleVersion": "TW_RULES_V23",
+              "ruleVersion": "TW_RULES_V24",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -23898,7 +23898,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
         "string",
         "null"
       ],
-      "description": "固定為 TW_RULES_V23|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
+      "description": "固定為 TW_RULES_V24|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
     },
     "source": {
       "type": [
@@ -23992,7 +23992,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
   },
   "additionalProperties": false,
   "example": {
-    "decisionInputVersion": "TW_RULES_V23|FUBON_OVERLAY_V1",
+    "decisionInputVersion": "TW_RULES_V24|FUBON_OVERLAY_V1",
     "source": "FUBON_SDK",
     "binding": "BOUND_CONTEXT",
     "contextFingerprint": "6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4",
@@ -24097,7 +24097,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V23\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V24\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |

@@ -107,6 +107,9 @@ public class RadarInputAssembler {
      *                             {@code WeeklyIndicators.dif}／{@code macd} 純揭露欄的<b>唯一來源</b>
      *                             （Task 356.4h）；與 {@code weekly.osc()} 出自<b>同一次</b>
      *                             {@code computeFromSeries(週K 序列)} 呼叫，不得為了揭露再算第二次。
+     * @param completedKd          完成日 KD 快照（Task 576／Requirement 201）：最近一根完成日 K 與其前一根
+     *                             完成日 K 的 K／D，排除盤中列。無盤中列時等於 {@code indicators} 的四值；
+     *                             有盤中列時只以完成日列另算。計算失敗或缺值時對應欄位為 null。
      */
     public record Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -138,8 +141,43 @@ public class RadarInputAssembler {
              * independent of {@link #distributionAdjusted()}.
              */
             boolean weeklyDistributionAdjusted,
-            TradingRadarRuleEngine.BollingerInput bollinger
+            TradingRadarRuleEngine.BollingerInput bollinger,
+            TradingRadarRuleEngine.CompletedKd completedKd
     ) {
+        /**
+         * Task 576 之前的正典形狀（含 Bollinger、無完成日 KD 快照）。語意同 StockInput 相容建構式：
+         * 輸入本身就是完成日序列，快照由 {@code indicators} 的四值推得；不傳 null。
+         */
+        public Assembled(
+            TechnicalIndicatorService.FullIndicators indicators,
+            List<StockPriceHistory> adjustedRowsDesc,
+            boolean distributionAdjusted,
+            List<BigDecimal> completedCloses,
+            BigDecimal previousAdjustedClose,
+            BigDecimal completedChangePercent,
+            BigDecimal week52High,
+            BigDecimal week52Low,
+            BigDecimal kdBandWidthPercent,
+            TradingRadarRuleEngine.Confirmation ma20Confirmation,
+            TradingRadarRuleEngine.Confirmation ma60Confirmation,
+            TradingRadarRuleEngine.Confirmation ma240Confirmation,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal ruleChangePercent,
+            BigDecimal volumeRatio,
+            VolatilityObservation volatility60,
+            TradingRadarRuleEngine.CandleInput dailyCandle,
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+            TechnicalIndicatorService.FullIndicators weeklyIndicators,
+            boolean weeklyDistributionAdjusted,
+            TradingRadarRuleEngine.BollingerInput bollinger) {
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, bollinger,
+                    completedKdOf(indicators));
+        }
+
         /** Previous canonical shape, retained for old fixtures/snapshots with no Bollinger observation. */
         public Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -168,7 +206,8 @@ public class RadarInputAssembler {
 
             boolean weeklyDistributionAdjusted
 ) {
-            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, null);
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, null,
+                    completedKdOf(indicators));
         }
 
         /** t274 primitive 的欄位捷徑；正式 normalized action 尚未在此任務啟用。 */
@@ -184,7 +223,8 @@ public class RadarInputAssembler {
                 TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
                 null, null, null, null, null, null,
                 VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"),
-                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY, false);
+                null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY, false, null,
+                new TradingRadarRuleEngine.CompletedKd(null, null, null, null));
 
         /** Compatibility shape before Task408 added the weekly price-basis flag. */
         public Assembled(
@@ -401,6 +441,7 @@ public class RadarInputAssembler {
         TradingRadarRuleEngine.WeeklyInput weekly = cachedWeekly == null
                 ? weeklyInput(prepared.weeklyBarsDesc(), prepared.weeklySeriesDesc(), weeklyIndicators, prepared.price())
                 : cachedWeekly;
+        TradingRadarRuleEngine.CompletedKd completedKd = completedKd(prepared, indicators);
         return new Assembled(
                 indicators,
                 adjustedRows,
@@ -427,7 +468,40 @@ public class RadarInputAssembler {
                 weeklyIndicators,
                 prepared.weeklyDistributionAdjusted(),
                 prepared.completedCloses().size() < 20 ? null
-                        : completedBollinger(prepared.dailyContractRowsDesc(), firstCompleted));
+                        : completedBollinger(prepared.dailyContractRowsDesc(), firstCompleted),
+                completedKd);
+    }
+
+    /**
+     * 完成日 KD 快照（Task 576／Requirement 201）。
+     *
+     * <p>無盤中列（{@code firstCompleted == 0}）時 {@code indicators} 本身就是完成日序列的結果
+     * （含 Task408 快取命中時的 LOCAL snapshot），直接取其四值，不另算。
+     * 有盤中列（{@code firstCompleted == 1}）時，不論 {@code indicators} 是否來自快取，一律以
+     * 排除盤中列、長度不超過完成日契約的序列呼叫同一 {@code computeFromSeries} 本地計算，
+     * 不讀任何含盤中列的值。計算失敗或缺值時對應欄位為 null。</p>
+     */
+    private TradingRadarRuleEngine.CompletedKd completedKd(
+            Prepared prepared, TechnicalIndicatorService.FullIndicators indicators) {
+        int firstCompleted = prepared.firstCompletedIndex();
+        if (firstCompleted == 0) return completedKdOf(indicators);
+        List<StockPriceHistory> adjustedRows = prepared.adjustedRowsDesc();
+        int end = Math.min(adjustedRows.size(), firstCompleted + prepared.indicatorRows() - 1);
+        if (end <= firstCompleted) return new TradingRadarRuleEngine.CompletedKd(null, null, null, null);
+        TechnicalIndicatorService.FullIndicators completed;
+        try {
+            completed = nonNull(indicatorService.computeFromSeries(adjustedRows.subList(firstCompleted, end)));
+        } catch (RuntimeException e) {
+            return new TradingRadarRuleEngine.CompletedKd(null, null, null, null);
+        }
+        return completedKdOf(completed);
+    }
+
+    private static TradingRadarRuleEngine.CompletedKd completedKdOf(TechnicalIndicatorService.FullIndicators indicators) {
+        return indicators == null
+                ? new TradingRadarRuleEngine.CompletedKd(null, null, null, null)
+                : new TradingRadarRuleEngine.CompletedKd(
+                        indicators.k(), indicators.d(), indicators.previousK(), indicators.previousD());
     }
 
     /** Price-only calculation, including fresh-local cache hits: never consumes provider BB values. */
