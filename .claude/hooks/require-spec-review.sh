@@ -120,11 +120,11 @@ cat >&2 <<EOF
 
     /spec-review
 
-（會先跑 scripts/spec-check.sh 取機械證據，再派唯讀的 spec-auditor 查證。
-  critical 與 major 修完即可開工；審查通過後由該 skill 寫入審查紀錄。）
+（會先跑 scripts/spec-check.sh 取機械證據，再以 scripts/codex-review.sh 交 Codex 唯讀查證；
+  Claude 每輪修完 critical／major 再交 Codex 複審，最多審三輪、第 3 輪問題也修完；之後由該 skill 寫入審查紀錄。）
 
 如何處理：
-    A. 跑 /spec-review，修完 critical／major → 本閘門自動放行
+    A. 跑 /spec-review，PASS 或第 3 輪修完並記錄後 → 本閘門自動放行
     B. 這次確實不需要審查（例如只是回填任務完成報告）：
        SKIP_SPEC_GATE=1 開頭執行，或請使用者確認後改用該環境變數
     C. 純樣式 / typo：那類變更通常不會動到 spec/，本閘門本來就不會擋——
