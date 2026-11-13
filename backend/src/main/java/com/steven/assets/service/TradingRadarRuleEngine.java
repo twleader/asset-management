@@ -18,6 +18,10 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
+     * V27（Task 581／Requirement 204）：只對台股0050／00881的52曆週價格回撤20%，及具名美股六家公司
+     * 七股類的30%回撤，在MEDIUM加入不等止穩的積極分批機會。成本／資料與後置證據閘門保留；
+     * 其他標的與兩軌不放寬。這是使用者風險偏好，3~6月為意圖，不保證回升。
+     *
      * V25（Task 577／Requirement 202）：減碼與試單除 KD 證據外，另須各持有期完成 K 價格結構確認
      * （{@link RadarCompletedStructure}；一周／1周~1月用日K、1月~6月用週K）——試單需「止穩」、減碼需「轉弱」，
      * 結構受阻或不可用時持有者 HOLD_CAUTION／未持有者 WAIT；支撐確認跌破只加 risks、不在低檔賣。
@@ -76,7 +80,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V26";
+    public static final String RULE_VERSION = "TW_RULES_V27";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -90,6 +94,8 @@ public class TradingRadarRuleEngine {
      * 兩條路徑會隨演進分歧。</p>
      */
     public enum Horizon { SHORT, SWING, MEDIUM }
+    public enum MediumAccumulationSignal { NONE, DEEP_DRAWDOWN }
+    private enum BuySafetyPolicy { NORMAL, MEDIUM_DEEP_DRAWDOWN }
 
     /** 現行 production 分層；candidate API 會改讀不可變 RuleParameters，既有入口仍固定這組。 */
     /*
@@ -796,17 +802,54 @@ public class TradingRadarRuleEngine {
             BollingerInput bollinger,
             /**
              * 完成日 KD 快照（Task 576）。production（{@code TradingRadarService}）與回測
-             * （{@code BacktestService}）一律走 30 參數正典建構式並顯式傳入。
+             * （{@code BacktestService}）一律走 31 參數正典建構式並顯式傳入。
              */
             CompletedKd completedKd,
             /**
-             * 三軌完成 K 結構事實（Task 577／Requirement 202）。production 與回測一律走本 30 參數
+             * 三軌完成 K 結構事實（Task 577／Requirement 202）。production 與回測一律走本 31 參數
              * 正典建構式並顯式傳入 {@link RadarCompletedStructure#evaluate} 的實算結果；
              * {@code null} 視同 {@link StructureFacts#NOT_EVALUATED}。
              */
-            StructureFacts structure
+            StructureFacts structure,
+            RadarCompletedPriceDrawdown.Context accumulation
     ) {
+        /** Compatibility input predating the named accumulation context; never infers eligibility. */
+        public StockInput(
+                boolean held,
+                BigDecimal price,
+                BigDecimal changePercent,
+                BigDecimal completedChangePercent,
+                Indicators indicators,
+                BigDecimal previousK,
+                BigDecimal previousD,
+                Confirmation ma20Confirmation,
+                Confirmation ma60Confirmation,
+                Confirmation ma240Confirmation,
+                InstrumentType instrumentType,
+                MarketRegime marketRegime,
+                boolean marketStale,
+                BigDecimal fxPercentile,
+                BigDecimal ma60BiasPercent,
+                BigDecimal ma60BiasPercentile,
+                BigDecimal ma240BiasPercent,
+                BigDecimal week52Position,
+                BigDecimal kdBandWidthPercent,
+                BigDecimal etfPremiumPct,
+                BigDecimal etfPremiumPercentile,
+                BigDecimal weeklyMa,
+                ExtendedIndicators extendedIndicators,
+                BigDecimal volumeRatio,
+                FundamentalInput fundamental,
+                CandleInput dailyCandle,
+                WeeklyInput weekly,
+                BollingerInput bollinger,
+                CompletedKd completedKd,
+                StructureFacts structure) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, bollinger, completedKd, structure, RadarCompletedPriceDrawdown.Context.NOT_EVALUATED);
+        }
+
         public StockInput {
+            accumulation = accumulation == null ? RadarCompletedPriceDrawdown.Context.NOT_EVALUATED : accumulation;
             structure = structure == null ? StructureFacts.NOT_EVALUATED : structure;
         }
 
@@ -814,7 +857,7 @@ public class TradingRadarRuleEngine {
          * V24 的 29 參數形狀（Task 577 之前的正典建構式）。
          *
          * <p>結構事實傳 {@link StructureFacts#NOT_EVALUATED}：<b>NOT_EVALUATED 只供既有單元測試，
-         * 代表結構條件不參與，維持 V24 行為；production 與回測必須顯式傳入實算結果</b>（走 30 參數正典建構式）。</p>
+         * 代表結構條件不參與，維持 V24 行為；production 與回測必須顯式傳入實算結果</b>（走 31 參數正典建構式）。</p>
          */
         public StockInput(boolean held,
             BigDecimal price,
@@ -937,7 +980,7 @@ public class TradingRadarRuleEngine {
          * 於是五個新因子（日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能）恆為缺值、
          * 權重被重分配掉——這正是本任務實作期間真的發生過的缺陷（{@code TradingRadarService
          * .buildStock} 只傳 25 個引數，線上五因子全空、回測卻有值，兩邊靜默分岔）。
-         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 30 參數的正式建構式（Task 577）並傳入
+         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 31 參數的正式建構式（Task 581）並傳入
          * {@code assembled.dailyCandle()}、{@code assembled.weekly()}、{@code assembled.bollinger()}、{@code assembled.completedKd()} 與 {@code assembled.structure()}；由
          * {@code TradingRadarStockWeeklyWiringTest} 釘住。</p>
          */
@@ -1344,8 +1387,35 @@ public class TradingRadarRuleEngine {
             Integer swingScore,
             Action swingAction,
             List<String> swingReasons,
-            List<String> swingRisks
+            List<String> swingRisks,
+            MediumAccumulationSignal mediumAccumulationSignal
     ) {
+        /** Compatibility input predating the named accumulation context; never infers eligibility. */
+        public StockResult(
+                Integer score,
+                Action action,
+                CounterTrendResult counterTrend,
+                List<String> reasons,
+                List<String> risks,
+                KdHeat kdHeat,
+                TimingState timingState,
+                boolean kdDeadCross,
+                boolean longTermBroken,
+                Integer shortScore,
+                Action shortAction,
+                List<String> shortReasons,
+                List<String> shortRisks,
+                boolean horizonConflict,
+                boolean profitTakingConfirmed,
+                NormalizedBiasProvenance normalizedBias,
+                NormalizedBiasProvenance shortNormalizedBias,
+                Integer swingScore,
+                Action swingAction,
+                List<String> swingReasons,
+                List<String> swingRisks) {
+            this(score, action, counterTrend, reasons, risks, kdHeat, timingState, kdDeadCross, longTermBroken, shortScore, shortAction, shortReasons, shortRisks, horizonConflict, profitTakingConfirmed, normalizedBias, shortNormalizedBias, swingScore, swingAction, swingReasons, swingRisks, MediumAccumulationSignal.NONE);
+        }
+
         /** Compatibility constructor for pre-provenance engine/test callers. */
         public StockResult(
                 Integer score,
@@ -1676,7 +1746,7 @@ public class TradingRadarRuleEngine {
                 horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()),
                 raw.profitTakingConfirmed(), raw.normalizedBias(), raw.shortNormalizedBias(),
                 raw.swingScore(), gated.swingAction(),
-                List.copyOf(swingReasons), List.copyOf(swingRisks));
+                List.copyOf(swingReasons), List.copyOf(swingRisks), raw.mediumAccumulationSignal());
     }
 
     /**
@@ -1769,7 +1839,7 @@ public class TradingRadarRuleEngine {
                 horizonConflict(medium.action(), baseline.swingAction(), shortTerm.shortAction()),
                 medium.profitTakingConfirmed(), medium.normalizedBias(), shortTerm.shortNormalizedBias(),
                 baseline.swingScore(), baseline.swingAction(),
-                baseline.swingReasons(), baseline.swingRisks());
+                baseline.swingReasons(), baseline.swingRisks(), medium.mediumAccumulationSignal());
     }
 
     private StockResult evaluateStockInternal(
@@ -1832,7 +1902,7 @@ public class TradingRadarRuleEngine {
             shortTerm = applyCandidatePolicy(input, shortTerm, candidate, context,
                     context.shortDownsideRiskPct(), deadCross, profitTaking, Horizon.SHORT);
         }
-        CounterTrendResult counterTrend = evaluateCounterTrend(input);
+        CounterTrendResult counterTrend = evaluateCounterTrend(input, accumulationEligible(input));
         return new StockResult(
                 medium.score(), medium.action(), counterTrend,
                 medium.reasons(), medium.risks(), kdHeat, timing,
@@ -1841,7 +1911,8 @@ public class TradingRadarRuleEngine {
                 horizonConflict(medium.action(), swing.action(), shortTerm.action()), profitTaking,
                 NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias),
                 NormalizedBiasProvenance.from(normalizedEnabled, normalizedBias),
-                swing.score(), swing.action(), swing.reasons(), swing.risks());
+                swing.score(), swing.action(), swing.reasons(), swing.risks(),
+                accumulationEligible(input) ? MediumAccumulationSignal.DEEP_DRAWDOWN : MediumAccumulationSignal.NONE);
     }
 
     private record HorizonScore(
@@ -1858,6 +1929,27 @@ public class TradingRadarRuleEngine {
      * {@link #evaluateHorizon} 內 {@code acc.add} 的既有順序一致。Task 356 新增的五欄
      * 一律追加在 {@code industry} 之後、{@code reasons}／{@code risks} 之前。</p>
      */
+    private enum PolicyNotice { RISK_OFF, CLOSE_DOWN, CHASE_RISK }
+    private record PolicyNarrative(int index, PolicyNotice source, String deepText) {}
+
+    private static List<String> renderNarratives(List<String> normal, List<PolicyNarrative> variants,
+                                                  BuySafetyPolicy policy) {
+        List<String> rendered = new ArrayList<>(normal);
+        if (policy == BuySafetyPolicy.MEDIUM_DEEP_DRAWDOWN) {
+            for (PolicyNarrative variant : variants) rendered.set(variant.index(), variant.deepText());
+        }
+        return rendered;
+    }
+
+    private static boolean accumulationEligible(StockInput input) {
+        return input != null && input.accumulation() != null && input.accumulation().eligible(input.price());
+    }
+
+    private static BuySafetyPolicy buySafetyPolicy(StockInput input, Horizon horizon) {
+        return horizon == Horizon.MEDIUM && accumulationEligible(input)
+                ? BuySafetyPolicy.MEDIUM_DEEP_DRAWDOWN : BuySafetyPolicy.NORMAL;
+    }
+
     private record FactorContributions(
             Double ma5,
             Double ma20,
@@ -1883,7 +1975,9 @@ public class TradingRadarRuleEngine {
             Double weeklyBias,
             Double weeklyCandleVolume,
             List<String> reasons,
-            List<String> risks
+            List<String> risks,
+            List<PolicyNarrative> deepReasonVariants,
+            List<PolicyNarrative> deepRiskVariants
     ) {}
 
     /**
@@ -1903,6 +1997,8 @@ public class TradingRadarRuleEngine {
     private FactorContributions computeFactors(StockInput input, boolean narrowBand, KdHeat kdHeat, boolean production) {
         List<String> reasons = new ArrayList<>();
         List<String> risks = new ArrayList<>();
+        List<PolicyNarrative> deepReasonVariants = new ArrayList<>();
+        List<PolicyNarrative> deepRiskVariants = new ArrayList<>();
 
         // Task 356.6a：標籤由「週線」改為「日線 MA5」。input.weeklyMa() 實際上是**日K 收盤序列的
         // 5 日 SMA**，不是週K；不改的話同一份 reasons 會同時出現「最新價位於週線之上」與
@@ -1929,11 +2025,12 @@ public class TradingRadarRuleEngine {
 
         Double market = null;
         if (equityMarketApplies(input)) {
-            market = marketContribution(input, reasons, risks);
+            market = marketContribution(input, reasons, risks, deepRiskVariants);
         } else {
             reasons.add("資產類別為債券，不套用台股大盤 RISK_ON／RISK_OFF 加減分與買進閘門。 ");
         }
-        Double dayMove = completedDayContribution(input.completedChangePercent(), reasons, risks);
+        Double dayMove = completedDayContribution(input.completedChangePercent(), reasons, risks,
+                deepReasonVariants, deepRiskVariants);
         Double fx = fxContribution(input.fxPercentile(), reasons, risks);
         Double etfPremium = etfPremiumContribution(input, reasons, risks);
 
@@ -1974,7 +2071,7 @@ public class TradingRadarRuleEngine {
         return new FactorContributions(ma5, ma20, ma60, ma240, kdJ, macd, rsi, bias, volume, market,
                 dayMove, fx, etfPremium, eps, roe, revenue, pe, industry,
                 dailyCandle, weeklyTrend, weeklyMomentum, weeklyBias, weeklyCandleVolume,
-                List.copyOf(reasons), List.copyOf(risks));
+                List.copyOf(reasons), List.copyOf(risks), List.copyOf(deepReasonVariants), List.copyOf(deepRiskVariants));
     }
 
     // ───────────────────────── Task 356.5／356.6 的五個新因子 ─────────────────────────
@@ -2251,8 +2348,9 @@ public class TradingRadarRuleEngine {
             Double treasuryContribution,
             CandidateContext context,
             NormalizedBiasObservation normalizedBias) {
-        List<String> reasons = new ArrayList<>(factors.reasons());
-        List<String> risks = new ArrayList<>(factors.risks());
+        BuySafetyPolicy policy = buySafetyPolicy(input, horizon);
+        List<String> reasons = renderNarratives(factors.reasons(), factors.deepReasonVariants(), policy);
+        List<String> risks = renderNarratives(factors.risks(), factors.deepRiskVariants(), policy);
         Accumulator acc = new Accumulator();
         boolean shortTerm = horizon == Horizon.SHORT;
         // Task 356.9c／356.9d 的不變式，寫成硬失敗而不是註解：SWING 沒有任何 candidate 校準依據，
@@ -2348,7 +2446,7 @@ public class TradingRadarRuleEngine {
                 0.0);
         acc.add(treasuryWeight, treasuryContribution);
 
-        describeHeat(kdHeat, input.indicators().k(), input.indicators().d(), risks);
+        describeHeat(kdHeat, input.indicators().k(), input.indicators().d(), risks, policy);
         // V12 keeps the historical percentile route.  V13 uses it only as a
         // disclosure field; it must not silently participate in candidate action.
         if (candidate == null) describeBiasPercentileExtreme(timing, input, reasons, risks);
@@ -2517,7 +2615,7 @@ public class TradingRadarRuleEngine {
         return action == Action.REDUCE_CANDIDATE || action == Action.EXIT_CANDIDATE;
     }
 
-    private CounterTrendResult evaluateCounterTrend(StockInput input) {
+    private CounterTrendResult evaluateCounterTrend(StockInput input, boolean mediumDeepDrawdown) {
         // 窄幅標的的 KD 在雜訊上飽和，低檔判定與高檔同樣失真（Task 264）。
         if (narrowKdBand(input)) {
             return new CounterTrendResult(CounterTrendState.NONE, List.of(), List.of());
@@ -2553,7 +2651,9 @@ public class TradingRadarRuleEngine {
             reasons.add("本日價格已停止續跌，可列為小額分批的逆勢試單候選。 ");
             risks.add("逆勢試單不取代原本的趨勢分數與主規則建議，必須限制部位並分批。 ");
             if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
-                risks.add("大盤仍為 RISK_OFF，只限小額試單，不得視為一般買進或加碼候選。 ");
+                risks.add(mediumDeepDrawdown
+                        ? "本欄僅描述短線逆勢小額試單；中期具名深回撤政策另行判斷，並非已通過成本與證據閘門。 "
+                        : "大盤仍為 RISK_OFF，只限小額試單，不得視為一般買進或加碼候選。 ");
             }
             return new CounterTrendResult(
                     CounterTrendState.TRIAL_CANDIDATE,
@@ -2573,7 +2673,9 @@ public class TradingRadarRuleEngine {
         }
         if (!stabilized) risks.add("本日價格仍在下跌，尚未出現停止續跌訊號。 ");
         if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
-            risks.add("大盤為 RISK_OFF，僅可觀察；若後續升級也只限小額分批，主規則建議仍優先。 ");
+            risks.add(mediumDeepDrawdown
+                    ? "RISK_OFF 下本欄仍僅屬短線觀察；中期具名深回撤政策可獨立評估，不代表成本與證據閘門已放行。 "
+                    : "大盤為 RISK_OFF，僅可觀察；若後續升級也只限小額分批，主規則建議仍優先。 ");
         }
         return new CounterTrendResult(
                 CounterTrendState.OVERSOLD_WATCH,
@@ -2835,12 +2937,17 @@ public class TradingRadarRuleEngine {
 
     /** 完成日漲跌採均值回歸方向，上漲延伸為負、下跌回落為正。 */
     private Double completedDayContribution(BigDecimal completedChangePercent,
-                                            List<String> reasons, List<String> risks) {
+                                            List<String> reasons, List<String> risks,
+                                            List<PolicyNarrative> deepReasons, List<PolicyNarrative> deepRisks) {
         if (completedChangePercent == null) return null;
         double value = clampUnit(-completedChangePercent.doubleValue() / 5.0);
         if (completedChangePercent.compareTo(BigDecimal.valueOf(5)) >= 0) {
+            deepRisks.add(new PolicyNarrative(risks.size(), PolicyNotice.CHASE_RISK,
+                    "完成日急彈風險仍反映於技術分數；本次具名中期價格回撤仍達門檻，單日追漲改為風險揭露，不放寬其他軌買方閘門。 "));
             risks.add("完成日漲幅達 5% 以上，追漲風險已反映於分數；實際買方硬閘門依設定門檻判斷。 ");
         } else if (completedChangePercent.signum() < 0) {
+            deepReasons.add(new PolicyNarrative(reasons.size(), PolicyNotice.CLOSE_DOWN,
+                    "完成日價格仍回落；本次具名中期深回撤政策不等待止跌，續跌風險仍在。 "));
             reasons.add("完成日價格回落，位置成本相對降低；仍須等待止跌才可買進。 ");
         }
         return value;
@@ -3106,10 +3213,12 @@ public class TradingRadarRuleEngine {
      * (2) <b>不得把門檻數字寫進句子</b>——條件為嚴格大於，而 K=85.02 顯示為 85.0，
      * 「已高於 85」會變成自我否定的句子。</p>
      */
-    private void describeHeat(KdHeat heat, BigDecimal k, BigDecimal d, List<String> risks) {
+    private void describeHeat(KdHeat heat, BigDecimal k, BigDecimal d, List<String> risks, BuySafetyPolicy policy) {
         if (heat == KdHeat.NORMAL || k == null || d == null) return;
         double avg = k.add(d).doubleValue() / 2.0;
-        if (heat == KdHeat.OVERHEATED) {
+        if (heat == KdHeat.OVERHEATED && policy == BuySafetyPolicy.MEDIUM_DEEP_DRAWDOWN) {
+            risks.add("KD 仍過熱，短期急彈與回落風險存在；本次具名中期價格回撤政策不以短線熱度否決積極分批，其他軌條件不變。 ");
+        } else if (heat == KdHeat.OVERHEATED) {
             // avg 與 K 同時過熱時只輸出一條，avg 版優先。
             risks.add(avg > KD_OVERHEAT_AVG
                     ? "KD 均值 " + Math.round(avg) + " 已達超買區，短線位置偏高；本日不列入買進／加碼候選。 "
@@ -3149,7 +3258,8 @@ public class TradingRadarRuleEngine {
         }
     }
 
-    private Double marketContribution(StockInput input, List<String> reasons, List<String> risks) {
+    private Double marketContribution(StockInput input, List<String> reasons, List<String> risks,
+                                      List<PolicyNarrative> deepRisks) {
         if (input.marketRegime() == MarketRegime.RISK_ON) {
             // stale 時不給多方加分：大盤停在前一交易日，盤中崩跌看不出來（Task 217.2）。
             if (input.marketStale()) {
@@ -3161,6 +3271,8 @@ public class TradingRadarRuleEngine {
         }
         if (input.marketRegime() == MarketRegime.RISK_OFF) {
             // 不對稱是刻意的：新鮮度不足時只收緊、不放寬。
+            deepRisks.add(new PolicyNarrative(risks.size(), PolicyNotice.RISK_OFF,
+                    "大盤仍為 RISK_OFF，下跌方向風險保留；本次具名中期深回撤政策允許積極分批，不代表一般買方已放行。 "));
             risks.add("大盤為 RISK_OFF，禁止產生買進或加碼候選。 ");
             return -1.0;
         }
@@ -3257,8 +3369,27 @@ public class TradingRadarRuleEngine {
         // Task 577：該軌完成 K 結構事實；只加嚴、不放寬。NOT_EVALUATED 維持 V24 行為。
         HorizonStructure hs = structureOf(input, horizon);
         discloseStructure(hs, horizon, reasons, risks);
+        BuySafetyPolicy policy = buySafetyPolicy(input, horizon);
         List<String> buySafetyBlockers = buySafetyBlockers(input, timing,
-                chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
+                chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct, policy);
+        if (policy == BuySafetyPolicy.MEDIUM_DEEP_DRAWDOWN) {
+            var fact = input.accumulation();
+            reasons.add("具名中期價格回撤政策：" + fact.market() + " " + fact.stockCode()
+                    + "，52週完成窗口 " + fact.windowStart() + " 至 " + fact.completedAsOfDate()
+                    + "，高點 " + fact.high().toPlainString() + "（" + fact.highDate() + "），比較價 "
+                    + fact.referencePrice().toPlainString() + "，回撤 " + fmt1(fact.drawdownPercent())
+                    + "%（精確門檻 " + RadarCompletedPriceDrawdown.threshold(fact.stockCode(), fact.market())
+                    + "%），價基 " + fact.priceBasis() + "。 ");
+            reasons.add("依本次3~6月資金安排列為積極分批買進／加碼機會，不等待短線止穩；技術分數仍可呈弱勢，不是獲利機率。 ");
+            risks.add("本次具名中期政策接受未止穩、均線偏弱與熊市方向風險，價格可能續跌；積極分批只表達可提高比重意向，金額由使用者自行決定，不保證3~6月回升。 ");
+            discloseBuySafetyBlockers(buySafetyBlockers, risks);
+            if (!buySafetyBlockers.isEmpty()) return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            return input.held() ? Action.ADD_CANDIDATE : Action.BUY_CANDIDATE;
+        }
+        if (horizon == Horizon.MEDIUM && input.accumulation().status() == RadarCompletedPriceDrawdown.Status.UNAVAILABLE) {
+            risks.add("具名中期52週價格回撤資料不可用：" + input.accumulation().unavailableReason()
+                    + "；本次不由新政策放行，既有策略仍分開判讀。 ");
+        }
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
         if (qualifiesForTrialBuy(input)) {
@@ -3522,11 +3653,14 @@ public class TradingRadarRuleEngine {
      * Trial qualification establishes the setup only; this method applies the
      * same safety conditions used by the ordinary BUY/ADD gate.  Market regime
      * and MA20/MA60 are deliberately absent so trials retain their documented
-     * RISK_OFF and moving-average exceptions.
+     * RISK_OFF and moving-average exceptions. The explicitly selected MEDIUM
+     * deep-drawdown policy keeps cost/quality vetoes and treats technical direction as risk disclosure.
      */
     private List<String> buySafetyBlockers(StockInput input, TimingState timing,
                                            BigDecimal chasedDailyMoveThresholdPct,
-                                           BigDecimal buyGateOverboughtBiasPct) {
+                                           BigDecimal buyGateOverboughtBiasPct,
+                                           BuySafetyPolicy policy) {
+        boolean deepMedium = policy == BuySafetyPolicy.MEDIUM_DEEP_DRAWDOWN;
         List<String> blockers = new ArrayList<>();
         boolean kdOverheated = kdHeatOf(input) == KdHeat.OVERHEATED;
         boolean fxExpensive = input.fxPercentile() != null
@@ -3543,15 +3677,15 @@ public class TradingRadarRuleEngine {
         // classification is never converted to overbought by absolute bias.
         boolean equityMarketStale = equityMarketApplies(input) && input.marketStale();
 
-        if (kdOverheated) blockers.add("KD 過熱，買方安全閘門關閉。 ");
+        if (kdOverheated && !deepMedium) blockers.add("KD 過熱，買方安全閘門關閉。 ");
         if (fxExpensive) blockers.add("FX 位於昂貴區，換匯成本偏高，買方安全閘門關閉。 ");
         if (premiumExpensive) blockers.add("ETF 溢價達昂貴門檻，買方安全閘門關閉。 ");
-        if (stillFalling) blockers.add("完成日漲跌缺值或收黑，買方安全閘門關閉。 ");
-        if (chasedDailyMove) blockers.add("完成日漲幅達本次追漲門檻，買方安全閘門關閉。 ");
-        if (biasOverbought && timing != TimingState.EXTREME_OVERSOLD) {
+        if (stillFalling && (!deepMedium || completedChange == null)) blockers.add("完成日漲跌缺值或收黑，買方安全閘門關閉。 ");
+        if (chasedDailyMove && !deepMedium) blockers.add("完成日漲幅達本次追漲門檻，買方安全閘門關閉。 ");
+        if (biasOverbought && timing != TimingState.EXTREME_OVERSOLD && !deepMedium) {
             blockers.add("季線正乖離達本次買方門檻，買方安全閘門關閉。 ");
         }
-        if (timing == TimingState.EXTREME_OVERBOUGHT) {
+        if (timing == TimingState.EXTREME_OVERBOUGHT && !deepMedium) {
             blockers.add("既有時序判定為極端超買，買方安全閘門關閉。 ");
         }
         if (fundamentalDeteriorating(input)) {

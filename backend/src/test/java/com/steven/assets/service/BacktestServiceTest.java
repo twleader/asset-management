@@ -925,7 +925,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V25")
     void ruleVersionIsV18() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V26");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V27");
     }
 
     @Test
@@ -938,7 +938,7 @@ class BacktestServiceTest {
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V26");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V27");
         assertThat(response.results()).isNotEmpty();
     }
 
@@ -954,7 +954,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V26");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V27");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();
@@ -1520,4 +1520,65 @@ class BacktestServiceTest {
         assertThat(held.structure().shortTerm().status())
                 .as("一周視窗不含剔除週").isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
     }
+    @Test void v27ReplayCarriesSelectedIdentityAndAsOfPriceFactsWithoutFuturePeaks() {
+        for (String market : List.of(TW, "美股")) {
+            org.mockito.Mockito.reset(priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo,
+                    stockRepo, fundamentalAnalysisService, etfNavHistoryRepo);
+            String code = TW.equals(market) ? "0050" : "NVDA";
+            List<StockPriceHistory> rows = new ArrayList<>(RadarCompletedPriceDrawdownTest.rows(code, market).reversed());
+            // 漸進回落避免分割式跳空，讓已有完整技術的 replay 確實穿越價格政策門檻。
+            for (int i = 0; i < rows.size(); i++) {
+                BigDecimal price = BigDecimal.valueOf(100 * Math.pow(0.9985, i));
+                rows.get(i).setClosePrice(price);
+                rows.get(i).setOpenPrice(price);
+                rows.get(i).setHighPrice(price.multiply(new BigDecimal("1.01")));
+                rows.get(i).setLowPrice(price.multiply(new BigDecimal("0.99")));
+            }
+            stubRepos(rows, List.of());
+            when(twseRepo.findAllByOrderByTradingDateAsc()).thenReturn(rows.stream().map(row ->
+                    new com.steven.assets.model.TwseIndexDailyHistory(row.getTradingDate(),
+                            row.getOpenPrice(), row.getHighPrice(), row.getLowPrice(), row.getClosePrice(),
+                            null, row.getVolume(), null)).toList());
+            when(marketContextService.resolveMarketFromRows(any(), any(), any()))
+                    .thenReturn(TradingRadarMarketContextService.MarketContext.EMPTY);
+            when(priceHistoryRepo.findDistinctStockCodesByMarket(market)).thenReturn(List.of(code));
+            when(priceHistoryRepo.findAllByStockCodeAndMarketOrderByTradingDateAsc(code, market)).thenReturn(rows);
+            when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc(anyString())).thenReturn(List.of());
+            when(usIndexRepo.findByIndexCodeOrderByTradingDateAsc("IXIC")).thenReturn(rows.stream().map(row ->
+                    new com.steven.assets.model.UsIndexDailyHistory("IXIC", row.getTradingDate(),
+                            row.getOpenPrice(), row.getHighPrice(), row.getLowPrice(), row.getClosePrice(),
+                            row.getVolume())).toList());
+            TradingRadarRuleEngine spyEngine = spy(new TradingRadarRuleEngine());
+            RadarInputAssembler wired = new RadarInputAssembler(new TechnicalIndicatorService(
+                    priceHistoryRepo, priceQuery, twseRepo, usIndexRepo), adjust, spyEngine);
+            BacktestService replay = new BacktestService(spyEngine, wired, new AssetClassifier(),
+                    priceHistoryRepo, dividendHistoryRepo, twseRepo, usIndexRepo, exchangeRateRepo,
+                    etfNavHistoryRepo, stockRepo, adjust, marketContextService, fundamentalAnalysisService);
+            replay.run(new BacktestDto.Request(List.of(code), null, null, List.of(1), null, null,
+                    Set.of(market), new BigDecimal("0.70"), 3, null, false));
+            org.mockito.ArgumentCaptor<TradingRadarRuleEngine.StockInput> inputs =
+                    org.mockito.ArgumentCaptor.forClass(TradingRadarRuleEngine.StockInput.class);
+            verify(spyEngine, org.mockito.Mockito.atLeastOnce()).evaluateStock(inputs.capture());
+            var available = inputs.getAllValues().stream().map(TradingRadarRuleEngine.StockInput::accumulation)
+                    .filter(f -> f.status() == RadarCompletedPriceDrawdown.Status.AVAILABLE).toList();
+            assertThat(available).isNotEmpty().allSatisfy(f -> {
+                assertThat(f.stockCode()).isEqualTo(code);
+                assertThat(f.market()).isEqualTo(market);
+                var asOfRows = rows.stream().filter(r -> !r.getTradingDate().isAfter(f.completedAsOfDate())).toList().reversed();
+                var expected = RadarCompletedPriceDrawdown.evaluate(code, market, asOfRows, 0, f.referencePrice(),
+                        f.priceBasis(), Set.of(), false);
+                assertThat(f).isEqualTo(expected);
+            });
+            var eligibleInputs = inputs.getAllValues().stream()
+                    .filter(input -> input.accumulation().eligible(input.price())).toList();
+            assertThat(eligibleInputs).isNotEmpty().allSatisfy(input -> {
+                assertThat(input.marketRegime()).isEqualTo(TradingRadarRuleEngine.MarketRegime.RISK_OFF);
+                assertThat(input.completedChangePercent()).isNegative();
+                assertThat(input.ma60Confirmation()).isEqualTo(TradingRadarRuleEngine.Confirmation.BELOW);
+                assertThat(engine.evaluateStock(input).action()).isEqualTo(input.held()
+                        ? TradingRadarRuleEngine.Action.ADD_CANDIDATE : TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+            });
+        }
+    }
+
 }

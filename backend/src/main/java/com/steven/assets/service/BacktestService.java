@@ -792,7 +792,7 @@ public class BacktestService {
             RadarInputAssembler.Assembled a = assembler.assemble(
                     windowDesc, events, false,
                     Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price,
-                    droppedDates, droppedUndated);
+                    droppedDates, droppedUndated, code, TW_MARKET);
 
             java.time.Instant decisionInstant = signalInstant(date);
             TradingRadarPremiumResolver.DecisionObservation premiumObservation =
@@ -887,7 +887,7 @@ public class BacktestService {
                 // Task 576：回測序列本就不含盤中列，完成日 KD 快照由完成日 indicators 推得並顯式傳入。
                 completedKd(a),
                 // Task 577：完成 K 結構事實與 production 同一 RadarCompletedStructure.evaluate（經 assembler）。
-                a.structure()));
+                a.structure(), a.accumulation()));
     }
 
     /** 回測過濾剔除（收盤 null 或非正）列的交易日（Task 577.4a）；只記錄、不改過濾。 */
@@ -1287,7 +1287,7 @@ public class BacktestService {
             RadarInputAssembler.Assembled assembled = assembler.assemble(
                     windowDesc, windowEvents, false,
                     Math.min(windowDesc.size(), DAILY_CONTRACT_ROWS), DAILY_CONTRACT_ROWS, price,
-                    droppedDates, droppedUndated);
+                    droppedDates, droppedUndated, code, market);
             TradingRadarRuleEngine.MarketRegime regime = regimes.getOrDefault(
                     signalDate, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
             TradingRadarMarketContextService.FxContext fx = fxSeries == null
@@ -3126,7 +3126,7 @@ public class BacktestService {
                 assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental,
                 // Task 356.13a-2：V13 candidate 回測路徑同樣必須接上日K 棒與週K，否則 promotion
                 // 稽核比較的是「有週K 的 production」與「沒有週K 的回測」，兩者根本不同一組規則。
-                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a), a.structure());
+                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a), a.structure(), a.accumulation());
     }
 
     private TradingRadarRuleEngine.CandidateContext v13Context(

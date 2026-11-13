@@ -630,7 +630,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -2603,7 +2603,7 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v24_ruleVersion() {
-        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 577／Requirement 202：完成 K 結構確認（TW_RULES_V25）═══════════════════════════
@@ -2868,6 +2868,104 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v25_ruleVersion() {
-        assertEquals("TW_RULES_V26", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
     }
+    private static TradingRadarRuleEngine.StockInput withAccumulation(TradingRadarRuleEngine.StockInput x,
+            RadarCompletedPriceDrawdown.Context context) {
+        return withAccumulation(x, context, x.structure());
+    }
+
+    private static TradingRadarRuleEngine.StockInput withAccumulation(TradingRadarRuleEngine.StockInput x,
+            RadarCompletedPriceDrawdown.Context context, TradingRadarRuleEngine.StructureFacts structure) {
+        return new TradingRadarRuleEngine.StockInput(x.held(), x.price(), x.changePercent(), x.completedChangePercent(),
+                x.indicators(), x.previousK(), x.previousD(), x.ma20Confirmation(), x.ma60Confirmation(), x.ma240Confirmation(),
+                x.instrumentType(), x.marketRegime(), x.marketStale(), x.fxPercentile(), x.ma60BiasPercent(),
+                x.ma60BiasPercentile(), x.ma240BiasPercent(), x.week52Position(), x.kdBandWidthPercent(), x.etfPremiumPct(),
+                x.etfPremiumPercentile(), x.weeklyMa(), x.extendedIndicators(), x.volumeRatio(), x.fundamental(),
+                x.dailyCandle(), x.weekly(), x.bollinger(), x.completedKd(), structure, context);
+    }
+
+    private static RadarCompletedPriceDrawdown.Context accumulation(String code, String market, BigDecimal price) {
+        var day = java.time.LocalDate.of(2026, 11, 13);
+        return new RadarCompletedPriceDrawdown.Context(RadarCompletedPriceDrawdown.Status.AVAILABLE, code, market,
+                day.minusWeeks(52), day, day.minusWeeks(8), new BigDecimal("100"), price,
+                "台股".equals(market) ? RadarCompletedPriceDrawdown.PriceBasis.TW_SPLIT_STOCK_PRICE
+                        : RadarCompletedPriceDrawdown.PriceBasis.STORED_PRICE_ONLY, null);
+    }
+
+    private static void assertShortSwingUnchanged(TradingRadarRuleEngine.StockResult old,
+                                                 TradingRadarRuleEngine.StockResult current) {
+        assertEquals(old.score(), current.score());
+        assertEquals(old.shortScore(), current.shortScore());
+        assertEquals(old.swingScore(), current.swingScore());
+        assertEquals(old.shortAction(), current.shortAction());
+        assertEquals(old.swingAction(), current.swingAction());
+        assertEquals(old.shortReasons(), current.shortReasons());
+        assertEquals(old.shortRisks(), current.shortRisks());
+        assertEquals(old.swingReasons(), current.swingReasons());
+        assertEquals(old.swingRisks(), current.swingRisks());
+    }
+
+    @Test void v27_namedDeepDrawdownBuysWithoutStabilityAcrossAllSelectedSymbolsAndOwnershipStates() {
+        for (String market : List.of("台股", "美股")) for (String code : "台股".equals(market)
+                ? List.of("0050", "00881") : List.of("GOOGL", "GOOG", "MSFT", "AVGO", "NVDA", "AAPL", "AMZN")) {
+            for (boolean held : List.of(false, true)) {
+                var input = new V23Stock().set(x -> { x.held = held; x.price = "台股".equals(market) ? "80" : "70";
+                    x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF; }).build();
+                var day = java.time.LocalDate.of(2026, 11, 13);
+                var weak = new TradingRadarRuleEngine.HorizonStructure(TradingRadarRuleEngine.StructureStatus.AVAILABLE,
+                        true, false, false, new BigDecimal("50"), day, 4, new BigDecimal("90"), null);
+                input = withAccumulation(input, RadarCompletedPriceDrawdown.Context.NOT_EVALUATED,
+                        new TradingRadarRuleEngine.StructureFacts(weak, weak, weak));
+                assertFalse(input.structure().medium().stabilized());
+                var baseline = engine.evaluateStock(input);
+                var result = engine.evaluateStock(withAccumulation(input, accumulation(code, market, input.price())));
+                assertEquals(held ? TradingRadarRuleEngine.Action.ADD_CANDIDATE : TradingRadarRuleEngine.Action.BUY_CANDIDATE, result.action());
+                assertEquals(TradingRadarRuleEngine.MediumAccumulationSignal.DEEP_DRAWDOWN, result.mediumAccumulationSignal());
+                assertShortSwingUnchanged(baseline, result);
+                assertTrue(result.reasons().stream().anyMatch(r -> r.contains("不等待短線止穩")));
+                assertTrue(result.risks().stream().anyMatch(r -> r.contains("RISK_OFF") && r.contains("允許積極分批")));
+                assertFalse(result.reasons().stream().anyMatch(r -> r.contains("仍須等待止跌才可買進")));
+                assertFalse(result.risks().stream().anyMatch(r -> r.contains("禁止產生買進或加碼候選")));
+            }
+        }
+    }
+
+    @Test void v27_hotKdPositiveBiasAndEightPercentBounceAreOnlyBoundedMediumDisclosures() {
+        var input = new V23Stock().set(x -> { x.price = "70"; x.completed = "8"; x.k = "86"; x.d = "80";
+            x.ma60Bias = "21"; x.ma60BiasPercentile = "99"; x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF; }).build();
+        var old = engine.evaluateStock(input);
+        var result = engine.evaluateStock(withAccumulation(input, accumulation("NVDA", "美股", input.price())));
+        assertEquals(TradingRadarRuleEngine.Action.ADD_CANDIDATE, result.action());
+        assertShortSwingUnchanged(old, result);
+        assertTrue(result.risks().stream().anyMatch(r -> r.contains("KD 仍過熱")));
+        assertTrue(result.risks().stream().anyMatch(r -> r.contains("單日追漲改為風險揭露")));
+        assertFalse(result.risks().stream().anyMatch(r -> r.contains("本日不列入買進／加碼候選")));
+    }
+
+    @Test void v27_costFundamentalStaleAndMissingFactsStillCloseNamedBranchWithoutSelling() {
+        List<java.util.function.Consumer<V23Stock>> blockers = List.of(
+                x -> x.fxPercentile = "90", x -> x.etfPremium = "3", x -> x.stale = true,
+                x -> x.fundamental = new TradingRadarRuleEngine.FundamentalInput(true, -1.0, -1.0, null, null, null, false));
+        for (var block : blockers) for (boolean held : List.of(false, true)) {
+            var fixture = new V23Stock().set(x -> { x.price = "70"; x.held = held; });
+            block.accept(fixture);
+            var input = fixture.build();
+            var result = engine.evaluateStock(withAccumulation(input, accumulation("NVDA", "美股", input.price())));
+            assertEquals(held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT, result.action());
+            assertTrue(result.risks().stream().anyMatch(r -> r.contains("買方安全閘門關閉")));
+        }
+        var missing = new V23Stock().set(x -> { x.price = "70"; x.completed = null; }).build();
+        assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, engine.evaluateStock(withAccumulation(missing,
+                accumulation("NVDA", "美股", missing.price()))).action(), "既有必要changePercent缺值仍先由complete封鎖");
+        var legacy = new V23Stock().build();
+        assertEquals(RadarCompletedPriceDrawdown.Context.NOT_EVALUATED, legacy.accumulation());
+        assertEquals(engine.evaluateStock(legacy), engine.evaluateStock(withAccumulation(legacy, null)));
+        assertEquals(engine.evaluateStock(legacy), engine.evaluateStock(withAccumulation(legacy,
+                accumulation("006208", "台股", legacy.price()))));
+        var below = new V23Stock().set(x -> x.price = "80.000001").build();
+        assertEquals(engine.evaluateStock(below), engine.evaluateStock(withAccumulation(below,
+                accumulation("0050", "台股", below.price()))));
+    }
+
 }

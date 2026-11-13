@@ -47,7 +47,7 @@ class TradingRadarPanelServiceTest {
         });
         assertThat(tw.data().skippedNonTwStocks()).isEqualTo(1);
         assertThat(us.data().skippedNonTwStocks()).isEqualTo(1);
-        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V26");
+        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V27");
         assertThat(tw.generatedAt()).isEqualTo("2026-09-23T16:00+08:00");
         assertThat(tw.actionPolicyVersion()).isEqualTo(baseline.actionPolicyVersion());
     }
@@ -415,6 +415,92 @@ class TradingRadarPanelServiceTest {
         assertThat(stock.shortAction()).isEqualTo(shortTerm);
         assertThat(stock.swingAction()).isEqualTo(swing);
         assertThat(stock.horizonConflict()).isEqualTo(conflict);
+    }
+
+    @Test void v27RealSelectedServiceUsesCanonicalPeakAndShowsStrongLabelOnlyAfterAllGates() {
+        Fixture f = accumulationFixture("00881", "台股", new BigDecimal("80"), false);
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            var evaluation = f.service.getStockEvaluation("00881", "台股", NOW);
+            assertThat(evaluation.stock().action()).isEqualTo("ADD_CANDIDATE");
+            assertThat(evaluation.stock().actionLabel()).isEqualTo("積極分批加碼候選");
+            assertThat(evaluation.summary().actionLabel()).isEqualTo(evaluation.stock().actionLabel());
+            assertThat(evaluation.stock().reasons()).anyMatch(r -> r.contains("52週完成窗口") && r.contains("00881"));
+            assertThat(evaluation.stock().reasons()).noneMatch(r -> r.contains("仍須等待止跌才可買進"));
+            assertThat(evaluation.stock().reasons()).anyMatch(r -> r.contains("不等待短線止穩"));
+            var list = f.service.getList(NOW).stocks().getFirst();
+            assertThat(list.actionLabel()).isEqualTo("積極分批加碼候選");
+            assertThat(list.horizonConflict()).isEqualTo(TradingRadarRuleEngine.horizonConflict(
+                    TradingRadarRuleEngine.Action.valueOf(list.action()),
+                    TradingRadarRuleEngine.Action.valueOf(list.swingAction()),
+                    TradingRadarRuleEngine.Action.valueOf(list.shortAction())));
+            f.service.setOfficialSma20Facts(f.facts);
+            when(f.facts.findOfficialSma20(anyMap())).thenReturn(Map.of("00881",
+                    new RadarTechnicalFactPort.OfficialSma20(TW_DATE, new BigDecimal("999"), NOW)));
+            var blocked = f.service.getStockEvaluation("00881", "台股", NOW);
+            assertThat(blocked.stock().officialSma20Verification().status()).isEqualTo("CONFLICT");
+            assertThat(blocked.stock().action()).isEqualTo("HOLD");
+            assertThat(blocked.stock().candidateAction()).isEqualTo("ADD_CANDIDATE");
+            assertThat(blocked.stock().actionLabel()).doesNotContain("積極");
+            assertThat(blocked.summary().actionLabel()).isEqualTo(blocked.stock().actionLabel());
+        }
+        try (var ignored = fixedEvidence(TradingRadarEvidenceConfidenceResolver.Evidence.EMPTY)) {
+            var blocked = f.service.getStockEvaluation("00881", "台股", NOW);
+            assertThat(blocked.stock().action()).isEqualTo("HOLD");
+            assertThat(blocked.stock().actionLabel()).doesNotContain("積極");
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    @Test void v27UsPriceOnlyFallbackHasReachableRealServiceOpportunityAndExactIdentity() {
+        Fixture f = accumulationFixture("NVDA", "美股", new BigDecimal("70"), true);
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            var evaluation = f.service.getStockEvaluation("NVDA", "美股", NOW);
+            assertThat(evaluation.stock().action()).isEqualTo("ADD_CANDIDATE");
+            assertThat(evaluation.stock().actionLabel()).isEqualTo("積極分批加碼候選");
+            assertThat(evaluation.stock().reasons()).anyMatch(r -> r.contains("NVDA") && r.contains("STORED_PRICE_ONLY"));
+            assertThat(evaluation.stock().risks()).anyMatch(r -> r.contains("未做配息還原"));
+            ArgumentCaptor<TradingRadarRuleEngine.StockInput> capture = ArgumentCaptor.forClass(TradingRadarRuleEngine.StockInput.class);
+            verify(f.engine).evaluateStock(capture.capture());
+            var fact = capture.getValue().accumulation();
+            assertThat(capture.getValue().completedChangePercent()).isNegative();
+            assertThat(capture.getValue().ma20Confirmation()).isEqualTo(TradingRadarRuleEngine.Confirmation.BELOW);
+            assertThat(capture.getValue().structure().medium().stabilized()).isFalse();
+            assertThat(fact.market()).isEqualTo("美股");
+            assertThat(fact.stockCode()).isEqualTo("NVDA");
+            assertThat(fact.completedAsOfDate()).isEqualTo(US_DATE);
+            assertThat(fact.high()).isEqualByComparingTo("100");
+            assertThat(fact.eligible(capture.getValue().price())).isTrue();
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    private static Fixture accumulationFixture(String code, String market, BigDecimal price, boolean usCashEvent) {
+        Fixture f = new Fixture();
+        var held = Optional.of(AssetSnapshot.builder().stocks(List.of(holding(code, market))).build());
+        when(f.snapshots.findLatestWithStocksByOwnerUserId(7L)).thenReturn(held);
+        when(f.snapshots.findLatestWithStocks()).thenReturn(held);
+        when(f.alerts.findDistinctStockCodeMarketByOwnerUserId(7L)).thenReturn(List.of());
+        when(f.alerts.findDistinctStockCodeMarket()).thenReturn(List.of());
+        LocalDate day = "台股".equals(market) ? TW_DATE : US_DATE;
+        List<StockPriceHistory> rows = new ArrayList<>();
+        var days = dates(day, 500);
+        for (int i = 0; i < 500; i++) {
+            BigDecimal close = i < 10 ? price.add(BigDecimal.valueOf(i)) : new BigDecimal("100");
+            rows.add(StockPriceHistory.builder().stockCode(code).market(market).tradingDate(days.get(i))
+                    .openPrice(close).highPrice(close.max(new BigDecimal("100")))
+                    .lowPrice(close.subtract(BigDecimal.ONE)).closePrice(close).volume(1000L)
+                    .closeSource("TWSE_MI_INDEX").build());
+        }
+        var key = new TradingRadarListBatchRepository.Key(code, market);
+        doReturn(Map.of(key, rows)).when(f.batch).findRecentPrices(any(), anyInt());
+        if (usCashEvent) {
+            LocalDate ex = days.get(30);
+            var event = StockDividendHistory.builder().id(1L).stockCode(code).market(market).canonicalDate(ex)
+                    .exDividendDate(ex).cashDividend(BigDecimal.ONE).stockDividend(BigDecimal.ZERO)
+                    .resolutionStatus("RESOLVED").sourceSnapshotId(1L).build();
+            when(f.batch.findAdjustmentEvents(any(), anyMap())).thenReturn(Map.of(key, List.of(event)));
+        }
+        return f;
     }
 
     private static final class Fixture {

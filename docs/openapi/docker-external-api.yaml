@@ -1,20 +1,20 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.27.4
+  version: 1.27.5
   description: |
-    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十六條精確 method/path pairs：
-    二十二條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
+    本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十七條精確 method/path pairs：
+    二十三條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
     ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
     中日報與事件證據可建立不可變收據或固定收件人郵件；決策端點採純計算 D130/D195，缺正式來源保持 BLOCKED。各端點絕不下單、刷新行情或呼叫券商。rescan
     經 business 端 30 秒全域 Redis 冷卻節流）。
 
     本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-    二十六條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+    現行逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
     全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 
     Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-    二十條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+    唯讀 GET 契約路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
     所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
     Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
     暴露文件端點。
@@ -727,7 +727,7 @@ paths:
                 synthetic:
                   summary: 去識別化、無實際持倉的合成範例
                   value:
-                    ruleVersion: TW_RULES_V26
+                    ruleVersion: TW_RULES_V27
                     actionPolicyVersion: EVIDENCE_GATE_V2
                     generatedAt: '2026-01-15T02:15:30Z'
                     market:
@@ -819,7 +819,7 @@ paths:
               schema: {$ref: '#/components/schemas/TradingRadarStockDetailResponse'}
               examples:
                 synthetic:
-                  value: {ruleVersion: TW_RULES_V26, actionPolicyVersion: EVIDENCE_GATE_V2, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null, officialSma20Verification: null, priceReference: null, intradayCandleConfirmation: null}}
+                  value: {ruleVersion: TW_RULES_V27, actionPolicyVersion: EVIDENCE_GATE_V2, generatedAt: '2026-01-15T02:15:30Z', market: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, usMarket: {regime: NEUTRAL, regimeLabel: 合成中性, score: 0, dataComplete: false, stale: true, asOfDate: '2026-01-14', price: null, changePercent: null, quoteStatus: SYNTHETIC, weeklyMa: null, monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, quarterlyConfirmation: null, annualConfirmation: null, reasons: [], risks: [], intraday: false, liveUpdatedAt: null, extendedIndicators: null, marketVolumeRatio: null, marketTurnoverRatio: null, marketVolumeAsOfDate: null, nasdaqChangePercent: null, soxChangePercent: null, usTechCompositePercent: null, usTechAsOfDate: null, usTechAvailable: false, weeklyIndicators: null}, stock: {stockCode: 2330, stockName: 合成科技, market: 台股, assetClass: 股票, distributionAdjusted: false, held: false, action: HOLD, actionLabel: 觀望, score: 0, counterTrendState: null, counterTrendLabel: null, counterTrendReasons: [], counterTrendRisks: [], dataComplete: false, price: null, changePercent: null, quoteStatus: SYNTHETIC, priceUpdatedAt: null, asOfDate: '2026-01-14', monthlyMa: null, quarterlyMa: null, annualMa: null, kValue: null, dValue: null, monthlyConfirmation: null, quarterlyConfirmation: null, annualConfirmation: null, fxPercentile: null, underlyingCurrency: TWD, reasons: [], risks: [], kdHeat: null, timingState: null, timingLabel: null, ma60BiasPercent: null, week52Position: null, weeklyMa: null, etfPremiumPct: null, etfPremiumPercentile: null, extendedIndicators: null, shortAction: HOLD, shortActionLabel: 觀望, shortScore: 0, shortReasons: [], shortRisks: [], horizonConflict: false, volumeRatio: null, fxAsOfDate: null, profitTakingConfirmed: false, fundamental: null, evidence: null, shortDownsideRisk: null, mediumDownsideRisk: null, shortEvidenceConfidence: null, mediumEvidenceConfidence: null, shortRiskCoverage: null, mediumRiskCoverage: null, candidateAction: null, shortCandidateAction: null, actionGateReasons: [], etfPremiumLivePct: null, etfPremiumLiveNavAsOf: null, swingAction: HOLD, swingActionLabel: 觀望, swingScore: 0, swingReasons: [], swingRisks: [], swingDownsideRisk: null, swingEvidenceConfidence: null, swingRiskCoverage: null, swingCandidateAction: null, dailyCandle: null, weeklyIndicators: null, technicalResolution: null, bollinger: null, officialSma20Verification: null, priceReference: null, intradayCandleConfirmation: null}}
         '400':
           description: >-
             email 格式不合法時優先回 email detail；否則缺少、重複或格式不合法的 stockCode／market 維持 selector detail。
@@ -10609,7 +10609,7 @@ components:
       additionalProperties: false
     TradingRadarListStock:
       type: object
-      description: 交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。
+      description: 交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。
       required:
       - intradayCandleConfirmation
       - stockCode
@@ -10739,7 +10739,7 @@ components:
           type:
           - string
           - 'null'
-          description: 中期／主要動作顯示文字。
+          description: 中期／主要最終動作顯示文字；只有V27具名深回撤政策且最後仍BUY/ADD時為積極分批買進／加碼候選，降級後顯示實際動作。
         score:
           type:
           - integer
@@ -11824,7 +11824,7 @@ components:
     StockDecision:
       type: object
       description: "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以
-        null 表示，不以 0 冒充。"
+        null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。"
       required:
       - intradayCandleConfirmation
       - stockCode
@@ -11945,7 +11945,7 @@ components:
           type:
           - string
           - 'null'
-          description: 策略動作的顯示名稱。
+          description: 最終策略動作顯示名稱；V27具名MEDIUM深回撤來源且最後仍BUY/ADD才顯示積極分批標籤，證據或成本否決後不得顯示已放行。
         score:
           type:
           - integer
@@ -12408,7 +12408,7 @@ components:
           type:
           - string
           - 'null'
-          description: 固定為 TW_RULES_V26|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。
+          description: 固定為 TW_RULES_V27|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。
         source:
           type:
           - string
@@ -12470,7 +12470,7 @@ components:
           description: 唯讀盤中技術明細，完全獨立於雷達評分與動作。
       additionalProperties: false
       example:
-        decisionInputVersion: TW_RULES_V26|FUBON_OVERLAY_V1
+        decisionInputVersion: TW_RULES_V27|FUBON_OVERLAY_V1
         source: FUBON_SDK
         binding: BOUND_CONTEXT
         contextFingerprint: 6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4
