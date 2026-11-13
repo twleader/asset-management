@@ -1404,7 +1404,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V23（V22 完成收盤基準與短線盤中K確認＋V23 高賣低買閘門）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V24（V22 完成收盤基準與短線盤中K確認＋V23 高賣低買閘門＋V24 轉折判定改讀完成日 KD）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1746,7 +1746,10 @@ public class TradingRadarService {
                             // 兩者與 DTO 揭露欄（toDailyCandleDto／toWeeklyDto）同源，皆取自這一份
                             // Assembled，不得為了接線再算第二次。
                             technical.dailyCandle(),
-                            resolvedWeekly, technical.bollinger()));
+                            resolvedWeekly, technical.bollinger(),
+                            // Task 576：完成日 KD 快照必須顯式傳入（29 參數正典建構式）；盤中時
+                            // indicators(ind) 含即時列，若走相容建構式推得的快照會變成盤中值。
+                            technical.completedKd()));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(

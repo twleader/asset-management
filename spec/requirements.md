@@ -6800,3 +6800,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] **版本與契約同步：** `TradingRadarRuleEngine.RULE_VERSION` 由 `TW_RULES_V22` 升為 `TW_RULES_V23`；`FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION` 同步為 `TW_RULES_V23|FUBON_OVERLAY_V1`（resolver／快取因版本不符失效重建，屬預期）。`docs/openapi/docker-external-api.yaml` 的 ruleVersion 範例與 `decisionInputVersion` 描述／範例同步 V23，`info.version` 由 1.27.0 升 1.27.1；以 `ruby scripts/render-9090-openapi-docs.rb` 重產兩份專案內 Swagger 鏡像，並依 Task 504 受控鏈同步 SRPP Swagger 身分（新 PublishedSwaggerIdentity、新 policy bundle hash、insert-only registry）。DTO Javadoc、`TradingRadarService` 註解、後端／BFF 測試與 fixtures 的 V22 字串一併同步。通知沿用既有機制：版本不符只重建 baseline、升版首輪不寄信。
 - [ ] **誠實揭露：** 本次是使用者明定的投資原則（風險偏好），**非 walk-forward 實證**；`BacktestService` baseline／swing 走正式路徑，離線回測結果會隨之改變，不得宣稱準確率或報酬提升。不新增 API／路由／DB／排程／券商 I/O；輸出只呈現建議，不下單。
 - [ ] **驗收：** 單元測試涵蓋：(1) 回檔低位（非高檔區、分數 <40、持有）→ `HOLD_CAUTION` 而非減碼／出場；(2) 高檔區＋K≤D＋兩項轉弱→可輸出減碼；(3) 高檔區但 K>D（反彈中）→ 不賣；(4) `week52Position` null 且時機中性→不賣；(5) 跌深＋完成日收紅＋K 上升且 K>D →`TRIAL_BUY`（持有／未持有各一）；(6) 跌深但完成日收黑或 K≤D →不出試單；(7) 各否決條件逐一阻擋；(8) RISK_OFF 不擋但有揭露；(9) `EXTREME_OVERSOLD` 原測試結果不變；(10) 三軌一致；(11) 規則版號與通知升版首輪不寄信。Docker 重建後重取 `GET /api/public/trading-radar/today`，記錄前後各動作分布於 Task 575 完成報告，並確認 2026-11-13 案例中 K>D 的回檔持股不再是減碼候選。
+
+### Requirement 201／Task 576：交易雷達轉折判定改讀同一完成日 KD，不混用盤中 K（TW_RULES_V24）
+
+**User Story：**作為交易雷達使用者，我要求「分批試單」與「主升段結束」這類轉折判定所依據的 KD、前一期 KD 與完成日漲跌來自**同一根已完成日 K**，KD 轉折證據不再因盤中即時價跳動而在一天之中忽隱忽現（最終動作仍受既有盤中條件如 KD 過熱／時機狀態影響，本需求不改那些條件）。
+
+**Acceptance Criteria：**
+
+- [ ] **根因揭露（2026-11-13 Codex 獲利性審查第 1 輪，已核實）：** 盤中 `TradingRadarService.prepareTechnicalBasis()` 把即時價列加到序列最前面（`liveAdded=true`），`RadarInputAssembler.calculate()` 以含該列的序列計算 `indicators().k()/d()`，`previousK/previousD` 因而是前一完成日；但 `completedChangePercent` 只用完成日收盤。`qualifiesForReboundBuy()`（跌深反彈試單）、`qualifiesForTrialBuy()`（長線試單）與 `uptrendEndConfirmed()`（V23 賣出閘門）因此把「盤中 K vs 昨日 K」與「昨日漲跌」混在同一個判定。反例：完成日 +0.98%、完成日 K/D=43.89/44.63（尚未交叉），盤中價上升使即時 K/D=45.93/45.06，若其他條件成立便輸出 `TRIAL_BUY`，盤中回落後又消失。
+- [ ] **行為：** 上述三個判定一律改讀「完成日 KD 快照」：最近一根完成日 K 的 K、D，以及其前一根完成日 K 的 K、D（同一公式、同一還原序列，排除盤中列）。收盤後（無盤中列）快照等於現行 `indicators` 的 K/D 與 previousK/D，結果不變；盤中時由完成日序列另算。`kdDeadCross` 在 `uptrendEndConfirmed()` 內的使用同樣改讀完成日快照。
+- [ ] **範圍限制：** `timingOf()`、`kdHeatOf()`、`kdOversold()`、`profitTakingConfirmed()`、分數因子、`buyGate`、窄幅 KD 判定與所有 DTO 揭露的 K/D（`kValue`／`dValue` 等）**維持現行**（盤中可含即時價），本需求不改其語意；門檻、權重、V23 的動作順序與文案不變。`profitTakingConfirmed` 分支的減碼回傳仍須 `uptrendEndConfirmed`，因此其賣出也隨之以完成日為準。
+- [ ] **缺值 fail closed：** 完成日快照任一必要值缺漏時，三個判定皆不成立（不試單、不放行賣出）；不得退回使用盤中 K。只在輸入本身即為完成日序列（回測與單元測試用的相容建構式）時，快照由既有 K/D／previousK/D 推得，並在 Javadoc 明載此相容語意；production 必須顯式傳入由完成日序列算出的快照，並以測試釘住。
+- [ ] **版本與契約：** `RULE_VERSION` 升為 `TW_RULES_V24`，`DECISION_INPUT_VERSION` 同步 `TW_RULES_V24|FUBON_OVERLAY_V1`；`docs/openapi/docker-external-api.yaml` 的版號範例／描述同步並將 `info.version` 由 1.27.1 升 1.27.2（路由與 schema 不變），重產 Swagger 鏡像並依 Task 504 受控鏈同步 SRPP 身分、產生新 policy bundle、insert-only registry；通知沿用升版只重建 baseline 不寄信。不新增 API／DB／排程／券商 I/O，只呈現建議、不下單。
+- [ ] **誠實揭露：** 這是時點一致性修正，不宣稱提升獲利；同日 Codex 審查與蒙地卡羅（37 檔、200 條路徑）顯示既有訊號扣除曝險後無顯著超額，結論記錄於 Task 576。

@@ -18,6 +18,12 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
+     * V24（Task 576／Requirement 201）：分批試單（{@code qualifiesForTrialBuy}）、跌深反彈試單
+     * （{@code qualifiesForReboundBuy}）與主升段結束確認（{@code uptrendEndConfirmed}）三處 KD 證據
+     * 一律改讀 {@link CompletedKd} 完成日快照（最近一根完成日 K 與其前一根完成日 K），不再混用盤中 K；
+     * 時機狀態、KD 熱度、獲利了結確認、分數、門檻與動作順序不變。收盤後（無盤中列）結果與 V23 相同。
+     * 時點一致性修正，不宣稱提升獲利。
+     *
      * V23（Task 575／Requirement 200）：高賣低買——減碼／出場只在「仍處高檔區（52 週位置 ≥0.75
      * 或超買）且主升段結束確認（K≤D＋四類轉弱證據至少兩項）」時輸出，否則降為續抱提高警戒；
      * 未持有 AVOID 在跌深區降為 WAIT；跌深後完成日收紅、K 上升且 K>D 新增分批試單候選。
@@ -65,7 +71,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V23";
+    public static final String RULE_VERSION = "TW_RULES_V24";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -671,6 +677,19 @@ public class TradingRadarRuleEngine {
             BigDecimal middleBand, BigDecimal upperBand, BigDecimal lowerBand,
             BigDecimal percentB, BigDecimal bandWidthPercent) {}
 
+    /**
+     * 最近一根完成日 K 與其前一根完成日 K 的 KD；排除盤中列（Task 576／Requirement 201）。
+     *
+     * <p>只供分批試單、跌深反彈試單與主升段結束確認三處轉折判定使用；任一欄為 null 時該判定
+     * 一律不成立（不試單、不放行賣出）。</p>
+     *
+     * @param k         最近一根完成日 K 的 K 值。
+     * @param d         最近一根完成日 K 的 D 值。
+     * @param previousK 前一根完成日 K 的 K 值。
+     * @param previousD 前一根完成日 K 的 D 值。
+     */
+    public record CompletedKd(BigDecimal k, BigDecimal d, BigDecimal previousK, BigDecimal previousD) {}
+
     public record StockInput(
             boolean held,
             BigDecimal price,
@@ -707,8 +726,58 @@ public class TradingRadarRuleEngine {
              * 四組週K 因子<b>全部</b>缺值、權重重分配，並於 risks 揭露。
              */
             WeeklyInput weekly,
-            BollingerInput bollinger
+            BollingerInput bollinger,
+            /**
+             * 完成日 KD 快照（Task 576）。production（{@code TradingRadarService}）與回測
+             * （{@code BacktestService}）一律走本 29 參數正典建構式並顯式傳入。
+             */
+            CompletedKd completedKd
     ) {
+        /**
+         * V23 的 28 參數形狀（Task 576 之前的正典建構式）。
+         *
+         * <p><b>語意：輸入本身就是完成日序列</b>（回測與單元測試），故完成日 KD 快照直接由
+         * {@code indicators.k()/d()} 與 {@code previousK/previousD} 推得，不傳 null。
+         * production 不得使用本建構式——盤中時 {@code indicators} 含即時列，推得的快照會是盤中值。</p>
+         */
+        public StockInput(boolean held,
+            BigDecimal price,
+            BigDecimal changePercent,
+            BigDecimal completedChangePercent,
+            Indicators indicators,
+            BigDecimal previousK,
+            BigDecimal previousD,
+            Confirmation ma20Confirmation,
+            Confirmation ma60Confirmation,
+            Confirmation ma240Confirmation,
+            InstrumentType instrumentType,
+            MarketRegime marketRegime,
+            boolean marketStale,
+            BigDecimal fxPercentile,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal kdBandWidthPercent,
+            BigDecimal etfPremiumPct,
+            BigDecimal etfPremiumPercentile,
+            BigDecimal weeklyMa,
+            ExtendedIndicators extendedIndicators,
+            BigDecimal volumeRatio,
+            FundamentalInput fundamental,
+            CandleInput dailyCandle,
+            WeeklyInput weekly,
+            BollingerInput bollinger) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, bollinger,
+                    completedKdOf(indicators, previousK, previousD));
+        }
+
+        /** 相容建構式的快照推導：輸入本身就是完成日序列（回測與單元測試）。 */
+        private static CompletedKd completedKdOf(Indicators indicators, BigDecimal previousK, BigDecimal previousD) {
+            return new CompletedKd(indicators == null ? null : indicators.k(),
+                    indicators == null ? null : indicators.d(), previousK, previousD);
+        }
+
         /** Pre-V19 full input: missing completed Bollinger data intentionally preserves original BIAS. */
         public StockInput(boolean held,
             BigDecimal price,
@@ -739,7 +808,8 @@ public class TradingRadarRuleEngine {
             CandleInput dailyCandle,
 
             WeeklyInput weekly) {
-            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, null);
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, null,
+                    completedKdOf(indicators, previousK, previousD));
         }
 
         /**
@@ -750,8 +820,8 @@ public class TradingRadarRuleEngine {
          * 於是五個新因子（日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能）恆為缺值、
          * 權重被重分配掉——這正是本任務實作期間真的發生過的缺陷（{@code TradingRadarService
          * .buildStock} 只傳 25 個引數，線上五因子全空、回測卻有值，兩邊靜默分岔）。
-         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 28 參數的正式建構式並傳入
-         * {@code assembled.dailyCandle()}、{@code assembled.weekly()} 與 {@code assembled.bollinger()}；由
+         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 29 參數的正式建構式（Task 576）並傳入
+         * {@code assembled.dailyCandle()}、{@code assembled.weekly()}、{@code assembled.bollinger()} 與 {@code assembled.completedKd()}；由
          * {@code TradingRadarStockWeeklyWiringTest} 釘住。</p>
          */
         public StockInput(
@@ -3018,8 +3088,9 @@ public class TradingRadarRuleEngine {
     private boolean qualifiesForTrialBuy(StockInput input) {
         BigDecimal price = input.price();
         BigDecimal ma240 = input.indicators() == null ? null : input.indicators().ma240();
-        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
-        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
+        // Task 576：條件 3／4 的 KD 一律讀完成日快照，不混用盤中 K。
+        BigDecimal k = completedK(input);
+        BigDecimal d = completedD(input);
         if (price == null || ma240 == null || k == null || d == null) return false;
         if (ma240.signum() <= 0) return false;
         // 基本面多項惡化時不主動接刀；這只擋買，不引發賣出。
@@ -3042,8 +3113,10 @@ public class TradingRadarRuleEngine {
         if (k.doubleValue() >= TRIAL_BUY_KD_OVERSOLD || d.doubleValue() >= TRIAL_BUY_KD_OVERSOLD) return false;
         // 4. 已轉強，且前一期確實是 K<=D——沒有這一項，「持續強勢的低檔股」會被誤判成交叉。
         if (k.compareTo(d) <= 0) return false;
-        if (input.previousK() == null || input.previousD() == null) return false;
-        if (input.previousK().compareTo(input.previousD()) > 0) return false;
+        BigDecimal previousK = completedPreviousK(input);
+        BigDecimal previousD = completedPreviousD(input);
+        if (previousK == null || previousD == null) return false;
+        if (previousK.compareTo(previousD) > 0) return false;
         // 5. 止跌：用最近一根完成日 K，不可用盤中漲跌幅（零交叉會讓狀態逐 tick 翻轉）。
         BigDecimal stability = input.completedChangePercent();
         if (stability == null || stability.signum() < 0) return false;
@@ -3195,11 +3268,13 @@ public class TradingRadarRuleEngine {
      * 完成日下跌爆量四項至少兩項成立。K 或 D 為 null 時無法判定，回 false。
      */
     private boolean uptrendEndConfirmed(StockInput input) {
-        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
-        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
-        if (k == null || d == null) return false;
+        // Task 576：K≤D 必要條件與死叉證據一律讀完成日快照；快照任一欄 null → 無法判定。
+        BigDecimal k = completedK(input);
+        BigDecimal d = completedD(input);
+        if (k == null || d == null
+                || completedPreviousK(input) == null || completedPreviousD(input) == null) return false;
         if (k.compareTo(d) > 0) return false;
-        int evidence = kdDeadCross(input) ? 1 : 0;
+        int evidence = completedKdDeadCross(input) ? 1 : 0;
         ExtendedIndicators extended = input.extendedIndicators();
         if (extended != null && extended.osc() != null && extended.osc().signum() < 0) evidence++;
         if (input.ma20Confirmation() == Confirmation.BELOW) evidence++;
@@ -3248,15 +3323,45 @@ public class TradingRadarRuleEngine {
         if (!deepDrop(input, timing)) return false;
         BigDecimal completed = input.completedChangePercent();
         if (completed == null || completed.signum() <= 0) return false;
-        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
-        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
-        if (k == null || d == null || input.previousK() == null) return false;
-        if (k.compareTo(input.previousK()) <= 0 || k.compareTo(d) <= 0) return false;
+        // Task 576：K 上升且 K>D 一律讀完成日快照（四值任一 null → 不成立）。
+        BigDecimal k = completedK(input);
+        BigDecimal d = completedD(input);
+        BigDecimal previousK = completedPreviousK(input);
+        if (k == null || d == null || previousK == null || completedPreviousD(input) == null) return false;
+        if (k.compareTo(previousK) <= 0 || k.compareTo(d) <= 0) return false;
         if (narrowKdBand(input) || fundamentalDeteriorating(input)) return false;
         if (input.etfPremiumPct() != null
                 && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE) return false;
         if (equityMarketApplies(input) && input.marketStale()) return false;
         return timing != TimingState.OVERBOUGHT && timing != TimingState.EXTREME_OVERBOUGHT;
+    }
+
+    // ── Task 576：完成日 KD 快照讀取（只供三個轉折判定使用） ─────────────────────────
+    private static BigDecimal completedK(StockInput input) {
+        return input.completedKd() == null ? null : input.completedKd().k();
+    }
+
+    private static BigDecimal completedD(StockInput input) {
+        return input.completedKd() == null ? null : input.completedKd().d();
+    }
+
+    private static BigDecimal completedPreviousK(StockInput input) {
+        return input.completedKd() == null ? null : input.completedKd().previousK();
+    }
+
+    private static BigDecimal completedPreviousD(StockInput input) {
+        return input.completedKd() == null ? null : input.completedKd().previousD();
+    }
+
+    /** 完成日死叉：前一根完成日 K&gt;D、最近一根完成日 K≤D。任一欄 null → false。 */
+    private static boolean completedKdDeadCross(StockInput input) {
+        BigDecimal k = completedK(input);
+        BigDecimal d = completedD(input);
+        BigDecimal previousK = completedPreviousK(input);
+        BigDecimal previousD = completedPreviousD(input);
+        return k != null && d != null && previousK != null && previousD != null
+                && previousK.compareTo(previousD) > 0
+                && k.compareTo(d) <= 0;
     }
 
     /**

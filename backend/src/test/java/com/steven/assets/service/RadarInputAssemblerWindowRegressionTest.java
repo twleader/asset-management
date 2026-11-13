@@ -166,6 +166,84 @@ class RadarInputAssemblerWindowRegressionTest {
                 .isEqualByComparingTo("20.6");
     }
 
+    // ───────────────────────── Task 576：完成日 KD 快照 ─────────────────────────
+
+    private static TechnicalIndicatorService indicatorService() {
+        return new TechnicalIndicatorService(
+                mock(StockPriceHistoryRepository.class),
+                mock(PriceQueryService.class),
+                mock(TwseIndexDailyHistoryRepository.class),
+                mock(UsIndexDailyHistoryRepository.class));
+    }
+
+    private static TradingRadarRuleEngine.CompletedKd kdOf(TechnicalIndicatorService.FullIndicators ind) {
+        return new TradingRadarRuleEngine.CompletedKd(ind.k(), ind.d(), ind.previousK(), ind.previousD());
+    }
+
+    /** 會明顯改變 K 的盤中列：收盤價遠高於前 9 日高點。 */
+    private static StockPriceHistory surgingLiveRow() {
+        BigDecimal price = closeAt(0).add(new BigDecimal("15.00"));
+        return StockPriceHistory.builder()
+                .stockCode("2330").market("台股")
+                .tradingDate(nextWeekday(NEWEST))
+                .openPrice(price).highPrice(price).lowPrice(price).closePrice(price)
+                .build();
+    }
+
+    @Test
+    void completedKdEqualsIndicatorsWhenNoLiveRow() {
+        RadarInputAssembler.Assembled assembled = assembler().assemble(
+                rowsDesc(LONG_WINDOW_ROWS), List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, closeAt(0));
+
+        assertThat(assembled.indicators().k()).isNotNull();
+        assertThat(assembled.indicators().previousK()).isNotNull();
+        assertThat(assembled.completedKd()).isEqualTo(kdOf(assembled.indicators()));
+    }
+
+    @Test
+    void completedKdExcludesTheLiveRowIntraday() {
+        List<StockPriceHistory> completed = rowsDesc(LONG_WINDOW_ROWS);
+        List<StockPriceHistory> combined = new ArrayList<>(completed);
+        StockPriceHistory live = surgingLiveRow();
+        combined.add(0, live);
+
+        RadarInputAssembler.Assembled intraday = assembler().assemble(
+                combined, List.of(), true, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, live.getClosePrice());
+        RadarInputAssembler.Assembled afterClose = assembler().assemble(
+                completed, List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, closeAt(0));
+
+        // 只用完成日列（排除盤中列、長度 = 完成日契約 241）算出的四值。
+        TradingRadarRuleEngine.CompletedKd expected = kdOf(indicatorService().computeFromSeries(
+                intraday.adjustedRowsDesc().subList(1, 1 + DAILY_CONTRACT_ROWS)));
+        assertThat(intraday.completedKd()).isEqualTo(expected);
+        assertThat(intraday.completedKd()).isEqualTo(afterClose.completedKd());
+        // 含盤中列的 K 已被拉高；快照不得等於含盤中列的值。
+        assertThat(intraday.indicators().k()).isNotEqualByComparingTo(intraday.completedKd().k());
+        assertThat(intraday.completedKd()).isNotEqualTo(kdOf(intraday.indicators()));
+        // 含盤中列的 previousK/D 就是完成日 K/D——快照的 k/d 與其相同，前一期則往前再推一日。
+        assertThat(intraday.completedKd().k()).isEqualByComparingTo(intraday.indicators().previousK());
+        assertThat(intraday.completedKd().d()).isEqualByComparingTo(intraday.indicators().previousD());
+    }
+
+    @Test
+    void completedKdIsComputedLocallyEvenOnALiveCacheHit() {
+        RadarInputAssembler assembler = assembler();
+        List<StockPriceHistory> combined = new ArrayList<>(rowsDesc(LONG_WINDOW_ROWS));
+        StockPriceHistory live = surgingLiveRow();
+        combined.add(0, live);
+        RadarInputAssembler.Prepared prepared = assembler.prepare(
+                combined, List.of(), true, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, live.getClosePrice());
+        RadarInputAssembler.Assembled local = assembler.calculate(prepared);
+
+        // 快取的 indicators 是含盤中列的 snapshot；快照仍須只由完成日列本地計算。
+        RadarInputAssembler.Assembled cached = assembler.calculate(prepared, local.indicators(),
+                local.weekly(), local.weeklyIndicators());
+
+        assertThat(cached.indicators()).isEqualTo(local.indicators());
+        assertThat(cached.completedKd()).isEqualTo(local.completedKd());
+        assertThat(cached.completedKd()).isNotEqualTo(kdOf(local.indicators()));
+    }
+
     // ───────────────────────── volumeRatio 沒有列數上限（356.4e 第三列） ─────────────────────────
 
     @Test
