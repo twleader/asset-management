@@ -39107,8 +39107,8 @@
     {
       "code": "VOO",
       "expected": {
-        "discretionaryBudget": "150000",
-        "remaining": "800000"
+        "discretionaryBudget": "225000",
+        "remaining": "1250000"
       },
       "fx": 32,
       "kind": "pace",
@@ -39139,7 +39139,7 @@
           "lastFillPrice": 100,
           "monthBatches": 5,
           "previousShortfall": 100000,
-          "spent": 400000,
+          "spent": 625000,
           "weekBatches": 1
         },
         "halved": false,
@@ -39160,7 +39160,7 @@
           "lastFillPrice": 100,
           "monthBatches": 0,
           "previousShortfall": 0,
-          "spent": 900000,
+          "spent": 1350000,
           "weekBatches": 0
         },
         "halved": false,
@@ -39270,12 +39270,12 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "core_sell_guard.py": "904c13ef09168ccd1abc0fb26575f918d9fd8f0e1d1dacb173baab7669464d12",
-    "execution_policy.py": "366981949ab214ec7463ca25d08875e92a12c11a0fc8c9d0b4f0fb3c32439afd",
+    "execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
     "pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
     "short_term_opportunities.py": "90877046a3150f5949cd806b08039565279a1f845c1d0341a9fa4445d0f0fabc",
     "strategic_buy_gate.py": "7bfe9d3b6b168335c7cd6b5e8bbc9f9c34a8c775c91b72a18520ef09e26cd6c1",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "326e18dfaa441e9090c065aa971adec087768832aa57d4e27b378efdec1cda7f",
+  "policyBundleSha256": "1f1e16466059fdc9a6b34674b3530eae70db10e0d3fadb41b18dad195328062b",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

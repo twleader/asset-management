@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Original SRPP D173/D185/D186 frozen-input parity, offline only."""
-import copy, hashlib, json, sys
+import copy, hashlib, json, os, sys
 from pathlib import Path
 from decimal import Decimal
-ROOT=Path(__file__).resolve().parents[1]; SRPP=Path('/Users/steven/Project/SRPP')
+ROOT=Path(__file__).resolve().parents[1]; SRPP=Path(os.environ.get('SRPP_RELEASE_WORKTREE','/Users/steven/Project/SRPP'))
 sys.path.insert(0,str(SRPP/'scripts'))
 import short_term_opportunities as short
 import us_tactical_order_check as us
