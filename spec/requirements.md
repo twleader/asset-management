@@ -6850,7 +6850,7 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 完整保留 main 的跨日修正：最新 snapshot/liveAssets 身分與日期相符、台北今日或市場當地今日、夏／冬令跨日、同 ID 日期推進的 bounded metadata/panel 重讀（只重載快照相關 panels，略過 trend 且不改其 generation／資料；不觸發 trend scheduler）、官方收盤／歷史／future／HTTP 晚回應保護。不改金融計算、策略、五檔、公開 API／Swagger、broker、資料 schema。固定時鐘測試需驗合併、尾端、cache 界限、取消、5 秒估值、60 秒獨立趨勢與原跨日回歸；部署只重建 frontend，非交易時不注入正式行情，實際盤中全鏈驗收未執行時如實標示。
 
 
-## Requirement 203：交易雷達買方安全一致與價格高檔判斷（Task 579）
+### Requirement 203：交易雷達買方安全一致與價格高檔判斷（Task 579）
 
 **User Story：** 作為交易雷達使用者，我希望一般買進與兩種試單遵守一致的防追高條件，且 ETF 溢價不會把價格低檔誤判為高檔減碼。
 
@@ -6861,3 +6861,19 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 4. 分數映射賣出所需 highZone 僅由 52 週位置至少 0.75、KD 過熱或季線乖離至少既有 BIAS_HIGH 判定；OVERBOUGHT 的 ETF 溢價來源不能單獨授權減碼／出場。既有 EXTREME_OVERSOLD 優先保護不變；即使正乖離滿足 BIAS_HIGH，若既有時序優先判為 EXTREME_OVERSOLD，仍不得產生賣出候選。
 5. 完成日漲幅達 5% 的原計分提醒必須明示為分數風險，不再暗示 5% 即硬否決；實際追漲否決仍讀該次門檻。
 6. 版本升 TW_RULES_V26，通知升版首輪不寄信；OpenAPI 版號與鏡像同步。只輸出建議、不下單；不修改高分續抱策略或放寬止穩條件。
+
+
+### Requirement 204：具名標的近52週深回撤積極中期分批累積（Task 581，TW_RULES_V27）
+
+**User Story：** 作為交易雷達使用者，我明確選擇「跌深即列積極分批加碼，允許尚未止穩」：台股僅0050／00881由近52曆週完成高點回撤至少20%，美股六家公司之GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN回撤至少30%時，依我預定3~6月的資金安排，在既有MEDIUM（1月~6月）軌列為積極分批買進／加碼機會。這是具名風險偏好，不是3~6月一定回升或必回原高點的預測。
+
+**Acceptance Criteria：**
+
+- [ ] **範圍精確而封閉。** exact market＋symbol政策集合固定為台股0050／00881門檻20%、美股GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN門檻30%；GOOG／GOOGL同屬Google但分別讀各自股類價格。006208與其他ETF／股票不自動加入，不由名稱、GROWTH、價格或代碼尾碼外推；00881為使用者具名科技集中型例外，不宣稱廣泛大盤型。本政策只作用於既有持股／警示雷達宇宙，不新增資料來源或自動擴大分析名單。
+- [ ] **52曆週價格回撤有明確來源。** 以同一次canonical完成OHLC長序列及accepted price建立新typed fact，使用最近完成市場交易日D之閉區間 `[D.minusWeeks(52), D]` 的最高high，排除live／未完成與未來列；不是240根、不是既有week52Position，也不以close補缺high。必須有覆蓋下界的歷史列、嚴格降序無重號、窗口內有效正high／close及high>=close、無已知上游剔除／未定日期或既有權威事實已證實的漏交易日；無法證明完整跨度或已知混價基時UNAVAILABLE。窗口跨度與逐交易日完整性必須區分：邊界列只證明覆蓋52週跨度，不能宣稱每個歷史交易日均完整；不能把短結構視窗的固定10曆日間距規則套到全年，也不能在缺少完整權威日曆時猜出漏交易日。0050／00881的2026-02-11至2026-02-23自然長假12曆日間距本身不得令新fact不可用；已知剔除／漏列診斷仍應拒絕。不新增外呼／日曆查詢，既有短窗Structure的10日規則不變。比價為價格報酬價基，不加入現金股利總報酬調整：TW只用既有分割／股票股利價基倍率；US沿現行STORED PRICE_ONLY及價基斷層／除息15根／未知日期guard，不能把price-only或provider名稱稱為verified split-adjusted。高點與當次P必須同單位，typed fact保存日期、H、P與價基；以BigDecimal交叉乘法P×100<=H×80／70精確判斷，顯示捨入不得影響資格。
+- [ ] **新輸入明確且相容路徑不啟用。** StockInput以一個不可變typed context顯式攜帶market、symbol、窗口事實、H/P、品質與價基；production、LOCAL cache重用與backtest共用新pure calculator及同一輸入事實。所有舊StockInput／Prepared／Assembled建構形狀保留，缺context／null一律NOT_EVALUATED，不能猜出政策資格。新fact只由既有已載入長序列、同輪事件、accepted price計算，不讀舊52週近似值、外部quote high、provider overlay或另查行情。既有US技術fallback與回測差異不在此任務擴大修復；新fact同源不代表全技術引擎已對齊，也不得用新策略解除既有技術不可用。
+- [ ] **只改MEDIUM的具名深回撤路徑。** 取得AVAILABLE且精確滿門檻的新context後，MEDIUM新分支優先於舊trial與分數映射；不要求MA20/60/240 ABOVE、KD黃金交叉、低點墊高、V25 stabilized、完成日正漲跌或RISK_ON。KD熱、正乖離、短期極端超買、日漲達8%與RISK_OFF只揭露這個中期具名政策接受的方向／急彈風險；不再以它們否決本路徑。必要MA/KD/confirmation可用、fresh/complete、合法來源／價基、marketStale與DATA_INCOMPLETE的品質界線仍保留。未達門檻或缺新fact者不因本政策獲得新放行，舊策略不擅自改寫。
+- [ ] **非技術成本與品質守門不放寬。** FX昂貴、ETF昂貴溢價、個股基本面多項惡化，以及既有evidence／最後官方SMA20安全閘門維持；基本面缺值不能稱為健康，TW ETF適用項仍按既有profile與evidence判斷，不要求不存在的EPS。新具名路徑受保留硬條件否決時立即回持有者HOLD_CAUTION／未持有者WAIT並具名揭露，不落回試單、其他買進或賣出。後置evidence／SMA20仍可降級，SHORT分鐘gate不影響MEDIUM，candidate不得被後備復活。
+- [ ] **強度與標籤由同一typed結果驅動。** 已通過最後閘門的持有者ADD_CANDIDATE顯示「積極分批加碼候選」，未持有者BUY_CANDIDATE顯示「積極分批買進候選」，列表／明細／單檔summary同義同源；只有typed原始MEDIUM來源是本政策、且最終仍為相應BUY/ADD時使用強標籤。被後置閘門降級時使用實際動作標籤，不顯示已放行。明細現有reasons可讀到標的、窗口、日期、高點、比較價、回撤與門檻及3~6月目標；不新增公開DTO字段。「大幅」僅表達積極分批與可提高比重的意向，不編造股數／金額、不動用資金、不下單。
+- [ ] **文案不能自相矛盾。** 產生KD熱、RISK_OFF、完成日下跌／追漲等文案的來源須以typed情境分軌render；同一新MEDIUM不能一面ADD/BUY一面絕對聲稱「本日不列買進／加碼」「必須等待止跌」。不能以contains／字串replace／刪除理由修補。23因子數值仍只算一次、權重與分數不變；非目標／SHORT／SWING保留原來的判斷與文字順序。CounterTrendResult仍為短線逆勢觀察，若與本政策同列，必明示其小額／等待語意不代表中期具名政策已被否決或已通過成本閘門。
+- [ ] **版本、驗證及完整發布。** RULE_VERSION升V27，DECISION_INPUT_VERSION、當前Backend/BFF fixtures／文案／範例同步；金融OpenAPI升1.27.5，保持路由／schema不變並重產asset兩份Swagger。新增窗口與精確門檻、自然長假12日間距仍AVAILABLE及已知剔除／漏列UNAVAILABLE、技術方向例外、成本品質阻擋、逐軌無影響與真service/cache/backtest接線測試。US PRICE_ONLY正向可達與分割假跌幅拒絕皆須有證據；不得因缺少不可得的額外官方split證明而讓七碼整條永久不可用，也不把raw連續性冒稱已驗證。SRPP金融規則不改，只依受控Task504發布metadata／Swagger／bundle identity、authority與insert-only registry；雙repo各feature commit及main no-ff merge／push核remote後，才登錄新hash並從乾淨main重建／recreate唯一必要business-services，最後從SRPP主機以exact新hash回讀9090。合法正式日報時窗外採用仍NOT_YET_EXECUTED；不手動報告／寄信／交易，通知升版首輪只重建baseline不寄信。

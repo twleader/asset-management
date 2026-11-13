@@ -13698,3 +13698,18 @@ Task 578 取消補載：若隱藏時 trend 正在首屏／換快照讀取、data
 highZone 不從混合原因 TimingState.OVERBOUGHT 推斷高價，改直接讀價格位置（week52>=0.75）、KD 過熱、ma60Bias>=BIAS_HIGH。故相同價格事實只改 ETF 溢價不會放行賣出；timingOf 顯示本身不變。完成日 5% 計分提醒標示「已反映於分數」，不與現行 8% production 買方硬閘門混淆。
 
 V26 是動作契約修正，不更改得分、StockInput、DTO 欄位、資料來源、路由、DB、排程或自動交易邊界。公開版本範例隨 V26 升 OpenAPI 1.27.4；Swagger 身分變動須依既有 Task504 發布鏈更新 SRPP 消費端 metadata／bundle hash、authority 與 insert-only registry 後，才可部署；未完成不得宣稱上線。保留高分續抱與 V25 完成 K 結構策略。舊 radar-v23-t575 有用的完成 K 判斷已由 V25 吸收，本輪只採其共用買方安全思路，不合併其舊資料接線或低檔破位出場。
+
+
+### 具名52曆週價格回撤與積極中期累積（Requirement 204／Task 581，V27）
+
+本節只覆寫V26在exact台股0050／00881回撤>=20%、exact美股GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN回撤>=30%時的MEDIUM進場政策。未命中者、SHORT、SWING、舊TRIAL與賣方保護維持；不加入006208、不依GROWTH猜整群ETF。使用者選擇不等止穩，3~6月是資金意圖而非回升期限；「積極分批」不是數量計算。
+
+**資料與型別。** 新pure `RadarCompletedPriceDrawdown`（或同等具名類）輸出不可變`MediumAccumulationContext`：status=AVAILABLE／UNAVAILABLE／NOT_EVALUATED、stockCode、market、windowStart、completedAsOfDate、highDate、high、referencePrice、priceBasis、unavailableReason。StockInput尾端追加此typed元件；Prepared／Assembled各保存同一輪新fact；舊canonical形狀也變成保留的相容constructor，全部缺context傳NOT_EVALUATED。context未持久化、不新增DB或公開DTO欄位。
+
+新fact使用同一次canonical raw長OHLC與同輪事件、accepted P，不能重用現有240/241根week52High（它含live且缺high補close）。D取排除live後的最新完成市場日期，閉區間[D.minusWeeks(52),D]；至少讀到日期<=windowStart的邊界歷史列，窗口high全為正且>=close、日期嚴格降序、已知剔除／漏列診斷及不明日期fail closed。邊界列只證明52週跨度，不證明每個交易日均已入庫；全年窗口不得套用短結構視窗的DAILY_MAX_GAP_DAYS=10。0050／00881現有2026-02-11至2026-02-23自然長假12日間距須可AVAILABLE；缺完整權威日曆時不猜漏交易日，只依已知剔除或既有可信事實已證實的漏列拒絕，不為此新增外呼／DB／日曆查詢。RadarCompletedStructure既有短窗10日規則不修改。只用價格報酬價基：TW重用現有分割／股票股利倍率但排除現金股利因子；US沿現有priceOnlyBasis guard並標STORED_PRICE_ONLY，允許其既有合格正向資料，不宣稱官方split proof或總報酬價基。必要時normalization可包含當日live以維持目前股數價基，但live的high絕不進入峰值；已知斷層仍不可用。舊MA/KD的權息還原／fallback路徑不變。P必與StockInput.price compareTo相等；門檻用P×100<=H×80／70，不從rounded percentage判斷。
+
+**同源接線與限制。** production prepareTechnicalBasis取得的raw combined／events只讀一次，new純計算追加到Prepared；calculate無論本地或LOCAL cache hit都使用當輪新fact，不從cache的舊high或provider overlay補出。BacktestService兩個StockInput建構點顯式傳code／market與同一as-of原始窗口的新fact，不用未來列；沒有新context的舊測試與caller不啟用。既有US technical fallback與回測差異如實保留，這次不抽換所有US技術計算、不使原本技術不可用的replay偷偷放行；「新價格fact同源」不能冒稱全部technical engine同源。真service的US PRICE_ONLY、新fact/cache/replay同輸入與本就技術可用replay的正向MEDIUM案例須分別驗證。
+
+**動作與文案。** actionFor在舊trial／分數前選typed政策，只有MEDIUM＋具名＋AVAILABLE＋回撤滿門檻啟用。該分支不以未止穩、負日漲跌、MA方向、KD轉強／熱度、正乖離／短期超買、>=8%急彈或RISK_OFF否決；這些仍影響原分數並揭露方向風險。缺必要資料／market stale、FX／ETF昂貴溢價及基本面惡化仍否決且立即HOLD_CAUTION／WAIT，不落賣方。既有evidence與官方SMA20最後閘門保留，SHORT分鐘只管SHORT。共用數值因子一次計算；少數策略允許／禁止文案以來源typed fact或normal/deep variant，在evaluateHorizon依情境render，不做字串匹配搬移／刪除。describeHeat、marketContribution、completedDayContribution與CounterTrend短線文案必避免對新MEDIUM輸出相反的絕對禁止。
+
+內部result保留新MEDIUM來源標記，讓兩個TradingRadarService投影在全部gate後僅對仍ADD／BUY的本政策輸出「積極分批加碼／買進候選」；降級後依實際動作label。reasons載窗口、高點、P、回撤、門檻與3~6月意圖，無新增public欄位、API、交易或資金副作用。t580的horizonConflict仍由最後三軌動作判斷。V27升版通知只重建baseline；OpenAPI1.27.5／統一Swagger身分改變後僅發布SRPP metadata，保留其金融規則語義與合法時間閘門。

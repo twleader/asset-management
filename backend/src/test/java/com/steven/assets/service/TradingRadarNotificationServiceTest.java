@@ -47,7 +47,7 @@ class TradingRadarNotificationServiceTest {
     private static final String MARKET = "台股";
     private static final Long SETTING_ID = 1L;
     /** V18 upgrade regression input; assembled to keep runtime/test V17 literals retired. */
-    private static final String PREVIOUS_RULE_VERSION = "TW_RULES_V" + 17;
+    private static final String PREVIOUS_RULE_VERSION = "TW_RULES_V" + 26;
 
     @Mock private TradingRadarNotificationSettingRepository settingRepo;
     @Mock private TradingRadarNotificationStateRepository stateRepo;
@@ -245,7 +245,7 @@ class TradingRadarNotificationServiceTest {
     }
 
     @Test
-    void v17RuleVersion首輪只重建V18Baseline且不改設定或收件人路徑() {
+    void v26RuleVersion首輪只重建V27Baseline且不改設定或收件人路徑() {
         setting.setRuleVersion(PREVIOUS_RULE_VERSION);
         setting.setLastAction("BUY_CANDIDATE");
         Long originalOwner = setting.getOwnerUserId();
@@ -254,7 +254,7 @@ class TradingRadarNotificationServiceTest {
         service.queueEvaluation(STOCK_CODE, MARKET);
         service.flushEvaluations();
 
-        assertEquals("TW_RULES_V26", setting.getRuleVersion());
+        assertEquals("TW_RULES_V27", setting.getRuleVersion());
         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
         assertEquals(originalOwner, setting.getOwnerUserId());
         assertEquals(originalActive, setting.getActive());
@@ -271,7 +271,7 @@ class TradingRadarNotificationServiceTest {
         setting.setLastAction("BUY_CANDIDATE");
         service.queueEvaluation(STOCK_CODE, MARKET);
         service.flushEvaluations();
-        assertEquals("TW_RULES_V26", setting.getRuleVersion());
+        assertEquals("TW_RULES_V27", setting.getRuleVersion());
         assertEquals("EXIT_CANDIDATE", setting.getLastAction());
         assertTrue(setting.getInitialized());
         verify(dispatcher, never()).enqueue(any(), any(), any());

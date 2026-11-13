@@ -1404,7 +1404,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V26（保留 V25 完成K結構確認，並統一試單／一般買進安全判斷及純價格高檔賣出閘門）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V27（保留 V25 完成K結構確認，並統一試單／一般買進安全判斷及純價格高檔賣出閘門）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1750,9 +1750,9 @@ public class TradingRadarService {
                             // Task 576：完成日 KD 快照必須顯式傳入；盤中時
                             // indicators(ind) 含即時列，若走相容建構式推得的快照會變成盤中值。
                             technical.completedKd(),
-                            // Task 577：三軌完成 K 結構事實必須顯式傳入（30 參數正典建構式）；
+                            // Task 581：完成 K 結構與具名回撤context皆顯式傳入（31 參數正典建構式）；
                             // 走相容建構式會得到 NOT_EVALUATED，結構確認在 production 靜默失效。
-                            technical.structure()));
+                            technical.structure(), technical.accumulation()));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
@@ -1890,6 +1890,14 @@ public class TradingRadarService {
         }
     }
 
+    private String mediumActionLabel(DecisionCore core, TradingRadarRuleEngine.Action action) {
+        if (core.result().mediumAccumulationSignal() == TradingRadarRuleEngine.MediumAccumulationSignal.DEEP_DRAWDOWN) {
+            if (action == TradingRadarRuleEngine.Action.ADD_CANDIDATE) return "積極分批加碼候選";
+            if (action == TradingRadarRuleEngine.Action.BUY_CANDIDATE) return "積極分批買進候選";
+        }
+        return actionLabel(action);
+    }
+
     /** Full/snapshot/export projection is intentionally kept behind this late boundary. */
     private TradingRadarDto.StockDecision toFullDecision(DecisionCore core) {
         return toFullDecision(core, officialSma20For(List.of(core)).get(core.target().code()));
@@ -1906,7 +1914,7 @@ public class TradingRadarService {
         return new TradingRadarDto.StockDecision(
                 core.target().code(), core.name(), core.target().market(), core.assetClass(),
                 core.technical().distributionAdjusted(), core.target().held(),
-                gated.mediumAction().name(), actionLabel(gated.mediumAction()), core.result().score(),
+                gated.mediumAction().name(), mediumActionLabel(core, gated.mediumAction()), core.result().score(),
                 core.result().counterTrend().state().name(), counterTrendLabel(core.result().counterTrend().state()),
                 core.result().counterTrend().reasons(), core.result().counterTrend().risks(),
                 core.result().action() != TradingRadarRuleEngine.Action.NO_TRADE,
@@ -2035,7 +2043,7 @@ public class TradingRadarService {
                 core.result().shortScore(), actionName(gated.swingAction()),
                 gated.swingAction() == null ? null : actionLabel(gated.swingAction()),
                 core.result().swingScore(), gated.mediumAction().name(),
-                actionLabel(gated.mediumAction()), core.result().score(), TradingRadarRuleEngine.horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()),
+                mediumActionLabel(core, gated.mediumAction()), core.result().score(), TradingRadarRuleEngine.horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()),
                 core.result().timingState().name(), timingLabel(core.result().timingState()),
                 core.result().counterTrend().state().name(), counterTrendLabel(core.result().counterTrend().state()),
                 core.displayPrice(), core.displayChangePercent(), core.quoteStatus(), core.updatedAt(),
@@ -2344,7 +2352,7 @@ public class TradingRadarService {
                     combined, events, liveAdded, completedRowCount,
                     RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS, acceptedPrice.value(),
                     // Task 577.4a：上游剔除診斷原樣傳入，供完成 K 結構判定辨識視窗內被剔除的列。
-                    acceptedPrice.droppedSeriesDates(), acceptedPrice.droppedUndatedSeriesRow()));
+                    acceptedPrice.droppedSeriesDates(), acceptedPrice.droppedUndatedSeriesRow(), target.code(), target.market()));
         } catch (CanonicalDividendFinancialGuard.Unavailable unavailable) {
             if (!US_MARKET.equals(target.market())) throw unavailable;
             String firstReason = unavailableMessage(unavailable);
@@ -2353,7 +2361,7 @@ public class TradingRadarService {
                 return TechnicalBasis.priceOnly(assembler.preparePriceOnly(
                         combined, events, liveAdded, completedRowCount,
                         RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS, acceptedPrice.value(),
-                        acceptedPrice.droppedSeriesDates(), acceptedPrice.droppedUndatedSeriesRow()), firstReason);
+                        acceptedPrice.droppedSeriesDates(), acceptedPrice.droppedUndatedSeriesRow(), target.code(), target.market()), firstReason);
             } catch (CanonicalDividendFinancialGuard.Unavailable priceOnlyUnavailable) {
                 // 價基斷層、除息後退避或日期無法證明：退回 Task 564 路徑，原因碼改為本次訊息。
                 return TechnicalBasis.unavailable(unavailableMessage(priceOnlyUnavailable));

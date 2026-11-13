@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.27.4` |
+| 契約版本 | `1.27.5` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -19,18 +19,18 @@
 
 以下引用金融 YAML 的 27 個 API 說明；引文中的「本文件」指金融 YAML。此統一 Swagger 的完整集合為 28 個 API，操作層憑證以各路由的授權章節為準。
 
-> 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十六條精確 method/path pairs：
-> 二十二條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
+> 本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十七條精確 method/path pairs：
+> 二十三條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
 > ＋ 四條 POST：`/api/public/crawler-data/rescan` 是唯一有外部抓取副作用者；SRPP 日報、事件證據與決策
 > 中日報與事件證據可建立不可變收據或固定收件人郵件；決策端點採純計算 D130/D195，缺正式來源保持 BLOCKED。各端點絕不下單、刷新行情或呼叫券商。rescan
 > 經 business 端 30 秒全域 Redis 冷卻節流）。
 >
 > 本機入口只綁定 loopback `127.0.0.1:9090`；遠端入口由 Tailscale Serve 的私有網路身分與
-> 二十六條逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
+> 現行逐一路徑規則形成網路邊界。HTTP 層本身沒有 OAuth、API key 或其他應用層認證，因此
 > 全域 `security` 為空陣列。不得把任一 server URL 解讀為公開網際網路服務。
 >
 > Gateway 只接受下列精確路徑：同一路徑的非合法 method 回 `405 Method Not Allowed`，
-> 二十條唯讀路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
+> 唯讀 GET 契約路徑帶 `Allow: GET`、`/api/public/crawler-data/rescan` 帶 `Allow: POST`；
 > 所有其他路徑、子路徑、尾斜線與 matrix 變體回 `404 Not Found`。
 > Swagger UI 或原始 OpenAPI 文件沒有對外路由；本 YAML 是版本控管文件，不代表 gateway
 > 暴露文件端點。
@@ -2462,7 +2462,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
           "synthetic": {
             "summary": "去識別化、無實際持倉的合成範例",
             "value": {
-              "ruleVersion": "TW_RULES_V26",
+              "ruleVersion": "TW_RULES_V27",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -2681,7 +2681,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
         "examples": {
           "synthetic": {
             "value": {
-              "ruleVersion": "TW_RULES_V26",
+              "ruleVersion": "TW_RULES_V27",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -20842,14 +20842,14 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
 
 ### `TradingRadarListStock`
 
-交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。
+交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
 ```json
 {
   "type": "object",
-  "description": "交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。",
+  "description": "交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。",
   "required": [
     "intradayCandleConfirmation",
     "stockCode",
@@ -21023,7 +21023,7 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
         "string",
         "null"
       ],
-      "description": "中期／主要動作顯示文字。"
+      "description": "中期／主要最終動作顯示文字；只有V27具名深回撤政策且最後仍BUY/ADD時為積極分批買進／加碼候選，降級後顯示實際動作。"
     },
     "score": {
       "type": [
@@ -21194,7 +21194,7 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
 | `swingActionLabel` | 是 | `string | null` | 是 |  | 波段動作顯示文字。 |
 | `swingScore` | 是 | `integer | null (int32)` | 是 | format: int32 | 波段分數。 |
 | `action` | 是 | `string | null` | 是 |  | 中期／主要動作字串。 |
-| `actionLabel` | 是 | `string | null` | 是 |  | 中期／主要動作顯示文字。 |
+| `actionLabel` | 是 | `string | null` | 是 |  | 中期／主要最終動作顯示文字；只有V27具名深回撤政策且最後仍BUY/ADD時為積極分批買進／加碼候選，降級後顯示實際動作。 |
 | `score` | 是 | `integer | null (int32)` | 是 | format: int32 | 中期／主要分數。 |
 | `horizonConflict` | 是 | `boolean` | 否 |  | 不同 horizon 的動作是否衝突。 |
 | `timingState` | 是 | `string | null` | 是 |  | 時機狀態字串。 |
@@ -22826,14 +22826,14 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 ### `StockDecision`
 
-`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。
+`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
 ```json
 {
   "type": "object",
-  "description": "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。",
+  "description": "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。",
   "required": [
     "intradayCandleConfirmation",
     "stockCode",
@@ -22976,7 +22976,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
         "string",
         "null"
       ],
-      "description": "策略動作的顯示名稱。"
+      "description": "最終策略動作顯示名稱；V27具名MEDIUM深回撤來源且最後仍BUY/ADD才顯示積極分批標籤，證據或成本否決後不得顯示已放行。"
     },
     "score": {
       "type": [
@@ -23544,7 +23544,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 | `distributionAdjusted` | 是 | `boolean` | 否 |  | 分配／除權息因素是否已調整到策略判斷。 |
 | `held` | 是 | `boolean` | 否 |  | configured-admin 範圍內是否持有該標的。 |
 | `action` | 是 | `string | null` | 是 |  | 規則引擎動作自由字串。 |
-| `actionLabel` | 是 | `string | null` | 是 |  | 策略動作的顯示名稱。 |
+| `actionLabel` | 是 | `string | null` | 是 |  | 最終策略動作顯示名稱；V27具名MEDIUM深回撤來源且最後仍BUY/ADD才顯示積極分批標籤，證據或成本否決後不得顯示已放行。 |
 | `score` | 是 | `integer | null (int32)` | 是 | format: int32 | 策略或市場判斷使用的量化分數。 |
 | `counterTrendState` | 是 | `string | null` | 是 |  | 逆勢判斷的狀態代碼。 |
 | `counterTrendLabel` | 是 | `string | null` | 是 |  | 逆勢判斷的顯示名稱。 |
@@ -23898,7 +23898,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
         "string",
         "null"
       ],
-      "description": "固定為 TW_RULES_V26|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
+      "description": "固定為 TW_RULES_V27|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
     },
     "source": {
       "type": [
@@ -23992,7 +23992,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
   },
   "additionalProperties": false,
   "example": {
-    "decisionInputVersion": "TW_RULES_V26|FUBON_OVERLAY_V1",
+    "decisionInputVersion": "TW_RULES_V27|FUBON_OVERLAY_V1",
     "source": "FUBON_SDK",
     "binding": "BOUND_CONTEXT",
     "contextFingerprint": "6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4",
@@ -24097,7 +24097,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V26\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V27\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |

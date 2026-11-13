@@ -192,6 +192,10 @@ class TradingRadarUsStockEngineTest {
 
     /** holdings 恆空；watchlist／大盤資料由各測試自行決定。 */
     private void stubBaseline() {
+        // V27 峰值另用價格報酬價基；保持既有 technical adjust/fallback 的 mock 與次數斷言。
+        lenient().when(adjustedPriceService.priceReturnBasis(anyList(), anyList(), anyString()))
+                .thenAnswer(inv -> new DistributionAdjustedPriceService().priceReturnBasis(
+                        inv.getArgument(0), inv.getArgument(1), inv.getArgument(2)));
         lenient().when(taiexDisplayPriceService.resolve()).thenReturn(
                 new TaiexDisplayPriceService.DisplayQuote(
                         null, null, null, null, null, null,

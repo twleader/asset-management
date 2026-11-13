@@ -96,6 +96,17 @@ public class DistributionAdjustedPriceService {
     public Adjustment adjust(
             List<StockPriceHistory> rowsDesc,
             List<StockDividendHistory> rawEvents) {
+        return adjust(rowsDesc, rawEvents, true);
+    }
+
+    /** Price return keeps split/stock units comparable and deliberately excludes cash-dividend factors. */
+    public Adjustment priceReturnBasis(List<StockPriceHistory> rowsDesc,
+                                       List<StockDividendHistory> events, String market) {
+        return "美股".equals(market) ? priceOnlyBasis(rowsDesc, events) : adjust(rowsDesc, events, false);
+    }
+
+    private Adjustment adjust(List<StockPriceHistory> rowsDesc,
+                              List<StockDividendHistory> rawEvents, boolean includeCash) {
         if (rowsDesc == null || rowsDesc.isEmpty()) {
             return new Adjustment(List.of(), false);
         }
@@ -113,9 +124,9 @@ public class DistributionAdjustedPriceService {
         for (CanonicalDividendFinancialGuard.EffectiveEvent event : canonical.events()) {
             BigDecimal stock = event.stock().divide(STOCK_PAR_VALUE, SCALE, RoundingMode.HALF_UP);
             BigDecimal close = closeOn(rowsAsc, event.date());
-            BigDecimal cash = event.cash().signum() > 0 && close != null && close.signum() > 0
+            BigDecimal cash = includeCash && event.cash().signum() > 0 && close != null && close.signum() > 0
                     ? event.cash().divide(close, SCALE, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-            if (event.cash().signum() > 0 && (close == null || close.signum() <= 0))
+            if (includeCash && event.cash().signum() > 0 && (close == null || close.signum() <= 0))
                 throw new CanonicalDividendFinancialGuard.Unavailable("DIVIDEND_EFFECTIVE_CLOSE_UNAVAILABLE");
             if (event.cash().signum() > 0 || event.stock().signum() > 0)
                 events.add(new FactorEvent(event.date(), BigDecimal.ONE.add(stock).add(cash),

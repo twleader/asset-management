@@ -785,4 +785,27 @@ class RadarInputAssemblerWindowRegressionTest {
         }
         return candidate;
     }
+    @Test void v27NamedPriceFactsAreRebuiltLocallyOnCacheHitAndLegacyShapesNeverActivate() {
+        var rows = RadarCompletedPriceDrawdownTest.rows("00881", "台股");
+        RadarInputAssembler assembler = assembler();
+        var prepared = assembler.prepare(rows, List.of(), false, 241, 241, new BigDecimal("80"),
+                java.util.Set.of(), false, "00881", "台股");
+        var local = assembler.calculate(prepared);
+        var cached = assembler.calculate(prepared, local.indicators(), local.weekly(), local.weeklyIndicators());
+        assertThat(local.accumulation().eligible(new BigDecimal("80"))).isTrue();
+        assertThat(cached.accumulation()).isEqualTo(local.accumulation());
+        assertThat(cached.accumulation().priceBasis()).isEqualTo(RadarCompletedPriceDrawdown.PriceBasis.TW_SPLIT_STOCK_PRICE);
+        assertThat(assembler.assemble(rows, List.of(), false, 241, 241, new BigDecimal("80")).accumulation())
+                .isEqualTo(RadarCompletedPriceDrawdown.Context.NOT_EVALUATED);
+        var usRows = RadarCompletedPriceDrawdownTest.rows("NVDA", "美股");
+        var us = assembler.preparePriceOnly(usRows, List.of(), false, 241, 241, new BigDecimal("70"),
+                java.util.Set.of(), false, "NVDA", "美股");
+        assertThat(assembler.calculate(us).accumulation().eligible(new BigDecimal("70"))).isTrue();
+        assertThat(assembler.calculate(us).accumulation().priceBasis()).isEqualTo(RadarCompletedPriceDrawdown.PriceBasis.STORED_PRICE_ONLY);
+        var priorPrice = assembler.calculate(assembler.prepare(rows, List.of(), false, 241, 241,
+                new BigDecimal("90"), java.util.Set.of(), false, "00881", "台股"));
+        var refreshedWithOldIndicators = assembler.calculate(prepared, priorPrice.indicators(), priorPrice.weekly(), priorPrice.weeklyIndicators());
+        assertThat(refreshedWithOldIndicators.accumulation().referencePrice()).isEqualByComparingTo("80");
+    }
+
 }

@@ -147,9 +147,43 @@ public class RadarInputAssembler {
             boolean weeklyDistributionAdjusted,
             TradingRadarRuleEngine.BollingerInput bollinger,
             TradingRadarRuleEngine.CompletedKd completedKd,
-            TradingRadarRuleEngine.StructureFacts structure
+            TradingRadarRuleEngine.StructureFacts structure,
+            RadarCompletedPriceDrawdown.Context accumulation
     ) {
+        /** Compatibility input predating the named accumulation context; never infers eligibility. */
+        public Assembled(
+                TechnicalIndicatorService.FullIndicators indicators,
+                List<StockPriceHistory> adjustedRowsDesc,
+                boolean distributionAdjusted,
+                List<BigDecimal> completedCloses,
+                BigDecimal previousAdjustedClose,
+                BigDecimal completedChangePercent,
+                BigDecimal week52High,
+                BigDecimal week52Low,
+                BigDecimal kdBandWidthPercent,
+                TradingRadarRuleEngine.Confirmation ma20Confirmation,
+                TradingRadarRuleEngine.Confirmation ma60Confirmation,
+                TradingRadarRuleEngine.Confirmation ma240Confirmation,
+                BigDecimal ma60BiasPercent,
+                BigDecimal ma60BiasPercentile,
+                BigDecimal ma240BiasPercent,
+                BigDecimal week52Position,
+                BigDecimal ruleChangePercent,
+                BigDecimal volumeRatio,
+                VolatilityObservation volatility60,
+                TradingRadarRuleEngine.CandleInput dailyCandle,
+                TradingRadarRuleEngine.WeeklyInput weekly,
+                List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+                TechnicalIndicatorService.FullIndicators weeklyIndicators,
+                boolean weeklyDistributionAdjusted,
+                TradingRadarRuleEngine.BollingerInput bollinger,
+                TradingRadarRuleEngine.CompletedKd completedKd,
+                TradingRadarRuleEngine.StructureFacts structure) {
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, bollinger, completedKd, structure, RadarCompletedPriceDrawdown.Context.NOT_EVALUATED);
+        }
+
         public Assembled {
+            accumulation = accumulation == null ? RadarCompletedPriceDrawdown.Context.NOT_EVALUATED : accumulation;
             structure = structure == null ? TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED : structure;
         }
 
@@ -327,9 +361,30 @@ public class RadarInputAssembler {
             /** 上游剔除列的交易日（Task 577.4a）；無剔除時為空集合。 */
             Set<LocalDate> droppedDailyDates,
             /** 上游是否剔除過日期為 null 的列（Task 577.4a）。 */
-            boolean droppedUndatedDailyRow
+            boolean droppedUndatedDailyRow,
+            RadarCompletedPriceDrawdown.Context accumulation
     ) {
+        /** Compatibility input predating the named accumulation context; never infers eligibility. */
+        public Prepared(
+                List<StockPriceHistory> adjustedRowsDesc,
+                List<StockPriceHistory> dailyContractRowsDesc,
+                boolean distributionAdjusted,
+                boolean weeklyDistributionAdjusted,
+                List<BigDecimal> completedCloses,
+                BigDecimal previousAdjustedClose,
+                int firstCompletedIndex,
+                int indicatorRows,
+                BigDecimal price,
+                List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+                List<StockPriceHistory> weeklySeriesDesc,
+                List<WeeklyBarAggregator.WeeklyBar> completedWeeklyBarsUnfilteredDesc,
+                Set<LocalDate> droppedDailyDates,
+                boolean droppedUndatedDailyRow) {
+            this(adjustedRowsDesc, dailyContractRowsDesc, distributionAdjusted, weeklyDistributionAdjusted, completedCloses, previousAdjustedClose, firstCompletedIndex, indicatorRows, price, weeklyBarsDesc, weeklySeriesDesc, completedWeeklyBarsUnfilteredDesc, droppedDailyDates, droppedUndatedDailyRow, RadarCompletedPriceDrawdown.Context.NOT_EVALUATED);
+        }
+
         public Prepared {
+            accumulation = accumulation == null ? RadarCompletedPriceDrawdown.Context.NOT_EVALUATED : accumulation;
             completedWeeklyBarsUnfilteredDesc = completedWeeklyBarsUnfilteredDesc == null
                     ? List.of() : completedWeeklyBarsUnfilteredDesc;
             droppedDailyDates = droppedDailyDates == null ? Set.of() : Set.copyOf(droppedDailyDates);
@@ -388,6 +443,48 @@ public class RadarInputAssembler {
             boolean droppedUndatedDailyRow) {
         return calculate(prepare(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price,
                 droppedDailyDates, droppedUndatedDailyRow));
+    }
+
+    /** Named-policy overload. The legacy technical path is unchanged; only price facts are appended. */
+    public Assembled assemble(List<StockPriceHistory> rows, List<StockDividendHistory> events,
+                              boolean liveAdded, int completedRows, int contractRows, BigDecimal price,
+                              Set<LocalDate> dropped, boolean undated, String code, String market) {
+        return calculate(prepare(rows, events, liveAdded, completedRows, contractRows, price,
+                dropped, undated, code, market));
+    }
+
+    public Prepared prepare(List<StockPriceHistory> rows, List<StockDividendHistory> events,
+                            boolean liveAdded, int completedRows, int contractRows, BigDecimal price,
+                            Set<LocalDate> dropped, boolean undated, String code, String market) {
+        return withAccumulation(prepare(rows, events, liveAdded, completedRows, contractRows, price, dropped, undated),
+                rows, events, liveAdded, price, dropped, undated, code, market);
+    }
+
+    public Prepared preparePriceOnly(List<StockPriceHistory> rows, List<StockDividendHistory> events,
+                                     boolean liveAdded, int completedRows, int contractRows, BigDecimal price,
+                                     Set<LocalDate> dropped, boolean undated, String code, String market) {
+        return withAccumulation(preparePriceOnly(rows, events, liveAdded, completedRows, contractRows, price, dropped, undated),
+                rows, events, liveAdded, price, dropped, undated, code, market);
+    }
+
+    private Prepared withAccumulation(Prepared prepared, List<StockPriceHistory> rows,
+                                      List<StockDividendHistory> events, boolean liveAdded, BigDecimal price,
+                                      Set<LocalDate> dropped, boolean undated, String code, String market) {
+        if (!RadarCompletedPriceDrawdown.selected(code, market) || prepared.empty()) return prepared;
+        RadarCompletedPriceDrawdown.Context context;
+        try {
+            var basis = adjustedPriceService.priceReturnBasis(rows, events, market);
+            context = RadarCompletedPriceDrawdown.evaluate(code, market, basis.rowsDesc(), liveAdded ? 1 : 0,
+                    price, "美股".equals(market) ? RadarCompletedPriceDrawdown.PriceBasis.STORED_PRICE_ONLY
+                            : RadarCompletedPriceDrawdown.PriceBasis.TW_SPLIT_STOCK_PRICE, dropped, undated);
+        } catch (com.steven.assets.model.CanonicalDividendFinancialGuard.Unavailable unavailable) {
+            context = RadarCompletedPriceDrawdown.Context.unavailable(code, market, unavailable.getMessage());
+        }
+        return new Prepared(prepared.adjustedRowsDesc(), prepared.dailyContractRowsDesc(), prepared.distributionAdjusted(),
+                prepared.weeklyDistributionAdjusted(), prepared.completedCloses(), prepared.previousAdjustedClose(),
+                prepared.firstCompletedIndex(), prepared.indicatorRows(), prepared.price(), prepared.weeklyBarsDesc(),
+                prepared.weeklySeriesDesc(), prepared.completedWeeklyBarsUnfilteredDesc(), prepared.droppedDailyDates(),
+                prepared.droppedUndatedDailyRow(), context);
     }
 
     /** Builds the immutable raw/adjusted price basis without indicator formulas. */
@@ -578,7 +675,7 @@ public class RadarInputAssembler {
                 prepared.completedCloses().size() < 20 ? null
                         : completedBollinger(prepared.dailyContractRowsDesc(), firstCompleted),
                 completedKd,
-                structure);
+                structure, prepared.accumulation());
     }
 
     /**

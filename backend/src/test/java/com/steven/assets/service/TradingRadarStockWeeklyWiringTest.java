@@ -372,6 +372,48 @@ class TradingRadarStockWeeklyWiringTest {
     }
 
     @Test
+    void v27SelectedPriceFactIsRebuiltFromCanonicalRowsEvenWhenLocalIndicatorsAreCached() {
+        stubBaseline();
+        List<StockPriceHistory> rows = twStockRows(TODAY, SERIES_ROWS, Set.of(TODAY));
+        for (int i = 0; i < rows.size(); i++) {
+            StockPriceHistory row = rows.get(i);
+            BigDecimal close = new BigDecimal("80").add(BigDecimal.valueOf(Math.min(i, 100)).movePointLeft(1).multiply(BigDecimal.TWO));
+            row.setStockCode("0050");
+            row.setClosePrice(close);
+            row.setOpenPrice(close);
+            row.setHighPrice(close.add(new BigDecimal("0.5")));
+            row.setLowPrice(close.subtract(new BigDecimal("0.5")));
+        }
+        when(alertRepo.findDistinctStockCodeMarket()).thenReturn(List.<Object[]>of(new Object[]{"0050", TW}));
+        when(priceHistoryRepo.findRecentN("0050", TW, 500)).thenReturn(rows);
+        TechnicalIndicatorService.FullIndicators cached = new TechnicalIndicatorService.FullIndicators(
+                BigDecimal.valueOf(101), BigDecimal.valueOf(102), BigDecimal.valueOf(103),
+                BigDecimal.valueOf(37), BigDecimal.valueOf(41), BigDecimal.valueOf(35), BigDecimal.valueOf(40),
+                BigDecimal.valueOf(101), TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
+        RadarTechnicalResolver resolver = Mockito.mock(RadarTechnicalResolver.class);
+        when(resolver.freshLocal(Mockito.eq("0050"), Mockito.eq(TW), any(), any(), any()))
+                .thenReturn(new ResolvedTechnicalInputs(cached, null, null, null));
+        TradingRadarService service = newService(resolver);
+        service.assembleAt(AFTER_CLOSE);
+        TradingRadarRuleEngine.StockInput input = captureStockInput();
+        assertThat(input.indicators().k()).isEqualByComparingTo("37");
+        assertThat(input.accumulation().stockCode()).isEqualTo("0050");
+        assertThat(input.accumulation().completedAsOfDate()).isEqualTo(TODAY);
+        assertThat(input.accumulation().high()).isEqualByComparingTo("100.5");
+        assertThat(input.accumulation().referencePrice()).isEqualByComparingTo("80");
+        assertThat(input.accumulation().eligible(input.price())).isTrue();
+        // 同份舊 indicators 再命中，本輪 canonical accepted close 改變時不能沿用前輪 fact。
+        Mockito.clearInvocations(ruleEngine);
+        rows.get(0).setClosePrice(new BigDecimal("75"));
+        rows.get(0).setOpenPrice(new BigDecimal("75"));
+        rows.get(0).setHighPrice(new BigDecimal("75.5"));
+        rows.get(0).setLowPrice(new BigDecimal("74.5"));
+        service.assembleAt(AFTER_CLOSE);
+        assertThat(captureStockInput().accumulation().referencePrice()).isEqualByComparingTo("75");
+        verify(resolver, Mockito.times(2)).freshLocal(Mockito.eq("0050"), Mockito.eq(TW), any(), any(), any());
+    }
+
+    @Test
     @DisplayName("577.4a：resolver 剔除的非正收盤列診斷經 production 路徑抵達引擎 → UPSTREAM_DROPPED_ROW")
     void upstreamDroppedRowReachesEngineThroughProductionPath() {
         stubBaseline();
