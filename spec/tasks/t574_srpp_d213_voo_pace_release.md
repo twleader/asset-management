@@ -51,3 +51,16 @@ DB 類 `SrppDecisionRepositoryPostgresTest` 不在本輪 focused 範圍。
 golden 另以結構化比對（`python3 -m json.tool --sort-keys` 對 HEAD 與新檔 diff）逐欄確認差異只落在 574.3 允許範圍。部署後唯讀確認 VOO／VT 現行比重與新上限 30%／3.5% 的關係，以及 00865B／00719B 現行策略比重相對新目標 2.5%／19.97% 的位置。
 
 雙 repo 落地及 registry 驗證後，在乾淨正式資產 main 執行 `docker compose -p asset-management build business-services` 及 `docker compose -p asset-management up -d --no-deps --force-recreate business-services`；project 須先由運行標籤證實。從 SRPP 實機執行 `python3 /Users/steven/.claude/skills/srpp-policy-release/scripts/verify_9090.py --srpp-root /Users/steven/Project/SRPP --expected-bundle 1f1e16466059fdc9a6b34674b3530eae70db10e0d3fadb41b18dad195328062b --output /Users/steven/Project/SRPP/reports/d214-allocation-release-2026-11-13/9090-connectivity.json`。本輪不動 Liquibase 或 schema。
+
+## 完成報告
+
+2026-11-13 依 Steven「現在就可以做」指示提前於台北 11:01–11:03 完成發布（原規劃 13:15 後）；當日 09:05 兩軌以舊 bundle `326e18df…` FINAL，12:00 起採新 bundle。**正式日報採用為 NOT_YET_EXECUTED**（待當日 12:00 合法時窗實跑）。
+
+- **審查。** spec 經作者以外審查多輪（含 D-214 擴大範圍）修正後通過；main 於 10:54 改採 Codex 審查後，再以 `scripts/codex-review.sh` 補審：spec 第 1 輪 critical 1（短線 `core_cap` 誤述，已修）、第 2 輪 PASS（minor 1 已修）；arch 第 1 輪 PASS。
+- **離線驗收。** authority gate PASS；三支 golden --check、Ruby 8＋5、三支 Python 回歸皆通過；srpp 非 Postgres 全套 541 項 0 failures／errors；backend package 成功；`git diff --check` 通過。四份 golden 與 policy document 與審查前試算逐位元相同。
+- **落地。** SRPP main `49ca0bcb5eadd29711452ec22a7787931004c55b`（feature `60066b2`）、資產 main `2a4e91594c33824ac29f2a623559de569bfb5d70`（feature `969ac1dd`），均 `--no-ff` 並 `ls-remote` 讀回；兩邊 main 樹與 feature 樹相同。合併後在 SRPP-main 跑 authority 檢查因該工作區缺 gitignored 交易日曆而 `TRADING_CALENDAR_UNVERIFIED`，改以樹相同的 feature 工作區重跑 PASS。
+- **登錄。** 已合併 SQL 以單一交易 insert-only 登錄；登錄前 42 列全文不變、新增 `1f1e1646…` 1 列，formula_version 與 policy_document 與 SQL 原文一致。
+- **部署。** 預檢：有效 env 47 鍵／mounts／network／restart 一致、`DIVIDEND_BACKFILL_ENABLED=false`、今日 analysis OK、三 owner 快照為今日、已到期匯出皆已執行、今日美股備份已存在、PROCESSING 0。只 build 並 force-recreate `business-services`（container `07f48157…`，image `sha256:1e2e8fc8…`），20 秒 healthy，其他容器不變；啟動時美股備份因已有紀錄略過，API 錯誤日誌保存期限清理刪除 533 筆。運行 JAR 內 model／manifest／swagger／registration SQL／policy document 與合併來源逐位元相同。
+- **SRPP 與 9090。** JAR 驗證後立即 `--ff-only` 將 `/Users/steven/Project/SRPP` 推進至 `49ca0bc`（只有未追蹤資料，保留），規則包 check PASS（D-214／2.62.0）；`verify_9090.py`：日曆 365 日、TWSE 日線 21 筆、台股報價 23 筆皆 PASS。部署後唯讀比重：VOO 4.08%（上限 30%）、VT 1.40%（3.5%）、00865B 2.26%（目標 2.5%）、00719B 1.56%（目標 19.97%）。
+
+收據位於 `/Users/steven/Project/SRPP/reports/d214-allocation-release-2026-11-13/`。
