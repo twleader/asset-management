@@ -100,12 +100,62 @@ export function createTrailingRefresh(read, { delay = 0, interval = 1000, tail =
 }
 
 /** Browser-independent transport core; EventSource construction belongs to the API adapter. */
-export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000, marketToday: todayForMarket = marketToday }) {
-  const listeners = new Set(), latest = new Map()
-  let source = null, closed = false
+export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000, marketToday: todayForMarket = marketToday,
+  setTimer = setTimeout, clearTimer = clearTimeout }) {
+  const listeners = new Set(), latest = new Map(), pending = new Set()
+  let source = null, closed = false, notifyTimer = null
   const visible = () => !doc?.hidden
-  function notify(method, value) { for (const listener of [...listeners]) { try { listener[method]?.(value) } catch (e) { console.warn('即時行情處理失敗', e) } } }
+  function notify(method, value) {
+    for (const listener of [...listeners]) {
+      if (!listeners.has(listener)) continue
+      // A consumer may hide the tab while handling a quote. Stop this flush before
+      // delivering to the remaining consumers in the now-hidden document.
+      if (method === 'onQuote' && (closed || !visible())) break
+      try { listener[method]?.(value) } catch (e) { console.warn('即時行情處理失敗', e) }
+    }
+  }
   function stop() { source?.close(); source = null }
+  function clearPending() {
+    if (notifyTimer != null) clearTimer(notifyTimer)
+    notifyTimer = null
+    pending.clear()
+  }
+  function clearTimerIfIdle() {
+    if (pending.size !== 0 || notifyTimer == null) return
+    clearTimer(notifyTimer)
+    notifyTimer = null
+  }
+  function scheduleNotify() {
+    if (notifyTimer != null || pending.size === 0) return
+    notifyTimer = setTimer(flushPending, 500)
+  }
+  function flushPending() {
+    notifyTimer = null
+    if (closed || !visible() || listeners.size === 0) { pending.clear(); return }
+    // Snapshot keys before calling user code. Read each canonical tuple only
+    // when its key is reached so a listener's newer HTTP overlay is not lost.
+    const batch = [...pending]
+    pending.clear()
+    for (const key of batch) {
+      // A reentrant SSE event for a later key belongs to the next window; leave
+      // it queued there. HTTP overlays do not add pending keys and are read now.
+      if (pending.has(key) || !latest.has(key)) continue
+      const quote = latest.get(key)
+      notify('onQuote', quote)
+      if (closed || !visible() || listeners.size === 0) break
+    }
+    scheduleNotify()
+  }
+  function store(key, quote) {
+    latest.delete(key); latest.set(key, quote)
+    if (latest.size > maxQuotes) {
+      const oldest = latest.keys().next().value
+      latest.delete(oldest)
+      pending.delete(oldest)
+      clearTimerIfIdle()
+    }
+    return latest.has(key)
+  }
   function start() {
     if (source || closed || !listeners.size || !visible()) return
     source = connect()
@@ -116,17 +166,17 @@ export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000
       try { quote = JSON.parse(event.data) } catch { return }
       const key = identity(quote), current = latest.get(key), next = mergeLiveQuote(current, quote, todayForMarket(quote?.market))
       if (!next || next === current) return
-      latest.delete(key); latest.set(key, next)
-      if (latest.size > maxQuotes) latest.delete(latest.keys().next().value)
-      notify('onQuote', next)
+      if (!store(key, next)) return
+      pending.add(key)
+      scheduleNotify()
     })
     source.onopen = () => { if (source === connection && visible()) notify('onCatchup') }
     source.onerror = () => {
-      if (source === connection && source?.readyState === 2) { closed = true; stop() }
+      if (source === connection && source?.readyState === 2) { closed = true; stop(); clearPending() }
     }
   }
   function visibility() {
-    if (!visible()) { stop(); notify('onPause') }
+    if (!visible()) { stop(); clearPending(); notify('onPause') }
     else { start(); notify('onCatchup') }
   }
   return {
@@ -140,15 +190,14 @@ export function createLivePriceStream({ connect, document: doc, maxQuotes = 1000
       return () => {
         listeners.delete(listener)
         listener.onPause?.()
-        if (!listeners.size) { stop(); latest.clear(); doc?.removeEventListener('visibilitychange', visibility) }
+        if (!listeners.size) { stop(); clearPending(); latest.clear(); doc?.removeEventListener('visibilitychange', visibility) }
       }
     },
     overlay(quote) {
       const key = identity(quote), cached = latest.get(key), today = todayForMarket(quote?.market)
       const next = mergeLiveQuote(cached, quote, today)
       if (next && next !== cached) {
-        latest.delete(key); latest.set(key, next)
-        if (latest.size > maxQuotes) latest.delete(latest.keys().next().value)
+        store(key, next)
       }
       return latest.has(key) ? (mergeLiveQuote(quote, latest.get(key), today) ?? quote) : quote
     },
