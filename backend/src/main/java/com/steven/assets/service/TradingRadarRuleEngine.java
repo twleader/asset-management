@@ -18,6 +18,11 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
+     * V23（Task 575／Requirement 200）：高賣低買——減碼／出場只在「仍處高檔區（52 週位置 ≥0.75
+     * 或超買）且主升段結束確認（K≤D＋四類轉弱證據至少兩項）」時輸出，否則降為續抱提高警戒；
+     * 未持有 AVOID 在跌深區降為 WAIT；跌深後完成日收紅、K 上升且 K>D 新增分批試單候選。
+     * 分數、權重、門檻與 timingOf() 不變；使用者原則，非回測實證。
+     *
      * V16：修正 J 值因子的<b>極性錯誤</b>——KD／J 因子（日線）與週線動能因子（週線）的 J 位置分量
      * 改由 {@link #standardJPosition(BigDecimal, BigDecimal)} 以標準 J（{@code 3K − 2D}）現算，
      * 不再直接餵入本專案為對齊券商畫面而採的顯示慣例 {@code j9 = 3D − 2K}
@@ -60,7 +65,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V22";
+    public static final String RULE_VERSION = "TW_RULES_V23";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -311,6 +316,36 @@ public class TradingRadarRuleEngine {
      * 它的中位數」而放行。</p>
      */
     private static final double ETF_PREMIUM_EXPENSIVE = 3.0;
+
+    /**
+     * 高賣低買（Task 575／Requirement 200）：52 週相對位置（0..1）達此值以上視為高檔區，
+     * 減碼／出場只在高檔區且轉弱確認時輸出。
+     *
+     * <p>使用者原則，無回測依據，不得宣稱降低風險或提升報酬。</p>
+     */
+    private static final double SELL_HIGH_ZONE_W52 = 0.75;
+
+    /**
+     * 高賣低買（Task 575）：季線乖離（單位 %）達此值以下視為跌深。
+     *
+     * <p>使用者原則，無回測依據，不得宣稱降低風險或提升報酬。</p>
+     */
+    private static final double REBOUND_DEEP_BIAS_PCT = -8.0;
+
+    /**
+     * 高賣低買（Task 575）：52 週相對位置（0..1）達此值以下視為跌深。
+     *
+     * <p>使用者原則，無回測依據，不得宣稱降低風險或提升報酬。</p>
+     */
+    private static final double REBOUND_DEEP_W52 = 0.25;
+
+    /**
+     * 高賣低買（Task 575）：主升段結束的「下跌爆量」量比門檻，沿用既有
+     * {@code profitTakingConfirmed()} 的 1.2。
+     *
+     * <p>使用者原則，無回測依據，不得宣稱降低風險或提升報酬。</p>
+     */
+    private static final double UPTREND_END_DOWN_VOLUME_RATIO = 1.2;
 
     public enum Confirmation { ABOVE, BELOW, MIXED, UNAVAILABLE }
     public enum MarketRegime { RISK_ON, NEUTRAL, RISK_OFF, DATA_INCOMPLETE }
@@ -3047,11 +3082,29 @@ public class TradingRadarRuleEngine {
             return Action.TRIAL_BUY;
         }
 
+        // Task 575：跌深後出現反彈 → 分批試單候選（大盤 RISK_OFF 不否決，只揭露）。
+        if (qualifiesForReboundBuy(input, timing)) {
+            reasons.add("已跌深（" + deepDropDescription(input, timing)
+                    + "）且出現反彈（完成日收紅、K 上升且 K>D），列為分批試單候選。 ");
+            risks.add("跌深反彈試單本質是接刀，僅適合小額分批；反彈可能失敗、低點可能再破。 ");
+            if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
+                risks.add("大盤為 RISK_OFF，本訊號只限小額試單，不得視為一般買進或加碼候選。 ");
+            }
+            if (input.ma240Confirmation() == Confirmation.BELOW) {
+                risks.add("年線已兩日跌破，長期結構偏弱，試單應更小額。 ");
+            }
+            return Action.TRIAL_BUY;
+        }
+
         // 高檔獲利了結須 KD／MACD／下跌爆量三類至少兩類轉弱；KD 死叉單獨不得再賣。
+        // Task 575：另需「主升段結束」確認（K≤D 且轉弱證據至少兩項），K>D 時暫不減碼、往下走一般流程。
         if (profitTaking) {
-            reasons.add("已達極端高檔，且 KD／MACD／量價三類轉弱證據至少兩項成立，獲利了結獲得確認。 ");
-            risks.add("本訊號只描述高檔與多項轉弱狀態，不預測後續漲跌；分批處理可降低單點判斷風險。 ");
-            return input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID;
+            if (uptrendEndConfirmed(input)) {
+                reasons.add("已達極端高檔，且 KD／MACD／量價三類轉弱證據至少兩項成立，獲利了結獲得確認。 ");
+                risks.add("本訊號只描述高檔與多項轉弱狀態，不預測後續漲跌；分批處理可降低單點判斷風險。 ");
+                return input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID;
+            }
+            reasons.add("已達極端高檔且有轉弱跡象，但短線仍呈 K>D，尚未確認主升段結束，暫不建議減碼。 ");
         }
 
         // 大盤 stale 時一律關閉買進閘門（債券不套大盤閘門，故不受影響）。
@@ -3114,7 +3167,96 @@ public class TradingRadarRuleEngine {
             risks.add("本訊號只描述當前位置，不預測反彈時點；後續條件改變仍應重新評估。 ");
             return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
         }
+        // ── Task 575 賣出閘門（高賣低買）：減碼／出場只在仍處高檔區且主升段結束確認時輸出。
+        if ((mapped == Action.REDUCE_CANDIDATE || mapped == Action.EXIT_CANDIDATE)
+                && !(highZone(input, timing) && uptrendEndConfirmed(input))) {
+            reasons.add("尚未符合『主升段結束』條件（需仍在高檔區且轉弱確認、K≤D），依高賣低買原則不在回檔位置建議減碼。 ");
+            if (input.ma240Confirmation() == Confirmation.BELOW) {
+                risks.add("年線已兩日跌破，長期結構轉弱；本雷達依高賣低買原則不在低檔給減碼，是否停損請自行評估。 ");
+            }
+            return Action.HOLD_CAUTION;
+        }
+        if (mapped == Action.AVOID && deepDrop(input, timing)) return Action.WAIT;
         return mapped;
+    }
+
+    /**
+     * 高檔區（Task 575）：52 週相對位置 ≥ {@link #SELL_HIGH_ZONE_W52}，或時機為超買／極端超買。
+     * {@code week52Position} 為 null 時該項不算高檔。
+     */
+    private boolean highZone(StockInput input, TimingState timing) {
+        if (input.week52Position() != null
+                && input.week52Position().doubleValue() >= SELL_HIGH_ZONE_W52) return true;
+        return timing == TimingState.OVERBOUGHT || timing == TimingState.EXTREME_OVERBOUGHT;
+    }
+
+    /**
+     * 主升段結束確認（Task 575）：必要條件 K≤D，且 KD 死叉／OSC 轉負／MA20 兩日跌破／
+     * 完成日下跌爆量四項至少兩項成立。K 或 D 為 null 時無法判定，回 false。
+     */
+    private boolean uptrendEndConfirmed(StockInput input) {
+        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
+        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
+        if (k == null || d == null) return false;
+        if (k.compareTo(d) > 0) return false;
+        int evidence = kdDeadCross(input) ? 1 : 0;
+        ExtendedIndicators extended = input.extendedIndicators();
+        if (extended != null && extended.osc() != null && extended.osc().signum() < 0) evidence++;
+        if (input.ma20Confirmation() == Confirmation.BELOW) evidence++;
+        if (input.completedChangePercent() != null && input.completedChangePercent().signum() < 0
+                && input.volumeRatio() != null
+                && input.volumeRatio().doubleValue() >= UPTREND_END_DOWN_VOLUME_RATIO) {
+            evidence++;
+        }
+        return evidence >= 2;
+    }
+
+    /**
+     * 跌深（Task 575）：季線乖離 ≤ {@link #REBOUND_DEEP_BIAS_PCT}%，或 52 週相對位置 ≤
+     * {@link #REBOUND_DEEP_W52}，或時機為超賣／極端超賣。null 欄位該項不成立。
+     */
+    private boolean deepDrop(StockInput input, TimingState timing) {
+        return deepBias(input) || deepWeek52(input)
+                || timing == TimingState.OVERSOLD || timing == TimingState.EXTREME_OVERSOLD;
+    }
+
+    private boolean deepBias(StockInput input) {
+        return input.ma60BiasPercent() != null
+                && input.ma60BiasPercent().doubleValue() <= REBOUND_DEEP_BIAS_PCT;
+    }
+
+    private boolean deepWeek52(StockInput input) {
+        return input.week52Position() != null
+                && input.week52Position().doubleValue() <= REBOUND_DEEP_W52;
+    }
+
+    /** 跌深命中條件的文案（只列實際命中者，數值以 {@link #fmt1} 呈現）。 */
+    private String deepDropDescription(StockInput input, TimingState timing) {
+        List<String> parts = new ArrayList<>();
+        if (deepBias(input)) parts.add("季線乖離 " + fmt1(input.ma60BiasPercent()) + "%");
+        if (deepWeek52(input)) parts.add("52 週低檔 " + fmt1(input.week52Position()));
+        if (timing == TimingState.OVERSOLD || timing == TimingState.EXTREME_OVERSOLD) parts.add("時機超賣");
+        return String.join("／", parts);
+    }
+
+    /**
+     * 跌深反彈試單（Task 575／Requirement 200）：跌深、最近完成日收紅、K 上升且 K>D，
+     * 並通過窄幅 KD、基本面惡化、ETF 溢價、大盤 stale 與超買否決。大盤 RISK_OFF 不否決。
+     * 使用者原則，無回測依據。
+     */
+    private boolean qualifiesForReboundBuy(StockInput input, TimingState timing) {
+        if (!deepDrop(input, timing)) return false;
+        BigDecimal completed = input.completedChangePercent();
+        if (completed == null || completed.signum() <= 0) return false;
+        BigDecimal k = input.indicators() == null ? null : input.indicators().k();
+        BigDecimal d = input.indicators() == null ? null : input.indicators().d();
+        if (k == null || d == null || input.previousK() == null) return false;
+        if (k.compareTo(input.previousK()) <= 0 || k.compareTo(d) <= 0) return false;
+        if (narrowKdBand(input) || fundamentalDeteriorating(input)) return false;
+        if (input.etfPremiumPct() != null
+                && input.etfPremiumPct().doubleValue() >= ETF_PREMIUM_EXPENSIVE) return false;
+        if (equityMarketApplies(input) && input.marketStale()) return false;
+        return timing != TimingState.OVERBOUGHT && timing != TimingState.EXTREME_OVERBOUGHT;
     }
 
     /**

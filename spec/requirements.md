@@ -6776,3 +6776,27 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 以受控SRPP feature凍結的本輪來源同步authority：model的VOO建倉節奏改為2026-11-13至2027-05-31每月基準900,000、上限1,350,000、每批225,000（新增說明鍵`pace_decision`、`pace_rule_d213`），policy升2.62.0、頂層及12個巢狀現行決策標記升D-214（`pace_decision`為D-213）；同輪D-214調整正式目標（009826 2.5%、VOO 27%、VT 2.5%、0050 10%、00881 4.53%、00865B 2.5%、00719B 19.97%），9090依registered policy document採用；`bull_correction_dip_d212`維持D-212、D-211兩區塊維持D-211；9090 `GLOBAL_EQUITY_PACE`依registered model自動採用新參數，不改Java計算。
 - [ ] 009826節奏、FX減半門檻、第二批條件、formula manifest、model3.22.0、API／DTO／DB／Swagger、時限、排程與交易權限全部不變。資產端同步精確model／manifest bytes，以原投影重產policy document、以原generator產生insert-only SQL及三份report／state golden，並以可指定SRPP來源的原產生器重產short-us golden（僅00881的core_allocation_full因正式目標4.53%由true變false）；兩處Java測試寫死期望（00865B正式目標、bondTarget的0.28／0.55）同步為新值；三份report／state golden只允許bundle hash、`execution_policy.py`與state-topup `transition_ledger.py` calculator hash及VOO節奏推導值改變（report golden generator僅把VOO pace案例的spent改由model月上限推導，state-topup generator僅將reserveDeployment案例的月上限改由model推導並調高overdue），不手改expected；`DecisionPolicyAuthorityTest`的決策／版本斷言更新為D-214／2.62.0。
 - [ ] 作者以外spec／arch審查與離線authority／generator／Java／package驗收完成後，於台北時間13:15之後雙repo各feature commit／main no-ff merge／push及精確remote讀回，再從已合併SQL登錄；核新hash四欄全文、舊rows不變，乾淨正式main與原設定只build／force-recreate business-services，核運行JAR authority bytes及其他容器保持。安全同步日報SRPP工作區；由SRPP實機跑9090日曆／TWSE／台股報價三GET維護檢查。正式日報採用尚未執行時維持NOT_YET_EXECUTED。
+
+### Requirement 200／Task 575：交易雷達「高賣低買」動作原則——賣出限主升段結束、買進限跌深反彈（TW_RULES_V23）
+
+**User Story：**作為交易雷達使用者，我要求雷達遵守「逢高賣出、逢低買進」：減碼／出場建議只能出現在**主升段結束**（仍在高檔、且轉弱已確認）時；買進建議應出現在**跌深之後、已出現反彈**時。不得在回檔低點建議減碼（殺低），也不得在跌深反彈時完全沒有買進建議。
+
+**Acceptance Criteria：**
+
+- [ ] **根因揭露（2026-11-13 以 `GET /api/public/trading-radar/today`、`TW_RULES_V22` 實測）：** 台股上週完成週跌 12.19% 後，持有中的 0050、006208、0056、00878、00881、009804、00919、VOO、VT 被判 `REDUCE_CANDIDATE`；它們的季線乖離為 −9.5%～+0.1%、年線之上 2.7%～23.7%，K 已回升且 K>D（反彈中），屬回檔而非破底；同時全場 36 檔沒有任何買進／加碼／試單候選。原因：`actionFor()` 的分數是順勢分數（跌破均線即扣分），分數 <40 直接映射為減碼／出場，而「不殺低」保護只在 `EXTREME_OVERSOLD`（KD 深度超賣**且**季線乖離 ≤ −20% 或自身分位 ≤ 2）時生效；低檔買進只有 `TRIAL_BUY`（年線之上 ≥5%＋KD<20 黃金交叉＋收紅）一條極窄路徑。
+- [ ] **賣出閘門（主升段結束）：** 減碼／出場候選（`REDUCE_CANDIDATE`、`EXIT_CANDIDATE`）只在同時滿足 (a)「高檔區」與 (b)「轉弱確認」時才可輸出；不滿足時，分數映射得到的減碼／出場一律降級為 `HOLD_CAUTION`（已持有），未持有者的 `AVOID` 在「跌深區」降為 `WAIT`、否則維持 `AVOID`（`AVOID` 不是賣出，只是不建議買進）。
+  - (a) 高檔區＝`week52Position ≥ 0.75`，或 `timingOf()` 為 `OVERBOUGHT`／`EXTREME_OVERBOUGHT`。`week52Position` 為 null 且時機非超買時視為**非**高檔區（資料不足不殺低）。
+  - (b) 轉弱確認＝短線動能仍弱（`K ≤ D`）為必要條件，且下列四項至少兩項成立：KD 死亡交叉（前一期 K>D、本期 K≤D）、MACD `osc < 0`、MA20 兩日確認 `BELOW`、下跌爆量（完成日跌幅 <0 且 `volumeRatio ≥ 1.2`）。K>D 代表已在反彈，此時不得賣（避免賣在反彈途中的低位）。
+  - 既有高檔獲利了結判定（`EXTREME_OVERBOUGHT` 且 KD 死叉／MACD／下跌爆量三類至少兩類，`profitTakingConfirmed`）的計算與 DTO 欄位語意不變，但它**不是**本閘門的子集（可在 K>D 時成立）；因此其直接回傳減碼的分支改為同時須 `uptrendEndConfirmed`（含 K≤D）才回 `REDUCE_CANDIDATE`／`AVOID`，否則只加註說明並落入一般流程（一般流程的減碼同樣受本閘門約束）。
+  - 賣出被本閘門擋下、且年線兩日確認 `BELOW` 時，須在 risks 揭露：「年線已兩日跌破，長期結構轉弱；本雷達依高賣低買原則不在低檔給減碼，是否停損請自行評估。」本閘門不在任何位置產生新的賣出。
+  - 舊 `EXTREME_OVERSOLD` 不追殺分支是**獨立且優先**的保護（它不讀 `week52Position`，可能與高檔區重疊，例如 52 週位置 0.85 但短線極端超賣），先於本閘門處理，既有文案與降級結果保持相同；須有兩區重疊的測試。
+- [ ] **買進路徑（跌深反彈）：** 新增「跌深反彈試單」判定，成立時輸出 `TRIAL_BUY`（分批試單候選；持有與未持有皆同，不新增 Action 值），優先序在既有 `TRIAL_BUY` 判定之後、獲利了結之前。
+  - 跌深＝`ma60BiasPercent ≤ −8`，或 `week52Position ≤ 0.25`，或時機為 `OVERSOLD`／`EXTREME_OVERSOLD`。
+  - 反彈出現＝最新完成日漲跌幅 `completedChangePercent > 0`（不可用盤中漲跌幅），且 `K > previousK` 且 `K > D`。
+  - 否決（任一成立即不成立）：KD 窄幅失效（`narrowKdBand`）、基本面多項惡化（`fundamentalDeteriorating`）、ETF 溢價 ≥ 3%、股票類且大盤資料 stale、時機為 `OVERBOUGHT`／`EXTREME_OVERBOUGHT`、K／D／previousK／completedChangePercent 任一缺值。大盤 `RISK_OFF` **不**否決，但須在 risks 揭露「大盤為 RISK_OFF，本訊號只限小額試單」。
+  - 成立時 reasons 須說明「已跌深（列出命中的條件）且出現反彈（完成日收紅、K 上升且 K>D）」，risks 須說明「跌深反彈試單本質是接刀，僅適合小額分批；反彈可能失敗」；年線兩日跌破時另揭露長期結構偏弱。
+  - 原順勢買進閘門（`buyGate`）、既有 `TRIAL_BUY`、超買否決買進、使用者風險偏好（極端超買不給加碼）全部不變。
+- [ ] **三軌一致：** 兩條新規則與既有保護同樣在短線／1週~1月／中長期三軌各自套用（同一 `actionFor()`、共用同一判定實作，依各軌傳入的 timing 逐軌求值；candidate 路徑的 SWING 軌沿用其 baseline timing）；分數、權重、分數門檻、`timingOf()` 門檻、`EVIDENCE_GATE_V2` 與 V13 candidate／promotion 機制均不改。Evidence gate 對新 `TRIAL_BUY` 的降級照既有規則運作。
+- [ ] **版本與契約同步：** `TradingRadarRuleEngine.RULE_VERSION` 由 `TW_RULES_V22` 升為 `TW_RULES_V23`；`FubonRadarCompatibilityManifest.DECISION_INPUT_VERSION` 同步為 `TW_RULES_V23|FUBON_OVERLAY_V1`（resolver／快取因版本不符失效重建，屬預期）。`docs/openapi/docker-external-api.yaml` 的 ruleVersion 範例與 `decisionInputVersion` 描述／範例同步 V23，`info.version` 由 1.27.0 升 1.27.1；以 `ruby scripts/render-9090-openapi-docs.rb` 重產兩份專案內 Swagger 鏡像，並依 Task 504 受控鏈同步 SRPP Swagger 身分（新 PublishedSwaggerIdentity、新 policy bundle hash、insert-only registry）。DTO Javadoc、`TradingRadarService` 註解、後端／BFF 測試與 fixtures 的 V22 字串一併同步。通知沿用既有機制：版本不符只重建 baseline、升版首輪不寄信。
+- [ ] **誠實揭露：** 本次是使用者明定的投資原則（風險偏好），**非 walk-forward 實證**；`BacktestService` baseline／swing 走正式路徑，離線回測結果會隨之改變，不得宣稱準確率或報酬提升。不新增 API／路由／DB／排程／券商 I/O；輸出只呈現建議，不下單。
+- [ ] **驗收：** 單元測試涵蓋：(1) 回檔低位（非高檔區、分數 <40、持有）→ `HOLD_CAUTION` 而非減碼／出場；(2) 高檔區＋K≤D＋兩項轉弱→可輸出減碼；(3) 高檔區但 K>D（反彈中）→ 不賣；(4) `week52Position` null 且時機中性→不賣；(5) 跌深＋完成日收紅＋K 上升且 K>D →`TRIAL_BUY`（持有／未持有各一）；(6) 跌深但完成日收黑或 K≤D →不出試單；(7) 各否決條件逐一阻擋；(8) RISK_OFF 不擋但有揭露；(9) `EXTREME_OVERSOLD` 原測試結果不變；(10) 三軌一致；(11) 規則版號與通知升版首輪不寄信。Docker 重建後重取 `GET /api/public/trading-radar/today`，記錄前後各動作分布於 Task 575 完成報告，並確認 2026-11-13 案例中 K>D 的回檔持股不再是減碼候選。

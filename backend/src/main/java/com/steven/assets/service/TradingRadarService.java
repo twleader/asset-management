@@ -1404,7 +1404,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V22（完成收盤基準與短線盤中K確認）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V23（V22 完成收盤基準與短線盤中K確認＋V23 高賣低買閘門）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1789,7 +1789,7 @@ public class TradingRadarService {
                             decisionClock != null && decisionClock.authoritative()
                                     ? sessionDate(decisionClock)
                                     : marketSummary == null ? null : parseLocalDate(marketSummary.asOfDate()));
-            // V12 score/candidate/parameters stay unchanged. TW_RULES_V22 adds only the final
+            // V12 score/candidate/parameters stay unchanged. The final
             // action passes through the deterministic safety policy, at this single construction
             // point shared by page, snapshot/export and evaluateForNotification.
             // Task 356.9b：gate 擴為三軌；既有兩軌的 gate 行為逐位不變，swing 軌套用同一組
