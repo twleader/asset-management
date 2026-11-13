@@ -18,6 +18,11 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
+     * V25（Task 577／Requirement 202）：減碼與試單除 KD 證據外，另須各持有期完成 K 價格結構確認
+     * （{@link RadarCompletedStructure}；一周／1周~1月用日K、1月~6月用週K）——試單需「止穩」、減碼需「轉弱」，
+     * 結構受阻或不可用時持有者 HOLD_CAUTION／未持有者 WAIT；支撐確認跌破只加 risks、不在低檔賣。
+     * 只加嚴、不放寬；分數、權重、門檻、timingOf()、kdHeatOf()、獲利了結確認與 buyGate 不變。門檻為判斷性初值，未經回測。
+     *
      * V24（Task 576／Requirement 201）：分批試單（{@code qualifiesForTrialBuy}）、跌深反彈試單
      * （{@code qualifiesForReboundBuy}）與主升段結束確認（{@code uptrendEndConfirmed}）三處 KD 證據
      * 一律改讀 {@link CompletedKd} 完成日快照（最近一根完成日 K 與其前一根完成日 K），不再混用盤中 K；
@@ -71,7 +76,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V24";
+    public static final String RULE_VERSION = "TW_RULES_V25";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -690,6 +695,68 @@ public class TradingRadarRuleEngine {
      */
     public record CompletedKd(BigDecimal k, BigDecimal d, BigDecimal previousK, BigDecimal previousD) {}
 
+    /**
+     * 完成 K 結構判定狀態（Task 577／Requirement 202）。
+     *
+     * <p>{@code NOT_EVALUATED} 只供既有單元測試：代表結構條件不參與，維持 V24 行為。
+     * {@code UNAVAILABLE} 代表資料不足或不可信，該軌一律不試單、不減碼。</p>
+     */
+    public enum StructureStatus { AVAILABLE, UNAVAILABLE, NOT_EVALUATED }
+
+    /**
+     * 單一持有期的完成 K 結構事實（Task 577），由 {@link RadarCompletedStructure#evaluate} 產生。
+     *
+     * @param status             判定狀態。
+     * @param weakened           高檔轉弱：收盤下跌、連兩根各自低於確認均線、高點降低。
+     * @param stabilized         跌深止穩：低點墊高、收盤突破前三根、站上確認均線。
+     * @param supportBroken      反覆測試的支撐已確認跌破（只作風險揭露，不改動作）。
+     * @param support            支撐價（回看視窗最低點）；非 AVAILABLE 時為 null。
+     * @param asOf               最近一根完成 K 的日期（週K 為該週最晚交易日）。
+     * @param confirmationPeriod 確認均線期數。
+     * @param confirmationSma    最近一根的確認均線值；非 AVAILABLE 時為 null。
+     * @param unavailableReason  UNAVAILABLE 的具名原因；其餘為 null。
+     */
+    public record HorizonStructure(
+            StructureStatus status,
+            boolean weakened,
+            boolean stabilized,
+            boolean supportBroken,
+            BigDecimal support,
+            LocalDate asOf,
+            int confirmationPeriod,
+            BigDecimal confirmationSma,
+            String unavailableReason) {
+        public HorizonStructure {
+            status = status == null ? StructureStatus.NOT_EVALUATED : status;
+        }
+
+        public static HorizonStructure notEvaluated() {
+            return new HorizonStructure(StructureStatus.NOT_EVALUATED, false, false, false,
+                    null, null, 0, null, null);
+        }
+
+        public static HorizonStructure unavailable(String reason, int confirmationPeriod) {
+            return new HorizonStructure(StructureStatus.UNAVAILABLE, false, false, false,
+                    null, null, confirmationPeriod, null, reason);
+        }
+    }
+
+    /** 三軌完成 K 結構事實（Task 577）。 */
+    public record StructureFacts(HorizonStructure shortTerm, HorizonStructure swing, HorizonStructure medium) {
+        /** 三軌皆 NOT_EVALUATED：只供既有單元測試，維持 V24 行為。 */
+        public static final StructureFacts NOT_EVALUATED = new StructureFacts(
+                HorizonStructure.notEvaluated(), HorizonStructure.notEvaluated(), HorizonStructure.notEvaluated());
+
+        public HorizonStructure of(Horizon horizon) {
+            HorizonStructure value = switch (horizon) {
+                case SHORT -> shortTerm;
+                case SWING -> swing;
+                case MEDIUM -> medium;
+            };
+            return value == null ? HorizonStructure.notEvaluated() : value;
+        }
+    }
+
     public record StockInput(
             boolean held,
             BigDecimal price,
@@ -729,16 +796,66 @@ public class TradingRadarRuleEngine {
             BollingerInput bollinger,
             /**
              * 完成日 KD 快照（Task 576）。production（{@code TradingRadarService}）與回測
-             * （{@code BacktestService}）一律走本 29 參數正典建構式並顯式傳入。
+             * （{@code BacktestService}）一律走 30 參數正典建構式並顯式傳入。
              */
-            CompletedKd completedKd
+            CompletedKd completedKd,
+            /**
+             * 三軌完成 K 結構事實（Task 577／Requirement 202）。production 與回測一律走本 30 參數
+             * 正典建構式並顯式傳入 {@link RadarCompletedStructure#evaluate} 的實算結果；
+             * {@code null} 視同 {@link StructureFacts#NOT_EVALUATED}。
+             */
+            StructureFacts structure
     ) {
+        public StockInput {
+            structure = structure == null ? StructureFacts.NOT_EVALUATED : structure;
+        }
+
+        /**
+         * V24 的 29 參數形狀（Task 577 之前的正典建構式）。
+         *
+         * <p>結構事實傳 {@link StructureFacts#NOT_EVALUATED}：<b>NOT_EVALUATED 只供既有單元測試，
+         * 代表結構條件不參與，維持 V24 行為；production 與回測必須顯式傳入實算結果</b>（走 30 參數正典建構式）。</p>
+         */
+        public StockInput(boolean held,
+            BigDecimal price,
+            BigDecimal changePercent,
+            BigDecimal completedChangePercent,
+            Indicators indicators,
+            BigDecimal previousK,
+            BigDecimal previousD,
+            Confirmation ma20Confirmation,
+            Confirmation ma60Confirmation,
+            Confirmation ma240Confirmation,
+            InstrumentType instrumentType,
+            MarketRegime marketRegime,
+            boolean marketStale,
+            BigDecimal fxPercentile,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal kdBandWidthPercent,
+            BigDecimal etfPremiumPct,
+            BigDecimal etfPremiumPercentile,
+            BigDecimal weeklyMa,
+            ExtendedIndicators extendedIndicators,
+            BigDecimal volumeRatio,
+            FundamentalInput fundamental,
+            CandleInput dailyCandle,
+            WeeklyInput weekly,
+            BollingerInput bollinger,
+            CompletedKd completedKd) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation, ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio, fundamental, dailyCandle, weekly, bollinger, completedKd,
+                    StructureFacts.NOT_EVALUATED);
+        }
+
         /**
          * V23 的 28 參數形狀（Task 576 之前的正典建構式）。
          *
          * <p><b>語意：輸入本身就是完成日序列</b>（回測與單元測試），故完成日 KD 快照直接由
          * {@code indicators.k()/d()} 與 {@code previousK/previousD} 推得，不傳 null。
-         * production 不得使用本建構式——盤中時 {@code indicators} 含即時列，推得的快照會是盤中值。</p>
+         * production 不得使用本建構式——盤中時 {@code indicators} 含即時列，推得的快照會是盤中值。
+         * 結構事實為 {@link StructureFacts#NOT_EVALUATED}（只供既有單元測試，維持 V24 行為）。</p>
          */
         public StockInput(boolean held,
             BigDecimal price,
@@ -820,8 +937,8 @@ public class TradingRadarRuleEngine {
          * 於是五個新因子（日K 棒、週線趨勢、週線動能、週線乖離、週K 棒與量能）恆為缺值、
          * 權重被重分配掉——這正是本任務實作期間真的發生過的缺陷（{@code TradingRadarService
          * .buildStock} 只傳 25 個引數，線上五因子全空、回測卻有值，兩邊靜默分岔）。
-         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 29 參數的正式建構式（Task 576）並傳入
-         * {@code assembled.dailyCandle()}、{@code assembled.weekly()}、{@code assembled.bollinger()} 與 {@code assembled.completedKd()}；由
+         * 凡是自己組 {@code Assembled} 的呼叫端，一律走 30 參數的正式建構式（Task 577）並傳入
+         * {@code assembled.dailyCandle()}、{@code assembled.weekly()}、{@code assembled.bollinger()}、{@code assembled.completedKd()} 與 {@code assembled.structure()}；由
          * {@code TradingRadarStockWeeklyWiringTest} 釘住。</p>
          */
         public StockInput(
@@ -2247,7 +2364,7 @@ public class TradingRadarRuleEngine {
                 ? BigDecimal.valueOf(PRODUCTION_CHASED_MOVE_PCT) : candidate.chasedDailyMoveThresholdPct();
         BigDecimal buyGateOverboughtBiasPct = candidate == null
                 ? BigDecimal.valueOf(PRODUCTION_BUYGATE_BIAS_PCT) : candidate.buyGateOverboughtBiasPct();
-        Action action = actionFor(input, score, timing, profitTaking, risks, reasons, thresholds,
+        Action action = actionFor(input, horizon, score, timing, profitTaking, risks, reasons, thresholds,
                 chasedDailyMoveThresholdPct, buyGateOverboughtBiasPct);
         return new HorizonScore(score, action, List.copyOf(reasons), List.copyOf(risks));
     }
@@ -3139,15 +3256,22 @@ public class TradingRadarRuleEngine {
      * 公式與門檻一律不改；Task 356 新增的日K 棒與週K 因子<b>只進分數，不進這五個判定</b>
      * ——把新指標接進極端態判定會同時改動保護門檻，本任務沒有回測依據支持那麼做（356.8c）。</p>
      */
-    private Action actionFor(StockInput input, int score, TimingState timing,
+    private Action actionFor(StockInput input, Horizon horizon, int score, TimingState timing,
                              boolean profitTaking,
                              List<String> risks, List<String> reasons,
                              RuleParameters.ActionThresholds thresholds,
                              BigDecimal chasedDailyMoveThresholdPct,
                              BigDecimal buyGateOverboughtBiasPct) {
+        // Task 577：該軌完成 K 結構事實；只加嚴、不放寬。NOT_EVALUATED 維持 V24 行為。
+        HorizonStructure hs = structureOf(input, horizon);
+        discloseStructure(hs, horizon, reasons, risks);
         // 分批試單優先於分數映射：這類標的的短線分數必然偏低（剛跌深），
         // 若先走分數映射會被判成減碼／出場，與「長線佳、可分批進場」的判斷自相矛盾。
         if (qualifiesForTrialBuy(input)) {
+            if (structureBlocksTrial(hs)) {
+                reasons.add(trialBlockedReason(hs, horizon));
+                return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            }
             risks.add("逆勢試單的本質是接刀，僅適合小額分批；長線判斷失準時虧損可能持續擴大。 ");
             if (equityMarketApplies(input) && input.marketRegime() == MarketRegime.RISK_OFF) {
                 risks.add("大盤為 RISK_OFF，本訊號只限小額試單，不得視為一般買進或加碼候選。 ");
@@ -3157,6 +3281,10 @@ public class TradingRadarRuleEngine {
 
         // Task 575：跌深後出現反彈 → 分批試單候選（大盤 RISK_OFF 不否決，只揭露）。
         if (qualifiesForReboundBuy(input, timing)) {
+            if (structureBlocksTrial(hs)) {
+                reasons.add(trialBlockedReason(hs, horizon));
+                return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+            }
             reasons.add("已跌深（" + deepDropDescription(input, timing)
                     + "）且出現反彈（完成日收紅、K 上升且 K>D），列為分批試單候選。 ");
             risks.add("跌深反彈試單本質是接刀，僅適合小額分批；反彈可能失敗、低點可能再破。 ");
@@ -3173,6 +3301,10 @@ public class TradingRadarRuleEngine {
         // Task 575：另需「主升段結束」確認（K≤D 且轉弱證據至少兩項），K>D 時暫不減碼、往下走一般流程。
         if (profitTaking) {
             if (uptrendEndConfirmed(input)) {
+                if (!structureAllowsSell(hs)) {
+                    reasons.add(sellBlockedReason(hs, horizon));
+                    return input.held() ? Action.HOLD_CAUTION : Action.WAIT;
+                }
                 reasons.add("已達極端高檔，且 KD／MACD／量價三類轉弱證據至少兩項成立，獲利了結獲得確認。 ");
                 risks.add("本訊號只描述高檔與多項轉弱狀態，不預測後續漲跌；分批處理可降低單點判斷風險。 ");
                 return input.held() ? Action.REDUCE_CANDIDATE : Action.AVOID;
@@ -3249,8 +3381,83 @@ public class TradingRadarRuleEngine {
             }
             return Action.HOLD_CAUTION;
         }
+        // ── Task 577 結構確認：原賣出閘門成立後，另需該軌完成 K 結構轉弱。
+        if ((mapped == Action.REDUCE_CANDIDATE || mapped == Action.EXIT_CANDIDATE)
+                && !structureAllowsSell(hs)) {
+            reasons.add(sellBlockedReason(hs, horizon));
+            return Action.HOLD_CAUTION;
+        }
         if (mapped == Action.AVOID && deepDrop(input, timing)) return Action.WAIT;
         return mapped;
+    }
+
+    // ── Task 577／Requirement 202：完成 K 結構確認（TW_RULES_V25） ───────────────────────
+    private static HorizonStructure structureOf(StockInput input, Horizon horizon) {
+        StructureFacts facts = input.structure();
+        return facts == null ? HorizonStructure.notEvaluated() : facts.of(horizon);
+    }
+
+    /** 試單受阻：AVAILABLE 但未止穩，或 UNAVAILABLE。NOT_EVALUATED 不受阻（V24 行為）。 */
+    private static boolean structureBlocksTrial(HorizonStructure hs) {
+        return hs.status() == StructureStatus.UNAVAILABLE
+                || (hs.status() == StructureStatus.AVAILABLE && !hs.stabilized());
+    }
+
+    /** 減碼放行：NOT_EVALUATED（V24 行為），或 AVAILABLE 且已轉弱。UNAVAILABLE 一律不放行。 */
+    private static boolean structureAllowsSell(HorizonStructure hs) {
+        return hs.status() == StructureStatus.NOT_EVALUATED
+                || (hs.status() == StructureStatus.AVAILABLE && hs.weakened());
+    }
+
+    private static String horizonLabel(Horizon horizon) {
+        return switch (horizon) {
+            case SHORT -> "一周";
+            case SWING -> "1周~1月";
+            case MEDIUM -> "1月~6月";
+        };
+    }
+
+    private static String barLabel(Horizon horizon) {
+        return horizon == Horizon.MEDIUM ? "週K" : "日K";
+    }
+
+    private static String trialBlockedReason(HorizonStructure hs, Horizon horizon) {
+        if (hs.status() == StructureStatus.UNAVAILABLE) {
+            return "V25結構確認：" + horizonLabel(horizon) + "完成K結構不可用（" + hs.unavailableReason()
+                    + "），無法確認止穩，暫不試單。 ";
+        }
+        return "V25結構確認：" + horizonLabel(horizon) + "完成K尚未止穩（需低點墊高、收盤突破前三根、站上 SMA"
+                + hs.confirmationPeriod() + "），暫不試單。 ";
+    }
+
+    private static String sellBlockedReason(HorizonStructure hs, Horizon horizon) {
+        if (hs.status() == StructureStatus.UNAVAILABLE) {
+            return "V25結構確認：" + horizonLabel(horizon) + "完成K結構不可用（" + hs.unavailableReason()
+                    + "），無法確認轉弱，暫不建議減碼。 ";
+        }
+        return "V25結構確認：" + horizonLabel(horizon) + "尚缺『完成K結構轉弱』（需收盤下跌、連兩根低於 SMA"
+                + hs.confirmationPeriod() + "、高點降低），暫不建議減碼。 ";
+    }
+
+    /** 統一揭露：AVAILABLE 放 reasons；UNAVAILABLE 原因與支撐破位風險放 risks；NOT_EVALUATED 不揭露。 */
+    private static void discloseStructure(HorizonStructure hs, Horizon horizon,
+                                          List<String> reasons, List<String> risks) {
+        if (hs.status() == StructureStatus.AVAILABLE) {
+            reasons.add("V25結構確認：" + horizonLabel(horizon) + "（" + barLabel(horizon) + "，as-of " + hs.asOf()
+                    + "，SMA" + hs.confirmationPeriod() + "=" + fmt2(hs.confirmationSma()) + "）轉弱="
+                    + (hs.weakened() ? "是" : "否") + "、止穩=" + (hs.stabilized() ? "是" : "否") + "。 ");
+            if (hs.supportBroken()) {
+                risks.add("V25結構確認：" + horizonLabel(horizon) + "完成K已確認跌破反覆測試的支撐 "
+                        + fmt2(hs.support()) + "，屬破位風險；本雷達依高賣低買原則不在低檔給減碼，是否停損請自行評估。 ");
+            }
+        } else if (hs.status() == StructureStatus.UNAVAILABLE) {
+            risks.add("V25結構確認：" + horizonLabel(horizon) + "完成K結構不可用（" + hs.unavailableReason()
+                    + "），本軌暫停試單與減碼。 ");
+        }
+    }
+
+    private static String fmt2(BigDecimal value) {
+        return value == null ? "—" : value.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     /**

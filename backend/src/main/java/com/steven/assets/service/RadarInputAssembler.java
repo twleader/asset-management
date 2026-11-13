@@ -11,6 +11,7 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.time.LocalDate;
 
 /**
@@ -110,6 +111,9 @@ public class RadarInputAssembler {
      * @param completedKd          完成日 KD 快照（Task 576／Requirement 201）：最近一根完成日 K 與其前一根
      *                             完成日 K 的 K／D，排除盤中列。無盤中列時等於 {@code indicators} 的四值；
      *                             有盤中列時只以完成日列另算。計算失敗或缺值時對應欄位為 null。
+     * @param structure            三軌完成 K 結構事實（Task 577／Requirement 202）：由
+     *                             {@link RadarCompletedStructure#evaluate} 以完成日列（排除盤中列）與
+     *                             未經缺高低過濾的完成週算得；{@link #EMPTY} 為三軌 UNAVAILABLE。
      */
     public record Assembled(
             TechnicalIndicatorService.FullIndicators indicators,
@@ -142,8 +146,48 @@ public class RadarInputAssembler {
              */
             boolean weeklyDistributionAdjusted,
             TradingRadarRuleEngine.BollingerInput bollinger,
-            TradingRadarRuleEngine.CompletedKd completedKd
+            TradingRadarRuleEngine.CompletedKd completedKd,
+            TradingRadarRuleEngine.StructureFacts structure
     ) {
+        public Assembled {
+            structure = structure == null ? TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED : structure;
+        }
+
+        /**
+         * Task 577 之前的正典形狀（含完成日 KD、無結構事實）。結構事實為 NOT_EVALUATED——只供既有
+         * 測試與舊 fixture；assembler 自身一律走正典建構式傳入實算結果。
+         */
+        public Assembled(
+            TechnicalIndicatorService.FullIndicators indicators,
+            List<StockPriceHistory> adjustedRowsDesc,
+            boolean distributionAdjusted,
+            List<BigDecimal> completedCloses,
+            BigDecimal previousAdjustedClose,
+            BigDecimal completedChangePercent,
+            BigDecimal week52High,
+            BigDecimal week52Low,
+            BigDecimal kdBandWidthPercent,
+            TradingRadarRuleEngine.Confirmation ma20Confirmation,
+            TradingRadarRuleEngine.Confirmation ma60Confirmation,
+            TradingRadarRuleEngine.Confirmation ma240Confirmation,
+            BigDecimal ma60BiasPercent,
+            BigDecimal ma60BiasPercentile,
+            BigDecimal ma240BiasPercent,
+            BigDecimal week52Position,
+            BigDecimal ruleChangePercent,
+            BigDecimal volumeRatio,
+            VolatilityObservation volatility60,
+            TradingRadarRuleEngine.CandleInput dailyCandle,
+            TradingRadarRuleEngine.WeeklyInput weekly,
+            List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
+            TechnicalIndicatorService.FullIndicators weeklyIndicators,
+            boolean weeklyDistributionAdjusted,
+            TradingRadarRuleEngine.BollingerInput bollinger,
+            TradingRadarRuleEngine.CompletedKd completedKd) {
+            this(indicators, adjustedRowsDesc, distributionAdjusted, completedCloses, previousAdjustedClose, completedChangePercent, week52High, week52Low, kdBandWidthPercent, ma20Confirmation, ma60Confirmation, ma240Confirmation, ma60BiasPercent, ma60BiasPercentile, ma240BiasPercent, week52Position, ruleChangePercent, volumeRatio, volatility60, dailyCandle, weekly, weeklyBarsDesc, weeklyIndicators, weeklyDistributionAdjusted, bollinger, completedKd,
+                    TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED);
+        }
+
         /**
          * Task 576 之前的正典形狀（含 Bollinger、無完成日 KD 快照）。語意同 StockInput 相容建構式：
          * 輸入本身就是完成日序列，快照由 {@code indicators} 的四值推得；不傳 null。
@@ -224,7 +268,8 @@ public class RadarInputAssembler {
                 null, null, null, null, null, null,
                 VolatilityObservation.unavailable(null, "沒有可用的 adjusted completed-price 序列"),
                 null, null, List.of(), TechnicalIndicatorService.FullIndicators.EMPTY, false, null,
-                new TradingRadarRuleEngine.CompletedKd(null, null, null, null));
+                new TradingRadarRuleEngine.CompletedKd(null, null, null, null),
+                RadarCompletedStructure.unavailableAll(RadarCompletedStructure.NO_PRICE_SERIES));
 
         /** Compatibility shape before Task408 added the weekly price-basis flag. */
         public Assembled(
@@ -276,10 +321,22 @@ public class RadarInputAssembler {
             int indicatorRows,
             BigDecimal price,
             List<WeeklyBarAggregator.WeeklyBar> weeklyBarsDesc,
-            List<StockPriceHistory> weeklySeriesDesc
+            List<StockPriceHistory> weeklySeriesDesc,
+            /** 未經缺 high／low 過濾的完成週（降序），只供完成 K 結構判定（Task 577.4）。 */
+            List<WeeklyBarAggregator.WeeklyBar> completedWeeklyBarsUnfilteredDesc,
+            /** 上游剔除列的交易日（Task 577.4a）；無剔除時為空集合。 */
+            Set<LocalDate> droppedDailyDates,
+            /** 上游是否剔除過日期為 null 的列（Task 577.4a）。 */
+            boolean droppedUndatedDailyRow
     ) {
+        public Prepared {
+            completedWeeklyBarsUnfilteredDesc = completedWeeklyBarsUnfilteredDesc == null
+                    ? List.of() : completedWeeklyBarsUnfilteredDesc;
+            droppedDailyDates = droppedDailyDates == null ? Set.of() : Set.copyOf(droppedDailyDates);
+        }
+
         public static final Prepared EMPTY = new Prepared(List.of(), List.of(), false, false, List.of(), null,
-                0, 0, null, List.of(), List.of());
+                0, 0, null, List.of(), List.of(), List.of(), Set.of(), false);
 
         public boolean empty() { return adjustedRowsDesc == null || adjustedRowsDesc.isEmpty(); }
     }
@@ -313,7 +370,24 @@ public class RadarInputAssembler {
             int dailyContractRows,
             BigDecimal price) {
 
-        return calculate(prepare(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price));
+        return assemble(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price, Set.of(), false);
+    }
+
+    /**
+     * 同 {@link #assemble(List, List, boolean, int, int, BigDecimal)}，另帶上游剔除診斷（Task 577.4a）。
+     * 回測必須走本多載並傳入實際剔除日期，無剔除時傳空集合與 false。
+     */
+    public Assembled assemble(
+            List<StockPriceHistory> combinedDesc,
+            List<StockDividendHistory> events,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price,
+            Set<LocalDate> droppedDailyDates,
+            boolean droppedUndatedDailyRow) {
+        return calculate(prepare(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price,
+                droppedDailyDates, droppedUndatedDailyRow));
     }
 
     /** Builds the immutable raw/adjusted price basis without indicator formulas. */
@@ -324,6 +398,19 @@ public class RadarInputAssembler {
             int completedRowCount,
             int dailyContractRows,
             BigDecimal price) {
+        return prepare(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price, Set.of(), false);
+    }
+
+    /** 同 {@link #prepare(List, List, boolean, int, int, BigDecimal)}，另帶上游剔除診斷（Task 577.4a）。 */
+    public Prepared prepare(
+            List<StockPriceHistory> combinedDesc,
+            List<StockDividendHistory> events,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price,
+            Set<LocalDate> droppedDailyDates,
+            boolean droppedUndatedDailyRow) {
 
         if (combinedDesc == null || combinedDesc.isEmpty()) return Prepared.EMPTY;
 
@@ -331,7 +418,7 @@ public class RadarInputAssembler {
         // 不得改為兩次查詢或兩次還原——兩份長度不同的序列各自跑分割偵測啟發式，結果可能分歧，
         // 會讓日K 與週K 在同一筆決策中用上兩種價基（既有鐵則明文禁止）。
         return prepareFrom(adjustedPriceService.adjust(new ArrayList<>(combinedDesc), events),
-                liveAdded, completedRowCount, dailyContractRows, price);
+                liveAdded, completedRowCount, dailyContractRows, price, droppedDailyDates, droppedUndatedDailyRow);
     }
 
     /**
@@ -350,11 +437,25 @@ public class RadarInputAssembler {
             int completedRowCount,
             int dailyContractRows,
             BigDecimal price) {
+        return preparePriceOnly(combinedDesc, events, liveAdded, completedRowCount, dailyContractRows, price,
+                Set.of(), false);
+    }
+
+    /** 同 {@link #preparePriceOnly(List, List, boolean, int, int, BigDecimal)}，另帶上游剔除診斷（Task 577.4a）。 */
+    public Prepared preparePriceOnly(
+            List<StockPriceHistory> combinedDesc,
+            List<StockDividendHistory> events,
+            boolean liveAdded,
+            int completedRowCount,
+            int dailyContractRows,
+            BigDecimal price,
+            Set<LocalDate> droppedDailyDates,
+            boolean droppedUndatedDailyRow) {
 
         if (combinedDesc == null || combinedDesc.isEmpty()) return Prepared.EMPTY;
 
         return prepareFrom(adjustedPriceService.priceOnlyBasis(new ArrayList<>(combinedDesc), events),
-                liveAdded, completedRowCount, dailyContractRows, price);
+                liveAdded, completedRowCount, dailyContractRows, price, droppedDailyDates, droppedUndatedDailyRow);
     }
 
     /** {@link #prepare} 與 {@link #preparePriceOnly} 共用：吃已決定的價基，切出日K 契約視窗與週K 聚合。 */
@@ -363,7 +464,9 @@ public class RadarInputAssembler {
             boolean liveAdded,
             int completedRowCount,
             int dailyContractRows,
-            BigDecimal price) {
+            BigDecimal price,
+            Set<LocalDate> droppedDailyDates,
+            boolean droppedUndatedDailyRow) {
         List<StockPriceHistory> adjustedRows = adjustment.rowsDesc();
         // 日K 契約視窗：完成列 + live K（若有）。凡是「沒有自帶列數上限」的既有計算都必須吃這一份，
         // 否則會被長視窗靜默改值且不會有任何編譯錯誤或執行期例外。
@@ -397,7 +500,11 @@ public class RadarInputAssembler {
         return new Prepared(List.copyOf(adjustedRows), List.copyOf(dailyContractRowsDesc),
                 distributionAdjusted(adjustment, dailyContractRowsDesc), weeklyDistributionAdjusted(adjustment, weeklyBarsDesc),
                 List.copyOf(completedCloses), previousAdjustedClose, firstCompleted, indicatorRows, price,
-                List.copyOf(weeklyBarsDesc), List.copyOf(weeklySeriesDesc));
+                List.copyOf(weeklyBarsDesc), List.copyOf(weeklySeriesDesc),
+                // Task 577.4：結構判定吃未經缺高低過濾的完成週，缺 high／low 的週使 MEDIUM 軌 UNAVAILABLE，
+                // 不得以過濾後清單讓相鄰兩週「看起來」連續。
+                List.copyOf(weeklyAggregation.completedDesc()),
+                droppedDailyDates, droppedUndatedDailyRow);
     }
 
     /** Runs normal local formulas after {@link #prepare}; callers may inject a fresh LOCAL snapshot. */
@@ -442,6 +549,7 @@ public class RadarInputAssembler {
                 ? weeklyInput(prepared.weeklyBarsDesc(), prepared.weeklySeriesDesc(), weeklyIndicators, prepared.price())
                 : cachedWeekly;
         TradingRadarRuleEngine.CompletedKd completedKd = completedKd(prepared, indicators);
+        TradingRadarRuleEngine.StructureFacts structure = structure(prepared);
         return new Assembled(
                 indicators,
                 adjustedRows,
@@ -469,7 +577,22 @@ public class RadarInputAssembler {
                 prepared.weeklyDistributionAdjusted(),
                 prepared.completedCloses().size() < 20 ? null
                         : completedBollinger(prepared.dailyContractRowsDesc(), firstCompleted),
-                completedKd);
+                completedKd,
+                structure);
+    }
+
+    /**
+     * 三軌完成 K 結構事實（Task 577／Requirement 202）。日K 一律取日K 契約視窗中排除盤中列的完成日列，
+     * 週K 取未經缺高低過濾的完成週；快取（cachedIndicators）命中時同樣在此本地計算，不讀任何快取值。
+     */
+    private static TradingRadarRuleEngine.StructureFacts structure(Prepared prepared) {
+        List<StockPriceHistory> contract = prepared.dailyContractRowsDesc();
+        int firstCompleted = Math.min(Math.max(0, prepared.firstCompletedIndex()), contract.size());
+        return RadarCompletedStructure.evaluate(
+                contract.subList(firstCompleted, contract.size()),
+                prepared.completedWeeklyBarsUnfilteredDesc(),
+                prepared.droppedDailyDates(),
+                prepared.droppedUndatedDailyRow());
     }
 
     /**

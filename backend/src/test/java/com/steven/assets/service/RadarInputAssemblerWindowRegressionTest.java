@@ -457,6 +457,131 @@ class RadarInputAssemblerWindowRegressionTest {
         assertThat(outside.adjustedRowsDesc()).isEqualTo(combined);
     }
 
+    // ───────────────────────── Task 577：完成 K 結構 ─────────────────────────
+
+    @Test
+    void structureExcludesTheLiveRowIntraday() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        BigDecimal price = rows.get(0).getClosePrice();
+        RadarInputAssembler assembler = assembler();
+        RadarInputAssembler.Assembled closed = assembler.assemble(
+                rows, List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price);
+
+        // 大漲 5% 的盤中列（低於分割偵測門檻）：若進入結構計算，一周／1周~1月軌的 as-of、SMA 與轉弱／止穩都會改變。
+        BigDecimal spike = price.multiply(new BigDecimal("1.05"));
+        List<StockPriceHistory> withLive = new ArrayList<>(rows);
+        withLive.add(0, StockPriceHistory.builder().stockCode("2330").market("台股")
+                .tradingDate(nextWeekday(NEWEST)).openPrice(spike).highPrice(spike).lowPrice(spike)
+                .closePrice(spike).build());
+        RadarInputAssembler.Assembled intraday = assembler.assemble(
+                withLive, List.of(), true, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, spike);
+
+        assertThat(closed.structure().shortTerm().status())
+                .isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(intraday.structure().shortTerm()).isEqualTo(closed.structure().shortTerm());
+        assertThat(intraday.structure().swing()).isEqualTo(closed.structure().swing());
+        assertThat(intraday.structure().shortTerm().asOf()).isEqualTo(NEWEST);
+        // 週K：盤中列所在週恆為進行中週，不進結構；as-of 為最新完成週。
+        assertThat(intraday.structure().medium().status())
+                .isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(intraday.structure().medium().asOf()).isEqualTo(NEWEST);
+    }
+
+    @Test
+    void weekFilteredForMissingHighLowMakesMediumUnavailable() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        // 無盤中列時最新 ISO 週（索引 0–4）為進行中週；索引 15–19 為第 3 根完成週，挖掉其中一天的 high。
+        rows.get(16).setHighPrice(null);
+        RadarInputAssembler assembler = assembler();
+        BigDecimal price = rows.get(0).getClosePrice();
+        RadarInputAssembler.Prepared prepared = assembler.prepare(
+                rows, List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, price);
+        LocalDate brokenWeekEnd = rows.get(15).getTradingDate();
+
+        assertThat(prepared.weeklyBarsDesc()).noneMatch(bar -> bar.weekEndDate().equals(brokenWeekEnd));
+        assertThat(prepared.completedWeeklyBarsUnfilteredDesc())
+                .anyMatch(bar -> bar.weekEndDate().equals(brokenWeekEnd) && bar.high() == null);
+        TradingRadarRuleEngine.HorizonStructure medium = assembler.calculate(prepared).structure().medium();
+        assertThat(medium.status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.UNAVAILABLE);
+        assertThat(medium.unavailableReason()).isEqualTo(RadarCompletedStructure.INVALID_HLC);
+    }
+
+    @Test
+    void dailyGapOfElevenCalendarDaysIsCalendarGap() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        // 索引 2（週三）與索引 3 之間拉開為 11 個日曆日；不經任何剔除。
+        for (int i = 3; i < rows.size(); i++) {
+            rows.get(i).setTradingDate(rows.get(i).getTradingDate().minusDays(10));
+        }
+        assertThat(java.time.temporal.ChronoUnit.DAYS.between(
+                rows.get(3).getTradingDate(), rows.get(2).getTradingDate())).isEqualTo(11);
+        RadarInputAssembler.Assembled assembled = assembler().assemble(
+                rows, List.of(), false, DAILY_CONTRACT_ROWS, DAILY_CONTRACT_ROWS, rows.get(0).getClosePrice(),
+                java.util.Set.of(), false);
+        assertThat(assembled.structure().shortTerm().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.CALENDAR_GAP);
+        assertThat(assembled.structure().swing().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.CALENDAR_GAP);
+    }
+
+    @Test
+    void resolverDroppedNonPositiveCloseInsideWindowMakesDailyTracksUpstreamDropped() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        rows.get(3).setClosePrice(BigDecimal.ZERO);
+        RadarInputAssembler.Assembled assembled = viaResolver(rows);
+
+        assertThat(assembled.structure().shortTerm().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(assembled.structure().swing().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        // 對照：沒有剔除列時同一路徑三軌皆 AVAILABLE。
+        RadarInputAssembler.Assembled clean = viaResolver(rowsDesc(LONG_WINDOW_ROWS));
+        assertThat(clean.structure().shortTerm().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(clean.structure().swing().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(clean.structure().medium().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+    }
+
+    @Test
+    void resolverDroppedSingleDayInsideCompletedWeekMakesMediumUpstreamDropped() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        // 索引 10–14 為第 2 根完成週；只剔除其中一天，其餘日列聚合的週 HLC 仍合法。
+        rows.get(12).setClosePrice(new BigDecimal("-1"));
+        RadarInputAssembler.Assembled assembled = viaResolver(rows);
+
+        assertThat(assembled.weeklyBarsDesc()).anyMatch(bar -> bar.weekEndDate().equals(rows.get(10).getTradingDate()));
+        assertThat(assembled.structure().medium().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+    }
+
+    @Test
+    void resolverDroppedWholeWeekWithFourteenDayStepMakesMediumUpstreamDropped() {
+        List<StockPriceHistory> rows = rowsDesc(LONG_WINDOW_ROWS);
+        for (int i = 10; i <= 14; i++) rows.get(i).setClosePrice(BigDecimal.ZERO);
+        RadarInputAssembler.Assembled assembled = viaResolver(rows);
+
+        List<WeeklyBarAggregator.WeeklyBar> weeks = assembled.weeklyBarsDesc();
+        assertThat(java.time.temporal.ChronoUnit.DAYS.between(
+                weeks.get(1).weekEndDate(), weeks.get(0).weekEndDate())).isEqualTo(14);
+        assertThat(assembled.structure().medium().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+    }
+
+    /**
+     * 比照 {@code TradingRadarService.prepareTechnicalBasis}：resolver 的過濾結果與剔除診斷原樣交給
+     * assembler（收盤後、無盤中列、美股市場使 completed session 列不需 provenance 白名單）。
+     */
+    private RadarInputAssembler.Assembled viaResolver(List<StockPriceHistory> rows) {
+        RadarObservationResolver.AcceptedPrice accepted = RadarObservationResolver.resolveAcceptedPrice(
+                rows, null, "美股", java.time.Instant.parse("2026-08-22T00:00:00Z"),
+                new RadarObservationResolver.DecisionSessions(nextWeekday(NEWEST), NEWEST, false));
+        assertThat(accepted.available()).isTrue();
+        RadarInputAssembler assembler = assembler();
+        return assembler.calculate(assembler.prepare(
+                accepted.weeklySeriesRows(), List.of(), false, accepted.indicatorSeriesRows().size(),
+                DAILY_CONTRACT_ROWS, accepted.value(),
+                accepted.droppedSeriesDates(), accepted.droppedUndatedSeriesRow()));
+    }
+
     // ───────────────────────── 兩臂比對 ─────────────────────────
 
     private record Arms(

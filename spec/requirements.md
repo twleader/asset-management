@@ -6813,3 +6813,25 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] **缺值 fail closed：** 完成日快照任一必要值缺漏時，三個判定皆不成立（不試單、不放行賣出）；不得退回使用盤中 K。只在輸入本身即為完成日序列（回測與單元測試用的相容建構式）時，快照由既有 K/D／previousK/D 推得，並在 Javadoc 明載此相容語意；production 必須顯式傳入由完成日序列算出的快照，並以測試釘住。
 - [ ] **版本與契約：** `RULE_VERSION` 升為 `TW_RULES_V24`，`DECISION_INPUT_VERSION` 同步 `TW_RULES_V24|FUBON_OVERLAY_V1`；`docs/openapi/docker-external-api.yaml` 的版號範例／描述同步並將 `info.version` 由 1.27.1 升 1.27.2（路由與 schema 不變），重產 Swagger 鏡像並依 Task 504 受控鏈同步 SRPP 身分、產生新 policy bundle、insert-only registry；通知沿用升版只重建 baseline 不寄信。不新增 API／DB／排程／券商 I/O，只呈現建議、不下單。
 - [ ] **誠實揭露：** 這是時點一致性修正，不宣稱提升獲利；同日 Codex 審查與蒙地卡羅（37 檔、200 條路徑）顯示既有訊號扣除曝險後無顯著超額，結論記錄於 Task 576。
+
+### Requirement 202／Task 577：交易雷達以完成 K 結構確認補強高賣低買（部分採納位置轉折設計，TW_RULES_V25）
+
+**User Story：**作為交易雷達使用者，我要求「主升段結束才減碼」與「跌深反彈才試單」除了 KD 證據，還要有各持有期完成 K 的價格結構確認（高點降低、連續跌破短均線；低點墊高、收盤突破、站上短均線），並揭露支撐破位風險，但仍不得在低檔建議賣出。
+
+**Acceptance Criteria：**
+
+- [ ] **來源與判定（2026-11-13）：** 另一 session 未提交的「位置＋完K轉折」設計（`RadarTurningPointPolicy`，branch `claude/radar-v23-t575`）經 Codex（gpt-6.1-sol／high）判定 `ADOPT_PARTIAL`：整體不優於 V24、不得直接合併；**不移植**其低檔支撐跌破直接 `EXIT_CANDIDATE`（違反「不在低點賣」）、以「近期曾高檔且目前 P>20」取代當下高檔條件、以「近期曾低檔且 P<80」取代當下跌深條件、以字串比對搬移舊理由。**移植**：純函數完成 K 結構判定、各軌獨立尺度、高檔轉弱與跌深止穩的結構補強、支撐破位僅作風險揭露、線上與回測共用同一評估器。
+- [ ] **結構事實（每檔每軌各算一次）：** 尺度：短線＝完成日 K、確認 SMA5；1週~1月＝完成日 K、SMA10；1月~6月＝完成週 K、SMA4。所需根數＝`max(確認期數+1, 4)`；支撐回看：短線 5、波段 20、中長 10 根（另需 +2 根）。
+  - `weakened`＝最新完成收盤 < 前一根完成收盤，且最新與前一根完成收盤**各自**低於其當根起算的確認 SMA，且最新完成高點 < 前一根完成高點。
+  - `stabilized`＝最新完成低點 > 前一根低點 ≥ 前二根低點，且最新完成收盤 > 前 1～3 根完成收盤最大值，且最新完成收盤 > 其確認 SMA。
+  - `supportBroken`＝支撐（前 2～L+1 根低點最小值）在該 L 根內至少兩次被觸及（低點 ≤ 支撐×1.01、索引相隔 ≥3、其間至少一根收盤 ≥ 支撐×1.03），且最新兩根完成收盤皆 < 支撐×0.99、最新收盤 < 前一根。**只作風險揭露，不產生任何賣出或迴避。**
+  - 一律只用完成 K（排除盤中列／未完成週）。結構公式只用 high／low／close（HLC），open 不參與。所需視窗內任何列日期非嚴格降序、HLC 缺值或非正、`low ≤ close ≤ high` 不成立、該週因缺 high／low 被上游過濾（以過濾前完成週序列偵測）、上游 resolver／回測組裝在視窗日期區間內剔除過任何無效列（以傳遞的剔除日期診斷偵測；週 K 軌以所用最舊週週一至最新週週日的完整區間（含已消失的中間週）比對剔除日期；無日期的剔除列使所有軌不可用），或相鄰兩根所用 K 的日期間距超過門檻（日 K >10 個日曆日、週 K >14 個日曆日，判斷性取值，涵蓋農曆年長假）→ 該軌結構狀態 `UNAVAILABLE`。
+- [ ] **動作規則（在 V24 之上加嚴，不放寬）：**
+  - 減碼／出場（分數映射與極端高檔獲利了結兩條路徑）須同時滿足 V24 的「當下高檔區＋完成日 KD 轉弱確認」**以及**該軌 `weakened`；原本已符合賣出、僅因結構 `UNAVAILABLE` 或不成立而受阻時，直接回傳持有者 `HOLD_CAUTION`、未持有者 `WAIT`（不再落入分數映射，避免高分時變成 HOLD），reasons 說明缺哪項。
+  - 跌深反彈試單與既有長線試單須在 V24 條件之外**另滿足**該軌 `stabilized`；原本會試單、僅因結構 `UNAVAILABLE` 或不成立而受阻時，直接回傳持有者 `HOLD_CAUTION`、未持有者 `WAIT`，同次評估不得再升為一般買進／加碼（原本未命中試單的順勢買進路徑不受影響）。當下跌深條件、超買否決、ETF 溢價、基本面、大盤 stale、完成日 KD 規則全部保留。
+  - `supportBroken` 成立時於該軌 risks 揭露「完成 K 已確認跌破反覆測試的支撐 X，屬破位風險；本雷達依高賣低買原則不在低檔給減碼，是否停損請自行評估」，不改動作。
+  - 揭露以 `V25結構確認：` 前綴：AVAILABLE 時該軌 reasons 列 weakened／stabilized 與所用完成 K 日期、確認 SMA 期數及數值；UNAVAILABLE 原因與 supportBroken 破位風險一律列該軌 risks。不得依自然語言比對改寫既有理由。
+  - 一般順勢買進（buyGate）、分數、權重、門檻、`timingOf()`、evidence gate、SHORT 盤中閘門、官方 SMA20 閘門不變。
+- [ ] **線上與回測一致：** 結構判定為純函數，由 `RadarInputAssembler` 與 `BacktestService` 以同一實作、同一輸入定義求值後傳入引擎；production 與回測都必須以正典建構式顯式傳入，相容建構式（單元測試用）的語意需明載並以測試釘住 production 不走相容路徑。
+- [ ] **版本與契約：** `RULE_VERSION`=`TW_RULES_V25`、`DECISION_INPUT_VERSION`=`TW_RULES_V25|FUBON_OVERLAY_V1`；OpenAPI 只改版號字串、`info.version` 1.27.2 → 1.27.3；重產 Swagger 鏡像並依 Task 504 受控鏈與 SRPP 一併發布（`/srpp-policy-release`）。通知升版只重建 baseline。不新增 API／DB／排程／券商 I/O，只呈現建議、不下單。
+- [ ] **誠實揭露：** 結構門檻為判斷性初值、未經回測校準；這些條件彼此高度相關，不是多份獨立證據；只會讓試單與減碼更少、更晚，不宣稱提升獲利。另一 session 的 `claude/radar-v23-t575` 分支不合併，由本需求取代。

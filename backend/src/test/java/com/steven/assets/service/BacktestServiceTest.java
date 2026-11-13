@@ -923,9 +923,9 @@ class BacktestServiceTest {
     // ─────────────────────────── (i) 回歸 ───────────────────────────
 
     @Test
-    @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V24")
+    @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V25")
     void ruleVersionIsV18() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V24");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V25");
     }
 
     @Test
@@ -938,7 +938,7 @@ class BacktestServiceTest {
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V24");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V25");
         assertThat(response.results()).isNotEmpty();
     }
 
@@ -954,7 +954,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V24");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V25");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();
@@ -1443,5 +1443,81 @@ class BacktestServiceTest {
             assertThat(predicateN(r, "MEDIUM_EXTREME_OVERSOLD_PROTECTED", held)).isZero();
             assertThat(predicateN(r, "SHORT_EXTREME_OVERSOLD_PROTECTED", held)).isZero();
         }
+    }
+
+    // ─────────────── Task 577.4a：回測剔除無效收盤後的完成 K 結構 ───────────────
+
+    /** legacy 回測（只跑 runOne）以 spy 引擎攔下每個訊號日的 held／free StockInput（依訊號日順序）。 */
+    private List<TradingRadarRuleEngine.StockInput> legacyInputs(List<StockPriceHistory> asc) {
+        stubRepos(asc, List.of());
+        TradingRadarRuleEngine spyEngine = spy(new TradingRadarRuleEngine());
+        RadarInputAssembler spyAssembler = new RadarInputAssembler(
+                new TechnicalIndicatorService(priceHistoryRepo, priceQuery, twseRepo, usIndexRepo), adjust, spyEngine);
+        new BacktestService(
+                spyEngine, spyAssembler, new AssetClassifier(),
+                priceHistoryRepo, dividendHistoryRepo, twseRepo,
+                usIndexRepo, exchangeRateRepo, etfNavHistoryRepo, stockRepo, adjust, marketContextService,
+                fundamentalAnalysisService)
+                .run(new BacktestDto.Request(List.of(CODE), null, null, List.of(1), null, null));
+        org.mockito.ArgumentCaptor<TradingRadarRuleEngine.StockInput> captor =
+                org.mockito.ArgumentCaptor.forClass(TradingRadarRuleEngine.StockInput.class);
+        verify(spyEngine, org.mockito.Mockito.atLeastOnce()).evaluateStock(captor.capture());
+        return captor.getAllValues();
+    }
+
+    /** 第一個 ≥ {@code from} 且為指定星期的 asc 索引（series 為連續日曆日）。 */
+    private static int firstIndexOn(List<StockPriceHistory> asc, int from, java.time.DayOfWeek day) {
+        for (int i = from; i < asc.size(); i++) {
+            if (asc.get(i).getTradingDate().getDayOfWeek() == day) return i;
+        }
+        throw new IllegalStateException("fixture 太短");
+    }
+
+    @Test
+    @DisplayName("Task 577.4a 回測剔除單日無效收盤 → 日K 兩軌與該週所屬 MEDIUM 軌皆 UPSTREAM_DROPPED_ROW")
+    void backtestDroppedCloseMakesDailyAndMediumStructureUpstreamDropped() {
+        List<StockPriceHistory> asc = new ArrayList<>(series(WARMUP_ROWS + 40, 100, 0.001, 999, 0.0));
+        int dropped = firstIndexOn(asc, WARMUP_ROWS + 10, java.time.DayOfWeek.WEDNESDAY);
+        asc.get(dropped).setClosePrice(BigDecimal.ZERO);
+
+        List<TradingRadarRuleEngine.StockInput> inputs = legacyInputs(asc);
+        // 第一個訊號日遠在剔除日之前：三軌皆 AVAILABLE（fixture 本身合法）。
+        TradingRadarRuleEngine.StructureFacts before = inputs.get(0).structure();
+        assertThat(before.shortTerm().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(before.swing().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(before.medium().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+
+        // 訊號日＝剔除日（週三）+6 天（下週二）：剔除日落在一周視窗內，其所屬週已是最新完成週。
+        int filteredSignal = dropped + 6 - 1;
+        TradingRadarRuleEngine.StockInput held = inputs.get(2 * (filteredSignal - WARMUP_ROWS));
+        assertThat(held.held()).isTrue();
+        assertThat(held.structure().shortTerm().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(held.structure().swing().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(held.structure().medium().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        // 回測與 production 共用同一份完成日 KD 快照語意（V24 不退化）。
+        assertThat(held.completedKd()).isNotNull();
+        assertThat(held.completedKd().k()).isEqualByComparingTo(held.indicators().k());
+    }
+
+    @Test
+    @DisplayName("Task 577.4a 回測整週剔除、相鄰完成週恰好相隔 14 天 → MEDIUM UPSTREAM_DROPPED_ROW")
+    void backtestWholeWeekDroppedMakesMediumUpstreamDropped() {
+        List<StockPriceHistory> asc = new ArrayList<>(series(WARMUP_ROWS + 60, 100, 0.001, 999, 0.0));
+        int monday = firstIndexOn(asc, WARMUP_ROWS + 10, java.time.DayOfWeek.MONDAY);
+        for (int i = monday; i < monday + 7; i++) asc.get(i).setClosePrice(new BigDecimal("-1"));
+
+        List<TradingRadarRuleEngine.StockInput> inputs = legacyInputs(asc);
+        // 訊號日＝被剔除週之後第二週的週三：完成週為「剔除週 +1」與「剔除週 −1」，相隔 14 天。
+        int signalAsc = monday + 7 + 7 + 2;
+        int filteredSignal = signalAsc - 7;
+        TradingRadarRuleEngine.StockInput held = inputs.get(2 * (filteredSignal - WARMUP_ROWS));
+        assertThat(held.held()).isTrue();
+        assertThat(held.structure().medium().unavailableReason())
+                .isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(held.structure().shortTerm().status())
+                .as("一周視窗不含剔除週").isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
     }
 }

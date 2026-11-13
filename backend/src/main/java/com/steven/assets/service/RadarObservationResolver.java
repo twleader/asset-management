@@ -105,8 +105,36 @@ public final class RadarObservationResolver {
             List<StockPriceHistory> verifiedCompletedRows,
             List<StockPriceHistory> indicatorSeriesRows,
             List<StockPriceHistory> weeklySeriesRows,
-            String missingReason
+            String missingReason,
+            /**
+             * 技術序列過濾時被剔除列的交易日（Task 577.4a；收盤非正或非有限、且日期不晚於 completed
+             * session 者）。只記錄、不改既有過濾；供完成 K 結構判定辨識「視窗內有被剔除列」。
+             */
+            Set<LocalDate> droppedSeriesDates,
+            /** 技術序列過濾時是否剔除過日期為 null（或整列為 null）的列（Task 577.4a）。 */
+            boolean droppedUndatedSeriesRow
     ) {
+        public AcceptedPrice {
+            droppedSeriesDates = droppedSeriesDates == null ? Set.of() : Set.copyOf(droppedSeriesDates);
+        }
+
+        /** Task 577 之前的十一參數形狀：沒有剔除診斷（空集合／false）。 */
+        public AcceptedPrice(
+                BigDecimal value,
+                LocalDate tradingDate,
+                String updatedAt,
+                String source,
+                Quality quality,
+                boolean liveAccepted,
+                PriceQueryService.LivePrice live,
+                List<StockPriceHistory> verifiedCompletedRows,
+                List<StockPriceHistory> indicatorSeriesRows,
+                List<StockPriceHistory> weeklySeriesRows,
+                String missingReason) {
+            this(value, tradingDate, updatedAt, source, quality, liveAccepted, live,
+                    verifiedCompletedRows, indicatorSeriesRows, weeklySeriesRows, missingReason, Set.of(), false);
+        }
+
         /**
          * 既有十參數形狀的相容建構式：呼叫端只備妥一份序列時，週K 序列即該序列
          * （回測等自組 snapshot 的路徑走這裡，行為與擴窗前完全相同）。
@@ -210,6 +238,9 @@ public final class RadarObservationResolver {
         List<StockPriceHistory> indicatorRows = weeklyRows.size() <= INDICATOR_SERIES_MAX_ROWS
                 ? weeklyRows
                 : List.copyOf(weeklyRows.subList(0, INDICATOR_SERIES_MAX_ROWS));
+        // Task 577.4a：只記錄上述過濾剔除的列（不改過濾本身），供完成 K 結構判定。
+        Set<LocalDate> droppedDates = droppedSeriesDates(completedRows, completedSession);
+        boolean droppedUndated = droppedUndatedSeriesRow(completedRows);
         if (rawLive != null) {
             LocalDate liveDate = parseDate(rawLive.tradingDate());
             boolean validPrice = positiveFinite(rawLive.price());
@@ -220,7 +251,8 @@ public final class RadarObservationResolver {
                 return new AcceptedPrice(
                         rawLive.price(), liveDate, rawLive.updatedAt(),
                         nonBlank(rawLive.source(), "REDIS_LIVE"), Quality.LIVE,
-                        true, rawLive, trustedRows, indicatorRows, weeklyRows, null);
+                        true, rawLive, trustedRows, indicatorRows, weeklyRows, null,
+                        droppedDates, droppedUndated);
             }
         }
 
@@ -239,7 +271,7 @@ public final class RadarObservationResolver {
                     completed.getClosePrice(), completed.getTradingDate(), null,
                     nonBlank(completed.getCloseSource(), "COMPLETED_CLOSE"),
                     Quality.COMPLETED_CLOSE, false, null,
-                    trustedRows, indicatorRows, weeklyRows, null);
+                    trustedRows, indicatorRows, weeklyRows, null, droppedDates, droppedUndated);
         }
 
         Quality quality = rawLive == null ? Quality.MISSING : classifyRejectedLive(
@@ -378,6 +410,25 @@ public final class RadarObservationResolver {
                             || isTrustedClose(row, market)))
                 .sorted(Comparator.comparing(StockPriceHistory::getTradingDate).reversed())
                 .toList();
+    }
+
+    /**
+     * {@link #eligibleSeriesRows} 因收盤非正或非有限而剔除的列之交易日（Task 577.4a）。
+     * 只看日期不晚於 completed session 的列；未來列本來就不屬於任何技術視窗。
+     */
+    private static Set<LocalDate> droppedSeriesDates(List<StockPriceHistory> rows, LocalDate completedSession) {
+        if (rows == null) return Set.of();
+        return rows.stream()
+                .filter(row -> row != null && row.getTradingDate() != null
+                        && !row.getTradingDate().isAfter(completedSession)
+                        && !positiveFinite(row.getClosePrice()))
+                .map(StockPriceHistory::getTradingDate)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** {@link #eligibleSeriesRows} 是否剔除過日期為 null（或整列為 null）的列（Task 577.4a）。 */
+    private static boolean droppedUndatedSeriesRow(List<StockPriceHistory> rows) {
+        return rows != null && rows.stream().anyMatch(row -> row == null || row.getTradingDate() == null);
     }
 
     private static boolean hasTrustedCompletedDate(List<StockPriceHistory> rows, LocalDate date) {

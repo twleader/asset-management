@@ -317,6 +317,78 @@ class TradingRadarStockWeeklyWiringTest {
                 .noneMatch(risk -> risk.contains(WEEKS_INSUFFICIENT));
     }
 
+    // ── (d) Task 577／Requirement 202：完成 K 結構事實必須經 production 路徑抵達引擎 ─────────
+
+    private static void assertAllAvailable(TradingRadarRuleEngine.StructureFacts structure) {
+        assertThat(structure).isNotEqualTo(TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED);
+        assertThat(structure.shortTerm().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(structure.swing().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(structure.medium().status()).isEqualTo(TradingRadarRuleEngine.StructureStatus.AVAILABLE);
+        assertThat(structure.shortTerm().asOf()).isEqualTo(TODAY);
+        assertThat(structure.shortTerm().confirmationPeriod()).isEqualTo(RadarCompletedStructure.SHORT_CONFIRM_PERIOD);
+        assertThat(structure.swing().confirmationPeriod()).isEqualTo(RadarCompletedStructure.SWING_CONFIRM_PERIOD);
+        assertThat(structure.medium().confirmationPeriod()).isEqualTo(RadarCompletedStructure.MEDIUM_CONFIRM_PERIOD);
+    }
+
+    @Test
+    @DisplayName("577.5：一般計算路徑的 StockInput 帶實算三軌結構（非 NOT_EVALUATED）與完成日 KD")
+    void productionStockInputCarriesComputedStructureAndCompletedKd() {
+        stubBaseline();
+        stubLongSeries();
+
+        newService().assembleAt(AFTER_CLOSE);
+
+        TradingRadarRuleEngine.StockInput input = captureStockInput();
+        assertAllAvailable(input.structure());
+        assertThat(input.completedKd()).isNotNull();
+        assertThat(input.completedKd().k()).isNotNull();
+        assertThat(input.completedKd().previousK()).isNotNull();
+        // 收盤後無盤中列：完成日快照即 indicators 的 K／D。
+        assertThat(input.completedKd().k()).isEqualByComparingTo(input.indicators().k());
+    }
+
+    @Test
+    @DisplayName("577.4／577.5：LOCAL 快取命中路徑同樣本地計算結構並顯式傳入完成日 KD")
+    void localCacheHitStockInputCarriesComputedStructureAndCompletedKd() {
+        stubBaseline();
+        stubLongSeries();
+        TechnicalIndicatorService.FullIndicators cached = new TechnicalIndicatorService.FullIndicators(
+                BigDecimal.valueOf(101), BigDecimal.valueOf(102), BigDecimal.valueOf(103),
+                BigDecimal.valueOf(37), BigDecimal.valueOf(41),
+                BigDecimal.valueOf(35), BigDecimal.valueOf(40),
+                BigDecimal.valueOf(101), TechnicalIndicatorService.ExtendedIndicators.EMPTY, null);
+        RadarTechnicalResolver resolver = Mockito.mock(RadarTechnicalResolver.class);
+        when(resolver.freshLocal(Mockito.eq(CODE), Mockito.eq(TW), any(), any(), any()))
+                .thenReturn(new ResolvedTechnicalInputs(cached, null, null, null));
+
+        newService(resolver).assembleAt(AFTER_CLOSE);
+
+        verify(resolver).freshLocal(Mockito.eq(CODE), Mockito.eq(TW), any(), any(), any());
+        TradingRadarRuleEngine.StockInput input = captureStockInput();
+        assertThat(input.indicators().k()).as("確實走 LOCAL 快取命中路徑").isEqualByComparingTo("37");
+        assertAllAvailable(input.structure());
+        assertThat(input.completedKd()).isEqualTo(new TradingRadarRuleEngine.CompletedKd(
+                BigDecimal.valueOf(37), BigDecimal.valueOf(41), BigDecimal.valueOf(35), BigDecimal.valueOf(40)));
+    }
+
+    @Test
+    @DisplayName("577.4a：resolver 剔除的非正收盤列診斷經 production 路徑抵達引擎 → UPSTREAM_DROPPED_ROW")
+    void upstreamDroppedRowReachesEngineThroughProductionPath() {
+        stubBaseline();
+        List<StockPriceHistory> rows = twStockRows(TODAY, SERIES_ROWS,
+                Set.of(TODAY, TODAY.minusDays(1), TODAY.minusDays(2), TODAY.minusDays(3)));
+        // TODAY 為週三；TODAY−5 是上週五：落在一周／1周~1月視窗與最新完成週內。
+        rows.get(5).setClosePrice(BigDecimal.ZERO);
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500)).thenReturn(rows);
+
+        newService().assembleAt(AFTER_CLOSE);
+
+        TradingRadarRuleEngine.StructureFacts structure = captureStockInput().structure();
+        assertThat(structure.shortTerm().unavailableReason()).isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(structure.swing().unavailableReason()).isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+        assertThat(structure.medium().unavailableReason()).isEqualTo(RadarCompletedStructure.UPSTREAM_DROPPED_ROW);
+    }
+
     // ─────────────────────────────── helpers ───────────────────────────────
 
     /** 只換掉 {@code dailyCandle}／{@code weekly} 兩欄，其餘 24 欄逐位沿用。 */
@@ -344,6 +416,22 @@ class TradingRadarStockWeeklyWiringTest {
         return newService().assembleAt(AFTER_CLOSE).stocks().stream()
                 .filter(row -> CODE.equals(row.stockCode()))
                 .findFirst().orElseThrow();
+    }
+
+    /** 帶 {@link RadarTechnicalResolver} 的完整建構形狀（Task 577：LOCAL 快取命中路徑）。 */
+    private TradingRadarService newService(RadarTechnicalResolver resolver) {
+        ruleEngine = Mockito.spy(new TradingRadarRuleEngine());
+        DistributionAdjustedPriceService adjustedPriceService = new DistributionAdjustedPriceService();
+        TechnicalIndicatorService seriesIndicatorService = new TechnicalIndicatorService(
+                priceHistoryRepo, priceQueryService, twseRepo, usIndexDailyHistoryRepo);
+        return new TradingRadarService(
+                ruleEngine, marketIndicatorService, adjustedPriceService,
+                new RadarInputAssembler(seriesIndicatorService, adjustedPriceService, ruleEngine),
+                assetClassifier, twseRepo, usIndexDailyHistoryRepo, priceHistoryRepo, dividendHistoryRepo,
+                priceQueryService, taiexDisplayPriceService, snapshotRepo, alertRepo, stockRepo,
+                marketDataService, marketContextService, fundamentalAnalysisService, etfNavHistoryRepo,
+                snapshotStore, currentUserContext, dividendEventEvidenceRepository, treasuryYieldService,
+                null, null, null, null, resolver, null);
     }
 
     private TradingRadarService newService() {

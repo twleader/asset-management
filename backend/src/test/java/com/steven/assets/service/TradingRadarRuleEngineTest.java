@@ -605,7 +605,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V24", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -2096,7 +2096,7 @@ class TradingRadarRuleEngineTest {
         assertTrue(stock.reasons().stream().anyMatch(r -> r.contains("獲利了結獲得確認")));
     }
 
-    // ═══ Task 576／Requirement 201：轉折判定改讀完成日 KD 快照（TW_RULES_V24）═══════════════
+    // ═══ Task 576／Requirement 201：轉折判定改讀完成日 KD 快照（V24 規則）═══════════════
 
     /** 以既有輸入的 28 個欄位＋顯式完成日 KD 快照走 29 參數正典建構式（模擬盤中：indicators 為即時 KD）。 */
     private static TradingRadarRuleEngine.StockInput withCompletedKd(
@@ -2264,6 +2264,271 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v24_ruleVersion() {
-        assertEquals("TW_RULES_V24", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
+    }
+
+    // ═══ Task 577／Requirement 202：完成 K 結構確認（TW_RULES_V25）═══════════════════════════
+
+    private static final String STRUCTURE_SELL_BLOCKED = "尚缺『完成K結構轉弱』";
+    private static final String STRUCTURE_TRIAL_BLOCKED = "完成K尚未止穩";
+    private static final String STRUCTURE_UNAVAILABLE = "完成K結構不可用";
+    private static final String SUPPORT_BROKEN_RISK = "已確認跌破反覆測試的支撐";
+
+    private static TradingRadarRuleEngine.HorizonStructure available(
+            boolean weakened, boolean stabilized, boolean supportBroken, int period) {
+        return new TradingRadarRuleEngine.HorizonStructure(
+                TradingRadarRuleEngine.StructureStatus.AVAILABLE, weakened, stabilized, supportBroken,
+                new BigDecimal("100"), java.time.LocalDate.of(2026, 11, 12), period, new BigDecimal("101.5"), null);
+    }
+
+    private static TradingRadarRuleEngine.StructureFacts allAvailable(
+            boolean weakened, boolean stabilized, boolean supportBroken) {
+        return new TradingRadarRuleEngine.StructureFacts(
+                available(weakened, stabilized, supportBroken, 5),
+                available(weakened, stabilized, supportBroken, 10),
+                available(weakened, stabilized, supportBroken, 4));
+    }
+
+    private static TradingRadarRuleEngine.StructureFacts allUnavailable() {
+        return new TradingRadarRuleEngine.StructureFacts(
+                TradingRadarRuleEngine.HorizonStructure.unavailable("INSUFFICIENT_BARS", 5),
+                TradingRadarRuleEngine.HorizonStructure.unavailable("CALENDAR_GAP", 10),
+                TradingRadarRuleEngine.HorizonStructure.unavailable("INVALID_HLC", 4));
+    }
+
+    /** 以既有輸入的 29 個欄位＋顯式結構事實走 30 參數正典建構式。 */
+    private static TradingRadarRuleEngine.StockInput withStructure(
+            TradingRadarRuleEngine.StockInput in, TradingRadarRuleEngine.StructureFacts structure) {
+        return new TradingRadarRuleEngine.StockInput(
+                in.held(), in.price(), in.changePercent(), in.completedChangePercent(), in.indicators(),
+                in.previousK(), in.previousD(), in.ma20Confirmation(), in.ma60Confirmation(),
+                in.ma240Confirmation(), in.instrumentType(), in.marketRegime(), in.marketStale(),
+                in.fxPercentile(), in.ma60BiasPercent(), in.ma60BiasPercentile(), in.ma240BiasPercent(),
+                in.week52Position(), in.kdBandWidthPercent(), in.etfPremiumPct(), in.etfPremiumPercentile(),
+                in.weeklyMa(), in.extendedIndicators(), in.volumeRatio(), in.fundamental(),
+                in.dailyCandle(), in.weekly(), in.bollinger(), in.completedKd(), structure);
+    }
+
+    private static boolean isBuyOrTrial(TradingRadarRuleEngine.Action action) {
+        return action == TradingRadarRuleEngine.Action.TRIAL_BUY
+                || action == TradingRadarRuleEngine.Action.BUY_CANDIDATE
+                || action == TradingRadarRuleEngine.Action.ADD_CANDIDATE;
+    }
+
+    private static List<TradingRadarRuleEngine.Action> actions(TradingRadarRuleEngine.StockResult r) {
+        return List.of(r.shortAction(), r.swingAction(), r.action());
+    }
+
+    /** V24 會減碼的高檔轉弱樣本（高檔區＋完成日死叉＋MA20 BELOW＋OSC&lt;0）。 */
+    private V23Stock highZoneWeakeningStock() {
+        return new V23Stock().set(s -> {
+            s.week52 = "0.85";
+            s.prevK = "50";
+            s.prevD = "45";
+        });
+    }
+
+    @Test
+    void v25_scoreMappingSell_requiresCompletedStructureWeakened() {
+        var base = highZoneWeakeningStock().build();
+        var v24 = engine.evaluateStock(base);
+        for (var action : actions(v24)) assertTrue(isSell(action), "fixture 必須是 V24 減碼樣本，實得 " + action);
+
+        var blocked = engine.evaluateStock(withStructure(base, allAvailable(false, false, false)));
+        for (var action : actions(blocked)) assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, action);
+        assertTrue(blocked.reasons().stream().anyMatch(r -> r.contains(STRUCTURE_SELL_BLOCKED)));
+        assertTrue(blocked.shortReasons().stream().anyMatch(r -> r.contains(STRUCTURE_SELL_BLOCKED)));
+        assertTrue(blocked.swingReasons().stream().anyMatch(r -> r.contains(STRUCTURE_SELL_BLOCKED)));
+        // 分數不受結構影響。
+        assertEquals(v24.score(), blocked.score());
+        assertEquals(v24.shortScore(), blocked.shortScore());
+        assertEquals(v24.swingScore(), blocked.swingScore());
+
+        var released = engine.evaluateStock(withStructure(base, allAvailable(true, false, false)));
+        assertEquals(actions(v24), actions(released));
+        // 揭露：AVAILABLE 各軌 reasons 有一條可核對的結構摘要。
+        assertTrue(released.shortReasons().stream().anyMatch(r -> r.contains("V25結構確認：一周（日K，as-of 2026-11-12，SMA5=101.50）轉弱=是、止穩=否")));
+        assertTrue(released.swingReasons().stream().anyMatch(r -> r.contains("V25結構確認：1周~1月（日K，as-of 2026-11-12，SMA10=101.50）")));
+        assertTrue(released.reasons().stream().anyMatch(r -> r.contains("V25結構確認：1月~6月（週K，as-of 2026-11-12，SMA4=101.50）")));
+    }
+
+    @Test
+    void v25_profitTaking_requiresWeakened_andHighScoreStillHoldCautionOrWait() {
+        var dead = profitTakingStock().set(s -> {
+            s.k = "84";
+            s.d = "86";
+            s.prevK = "88";
+            s.prevD = "85";
+        });
+        var heldBase = dead.build();
+        var v24 = engine.evaluateStock(heldBase);
+        assertEquals(TradingRadarRuleEngine.Action.REDUCE_CANDIDATE, v24.action());
+        assertTrue(v24.score() >= 55, "需為分數 ≥ hold 門檻的高分樣本，實得 " + v24.score());
+
+        var heldBlocked = engine.evaluateStock(withStructure(heldBase, allAvailable(false, false, false)));
+        for (var action : actions(heldBlocked)) assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, action);
+        assertTrue(heldBlocked.reasons().stream().anyMatch(r -> r.contains(STRUCTURE_SELL_BLOCKED)));
+        assertTrue(heldBlocked.reasons().stream().noneMatch(r -> r.contains("獲利了結獲得確認")));
+
+        var freeBase = dead.set(s -> s.held = false).build();
+        assertEquals(TradingRadarRuleEngine.Action.AVOID, engine.evaluateStock(freeBase).action());
+        var freeBlocked = engine.evaluateStock(withStructure(freeBase, allAvailable(false, false, false)));
+        for (var action : actions(freeBlocked)) assertEquals(TradingRadarRuleEngine.Action.WAIT, action);
+
+        var heldUnavailable = engine.evaluateStock(withStructure(heldBase, allUnavailable()));
+        for (var action : actions(heldUnavailable)) assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, action);
+
+        var released = engine.evaluateStock(withStructure(heldBase, allAvailable(true, false, false)));
+        assertEquals(actions(v24), actions(released));
+    }
+
+    @Test
+    void v25_reboundTrial_requiresStabilized_andNeverUpgradesToBuy() {
+        for (boolean held : new boolean[] {true, false}) {
+            var base = reboundStock(held).build();
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, engine.evaluateStock(base).action());
+            var expected = held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+
+            for (var structure : List.of(allAvailable(false, false, false), allUnavailable())) {
+                var blocked = engine.evaluateStock(withStructure(base, structure));
+                for (var action : actions(blocked)) {
+                    assertEquals(expected, action, "held=" + held);
+                    assertFalse(isBuyOrTrial(action));
+                    assertFalse(isSell(action));
+                }
+            }
+            var notStable = engine.evaluateStock(withStructure(base, allAvailable(false, false, false)));
+            assertTrue(notStable.reasons().stream().anyMatch(r -> r.contains(STRUCTURE_TRIAL_BLOCKED)
+                    && r.contains("SMA4")));
+            assertTrue(notStable.shortReasons().stream().anyMatch(r -> r.contains(STRUCTURE_TRIAL_BLOCKED)
+                    && r.contains("SMA5")));
+
+            var stable = engine.evaluateStock(withStructure(base, allAvailable(false, true, false)));
+            for (var action : actions(stable)) assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, action);
+        }
+    }
+
+    /** 審查反例：價格 120、MA20/60/240=115/110/100 皆 ABOVE、盤中 KD 60/40、完成日 KD 15/14 前期 12/16、完成日 +1%、RISK_ON。 */
+    private TradingRadarRuleEngine.StockInput reviewCounterExample(boolean held) {
+        var base = new V23Stock().set(s -> {
+            s.held = held;
+            s.price = "120";
+            s.ma20 = "115";
+            s.ma60 = "110";
+            s.ma240 = "100";
+            s.c20 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.c60 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.c240 = TradingRadarRuleEngine.Confirmation.ABOVE;
+            s.k = "60";
+            s.d = "40";
+            s.prevK = "55";
+            s.prevD = "42";
+            s.completed = "1";
+            s.regime = TradingRadarRuleEngine.MarketRegime.RISK_ON;
+            s.ma60Bias = "9.09";
+            s.ma240Bias = "20";
+            s.week52 = "0.70";
+            s.osc = "1";
+        }).build();
+        return withCompletedKd(base, "15", "14", "12", "16");
+    }
+
+    @Test
+    void v25_longTermTrial_reviewCounterExample_neverUpgradesToBuyOrAdd() {
+        for (boolean held : new boolean[] {true, false}) {
+            var v24 = engine.evaluateStock(reviewCounterExample(held));
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, v24.action(), "held=" + held);
+            var expected = held ? TradingRadarRuleEngine.Action.HOLD_CAUTION : TradingRadarRuleEngine.Action.WAIT;
+
+            for (var structure : List.of(allAvailable(false, false, false), allUnavailable())) {
+                var blocked = engine.evaluateStock(withStructure(reviewCounterExample(held), structure));
+                for (var action : actions(blocked)) {
+                    assertEquals(expected, action, "held=" + held);
+                    assertFalse(isBuyOrTrial(action), "結構受阻時不得升級為一般買進／加碼");
+                }
+            }
+            var stable = engine.evaluateStock(withStructure(reviewCounterExample(held), allAvailable(false, true, false)));
+            assertEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, stable.action());
+        }
+    }
+
+    @Test
+    void v25_supportBroken_addsRiskOnly_actionUnchanged() {
+        // 低檔持有者（回檔區，V24 已降為 HOLD_CAUTION）：支撐破位只加 risks，仍非減碼。
+        var pullback = new V23Stock().build();
+        var withoutBreak = engine.evaluateStock(withStructure(pullback, allAvailable(true, false, false)));
+        var withBreak = engine.evaluateStock(withStructure(pullback, allAvailable(true, false, true)));
+        assertEquals(actions(withoutBreak), actions(withBreak));
+        for (var action : actions(withBreak)) assertFalse(isSell(action));
+        assertTrue(withBreak.risks().stream().anyMatch(r -> r.contains(SUPPORT_BROKEN_RISK)
+                && r.contains("支撐 100.00") && r.contains("不在低檔給減碼")));
+        assertTrue(withBreak.shortRisks().stream().anyMatch(r -> r.contains(SUPPORT_BROKEN_RISK)));
+        assertTrue(withBreak.swingRisks().stream().anyMatch(r -> r.contains(SUPPORT_BROKEN_RISK)));
+        assertTrue(withoutBreak.risks().stream().noneMatch(r -> r.contains(SUPPORT_BROKEN_RISK)));
+
+        // 試單樣本：止穩但支撐破位旗標仍不改動作。
+        var rebound = reboundStock(true).build();
+        assertEquals(actions(engine.evaluateStock(withStructure(rebound, allAvailable(false, true, false)))),
+                actions(engine.evaluateStock(withStructure(rebound, allAvailable(false, true, true)))));
+    }
+
+    @Test
+    void v25_horizonsCanDifferByStructure() {
+        var base = highZoneWeakeningStock().build();
+        var mixed = new TradingRadarRuleEngine.StructureFacts(
+                available(true, false, false, 5),
+                available(false, false, false, 10),
+                TradingRadarRuleEngine.HorizonStructure.unavailable("CALENDAR_GAP", 4));
+        var result = engine.evaluateStock(withStructure(base, mixed));
+
+        assertTrue(isSell(result.shortAction()), "一周軌已轉弱 → 可減碼，實得 " + result.shortAction());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, result.swingAction());
+        assertEquals(TradingRadarRuleEngine.Action.HOLD_CAUTION, result.action());
+        assertTrue(result.risks().stream().anyMatch(r -> r.contains(STRUCTURE_UNAVAILABLE) && r.contains("CALENDAR_GAP")));
+        assertTrue(result.shortRisks().stream().noneMatch(r -> r.contains(STRUCTURE_UNAVAILABLE)));
+    }
+
+    @Test
+    void v25_notEvaluated_keepsV24Behaviour() {
+        var samples = List.of(
+                highZoneWeakeningStock().build(), reboundStock(true).build(), reboundStock(false).build(),
+                profitTakingStock().build(), new V23Stock().build(), reviewCounterExample(true));
+        for (var compat : samples) {
+            assertEquals(TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED, compat.structure(),
+                    "相容建構式一律 NOT_EVALUATED");
+            var expected = engine.evaluateStock(compat);
+            assertEquals(expected, engine.evaluateStock(
+                    withStructure(compat, TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED)));
+            var nullStructure = withStructure(compat, null);
+            assertEquals(TradingRadarRuleEngine.StructureFacts.NOT_EVALUATED, nullStructure.structure());
+            assertEquals(expected, engine.evaluateStock(nullStructure));
+            assertTrue(expected.reasons().stream().noneMatch(r -> r.contains("V25結構確認")));
+            assertTrue(expected.risks().stream().noneMatch(r -> r.contains("V25結構確認")));
+        }
+    }
+
+    @Test
+    void v25_unavailable_neverSellsNorTrials() {
+        var samples = List.of(
+                highZoneWeakeningStock().build(),
+                highZoneWeakeningStock().set(s -> s.held = false).build(),
+                profitTakingStock().set(s -> { s.k = "84"; s.d = "86"; s.prevK = "88"; s.prevD = "85"; }).build(),
+                reboundStock(true).build(), reboundStock(false).build(),
+                reviewCounterExample(true), reviewCounterExample(false),
+                new V23Stock().set(s -> { s.week52 = null; s.price = "80"; s.completed = "-2"; }).build());
+        for (var input : samples) {
+            var result = engine.evaluateStock(withStructure(input, allUnavailable()));
+            for (var action : actions(result)) {
+                assertFalse(isSell(action), "UNAVAILABLE 不得賣出，實得 " + action);
+                assertNotEquals(TradingRadarRuleEngine.Action.TRIAL_BUY, action);
+            }
+            assertTrue(result.shortRisks().stream().anyMatch(r -> r.contains(STRUCTURE_UNAVAILABLE)
+                    && r.contains("INSUFFICIENT_BARS")));
+        }
+    }
+
+    @Test
+    void v25_ruleVersion() {
+        assertEquals("TW_RULES_V25", TradingRadarRuleEngine.RULE_VERSION);
     }
 }
