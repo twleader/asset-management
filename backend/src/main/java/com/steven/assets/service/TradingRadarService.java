@@ -1918,7 +1918,7 @@ public class TradingRadarService {
                 core.week52Position(), core.indicators().weeklyMa(), core.etfPremiumPct(),
                 core.etfPremiumPercentile(), toDto(core.indicators().extended()), gated.shortAction().name(),
                 actionLabel(gated.shortAction()), core.result().shortScore(), core.shortReasons(),
-                appendDiagnostics(core.shortRisks(), gated.shortDiagnostics()), core.result().horizonConflict(), core.technical().volumeRatio(), core.fxAsOfDate(),
+                appendDiagnostics(core.shortRisks(), gated.shortDiagnostics()), TradingRadarRuleEngine.horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()), core.technical().volumeRatio(), core.fxAsOfDate(),
                 core.result().profitTakingConfirmed(), core.fundamental().snapshot(),
                 TradingRadarDto.RadarEvidence.withConfidence(
                         core.asOf(), core.acceptedPrice().source(), core.acceptedPrice().quality().name(),
@@ -2035,7 +2035,7 @@ public class TradingRadarService {
                 core.result().shortScore(), actionName(gated.swingAction()),
                 gated.swingAction() == null ? null : actionLabel(gated.swingAction()),
                 core.result().swingScore(), gated.mediumAction().name(),
-                actionLabel(gated.mediumAction()), core.result().score(), core.result().horizonConflict(),
+                actionLabel(gated.mediumAction()), core.result().score(), TradingRadarRuleEngine.horizonConflict(gated.mediumAction(), gated.swingAction(), gated.shortAction()),
                 core.result().timingState().name(), timingLabel(core.result().timingState()),
                 core.result().counterTrend().state().name(), counterTrendLabel(core.result().counterTrend().state()),
                 core.displayPrice(), core.displayChangePercent(), core.quoteStatus(), core.updatedAt(),

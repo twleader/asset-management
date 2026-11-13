@@ -2898,15 +2898,16 @@ public class TradingRadarRuleEngine {
     /**
      * 持有期分歧（Task 356.1c）：<b>三軌的動作分組不全相同</b>即為分歧。
      *
-     * <p>V15 之前是「短 vs 中兩軌分組不同」；分組定義沿用 {@link #actionGroup}。</p>
+     * <p>V15 之前是「短 vs 中兩軌分組不同」；分組定義沿用 {@link #actionGroup}。
+     * Task 580：同一純函數也供對外投影以安全閘門後的最終動作判斷，不沿用原始候選分歧。</p>
      */
-    private boolean horizonConflict(Action medium, Action swing, Action shortTerm) {
+    public static boolean horizonConflict(Action medium, Action swing, Action shortTerm) {
         int mediumGroup = actionGroup(medium);
         return mediumGroup != actionGroup(swing) || mediumGroup != actionGroup(shortTerm);
     }
 
     /** 持有期分歧只比較買進／中性／賣出／無法判定四個方向群組。 */
-    private int actionGroup(Action action) {
+    private static int actionGroup(Action action) {
         if (action == null || action == Action.NO_TRADE) return 4;
         return switch (action) {
             case BUY_CANDIDATE, ADD_CANDIDATE, TRIAL_BUY -> 1;

@@ -8,16 +8,19 @@ import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.security.UnauthenticatedException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 
 import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static com.steven.assets.service.TradingRadarRuleEngine.Action.*;
 
 /** Real rule/indicator/assembler projections over fixed persisted fixtures, never a live provider. */
 class TradingRadarPanelServiceTest {
@@ -173,6 +176,8 @@ class TradingRadarPanelServiceTest {
         assertThat(result.summary().shortAction()).isEqualTo(result.stock().shortAction()).isNull();
         assertThat(result.summary().swingAction()).isEqualTo(result.stock().swingAction()).isNull();
         assertThat(result.summary().score()).isEqualTo(result.stock().score()).isNull();
+        assertThat(result.summary().horizonConflict()).isFalse();
+        assertThat(result.stock().horizonConflict()).isFalse();
         verify(f.engine).evaluateStock(any());
         verifyNoExternalOrWrites(f);
     }
@@ -238,6 +243,178 @@ class TradingRadarPanelServiceTest {
         assertThat(unknown.stock().intradayCandleConfirmation().status()).isEqualTo("UNAVAILABLE");
         assertThat(unknown.stock().intradayCandleConfirmation().reason()).isEqualTo("MARKET_CALENDAR_UNAVAILABLE");
         verifyNoInteractions(port);
+    }
+
+    @Test void missingShortMinutesCreatesFinalConflictOnSingleEvaluationListAndPanel() {
+        Fixture f = new Fixture();
+        var raw = forceRawActions(f, TRIAL_BUY, TRIAL_BUY, TRIAL_BUY);
+        var evidence = completeEvidence();
+        Instant now = Instant.parse("2026-09-23T01:14:00Z");
+        RadarIntradayCandlePort minutes = mock(RadarIntradayCandlePort.class);
+        when(minutes.read(anyList(), eq(TW_DATE), eq(now))).thenReturn(Map.of());
+        f.service.setIntradayCandles(minutes);
+        try (var ignored = fixedEvidence(evidence)) {
+            var evaluation = f.service.getStockEvaluation("2330", "台股", now);
+            assertThat(raw.get().horizonConflict()).isFalse();
+            assertFinalProjection(evaluation, raw.get(), "TRIAL_BUY", "HOLD", "TRIAL_BUY", true);
+            assertThat(evaluation.stock().intradayCandleConfirmation().reason()).isEqualTo("CAPTURE_MISSING");
+            assertThat(evaluation.stock().shortRisks()).anyMatch(r -> r.contains("暫緩短線買進"));
+            assertThat(evaluation.stock().risks()).noneMatch(r -> r.contains("暫緩短線買進"));
+            assertThat(evaluation.stock().swingRisks()).noneMatch(r -> r.contains("暫緩短線買進"));
+            assertThat(evaluation.stock().actionGateReasons()).containsAll(
+                    TradingRadarEvidenceGate.apply(TRIAL_BUY, TRIAL_BUY, TRIAL_BUY,
+                            true, null, evidence).reasons());
+            assertCompactProjection(f.service.getList(now).stocks(), "TRIAL_BUY", "HOLD", "TRIAL_BUY", true);
+            assertCompactProjection(f.service.getStocksPanel("台股", now).data().stocks(),
+                    "TRIAL_BUY", "HOLD", "TRIAL_BUY", true);
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    @Test void evidenceDowngradeRemovesRawConflictWithoutChangingCandidatesOrScores() {
+        Fixture f = new Fixture();
+        var raw = forceRawActions(f, TRIAL_BUY, HOLD, TRIAL_BUY);
+        try (var ignored = fixedEvidence(TradingRadarEvidenceConfidenceResolver.Evidence.EMPTY)) {
+            var evaluation = f.service.getStockEvaluation("2330", "台股", NOW);
+            assertThat(raw.get().horizonConflict()).isTrue();
+            assertFinalProjection(evaluation, raw.get(), "HOLD", "HOLD", "HOLD", false);
+            assertThat(evaluation.stock().risks()).anyMatch(r -> r.contains("中期 evidence gate 未達"));
+            assertThat(evaluation.stock().swingRisks()).anyMatch(r -> r.contains("1周~1月 evidence gate 未達"));
+            assertThat(evaluation.stock().actionGateReasons()).anyMatch(r -> r.contains("中期 evidence gate 未達"));
+            assertCompactProjection(f.service.getList(NOW).stocks(), "HOLD", "HOLD", "HOLD", false);
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    @Test void officialSma20IsAppliedBeforeFinalConflictOnBothProjections() {
+        Fixture f = new Fixture();
+        var raw = forceRawActions(f, TRIAL_BUY, HOLD, TRIAL_BUY);
+        f.service.setOfficialSma20Facts(f.facts);
+        when(f.facts.findOfficialSma20(anyMap())).thenReturn(Map.of("2330",
+                new RadarTechnicalFactPort.OfficialSma20(TW_DATE, new BigDecimal("999"), NOW)));
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            var evaluation = f.service.getStockEvaluation("2330", "台股", NOW);
+            assertThat(raw.get().horizonConflict()).isTrue();
+            assertThat(evaluation.stock().officialSma20Verification().status()).isEqualTo("CONFLICT");
+            assertThat(evaluation.stock().officialSma20Verification().gateApplied()).isTrue();
+            assertFinalProjection(evaluation, raw.get(), "HOLD", "HOLD", "HOLD", false);
+            assertThat(evaluation.stock().risks()).anyMatch(r -> r.contains("富邦原始 SMA20"));
+            assertThat(evaluation.stock().swingRisks()).anyMatch(r -> r.contains("富邦原始 SMA20"));
+            assertThat(evaluation.stock().shortRisks()).noneMatch(r -> r.contains("富邦原始 SMA20"));
+            assertCompactProjection(f.service.getList(NOW).stocks(), "HOLD", "HOLD", "HOLD", false);
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    @Test void differentNeutralActionsStayInOneGroupAndMissingSwingIsNeverInferred() {
+        Fixture neutral = new Fixture();
+        var rawNeutral = forceRawActions(neutral, HOLD_CAUTION, WAIT, WATCH);
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            assertFinalProjection(neutral.service.getStockEvaluation("2330", "台股", NOW), rawNeutral.get(),
+                    "HOLD_CAUTION", "WAIT", "WATCH", false);
+            assertCompactProjection(neutral.service.getList(NOW).stocks(), "HOLD_CAUTION", "WAIT", "WATCH", false);
+        }
+        Fixture missing = new Fixture();
+        var rawMissing = forceRawActions(missing, HOLD, HOLD, null);
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            assertFinalProjection(missing.service.getStockEvaluation("2330", "台股", NOW), rawMissing.get(),
+                    "HOLD", "HOLD", null, true);
+            assertCompactProjection(missing.service.getList(NOW).stocks(), "HOLD", "HOLD", null, true);
+        }
+        verifyNoExternalOrWrites(neutral);
+        verifyNoExternalOrWrites(missing);
+    }
+
+    @Test void unchangedBuyDirectionsKeepFalseAndPreserveAllThreeDistinctCandidates() {
+        Fixture f = new Fixture();
+        var raw = forceRawActions(f, BUY_CANDIDATE, ADD_CANDIDATE, TRIAL_BUY);
+        try (var ignored = fixedEvidence(completeEvidence())) {
+            assertFinalProjection(f.service.getStockEvaluation("2330", "台股", NOW), raw.get(),
+                    "BUY_CANDIDATE", "ADD_CANDIDATE", "TRIAL_BUY", false);
+            assertCompactProjection(f.service.getList(NOW).stocks(),
+                    "BUY_CANDIDATE", "ADD_CANDIDATE", "TRIAL_BUY", false);
+        }
+        verifyNoExternalOrWrites(f);
+    }
+
+    /** Fixed candidate inputs isolate projection wiring; all three safety gates remain real. */
+    private static AtomicReference<TradingRadarRuleEngine.StockResult> forceRawActions(Fixture f,
+            TradingRadarRuleEngine.Action medium, TradingRadarRuleEngine.Action shortTerm,
+            TradingRadarRuleEngine.Action swing) {
+        var captured = new AtomicReference<TradingRadarRuleEngine.StockResult>();
+        doAnswer(call -> {
+            TradingRadarRuleEngine.StockResult actual = (TradingRadarRuleEngine.StockResult) call.callRealMethod();
+            var fixed = new TradingRadarRuleEngine.StockResult(actual.score(), medium, actual.counterTrend(),
+                    actual.reasons(), actual.risks(), actual.kdHeat(), actual.timingState(), actual.kdDeadCross(),
+                    actual.longTermBroken(), actual.shortScore(), shortTerm, actual.shortReasons(), actual.shortRisks(),
+                    TradingRadarRuleEngine.horizonConflict(medium, swing, shortTerm), actual.profitTakingConfirmed(),
+                    actual.normalizedBias(), actual.shortNormalizedBias(), actual.swingScore(), swing,
+                    actual.swingReasons(), actual.swingRisks());
+            captured.set(fixed);
+            return fixed;
+        }).when(f.engine).evaluateStock(any());
+        return captured;
+    }
+
+    /** Only observation quality is controlled; gate logic and emitted diagnostics are not mocked. */
+    private static MockedStatic<TradingRadarEvidenceConfidenceResolver> fixedEvidence(
+            TradingRadarEvidenceConfidenceResolver.Evidence evidence) {
+        var resolver = mockStatic(TradingRadarEvidenceConfidenceResolver.class, CALLS_REAL_METHODS);
+        resolver.when(() -> TradingRadarEvidenceConfidenceResolver.resolve(
+                any(TradingRadarEvidenceConfidenceResolver.Inputs.class), nullable(LocalDate.class),
+                nullable(LocalDate.class))).thenReturn(evidence);
+        return resolver;
+    }
+
+    private static TradingRadarEvidenceConfidenceResolver.Evidence completeEvidence() {
+        var groups = new EnumMap<TradingRadarEvidenceConfidenceResolver.Group,
+                TradingRadarEvidenceConfidenceResolver.GroupEvidence>(TradingRadarEvidenceConfidenceResolver.Group.class);
+        for (var group : TradingRadarEvidenceConfidenceResolver.Group.values()) {
+            groups.put(group, new TradingRadarEvidenceConfidenceResolver.GroupEvidence(group, List.of(),
+                    1, 1, 1, true, true, true, true, true, true, 1, false, true));
+        }
+        var risk = new TradingRadarEvidenceConfidenceResolver.Risk(10, 1, List.of());
+        return new TradingRadarEvidenceConfidenceResolver.Evidence(groups, 100, 100, 100,
+                risk, risk, risk, List.of());
+    }
+
+    private static void assertFinalProjection(com.steven.assets.dto.TradingRadarPanelDto.StockEvaluation evaluation,
+            TradingRadarRuleEngine.StockResult raw, String medium, String shortTerm, String swing, boolean conflict) {
+        var stock = evaluation.stock();
+        var summary = evaluation.summary();
+        assertThat(stock.action()).isEqualTo(medium);
+        assertThat(stock.shortAction()).isEqualTo(shortTerm);
+        assertThat(stock.swingAction()).isEqualTo(swing);
+        assertThat(stock.horizonConflict()).isEqualTo(conflict);
+        assertThat(summary.action()).isEqualTo(medium);
+        assertThat(summary.shortAction()).isEqualTo(shortTerm);
+        assertThat(summary.swingAction()).isEqualTo(swing);
+        assertThat(summary.horizonConflict()).isEqualTo(conflict);
+        assertThat(stock.score()).isEqualTo(raw.score());
+        assertThat(stock.shortScore()).isEqualTo(raw.shortScore());
+        assertThat(stock.swingScore()).isEqualTo(raw.swingScore());
+        assertThat(summary.score()).isEqualTo(raw.score());
+        assertThat(summary.shortScore()).isEqualTo(raw.shortScore());
+        assertThat(summary.swingScore()).isEqualTo(raw.swingScore());
+        assertThat(stock.candidateAction()).isEqualTo(raw.action().name());
+        assertThat(stock.shortCandidateAction()).isEqualTo(raw.shortAction().name());
+        assertThat(stock.swingCandidateAction()).isEqualTo(raw.swingAction() == null ? null : raw.swingAction().name());
+        assertThat(stock.reasons()).containsAll(raw.reasons());
+        assertThat(stock.shortReasons()).containsAll(raw.shortReasons());
+        assertThat(stock.swingReasons()).containsAll(raw.swingReasons());
+        assertThat(stock.risks()).containsAll(raw.risks());
+        assertThat(stock.shortRisks()).containsAll(raw.shortRisks());
+        assertThat(stock.swingRisks()).containsAll(raw.swingRisks());
+    }
+
+    private static void assertCompactProjection(List<TradingRadarDto.ListStock> stocks,
+            String medium, String shortTerm, String swing, boolean conflict) {
+        var stock = stocks.stream().filter(row -> "2330".equals(row.stockCode()) && "台股".equals(row.market()))
+                .findFirst().orElseThrow();
+        assertThat(stock.action()).isEqualTo(medium);
+        assertThat(stock.shortAction()).isEqualTo(shortTerm);
+        assertThat(stock.swingAction()).isEqualTo(swing);
+        assertThat(stock.horizonConflict()).isEqualTo(conflict);
     }
 
     private static final class Fixture {
