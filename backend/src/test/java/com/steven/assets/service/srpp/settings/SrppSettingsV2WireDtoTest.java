@@ -21,9 +21,10 @@ class SrppSettingsV2WireDtoTest {
     JsonNode wire()throws Exception{return SettingsCanonicalJson.parse(new String(getClass().getResourceAsStream("/srpp/settings-result-wire-v2.json").readAllBytes(),StandardCharsets.UTF_8));}
     @Test void actualPythonV2EvidenceSurvivesTypedRecordsGlobalNonNullAndHttpWithoutHashDrift()throws Exception {
         JsonNode original=wire();String pythonHash=new String(getClass().getResourceAsStream("/srpp/settings-result-wire-v2.sha256").readAllBytes(),StandardCharsets.UTF_8).strip();
-        assertThat(SettingsCanonicalJson.hash(original)).isEqualTo(pythonHash);SrppSettingsService.validateResult(original);
+        assertThat(SettingsCanonicalJson.hash(original)).isEqualTo(pythonHash);
         SimulationEnvelope typed=SettingsCanonicalJson.bind(original,SimulationEnvelope.class);
         assertThat(SettingsCanonicalJson.hash(SettingsCanonicalJson.tree(typed))).isEqualTo(pythonHash);
+        assertThat(typed.result().scenario().assumptions().cashflowSchedule().payroll().annualIncomeTax()).isNull();
         assertThat(typed.result().scenario().assumptions().cashflowSchedule().laborInsurance().monthlyNominalTwd()).isEqualTo(new BigDecimal("16013.60"));
         assertThat(typed.result().scenario().assumptions().cashflowSchedule().payroll().bonusEvents().get(2).festivalDate()).isNull();
         assertThat(typed.result().scenario().assumptions().reserveStrategy().protectedReserveRealTwd()).isEqualTo(new BigDecimal("1600000.00"));
@@ -49,7 +50,7 @@ class SrppSettingsV2WireDtoTest {
             n->((ObjectNode)n.at("/result/scenario/reserveStrategyAudit/monthlyAudit/0")).put("bullSignalPathCount",100001),
             n->((ObjectNode)n.at("/result/scenario/reserveStrategyAudit/monthlyAudit/0/livingRefillRealTwd")).put("p10","100000000.00"));
         for(Consumer<ObjectNode> mutate:mutations) {
-            ObjectNode bad=(ObjectNode)wire();mutate.accept(bad);
+            ObjectNode bad=(ObjectNode)SettingsCanonicalJson.parse(new String(getClass().getResourceAsStream("/srpp/settings-result-wire-v3.json").readAllBytes(),StandardCharsets.UTF_8));mutate.accept(bad);
             assertThatThrownBy(()->SrppSettingsService.validateResult(bad)).isInstanceOf(SrppSettingsProblem.class).hasMessage("模擬結果格式無效");
         }
         ObjectNode unknown=(ObjectNode)wire();((ObjectNode)unknown.at("/result/scenario/assumptions/reserveStrategy")).put("unknown",true);

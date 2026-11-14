@@ -155,7 +155,7 @@
       "source": "payroll",
       "displayFormat": "money",
       "precision": 0,
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "salaryPayday",
@@ -173,7 +173,7 @@
       "pointer": "/payday_day_of_month",
       "reason": "本欄僅供情境模擬，不改變正式設定。",
       "source": "payroll",
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "annualRaiseAmount",
@@ -193,7 +193,7 @@
       "source": "payroll",
       "displayFormat": "money",
       "precision": 0,
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "annualRaiseFirstDate",
@@ -211,11 +211,11 @@
       "pointer": "/employee_profile/annual_salary_increase/first_increase_date",
       "reason": "本欄僅供情境模擬，不改變正式設定。",
       "source": "payroll",
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "withholdingRate",
-      "label": "所得稅現金扣繳率",
+      "label": "薪資預扣率（預繳，非最終稅率）",
       "type": "number",
       "group": "退休前收入",
       "order": 12,
@@ -229,7 +229,7 @@
       "pointer": "/employee_profile/income_tax_withholding/rate",
       "reason": "本欄僅供情境模擬，不改變正式設定。",
       "source": "payroll",
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "selfPensionRate",
@@ -247,7 +247,7 @@
       "pointer": "/employee_profile/voluntary_labor_pension/employee_rate",
       "reason": "本欄僅供情境模擬，不改變正式設定。",
       "source": "payroll",
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "nhiDependents",
@@ -265,7 +265,7 @@
       "pointer": "/employee_profile/nhi_dependents",
       "reason": "本欄僅供情境模擬，不改變正式設定。",
       "source": "payroll",
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "preRetirementMonthlyExpense",
@@ -285,7 +285,7 @@
       "source": "payroll",
       "displayFormat": "money",
       "precision": 2,
-      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，未含完整年度綜所稅結算。"
+      "help": "沿同版薪資帳務估算；保費與未公告級距為規劃代理，薪資與獎金依年度累進級距結算；單身標準扣除額規劃，未含完整申報戶及投資所得。"
     },
     {
       "id": "bonusEvents",
@@ -1215,8 +1215,10 @@
       "reason": "僅供策略草稿與正式參數差異預覽，退休現金流未建模。",
       "allowedSymbols": [
         "00679B",
+        "00697B",
+        "00719B",
         "00751B",
-        "00697B"
+        "00865B"
       ]
     },
     {

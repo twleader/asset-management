@@ -25,7 +25,9 @@ class SrppShortTermServiceTest {
     final TradingRadarService radar=mock(TradingRadarService.class);
     final DecisionPolicyAuthority authority=new DecisionPolicyAuthority();
     SrppShortTermService service;
-    @BeforeEach void setup(){user.setEffectiveUserId(7L);user.setStatus("ACTIVE");user.setRole("USER");service=new SrppShortTermService(user,drafts,settings,radar,authority);}
+    @BeforeEach void setup(){user.setEffectiveUserId(7L);user.setStatus("ACTIVE");user.setRole("USER");
+        when(settings.allowedSymbols("shortBondSymbols")).thenReturn(List.of("00679B","00697B","00719B","00751B","00865B"));
+        service=new SrppShortTermService(user,drafts,settings,radar,authority);}
     TradingRadarDto.MarketSummary market(boolean stale)throws Exception {
         return json.readValue("{\"dataComplete\":true,\"stale\":"+stale+",\"asOfDate\":\"2026-11-13\",\"quoteStatus\":\"VERIFIED_CLOSE\"}",TradingRadarDto.MarketSummary.class);
     }
@@ -87,6 +89,40 @@ class SrppShortTermServiceTest {
         TaiwanPolicy policy=(TaiwanPolicy)out.policies().get(0);assertThat(policy.formalValues().reboundPct()).isEqualTo(3);assertThat(policy.draftValues().reboundPct()).isZero();
         verify(settings).ensureDraftCurrent(d);verify(radar).getList();verifyNoMoreInteractions(radar);
     }
+    @Test void draftCanSelectAdditionalBondEtfsWhileFormalDefaultSelectionRemainsThree()throws Exception {
+        ObjectNode values=currentValues();values.putArray("shortEquitySymbols");
+        values.putArray("shortBondSymbols").add("00865B").add("00719B");SrppSettingsDraft d=draft(values);
+        source(false,row("00719B","台股","BUY_CANDIDATE",70),row("00865B","台股","NO_TRADE",90),row("00697B","台股","BUY_CANDIDATE",80));
+        ListEnvelope preview=service.list(d.getId().toString(),"3");
+        assertThat(preview.rows()).extracting(Row::stockCode).containsExactly("00719B","00865B");
+        assertThat(preview.rows()).extracting(Row::group).containsOnly("TW_BOND");
+        assertThat(preview.rows().get(1).shortAction()).isEqualTo("NO_TRADE");
+        assertThat(preview.rows().get(1).observationType()).isEqualTo("WAIT");
+        TaiwanPolicy policy=(TaiwanPolicy)preview.policies().get(1);
+        assertThat(policy.formalValues().symbols()).containsExactly("00679B","00751B","00697B");
+        assertThat(policy.draftValues().symbols()).containsExactly("00865B","00719B");
+        assertThat(preview.thresholdsAppliedToRadar()).isFalse();assertThat(preview.tradeAuthorization()).isFalse();
+        assertThat(service.list(null,null).rows()).extracting(Row::stockCode).containsExactly("00697B");
+        verify(radar,times(2)).getList();verifyNoMoreInteractions(radar);
+    }
+    @Test void newBondMissingOrIncompleteEvidenceStaysWaiting()throws Exception {
+        ObjectNode values=currentValues();values.putArray("shortEquitySymbols");values.putArray("shortBondSymbols").add("00719B").add("00865B");
+        SrppSettingsDraft d=draft(values);source(false,row("00719B","台股","BUY_CANDIDATE",null));
+        ListEnvelope preview=service.list(d.getId().toString(),"3");
+        assertThat(preview.rows()).hasSize(1);assertThat(preview.rows().get(0).status()).isEqualTo("WAITING_DATA");
+        assertThat(preview.rows().get(0).observationType()).isEqualTo("WAIT");
+        assertThat(preview.missingSymbols()).extracting(MissingSymbol::stockCode).containsExactly("00865B");
+        verify(radar).getList();verifyNoMoreInteractions(radar);
+    }
+    @Test void additionalBondSymbolsDoNotAllowEquityForeignMarketsOrDuplicates()throws Exception {
+        for(List<String> invalid:List.of(List.of("0050"),List.of("SGOV"),List.of("UNKNOWN"),List.of("00719B","00719B"))) {
+            ObjectNode values=currentValues();var symbols=values.putArray("shortBondSymbols");invalid.forEach(symbols::add);
+            SrppSettingsDraft d=draft(values);
+            assertThatThrownBy(()->service.list(d.getId().toString(),"3")).isInstanceOf(SrppSettingsProblem.class)
+                    .satisfies(e->assertThat(((SrppSettingsProblem)e).status()).isEqualTo(503));
+        }
+        verifyNoInteractions(radar);
+    }
     @Test void staleMarketMissingScoreAndMissingPriceStayWaitingWithoutChangingSourceAction()throws Exception {
         source(true,row("0050","台股","BUY_CANDIDATE",99));var stale=service.list(null,null).rows().get(0);
         assertThat(stale.observationType()).isEqualTo("WAIT");assertThat(stale.shortAction()).isEqualTo("BUY_CANDIDATE");assertThat(stale.status()).isEqualTo("WAITING_DATA");
@@ -113,6 +149,21 @@ class SrppShortTermServiceTest {
         assertThat(out.observationType()).isEqualTo("WAIT");assertThat(out.shortAction()).isEqualTo("HOLD");assertThat(out.tradeAuthorization()).isFalse();
         assertThat(out.priceReference().buyLower()).isEqualTo("12.3456");assertThat(out.priceReference().sellLower()).isNull();assertThat(out.priceReference().asOfDate()).isEqualTo("2026-11-13");
         assertThat(out.limitations()).anyMatch(s->s.contains("不是可成交限價"));verify(radar).getStockEvaluation("0050","台股");verifyNoMoreInteractions(radar);
+    }
+    @Test void additionalBondDetailsUseTheExistingSingleOwnerScopedPureRead()throws Exception {
+        for(String code:List.of("00719B","00865B")) {
+            detail(decision(code,"台股","NO_TRADE"));DetailEnvelope out=service.stock(code,"台股");
+            assertThat(out.group()).isEqualTo("TW_BOND");assertThat(out.observationType()).isEqualTo("WAIT");
+            assertThat(out.shortAction()).isEqualTo("NO_TRADE");assertThat(out.tradeAuthorization()).isFalse();
+            verify(radar).getStockEvaluation(code,"台股");
+        }
+        verifyNoMoreInteractions(radar);
+    }
+    @Test void newCatalogBondOutsideTheCurrentOwnerRadarUniverseIsStillNotFound() {
+        when(radar.getStockEvaluation("00865B","台股")).thenThrow(new IllegalArgumentException("找不到可分析標的"));
+        assertThatThrownBy(()->service.stock("00865B","台股")).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->assertThat(((SrppSettingsProblem)e).status()).isEqualTo(404));
+        verify(radar).getStockEvaluation("00865B","台股");verifyNoMoreInteractions(radar);
     }
     @Test void detailRejectsUnownedOrUnconfiguredTargetsAndPreservesNullEvidence()throws Exception {
         assertThatThrownBy(()->service.stock("2330","台股")).isInstanceOf(SrppSettingsProblem.class);verifyNoInteractions(radar);

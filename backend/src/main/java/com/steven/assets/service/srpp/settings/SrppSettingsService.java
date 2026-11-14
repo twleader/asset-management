@@ -123,7 +123,7 @@ public class SrppSettingsService {
     }
     static void validateResult(JsonNode result) {
         boolean valid=result.path("schemaVersion").isIntegralNumber()&&result.path("schemaVersion").intValue()==1
-                &&"SRPP_SCENARIO_CASHFLOW_V2".equals(result.path("engineVersion").asText());
+                &&"SRPP_SCENARIO_CASHFLOW_V3".equals(result.path("engineVersion").asText());
         JsonNode body=result.path("result");valid&=body.isObject()&&body.path("differences").isObject()&&body.path("changes").isArray()&&body.path("warnings").isArray();
         for(String key:List.of("baseline","scenario")) {
             JsonNode scenario=body.path(key),prob=scenario.path("successProbability");
@@ -139,6 +139,13 @@ public class SrppSettingsService {
             for(JsonNode point:scenario.path("percentilePaths")){valid&=point.path("age").isNumber();for(String money:List.of("p10","p50","p90"))valid&=isMoney(point.path(money));}
             for(String asset:List.of("retirementAssets","terminalAssets"))for(String number:List.of("p10","p50","p90"))valid&=isMoney(scenario.path(asset).path(number));
             valid&=isMoney(scenario.path("assumptions").path("protectedReserveRealTwd"));
+            JsonNode tax=scenario.path("assumptions").path("cashflowSchedule").path("payroll").path("annualIncomeTax");
+            valid&=tax.isObject()&&"SALARY_ONLY_SINGLE_RESIDENT_PLANNING".equals(tax.path("scope").asText())
+                    &&tax.path("ruleYear").isIntegralNumber()&&tax.path("ruleYear").intValue()==2026
+                    &&tax.path("sourceUrl").isTextual()&&!tax.path("sourceUrl").asText().isBlank()
+                    &&tax.path("futureYearPolicy").isTextual()&&!tax.path("futureYearPolicy").asText().isBlank()
+                    &&tax.path("historicalBasis").isTextual()&&!tax.path("historicalBasis").asText().isBlank()
+                    &&tax.path("years").isArray()&&tax.path("notes").isArray();
         }
         valid&=body.path("differences").path("successProbability").isNumber();for(String key:List.of("retirementAssetsP50","terminalAssetsP50"))valid&=isMoney(body.path("differences").path(key));
         valid&=SettingsResultValidator.validV2(result);
@@ -168,6 +175,21 @@ public class SrppSettingsService {
             if(!digest.equals(manifest.path("files").path("assumptions/settings_catalog.json").asText()))throw new IllegalStateException();
             return new CatalogAuthority(SettingsCanonicalJson.parse(new String(bytes,StandardCharsets.UTF_8)),digest);
         }catch(Exception invalid){throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","設定目錄尚未與正式規則包同步");}
+    }
+    /** Pure metadata read for the short-term projection; never contacts the worker or asset sources. */
+    List<String> allowedSymbols(String fieldId) {
+        for(JsonNode field:catalogAuthority().document().path("fields"))if(fieldId.equals(field.path("id").asText())) {
+            JsonNode allowed=field.path("allowedSymbols");
+            if(!"symbols".equals(field.path("type").asText())||!allowed.isArray())break;
+            List<String> codes=new ArrayList<>();Set<String> seen=new HashSet<>();
+            for(JsonNode code:allowed) {
+                if(!code.isTextual()||code.asText().isBlank()||!seen.add(code.asText()))
+                    throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","設定標的白名單無法驗證");
+                codes.add(code.asText());
+            }
+            return List.copyOf(codes);
+        }
+        throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","設定標的白名單無法驗證");
     }
     private JsonNode authorityValues(JsonNode document) {
         try {

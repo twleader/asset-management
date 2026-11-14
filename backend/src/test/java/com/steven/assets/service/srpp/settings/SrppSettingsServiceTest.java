@@ -75,11 +75,11 @@ class SrppSettingsServiceTest {
     ObjectNode simulate(ObjectNode d,String mode){return (ObjectNode)SettingsCanonicalJson.tree(service.simulate(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"mode\":\""+mode+"\",\"seed\":7,\"simulations\":100}"));}
     ObjectNode publish(ObjectNode d,ObjectNode r){return (ObjectNode)SettingsCanonicalJson.tree(service.publish(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"simulationId\":\""+r.path("id").asText()+"\"}"));}
     ObjectNode update(ObjectNode d,String key,JsonNode value){ObjectNode values=d.path("values").deepCopy();values.set(key,value);ObjectNode b=json.createObjectNode().put("revision",d.path("revision").asLong()).put("name","修改情境");b.set("values",values);return (ObjectNode)SettingsCanonicalJson.tree(service.update(UUID.fromString(d.path("id").asText()),b.toString()));}
-    /** Real Python V2 shape, with simple synthetic amounts for workflow assertions. */
+    /** Real Python V3 shape, with simple synthetic amounts for workflow assertions. */
     static ObjectNode result(JsonNode request) {
         try {
             ObjectNode out=(ObjectNode)SettingsCanonicalJson.parse(new String(SrppSettingsServiceTest.class
-                    .getResourceAsStream("/srpp/settings-result-wire-v2.json").readAllBytes(),StandardCharsets.UTF_8));
+                    .getResourceAsStream("/srpp/settings-result-wire-v3.json").readAllBytes(),StandardCharsets.UTF_8));
             for(String key:List.of("baseBundleSha256","configSha256","inputSha256"))out.set(key,request.path(key));
             for(String side:List.of("baseline","scenario")) {
                 ObjectNode scenario=(ObjectNode)out.path("result").path(side);
@@ -94,6 +94,42 @@ class SrppSettingsServiceTest {
         ObjectNode d=create(),r=simulate(d,"LOCAL");assertThat(r.path("status").asText()).isEqualTo("SUCCEEDED");verifyNoInteractions(ai);verify(assets).getLatestForOwner(7);
         SrppSettingsRun stored=rs.get(UUID.fromString(r.path("id").asText()));JsonNode frozen=SettingsCanonicalJson.parse(stored.getRequestJson());assertThat(SettingsCanonicalJson.hash(frozen.path("input"))).isEqualTo(stored.getInputSha256());
         assertThat(stored.getResultSha256()).isEqualTo(SettingsCanonicalJson.hash(r.path("deterministicResult")));assertThat(r.path("publishEligible").asBoolean()).isTrue();
+    }
+    @Test void symbolOptionsComeFromVerifiedCatalogWithoutWorkerOrAssetReads() {
+        List<String> allowed=service.allowedSymbols("shortBondSymbols");
+        assertThat(allowed).containsExactly("00679B","00697B","00719B","00751B","00865B");
+        assertThatThrownBy(()->allowed.add("SGOV")).isInstanceOf(UnsupportedOperationException.class);
+        verifyNoInteractions(worker,assets);
+        assertThatThrownBy(()->service.allowedSymbols("planningAge")).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("SIMULATOR_POLICY_MISMATCH"));
+        ObjectNode altered=(ObjectNode)SettingsCanonicalJson.parse(authority.manifestBytes());
+        ((ObjectNode)altered.path("files")).put("assumptions/settings_catalog.json","0".repeat(64));
+        when(authority.manifestBytes()).thenReturn(SettingsCanonicalJson.canonical(altered));
+        assertThatThrownBy(()->service.allowedSymbols("shortBondSymbols")).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("SIMULATOR_POLICY_MISMATCH"));
+        verifyNoInteractions(worker,assets);
+    }
+    @Test void newCalculationsRequireV3AndAnExplicitAnnualSalaryTaxScope() {
+        ObjectNode valid=result(json.createObjectNode().put("baseBundleSha256",base).put("configSha256","b".repeat(64)).put("inputSha256","c".repeat(64)));
+        assertThatCode(()->SrppSettingsService.validateResult(valid)).doesNotThrowAnyException();
+        for(String legacy:List.of("SRPP_SCENARIO_CASHFLOW_V1","SRPP_SCENARIO_CASHFLOW_V2")) {
+            ObjectNode old=valid.deepCopy();old.put("engineVersion",legacy);
+            assertThatThrownBy(()->SrppSettingsService.validateResult(old)).isInstanceOf(SrppSettingsProblem.class);
+        }
+        for(String side:List.of("baseline","scenario")) {
+            for(String invalid:List.of("missing","scope","ruleYear","years")) {
+                ObjectNode bad=valid.deepCopy();ObjectNode payroll=(ObjectNode)bad.path("result").path(side).path("assumptions").path("cashflowSchedule").path("payroll");
+                ObjectNode tax=(ObjectNode)payroll.path("annualIncomeTax");
+                switch(invalid) {
+                    case "missing" -> payroll.remove("annualIncomeTax");
+                    case "scope" -> tax.put("scope","FULL_HOUSEHOLD_TAX");
+                    case "ruleYear" -> tax.put("ruleYear",2027);
+                    default -> tax.putNull("years");
+                }
+                assertThatThrownBy(()->SrppSettingsService.validateResult(bad)).isInstanceOf(SrppSettingsProblem.class)
+                        .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("SIMULATION_INVALID"));
+            }
+        }
     }
     @Test void aiFailureAndMissingKeyRetainIdenticalDeterministicNumbers() {
         ObjectNode d=create(),local=simulate(d,"LOCAL");when(ai.available()).thenReturn(true);when(ai.interpret(any())).thenThrow(new IllegalStateException("test"));ObjectNode failed=simulate(d,"AI");assertThat(failed.path("status").asText()).isEqualTo("SUCCEEDED");assertThat(failed.path("aiStatus").asText()).isEqualTo("FAILED");assertThat(failed.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
