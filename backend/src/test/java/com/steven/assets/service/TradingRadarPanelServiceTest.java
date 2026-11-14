@@ -47,7 +47,7 @@ class TradingRadarPanelServiceTest {
         });
         assertThat(tw.data().skippedNonTwStocks()).isEqualTo(1);
         assertThat(us.data().skippedNonTwStocks()).isEqualTo(1);
-        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V27");
+        assertThat(tw.ruleVersion()).isEqualTo("TW_RULES_V28");
         assertThat(tw.generatedAt()).isEqualTo("2026-09-23T16:00+08:00");
         assertThat(tw.actionPolicyVersion()).isEqualTo(baseline.actionPolicyVersion());
     }
@@ -461,6 +461,8 @@ class TradingRadarPanelServiceTest {
             assertThat(evaluation.stock().risks()).anyMatch(r -> r.contains("未做配息還原"));
             ArgumentCaptor<TradingRadarRuleEngine.StockInput> capture = ArgumentCaptor.forClass(TradingRadarRuleEngine.StockInput.class);
             verify(f.engine).evaluateStock(capture.capture());
+            assertThat(capture.getValue().usdFxPurchase().data().quality()).isEqualTo("LIVE");
+            assertThat(capture.getValue().usdFxPurchase().data().history().available()).isTrue();
             var fact = capture.getValue().accumulation();
             assertThat(capture.getValue().completedChangePercent()).isNegative();
             assertThat(capture.getValue().ma20Confirmation()).isEqualTo(TradingRadarRuleEngine.Confirmation.BELOW);
@@ -481,6 +483,26 @@ class TradingRadarPanelServiceTest {
         when(f.snapshots.findLatestWithStocks()).thenReturn(held);
         when(f.alerts.findDistinctStockCodeMarketByOwnerUserId(7L)).thenReturn(List.of());
         when(f.alerts.findDistinctStockCodeMarket()).thenReturn(List.of());
+        if ("美股".equals(market)) {
+            UsdTwdLiveRateService cachedFx = mock(UsdTwdLiveRateService.class);
+            when(cachedFx.getCachedLiveRate()).thenReturn(new UsdTwdLiveRateService.LiveRate("USD/TWD", "USD", "TWD",
+                    TW_DATE, new BigDecimal("30.9"), new BigDecimal("31"), "BANK_OF_TAIWAN", NOW, null, "ACTIVE", "LIVE"));
+            f.context.setUsdTwdLiveRateService(cachedFx);
+            var source = ExchangeRateSourceCapture.builder().id(1L).provider("FINMIND_TAIWAN_EXCHANGE_RATE")
+                    .rateBasis("BANK_SPOT_SELLING").capturedAt(NOW.minusSeconds(1)).sourceSha256("a".repeat(64))
+                    .sourceUrl("https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate&data_id=USD&start_date="
+                            + TW_DATE.minusYears(2).minusDays(5) + "&end_date=" + US_DATE).build();
+            List<ExchangeRateHistory> fxRows = new ArrayList<>();
+            for (var point : Map.of(TW_DATE.minusYears(2), "30", TW_DATE.minusMonths(2), "33", US_DATE, "32").entrySet()) {
+                var sell = new BigDecimal(point.getValue());
+                var row = ExchangeRateHistory.builder().currency("USD").rateDate(point.getKey()).buyRate(sell.subtract(new BigDecimal("0.1")))
+                        .sellRate(sell).sourceCapture(source).build();
+                row.setSourceMemberSha256(ExchangeRateSourceCapture.memberSha(source.getSourceSha256(), "USD", row.getRateDate(), row.getBuyRate(), sell));
+                fxRows.add(row);
+            }
+            when(f.fxHistory.findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(any(), any(), any())).thenReturn(fxRows);
+            when(f.fxHistory.findByCurrencyAndRateDateBetweenOrderByRateDateAsc(anyString(), any(), any())).thenReturn(fxRows);
+        }
         LocalDate day = "台股".equals(market) ? TW_DATE : US_DATE;
         List<StockPriceHistory> rows = new ArrayList<>();
         var days = dates(day, 500);
@@ -521,6 +543,7 @@ class TradingRadarPanelServiceTest {
         final TradingRadarRuleEngine engine = spy(new TradingRadarRuleEngine());
         final RadarTechnicalCachePort technicalCache = mock(RadarTechnicalCachePort.class);
         final RadarTechnicalFactPort facts = mock(RadarTechnicalFactPort.class);
+        final ExchangeRateHistoryRepository fxHistory = mock(ExchangeRateHistoryRepository.class);
         final TradingRadarMarketContextService context;
         final TradingRadarService service;
         Fixture() {
@@ -584,7 +607,7 @@ class TradingRadarPanelServiceTest {
                 }
                 return out;
             });
-            context = new TradingRadarMarketContextService(tw, us, mock(ExchangeRateHistoryRepository.class), news, calendar);
+            context = new TradingRadarMarketContextService(tw, us, fxHistory, news, calendar);
             var indicators = new TechnicalIndicatorService(history, prices, tw, us);
             var adjustments = new DistributionAdjustedPriceService();
             var dividends = mock(DividendEventEvidenceRepository.class);

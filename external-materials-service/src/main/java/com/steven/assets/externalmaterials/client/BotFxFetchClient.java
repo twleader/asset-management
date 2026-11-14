@@ -54,7 +54,7 @@ public class BotFxFetchClient {
                     log.warn("台灣銀行 CSV {} 即期匯率解析失敗: buy=[{}], sell=[{}]", currency, cols[3], cols[13]);
                     return Optional.empty();
                 }
-                return Optional.of(new FxSpotQuote(spotBuy, spotSell));
+                return Optional.of(new FxSpotQuote(spotBuy, spotSell, null, "USD".equals(currency) ? new FxSourceEvidence("BANK_OF_TAIWAN", "https://rate.bot.com.tw/xrt/flcsv/0/day", response.get(), java.time.Instant.now()) : null));
             }
             log.warn("台灣銀行 CSV 找不到 {} 的匯率資料", currency);
             return Optional.empty();

@@ -470,7 +470,7 @@ public class RadarInputAssembler {
     private Prepared withAccumulation(Prepared prepared, List<StockPriceHistory> rows,
                                       List<StockDividendHistory> events, boolean liveAdded, BigDecimal price,
                                       Set<LocalDate> dropped, boolean undated, String code, String market) {
-        if (!RadarCompletedPriceDrawdown.selected(code, market) || prepared.empty()) return prepared;
+        if (code == null || !("台股".equals(market) || "美股".equals(market)) || prepared.empty()) return prepared;
         RadarCompletedPriceDrawdown.Context context;
         try {
             var basis = adjustedPriceService.priceReturnBasis(rows, events, market);

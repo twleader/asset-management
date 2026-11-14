@@ -205,7 +205,8 @@ public class ExchangeRatePoller {
         log.info("排程：收盤後 FinMind 增量補匯率");
         LocalDate since = LocalDate.now().minusDays(5);
         for (String currency : store.collectTrackedCurrencies()) {
-            backfill.backfillExchangeRate(currency, since);
+            if("USD".equals(currency))backfill.backfillExchangeRateFrom(currency,LocalDate.now(ZoneId.of("Asia/Taipei")).minusYears(2).minusMonths(1));
+            else backfill.backfillExchangeRate(currency, since);
         }
     }
 
@@ -249,7 +250,8 @@ public class ExchangeRatePoller {
     }
 
     private void upsertSpot(String sourceName, String currency, LocalDate today, FxSpotQuote q) {
-        store.upsertExchangeRate(currency, today, q.spotBuy(), q.spotSell());
+        if("USD".equals(currency)&&q.evidence()!=null)store.upsertExchangeRate(currency,today,q.spotBuy(),q.spotSell(),q.evidence());
+        else store.upsertExchangeRate(currency, today, q.spotBuy(), q.spotSell());
         log.info("{} {} 匯率: buy={}, sell={} ({})", sourceName, currency, q.spotBuy(), q.spotSell(), today);
     }
 }

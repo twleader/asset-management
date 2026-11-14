@@ -32,7 +32,7 @@ class PublicUsdTwdControllerTest {
                 .expectBody()
                 .jsonPath("$.pair").isEqualTo("USD/TWD")
                 .jsonPath("$.refreshIntervalSeconds").isEqualTo(2)
-                .jsonPath("$.requestedStartDate").isEqualTo("2025-08-13")
+                .jsonPath("$.requestedStartDate").isEqualTo("2024-08-13")
                 .jsonPath("$.requestedEndDate").isEqualTo("2026-08-13")
                 .jsonPath("$.spot.midRate").isEqualTo(32.15)
                 .jsonPath("$.count").isEqualTo(1)

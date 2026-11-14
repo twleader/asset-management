@@ -50,7 +50,19 @@ public class TradingRadarListBatchPreloader {
             TradingRadarMarketFeatureResolver.Evidence marketFeatures,
             LocalDate premiumTargetDate,
             List<EtfNavObservation> premiumObservations,
-            java.math.BigDecimal incomeThreshold) {
+            java.math.BigDecimal incomeThreshold,
+            TradingRadarMarketContextService.FxContext usdPurchaseFx) {
+        public Entry(Optional<Stock> stock, List<StockPriceHistory> prices,
+                     Optional<PriceQueryService.LivePrice> live, Optional<PriceQueryService.EtfNav> liveNav,
+                     List<StockDividendHistory> adjustmentEvents, DividendEventEvidenceResolver.Resolution dividendEvidence,
+                     FundamentalAnalysisService.Resolved fundamental, BondYieldBetaResolver.Result bondYieldBeta,
+                     TreasuryYieldDto.RateContext rateContext, TradingRadarMarketContextService.FxContext fx,
+                     TradingRadarMarketFeatureResolver.Evidence marketFeatures, LocalDate premiumTargetDate,
+                     List<EtfNavObservation> premiumObservations, java.math.BigDecimal incomeThreshold) {
+            this(stock, prices, live, liveNav, adjustmentEvents, dividendEvidence, fundamental, bondYieldBeta,
+                    rateContext, fx, marketFeatures, premiumTargetDate, premiumObservations, incomeThreshold,
+                    TradingRadarMarketContextService.FxContext.EMPTY);
+        }
         /** Compatibility shape for existing adapters; the catalog fallback is immutable. */
         public Entry(Optional<Stock> stock, List<StockPriceHistory> prices,
                      Optional<PriceQueryService.LivePrice> live, Optional<PriceQueryService.EtfNav> liveNav,
@@ -75,6 +87,7 @@ public class TradingRadarListBatchPreloader {
             fundamental = fundamental == null ? FundamentalAnalysisService.Resolved.unavailable(false) : fundamental;
             bondYieldBeta = bondYieldBeta == null ? BondYieldBetaResolver.Result.notApplicable(null) : bondYieldBeta;
             fx = fx == null ? TradingRadarMarketContextService.FxContext.EMPTY : fx;
+            usdPurchaseFx = usdPurchaseFx == null ? TradingRadarMarketContextService.FxContext.EMPTY : usdPurchaseFx;
             marketFeatures = marketFeatures == null ? TradingRadarMarketFeatureResolver.Evidence.empty(
                     null, null, "清單批次資料不可得") : marketFeatures;
             premiumObservations = premiumObservations == null ? List.of() : List.copyOf(premiumObservations);
@@ -223,9 +236,14 @@ public class TradingRadarListBatchPreloader {
         Map<String, TreasuryYieldDto.RateContext> ratesByTenor = exactValues(
                 readMap("treasury-rates", () -> requestedTenors.isEmpty() || treasuryYieldService == null ? Map.of()
                         : treasuryYieldService.resolveRateContexts(decisionInstant, requestedTenors)), requestedTenors);
-        Set<String> currencies = profiles.values().stream().filter(java.util.Objects::nonNull)
+        Set<String> currencies = new java.util.HashSet<>(profiles.values().stream().filter(java.util.Objects::nonNull)
                 .map(TradingRadarAssetProfileResolver.AssetProfile::underlyingCurrency)
-                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toUnmodifiableSet());
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet()));
+        for (var pair : profiles.entrySet()) {
+            var profile = pair.getValue();
+            if (profile != null && UsdFxPurchaseContext.requiresUsd(pair.getKey().code(), pair.getKey().market(), profile.quoteCurrency()))
+                currencies.add("USD");
+        }
         Map<String, TradingRadarMarketContextService.FxContext> fxByCurrency = exactValues(
                 readMap("fx", () -> marketContextService == null ? Map.of()
                         : marketContextService.resolveFxBatchCachedOnly(currencies, decisionInstant)), currencies);
@@ -276,7 +294,8 @@ public class TradingRadarListBatchPreloader {
                         featuresByMarket.getOrDefault(target.market(), TradingRadarMarketFeatureResolver.Evidence.empty(
                                 target.market(), decisionInstant, "市場 feature batch 缺少市場")),
                         premiumTargetDates == null ? null : premiumTargetDates.get(target.market()),
-                        premiumObservations.getOrDefault(readerKey, List.of()), incomeThreshold));
+                        premiumObservations.getOrDefault(readerKey, List.of()), incomeThreshold,
+                        fxByCurrency.getOrDefault("USD", TradingRadarMarketContextService.FxContext.EMPTY)));
             } catch (RuntimeException unavailable) {
                 logBatchUnavailable("entry-materialization", unavailable);
                 entries.put(key, Entry.unavailable(target.market(), decisionInstant, incomeThreshold));

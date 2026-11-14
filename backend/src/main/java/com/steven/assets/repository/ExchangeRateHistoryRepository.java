@@ -2,6 +2,7 @@ package com.steven.assets.repository;
 
 import com.steven.assets.model.ExchangeRateHistory;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDate;
@@ -11,15 +12,19 @@ import java.util.Optional;
 
 public interface ExchangeRateHistoryRepository extends JpaRepository<ExchangeRateHistory, Long> {
 
+    @EntityGraph(attributePaths = "sourceCapture")
     Optional<ExchangeRateHistory> findByCurrencyAndRateDate(String currency, LocalDate rateDate);
 
+    @EntityGraph(attributePaths = "sourceCapture")
     List<ExchangeRateHistory> findByCurrencyAndRateDateBetweenOrderByRateDateAsc(
         String currency, LocalDate start, LocalDate end);
 
     /** Exact currency-set read for one request-scoped radar context. */
+    @EntityGraph(attributePaths = "sourceCapture")
     List<ExchangeRateHistory> findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(
             Collection<String> currencies, LocalDate start, LocalDate end);
 
+    @EntityGraph(attributePaths = "sourceCapture")
     List<ExchangeRateHistory> findByCurrencyOrderByRateDateAsc(String currency);
 
     @Query("SELECT MAX(e.rateDate) FROM ExchangeRateHistory e WHERE e.currency = ?1")
@@ -38,5 +43,6 @@ public interface ExchangeRateHistoryRepository extends JpaRepository<ExchangeRat
     Optional<ExchangeRateHistory> findClosestRate(String currency, LocalDate date);
 
     /** 該幣別最新一筆匯率（不限日期）。 */
+    @EntityGraph(attributePaths = "sourceCapture")
     Optional<ExchangeRateHistory> findFirstByCurrencyOrderByRateDateDesc(String currency);
 }

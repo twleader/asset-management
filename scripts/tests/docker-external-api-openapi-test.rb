@@ -242,7 +242,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.27.5', 'Task 581 後 OpenAPI info.version 必須為 1.27.5')
+assert!(document.dig('info', 'version') == '1.28.0', 'Task 581 後 OpenAPI info.version 必須為 1.28.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -1084,8 +1084,8 @@ assert!(facts_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497
         'Task497 A2 example 的 contentSha256 必須由 sealed body 的 JCS 實際重算')
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 259,
-        "全量 strict audit 預期 259 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 260,
+        "全量 strict audit 預期 260 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1299,7 +1299,7 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(document.dig('info', 'version') == '1.27.5', 'Task581 金融 YAML 必須升為1.27.5')
+assert!(document.dig('info', 'version') == '1.28.0', 'Task581 金融 YAML 必須升為1.28.0')
 unified_markdown = File.read(swagger_copies.first)
 assert!(unified_markdown.include?('| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整28pairs')
 assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')

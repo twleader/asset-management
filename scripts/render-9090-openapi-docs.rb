@@ -167,7 +167,7 @@ def validate_schema_node!(node, path, kind: 'schema')
   end
 end
 
-def validate_document!(document, expected_schemas: 259)
+def validate_document!(document, expected_schemas: 260)
   assert!(document.fetch('openapi').to_s.start_with?('3.'), 'OpenAPI 必須為 3.x')
   assert!(document['security'] == [], 'global security 必須明確為空陣列')
   schemas = document.dig('components', 'schemas')
@@ -464,7 +464,7 @@ document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 validate_document!(document)
 observation = YAML.safe_load(File.read(OBSERVATION_OPENAPI), aliases: false)
 document = unified_document(document, observation)
-validate_document!(document, expected_schemas: 271)
+validate_document!(document, expected_schemas: 272)
 rendered = render(document)
 targets = ASSET_TARGETS + (srpp_root ? [File.join(srpp_root, 'docs/9090 Port API Swagger.md')] : [])
 

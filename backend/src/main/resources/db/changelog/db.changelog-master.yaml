@@ -528,3 +528,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.164.0-daily-inventory-retention-42-months.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.165.0-usd-fx-source-capture.sql
+      relativeToChangelogFile: false

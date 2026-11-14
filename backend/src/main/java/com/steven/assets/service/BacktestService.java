@@ -749,6 +749,8 @@ public class BacktestService {
         boolean etfLike = isEtf(profile) || !premiumObservations.isEmpty() || code.startsWith("00");
         String currency = profile.underlyingCurrency();
         FxSeries fxSeries = currency == null || TWD.equals(currency) ? null : fxSeries(currency, fxCache);
+        FxSeries usdPurchaseSeries = UsdFxPurchaseContext.requiresUsd(code, TW_MARKET, profile.quoteCurrency())
+                ? ("USD".equals(currency) ? fxSeries : fxSeries("USD", fxCache)) : null;
 
         // 基本面 observation 每檔只查一次；各訊號日的 as-of/revision collapse 由 resolver 在記憶體完成。
         List<java.time.Instant> fundamentalInstants = rows.stream().skip(WARMUP)
@@ -806,13 +808,16 @@ public class BacktestService {
                     date, TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE);
 
             BigDecimal fxPct = fxSeries == null ? null : fxAt(currency, fxSeries, date).percentile();
+            var usdPurchaseFx = usdPurchaseSeries == null ? TradingRadarMarketContextService.FxContext.EMPTY
+                    : fxAt("USD", usdPurchaseSeries, date);
+            var usdPurchase = UsdFxPurchaseContext.forAsset(code, TW_MARKET, profile.quoteCurrency(), (usdPurchaseFx == null ? TradingRadarMarketContextService.FxContext.EMPTY : usdPurchaseFx).usdPurchaseData());
             TradingRadarRuleEngine.FundamentalInput fundamental = fundamentalByInstant.getOrDefault(
                     decisionInstant, FundamentalAnalysisService.Resolved.unavailable(true).input());
 
             TradingRadarRuleEngine.StockResult held = evaluate(
-                    a, true, price, instrumentType, regime, fxPct, premium, premiumPercentile, fundamental);
+                    a, true, price, instrumentType, regime, fxPct, premium, premiumPercentile, fundamental, usdPurchase);
             TradingRadarRuleEngine.StockResult free = evaluate(
-                    a, false, price, instrumentType, regime, fxPct, premium, premiumPercentile, fundamental);
+                    a, false, price, instrumentType, regime, fxPct, premium, premiumPercentile, fundamental, usdPurchase);
 
             observations.add(new Obs(
                     date, t,
@@ -852,7 +857,7 @@ public class BacktestService {
             BigDecimal fxPct,
             BigDecimal premium,
             BigDecimal premiumPercentile,
-            TradingRadarRuleEngine.FundamentalInput fundamental) {
+            TradingRadarRuleEngine.FundamentalInput fundamental, UsdFxPurchaseContext usdPurchase) {
         return ruleEngine.evaluateStock(new TradingRadarRuleEngine.StockInput(
                 held,
                 price,
@@ -887,7 +892,7 @@ public class BacktestService {
                 // Task 576：回測序列本就不含盤中列，完成日 KD 快照由完成日 indicators 推得並顯式傳入。
                 completedKd(a),
                 // Task 577：完成 K 結構事實與 production 同一 RadarCompletedStructure.evaluate（經 assembler）。
-                a.structure(), a.accumulation()));
+                a.structure(), a.accumulation(), usdPurchase));
     }
 
     /** 回測過濾剔除（收盤 null 或非正）列的交易日（Task 577.4a）；只記錄、不改過濾。 */
@@ -1225,6 +1230,8 @@ public class BacktestService {
         String currency = profile.underlyingCurrency();
         FxSeries fxSeries = currency == null || TWD.equals(currency)
                 ? null : fxSeries(currency, new HashMap<>());
+        FxSeries usdPurchaseSeries = UsdFxPurchaseContext.requiresUsd(code, market, profile.quoteCurrency())
+                ? ("USD".equals(currency) ? fxSeries : fxSeries("USD", new HashMap<>())) : null;
         List<java.time.Instant> fundamentalInstants = rows.stream()
                 .skip(WARMUP)
                 .map(StockPriceHistory::getTradingDate)
@@ -1293,6 +1300,9 @@ public class BacktestService {
             TradingRadarMarketContextService.FxContext fx = fxSeries == null
                     ? null : fxAt(currency, fxSeries, signalDate, market, twHolidayRequestCache);
             BigDecimal fxPct = fx == null ? null : fx.percentile();
+            var usdPurchaseFx = usdPurchaseSeries == null ? TradingRadarMarketContextService.FxContext.EMPTY
+                    : fxAt("USD", usdPurchaseSeries, signalDate, market, twHolidayRequestCache);
+            var usdPurchase = UsdFxPurchaseContext.forAsset(code, market, profile.quoteCurrency(), (usdPurchaseFx == null ? TradingRadarMarketContextService.FxContext.EMPTY : usdPurchaseFx).usdPurchaseData());
             java.time.Instant decisionInstant = signalInstant(signalDate, market);
             TradingRadarPremiumResolver.DecisionObservation premiumObservation =
                     resolvePremiumObservation(profile, market, signalDate, decisionInstant, premiumObservations);
@@ -1313,9 +1323,9 @@ public class BacktestService {
                     : legacyFundamentalByInstant.getOrDefault(decisionInstant,
                             FundamentalAnalysisService.Resolved.unavailable(true).input());
             TradingRadarRuleEngine.StockInput freeInput = v13Input(
-                    assembled, false, price, kind, regime, fxPct, premium, premiumPercentile, fundamental);
+                    assembled, false, price, kind, regime, fxPct, premium, premiumPercentile, fundamental, usdPurchase);
             TradingRadarRuleEngine.StockInput heldInput = v13Input(
-                    assembled, true, price, kind, regime, fxPct, premium, premiumPercentile, fundamental);
+                    assembled, true, price, kind, regime, fxPct, premium, premiumPercentile, fundamental, usdPurchase);
             // Raw V12 is needed only for timing evidence; final baseline actions are
             // evidence-gated through evaluateBaseline, matching candidate semantics
             // without changing production evaluateStock.
@@ -3113,7 +3123,7 @@ public class BacktestService {
             BigDecimal fxPct,
             BigDecimal premium,
             BigDecimal premiumPercentile,
-            TradingRadarRuleEngine.FundamentalInput fundamental) {
+            TradingRadarRuleEngine.FundamentalInput fundamental, UsdFxPurchaseContext usdPurchase) {
         TradingRadarRuleEngine.InstrumentType instrumentType = kind == RadarBacktestExecution.InstrumentKind.BOND_ETF
                 ? TradingRadarRuleEngine.InstrumentType.BOND
                 : TradingRadarRuleEngine.InstrumentType.EQUITY;
@@ -3126,7 +3136,7 @@ public class BacktestService {
                 assembler.extendedIndicators(a.indicators().extended()), a.volumeRatio(), fundamental,
                 // Task 356.13a-2：V13 candidate 回測路徑同樣必須接上日K 棒與週K，否則 promotion
                 // 稽核比較的是「有週K 的 production」與「沒有週K 的回測」，兩者根本不同一組規則。
-                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a), a.structure(), a.accumulation());
+                a.dailyCandle(), a.weekly(), a.bollinger(), completedKd(a), a.structure(), a.accumulation(), usdPurchase);
     }
 
     private TradingRadarRuleEngine.CandidateContext v13Context(
@@ -4438,6 +4448,7 @@ public class BacktestService {
                 .count();
         int dirty = runs.stream().mapToInt(r -> r.coverage().nonPositiveRows()).sum();
         List<String> out = new ArrayList<>(List.of(
+                "D-215 匯率使用歷史時點可驗證的即期賣出價；後來回填的來源不能回灌舊訊號。缺證據的 FX UNKNOWN／等待不代表策略績效已獲驗證。",
                 "本輸出為「歷史上此條件成立後的報酬分布」，不是預測。",
                 "刻意不輸出 p 值與信賴區間：樣本嚴重自相關（連續多日同一訊號成立），古典檢定前提不成立。",
                 "已剔除 close_price <= 0 的髒列共 " + dirty + " 列（既有資料品質問題，另立任務處理）。",

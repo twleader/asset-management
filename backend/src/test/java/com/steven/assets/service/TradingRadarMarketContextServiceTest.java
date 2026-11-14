@@ -250,4 +250,31 @@ class TradingRadarMarketContextServiceTest {
         return ExchangeRateHistory.builder().currency(currency).rateDate(date)
                 .buyRate(new BigDecimal(buy)).sellRate(new BigDecimal(sell)).build();
     }
+    @Test void fxReadersQueryClockSupersetWhileLegacyPercentileKeepsTwTarget() {
+        var target = LocalDate.of(2026, 2, 11);
+        var cutoff = LocalDate.of(2026, 2, 13);
+        var at = Instant.parse("2026-02-13T14:35:00Z");
+        for (var day : List.of(cutoff, cutoff.minusDays(1))) {
+            when(marketData.isTwTradingDayKnown(day)).thenReturn(Optional.of(false));
+            when(marketData.isTwTradingDayCachedOnly(day)).thenReturn(Optional.of(false));
+        }
+        when(marketData.isTwTradingDayKnown(target)).thenReturn(Optional.of(true));
+        when(marketData.isTwTradingDayCachedOnly(target)).thenReturn(Optional.of(true));
+        var rows = new ArrayList<ExchangeRateHistory>();
+        for (int n = 599; n >= 0; n--) rows.add(fx("USD", target.minusDays(n), "30", "32"));
+        rows.add(fx("USD", cutoff.minusDays(1), "40", "42"));
+        rows.add(fx("USD", cutoff, "45", "47"));
+        when(exchangeRateRepo.findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD", target.minusYears(5), cutoff)).thenReturn(rows);
+        when(exchangeRateRepo.findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(java.util.Set.of("USD"), target.minusYears(5), cutoff)).thenReturn(rows);
+        var single = service.resolveFx("USD", at);
+        var batch = service.resolveFxBatch(java.util.Set.of("USD"), at).get("USD");
+        var cached = service.resolveFxBatchCachedOnly(java.util.Set.of("USD"), at).get("USD");
+        for (var result : List.of(single, batch, cached)) {
+            assertEquals(target, result.asOfDate());
+            assertEquals(new BigDecimal("100.00"), result.percentile(), "Bank holidays do not alter legacy five-year MID percentile");
+        }
+        verify(exchangeRateRepo).findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD", target.minusYears(5), cutoff);
+        verify(exchangeRateRepo, org.mockito.Mockito.times(2)).findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(java.util.Set.of("USD"), target.minusYears(5), cutoff);
+    }
+
 }

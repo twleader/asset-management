@@ -334,8 +334,15 @@ public class HistoricalBackfillService {
 
     private int upsertRates(String currency, LocalDate since) {
         int count = 0;
-        for (ExchangeRateFetchClient.RateBar r : rateFetch.fetchRange(currency, since)) {
-            store.upsertExchangeRate(currency, r.rateDate(), r.buyRate(), r.sellRate());
+        var fetched=rateFetch.fetchRange(currency,since);
+        if("USD".equals(currency)&&!fetched.isEmpty()&&fetched.stream().allMatch(row->row.evidence()!=null)) {
+            store.upsertExchangeRates(currency,fetched);
+            log.info("{} 匯率原生spot批次匯入 {} 筆",currency,fetched.size());
+            return fetched.size();
+        }
+        for (ExchangeRateFetchClient.RateBar r : fetched) {
+            if(r.evidence()!=null)store.upsertExchangeRate(currency, r.rateDate(), r.buyRate(), r.sellRate(),r.evidence());
+            else store.upsertExchangeRate(currency, r.rateDate(), r.buyRate(), r.sellRate());
             count++;
         }
         if (count > 0) log.info("{} 匯率匯入 {} 筆", currency, count);

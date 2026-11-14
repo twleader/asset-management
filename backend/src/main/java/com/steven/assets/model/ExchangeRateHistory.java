@@ -42,6 +42,27 @@ public class ExchangeRateHistory {
     @Column(precision = 10, scale = 4)
     private BigDecimal sellRate;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_capture_id")
+    private ExchangeRateSourceCapture sourceCapture;
+    @Column(name = "source_member_sha256", length = 64)
+    private String sourceMemberSha256;
+
+    /** Audit member hash is an explicitly approved cryptographic receipt, not a financial derived metric. */
+    @Transient public boolean isSpotBasisVerified() {
+        return sourceCapture != null && sourceCapture.matchesAuthorityDate(currency,rateDate) && currency != null && rateDate != null
+                && buyRate != null && sellRate != null && buyRate.signum() > 0 && sellRate.compareTo(buyRate) > 0
+                && ExchangeRateSourceCapture.memberSha(sourceCapture.getSourceSha256(),currency,rateDate,buyRate,sellRate).equals(sourceMemberSha256);
+    }
+    @Transient public String getRateBasis() { return isSpotBasisVerified() ? "BANK_SPOT_SELLING" : "UNKNOWN"; }
+    @Transient public String getSource() { return sourceCapture == null ? null : sourceCapture.getProvider(); }
+    @Transient public String getSourceSha256() { return sourceCapture == null ? null : sourceCapture.getSourceSha256(); }
+    @Transient public String getSourceUrl() { return sourceCapture == null ? null : sourceCapture.getSourceUrl(); }
+    @Transient public java.time.Instant getFetchedAt() { return sourceCapture == null ? null : sourceCapture.getCapturedAt(); }
+    public ExchangeRateHistory(Long id,String currency,LocalDate date,BigDecimal buy,BigDecimal sell) {
+        this.id=id;this.currency=currency;this.rateDate=date;this.buyRate=buy;this.sellRate=sell;
+    }
+
     /** 中間價 = (買入+賣出)/2，由欄位即時計算 */
     @Transient
     public BigDecimal getMidRate() {

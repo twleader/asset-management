@@ -45,7 +45,10 @@ public class UsdTwdLiveRateService {
         this.clock = clock;
     }
 
-    public LiveRate getLiveRate() {
+    public LiveRate getLiveRate() { return readLiveRate(true); }
+    /** Radar source: one canonical cache read, no historical DB fallback. */
+    public LiveRate getCachedLiveRate() { return readLiveRate(false); }
+    private LiveRate readLiveRate(boolean allowHistoryFallback) {
         Instant now = clock.instant();
         final UsdTwdLiveRateCachePort.Snapshot snapshot;
         try {
@@ -53,7 +56,7 @@ public class UsdTwdLiveRateService {
         } catch (MalformedUsdTwdRateException ex) {
             throw ex;
         } catch (RuntimeException ex) {
-            return fallback("UNAVAILABLE", "STALE");
+            return allowHistoryFallback ? fallback("UNAVAILABLE", "STALE") : null;
         }
 
         if (snapshot == null) throw new MalformedUsdTwdRateException("USD/TWD cache snapshot 為 null");
@@ -61,7 +64,7 @@ public class UsdTwdLiveRateService {
                 .map(heartbeat -> heartbeatStatus(heartbeat, now))
                 .orElse("INACTIVE");
         if (snapshot.spot().isEmpty()) {
-            return fallback(liveStatus, "INACTIVE".equals(liveStatus) ? "LAST_AVAILABLE" : "STALE");
+            return allowHistoryFallback ? fallback(liveStatus, "INACTIVE".equals(liveStatus) ? "LAST_AVAILABLE" : "STALE") : null;
         }
 
         UsdTwdLiveRateCachePort.Spot spot = validateSpot(snapshot.spot().orElseThrow());
