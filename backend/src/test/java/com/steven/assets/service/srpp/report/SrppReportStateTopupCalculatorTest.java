@@ -52,4 +52,89 @@ class SrppReportStateTopupCalculatorTest {
     @Test void settledReservePriorityBypassesOnlyTimingAndStillRespectsAllAmountCaps(){BigDecimal capacity=SrppReportStateCalculator.reserveDeployment(new BigDecimal("1000000"),new BigDecimal("500000"),new BigDecimal("900000"),new BigDecimal("800000"),new BigDecimal("700000"),new BigDecimal("100000"),BigDecimal.ONE,new BigDecimal("0.001425"),false,true);assertThat(capacity).isEqualByComparingTo("100000");assertThat(SrppReportStateCalculator.reserveDeployment(BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.ONE,BigDecimal.ZERO,true,true)).isZero();assertThat(SrppReportStateCalculator.reserveDeployment(BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.TEN,BigDecimal.ONE,BigDecimal.ZERO,false,false)).isZero();}
     @Test void sameCaptureCurrentRecommendationsConsumeOneSharedCurrencyPool()throws Exception{var f=fullFixture();ArrayNode modules=SrppReportModuleCalculator.calculateShared(f.frozen(),f.policy(),model(),f.registered(),f.frozen().input().path("sources"));ObjectNode topup=(ObjectNode)modules.get(6);ObjectNode first=(ObjectNode)java.util.stream.StreamSupport.stream(topup.path("data").path("legs").spliterator(),false).filter(v->"ACTIONABLE_FOR_REPORT".equals(v.path("status").asText())).findFirst().orElseThrow();ObjectNode second=first.deepCopy();((ArrayNode)topup.path("data").path("legs")).add(second);BigDecimal cost=n(first.get("amount")).add(n(first.get("fees")));for(JsonNode fact:modules.get(2).path("data").path("facts"))if("deployableCapacity".equals(fact.path("name").asText())&&"TWD".equals(fact.path("subject").asText()))((ObjectNode)fact).put("value",cost.multiply(new BigDecimal("1.5")).toPlainString());SrppReportModuleCalculator.sharedFunds(modules);assertThat(first.path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(second.path("status").asText()).isEqualTo("BLOCKED");assertThat(second.path("lots").asInt()).isZero();assertThat(second.path("amount").isNull()).isTrue();assertThat(second.path("blockingReasons").toString()).contains("CURRENT_REPORT_SHARED_FUNDS_EXHAUSTED");}
 
+    private static ObjectNode d216Dynamic() throws Exception {
+        ObjectNode policy = model().path("execution_policy").path("dynamic_allocation_policy_d141").deepCopy();
+        policy.putObject("daily_core_retention_d216").put("decision", "D-216").put("enabled", true)
+                .put("aggregate_target_source", "normal_equity_target")
+                .put("per_symbol_target_source", "detailed_target_allocation_2027");
+        return policy;
+    }
+
+    private static JsonNode bullCase() throws Exception {
+        for (JsonNode row : golden().path("cases"))
+            if ("ladder".equals(row.path("kind").asText()) && "BULL".equals(row.path("mode").asText())) return row;
+        throw new AssertionError("missing isolated bull fixture");
+    }
+
+    @Test void d216DailyBullUsesStrategicTargetWithoutChangingMonthlyProxy() throws Exception {
+        ObjectNode policy = d216Dynamic();
+        assertThat(n(policy.get("monthly_bull_first_equity_target"))).isEqualByComparingTo(".5");
+        assertThat(SrppReportStateCalculator.bullSaleCapacity(policy, new BigDecimal("10000000"), new BigDecimal("5653000"))).isZero();
+        assertThat(SrppReportStateCalculator.bullSaleCapacity(policy, new BigDecimal("10000000"), new BigDecimal("5652999"))).isZero();
+        assertThat(SrppReportStateCalculator.bullSaleCapacity(policy, new BigDecimal("10000000"), new BigDecimal("6000000"))).isEqualByComparingTo("347000");
+        JsonNode c = bullCase();
+        JsonNode armed = SrppReportStateCalculator.ladderAdvance(policy, "BULL", c.path("before"), c.path("event"), 5);
+        assertThat(n(armed.path("stateAfter").get("windowBudget"))).isEqualByComparingTo("347000");
+        assertThat(n(armed.get("ladderAmount"))).isZero();
+        ObjectNode correction = c.path("event").deepCopy();
+        correction.put("gain", ".15").put("session", 5);
+        JsonNode released = SrppReportStateCalculator.ladderAdvance(policy, "BULL", armed.path("stateAfter"), correction, 5);
+        assertThat(n(released.get("ladderAmount"))).isEqualByComparingTo("27760");
+        policy.remove("daily_core_retention_d216");
+        JsonNode legacy = SrppReportStateCalculator.ladderAdvance(policy, "BULL", c.path("before"), c.path("event"), 5);
+        assertThat(n(legacy.path("stateAfter").get("windowBudget"))).isEqualByComparingTo("1000000");
+    }
+
+    @Test void d216ExistingBullBudgetAndHighWaterStayButCurrentExcessClampsProposal() throws Exception {
+        ObjectNode policy = d216Dynamic(), legacy = policy.deepCopy();
+        legacy.remove("daily_core_retention_d216");
+        JsonNode c = bullCase();
+        ObjectNode before = SrppReportStateCalculator.ladderAdvance(legacy, "BULL", c.path("before"), c.path("event"), 5)
+                .path("stateAfter").deepCopy();
+        ObjectNode event = c.path("event").deepCopy();
+        event.put("gain", ".15").put("equity", "5663000").put("session", 5);
+        JsonNode result = SrppReportStateCalculator.ladderAdvance(policy, "BULL", before, event, 5);
+        assertThat(n(result.get("ladderAmount"))).isEqualByComparingTo("10000");
+        for (String key : List.of("windowBudget", "budget", "spent", "fills", "lastFill", "highWaterGain"))
+            assertThat(result.path("stateAfter").get(key)).as(key).isEqualTo(before.get(key));
+        before.put("lastAmount", "20000");
+        assertThat(SrppReportStateCalculator.ladderAdvance(policy, "BULL", before, event, 5).path("growingFill").asBoolean()).isFalse();
+        event.put("equity", "5653000");
+        JsonNode noExcess = SrppReportStateCalculator.ladderAdvance(policy, "BULL", before, event, 5);
+        assertThat(n(noExcess.get("ladderAmount"))).isZero();
+        assertThat(noExcess.path("eligible").asBoolean()).isFalse();
+    }
+
+    @Test void d216InvalidDailyPolicyCannotOpenTheOldFiftyPercentBudget() throws Exception {
+        ObjectNode policy = d216Dynamic();
+        ((ObjectNode)policy.path("daily_core_retention_d216")).put("enabled", "true");
+        assertThatThrownBy(() -> SrppReportStateCalculator.bullSaleCapacity(policy, new BigDecimal("10000000"), new BigDecimal("6000000")))
+                .hasMessage("D216_CORE_RETENTION_POLICY_UNVERIFIED");
+        ObjectNode invalid = d216Dynamic();
+        invalid.put("normal_equity_target", ".4");
+        assertThatThrownBy(() -> SrppReportStateCalculator.bullSaleCapacity(invalid, new BigDecimal("10000000"), new BigDecimal("6000000")))
+                .hasMessage("D216_CORE_RETENTION_POLICY_UNVERIFIED");
+    }
+
+    @Test void d216SimplifiedDailyRegimeAlsoClampsLegacyLockedBudget() throws Exception {
+        ObjectNode policy = d216Dynamic(), live = J.createObjectNode();
+        live.put("verified", true).put("mode", "BULL").put("anchor", "100").put("highWater", "120")
+                .put("price", "115").put("lockedBudget", "1000000").put("nextBatch", 0).put("cooldownVerified", true);
+        JsonNode funding = model().path("execution_policy").path("stock_purchase_funding_policy_d150");
+        for (String equity : new String[]{"5653000", "5663000"}) {
+            JsonNode result = SrppReportModuleCalculator.regimeCapacity(live, policy, funding,
+                    new BigDecimal("10000000"), new BigDecimal("3000000"), new BigDecimal("1000000"), new BigDecimal(equity), BigDecimal.ONE);
+            assertThat(n(result.get("ladderAmount"))).isEqualByComparingTo(equity.equals("5653000") ? "0" : "10000");
+        }
+        policy.remove("daily_core_retention_d216");
+        JsonNode legacy = SrppReportModuleCalculator.regimeCapacity(live, policy, funding,
+                new BigDecimal("10000000"), new BigDecimal("3000000"), new BigDecimal("1000000"), new BigDecimal("5653000"), BigDecimal.ONE);
+        assertThat(n(legacy.get("ladderAmount"))).isEqualByComparingTo("80000");
+        policy.put("pre_retirement_rotation_equity_floor", ".4");
+        live.put("preRetirementRotation", true);
+        JsonNode oldTransition = SrppReportModuleCalculator.regimeCapacity(live, policy, funding,
+                new BigDecimal("10000000"), new BigDecimal("3000000"), new BigDecimal("1000000"), new BigDecimal("4900000"), BigDecimal.ONE);
+        assertThat(n(oldTransition.get("ladderAmount"))).isEqualByComparingTo("80000");
+    }
+
 }

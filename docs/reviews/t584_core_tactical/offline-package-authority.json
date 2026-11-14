@@ -1,0 +1,33 @@
+{
+  "stage": "OFFLINE_PACKAGE_ONLY_NOT_RUNTIME",
+  "bundle": "a9d05b6ab58685ca5cee088b05996fa9db868e3e4e4a6d3bf6a272b52ecb6175",
+  "jar": "asset-management-1.0.0.jar",
+  "jar_sha256": "0143b18738a7655960c83cb5a87a7e4ef5f6c4e73ae18e5cd8c91758ae161f2a",
+  "resources": [
+    {
+      "path": "srpp/decision/model_inputs.json",
+      "sha256": "c246fb2cb10a15faa1a5f0827a15a8a7f6b7df2b916ad88cb0f3ab45788c5c22",
+      "exact_bytes": true
+    },
+    {
+      "path": "srpp/decision/policy_manifest.json",
+      "sha256": "1bd7e9d5bdfe7d5fe64432ddc5e5c0618d4e269ef1316324c08bce3f3377d7b6",
+      "exact_bytes": true
+    },
+    {
+      "path": "srpp/report/d201-policy-document.json",
+      "sha256": "d2352d97f44e0ba74e32c35000148f034352a186bb26243bc743ec9f5abc2212",
+      "exact_bytes": true
+    },
+    {
+      "path": "srpp/report/d201-registration.sql",
+      "sha256": "cd895d58bc824eeccda923e576427411767be3c2d22cbc97d393ace3243310be",
+      "exact_bytes": true
+    },
+    {
+      "path": "srpp/9090-api-swagger.md",
+      "sha256": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+      "exact_bytes": true
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "stage": "READY_FOR_GIT_REGISTRY_DEPLOY",
+  "runtime_acceptance": "NOT_EXECUTED_BY_THIS_AGENT",
+  "bundle": "a9d05b6ab58685ca5cee088b05996fa9db868e3e4e4a6d3bf6a272b52ecb6175",
+  "policy_version": "2.64.0",
+  "model_version": "3.22.0",
+  "model_sha256": "c246fb2cb10a15faa1a5f0827a15a8a7f6b7df2b916ad88cb0f3ab45788c5c22",
+  "manifest_sha256": "1bd7e9d5bdfe7d5fe64432ddc5e5c0618d4e269ef1316324c08bce3f3377d7b6",
+  "swagger_sha256": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+  "java_suites": [
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportStateTopupCalculatorTest",
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.steven.assets.service.srpp.us.UsTacticalCalculatorTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest",
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "java_total": 65,
+  "python_generator_tests": {
+    "state_topup": 5,
+    "long_short_exit": 5,
+    "authority": 4
+  },
+  "ruby_registry_tests": {
+    "tests": 5,
+    "assertions": 261,
+    "failures": 0,
+    "errors": 0
+  },
+  "spec_review_rounds": 2,
+  "arch_review_rounds": 2,
+  "last_arch_verdict": "PASS",
+  "last_arch_findings": 0,
+  "post_small_fix_arch_rechecked": true,
+  "golden_case_counts": {
+    "report_same_input": 111,
+    "state_topup": 22,
+    "short_us_full": 13,
+    "long_short_exit": 15
+  },
+  "source_model_bytes_match": true,
+  "source_manifest_bytes_match": true,
+  "registry_sql_executed": false,
+  "container_recreated": false
+}

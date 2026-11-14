@@ -6917,3 +6917,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 
 8. 實際DB有536列、原始FinMind合格495列，另外41列是舊來源未驗證／合成或假日資料，不能把它們改標已驗、當成已知漏交易日或擅刪。當可信FinMind capture之精確官方URI（dataset=TaiwanExchangeRate、data_id=USD、單一ISO start_date/end_date）查詢閉區間涵蓋[start,D]、每個採用成員收據一致、可信邊界及最新D成立，才可取qualified native spot series、排除UNKNOWN並揭露排除數。沒有完整coverage證據仍UNKNOWN。public保留一份history全列與品質，新增historySourceCaptures去重metadata作coverage證明，不新增DB原文重複欄。
 9. 原USD17:00排程每次一次GET回抓兩曆年加一曆月邊界、帶明確end_date；避免短5日查詢在春節長假留下capture query interval洞。其他幣別不變。
+## Requirement 207：SRPP核心與短線獨立額度、低接優先順序及日頻核心保留（Task 584）
+
+**User Story：** Steven已要求修正SRPP規則間的互相阻擋，讓核心持股與短線部位分開管理，降低因額度衝突、急跌一刀切與牛市過度減碼造成的機會成本；完成測試後同步兩專案並發布。這是D-216／政策2.64.0的已核准行為變更，不宣稱能預測高低點或增加報酬。
+
+### Acceptance Criteria
+
+1. 股票`SHORT_TERM_D173`保留總額度1%、單檔0.5%、最多2檔、計畫損失0.1%與成交歸屬驗真；`limits.combined_symbol_cap_mode=CORE_TARGET_PLUS_SLEEVE`時，同代號合併上限為`max(limits.combined_symbol_cap, detailed_target_allocation_2027[code]+limits.per_position)`。0050目標10%時合併上限10.5%，不再因舊5%上限封住全部短線容量；此不是新增核心買進授權。計算與最終五檔重定價都使用同輪扣成本後分母及相同公式。沒有新模式的歷史政策保留原上限，債券`BOND_SHORT_TERM_D185`仍為原3%，不借用股票例外。
+2. 核心目標／停扣／補足計算只扣除已核對實際成交的短線份額；合併同代號、群組、全股票、資金、待成交與成本不扣短線、不重複使用餘額。缺帳本／成交歸屬與未知掛單依原限制等待，不能默認空帳；短線獨立退出不得賣核心替代。
+3. D-204的Nasdaq最近完成日跌幅達5%只保留分數及急跌風險揭露，不再單獨硬擋所有新增股票風險；官方一手確認直接台海戰爭／封鎖、六項風險防禦、必要證據、雷達反向、基本面／估值、資金及全部配置限制仍有效。D-215具名深回撤是獨立MEDIUM路徑，不因普通換股暫停或D-212窗口未開而重複否決；不得用本機診斷解開既有API有效BLOCKED或零量。D-204與最終逐筆路徑驗證由SRPP執行，資產端維持現有具名深回撤驗真與原硬閘。
+4. 日頻`daily_core_retention_d216`以`normal_equity_target`作牛市D-156可釋出股票預算的保留目標，而非沿用50%安全下限。新窗口最多鎖定`max(0,equity-total*normal_equity_target)`；已開窗口每輪候選量取既有該批預算與當輪上述餘額之較小值，不擴大舊預算、不重設高水位／批次／已成交。縮小後仍須大於前批實際成交金額，否則等待。舊政策無此日頻設定時保留歷史運算，月頻模型代理不讀此設定。
+5. 正目標核心的逐檔一般減碼與D-156最終賣出不得把該檔已核對核心份額賣到其目標以下；具名且驗真的必要風險退出、生活提款等既有授權例外，以及確認短線／美股戰術獨立退出依原分支。資產端`ROTATION_AND_REGIME_CAPACITY`目前只提供aggregate facts而無D-156可執行賣腿，不能把aggregate容量收據冒稱逐檔驗證；逐檔份額、最終股數與例外來源由SRPP確定性helper及report guard核對，缺拆分證據局部等待。
+6. 所有變更維持純計算與既有schema、端點、read-only broker邊界、排程及通知設定；D-174／D-211的1.5%回落與D值門檻不變。模型3.22.0保持原月頻代理，歷史結果不重標，日頻新保護未經樣本外績效驗證。
+7. 完成限定單元測試、Python／Java同輸入golden與authority一致性檢查，雙repo feature commit→main no-ff merge／push及精確remote refs後才insert-only registry、乾淨main rebuild／recreate必要服務，再從SRPP以新bundle hash讀回9090業務API。無合法交易時窗只記正式採用NOT_YET_EXECUTED，不手動啟動producer、報告、寄信或交易。

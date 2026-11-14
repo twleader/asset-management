@@ -65,7 +65,15 @@ def ladder_state(l,mode):
  out={'verified':True,'active':bool(l.active[0]),'windowBudget':num(l.window_budget),'budget':l.budget[0].tolist(),'spent':l.spent[0].tolist(),'fills':l.fills[0].tolist(),'lastFill':int(l.last_fill[0]),'lastAmount':num(l.last_amount),'initialBonds':num(l.initial_bonds) if mode=='BEAR' else 0,'bondsSold':num(l.bonds_sold) if mode=='BEAR' else 0,'highWaterGain':num(l.high_water_gain) if mode=='BULL' and np.isfinite(l.high_water_gain[0]) else 0,'pendingClose':bool(l.pending_close[0]) if mode=='BULL' else False}
  return out
 for mode in ('BULL','BEAR'):
- l=(BullLadder if mode=='BULL' else BearLadder)(dyn,1); l.cooldown=5
+ # The fixture represents the actual-session daily port, not the retirement
+ # monthly proxy. Adapt a copy; never change authored monthly parameters.
+ daily_dyn=copy.deepcopy(dyn)
+ if mode=='BULL' and 'daily_core_retention_d216' in dyn:
+  cfg216=dyn['daily_core_retention_d216']
+  if cfg216!={'decision':'D-216','enabled':True,'aggregate_target_source':'normal_equity_target','per_symbol_target_source':'detailed_target_allocation_2027'}:
+   raise SystemExit('D216_CORE_RETENTION_POLICY_UNVERIFIED')
+  daily_dyn['monthly_bull_first_equity_target']=dyn['normal_equity_target']
+ l=(BullLadder if mode=='BULL' else BearLadder)(daily_dyn,1); l.cooldown=5
  for i,(gain,dd,confirmed) in enumerate([(0.2,-.15,0),(0.15,-.15,0),(0.17,-.2,1),(0.15,-.2,0),(.05,-.05,0)]):
   before=ladder_state(l,mode);session=i*5;event={'verified':True,'qualified':True,'session':session,'total':10000000,'equity':6000000 if mode=='BULL' else 3500000,'gain':gain,'corrected':False,'drawdown':dd,'eligibleBonds':3000000,'totalBonds':3000000,'availableCash':1000000,'fills':[]}
   if mode=='BULL': l.update(np.array([gain]),np.array([True]),np.array([event['total']]),np.array([event['equity']]),corrected=np.array([False]))

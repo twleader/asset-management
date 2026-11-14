@@ -2,7 +2,7 @@
   "schema": "SHORT_US_FULL_PARITY_V1",
   "calculatorHashes": {
     "short_term_sleeve.py": "e7909fe13ffc13ea5e4986fef92cdf35141c8b22e568845400f3ed51d397caf0",
-    "short_term_opportunities.py": "90877046a3150f5949cd806b08039565279a1f845c1d0341a9fa4445d0f0fabc",
+    "short_term_opportunities.py": "fa673abd138f54e1cbf293070cd415b942a01fb696e13ca8692ab163648d66a2",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
   "cases": [

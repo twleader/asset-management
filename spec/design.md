@@ -13778,3 +13778,12 @@ Task583實作功能QA修正：capture唯一性與lookup精確綁(provider,basis,
 
 
 Task582／583根agent獨立功能QA日期修正：實際495筆FinMind USD spot原文包含2026-02-12、02-13、07-10、10-23，但當輪本機TW股票日曆均休市且US開市，故TW交易日完成日不能冒充銀行日上限。新2年FX區間的clock cutoff為decisionInstant台北日17:00（之前最多前一曆日），actualD取不晚於cutoff且成員／capture驗證通過的最大原生日期；獨立TW完成日只作最低新鮮度，actualD小於它維持UNKNOWN。完整FinMind query coverage驗至actualD，當前LIVE不混歷史、所有capture knownAt防前視保留。既有5年MID分數仍以原TW target篩選；同一次DB批量讀取可讀至clock cutoff之superset，舊分數再篩原target，不增加IO。回測必須保留真正signalInstant而不能合成TW target17:00。測試TW minimum=02-11、原生02-12／13兩列含新極值，US晚盤應納入13，17:00前只納入12；落後TW minimum維持UNKNOWN。此為既有「完整銀行資料／不看未來」契約的具體修正，ARCH第一輪已PASS，第二輪獨立審查此delta，不新增第四輪spec review。實際source/calendar hashes及日期證據保存於/private/tmp/d215-d583-arch-review/native-bank-calendar-evidence.json。
+## Requirement 207／Task 584：D-216核心保留與獨立短線容量
+
+此節描述將實作的D-216純計算變更。既有source vector、owner、immutable package與公開DTO不變，不新增外部I/O、DB schema或endpoint。
+
+- `SrppReportShortUsCalculator`在screen與最終book重定價共用一個由policy／model導出的combined cap helper。僅`ledger.strategy=SHORT_TERM_D173`與精確模式`CORE_TARGET_PLUS_SLEEVE`使用`max(原combined_symbol_cap, 權威target+per_position)`；policy無模式走歷史值，錯模式／缺或非法target不以0補值。現有reconcile依實際fill與pending核對coreAttribution、sleeve occupancy，group／portfolio／protectedCash等daily execution gates仍獨立必須通過。債券袖套不放寬。
+- `SrppReportStateCalculator`為日頻actual-session ladder共用D-216 aggregate bull retention helper，使用`dynamic_allocation_policy_d141.daily_core_retention_d216`精確設定與`normal_equity_target`，不修改`monthly_bull_first_equity_target`。`regimeCapacity`的既有簡化pure入口與`regime`的fullStateEvolution入口都使用相同當輪股票超額上限。首次arm只縮小budget；active舊state保留windowBudget、budget、spent、fills、highWaterGain和lastFill，僅以當輪excess clamp輸出並重算growingFill。corrected關窗仍照原語義，不能藉新規則重開舊批次。
+- `ROTATION_AND_REGIME_CAPACITY`只有aggregate facts／receipts，本輪不把它擴成可執行D-156 SELL。逐檔核心目標保留、同代號短線扣除與具名原授權例外驗真由SRPP final instruction helper／guard完成，來源不足時該筆無可執行量；aggregate PASS不代表逐檔可賣。
+- D-204急跌揭露與D-212／D-215優先順序的唯一執行者仍為SRPP；資產端具名D-215正式來源由`UsNamedDrawdownD215`及`UsTacticalCalculator`驗真，普通分支、未知來源、六項風險與其餘硬閘不因本節全面放寬。API有效BLOCKED仍不得以本機診斷翻轉。
+- authority resource bytes由最終SRPP D-216來源同步，既有generators產生正式target document、同輸入golden及insert-only SQL。先測試與獨立spec／arch審查，正式發布沿Task542明文的雙repo落地→registry→main image rebuild/recreate→exact hash business readback順序。月頻模型與歷史績效不聲稱含此日頻邏輯。
