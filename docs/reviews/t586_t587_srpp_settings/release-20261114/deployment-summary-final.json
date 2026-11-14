@@ -1,0 +1,190 @@
+{
+  "status": "FORMALLY_DEPLOYED_ACCEPTANCE_PASS_WITH_EXPLICIT_SCOPE_LIMITS",
+  "bundle": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "sourceCommit": "b2e057067a19ad551325d6f194a4a0bfb545e22c",
+  "modelSelection": "Inherited main model/effort; gpt-5.6-terra unavailable in delegation tool",
+  "completedAt": "2026-11-14T08:31:52.308300+00:00",
+  "unchangedServices": [
+    "api-gateway",
+    "external-materials-service",
+    "fubon-broker-service",
+    "postgres",
+    "redis",
+    "yuanta-broker-service"
+  ],
+  "allComparedEffectiveEnvironmentSame": true,
+  "artifacts": {
+    "businessResourcesByteExact": 7,
+    "bffOpenApiResourcesByteExact": 2,
+    "newClasses": 12,
+    "workerRuntimeFilesHashExact": 19,
+    "deployedFrontendAssetsVerified": true,
+    "dynamicLabelsProvidedByBffAndCatalog": true
+  },
+  "backendLOCALSimulate": "NOT_EXECUTED_ZERO_VENDOR_GUARD",
+  "noFormalPublish": true,
+  "noBrokerWrite": true,
+  "noManualReportProducer": true,
+  "noMail": true,
+  "noEnvOrSourceChanges": true,
+  "changedServices": [
+    {
+      "service": "bff",
+      "imageId": "sha256:341014f15783f5cb54ea6fb496992e93fba1d4267797f6244a3e1e91b9e2821f",
+      "running": true,
+      "restartCount": 0,
+      "health": "healthy",
+      "changedAsExpected": true,
+      "currentTagMatchesRunningImage": true
+    },
+    {
+      "service": "business-services",
+      "imageId": "sha256:41adb1cf42e2d60afda6c3782e407cce4a5d4621d29e5adfde1d6e0c08b82883",
+      "running": true,
+      "restartCount": 0,
+      "health": "healthy",
+      "changedAsExpected": true,
+      "currentTagMatchesRunningImage": true
+    },
+    {
+      "service": "frontend",
+      "imageId": "sha256:6e166dfd8efec65d3564341560c929c6c7df033dae7db708511dd30d4617729a",
+      "running": true,
+      "restartCount": 0,
+      "health": "NO_HEALTHCHECK",
+      "changedAsExpected": true,
+      "currentTagMatchesRunningImage": true
+    },
+    {
+      "service": "srpp-simulator",
+      "imageId": "sha256:4d1035b9b34c5cb648a9d981cc32e1f49631190ca39de18e26d310a2b4162883",
+      "running": true,
+      "restartCount": 0,
+      "health": "healthy",
+      "changedAsExpected": true,
+      "currentTagMatchesRunningImage": true
+    }
+  ],
+  "bff": {
+    "actualHttpAnonymousAndForgedHeaderGuardCases": 6,
+    "guardStatus": "PASS_ALL_401",
+    "authenticatedGoogleE2E": false,
+    "exactDeployedJarProjection": "PASS_ACTUAL_BUSINESS_RESPONSES",
+    "needsReloginAfterRecreate": true
+  },
+  "runtimeProjection": {
+    "status": "PASS",
+    "classification": "EXACT_DEPLOYED_BFF_JAR_PROJECTING_ACTUAL_BUSINESS_RESPONSES",
+    "authenticatedBffHttpE2E": false,
+    "jarSha256": "78aeeeba0ac730d03a8a7c7896592923fbd25f6d75faf38fe57ba0a152d541ad",
+    "shortChecks": [
+      {
+        "mode": "formal",
+        "sourceEnvelopeExact": true,
+        "bucketRowCount": 24,
+        "sourceOrderAndNullsPreserved": true
+      },
+      {
+        "mode": "draft",
+        "sourceEnvelopeExact": true,
+        "bucketRowCount": 24,
+        "sourceOrderAndNullsPreserved": true
+      }
+    ],
+    "centerFieldGroups": 12,
+    "rootMetadataOnly": true,
+    "existingHistoricalRunResultUnchanged": true,
+    "historicalRunEngineVersion": "SRPP_SCENARIO_CASHFLOW_V1"
+  },
+  "deployedWorkerHttp": {
+    "status": "PASS",
+    "health": {
+      "status": "UP",
+      "baseBundleSha256": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda"
+    },
+    "catalogFields": 76,
+    "catalogSha256": "fef178c38b6c9b1d71f8809416777540811f09255235d8d286b5f111336af2bb",
+    "configSha256": "0ac36fb5aff571853a56d47759f6186b931730a3a120f2952cdd974bb5680105",
+    "inputSha256": "8bc6bb991b7b86d52b4da62a8fb17b8f12ae5973f45ca8b1df79500078ea151d",
+    "resultSha256": "e9a96995e3142f5403281cf3dd2d858843cc6b94419d820170a719917a9ed5f8",
+    "engineVersion": "SRPP_SCENARIO_CASHFLOW_V2",
+    "simulations": 100,
+    "seed": 31415,
+    "deterministicRepeat": true,
+    "monthlyAuditRows": 406,
+    "invalidRequests": [
+      {
+        "label": "malformed",
+        "status": 400,
+        "code": "INVALID_JSON"
+      },
+      {
+        "label": "duplicate-member",
+        "status": 400,
+        "code": "DUPLICATE_MEMBER"
+      },
+      {
+        "label": "nonfinite",
+        "status": 400,
+        "code": "INVALID_JSON_NUMBER"
+      },
+      {
+        "label": "config-hash-mismatch",
+        "status": 409,
+        "code": "CONFIG_HASH_MISMATCH"
+      },
+      {
+        "label": "boolean-type",
+        "status": 422,
+        "code": "CONFIG_INVALID"
+      },
+      {
+        "label": "symbols-allowlist",
+        "status": 422,
+        "code": "CONFIG_INVALID"
+      },
+      {
+        "label": "readonly-ladder",
+        "status": 422,
+        "code": "CONFIG_INVALID"
+      },
+      {
+        "label": "input-hash-mismatch",
+        "status": 409,
+        "code": "INPUT_HASH_MISMATCH"
+      },
+      {
+        "label": "invalid-path-count",
+        "status": 422,
+        "code": "CONFIG_INVALID"
+      }
+    ]
+  },
+  "businessInternalFeatureAcceptance": {
+    "status": "PASS",
+    "scope": "ACTUAL_BUSINESS_INTERNAL_OWNER_CONTRACT",
+    "catalogFields": 76,
+    "rootHistoryMetadataOnly": true,
+    "draft": {
+      "savedValueCount": 76,
+      "moneyCentsPreserved": true,
+      "reloadIdentical": true,
+      "oldDraftsUnchanged": true,
+      "publishInvoked": false
+    },
+    "short": {
+      "formalRows": 24,
+      "draftRows": 24,
+      "missingSymbols": 0,
+      "thresholdsAppliedToRadar": false,
+      "tradeAuthorization": false,
+      "draftThresholdSavedAndVisible": true,
+      "staleRevisionCode": "REVISION_CONFLICT",
+      "detailStatus": "RADAR_OBSERVATION",
+      "detailObservation": "WAIT",
+      "pricePreservedAsStringOrNull": true,
+      "detailUsesActualListMembership": true
+    }
+  },
+  "evidenceScope": "SANITIZED_COMPACT_SUMMARY_NOT_AUTHENTICATED_GOOGLE_BFF_HTTP_E2E"
+}

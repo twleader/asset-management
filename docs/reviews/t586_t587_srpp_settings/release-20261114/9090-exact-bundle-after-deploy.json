@@ -1,0 +1,27 @@
+{
+  "kind": "EXACT_BUNDLE_READ_ONLY_DIAGNOSTIC_NOT_FORMAL_REPORT_ADOPTION",
+  "startedAt": "2026-11-14T08:24:40.237442+00:00",
+  "formalReportAdoption": "NOT_YET_EXECUTED",
+  "retryCount": 0,
+  "status": 409,
+  "durationSeconds": 0.057,
+  "body": {
+    "type": "about:blank",
+    "title": "SRPP report calculations NON_TRADING_DAY",
+    "status": 409,
+    "detail": "指定日期不是交易日。",
+    "instance": "/api/public/srpp/report-calculations",
+    "code": "NON_TRADING_DAY",
+    "retryable": false
+  },
+  "businessApiAccepted": false,
+  "request": {
+    "method": "GET",
+    "path": "/api/public/srpp/report-calculations",
+    "consumer": "Codex",
+    "tradingDate": "2026-11-14",
+    "reportSlot": "12:00",
+    "policyBundleSha256": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+    "swaggerSha256": "a270af1021fa58e0c5d91e190a9d86363ceb9cd9f2b08140de96decc5740ec6c"
+  }
+}

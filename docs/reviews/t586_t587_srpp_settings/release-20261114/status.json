@@ -1,0 +1,18 @@
+{
+  "evidenceDate": "2026-11-14",
+  "timezone": "Asia/Taipei",
+  "git": "COMPLETE",
+  "registry": "COMPLETE_EXACT_ROW_VERIFIED",
+  "deployment": "PASS_WITH_EXPLICIT_SCOPE_LIMITS",
+  "businessApiAccepted": false,
+  "latestBusinessApiStatus": 409,
+  "latestBusinessApiCode": "NON_TRADING_DAY",
+  "formalScheduledReportAdoption": "NOT_YET_EXECUTED",
+  "bundle": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "sqlSha256": "5dff438c23c99b5f102a402c3999981277b79b0c1227ec85c707a49e9644f156",
+  "previousPreflightSnapshot": "../proofs/status.json",
+  "note": "Four services rebuilt/recreated from b2e057; deployed worker, internal business contract, exact JAR projection, HTTPS assets and final ten-container pins passed. Browser identity is synthetic; no authenticated Google BFF HTTP E2E. Exact-bundle report GET remains 409 NON_TRADING_DAY, not formal report adoption.",
+  "backendLOCALSimulate": "NOT_EXECUTED_ZERO_VENDOR_GUARD",
+  "authenticatedGoogleBffHttpE2E": false,
+  "needsRelogin": true
+}

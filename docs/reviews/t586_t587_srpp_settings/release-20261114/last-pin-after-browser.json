@@ -1,0 +1,89 @@
+{
+  "status": "PASS",
+  "checkedAt": "2026-11-14T08:31:52.308300+00:00",
+  "allTenSameAsAcceptedContainers": true,
+  "allFourCurrentTagsMatchRunningImages": true,
+  "browserProofSha256": "08744f011139e19ba2f0e471ce53a5a76ba26ba3c5df400e7d151f169c5856dc",
+  "services": [
+    {
+      "service": "api-gateway",
+      "containerId": "aaab06740d9ad9b56469c6aea8d48712b77a1a673c48fbd7ed55dadcfb19c1e4",
+      "imageId": "sha256:c5bd2d2feecb096d6fb7ac65f6ca8afd045c060ea30854a97b43cb735063f5a6",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "bff",
+      "containerId": "6f8e90aa4861d46d49e8f151f5c20387aa00f502e9714c6814ab81572e246722",
+      "imageId": "sha256:341014f15783f5cb54ea6fb496992e93fba1d4267797f6244a3e1e91b9e2821f",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "business-services",
+      "containerId": "d54a0ccb4813606421b1751087be3944928fb5e5f217db833402d9ce9cc93f76",
+      "imageId": "sha256:41adb1cf42e2d60afda6c3782e407cce4a5d4621d29e5adfde1d6e0c08b82883",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "external-materials-service",
+      "containerId": "50db774a99e254b03760420a035ef83911721c3fcc18cdef1352b9da48471248",
+      "imageId": "sha256:0112abf8d73a2698d8bd839d73c95eeed260838d0ce9e235b7ee68133b1fdb46",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "frontend",
+      "containerId": "102afd64683de242bc4ec0059e26d81d637a16461e903ec7a7a5d055368411f1",
+      "imageId": "sha256:6e166dfd8efec65d3564341560c929c6c7df033dae7db708511dd30d4617729a",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "NO_HEALTHCHECK"
+    },
+    {
+      "service": "fubon-broker-service",
+      "containerId": "212964deefab659e64c7cdd173077a4efa30f212d1b3a3cb180fd8d5cf6e4bc0",
+      "imageId": "sha256:df04167022c321119e4e3836a5589581ef55c9cfce0a08485216ca2f8131b8e4",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "postgres",
+      "containerId": "67320a18be6ca408ab811d74f62e9f1861b4447bfc953d6b18125f4da02ad930",
+      "imageId": "sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "redis",
+      "containerId": "d67df96cd49f31ba2c429b83394f36fe1b29ba35dff751206d21c5687058f68a",
+      "imageId": "sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "srpp-simulator",
+      "containerId": "3827c9d5e19955cd8f4466dc938437d8004f1069bbe3962d7981796ac6ab7076",
+      "imageId": "sha256:4d1035b9b34c5cb648a9d981cc32e1f49631190ca39de18e26d310a2b4162883",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    },
+    {
+      "service": "yuanta-broker-service",
+      "containerId": "c936a4131d00b5098d7ad17bd3df0b0b334c14c9e6c7c4c2ad8eee501155bf23",
+      "imageId": "sha256:33c2a9c8cfb1067c73ae245588f8cbf16259ca531101421ec3a27a89d293a2d5",
+      "sameAsAcceptedArtifacts": true,
+      "running": true,
+      "health": "healthy"
+    }
+  ]
+}
