@@ -74,4 +74,4 @@ npm --prefix frontend run build
 
 ## 完成報告
 
-待實作、測試、部署及Git落地完成後回填實際證據，不預先宣稱。
+2026-11-14：實作、獨立spec／arch審查及限縮範圍發布驗收完成；catalog V2共76欄。asset已部署main `b2e057067a19ad551325d6f194a4a0bfb545e22c`、SRPP main `b9eccf2e8790c0dd7af9f15ee5f777fce6424ff0`，bundle `fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda`；測試、精確Git／registry、部署及限制見[發布收據](../../docs/reviews/t586_t587_srpp_settings/release-20261114/README.md)。已部署worker HTTP／內部草稿保存回讀／實際BFF JAR投影／HTTPS畫面通過；backend LOCAL simulate為 `NOT_EXECUTED_ZERO_VENDOR_GUARD`，Google OIDC已登入BFF HTTP E2E未執行（畫面身份合成、需重新登入）。短線草稿未套正式雷達且NOT_MODELED；正式報告GET409 NON_TRADING_DAY，`businessApiAccepted=false`、正式日報採用 `NOT_YET_EXECUTED`，無正式publish／寄信／交易／手動報告。依CLAUDE.md「SKIP_SPEC_GATE=1（例如只是回填任務完成報告）」例外僅補完成metadata，不更動上文契約或原checklist；無新語義審查週期，兩項arch minor保留理由見驗收README。

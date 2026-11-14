@@ -1,6 +1,8 @@
 # Task 586／587：SRPP 設定與短線觀察驗收證據
 
-本證據包僅記錄 **OFFLINE／隔離 PREFLIGHT**。正式 Git 落地、registry 登錄、正式容器部署、業務 API 驗收及排程採用皆為 **NOT_YET_EXECUTED**；不可據此宣稱已上線。狀態快照見 [status.json](proofs/status.json)。
+**最新發布進度見 [2026-11-14 發布收據](release-20261114/README.md)**：兩專案 Git、精確 registry 登錄及正式部署限縮範圍驗收已完成。已部署worker／內部業務／JAR投影與HTTPS畫面PASS；Google OIDC BFF端到端登入與backend LOCAL simulate未執行，服務重建後需重新登入。正式報告exact-bundle GET仍409 `NON_TRADING_DAY`，`businessApiAccepted=false`，正式日報採用 `NOT_YET_EXECUTED`。
+
+下列章節及 [原狀態快照](proofs/status.json) 為發布前的 **OFFLINE／隔離 PREFLIGHT 歷史證據**；其中 NOT_YET_EXECUTED 表示該快照當時尚未進入正式階段，不覆蓋上列最新收據，也不能反過來把前置驗收改標為正式採用。
 
 ## 交付範圍
 
@@ -53,4 +55,4 @@ Task 586 最終 [spec 第 3 輪](reviews/t586-spec-round3.md)、Task 587 最終 
 
 兩項 minor **保留、未修正**：短線 DTO 價格仍為 String，來源以 `BigDecimal.toPlainString()` 保留原精度／scale／null，未經浮點轉換；日期與時間戳 DTO 仍為 String，已有 ISO 日期驗證，維持已審 wire／canonical hash 與來源 offset。本輪審查未發現精度損壞或日期輸出錯誤證據，但仍明列與專案 `BigDecimal`、`LocalDate`／`Instant` 型別慣例的差異，不宣稱已修。最終架構 PASS 只證明本輪唯讀審查結論，不替代正式部署或排程採用。
 
-正式發布完成後，另增具體 Git／registry／部署／exact-hash 業務 API 與日曆時窗證據；不能把本包的離線測試或隔離容器結果改標為正式日報採用。全文未執行交易、寄信或手動重跑正式報告。
+正式部署與連線驗收詳見 [發布收據](release-20261114/README.md) 的限縮範圍與未執行項目；本包的離線測試或隔離容器結果仍為歷史，不改標為正式日報採用。未執行交易、寄信或手動重跑正式報告。

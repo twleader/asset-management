@@ -1,0 +1,19 @@
+{
+  "result": "PASS",
+  "registeredAt": "2026-11-14T08:22:20.879782+00:00",
+  "source": "merged tracked original INSERT ON CONFLICT DO NOTHING SQL",
+  "sqlSha256": "5dff438c23c99b5f102a402c3999981277b79b0c1227ec85c707a49e9644f156",
+  "bundle": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "rowsBefore": 52,
+  "rowsAfter": 53,
+  "existingRowsUnchanged": true,
+  "sameHashAlreadyExisted": false,
+  "exactRow": {
+    "policy_bundle_sha256": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+    "formula_version": "ASSET_MGMT_SRPP_V2",
+    "policy_document": "{\"schema\":\"SRPP_POLICY_DOCUMENT_V1\",\"targets\":{\"CASH:TWD:DEMAND\":\"0.006\",\"CASH:TWD:TERM\":\"0.164\",\"STOCK:台股:0050\":\"0.1\",\"STOCK:台股:0056\":\"0.025\",\"STOCK:台股:00679B\":\"0\",\"STOCK:台股:00697B\":\"0.02\",\"STOCK:台股:00713\":\"0.0333333333\",\"STOCK:台股:00719B\":\"0.1997\",\"STOCK:台股:00751B\":\"0\",\"STOCK:台股:00850\":\"0\",\"STOCK:台股:00865B\":\"0.025\",\"STOCK:台股:00878\":\"0.025\",\"STOCK:台股:00881\":\"0.0453\",\"STOCK:台股:00919\":\"0.0166666667\",\"STOCK:台股:009826\":\"0.025\",\"STOCK:美股:SGOV\":\"0.02\",\"STOCK:美股:VOO\":\"0.27\",\"STOCK:美股:VT\":\"0.025\"}}",
+    "formula_manifest": "{\"calculations\":{\"allocation\":{\"assetKey\":\"ASSET_KEY_V1\",\"calculationId\":\"ASSET_MGMT_TOTAL_EXPOSURE_V1\",\"division\":\"MathContext(34,HALF_EVEN)\"},\"assets\":{\"calculationId\":\"ASSET_MGMT_ASSETS_RECON_V2\",\"dataAsOf\":\"MIN_LIVE_STOCK_UPDATED_AT_V1\",\"depositInterest\":\"SnapshotAggregateCalculator.depositEstimatedInterest\",\"depositNullRatePolicy\":\"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2\",\"inputs\":\"LatestAssetsDto.Response(snapshot,liveAssets,targetPriceComplete)\",\"revisionProjection\":\"SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1\",\"tolerance\":\"max(0.01,max(abs(detail),abs(reported))*0.0001)\"},\"cashIncome\":{\"calculationId\":\"ASSET_MGMT_GROSS_INCOME_V2\",\"depositNullRatePolicy\":\"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2\",\"netCalculation\":\"NOT_VERIFIED\"},\"completedTechnicals\":{\"calculationId\":\"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1\",\"status\":\"CALCULATOR_NOT_VERIFIED\"},\"funding\":{\"calculationId\":\"ASSET_MGMT_FUNDING_UNAVAILABLE_V1\",\"status\":\"CALCULATOR_NOT_VERIFIED\"}},\"decimal\":\"canonical-string\",\"formulaVersion\":\"ASSET_MGMT_SRPP_V2\",\"hash\":\"RFC8785-JCS+SHA-256\",\"offsetLessTimezone\":\"Asia/Taipei\",\"schema\":\"SRPP_FORMULA_MANIFEST_V2\",\"timezone\":\"Asia/Taipei\"}",
+    "registered_at": "2026-11-14T16:22:20.862895+08:00"
+  },
+  "exactAllFourSourceFieldsEqual": true
+}
