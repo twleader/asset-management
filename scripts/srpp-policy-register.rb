@@ -154,6 +154,12 @@ module SrppPolicyRegister
        sha256(manifest_jcs) != '0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86'
       raise Error, 'ASSET_MGMT_SRPP_V2 manifest does not match Task 476 golden digest'
     end
+    if version == 'ASSET_MGMT_SRPP_V3'
+      reviewed = parse_strict(File.read(File.expand_path('../spec/fixtures/srpp_formula_manifest_v3.json', __dir__), encoding: 'UTF-8'))
+      unless manifest_jcs == jcs(reviewed)
+        raise Error, 'ASSET_MGMT_SRPP_V3 manifest does not match Task 588 source-bound fixture'
+      end
+    end
     sql = 'INSERT INTO srpp_policy_registry (policy_bundle_sha256, formula_version, policy_document, ' \
           "formula_manifest) VALUES (#{sql_literal(bundle)}, #{sql_literal(version)}, #{sql_literal(policy_jcs)}, " \
           "#{sql_literal(manifest_jcs)}) ON CONFLICT (policy_bundle_sha256) DO NOTHING;"

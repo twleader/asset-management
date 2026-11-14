@@ -72,7 +72,7 @@ final class SrppOrchestratedResponseValidator {
             if ("UNAVAILABLE".equals(text(item, "status")) && item.get("reasonCodes").isEmpty()) fail();
             uniqueTexts(item.get("sourceIds"), 100);
             requireKnownSources(item.get("sourceIds"), sourceIds);
-            if (V2.equals(expectedVersion)) validateV2Calculation(item);
+            if (V2.equals(expectedVersion) || SrppFormulaV3Identity.VERSION.equals(expectedVersion)) validateV2Calculation(item);
             switch (text(item, "status")) {
                 case "COMPLETE" -> complete++;
                 case "PARTIAL" -> partial++;
@@ -87,6 +87,7 @@ final class SrppOrchestratedResponseValidator {
         String digest = text(root, "formulaSetSha256");
         if (V1_DIGEST.equals(digest)) return V1;
         if (V2_DIGEST.equals(digest)) return V2;
+        if (SrppFormulaV3Identity.DIGEST.equals(digest)) return SrppFormulaV3Identity.VERSION;
         fail();
         return null;
     }

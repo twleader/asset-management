@@ -50,4 +50,23 @@ class SrppFormulaCatalogTest {
                 .isEqualTo("0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
         assertThat(SrppFormulaCatalog.formulaSetSha256()).isEqualTo(GOLDEN_FORMULA_SET_SHA256);
     }
+
+    @Test
+    void v3BindsReviewedImplementationSourcesWithoutChangingLegacyDigests() throws Exception {
+        Path path = Path.of("spec/fixtures/srpp_formula_manifest_v3.json");
+        if (!Files.exists(path)) path = Path.of("../spec/fixtures/srpp_formula_manifest_v3.json");
+        String fixture = Files.readString(path).trim();
+        String version = SrppFormulaCatalog.CURRENT_FORMULA_VERSION;
+        assertThat(version).isEqualTo("ASSET_MGMT_SRPP_V3");
+        assertThat(SrppFormulaCatalog.manifestJcs(version)).isEqualTo(fixture);
+        var scope = SrppFormulaCatalog.manifest(version).path("calculations").path("dividendStabilization");
+        assertThat(scope.path("calculationId").asText())
+                .isEqualTo("DIVIDEND_TOPUP_D218_COMPLETED_TWO_SESSIONS_FIXED_WAVE_CUMULATIVE_BUDGET");
+        assertThat(scope.path("sourceSha256").size()).isEqualTo(4);
+        scope.path("sourceSha256").forEach(hash -> assertThat(hash.asText()).matches("[0-9a-f]{64}"));
+        assertThat(SrppFormulaCatalog.formulaSetSha256(version)).isEqualTo(SrppJcs.sha256Hex(fixture));
+        assertThat(SrppFormulaCatalog.formulaSetSha256(SrppFormulaCatalog.FORMULA_VERSION_V2))
+                .isEqualTo("0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
+        assertThat(SrppFormulaCatalog.formulaSetSha256()).isEqualTo(GOLDEN_FORMULA_SET_SHA256);
+    }
 }

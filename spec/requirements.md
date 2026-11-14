@@ -6976,3 +6976,21 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 24. 本頁登入BFF與business各新增short-opportunities清單及逐檔純讀GET，重用同owner的TradingRadarService.getList及既有cached-only getStockEvaluation().stock()，禁止舊getStockDetail的refresh/writer路徑；保留SHORT最終方向、來源時間、資料不足／阻擋與本軌原因風險；不生成買賣或股數，不以中長線訊號替代。台股政策未在owner雷達內者明示等待；美股只取現有雷達primary集合。草稿可縮小symbols觀察集合，其餘參數只作預覽，thresholdsAppliedToRadar固定false，不能假稱已過SRPP分艙/對帳/資金/深度閘門。
 25. 使用者可看三組正式策略的進場／出場條件、調整草稿、查看雷達買進觀察／減碼退出觀察／等待並懶載入逐檔理由。保留市場stale/dataComplete與quote/candle時點；缺值不補0，布林區間只稱完成日參考、不稱限價/停損/目標。只GET重讀，不觸發外部行情、refresh、AI、匯出、報告、通知或交易；無新DB/9090/Swagger。own/other-owner/CAS/stale與精確typed wire均須驗。
 26. V2完整結果增大後，root最多20筆歷史只傳metadata，完整deterministicResult/presentation為null；選取run由原GET simulations/{id}取單筆原內容，resultSha256與儲存bytes不變。前端需防晚到回應跨owner/draft/run覆寫，不以補造空模型處理摘要。此界線與短線功能一併驗收，不刪減稽核或歷史規避大payload。
+
+
+## Requirement 209：高股息核心補足的兩個完成交易日止穩與分批防重（D-218／Task 588）
+
+### User Story
+身為尚未補足0056、00713、00878核心部位的使用者，我希望先確認連續兩個交易日未創本輪新低，再小額分批承接，避免單靠52週回撤或每週額度重置而一路買進；初步止穩不要求站回5日線。
+
+### Acceptance Criteria
+1. 新規則只適用0056、00713、00878的自主核心補足；00919、既有定期定額及短線策略維持原規則。沿用D-198配息調整後20個完成交易日價位分級、D-189不追高、原風險／資金／配置／來源／成交去重硬閘；不採5／10／15／20%回撤直接買進，不新增任意RSI／ATR硬門檻。
+2. 以同一現金配息調整價基的完成日最低價判斷：創低當天不計，之後兩個相鄰且已完成的台股交易日最低價皆不低於當時running low即初步止穩，平低通過；再破低歸零。日曆缺日、未完成日、重複／亂序、缺low／close、資料非有限正數或價基無法核實均UNKNOWN/BLOCKED。盤中價／當日low可否決破底，不可計入兩天。
+3. 本輪由正式owner-bound canonical wave source提供固定waveId、anchor日期／原始最低價、固定含費補足預算與完整confirmed fill／pending coverage；不得由滾動20日視窗自行新建wave或把缺state當空帳。新wave只接受明示的前wave結束及新wave核准證據；本次calculator不建立、重置或寫wave。來源未就緒須具名STABILIZATION_STATE_UNAVAILABLE。不依賴state的市場觀察另取D198同一前20個完成台股交易日（含該窗口第一日），重播配息調整後running low與未創低天數，只輸出市場observation、不建立wave/stage；與wave-bound stabilized分開。市場原始來源齊全時須保留此事實，state缺失仍STABILIZATION_STATE_UNAVAILABLE／0預算，不得由既有account/pending缺口吞沒市場observation。
+4. 初步止穩的FIRST上限為固定預算10%，且同一wave只能一批。必須真FIRST成交後才可評估RETEST；首筆成交日之後先有完成日low高於固定anchor，再有更後完成日low低於前low形成回測，全程不跌破固定anchor且確認日嚴格晚於回測日、最新完成收盤高於前完成收盤，RETEST才可用額外20%（累計最多30%）。部分成交即占用該批，剩餘批額不得跨週重提；任何active pending先阻擋新增，推薦不冒充成交。
+5. 真RETEST成交後的FOLLOW需兩日止穩仍成立，且當輪精確雷達monthlyConfirmation=ABOVE、K>D，才可使用剩餘預算至累計100%；不要求5日線或3%反彈，沿原每日最多3張、每週四檔最多5張分批。confirmed核心補買、定期定額與pending共同扣同一wave預算；已成交FIRST／RETEST不得因換週、換consumer、重啟或policy hash改變而消失。尚無FIRST真成交或active pending時，創新低只更新同wave觀察低點並重算兩日，waveId與固定預算不變；FIRST真成交或掛單後，以該FIRST原始來源記錄的低點作固定保護線，完成日或盤中跌破則凍結後批，不自動新wave。
+6. pure evaluator只產技術事實、stage與含費預算上限；正式DIVIDEND_TOPUP必須實際呼叫並把該上限納入原五檔／費用／資金／配置sizing，不能只新增未採用helper。兩端採同一typed policy與neutral JSON fixtures；原已驗證API BLOCKED／0張不可由本機解封。最終仍只報告建議，不觸發交易。
+7. 既有生產topup-state、國泰帳戶／pending與風險等canonical來源尚未提供時維持局部BLOCKED，不能以新策略補造PASS。部署／hash註冊／離線正數fixture與自然排程正數採用分開回報；無新公開API、路由、排程、DB表、通知或券商寫入；BFF同步六個closed fact name及單位／型別，D218三檔正數leg需額外D218_STABILIZATION PASS收據、完整原topup來源refs與單一同symbol/TWD/EXACT的正budget值，amount+fees不得超過該值，歷史無D218規則維持原gate集合；僅擴充既有SrppReportFactDividendTopup的closed name enum與描述，最小同步consumer schema及三份Swagger。新增d218ObservedNoNewLowSessions(COUNT，獨立20完成日市場觀察)、d218Stabilized(BOOLEAN，wave-bound)、d218AnchorLow(TWD)、d218UsedBudget(TWD)、d218CumulativeFraction(RATIO)、d218BudgetCeiling(TWD)；後五項缺wave來源為null/UNAVAILABLE，預算授權仍0。
+8. 原雷達WAIT沒有可靠typed cause可證明僅等均線或止穩時，保留獨立方向阻擋並揭露RADAR_WAIT_CAUSE_NOT_VERIFIABLE；不得依自然語言reasons/risks猜測放行。FIRST/RETEST本身不另要求MA5、MA20或KD轉強，原非反向雷達與必要來源仍有效；不宣稱已建立技術WAIT豁免。
+9. 新增ASSET_MGMT_SRPP_V3／SRPP_FORMULA_MANIFEST_V3記錄D218公式scope與Java rule/module/sizing及SRPP pure腳本SHA-256，使用可重播generator產生fixture與runtime常數；原V1/V2 manifest與fixture完整bytes不變、歷史registry仍可驗證。current registration generator改用V3，checker/golden相依同步；V3沿用V2 nullable-deposit金融語意、原daily-context producer接受V3但不改時窗或副作用。舊row不得UPDATE/DELETE。BFF舊daily-context/orchestrated response validator需接受精確V3formulaVersion、formulaSetSha256與已審manifest（由同一generator同步resource），不靠version字串放行，V1/V2仍原精確bytes；srpp-simulator的受控runtime/baseBundle/catalog/provenance與新bundle同來源重產，避免設定頁仍綁舊bundle，無變更模型公式或新增設定。
+10. 同步SRPP D-218／v2.66.0 model與manifest原bytes，依既有工具產生authority、golden、policy document與insert-only registry SQL；雙專案feature commit、main no-ff merge／push及remote-ref驗證後，才正式registry、乾淨main重建/recreate business-services、bff、srpp-simulator三個實際變更服務，JAR位元組與精確hash業務API回讀。正式日報合法時窗未執行記NOT_YET_EXECUTED。

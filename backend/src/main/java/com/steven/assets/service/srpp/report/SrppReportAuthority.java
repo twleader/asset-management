@@ -39,6 +39,11 @@ public class SrppReportAuthority {
     public boolean matches(SupportedPolicy policy) {
         if (policy == null || !decision.policy().bundleHash().equals(policy.bundleHash())) return false;
         try {
+            if (model.path("execution_policy").has("high_dividend_stabilization_d218")
+                    && (!SrppFormulaCatalog.FORMULA_VERSION_V3.equals(policy.formulaVersion())
+                    || !SrppFormulaCatalog.formulaSetSha256(SrppFormulaCatalog.FORMULA_VERSION_V3).equals(policy.formulaSetSha256())
+                    || !SrppFormulaCatalog.manifestJcs(SrppFormulaCatalog.FORMULA_VERSION_V3)
+                            .equals(SrppJcs.canonicalize(policy.manifest())))) return false;
             JsonNode expected = SrppReportModuleCalculator.registryDocument(model);
             SrppPolicyDocument parsed = SrppPolicyDocument.parse(SrppJcs.canonicalize(expected));
             return SrppJcs.canonicalize(expected).equals(SrppJcs.canonicalize(policy.policyDocument())) && parsed.targets().equals(policy.targets());

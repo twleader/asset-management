@@ -87,7 +87,7 @@ public class SrppDailyContextProducerScheduler {
         String slot = slotFor(time);
 
         List<SupportedPolicy> policies = registry.supportedPolicies().stream()
-                .filter(policy -> SrppFormulaCatalog.FORMULA_VERSION_V2.equals(policy.formulaVersion()))
+                .filter(policy -> SrppFormulaCatalog.supportsNullableDepositRates(policy.formulaVersion()))
                 .toList();
         if (policies.isEmpty()) return;
 

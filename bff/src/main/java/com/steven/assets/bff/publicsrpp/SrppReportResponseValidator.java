@@ -23,7 +23,7 @@ final class SrppReportResponseValidator {
             java.util.Map.entry("CASH_INCOME", Set.of("stockGross","fundGross","depositGross","totalGross","nonSpendableInterest","spendableGross","taiwanIncomeTax","usWithholding","additionalBasicTax","supplementaryNhi","afterTaxCash","annualSettlement","spendableSgovGross","domesticDividend","domesticInterest","savingsInterest","otherDomesticIncome","overseasIncome","creditableForeignTax","nhiChargeableIncome","taxCalculation","annualTaxPrepayments")),
             java.util.Map.entry("PAYROLL_CASHFLOW", Set.of("grossSalary","withholding","voluntaryPension","takeHome","investableContribution","annualSettlement","paymentCount","payrollDetail","calendarYearPayroll","pensionReceipt")),
             java.util.Map.entry("BOND_D130_D195", Set.of()),
-            java.util.Map.entry("DIVIDEND_TOPUP", Set.of("referenceHigh","drawdownPct","tierLots","targetGap","normalizedGap","remainingDailyLots","remainingWeeklyLots")),
+            java.util.Map.entry("DIVIDEND_TOPUP", Set.of("referenceHigh","drawdownPct","tierLots","targetGap","normalizedGap","remainingDailyLots","remainingWeeklyLots","d218ObservedNoNewLowSessions","d218Stabilized","d218AnchorLow","d218UsedBudget","d218CumulativeFraction","d218BudgetCeiling")),
             java.util.Map.entry("CORE_SELL_GUARD", Set.of("highWater","pullbackPct","overheatHits","trendReversal","timingPass")),
             java.util.Map.entry("STRATEGIC_BUY_GATES", Set.of("position52w","high52w","low52w","overheatHits","averageExDividendClose","eligible","dcaExempt")),
             java.util.Map.entry("GLOBAL_EQUITY_PACE", Set.of("monthlyBaseline","monthlyCap","spent","remaining","previousShortfall","discretionaryBudget","remainingDayLots","remainingWeekLots","consecutiveShortfalls")),
@@ -128,6 +128,16 @@ final class SrppReportResponseValidator {
             for(JsonNode fact:data.get("facts")){
                 fact(fact);
                 if(!FACT_NAMES.get(id).contains(text(fact,"name")) || !factIdentities.add(text(fact,"name")+"\u0000"+fact.get("subject").toString()))fail();
+                if("DIVIDEND_TOPUP".equals(id)&&text(fact,"name").startsWith("d218")){
+                    String name=text(fact,"name"),unit=switch(name){case "d218ObservedNoNewLowSessions"->"COUNT";case "d218Stabilized"->"BOOLEAN";case "d218CumulativeFraction"->"RATIO";default->"TWD";};
+                    if(!unit.equals(text(fact,"unit")))fail();
+                    if(!fact.get("value").isNull()){
+                        BigDecimal value=new BigDecimal(fact.get("value").textValue());if(value.signum()<0)fail();
+                        if(name.equals("d218Stabilized")&&value.compareTo(BigDecimal.ZERO)!=0&&value.compareTo(BigDecimal.ONE)!=0)fail();
+                        if(name.equals("d218ObservedNoNewLowSessions")&&value.stripTrailingZeros().scale()>0)fail();
+                        if(name.equals("d218CumulativeFraction")&&value.compareTo(BigDecimal.ONE)>0)fail();
+                    }
+                }
                 if(index==0 && "UNAVAILABLE".equals(text(fact,"quality")))fail();
                 if(index==2 && !fact.get("value").isNull())fail();
             }
@@ -139,7 +149,7 @@ final class SrppReportResponseValidator {
                 }
                 if(!bondLegs.equals(Set.of("00697B:STRATEGIC_FUBON","00719B:STRATEGIC_FUBON","00865B:STRATEGIC_FUBON","00865B:EMERGENCY_CATHAY")))fail();
             }
-            for(JsonNode leg:data.get("legs")){leg(id,leg,sourceIds,verifiedSources);if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
+            for(JsonNode leg:data.get("legs")){leg(id,leg,sourceIds,verifiedSources,model);if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
         }
         JsonNode coverage=root.get("coverage");fields(coverage,"requestedCount","completeCount","partialCount","unavailableCount","notEvaluatedCount");
         if(integer(coverage,"requestedCount")!=12 || integer(coverage,"completeCount")!=counts[0]
@@ -148,7 +158,7 @@ final class SrppReportResponseValidator {
         sha(root,"contentSha256");ObjectNode projection=((ObjectNode)root).deepCopy();projection.remove("contentSha256");
         if(!text(root,"contentSha256").equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(projection))))fail();
     }
-    private static void leg(String moduleId,JsonNode leg,Set<String> sources,Set<String> verifiedSources){
+    private static void leg(String moduleId,JsonNode leg,Set<String> sources,Set<String> verifiedSources,JsonNode model){
         fields(leg,"symbol","market","broker","subaccount","strategy","status","action","lots","units","limitPrice","amount","currency","fees","netProfitSpace","rankingReason","blockingReasons","receipts");
         text(leg,"symbol");text(leg,"market");text(leg,"strategy");text(leg,"currency");
         for(String key:Set.of("broker","subaccount","rankingReason"))nullableText(leg,key);
@@ -195,8 +205,20 @@ final class SrppReportResponseValidator {
                 if(!gates.containsAll(required))fail();
             }
             if("DIVIDEND_TOPUP".equals(strategy)){
+                boolean d218=model.path("execution_policy").path("high_dividend_stabilization_d218").path("enabled").asBoolean()
+                        && Set.of("0056","00713","00878").contains(text(leg,"symbol"));
+                Set<String> required=new HashSet<>(TOPUP_RECEIPTS);if(d218)required.add("D218_STABILIZATION");
                 if(!"BUY".equals(action) || !"國泰證券".equals(text(leg,"broker"))
-                        || !"HIGH_DIVIDEND_TOPUP".equals(text(leg,"subaccount")) || !gates.equals(TOPUP_RECEIPTS))fail();
+                        || !"HIGH_DIVIDEND_TOPUP".equals(text(leg,"subaccount")) || !gates.equals(required))fail();
+                if(d218){
+                    JsonNode ceiling=null;
+                    for(JsonNode r:leg.get("receipts"))if("D218_STABILIZATION".equals(text(r,"ruleId"))){
+                        if(r.get("values").size()!=1)fail();ceiling=r.get("values").get(0);
+                    }
+                    if(ceiling==null || !"d218BudgetCeiling".equals(text(ceiling,"name")) || !text(leg,"symbol").equals(text(ceiling,"subject"))
+                            || !"TWD".equals(text(ceiling,"unit")) || !"EXACT".equals(text(ceiling,"quality")) || !positive(ceiling.get("value")))fail();
+                    if(new BigDecimal(leg.get("amount").textValue()).add(new BigDecimal(leg.get("fees").textValue())).compareTo(new BigDecimal(ceiling.get("value").textValue()))>0)fail();
+                }
                 Set<String> expectedRefs=Set.of("market:台股:"+text(leg,"symbol"),"assets","policy","ledger","topup-state","report-reservations","classifications");
                 for(JsonNode receipt:leg.get("receipts")){
                     Set<String> actualRefs=new HashSet<>();receipt.get("inputRefs").forEach(r->actualRefs.add(r.textValue()));

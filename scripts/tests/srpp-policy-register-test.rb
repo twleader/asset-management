@@ -67,6 +67,19 @@ class SrppPolicyRegisterTest < Minitest::Test
                  SrppPolicyRegister.jcs(value)
   end
 
+  def test_v3_requires_the_exact_source_bound_fixture_and_keeps_legacy_v2_digest
+    fixture = File.read(File.expand_path('../../spec/fixtures/srpp_formula_manifest_v3.json', __dir__)).strip
+    sql, _, digest = build(manifest: fixture)
+    assert_includes sql, "'ASSET_MGMT_SRPP_V3'"
+    assert_equal Digest::SHA256.hexdigest(fixture), digest
+    assert sql.end_with?('ON CONFLICT (policy_bundle_sha256) DO NOTHING;')
+    assert_raises(SrppPolicyRegister::Error) do
+      build(manifest: fixture.sub('DIVIDEND_TOPUP_D218_COMPLETED_TWO_SESSIONS_FIXED_WAVE_CUMULATIVE_BUDGET', 'OTHER_FORMULA'))
+    end
+    legacy = File.read(File.expand_path('../../spec/fixtures/srpp_formula_manifest_v2.json', __dir__)).strip
+    assert_equal '0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86', build(manifest: legacy)[2]
+  end
+
   def test_sql_literal_doubles_single_quotes
     sql, = build(policy: '{"schema":"SRPP_POLICY_DOCUMENT_V1","targets":{"CASH:TWD:o\'k":"0.1"}}')
     assert_includes sql, "CASH:TWD:o''k"

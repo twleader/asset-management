@@ -179,6 +179,9 @@ def check_release(srpp_root: Path) -> str:
     require_exact_bytes("EMBEDDED_MANIFEST", manifest_bytes, ROOT / MANIFEST_PATH)
     bundle = manifest["POLICY_BUNDLE_SHA256"]
     model = parse_json(model_bytes, "OFFICIAL_MODEL")
+    if isinstance(model, dict) and "high_dividend_stabilization_d218" in model.get("execution_policy", {}):
+        run_read_only([sys.executable, str(ROOT / "scripts/generate-srpp-formula-v3.py"),
+                       "--srpp-root", str(srpp_root), "--check"], ROOT, "FORMULA_V3_SOURCE_IDENTITY")
     verify_golden(srpp_root, bundle)
     verify_formal_and_registration(model, bundle)
     return bundle

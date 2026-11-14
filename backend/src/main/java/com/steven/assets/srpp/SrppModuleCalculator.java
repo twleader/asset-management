@@ -75,7 +75,7 @@ public final class SrppModuleCalculator {
         verifyIdentity(snapshot, live);
         verifyCurrencies(snapshot);
         Totals totals = totals(snapshot, live);
-        boolean v2 = SrppFormulaCatalog.FORMULA_VERSION_V2.equals(policy.formulaVersion());
+        boolean v2 = SrppFormulaCatalog.supportsNullableDepositRates(policy.formulaVersion());
 
         ObjectNode modules = F.objectNode();
         modules.set("assets", assetsModule(response, snapshot, live, totals, v2));

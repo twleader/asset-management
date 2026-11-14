@@ -129,6 +129,23 @@ class SrppDailyContextProducerSchedulerTest {
     }
 
     @Test
+    void v3UsesTheExistingTradingDaySlotAndOwnerGates() {
+        SupportedPolicy v3 = new SupportedPolicy(policy.bundleHash(), SrppFormulaCatalog.FORMULA_VERSION_V3,
+                policy.calculationPolicySha256(), SrppFormulaCatalog.formulaSetSha256(SrppFormulaCatalog.FORMULA_VERSION_V3),
+                policy.policyDocument(), SrppFormulaCatalog.manifest(SrppFormulaCatalog.FORMULA_VERSION_V3),
+                policy.targets(), policy.registeredAt());
+        openWithOwners(1L);
+        when(registry.supportedPolicies()).thenReturn(List.of(v3));
+        when(users.findByStatus(AppUser.STATUS_ACTIVE)).thenReturn(List.of(user(1, "ACTIVE")));
+        when(capture.capture(1L, v3, THURSDAY, "09:05"))
+                .thenReturn(new SrppCapture(1L, v3, THURSDAY, "09:05", SrppTestData.proposal().build(), "rev",
+                        java.time.Instant.EPOCH, List.of()));
+        at(THURSDAY, "10:00").produce();
+        verify(capture).capture(1L, v3, THURSDAY, "09:05");
+        verify(publisher).publish(any(), any());
+    }
+
+    @Test
     void oneOwnerFailureDoesNotAffectNextAndInactiveOwnersAreSkipped() {
         openWithOwners(3L, 1L, 2L, 4L);
         when(users.findByStatus(AppUser.STATUS_ACTIVE)).thenReturn(List.of(user(1, "ACTIVE"), user(2, "ACTIVE"),

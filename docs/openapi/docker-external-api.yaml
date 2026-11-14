@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.28.1
+  version: 1.28.2
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十七條精確 method/path pairs：
     二十三條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -5894,7 +5894,7 @@ components:
         name:
           type: string
           description: D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度；以下名稱按上述用途順序給出原始及衍生計算量；允許值：referenceHigh,
-            drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots。
+            drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots；D218新增d218ObservedNoNewLowSessions為前20完成日獨立觀察天數(COUNT)、d218Stabilized為wave止穩(BOOLEAN)、d218AnchorLow為配息調整後固定保護低點(TWD)、d218UsedBudget為已用含費預算(TWD)、d218CumulativeFraction為階段累計比率(RATIO)、d218BudgetCeiling為本次含費預算上限(TWD)。
           enum:
           - referenceHigh
           - drawdownPct
@@ -5903,6 +5903,12 @@ components:
           - normalizedGap
           - remainingDailyLots
           - remainingWeeklyLots
+          - d218ObservedNoNewLowSessions
+          - d218Stabilized
+          - d218AnchorLow
+          - d218UsedBudget
+          - d218CumulativeFraction
+          - d218BudgetCeiling
         subject:
           type:
           - string
@@ -5942,7 +5948,7 @@ components:
           - string
           - 'null'
           description: 品質缺口具名原因；UNAVAILABLE 必須非空；已核實值可 null；未知或不適用為 null。
-      description: D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度，每個 name 是該正式 scope
+      description: D143/D198/D189與D218高股息事實；d218ObservedNoNewLowSessions只為前20完成日市場觀察，不建立wave或授權預算；d218Stabilized與低點/預算須正式wave來源，缺失為null UNAVAILABLE。每個name是正式scope
         的欄位身份。
     SrppReportDataDividendTopup:
       type: object
@@ -15628,7 +15634,7 @@ components:
           description: 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。
         formulaVersion:
           type: string
-          description: 公式版本識別；舊固定包為 ASSET_MGMT_SRPP_V1，新發布固定包為 ASSET_MGMT_SRPP_V2。V2 manifest 的 JCS SHA-256 為 0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86。
+          description: 公式版本識別；歷史 ASSET_MGMT_SRPP_V1／ASSET_MGMT_SRPP_V2 的 manifest 與既有固定包保留。D218 採 ASSET_MGMT_SRPP_V3，增加 D218 公式及實作來源雜湊，nullable deposit 語意沿用 V2；V3 digest 由實際來源與 manifest 生成，不寫死為固定值。
           minLength: 1
         scope:
           type: string

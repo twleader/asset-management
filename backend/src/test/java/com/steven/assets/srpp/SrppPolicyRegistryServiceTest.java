@@ -95,4 +95,23 @@ class SrppPolicyRegistryServiceTest {
         assertThat(service.find(HASH).orElseThrow().formulaSetSha256())
                 .isEqualTo(SrppFormulaCatalogTest.GOLDEN_FORMULA_SET_SHA256);
     }
+
+    @Test
+    void v3SourceIdentityIsExactWhileHistoricalV1AndV2RowsRemainReadable() {
+        String v3 = SrppFormulaCatalog.FORMULA_VERSION_V3;
+        String v3Hash = "3".repeat(64);
+        when(repository.findById(v3Hash)).thenReturn(Optional.of(
+                entry(v3Hash, v3, POLICY, SrppFormulaCatalog.MANIFEST_JSON_V3)));
+        assertThat(service.find(v3Hash).orElseThrow().formulaSetSha256())
+                .isEqualTo(SrppFormulaCatalog.formulaSetSha256(v3));
+        String changed = SrppFormulaCatalog.MANIFEST_JSON_V3
+                .replace("DIVIDEND_TOPUP_D218_COMPLETED_TWO_SESSIONS_FIXED_WAVE_CUMULATIVE_BUDGET", "OTHER_FORMULA");
+        when(repository.findById(v3Hash)).thenReturn(Optional.of(entry(v3Hash, v3, POLICY, changed)));
+        assertThat(service.find(v3Hash)).isEmpty();
+        when(repository.findAll()).thenReturn(List.of(
+                entry(HASH, SrppFormulaCatalog.FORMULA_VERSION, POLICY, SrppFormulaCatalog.MANIFEST_JSON),
+                entry("2".repeat(64), SrppFormulaCatalog.FORMULA_VERSION_V2, POLICY, SrppFormulaCatalog.MANIFEST_JSON_V2),
+                entry(v3Hash, v3, POLICY, SrppFormulaCatalog.MANIFEST_JSON_V3)));
+        assertThat(service.supportedPolicies()).hasSize(3);
+    }
 }
