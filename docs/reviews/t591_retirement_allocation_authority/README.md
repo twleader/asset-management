@@ -1,19 +1,17 @@
-# Task 591 離線權威同步準備
+# Task 591 退休配置權威同步與發布
 
-D220，policy 2.68.0／model 3.24.0；最終凍結bundle `b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11`，已由主代理明確凍結。
+D220、policy 2.68.0／model 3.24.0，最終bundle `b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11`。
 
-VOO 20%、0050核心12%、00881核心6.53%、高股息13%/硬上限15%；股票56.53%、債券26.47%、現金17%。保留D219熊市15%首梯、Task589債券稅務與D218止穩。
+VOO20%、0050核心12%、00881核心6.53%、高股息13%/硬上限15%；股票56.53%、債券26.47%、現金17%。保留D219熊市15%首梯、Task589稅務與D218止穩。
 
-獨立本機Codex spec三輪：第1輪PASS；第2輪指出合成fixture漏兩個開關，已採納；第3輪PASS。獨立本機Codex架構審查第1輪PASS（0/0/0）。六類Java離線回歸61 tests無失敗，三組golden111/15/22與authority、runtime23檔、匯出worker import均通過。
+獨立本機Codex spec與架構各最多三輪，最終均PASS（0/0/0）；六類Java61測例、authority、golden111/15/22、runtime23檔與worker import通過。原無bridge合成fixture明示零bridge狀態及execution_fx_ratio=1.0，未改正式未知證據判定。正式Java演算法未變。
 
-Same-input與long-short golden只bundle hash差異；state-topup只有原始transition_ledger來源hash及三筆groupCap從12%至15%，金融expected輸出原樣。正式Java演算法無修改；D216兩個精確target+.5pp斷言更新，離線state fixture補明示無bridge四欄。
+程式feature620a8da0、main no-ff bac1bb67已推送並remote精確回讀。SRPP程式featurea5aa206b、main no-ff 5de629cd另由主代理驗證。insert-only registry新增b711，55→56筆，原row全文保持、新policy/formula全文吻合。
 
-VOO bridge仍為saved-evidence budget diagnostics，正式API既有BLOCKED/UNAVAILABLE/零量保持；未新增bridge正數量wire、route或執行能力。新配置可載入不代表bridge金融採用。
+從乾淨main與原.env重建/recreate business-services及srpp-simulator；兩新image/container健康，JAR五份authority與worker23檔逐位元相等，正式env/mounts及其他8容器保持。完整runtime/registry與sourceGit收據在release-20261114/。本次後續收尾只有文件與收據，不變更source/runtime bytes、不再重建服務。
 
-本階段沒有commit/merge/push、正式registry、部署、報告、交易或寄信；註冊SQL僅產物。完整發布待最終source凍結與主代理協調。
+SRPP host三GET連線PASS（365日曆、21TWSE日線、39報價）；精確hash report-calculations回409 NON_TRADING_DAY。calculation-context合法11:40 query回400是原service:105非交易日分支，並非slot矛盾，詳release-20261114/calculation-context-400-source.md。未改date/參數重試或解封。
 
-最新候選包含月頻runtime修正：USD DCA專款、alias隔離、滾動FX與D215直接VOO優先、跌深例外代理、共享cadence/資金及期限。已逐位元重新匯出並重跑authority/golden/runtime/import/Java；獨立架構第2輪審查中，原第1輪報告僅保留原版本證據。
+**正式金融採用：NOT_ESTABLISHED。** 當日2026-11-14為週六，沒有正式報告、POST、寄信或交易。bridge仍為saved-evidence預算診斷及明示月頻代理，未新增正式API正數量能力。退休財務目標是否達成由SRPP最終Monte Carlo報告判定；測試通過不等於達標。
 
-歷史5c2c候選已作廢；最新b711最終凍結來源已包含共用cap_direct_voo_purchase及三個入口修正、嚴格bridge ledger、專款釋放、FX-only與持有cap分離、執行/估值FX分離。已重新生成所有artifacts；第3輪獨立架構審查PASS（0/0/0），已重讀最終b711來源與三個直接VOO入口；舊PASS僅歷史證據。
-
-最終隔離state fixture另明示execution_fx_ratio=1.0與bridge_cash_released=0；沒有修改正式缺證據判斷。等待主代理最終蒙地卡羅數字驗收後才協調發布。
+歷史失效候選及複審原文保留供追溯；最終狀態以b711與本release收據為準。

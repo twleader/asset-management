@@ -1,0 +1,31 @@
+{
+  "timestampUtc": "2026-11-14T11:59:30.960906+00:00",
+  "healthy": true,
+  "states": {
+    "asset-business-services": "healthy",
+    "asset-srpp-simulator": "healthy"
+  },
+  "polls": [
+    {
+      "elapsed": 0.0203310419965419,
+      "states": {
+        "asset-business-services": "starting",
+        "asset-srpp-simulator": "starting"
+      }
+    },
+    {
+      "elapsed": 1.059724124999775,
+      "states": {
+        "asset-business-services": "starting",
+        "asset-srpp-simulator": "starting"
+      }
+    },
+    {
+      "elapsed": 2.0896575419974397,
+      "states": {
+        "asset-business-services": "healthy",
+        "asset-srpp-simulator": "healthy"
+      }
+    }
+  ]
+}

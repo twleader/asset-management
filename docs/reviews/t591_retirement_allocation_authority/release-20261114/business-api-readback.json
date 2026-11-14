@@ -1,0 +1,56 @@
+{
+  "purpose": "DEPLOYMENT_READ_ONLY_DIAGNOSTIC",
+  "method": "GET",
+  "expected_bundle": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "expected_swagger": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+  "trading_date": "2026-11-14",
+  "attempted_at": "2026-11-14T12:01:19.401823+00:00",
+  "formal_report_executed": false,
+  "financial_adoption": "NOT_ESTABLISHED",
+  "requests": [
+    {
+      "path": "/api/public/srpp/calculation-context",
+      "query": {
+        "tradingDate": "2026-11-14",
+        "slot": "11:40",
+        "policyBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11"
+      },
+      "http_status": 400,
+      "business_api_accepted_package": false,
+      "content_type": "application/problem+json",
+      "cache_control": "private, no-store",
+      "response": {
+        "type": "about:blank",
+        "title": "Invalid SRPP request",
+        "status": 400,
+        "detail": "查詢參數不合法，請修正後再試。",
+        "instance": "/api/public/srpp/calculation-context",
+        "code": "INVALID_REQUEST",
+        "retryable": false
+      }
+    },
+    {
+      "path": "/api/public/srpp/report-calculations",
+      "query": {
+        "consumer": "Codex",
+        "tradingDate": "2026-11-14",
+        "reportSlot": "12:00",
+        "policyBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+        "swaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0"
+      },
+      "http_status": 409,
+      "business_api_accepted_package": false,
+      "content_type": "application/problem+json",
+      "cache_control": "private, no-store",
+      "response": {
+        "type": "about:blank",
+        "title": "SRPP report calculations NON_TRADING_DAY",
+        "status": 409,
+        "detail": "指定日期不是交易日。",
+        "instance": "/api/public/srpp/report-calculations",
+        "code": "NON_TRADING_DAY",
+        "retryable": false
+      }
+    }
+  ]
+}
