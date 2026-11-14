@@ -1,0 +1,21 @@
+{
+  "bundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "sourceGitVerified": true,
+  "registryAppliedAndExactVerified": true,
+  "deployedAndExactBytesVerified": true,
+  "srppHostThreeGetConnectivity": "PASS",
+  "reportCalculationsReadback": {
+    "httpStatus": 409,
+    "code": "NON_TRADING_DAY",
+    "packageAccepted": false
+  },
+  "calculationContextReadback": {
+    "httpStatus": 400,
+    "code": "INVALID_REQUEST",
+    "sourceCause": "NON_TRADING_DAY_BRANCH",
+    "slotContractContradiction": false
+  },
+  "formalFinancialAdoption": "NOT_ESTABLISHED",
+  "bridgeApiPositiveQuantitySupport": false,
+  "docOnlyCloseoutRequiresRebuild": false
+}

@@ -1,0 +1,164 @@
+{
+  "stage": "DEPLOYED_STATIC_AND_SAFE_GET_VERIFIED",
+  "timestampUtc": "2026-11-14T12:00:18.447133+00:00",
+  "mainSha": "bac1bb67dbfd95c7fdf149af876bf42f9d6d4cff",
+  "bundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "modelSelection": "INHERITED_MAIN_MODEL_TERRA_ID_NOT_AVAILABLE",
+  "services": {
+    "business-services": {
+      "id": "e377d678f7dd497572169918c0a0a31166beddec76fbbf6d0b8c732838401f0b",
+      "image": "sha256:78a97e6c67fd88522bb287c71fc34d50fe1fa911c99c70db725b00c1c07662f1",
+      "containerUpdated": true,
+      "imageUpdated": true,
+      "healthy": true,
+      "environmentKeys": 47,
+      "fullEnvironmentUnchanged": true,
+      "composeEnvironmentMatches": true,
+      "bindMountsUnchanged": true,
+      "mountsSha256": "c25a5f5028e78c49f2728a6046cf2fbe9a5e0e7df18956ff9d8c264cd97fabc6",
+      "startedAt": "2026-11-14T11:59:19.91837568Z"
+    },
+    "srpp-simulator": {
+      "id": "863238bd41dc409861ca0a0a778ea82fe050f4eaf8892906ecdc754f5cd9f09b",
+      "image": "sha256:ba3d19b0e3bdf3833f7ca13d06bf7c2f4466463374ab28282ef9b197127fe2cd",
+      "containerUpdated": true,
+      "imageUpdated": true,
+      "healthy": true,
+      "environmentKeys": 2,
+      "fullEnvironmentUnchanged": true,
+      "composeEnvironmentMatches": true,
+      "bindMountsUnchanged": true,
+      "mountsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "startedAt": "2026-11-14T11:59:19.916520139Z"
+    }
+  },
+  "jar": {
+    "pathInContainer": "/app/app.jar",
+    "sha256": "165228c484fedc2255df0cc4b70a19f380cae670b9fab55544698e1ad818eb40",
+    "resources": {
+      "srpp/decision/model_inputs.json": {
+        "bytesEqual": true,
+        "sha256": "0e8a30a19cfeca49b5781a865e6ef0bbdb3be6c64f9d9d16b679d035d4899500",
+        "size": 239294
+      },
+      "srpp/decision/policy_manifest.json": {
+        "bytesEqual": true,
+        "sha256": "13d77e7507bfbd8ca76a308efc7272323d938ec1e52343f47f33b8c3a7037d78",
+        "size": 24153
+      },
+      "srpp/report/d201-registration.sql": {
+        "bytesEqual": true,
+        "sha256": "13952be1dbdc4912cf5854d508c9b1d12b436d8bd7aed2cf29c4d45fbbc28837",
+        "size": 2736
+      },
+      "srpp/9090-api-swagger.md": {
+        "bytesEqual": true,
+        "sha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+        "size": 1489514
+      },
+      "srpp/report/d201-policy-document.json": {
+        "bytesEqual": true,
+        "sha256": "449887063f7594c9d35652e1a64d12f7a7760499a9dc5895b2f849c81e2626da",
+        "size": 562
+      }
+    }
+  },
+  "worker": {
+    "runtimeFileCount": 23,
+    "allBytesEqual": true,
+    "filesSha256": {
+      "runtime-manifest.json": "c98644275c56817e3adb6744d3d18fd1453656a1f6da33391bc5b90a99ecf74a",
+      "assumptions/model_inputs.json": "0e8a30a19cfeca49b5781a865e6ef0bbdb3be6c64f9d9d16b679d035d4899500",
+      "assumptions/settings_catalog.json": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3",
+      "assumptions/policy_manifest.json": "13d77e7507bfbd8ca76a308efc7272323d938ec1e52343f47f33b8c3a7037d78",
+      "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
+      "scripts/settings_daily_rules.py": "fe6bfef8416326b4b5621df777feadb402988d8134d559a00ba3adad299513c3",
+      "scripts/monthly_engine.py": "61e17f94c72e37de6b2c9686970d5f397e5464056ee46739b01bd7ea3f582966",
+      "scripts/transition_ledger.py": "5760f96ee5c68e47a15fc44e62ef0c3dbfea6e2b86d9dbb8fb86081a908810d1",
+      "scripts/scenario_money.py": "933ade7fc5af788c8cb465a638557eb746501e481c5c8d12230ddd8bb4b6f7a2",
+      "scripts/bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
+      "scripts/settings_catalog.py": "5a0b5816e51400dad25195abc8d0071d05eb090a802ab4f41711789bcf204a12",
+      "scripts/scenario_tax.py": "e478deb6c77101161add96839d00ee529df5bb538a159e9d269df9da9b805e16",
+      "scripts/pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
+      "scripts/scenario_reserves.py": "6c7902e4d796180803cc00689f9ade4e5588139c29402b7b495fac61813d92f2",
+      "scripts/scenario_life.py": "1a043bcdf2bfced57738fe2a8dddc79ee2e23740b101bad348738a1d86887489",
+      "scripts/budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268",
+      "scripts/execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
+      "scripts/return_model.py": "29802801f034261236e7dffd7aaf7bd030ff4c24aaa3e61cc9cbcf9cf41c44b3",
+      "scripts/resident_income_tax.py": "0ce3c40e5ebd5d8506293748ab353dd7dd552f700fff81083d55c49f88c202b7",
+      "scripts/settings_worker.py": "cd78c06a60c458a0ec6ab04b3926a267f8b457bf9d9a39e167b83895bdf70ab8",
+      "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590",
+      "scripts/scenario_cashflow.py": "7abff8473546be2d06323d1afd497d796f66d609d829f404b790795b981b87a0",
+      "scripts/risk_rubric.py": "030810558674be4056ab8b0bb0afd9dfb3d8793a0b5dc53e771b36343484726d"
+    },
+    "health": {
+      "baseBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+      "status": "UP"
+    }
+  },
+  "bffSafeGetRecovered": true,
+  "bffHealth": {
+    "status": "UP",
+    "groups": [
+      "liveness",
+      "readiness"
+    ]
+  },
+  "unrelatedContainers": [
+    {
+      "service": "frontend",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "bff",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "external-materials-service",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "fubon-broker-service",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "api-gateway",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "yuanta-broker-service",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "postgres",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    },
+    {
+      "service": "redis",
+      "idUnchanged": true,
+      "imageUnchanged": true,
+      "startUnchanged": true
+    }
+  ],
+  "unrelatedCount": 8,
+  "envFileUnchanged": true,
+  "mainClean": true,
+  "imagesPinnedAtFinalRead": true,
+  "registrySqlExecutedByThisAgent": false,
+  "formalFinancialAdoption": "NOT_YET_EXECUTED",
+  "bridgeApiPositiveQuantitySupport": false
+}

@@ -1,0 +1,12 @@
+{
+  "route": "GET /api/public/market-index?market=TWSE&range=1m",
+  "recovered": true,
+  "attempts": [
+    {
+      "httpStatus": 200,
+      "jsonType": "dict",
+      "bodySha256": "f6f04a0bc02c3f3301a5b150672ee31fd6e98186e1b9c07a954a0b10e1edbab7",
+      "bytes": 2759
+    }
+  ]
+}

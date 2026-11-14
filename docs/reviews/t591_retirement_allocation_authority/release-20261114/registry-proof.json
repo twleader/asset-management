@@ -1,0 +1,17 @@
+{
+  "bundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "assetMain": "bac1bb67dbfd95c7fdf149af876bf42f9d6d4cff",
+  "insertOnlySqlSha256": "13952be1dbdc4912cf5854d508c9b1d12b436d8bd7aed2cf29c4d45fbbc28837",
+  "commandResult": "INSERT 0 1",
+  "rowsBefore": 55,
+  "rowsAfter": 56,
+  "beforeRowsSha256": "c8ab5cfce92e22a144c1407ee09e079334f02c3965446c26bb6bd30c1caf270b",
+  "afterRowsSha256": "b09f5007e0cebbc9c354874436f28a2ead4c6a9c12655a9248a5815104bc97df",
+  "oldRowsUnchanged": true,
+  "onlyPermittedNewBundle": true,
+  "formulaVersion": "ASSET_MGMT_SRPP_V3",
+  "formulaManifestEqual": true,
+  "policyDocumentEqual": true,
+  "registeredAt": "2026-11-14T19:57:38.768531+08:00",
+  "rowSha256": "388ed7dcf099712a3a147c56414c6b8bde7a4b46c9ce9e5e72b8c54cf3e1a694"
+}

@@ -1,0 +1,121 @@
+{
+  "stage": "PRE_BUILD",
+  "timestampUtc": "2026-11-14T11:58:46.983858+00:00",
+  "mainSha": "bac1bb67dbfd95c7fdf149af876bf42f9d6d4cff",
+  "project": "asset-management",
+  "envFileSha256": "46d60a5fba154a397729c3d13d6aeec624894e7e0b4b7ad101b7a4a8aea3a702",
+  "targets": {
+    "business-services": {
+      "environmentKeys": 47,
+      "environmentMatch": true,
+      "configuredEnvironmentSha256": "5fba3ae4808b3b72f6602e79fc5187332681693756555e477d7d8feb5fcda741",
+      "fullEnvironmentSha256": "8be312a380b72bf27df55d208992f6da2356973c625ae099be30acd2d5479f00",
+      "bindMountsMatch": true,
+      "mountsSha256": "c25a5f5028e78c49f2728a6046cf2fbe9a5e0e7df18956ff9d8c264cd97fabc6",
+      "id": "b95919686fa26aca2e62dc44b03c93e57a083fab3f73dca770edcf847e3d915f",
+      "image": "sha256:19e2aa813731dea68f783ea5f16563971ff34886b784c44e9f08e54cd705680f"
+    },
+    "srpp-simulator": {
+      "environmentKeys": 2,
+      "environmentMatch": true,
+      "configuredEnvironmentSha256": "90116afaedf7ef9ca51df7260afd28edeb5c00d38cae65efac20859630270e87",
+      "fullEnvironmentSha256": "519e3e8df614fb9d85b9e80ae8c4d1655ebb9618df1846b4d4244509733483d1",
+      "bindMountsMatch": true,
+      "mountsSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "id": "e4473097e25cbb147d80314988dc65d78ca2a57bc875b35ed6fcc2b680a3b417",
+      "image": "sha256:f2f4f3320bbe15a56b9d0f9f9c10d071e96fb7ac93f862068fdb10cc644c2592"
+    }
+  },
+  "containers": [
+    {
+      "name": "asset-frontend",
+      "service": "frontend",
+      "id": "a606b748716fb4386a9bf06c458f2a37d2694a5a46fbab5450781bc6642dc0d4",
+      "image": "sha256:3305b86d60a0e197d5ce27754f747f5bc83d8c7586b22cbee88539f3e8d86850",
+      "startedAt": "2026-11-14T09:57:47.717142471Z",
+      "health": null,
+      "state": "running"
+    },
+    {
+      "name": "asset-bff",
+      "service": "bff",
+      "id": "4c11e95a433dd62b080e518d7bdb65f47143185c4ae7238f64622f94d413d21a",
+      "image": "sha256:f5ecce73096a733ade50502302f403615851522663b9d9733716154d81f41cb6",
+      "startedAt": "2026-11-14T09:57:42.12078551Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-business-services",
+      "service": "business-services",
+      "id": "b95919686fa26aca2e62dc44b03c93e57a083fab3f73dca770edcf847e3d915f",
+      "image": "sha256:19e2aa813731dea68f783ea5f16563971ff34886b784c44e9f08e54cd705680f",
+      "startedAt": "2026-11-14T09:57:29.415094213Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-srpp-simulator",
+      "service": "srpp-simulator",
+      "id": "e4473097e25cbb147d80314988dc65d78ca2a57bc875b35ed6fcc2b680a3b417",
+      "image": "sha256:f2f4f3320bbe15a56b9d0f9f9c10d071e96fb7ac93f862068fdb10cc644c2592",
+      "startedAt": "2026-11-14T09:57:18.28303893Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-external-materials-service",
+      "service": "external-materials-service",
+      "id": "50db774a99e254b03760420a035ef83911721c3fcc18cdef1352b9da48471248",
+      "image": "sha256:0112abf8d73a2698d8bd839d73c95eeed260838d0ce9e235b7ee68133b1fdb46",
+      "startedAt": "2026-11-14T03:58:37.564495635Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-fubon-broker-service",
+      "service": "fubon-broker-service",
+      "id": "212964deefab659e64c7cdd173077a4efa30f212d1b3a3cb180fd8d5cf6e4bc0",
+      "image": "sha256:df04167022c321119e4e3836a5589581ef55c9cfce0a08485216ca2f8131b8e4",
+      "startedAt": "2026-11-13T19:37:11.721167459Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-api-gateway",
+      "service": "api-gateway",
+      "id": "aaab06740d9ad9b56469c6aea8d48712b77a1a673c48fbd7ed55dadcfb19c1e4",
+      "image": "sha256:c5bd2d2feecb096d6fb7ac65f6ca8afd045c060ea30854a97b43cb735063f5a6",
+      "startedAt": "2026-11-13T19:37:11.723363Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-yuanta-broker-service",
+      "service": "yuanta-broker-service",
+      "id": "c936a4131d00b5098d7ad17bd3df0b0b334c14c9e6c7c4c2ad8eee501155bf23",
+      "image": "sha256:33c2a9c8cfb1067c73ae245588f8cbf16259ca531101421ec3a27a89d293a2d5",
+      "startedAt": "2026-11-13T19:37:11.723652542Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-postgres",
+      "service": "postgres",
+      "id": "67320a18be6ca408ab811d74f62e9f1861b4447bfc953d6b18125f4da02ad930",
+      "image": "sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229",
+      "startedAt": "2026-11-13T19:37:11.730163792Z",
+      "health": "healthy",
+      "state": "running"
+    },
+    {
+      "name": "asset-redis",
+      "service": "redis",
+      "id": "d67df96cd49f31ba2c429b83394f36fe1b29ba35dff751206d21c5687058f68a",
+      "image": "sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6",
+      "startedAt": "2026-11-13T19:37:11.717370667Z",
+      "health": "healthy",
+      "state": "running"
+    }
+  ]
+}

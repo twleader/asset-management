@@ -1,0 +1,21 @@
+{
+  "featureBranch": "codex/srpp-d219-retirement-allocation",
+  "featureSha": "620a8da0465d766114e99e6a3e6b9d1cbfa7ab2a",
+  "mainMergeSha": "bac1bb67dbfd95c7fdf149af876bf42f9d6d4cff",
+  "parents": [
+    "d5ec1821c76cfcb9bcf78609ce7bc8c2563a953c",
+    "620a8da0465d766114e99e6a3e6b9d1cbfa7ab2a"
+  ],
+  "remoteRefs": {
+    "refs/heads/codex/srpp-d219-retirement-allocation": "620a8da0465d766114e99e6a3e6b9d1cbfa7ab2a",
+    "refs/heads/main": "bac1bb67dbfd95c7fdf149af876bf42f9d6d4cff"
+  },
+  "featureClean": true,
+  "mainClean": true,
+  "noFfMerge": true,
+  "priorMainPreserved": true,
+  "bundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "registrySqlExecuted": false,
+  "deploymentExecuted": false,
+  "verifiedAtUtc": "2026-11-14T11:57:03.117150+00:00"
+}
