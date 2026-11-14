@@ -1,0 +1,9 @@
+Run options: --seed 12233
+
+# Running:
+
+.....
+
+Finished in 2.918222s, 1.7134 runs/s, 225.1371 assertions/s.
+
+5 runs, 657 assertions, 0 failures, 0 errors, 0 skips

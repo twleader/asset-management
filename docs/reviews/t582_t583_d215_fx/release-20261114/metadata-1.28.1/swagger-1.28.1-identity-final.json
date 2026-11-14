@@ -1,0 +1,9 @@
+{
+  "policyBundleSha256": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f",
+  "swaggerSha256": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+  "manifestFileSha256": "8a9d7a276046a67370b66118a59794a6d3190b3b74029684781416056098900b",
+  "modelSha256": "a01ab388581fed8bbced524951f28caee1151b38c46679f9289c7383ad29c545",
+  "contractVersion": "1.28.1",
+  "sourceDeltaOnlyFourMetadataPaths": true,
+  "supersedesBundle": "1ae220819d750d7016175ea0e5e8f616ae2e7551cbdbe1c1ac15238a3c4bbbb0"
+}

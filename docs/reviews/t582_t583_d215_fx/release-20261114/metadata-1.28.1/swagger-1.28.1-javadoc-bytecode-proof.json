@@ -1,0 +1,7 @@
+{
+  "status": "PASS",
+  "sourceOnlyDiff": "same-line Javadoc one-year to two-year",
+  "beforeAfterClassBytesIdentical": true,
+  "classSha256": "1af5db4e93adbcccb99985e722e0ebdd83accfc2c7367f93285aff6655a3585a",
+  "bffRebuildNotRequired": true
+}

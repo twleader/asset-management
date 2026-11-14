@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.28.0` |
+| 契約版本 | `1.28.1` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -89,7 +89,7 @@
 | 2 | `GET` | `/api/quotes/one` | `getLatestQuote` | 查詢單一標的的快取報價與四頁籤公開市場資料 | 200 application/json: DetailedLatestQuote<br>204  |
 | 3 | `GET` | `/api/public/market-index` | `getPublicMarketIndex` | 取得大盤日線或當日分時圖表 | 200 application/json: MarketIndexResponse |
 | 4 | `GET` | `/api/assets/latest` | `getLatestAssets` | 取得指定帳號或預設主要管理者的最新完整資產 | 200 application/json: LatestAssetsResponse |
-| 5 | `GET` | `/api/public/exchange-rate/usd-twd` | `getPublicUsdTwd` | 取得 USD/TWD 即期與近一年歷史 | 200 application/json: UsdTwdResponse |
+| 5 | `GET` | `/api/public/exchange-rate/usd-twd` | `getPublicUsdTwd` | 取得 USD/TWD 即期與近兩年歷史 | 200 application/json: UsdTwdResponse |
 | 6 | `POST` | `/api/public/crawler-data/rescan` | `triggerPublicCrawlerRescan` | 免登入觸發爬蟲重新搜尋 | 200 application/json: CrawlerRescanResponse |
 | 7 | `GET` | `/api/public/market-analysis/today` | `getPublicMarketAnalysisToday` | 取得最近一筆今日股市分析 | 200 application/json: MarketAnalysisResponse |
 | 8 | `GET` | `/api/public/portfolio-advice/latest` | `getPublicPortfolioAdviceLatest` | 取得指定帳號或預設主要管理者的最新資產配置建議 | 200 application/json: PortfolioAdviceResponse |
@@ -1769,7 +1769,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
 
 ### 5. `GET /api/public/exchange-rate/usd-twd`
 
-以 Asia/Taipei 當日計算 inclusive 的 today.minusYears(1)..today；history 日期升冪且不重複，count 必須等於 history 長度，中間價以 HALF_UP 固定計算至小數 4 位。
+以 Asia/Taipei 當日計算 inclusive 的 today.minusYears(2)..today；history 日期升冪且不重複，count 必須等於 history 長度，中間價以 HALF_UP 固定計算至小數 4 位。
 
 #### 授權
 
@@ -1805,7 +1805,7 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
               "pair": "USD/TWD",
               "baseCurrency": "USD",
               "quoteCurrency": "TWD",
-              "requestedStartDate": "2025-01-15",
+              "requestedStartDate": "2024-01-15",
               "requestedEndDate": "2026-01-15",
               "refreshIntervalSeconds": 2,
               "timezone": "Asia/Taipei",
@@ -1823,17 +1823,33 @@ canonical quote 時才可填入同一份既有 top-level quote fields；不符�
               "count": 2,
               "history": [
                 {
-                  "date": "2025-01-15",
+                  "date": "2024-01-15",
                   "buyRate": 30.1,
                   "sellRate": 30.2,
-                  "midRate": 30.15
+                  "midRate": 30.15,
+                  "rateBasis": "UNKNOWN",
+                  "source": null,
+                  "sourceSha256": null,
+                  "sourceMemberSha256": null,
+                  "fetchedAt": null,
+                  "spotBasisVerified": false
                 },
                 {
                   "date": "2026-01-15",
                   "buyRate": 31.1,
                   "sellRate": 31.2,
-                  "midRate": 31.15
+                  "midRate": 31.15,
+                  "rateBasis": "UNKNOWN",
+                  "source": null,
+                  "sourceSha256": null,
+                  "sourceMemberSha256": null,
+                  "fetchedAt": null,
+                  "spotBasisVerified": false
                 }
+              ],
+              "historyBoundary": null,
+              "historySourceCaptures": [
+
               ]
             }
           }
