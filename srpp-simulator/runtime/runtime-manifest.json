@@ -1,0 +1,22 @@
+{
+  "baseBundleSha256": "2933483b0da751e03acbf2f56ac16f034b14de50f81fc8e46dd25fc07b75cd1c",
+  "files": {
+    "assumptions/model_inputs.json": "6d26483bcb530e26d8686bbaa565e805bfe137efa1d6db7a8671cedb796620aa",
+    "assumptions/policy_manifest.json": "a49cf9674b4de47ec8c69afd8e53e120180585a7cec086b2aa7bfe01acdf1503",
+    "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
+    "assumptions/settings_catalog.json": "c66ba38d9bb86f5a115a5b45ee0bc1feef42860472be5efbee6e03221aac263a",
+    "scripts/bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
+    "scripts/budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268",
+    "scripts/execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
+    "scripts/monthly_engine.py": "b9c711c8ca3aaf9bc8847b2456106fd271eb30851ec38a89ce19ddfc364695d0",
+    "scripts/pre_retirement_cashflow.py": "6bac89ae3df3180340b36b485c7dfcb16c763b329357d8e1368f54a000a5b34b",
+    "scripts/return_model.py": "29802801f034261236e7dffd7aaf7bd030ff4c24aaa3e61cc9cbcf9cf41c44b3",
+    "scripts/risk_rubric.py": "030810558674be4056ab8b0bb0afd9dfb3d8793a0b5dc53e771b36343484726d",
+    "scripts/scenario_cashflow.py": "7e067511640388329a84630109159634d52ed98287eef56a333f06a0a56db953",
+    "scripts/settings_catalog.py": "b83b57143dc1ea29b662d3cebe980161148e6c7c32a0645116f2b60b2ae66d98",
+    "scripts/settings_daily_rules.py": "fe6bfef8416326b4b5621df777feadb402988d8134d559a00ba3adad299513c3",
+    "scripts/settings_worker.py": "cd78c06a60c458a0ec6ab04b3926a267f8b457bf9d9a39e167b83895bdf70ab8",
+    "scripts/transition_ledger.py": "e01032aea964331841cc54aee5e7587061333225640bef178b7113cfbff511f5"
+  },
+  "schemaVersion": 1
+}

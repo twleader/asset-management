@@ -48,6 +48,11 @@ public final class RiskEvidenceEvaluator {
      * 這些情形必須先由服務層以 422 擋下，不可能抵達此處。
      */
     public static Assessment evaluate(List<CategoryInput> inputs) {
+        return evaluate(inputs,null);
+    }
+
+    /** V2 is explicit: no caller-provided score or mutable global can select thresholds. */
+    public static Assessment evaluate(List<CategoryInput> inputs,SrppRiskRubricV2 rubric) {
         if (inputs == null || inputs.size() != SrppRiskRubricV1.CATEGORY_CODES.size()) {
             throw new IllegalArgumentException("RISK_CATEGORY_COUNT");
         }
@@ -75,7 +80,7 @@ public final class RiskEvidenceEvaluator {
             total += result.score();
             if (result.assessed()) assessedCount++;
         }
-        return new Assessment(List.copyOf(results), total, assessedCount, classify(scores, assessedCount));
+        return new Assessment(List.copyOf(results), total, assessedCount, classify(scores, assessedCount,rubric));
     }
 
     private static CategoryResult category(CategoryInput input) {
@@ -93,6 +98,10 @@ public final class RiskEvidenceEvaluator {
      * → CAUTIOUS；其餘 NORMAL。package-private 供窮舉測試直接呼叫（經 {@link #evaluate} 造不出「有分數但已評數不足」）。
      */
     static RiskMode classify(int[] scores, int assessedCount) {
+        return classify(scores,assessedCount,null);
+    }
+
+    static RiskMode classify(int[] scores,int assessedCount,SrppRiskRubricV2 rubric) {
         if (scores == null || scores.length != SrppRiskRubricV1.CATEGORY_CODES.size()) {
             throw new IllegalArgumentException("RISK_SCORE_VECTOR");
         }
@@ -104,10 +113,10 @@ public final class RiskEvidenceEvaluator {
             total += score;
             if (score >= SrppRiskRubricV1.DEFENSIVE_CATEGORY_SCORE) categoryDefensive = true;
         }
-        if (categoryDefensive || total >= SrppRiskRubricV1.DEFENSIVE_TOTAL_SCORE
+        if (categoryDefensive || total >= (rubric==null?SrppRiskRubricV1.DEFENSIVE_TOTAL_SCORE:rubric.defensiveTotalScore())
                 || assessedCount < SrppRiskRubricV1.MINIMUM_EVALUATED_CATEGORIES) {
             return RiskMode.DEFENSIVE;
         }
-        return total >= SrppRiskRubricV1.CAUTIOUS_TOTAL_SCORE ? RiskMode.CAUTIOUS : RiskMode.NORMAL;
+        return total >= (rubric==null?SrppRiskRubricV1.CAUTIOUS_TOTAL_SCORE:rubric.cautiousTotalScore()) ? RiskMode.CAUTIOUS : RiskMode.NORMAL;
     }
 }

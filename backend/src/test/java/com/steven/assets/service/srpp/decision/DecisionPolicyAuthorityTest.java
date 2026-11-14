@@ -28,9 +28,10 @@ class DecisionPolicyAuthorityTest {
     void currentAuthorityAcceptsCurrentCandidateAndAllowsAdditionalReadOnlyRoutes() throws Exception {
         DecisionPolicyAuthority current = new DecisionPolicyAuthority();
         SrppReportAuthority authority = new SrppReportAuthority(current);
-        assertThat(authority.decision().policy().decision()).isEqualTo("D-214");
-        assertThat(authority.decision().policy().policyVersion()).isEqualTo("2.62.0");
-        assertThat(authority.decision().policy().modelVersion()).isEqualTo("3.22.0");
+        JsonNode published=MAPPER.readTree(authority.decision().manifestBytes());
+        assertThat(authority.decision().policy().decision()).isEqualTo(published.path("decision").asText());
+        assertThat(authority.decision().policy().policyVersion()).isEqualTo(published.path("policy_version").asText());
+        assertThat(authority.decision().policy().modelVersion()).isEqualTo(published.path("model_version").asText());
 
         ObjectNode model = currentModel();
         ((ArrayNode) orchestrated(model).get("read_only_routes")).add("/api/public/srpp/future-projection");

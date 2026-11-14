@@ -6930,3 +6930,18 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 5. 正目標核心的逐檔一般減碼與D-156最終賣出不得把該檔已核對核心份額賣到其目標以下；具名且驗真的必要風險退出、生活提款等既有授權例外，以及確認短線／美股戰術獨立退出依原分支。資產端`ROTATION_AND_REGIME_CAPACITY`目前只提供aggregate facts而無D-156可執行賣腿，不能把aggregate容量收據冒稱逐檔驗證；逐檔份額、最終股數與例外來源由SRPP確定性helper及report guard核對，缺拆分證據局部等待。
 6. 所有變更維持純計算與既有schema、端點、read-only broker邊界、排程及通知設定；D-174／D-211的1.5%回落與D值門檻不變。模型3.22.0保持原月頻代理，歷史結果不重標，日頻新保護未經樣本外績效驗證。
 7. 完成限定單元測試、Python／Java同輸入golden與authority一致性檢查，雙repo feature commit→main no-ff merge／push及精確remote refs後才insert-only registry、乾淨main rebuild／recreate必要服務，再從SRPP以新bundle hash讀回9090業務API。無合法交易時窗只記正式採用NOT_YET_EXECUTED，不手動啟動producer、報告、寄信或交易。
+
+
+## Requirement 208：SRPP 設定、雙模式情境模擬與正式規則發布（Task 585）
+
+### User Story
+作為管理者，我希望在資產配置建議頁載入 SRPP 的實際版本、調整退休、配置及可參數化的買賣／風險門檻，以不呼叫 AI 或呼叫 AI 解讀兩種模式比較結果，並透過可追蹤發布流程將已驗證草稿採用為正式規則。
+
+### Acceptance Criteria
+1. 頁面提供 SRPP 設定中心，顯示來源 bundle、model、catalog 身分與當前值；原配置建議及個人理財條件保留為既有功能，不將其固定報酬逐年試算誤稱完整 SRPP 模型。catalog 由 SRPP 維護、同步為資產端唯讀產物；欄位含 id、台灣繁體中文 label/group/unit、type、bounds、default/current value、simulationSupported、formalSupported、impact 與限制說明。有限欄位涵退休日期／終點年齡、分齡生活費／長照、大額支出、通膨、既有標的配置、股票部位上下界、債券買價回撤／溢價／每日每週額度與 KD 買賣門檻。六項風險類別／上限與交易禁止邊界維持唯讀；總分審慎／防禦門檻以新 V2 model-driven rubric 正式可調，保留 V1 原樣；新增公式不藉任意 JSON/code 輸入執行。
+2. 已登入使用者僅能讀寫自己的草稿、模擬及發布請求；全域正式發布限 ADMIN，BFF 與 business 皆檢查。ID 不作授權，依 owner 查詢；無身份拒絕。草稿名長度 1..100，值必須符合 catalog 白名單／型別／範圍及跨欄位一致性；配置鍵限既有標的、非負有限數、合計為 1。revision CAS 拒絕覆蓋較新修改，base bundle 漂移不得發布。
+3. 每次模擬凍結 owner 最新資產來源及 as-of、完整設定、revision、bundle/model/catalog/config/input hashes、seed、path count 與引擎版本。baseline 與 scenario 使用同一輸入及相同亂數；回傳成功率／資產分位路徑／資金缺口等實際可算結果及模型限制。未被退休模型表示的日頻門檻明示 NOT_MODELED，以獨立規則預覽呈現其改動，不編造退休成功率效果。必要資產／來源缺漏回具名 unavailable/failed，不取另一owner、不用過期快取假裝本輪資料、不手動重跑正式報告。
+4. 模式僅 LOCAL／AI。LOCAL 完全不建立 AI client、不檢查 AI key、不發 AI 或網路搜尋請求；兩模式共用同一 deterministic result。AI 僅解讀凍結結果，沿既有模型設定與 SDK，不修改計算數值、規則或發動發布。AI 缺 key／失敗須明示並保留可驗證計算結果；不得把本機文字冒充 AI。耗時計算經有界背景工作與 timeout，前端可查進度，重啟中斷可辨識。
+5. 儲存、模擬與正式發布是不同動作。發布須綁當下成功模擬的 draft revision/config hash，產生不可變 PENDING_RELEASE 請求及可下載的封閉 payload（包含 base bundle/model/catalog/config/result/request hashes），可重複讀取且不得由瀏覽器宣稱 ACTIVE。Unsupported formal changes 具名拒絕。頁面顯示正式與草稿差異及限制。
+6. 受控 host CLI 驗證 request 身分、白名單／型別／base bundle、原始來源乾淨及 managed feature worktree，產生確定性的來源變更和發布收據；不給 business 容器 Docker socket、Git 憑證或任意 shell/code 執行。正式採用沿雙 repo 規則／runtime／manifest／authority／golden／insert-only registry／no-ff Git／部署流程，驗證不通過就保持待發布。ACTIVE 只能由部署內嵌收據與目前 bundle/model/config、registry exact row 及 authority 全部相符推導，歷史發布不得隨便再稱現行。此次功能部署保留現有投資數值，不能為示範任意改正式投資決策。
+7. 實作需有獨立 spec/arch 審查、owner／ADMIN／CAS／hash／invalid field／stale run／LOCAL 零 AI／AI failure／release receipt／canonical 模型測試與前端 build；部署重建並 recreate 必要服務，實際操作新 API 與畫面。DB 增量需冪等、同步 schema.sql；riskMode 文字契約與新門檻同步且走完整renderer／identity／registry發布鏈；本中心只用登入 BFF，不新增公網／9090 路由、不改排程／寄信／券商狀態。

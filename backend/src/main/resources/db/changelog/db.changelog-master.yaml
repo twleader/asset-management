@@ -531,3 +531,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.165.0-usd-fx-source-capture.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.166.0-srpp-settings-simulation.sql
+      relativeToChangelogFile: false

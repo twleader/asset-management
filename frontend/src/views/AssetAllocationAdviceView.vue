@@ -1,5 +1,11 @@
 <template>
-  <div v-loading="loading" :element-loading-text="generating ? '配置建議產生中…' : '載入中…'">
+  <div class="advice-page">
+    <el-tabs v-model="activeCenterTab" class="advice-tabs">
+      <el-tab-pane label="SRPP 設定模擬中心" name="srpp">
+        <SrppSettingsCenter />
+      </el-tab-pane>
+      <el-tab-pane label="原資產配置建議" name="legacy" lazy>
+        <div v-loading="loading" :element-loading-text="generating ? '配置建議產生中…' : '載入中…'">
     <!-- 頂列：標題 + （管理者）成本設定 -->
     <div class="header-row">
       <div>
@@ -470,6 +476,9 @@
         </el-table-column>
       </el-table>
     </el-card>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -478,6 +487,7 @@ import { MagicStick, Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bffApi } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
+import SrppSettingsCenter from '@/components/SrppSettingsCenter.vue'
 import { LOCAL_HYBRID_TEMPLATE_NOTICE, portfolioAdviceEngineNotice } from '@/utils/portfolioAdviceEngineNotice'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -488,6 +498,8 @@ import VChart from 'vue-echarts'
 use([CanvasRenderer, LineChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, MarkLineComponent, MarkPointComponent])
 
 const auth = useAuthStore()
+const activeCenterTab = ref('srpp')
+let legacyLoaded = false
 const loading = ref(false)
 const generating = ref(false)
 const savingProfile = ref(false)
@@ -925,13 +937,23 @@ let pollTimer = null
 function stopPoll() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
-watch(() => latest.value && latest.value.status, (status) => {
-  if (status === 'PROCESSING') {
+watch([() => latest.value && latest.value.status, activeCenterTab], ([status, tab]) => {
+  if (status === 'PROCESSING' && tab === 'legacy') {
     if (!pollTimer) pollTimer = setInterval(() => load(true), 5000)
   } else {
     stopPoll()
   }
 })
+
+async function ensureLegacyLoaded() {
+  if (legacyLoaded) return
+  legacyLoaded = true
+  try {
+    await load()
+  } catch (_) {
+    legacyLoaded = false
+  }
+}
 
 // 管理者切換分析引擎（local／hybrid／llm）→ 持久化，下次產生生效。失敗還原。
 async function onEngineChange(engine) {
@@ -990,11 +1012,22 @@ function syncSettingSelects(res) {
   selectedWebSearch.value = res.webSearchMaxUses ?? null
 }
 
-onMounted(() => load())
+watch(activeCenterTab, tab => {
+  if (tab === 'legacy') ensureLegacyLoaded()
+  else stopPoll()
+})
+
+onMounted(() => {
+  if (activeCenterTab.value === 'legacy') ensureLegacyLoaded()
+})
 onUnmounted(stopPoll)
 </script>
 
 <style scoped>
+.advice-tabs { margin-top: 4px; }
+.advice-tabs :deep(.el-tabs__content) { overflow: visible; }
+.advice-tabs :deep(.el-tab-pane) { min-width: 0; }
+.advice-page { min-width: 0; }
 .header-row {
   display: flex;
   align-items: flex-start;
