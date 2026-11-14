@@ -55,3 +55,16 @@ Draft存changes_json為當初baseline差異稽核snapshot（fieldId/label/before
 期初即時名目資產除 `reference_price_level(asOfDate,refInfl)` 轉 2026-08-31 實質元，此期初換算兩情境相同，不因修改未來通膨重寫過去物價。其後 price level 逐期依情境 CPI 複利；名目薪資／年金／勞退入帳時只除該期 price level 一次；政策標為 2026-08 實質的生活費／大額支出不重複膨脹。
 創新值沿 CalendarMarketPath 依 seed/曆年/月份固定，每月同一 draw 以 log interpolation 分配月內事件，修改退休或入帳日期不重抽整條市場路徑。
 固定 innovation golden 應核對漂移、t 正規化、CPI/FX 各一次；zero-volatility 測試核對同一路徑逐期精確現金流，並證明波動改變重算 a_e。
+
+## 正式部署驗收修正（2026-11-14）
+
+首次正式 HTTP 驗收發現：未帶使用者身分的中心請求被全域 `Exception.class` handler 攔成 500，未保留原訂 401。原因是本中心的具名例外 advice 未宣告優先序；補上 `Ordered.HIGHEST_PRECEDENCE`，僅優先處理本 controller 的 `SrppSettingsProblem`，其他未預期錯誤仍沿全域 500 處理，未更動既有 API 契約、正式規則、Swagger、authority 或 bundle 身分。
+
+新增 `SrppSettingsAdviceWebMvcTest`，以真正 MVC application context 同時註冊本中心與全域 advice，驗證 401／403／409 的狀態、code、message，以及未預期例外仍為 500。修正前四項測試有三項失敗（原訂 401／403／409 皆得到 500），修正後四項全過；完整 settings 範圍 28 項測試全過、零失敗／錯誤／跳過。
+
+```bash
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true -Dtest=SrppSettingsAdviceWebMvcTest test
+/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn -q -f backend/pom.xml -DextraArgLine=-Dnet.bytebuddy.experimental=true '-Dtest=SrppSettings*Test' test
+```
+
+修正前後紀錄：`/tmp/srpp-settings-live-advice-before.log`、`/tmp/srpp-settings-live-advice-after.log`。本修正仍須完成獨立架構複查、Git 落地與正式映像重建後，再重新執行實際 HTTP 驗收；單元／MVC 測試不能代替正式部署採用證據。
