@@ -108,8 +108,24 @@ public class TradingRadarMarketContextService {
                 null, null, null, null, null, null, null, null, false, false);
     }
 
-    public record FxContext(BigDecimal percentile, LocalDate asOfDate) {
+    public record FxContext(BigDecimal percentile, LocalDate asOfDate, UsdFxPurchaseContext.MarketData usdPurchaseData) {
+        public FxContext(BigDecimal percentile, LocalDate asOfDate) {
+            this(percentile, asOfDate, UsdFxPurchaseContext.MarketData.unavailable("NOT_EVALUATED"));
+        }
         public static final FxContext EMPTY = new FxContext(null, null);
+    }
+    private UsdTwdLiveRateService usdTwdLiveRateService;
+    @org.springframework.beans.factory.annotation.Autowired
+    void setUsdTwdLiveRateService(UsdTwdLiveRateService service) { this.usdTwdLiveRateService = service; }
+
+    private FxContext withLiveUsd(FxContext context, String currency, Instant instant,
+                                   LocalDate completed, List<ExchangeRateHistory> rows) {
+        if (!"USD".equals(currency)) return context;
+        UsdTwdLiveRateService.LiveRate rate = null;
+        try { if (usdTwdLiveRateService != null) rate = usdTwdLiveRateService.getCachedLiveRate(); }
+        catch (RuntimeException unavailable) { /* This symbol waits; never refresh or use a history fallback. */ }
+        return new FxContext(context.percentile(), context.asOfDate(),
+                UsdFxPurchaseContext.live(rate, instant, completed, rows, null));
     }
 
     /**
@@ -343,7 +359,7 @@ public class TradingRadarMarketContextService {
                 us.nasdaqChange(), us.soxChange(), us.composite(), us.asOfDate(), us.available(), true);
     }
 
-    /** Production 匯率入口；只查目標日往前五年，無精確有效目標列就 fail closed。 */
+    /** Production 匯率入口；批次讀到時鐘完成日，舊五年分數仍只使用台股目標日以前的列。 */
     public FxContext resolveFx(String currency, Instant decisionInstant) {
         if (currency == null || currency.isBlank() || decisionInstant == null) return FxContext.EMPTY;
         LocalDate target = fxTargetDate(decisionInstant);
@@ -351,8 +367,10 @@ public class TradingRadarMarketContextService {
         try {
             List<ExchangeRateHistory> rows = exchangeRateRepo
                     .findByCurrencyAndRateDateBetweenOrderByRateDateAsc(
-                            currency.trim().toUpperCase(), target.minusYears(FX_LOOKBACK_YEARS), target);
-            return resolveFxFromRows(currency, decisionInstant, rows);
+                            currency.trim().toUpperCase(), target.minusYears(FX_LOOKBACK_YEARS),
+                            UsdFxPurchaseContext.completedClockCutoff(decisionInstant));
+            return withLiveUsd(resolveFxFromRowsAtTarget(currency, target, decisionInstant, rows),
+                    currency.trim().toUpperCase(), decisionInstant, target, rows);
         } catch (Exception e) {
             log.warn("交易雷達匯率脈絡讀取失敗（{}）：{}", currency, e.toString());
             return FxContext.EMPTY;
@@ -376,7 +394,8 @@ public class TradingRadarMarketContextService {
         try {
             List<ExchangeRateHistory> rows = exchangeRateRepo
                     .findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(
-                            currencies, target.minusYears(FX_LOOKBACK_YEARS), target);
+                            currencies, target.minusYears(FX_LOOKBACK_YEARS),
+                            UsdFxPurchaseContext.completedClockCutoff(decisionInstant));
             Map<String, List<ExchangeRateHistory>> byCurrency = new HashMap<>();
             if (rows != null) for (ExchangeRateHistory row : rows) {
                 if (row == null || row.getCurrency() == null) continue;
@@ -385,8 +404,9 @@ public class TradingRadarMarketContextService {
             }
             Map<String, FxContext> out = new HashMap<>();
             for (String currency : currencies) {
-                out.put(currency, resolveFxFromRows(currency, decisionInstant,
-                        byCurrency.getOrDefault(currency, List.of())));
+                List<ExchangeRateHistory> currencyRows = byCurrency.getOrDefault(currency, List.of());
+                out.put(currency, withLiveUsd(resolveFxFromRowsAtTarget(currency, target, decisionInstant, currencyRows),
+                        currency, decisionInstant, target, currencyRows));
             }
             return Map.copyOf(out);
         } catch (Exception e) {
@@ -412,7 +432,8 @@ public class TradingRadarMarketContextService {
         try {
             List<ExchangeRateHistory> rows = exchangeRateRepo
                     .findByCurrencyInAndRateDateBetweenOrderByCurrencyAscRateDateAsc(
-                            currencies, target.minusYears(FX_LOOKBACK_YEARS), target);
+                            currencies, target.minusYears(FX_LOOKBACK_YEARS),
+                            UsdFxPurchaseContext.completedClockCutoff(decisionInstant));
             Map<String, List<ExchangeRateHistory>> byCurrency = new HashMap<>();
             if (rows != null) for (ExchangeRateHistory row : rows) {
                 if (row == null || row.getCurrency() == null) continue;
@@ -421,8 +442,9 @@ public class TradingRadarMarketContextService {
             }
             Map<String, FxContext> out = new HashMap<>();
             for (String currency : currencies) {
-                out.put(currency, resolveFxFromRowsAtTarget(currency, target,
-                        byCurrency.getOrDefault(currency, List.of())));
+                List<ExchangeRateHistory> currencyRows = byCurrency.getOrDefault(currency, List.of());
+                out.put(currency, withLiveUsd(resolveFxFromRowsAtTarget(currency, target, decisionInstant, currencyRows),
+                        currency, decisionInstant, target, currencyRows));
             }
             return Map.copyOf(out);
         } catch (Exception e) {
@@ -439,7 +461,7 @@ public class TradingRadarMarketContextService {
         if (currency == null || currency.isBlank() || decisionInstant == null) return FxContext.EMPTY;
         LocalDate target = fxTargetDate(decisionInstant);
         if (target == null) return FxContext.EMPTY;
-        return resolveFxFromRowsAtTarget(currency, target, suppliedRows);
+        return resolveFxFromRowsAtTarget(currency, target, decisionInstant, suppliedRows);
     }
 
     /**
@@ -452,11 +474,11 @@ public class TradingRadarMarketContextService {
         if (currency == null || currency.isBlank() || decisionInstant == null) return FxContext.EMPTY;
         LocalDate target = fxTargetDate(decisionInstant, requestScopedCache);
         if (target == null) return FxContext.EMPTY;
-        return resolveFxFromRowsAtTarget(currency, target, suppliedRows);
+        return resolveFxFromRowsAtTarget(currency, target, decisionInstant, suppliedRows);
     }
 
     private FxContext resolveFxFromRowsAtTarget(
-            String currency, LocalDate target, List<ExchangeRateHistory> suppliedRows) {
+            String currency, LocalDate target, Instant decisionInstant, List<ExchangeRateHistory> suppliedRows) {
         if (currency == null || currency.isBlank() || target == null) return FxContext.EMPTY;
         LocalDate lower = target.minusYears(FX_LOOKBACK_YEARS);
         String normalizedCurrency = currency.trim().toUpperCase();
@@ -470,7 +492,10 @@ public class TradingRadarMarketContextService {
                 .filter(r -> target.equals(r.getRateDate()))
                 .reduce((first, second) -> second)
                 .orElse(null);
-        if (exact == null || valid.size() < FX_MIN_SAMPLES) return FxContext.EMPTY;
+        UsdFxPurchaseContext.MarketData purchaseData = "USD".equals(normalizedCurrency)
+                ? UsdFxPurchaseContext.historical(suppliedRows, decisionInstant, target)
+                : UsdFxPurchaseContext.MarketData.unavailable("NOT_APPLICABLE");
+        if (exact == null || valid.size() < FX_MIN_SAMPLES) return new FxContext(null, null, purchaseData);
 
         BigDecimal reference = midRate(exact);
         long atOrBelow = valid.stream()
@@ -479,7 +504,7 @@ public class TradingRadarMarketContextService {
                 .count();
         BigDecimal percentile = BigDecimal.valueOf(100.0 * atOrBelow / valid.size())
                 .setScale(2, RoundingMode.HALF_UP);
-        return new FxContext(percentile, target);
+        return new FxContext(percentile, target, purchaseData);
     }
 
     /**

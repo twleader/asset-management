@@ -925,7 +925,7 @@ class BacktestServiceTest {
     @Test
     @DisplayName("Task 292／341／356／360／382 回測與 production 共用 TW_RULES_V25")
     void ruleVersionIsV18() {
-        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V27");
+        assertThat(TradingRadarRuleEngine.RULE_VERSION).isEqualTo("TW_RULES_V28");
     }
 
     @Test
@@ -938,7 +938,7 @@ class BacktestServiceTest {
                 List.of(CODE), null, null, List.of(1), null, null));
 
         assertThat(response.v13()).isNull();
-        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V27");
+        assertThat(response.ruleVersion()).isEqualTo("TW_RULES_V28");
         assertThat(response.results()).isNotEmpty();
     }
 
@@ -954,7 +954,7 @@ class BacktestServiceTest {
 
         assertThat(response.v13()).isNotNull();
         BacktestDto.V13Report v13 = response.v13();
-        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V27");
+        assertThat(v13.productionRuleVersion()).isEqualTo("TW_RULES_V28");
         assertThat(v13.productionPromoted()).isFalse();
         assertThat(v13.universeMode()).isEqualTo(BacktestDto.UniverseMode.BOUNDED_DIAGNOSTIC);
         assertThat(v13.promotedCandidateCount()).isZero();
@@ -1575,8 +1575,14 @@ class BacktestServiceTest {
                 assertThat(input.marketRegime()).isEqualTo(TradingRadarRuleEngine.MarketRegime.RISK_OFF);
                 assertThat(input.completedChangePercent()).isNegative();
                 assertThat(input.ma60Confirmation()).isEqualTo(TradingRadarRuleEngine.Confirmation.BELOW);
-                assertThat(engine.evaluateStock(input).action()).isEqualTo(input.held()
-                        ? TradingRadarRuleEngine.Action.ADD_CANDIDATE : TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+                var result = engine.evaluateStock(input);
+                if (input.usdFxPurchase().applies() && input.usdFxPurchase().preference() == UsdFxPurchaseContext.Preference.UNKNOWN) {
+                    assertThat(result.action()).isNotIn(TradingRadarRuleEngine.Action.BUY_CANDIDATE, TradingRadarRuleEngine.Action.ADD_CANDIDATE);
+                    assertThat(result.risks()).anyMatch(reason -> reason.contains("匯率證據未核實"));
+                } else {
+                    assertThat(result.action()).isEqualTo(input.held()
+                            ? TradingRadarRuleEngine.Action.ADD_CANDIDATE : TradingRadarRuleEngine.Action.BUY_CANDIDATE);
+                }
             });
         }
     }

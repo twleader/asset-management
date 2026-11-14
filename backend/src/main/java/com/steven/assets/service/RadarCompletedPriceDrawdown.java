@@ -36,6 +36,17 @@ public final class RadarCompletedPriceDrawdown {
                     && !highDate.isBefore(windowStart) && !highDate.isAfter(completedAsOfDate)
                     && referencePrice.multiply(HUNDRED).compareTo(high.multiply(HUNDRED.subtract(threshold))) <= 0;
         }
+        public boolean validPriceFact(String code, String expectedMarket, BigDecimal price) {
+            return status == Status.AVAILABLE && code != null && code.equals(stockCode)
+                    && expectedMarket != null && expectedMarket.equals(market)
+                    && high != null && high.signum() > 0 && referencePrice != null && referencePrice.signum() > 0
+                    && price != null && price.signum() > 0 && price.compareTo(referencePrice) == 0
+                    && ("台股".equals(market) && priceBasis == PriceBasis.TW_SPLIT_STOCK_PRICE
+                        || "美股".equals(market) && priceBasis == PriceBasis.STORED_PRICE_ONLY)
+                    && windowStart != null && completedAsOfDate != null && highDate != null
+                    && windowStart.equals(completedAsOfDate.minusWeeks(52))
+                    && !highDate.isBefore(windowStart) && !highDate.isAfter(completedAsOfDate);
+        }
         public BigDecimal drawdownPercent() {
             return high == null || high.signum() <= 0 || referencePrice == null ? null
                     : high.subtract(referencePrice).multiply(HUNDRED).divide(high, MathContext.DECIMAL128);
@@ -58,7 +69,7 @@ public final class RadarCompletedPriceDrawdown {
     public static Context evaluate(String code, String market, List<StockPriceHistory> priceRowsDesc,
                                    int firstCompleted, BigDecimal price, PriceBasis basis,
                                    Set<LocalDate> droppedDates, boolean droppedUndated) {
-        if (!selected(code, market)) return Context.NOT_EVALUATED;
+        if (code == null || !("台股".equals(market) || "美股".equals(market))) return Context.NOT_EVALUATED;
         if (priceRowsDesc == null || firstCompleted < 0 || firstCompleted >= priceRowsDesc.size()
                 || price == null || price.signum() <= 0 || basis == null)
             return Context.unavailable(code, market, "PRICE_WINDOW_UNAVAILABLE");

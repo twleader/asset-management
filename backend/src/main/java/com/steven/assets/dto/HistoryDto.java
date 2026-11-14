@@ -30,10 +30,20 @@ public final class HistoryDto {
             BigDecimal buyRate,
             BigDecimal sellRate,
             BigDecimal midRate,
-            BigDecimal fundValuationRate
+            BigDecimal fundValuationRate,
+            String rateBasis,
+            String source,
+            String sourceSha256,
+            String sourceMemberSha256,
+            String sourceUrl,
+            Instant fetchedAt,
+            boolean spotBasisVerified
     ) {
+        public ExchangeRateHistory(Long id,String currency,LocalDate day,BigDecimal buy,BigDecimal sell,BigDecimal mid,BigDecimal valuation) {
+            this(id,currency,day,buy,sell,mid,valuation,"UNKNOWN",null,null,null,null,null,false);
+        }
         public static ExchangeRateHistory from(com.steven.assets.model.ExchangeRateHistory row) {
-            return new ExchangeRateHistory(row.getId(), row.getCurrency(), row.getRateDate(), row.getBuyRate(), row.getSellRate(), row.getMidRate(), row.getFundValuationRate());
+            return new ExchangeRateHistory(row.getId(), row.getCurrency(), row.getRateDate(), row.getBuyRate(), row.getSellRate(), row.getMidRate(), row.getFundValuationRate(),row.getRateBasis(),row.getSource(),row.getSourceSha256(),row.getSourceMemberSha256(),row.getSourceUrl(),row.getFetchedAt(),row.isSpotBasisVerified());
         }
     }
     public record CommodityPriceHistory(

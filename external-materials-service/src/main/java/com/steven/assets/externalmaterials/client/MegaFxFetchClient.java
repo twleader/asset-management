@@ -67,7 +67,7 @@ public class MegaFxFetchClient {
                     log.warn("兆豐銀行 {} 缺少有效 update timestamp", currency);
                     return Optional.empty();
                 }
-                return Optional.of(new FxSpotQuote(bid, ask, sourceUpdatedAt));
+                return Optional.of(new FxSpotQuote(bid, ask, sourceUpdatedAt, "USD".equals(currency) ? new FxSourceEvidence("MEGA_BANK", RATE_URL, body, java.time.Instant.now()) : null));
             }
             log.warn("兆豐銀行 API 找不到 {} 的匯率資料", currency);
             return Optional.empty();

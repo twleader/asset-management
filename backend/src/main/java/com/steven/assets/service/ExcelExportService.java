@@ -468,16 +468,16 @@ public class ExcelExportService {
      */
     private ExportDoc.Sheet exchangeRateSheet(String currency,
                                               java.time.LocalDate start, java.time.LocalDate end) {
-        List<String> headers = List.of("日期", "即期買入", "即期賣出", "中間價");
+        List<String> headers = List.of("日期", "買入匯率", "賣出匯率", "中間價", "價基", "來源", "原文SHA256", "來源成員SHA256", "取得時間", "即期來源已驗證");
         List<ExportDoc.Format> formats = List.of(ExportDoc.Format.DATE,
-                ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4);
+                ExportDoc.Format.NUM4, ExportDoc.Format.NUM4, ExportDoc.Format.NUM4,ExportDoc.Format.TEXT,ExportDoc.Format.TEXT,ExportDoc.Format.TEXT,ExportDoc.Format.TEXT,ExportDoc.Format.TEXT,ExportDoc.Format.BOOL_ZH);
 
         List<List<Object>> rows = new java.util.ArrayList<>();
         for (ExchangeRateHistory e : rateHistRepo
                 .findByCurrencyAndRateDateBetweenOrderByRateDateAsc(currency, start, end)) {
             // Format.DATE 會寫成 ISO 文字 cell：避免 Excel 依開啟端時區重新詮釋 date cell 而偏移一天
             rows.add(java.util.Arrays.asList(
-                    e.getRateDate(), e.getBuyRate(), e.getSellRate(), e.getMidRate()));
+                    e.getRateDate(), e.getBuyRate(), e.getSellRate(), e.getMidRate(),e.getRateBasis(),e.getSource(),e.getSourceSha256(),e.getSourceMemberSha256(),e.getFetchedAt()==null?null:e.getFetchedAt().toString(),e.isSpotBasisVerified()));
         }
         // omitNullCells=true：既有 if (x != null) cell(...)，缺牌告時該格根本不建（不是 BLANK 格）
         return new ExportDoc.Sheet(exchangeRateLabel(currency),

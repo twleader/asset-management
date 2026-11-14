@@ -630,7 +630,7 @@ class TradingRadarRuleEngineTest {
      */
     @Test
     void ruleVersion_isV18() {
-        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V28", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 360：J 值因子極性修正（standardJPosition）═══
@@ -2603,7 +2603,7 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v24_ruleVersion() {
-        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V28", TradingRadarRuleEngine.RULE_VERSION);
     }
 
     // ═══ Task 577／Requirement 202：完成 K 結構確認（TW_RULES_V25）═══════════════════════════
@@ -2868,7 +2868,7 @@ class TradingRadarRuleEngineTest {
 
     @Test
     void v25_ruleVersion() {
-        assertEquals("TW_RULES_V27", TradingRadarRuleEngine.RULE_VERSION);
+        assertEquals("TW_RULES_V28", TradingRadarRuleEngine.RULE_VERSION);
     }
     private static TradingRadarRuleEngine.StockInput withAccumulation(TradingRadarRuleEngine.StockInput x,
             RadarCompletedPriceDrawdown.Context context) {
@@ -2966,6 +2966,55 @@ class TradingRadarRuleEngineTest {
         var below = new V23Stock().set(x -> x.price = "80.000001").build();
         assertEquals(engine.evaluateStock(below), engine.evaluateStock(withAccumulation(below,
                 accumulation("0050", "台股", below.price()))));
+    }
+
+    private static TradingRadarRuleEngine.StockInput withUsdFx(TradingRadarRuleEngine.StockInput x, UsdFxPurchaseContext fx) {
+        return new TradingRadarRuleEngine.StockInput(x.held(), x.price(), x.changePercent(), x.completedChangePercent(),
+                x.indicators(), x.previousK(), x.previousD(), x.ma20Confirmation(), x.ma60Confirmation(), x.ma240Confirmation(),
+                x.instrumentType(), x.marketRegime(), x.marketStale(), x.fxPercentile(), x.ma60BiasPercent(),
+                x.ma60BiasPercentile(), x.ma240BiasPercent(), x.week52Position(), x.kdBandWidthPercent(), x.etfPremiumPct(),
+                x.etfPremiumPercentile(), x.weeklyMa(), x.extendedIndicators(), x.volumeRatio(), x.fundamental(),
+                x.dailyCandle(), x.weekly(), x.bollinger(), x.completedKd(), x.structure(), x.accumulation(), fx);
+    }
+    @Test void d215VerifiedCheapFxExceptionReplacesOldPercentileVetoWithoutExpandingNamedEntry() {
+        for (String cost : List.of("33", "31")) for (String code : List.of("NVDA", "OTHER")) {
+            var input = new V23Stock().set(x -> { x.held = false; x.price = "70";
+                x.fxPercentile = "99"; x.regime = TradingRadarRuleEngine.MarketRegime.RISK_OFF; }).build();
+            input = withAccumulation(input, accumulation(code, "美股", input.price()));
+            var market = new UsdFxPurchaseContext.MarketData("LIVE", new BigDecimal(cost), java.time.Instant.EPOCH,
+                    "BANK_OF_TAIWAN", null, null);
+            var proof = new UsdFxPurchaseContext.VerifiedInstrument(code, "美股", "USD",
+                    TradingRadarAssetProfileResolver.InstrumentKind.STOCK, "accepted-policy", "a".repeat(64));
+            var context = UsdFxPurchaseContext.forAsset(code, "美股", "USD", market, proof);
+            var result = engine.evaluateStock(withUsdFx(input, context));
+            assertTrue(context.priceException(input.accumulation(), input.price()));
+            assertFalse(result.risks().stream().anyMatch(r -> r.contains("FX 位於昂貴區") || r.contains("D-215 美元買入成本偏高，買方優先等待")));
+            if (code.equals("NVDA")) {
+                assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, result.action());
+                assertEquals(TradingRadarRuleEngine.MediumAccumulationSignal.DEEP_DRAWDOWN, result.mediumAccumulationSignal());
+                var unavailable = UsdFxPurchaseContext.forAsset(code, "美股", "USD", UsdFxPurchaseContext.MarketData.unavailable("STALE"), proof);
+                var blocked = engine.evaluateStock(withUsdFx(input, unavailable));
+                assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, blocked.action());
+                assertTrue(blocked.risks().stream().anyMatch(r -> r.contains("匯率證據未核實")));
+            } else {
+                assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, result.action());
+                assertNotEquals(TradingRadarRuleEngine.MediumAccumulationSignal.DEEP_DRAWDOWN, result.mediumAccumulationSignal());
+            }
+        }
+    }
+
+    @Test void d215UnknownRangeWithoutCheapPriceWaitsWhileOrdinaryTechnicalSetupWouldBuy() {
+        var input = strongStock(false, TradingRadarRuleEngine.MarketRegime.RISK_ON);
+        assertEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, engine.evaluateStock(input).action());
+        var proof = new UsdFxPurchaseContext.VerifiedInstrument("OTHER", "美股", "USD",
+                TradingRadarAssetProfileResolver.InstrumentKind.STOCK, "accepted-policy", "a".repeat(64));
+        var data = new UsdFxPurchaseContext.MarketData("LIVE", new BigDecimal("31"), java.time.Instant.EPOCH,
+                "BANK_OF_TAIWAN", null, null);
+        var context = UsdFxPurchaseContext.forAsset("OTHER", "美股", "USD", data, proof);
+        input = withAccumulation(input, accumulation("OTHER", "美股", input.price()));
+        var result = engine.evaluateStock(withUsdFx(input, context));
+        assertNotEquals(TradingRadarRuleEngine.Action.BUY_CANDIDATE, result.action());
+        assertTrue(result.risks().stream().anyMatch(r -> r.contains("匯率證據未核實")));
     }
 
 }

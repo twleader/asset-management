@@ -1404,7 +1404,7 @@ public class TradingRadarService {
                             // Task 342（推翻 Task 323.2 的刻意留白）：完成日漲跌幅與量能比真正接進
                             // regime 分數（averageAvailable(...) → score ±8／±10／±3）。使用者已知情
                             // 並接受「美股個股 regime 與買進閘門會因此變動」的代價，RULE_VERSION 於該次
-                            // 同步升版；現行 production 版號為 TW_RULES_V27（保留 V25 完成K結構確認，並統一試單／一般買進安全判斷及純價格高檔賣出閘門）。
+                            // 同步升版；現行 production 版號為 TW_RULES_V28（保留 V25 完成K結構確認，並統一試單／一般買進安全判斷及純價格高檔賣出閘門）。
                             //
                             // ⚠ completedChangePercent 必須取 usContext 這一份，不得改用本方法上面的區域
                             // 變數 changePercent：後者算自 findTopN...(IXIC_CODE, 241)，該查詢沒有任何完成日
@@ -1750,9 +1750,15 @@ public class TradingRadarService {
                             // Task 576：完成日 KD 快照必須顯式傳入；盤中時
                             // indicators(ind) 含即時列，若走相容建構式推得的快照會變成盤中值。
                             technical.completedKd(),
-                            // Task 581：完成 K 結構與具名回撤context皆顯式傳入（31 參數正典建構式）；
+                            // Task 581：完成 K 結構與具名回撤context皆顯式傳入（32 參數正典建構式）；
                             // 走相容建構式會得到 NOT_EVALUATED，結構確認在 production 靜默失效。
-                            technical.structure(), technical.accumulation()));
+                            technical.structure(), technical.accumulation(),
+                            UsdFxPurchaseContext.forAsset(target.code(), target.market(), profile.quoteCurrency(),
+                                    (listEntry == null
+                                        ? UsdFxPurchaseContext.requiresUsd(target.code(), target.market(), profile.quoteCurrency())
+                                            ? fxCache.computeIfAbsent("USD", ignored -> marketContextService.resolveFx("USD", decisionInstant))
+                                            : TradingRadarMarketContextService.FxContext.EMPTY
+                                        : listEntry.usdPurchaseFx()).usdPurchaseData())));
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(

@@ -13713,3 +13713,68 @@ V26 是動作契約修正，不更改得分、StockInput、DTO 欄位、資料�
 **動作與文案。** actionFor在舊trial／分數前選typed政策，只有MEDIUM＋具名＋AVAILABLE＋回撤滿門檻啟用。該分支不以未止穩、負日漲跌、MA方向、KD轉強／熱度、正乖離／短期超買、>=8%急彈或RISK_OFF否決；這些仍影響原分數並揭露方向風險。缺必要資料／market stale、FX／ETF昂貴溢價及基本面惡化仍否決且立即HOLD_CAUTION／WAIT，不落賣方。既有evidence與官方SMA20最後閘門保留，SHORT分鐘只管SHORT。共用數值因子一次計算；少數策略允許／禁止文案以來源typed fact或normal/deep variant，在evaluateHorizon依情境render，不做字串匹配搬移／刪除。describeHeat、marketContribution、completedDayContribution與CounterTrend短線文案必避免對新MEDIUM輸出相反的絕對禁止。
 
 內部result保留新MEDIUM來源標記，讓兩個TradingRadarService投影在全部gate後僅對仍ADD／BUY的本政策輸出「積極分批加碼／買進候選」；降級後依實際動作label。reasons載窗口、高點、P、回撤、門檻與3~6月意圖，無新增public欄位、API、交易或資金副作用。t580的horizonConflict仍由最後三軌動作判斷。V27升版通知只重建baseline；OpenAPI1.27.5／統一Swagger身分改變後僅發布SRPP metadata，保留其金融規則語義與合法時間閘門。
+
+
+### Requirement 205／Task 582：D-215深回撤正式來源與窄範圍例外
+
+SRPP `UsTacticalCalculator`目前在independentGate與fullChecks都獨立檢查RISK_OFF／MA200及stabilizationEvidence，V27雷達本身放行無法解除它。新增純helper驗D-215政策及`US_TACTICAL_BULL_DIP.body.namedDeepDrawdownD215`，兩處共用同一結果；維持原八來源／check IDs、gateEvidence及BLOCKED語義，不改公開DTO／Swagger。formalSources的既有sourceId/source/sha256/capturedAt仍須驗證，不因新fact跳過。
+
+fact固定欄位：status=AVAILABLE、horizon=MEDIUM、stockCode、market=美股、windowStart、completedAsOfDate、highDate、high、referencePrice、priceBasis=STORED_PRICE_ONLY、completedPriceHistory（嚴格降序`{tradingDate,high,close}`）、droppedDates（ISO日期陣列）、droppedUndated（boolean）。完成日嚴格早於同輪美股sessionDate，且必須等於當輪canonicalRadarGate已通過之同標的雷達dailyCandle.asOfDate，缺失、不符或canonical閘門未PASS即不得啟用；最近列日期等於completedAsOfDate；windowStart必為D.minusWeeks(52)，至少一列<=windowStart證明跨度。只取閉區間高價最大值，正值且high>=close、無重複／未來／live，已知窗口剔除與不明日期拒絕，不以自然長假猜缺日。重用RadarCompletedPriceDrawdown的pure計算與價基標記，不假稱完整逐日權威日曆或官方split驗證；P同時精確綁定dip.currentPrice及candidate.quote.last，H／highDate精確比對，不以捨入回撤放行。
+
+合格named路徑仍讀並驗美股regime的來源／欄位，只把RISK_OFF／價格均線方向改為風險揭露；允許缺stabilizationEvidence，不把原市場／dip來源缺失擴成全域交易豁免。後續批次只免notAveragingDown，thesisStillValid仍必須。Google兩股類在成本／批次／pending公司容量採同一company key，報價及52週高點分開。
+
+台股STRATEGIC_BUY_GATES現行清單不含0050／00881，且其核心買方沒有同US的止穩程式閘門，本次不擴充D173或虛造新核心腿。SRPP保存證據工具負責具名20%門檻及固定首批前高的純觀察；它不覆寫API BLOCKED或補造正式來源。US adapter目前formalSources為空，仍如實PARTIAL，不因fixture通過宣稱production已有全部必要來源。
+
+固定H退出觀察只由SRPP既有讀取程序新增required-read的純工具評估，無自動寫ledger／新API；工具須綁實際firstFillId、tradeId、剩餘部位分類及首批時來源指紋，且不從後來滾動高點補建H。這不是production tactical sell計算包擴充，無股數／限價／金額或成交授權。
+
+
+**同輪美元資產匯率偏好追加（D-215）。** StockInput新增typed `UsdFxPurchaseContext`，保留V27的31參數及所有歷史相容constructor；缺context表示品質不足，不能靠舊5年百分位當新2年條件已驗證。context由權威profile.quoteCurrency／instrumentKind（STOCK／EQUITY_ETF／BOND_ETF／UNKNOWN）及instrumentKindComplete、同輪唯一canonical LIVE sellRate＋asOf/provider、同一既有5年歷史讀取內截出的2曆年sellRate範圍建成。FxContext保留原2參數相容形狀及5年MID percentile，追加typed歷史range。新context供USD報價股票／ETF，另依使用者明示納入quoteCurrency=TWD且有來源證實BOND_ETF者；台幣股票ETF0050／00881等不因本次指示納入。TWD債券ETF不再另外要求underlyingCurrency必須已填USD。
+
+每radar request允許一次canonical persisted current FX cache讀取，無vendor／refresh／寫入，list/detail/cache路徑共用同sourcefreshness與準確截點；LIVE銀行美元賣出價代表買入美元成本，當前與2年歷史sellRate同BANK_SELLING價基；provider未記錄須明示，不能冒稱同銀行驗證，區間以current LIVE台北日windowEnd回溯兩曆年，歷史僅取至台北17:00時鐘截點（未到17:00為前一曆日，已到則當日）內最新qualified native日期D，既有TW完成日只作最低新鮮度，D不得更早且不受TW休市日硬截斷、需起點邊界覆蓋，日期／數值／asOf可信且max>min。INDICATIVE／HISTORY／STALE／LAST_AVAILABLE／未來價均不得當合格current。缺current無法由歷史單獨變成NORMAL，缺跨度也不以1年公開API替代2年。既有FX score、weight、公開fxPercentile／asOf欄位不改口徑；新偏好以既有reason/risk文字揭露當前價、2年窗口、low/high與門檻。
+
+精確highFX判斷=currentSell>32.8 OR (currentSell-low)*100 >= (high-low)*90。OR逐支求值：合格current>32.8時即HIGH，即使2年range缺失也可確認，仍可對合格型別及本身回撤評估FX例外並揭露range缺口；current<=32.8且range不可用則UNKNOWN，不能判NORMAL。一般USD買進優先WAIT／HOLD_CAUTION；若來源驗證stock type且本身52週價格回撤>=30%，或來源驗證ETF type且本身回撤嚴格>10%，只略過此FX偏好，不改其他買方條件。原RadarCompletedPriceDrawdown可對所有美股建同源raw完成價格窗口，Context.eligible／threshold仍鎖定原具名免止穩集合，另以純方法供FX例外讀取回撤，避免把全部ETF>10%誤變免止穩。公開分類值不新增Enum、不由名稱猜ETF；未知type只觀察。production與既有兩個回測接線都須不看未來；歷史沒有同時點currentLIVE時明示診斷代理或不可用，不拿今天live值回灌。
+
+USD舊fxPercentile>=90硬否決由新偏好取代，其他幣別原規則不變；原5年因子數值不變，文字只作歷史披露，避免與合格例外同時聲稱FX禁止。行為版升TW_RULES_V28／compatibilityV28，通知首輪只baseline，公開schema／路由不新增但example/Javadoc/OpenAPI版本身分要按既有renderer→SRPP identity sync發布，先凍結並提交SRPP語義再在受控乾淨feature操作metadata。
+
+
+**第三輪來源修正與新增指示。** instrumentKindComplete只代表非UNKNOWN；resolver的NAME_RULE、CODE_RULE（包括後綴）、MARKET_DEFAULT及無原文證據OVERRIDE都不得成為FX豁免verified=true。只接受原始官方typed metadata（精確market/code/type、source原文hash）或本輪明確Accepted的精確instrument fact map，後者須綁既有已核准政策來源及其bytes hash，不擴宇宙或新建通用分類系統。無證據保留UNVERIFIED；TWD債券ETF亦須真BOND_ETF證據，不能由名稱猜。
+
+Legacy exchange_rate_history實際無provider／價基，歷史fetcher偏好cash_sell而current使用spotSell，另可能含Yahoo中間價。故buy!=sell只可排除部分已知中間價退回，不能證明SPOT_SELL。沒有額外可信且精確綁列／窗口之價基證明時，production兩年range固定UNAVAILABLE並披露原因；不是假稱AVAILABLE，也不因沒法證明同銀行而新增同provider閘門。current獨立可驗證為BANK_SELLING_SPOT時，>32.8照樣HIGH及可評估具來源的便宜資產FX例外；<=32.8而range缺失為UNKNOWN。真實broker換匯成本仍另算。無DB遷移／回填／新外呼以掩蓋缺口。
+
+TWD交易BOND_ETF依使用者指定視作美元資產（含D130與緊急00865B），其本身價格回撤嚴格>10%僅解除FX；所有原債券門檻仍成立。D130 backend API正腿維持原公式的數量上限，報告再依新增mandatory FXhelper偏好採WAIT／WATCH，不能以API正腿冒充已通過FX，不能用helper解除已驗證零腿／BLOCKED。此分層限制必須在發布／正式採用說明中明示。
+
+
+### Requirement 206／Task 583：USD spot來源修復與兩年可驗資料
+
+此新資料單元源於使用者追加「把匯率資料補齊」，取代先前不修資料管線範圍，不更動D215門檻。FinMind官方文件明列cash_buy/cash_sell/spot_buy/spot_sell，現有parser優先cash為缺陷。USD路徑只取native spot，其他幣別原行為不變。已取得原始495唯一日期合格USD spot列（2024-11-08～2026-11-13），禁止把cached舊匯出即期標題當原始證據。
+
+新增normalized exchange_rate_source_capture：id、provider、rate_basis、source_url（禁止token）、captured_at、source_sha256、raw_body TEXT。provider/basis為閉合來源協定，不是可管理投資分類。source_sha256保護UTF8原文字節，capture immutable，重複相僅同provider/basis/rawSHA/sourceURL/capturedAt的同一實際fetch snapshot可重用；history只存source_capture_id nullable FK及source_member_sha256稽核收據，不每列重複存整份raw／provider。舊列FK NULL，UNKNOWN不改標。migration版本避撞後採v1.165.0或下一可用版本，不動原歷史migration。capture INSERT需hash有效，UPDATE/DELETE拒絕；不新增清理排程。
+
+ExchangeRateHistory追加sourceCapture relation並提供純getRateBasis/getSource/getSourceSha256/getFetchedAt/isSpotBasisVerified。proof須核對原文hash與provider native原文同(currency,date,buy,sell)：FinMind `data[].currency/date/spot_buy/spot_sell`；BOT CSV原始USD列索引3/13、rateDate為同次已知觀察日；MEGA原始rates[].currKey、spot.bid/ask及update日期。來源原文parse結果可在immutable capture內快取，不衍生持久化重複資料；repository EntityGraph預載relation避免reader pure迴圈新IO。未知來源或raw/value不符不能verified。public DTO不得序列化整個entity/capture。
+
+現有USD歷史writer在5分鐘持久化／17:00 FinMind／明確backfill時存capture，非2秒liveCache輪詢；原FxSpotQuote保留2/3參數相容constructor，新增optional原始來源證據供歷史writer。USD FinMind只取spot正價且sell>buy，缺值拒絕；非USD保留既有cash優先價格且不藉此宣稱其spot verified。Yahoo中間價不可覆蓋verified SPOT；legacy無證據寫法不能降級已驗資料。USD17:00使用近期force窗口，使當日intraday存在不阻擋FinMind收盤補正，其他幣別原流程維持。
+
+公開既有GET /api/public/exchange-rate/usd-twd保留spot狀態及mid欄位，requestedStartDate=end.minusYears(2)，requestedEndDate為台北今日；history每點新增rateBasis BANK_SPOT_SELLING/UNKNOWN、source nullable、sourceSha256 nullable、sourceMemberSha256 nullable、fetchedAt nullable、spotBasisVerified boolean。historyBoundary nullable同型點，只允許日期<start且為實際最近可信邊界，若start本身已有列不需重複boundary。backend內部history transport增加metadata，BFF僅聚合，GET零外呼寫入。此API資料只有來源verified的真窗口可供共同FX工具使用，current LIVE價格仍獨立驗證，歷史修好不把週末LAST_AVAILABLE改稱LIVE。
+
+一次性腳本離線讀原始FinMindbody與取得收據，驗hash／URL無token／USD唯一date／spot值／窗口及邊界後預設只出稽核計畫；--apply才由根agent在審查與Git落地後執行單交易capture+window upsert。apply前後比較窗口外全行fingerprint、回讀每列raw spot與capture FK，不更新capture。重跑相同raw與已同值列不得改row/capture。資料庫migration先由backend部署，再external writer，再工具回補；最後schema-only dump更新db/schema.sql、附實際資料readback。舊SRPP datedrun檔不覆蓋，新匯出或API收據保存新時間戳、來源metadata與部分十年/完整兩年品質界線。
+
+
+Task583原始來源proof效能補充（根agent核准）：capture完整raw_body只存在DB canonical表，backend `ExchangeRateSourceCapture`作metadata-only映射，完全不映射raw_body欄；因此EntityGraph只JOIN metadata，不會把一份90KBbody重傳495次。writer/backfill先驗真rawhash與native member再寫audit memberSHA，reader以metadata+實際price重算memberSHA並驗證來源協定。source_member_sha256是具名允許的密碼學稽核收據，不是新增金融衍生值，與source_capture_id必須同NULL或同非NULL；legacy兩者NULL。
+
+memberSHA定義為UTF8 SHA256下列字串，最後無換行：`FX_SPOT_MEMBER_V1\n<rawSHA>\n<currency>\n<ISO date>\n<buy canonicalDecimal>\n<sell canonicalDecimal>`。canonicalDecimal為精確Decimal去尾0後plain string（無科學記號），原生有效價精度需能以DB scale4精確表示，不用cash／mid推估。writer/backfill與backendreader／SRPP共同工具測同一golden tuple。收據一致性不單獨證明authenticity，必須可信source writer+immutable原文capture邊界，正式import另重算DB原文字節SHA與495筆native值回讀。publicHistoryPoint附nullable sourceMemberSha256，無rawbody或DBid。
+
+
+Task583實際資料品質修正：canonical DB窗口536列，而合格原始FinMind response495列；41列舊未驗證值不是FinMind缺漏的證明，保留UNKNOWN、不刪除也不改標。qualified範圍只能在可信capture query coverage完整時排除legacy：provider固定FINMIND_TAIWAN_EXCHANGE_RATE，sourceURL精確https://api.finmindtrade.com/api/v4/data，query dataset=TaiwanExchangeRate、data_id=USD、各恰一start_date/end_date且為canonical ISO日期，scope閉區間聯集須連續涵蓋windowStart..expectedD。每個採用row rawSHA須對到同capture，其日期落於該查詢interval、native member receipt有效；另外可信起點邊界及最新completed D必須成立。對帶verified旗標但receipt壞掉的row不能靜默忽略。完整coverage與actual495原文匯入稽核證明的是provider返回序列，不宣稱逐銀行營業日獨立完整。qualified extrema只用真native rows，UNKNOWN價格永不參與；揭露excludedLegacyRows數。
+
+public仍保留同一history全列與rateBasis/spotBasisVerified及historyBoundary，新增historySourceCaptures陣列：每項{source,sourceSha256,sourceUrl,requestedStartDate,requestedEndDate,fetchedAt,rateBasis}，由所用verified rows/boundary之immutable metadata去重投影。sourceURL已去密且必須通過上述exact FinMind檢查，無內部id/rawbody。metadata-onlyentity已含sourceUrl，無額外DBschema／N+1／rawbody讀取。API共同工具對query interval coverage及成員關聯再驗，不能只信全域AVAILABLE字樣。
+
+USD既有17:00使用force rolling2年+1曆月邊界、單次FinMindGET帶end_date=台北今日；不是新增schedule或增加查詢次數。長假期間即使無新native列，captured query仍覆蓋原始request期間，不把春節非營業日誤當coverage洞；TW最低完成日仍由既有日曆程序獨立決定；actualD取時鐘截點內最新qualified native銀行日期。非USD原價格與增量流程不改。
+
+
+Task583最後來源明確化：historySourceCaptures同時包含參照的NATIVE_QUERY及OBSERVATION；新增sourceKind欄位。只有exact FinMind NATIVE_QUERY有requestedStartDate/endDate且可做coverage；BOT/MEGA OBSERVATION之查詢日期必NULL，僅提供真原文member價格、不能填補查詢缺口。已具完整FinMind query coverage時，真銀行SPOT觀察可以作價格及latestD（例如晚間覆寫D列），不得為追求FinMind-only而丟失合法D；每點仍須匹配自己的capture及member receipt。銀行價格與FinMind coverage角色分開，provider保留，不宣稱samebank。可信boundary取最近已驗native點，較近UNKNOWN不能遮蔽它。
+
+
+Task583實作功能QA修正：capture唯一性與lookup精確綁(provider,basis,rawSHA,sourceURL,capturedAt)，相同原文的新觀察日或新查詢URL不是同一fetch context，不能只憑rawSHA重用舊時間/舊coverage。BACKFILL重跑保留原HTTPreceipt.capturedAt，不改成重跑時間。BANK OBSERVATION rowDate必須等於capture取得時點之台北日期；FinMind須符合原生member與USD query日期範圍。公開metadata去重保留URL與fetchedAt，point用provider/basis/rawSHA/fetchedAt對應所有合法可適用capture，不因同body新URL遺失coverage。此為既有immutable來源契約的具體bug修正，獨立功能QA已核實，final架構審查會讀完整實作，不新增第四輪spec審查。
+
+
+Task582／583根agent獨立功能QA日期修正：實際495筆FinMind USD spot原文包含2026-02-12、02-13、07-10、10-23，但當輪本機TW股票日曆均休市且US開市，故TW交易日完成日不能冒充銀行日上限。新2年FX區間的clock cutoff為decisionInstant台北日17:00（之前最多前一曆日），actualD取不晚於cutoff且成員／capture驗證通過的最大原生日期；獨立TW完成日只作最低新鮮度，actualD小於它維持UNKNOWN。完整FinMind query coverage驗至actualD，當前LIVE不混歷史、所有capture knownAt防前視保留。既有5年MID分數仍以原TW target篩選；同一次DB批量讀取可讀至clock cutoff之superset，舊分數再篩原target，不增加IO。回測必須保留真正signalInstant而不能合成TW target17:00。測試TW minimum=02-11、原生02-12／13兩列含新極值，US晚盤應納入13，17:00前只納入12；落後TW minimum維持UNKNOWN。此為既有「完整銀行資料／不看未來」契約的具體修正，ARCH第一輪已PASS，第二輪獨立審查此delta，不新增第四輪spec review。實際source/calendar hashes及日期證據保存於/private/tmp/d215-d583-arch-review/native-bank-calendar-evidence.json。

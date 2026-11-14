@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.27.5` |
+| 契約版本 | `1.28.0` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -2462,7 +2462,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
           "synthetic": {
             "summary": "去識別化、無實際持倉的合成範例",
             "value": {
-              "ruleVersion": "TW_RULES_V27",
+              "ruleVersion": "TW_RULES_V28",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -2681,7 +2681,7 @@ configured-admin 與 by-email owner lookup 均最多 5 秒；逾時取消查找�
         "examples": {
           "synthetic": {
             "value": {
-              "ruleVersion": "TW_RULES_V27",
+              "ruleVersion": "TW_RULES_V28",
               "actionPolicyVersion": "EVIDENCE_GATE_V2",
               "generatedAt": "2026-01-15T02:15:30Z",
               "market": {
@@ -19683,7 +19683,9 @@ Java LocalDateTime 的 ISO 字串，沒有 UTC offset；刻意不使用 date-tim
     "liveUpdateStatus",
     "spot",
     "count",
-    "history"
+    "history",
+    "historyBoundary",
+    "historySourceCaptures"
   ],
   "properties": {
     "pair": {
@@ -19749,6 +19751,27 @@ Java LocalDateTime 的 ISO 字串，沒有 UTC offset；刻意不使用 date-tim
         "$ref": "#/components/schemas/UsdTwdHistoryPoint",
         "description": "陣列中的單一元素：歷史點的業務屬性。"
       }
+    },
+    "historyBoundary": {
+      "anyOf": [
+        {
+          "$ref": "#/components/schemas/UsdTwdHistoryPoint",
+          "description": "查詢起點前最近來源已驗證的原生即期歷史點；日期嚴格早於requestedStartDate，供完整跨度驗證。"
+        },
+        {
+          "type": "null",
+          "description": "起點已有已驗證歷史點或查無較早合格點時為null，不推估匯率。"
+        }
+      ],
+      "description": "起點前最近實際歷史列（最多額外查一曆月），供兩年跨度驗證；起點當日已有列時為null。不是新增或推估匯率。"
+    },
+    "historySourceCaptures": {
+      "type": "array",
+      "description": "歷史及邊界採用的來源已驗證capture metadata去重投影；NATIVE_QUERY才可作查詢期間coverage，OBSERVATION只有個別價格觀察，不讀或暴露原文。",
+      "items": {
+        "$ref": "#/components/schemas/UsdTwdSourceCapture",
+        "description": "單一immutable原始來源的metadata收據，不是另一份價格序列。"
+      }
     }
   },
   "additionalProperties": false
@@ -19768,6 +19791,8 @@ Java LocalDateTime 的 ISO 字串，沒有 UTC offset；刻意不使用 date-tim
 | `spot` | 是 | `UsdTwdSpot` | 否 |  | 目前 USD/TWD 即期匯率與來源時間。 |
 | `count` | 是 | `integer (int32)` | 否 | format: int32<br>minimum: 1 | 必須等於 history 的項目數。 |
 | `history` | 是 | `array of UsdTwdHistoryPoint` | 否 | minItems: 1<br>items: UsdTwdHistoryPoint<br>items 說明: 陣列中的單一元素：歷史點的業務屬性。 | 日期升冪、無重複且落在 requested range 內。 |
+| `historyBoundary` | 是 | `UsdTwdHistoryPoint | null` | 是 |  | 起點前最近實際歷史列（最多額外查一曆月），供兩年跨度驗證；起點當日已有列時為null。不是新增或推估匯率。 |
+| `historySourceCaptures` | 是 | `array of UsdTwdSourceCapture` | 否 | items: UsdTwdSourceCapture<br>items 說明: 單一immutable原始來源的metadata收據，不是另一份價格序列。 | 歷史及邊界採用的來源已驗證capture metadata去重投影；NATIVE_QUERY才可作查詢期間coverage，OBSERVATION只有個別價格觀察，不讀或暴露原文。 |
 
 ### `UsdTwdSpot`
 
@@ -19935,7 +19960,13 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
     "date",
     "buyRate",
     "sellRate",
-    "midRate"
+    "midRate",
+    "rateBasis",
+    "source",
+    "sourceSha256",
+    "sourceMemberSha256",
+    "fetchedAt",
+    "spotBasisVerified"
   ],
   "properties": {
     "date": {
@@ -19958,6 +19989,49 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
       "exclusiveMinimum": 0,
       "multipleOf": 0.0001,
       "description": "(buyRate+sellRate)/2，HALF_UP scale 4。"
+    },
+    "rateBasis": {
+      "type": "string",
+      "enum": [
+        "BANK_SPOT_SELLING",
+        "UNKNOWN"
+      ],
+      "description": "BANK_SPOT_SELLING表示來源原文及成員收據已驗證的銀行即期賣出價基；UNKNOWN表示舊資料或證據不合格。"
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "實際原文提供者；不代表所有歷史都來自同一家銀行。"
+    },
+    "sourceSha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "原始來源UTF8原文字節SHA256；不是重新排版JSON的hash。"
+    },
+    "sourceMemberSha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "FX_SPOT_MEMBER_V1收據綁定原文hash、USD、日期與精確買賣值；不是單獨來源真偽證明。"
+    },
+    "fetchedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "該原文真正取得時間，不冒稱歷史牌告發布時間。"
+    },
+    "spotBasisVerified": {
+      "type": "boolean",
+      "description": "可信原文writer已驗native即期欄位且目前row成員收據仍一致。UNKNOWN不得當即期。"
     }
   },
   "additionalProperties": false,
@@ -19971,6 +20045,102 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
 | `buyRate` | 是 | `number` | 否 | exclusiveMinimum: 0 | 銀行或來源公告的買入匯率。 |
 | `sellRate` | 是 | `number` | 否 | exclusiveMinimum: 0 | 必須大於等於 buyRate。 |
 | `midRate` | 是 | `number` | 否 | multipleOf: 0.0001<br>exclusiveMinimum: 0 | (buyRate+sellRate)/2，HALF_UP scale 4。 |
+| `rateBasis` | 是 | `string` | 否 | enum: `BANK_SPOT_SELLING`, `UNKNOWN` | BANK_SPOT_SELLING表示來源原文及成員收據已驗證的銀行即期賣出價基；UNKNOWN表示舊資料或證據不合格。 |
+| `source` | 是 | `string | null` | 是 |  | 實際原文提供者；不代表所有歷史都來自同一家銀行。 |
+| `sourceSha256` | 是 | `string | null` | 是 | pattern: ^[a-f0-9]{64}$ | 原始來源UTF8原文字節SHA256；不是重新排版JSON的hash。 |
+| `sourceMemberSha256` | 是 | `string | null` | 是 | pattern: ^[a-f0-9]{64}$ | FX_SPOT_MEMBER_V1收據綁定原文hash、USD、日期與精確買賣值；不是單獨來源真偽證明。 |
+| `fetchedAt` | 是 | `string | null (date-time)` | 是 | format: date-time | 該原文真正取得時間，不冒稱歷史牌告發布時間。 |
+| `spotBasisVerified` | 是 | `boolean` | 否 |  | 可信原文writer已驗native即期欄位且目前row成員收據仍一致。UNKNOWN不得當即期。 |
+
+### `UsdTwdSourceCapture`
+
+Task583原始匯率來源metadata，綁定原始UTF8 bytes hash；不能單靠hash一致冒稱來源真實。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Task583原始匯率來源metadata，綁定原始UTF8 bytes hash；不能單靠hash一致冒稱來源真實。",
+  "required": [
+    "source",
+    "sourceKind",
+    "sourceSha256",
+    "sourceUrl",
+    "requestedStartDate",
+    "requestedEndDate",
+    "fetchedAt",
+    "rateBasis"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "enum": [
+        "FINMIND_TAIWAN_EXCHANGE_RATE",
+        "BANK_OF_TAIWAN",
+        "MEGA_BANK"
+      ],
+      "description": "FINMIND_TAIWAN_EXCHANGE_RATE為TaiwanExchangeRate原生即期資料，BANK_OF_TAIWAN為台銀CSV即期觀察，MEGA_BANK為兆豐原生即期觀察；不假稱來源皆為同一家銀行。"
+    },
+    "sourceKind": {
+      "type": "string",
+      "enum": [
+        "NATIVE_QUERY",
+        "OBSERVATION"
+      ],
+      "description": "NATIVE_QUERY表示FinMind原生查詢且帶明確起迄日期；OBSERVATION表示銀行單次原文價格，不能填補查詢coverage缺口。"
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "真正原始回應UTF8 bytes之SHA256，不是改排版後JSON雜湊。"
+    },
+    "sourceUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "去除憑證的公開原始來源URL。FinMind須精確官方host/path、dataset=TaiwanExchangeRate、data_id=USD且起迄日期各一個；禁止token參數。"
+    },
+    "requestedStartDate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "原生查詢URL的start_date；OBSERVATION必為null，不以觀察日偽造查詢期間。"
+    },
+    "requestedEndDate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "原生查詢URL的end_date；OBSERVATION必為null。查詢閉區間聯集須覆蓋共同FX工具窗口才可排除legacy。"
+    },
+    "fetchedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "該原始回應實際取得時間，不冒稱歷史牌告的發布時間。"
+    },
+    "rateBasis": {
+      "type": "string",
+      "const": "BANK_SPOT_SELLING",
+      "description": "BANK_SPOT_SELLING固定代表原文native即期買賣欄及member receipt一致，不可混cash或中間價。"
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `source` | 是 | `string` | 否 | enum: `FINMIND_TAIWAN_EXCHANGE_RATE`, `BANK_OF_TAIWAN`, `MEGA_BANK` | FINMIND_TAIWAN_EXCHANGE_RATE為TaiwanExchangeRate原生即期資料，BANK_OF_TAIWAN為台銀CSV即期觀察，MEGA_BANK為兆豐原生即期觀察；不假稱來源皆為同一家銀行。 |
+| `sourceKind` | 是 | `string` | 否 | enum: `NATIVE_QUERY`, `OBSERVATION` | NATIVE_QUERY表示FinMind原生查詢且帶明確起迄日期；OBSERVATION表示銀行單次原文價格，不能填補查詢coverage缺口。 |
+| `sourceSha256` | 是 | `string` | 否 | pattern: ^[a-f0-9]{64}$ | 真正原始回應UTF8 bytes之SHA256，不是改排版後JSON雜湊。 |
+| `sourceUrl` | 是 | `string (uri)` | 否 | format: uri | 去除憑證的公開原始來源URL。FinMind須精確官方host/path、dataset=TaiwanExchangeRate、data_id=USD且起迄日期各一個；禁止token參數。 |
+| `requestedStartDate` | 是 | `string | null (date)` | 是 | format: date | 原生查詢URL的start_date；OBSERVATION必為null，不以觀察日偽造查詢期間。 |
+| `requestedEndDate` | 是 | `string | null (date)` | 是 | format: date | 原生查詢URL的end_date；OBSERVATION必為null。查詢閉區間聯集須覆蓋共同FX工具窗口才可排除legacy。 |
+| `fetchedAt` | 是 | `string (date-time)` | 否 | format: date-time | 該原始回應實際取得時間，不冒稱歷史牌告的發布時間。 |
+| `rateBasis` | 是 | `string` | 否 | enum: `BANK_SPOT_SELLING` | BANK_SPOT_SELLING固定代表原文native即期買賣欄及member receipt一致，不可混cash或中間價。 |
 
 ### `CrawlerRescanResponse`
 
@@ -20842,14 +21012,14 @@ Timestamp 組合固定：HISTORY 的兩個 timestamp 都為 null；BANK_OF_TAIWA
 
 ### `TradingRadarListStock`
 
-交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。
+交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。V28另以當前美元即期賣出價>32.8或近兩曆年同價基區間位置>=90%作美元資產買方等待偏好；美元報價資產及已核實台幣債券ETF適用，個股本身52週回撤>=30%或ETF嚴格>10%僅可豁免FX偏好，不擴大免止穩集合；未知分類、非LIVE當前價或必要價基不可用均揭露缺口。舊五年匯率分位只保留計分，不冒充兩年區間位置。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
 ```json
 {
   "type": "object",
-  "description": "交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。",
+  "description": "交易雷達第一屏的收合列；刻意不含 reasons、evidence、完整 basic/fundamental tree 或 K 棒。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。V28另以當前美元即期賣出價>32.8或近兩曆年同價基區間位置>=90%作美元資產買方等待偏好；美元報價資產及已核實台幣債券ETF適用，個股本身52週回撤>=30%或ETF嚴格>10%僅可豁免FX偏好，不擴大免止穩集合；未知分類、非LIVE當前價或必要價基不可用均揭露缺口。舊五年匯率分位只保留計分，不冒充兩年區間位置。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。",
   "required": [
     "intradayCandleConfirmation",
     "stockCode",
@@ -22826,14 +22996,14 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 ### `StockDecision`
 
-`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。
+`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。V28另以當前美元即期賣出價>32.8或近兩曆年同價基區間位置>=90%作美元資產買方等待偏好；美元報價資產及已核實台幣債券ETF適用，個股本身52週回撤>=30%或ETF嚴格>10%僅可豁免FX偏好，不擴大免止穩集合；未知分類、非LIVE當前價或必要價基不可用均揭露缺口。舊五年匯率分位只保留計分，不冒充兩年區間位置。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
 ```json
 {
   "type": "object",
-  "description": "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；FX昂貴、ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。",
+  "description": "`TradingRadarDto.StockDecision` 的固定 record projection；分數、價格、指標與證據不足時以 null 表示，不以 0 冒充。V27僅對MEDIUM（1月~6月）具名深回撤政策提供積極分批機會：台股只0050／00881距近52曆週完成高點至少20%，美股只GOOGL／GOOG／MSFT／AVGO／NVDA／AAPL／AMZN至少30%；使用者資金意圖為3~6月，不保證回升。不等止穩、收紅、MA方向或KD轉強，RISK_OFF與短線過熱／正乖離／單日急彈在此路徑僅揭露風險；ETF溢價、基本面惡化與來源／freshness／evidence／官方SMA20限制仍保留。V28另以當前美元即期賣出價>32.8或近兩曆年同價基區間位置>=90%作美元資產買方等待偏好；美元報價資產及已核實台幣債券ETF適用，個股本身52週回撤>=30%或ETF嚴格>10%僅可豁免FX偏好，不擴大免止穩集合；未知分類、非LIVE當前價或必要價基不可用均揭露缺口。舊五年匯率分位只保留計分，不冒充兩年區間位置。SHORT／SWING、其他股票與普通買方條件不放寬，未通過最後閘門不顯示積極分批已放行標籤；不計股數／金額、不下單。 價格回撤事實（窗口／as-of／H／P／價基）在既有reasons揭露；PRICE_ONLY不冒稱已驗證split或總報酬價基。",
   "required": [
     "intradayCandleConfirmation",
     "stockCode",
@@ -23898,7 +24068,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
         "string",
         "null"
       ],
-      "description": "固定為 TW_RULES_V27|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
+      "description": "固定為 TW_RULES_V28|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。"
     },
     "source": {
       "type": [
@@ -23992,7 +24162,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
   },
   "additionalProperties": false,
   "example": {
-    "decisionInputVersion": "TW_RULES_V27|FUBON_OVERLAY_V1",
+    "decisionInputVersion": "TW_RULES_V28|FUBON_OVERLAY_V1",
     "source": "FUBON_SDK",
     "binding": "BOUND_CONTEXT",
     "contextFingerprint": "6ca2664cf7163c46b1b6a6d5b49ea02b584ce25aaef5919233d7bb28c4d0f8e4",
@@ -24097,7 +24267,7 @@ KD、MACD、RSI、乖離與威廉指標的延伸技術指標快照。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V27\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
+| `decisionInputVersion` | 是 | `string | null` | 是 |  | 固定為 TW_RULES_V28\|FUBON_OVERLAY_V1；舊 snapshot 缺整個 technicalResolution，不以此欄猜測版本。 |
 | `source` | 是 | `string | null` | 是 | enum: `FUBON_SDK`, `LOCAL_CALCULATED` | 實際提供本次 technical boundary 的來源。FUBON_SDK 表示已通過 context／freshness／exact-17 驗證的富邦值（Redis BOUND 命中或 PostgreSQL historical capture 重新投影）；LOCAL_CALCULATED 表示富邦值不適用時的本地完整計算，僅覆寫 Redis、絕不覆寫 PostgreSQL 富邦 facts/members。兩者都不代表每一個 V18 欄位必然採用富邦值，逐欄以 fieldProvenance 為準。 |
 | `binding` | 是 | `string | null` | 是 | enum: `BOUND_CONTEXT`, `UNBOUND_FUBON_SOURCE` | Redis 文件的 context binding。BOUND_CONTEXT 是已綁定本次 decision fingerprint、雷達可採用的文件；UNBOUND_FUBON_SOURCE 是 scheduler 寫入但尚未綁定 decision context 的原始富邦投影，雷達不得直接採用。 |
 | `contextFingerprint` | 是 | `string | null` | 是 |  | 同一 decision input context 的 SHA-256 指紋；UNBOUND_FUBON_SOURCE 時為 null。 |

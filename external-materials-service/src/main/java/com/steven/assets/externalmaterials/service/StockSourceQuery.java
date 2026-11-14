@@ -385,19 +385,50 @@ public class StockSourceQuery implements StockUniversePort, StockMarketRepositor
 
     /** Upsert 匯率歷史（同一 currency+rate_date 視為覆寫）。 */
     public void upsertExchangeRate(String currency, LocalDate rateDate, BigDecimal buyRate, BigDecimal sellRate) {
-        Long existing = jdbc.query(
-                "SELECT id FROM exchange_rate_history WHERE currency=? AND rate_date=?",
-                ps -> { ps.setString(1, currency); ps.setObject(2, rateDate); },
-                rs -> rs.next() ? rs.getLong(1) : null);
-        if (existing != null) {
-            jdbc.update(
-                    "UPDATE exchange_rate_history SET buy_rate=?, sell_rate=? WHERE id=?",
-                    buyRate, sellRate, existing);
-        } else {
-            jdbc.update(
-                    "INSERT INTO exchange_rate_history (currency, rate_date, buy_rate, sell_rate) VALUES (?, ?, ?, ?)",
-                    currency, rateDate, buyRate, sellRate);
-        }
+        // Unverified/Yahoo writers may not erase a validated spot receipt.
+        jdbc.update("""
+            INSERT INTO exchange_rate_history(currency,rate_date,buy_rate,sell_rate) VALUES(?,?,?,?)
+            ON CONFLICT(currency,rate_date) DO UPDATE SET buy_rate=EXCLUDED.buy_rate,sell_rate=EXCLUDED.sell_rate,
+              source_capture_id=NULL,source_member_sha256=NULL
+            WHERE exchange_rate_history.source_capture_id IS NULL
+            """,currency,rateDate,buyRate,sellRate);
+    }
+
+    @Transactional
+    public void upsertExchangeRate(String currency,LocalDate date,BigDecimal buy,BigDecimal sell,
+            com.steven.assets.externalmaterials.client.FxSourceEvidence evidence) {
+        if(evidence==null||!evidence.matches(currency,date,buy,sell))throw new IllegalArgumentException("FX_NATIVE_MEMBER_MISMATCH");
+        String member=evidence.memberSha(currency,date,buy,sell);
+        Long capture=ensureFxCapture(evidence);
+        upsertVerifiedFx(currency,date,buy,sell,capture,member);
+    }
+
+    /** One immutable batch body is persisted/read back once, not repeated once per native row. */
+    @Transactional
+    public void upsertExchangeRates(String currency,java.util.List<com.steven.assets.externalmaterials.client.ExchangeRateFetchClient.RateBar> rows) {
+        for(var row:rows)if(row.evidence()==null||!row.evidence().matches(currency,row.rateDate(),row.buyRate(),row.sellRate()))throw new IllegalArgumentException("FX_NATIVE_MEMBER_MISMATCH");
+        java.util.Map<String,Long> captures=new java.util.HashMap<>();
+        for(var row:rows){var e=row.evidence();String key=e.provider()+":"+e.sha256()+":"+e.sourceUrl()+":"+e.capturedAt();Long id=captures.computeIfAbsent(key,k->ensureFxCapture(e));upsertVerifiedFx(currency,row.rateDate(),row.buyRate(),row.sellRate(),id,e.memberSha(currency,row.rateDate(),row.buyRate(),row.sellRate()));}
+    }
+
+    private record FxStoredCapture(Long id,String rawBody) {}
+    private Long ensureFxCapture(com.steven.assets.externalmaterials.client.FxSourceEvidence evidence) {
+        jdbc.update("""
+            INSERT INTO exchange_rate_source_capture(provider,rate_basis,source_url,captured_at,source_sha256,raw_body)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(provider,rate_basis,source_sha256,source_url,captured_at) DO NOTHING
+            """,evidence.provider(),evidence.rateBasis(),evidence.sourceUrl(),java.sql.Timestamp.from(evidence.capturedAt()),evidence.sha256(),evidence.rawBody());
+        FxStoredCapture stored=jdbc.queryForObject("SELECT id,raw_body FROM exchange_rate_source_capture WHERE provider=? AND rate_basis=? AND source_sha256=? AND source_url=? AND captured_at=?",(rs,i)->new FxStoredCapture(rs.getLong("id"),rs.getString("raw_body")),evidence.provider(),evidence.rateBasis(),evidence.sha256(),evidence.sourceUrl(),java.sql.Timestamp.from(evidence.capturedAt()));
+        if(stored==null||!evidence.rawBody().equals(stored.rawBody())||!evidence.sha256().equals(com.steven.assets.externalmaterials.client.FxSourceEvidence.hash(stored.rawBody())))throw new IllegalArgumentException("FX_CAPTURE_RAW_CONFLICT");
+        return stored.id();
+    }
+    private void upsertVerifiedFx(String currency,LocalDate date,BigDecimal buy,BigDecimal sell,Long capture,String member) {
+        jdbc.update("""
+            INSERT INTO exchange_rate_history(currency,rate_date,buy_rate,sell_rate,source_capture_id,source_member_sha256)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(currency,rate_date) DO UPDATE SET buy_rate=EXCLUDED.buy_rate,sell_rate=EXCLUDED.sell_rate,
+              source_capture_id=EXCLUDED.source_capture_id,source_member_sha256=EXCLUDED.source_member_sha256
+            WHERE (exchange_rate_history.buy_rate,exchange_rate_history.sell_rate,exchange_rate_history.source_capture_id,exchange_rate_history.source_member_sha256)
+              IS DISTINCT FROM (EXCLUDED.buy_rate,EXCLUDED.sell_rate,EXCLUDED.source_capture_id,EXCLUDED.source_member_sha256)
+            """,currency,date,buy,sell,capture,member);
     }
 
     /** 取原物料（油／金）最早日期（用於判斷是否需向前回補 10 年）。 */

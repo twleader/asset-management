@@ -18,6 +18,9 @@ import java.util.Objects;
 public class TradingRadarRuleEngine {
 
     /**
+     * V28（Task 582／D-215）：美元資產以即期賣出成本及兩年同價基區間判斷 FX 等待偏好；
+     * 具來源分類的個股回撤至少30%／ETF嚴格超過10%只豁免 FX，不擴大下述免止穩集合。
+     *
      * V27（Task 581／Requirement 204）：只對台股0050／00881的52曆週價格回撤20%，及具名美股六家公司
      * 七股類的30%回撤，在MEDIUM加入不等止穩的積極分批機會。成本／資料與後置證據閘門保留；
      * 其他標的與兩軌不放寬。這是使用者風險偏好，3~6月為意圖，不保證回升。
@@ -80,7 +83,7 @@ public class TradingRadarRuleEngine {
      */
     // Task487: scores/parameters are unchanged; the service adds a SHORT-only completed-minute veto.
     // Daily-only backtests do not establish the intraday gate's profitability or point-in-time availability.
-    public static final String RULE_VERSION = "TW_RULES_V27";
+    public static final String RULE_VERSION = "TW_RULES_V28";
 
     /**
      * 三軌持有期（Task 356.1a）。
@@ -802,17 +805,56 @@ public class TradingRadarRuleEngine {
             BollingerInput bollinger,
             /**
              * 完成日 KD 快照（Task 576）。production（{@code TradingRadarService}）與回測
-             * （{@code BacktestService}）一律走 31 參數正典建構式並顯式傳入。
+             * （{@code BacktestService}）一律走 32 參數正典建構式並顯式傳入。
              */
             CompletedKd completedKd,
             /**
-             * 三軌完成 K 結構事實（Task 577／Requirement 202）。production 與回測一律走本 31 參數
+             * 三軌完成 K 結構事實（Task 577／Requirement 202）。production 與回測一律走本 32 參數
              * 正典建構式並顯式傳入 {@link RadarCompletedStructure#evaluate} 的實算結果；
              * {@code null} 視同 {@link StructureFacts#NOT_EVALUATED}。
              */
             StructureFacts structure,
-            RadarCompletedPriceDrawdown.Context accumulation
+            RadarCompletedPriceDrawdown.Context accumulation,
+            UsdFxPurchaseContext usdFxPurchase
     ) {
+        /** V27 compatibility: absence of the explicit new context retains legacy behavior. */
+        public StockInput(
+                boolean held,
+                BigDecimal price,
+                BigDecimal changePercent,
+                BigDecimal completedChangePercent,
+                Indicators indicators,
+                BigDecimal previousK,
+                BigDecimal previousD,
+                Confirmation ma20Confirmation,
+                Confirmation ma60Confirmation,
+                Confirmation ma240Confirmation,
+                InstrumentType instrumentType,
+                MarketRegime marketRegime,
+                boolean marketStale,
+                BigDecimal fxPercentile,
+                BigDecimal ma60BiasPercent,
+                BigDecimal ma60BiasPercentile,
+                BigDecimal ma240BiasPercent,
+                BigDecimal week52Position,
+                BigDecimal kdBandWidthPercent,
+                BigDecimal etfPremiumPct,
+                BigDecimal etfPremiumPercentile,
+                BigDecimal weeklyMa,
+                ExtendedIndicators extendedIndicators,
+                BigDecimal volumeRatio,
+                FundamentalInput fundamental,
+                CandleInput dailyCandle,
+                WeeklyInput weekly,
+                BollingerInput bollinger,
+                CompletedKd completedKd,
+                StructureFacts structure,
+                RadarCompletedPriceDrawdown.Context accumulation) {
+            this(held, price, changePercent, completedChangePercent, indicators, previousK, previousD, ma20Confirmation,
+                    ma60Confirmation, ma240Confirmation, instrumentType, marketRegime, marketStale, fxPercentile, ma60BiasPercent, ma60BiasPercentile,
+                    ma240BiasPercent, week52Position, kdBandWidthPercent, etfPremiumPct, etfPremiumPercentile, weeklyMa, extendedIndicators, volumeRatio,
+                    fundamental, dailyCandle, weekly, bollinger, completedKd, structure, accumulation, UsdFxPurchaseContext.NOT_EVALUATED);
+        }
         /** Compatibility input predating the named accumulation context; never infers eligibility. */
         public StockInput(
                 boolean held,
@@ -849,6 +891,7 @@ public class TradingRadarRuleEngine {
         }
 
         public StockInput {
+            usdFxPurchase = usdFxPurchase == null ? UsdFxPurchaseContext.NOT_EVALUATED : usdFxPurchase;
             accumulation = accumulation == null ? RadarCompletedPriceDrawdown.Context.NOT_EVALUATED : accumulation;
             structure = structure == null ? StructureFacts.NOT_EVALUATED : structure;
         }
@@ -857,7 +900,7 @@ public class TradingRadarRuleEngine {
          * V24 的 29 參數形狀（Task 577 之前的正典建構式）。
          *
          * <p>結構事實傳 {@link StructureFacts#NOT_EVALUATED}：<b>NOT_EVALUATED 只供既有單元測試，
-         * 代表結構條件不參與，維持 V24 行為；production 與回測必須顯式傳入實算結果</b>（走 31 參數正典建構式）。</p>
+         * 代表結構條件不參與，維持 V24 行為；production 與回測必須顯式傳入實算結果</b>（走 32 參數正典建構式）。</p>
          */
         public StockInput(boolean held,
             BigDecimal price,
@@ -2032,6 +2075,8 @@ public class TradingRadarRuleEngine {
         Double dayMove = completedDayContribution(input.completedChangePercent(), reasons, risks,
                 deepReasonVariants, deepRiskVariants);
         Double fx = fxContribution(input.fxPercentile(), reasons, risks);
+        String usdFxDisclosure = input.usdFxPurchase().disclosure(input.accumulation(), input.price());
+        if (usdFxDisclosure != null) risks.add(usdFxDisclosure);
         Double etfPremium = etfPremiumContribution(input, reasons, risks);
 
         Double eps = null;
@@ -3288,7 +3333,7 @@ public class TradingRadarRuleEngine {
         double pct = fxPercentile.doubleValue();
         double v = clampUnit(-(pct - 50.0) / 50.0);
         if (pct >= FX_EXPENSIVE_PCT) {
-            risks.add("底層外幣對台幣位於五年期第 " + Math.round(pct) + " 百分位，換匯成本偏高，暫不宜進場。 ");
+            risks.add("底層外幣對台幣位於五年期第 " + Math.round(pct) + " 百分位，歷史換匯成本偏高，已反映於分數；D-215 匯率偏好另以當前即期賣出價與兩年區間判斷。 ");
         } else if (pct >= 65.0) {
             risks.add("底層外幣對台幣位於五年期第 " + Math.round(pct) + " 百分位，換匯偏貴，已反映於分數。 ");
         } else if (pct <= 35.0) {
@@ -3678,7 +3723,15 @@ public class TradingRadarRuleEngine {
         boolean equityMarketStale = equityMarketApplies(input) && input.marketStale();
 
         if (kdOverheated && !deepMedium) blockers.add("KD 過熱，買方安全閘門關閉。 ");
-        if (fxExpensive) blockers.add("FX 位於昂貴區，換匯成本偏高，買方安全閘門關閉。 ");
+        if (input.usdFxPurchase().applies()) {
+            UsdFxPurchaseContext.Preference preference = input.usdFxPurchase().preference();
+            if (preference == UsdFxPurchaseContext.Preference.UNKNOWN
+                    && !input.usdFxPurchase().priceException(input.accumulation(), input.price()))
+                blockers.add("D-215 美元資產匯率證據未核實，買方優先等待。 ");
+            else if (preference == UsdFxPurchaseContext.Preference.HIGH
+                    && !input.usdFxPurchase().priceException(input.accumulation(), input.price()))
+                blockers.add("D-215 美元買入成本偏高，買方優先等待。 ");
+        } else if (fxExpensive) blockers.add("FX 位於昂貴區，換匯成本偏高，買方安全閘門關閉。 ");
         if (premiumExpensive) blockers.add("ETF 溢價達昂貴門檻，買方安全閘門關閉。 ");
         if (stillFalling && (!deepMedium || completedChange == null)) blockers.add("完成日漲跌缺值或收黑，買方安全閘門關閉。 ");
         if (chasedDailyMove && !deepMedium) blockers.add("完成日漲幅達本次追漲門檻，買方安全閘門關閉。 ");

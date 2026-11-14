@@ -40,7 +40,9 @@ public class ExchangeRateFetchClient {
         this.finmindToken = finmindToken == null ? "" : finmindToken.trim();
     }
 
-    public record RateBar(LocalDate rateDate, BigDecimal buyRate, BigDecimal sellRate) {}
+    public record RateBar(LocalDate rateDate, BigDecimal buyRate, BigDecimal sellRate, FxSourceEvidence evidence) {
+        public RateBar(LocalDate date,BigDecimal buy,BigDecimal sell){this(date,buy,sell,null);}
+    }
 
     /**
      * 從 FinMind TaiwanExchangeRate 抓 currency 從 since 至今的匯率區間。
@@ -49,7 +51,7 @@ public class ExchangeRateFetchClient {
     public List<RateBar> fetchRange(String currency, LocalDate since) {
         try {
             String url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate"
-                    + "&data_id=" + currency + "&start_date=" + since;
+                    + "&data_id=" + currency + "&start_date=" + since + ("USD".equals(currency) ? "&end_date=" + LocalDate.now(java.time.ZoneId.of("Asia/Taipei")) : "");
             HttpRequest.Builder b = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(30))
@@ -64,24 +66,32 @@ public class ExchangeRateFetchClient {
                 log.warn("FinMind TaiwanExchangeRate {} 回應 {}", currency, resp.statusCode());
                 return List.of();
             }
-            JsonNode data = mapper.readTree(resp.body()).path("data");
-            if (!data.isArray()) return List.of();
-
-            List<RateBar> out = new ArrayList<>();
-            for (JsonNode row : data) {
-                LocalDate date = LocalDate.parse(row.path("date").asText());
-                BigDecimal buy = decimal(row, "cash_buy");
-                BigDecimal sell = decimal(row, "cash_sell");
-                if (buy == null || buy.compareTo(BigDecimal.ZERO) <= 0) buy = decimal(row, "spot_buy");
-                if (sell == null || sell.compareTo(BigDecimal.ZERO) <= 0) sell = decimal(row, "spot_sell");
-                if (buy == null && sell == null) continue;
-                out.add(new RateBar(date, buy, sell));
-            }
-            return out;
+            return parseRates(currency,resp.body(),url,java.time.Instant.now());
         } catch (Exception e) {
             log.warn("FinMind TaiwanExchangeRate {} 抓取失敗: {}", currency, e.getMessage());
             return List.of();
         }
+    }
+
+    static List<RateBar> parseRates(String currency,String raw,String url,java.time.Instant capturedAt) throws java.io.IOException {
+        JsonNode root=new ObjectMapper().readTree(raw);if(root.path("status").asInt()!=200||!root.path("data").isArray())return List.of();
+        FxSourceEvidence evidence="USD".equals(currency)?new FxSourceEvidence("FINMIND_TAIWAN_EXCHANGE_RATE",url,raw,capturedAt):null;
+        List<RateBar> out=new ArrayList<>();
+        for(JsonNode row:root.path("data")) {
+            if(!currency.equals(row.path("currency").asText()))continue;
+            LocalDate date=LocalDate.parse(row.path("date").asText());
+            BigDecimal buy=decimal(row,"USD".equals(currency)?"spot_buy":"cash_buy");
+            BigDecimal sell=decimal(row,"USD".equals(currency)?"spot_sell":"cash_sell");
+            if("USD".equals(currency)) {
+                if(!evidence.matches(currency,date,buy,sell))continue;
+            }else {
+                if(buy==null||buy.signum()<=0)buy=decimal(row,"spot_buy");
+                if(sell==null||sell.signum()<=0)sell=decimal(row,"spot_sell");
+                if(buy==null&&sell==null)continue;
+            }
+            out.add(new RateBar(date,buy,sell,evidence));
+        }
+        return List.copyOf(out);
     }
 
     private static BigDecimal decimal(JsonNode row, String field) {

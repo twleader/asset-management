@@ -75,6 +75,8 @@ public final class UsTacticalCalculator {
         catch (RuntimeException failure) { unavailableGate(radarGate, missing, code(failure, "US_EXACT_RADAR_SOURCE_UNAVAILABLE")); }
         gateEvidence.add(radarGate); mergeBlocks(radarGate, blocking);
         boolean candidateBound = formal.containsKey("D186_CANDIDATE") && candidateBound(item, formal.get("D186_CANDIDATE"), total);
+        boolean namedDeepDrawdown = quoteValid && candidateBound && "PASS".equals(radarGate.path("status").asText())
+                && UsNamedDrawdownD215.eligible(item, formal, day, model);
         ObjectNode mechanicalGate = gate("D186_MECHANICAL", List.of("D186_CANDIDATE", "market", "assets"));
         if (candidateBound && quoteValid) {
             for (JsonNode reason : reasons) if (MECHANICAL_BLOCKS.contains(reason.asText())) unique((ArrayNode)mechanicalGate.path("reasons"), reason.asText());
@@ -86,7 +88,7 @@ public final class UsTacticalCalculator {
             ObjectNode evidence = gate(source, List.of(source));
             if (!formal.containsKey(source)) unavailableGate(evidence, missing, "FORMAL_SOURCE_UNAVAILABLE:" + source);
             else {
-                try { independentGate(source, item, formal, day, asOf, model, (ArrayNode)evidence.path("reasons")); finishGate(evidence); }
+                try { independentGate(source, item, formal, day, asOf, model, namedDeepDrawdown, (ArrayNode)evidence.path("reasons")); finishGate(evidence); }
                 catch (RuntimeException failure) { unavailableGate(evidence, missing, code(failure, "US_FORMAL_SOURCE_INVALID")); }
             }
             gateEvidence.add(evidence); mergeBlocks(evidence, blocking);
@@ -94,7 +96,7 @@ public final class UsTacticalCalculator {
         boolean fullChecked = false;
         if (mechanicsComplete && candidateBound && formal.size() == SOURCES.size() && missing.isEmpty()) {
             try {
-                fullChecks(item, out, formal, day, asOf, total, model); fullChecked = true;
+                fullChecks(item, out, formal, day, asOf, total, model, namedDeepDrawdown); fullChecked = true;
                 ObjectNode actualGate = gate("D186_ACTUAL_SIZE", new ArrayList<>(SOURCES));
                 ((ArrayNode)actualGate.path("sourceRefs")).add("assets").add("market");
                 for (JsonNode reason : reasons) if (FULL_BLOCKS.contains(reason.asText())) unique((ArrayNode)actualGate.path("reasons"), reason.asText());
@@ -161,19 +163,23 @@ public final class UsTacticalCalculator {
         else if (!Set.of("BUY_CANDIDATE", "ADD_CANDIDATE").contains(action) && !Set.of("BUY_CANDIDATE", "ADD_CANDIDATE").contains(candidate)) unique(blocks, "RADAR_NOT_BUY_DIRECTION");
     }
     /** Evaluate a proved gate independently so an unrelated missing source cannot erase its veto. */
-    private static void independentGate(String id, JsonNode item, Map<String, JsonNode> formal, String day, String asOf, JsonNode model, ArrayNode blocks) {
+    private static void independentGate(String id, JsonNode item, Map<String, JsonNode> formal, String day, String asOf, JsonNode model, boolean namedDeepDrawdown, ArrayNode blocks) {
         JsonNode body = formal.get(id), candidate = formal.get("D186_CANDIDATE");
         if (id.equals("US_MARKET_REGIME")) {
             require("US".equals(body.path("market").asText()) && day.equals(body.path("sessionDate").asText()) && Set.of("SPX", "NDX").contains(body.path("benchmark").asText()), "US_MARKET_REGIME_UNVERIFIED");
             require(Set.of("NORMAL", "RISK_ON", "RISK_OFF").contains(body.path("riskMode").asText()), "US_MARKET_REGIME_UNVERIFIED");
-            if ("RISK_OFF".equals(body.path("riskMode").asText())) unique(blocks, "US_RISK_OFF");
+            if (!namedDeepDrawdown && "RISK_OFF".equals(body.path("riskMode").asText())) unique(blocks, "US_RISK_OFF");
             require(positive(body.get("completedClose")) && positive(body.get("ma200")) && positive(body.get("priorMa200")) && nonnegative(body.get("drawdownFraction")), "US_MARKET_REGIME_UNVERIFIED");
-            if (n(body.get("completedClose")).compareTo(n(body.get("ma200"))) <= 0 || n(body.get("ma200")).compareTo(n(body.get("priorMa200"))) <= 0 || n(body.get("drawdownFraction")).compareTo(new BigDecimal(".20")) >= 0) unique(blocks, "US_BULL_MARKET_GATE_FAILED");
+            if (!namedDeepDrawdown && (n(body.get("completedClose")).compareTo(n(body.get("ma200"))) <= 0 || n(body.get("ma200")).compareTo(n(body.get("priorMa200"))) <= 0 || n(body.get("drawdownFraction")).compareTo(new BigDecimal(".20")) >= 0)) unique(blocks, "US_BULL_MARKET_GATE_FAILED");
             return;
         }
         if (id.equals("US_TACTICAL_BULL_DIP")) {
-            require(item.path("stock_code").equals(body.path("symbol")) && day.equals(body.path("sessionDate").asText()) && positive(body.get("recentHigh")) && positive(body.get("currentPrice")) && body.path("stabilizationEvidence").isArray() && !body.path("stabilizationEvidence").isEmpty(), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
-            if (n(body.get("currentPrice")).compareTo(n(body.get("recentHigh"))) >= 0) unique(blocks, "US_BULL_DRAWDOWN_STABILIZATION_FAILED"); return;
+            require(item.path("stock_code").equals(body.path("symbol")) && day.equals(body.path("sessionDate").asText()) && positive(body.get("currentPrice")), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
+            if (!namedDeepDrawdown) {
+                require(positive(body.get("recentHigh")) && body.path("stabilizationEvidence").isArray() && !body.path("stabilizationEvidence").isEmpty(), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
+                if (n(body.get("currentPrice")).compareTo(n(body.get("recentHigh"))) >= 0) unique(blocks, "US_BULL_DRAWDOWN_STABILIZATION_FAILED");
+            }
+            return;
         }
         if (id.equals("US_QUOTE_CROSSCHECK")) {
             require("VERIFIED".equals(body.path("sourceIndependence").asText()) && body.path("primaryFeedIds").isArray() && !body.path("primaryFeedIds").isEmpty() && body.path("secondaryFeedIds").isArray() && !body.path("secondaryFeedIds").isEmpty()
@@ -187,12 +193,16 @@ public final class UsTacticalCalculator {
         require(owner > 0 && item.path("stock_code").equals(candidate.path("stock_code")) && body.path("ownerUserId").asLong(-2) == owner && day.equals(body.path("sessionDate").asText()), "US_OWNER_EVIDENCE_UNVERIFIED");
         if (id.equals("US_TACTICAL_POSITIONS")) {
             require(body.path("positions").isArray(), "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); int batches = 0; Set<String> ids = new HashSet<>();
-            for (JsonNode position : body.path("positions")) { require(!position.path("tradeId").asText().isBlank() && ids.add(position.path("tradeId").asText()) && position.path("confirmedFillIds").isArray() && !position.path("confirmedFillIds").isEmpty() && nonnegative(position.get("remainingCostTwd")) && positive(position.get("remainingShares")), "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); if (item.path("stock_code").equals(position.path("symbol"))) { require(position.path("batchCount").isIntegralNumber() && position.path("batchCount").asInt() >= 0, "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); batches += position.path("batchCount").asInt(); } }
-            if (batches >= 3) unique(blocks, "US_MAX_THREE_BATCHES"); if (batches > 0 && candidate.path("thesisStillValid").isBoolean() && candidate.path("notAveragingDown").isBoolean() && (!candidate.path("thesisStillValid").asBoolean() || !candidate.path("notAveragingDown").asBoolean())) unique(blocks, "US_ADD_THESIS_OR_AVERAGING_DOWN"); return;
+            for (JsonNode position : body.path("positions")) { require(!position.path("tradeId").asText().isBlank() && ids.add(position.path("tradeId").asText()) && position.path("confirmedFillIds").isArray() && !position.path("confirmedFillIds").isEmpty() && nonnegative(position.get("remainingCostTwd")) && positive(position.get("remainingShares")), "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); if (UsNamedDrawdownD215.sameCompany(item.path("stock_code").asText(), position.path("symbol").asText())) { require(position.path("batchCount").isIntegralNumber() && position.path("batchCount").asInt() >= 0, "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); batches += position.path("batchCount").asInt(); } }
+            if (batches >= 3) unique(blocks, "US_MAX_THREE_BATCHES");
+            if (batches > 0 && candidate.path("thesisStillValid").isBoolean()
+                    && (!candidate.path("thesisStillValid").asBoolean()
+                        || !namedDeepDrawdown && candidate.path("notAveragingDown").isBoolean() && !candidate.path("notAveragingDown").asBoolean())) unique(blocks, "US_ADD_THESIS_OR_AVERAGING_DOWN");
+            return;
         }
         if (id.equals("US_TACTICAL_PENDING")) {
             require(body.path("orders").isArray(), "US_PENDING_ORDERS_UNVERIFIED"); Set<String> ids = new HashSet<>();
-            for (JsonNode order : body.path("orders")) { require(!order.path("orderId").asText().isBlank() && ids.add(order.path("orderId").asText()) && nonnegative(order.get("reservedTwd")) && "國泰".equals(order.path("broker").asText()) && !order.path("account").asText().isBlank(), "US_PENDING_ORDERS_UNVERIFIED"); if (item.path("stock_code").equals(order.path("symbol")) && "BUY".equals(order.path("side").asText()) && !Set.of("FILLED", "CANCELLED", "REJECTED").contains(order.path("status").asText()) && n(order.get("reservedTwd")).signum() > 0) unique(blocks, "US_EXACT_PENDING_BUY_EXISTS"); } return;
+            for (JsonNode order : body.path("orders")) { require(!order.path("orderId").asText().isBlank() && ids.add(order.path("orderId").asText()) && nonnegative(order.get("reservedTwd")) && "國泰".equals(order.path("broker").asText()) && !order.path("account").asText().isBlank(), "US_PENDING_ORDERS_UNVERIFIED"); if (UsNamedDrawdownD215.sameCompany(item.path("stock_code").asText(), order.path("symbol").asText()) && "BUY".equals(order.path("side").asText()) && !Set.of("FILLED", "CANCELLED", "REJECTED").contains(order.path("status").asText()) && n(order.get("reservedTwd")).signum() > 0) unique(blocks, "US_EXACT_PENDING_BUY_EXISTS"); } return;
         }
         if (id.equals("CATHAY_TWD_US_TACTICAL")) {
             require("CATHAY_TWD_US_TACTICAL".equals(body.path("bucket").asText()) && "國泰".equals(body.path("broker").asText()) && "TWD".equals(body.path("currency").asText()) && !body.path("account").asText().isBlank() && nonnegative(body.get("termTwd")) && nonnegative(body.get("totalDepositsTwd")) && nonnegative(body.get("availableTwd")), "US_CATHAY_TWD_FUNDING_UNVERIFIED");
@@ -206,16 +216,19 @@ public final class UsTacticalCalculator {
             if (LocalDate.parse(day).isAfter(review)) { JsonNode extension = body.path("extension"); boolean accepted = extension.path("acceptedByUser").asBoolean() && extension.path("decisionSourceSha256").asText().matches("[a-f0-9]{64}"); if (accepted) { LocalDate until = LocalDate.parse(extension.path("until").asText()); accepted = !until.isAfter(review.plusDays(90)) && !until.isBefore(review) && !LocalDate.parse(day).isAfter(until); } if (!accepted) unique(blocks, "US_TACTICAL_REVIEW_DUE"); }
         }
     }
-    private static void fullChecks(JsonNode item, ObjectNode out, Map<String, JsonNode> formal, String day, String asOf, BigDecimal total, JsonNode model) {
+    private static void fullChecks(JsonNode item, ObjectNode out, Map<String, JsonNode> formal, String day, String asOf, BigDecimal total, JsonNode model, boolean namedDeepDrawdown) {
         ArrayNode reasons = (ArrayNode)out.path("reasons"); JsonNode candidate = formal.get("D186_CANDIDATE");
         for (String field : List.of("stock_code", "qualification_path", "target_price", "target_price_basis", "costs", "proposed_notional_twd", "existing_company_cost_twd", "open_tactical_total_twd")) require(wire(candidate.path(field)).equals(wire(item.path(field))), "US_CANDIDATE_FORMAL_SOURCE_MISMATCH");
         JsonNode market = formal.get("US_MARKET_REGIME"), dip = formal.get("US_TACTICAL_BULL_DIP");
         require("US".equals(market.path("market").asText()) && day.equals(market.path("sessionDate").asText()) && Set.of("SPX", "NDX").contains(market.path("benchmark").asText()), "US_MARKET_REGIME_UNVERIFIED");
-        if ("RISK_OFF".equals(market.path("riskMode").asText())) unique(reasons, "US_RISK_OFF");
+        if (!namedDeepDrawdown && "RISK_OFF".equals(market.path("riskMode").asText())) unique(reasons, "US_RISK_OFF");
         require(positive(market.get("completedClose")) && positive(market.get("ma200")) && positive(market.get("priorMa200")) && nonnegative(market.get("drawdownFraction")), "US_MARKET_REGIME_UNVERIFIED");
-        if (n(market.get("completedClose")).compareTo(n(market.get("ma200"))) <= 0 || n(market.get("ma200")).compareTo(n(market.get("priorMa200"))) <= 0 || n(market.get("drawdownFraction")).compareTo(new BigDecimal("0.20")) >= 0) unique(reasons, "US_BULL_MARKET_GATE_FAILED");
-        require(item.path("stock_code").equals(dip.path("symbol")) && day.equals(dip.path("sessionDate").asText()) && positive(dip.get("recentHigh")) && positive(dip.get("currentPrice")) && dip.path("stabilizationEvidence").isArray() && !dip.path("stabilizationEvidence").isEmpty(), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
-        if (n(dip.get("currentPrice")).compareTo(n(dip.get("recentHigh"))) >= 0) unique(reasons, "US_BULL_DRAWDOWN_STABILIZATION_FAILED");
+        if (!namedDeepDrawdown && (n(market.get("completedClose")).compareTo(n(market.get("ma200"))) <= 0 || n(market.get("ma200")).compareTo(n(market.get("priorMa200"))) <= 0 || n(market.get("drawdownFraction")).compareTo(new BigDecimal("0.20")) >= 0)) unique(reasons, "US_BULL_MARKET_GATE_FAILED");
+        require(item.path("stock_code").equals(dip.path("symbol")) && day.equals(dip.path("sessionDate").asText()) && positive(dip.get("currentPrice")), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
+        if (!namedDeepDrawdown) {
+            require(positive(dip.get("recentHigh")) && dip.path("stabilizationEvidence").isArray() && !dip.path("stabilizationEvidence").isEmpty(), "US_BULL_DRAWDOWN_STABILIZATION_UNVERIFIED");
+            if (n(dip.get("currentPrice")).compareTo(n(dip.get("recentHigh"))) >= 0) unique(reasons, "US_BULL_DRAWDOWN_STABILIZATION_FAILED");
+        }
         JsonNode positions = formal.get("US_TACTICAL_POSITIONS"), pending = formal.get("US_TACTICAL_PENDING"), funding = formal.get("CATHAY_TWD_US_TACTICAL"), exit = formal.get("US_TACTICAL_EXIT_PLAN"), cross = formal.get("US_QUOTE_CROSSCHECK");
         long owner = candidate.path("ownerUserId").asLong(-1); require(owner > 0, "US_OWNER_EVIDENCE_UNVERIFIED");
         for (JsonNode body : List.of(positions, pending, funding, exit)) require(body.path("ownerUserId").asLong(-2) == owner && day.equals(body.path("sessionDate").asText()), "US_OWNER_EVIDENCE_UNVERIFIED");
@@ -224,15 +237,15 @@ public final class UsTacticalCalculator {
         for (JsonNode position : positions.path("positions")) {
             require(!position.path("tradeId").asText().isBlank() && tradeIds.add(position.path("tradeId").asText()) && position.path("confirmedFillIds").isArray() && !position.path("confirmedFillIds").isEmpty() && nonnegative(position.get("remainingCostTwd")) && positive(position.get("remainingShares")), "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED");
             for (JsonNode fill : position.path("confirmedFillIds")) require(!fill.asText().isBlank() && fillIds.add(fill.asText()), "US_DUPLICATE_FILL");
-            sleeve = sleeve.add(n(position.get("remainingCostTwd"))); if (item.path("stock_code").equals(position.path("symbol"))) { company = company.add(n(position.get("remainingCostTwd"))); batches += position.path("batchCount").asInt(-1); require(batches >= 0, "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); }
+            sleeve = sleeve.add(n(position.get("remainingCostTwd"))); if (UsNamedDrawdownD215.sameCompany(item.path("stock_code").asText(), position.path("symbol").asText())) { company = company.add(n(position.get("remainingCostTwd"))); batches += position.path("batchCount").asInt(-1); require(batches >= 0, "US_TACTICAL_POSITION_EVIDENCE_UNVERIFIED"); }
         }
         require(company.compareTo(n(item.get("existing_company_cost_twd"))) == 0 && sleeve.compareTo(n(item.get("open_tactical_total_twd"))) == 0, "US_OPEN_POSITION_TOTAL_MISMATCH");
         if (batches >= 3) unique(reasons, "US_MAX_THREE_BATCHES");
-        if (batches > 0 && (!candidate.path("thesisStillValid").asBoolean() || !candidate.path("notAveragingDown").asBoolean())) unique(reasons, "US_ADD_THESIS_OR_AVERAGING_DOWN");
+        if (batches > 0 && (!candidate.path("thesisStillValid").asBoolean() || !namedDeepDrawdown && !candidate.path("notAveragingDown").asBoolean())) unique(reasons, "US_ADD_THESIS_OR_AVERAGING_DOWN");
         Set<String> orderIds = new HashSet<>();
         for (JsonNode order : pending.path("orders")) {
             require(orderIds.add(order.path("orderId").asText()) && !order.path("orderId").asText().isBlank() && nonnegative(order.get("reservedTwd")) && "國泰".equals(order.path("broker").asText()) && !order.path("account").asText().isBlank(), "US_PENDING_ORDERS_UNVERIFIED");
-            if ("BUY".equals(order.path("side").asText()) && !Set.of("FILLED", "CANCELLED", "REJECTED").contains(order.path("status").asText())) { pendingTotal = pendingTotal.add(n(order.get("reservedTwd"))); if (item.path("stock_code").equals(order.path("symbol"))) pendingCompany = pendingCompany.add(n(order.get("reservedTwd"))); }
+            if ("BUY".equals(order.path("side").asText()) && !Set.of("FILLED", "CANCELLED", "REJECTED").contains(order.path("status").asText())) { pendingTotal = pendingTotal.add(n(order.get("reservedTwd"))); if (UsNamedDrawdownD215.sameCompany(item.path("stock_code").asText(), order.path("symbol").asText())) pendingCompany = pendingCompany.add(n(order.get("reservedTwd"))); }
         }
         if (pendingCompany.signum() > 0) unique(reasons, "US_EXACT_PENDING_BUY_EXISTS");
         require("CATHAY_TWD_US_TACTICAL".equals(funding.path("bucket").asText()) && "國泰".equals(funding.path("broker").asText()) && !funding.path("account").asText().isBlank()
