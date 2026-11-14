@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.28.1` |
+| 契約版本 | `1.28.2` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -12476,7 +12476,7 @@ Task 488 四個 D130/D195 leg、策略與緊急分帳、日週額度及深度；
 
 ### `SrppReportFactDividendTopup`
 
-D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度，每個 name 是該正式 scope 的欄位身份。
+D143/D198/D189與D218高股息事實；d218ObservedNoNewLowSessions只為前20完成日市場觀察，不建立wave或授權預算；d218Stabilized與低點/預算須正式wave來源，缺失為null UNAVAILABLE。每個name是正式scope 的欄位身份。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -12495,7 +12495,7 @@ D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額�
   "properties": {
     "name": {
       "type": "string",
-      "description": "D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度；以下名稱按上述用途順序給出原始及衍生計算量；允許值：referenceHigh, drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots。",
+      "description": "D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度；以下名稱按上述用途順序給出原始及衍生計算量；允許值：referenceHigh, drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots；D218新增d218ObservedNoNewLowSessions為前20完成日獨立觀察天數(COUNT)、d218Stabilized為wave止穩(BOOLEAN)、d218AnchorLow為配息調整後固定保護低點(TWD)、d218UsedBudget為已用含費預算(TWD)、d218CumulativeFraction為階段累計比率(RATIO)、d218BudgetCeiling為本次含費預算上限(TWD)。",
       "enum": [
         "referenceHigh",
         "drawdownPct",
@@ -12503,7 +12503,13 @@ D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額�
         "targetGap",
         "normalizedGap",
         "remainingDailyLots",
-        "remainingWeeklyLots"
+        "remainingWeeklyLots",
+        "d218ObservedNoNewLowSessions",
+        "d218Stabilized",
+        "d218AnchorLow",
+        "d218UsedBudget",
+        "d218CumulativeFraction",
+        "d218BudgetCeiling"
       ]
     },
     "subject": {
@@ -12561,13 +12567,13 @@ D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額�
       "description": "品質缺口具名原因；UNAVAILABLE 必須非空；已核實值可 null；未知或不適用為 null。"
     }
   },
-  "description": "D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度，每個 name 是該正式 scope 的欄位身份。"
+  "description": "D143/D198/D189與D218高股息事實；d218ObservedNoNewLowSessions只為前20完成日市場觀察，不建立wave或授權預算；d218Stabilized與低點/預算須正式wave來源，缺失為null UNAVAILABLE。每個name是正式scope 的欄位身份。"
 }
 ```
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `name` | 是 | `string` | 否 | enum: `referenceHigh`, `drawdownPct`, `tierLots`, `targetGap`, `normalizedGap`, `remainingDailyLots`, `remainingWeeklyLots` | D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度；以下名稱按上述用途順序給出原始及衍生計算量；允許值：referenceHigh, drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots。 |
+| `name` | 是 | `string` | 否 | enum: `referenceHigh`, `drawdownPct`, `tierLots`, `targetGap`, `normalizedGap`, `remainingDailyLots`, `remainingWeeklyLots`, `d218ObservedNoNewLowSessions`, `d218Stabilized`, `d218AnchorLow`, `d218UsedBudget`, `d218CumulativeFraction`, `d218BudgetCeiling` | D143/D198/D189 四檔高股息前20完成日 referenceHigh、跌幅與日週額度；以下名稱按上述用途順序給出原始及衍生計算量；允許值：referenceHigh, drawdownPct, tierLots, targetGap, normalizedGap, remainingDailyLots, remainingWeeklyLots；D218新增d218ObservedNoNewLowSessions為前20完成日獨立觀察天數(COUNT)、d218Stabilized為wave止穩(BOOLEAN)、d218AnchorLow為配息調整後固定保護低點(TWD)、d218UsedBudget為已用含費預算(TWD)、d218CumulativeFraction為階段累計比率(RATIO)、d218BudgetCeiling為本次含費預算上限(TWD)。 |
 | `subject` | 是 | `string | null` | 是 |  | 逐 holding/bank/target/candidate ID，總額為 null；不由顯示名稱猜分類；未知或不適用為 null。 |
 | `value` | 是 | `string | null` | 是 | pattern: ^-?(0\|[1-9][0-9]*)(\.[0-9]*[1-9])?$ | 正規化 Decimal 字串；無尾零、不含科學記號，不接受 -0；已知0為 "0"，來源未知為 null；未知或不適用為 null。 |
 | `unit` | 是 | `string | string` | 否 |  | 數值單位：固定非金額單位或正式 ISO 三碼原幣別；銀行餘額／交割／應收均保留實際 currency，Twd 欄固定 TWD。 |
@@ -29594,7 +29600,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
     },
     "formulaVersion": {
       "type": "string",
-      "description": "公式版本識別；舊固定包為 ASSET_MGMT_SRPP_V1，新發布固定包為 ASSET_MGMT_SRPP_V2。V2 manifest 的 JCS SHA-256 為 0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86。",
+      "description": "公式版本識別；歷史 ASSET_MGMT_SRPP_V1／ASSET_MGMT_SRPP_V2 的 manifest 與既有固定包保留。D218 採 ASSET_MGMT_SRPP_V3，增加 D218 公式及實作來源雜湊，nullable deposit 語意沿用 V2；V3 digest 由實際來源與 manifest 生成，不寫死為固定值。",
       "minLength": 1
     },
     "scope": {
@@ -29618,7 +29624,7 @@ Canonical Decimal 字串：無千分位、指數、前導零、多餘尾端零�
 | `policyBundleSha256` | 是 | `SrppSha256` | 否 |  | 呼叫端指定且已登錄的規則包雜湊（registry 主鍵），必須等於 query 的 policyBundleSha256。 |
 | `calculationPolicySha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(政策文件)) 計算的政策內容雜湊。 |
 | `formulaSetSha256` | 是 | `SrppSha256` | 否 |  | 伺服器以 SHA-256(JCS(公式 manifest)) 計算的公式集雜湊；manifest 改動即產生不同值。 |
-| `formulaVersion` | 是 | `string` | 否 | minLength: 1 | 公式版本識別；舊固定包為 ASSET_MGMT_SRPP_V1，新發布固定包為 ASSET_MGMT_SRPP_V2。V2 manifest 的 JCS SHA-256 為 0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86。 |
+| `formulaVersion` | 是 | `string` | 否 | minLength: 1 | 公式版本識別；歷史 ASSET_MGMT_SRPP_V1／ASSET_MGMT_SRPP_V2 的 manifest 與既有固定包保留。D218 採 ASSET_MGMT_SRPP_V3，增加 D218 公式及實作來源雜湊，nullable deposit 語意沿用 V2；V3 digest 由實際來源與 manifest 生成，不寫死為固定值。 |
 | `scope` | 是 | `string` | 否 | enum: `LISTED_CALCULATIONS_ONLY` | 適用範圍，常數 `LISTED_CALCULATIONS_ONLY`：只涵蓋 manifest 明列的計算，不是完整投資政策或交易決策。 |
 
 ### `SrppContext`

@@ -77,10 +77,25 @@ class SrppReportPolicyRegisterTest < Minitest::Test
         model_bytes: duplicate,
         manifest_bytes: (ROOT / 'backend/src/main/resources/srpp/decision/policy_manifest.json').read,
         formal_policy_bytes: (ROOT / 'backend/src/main/resources/srpp/report/d201-policy-document.json').read,
-        formula_bytes: (ROOT / 'spec/fixtures/srpp_formula_manifest_v2.json').read
+        formula_bytes: (ROOT / 'spec/fixtures/srpp_formula_manifest_v3.json').read
       )
     end
     assert_equal 'duplicate key: model_version', error.message
+  end
+
+  def test_d218_cannot_be_registered_with_a_legacy_v2_formula
+    model = current_model
+    model.fetch('execution_policy')['high_dividend_stabilization_d218'] = { 'enabled' => true }
+    model_bytes, manifest_bytes = fixture(model)
+    error = assert_raises(SrppPolicyRegister::Error) do
+      SrppReportPolicyRegister.generate(
+        model_bytes: model_bytes,
+        manifest_bytes: manifest_bytes,
+        formal_policy_bytes: (ROOT / 'backend/src/main/resources/srpp/report/d201-policy-document.json').read,
+        formula_bytes: (ROOT / 'spec/fixtures/srpp_formula_manifest_v2.json').read
+      )
+    end
+    assert_equal 'D218_REQUIRES_SOURCE_BOUND_FORMULA_V3', error.message
   end
 
   private
@@ -129,7 +144,7 @@ class SrppReportPolicyRegisterTest < Minitest::Test
       model_bytes: model_bytes,
       manifest_bytes: manifest_bytes,
       formal_policy_bytes: (ROOT / 'backend/src/main/resources/srpp/report/d201-policy-document.json').read,
-      formula_bytes: (ROOT / 'spec/fixtures/srpp_formula_manifest_v2.json').read
+      formula_bytes: (ROOT / 'spec/fixtures/srpp_formula_manifest_v3.json').read
     )
   end
 

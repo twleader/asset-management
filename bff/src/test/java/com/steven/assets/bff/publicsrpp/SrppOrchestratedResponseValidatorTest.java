@@ -176,6 +176,30 @@ class SrppOrchestratedResponseValidatorTest {
         assertThatThrownBy(() -> validate(query, context)).isInstanceOf(SrppPayloadException.class);
     }
 
+    @Test
+    void v3UsesItsTrustedManifestDigestAndPreservesNullableDepositChecks() throws Exception {
+        Path fixture = Path.of("spec/fixtures/srpp_formula_manifest_v3.json");
+        if (!Files.exists(fixture)) fixture = Path.of("../spec/fixtures/srpp_formula_manifest_v3.json");
+        assertThat(SrppFormulaV3Identity.DIGEST).isEqualTo(SrppJcs.sha256Hex(Files.readString(fixture).trim()));
+        var params = new LinkedMultiValueMap<String, String>();
+        params.add("contextId", CONTEXT);
+        params.add("calculationIds", "ASSET_RECONCILIATION,CASH_INCOME");
+        SrppOrchestratedQuery query = SrppOrchestratedQuery.parse(
+                SrppOrchestratedQuery.Route.CALCULATIONS, params, new HttpHeaders());
+        ObjectNode good = v2UnknownRate();
+        good.put("formulaSetSha256", SrppFormulaV3Identity.DIGEST);
+        for (var item : good.path("calculations")) ((ObjectNode) item)
+                .put("formulaVersion", SrppFormulaV3Identity.VERSION).put("formulaSetSha256", SrppFormulaV3Identity.DIGEST);
+        validate(query, good);
+        ObjectNode mismatch = good.deepCopy();
+        ((ObjectNode) mismatch.path("calculations").get(0)).put("formulaVersion", "ASSET_MGMT_SRPP_V2");
+        assertThatThrownBy(() -> validate(query, mismatch)).isInstanceOf(SrppPayloadException.class);
+        ObjectNode falseZero = good.deepCopy();
+        ((ObjectNode) falseZero.at("/calculations/0/data/depositGroups/0/estimatedAnnualInterest"))
+                .put("quality", "ESTIMATE").put("value", "0");
+        assertThatThrownBy(() -> validate(query, falseZero)).isInstanceOf(SrppPayloadException.class);
+    }
+
     private static ObjectNode v2UnknownRate() {
         ObjectNode root = base();
         root.put("formulaSetSha256", V2_DIGEST);

@@ -132,6 +132,42 @@ class SrppReportResponseValidatorTest {
   ObjectNode amount=producer("short-buy-codex");((ObjectNode)activeLeg(amount,11)).put("amount","1");assertThatThrownBy(()->validateProducer(amount)).isInstanceOf(RuntimeException.class);
   ObjectNode topup=producer("full-codex");((ObjectNode)activeLeg(topup,6)).put("units","1000");assertThatThrownBy(()->validateProducer(topup)).isInstanceOf(RuntimeException.class);
  }
+ @Test void d218ClosedFactsAndSealedPositiveBudgetValidateWithoutChangingHistoricalPackages() throws Exception {
+  ObjectNode n=d218Producer();validateProducer(n);
+  var facts=(com.fasterxml.jackson.databind.node.ArrayNode)n.path("modules").get(6).path("data").path("facts");
+  for(String name:java.util.List.of("d218ObservedNoNewLowSessions","d218Stabilized","d218AnchorLow","d218UsedBudget","d218CumulativeFraction","d218BudgetCeiling"))
+   facts.add(fact(name,"0056",name.equals("d218BudgetCeiling")?"1000000":name.equals("d218Stabilized")?"1":name.equals("d218CumulativeFraction")?"0.1":"2",name.equals("d218ObservedNoNewLowSessions")?"COUNT":name.equals("d218Stabilized")?"BOOLEAN":name.equals("d218CumulativeFraction")?"RATIO":"TWD"));
+  validateProducer(n);
+  var bad=n.deepCopy();((ObjectNode)bad.path("modules").get(6).path("data").path("facts").get(facts.size()-1)).put("name","d218UnknownField");
+  assertThatThrownBy(()->validateProducer(bad)).isInstanceOf(RuntimeException.class);
+  validateProducer(producer("full-codex"));
+ }
+ @Test void d218PositiveLegRejectsMissingWrongSymbolAndInsufficientFeeInclusiveBudget() throws Exception {
+  for(String mutation:java.util.List.of("missing","symbol","budget")){
+   ObjectNode n=d218Producer();var receipts=(com.fasterxml.jackson.databind.node.ArrayNode)activeLeg(n,6).path("receipts");
+   for(int i=receipts.size()-1;i>=0;i--)if(receipts.get(i).path("ruleId").asText().equals("D218_STABILIZATION")){
+    if(mutation.equals("missing"))receipts.remove(i);
+    else ((ObjectNode)receipts.get(i).path("values").get(0)).put(mutation.equals("symbol")?"subject":"value",mutation.equals("symbol")?"00878":"1");
+   }
+   assertThatThrownBy(()->validateProducer(n)).as(mutation).isInstanceOf(RuntimeException.class);
+  }
+ }
+ private static ObjectNode d218Producer() throws Exception {
+  ObjectNode root=producer("full-codex"),snapshot=(ObjectNode)root.path("inputSnapshot");
+  ObjectNode bundle=(ObjectNode)SrppDailyContextResponseValidator.parseStrict(snapshot.path("inputBundleJcs").asText().getBytes(StandardCharsets.UTF_8));
+  ObjectNode policy=(ObjectNode)bundle.path("sources").path("policy");
+  ObjectNode model=(ObjectNode)new com.fasterxml.jackson.databind.ObjectMapper().readTree(policy.path("rawModelBytes").asText());
+  model.withObject("execution_policy").putObject("high_dividend_stabilization_d218").put("enabled",true).putArray("symbols").add("0056").add("00713").add("00878");
+  String raw=model.toString();policy.put("rawModelBytes",raw);
+  ((ObjectNode)root.path("authorityRevision")).put("modelInputsSha256",SrppJcs.sha256Hex(raw));
+  ((ObjectNode)bundle.path("authority")).put("modelInputsSha256",SrppJcs.sha256Hex(raw));
+  String input=SrppJcs.canonicalize(bundle);snapshot.put("inputBundleJcs",input).put("inputSnapshotSha256",SrppJcs.sha256Hex(input));
+  ((ObjectNode)snapshot.path("sourceVector").path("policy")).put("sha256",SrppJcs.sha256Hex(SrppJcs.canonicalize(policy)));
+  ObjectNode leg=(ObjectNode)activeLeg(root,6);assertThat(leg.path("symbol").asText()).isEqualTo("0056");
+  ObjectNode receipt=leg.path("receipts").get(0).deepCopy();receipt.put("ruleId","D218_STABILIZATION");
+  receipt.putArray("values").add(fact("d218BudgetCeiling","0056","1000000","TWD"));
+  ((com.fasterxml.jackson.databind.node.ArrayNode)leg.path("receipts")).add(receipt);return root;
+ }
  private static JsonNode activeLeg(ObjectNode root,int index){for(JsonNode leg:root.get("modules").get(index).get("data").get("legs"))if("ACTIONABLE_FOR_REPORT".equals(leg.get("status").asText()))return leg;throw new AssertionError("positive leg required");}
  private static ObjectNode producer(String name)throws Exception{return (ObjectNode)SrppDailyContextResponseValidator.parseStrict(SrppReportResponseValidatorTest.class.getResourceAsStream("/srpp-report/report-producer-"+name+"-pg.json").readAllBytes());}
  private static void validateProducer(ObjectNode root){var identity=root.get("identity");var query=new SrppReportQuery(null,identity.get("consumer").asText(),identity.get("tradingDate").asText(),identity.get("reportSlot").asText(),identity.get("policyBundleSha256").asText(),identity.get("swaggerSha256").asText(),root.get("calculationRunId").asText());SrppReportResponseValidator.validate(query,identity.get("ownerUserId").asLong(),MediaType.APPLICATION_JSON,signed(root));}

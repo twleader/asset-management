@@ -1,0 +1,3180 @@
+{
+  "schemaVersion": 1,
+  "config": {
+    "decision": "D-218",
+    "enabled": true,
+    "symbols": [
+      "0056",
+      "00713",
+      "00878"
+    ],
+    "completed_no_new_low_sessions": 2,
+    "requires_five_day_ma": false,
+    "first_cumulative_budget_fraction": "0.10",
+    "retest_cumulative_budget_fraction": "0.30",
+    "follow_cumulative_budget_fraction": "1.00",
+    "follow_requires_monthly_above": true,
+    "follow_requires_k_above_d": true,
+    "same_wave_first_once": true,
+    "same_wave_retest_once": true,
+    "freeze_on_anchor_break": true,
+    "new_wave_requires_closed_prior_evidence": true
+  },
+  "synthetic": true,
+  "cases": [
+    {
+      "name": "first-without-ma5-monthly-or-kd",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "AVAILABLE",
+        "reason": "STABILIZATION_BUDGET_AVAILABLE",
+        "stage": "FIRST",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "0",
+        "cumulative_fraction": "0.1",
+        "budget_ceiling_twd": "10000",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "only-one-completed-day-after-low",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-03",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_TWO_COMPLETED_SESSIONS",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-03",
+        "completed_no_new_low_sessions": 1,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "pre-first-new-low-restarts-same-wave",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "89",
+            "close": "90"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "88",
+            "close": "89"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "89",
+            "close": "90"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_TWO_COMPLETED_SESSIONS",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-10",
+        "anchor_low": "88",
+        "observation_anchor_date": "2026-11-10",
+        "observation_anchor_low_raw": "88",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 1,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "equal-low-does-not-restart",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "89",
+            "close": "90"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "88",
+            "close": "89"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "88",
+            "close": "90"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_TWO_COMPLETED_SESSIONS",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-10",
+        "anchor_low": "88",
+        "observation_anchor_date": "2026-11-10",
+        "observation_anchor_low_raw": "88",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 1,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "intraday-new-low-waits-before-first",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "89",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_TWO_COMPLETED_SESSIONS",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-12",
+        "anchor_low": "89",
+        "observation_anchor_date": "2026-11-12",
+        "observation_anchor_low_raw": "89",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 0,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "ordered-later-retest-confirmation",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "AVAILABLE",
+        "reason": "STABILIZATION_BUDGET_AVAILABLE",
+        "stage": "RETEST",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0.3",
+        "budget_ceiling_twd": "20000",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "partial-first-does-not-increase-retest-above-twenty-percent",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "1000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "AVAILABLE",
+        "reason": "STABILIZATION_BUDGET_AVAILABLE",
+        "stage": "RETEST",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "1000",
+        "cumulative_fraction": "0.3",
+        "budget_ceiling_twd": "20000",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "same-day-retest-and-confirmation-waits",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "95",
+            "close": "96"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "96",
+            "close": "97"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "99"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_RETEST_CONFIRMATION",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "post-first-completed-break-freezes",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "89",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "FROZEN",
+        "reason": "FROZEN_ANCHOR_BREAK",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "post-first-intraday-break-freezes",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "89",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "FROZEN",
+        "reason": "FROZEN_ANCHOR_BREAK",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "actual-pending-order-blocks-duplicate",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": [
+          {
+            "id": "pending-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_PENDING_ORDER",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "pending-first-locks-anchor",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "89",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": [
+          {
+            "id": "pending-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "FROZEN",
+        "reason": "FROZEN_ANCHOR_BREAK",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "dca-debits-but-does-not-create-first",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "9000",
+            "kind": "DCA",
+            "stage": null
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "AVAILABLE",
+        "reason": "STABILIZATION_BUDGET_AVAILABLE",
+        "stage": "FIRST",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "9000",
+        "cumulative_fraction": "0.1",
+        "budget_ceiling_twd": "1000",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "dca-exhausts-first-budget",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10001",
+            "kind": "DCA",
+            "stage": null
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "CUMULATIVE_BUDGET_EXHAUSTED",
+        "stage": "FIRST",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10001",
+        "cumulative_fraction": "0.1",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "follow-waits-for-monthly-above-and-kd",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          },
+          {
+            "id": "retest-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-11",
+            "amount_twd": "20000",
+            "kind": "STABILIZATION",
+            "stage": "RETEST"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_FOLLOW_TREND",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "30000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "follow-with-seventy-percent-remaining",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "ABOVE",
+          "k": "21",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          },
+          {
+            "id": "retest-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-11",
+            "amount_twd": "20000",
+            "kind": "STABILIZATION",
+            "stage": "RETEST"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "AVAILABLE",
+        "reason": "STABILIZATION_BUDGET_AVAILABLE",
+        "stage": "FOLLOW",
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "30000",
+        "cumulative_fraction": "1",
+        "budget_ceiling_twd": "70000",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "follow-k-equals-d-still-waits",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "ABOVE",
+          "k": "20",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          },
+          {
+            "id": "retest-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-11",
+            "amount_twd": "20000",
+            "kind": "STABILIZATION",
+            "stage": "RETEST"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_FOLLOW_TREND",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "90",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "30000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "cash-adjustment-preserves-fixed-anchor",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "88",
+            "close": "89"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [
+          {
+            "date": "2026-11-06",
+            "amount": "2"
+          }
+        ],
+        "current_price": "89",
+        "current_low": "88",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "WAIT",
+        "reason": "WAIT_RETEST_CONFIRMATION",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "88",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": true,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "cash-adjustment-exact-break-boundary",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "87.9999999999",
+            "close": "89"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [
+          {
+            "date": "2026-11-06",
+            "amount": "2"
+          }
+        ],
+        "current_price": "89",
+        "current_low": "88",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "FROZEN",
+        "reason": "FROZEN_ANCHOR_BREAK",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": "2026-11-02",
+        "anchor_low": "88",
+        "observation_anchor_date": "2026-11-02",
+        "observation_anchor_low_raw": "90",
+        "stabilized": false,
+        "latest_completed_date": "2026-11-11",
+        "completed_no_new_low_sessions": 7,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "missing-first-wave-approval-blocks",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "UNVERIFIED",
+        "reason": "D218_APPROVAL_EVIDENCE_REQUIRED",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": null,
+        "anchor_date": null,
+        "anchor_low": null,
+        "observation_anchor_date": null,
+        "observation_anchor_low_raw": null,
+        "stabilized": false,
+        "latest_completed_date": null,
+        "completed_no_new_low_sessions": 0,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "duplicate-confirmed-fill-blocks",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          },
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "FIRST",
+            "observation_anchor_date": "2026-11-02",
+            "observation_anchor_low_raw": "90",
+            "evidence_ref": "canonical:recommendation:first"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "UNVERIFIED",
+        "reason": "D218_HISTORY_IDENTITY_CONFLICT",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": null,
+        "anchor_date": null,
+        "anchor_low": null,
+        "observation_anchor_date": null,
+        "observation_anchor_low_raw": null,
+        "stabilized": false,
+        "latest_completed_date": null,
+        "completed_no_new_low_sessions": 0,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "retest-without-first-blocks",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": true,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [
+          {
+            "id": "fill-1",
+            "wave_id": "approved-wave-1",
+            "date": "2026-11-05",
+            "amount_twd": "10000",
+            "kind": "STABILIZATION",
+            "stage": "RETEST"
+          }
+        ],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "UNVERIFIED",
+        "reason": "D218_STAGE_SEQUENCE_UNVERIFIED",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": "approved-wave-1",
+        "anchor_date": null,
+        "anchor_low": null,
+        "observation_anchor_date": null,
+        "observation_anchor_low_raw": null,
+        "stabilized": false,
+        "latest_completed_date": null,
+        "completed_no_new_low_sessions": 0,
+        "used_twd": "10000",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "missing-history-does-not-become-empty",
+      "kind": "evaluate",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-12",
+        "completed_session": "2026-11-11",
+        "completed_sessions": [
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06",
+          "2026-11-09",
+          "2026-11-10",
+          "2026-11-11"
+        ],
+        "rows": [
+          {
+            "date": "2026-11-02",
+            "low": "90",
+            "close": "91"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "92",
+            "close": "93"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-09",
+            "low": "93",
+            "close": "94"
+          },
+          {
+            "date": "2026-11-10",
+            "low": "94",
+            "close": "95"
+          },
+          {
+            "date": "2026-11-11",
+            "low": "95",
+            "close": "96"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": {
+        "wave_id": "approved-wave-1",
+        "stock_code": "0056",
+        "market": "台股",
+        "anchor_date": "2026-11-02",
+        "anchor_low_raw": "90",
+        "budget_twd": "100000",
+        "price_basis": "TW_SPLIT_STOCK_PRICE",
+        "coverage_start_date": "2026-11-02",
+        "coverage_end_date": "2026-11-12",
+        "history_complete": false,
+        "wave_history_complete": true,
+        "prior_wave_closed_evidence": null,
+        "approval_evidence_ref": "canonical:approval:1",
+        "frozen": false,
+        "confirmed_fills": [],
+        "pending_orders": []
+      },
+      "expected": {
+        "decision": "D-218",
+        "status": "UNVERIFIED",
+        "reason": "D218_HISTORY_UNVERIFIED",
+        "stage": null,
+        "stock_code": "0056",
+        "wave_id": null,
+        "anchor_date": null,
+        "anchor_low": null,
+        "observation_anchor_date": null,
+        "observation_anchor_low_raw": null,
+        "stabilized": false,
+        "latest_completed_date": null,
+        "completed_no_new_low_sessions": 0,
+        "used_twd": "0",
+        "cumulative_fraction": "0",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "market-only-observation-without-wave",
+      "kind": "observe",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-09",
+        "completed_session": "2026-11-06",
+        "completed_sessions": [
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-20",
+          "2026-10-21",
+          "2026-10-22",
+          "2026-10-23",
+          "2026-10-26",
+          "2026-10-27",
+          "2026-10-28",
+          "2026-10-29",
+          "2026-10-30",
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06"
+        ],
+        "rows": [
+          {
+            "date": "2026-10-12",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-13",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-14",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-15",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-16",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-19",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-20",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-21",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-22",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-23",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-26",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-27",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-28",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-29",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-30",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-02",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "90",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "91",
+            "close": "92"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "94",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": null,
+      "expected": {
+        "decision": "D-218",
+        "status": "OBSERVATION_ONLY",
+        "reason": "MARKET_TWO_SESSION_OBSERVATION",
+        "stock_code": "0056",
+        "observation_only": true,
+        "stage": null,
+        "wave_id": null,
+        "observation_anchor_date": "2026-11-04",
+        "observation_anchor_low_raw": "90",
+        "anchor_low": "90",
+        "completed_no_new_low_sessions": 2,
+        "stabilized": true,
+        "latest_completed_date": "2026-11-06",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "market-observation-excludes-intraday-low",
+      "kind": "observe",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-09",
+        "completed_session": "2026-11-06",
+        "completed_sessions": [
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-20",
+          "2026-10-21",
+          "2026-10-22",
+          "2026-10-23",
+          "2026-10-26",
+          "2026-10-27",
+          "2026-10-28",
+          "2026-10-29",
+          "2026-10-30",
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06"
+        ],
+        "rows": [
+          {
+            "date": "2026-10-12",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-13",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-14",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-15",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-16",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-19",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-20",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-21",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-22",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-23",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-26",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-27",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-28",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-29",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-30",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-02",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "90",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-06",
+            "low": "91",
+            "close": "92"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "80",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": null,
+      "expected": {
+        "decision": "D-218",
+        "status": "OBSERVATION_ONLY",
+        "reason": "MARKET_TWO_SESSION_OBSERVATION",
+        "stock_code": "0056",
+        "observation_only": true,
+        "stage": null,
+        "wave_id": null,
+        "observation_anchor_date": "2026-11-04",
+        "observation_anchor_low_raw": "90",
+        "anchor_low": "90",
+        "completed_no_new_low_sessions": 2,
+        "stabilized": true,
+        "latest_completed_date": "2026-11-06",
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    },
+    {
+      "name": "market-observation-missing-completed-low",
+      "kind": "observe",
+      "fact": {
+        "stock_code": "0056",
+        "market": "台股",
+        "trading_date": "2026-11-09",
+        "completed_session": "2026-11-06",
+        "completed_sessions": [
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-20",
+          "2026-10-21",
+          "2026-10-22",
+          "2026-10-23",
+          "2026-10-26",
+          "2026-10-27",
+          "2026-10-28",
+          "2026-10-29",
+          "2026-10-30",
+          "2026-11-02",
+          "2026-11-03",
+          "2026-11-04",
+          "2026-11-05",
+          "2026-11-06"
+        ],
+        "rows": [
+          {
+            "date": "2026-10-12",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-13",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-14",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-15",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-16",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-19",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-20",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-21",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-22",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-23",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-26",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-27",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-28",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-29",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-10-30",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-02",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-03",
+            "low": "91",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-04",
+            "low": "90",
+            "close": "92"
+          },
+          {
+            "date": "2026-11-05",
+            "low": "91",
+            "close": "92"
+          }
+        ],
+        "cash_events": [],
+        "current_price": "95",
+        "current_low": "80",
+        "radar": {
+          "monthly_confirmation": "BELOW",
+          "k": "15",
+          "d": "20"
+        }
+      },
+      "state": null,
+      "expected": {
+        "decision": "D-218",
+        "status": "UNVERIFIED",
+        "reason": "D218_COMPLETED_ROWS_UNVERIFIED",
+        "stock_code": "0056",
+        "observation_only": true,
+        "stage": null,
+        "wave_id": null,
+        "observation_anchor_date": null,
+        "observation_anchor_low_raw": null,
+        "anchor_low": null,
+        "completed_no_new_low_sessions": 0,
+        "stabilized": false,
+        "latest_completed_date": null,
+        "budget_ceiling_twd": "0",
+        "places_orders": false,
+        "trade_authorization": false
+      }
+    }
+  ]
+}

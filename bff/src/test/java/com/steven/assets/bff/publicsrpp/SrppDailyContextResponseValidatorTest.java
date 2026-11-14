@@ -34,6 +34,24 @@ class SrppDailyContextResponseValidatorTest {
     }
 
     @Test
+    void v3RequiresTheMatchingTrustedDigestAndKeepsV2UnknownRateSemantics() {
+        ObjectNode good = v2UnknownRate();
+        ((ObjectNode) good.at("/context/policy")).put("formulaVersion", SrppFormulaV3Identity.VERSION)
+                .put("formulaSetSha256", SrppFormulaV3Identity.DIGEST);
+        accept(latest(), rehash(good));
+        ObjectNode wrongDigest = good.deepCopy();
+        ((ObjectNode) wrongDigest.at("/context/policy")).put("formulaSetSha256", "a".repeat(64));
+        reject(latest(), rehash(wrongDigest));
+        ObjectNode wrongVersion = good.deepCopy();
+        ((ObjectNode) wrongVersion.at("/context/policy")).put("formulaVersion", "ASSET_MGMT_SRPP_V1");
+        reject(latest(), rehash(wrongVersion));
+        ObjectNode falseZero = good.deepCopy();
+        ((ObjectNode) falseZero.at("/context/modules/assets/data/depositGroups/0/estimatedAnnualInterest"))
+                .put("quality", "ESTIMATE").put("value", "0");
+        reject(latest(), rehash(falseZero));
+    }
+
+    @Test
     void v2UnknownRateRequiresConsistentGroupAndIncomeQuality() {
         ObjectNode good = v2UnknownRate();
         accept(latest(), good);

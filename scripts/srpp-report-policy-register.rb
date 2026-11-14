@@ -77,6 +77,10 @@ module SrppReportPolicyRegister
       raise SrppPolicyRegister::Error, 'POLICY_VERSION_MISMATCH'
     end
     verify_report_candidate!(model)
+    if model.dig('execution_policy', 'high_dividend_stabilization_d218') &&
+       SrppPolicyRegister.parse_strict(formula_bytes)['formulaVersion'] != 'ASSET_MGMT_SRPP_V3'
+      raise SrppPolicyRegister::Error, 'D218_REQUIRES_SOURCE_BOUND_FORMULA_V3'
+    end
 
     policy_text = policy_document(model)
     expected = SrppPolicyRegister.parse_strict(formal_policy_bytes)
@@ -93,7 +97,7 @@ module SrppReportPolicyRegister
       model_bytes: (root / 'backend/src/main/resources/srpp/decision/model_inputs.json').read,
       manifest_bytes: (root / 'backend/src/main/resources/srpp/decision/policy_manifest.json').read,
       formal_policy_bytes: (root / 'backend/src/main/resources/srpp/report/d201-policy-document.json').read,
-      formula_bytes: (root / 'spec/fixtures/srpp_formula_manifest_v2.json').read
+      formula_bytes: (root / 'spec/fixtures/srpp_formula_manifest_v3.json').read
     )
   end
 end

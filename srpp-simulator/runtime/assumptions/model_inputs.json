@@ -1,6 +1,6 @@
 {
   "model_version": "3.22.0",
-  "policy_version": "2.65.0",
+  "policy_version": "2.66.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -688,7 +688,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes for anything already reconciled; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-217",
+      "decision": "D-218",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -979,7 +979,7 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-217",
+      "decision": "D-218",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
@@ -1048,7 +1048,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-217",
+    "decision": "D-218",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -1081,7 +1081,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-217",
+      "decision": "D-218",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1444,7 +1444,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-217",
+      "decision": "D-218",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1495,7 +1495,7 @@
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-217",
+        "decision": "D-218",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1513,7 +1513,8 @@
         "stop_rule": "No top-up once a fund reaches its individual target; later price drift below target does not restart it without a new Accepted decision. Scheduled DCA keeps its own D-143 stop rule.",
         "defensive_mode_blocks": true,
         "bear_window": "When REBALANCE_BEAR_WINDOW is active, the D-143 bear sequence replaces this top-up.",
-        "rotation_relation": "Separate from D-132 rotation; rotation buy legs still need two low/oversold triggers."
+        "rotation_relation": "Separate from D-132 rotation; rotation buy legs still need two low/oversold triggers.",
+        "stabilization_rule": "For autonomous core top-ups in 0056, 00713 and 00878 also require high_dividend_stabilization_d218. Two completed TW sessions without a lower daily low after the observation anchor; no MA5 requirement. One FIRST stage at 10%, RETEST adds at most 20% (30% cumulative), FOLLOW to 100% only after monthly ABOVE and K>D. Complete approved-wave, fills and pending evidence required; no weekly reset or local override of API BLOCKED. 00919 and existing scheduled DCA retain their own rules."
       },
       "settlement_bank_policy": "Verify the actual settlement bank and TWD demand-deposit capacity through /api/assets/latest; do not infer Cathay United Bank solely from the broker name.",
       "rotation_policy": "D-143 retains all four funds. 00919 is not an exit-to-zero seller. A retained high-dividend seller must have genuine excess under an individual upper band or the shared 12% cap, be high/overbought and radar-compatible, and may only reduce toward its positive target. Each buyer must be below its accepted target, satisfy at least two low/oversold triggers and all evidence/funding/settlement gates. Purchases, including existing DCA, cannot exceed the individual target or shared four-fund 12% cap after fees. No fixed symbol pair and no forced transaction solely to reach an exact percentage.",
@@ -1523,7 +1524,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-217",
+      "decision": "D-218",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1787,7 +1788,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-217",
+      "current_entry_rule_decision": "D-218",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1925,7 +1926,7 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-217",
+      "decision": "D-218",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
@@ -2277,7 +2278,7 @@
       "kd_overbought_d_greater_than": 80
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-217",
+      "decision": "D-218",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
@@ -2304,7 +2305,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B target (2.5% under D-214). If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-217",
+        "decision": "D-218",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2594,7 +2595,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00881",
@@ -2602,7 +2603,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "0056",
@@ -2610,7 +2611,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00878",
@@ -2618,7 +2619,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00713",
@@ -2626,7 +2627,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00919",
@@ -2634,7 +2635,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "009826",
@@ -2642,7 +2643,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "006208",
@@ -2650,7 +2651,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "009804",
@@ -2658,7 +2659,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00850",
@@ -2666,7 +2667,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00882",
@@ -2674,7 +2675,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00865B",
@@ -2682,7 +2683,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00719B",
@@ -2690,7 +2691,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00697B",
@@ -2698,7 +2699,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00679B",
@@ -2706,7 +2707,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "00751B",
@@ -2714,7 +2715,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "VOO",
@@ -2722,7 +2723,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "VT",
@@ -2730,7 +2731,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "SGOV",
@@ -2738,7 +2739,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "21de6370d1ecff132e17e5b2856c659cc42179f5ed636970241253528caef166"
+          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
         },
         {
           "stock_code": "GOOG",
@@ -2746,7 +2747,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "GOOGL",
@@ -2754,7 +2755,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "MSFT",
@@ -2762,7 +2763,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "AVGO",
@@ -2770,7 +2771,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "NVDA",
@@ -2778,7 +2779,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "AAPL",
@@ -2786,7 +2787,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         },
         {
           "stock_code": "AMZN",
@@ -2794,7 +2795,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "13f68aca025214ab3f40279fe9cb0c156a160febc69265795c1f89e679e7f400"
+          "source_sha256": "af5453d4bfb00531f0799ad5575aca5a15c9b8a0b77433e29223c0325b001c80"
         }
       ],
       "final_report_composition": {
@@ -2815,6 +2816,26 @@
         "source_api_validator": "scripts/verify_usd_asset_fx_source.py"
       },
       "native_history_coverage": "Retain all legacy UNKNOWN canonical rows. Exclude their prices/count them only when immutable trusted FinMind NATIVE_QUERY URL intervals for TaiwanExchangeRate/USD continuously cover the exact window through independent completed D, with qualified source-member-bound prices, boundary and latest D. Bank OBSERVATION captures may supply verified SPOT prices but never query coverage. Do not require all canonical dates to be native bank days or relabel legacy as verified."
+    },
+    "high_dividend_stabilization_d218": {
+      "decision": "D-218",
+      "enabled": true,
+      "symbols": [
+        "0056",
+        "00713",
+        "00878"
+      ],
+      "completed_no_new_low_sessions": 2,
+      "requires_five_day_ma": false,
+      "first_cumulative_budget_fraction": "0.10",
+      "retest_cumulative_budget_fraction": "0.30",
+      "follow_cumulative_budget_fraction": "1.00",
+      "follow_requires_monthly_above": true,
+      "follow_requires_k_above_d": true,
+      "same_wave_first_once": true,
+      "same_wave_retest_once": true,
+      "freeze_on_anchor_break": true,
+      "new_wave_requires_closed_prior_evidence": true
     }
   },
   "major_illness_events": {
@@ -2866,7 +2887,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-217",
+  "decision": "D-218",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2887,7 +2908,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-217",
+    "decision": "D-218",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,

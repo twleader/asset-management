@@ -194,7 +194,8 @@ public final class SrppDailyContextResponseValidator {
                     module(modules.get("cashIncome"), mp + ".cashIncome", this::cashIncomeData),
                     module(modules.get("funding"), mp + ".funding", this::fundingData),
                     module(modules.get("completedTechnicals"), mp + ".completedTechnicals", this::technicalsData));
-            if (V2.equals(ctx.get("policy").get("formulaVersion").asText())) {
+            if (V2.equals(ctx.get("policy").get("formulaVersion").asText())
+                    || SrppFormulaV3Identity.VERSION.equals(ctx.get("policy").get("formulaVersion").asText())) {
                 validateV2(modules);
             }
             String expectedCoverage = statuses.stream().allMatch("COMPLETE"::equals) ? "COMPLETE" : "PARTIAL";
@@ -212,6 +213,10 @@ public final class SrppDailyContextResponseValidator {
             constText(node, "scope", "LISTED_CALCULATIONS_ONLY", path);
             if (V2.equals(node.get("formulaVersion").asText())
                     && !V2_DIGEST.equals(node.get("formulaSetSha256").asText())) fail(path + " V2 digest 不符");
+            if (SrppFormulaV3Identity.VERSION.equals(node.get("formulaVersion").asText())
+                    != SrppFormulaV3Identity.DIGEST.equals(node.get("formulaSetSha256").asText())) {
+                fail(path + " V3 version/digest 不符");
+            }
         }
 
         private void validateV2(JsonNode modules) {
