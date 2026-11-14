@@ -3,6 +3,11 @@ package com.steven.assets.bff.portfolioadvice;
 import com.fasterxml.jackson.annotation.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateDeserializer;
+import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateSerializer;
 import java.util.List;
 import java.util.Map;
 
@@ -146,9 +151,39 @@ public final class SrppSettingsDto {
             @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal monthlyExpenseRealTwd,
             List<DatedBonus> bonusEvents,List<RecurringBonus> recurringBonuses,List<PayrollEntry> ledger,
             @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal receivedByRetirementNominalTwd,
-            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal receivableAfterRetirementNominalTwd) {
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal receivableAfterRetirementNominalTwd,
+            @JsonInclude(JsonInclude.Include.NON_NULL) AnnualIncomeTax annualIncomeTax) {
         public Payroll {bonusEvents=list(bonusEvents);recurringBonuses=list(recurringBonuses);ledger=list(ledger);}
     }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AnnualIncomeTax(String scope,int ruleYear,String sourceUrl,String futureYearPolicy,
+            String historicalBasis,List<AnnualIncomeTaxYear> years,List<String> notes) {
+        public AnnualIncomeTax {years=list(years);notes=list(notes);}
+    }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AnnualIncomeTaxYear(int taxYear,
+            @JsonFormat(shape=JsonFormat.Shape.STRING,pattern="yyyy-MM-dd")
+            @JsonSerialize(using=LocalDateSerializer.class) @JsonDeserialize(using=LocalDateDeserializer.class) LocalDate settlementDate,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal grossSalaryNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal selfPensionNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal taxableSalaryNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal personalExemptionNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal standardDeductionNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal salaryDeductionNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal taxableIncomeNominalTwd,
+            double marginalRate,double effectiveRate,List<IncomeTaxBracket> brackets,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal liabilityNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal withheldNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal settlementNominalTwd,IncomeTaxTreatment treatment) {
+        public AnnualIncomeTaxYear {brackets=list(brackets);}
+    }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record IncomeTaxBracket(@JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal lowerNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal upperNominalTwd,double rate,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal taxableSliceNominalTwd,
+            @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal taxNominalTwd) {}
+    /** Closed wire treatment codes, not a user-managed business classification. */
+    public enum IncomeTaxTreatment { SETTLED_BEFORE_AS_OF,CASH_SETTLEMENT,TERMINAL_ACCRUAL }
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record PayrollEntry(String payDate,@JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal contractualMonthlySalaryNominalTwd,
             @JsonFormat(shape=JsonFormat.Shape.STRING) BigDecimal regularSalaryNominalTwd,

@@ -37,7 +37,8 @@ public class SrppShortTermService {
     public ListEnvelope list(String draftId,String revision) {
         long owner=owner();JsonNode values=draftValues(owner,draftId,revision),model=model();
         SixPolicy equity=twPolicy(model,"short_term_opportunity_d171"),bond=twPolicy(model,"bond_short_term_opportunity_d185");
-        SixPolicy chosenEquity=values==null?equity:draftTw(values,"shortEquity",equity),chosenBond=values==null?bond:draftTw(values,"shortBond",bond);
+        SixPolicy chosenEquity=values==null?equity:draftTw(values,"shortEquity",equity.symbols()),
+                chosenBond=values==null?bond:draftTw(values,"shortBond",settings.allowedSymbols("shortBondSymbols"));
         UsValues us=usPolicy(model),draftUs=values==null?null:draftUs(values);
         TradingRadarDto.ListResponse source;
         try {source=radar.getList();}catch(RuntimeException failure){throw unavailable();}
@@ -82,8 +83,8 @@ public class SrppShortTermService {
     public DetailEnvelope stock(String code,String market) {
         owner();
         if(code==null||!code.matches("[A-Za-z0-9.\\-]{1,12}")||!Set.of("台股","美股").contains(market==null?"":market))throw bad("股票代號或市場別格式不合法");
-        JsonNode model=model();SixPolicy equity=twPolicy(model,"short_term_opportunity_d171"),bond=twPolicy(model,"bond_short_term_opportunity_d185");
-        String group=group(code,market,equity.symbols(),bond.symbols());if(group==null)throw notFound();
+        JsonNode model=model();SixPolicy equity=twPolicy(model,"short_term_opportunity_d171");
+        String group=group(code,market,equity.symbols(),settings.allowedSymbols("shortBondSymbols"));if(group==null)throw notFound();
         com.steven.assets.dto.TradingRadarPanelDto.StockEvaluation source;
         try {source=radar.getStockEvaluation(code,market);}catch(IllegalArgumentException foreign){throw notFound();}
         catch(RuntimeException unavailable){throw unavailable();}
@@ -128,9 +129,9 @@ public class SrppShortTermService {
         return new SixPolicy(symbols(p.path("symbols")),num(p,"minimum_rebound_pct"),num(p,"minimum_net_reward_risk"),
                 num(limits,"sleeve"),num(limits,"per_position"),integer(limits,"max_holding_sessions"));
     }
-    private static SixPolicy draftTw(JsonNode values,String prefix,SixPolicy formal) {
+    private static SixPolicy draftTw(JsonNode values,String prefix,List<String> allowed) {
         List<String> symbols=symbols(values.path(prefix+"Symbols"));
-        if(!new HashSet<>(formal.symbols()).containsAll(symbols)||new HashSet<>(symbols).size()!=symbols.size())throw unavailable();
+        if(!new HashSet<>(allowed).containsAll(symbols)||new HashSet<>(symbols).size()!=symbols.size())throw unavailable();
         return new SixPolicy(symbols,num(values,prefix+"ReboundPct"),num(values,prefix+"NetRewardRisk"),num(values,prefix+"SleeveCap"),
                 num(values,prefix+"PositionCap"),integer(values,prefix+"MaxHoldingSessions"));
     }

@@ -142,7 +142,10 @@ def accrue_terminal_tax(assets, pending_tax, price_level, end_date, tax_budget=N
 
 class MonthlySignals:
     """Observable monthly proxy, never a substitute for daily radar evidence."""
-    def __init__(self, paths):
+    def __init__(self, paths, *, bear_drawdown=.20):
+        if isinstance(bear_drawdown, bool) or not isinstance(bear_drawdown, (int, float)) or not math.isfinite(bear_drawdown) or not 0 < bear_drawdown < 1:
+            raise ValueError("bear drawdown must be a finite fraction strictly between zero and one")
+        self.bear_drawdown = float(bear_drawdown)
         self.history = np.ones((10, paths))
         self.count = 0
         self.ma = np.ones(paths)
@@ -173,7 +176,7 @@ class MonthlySignals:
         rising = warmed & (self.ma > old_ma) & (index >= self.ma)
         risk_off = warmed & (self.ma < old_ma) & (index < self.ma)
         bull = rising & ~self.used & (self.window_months >= wait) & (index >= self.anchor * 1.15) & ~corrected
-        bear = risk_off & (drawdown <= -.20)
+        bear = risk_off & (drawdown <= -self.bear_drawdown)
         return bull, bear, drawdown
 
     def sold(self, mask):
@@ -276,12 +279,12 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
     retirement_start_weights = np.broadcast_to(start_weight, (n, 3)).copy()
     elapsed = 0.
     retired_months = 0
-    signals = MonthlySignals(n)
+    signals = MonthlySignals(n, bear_drawdown=cfg["monthly_signal_proxy"]["bear_drawdown_initial"])
     bull_signal = np.zeros(n, dtype=bool)
     spending_bull_signal = np.zeros(n, dtype=bool)
     spending_bear_signal = np.zeros(n, dtype=bool)
     # D-193 is a market state, independent of tactical wait and prior sales.
-    spending_signals = MonthlySignals(n)
+    spending_signals = MonthlySignals(n, bear_drawdown=cfg["monthly_signal_proxy"]["bear_drawdown_initial"])
     bear_signal = np.zeros(n, dtype=bool)
     tactical_rng = np.random.default_rng(np.random.SeedSequence([seed, 139, 3]))
     ordinary_rng = np.random.default_rng(np.random.SeedSequence([seed, 139, 4]))
@@ -1096,7 +1099,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             },
             "stage_age_boundaries": {"age_75_start": stage_age_75, "age_80_start": stage_age_80},
             "market_adjustment_annualized_real_twd": float(market_spend_adjustment_twd),
-            "bear_definition": "MonthlySignals: at least 20% drawdown and falling 10-month trend; applied from the next modeled period.",
+            "bear_definition": f"MonthlySignals: at least {100*cfg['monthly_signal_proxy']['bear_drawdown_initial']:g}% drawdown and falling 10-month trend; applied from the next modeled period.",
             "strong_bull_definition": f"MonthlySignals D-156 proxy: rising 10-month trend, at least 15% above the locked anchor, after {tactical_wait_months} months; applied from the next modeled period.",
             "application": "Prorated by modeled period duration while each path is in the confirmed monthly regime; no future-month look-ahead.",
             "base_allocation_bull_bear_timing_enabled": False,

@@ -143,4 +143,72 @@ class SrppReportStateTopupCalculatorTest {
         assertThat(n(oldTransition.get("ladderAmount"))).isEqualByComparingTo("80000");
     }
 
+    static ObjectNode d219BearState() {
+        ObjectNode state=J.createObjectNode();
+        state.put("verified",true).put("active",false).put("windowBudget","0").put("lastFill",-100)
+                .put("lastAmount","0").put("initialBonds","0").put("bondsSold","0");
+        for(String key:List.of("budget","spent","fills")){ArrayNode values=state.putArray(key);for(int i=0;i<5;i++)values.add("0");}
+        return state;
+    }
+    static ObjectNode d219BearEvent(String drawdown,int session) {
+        ObjectNode event=J.createObjectNode();
+        event.put("verified",true).put("qualified",true).put("session",session).put("drawdown",drawdown)
+                .put("total","10000000").put("equity","5000000").put("eligibleBonds","3000000")
+                .put("totalBonds","3000000").put("availableCash","1000000");
+        event.putArray("fills");return event;
+    }
+    @Test void d219CurrentModelStartsAtFifteenAndKeepsBoundaryQualificationAndCapacity()throws Exception {
+        JsonNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141");
+        String[] thresholds={".15",".20",".25",".30",".35"};
+        for(int i=0;i<5;i++)assertThat(n(policy.path("bear_ladder_d141").get(i).get("drawdown"))).isEqualByComparingTo(thresholds[i]);
+        JsonNode below=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",d219BearState(),d219BearEvent("-.1499",10),5);
+        assertThat(below.path("eligible").asBoolean()).isFalse();assertThat(n(below.get("ladderAmount"))).isZero();
+        JsonNode first=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",d219BearState(),d219BearEvent("-.15",10),5);
+        assertThat(first.path("eligible").asBoolean()).isTrue();assertThat(n(first.get("ladderAmount"))).isEqualByComparingTo("160000");
+        assertThat(n(first.path("stateAfter").get("windowBudget"))).isEqualByComparingTo("2000000");
+        for(String block:List.of("qualification","cashAndBondFloor","equityCap")) {
+            ObjectNode event=d219BearEvent("-.35",10);
+            if(block.equals("qualification"))event.put("qualified",false);
+            if(block.equals("cashAndBondFloor"))event.put("availableCash","0").put("totalBonds","1000000");
+            if(block.equals("equityCap"))event.put("equity","7000000");
+            JsonNode result=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",d219BearState(),event,5);
+            assertThat(result.path("eligible").asBoolean()).as(block).isFalse();assertThat(n(result.get("ladderAmount"))).as(block).isZero();
+        }
+    }
+    @Test void d219FiveConfirmedBatchesKeepOneBudgetCooldownAndNoGapRelease()throws Exception {
+        JsonNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141");
+        ObjectNode state=d219BearState();String[] drawdowns={"-.15","-.20","-.25","-.30","-.35"};
+        String[] expected={"160000","240000","400000","500000","700000"},bondSales={"0","0","0","300000","700000"};
+        BigDecimal paid=BigDecimal.ZERO;
+        for(int i=0;i<5;i++) {
+            int session=i*5;ObjectNode event=d219BearEvent(drawdowns[i],session);
+            if(i>0) {
+                JsonNode early=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",state,d219BearEvent("-.35",session-1),5);
+                assertThat(n(early.get("ladderAmount"))).isZero();
+            }
+            JsonNode proposal=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",state,event,5);
+            assertThat(proposal.path("nextBatch").asInt()).isEqualTo(i);
+            assertThat(n(proposal.get("ladderAmount"))).isEqualByComparingTo(expected[i]);
+            assertThat(proposal.path("growingFill").asBoolean()).isTrue();
+            state=proposal.path("stateAfter").deepCopy();
+            ObjectNode confirmation=d219BearEvent(drawdowns[i],session);
+            confirmation.withArray("fills").addObject().put("confirmed",true).put("rung",i).put("session",session)
+                    .put("deployed",expected[i]).put("bondSale",bondSales[i]);
+            JsonNode filled=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",state,confirmation,5);
+            state=filled.path("stateAfter").deepCopy();paid=paid.add(new BigDecimal(expected[i]));
+            assertThat(n(filled.get("ladderAmount"))).isZero();
+            assertThat(n(state.get("windowBudget"))).isEqualByComparingTo("2000000");
+            assertThat(n(state.path("fills").get(i))).isEqualByComparingTo("1");
+            if(i==0) {
+                JsonNode notYetSecond=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",state,d219BearEvent("-.1999",session+5),5);
+                assertThat(n(notYetSecond.get("ladderAmount"))).isZero();
+            }
+        }
+        assertThat(paid).isEqualByComparingTo("2000000");
+        JsonNode complete=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",state,d219BearEvent("-.35",100),5);
+        assertThat(complete.path("eligible").asBoolean()).isFalse();assertThat(n(complete.get("ladderAmount"))).isZero();
+        JsonNode gap=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",d219BearState(),d219BearEvent("-.35",0),5);
+        assertThat(gap.path("nextBatch").asInt()).isZero();assertThat(n(gap.get("ladderAmount"))).isEqualByComparingTo("160000");
+    }
+
 }

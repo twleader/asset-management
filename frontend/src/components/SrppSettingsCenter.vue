@@ -604,7 +604,7 @@
             <template v-else>
               <el-alert type="warning" show-icon :closable="false" class="operation-alert"
                 title="月頻情境預估，不代表已核定的勞保或勞退給付"
-                description="薪資保費與未公告年度級距採規劃代理，沒有完整年度所得稅結算；此結果不含逐檔配置容量、交易成本與交割，也不是雷達訊號、正式報告或下單授權。" />
+                description="年度薪資稅如有提供，僅試算本人薪資與獎金的單身居民規劃範圍，非完整全戶申報或實際核定。最高適用稅率由所得淨額自動計算，非整筆所得套用該率。未公告年度級距採規劃代理；此結果不含逐檔配置容量、交易成本與交割，也不是雷達訊號、正式報告或下單授權。" />
 
               <div class="subsection-heading">生日、給付與定期支出時程</div>
               <el-table :data="cashflowScheduleRows" size="small" stripe>
@@ -634,6 +634,57 @@
                   <el-table-column label="系統結果" min-width="210"><template #default="{ row }">{{ formatScheduleValue(row.value, row.kind) }}</template></el-table-column>
                   <el-table-column prop="note" label="說明" min-width="200" show-overflow-tooltip />
                 </el-table>
+
+              <div class="subsection-heading">年度薪資所得稅試算</div>
+              <template v-if="cashflowSchedule.payroll.annualIncomeTax">
+                <div class="typed-result-note">
+                  範圍：{{ incomeTaxScopeLabel(cashflowSchedule.payroll.annualIncomeTax.scope) }}；級距規則年度：{{ cashflowSchedule.payroll.annualIncomeTax.ruleYear }}；
+                  未公告年度政策：{{ incomeTaxFuturePolicyLabel(cashflowSchedule.payroll.annualIncomeTax.futureYearPolicy) }}。
+                  <a :href="cashflowSchedule.payroll.annualIncomeTax.sourceUrl" target="_blank" rel="noopener noreferrer">官方級距來源</a>
+                </div>
+                <p class="typed-result-note">歷史基礎：{{ incomeTaxHistoricalBasisLabel(cashflowSchedule.payroll.annualIncomeTax.historicalBasis) }}</p>
+                <ul v-if="cashflowSchedule.payroll.annualIncomeTax.notes?.length" class="typed-result-note">
+                  <li v-for="(note, index) in cashflowSchedule.payroll.annualIncomeTax.notes" :key="`annual-tax-note-${index}`">{{ note }}</li>
+                </ul>
+                <el-table v-if="cashflowSchedule.payroll.annualIncomeTax.years?.length"
+                  :data="cashflowSchedule.payroll.annualIncomeTax.years" size="small" stripe max-height="460" class="typed-wide-table">
+                  <el-table-column type="expand" width="48" fixed="left">
+                    <template #default="{ row }">
+                      <div class="subsection-heading">課稅所得與扣除額</div>
+                      <el-descriptions :column="3" border size="small">
+                        <el-descriptions-item label="扣自提後薪資所得">{{ formatCurrency(row.taxableSalaryNominalTwd) }}</el-descriptions-item>
+                        <el-descriptions-item label="免稅額">{{ formatCurrency(row.personalExemptionNominalTwd) }}</el-descriptions-item>
+                        <el-descriptions-item label="單身標準扣除額">{{ formatCurrency(row.standardDeductionNominalTwd) }}</el-descriptions-item>
+                        <el-descriptions-item label="薪資所得特別扣除額">{{ formatCurrency(row.salaryDeductionNominalTwd) }}</el-descriptions-item>
+                      </el-descriptions>
+                      <div class="subsection-heading">各級距稅額切片</div>
+                      <el-table :data="row.brackets" size="small" stripe>
+                        <el-table-column label="級距下界" min-width="130"><template #default="{ row: bracket }">{{ formatCurrency(bracket.lowerNominalTwd) }}</template></el-table-column>
+                        <el-table-column label="級距上界" min-width="130"><template #default="{ row: bracket }">{{ bracket.upperNominalTwd == null ? '無上限' : formatCurrency(bracket.upperNominalTwd) }}</template></el-table-column>
+                        <el-table-column label="級距稅率" min-width="110"><template #default="{ row: bracket }">{{ formatFraction(bracket.rate) }}</template></el-table-column>
+                        <el-table-column label="本級課稅切片" min-width="150"><template #default="{ row: bracket }">{{ formatCurrency(bracket.taxableSliceNominalTwd) }}</template></el-table-column>
+                        <el-table-column label="本級稅額" min-width="130"><template #default="{ row: bracket }">{{ formatCurrency(bracket.taxNominalTwd) }}</template></el-table-column>
+                      </el-table>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="taxYear" label="所得年度" width="100" fixed="left" />
+                  <el-table-column label="全年薪資與獎金" min-width="150"><template #default="{ row }">{{ formatCurrency(row.grossSalaryNominalTwd) }}</template></el-table-column>
+                  <el-table-column label="勞退自提" min-width="130"><template #default="{ row }">{{ formatCurrency(row.selfPensionNominalTwd) }}</template></el-table-column>
+                  <el-table-column label="所得淨額（課稅所得）" min-width="180"><template #default="{ row }">{{ formatCurrency(row.taxableIncomeNominalTwd) }}</template></el-table-column>
+                  <el-table-column label="最高適用稅率" min-width="130"><template #default="{ row }">{{ formatFraction(row.marginalRate) }}</template></el-table-column>
+                  <el-table-column label="有效稅率（約）" min-width="140"><template #default="{ row }">{{ formatEffectiveTaxRate(row.effectiveRate) }}</template></el-table-column>
+                  <el-table-column label="試算應納稅額" min-width="145"><template #default="{ row }">{{ formatCurrency(row.liabilityNominalTwd) }}</template></el-table-column>
+                  <el-table-column label="已預扣" min-width="130"><template #default="{ row }">{{ formatCurrency(row.withheldNominalTwd) }}</template></el-table-column>
+                  <el-table-column label="結算補／退（正退負補）" min-width="190"><template #default="{ row }">{{ formatCurrency(row.settlementNominalTwd) }}</template></el-table-column>
+                  <el-table-column prop="settlementDate" label="結算日" width="120" />
+                  <el-table-column label="年度處理" min-width="145"><template #default="{ row }">{{ incomeTaxTreatmentLabel(row.treatment) }}</template></el-table-column>
+
+                </el-table>
+                <el-alert v-else type="info" show-icon :closable="false"
+                  title="此結果未提供年度列" description="畫面不補造年度薪資、稅額或結算資料。" />
+              </template>
+              <el-alert v-else type="info" show-icon :closable="false"
+                title="此歷史結果尚無年度累進稅明細" description="舊版結果未提供年度薪資所得稅資料；畫面不以預扣率或零值補造年度應納稅額。" />
 
                 <template v-if="cashflowSchedule.payroll.bonusEvents?.length">
                   <div class="subsection-heading">指定日期年終／績效／節慶獎金</div>
@@ -675,7 +726,7 @@
                     <el-table-column label="獎金明細" min-width="220"><template #default="{ row }">{{ formatLedgerBonuses(row.bonusEvents) }}</template></el-table-column>
                   </el-table>
                 </template>
-                <p class="typed-result-note">已收／待發放合計只涵蓋本輪 ledger；所得稅為現金扣繳代理，並非完整年度最終稅額。</p>
+                <p class="typed-result-note">已收／待發放合計只涵蓋本輪 ledger；薪資預扣是預繳，年度應納稅額及補退請參照上方累進稅試算明細。</p>
               </template>
 
               <template v-if="selectedResult?.assumptions?.reserveStrategy">
@@ -1798,6 +1849,11 @@ function formatFraction(value) {
   return `${formatPreciseDecimal(value * 100)}%`
 }
 
+function formatEffectiveTaxRate(value) {
+  if (value == null || typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return `${new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(value * 100)}%`
+}
+
 function formatMonths(value) {
   if (value == null || typeof value !== 'number' || !Number.isFinite(value)) return '—'
   return formatPreciseDecimal(value, 4)
@@ -1832,6 +1888,28 @@ function formatScheduleValue(value, kind = 'text') {
   if (kind === 'status') return exclusionReasonLabel(value)
   if (kind === 'integer' || kind === 'months') return String(value)
   return String(value)
+}
+
+function incomeTaxScopeLabel(value) {
+  if (value === 'SALARY_ONLY_SINGLE_RESIDENT_PLANNING') return '本人薪資與獎金的單身居民規劃（非完整全戶申報）'
+  return value == null || value === '' ? '—' : String(value)
+}
+
+function incomeTaxFuturePolicyLabel(value) {
+  if (value === 'CARRY_115_UNTIL_OFFICIAL') return '沿用115年度級距作代理，直到官方公布新年度級距；不代表未來法規已公告'
+  return value == null || value === '' ? '—' : String(value)
+}
+
+function incomeTaxHistoricalBasisLabel(value) {
+  if (value === 'SOURCE_PAYROLL_PROJECTION_NOT_VERIFIED_SLIPS') return '依來源薪資資料回推的規劃值，未核實薪資扣繳憑單'
+  return value == null || value === '' ? '—' : String(value)
+}
+
+function incomeTaxTreatmentLabel(value) {
+  if (value === 'SETTLED_BEFORE_AS_OF') return '估值日前已結算'
+  if (value === 'CASH_SETTLEMENT') return '按結算日補退'
+  if (value === 'TERMINAL_ACCRUAL') return '期末應補稅負債'
+  return value == null || value === '' ? '—' : String(value)
 }
 
 function exclusionReasonLabel(value) {
@@ -1878,7 +1956,7 @@ function buildPayrollScheduleRows(payroll) {
     { label: '每月發薪日', value: payroll.payday, kind: 'integer', note: '每月日期。' },
     { label: '每年調薪金額', value: payroll.annualRaiseAmountNominalTwd, kind: 'money', note: '名目新臺幣。' },
     { label: '首次調薪日期', value: payroll.annualRaiseFirstDate, kind: 'text', note: '之後依薪資帳務規約。' },
-    { label: '所得稅現金扣繳率', value: payroll.withholdingRate, kind: 'fraction', note: '扣繳代理，不是最終稅率。' },
+    { label: '薪資預扣率（預繳，非最終稅率）', value: payroll.withholdingRate, kind: 'fraction', note: '僅影響預繳金額與現金時點，不決定年度應納稅額。' },
     { label: '勞退自提率', value: payroll.selfPensionRate, kind: 'fraction', note: '自提款不列入可支用現金。' },
     { label: '健保眷屬人數', value: payroll.nhiDependents, kind: 'integer', note: '人。' },
     { label: '退休前每月實質生活費', value: payroll.monthlyExpenseRealTwd, kind: 'money', note: '2026 年 8 月實質新臺幣。' },

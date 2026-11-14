@@ -6994,3 +6994,7 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 8. 原雷達WAIT沒有可靠typed cause可證明僅等均線或止穩時，保留獨立方向阻擋並揭露RADAR_WAIT_CAUSE_NOT_VERIFIABLE；不得依自然語言reasons/risks猜測放行。FIRST/RETEST本身不另要求MA5、MA20或KD轉強，原非反向雷達與必要來源仍有效；不宣稱已建立技術WAIT豁免。
 9. 新增ASSET_MGMT_SRPP_V3／SRPP_FORMULA_MANIFEST_V3記錄D218公式scope與Java rule/module/sizing及SRPP pure腳本SHA-256，使用可重播generator產生fixture與runtime常數；原V1/V2 manifest與fixture完整bytes不變、歷史registry仍可驗證。current registration generator改用V3，checker/golden相依同步；V3沿用V2 nullable-deposit金融語意、原daily-context producer接受V3但不改時窗或副作用。舊row不得UPDATE/DELETE。BFF舊daily-context/orchestrated response validator需接受精確V3formulaVersion、formulaSetSha256與已審manifest（由同一generator同步resource），不靠version字串放行，V1/V2仍原精確bytes；srpp-simulator的受控runtime/baseBundle/catalog/provenance與新bundle同來源重產，避免設定頁仍綁舊bundle，無變更模型公式或新增設定。
 10. 同步SRPP D-218／v2.66.0 model與manifest原bytes，依既有工具產生authority、golden、policy document與insert-only registry SQL；雙專案feature commit、main no-ff merge／push及remote-ref驗證後，才正式registry、乾淨main重建/recreate business-services、bff、srpp-simulator三個實際變更服務，JAR位元組與精確hash業務API回讀。正式日報合法時窗未執行記NOT_YET_EXECUTED。
+
+### Requirements 187／193／208 補充：設定中心三項修正與15%正式五批（Tasks 589／590）
+
+使用者確認台股債券候選須含現有五檔00679B／00697B／00719B／00751B／00865B，原正式觀察預設三檔不自動增選；薪資綜所稅應逐級累計，V3情境增加本人薪資獎金的單身標準扣除額年度規劃稅、已預扣與五月補退、期末應補負債，最高/有效稅率自動推導，20%非全薪稅率或上限，完整申報戶與投資稅仍未建模。D219將正式熊市五批改15/20/25/30/35%及原8/12/20/25/35%窗口份額，D202/D212熊窗口門檻同步15%，保留MA200/RISK_OFF與原AI互斥路由及全部資金/風險硬閘門，無重複資金/自動交易。月頻同版來源與實際啟動一致，仍明示aggregate近似，不宣稱完整逐日策略等價。完整閉合型別、來源、相容、測試與發布契約凍結於t589與t590自足任務。

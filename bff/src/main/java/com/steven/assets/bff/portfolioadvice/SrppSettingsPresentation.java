@@ -70,7 +70,11 @@ final class SrppSettingsPresentation {
         new Definition("payroll.payday","/cashflowSchedule/payroll/payday","每月發薪日","日"),
         new Definition("payroll.annualRaiseAmountNominalTwd","/cashflowSchedule/payroll/annualRaiseAmountNominalTwd","每年調薪金額","名目新臺幣元"),
         new Definition("payroll.annualRaiseFirstDate","/cashflowSchedule/payroll/annualRaiseFirstDate","首次調薪日期",""),
-        new Definition("payroll.withholdingRate","/cashflowSchedule/payroll/withholdingRate","薪資與獎金扣繳率（非最終所得稅）","fraction"),
+        new Definition("payroll.withholdingRate","/cashflowSchedule/payroll/withholdingRate","薪資預扣率（預繳，非最終稅率）","fraction"),
+        new Definition("payroll.annualIncomeTax.scope","/cashflowSchedule/payroll/annualIncomeTax/scope","年度薪資稅試算範圍",""),
+        new Definition("payroll.annualIncomeTax.ruleYear","/cashflowSchedule/payroll/annualIncomeTax/ruleYear","所得稅級距來源年度","年"),
+        new Definition("payroll.annualIncomeTax.futureYearPolicy","/cashflowSchedule/payroll/annualIncomeTax/futureYearPolicy","未來所得稅級距規約",""),
+        new Definition("payroll.annualIncomeTax.historicalBasis","/cashflowSchedule/payroll/annualIncomeTax/historicalBasis","年中起算前薪資來源",""),
         new Definition("payroll.selfPensionRate","/cashflowSchedule/payroll/selfPensionRate","自提勞退比例（未計入可支用現金）","fraction"),
         new Definition("payroll.nhiDependents","/cashflowSchedule/payroll/nhiDependents","健保眷屬人數","人"),
         new Definition("payroll.monthlyExpenseRealTwd","/cashflowSchedule/payroll/monthlyExpenseRealTwd","退休前每月生活支出（含稅務預算）","2026年8月實質元"),
@@ -105,6 +109,12 @@ final class SrppSettingsPresentation {
                     "REFERENCE_INFLATION_HISTORY_PROXY".equals(value.asText())?"以固定基準通膨初始化過往物價；未取得官方歷史CPI，不是核定月額":"依未來情境物價路徑；個人資格與金額尚未核定");
             if(d.key().equals("strategy.signalBasis")&&!value.isMissingNode()&&!value.isNull())value=com.fasterxml.jackson.databind.node.TextNode.valueOf(
                     "月頻合成股票報酬代理，至少11個完整月份暖機；不是每日MA200、當日雷達或買賣許可");
+            if(!value.isMissingNode()&&!value.isNull()&&d.key().equals("payroll.annualIncomeTax.scope"))value=com.fasterxml.jackson.databind.node.TextNode.valueOf(
+                    "本人薪資與獎金的單身居民規劃稅；不含完整家戶與投資所得申報");
+            if(!value.isMissingNode()&&!value.isNull()&&d.key().equals("payroll.annualIncomeTax.futureYearPolicy"))value=com.fasterxml.jackson.databind.node.TextNode.valueOf(
+                    "未公告年度沿115年度級距與扣除額規劃，並非未來已公告法規");
+            if(!value.isMissingNode()&&!value.isNull()&&d.key().equals("payroll.annualIncomeTax.historicalBasis"))value=com.fasterxml.jackson.databind.node.TextNode.valueOf(
+                    "同版薪資規則回推規劃值，未核對實際扣繳憑單；不重播既往現金");
             if(!value.isMissingNode()&&!value.isNull())rows.add(new AssumptionEntry(d.key(),d.label(),value,d.unit()));
         }
         return new ScenarioPresentation(rows,s.modeledFields(),s.notModeledFields());
