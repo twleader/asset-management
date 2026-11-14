@@ -1,0 +1,1 @@
+{"status": "PASS", "consumer": "Codex", "purpose": "daily", "decision": "D-219", "policy_version": "2.67.0", "model_version": "3.23.0", "POLICY_BUNDLE_SHA256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4", "verified_files": 215, "SWAGGER_SHA256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0", "swagger_contract_version": "1.28.2"}

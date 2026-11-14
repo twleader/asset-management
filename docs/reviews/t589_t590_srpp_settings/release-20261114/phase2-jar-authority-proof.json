@@ -1,0 +1,26 @@
+{
+  "srpp/decision/model_inputs.json": {
+    "exactBytes": true,
+    "sha256": "48c87397b59b5594f623e993363083b5585ba9c2eebfa100551815f068468484"
+  },
+  "srpp/decision/policy_manifest.json": {
+    "exactBytes": true,
+    "sha256": "4dc2618c40a216da7e065d5d750d1713e8e9ba63dacc29bf7f2dbfa1f70e6396"
+  },
+  "srpp/9090-api-swagger.md": {
+    "exactBytes": true,
+    "sha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0"
+  },
+  "srpp/report/d201-registration.sql": {
+    "exactBytes": true,
+    "sha256": "8c357f0e20124b82ce9c6b56c9cfd0abef2b65b0046bc573477fd0781cd8759c"
+  },
+  "srpp/settings/settings_catalog.json": {
+    "exactBytes": true,
+    "sha256": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3"
+  },
+  "srpp/settings/pre_retirement_payroll.json": {
+    "exactBytes": true,
+    "sha256": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5"
+  }
+}

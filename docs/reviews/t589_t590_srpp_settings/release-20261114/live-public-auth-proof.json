@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "at": "2026-11-14T10:01:03.643293+00:00",
+  "checks": {
+    "publicUnauthenticated": 401,
+    "publicForgedIdentityRejected": 401,
+    "privateSettingsNotOn9090": 404
+  }
+}

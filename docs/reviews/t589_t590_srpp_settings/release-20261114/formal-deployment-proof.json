@@ -1,0 +1,253 @@
+{
+  "createdAt": "2026-11-14T09:58:28.682313+00:00",
+  "mainHead": "5c19bf5dc0d7b03ba40031fd8917f1a55d0825b7",
+  "mainRemoteExact": true,
+  "mainClean": true,
+  "composeProject": "asset-management",
+  "source": "Clean main with original main .env; production Compose build/recreate for four changed services.",
+  "formalBuildExitCode": 0,
+  "formalBuildLog": "/tmp/srpp-bond-tax-review/formal-build.log",
+  "formalBuildLogSha256": "f8ea779453211bd3d7e6e5e173fffcd9fa8fc86119d18cfa9a825ae0a1075a31",
+  "services": {
+    "srpp-simulator": {
+      "containerId": "e4473097e25cbb147d80314988dc65d78ca2a57bc875b35ed6fcc2b680a3b417",
+      "imageId": "sha256:f2f4f3320bbe15a56b9d0f9f9c10d071e96fb7ac93f862068fdb10cc644c2592",
+      "running": true,
+      "health": "healthy",
+      "imagePinMatched": true,
+      "environmentKeysChecked": [
+        "OPENBLAS_NUM_THREADS",
+        "PYTHONDONTWRITEBYTECODE"
+      ],
+      "environmentValuesEqual": true,
+      "mounts": []
+    },
+    "business-services": {
+      "containerId": "b95919686fa26aca2e62dc44b03c93e57a083fab3f73dca770edcf847e3d915f",
+      "imageId": "sha256:19e2aa813731dea68f783ea5f16563971ff34886b784c44e9f08e54cd705680f",
+      "running": true,
+      "health": "healthy",
+      "imagePinMatched": true,
+      "environmentKeysChecked": [
+        "ADMIN_EMAIL",
+        "AI_FLOW_CLAUDE_TOKEN",
+        "AI_FLOW_CODEX_TOKEN",
+        "AI_FLOW_COLLECTOR_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_MODEL",
+        "API_ERROR_LOG_INGEST_TOKEN",
+        "APP_PUBLIC_BASE_URL",
+        "BACKUP_CRYPT_CONFIG_SHA256",
+        "BACKUP_DRIVE_FOLDER_ID",
+        "BACKUP_KNOWN_ARCHIVE_FILENAME",
+        "BACKUP_KNOWN_ARCHIVE_FOLDER",
+        "DB_HOST",
+        "DB_NAME",
+        "DB_PASSWORD",
+        "DB_PORT",
+        "DB_USERNAME",
+        "DIVIDEND_BACKFILL_BATCH_PAUSE_MILLIS",
+        "DIVIDEND_BACKFILL_BATCH_SIZE",
+        "DIVIDEND_BACKFILL_ENABLED",
+        "DIVIDEND_BACKFILL_STATE_DIR",
+        "DIVIDEND_CANONICAL_PROJECTION_ENABLED",
+        "EXPORT_OUTPUT_DIR",
+        "FUBON_BANK_BALANCE_SYNC_ENABLED",
+        "FUBON_BASE_URL",
+        "FUBON_ENABLED",
+        "FUBON_ETF_HOLDINGS_SYNC_ENABLED",
+        "FUBON_INVENTORY_SYNC_ENABLED",
+        "FUBON_REALIZED_GAIN_SYNC_ENABLED",
+        "FUBON_SETTLEMENT_SYNC_ENABLED",
+        "FUBON_SYNC_OWNER_EMAIL",
+        "FUBON_TRADE_SYNC_ENABLED",
+        "FUBON_TW_LIVE_QUOTES_ENABLED",
+        "GDRIVE_OUTPUT_REMOTE",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "INTERNAL_TREASURY_TOKEN",
+        "MAIL_HOST",
+        "MAIL_PASSWORD",
+        "MAIL_PORT",
+        "MAIL_USERNAME",
+        "MARKET_ANALYSIS_NEWS_MAX_AGE_DAYS",
+        "MARKET_ANALYSIS_NEWS_REGION_BLOCK_ENABLED",
+        "MARKET_ANALYSIS_NEWS_VERIFY_PUBLISHED_DATE",
+        "NOTIFICATION_FROM",
+        "RCLONE_CONFIG",
+        "TZ"
+      ],
+      "environmentValuesEqual": true,
+      "mounts": [
+        {
+          "target": "/etc/rclone",
+          "sourceAndReadOnlyEqual": true
+        },
+        {
+          "target": "/home/steven",
+          "sourceAndReadOnlyEqual": true
+        },
+        {
+          "target": "/run/secrets/fubon/shared",
+          "sourceAndReadOnlyEqual": true
+        }
+      ]
+    },
+    "bff": {
+      "containerId": "4c11e95a433dd62b080e518d7bdb65f47143185c4ae7238f64622f94d413d21a",
+      "imageId": "sha256:f5ecce73096a733ade50502302f403615851522663b9d9733716154d81f41cb6",
+      "running": true,
+      "health": "healthy",
+      "imagePinMatched": true,
+      "environmentKeysChecked": [
+        "AI_FLOW_CLAUDE_TOKEN",
+        "AI_FLOW_CODEX_TOKEN",
+        "AI_FLOW_COLLECTOR_TOKEN",
+        "API_ERROR_LOG_INGEST_TOKEN",
+        "BUSINESS_SERVICES_URL",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "SESSION_COOKIE_SECURE",
+        "TZ"
+      ],
+      "environmentValuesEqual": true,
+      "mounts": [
+        {
+          "target": "/var/log/nginx-shared",
+          "sourceAndReadOnlyEqual": true
+        }
+      ]
+    },
+    "frontend": {
+      "containerId": "a606b748716fb4386a9bf06c458f2a37d2694a5a46fbab5450781bc6642dc0d4",
+      "imageId": "sha256:3305b86d60a0e197d5ce27754f747f5bc83d8c7586b22cbee88539f3e8d86850",
+      "running": true,
+      "health": "no-healthcheck",
+      "imagePinMatched": true,
+      "environmentKeysChecked": [
+        "FRONTEND_LOCAL_TLS_SOURCE_HOST_PATH",
+        "FRONTEND_PUBLIC_TLS_REQUIRED",
+        "FRONTEND_PUBLIC_TLS_SOURCE_HOST_PATH",
+        "TZ"
+      ],
+      "environmentValuesEqual": true,
+      "mounts": [
+        {
+          "target": "/run/secrets/frontend-tls-source",
+          "sourceAndReadOnlyEqual": true
+        },
+        {
+          "target": "/run/secrets/frontend-local-tls-source",
+          "sourceAndReadOnlyEqual": true
+        }
+      ]
+    }
+  },
+  "unrelatedSixContainerIdsAndImagesUnchanged": [
+    "/asset-external-materials-service",
+    "/asset-fubon-broker-service",
+    "/asset-api-gateway",
+    "/asset-yuanta-broker-service",
+    "/asset-postgres",
+    "/asset-redis"
+  ],
+  "totalFormalContainers": 10,
+  "jarAuthority": {
+    "srpp/decision/model_inputs.json": {
+      "sha256": "48c87397b59b5594f623e993363083b5585ba9c2eebfa100551815f068468484",
+      "exactMainSourceBytes": true
+    },
+    "srpp/decision/policy_manifest.json": {
+      "sha256": "4dc2618c40a216da7e065d5d750d1713e8e9ba63dacc29bf7f2dbfa1f70e6396",
+      "exactMainSourceBytes": true
+    },
+    "srpp/9090-api-swagger.md": {
+      "sha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+      "exactMainSourceBytes": true
+    },
+    "srpp/report/d201-registration.sql": {
+      "sha256": "8c357f0e20124b82ce9c6b56c9cfd0abef2b65b0046bc573477fd0781cd8759c",
+      "exactMainSourceBytes": true
+    },
+    "srpp/settings/settings_catalog.json": {
+      "sha256": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3",
+      "exactMainSourceBytes": true
+    },
+    "srpp/settings/pre_retirement_payroll.json": {
+      "sha256": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
+      "exactMainSourceBytes": true
+    }
+  },
+  "workerHealth": {
+    "status": "UP",
+    "baseBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4"
+  },
+  "allowedBondSymbols": [
+    "00679B",
+    "00697B",
+    "00719B",
+    "00751B",
+    "00865B"
+  ],
+  "defaultBondSymbols": [
+    "00679B",
+    "00751B",
+    "00697B"
+  ],
+  "bearLadder": [
+    {
+      "drawdown": 0.15,
+      "share_of_window_budget": 0.08
+    },
+    {
+      "drawdown": 0.2,
+      "share_of_window_budget": 0.12
+    },
+    {
+      "drawdown": 0.25,
+      "share_of_window_budget": 0.2
+    },
+    {
+      "drawdown": 0.3,
+      "share_of_window_budget": 0.25
+    },
+    {
+      "drawdown": 0.35,
+      "share_of_window_budget": 0.35
+    }
+  ],
+  "bffHealth": "UP",
+  "oldBffNaturalDnsRecovery": {
+    "safeGetStatus": 200,
+    "jsonParsed": true,
+    "seconds": 0.034
+  },
+  "safeMarketIndexGetStatus": 200,
+  "safeQuotesGetStatus": 200,
+  "safeQuotesJsonArray": true,
+  "host8080and8082NoListeners": true,
+  "frontend": {
+    "httpRootStatus": 200,
+    "adviceChunkName": "AssetAllocationAdviceView-nbsdHMxQ.js",
+    "adviceChunkSha256": "ae12342846657287cddb1320cbb34efc87bc5d0a1a1e4eace82a561860533e95",
+    "annualIncomeTaxFieldIncluded": true,
+    "approximateRateLabelIncluded": true,
+    "servedChunkExactContainerBytes": true,
+    "tls": {
+      "publicDns": {
+        "httpStatus": 200,
+        "certificateTrustVerified": true,
+        "sslVerifyResult": 0
+      },
+      "localDeployedDomain": {
+        "httpStatus": 200,
+        "certificateTrustVerified": true,
+        "sslVerifyResult": 0
+      }
+    }
+  },
+  "temporaryUiRemoved": true,
+  "featureLiveOwnerChecksDelegatedToRoot": true,
+  "noLocalSimulationOrFormalPublishReportMailTradeTriggered": true,
+  "failures": []
+}

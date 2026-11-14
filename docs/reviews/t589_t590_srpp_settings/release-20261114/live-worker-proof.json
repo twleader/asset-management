@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "at": "2026-11-14T09:58:51.318518+00:00",
+  "syntheticAssets": true,
+  "hostBusinessAssetsNotCalled": true,
+  "actualDeployedWorker": true,
+  "containerId": "e4473097e25cbb147d80314988dc65d78ca2a57bc875b35ed6fcc2b680a3b417",
+  "imageId": "sha256:f2f4f3320bbe15a56b9d0f9f9c10d071e96fb7ac93f862068fdb10cc644c2592",
+  "baseBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "engineVersion": "SRPP_SCENARIO_CASHFLOW_V3",
+  "paths": 1000,
+  "seed": 7,
+  "sameAsIsolatedAcceptanceResultJcs": true,
+  "resultJcsSha256": "37979e33789ddb4d8d85082ed10fcc8cbccd7b3ba708a97c85958ef0e4fdb7c5",
+  "annualTaxScope": "SALARY_ONLY_SINGLE_RESIDENT_PLANNING",
+  "taxYears": 2,
+  "trade": false,
+  "externalVendor": false
+}

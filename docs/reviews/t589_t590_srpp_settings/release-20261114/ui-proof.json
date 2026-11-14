@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "syntheticIdentity": true,
+  "syntheticAssets": true,
+  "actualCompiledDockerFrontend": true,
+  "actualBffPresentation": true,
+  "checks": [
+    "formal_five_tranches_15_to_35_same_weights",
+    "five_bond_options_visible",
+    "original_three_defaults_unchanged",
+    "new_two_selected_and_saved",
+    "annual_tax_table",
+    "actual_tax_year_visible",
+    "deductions_and_bracket_slices_expand",
+    "precise_money_format",
+    "mobile_render",
+    "old_v2_no_fake_tax_rows"
+  ],
+  "pageErrors": [],
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/api/bff/snapshot-list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp/simulations/22222222-2222-4222-8222-222222222222"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp/short-opportunities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/bff/portfolio-advice/srpp/drafts"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp/short-opportunities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/snapshot-list"
+    },
+    {
+      "method": "GET",
+      "path": "/api/me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp/simulations/22222222-2222-4222-8222-222222222222"
+    },
+    {
+      "method": "GET",
+      "path": "/api/bff/portfolio-advice/srpp/short-opportunities"
+    }
+  ],
+  "apiRequestsNeverReachedProduction": true
+}

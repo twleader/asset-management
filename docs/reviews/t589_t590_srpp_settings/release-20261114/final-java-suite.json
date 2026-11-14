@@ -1,0 +1,314 @@
+{
+  "status": "PASS",
+  "scope": "ONLY_CURRENT_SELECTED_SUREFIRE_REPORTS",
+  "workingDirectory": "/Users/steven/.codex/worktrees/srpp-bond-symbol-options/asset-management",
+  "startedAt": "2026-11-14T09:46:29.539273+00:00",
+  "completedAt": "2026-11-14T09:48:17.054219+00:00",
+  "suites": {
+    "backend": {
+      "exitCode": 0,
+      "status": "PASS",
+      "totals": {
+        "tests": 307,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "classes": [
+        {
+          "class": "com.steven.assets.controller.SrppSettingsAdviceWebMvcTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.controller.SrppSettingsAdviceWebMvcTest.xml",
+          "reportSha256": "8c874c90e203ee9af306e8a52c250377779480bbad8d4d65ec8fdbb3e28d2393"
+        },
+        {
+          "class": "com.steven.assets.controller.SrppShortTermAdviceWebMvcTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.controller.SrppShortTermAdviceWebMvcTest.xml",
+          "reportSha256": "279b105fed61f9826d40ea7f19d4a51ab64f75a1fd47b86534aac5fa0c724b02"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.EventEvidenceCaptureServiceTest",
+          "tests": 145,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.EventEvidenceCaptureServiceTest.xml",
+          "reportSha256": "8dd4151507d0d4438da4efc81647db6eb60159664fe33f2302bb430a791e8ccb"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.RiskEvidenceEvaluatorTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.RiskEvidenceEvaluatorTest.xml",
+          "reportSha256": "d6b9fc15328bf707ada9180b051040b38421741b398c7fd68647759928b0ffc3"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.SrppSettingsRiskV2Test",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.SrppSettingsRiskV2Test.xml",
+          "reportSha256": "e2c9c57cb495ef5d1313c0de39a2165cdc8fe7e60e2e3c0c38722ec4af4057dc"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.decision.D218FormulaAuthorityTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.decision.D218FormulaAuthorityTest.xml",
+          "reportSha256": "9bd51861ca18bb88d6cf74b84967bcf5d1d4cd467fb924b5ea6a174774d426d4"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.decision.DecisionPolicyAuthorityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.decision.DecisionPolicyAuthorityTest.xml",
+          "reportSha256": "ff8905bfcf395e32722888fd9059194b544a777e0e28692f383683e2367fc190"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppDividendStabilizationTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppDividendStabilizationTest.xml",
+          "reportSha256": "45a7262761db76672672a0e39e5ab64fa1bba4a7e2d9276e847e82d1d6c860ff"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppReportIncomePayrollCalculatorTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppReportIncomePayrollCalculatorTest.xml",
+          "reportSha256": "ba3b0fcead57f3936ef1cba83a7c0324a493e68ab1759b460b9f928a53bdce48"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest",
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest.xml",
+          "reportSha256": "874505dfa64dc29817755e376af5739c5366b4e49a81ee6d04c9c724bf93666d"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest.xml",
+          "reportSha256": "d35c75e0a08fff7c59584b682251446cd93b04f51f3fb76f80698cab83c04800"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppReportStateTopupCalculatorTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppReportStateTopupCalculatorTest.xml",
+          "reportSha256": "eca6eb8b735a74516447459615109dbedb87db9a795ff129c34c63482cb727ad"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.report.SrppSettingsFormalGatesTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.report.SrppSettingsFormalGatesTest.xml",
+          "reportSha256": "da04a4bf217b2a39155159d36ccebef0d6e460724e9f49254237b9c5e14b0c09"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsAuthorityValuesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsAuthorityValuesTest.xml",
+          "reportSha256": "40724f8df24ef378edda8ac2ea01dcad63d16a1b85ecebb7b2cb87bcf1821c32"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsCanonicalTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsCanonicalTest.xml",
+          "reportSha256": "2d7dba58a1521636e23ebe6141f72e6060d8af3e7351f253975a3f94c4ac258c"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsSchemaTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsSchemaTest.xml",
+          "reportSha256": "1bd5f5c81f69d77b2f47b67476f18cd1401bb66b122fcc916642322552be6955"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsServiceTest",
+          "tests": 19,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsServiceTest.xml",
+          "reportSha256": "6dc9bc630ff6964481929737fb51b95066919b59b2c120e3458767e1250b9c2e"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsV2WireDtoTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsV2WireDtoTest.xml",
+          "reportSha256": "b5c130c6890bab8e4647d77f2332114903cfd43c2354cc1fa3a87f954b2191cf"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsV3WireDtoTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsV3WireDtoTest.xml",
+          "reportSha256": "bfc67e626e7beccf27ee30cdc3e26251c06db907bb3e1a7ccdc6a151b94bcda0"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppSettingsWireDtoTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppSettingsWireDtoTest.xml",
+          "reportSha256": "e55268230a413507d5b4ef4fb82cee68dcfe7db74e745d4ca91e2204c2dadb00"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.settings.SrppShortTermServiceTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.settings.SrppShortTermServiceTest.xml",
+          "reportSha256": "3ae0715b2d87b93cfba3c76c9afbc151ef5dae8b9656bb6850ac3d73487b62fc"
+        },
+        {
+          "class": "com.steven.assets.service.srpp.us.UsCoreSellCalculatorTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.service.srpp.us.UsCoreSellCalculatorTest.xml",
+          "reportSha256": "9b2b9773cca5f944747f1f6b0508ad6bd8b9bc80f78cd69a551b907d38e14324"
+        },
+        {
+          "class": "com.steven.assets.srpp.SrppModuleCalculatorV3Test",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.srpp.SrppModuleCalculatorV3Test.xml",
+          "reportSha256": "8ea6b95ba809677f69c26dbca8d73f66c64428b4653f440730bd85514c0f93cc"
+        }
+      ],
+      "excludedStaleOrUnselectedReports": [],
+      "command": [
+        "/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn",
+        "-q",
+        "-f",
+        "backend/pom.xml",
+        "-DextraArgLine=-Dnet.bytebuddy.experimental=true",
+        "-Dtest=SrppSettings*Test,SrppShortTerm*Test,SrppReportStateTopupCalculatorTest,SrppReportModuleCalculatorTest,SrppReportIncomePayrollCalculatorTest,SrppReportShortUsCalculatorTest,DecisionPolicyAuthorityTest,EventEvidenceCaptureServiceTest,RiskEvidenceEvaluatorTest,UsCoreSellCalculatorTest,D218FormulaAuthorityTest,SrppDividendStabilizationTest,SrppModuleCalculatorV3Test",
+        "test"
+      ],
+      "log": "/tmp/srpp-bond-tax-review/backend-final-java-suite-rerun.log",
+      "logSha256": "122d2a77c4ff514cb697aa175d2e8504d015fb64a9a5c4c4cec81ea09363fc70"
+    },
+    "bff": {
+      "exitCode": 0,
+      "status": "PASS",
+      "totals": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "classes": [
+        {
+          "class": "com.steven.assets.bff.portfolioadvice.SrppSettingsBffTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.bff.portfolioadvice.SrppSettingsBffTest.xml",
+          "reportSha256": "871ad6377c9428310c64716eb9f39387325da9bc8b583bf24ba7f234eb09b376"
+        },
+        {
+          "class": "com.steven.assets.bff.portfolioadvice.SrppSettingsSecurityTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.bff.portfolioadvice.SrppSettingsSecurityTest.xml",
+          "reportSha256": "334e5890ad2765577820db1d9ad3dde5267e7cbcc6bd2089d75ebe7ca9686881"
+        },
+        {
+          "class": "com.steven.assets.bff.portfolioadvice.SrppShortTermBffTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "report": "TEST-com.steven.assets.bff.portfolioadvice.SrppShortTermBffTest.xml",
+          "reportSha256": "38bb8d67234848f784915de55c3d7285d81847153575c9e2f0611204e9ea7ece"
+        }
+      ],
+      "excludedStaleOrUnselectedReports": [],
+      "command": [
+        "/usr/local/apache-maven/apache-maven-3.9.11/bin/mvn",
+        "-q",
+        "-f",
+        "bff/pom.xml",
+        "-Dtest=SrppSettings*Test,SrppShortTerm*Test",
+        "test"
+      ],
+      "log": "/tmp/srpp-bond-tax-review/bff-final-java-suite-rerun.log",
+      "logSha256": "14fdeb8a5edaa652d86fb15700d5570c8a1828702ab0a7d74d29e84e261fd0cf"
+    }
+  },
+  "firstFailure": {
+    "backendTests": 307,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "class": "DecisionPolicyAuthorityTest",
+    "test": "duplicateModelOrManifestKeysAreRejectedBeforeTheyCanBecomeAuthority",
+    "cause": "test injection hardcoded 3.22.0 and did not mutate 3.23.0 model",
+    "log": "/tmp/srpp-bond-tax-review/backend-final-java-suite.log",
+    "logSha256": "fe922176e799895425db9fa6a0b3be6a1ab7d781e8453a62553fe1783bb589ff"
+  },
+  "allowedRepair": {
+    "file": "backend/src/test/java/com/steven/assets/service/srpp/decision/DecisionPolicyAuthorityTest.java",
+    "behavior": "version-independent key/value match; asserts bytes changed and duplicate key exists; same strict-parser rejection assertions retained",
+    "targetedAuthorityTests": 6,
+    "targetedStatus": "PASS",
+    "log": "/tmp/srpp-bond-tax-review/backend-authority-duplicate-repair.log",
+    "sourceSha256": "1a76c69bf24bc9767115e3a634ac4421e35c42318880b98b98122029f592e381"
+  },
+  "restoredHistoricalUsFixtureExact": true,
+  "bundle": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "sourceModelSha256": "48c87397b59b5594f623e993363083b5585ba9c2eebfa100551815f068468484",
+  "sourceSwaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+  "usFixtureSha256": "5a9678e38f9b808d6d61dae2c17c9116cfbd569a58cf397fa8fb06958a52e563"
+}

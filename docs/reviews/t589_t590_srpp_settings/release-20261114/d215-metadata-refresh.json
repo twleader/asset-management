@@ -1,0 +1,119 @@
+{
+  "instrumentMapUnchanged": true,
+  "changedSourceHashes": [
+    {
+      "code": "0050",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00881",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "0056",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00878",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00713",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00919",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "009826",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "006208",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "009804",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00850",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00882",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00865B",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00719B",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00697B",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00679B",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "00751B",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "VOO",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "VT",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    },
+    {
+      "code": "SGOV",
+      "source": "research/ETF_UNIVERSE.md",
+      "before": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e",
+      "after": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
+    }
+  ]
+}

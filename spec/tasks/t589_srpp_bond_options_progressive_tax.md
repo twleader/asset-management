@@ -34,10 +34,10 @@
 
 13. 不改DB schema、正式薪資來源個人值、正式觀察預設、交易／寄信／producer／排程。Source mirrors/export/manifest/registry必同版；新source module自動納入原policy bundle，不放寬工具dirty-root限制。所有變更完成後依既有雙repo測試、獨立審查、Git no-ff merge/push、insert-only registry、正確main原.env重建/重建容器及精確身份回讀，合法日報時窗未執行記NOT_YET_EXECUTED。
 
-- [ ] 589.1 補齊五檔選項及純讀草稿/明細邊界，原預設三檔不變。
-- [ ] 589.2 共用純累進稅與V3年度薪資稅/補退/終點負債，原正式稅函式parity。
-- [ ] 589.3 typed精度、舊結果相容、BFF投影與前端明細。
-- [ ] 589.4 完成獨立審查、測試、受控來源發布、雙repoGit與部署驗收。
+- [x] 589.1 補齊五檔選項及純讀草稿/明細邊界，原預設三檔不變。
+- [x] 589.2 共用純累進稅與V3年度薪資稅/補退/終點負債，原正式稅函式parity。
+- [x] 589.3 typed精度、舊結果相容、BFF投影與前端明細。
+- [x] 589.4 完成獨立審查、測試、受控來源發布、雙repoGit與部署驗收。
 
 ## 驗證
 
@@ -65,4 +65,6 @@ npm --prefix frontend run build
 
 ## 完成報告
 
-待完成後回填，並保存可覆核驗收紀錄。
+2026-11-14 已完成實作、獨立審查、619 項測試、雙專案 no-ff merge／push、insert-only 登錄與四服務正式部署。完成報告與精確身份、測試及實機證據見 [t589／t590 部署驗收紀錄](../../docs/reviews/t589_t590_srpp_settings/release-20261114/README.md)。
+
+本段及勾選為純完成狀態回填（SKIP_SPEC_GATE），未修改已審查契約。精確新 bundle 的 9090 診斷為 409 NON_TRADING_DAY，正式報表自然採用仍為 NOT_YET_EXECUTED。正式資產 LOCAL、真 AI 與 Google OIDC 完整登入未執行；實際部署 worker 合成 1,000 路徑、owner 安全草稿／純讀及編譯介面驗收通過，具體範圍與限制見紀錄。

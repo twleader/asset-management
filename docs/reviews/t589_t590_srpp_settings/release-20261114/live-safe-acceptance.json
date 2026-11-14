@@ -1,0 +1,44 @@
+{
+  "at": "2026-11-14T09:58:11.240399+00:00",
+  "scope": "LIVE_OWNER_SCOPED_SAFE_READS_AND_DRAFTS_ONLY",
+  "status": "PASS",
+  "checks": [
+    "configured_admin_active",
+    "deployed_current_bundle_and_model",
+    "catalog76_and_five_tw_bond_choices",
+    "original_three_defaults_preserved",
+    "formal_five_tranches_15_to_35_unchanged_weights",
+    "prepayment_label_clear",
+    "unauthenticated_root401",
+    "new_current_base_draft_created",
+    "two_additional_bonds_save_and_revision2",
+    "stale_revision409",
+    "draft_persisted_without_changing_defaults",
+    "SGOV_tw_bond_rejected",
+    "0050_tw_bond_rejected",
+    "formal_short_list_keeps_original3",
+    "saved_draft_short_preview_all5",
+    "all_five_observed_or_explicitly_missing",
+    "00719B_detail_owner_scoped_pure_read",
+    "00865B_detail_owner_scoped_pure_read",
+    "nonadmin_publish403"
+  ],
+  "actualPortfolioLocalSimulation": "NOT_EXECUTED_ZERO_VENDOR_GUARD",
+  "realGoogleOidcHttpE2e": "NOT_EXECUTED",
+  "formalReportProduced": false,
+  "draftsFormallyPublished": false,
+  "trades": false,
+  "draftId": "ce71f7bd-1bf9-4815-800d-347decbb38b6",
+  "details": {
+    "00719B": {
+      "httpStatus": 200,
+      "status": "WAITING_DATA",
+      "observationType": "WAIT"
+    },
+    "00865B": {
+      "httpStatus": 200,
+      "status": "WAITING_DATA",
+      "observationType": "WAIT"
+    }
+  }
+}

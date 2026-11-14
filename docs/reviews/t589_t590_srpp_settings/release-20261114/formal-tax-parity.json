@@ -1,0 +1,10 @@
+{
+  "scope": "FORMAL_ANNUAL_TAX_PARITY_SUBRECEIPT",
+  "at": "2026-11-14T09:21:34.724195+00:00",
+  "cases": 64,
+  "result": "EXACT_PARITY",
+  "goldenSha256": "0512f76e132ec647731c3b8ae6497a2c6b4c1d116fb0d60b39b2bbe179d3d02e",
+  "unchangedPureTaxModuleSha256": "0ce3c40e5ebd5d8506293748ab353dd7dd552f700fff81083d55c49f88c202b7",
+  "sourceReceiptSha256": "33a6c08b4faae1cd76887d7db15dcf633b6538dcf58f34c3e3948d4d8a357d7f",
+  "note": "Extracted parity result from targeted pre-freeze implementation receipt; final source and full regression status are recorded separately."
+}

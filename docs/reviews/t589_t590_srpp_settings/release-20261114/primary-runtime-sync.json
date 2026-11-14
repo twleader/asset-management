@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "at": "2026-11-14T09:59:16.131112+00:00",
+  "before": "ab1c27adc4e1e0db2eafe798aed2749dcba595b2",
+  "after": "9c0a199e9cfdc656533c239cd8ebab7ecde2088d",
+  "branch": "codex/trade-blocker-consistency-20261113",
+  "untrackedPreserved": true,
+  "trackedClean": true
+}

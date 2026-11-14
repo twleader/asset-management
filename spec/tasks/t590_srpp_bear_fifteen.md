@@ -21,10 +21,10 @@
 9. 同步正式目前權威說明，清楚區分兩套都15%但不同資金規則/權重；較新D219取代「熊市五批20%起」之現行數字，歷史決策原文保留為歷史。policy guard驗證確切五梯、D202/D212相同15及原互斥路由不變；不得為通過而放寬其它guard。既有正式golden只容許獲授權門檻造成的差異，必保存差異路徑，D218其它金融輸出維持。
 10. 本任務與t589整體完成獨立架構審查與受控雙repo發布；authority/model/catalog/export/contract/registry一版到底。兩repo commit/no-ff merge/push且remote精確回讀後才insert-only登錄與乾淨main原.env部署，重建必要服務並核JAR、worker與實際API；不改DB schema或執行正式報告/下單/寄信。今天非交易日，正式報告採用不得偽稱已執行。
 
-- [ ] 590.1 更新五梯、D202/D212相同15、版本與現行權威，原互斥分流和所有非目標條件保留。
-- [ ] 590.2 月頻真正使用15%門檻與同一梯表，保留暖機/趨勢/資金保護及近似範圍。
-- [ ] 590.3 Python/Java資格、階梯、路由與保護條件邊界，回歸及golden差異證據。
-- [ ] 590.4 與t589完成測試、獨立審查、雙repoGit、登錄、部署與精確API回讀。
+- [x] 590.1 更新五梯、D202/D212相同15、版本與現行權威，原互斥分流和所有非目標條件保留。
+- [x] 590.2 月頻真正使用15%門檻與同一梯表，保留暖機/趨勢/資金保護及近似範圍。
+- [x] 590.3 Python/Java資格、階梯、路由與保護條件邊界，回歸及golden差異證據。
+- [x] 590.4 與t589完成測試、獨立審查、雙repoGit、登錄、部署與精確API回讀。
 
 ## 驗證
 
@@ -43,4 +43,6 @@ Asset以`SrppReportStateTopupCalculatorTest`及原report state/topup/same-input 
 
 ## 完成報告
 
-待完整驗收後回填。
+2026-11-14 已完成實作、獨立審查、619 項測試、雙專案 no-ff merge／push、insert-only 登錄與四服務正式部署。完成報告與精確身份、測試及實機證據見 [t589／t590 部署驗收紀錄](../../docs/reviews/t589_t590_srpp_settings/release-20261114/README.md)。
+
+本段及勾選為純完成狀態回填（SKIP_SPEC_GATE），未修改已審查契約。精確新 bundle 的 9090 診斷為 409 NON_TRADING_DAY，正式報表自然採用仍為 NOT_YET_EXECUTED。正式資產 LOCAL、真 AI 與 Google OIDC 完整登入未執行；實際部署 worker 合成 1,000 路徑、owner 安全草稿／純讀及編譯介面驗收通過，具體範圍與限制見紀錄。
