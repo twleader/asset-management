@@ -111,4 +111,131 @@ class SrppReportShortUsCalculatorTest {
     @Test void fallbackTwelveMonthPricesCostsProbabilitiesAndBoundaryRankAreCalculated()throws Exception{
         ObjectNode item=usFullItem();item.put("qualification_path","FALLBACK");item.putObject("fallback_evidence").put("global_top10_market_cap",true).put("us_tech_giant",true).put("twelve_month_base_net_return_pct","20").put("twelve_month_upside_to_downside","3");ObjectNode e=(ObjectNode)item.path("full_evidence");e.put("radarListHit",false);ObjectNode fallback=e.putObject("fallback");fallback.put("verified",true).put("independentRankSources",2).put("rankDate","2026-09-25").put("globalMarketCapRank",11).put("boundary10And11Only",true).put("usRegistered",true).put("usPrimarilyOperated",true).put("coreTechBusiness",true).put("threeScenariosVerified",true).put("horizonMonths",12).put("scenarioBasis","ISOLATED_AUDITED_SCENARIOS").put("basePrice","125").put("pessimisticPrice","95").put("optimisticPrice","140").put("baseProbability","0.5").put("pessimisticProbability","0.2").put("optimisticProbability","0.3");JsonNode pass=SrppReportShortUsCalculator.usFull(item,"2026-09-25",Instant.parse("2026-09-25T14:00:00Z"),new BigDecimal("20000000"),7,model());assertThat(pass.path("status").asText()).isEqualTo("PASS_FOR_REPORT_REVIEW");assertThat(pass.path("market_cap_boundary").asText()).isEqualTo("MARKET_CAP_BOUNDARY_10_11");assertThat(new BigDecimal(pass.path("twelve_month_upside_to_downside").asText())).isGreaterThanOrEqualTo(new BigDecimal("2"));fallback.put("optimisticProbability","0.4");JsonNode invalid=SrppReportShortUsCalculator.usFull(item,"2026-09-25",Instant.parse("2026-09-25T14:00:00Z"),new BigDecimal("20000000"),7,model());assertThat(invalid.path("status").asText()).isEqualTo("NO_EXECUTABLE_ORDER");assertThat(invalid.path("units").asInt()).isZero();}
 
+    private static ObjectNode d216Model() throws Exception {
+        ObjectNode value = model().deepCopy();
+        ((ObjectNode)value.path("execution_policy").path("short_term_opportunity_d171").path("limits"))
+                .put("combined_symbol_cap_mode", "CORE_TARGET_PLUS_SLEEVE");
+        return value;
+    }
+
+    private ObjectNode coreAtTargetBundle(String code, String eachHoldingValue) throws Exception {
+        ObjectNode value = golden().path("cases").get(0).path("input").deepCopy();
+        for (JsonNode row : value.path("assets").path("snapshot").path("stocks"))
+            ((ObjectNode)row).put("stockCode", code);
+        for (JsonNode row : value.path("assets").path("liveAssets").path("stocks"))
+            ((ObjectNode)row).put("stockCode", code).put("liveValue", eachHoldingValue);
+        ObjectNode item = (ObjectNode)value.path("items").get(0);
+        item.put("stock_code", code);
+        ((ObjectNode)item.path("quote")).put("stockCode", code);
+        ((ObjectNode)item.path("quote").path("dividendHistory")).put("stockCode", code);
+        ((ObjectNode)item.path("radar").path("stock")).put("stockCode", code);
+        return value;
+    }
+
+    @Test void d216CoreAtTargetCanUseItsSeparateSmallEquitySleeve() throws Exception {
+        ObjectNode current = d216Model();
+        for (String code : new String[]{"0050", "00881"}) {
+            ObjectNode bundle = coreAtTargetBundle(code, code.equals("0050") ? "1000000" : "453000");
+            JsonNode actual = SrppReportShortUsCalculator.screen(bundle, current, "short_term_opportunity_d171");
+            JsonNode row = actual.path("results").get(0), sleeve = actual.path("sleeve");
+            assertThat(sleeve.path("status").asText()).isEqualTo("VERIFIED");
+            assertThat(row.path("reasons")).isEmpty();
+            assertThat(row.path("share_ceiling_before_funding").asLong()).isPositive();
+            BigDecimal denominator = new BigDecimal(sleeve.path("capacity_denominator_twd").asText());
+            BigDecimal budget = new BigDecimal(row.path("buy_budget_ceiling_before_funding_twd").asText());
+            assertThat(budget).isLessThanOrEqualTo(denominator.multiply(new BigDecimal(".005")));
+            BigDecimal held = new BigDecimal(row.path("existing_value_twd").asText());
+            BigDecimal price = new BigDecimal(row.path("analysis_price").asText());
+            BigDecimal cap = SrppReportShortUsCalculator.combinedSymbolCap(current,
+                    current.path("execution_policy").path("short_term_opportunity_d171"), code);
+            assertThat(held.add(price.multiply(BigDecimal.valueOf(row.path("share_ceiling_before_funding").asLong()))))
+                    .isLessThanOrEqualTo(cap.multiply(denominator));
+        }
+        ObjectNode legacy = d216Model();
+        ((ObjectNode)legacy.path("execution_policy").path("short_term_opportunity_d171").path("limits"))
+                .remove("combined_symbol_cap_mode");
+        JsonNode blocked = SrppReportShortUsCalculator.screen(coreAtTargetBundle("0050", "1000000"), legacy,
+                "short_term_opportunity_d171");
+        assertThat(blocked.path("results").get(0).path("share_ceiling_before_funding").asLong()).isZero();
+        assertThat(blocked.path("results").get(0).path("reasons").toString()).contains("SHORT_TERM_CAPACITY_EXHAUSTED");
+    }
+
+    @Test void d216CombinedCapKeepsBondLegacyAndInvalidPolicyClosed() throws Exception {
+        ObjectNode current = d216Model();
+        JsonNode equity = current.path("execution_policy").path("short_term_opportunity_d171");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0050")).isEqualByComparingTo(".105");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "00881")).isEqualByComparingTo(".0503");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0056")).isEqualByComparingTo(".05");
+        JsonNode bond = current.path("execution_policy").path("bond_short_term_opportunity_d185");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, bond, "00697B")).isEqualByComparingTo(".03");
+        ObjectNode invalidBond = bond.deepCopy();
+        ((ObjectNode)invalidBond.path("limits")).put("combined_symbol_cap_mode", "CORE_TARGET_PLUS_SLEEVE");
+        assertThatThrownBy(() -> SrppReportShortUsCalculator.combinedSymbolCap(current, invalidBond, "00697B"))
+                .hasMessage("D216_COMBINED_CAP_POLICY_UNVERIFIED");
+        ((ObjectNode)current.path("detailed_target_allocation_2027")).remove("0050");
+        assertThatThrownBy(() -> SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0050"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test void d216NewCapDoesNotReleaseUnknownAttributionOrOpposingRadar() throws Exception {
+        ObjectNode current = d216Model(), bundle = coreAtTargetBundle("0050", "1000000");
+        ((ObjectNode)bundle.path("sleeve_evidence")).put("pending_orders_verified", false);
+        JsonNode unknown = SrppReportShortUsCalculator.screen(bundle, current, "short_term_opportunity_d171");
+        assertThat(unknown.path("results").get(0).path("share_ceiling_before_funding").asLong()).isZero();
+        bundle = coreAtTargetBundle("0050", "1000000");
+        ((ObjectNode)bundle.path("items").get(0).path("radar").path("stock")).put("action", "WAIT");
+        JsonNode wait = SrppReportShortUsCalculator.screen(bundle, current, "short_term_opportunity_d171");
+        assertThat(wait.path("results").get(0).path("share_ceiling_before_funding").asLong()).isZero();
+        assertThat(wait.path("results").get(0).path("reasons").toString()).contains("RADAR_WAIT_OR_CONFLICT");
+    }
+
+    @Test void d216FinalExecutableRepriceUsesTheSameCapAndKeepsDailyRiskGates() throws Exception {
+        ObjectNode current = d216Model(), bundle = coreAtTargetBundle("0050", "1000000");
+        var base = SrppReportStateTopupCalculatorTest.fullFixture();
+        String at = base.frozen().facts().capturedAt().toString();
+        bundle.put("as_of", at).put("policyKey", "short_term_opportunity_d171");
+        ((ObjectNode)bundle.path("assets")).put("generatedAt", at);
+        ((ObjectNode)bundle.path("sleeve_evidence")).put("fetched_at", at);
+        ((ObjectNode)bundle.path("items").get(0).path("radar")).put("generatedAt", at);
+        bundle.putObject("funding").put("verified", true).put("availableTwd", "1000000");
+        ObjectNode gates = bundle.putObject("executionGates").putObject("0050");
+        for (String key : new String[]{"portfolio", "group", "protectedCash", "deduplication", "intraday"})
+            gates.putObject(key).put("verified", true).put("pass", true);
+        gates.putObject("executionAccount").put("verified", true).put("ownerUserId", 7)
+                .put("broker", "國泰證券").put("subaccount", "SHORT_TERM_D173");
+        ObjectNode input = base.frozen().input();
+        ((ObjectNode)input.path("sources")).set("assets", bundle.path("assets"));
+        var frozen = new com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen(
+                base.frozen().facts(), input, base.frozen().sourceVector(), 15, at);
+        ObjectNode extra = M.createObjectNode(), source = extra.putObject("short-sleeve");
+        source.put("verified", true).put("ownerUserId", 7).putArray("bundles").add(bundle);
+        ObjectNode body = extra.putObject("market:台股:0050");
+        body.put("symbol", "0050").put("market", "台股").put("volumeUnit", "SHARES");
+        ObjectNode quote = bundle.path("items").get(0).path("quote").deepCopy();
+        quote.put("quoteStatus", "LIVE").put("closed", false).put("updatedAt", at)
+                .put("previousClose", "49").put("volume", 2000000);
+        body.set("quote", quote);
+        ObjectNode book = body.putObject("book");
+        book.put("available", true).put("supported", true).put("stockCode", "0050").put("market", "台股")
+                .put("marketStatus", "OPEN").put("source", "FUBON_BOOKS").put("sourceTime", at).put("fetchedAt", at);
+        ArrayNode levels = book.putArray("levels");
+        for (int level = 1; level <= 5; level++) levels.addObject().put("level", level)
+                .put("bidPrice", new BigDecimal("50").subtract(new BigDecimal(".1").multiply(BigDecimal.valueOf(level))).toPlainString())
+                .put("askPrice", new BigDecimal("50").add(new BigDecimal(".1").multiply(BigDecimal.valueOf(level))).toPlainString())
+                .put("bidVolumeLots", 100).put("askVolumeLots", 100);
+        JsonNode screening = SrppReportShortUsCalculator.screen(bundle, current, "short_term_opportunity_d171");
+        JsonNode result = SrppReportShortUsCalculator.calculate(frozen, current, extra);
+        JsonNode leg = result.path("data").path("legs").get(0);
+        assertThat(leg.path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");
+        assertThat(leg.path("units").asLong()).isPositive()
+                .isLessThan(screening.path("results").get(0).path("share_ceiling_before_funding").asLong());
+        BigDecimal after = new BigDecimal("2000000").add(new BigDecimal(leg.path("amount").asText()));
+        BigDecimal denominator = new BigDecimal(screening.path("sleeve").path("capacity_denominator_twd").asText());
+        assertThat(after).isLessThanOrEqualTo(denominator.multiply(new BigDecimal(".105")));
+        ((ObjectNode)gates.path("portfolio")).put("pass", false);
+        JsonNode blocked = SrppReportShortUsCalculator.calculate(frozen, current, extra).path("data").path("legs").get(0);
+        assertThat(blocked.path("units").asLong()).isZero();
+        assertThat(blocked.path("blockingReasons").toString()).contains("SHORT_DAILY_GATE_BLOCKED:portfolio");
+    }
+
 }

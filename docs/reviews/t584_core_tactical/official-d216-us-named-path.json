@@ -1,0 +1,11 @@
+{
+  "stage": "OFFLINE_ACTUAL_US_CALCULATOR_SYNTHETIC_INPUT",
+  "policy_version": "2.64.0",
+  "policy": "D-216",
+  "status": "PASS_FOR_REPORT_REVIEW",
+  "positive_units": true,
+  "regime": "RISK_OFF",
+  "stabilization_evidence_present": false,
+  "ordinary_bull_ma200_condition": false,
+  "production_caller_trace": "STATICALLY_VERIFIED: UsReportPublisher -> UsTacticalCalculator; legacy usFull has no production caller"
+}

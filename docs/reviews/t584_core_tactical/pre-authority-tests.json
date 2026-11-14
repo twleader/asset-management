@@ -1,0 +1,28 @@
+{
+  "stage": "PRE_AUTHORITY_SYNC",
+  "embedded_policy": "D-215",
+  "d216_cases": "Explicit isolated D-216 policy objects, not production acceptance",
+  "suites": [
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest",
+      "tests": "19",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportStateTopupCalculatorTest",
+      "tests": "12",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest",
+      "tests": "17",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ]
+}
