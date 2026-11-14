@@ -1,0 +1,13 @@
+{
+  "mode": "APPLY",
+  "sourceSha256": "2b271509afc67b01784af5880a4ec474fb8e00d4584303dcc59c48840a19dce7",
+  "rows": 495,
+  "first": "2024-11-08",
+  "last": "2026-11-13",
+  "sourceUrl": "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate&data_id=USD&start_date=2024-11-08&end_date=2026-11-13",
+  "capturedAt": "2026-11-14T02:57:54.889349+00:00",
+  "status": "PASS",
+  "outsideWindowUnchanged": true,
+  "priceCorrections": 495,
+  "rowsInserted": 0
+}

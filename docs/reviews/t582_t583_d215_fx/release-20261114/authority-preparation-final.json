@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "policyBundleSha256": "1ae220819d750d7016175ea0e5e8f616ae2e7551cbdbe1c1ac15238a3c4bbbb0",
+  "manifestFileSha256": "99b1b5c8c334520e79bda1bd2e5c4dffa8266b43fa827c76d1128424fcb64023",
+  "modelSha256": "a01ab388581fed8bbced524951f28caee1151b38c46679f9289c7383ad29c545",
+  "swaggerSha256": "85c7e3d7f84bf9fceec94fb4efee876f910bfe936537a37c145518bfd1f75001",
+  "formalOriginalGenerator": true,
+  "formalTargetPolicyUnchanged": true,
+  "insertOnlySqlOriginalGenerator": true,
+  "registrySqlSha256": "0fe942107622af69c1aa4b8f21168c3e2ec7a179873fc4e8e778342a4b11b628",
+  "sameInputGoldenCases": 111,
+  "longShortExitGoldenCases": 15,
+  "registryNotExecuted": true
+}
