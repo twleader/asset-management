@@ -1,0 +1,67 @@
+{
+  "scope": "OFFLINE_IMAGE_AND_JAR_PREFLIGHT_NOT_FORMAL_SERVE",
+  "sourceWorktree": "/Users/steven/.codex/worktrees/srpp-life-cashflow-fields/asset-management",
+  "tag": "codex-t586-bff-preflight:fc31e0979d72-buckets",
+  "modelSelection": "inherited main model; gpt-5.6-terra unavailable in delegation tool",
+  "status": "PASS",
+  "imageId": "sha256:fd069a1627212e063c73b6525de79fc50248709c68000dbfd40ba5a8047c55b7",
+  "temporaryContainer": {
+    "id": "156c10b859b05ee74aff5473c6faea3bd40f90fe575c21d03edb6dcdaec052a8",
+    "name": "/codex-java-preflight-bff-buckets-fc31e0979d72",
+    "status": "created",
+    "running": false,
+    "startedAt": "0001-01-01T00:00:00Z"
+  },
+  "jarSha256": "78aeeeba0ac730d03a8a7c7896592923fbd25f6d75faf38fe57ba0a152d541ad",
+  "sourceHashes": {
+    "bff/src/main/java/com/steven/assets/bff/portfolioadvice/SrppShortTermPresentation.java": "7701ee694cf2cb3aeba1f9f8e817f91de1b10c18f07a492ac2db627bdb5a7e8e",
+    "bff/src/main/java/com/steven/assets/bff/portfolioadvice/SrppShortTermBffController.java": "f2acaaf35d2904e166b8ced80a56a1cb35c2a75f649b16c58554f6a40a588c34"
+  },
+  "classChecks": [
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppShortTermBffController.class",
+      "present": true,
+      "sha256": "d15cad5ea7b24132097ae555ad9280cae0e923b712c557a011dfd85cb62b9997"
+    },
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppShortTermPresentation.class",
+      "present": true,
+      "sha256": "6f7dd62e6ac551f27e0965cda666fe72a7defa12b5b1e6371a2c7ee635403604"
+    },
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppShortTermPresentation$PageEnvelope.class",
+      "present": true,
+      "sha256": "18ca55cdf4de611ef4c080fdfcef81be9a30f4f4712fbc8401edce967519f88d"
+    },
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppShortTermPresentation$ObservationBucket.class",
+      "present": true,
+      "sha256": "436f895c3558b8540df127159963a9b9cd6fcbbbc4b792dea9b15273fee1282e"
+    },
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppShortTermDto$ListEnvelope.class",
+      "present": true,
+      "sha256": "9bb1bb88f185fd7d1802b065a3708ad2fff5a60ddb26fe9e6dc31e320f39d45f"
+    },
+    {
+      "entry": "BOOT-INF/classes/com/steven/assets/bff/portfolioadvice/SrppSettingsDto$CashflowSchedule.class",
+      "present": true,
+      "sha256": "fcfd623bac5555b36dd6437932cb7c0a341074727be1c99bc4c70c20ebf316d6"
+    }
+  ],
+  "pageBucketsPresent": true,
+  "resourceChecks": [
+    {
+      "entry": "BOOT-INF/classes/docker-external-api.yaml",
+      "byteIdentical": true,
+      "sha256": "168fc760b378b8f963f81810af3a775b34809767327f4f5dfef4f62f82ea5dd8"
+    },
+    {
+      "entry": "BOOT-INF/classes/ai-flow-observation-api.yaml",
+      "byteIdentical": true,
+      "sha256": "9259cfb0464c9bfd3f7d8b4a17e56445b907dec2b2b20f91778a9e73c12ed892"
+    }
+  ],
+  "temporaryContainerRemoved": true,
+  "formalContainersAndTagsUnchanged": true
+}

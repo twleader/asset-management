@@ -22,6 +22,8 @@ class SrppSettingsSecurityTest {
     @BeforeEach void setup(){reset(users,ingest);client=WebTestClient.bindToApplicationContext(context).apply(springSecurity()).configureClient().build();}
     @Test void anonymousCannotReadAndOrdinaryUserCannotPublishBeforeOwnerLookup() {
         client.get().uri("/api/bff/portfolio-advice/srpp").exchange().expectStatus().isUnauthorized();
+        client.get().uri("/api/bff/portfolio-advice/srpp/short-opportunities").exchange().expectStatus().isUnauthorized();
+        client.get().uri("/api/bff/portfolio-advice/srpp/short-opportunities/stock?stockCode=0050&market=台股").exchange().expectStatus().isUnauthorized();
         String publish="/api/bff/portfolio-advice/srpp/drafts/5bd55e21-7e39-5fa7-8c35-d2b2664e54e1/publish";
         client.post().uri(publish).bodyValue("{}").exchange().expectStatus().isUnauthorized();
         client.mutateWith(mockUser().roles("USER")).post().uri(publish).bodyValue("{}").exchange().expectStatus().isForbidden();

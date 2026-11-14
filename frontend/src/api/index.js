@@ -431,6 +431,14 @@ export const bffApi = {
       updateDraft: (id, payload) => api.put(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}`, payload, { skipErrorToast: true }),
       simulateDraft: (id, payload) => api.post(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}/simulate`, payload, { skipErrorToast: true }),
       getSimulation: (id) => api.get(`/bff/portfolio-advice/srpp/simulations/${encodeURIComponent(id)}`, { skipErrorToast: true }),
+      shortOpportunities: ({ draftId, revision } = {}) => api.get('/bff/portfolio-advice/srpp/short-opportunities', {
+        params: draftId && revision != null ? { draftId, revision } : {},
+        skipErrorToast: true
+      }),
+      shortOpportunityStock: (stockCode, market) => api.get('/bff/portfolio-advice/srpp/short-opportunities/stock', {
+        params: { stockCode, market },
+        skipErrorToast: true
+      }),
       publishDraft: (id, payload) => api.post(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}/publish`, payload, { skipErrorToast: true }),
       releasePayload: (id) => api.get(`/bff/portfolio-advice/srpp/releases/${encodeURIComponent(id)}/payload`, { skipErrorToast: true })
     }

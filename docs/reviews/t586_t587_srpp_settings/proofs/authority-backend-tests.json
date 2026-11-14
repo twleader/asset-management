@@ -1,0 +1,66 @@
+{
+  "classes": [
+    {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "DecisionPolicyAuthorityTest"
+    },
+    {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppPolicyRegistryServiceTest"
+    },
+    {
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppReportModuleCalculatorTest"
+    },
+    {
+      "tests": 17,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppReportShortUsCalculatorTest"
+    },
+    {
+      "tests": 12,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppReportStateTopupCalculatorTest"
+    },
+    {
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppReportIncomePayrollCalculatorTest"
+    },
+    {
+      "tests": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppSettingsFormalGatesTest"
+    },
+    {
+      "tests": 8,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppRadarPolicyCompatibilityTest"
+    }
+  ],
+  "total": {
+    "tests": 80,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

@@ -67,7 +67,7 @@ public class SrppSettingsService {
         long owner=owner();JsonNode catalog=catalog();ObjectNode out=F.objectNode();out.set("catalog",catalog);
         var p=authority.policy();out.putObject("current").put("baseBundleSha256",p.bundleHash()).put("modelInputsSha256",p.modelHash()).put("decision",p.decision()).put("policyVersion",p.policyVersion());
         ArrayNode ds=out.putArray("drafts");drafts.findTop20ByOwnerUserIdOrderByUpdatedAtDesc(owner).forEach(d->ds.add(draftTree(d)));
-        ArrayNode rs=out.putArray("simulations");runs.findTop20ByOwnerUserIdOrderByCreatedAtDesc(owner).forEach(r->rs.add(runTree(r)));
+        ArrayNode rs=out.putArray("simulations");runs.findTop20ByOwnerUserIdOrderByCreatedAtDesc(owner).forEach(r->rs.add(runSummaryTree(r)));
         ArrayNode rel=out.putArray("releases");releases.findTop20ByOwnerUserIdOrderByCreatedAtDesc(owner).forEach(r->rel.add(releaseTree(r,catalog)));
         out.put("canPublish",user.isAdmin()).put("aiAvailable",ai.available());return SettingsCanonicalJson.bind(out,CenterResponse.class);
     }
@@ -123,7 +123,7 @@ public class SrppSettingsService {
     }
     static void validateResult(JsonNode result) {
         boolean valid=result.path("schemaVersion").isIntegralNumber()&&result.path("schemaVersion").intValue()==1
-                &&"SRPP_SCENARIO_CASHFLOW_V1".equals(result.path("engineVersion").asText());
+                &&"SRPP_SCENARIO_CASHFLOW_V2".equals(result.path("engineVersion").asText());
         JsonNode body=result.path("result");valid&=body.isObject()&&body.path("differences").isObject()&&body.path("changes").isArray()&&body.path("warnings").isArray();
         for(String key:List.of("baseline","scenario")) {
             JsonNode scenario=body.path(key),prob=scenario.path("successProbability");
@@ -141,6 +141,7 @@ public class SrppSettingsService {
             valid&=isMoney(scenario.path("assumptions").path("protectedReserveRealTwd"));
         }
         valid&=body.path("differences").path("successProbability").isNumber();for(String key:List.of("retirementAssetsP50","terminalAssetsP50"))valid&=isMoney(body.path("differences").path(key));
+        valid&=SettingsResultValidator.validV2(result);
         if(!valid)throw new SrppSettingsProblem(503,"SIMULATION_INVALID","模擬結果格式無效");
     }
     private static boolean isMoney(JsonNode value){return value.isTextual()&&value.textValue().matches("-?(0|[1-9][0-9]*)\\.[0-9]{2}")&&!value.textValue().equals("-0.00");}
@@ -169,13 +170,17 @@ public class SrppSettingsService {
         }catch(Exception invalid){throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","設定目錄尚未與正式規則包同步");}
     }
     private JsonNode authorityValues(JsonNode document) {
-        JsonNode model=SettingsCanonicalJson.parse(authority.modelBytes());ObjectNode values=F.objectNode();
-        for(JsonNode field:document.path("fields")) {
-            JsonNode value=field.path("pointer").isTextual()?model.at(field.path("pointer").asText()):field.path("defaultAssumption");
-            if(value.isMissingNode()||value.isNull())throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","正式規則缺少設定來源");
-            values.set(field.path("id").asText(),value);
-        }
-        return values;
+        try {
+            byte[] payroll=null;
+            boolean needsPayroll=false;
+            for(JsonNode field:document.path("fields"))needsPayroll|="payroll".equals(field.path("source").asText());
+            if(needsPayroll)try(InputStream in=SrppSettingsService.class.getResourceAsStream("/srpp/settings/pre_retirement_payroll.json")) {
+                if(in==null)throw new IllegalStateException();
+                payroll=in.readAllBytes();
+            }
+            return SettingsAuthorityValues.extract(document,SettingsCanonicalJson.parse(authority.modelBytes()),
+                    SettingsCanonicalJson.parse(authority.manifestBytes()),payroll);
+        }catch(Exception invalid){throw new SrppSettingsProblem(503,"SIMULATOR_POLICY_MISMATCH","正式設定來源缺漏或與規則包不一致");}
     }
     private JsonNode catalog() {
         CatalogAuthority proof=catalogAuthority();JsonNode cat=worker.catalog();
@@ -203,9 +208,17 @@ public class SrppSettingsService {
     }
     static String configHash(String base,String catalogVersion,JsonNode values){ObjectNode n=F.objectNode();n.put("baseBundleSha256",base).put("catalogVersion",catalogVersion);n.set("values",values);return SettingsCanonicalJson.hash(n);}
     private ObjectNode draftTree(SrppSettingsDraft d){ObjectNode n=F.objectNode();n.put("id",d.getId().toString()).put("name",d.getName()).put("revision",d.getRevision()).put("baseBundleSha256",d.getBaseBundleSha256()).put("modelInputsSha256",d.getModelInputsSha256()).put("catalogSha256",d.getCatalogSha256()).put("catalogVersion",d.getCatalogVersion()).put("configSha256",d.getConfigSha256()).put("createdAt",d.getCreatedAt().toString()).put("updatedAt",d.getUpdatedAt().toString());n.set("values",SettingsCanonicalJson.parse(d.getValuesJson()));n.set("changes",SettingsCanonicalJson.parse(d.getChangesJson()));SrppSettingsRun r=runs.findFirstByDraftIdAndOwnerUserIdAndDraftRevisionAndConfigSha256AndStatusOrderByCreatedAtDesc(d.getId(),d.getOwnerUserId(),d.getRevision(),d.getConfigSha256(),"SUCCEEDED").orElse(null);eligibility(n,d,r);return n;}
-    private ObjectNode runTree(SrppSettingsRun r){ObjectNode n=F.objectNode();n.put("id",r.getId().toString()).put("draftId",r.getDraftId().toString()).put("draftRevision",r.getDraftRevision()).put("mode",r.getMode()).put("status",r.getStatus()).put("configSha256",r.getConfigSha256()).put("inputSha256",r.getInputSha256()).put("resultSha256",r.getResultSha256()).put("aiStatus",r.getAiStatus()).put("aiInterpretation",r.getAiInterpretation()).put("errorCode",r.getErrorCode()).put("createdAt",r.getCreatedAt().toString());if(r.getCompletedAt()==null)n.putNull("completedAt");else n.put("completedAt",r.getCompletedAt().toString());n.set("deterministicResult",r.getResultJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getResultJson()));n.set("changes",SettingsCanonicalJson.parse(r.getChangesJson()));SrppSettingsDraft d=drafts.findByIdAndOwnerUserId(r.getDraftId(),r.getOwnerUserId()).orElse(null);eligibility(n,d,r);return n;}
+    private ObjectNode runSummaryTree(SrppSettingsRun r) {
+        ObjectNode summary=runTree(r,false);summary.putNull("presentation");return summary;
+    }
+    private ObjectNode runTree(SrppSettingsRun r){return runTree(r,true);}
+    private ObjectNode runTree(SrppSettingsRun r,boolean includeResult){ObjectNode n=F.objectNode();n.put("id",r.getId().toString()).put("draftId",r.getDraftId().toString()).put("draftRevision",r.getDraftRevision()).put("mode",r.getMode()).put("status",r.getStatus()).put("configSha256",r.getConfigSha256()).put("inputSha256",r.getInputSha256()).put("resultSha256",r.getResultSha256()).put("aiStatus",r.getAiStatus()).put("aiInterpretation",r.getAiInterpretation()).put("errorCode",r.getErrorCode()).put("createdAt",r.getCreatedAt().toString());if(r.getCompletedAt()==null)n.putNull("completedAt");else n.put("completedAt",r.getCompletedAt().toString());n.set("deterministicResult",!includeResult||r.getResultJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getResultJson()));n.set("changes",SettingsCanonicalJson.parse(r.getChangesJson()));SrppSettingsDraft d=drafts.findByIdAndOwnerUserId(r.getDraftId(),r.getOwnerUserId()).orElse(null);eligibility(n,d,r);return n;}
     private void eligibility(ObjectNode n,SrppSettingsDraft d,SrppSettingsRun r){ArrayNode reasons=blocked(d,r,user.isAdmin());n.put("publishEligible",reasons.isEmpty());n.set("blockedReasons",reasons);}
-    private ArrayNode blocked(SrppSettingsDraft d,SrppSettingsRun r,boolean admin){ArrayNode reasons=F.arrayNode();if(!admin)reason(reasons,"ADMIN_REQUIRED","正式發布需要管理者權限");if(d==null){reason(reasons,"DRAFT_CHANGED","草稿已不存在");return reasons;}if(!authority.policy().bundleHash().equals(d.getBaseBundleSha256()))reason(reasons,"BASE_POLICY_CHANGED","正式規則已更新，請以新基準建立草稿");for(JsonNode change:SettingsCanonicalJson.parse(d.getChangesJson()))if(!change.path("formalSupported").asBoolean()){reason(reasons,"FORMAL_FIELD_UNSUPPORTED",change.path("label").asText()+"僅供情境模擬，不能發布為正式規則");}
+    private ArrayNode blocked(SrppSettingsDraft d,SrppSettingsRun r,boolean admin){ArrayNode reasons=F.arrayNode();if(!admin)reason(reasons,"ADMIN_REQUIRED","正式發布需要管理者權限");if(d==null){reason(reasons,"DRAFT_CHANGED","草稿已不存在");return reasons;}if(!authority.policy().bundleHash().equals(d.getBaseBundleSha256()))reason(reasons,"BASE_POLICY_CHANGED","正式規則已更新，請以新基準建立草稿");try {CatalogAuthority current=catalogAuthority();
+            if(!current.sha256().equals(d.getCatalogSha256())||!current.document().path("catalogVersion").asText().equals(d.getCatalogVersion())
+                    ||!authority.policy().modelHash().equals(d.getModelInputsSha256()))reason(reasons,"BASE_POLICY_CHANGED","設定目錄或模型來源已更新，請以目前版本建立新草稿");
+        }catch(SrppSettingsProblem unavailable){reason(reasons,"SIMULATOR_POLICY_MISMATCH","目前設定來源無法驗證，暫時不能發布");}
+        for(JsonNode change:SettingsCanonicalJson.parse(d.getChangesJson()))if(!change.path("formalSupported").asBoolean()){reason(reasons,"FORMAL_FIELD_UNSUPPORTED",change.path("label").asText()+"僅供情境模擬，不能發布為正式規則");}
         if(r==null)reason(reasons,"SIMULATION_REQUIRED","請先完成此版本草稿的模擬");else if(!r.getDraftId().equals(d.getId())||r.getDraftRevision()!=d.getRevision()||!r.getConfigSha256().equals(d.getConfigSha256()))reason(reasons,"DRAFT_CHANGED","模擬結果不屬於目前草稿版本");else if(!"SUCCEEDED".equals(r.getStatus())||r.getResultJson()==null||!isHash(r.getResultSha256()))reason(reasons,"SIMULATION_FAILED","目前模擬尚未成功完成");return reasons;}
     private static void reason(ArrayNode a,String code,String message){a.addObject().put("code",code).put("message",message);}
     private ObjectNode releaseTree(SrppSettingsRelease rel,JsonNode cat){JsonNode p=SettingsCanonicalJson.parse(rel.getPayloadJson());ObjectNode n=F.objectNode();n.put("id",rel.getId().toString()).put("draftId",rel.getDraftId().toString()).put("simulationId",rel.getRunId().toString()).put("requestSha256",rel.getRequestSha256()).put("configSha256",p.path("configSha256").asText()).put("baseBundleSha256",p.path("baseBundleSha256").asText()).put("createdAt",rel.getCreatedAt().toString());n.put("status",active(rel,p,cat)?"ACTIVE":superseded(rel,p,historicalReceipts())?"SUPERSEDED":"PENDING_RELEASE");return n;}
@@ -261,6 +274,12 @@ public class SrppSettingsService {
     private void finish(long owner,UUID id,Consumer<SrppSettingsRun> change){mutate(owner,id,r->{change.accept(r);r.setCompletedAt(clock.instant());});}
     private long owner(){if(!user.hasUser()||!"ACTIVE".equals(user.getStatus()))throw new SrppSettingsProblem(401,"UNAUTHENTICATED","請先登入有效帳號");return user.getEffectiveUserId();}
     private SrppSettingsDraft lockedDraft(UUID id,long owner){return drafts.lockOwned(id,owner).orElseThrow(SrppSettingsService::notFound);}
+    /** Pure source identity check shared by draft-preview readers; never calls the worker. */
+    void ensureDraftCurrent(SrppSettingsDraft d) {
+        ensureBase(d.getBaseBundleSha256());CatalogAuthority cat=catalogAuthority();
+        if(!cat.sha256().equals(d.getCatalogSha256())||!cat.document().path("catalogVersion").asText().equals(d.getCatalogVersion())
+                ||!authority.policy().modelHash().equals(d.getModelInputsSha256()))throw new SrppSettingsProblem(409,"BASE_POLICY_CHANGED","規則或設定目錄已更新，請以新基準建立草稿");
+    }
     private void ensureDraftCurrent(SrppSettingsDraft d,JsonNode cat){ensureBase(d.getBaseBundleSha256());if(!d.getCatalogSha256().equals(cat.path("catalogSha256").asText())||!d.getCatalogVersion().equals(cat.path("catalogVersion").asText())||!d.getModelInputsSha256().equals(authority.policy().modelHash()))throw new SrppSettingsProblem(409,"BASE_POLICY_CHANGED","規則或設定目錄已更新，請以新基準建立草稿");}
     private void ensureBase(String base){if(!authority.policy().bundleHash().equals(base))throw new SrppSettingsProblem(409,"BASE_POLICY_CHANGED","正式規則已更新，請以新基準建立草稿");}
     private static void checkRevision(SrppSettingsDraft d,long revision){if(d.getRevision()!=revision)throw new SrppSettingsProblem(409,"REVISION_CONFLICT","草稿已更新，請重新載入後再修改");}

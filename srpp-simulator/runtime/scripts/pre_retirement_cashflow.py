@@ -136,8 +136,6 @@ def calculate(config: dict[str, Any]) -> dict[str, Any]:
     # employee leaves before the usual payday. Bonuses require employment
     # on their stated payment date under the separately declared assumption.
     pay_dates = monthly_dates(as_of, max(retirement, final_payday), payday)
-    if not pay_dates:
-        raise ValueError("no pay dates fall inside the requested cash-paydate window")
 
     rows: dict[date, dict[str, Any]] = {
         pay_date: {
@@ -160,9 +158,14 @@ def calculate(config: dict[str, Any]) -> dict[str, Any]:
         pay_date = date.fromisoformat(event["pay_date"])
         if as_of < pay_date <= retirement:
             if pay_date not in rows:
-                raise ValueError(
-                    f"bonus {event['name']} has pay date {event['pay_date']} that is not a monthly payday"
-                )
+                # A dated bonus is a separate cash event, never another salary month.
+                rows[pay_date] = {
+                    "pay_date": iso(pay_date),
+                    "contractual_monthly_salary": salary_on(config, pay_date),
+                    "bonus_events": [], "earned_month_fraction": Decimal(0),
+                    "regular_salary": 0, "insurance_month_fraction": Decimal(0),
+                    "employer_nhi_due": False,
+                }
             amount = twd(decimal(rows[pay_date]["contractual_monthly_salary"]) * decimal(event["months"]))
             rows[pay_date]["bonus_events"].append({
                 "name": event["name"],
@@ -194,7 +197,7 @@ def calculate(config: dict[str, Any]) -> dict[str, Any]:
     ledger: list[dict[str, Any]] = []
     budget_accrued = Decimal(0)
     budget_paid = 0
-    for pay_date in pay_dates:
+    for pay_date in sorted(rows):
         row = rows[pay_date]
         rule = insurance_rule(config, pay_date, row["contractual_monthly_salary"])
 

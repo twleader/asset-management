@@ -1,0 +1,80 @@
+{
+  "result": "PASS",
+  "inputs": [
+    {
+      "id": "srpp-field-targetWeights-009826",
+      "value": "2.5"
+    },
+    {
+      "id": "srpp-field-targetWeights-VOO",
+      "value": "27"
+    },
+    {
+      "id": "srpp-field-targetWeights-VT",
+      "value": "2.5"
+    },
+    {
+      "id": "srpp-field-targetWeights-0050",
+      "value": "10"
+    },
+    {
+      "id": "srpp-field-targetWeights-00881",
+      "value": "4.53"
+    },
+    {
+      "id": "srpp-field-targetWeights-00713",
+      "value": "3.33333333"
+    },
+    {
+      "id": "srpp-field-targetWeights-0056",
+      "value": "2.5"
+    },
+    {
+      "id": "srpp-field-targetWeights-00878",
+      "value": "2.5"
+    },
+    {
+      "id": "srpp-field-targetWeights-00919",
+      "value": "1.66666667"
+    },
+    {
+      "id": "srpp-field-targetWeights-00865B",
+      "value": "2.5"
+    },
+    {
+      "id": "srpp-field-targetWeights-00719B",
+      "value": "19.97"
+    },
+    {
+      "id": "srpp-field-targetWeights-SGOV",
+      "value": "2"
+    },
+    {
+      "id": "srpp-field-targetWeights-00697B",
+      "value": "2"
+    },
+    {
+      "id": "srpp-field-targetWeights-TWD_term_deposits",
+      "value": "16.4"
+    },
+    {
+      "id": "srpp-field-targetWeights-demand_deposits_and_cash",
+      "value": "0.6"
+    },
+    {
+      "id": "srpp-field-targetWeights-00850",
+      "value": "0"
+    },
+    {
+      "id": "srpp-field-targetWeights-00679B",
+      "value": "0"
+    },
+    {
+      "id": "srpp-field-targetWeights-00751B",
+      "value": "0"
+    }
+  ],
+  "total": "合計：100%\n配置合計符合 100%",
+  "savedOriginalPrecisionUnchanged": true,
+  "pageErrors": []
+}

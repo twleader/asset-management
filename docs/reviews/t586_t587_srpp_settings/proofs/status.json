@@ -1,0 +1,33 @@
+{
+  "scope": "OFFLINE_AND_ISOLATED_PREFLIGHT_ONLY",
+  "sourceBundleSha256": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "formalGit": "NOT_YET_EXECUTED",
+  "formalRegistry": "NOT_YET_EXECUTED",
+  "formalDeployment": "NOT_YET_EXECUTED",
+  "formalBusinessApiAcceptance": "NOT_YET_EXECUTED",
+  "formalScheduledReportAdoption": "NOT_YET_EXECUTED",
+  "archReviewRound2": "CHANGES_REQUESTED",
+  "archReviewRound2Major": "BFF observation grouping repair independently verified and finding removed in arch round3",
+  "archReviewRound3": "PASS",
+  "currentBffPreflight": "proofs/bff-observation-buckets-image-preflight.json",
+  "finalArchReview": {
+    "verdict": "PASS",
+    "critical": 0,
+    "major": 0,
+    "minor": 2
+  },
+  "archGateHashPrefix": "784740c96694",
+  "specGateHashPrefix": "a6a3ff723af2",
+  "retainedMinorConventions": [
+    {
+      "finding": "Short DTO decimal prices remain String rather than BigDecimal",
+      "status": "RETAINED_NOT_FIXED",
+      "reason": "Source BigDecimal.toPlainString preserves scale/null and avoids floating conversion; no precision-loss evidence found. Preserve reviewed decimal-string wire for this release."
+    },
+    {
+      "finding": "Date/timestamp DTO fields remain String rather than LocalDate/Instant",
+      "status": "RETAINED_NOT_FIXED",
+      "reason": "ISO date validation exists; preserve reviewed wire/canonical hash and source offset. This remains a declared Java type-convention difference."
+    }
+  ]
+}

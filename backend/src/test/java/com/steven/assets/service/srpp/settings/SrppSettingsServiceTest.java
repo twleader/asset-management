@@ -50,7 +50,9 @@ class SrppSettingsServiceTest {
         byte[] bytes=getClass().getResourceAsStream("/srpp/settings/settings_catalog.json").readAllBytes();JsonNode meta=SettingsCanonicalJson.parse(new String(bytes,StandardCharsets.UTF_8));String catHash=SettingsCanonicalJson.bytesHash(bytes);
         ObjectNode manifest=(ObjectNode)SettingsCanonicalJson.parse(real.manifestBytes());((ObjectNode)manifest.path("files")).put("assumptions/settings_catalog.json",catHash);when(authority.manifestBytes()).thenReturn(SettingsCanonicalJson.canonical(manifest));
         ObjectNode cat=((ObjectNode)meta).deepCopy();cat.put("baseBundleSha256",base).put("modelInputsSha256",real.policy().modelHash()).put("catalogSha256",catHash);ObjectNode values=cat.putObject("currentValues");JsonNode model=SettingsCanonicalJson.parse(real.modelBytes());
-        for(JsonNode f:cat.path("fields")){JsonNode v=f.path("pointer").isTextual()?model.at(f.path("pointer").asText()):f.path("defaultAssumption");values.set(f.path("id").asText(),v);((ObjectNode)f).set("defaultValue",v);}
+        byte[] payrollBytes;try(var in=getClass().getResourceAsStream("/srpp/settings/pre_retirement_payroll.json")){payrollBytes=in==null?null:in.readAllBytes();}
+        ObjectNode extracted=SettingsAuthorityValues.extract(meta,model,manifest,payrollBytes);values.setAll(extracted);
+        for(JsonNode f:cat.path("fields"))((ObjectNode)f).set("defaultValue",extracted.path(f.path("id").asText()));
         catalog=cat;when(worker.catalog()).thenAnswer(i->catalog.deepCopy());
         when(worker.validate(any())).thenAnswer(i->{JsonNode request=i.getArgument(0);JsonNode v=request.path("values");for(var names=v.fieldNames();names.hasNext();)if(!values.has(names.next()))throw new SrppSettingsProblem(400,"CONFIG_INVALID","未知欄位");ObjectNode out=json.createObjectNode().put("valid",true).put("configSha256",SrppSettingsService.configHash(base,meta.path("catalogVersion").asText(),v));out.set("normalizedValues",v);return out;});
         when(worker.simulate(any())).thenAnswer(i->result(i.getArgument(0)));
@@ -73,7 +75,21 @@ class SrppSettingsServiceTest {
     ObjectNode simulate(ObjectNode d,String mode){return (ObjectNode)SettingsCanonicalJson.tree(service.simulate(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"mode\":\""+mode+"\",\"seed\":7,\"simulations\":100}"));}
     ObjectNode publish(ObjectNode d,ObjectNode r){return (ObjectNode)SettingsCanonicalJson.tree(service.publish(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"simulationId\":\""+r.path("id").asText()+"\"}"));}
     ObjectNode update(ObjectNode d,String key,JsonNode value){ObjectNode values=d.path("values").deepCopy();values.set(key,value);ObjectNode b=json.createObjectNode().put("revision",d.path("revision").asLong()).put("name","修改情境");b.set("values",values);return (ObjectNode)SettingsCanonicalJson.tree(service.update(UUID.fromString(d.path("id").asText()),b.toString()));}
-    static ObjectNode result(JsonNode request){ObjectNode out=JsonNodeFactory.instance.objectNode().put("schemaVersion",1).put("engineVersion","SRPP_SCENARIO_CASHFLOW_V1");for(String key:List.of("baseBundleSha256","configSha256","inputSha256"))out.set(key,request.path(key));ObjectNode body=out.putObject("result");for(String key:List.of("baseline","scenario")){ObjectNode s=body.putObject(key).put("scope","MONTHLY_SCENARIO_NOT_FORMAL_MODEL").put("successProbability",0.9);s.putObject("successProbabilityCi95").put("low",0.8).put("high",0.95);s.putArray("percentilePaths").addObject().put("date","2030-01-01").put("age",60).put("p10","100.00").put("p50","200.00").put("p90","300.00");for(String a:List.of("retirementAssets","terminalAssets"))s.putObject(a).put("p10","100.00").put("p50","200.00").put("p90","300.00");ObjectNode a=s.putObject("assumptions");a.put("baseCurrency","TWD_2026_08_REAL").put("purchasingPowerBaseDate","2026-08-31").put("asOfDate","2026-11-14").put("assetSnapshotDate","2026-11-14").put("targetPriceComplete",false).put("retirementDate","2027-06-30").put("planningAge",90).put("simulations",100).put("seed",7).put("reserveExcluded",true).put("protectedReserveRealTwd","1600000.00").put("referenceInflation",0.0225).put("equityRealCompoundPlanningTarget",0.04).put("equityArithmeticPlanningMean",0.056).put("bondReferenceRealArithmeticMean",0.01).put("cashReferenceRealArithmeticMean",0).put("equityVolatility",0.18).put("bondVolatility",0.08).put("fxVolatility",0.1).put("fxVolatilitySource","TEST").put("bondNominalPlanningYield",0.04).put("returnMeanSource","TEST").put("equityMeanConversion","TEST");a.putObject("scenarioInflationBounds").put("low",0.01).put("high",0.03);a.putArray("approximationNotes");s.putNull("depletionAge");s.putArray("modeledFields");s.putArray("notModeledFields");}body.putObject("differences").put("successProbability",0).put("retirementAssetsP50","0.00").put("terminalAssetsP50","0.00");body.putArray("changes");body.putArray("warnings");return out;}
+    /** Real Python V2 shape, with simple synthetic amounts for workflow assertions. */
+    static ObjectNode result(JsonNode request) {
+        try {
+            ObjectNode out=(ObjectNode)SettingsCanonicalJson.parse(new String(SrppSettingsServiceTest.class
+                    .getResourceAsStream("/srpp/settings-result-wire-v2.json").readAllBytes(),StandardCharsets.UTF_8));
+            for(String key:List.of("baseBundleSha256","configSha256","inputSha256"))out.set(key,request.path(key));
+            for(String side:List.of("baseline","scenario")) {
+                ObjectNode scenario=(ObjectNode)out.path("result").path(side);
+                for(String field:List.of("retirementAssets","terminalAssets"))scenario.putObject(field).put("p10","100.00").put("p50","200.00").put("p90","300.00");
+                scenario.putNull("depletionAge");
+            }
+            return out;
+        }catch(Exception failure){throw new IllegalStateException(failure);}
+    }
+
     @Test void localNeverChecksOrCreatesAiAndFreezesOwnerInput() {
         ObjectNode d=create(),r=simulate(d,"LOCAL");assertThat(r.path("status").asText()).isEqualTo("SUCCEEDED");verifyNoInteractions(ai);verify(assets).getLatestForOwner(7);
         SrppSettingsRun stored=rs.get(UUID.fromString(r.path("id").asText()));JsonNode frozen=SettingsCanonicalJson.parse(stored.getRequestJson());assertThat(SettingsCanonicalJson.hash(frozen.path("input"))).isEqualTo(stored.getInputSha256());
@@ -94,12 +110,31 @@ class SrppSettingsServiceTest {
         user.setEffectiveUserId(7L);user.setRole("USER");assertThatThrownBy(()->service.publish(id,"{}" )).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("管理者");
         user.setRole("ADMIN");assertThatThrownBy(()->update(changed,"unknown",IntNode.valueOf(1))).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("未知");
     }
+    @Test void oldCatalogVersionOrHashCanBeReadButCannotBeUpdatedSimulatedOrPublished() {
+        ObjectNode draft=create(),run=simulate(draft,"LOCAL");UUID id=UUID.fromString(draft.path("id").asText());
+        SrppSettingsDraft stored=ds.get(id);stored.setCatalogVersion("SRPP_SETTINGS_CATALOG_V1_OLD");stored.setCatalogSha256("0".repeat(64));
+        var historical=service.simulation(UUID.fromString(run.path("id").asText()));
+        assertThat(historical.deterministicResult()).isNotNull();assertThat(historical.publishEligible()).isFalse();
+        assertThat(historical.blockedReasons()).anyMatch(reason->reason.code().equals("BASE_POLICY_CHANGED"));
+        assertThatThrownBy(()->update(draft,"riskCautiousTotal",IntNode.valueOf(4))).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("新基準");
+        assertThatThrownBy(()->simulate(draft,"LOCAL")).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("新基準");
+        assertThatThrownBy(()->publish(draft,run)).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("新基準");
+    }
     @Test void changedDraftAndSimulationOnlyValuesCannotBeReleased() {
         ObjectNode d=create(),r=simulate(d,"LOCAL");ObjectNode changed=update(d,"riskCautiousTotal",IntNode.valueOf(4));assertThatThrownBy(()->publish(changed,r)).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("目前草稿");
         ObjectNode simulationOnly=update(changed,"livingExpense",IntNode.valueOf(600000));ObjectNode run=simulate(simulationOnly,"LOCAL");assertThat(run.path("publishEligible").asBoolean()).isFalse();assertThatThrownBy(()->publish(simulationOnly,run)).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("僅供情境");
     }
     @Test void releaseIsIdempotentPendingAndOtherOwnerCannotDownload() {
         ObjectNode d=create(),r=simulate(d,"LOCAL"),release=publish(d,r);assertThat(release.path("status").asText()).isEqualTo("PENDING_RELEASE");assertThat(publish(d,r).path("id")).isEqualTo(release.path("id"));UUID id=UUID.fromString(release.path("id").asText());JsonNode p=SettingsCanonicalJson.tree(service.payload(id));ObjectNode unsigned=((ObjectNode)p).deepCopy();unsigned.remove("requestSha256");assertThat(SettingsCanonicalJson.hash(unsigned)).isEqualTo(p.path("requestSha256").asText());user.setEffectiveUserId(8L);assertThatThrownBy(()->service.payload(id)).isInstanceOf(SrppSettingsProblem.class);
+    }
+    @Test void centerKeepsTwentyRunsMetadataOnlyWhileSingleGetPreservesCompleteEvidenceAndHash() {
+        ObjectNode d=create();for(int i=0;i<20;i++)simulate(d,"LOCAL");
+        when(drafts.findTop20ByOwnerUserIdOrderByUpdatedAtDesc(7L)).thenReturn(List.of(ds.get(UUID.fromString(d.path("id").asText()))));
+        when(runs.findTop20ByOwnerUserIdOrderByCreatedAtDesc(7L)).thenReturn(List.copyOf(rs.values()));
+        var center=service.center();assertThat(center.simulations()).hasSize(20);
+        assertThat(center.simulations()).allSatisfy(r->{assertThat(r.deterministicResult()).isNull();assertThat(r.presentation()).isNull();assertThat(r.resultSha256()).isNotBlank();});
+        var full=service.simulation(rs.keySet().iterator().next());assertThat(full.deterministicResult().result().scenario().reserveStrategyAudit()).isNotNull();
+        assertThat(SettingsCanonicalJson.hash(SettingsCanonicalJson.tree(full.deterministicResult()))).isEqualTo(full.resultSha256());
     }
     @Test void identityMatchedButEmptyResultCannotSucceedOrPublish() {
         doAnswer(i->{ObjectNode n=result(i.getArgument(0));n.set("result",json.createObjectNode());return n;}).when(worker).simulate(any());ObjectNode d=create(),r=simulate(d,"LOCAL");assertThat(r.path("status").asText()).isEqualTo("FAILED");assertThat(r.path("errorCode").asText()).isEqualTo("SIMULATION_INVALID");assertThatThrownBy(()->publish(d,r)).isInstanceOf(SrppSettingsProblem.class);
