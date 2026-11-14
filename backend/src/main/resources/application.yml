@@ -128,6 +128,8 @@ trading-radar:
 # Requirement 163／Task 452：SRPP 共用計算結果 producer 與保留期（Asia/Taipei）。
 # retention-days 小於 7 時啟動視為 7。
 srpp:
+  settings:
+    worker-url: ${SRPP_SETTINGS_WORKER_URL:http://srpp-simulator:8080}
   producer-cron: ${SRPP_PRODUCER_CRON:0 */5 * * * *}
   retention-cron: ${SRPP_RETENTION_CRON:0 25 3 * * *}
   retention-days: ${SRPP_RETENTION_DAYS:7}

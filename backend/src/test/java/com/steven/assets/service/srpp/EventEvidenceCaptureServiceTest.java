@@ -1034,4 +1034,37 @@ class EventEvidenceCaptureServiceTest {
         assertThat(new EventEvidenceCaptureService.Settings(Set.of(" fx "), Set.of(), 31, List.of(" BLS.gov ")).officialDomains())
                 .containsExactly("bls.gov");
     }
+    @Test
+    void productionV2UsesCurrentModelThresholdsAndRejectsNewHistoricalBundle() throws Exception {
+        var authority = org.mockito.Mockito.mock(com.steven.assets.service.srpp.decision.DecisionPolicyAuthority.class);
+        var policy = org.mockito.Mockito.mock(com.steven.assets.service.srpp.decision.DecisionFacts.Policy.class);
+        when(authority.policy()).thenReturn(policy);when(policy.bundleHash()).thenReturn(POLICY);
+        ObjectNode model=(ObjectNode)JSON.readTree(new com.steven.assets.service.srpp.decision.DecisionPolicyAuthority().modelBytes());
+        ((ObjectNode)model.path("execution_policy").path("risk_score_decision_policy"))
+            .put("rubric_schema",SrppRiskRubricV2.SCHEMA).put("cautious_total_score",4).put("defensive_total_score",7);
+        when(authority.modelBytes()).thenReturn(JSON.writeValueAsString(model));
+        service=new EventEvidenceCaptureService(currentUser,marketData,policies,swagger,bundles,news,
+            EventEvidenceCaptureService.newTransactions(transactionManager),defaults(),Clock.fixed(NOW,TW),authority);
+        JsonNode response=JSON.readTree(capture(validBody()).body());
+        assertThat(response.path("riskAssessment").path("riskMode").asText()).isEqualTo("CAUTIOUS");
+        assertThat(response.path("rubricSha256").asText()).isEqualTo(new SrppRiskRubricV2(4,7).rubricSha256());
+        when(policy.bundleHash()).thenReturn("e".repeat(64));
+        assertThatThrownBy(()->capture(validBody())).isInstanceOf(SrppCaptureProblem.class)
+            .satisfies(e->assertThat(((SrppCaptureProblem)e).code).isEqualTo("POLICY_UNSUPPORTED"));
+    }
+
+    @Test
+    void productionCurrentOnlyRuleDoesNotRewriteExistingHistoricalReplay() throws Exception {
+        SrppEventEvidenceBundle saved=persistedFirst(validBody());
+        var authority=org.mockito.Mockito.mock(com.steven.assets.service.srpp.decision.DecisionPolicyAuthority.class);
+        var policy=org.mockito.Mockito.mock(com.steven.assets.service.srpp.decision.DecisionFacts.Policy.class);
+        when(authority.policy()).thenReturn(policy);when(policy.bundleHash()).thenReturn("e".repeat(64));
+        service=new EventEvidenceCaptureService(currentUser,marketData,policies,swagger,bundles,news,
+            EventEvidenceCaptureService.newTransactions(transactionManager),defaults(),Clock.fixed(NOW,TW),authority);
+        JsonNode replay=JSON.readTree(capture(validBody()).body());
+        assertThat(replay.path("rubricSha256").asText()).isEqualTo(SrppRiskRubricV1.rubricSha256());
+        assertThat(replay.path("eventBundleId").asText()).isEqualTo(saved.getId().toString());
+        org.mockito.Mockito.verify(authority,org.mockito.Mockito.never()).modelBytes();
+    }
+
 }

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "value": {
+        "inflationRate": 0.0225,
+        "weights": {
+          "equity": 0.5653,
+          "bonds": 0.2647,
+          "cash": 0.17
+        },
+        "amount": 12345.67
+      },
+      "canonical": "{\"amount\":12345.67,\"inflationRate\":0.0225,\"weights\":{\"bonds\":0.2647,\"cash\":0.17,\"equity\":0.5653}}",
+      "sha256": "7483476c168e2e805b08afc0c2028febad72729c7b66c4d966c9f22c90607718"
+    },
+    {
+      "value": {
+        "small": 1e-07,
+        "large": 1e+21,
+        "negativeZero": -0.0
+      },
+      "canonical": "{\"large\":1e+21,\"negativeZero\":0,\"small\":1e-7}",
+      "sha256": "6606a335519b1c6c815454ba545fd693ca40a01d3e010c896ee743f6a1b7ad6f"
+    },
+    {
+      "value": {
+        "中文": "退休規劃",
+        "": 1,
+        "😀": 2
+      },
+      "canonical": "{\"中文\":\"退休規劃\",\"😀\":2,\"\":1}",
+      "sha256": "de87077a8a7c61e4a9c4c662033d4009f4fdace5e40242df93083d0864c0d3ee"
+    }
+  ]
+}

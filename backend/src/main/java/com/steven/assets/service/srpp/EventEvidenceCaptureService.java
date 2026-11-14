@@ -21,6 +21,7 @@ import com.steven.assets.service.srpp.RiskEvidenceEvaluator.CategoryInput;
 import com.steven.assets.service.srpp.RiskEvidenceEvaluator.CategoryResult;
 import com.steven.assets.srpp.SrppJcs;
 import com.steven.assets.srpp.SrppPolicyRegistryService;
+import com.steven.assets.service.srpp.decision.DecisionPolicyAuthority;
 import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,13 +151,14 @@ public class EventEvidenceCaptureService {
     private final TransactionTemplate transactions;
     private final Settings settings;
     private final Clock clock;
+    private final DecisionPolicyAuthority authority;
 
     @Autowired
     public EventEvidenceCaptureService(
             CurrentUserContext currentUser, MarketDataService marketData,
             SrppPolicyRegistryService policies, PublishedSwaggerIdentity swagger,
             SrppEventEvidenceBundleRepository bundles, NewsHeadlineRepository news,
-            PlatformTransactionManager transactionManager,
+            PlatformTransactionManager transactionManager, DecisionPolicyAuthority authority,
             @Value("${srpp.event-evidence.volatile-categories:fx,us-market,kr-market,kr-intraday}") String volatileCategories,
             @Value("${srpp.event-evidence.api-endpoints:/api/public/commodity-prices,/api/public/market-index,/api/public/exchange-rate/usd-twd}") String apiEndpoints,
             @Value("${srpp.event-evidence.api-observed-max-age-days:31}") int apiObservedMaxAgeDays,
@@ -164,7 +166,7 @@ public class EventEvidenceCaptureService {
         this(currentUser, marketData, policies, swagger, bundles, news, newTransactions(transactionManager),
                 new Settings(Set.copyOf(csv(volatileCategories)), Set.copyOf(csv(apiEndpoints)), apiObservedMaxAgeDays,
                         csv(officialDomains)),
-                Clock.system(TW));
+                Clock.system(TW),authority);
     }
 
     /** 逗號分隔設定值；空字串＝空清單。 */
@@ -178,6 +180,13 @@ public class EventEvidenceCaptureService {
                                 PublishedSwaggerIdentity swagger, SrppEventEvidenceBundleRepository bundles,
                                 NewsHeadlineRepository news, TransactionTemplate transactions, Settings settings,
                                 Clock clock) {
+        this(currentUser,marketData,policies,swagger,bundles,news,transactions,settings,clock,null);
+    }
+
+    EventEvidenceCaptureService(CurrentUserContext currentUser,MarketDataService marketData,
+                                SrppPolicyRegistryService policies,PublishedSwaggerIdentity swagger,
+                                SrppEventEvidenceBundleRepository bundles,NewsHeadlineRepository news,
+                                TransactionTemplate transactions,Settings settings,Clock clock,DecisionPolicyAuthority authority) {
         this.currentUser = currentUser;
         this.marketData = marketData;
         this.policies = policies;
@@ -187,6 +196,7 @@ public class EventEvidenceCaptureService {
         this.transactions = transactions;
         this.settings = settings;
         this.clock = clock;
+        this.authority=authority;
     }
 
     /** 每次 {@code execute} 都是全新 transaction（REQUIRES_NEW），不會被任何外層 transaction 吞併。 */
@@ -246,6 +256,14 @@ public class EventEvidenceCaptureService {
         Optional<SrppEventEvidenceBundle> existing = findIdentity(ownerId, request);
         if (existing.isPresent()) return replay(existing.get(), request);
 
+        // Historical registry documents do not contain a verifiable rubric. New writes are current-only.
+        SrppRiskRubricV2 rubric=null;
+        if(authority!=null) {
+            if(!authority.policy().bundleHash().equals(request.policyBundleSha256()))throw problem(HttpStatus.CONFLICT,"POLICY_UNSUPPORTED");
+            try{rubric=SrppRiskRubricV2.fromModel(SrppJcs.parseStrict(authority.modelBytes()));}
+            catch(RuntimeException invalid){throw problem(HttpStatus.CONFLICT,"POLICY_UNSUPPORTED");}
+        }
+
         Evidence evidence = verify(request);
         List<CategoryInput> inputs = new ArrayList<>();
         for (String code : SrppRiskRubricV1.CATEGORY_CODES) {
@@ -253,10 +271,10 @@ public class EventEvidenceCaptureService {
             inputs.add(new CategoryInput(code, category.claimedScore(), category.conflicting(),
                     evidence.receipts().get(code).size()));
         }
-        Assessment assessment = RiskEvidenceEvaluator.evaluate(inputs);
+        Assessment assessment = RiskEvidenceEvaluator.evaluate(inputs,rubric);
 
         UUID id = UUID.randomUUID();
-        ObjectNode content = content(id, request, assessment, evidence);
+        ObjectNode content = content(id, request, assessment, evidence,rubric);
         String contentJcs = SrppJcs.canonicalize(content);
         bundles.saveAndFlush(new SrppEventEvidenceBundle(id, ownerId, request.tradingDate(), request.slot(),
                 request.analysisProfile(), request.consumer(), request.decisionId(), request.policyBundleSha256(),
@@ -589,7 +607,7 @@ public class EventEvidenceCaptureService {
     // ---------------------------------------------------------------- 回應（481.10／481.11）
 
     /** 不含 {@code created}／{@code idempotentReplay} 的完整回應本體，含 {@code eventBundleContentSha256}。 */
-    private ObjectNode content(UUID id, EventEvidenceRequest request, Assessment assessment, Evidence evidence) {
+    private ObjectNode content(UUID id, EventEvidenceRequest request, Assessment assessment, Evidence evidence,SrppRiskRubricV2 rubric) {
         JsonNodeFactory json = JsonNodeFactory.instance;
         ObjectNode root = json.objectNode();
         root.put("schemaVersion", SCHEMA_VERSION);
@@ -603,7 +621,7 @@ public class EventEvidenceCaptureService {
         identity.put("decisionId", request.decisionId());
         identity.put("policyBundleSha256", request.policyBundleSha256());
         identity.put("swaggerSha256", request.swaggerSha256());
-        root.put("rubricSha256", SrppRiskRubricV1.rubricSha256());
+        root.put("rubricSha256", rubric==null?SrppRiskRubricV1.rubricSha256():rubric.rubricSha256());
         ObjectNode risk = root.putObject("riskAssessment");
         ArrayNode categories = risk.putArray("categories");
         for (CategoryResult result : assessment.categories()) {

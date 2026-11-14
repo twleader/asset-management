@@ -423,7 +423,17 @@ export const bffApi = {
       api.post('/bff/portfolio-advice/generate', payload, { timeout: 60000 }),
     // 更新成本控管設定（模型／思考深度／web 搜尋，限管理者）；payload 例：{ model } 或 { effort } 或 { webSearchMaxUses }
     updateSettings: (payload) =>
-      api.put('/bff/portfolio-advice/settings', payload)
+      api.put('/bff/portfolio-advice/settings', payload),
+    // SRPP 設定模擬中心：專屬頁面 BFF；Vue 僅送出設定並呈現 server 計算結果。
+    srpp: {
+      root: () => api.get('/bff/portfolio-advice/srpp', { skipErrorToast: true }),
+      createDraft: (payload) => api.post('/bff/portfolio-advice/srpp/drafts', payload, { skipErrorToast: true }),
+      updateDraft: (id, payload) => api.put(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}`, payload, { skipErrorToast: true }),
+      simulateDraft: (id, payload) => api.post(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}/simulate`, payload, { skipErrorToast: true }),
+      getSimulation: (id) => api.get(`/bff/portfolio-advice/srpp/simulations/${encodeURIComponent(id)}`, { skipErrorToast: true }),
+      publishDraft: (id, payload) => api.post(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}/publish`, payload, { skipErrorToast: true }),
+      releasePayload: (id) => api.get(`/bff/portfolio-advice/srpp/releases/${encodeURIComponent(id)}/payload`, { skipErrorToast: true })
+    }
   },
 
   // TradingCalendar

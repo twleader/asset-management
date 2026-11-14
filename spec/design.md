@@ -13787,3 +13787,51 @@ Task582／583根agent獨立功能QA日期修正：實際495筆FinMind USD spot�
 - `ROTATION_AND_REGIME_CAPACITY`只有aggregate facts／receipts，本輪不把它擴成可執行D-156 SELL。逐檔核心目標保留、同代號短線扣除與具名原授權例外驗真由SRPP final instruction helper／guard完成，來源不足時該筆無可執行量；aggregate PASS不代表逐檔可賣。
 - D-204急跌揭露與D-212／D-215優先順序的唯一執行者仍為SRPP；資產端具名D-215正式來源由`UsNamedDrawdownD215`及`UsTacticalCalculator`驗真，普通分支、未知來源、六項風險與其餘硬閘不因本節全面放寬。API有效BLOCKED仍不得以本機診斷翻轉。
 - authority resource bytes由最終SRPP D-216來源同步，既有generators產生正式target document、同輸入golden及insert-only SQL。先測試與獨立spec／arch審查，正式發布沿Task542明文的雙repo落地→registry→main image rebuild/recreate→exact hash business readback順序。月頻模型與歷史績效不聲稱含此日頻邏輯。
+
+
+## Task 585：SRPP 設定與情境中心
+
+### 邊界與資料流
+AssetAllocationAdviceView 加入 SRPP 中心，Vue 只 render catalog 與後端差異／結果。瀏覽器→本頁 BFF `/api/bff/portfolio-advice/srpp`→business `/api/portfolio-advice/srpp`→SRPP_SCENARIO_CASHFLOW_V1 純計算 adapter。SRPP 維護 catalog／scenario adapter／release apply CLI，資產端同步精確 source/hash；不新增 9090 method/path；riskMode 的 Swagger 固定5／8門檻說明改為依已發布policy/rubric，觸發既有完整renderer／identity同步發布鏈。若採 Python 服務，只允許 Compose 內部網路（不映射 host port），僅接受凍結 JSON，無 vendor／AI／broker I/O，不執行 formal_run.py、不寫 canonical data/output。每 run 隔離資料／程序，bounded concurrency/timeout。新 simulator 與本機部署來源必須包含同版 canonical SRPP 計算原始碼及 provenance；重用原SRPP可用的spending/payroll/pension/returns純函式；明示這是有範圍的月頻規劃模型，不等同完整formal monthly_engine；未納逐檔過渡／完整稅務／日頻閘門，不能宣稱完全同等正式結果。
+
+### API（皆登入、owner-scoped）
+- GET root → `{catalog,current:{baseBundleSha256,modelInputsSha256,decision,policyVersion},drafts,simulations,releases,canPublish,aiAvailable}`。
+- POST `/drafts` `{name,baseBundleSha256,values}`；PUT `/drafts/{id}` `{revision,name,values}`，回 `{id,revision,name,baseBundleSha256,configSha256,values,createdAt,updatedAt}`。unknown/type/range/cross-field errors 400/422，revision/base drift 409，非owner 404，無登入401。
+- POST `/drafts/{id}/simulate` `{revision,mode:LOCAL|AI,seed,simulations}`→run；GET `/simulations/{id}`→`{id,status,mode,draftRevision,configSha256,inputSha256,deterministicResult,aiStatus,aiInterpretation,errorCode}`。seed為非負32位整數；simulations為整數100..100000，預設1000；有界背景排隊，滿載429，計算逾時FAILED，啟動恢復中斷狀態。
+- POST `/drafts/{id}/publish` `{revision,simulationId}`→`{id,status:PENDING_RELEASE,requestSha256,baseBundleSha256,configSha256}`，ADMIN限定；同一request冪等。GET `/releases/{id}/payload`→封閉版本1 JSON `{schemaVersion,requestSha256,baseBundleSha256,modelInputsSha256,catalogSha256,configSha256,values,simulation:{id,resultSha256}}`。hash計算排除自身hash欄、使用雙端同一canonical JSON規則，嚴禁 NaN/Infinity/duplicate keys 與任意路徑／命令。
+- 如 simulation adapter 需服務，request=`{schemaVersion:1,baseBundleSha256,configSha256,values,input:{latestAssets,capturedAt},seed,simulations}`，response攜相同身分、engineVersion及result。服務端重新驗證，不能信任 caller 自報hash，無資料用具名錯誤，不取其他來源代替。
+
+### 持久化與並行
+新增 `srpp_settings_draft`（UUID id、owner_user_id FK、name varchar100、revision bigint、base_bundle_sha256 char64、catalog_sha256 char64、config_sha256 char64、values_json text、changes_json text not null、created_at/updated_at timestamptz）；`srpp_settings_run`（UUID id、owner FK、draft id FK、draft revision、mode、status、config/input/result hashes、frozen request/result JSON text、ai_status/interpretation、error_code、created/finished timestamps）；`srpp_settings_release`（UUID id、owner FK、draft/run FK、request hash unique、immutable payload JSON、created timestamp）。全部repository以owner限制，草稿CAS需DB原子樂觀鎖、不可先讀後無條件覆蓋。run/release的凍結JSON與hash是具名歷史稽核snapshot正規化例外，不複製成第二份現行權威。migration選未占用版號、冪等，更新schema.sql。背景任務顯式攜owner/輸入，不能取request scoped context。
+
+### Catalog／模擬語意
+僅有既有參數的typed editor。日期／年齡／支出／配置等對原模型以顯式scenario context套用，原模型canonical來源不得被當場寫回；model適用範圍與NOT_MODELED日頻欄位分開回傳。基準及草稿同一資產與亂數，顯示實際差異、實質幣值基準、來源日期、抽樣不確定性。新增 risk rubric V2 從同版model讀審慎／防禦總分門檻（整數1..15，審慎<防禦），原V1原樣保留；六項類別與上限、單項3及coverage4不變。V2由實際capture/evaluator與Python verifier共用新digest，未部署不得採用。其他可變風險欄為部位上下界、買價回撤、溢價暫停與KD等現有可參數化門檻，正式可支援旗標須有實際consumer／compiler證據。
+
+### 正式發布與採用
+publish不代表ACTIVE。host operator驗證payload後以白名單compiler更新SRPP來源與必要aliases／文件／契約，原驗證工具仍必須通過；不支援的參數不可偷偷忽略或強制通過。資產端classpath `srpp/settings/release-receipt.json` 攜 `{schemaVersion:1,requestSha256,configSha256,baselineBundleSha256,publishedBundleSha256,modelInputsSha256}`，隨正常發布鏈產生。business derived ACTIVE要求收據request/config與已存payload一致、publishedBundle/modelHash與DecisionPolicyAuthority相同、沿原request baseline身分重驗configHash（不可改用新bundle計算原hash），且從目前authority抽取的完整設定values與原payload.values的canonical JSON相同、registry.find與SrppReportAuthority.matches均通過；否則PENDING_RELEASE，後續其他版本採用則歷史SUPERSEDED。禁止client ACK/ACTIVE endpoint。不掛host docker/socket，不讓LLM決定發布。此輪驗收使用現值草稿與隔離測試證明整條鏈，不任意改實盤規則；正式日報合法時窗採用另記NOT_YET_EXECUTED。
+
+風險V2補充：既有 immutable event-evidence replay維持原內容；建立新capture時，只接受精確目前DecisionPolicyAuthority bundle（且registry驗證通過），其餘409 POLICY_UNSUPPORTED，不把歷史bundle套目前V2或猜V1。這是因歷史registry document僅含targets、不含可驗的完整rubric。測試用V1入口維持歷史語意，production明確注入current V2並對回應rubricSha256驗真。
+
+Settings 身分編碼補充（獨立審查 round1 修正）：既有 SrppJcs 只支援安全整數，原樣保留不修改；本中心新增 SettingsCanonicalJson，使用完整 RFC8785 實作 `io.github.erdtman:java-json-canonicalization:1.1`，Python固定rfc8785==0.1.4。嚴格parser拒duplicate key、trailing token、NaN/Infinity及非法Unicode。values/input/result/request以同一新canonicalizer計hash；測試含0.0225、18鍵權重、小數金額、1e-7／1e20、中文與UTF16 keys跨語言golden。configHash=H({baseBundleSha256,catalogVersion,values:全normalized值})；catalogSha256=assumptions/settings_catalog.json原始bytes hash（metadata不含default/currentValues），worker額外提供currentValues/defaultValue。發布後不能對newBundle重算original configHash；驗原request baseline身分及configHash，再比較目前authority抽取完整values與payload.values canonical相等，另驗publishedBundle/model/registry/JAR。測試包含values不變但bundle改變、非預設門檻發布、current values與receipt矛盾。
+Draft存changes_json為當初baseline差異稽核snapshot（fieldId/label/before/after/formalSupported/retirementImpact）；server DTO提供changes、publishEligible、blockedReasons:[{code,message}]，前端只render，不自己推導formal差異。更新draft重驗重產changes；舊baseline仍可讀，base漂移不得新模擬／發布，需明確建立新baseline草稿。run.deterministicResult保存完整worker response：{schemaVersion,baseBundleSha256,configSha256,inputSha256,engineVersion,result:{baseline,scenario,differences,changes,warnings}}，baseline/scenario各含successProbability/95%區間/percentilePaths/retirementAssets/terminalAssets/depletionAge/modeledFields/notModeledFields/assumptions，differences由Python或Java算不由Vue算。V2 model marker固定 execution_policy.risk_score_decision_policy.rubric_schema=SRPP_RISK_RUBRIC_V2，V1四camelCase決策keys及category順序沿用，除schema不同及總分門檻可變，其餘3/4固定。
+
+波動假設補充：catalog新增equityVolatility/bondVolatility兩個simulation-only fraction欄位，bounds 0..1，預設0.18/0.08為明示的規劃情境假設，非本日觀測或完整正式模型校準。共27fields（16 simulation-only、11 formal）。期望報酬以同版model可驗來源揭露；成功率/95%區間僅表示給定假設下的存續比例與Monte Carlo抽樣不確定性，不表示假設本身可靠度。UI可調波動並完整顯示限制，不使用舊個人artifact假裝新資料。
+
+## 明確報酬與購買力規約
+
+本引擎是簡化情境模型，不等同完整正式模型校準。
+股票實質複合目標 `g = global_equity_wrapper_assumptions.core_real_compound_return_before_wrapper_overlay - target_weighted_equity_wrapper_drag`，不得用其他過期重複欄位。
+股票算術規劃均值 `a_e = exp(log1p(g) + 0.5 * equityVolatility^2) - 1`；抽取原 `_arithmetic_for_geometric_target` 為 return_model 共用純 helper，monte_carlo wrapper 保留原 API 與輸出。
+此 lognormal 換算只是近似波動拖累補償，不宣稱 Student-t generator 實際實現 g；波動假設變更要重算 a_e，輸出原始 g、a_e、公式／來源與這項限制。
+
+唯一 reference inflation `refInfl = global_equity_wrapper_assumptions.forward_return_assumptions.inflation_assumption.midpoint`。
+債券名目規劃收益 `y = bond_forward_assumptions.weighted_nominal_yield_net_expense_before_fx`，轉基準實質算術均值 `a_b_ref=(1+y)/(1+refInfl)-1`。
+現金基準實質均值只取 `asset_assumptions.cash.real_return_at_2_25_percent_inflation`；不另造存款收益來源。
+每期算術漂移 `(1+a)^fraction-1` 加相關 Student-t(df=7) 的零均值、變異數正規化 shocks，最低單期報酬 -0.95；原 draw_period_returns/covariance_factor 抽至 return_model 純 helper，monte_carlo wrapper 傳原 df 以保留歷史輸出。
+相關矩陣取原正式四因子架構；現金年波動 0.005 沿原模型固定假設，FX 波動取同版 model asset_assumptions.usd_twd.volatility 並揭露其既有來源日期，FX 長期漂移 0。股票／債券波動只取明示情境欄位。
+
+沿 return_model.security_returns 的原規約：股票實質因子先加目標配置的已知美元曝險，不再重複扣 CPI；債券／現金先將基準實質報酬乘 `(1+refInfl)^fraction` 還原名目，再除當期實際情境 CPI multiplier，FX 對債券只加一次。
+情境 CPI 使用 InflationPath，每曆年單一 uniform 抽樣：正式 minimum/maximum 同減 formal midpoint，再加情境 inflationRate，lower 至少 0，upper 至少 lower；不得把 reference inflation 與情境預測 CPI 混為一個基準。
+期初即時名目資產除 `reference_price_level(asOfDate,refInfl)` 轉 2026-08-31 實質元，此期初換算兩情境相同，不因修改未來通膨重寫過去物價。其後 price level 逐期依情境 CPI 複利；名目薪資／年金／勞退入帳時只除該期 price level 一次；政策標為 2026-08 實質的生活費／大額支出不重複膨脹。
+創新值沿 CalendarMarketPath 依 seed/曆年/月份固定，每月同一 draw 以 log interpolation 分配月內事件，修改退休或入帳日期不重抽整條市場路徑。
+固定 innovation golden 應核對漂移、t 正規化、CPI/FX 各一次；zero-volatility 測試核對同一路徑逐期精確現金流，並證明波動改變重算 a_e。

@@ -30879,7 +30879,7 @@ bundle 識別（tradingDate、slot、analysisProfile、consumer、decisionId 加
         "CAUTIOUS",
         "DEFENSIVE"
       ],
-      "description": "任一類 score ≥ 3、或 totalScore ≥ 8、或 assessedCount < 4 為 DEFENSIVE（防禦）；否則 totalScore ≥ 5 為 CAUTIOUS（審慎）；其餘 NORMAL（正常）。"
+      "description": "依 identity.policyBundleSha256 對應的已發布 rubric 與 rubricSha256 機械判定。NORMAL 為正常、CAUTIOUS 為審慎、DEFENSIVE 為防禦。V2 從目前不可變規則包讀取審慎／防禦總分門檻；任一類 score ≥ 3 或 assessedCount < 4 仍優先為 DEFENSIVE。V1 歷史門檻為總分 ≥ 8 為 DEFENSIVE、否則總分 ≥ 5 為 CAUTIOUS、其餘為 NORMAL。既有不可變 replay 保留原 rubric；新 capture 僅接受目前已部署且登錄的規則包。"
     }
   }
 }
@@ -30890,7 +30890,7 @@ bundle 識別（tradingDate、slot、analysisProfile、consumer、decisionId 加
 | `categories` | 是 | `array of SrppRiskCategoryAssessment` | 否 | minItems: 6<br>maxItems: 6<br>items: SrppRiskCategoryAssessment<br>items 說明: 單一風險類別的計分結果。 | 固定依 fed、geopolitics、oil、taiwan_politics、us_taiwan_inflation、semiconductor_cycle_and_advanced_process 順序的六項結果。 |
 | `totalScore` | 是 | `integer` | 否 | minimum: 0<br>maximum: 15 | 六類 score 總和。 |
 | `assessedCount` | 是 | `integer` | 否 | minimum: 0<br>maximum: 6 | assessed=true 的類別數。 |
-| `riskMode` | 是 | `string` | 否 | enum: `NORMAL`, `CAUTIOUS`, `DEFENSIVE` | 任一類 score ≥ 3、或 totalScore ≥ 8、或 assessedCount < 4 為 DEFENSIVE（防禦）；否則 totalScore ≥ 5 為 CAUTIOUS（審慎）；其餘 NORMAL（正常）。 |
+| `riskMode` | 是 | `string` | 否 | enum: `NORMAL`, `CAUTIOUS`, `DEFENSIVE` | 依 identity.policyBundleSha256 對應的已發布 rubric 與 rubricSha256 機械判定。NORMAL 為正常、CAUTIOUS 為審慎、DEFENSIVE 為防禦。V2 從目前不可變規則包讀取審慎／防禦總分門檻；任一類 score ≥ 3 或 assessedCount < 4 仍優先為 DEFENSIVE。V1 歷史門檻為總分 ≥ 8 為 DEFENSIVE、否則總分 ≥ 5 為 CAUTIOUS、其餘為 NORMAL。既有不可變 replay 保留原 rubric；新 capture 僅接受目前已部署且登錄的規則包。 |
 
 ### `SrppRiskCategoryAssessment`
 

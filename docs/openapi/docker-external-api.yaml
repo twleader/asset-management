@@ -16155,7 +16155,7 @@ components:
           items: {$ref: '#/components/schemas/SrppRiskCategoryAssessment', description: 單一風險類別的計分結果。}
         totalScore: {type: integer, minimum: 0, maximum: 15, description: 六類 score 總和。}
         assessedCount: {type: integer, minimum: 0, maximum: 6, description: assessed=true 的類別數。}
-        riskMode: {type: string, enum: [NORMAL, CAUTIOUS, DEFENSIVE], description: 任一類 score ≥ 3、或 totalScore ≥ 8、或 assessedCount < 4 為 DEFENSIVE（防禦）；否則 totalScore ≥ 5 為 CAUTIOUS（審慎）；其餘 NORMAL（正常）。}
+        riskMode: {type: string, enum: [NORMAL, CAUTIOUS, DEFENSIVE], description: 依 identity.policyBundleSha256 對應的已發布 rubric 與 rubricSha256 機械判定。NORMAL 為正常、CAUTIOUS 為審慎、DEFENSIVE 為防禦。V2 從目前不可變規則包讀取審慎／防禦總分門檻；任一類 score ≥ 3 或 assessedCount < 4 仍優先為 DEFENSIVE。V1 歷史門檻為總分 ≥ 8 為 DEFENSIVE、否則總分 ≥ 5 為 CAUTIOUS、其餘為 NORMAL。既有不可變 replay 保留原 rubric；新 capture 僅接受目前已部署且登錄的規則包。}
     SrppRiskCategoryAssessment:
       type: object
       additionalProperties: false

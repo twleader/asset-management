@@ -45,7 +45,8 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：120 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：123 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+--
 --
 --
 --
@@ -252,6 +253,23 @@ BEGIN
     RAISE EXCEPTION 'fubon_historical_daily_candle is immutable';
 END;
 $$;
+
+
+--
+-- Name: guard_srpp_settings_run_update(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.guard_srpp_settings_run_update() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+ IF ROW(NEW.id,NEW.owner_user_id,NEW.draft_id,NEW.draft_revision,NEW.mode,NEW.config_sha256,NEW.input_sha256,NEW.request_json,NEW.changes_json,NEW.created_at)
+ IS DISTINCT FROM ROW(OLD.id,OLD.owner_user_id,OLD.draft_id,OLD.draft_revision,OLD.mode,OLD.config_sha256,OLD.input_sha256,OLD.request_json,OLD.changes_json,OLD.created_at)
+ OR OLD.status <> 'PROCESSING'
+ OR (OLD.result_json IS NOT NULL AND ROW(NEW.result_json,NEW.result_sha256) IS DISTINCT FROM ROW(OLD.result_json,OLD.result_sha256)) THEN
+ RAISE EXCEPTION 'SRPP settings run evidence is immutable' USING ERRCODE='23514'; END IF;
+ RETURN NEW;
+END $$;
 
 
 --
@@ -2647,6 +2665,80 @@ CREATE TABLE public.srpp_report_calculation_package (
 
 
 --
+-- Name: srpp_settings_draft; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_settings_draft (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    name character varying(100) NOT NULL,
+    revision bigint NOT NULL,
+    base_bundle_sha256 character varying(64) NOT NULL,
+    model_inputs_sha256 character varying(64) NOT NULL,
+    catalog_version character varying(80) NOT NULL,
+    catalog_sha256 character varying(64) NOT NULL,
+    config_sha256 character varying(64) NOT NULL,
+    values_json text NOT NULL,
+    changes_json text NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_settings_draft_base_bundle_sha256_check CHECK (((base_bundle_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_draft_catalog_sha256_check CHECK (((catalog_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_draft_config_sha256_check CHECK (((config_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_draft_model_inputs_sha256_check CHECK (((model_inputs_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_draft_revision_check CHECK ((revision > 0))
+);
+
+
+--
+-- Name: srpp_settings_release; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_settings_release (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    draft_id uuid NOT NULL,
+    run_id uuid NOT NULL,
+    request_sha256 character varying(64) NOT NULL,
+    payload_json text NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    CONSTRAINT srpp_settings_release_request_sha256_check CHECK (((request_sha256)::text ~ '^[a-f0-9]{64}$'::text))
+);
+
+
+--
+-- Name: srpp_settings_run; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.srpp_settings_run (
+    id uuid NOT NULL,
+    owner_user_id bigint NOT NULL,
+    draft_id uuid NOT NULL,
+    draft_revision bigint NOT NULL,
+    mode character varying(10) NOT NULL,
+    status character varying(20) NOT NULL,
+    config_sha256 character varying(64) NOT NULL,
+    input_sha256 character varying(64) NOT NULL,
+    result_sha256 character varying(64),
+    request_json text NOT NULL,
+    result_json text,
+    changes_json text NOT NULL,
+    ai_status character varying(20) NOT NULL,
+    ai_interpretation text,
+    error_code character varying(80),
+    created_at timestamp with time zone NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT srpp_settings_run_ai_status_check CHECK (((ai_status)::text = ANY ((ARRAY['NOT_REQUESTED'::character varying, 'PENDING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'NOT_CONFIGURED'::character varying])::text[]))),
+    CONSTRAINT srpp_settings_run_config_sha256_check CHECK (((config_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_run_draft_revision_check CHECK ((draft_revision > 0)),
+    CONSTRAINT srpp_settings_run_input_sha256_check CHECK (((input_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_run_mode_check CHECK (((mode)::text = ANY ((ARRAY['LOCAL'::character varying, 'AI'::character varying])::text[]))),
+    CONSTRAINT srpp_settings_run_result_sha256_check CHECK (((result_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
+    CONSTRAINT srpp_settings_run_status_check CHECK (((status)::text = ANY ((ARRAY['PROCESSING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying])::text[])))
+);
+
+
+--
 -- Name: srpp_us_report_package; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4972,6 +5064,54 @@ ALTER TABLE ONLY public.srpp_report_calculation_package
 
 
 --
+-- Name: srpp_settings_draft srpp_settings_draft_id_owner_user_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_draft
+    ADD CONSTRAINT srpp_settings_draft_id_owner_user_id_key UNIQUE (id, owner_user_id);
+
+
+--
+-- Name: srpp_settings_draft srpp_settings_draft_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_draft
+    ADD CONSTRAINT srpp_settings_draft_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_release
+    ADD CONSTRAINT srpp_settings_release_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_request_sha256_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_release
+    ADD CONSTRAINT srpp_settings_release_request_sha256_key UNIQUE (request_sha256);
+
+
+--
+-- Name: srpp_settings_run srpp_settings_run_id_owner_user_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_run
+    ADD CONSTRAINT srpp_settings_run_id_owner_user_id_key UNIQUE (id, owner_user_id);
+
+
+--
+-- Name: srpp_settings_run srpp_settings_run_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_run
+    ADD CONSTRAINT srpp_settings_run_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: srpp_us_report_package srpp_us_report_package_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6180,6 +6320,34 @@ CREATE INDEX srpp_daily_report_mail_state_sent_at_idx ON public.srpp_daily_repor
 
 
 --
+-- Name: srpp_settings_draft_owner_updated; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX srpp_settings_draft_owner_updated ON public.srpp_settings_draft USING btree (owner_user_id, updated_at DESC);
+
+
+--
+-- Name: srpp_settings_release_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX srpp_settings_release_owner_created ON public.srpp_settings_release USING btree (owner_user_id, created_at DESC);
+
+
+--
+-- Name: srpp_settings_run_matching; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX srpp_settings_run_matching ON public.srpp_settings_run USING btree (owner_user_id, draft_id, draft_revision, config_sha256, status, created_at DESC);
+
+
+--
+-- Name: srpp_settings_run_owner_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX srpp_settings_run_owner_created ON public.srpp_settings_run USING btree (owner_user_id, created_at DESC);
+
+
+--
 -- Name: uk_dividend_event; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6275,6 +6443,20 @@ CREATE TRIGGER fubon_srpp_snapshot_immutable BEFORE DELETE OR UPDATE ON public.f
 --
 
 CREATE TRIGGER immutable_exchange_rate_capture_trigger BEFORE DELETE OR UPDATE ON public.exchange_rate_source_capture FOR EACH ROW EXECUTE FUNCTION public.immutable_exchange_rate_capture();
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER srpp_settings_release_immutable BEFORE DELETE OR UPDATE ON public.srpp_settings_release FOR EACH ROW EXECUTE FUNCTION public.reject_srpp_immutable_update();
+
+
+--
+-- Name: srpp_settings_run srpp_settings_run_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER srpp_settings_run_guard BEFORE UPDATE ON public.srpp_settings_run FOR EACH ROW EXECUTE FUNCTION public.guard_srpp_settings_run_update();
 
 
 --
@@ -6834,6 +7016,54 @@ ALTER TABLE ONLY public.srpp_report_calculation_package
 
 ALTER TABLE ONLY public.srpp_report_calculation_package
     ADD CONSTRAINT srpp_report_package_base_identity_fk FOREIGN KEY (shared_calculation_id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version) REFERENCES public.srpp_report_calculation_base(id, owner_user_id, trading_date, report_slot, policy_bundle_sha256, swagger_sha256, calculator_version);
+
+
+--
+-- Name: srpp_settings_draft srpp_settings_draft_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_draft
+    ADD CONSTRAINT srpp_settings_draft_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_draft_id_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_release
+    ADD CONSTRAINT srpp_settings_release_draft_id_owner_user_id_fkey FOREIGN KEY (draft_id, owner_user_id) REFERENCES public.srpp_settings_draft(id, owner_user_id);
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_release
+    ADD CONSTRAINT srpp_settings_release_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
+
+
+--
+-- Name: srpp_settings_release srpp_settings_release_run_id_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_release
+    ADD CONSTRAINT srpp_settings_release_run_id_owner_user_id_fkey FOREIGN KEY (run_id, owner_user_id) REFERENCES public.srpp_settings_run(id, owner_user_id);
+
+
+--
+-- Name: srpp_settings_run srpp_settings_run_draft_id_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_run
+    ADD CONSTRAINT srpp_settings_run_draft_id_owner_user_id_fkey FOREIGN KEY (draft_id, owner_user_id) REFERENCES public.srpp_settings_draft(id, owner_user_id);
+
+
+--
+-- Name: srpp_settings_run srpp_settings_run_owner_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.srpp_settings_run
+    ADD CONSTRAINT srpp_settings_run_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES public.app_user(id);
 
 
 --

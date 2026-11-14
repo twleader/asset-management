@@ -37,6 +37,7 @@ public class DecisionPolicyAuthority {
                 classifiedFunds.add(new FundClassification(code.asText(),name.asText(),assetClass.asText()));
             }
             fundClassifications=List.copyOf(classifiedFunds);
+            verifySettingsAliases(model);
             JsonNode e=model.path("execution_policy"),d=e.path("bond_price_selection_d195"),fund=e.path("stock_purchase_funding_policy_d150"),fresh=e.path("bond_trade_price_policy").path("quote_freshness_policy");
             List<String> symbols=new ArrayList<>();d.path("strategic_symbols").forEach(v->symbols.add(v.asText()));
             Map<String,BigDecimal> targets=new TreeMap<>();symbols.forEach(s->targets.put(s,num(model.path("detailed_target_allocation_2027"),s)));
@@ -52,6 +53,15 @@ public class DecisionPolicyAuthority {
     public String manifestBytes(){return manifestBytes;}
     public List<FundClassification> fundClassifications(){return fundClassifications;}
     public Optional<String> fundAssetClass(String code,String name){return fundClassifications.stream().filter(row->row.fundCode().equals(code)&&row.fundName().equals(name)).map(FundClassification::assetClass).findFirst();}
+    private static void verifySettingsAliases(JsonNode model){
+        JsonNode e=model.path("execution_policy");
+        if(!"SRPP_RISK_RUBRIC_V2".equals(e.path("risk_score_decision_policy").path("rubric_schema").asText()))return;
+        com.steven.assets.service.srpp.SrppRiskRubricV2.fromModel(model);
+        for(String key:List.of("kd_overbought_k_greater_than","kd_overbought_d_greater_than")){
+            BigDecimal top=num(e,key);if(top.signum()<0||top.compareTo(new BigDecimal("100"))>0)throw new IllegalArgumentException("KD_POLICY_INVALID");
+            for(String child:List.of("strategic_buy_high_gate_d188","core_sell_guard_d174"))if(top.compareTo(num(e.path(child),key))!=0)throw new IllegalArgumentException("KD_POLICY_ALIAS_MISMATCH");
+        }
+    }
     private static JsonNode parseModelStrictly(ObjectMapper mapper,String modelBytes)throws Exception{
         // Keep BigDecimal materialization for policy arithmetic, after strict duplicate/trailing-token validation.
         SrppJcs.parseStrict(modelBytes);

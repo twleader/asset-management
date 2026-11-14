@@ -107,7 +107,7 @@ public final class UsCoreSellCalculator {
                 && "LIVE".equals(stock.path("quoteStatus").asText()) && radarAge >= 0 && radarAge <= 3_600_000, "EXACT_RADAR_UNVERIFIED");
             actionPolicy(radar, stock, policy);
             JsonNode ext = stock.path("extendedIndicators"); BigDecimal k = domain(stock.get("kValue"), ZERO, HUNDRED), d = domain(stock.get("dValue"), ZERO, HUNDRED), rsi = domain(ext.get("rsi5"), ZERO, HUNDRED), wr = domain(ext.get("wr9"), ZERO, HUNDRED), bias = n(ext.get("bias10")), position = domain(stock.get("week52Position"), ZERO, BigDecimal.ONE);
-            int hits = (k.compareTo(new BigDecimal("90")) > 0 && d.compareTo(new BigDecimal("80")) > 0 ? 1 : 0) + (rsi.compareTo(new BigDecimal("80")) >= 0 ? 1 : 0) + (bias.compareTo(new BigDecimal("8")) >= 0 ? 1 : 0) + (wr.compareTo(new BigDecimal("20")) <= 0 ? 1 : 0);
+            int hits = (k.compareTo(kdThreshold(policy,"kd_overbought_k_greater_than","90")) > 0 && d.compareTo(kdThreshold(policy,"kd_overbought_d_greater_than","80")) > 0 ? 1 : 0) + (rsi.compareTo(new BigDecimal("80")) >= 0 ? 1 : 0) + (bias.compareTo(new BigDecimal("8")) >= 0 ? 1 : 0) + (wr.compareTo(new BigDecimal("20")) <= 0 ? 1 : 0);
             boolean armed = position.compareTo(new BigDecimal("0.95")) >= 0 && hits >= 2;
             out.set("week52_position", stock.get("week52Position")); out.put("overheat_hits", hits).put("overheat_watch", armed);
             if (state == null && !armed) { out.put("status", "NOT_ARMED").put("reason", "OVERHEAT_WATCH_NOT_MET"); return out; }
@@ -212,4 +212,6 @@ public final class UsCoreSellCalculator {
     static BigDecimal n(JsonNode value) { try { require(value != null && !value.isNull() && !value.isBoolean() && (value.isNumber() || value.isTextual()), "RADAR_INDICATORS_UNVERIFIED"); return new BigDecimal(value.asText()); } catch (NumberFormatException failure) { throw new Gap("RADAR_INDICATORS_UNVERIFIED"); } }
     private static BigDecimal domain(JsonNode value, BigDecimal low, BigDecimal high) { BigDecimal number = n(value); require(number.compareTo(low) >= 0 && number.compareTo(high) <= 0, "RADAR_INDICATORS_UNVERIFIED"); return number; }
     private static void addUnique(ArrayNode list, String value) { for (JsonNode entry : list) if (value.equals(entry.asText())) return; list.add(value); }
+    private static BigDecimal kdThreshold(JsonNode policy,String key,String legacy){JsonNode v=policy.get(key);return v==null?new BigDecimal(legacy):domain(v,ZERO,HUNDRED);}
+
 }

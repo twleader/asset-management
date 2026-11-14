@@ -1,5 +1,28 @@
 services:
 
+  # SRPP pure scenario calculator; no host port, secrets, database or broker credentials.
+  srpp-simulator:
+    build:
+      context: ./srpp-simulator
+      dockerfile: Dockerfile
+    container_name: asset-srpp-simulator
+    restart: unless-stopped
+    user: "10003:10003"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    networks: [asset-net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/internal/health',timeout=3))['status']=='UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # ── PostgreSQL ──────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
