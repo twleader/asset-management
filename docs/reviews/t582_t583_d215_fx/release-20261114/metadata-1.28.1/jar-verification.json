@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "jarSha256": "784244124ef05e9839e6f67ab2def05dd15ad239733a834b4f0e242bbfe7c55e",
+  "allBusinessClassBytesIdenticalToValidated1aeRuntime": true,
+  "identicalClassCount": 1762,
+  "authorityResourcesExact": {
+    "srpp/decision/policy_manifest.json": "8a9d7a276046a67370b66118a59794a6d3190b3b74029684781416056098900b",
+    "srpp/decision/model_inputs.json": "a01ab388581fed8bbced524951f28caee1151b38c46679f9289c7383ad29c545",
+    "srpp/9090-api-swagger.md": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+    "srpp/report/d201-registration.sql": "9270e2696c42bfa504fb73a3954ec49cf1de65b20d13a32154c538219ec04fd8",
+    "srpp/report/d201-policy-document.json": "d2352d97f44e0ba74e32c35000148f034352a186bb26243bc743ec9f5abc2212"
+  },
+  "modelBytesUnchanged": true
+}

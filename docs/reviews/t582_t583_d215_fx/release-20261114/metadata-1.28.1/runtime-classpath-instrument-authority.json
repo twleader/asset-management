@@ -1,0 +1,10 @@
+{
+  "status": "PASS",
+  "acceptedTypeRecords": 26,
+  "usdScopeRecords": 15,
+  "modelSha256": "a01ab388581fed8bbced524951f28caee1151b38c46679f9289c7383ad29c545",
+  "manifestFileSha256": "8a9d7a276046a67370b66118a59794a6d3190b3b74029684781416056098900b",
+  "policyBundleSha256": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f",
+  "unknownTypeNotGuessed": true,
+  "auditedScope": "ACTUAL_FINAL8C5_RUNNING_JAR_CLASSES_AND_RESOURCES"
+}

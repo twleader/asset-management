@@ -1,0 +1,21 @@
+{
+  "http": 200,
+  "publicRows": 533,
+  "qualifiedNativeWindowRows": 491,
+  "completedNativeSeriesExactToRootAuditedSnapshot": true,
+  "actualCompletedDate": "2026-11-13",
+  "twCompletedMinimumDate": "2026-11-13",
+  "low": {
+    "rate": "28.86",
+    "date": "2025-07-03"
+  },
+  "high": {
+    "rate": "33.255",
+    "date": "2025-03-31"
+  },
+  "excludedLegacyRows": 41,
+  "scope": "HISTORICAL_SOURCE_VERIFICATION_ONLY",
+  "validation": "VERIFIED",
+  "tradeAuthorization": false,
+  "fullSnapshotNormalizer": "PASS"
+}

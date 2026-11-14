@@ -1,0 +1,73 @@
+{
+  "status": "PASS",
+  "checkedAtUtc": "2026-11-14T04:12:26.142430+00:00",
+  "onlyBusinessRecreated": true,
+  "allOtherEightContainersAndImagesUnchanged": true,
+  "bffAndExternalNotRestarted": true,
+  "mainEffectiveEnvAndMountsSame": true,
+  "containers": [
+    {
+      "name": "/asset-bff",
+      "id": "3df09551f1e8b4c2e9dd509f607b8cd88542fbe5d626188b67eb9e35438292bc",
+      "image": "sha256:d9a0555dd6561fef907395f3a6305164759fb170ee9d1746367bfb72891f6ab7",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-external-materials-service",
+      "id": "50db774a99e254b03760420a035ef83911721c3fcc18cdef1352b9da48471248",
+      "image": "sha256:0112abf8d73a2698d8bd839d73c95eeed260838d0ce9e235b7ee68133b1fdb46",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-business-services",
+      "id": "8091ce1303d8356d5ac5abf5b932b766146a1dcdcd61ceed025d9d26ded665f4",
+      "image": "sha256:71304d4a892309cff2a7af7b742514e6354f92235818179cdd7ece9eedde3c12",
+      "health": "healthy",
+      "recreated": true
+    },
+    {
+      "name": "/asset-frontend",
+      "id": "7e44793714b06e4782bf2f7e8af2aa4d545656909106d8002af5be9ba845558b",
+      "image": "sha256:36f9c1a03721ea5ec51d668b093112309c0b3cd0cb72f243f3284deb5572876a",
+      "health": null,
+      "recreated": false
+    },
+    {
+      "name": "/asset-fubon-broker-service",
+      "id": "212964deefab659e64c7cdd173077a4efa30f212d1b3a3cb180fd8d5cf6e4bc0",
+      "image": "sha256:df04167022c321119e4e3836a5589581ef55c9cfce0a08485216ca2f8131b8e4",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-api-gateway",
+      "id": "aaab06740d9ad9b56469c6aea8d48712b77a1a673c48fbd7ed55dadcfb19c1e4",
+      "image": "sha256:c5bd2d2feecb096d6fb7ac65f6ca8afd045c060ea30854a97b43cb735063f5a6",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-yuanta-broker-service",
+      "id": "c936a4131d00b5098d7ad17bd3df0b0b334c14c9e6c7c4c2ad8eee501155bf23",
+      "image": "sha256:33c2a9c8cfb1067c73ae245588f8cbf16259ca531101421ec3a27a89d293a2d5",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-postgres",
+      "id": "67320a18be6ca408ab811d74f62e9f1861b4447bfc953d6b18125f4da02ad930",
+      "image": "sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229",
+      "health": "healthy",
+      "recreated": false
+    },
+    {
+      "name": "/asset-redis",
+      "id": "d67df96cd49f31ba2c429b83394f36fe1b29ba35dff751206d21c5687058f68a",
+      "image": "sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6",
+      "health": "healthy",
+      "recreated": false
+    }
+  ]
+}
