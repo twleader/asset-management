@@ -1,0 +1,44 @@
+[
+  {
+    "name": "com.steven.assets.service.srpp.report.SrppReportModuleCalculatorTest",
+    "tests": "19",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.srpp.report.SrppReportShortUsCalculatorTest",
+    "tests": "13",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.srpp.report.SrppReportBuildIdentityTest",
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.srpp.us.UsTacticalCalculatorTest",
+    "tests": "17",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.srpp.SrppPolicyDocumentTest",
+    "tests": "17",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.srpp.SrppPolicyRegistryServiceTest",
+    "tests": "7",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  }
+]

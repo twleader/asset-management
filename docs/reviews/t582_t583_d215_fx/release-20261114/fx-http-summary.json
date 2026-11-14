@@ -1,0 +1,29 @@
+{
+  "http": 200,
+  "rawBodySha256": "bc59ba40532dc1a7da5bf0474f80394b2e8252aa8eb6316b9bc3ba770b788174",
+  "sourceSha256": "896d82b726557e8a5f8758c940f51bd1938c551b3b4c2a5c45a9787529ca3852",
+  "requestedStartDate": "2024-11-14",
+  "requestedEndDate": "2026-11-14",
+  "apiHistoryCount": 533,
+  "qualifiedNativeWindowCount": 491,
+  "boundaryDate": "2024-11-14",
+  "boundaryProof": "QUALIFIED_NATIVE_ROW_AT_EXACT_WINDOW_START",
+  "historyCaptureCount": 1,
+  "excludedLegacyCount": 41,
+  "actualCompletedDate": "2026-11-13",
+  "twCompletedMinimumDate": "2026-11-13",
+  "low": {
+    "rate": "28.86",
+    "date": "2025-07-03"
+  },
+  "high": {
+    "rate": "33.255",
+    "date": "2025-03-31"
+  },
+  "liveUpdateStatus": "ACTIVE",
+  "spotQuoteStatus": "LIVE",
+  "validation": "VERIFIED",
+  "scope": "HISTORICAL_SOURCE_VERIFICATION_ONLY",
+  "tradeAuthorization": false,
+  "fullSnapshotNormalizer": "PASS"
+}

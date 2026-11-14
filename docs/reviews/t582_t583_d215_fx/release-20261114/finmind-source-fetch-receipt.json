@@ -1,0 +1,33 @@
+{
+  "url": "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanExchangeRate&data_id=USD&start_date=2024-11-08&end_date=2026-11-13",
+  "provider": "FINMIND_TAIWAN_EXCHANGE_RATE",
+  "basis": "BANK_SELLING_SPOT",
+  "capturedAt": "2026-11-14T02:57:54.889349+00:00",
+  "http": 200,
+  "rawSha256": "2b271509afc67b01784af5880a4ec474fb8e00d4584303dcc59c48840a19dce7",
+  "rawPath": "/private/tmp/d216-fx-source-repair/finmind-usd-20241108-20261113.json",
+  "apiStatus": 200,
+  "apiMsg": "success",
+  "rows": 495,
+  "validSpotRows": 495,
+  "first": [
+    {
+      "date": "2024-11-08",
+      "currency": "USD",
+      "cash_buy": 31.715,
+      "cash_sell": 32.385,
+      "spot_buy": 32.065,
+      "spot_sell": 32.165
+    }
+  ],
+  "last": [
+    {
+      "date": "2026-11-13",
+      "currency": "USD",
+      "cash_buy": 32.44,
+      "cash_sell": 33.11,
+      "spot_buy": 32.79,
+      "spot_sell": 32.89
+    }
+  ]
+}

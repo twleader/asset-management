@@ -1,0 +1,2 @@
+PASS: db/schema.sql（去除專案檔頭後）逐位元等於 asset-postgres 此刻的 pg_dump 輸出
+      表數：120 張（檔頭宣告一致）

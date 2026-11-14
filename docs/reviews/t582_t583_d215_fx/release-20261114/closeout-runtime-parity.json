@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "runtimeBuildSourceCommit": "6d6b7aca80773289c94269b7cf097de6b4d70ed6",
+  "followupScope": [
+    "db/schema.sql",
+    "spec/tasks/t582_srpp_named_deep_drawdown.md",
+    "spec/tasks/t583_usd_fx_spot_source_repair.md",
+    "docs/reviews/t582_t583_d215_fx/release-20261114/"
+  ],
+  "runtimeCodeResourceBuildInputsUnchanged": true,
+  "checkedBuildPaths": [
+    "backend/src/main",
+    "bff/src/main",
+    "external-materials-service/src/main",
+    "docs/openapi",
+    "docker-compose.yml",
+    "backend/Dockerfile",
+    "bff/Dockerfile",
+    "external-materials-service/Dockerfile"
+  ],
+  "specCloseoutStatusOnly": true,
+  "implementationArchHashUnchanged": "cc1d1f139a62",
+  "specCloseoutHash": "81b77787bd07",
+  "sourceQualityNoRelaxation": true,
+  "noRepeatedBuildRequired": true
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "name": "com.steven.assets.service.UsdFxPurchaseContextTest",
+    "tests": "10",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.TradingRadarMarketContextServiceTest",
+    "tests": "10",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.BacktestServiceTest",
+    "tests": "40",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.TradingRadarPanelServiceTest",
+    "tests": "18",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  },
+  {
+    "name": "com.steven.assets.service.TradingRadarListBatchPreloaderFailSoftTest",
+    "tests": "2",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0"
+  }
+]

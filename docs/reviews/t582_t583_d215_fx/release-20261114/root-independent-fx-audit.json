@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "public_rows": 533,
+  "native_completed_rows": 491,
+  "each_native_price_and_member_sha_exact": true,
+  "window_start": "2024-11-14",
+  "window_end": "2026-11-14",
+  "actual_completed_day": "2026-11-13",
+  "low_sell": "28.86",
+  "low_date": "2025-07-03",
+  "high_sell": "33.255",
+  "high_date": "2025-03-31",
+  "boundary": null,
+  "unverified_completed_rows": 41,
+  "unfinished_rows_excluded": 1,
+  "raw_source_sha": "2b271509afc67b01784af5880a4ec474fb8e00d4584303dcc59c48840a19dce7"
+}

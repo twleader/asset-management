@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "rawNativeRowsVerified": 495,
+  "historyRowsBefore": 4289,
+  "historyRowsAfter": 4289,
+  "sourceCaptures": 1,
+  "captureId": 1,
+  "sourceSha256": "2b271509afc67b01784af5880a4ec474fb8e00d4584303dcc59c48840a19dce7",
+  "storedRawBodyShaExact": true,
+  "all495SpotPricesAndMemberBindingsExact": true,
+  "allOutsideNativeDatesByteEquivalent": true,
+  "outsideRowsPreserved": 3794,
+  "legacyNonnativeRowsPreserved": 41,
+  "reapplyWouldBeNoOp": true,
+  "idempotenceProof": "All495 tuples already match SQL guarded-upsert; original immutable capture key exists; no duplicate apply executed."
+}
