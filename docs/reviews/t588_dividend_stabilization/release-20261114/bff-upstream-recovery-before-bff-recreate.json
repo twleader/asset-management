@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "path": "/api/public/market-index",
+  "method": "GET",
+  "market": "TWSE",
+  "rows": 21,
+  "priorErrors": []
+}

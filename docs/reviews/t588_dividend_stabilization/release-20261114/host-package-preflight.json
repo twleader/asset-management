@@ -1,0 +1,52 @@
+{
+  "status": "HOST_PACKAGE_PREFLIGHT_PASS_NOT_DEPLOYED",
+  "capturedAt": "2026-11-14T09:14:46.142768+00:00",
+  "services": {
+    "backend": {
+      "packageExitCode": 0,
+      "jar": "/Users/steven/.codex/worktrees/dividend-two-session/asset-management/backend/target/asset-management-1.0.0.jar",
+      "jarSha256": "37b1c13fa63d2d2c6b949c78f266185332e4a55e9b97de37e75bfb87948f6647",
+      "resources": [
+        {
+          "path": "srpp/decision/model_inputs.json",
+          "bytesEqualSource": true,
+          "sha256": "c4d982462afcf3985eae7071b2b8cf75ccf6052011663c22f8d3df4c097c1776"
+        },
+        {
+          "path": "srpp/decision/policy_manifest.json",
+          "bytesEqualSource": true,
+          "sha256": "424d492806033b48fcea20e6735918a91fe7af486b215890a0998f912e878351"
+        },
+        {
+          "path": "srpp/9090-api-swagger.md",
+          "bytesEqualSource": true,
+          "sha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0"
+        },
+        {
+          "path": "srpp/report/d201-registration.sql",
+          "bytesEqualSource": true,
+          "sha256": "aeae2515493f9c058228ef0556af9f62f61dadde7eb2d66cb339e56f568bb01d"
+        }
+      ],
+      "requiredClasses": [
+        "com/steven/assets/service/srpp/report/SrppDividendStabilization.class",
+        "com/steven/assets/srpp/SrppFormulaCatalog.class"
+      ]
+    },
+    "bff": {
+      "packageExitCode": 0,
+      "jar": "/Users/steven/.codex/worktrees/dividend-two-session/asset-management/bff/target/asset-management-bff-1.0.0.jar",
+      "jarSha256": "6a1a058aa20437104cd797588779521f8b467959517aa45eeeef77bafd5a5f73",
+      "resources": [
+        {
+          "path": "srpp/formula_manifest_v3.json",
+          "bytesEqualSource": true,
+          "sha256": "4315950ca25e3de20b6afa7b50000466975c375c5569f4e80af0f7257f88e132"
+        }
+      ],
+      "requiredClasses": [
+        "com/steven/assets/bff/publicsrpp/SrppFormulaV3Identity.class"
+      ]
+    }
+  }
+}

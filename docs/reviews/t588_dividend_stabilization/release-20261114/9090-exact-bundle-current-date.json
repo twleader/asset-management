@@ -1,0 +1,40 @@
+{
+  "kind": "EXACT_BUNDLE_CURRENT_DATE_NON_TRADING_BOUNDARY_DIAGNOSTIC",
+  "startedAt": "2026-11-14T17:23:41.818381+08:00",
+  "negativeDiagnostic": true,
+  "dateIsCurrent": true,
+  "tradingDay": false,
+  "businessApiAccepted": false,
+  "formalReportAdoption": "NOT_YET_EXECUTED",
+  "retryCount": 0,
+  "sourceSwaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+  "request": {
+    "method": "GET",
+    "path": "/api/public/srpp/calculation-context",
+    "tradingDate": "2026-11-14",
+    "slot": "11:40",
+    "policyBundleSha256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56"
+  },
+  "calendarEvidence": {
+    "generatedAt": "2026-11-14T17:23:41.824723385+08:00",
+    "availability": {
+      "status": "AVAILABLE",
+      "source": "TWSE/DGPA",
+      "message": null
+    },
+    "selectedDate": "2026-11-14",
+    "twTrading": false
+  },
+  "status": 400,
+  "contentType": "application/problem+json",
+  "body": {
+    "type": "about:blank",
+    "title": "Invalid SRPP request",
+    "status": 400,
+    "detail": "查詢參數不合法，請修正後再試。",
+    "instance": "/api/public/srpp/calculation-context",
+    "code": "INVALID_REQUEST",
+    "retryable": false
+  },
+  "durationSeconds": 0.021
+}
