@@ -1,6 +1,6 @@
 {
-  "model_version": "3.22.0",
-  "policy_version": "2.66.0",
+  "model_version": "3.23.0",
+  "policy_version": "2.67.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -404,7 +404,7 @@
         "07-15",
         "10-15"
       ],
-      "bear_window": "D-202 per market: TWSE capitalization-weighted index for Taiwan-listed buys, S&P 500 for VOO. A market's window opens when its benchmark's latest completed close is at least 20% below its 24-month highest close, below its 200-session simple MA200, and RISK_OFF (close below MA200 and MA200 below its level 20 sessions earlier). Only legs of an open market may buy; the other market's share stays cash.",
+      "bear_window": "D-202 per market: TWSE capitalization-weighted index for Taiwan-listed buys, S&P 500 for VOO. A market's window opens when its benchmark's latest completed close is at least 15% below its 24-month highest close, below its 200-session simple MA200, and RISK_OFF (close below MA200 and MA200 below its level 20 sessions earlier). Only legs of an open market may buy; the other market's share stays cash.",
       "bear_action": "When the verified bear window holds, up to two-thirds of eligible bond ETFs may be sold and invested in stock ETFs after all costs, following the D-180 order: high-dividend back to its 10% target first, then all remaining proceeds into VOO and 0050 at 4:1. TWD funding may use only amounts that leave the daily elapsed-time indexed 2026-08-real TWD 800K emergency term-deposit and TWD 1.55M total-deposit floors intact; up to the daily elapsed-time indexed 2026-08-real TWD 1.5M living-reserve component may contribute, while its TWD 750K floor and all-bank USD earmarked for VOO remain protected. The emergency reserve is never tactical funding.",
       "bear_tactical_cap": "No fixed amount. The maximum candidate pool is refreshed from /api/assets/latest and includes no more than two-thirds of bond ETFs; it is not a forced trade amount.",
       "bull_high_window": "D-202: the benchmark of the proposed stock's listing market (TWSE for Taiwan-listed holdings including 009826; S&P 500 for VOO and VT) and the proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, benchmark drawdown from its 24-month high < 20% and not RISK_OFF; week52Position and short-term overheat qualify initial arming only, not an already-armed pullback tranche; market benchmark, price, radar, funding, capacity, cooldown and other hard gates still apply.",
@@ -473,7 +473,7 @@
         "peak_window_months": 24,
         "ma_sessions": 200,
         "ma_slope_lookback_sessions": 20,
-        "bear_drawdown": 0.2,
+        "bear_drawdown": 0.15,
         "deep_bear_drawdown": 0.3,
         "risk_off": "Same for both markets: close below MA200 and MA200 below its level 20 sessions earlier. Radar market.regime is not a window condition.",
         "bear_buy_symbols_by_market": {
@@ -688,7 +688,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes for anything already reconciled; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-218",
+      "decision": "D-219",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -979,7 +979,7 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-218",
+      "decision": "D-219",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 20% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
@@ -1048,7 +1048,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-218",
+    "decision": "D-219",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -1081,7 +1081,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-218",
+      "decision": "D-219",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1206,30 +1206,30 @@
       "bear_bond_sale_order_d141": "D-141 replaces 'sell the shorter duration first'. Sell bond ETFs in descending order of trailing 12-month total return. A disinflationary bear (stocks down, duration up) therefore sells 00697B first, which is the genuine rebalancing trade; an inflationary bear (stocks and bonds both down) sells 00865B first and halves the deployment size for that round. The 10% total-bond floor still binds before any of this.",
       "bear_ladder_d141": [
         {
-          "drawdown": 0.2,
+          "drawdown": 0.15,
           "share_of_window_budget": 0.08
         },
         {
-          "drawdown": 0.25,
+          "drawdown": 0.2,
           "share_of_window_budget": 0.12
         },
         {
-          "drawdown": 0.3,
+          "drawdown": 0.25,
           "share_of_window_budget": 0.2
         },
         {
-          "drawdown": 0.35,
+          "drawdown": 0.3,
           "share_of_window_budget": 0.25
         },
         {
-          "drawdown": 0.4,
+          "drawdown": 0.35,
           "share_of_window_budget": 0.35
         }
       ],
-      "bear_ladder_note": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. Five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
+      "bear_ladder_note": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
       "bear_precedence_over_rotation_d141": "If a verified bear window opens during the pre-retirement or transition rotation, the bear window takes precedence: rotation buying pauses, rotation deadlines extend by the length of the window, and DEADLINE_RADAR_EXCEPTION items accrued inside the window are excluded from the incompletion rate.",
       "bear_bond_sale_order_basis": "Trailing 12-month TWD total return of each bond ETF (price change plus distributions, from the same /api/quotes/one series used for the ten-year diagnostics), ranked highest first among 00865B, 00719B and 00697B. SGOV keeps its own age-70-to-80 disposal rule and is not part of this ranking. Ties break to the longer effective duration. Recompute every round; never carry a previous rounds ranking.",
-      "bear_ladder_budget_basis": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. Five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
+      "bear_ladder_budget_basis": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
       "bull_ladder_d156": [
         {
           "gain_above_anchor": 0.15,
@@ -1444,7 +1444,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-218",
+      "decision": "D-219",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1495,7 +1495,7 @@
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-218",
+        "decision": "D-219",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1524,7 +1524,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-218",
+      "decision": "D-219",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1788,7 +1788,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-218",
+      "current_entry_rule_decision": "D-219",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1926,7 +1926,7 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-218",
+      "decision": "D-219",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
@@ -2278,7 +2278,7 @@
       "kd_overbought_d_greater_than": 80
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-218",
+      "decision": "D-219",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
@@ -2305,7 +2305,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B target (2.5% under D-214). If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-218",
+        "decision": "D-219",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2392,7 +2392,7 @@
       "open_drawdown": 0.15,
       "close_drawdown": 0.1,
       "requires_ma200_or_risk_off": false,
-      "d202_bear_drawdown": 0.2,
+      "d202_bear_drawdown": 0.15,
       "ladder": [
         {
           "drawdown": 0.15,
@@ -2459,7 +2459,7 @@
         "evidence": "Each check needs a named official or primary source, its publication date and the event date. A present signal stays active for 183 days from its event date. NOT_PRESENT requires all three checks verified with sources no older than 120 days; otherwise UNVERIFIED.",
         "unverified_action": "APPLY_D202_BEAR_RULES"
       },
-      "routing": "AI-cycle NOT_PRESENT: a market drawdown of at least 15% opens the correction window regardless of MA200 or RISK_OFF, and the D-141 bear ladder is not used. PRESENT or UNVERIFIED: the unchanged D-202 bear window and D-141 ladder (20% start, 8/12/20/25/35) apply; a 15-20% drawdown opens nothing. A status change closes the other window for new batches; filled positions are kept.",
+      "routing": "AI-cycle NOT_PRESENT: a market drawdown of at least 15% opens the correction window regardless of MA200 or RISK_OFF, and the D-141 bear ladder is not used. PRESENT or UNVERIFIED: the D-219 revision of the D-202 bear window opens at 15% drawdown only with below-MA200 and RISK_OFF, using D-141 rungs 15/20/25/30/35% and shares 8/12/20/25/35%. Each evaluation selects only one window. A status change closes the other window for new batches; filled positions are kept. Existing pending orders, earmarks and confirmed fills remain included in shared funding and deduplication evidence; missing evidence never creates another available budget.",
       "funding_rule": "Correction batches never use the TWD 2,250,000 living reserve: post-buy all-bank TWD deposits must stay at least the daily elapsed-time indexed 2026-08-real TWD 3,050,000 (800,000 emergency term deposits plus the full 2,250,000 living reserve), with the 800,000 term-deposit floor unchanged; up to two-thirds of eligible bond ETFs may be sold while total bonds stay at least 10%. The window budget is locked once at opening and split 30/25/20/15/10.",
       "model_scope": "Model v3.22.0 base excludes tactical timing and cannot simulate the AI-cycle evidence; a research sensitivity (research/dip_buying) is not a formal result.",
       "tsmc_exposure_waiver": {
@@ -2595,7 +2595,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00881",
@@ -2603,7 +2603,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "0056",
@@ -2611,7 +2611,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00878",
@@ -2619,7 +2619,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00713",
@@ -2627,7 +2627,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00919",
@@ -2635,7 +2635,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "009826",
@@ -2643,7 +2643,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "006208",
@@ -2651,7 +2651,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "009804",
@@ -2659,7 +2659,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00850",
@@ -2667,7 +2667,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00882",
@@ -2675,7 +2675,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00865B",
@@ -2683,7 +2683,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00719B",
@@ -2691,7 +2691,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00697B",
@@ -2699,7 +2699,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00679B",
@@ -2707,7 +2707,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "00751B",
@@ -2715,7 +2715,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "VOO",
@@ -2723,7 +2723,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "VT",
@@ -2731,7 +2731,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "SGOV",
@@ -2739,7 +2739,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "dfe973c83453cd19014e901a3cee237dfd29f057f49ef5b06d96f1ac4487292e"
+          "source_sha256": "59e30e8eecb1b36a0f408aab8e227bb1edffe0b87ffa3b1adcf99d7668b36588"
         },
         {
           "stock_code": "GOOG",
@@ -2887,7 +2887,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-218",
+  "decision": "D-219",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2908,7 +2908,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-218",
+    "decision": "D-219",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,
@@ -2971,7 +2971,7 @@
       "risk_off": "equity total-return proxy below falling 10-month average",
       "bull_gain_above_original_high": 0.15,
       "bull_cancel_drawdown": 0.1,
-      "bear_drawdown_initial": 0.2,
+      "bear_drawdown_initial": 0.15,
       "bear_initial_equity_cap": 0.6,
       "bear_deep_drawdown": 0.3,
       "bear_deep_equity_cap": 0.7,

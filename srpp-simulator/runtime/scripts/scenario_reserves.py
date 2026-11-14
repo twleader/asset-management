@@ -53,8 +53,11 @@ class ReserveStrategy:
         self.base_enabled=model['simulation_contract']['base_living_runway_market_branches'] is True
         policy=copy.deepcopy(model['execution_policy']['dynamic_allocation_policy_d141'])
         for key,source in [('bear_bond_sale_max_share','bearBondSaleMaxShare'),('total_bond_floor','minimumBondWeight'),('bear_equity_cap','bearEquityCap'),('monthly_bull_first_equity_target','bullEquityFloor')]:policy[key]=values[source]
+        policy['bear_ladder_d141']=copy.deepcopy(values['bearLadder'])
         self.bear=BearLadder(policy,paths);self.bull=BullLadder(policy,paths)
-        self.signals=MonthlySignals(paths);self.base_signals=MonthlySignals(paths)
+        source_threshold=model['simulation_contract']['monthly_signal_proxy']['bear_drawdown_initial']
+        self.signals=MonthlySignals(paths,bear_drawdown=policy['bear_ladder_d141'][0]['drawdown'])
+        self.base_signals=MonthlySignals(paths,bear_drawdown=source_threshold)
         self.base_bull=np.zeros(paths,dtype=bool);self.base_bear=np.zeros(paths,dtype=bool)
         self.bear_cash_budget=np.zeros(paths);self.bear_cash_spent=np.zeros(paths)
         self.months=0;self.monthly=[]

@@ -728,10 +728,10 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "0",
-        "eligible": false,
-        "growingFill": false,
-        "ladderAmount": "0",
+        "bondAllowance": "2000000",
+        "eligible": true,
+        "growingFill": true,
+        "ladderAmount": "240000",
         "nextBatch": 0
       },
       "kind": "ladder",
@@ -740,14 +740,14 @@
     },
     {
       "before": {
-        "active": false,
+        "active": true,
         "bondsSold": "0",
         "budget": [
-          "0",
-          "0",
-          "0",
-          "0",
-          "0"
+          "240000",
+          "360000",
+          "600000",
+          "750000",
+          "1050000"
         ],
         "fills": [
           0,
@@ -757,7 +757,7 @@
           0
         ],
         "highWaterGain": 0,
-        "initialBonds": "0",
+        "initialBonds": "3000000",
         "lastAmount": "0",
         "lastFill": -100,
         "pendingClose": false,
@@ -769,7 +769,7 @@
           "0"
         ],
         "verified": true,
-        "windowBudget": "0"
+        "windowBudget": "3000000"
       },
       "event": {
         "availableCash": 1000000,
@@ -786,10 +786,10 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "0",
-        "eligible": false,
-        "growingFill": false,
-        "ladderAmount": "0",
+        "bondAllowance": "2000000",
+        "eligible": true,
+        "growingFill": true,
+        "ladderAmount": "240000",
         "nextBatch": 0
       },
       "kind": "ladder",
@@ -798,14 +798,14 @@
     },
     {
       "before": {
-        "active": false,
+        "active": true,
         "bondsSold": "0",
         "budget": [
-          "0",
-          "0",
-          "0",
-          "0",
-          "0"
+          "240000",
+          "360000",
+          "600000",
+          "750000",
+          "1050000"
         ],
         "fills": [
           0,
@@ -815,7 +815,7 @@
           0
         ],
         "highWaterGain": 0,
-        "initialBonds": "0",
+        "initialBonds": "3000000",
         "lastAmount": "0",
         "lastFill": -100,
         "pendingClose": false,
@@ -827,7 +827,7 @@
           "0"
         ],
         "verified": true,
-        "windowBudget": "0"
+        "windowBudget": "3000000"
       },
       "event": {
         "availableCash": 1000000,
@@ -911,9 +911,9 @@
       },
       "expected": {
         "bondAllowance": "2000000",
-        "eligible": false,
-        "growingFill": false,
-        "ladderAmount": "0",
+        "eligible": true,
+        "growingFill": true,
+        "ladderAmount": "360000",
         "nextBatch": 1
       },
       "kind": "ladder",

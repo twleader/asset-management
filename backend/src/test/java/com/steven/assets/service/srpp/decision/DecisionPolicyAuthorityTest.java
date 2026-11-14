@@ -95,8 +95,10 @@ class DecisionPolicyAuthorityTest {
     void duplicateModelOrManifestKeysAreRejectedBeforeTheyCanBecomeAuthority() throws Exception {
         DecisionPolicyAuthority current = new DecisionPolicyAuthority();
         String duplicateModel = current.modelBytes().replaceFirst(
-                "\\n  \"model_version\": \"3\\.22\\.0\",",
-                "\n  \"model_version\": \"3.22.0\",\n  \"model_version\": \"3.22.0\",");
+                "(\"model_version\"\\s*:\\s*\"[^\"]+\")", "$1,$1");
+        assertThat(duplicateModel).isNotEqualTo(current.modelBytes());
+        assertThat(duplicateModel).containsPattern(
+                "\"model_version\"\\s*:\\s*\"[^\"]+\"\\s*,\\s*\"model_version\"\\s*:");
         assertThatThrownBy(() -> new DecisionPolicyAuthority(duplicateModel,
                 selfConsistentManifest(duplicateModel, currentModel())))
                 .isInstanceOf(IllegalStateException.class);

@@ -18,18 +18,18 @@ from return_model import (CalendarMarketPath,InflationPath,security_returns,
                           covariance_factor,draw_period_returns,arithmetic_for_geometric_target)
 from settings_catalog import SettingsError,BOND_CODES,CASH_CODES,canonical,digest
 
-ENGINE_VERSION='SRPP_SCENARIO_CASHFLOW_V2'
+ENGINE_VERSION='SRPP_SCENARIO_CASHFLOW_V3'
 WARNINGS=[
  '這是給定假設下的月頻存續率，不是退休保證，也不是完整正式模型重跑。',
  '股票18%／債券8%年波動率預設為可調示範規劃假設，不是本日觀測或正式模型校準。',
- '假設立即依目標配置建倉與按月檢查股票再平衡帶；未模擬逐檔過渡、成交機會、完整個人稅務、交易成本、交割及日頻買賣閘門。',
+ '假設立即依目標配置建倉與按月檢查股票再平衡帶；未模擬逐檔過渡、成交機會、完整家戶與投資所得稅務、交易成本、交割及日頻買賣閘門。',
  '基準市況生活費與生活cash回補有建模；額外配置戰術預設關閉，開啟時僅為月頻aggregate敏感度，未經績效驗證。',
  '以單一股票及單一債券因子近似；同一資產桶內換標的不構成額外分散或超額報酬。',
  '報酬均值取正式政策的規劃來源；lognormal波動拖累補償不保證Student-t路徑實現該複合報酬。',
  '緊急預備金採固定實質額代理並排除於成功判準，未模擬00865B專屬報酬、緊急提款及補回。',
  '首次資金耗盡即記為失敗；其後路徑停止，不預測借款、支出調整或後續收入恢復。',
  '薪資與勞保勞退沿正式政策帳務假設；法定資格、未來雇主支付及未來法規未由本模擬另行查證。',
- '退休當日為假設下可支用資產預估；未發薪資另列應收，自提勞退不提前計入，未含完整年度綜所稅結算。',
+ '退休當日為假設下可支用資產預估；未發薪資另列應收，自提勞退不提前計入，薪資年度稅已逐級計算與補退；未含完整家戶及投資所得綜所稅。',
  '保費及未公告年度級距沿既有規劃代理；現有級距表未完整涵蓋低薪，不能視為法定最新或精確保費。',
  '起領年度開始早於估值日時，歷史CPI以固定基準通膨代理暖機；並非真實官方歷史CPI或核定月額，未來通膨不回寫歷史。',
  'MonthlySignals使用合成股票總報酬、完成月與11月暖機的10月均線代理，非每日MA200或雷達同向證據；熊市5交易日僅以每月20合成時段代理。',
@@ -104,8 +104,8 @@ def simulate_one(context,values,input_data,simulations,seed):
     price_level=np.full(simulations,opening_level);failed=np.zeros(simulations,dtype=bool);failure_ages=np.full(simulations,np.nan)
     life=resolve_life(context,values,asof,retire,end,reference,simulations)
     payroll_config=life['config'];payroll_events={_date(r['pay_date'],'薪資'):r for r in life['ledger']}
-    pension_events=life['pension_events'];pension=life['pension'];claim=life['claim'];events=life['events']
-    dates={asof,end,retire,retire+dt.timedelta(days=1),claim,*payroll_events,*pension_events,*events}
+    pension_events=life['pension_events'];pension=life['pension'];claim=life['claim'];events=life['events'];tax_events=life['tax_events']
+    dates={asof,end,retire,retire+dt.timedelta(days=1),claim,*payroll_events,*pension_events,*events,*tax_events}
     for year in range(asof.year,end.year+1):
         dates.update({_birthday(birth,age) for age in [75,values['careStartAge']] if birth.year+age==year})
         for month in range(1,13):dates.add(dt.date(year,month,1));dates.add(dt.date(year,month,calendar.monthrange(year,month)[1]))
@@ -142,6 +142,12 @@ def simulate_one(context,values,input_data,simulations,seed):
         if row:
             taxes=float(row['income_tax_withholding'])+float(row['supplemental_nhi_high_bonus'])
             flow+=float(row['net_cash_after_payroll'])/price_level+budget.cover(taxes/price_level,finish.year)
+        if finish in tax_events:
+            settlement=float(tax_events[finish])/price_level
+            flow+=settlement+budget.cover(-settlement,finish.year)
+        if finish==end and life['terminal_tax']<0:
+            terminal=float(life['terminal_tax'])/price_level
+            flow+=terminal+budget.cover(-terminal,finish.year)
         if finish in pension_events:flow+=pension_events[finish]/price_level
         if finish.day==calendar.monthrange(finish.year,finish.month)[1] and finish>=claim:
             month_start=finish.replace(day=1);eligible=max(0,(finish-max(month_start,claim)).days+1)

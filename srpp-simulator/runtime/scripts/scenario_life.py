@@ -7,6 +7,7 @@ import numpy as np
 import pre_retirement_cashflow as payroll
 from budget_accounting import labor_insurance_claim_terms,labor_pension_projection,PensionIndexation,reference_price_level
 from scenario_money import money
+from scenario_tax import annual_salary_tax
 from settings_catalog import PAYROLL_POINTERS,pointer_set,SettingsError
 
 
@@ -43,7 +44,7 @@ def pension_state(paths,claim,monthly,asof,reference):
     return state,'REFERENCE_INFLATION_HISTORY_PROXY'
 
 
-def payroll_wire(config,ledger,asof,retire):
+def payroll_wire(config,ledger,asof,retire,annual_tax):
     fields={
         'contractualMonthlySalaryNominalTwd':'contractual_monthly_salary',
         'regularSalaryNominalTwd':'regular_salary','bonusNominalTwd':'bonus',
@@ -64,7 +65,7 @@ def payroll_wire(config,ledger,asof,retire):
         annualRaiseAmountNominalTwd=money(raise_rule['amount']),annualRaiseFirstDate=raise_rule['first_increase_date'],
         withholdingRate=profile['income_tax_withholding']['rate'],selfPensionRate=profile['voluntary_labor_pension']['employee_rate'],
         nhiDependents=profile['nhi_dependents'],monthlyExpenseRealTwd=money(config['planned_living_costs']['monthly_living_expense']),
-        bonusEvents=copy.deepcopy(config['bonus_events']),recurringBonuses=copy.deepcopy(config['recurring_bonuses']),ledger=rows,
+        bonusEvents=copy.deepcopy(config['bonus_events']),recurringBonuses=copy.deepcopy(config['recurring_bonuses']),ledger=rows,annualIncomeTax=annual_tax,
         receivedByRetirementNominalTwd=money(sum(r['net_cash_after_payroll'] for r in ledger if dt.date.fromisoformat(r['pay_date'])<=retire)),
         receivableAfterRetirementNominalTwd=money(sum(r['net_cash_after_payroll'] for r in ledger if dt.date.fromisoformat(r['pay_date'])>retire)))
 
@@ -74,6 +75,7 @@ def resolve_life(context,values,asof,retire,end,reference,paths):
     config=copy.deepcopy(context.payroll)
     for key,pointer in PAYROLL_POINTERS.items():pointer_set(config,pointer,values[key])
     ledger=payroll.scenario(config,retire,asof)['ledger'] if retire>asof else []
+    annual_tax,tax_events,terminal_tax=annual_salary_tax(config,model,birth,asof,retire,end)
     if values['laborPensionReceiptDate'] is None:
         lp=copy.deepcopy(model['labor_retirement'])
         lp['eligible_date']=str(birthday(birth,int(lp['age'])))
@@ -106,6 +108,6 @@ def resolve_life(context,values,asof,retire,end,reference,paths):
         laborInsurance=dict(mode=li_mode,startDate=str(claim),monthlyNominalTwd=money(monthly),asOfMonthlyNominalTwd=money(float(pension.monthly[0])),indexationBasis=basis),
         homeRepair=dict(firstYear=values['homeRepairFirstYear'],eventMonthDay='08-31',intervalYears=values['homeRepairInterval'],amountRealTwd=money(values['homeRepairCost'])),
         appliance=dict(firstYear=values['applianceFirstYear'],eventMonthDay='08-31',intervalYears=values['applianceInterval'],amountRealTwd=money(values['applianceCost'])),
-        majorExpenses=major,payroll=payroll_wire(config,ledger,asof,retire))
-    return dict(config=config,ledger=ledger,pension=pension,claim=claim,
+        majorExpenses=major,payroll=payroll_wire(config,ledger,asof,retire,annual_tax))
+    return dict(config=config,ledger=ledger,pension=pension,claim=claim,tax_events=tax_events,terminal_tax=terminal_tax,
                 pension_events={receipt:float(amount)} if asof<receipt<=end else {},events=events,schedule=schedule)
