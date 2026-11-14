@@ -1,0 +1,9 @@
+# 架構審查作者回覆與候選失效
+
+主代理2026-11-14通知：候選5c2c6dec9a60e5d8bdcfb5c089a4bcd811bcf0e8934c9e0dccd8160fe829a4a9作廢。
+
+沿R2-07查出退休金一次入帳及2028年後一般再平衡之直接VOO購買入口未扣bridge承諾，可能重複使用同一目標缺口。主代理已在SRPP新增共用cap_direct_voo_purchase，涵蓋三個入口並新增回歸測例（來源端bridge10tests通過），仍待Claude CLI第3輪與最終凍結hash。
+
+本feature未同步該新候選，停止copy，未提交／registry／部署。第2輪獨立架構報告即使判PASS，也只能證明其已讀取的舊候選，不能證明此缺陷已修或作最終金融驗收。最終來源凍結後須重製authority/golden/runtime、必要檢查及獨立架構第3輪。
+
+最終處理：主代理凍結b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11，已重新同步並通過authority/三golden/runtime/import/61Java及獨立架構第3輪PASS；該輪重新讀取helper/三個入口與同版bytes，沒有沿用舊候選判定。

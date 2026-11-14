@@ -1,0 +1,45 @@
+{
+  "stage": "READ_ONLY_PREFLIGHT_NO_LANDING",
+  "assetHead": "5c19bf5dc0d7b03ba40031fd8917f1a55d0825b7",
+  "assetMain": "d5ec1821c76cfcb9bcf78609ce7bc8c2563a953c",
+  "assetOriginMain": "d5ec1821c76cfcb9bcf78609ce7bc8c2563a953c",
+  "assetMainWorktree": "/Users/steven/Project/asset-management-main",
+  "assetMainClean": true,
+  "remoteChangesOverlap": [],
+  "otherWorktreeCollisions": [],
+  "unavailableHistoricalWorktrees": [
+    "/private/tmp/asset-d213-voo-pace-20261113",
+    "/private/tmp/asset-radar-v26-delivery-20261114",
+    "/private/tmp/asset-risk-evidence-alignment-20261111"
+  ],
+  "sourceBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "embeddedModelEqual": true,
+  "embeddedManifestEqual": true,
+  "mainEnvironmentPresent": true,
+  "currentContainers": [
+    {
+      "service": "business-services",
+      "id": "b95919686fa26aca2e62dc44b03c93e57a083fab3f73dca770edcf847e3d915f",
+      "image": "sha256:19e2aa813731dea68f783ea5f16563971ff34886b784c44e9f08e54cd705680f",
+      "health": "healthy",
+      "composeEnvironmentKeys": 47,
+      "environmentMismatchCount": 0,
+      "bindMountsMatch": true
+    },
+    {
+      "service": "srpp-simulator",
+      "id": "e4473097e25cbb147d80314988dc65d78ca2a57bc875b35ed6fcc2b680a3b417",
+      "image": "sha256:f2f4f3320bbe15a56b9d0f9f9c10d071e96fb7ac93f862068fdb10cc644c2592",
+      "health": "healthy",
+      "composeEnvironmentKeys": 2,
+      "environmentMismatchCount": 0,
+      "bindMountsMatch": true
+    }
+  ],
+  "registryRows": 55,
+  "registryRowsSha256": "c8ab5cfce92e22a144c1407ee09e079334f02c3965446c26bb6bd30c1caf270b",
+  "newBundleAlreadyRegistered": false,
+  "registryMutationExecuted": false,
+  "deployed": false,
+  "gitLandingExecuted": false
+}

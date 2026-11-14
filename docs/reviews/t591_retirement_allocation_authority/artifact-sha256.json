@@ -1,0 +1,10 @@
+{
+  "backend/src/main/resources/srpp/decision/model_inputs.json": "0e8a30a19cfeca49b5781a865e6ef0bbdb3be6c64f9d9d16b679d035d4899500",
+  "backend/src/main/resources/srpp/decision/policy_manifest.json": "13d77e7507bfbd8ca76a308efc7272323d938ec1e52343f47f33b8c3a7037d78",
+  "backend/src/main/resources/srpp/report/d201-policy-document.json": "449887063f7594c9d35652e1a64d12f7a7760499a9dc5895b2f849c81e2626da",
+  "backend/src/main/resources/srpp/report/d201-registration.sql": "13952be1dbdc4912cf5854d508c9b1d12b436d8bd7aed2cf29c4d45fbbc28837",
+  "backend/src/test/resources/srpp/report-long-short-exit-golden.json": "76c1a6b2a660e970236b391bc83ded4cbe70b49721951316330e390de01e7bbe",
+  "backend/src/test/resources/srpp/report-same-input-golden.json": "0888aa03fb1e46b1d66ae14ec627c6cb5205c5ba35bdfdc2aebdb9a53ea0e34d",
+  "backend/src/test/resources/srpp/report-state-topup-golden.json": "6da89c474e5022dedfe682a21dd11f1d5c87fb40cf2ddf450a1ef8d96a925d58",
+  "srpp-simulator/runtime/runtime-manifest.json": "c98644275c56817e3adb6744d3d18fd1453656a1f6da33391bc5b90a99ecf74a"
+}
