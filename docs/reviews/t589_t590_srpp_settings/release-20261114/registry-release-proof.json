@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "at": "2026-11-14T09:55:16.654201+00:00",
+  "bundle": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "beforeRows": 54,
+  "afterRows": 55,
+  "historicalRowsUnchanged": true,
+  "exactFourFieldReadback": true,
+  "formulaVersion": "ASSET_MGMT_SRPP_V3",
+  "sqlSha256": "8c357f0e20124b82ce9c6b56c9cfd0abef2b65b0046bc573477fd0781cd8759c",
+  "rowSha256": "9676a6f9bef13b00109133b1364577363e34866925b6e7709e30509bf1cce853",
+  "operatorResult": "BEGIN\nINSERT 0 1\nCOMMIT"
+}

@@ -1,0 +1,22 @@
+{
+  "at": "2026-11-14T18:00:13.431144+08:00",
+  "scope": "READ_ONLY_EXACT_BUNDLE_DIAGNOSTIC",
+  "path": "/api/public/srpp/daily-context",
+  "method": "GET",
+  "parameters": {
+    "tradingDate": "2026-11-14",
+    "slot": "09:05",
+    "policyBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+    "view": "summary"
+  },
+  "httpStatus": 409,
+  "code": "NON_TRADING_DAY",
+  "bodySha256": "761088912c12278862e6adabb69c500379451c926b27d263b5da2e3152a742e1",
+  "twTradingToday": false,
+  "registryAndJarExact": true,
+  "businessPackageAccepted": false,
+  "formalReportAdoption": "NOT_YET_EXECUTED",
+  "reason": "NON_TRADING_DAY",
+  "reportCalculationsCalled": false,
+  "producerTriggered": false
+}

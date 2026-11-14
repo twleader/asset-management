@@ -1,0 +1,944 @@
+
+> asset-management-frontend@1.0.0 test
+> node --test src/utils/displayQuote.test.js src/utils/tradingRadarSsePriceUpdate.test.js src/utils/valuationEvidence.test.js src/utils/gdpTwseMarketCatalog.test.js src/utils/gdpTwseSchedule.contract.test.js src/utils/tradingCalendarYearWindow.test.js src/utils/stockAnalysisDialog.contract.test.js src/utils/intradaySession.test.js src/utils/tradingRadarDecisionPresentation.test.js src/utils/openApiContract.test.js src/utils/assetClassSettings.contract.test.js src/utils/apiErrorLogsView.contract.test.js src/utils/exchangeRateMultiSchedule.contract.test.js src/utils/exportSchedules.test.js src/utils/exportSchedules.contract.test.js src/utils/snapshotFormUpdateMode.contract.test.js src/utils/exportSettingDraft.test.js src/utils/transactionStockFilter.test.js src/utils/realizedGainDateSort.test.js src/utils/portfolioAdviceEngineNotice.contract.test.js src/utils/backupRestoreDeadline.contract.test.js src/utils/backupPath.test.js src/utils/aiFlowView.contract.test.js src/utils/livePrices.test.js src/utils/transactionClassificationDraft.test.js src/utils/srppSettingsCenterState.test.js
+
+TAP version 13
+# Subtest: 日期窗用台北日，90 天含今天；未知耗時保留為未記錄
+ok 1 - 日期窗用台北日，90 天含今天；未知耗時保留為未記錄
+  ---
+  duration_ms: 11.770959
+  ...
+# Subtest: 時段選項保留全部並依協定順序呈現，US 會原樣送進專屬 BFF 查詢
+ok 2 - 時段選項保留全部並依協定順序呈現，US 會原樣送進專屬 BFF 查詢
+  ---
+  duration_ms: 0.848333
+  ...
+# Subtest: filter generation 清空舊資料並拒絕過期清單回應
+ok 3 - filter generation 清空舊資料並拒絕過期清單回應
+  ---
+  duration_ms: 0.229541
+  ...
+# Subtest: 查詢錯誤不保留上一筆資料，明細舊回應不能跨 filter 回填
+ok 4 - 查詢錯誤不保留上一筆資料，明細舊回應不能跨 filter 回填
+  ---
+  duration_ms: 0.292625
+  ...
+# Subtest: 工具參數只在節點選取後讀取，清除、切換 run/filter 後舊回應不回填，null 不算錯誤
+ok 5 - 工具參數只在節點選取後讀取，清除、切換 run/filter 後舊回應不回填，null 不算錯誤
+  ---
+  duration_ms: 0.496459
+  ...
+# Subtest: ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤
+ok 6 - ECharts 只映射 BFF layout、中文狀態、顏色與關係標籤
+  ---
+  duration_ms: 0.865875
+  ...
+# Subtest: 公開候選只形成 UI 分支、改接 inbound edge，並維持固定不重疊 layout
+ok 7 - 公開候選只形成 UI 分支、改接 inbound edge，並維持固定不重疊 layout
+  ---
+  duration_ms: 2.809417
+  ...
+# Subtest: DAG 分層讓分叉同階、匯合取最高前驅層，且不改變輸入資料或原始座標
+ok 8 - DAG 分層讓分叉同階、匯合取最高前驅層，且不改變輸入資料或原始座標
+  ---
+  duration_ms: 0.374875
+  ...
+# Subtest: 二至八個公開候選與一至三十二個決策選項同階排列並保留來源順序
+ok 9 - 二至八個公開候選與一至三十二個決策選項同階排列並保留來源順序
+  ---
+  duration_ms: 2.256375
+  ...
+# Subtest: 長流程的公開決策選項貼近所屬分支，不會集中排在末端
+ok 10 - 長流程的公開決策選項貼近所屬分支，不會集中排在末端
+  ---
+  duration_ms: 0.567792
+  ...
+# Subtest: 圖框處理空圖、單點、單列、單欄、未知端點、自連線與 cycle
+ok 11 - 圖框處理空圖、單點、單列、單欄、未知端點、自連線與 cycle
+  ---
+  duration_ms: 0.304375
+  ...
+# Subtest: 不安全或不閉合的公開候選摘要整組省略，且絕不進入圖與 tooltip
+ok 12 - 不安全或不閉合的公開候選摘要整組省略，且絕不進入圖與 tooltip
+  ---
+  duration_ms: 1.774042
+  ...
+# Subtest: synthetic 點擊以 fromSynthetic 強制保留已選的實際 parent，不產生 synthetic API 請求
+ok 13 - synthetic 點擊以 fromSynthetic 強制保留已選的實際 parent，不產生 synthetic API 請求
+  ---
+  duration_ms: 0.243666
+  ...
+# Subtest: 工具與公開候選 detail 同時請求，兩者各自 abort、stale fence 與錯誤狀態隔離
+ok 14 - 工具與公開候選 detail 同時請求，兩者各自 abort、stale fence 與錯誤狀態隔離
+  ---
+  duration_ms: 0.426875
+  ...
+# Subtest: 長公開工具標題在節點內截斷，完整 title 仍保留於 tooltip
+ok 15 - 長公開工具標題在節點內截斷，完整 title 仍保留於 tooltip
+  ---
+  duration_ms: 0.68075
+  ...
+# Subtest: 路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace
+ok 16 - 路由與選單限 ADMIN，view 經自己的 AI Flow BFF namespace
+  ---
+  duration_ms: 2.099042
+  ...
+# Subtest: 工具入口沿 CALL_RESULT 找唯一同 step START；slow row END 不直接當參數 id
+ok 17 - 工具入口沿 CALL_RESULT 找唯一同 step START；slow row END 不直接當參數 id
+  ---
+  duration_ms: 0.833083
+  ...
+# Subtest: 工具入口顯示公開原始輸入與來源界線，保留載入、錯誤、未記錄及空輸入狀態
+ok 18 - 工具入口顯示公開原始輸入與來源界線，保留載入、錯誤、未記錄及空輸入狀態
+  ---
+  duration_ms: 0.705208
+  ...
+# Subtest: 公開決策圖分支完整保留 32 個選項，null 選擇不虛構採用且點擊回真實事件
+ok 19 - 公開決策圖分支完整保留 32 個選項，null 選擇不虛構採用且點擊回真實事件
+  ---
+  duration_ms: 1.216041
+  ...
+# Subtest: 公開決策明細只按需查詢，使用獨立 abort/generation 並在 filter、run、close、unmount 時失效
+ok 20 - 公開決策明細只按需查詢，使用獨立 abort/generation 並在 filter、run、close、unmount 時失效
+  ---
+  duration_ms: 1.535792
+  ...
+# Subtest: 公開決策全文只在獨立明細區以純文字顯示，Node summary 與圖表不帶理由或參數
+ok 21 - 公開決策全文只在獨立明細區以純文字顯示，Node summary 與圖表不帶理由或參數
+  ---
+  duration_ms: 1.110542
+  ...
+# Subtest: API error-log view keeps the three selects, source contract and lazy text-only stacktrace detail
+ok 22 - API error-log view keeps the three selects, source contract and lazy text-only stacktrace detail
+  ---
+  duration_ms: 1.090083
+  ...
+# Subtest: API-name select displays explicit all while encoding it as an absent request filter
+ok 23 - API-name select displays explicit all while encoding it as an absent request filter
+  ---
+  duration_ms: 0.116917
+  ...
+# Subtest: API error-log view adds an HTTP status column between source and apiName with a dash fallback for null (Task 421／Requirement 143)
+ok 24 - API error-log view adds an HTTP status column between source and apiName with a dash fallback for null (Task 421／Requirement 143)
+  ---
+  duration_ms: 0.054833
+  ...
+# Subtest: API error-log listing requests one zero-based server page of 100 and renders response metadata
+ok 25 - API error-log listing requests one zero-based server page of 100 and renders response metadata
+  ---
+  duration_ms: 0.065834
+  ...
+# Subtest: list responses are last-request-wins and each filter resets to page one
+ok 26 - list responses are last-request-wins and each filter resets to page one
+  ---
+  duration_ms: 0.060792
+  ...
+# Subtest: asset-class settings exclude only the TAIEX display record
+ok 27 - asset-class settings exclude only the TAIEX display record
+  ---
+  duration_ms: 0.31725
+  ...
+# Subtest: active backup path uses the date in the filename
+ok 28 - active backup path uses the date in the filename
+  ---
+  duration_ms: 1.432125
+  ...
+# Subtest: older, mismatched, and malformed records cannot be restored
+ok 29 - older, mismatched, and malformed records cannot be restored
+  ---
+  duration_ms: 0.376792
+  ...
+# Subtest: backup browser deadlines stay beyond service workflows and below the exact nginx deadline
+ok 30 - backup browser deadlines stay beyond service workflows and below the exact nginx deadline
+  ---
+  duration_ms: 1.382083
+  ...
+# Subtest: backup action cannot be submitted again while its request is in flight
+ok 31 - backup action cannot be submitted again while its request is in flight
+  ---
+  duration_ms: 0.080667
+  ...
+# Subtest: marketToday uses each market timezone
+ok 32 - marketToday uses each market timezone
+  ---
+  duration_ms: 9.769625
+  ...
+# Subtest: pending close cannot be overwritten by an old live SSE tick
+ok 33 - pending close cannot be overwritten by an old live SSE tick
+  ---
+  duration_ms: 0.074
+  ...
+# Subtest: verified close can replace pending and must match today
+ok 34 - verified close can replace pending and must match today
+  ---
+  duration_ms: 0.053083
+  ...
+# Subtest: legacy PREVIOUS_CLOSE remains compatible for non-terminal Dashboard rows, but missing status is ignored
+ok 35 - legacy PREVIOUS_CLOSE remains compatible for non-terminal Dashboard rows, but missing status is ignored
+  ---
+  duration_ms: 0.095333
+  ...
+# Subtest: pending enriched quote clears stale price fields
+ok 36 - pending enriched quote clears stale price fields
+  ---
+  duration_ms: 1.470291
+  ...
+# Subtest: exchange-rate schedules are independent rows with an editable per-row range
+ok 37 - exchange-rate schedules are independent rows with an editable per-row range
+  ---
+  duration_ms: 0.395166
+  ...
+# Subtest: each export page binds CRUD and run-now to its own schedule resource
+ok 38 - each export page binds CRUD and run-now to its own schedule resource
+  ---
+  duration_ms: 0.364625
+  ...
+# Subtest: all four pages distinguish load errors from empty schedules and keep edits draft-local
+ok 39 - all four pages distinguish load errors from empty schedules and keep edits draft-local
+  ---
+  duration_ms: 1.313708
+  ...
+# Subtest: 新增草稿預設停用，編輯草稿會獨立複製單筆設定
+ok 40 - 新增草稿預設停用，編輯草稿會獨立複製單筆設定
+  ---
+  duration_ms: 0.344708
+  ...
+# Subtest: payload 正規化名稱與時間，非管理者不送 Drive 設定
+ok 41 - payload 正規化名稱與時間，非管理者不送 Drive 設定
+  ---
+  duration_ms: 0.382125
+  ...
+# Subtest: payload 拒絕非法名稱、時間及已啟用但沒有資料夾的管理者 Drive
+ok 42 - payload 拒絕非法名稱、時間及已啟用但沒有資料夾的管理者 Drive
+  ---
+  duration_ms: 0.378833
+  ...
+# Subtest: rangeMonths 保留任意既存合法值，並讓自訂值在選單中可見
+ok 43 - rangeMonths 保留任意既存合法值，並讓自訂值在選單中可見
+  ---
+  duration_ms: 1.797375
+  ...
+# Subtest: 清單回應須完整且不可超過每頁上限
+ok 44 - 清單回應須完整且不可超過每頁上限
+  ---
+  duration_ms: 0.162583
+  ...
+# Subtest: 草稿時間列與 canonical 完全隔離，取消不會發出寫入
+ok 45 - 草稿時間列與 canonical 完全隔離，取消不會發出寫入
+  ---
+  duration_ms: 0.868958
+  ...
+# Subtest: fake API 成功只接受一次保存並以 server canonical response 覆寫摘要
+ok 46 - fake API 成功只接受一次保存並以 server canonical response 覆寫摘要
+  ---
+  duration_ms: 0.222834
+  ...
+# Subtest: fake API 失敗時草稿保留，下一次可重試
+ok 47 - fake API 失敗時草稿保留，下一次可重試
+  ---
+  duration_ms: 0.315875
+  ...
+# Subtest: GDP 大盤頁 market catalog 固定為集中、櫃買及八個海外市場
+ok 48 - GDP 大盤頁 market catalog 固定為集中、櫃買及八個海外市場
+  ---
+  duration_ms: 0.673667
+  ...
+# Subtest: 主圖單選與排程匯出多選皆以 market value 綁定 TPEX
+ok 49 - 主圖單選與排程匯出多選皆以 market value 綁定 TPEX
+  ---
+  duration_ms: 0.711458
+  ...
+# Subtest: 排程 CRUD 與 run-now 使用本頁 BFF route 和 row id
+ok 50 - 排程 CRUD 與 run-now 使用本頁 BFF route 和 row id
+  ---
+  duration_ms: 0.523125
+  ...
+# Subtest: 指數選項與排程標籤採用 list response 的 marketOptions
+ok 51 - 指數選項與排程標籤採用 list response 的 marketOptions
+  ---
+  duration_ms: 0.180833
+  ...
+# Subtest: 空 markets placeholder 停用立即匯出並提示先選指數
+ok 52 - 空 markets placeholder 停用立即匯出並提示先選指數
+  ---
+  duration_ms: 0.086875
+  ...
+# Subtest: 逐指數結果傳入共用雙格式提示，手動下載仍走單一 market route
+ok 53 - 逐指數結果傳入共用雙格式提示，手動下載仍走單一 market route
+  ---
+  duration_ms: 0.152875
+  ...
+# Subtest: session object keeps a complete verified comparison tuple and every label is explicit
+ok 54 - session object keeps a complete verified comparison tuple and every label is explicit
+  ---
+  duration_ms: 1.298
+  ...
+# Subtest: incomplete or inconsistent comparison tuple fails closed without inventing a price change
+ok 55 - incomplete or inconsistent comparison tuple fails closed without inventing a price change
+  ---
+  duration_ms: 0.192417
+  ...
+# Subtest: unavailable session keeps chart date fallback and never claims a reference
+ok 56 - unavailable session keeps chart date fallback and never claims a reference
+  ---
+  duration_ms: 1.322208
+  ...
+# Subtest: invalid or missing ISO calendar dates fail every comparison field closed
+ok 57 - invalid or missing ISO calendar dates fail every comparison field closed
+  ---
+  duration_ms: 0.08975
+  ...
+# Subtest: raw-history comparison is only valid with no raw session-reference metadata
+ok 58 - raw-history comparison is only valid with no raw session-reference metadata
+  ---
+  duration_ms: 0.126458
+  ...
+# Subtest: legacy bare-array wire shape fails closed instead of being treated as ticks
+ok 59 - legacy bare-array wire shape fails closed instead of being treated as ticks
+  ---
+  duration_ms: 0.043458
+  ...
+# Subtest: one shared authenticated source, new consumer catchup, reconnect, visibility and final cleanup
+ok 60 - one shared authenticated source, new consumer catchup, reconnect, visibility and final cleanup
+  ---
+  duration_ms: 1.329209
+  ...
+# Subtest: permanent CLOSED clears pending timer and never rebuilds automatically or on visibility/new active consumer
+ok 61 - permanent CLOSED clears pending timer and never rebuilds automatically or on visibility/new active consumer
+  ---
+  duration_ms: 0.171834
+  ...
+# Subtest: SSE cache advances immediately while each fixed 500ms window coalesces per symbol without starvation
+ok 62 - SSE cache advances immediately while each fixed 500ms window coalesces per symbol without starvation
+  ---
+  duration_ms: 1.320042
+  ...
+# Subtest: HTTP overlay and newer cache tuple win over an older pending SSE notification
+ok 63 - HTTP overlay and newer cache tuple win over an older pending SSE notification
+  ---
+  duration_ms: 0.239875
+  ...
+# Subtest: a reentrant HTTP overlay for a later key is emitted from the latest shared cache tuple
+ok 64 - a reentrant HTTP overlay for a later key is emitted from the latest shared cache tuple
+  ---
+  duration_ms: 0.26975
+  ...
+# Subtest: cache eviction removes pending keys and a flush never broadcasts an evicted tuple
+ok 65 - cache eviction removes pending keys and a flush never broadcasts an evicted tuple
+  ---
+  duration_ms: 0.213916
+  ...
+# Subtest: flush checks live subscriptions and visibility after each listener callback
+ok 66 - flush checks live subscriptions and visibility after each listener callback
+  ---
+  duration_ms: 0.303875
+  ...
+# Subtest: hidden visibility clears queued notifications and timer; catchup owns recovery
+ok 67 - hidden visibility clears queued notifications and timer; catchup owns recovery
+  ---
+  duration_ms: 0.198916
+  ...
+# Subtest: closed statuses, market dates, identity, finite tuples, out-of-order SSE and HTTP overlay never regress
+ok 68 - closed statuses, market dates, identity, finite tuples, out-of-order SSE and HTTP overlay never regress
+  ---
+  duration_ms: 1.5435
+  ...
+# Subtest: throttle does not starve under continuous ticks and final tick gets a bounded trailing read
+ok 69 - throttle does not starve under continuous ticks and final tick gets a bounded trailing read
+  ---
+  duration_ms: 1.55075
+  ...
+# Subtest: in-flight reads never overlap, pending survives, cancel invalidates trailing work
+ok 70 - in-flight reads never overlap, pending survives, cancel invalidates trailing work
+  ---
+  duration_ms: 0.2635
+  ...
+# Subtest: Dashboard live eligibility uses selected/latest identity and Taipei-or-market dates through DST
+ok 71 - Dashboard live eligibility uses selected/latest identity and Taipei-or-market dates through DST
+  ---
+  duration_ms: 0.871875
+  ...
+# Subtest: Dashboard rollover only accepts a same-ID forward move to Taipei today
+ok 72 - Dashboard rollover only accepts a same-ID forward move to Taipei today
+  ---
+  duration_ms: 0.130542
+  ...
+# Subtest: Dashboard real SFC handler uses each panel identity, displays first US tuples, and accepts later SSE
+ok 73 - Dashboard real SFC handler uses each panel identity, displays first US tuples, and accepts later SSE
+  ---
+  duration_ms: 51.143083
+  ...
+# Subtest: Dashboard real priceMap cannot poison shared stream with a future frozen row before true US BFF and SSE tuples
+ok 74 - Dashboard real priceMap cannot poison shared stream with a future frozen row before true US BFF and SSE tuples
+  ---
+  duration_ms: 14.134667
+  ...
+# Subtest: Dashboard real overlay receives panel-local snapshot/liveAssets and stays frozen for historical or invalid IDs
+ok 75 - Dashboard real overlay receives panel-local snapshot/liveAssets and stays frozen for historical or invalid IDs
+  ---
+  duration_ms: 9.0785
+  ...
+# Subtest: Dashboard holdings price cell keeps price/change tuple together when live-assets is unavailable
+ok 76 - Dashboard holdings price cell keeps price/change tuple together when live-assets is unavailable
+  ---
+  duration_ms: 8.568791
+  ...
+# Subtest: Dashboard rollover SFC reload is bounded and late metadata cannot jump away from historical selection
+ok 77 - Dashboard rollover SFC reload is bounded and late metadata cannot jump away from historical selection
+  ---
+  duration_ms: 7.587959
+  ...
+# Subtest: Dashboard SFC shares quote, catchup and five-second valuation triggers while trend stays independent at sixty seconds
+ok 78 - Dashboard SFC shares quote, catchup and five-second valuation triggers while trend stays independent at sixty seconds
+  ---
+  duration_ms: 9.599417
+  ...
+# Subtest: Dashboard hidden initial trend read resumes once and a late abort-ignoring response is fenced
+ok 79 - Dashboard hidden initial trend read resumes once and a late abort-ignoring response is fenced
+  ---
+  duration_ms: 7.91825
+  ...
+# Subtest: Dashboard manual snapshot selection clears a hidden trend resume scope and still loads every panel
+ok 80 - Dashboard manual snapshot selection clears a hidden trend resume scope and still loads every panel
+  ---
+  duration_ms: 5.830917
+  ...
+# Subtest: Dashboard ordinary first-trend errors wait for user retry instead of visibility retry
+ok 81 - Dashboard ordinary first-trend errors wait for user retry instead of visibility retry
+  ---
+  duration_ms: 7.31225
+  ...
+# Subtest: Dashboard realtime rollover skips trend after a recent trend refresh
+ok 82 - Dashboard realtime rollover skips trend after a recent trend refresh
+  ---
+  duration_ms: 5.751958
+  ...
+# Subtest: Dashboard realtime restores unavailable live projection once and leaves look-through allocation tab untouched
+ok 83 - Dashboard realtime restores unavailable live projection once and leaves look-through allocation tab untouched
+  ---
+  duration_ms: 15.526917
+  ...
+# Subtest: Dashboard frozen latest close keeps its own changes without using unrelated live comparisons
+ok 84 - Dashboard frozen latest close keeps its own changes without using unrelated live comparisons
+  ---
+  duration_ms: 7.437458
+  ...
+# Subtest: Dashboard CLOSE_PENDING remains visible while eligible live-assets are unavailable
+ok 85 - Dashboard CLOSE_PENDING remains visible while eligible live-assets are unavailable
+  ---
+  duration_ms: 6.753916
+  ...
+# Subtest: Radar real handler updates exact stock, detail and TW0000 quote while decision evidence stays frozen
+ok 86 - Radar real handler updates exact stock, detail and TW0000 quote while decision evidence stays frozen
+  ---
+  duration_ms: 30.9485
+  ...
+# Subtest: WatchStock real handler only patches quotes, keeps alert/technical snapshots and index comparison intact
+ok 87 - WatchStock real handler only patches quotes, keeps alert/technical snapshots and index comparison intact
+  ---
+  duration_ms: 2.846708
+  ...
+# Subtest: SnapshotForm actual handlers preserve dirty/manual fields, gate scope/date and reject late enriched HTTP
+ok 88 - SnapshotForm actual handlers preserve dirty/manual fields, gate scope/date and reject late enriched HTTP
+  ---
+  duration_ms: 32.211917
+  ...
+# Subtest: Dialog actual session handler delays >=300ms, tails final tick, uses canonical readOnly GET and no overlap
+ok 89 - Dialog actual session handler delays >=300ms, tails final tick, uses canonical readOnly GET and no overlap
+  ---
+  duration_ms: 14.278792
+  ...
+# Subtest: Dialog actual generation/abort fences switch stock and close; initial read keeps reference default
+ok 90 - Dialog actual generation/abort fences switch stock and close; initial read keeps reference default
+  ---
+  duration_ms: 5.826958
+  ...
+# Subtest: Dialog book real handler only reads open book tab, minimum two seconds and no price synthesis
+ok 91 - Dialog book real handler only reads open book tab, minimum two seconds and no price synthesis
+  ---
+  duration_ms: 7.398792
+  ...
+# Subtest: Dialog quote-detail interval refreshes without SSE and repeated starts keep one timer
+ok 92 - Dialog quote-detail interval refreshes without SSE and repeated starts keep one timer
+  ---
+  duration_ms: 4.723417
+  ...
+# Subtest: Dialog quote-detail timer shares bookRefresh throttle with catchup and coalesces requests during slow reads
+ok 93 - Dialog quote-detail timer shares bookRefresh throttle with catchup and coalesces requests during slow reads
+  ---
+  duration_ms: 7.131
+  ...
+# Subtest: Dialog quote-detail timer stops and resumes across hidden, tab, stock, close and pause cleanup states
+ok 94 - Dialog quote-detail timer stops and resumes across hidden, tab, stock, close and pause cleanup states
+  ---
+  duration_ms: 4.452958
+  ...
+# Subtest: quote detail compiled template keeps refresh feedback behind the available-snapshot boundary
+ok 95 - quote detail compiled template keeps refresh feedback behind the available-snapshot boundary
+  ---
+  duration_ms: 6.856917
+  ...
+# Subtest: Dialog quote detail real handler deduplicates canonical reads and ignores late failures after stock switch or close
+ok 96 - Dialog quote detail real handler deduplicates canonical reads and ignores late failures after stock switch or close
+  ---
+  duration_ms: 19.248584
+  ...
+# Subtest: Dialog real SSE handler replays cache and applies only ordered current-stock tuples independently of late book snapshots
+ok 97 - Dialog real SSE handler replays cache and applies only ordered current-stock tuples independently of late book snapshots
+  ---
+  duration_ms: 8.799458
+  ...
+# Subtest: Dialog latest-trade presentation never labels a prior close as live and preserves true close status
+ok 98 - Dialog latest-trade presentation never labels a prior close as live and preserves true close status
+  ---
+  duration_ms: 6.890541
+  ...
+# Subtest: nanosecond source ordering and offset normalization retain exact newest quote
+ok 99 - nanosecond source ordering and offset normalization retain exact newest quote
+  ---
+  duration_ms: 0.168542
+  ...
+# Subtest: queued events from disposed/hidden transport cannot enter a new connection
+ok 100 - queued events from disposed/hidden transport cannot enter a new connection
+  ---
+  duration_ms: 0.145583
+  ...
+# Subtest: Radar real HTTP pending and verified close preserve unknown comparison without zero
+ok 101 - Radar real HTTP pending and verified close preserve unknown comparison without zero
+  ---
+  duration_ms: 4.5785
+  ...
+# Subtest: actual WatchStock catchup is fenced across hidden-visible generation and disposal
+ok 102 - actual WatchStock catchup is fenced across hidden-visible generation and disposal
+  ---
+  duration_ms: 1.180667
+  ...
+# Subtest: Dialog actual in-flight event reads remain singular and abort on hidden/switch
+ok 103 - Dialog actual in-flight event reads remain singular and abort on hidden/switch
+  ---
+  duration_ms: 5.799291
+  ...
+# Subtest: explicit null LIVE comparisons update authoritative price and atomically clear the comparison pair
+ok 104 - explicit null LIVE comparisons update authoritative price and atomically clear the comparison pair
+  ---
+  duration_ms: 0.82675
+  ...
+# Subtest: all real page handlers accept explicit null comparisons, reject missing/NaN, and preserve strategy/manual evidence
+ok 105 - all real page handlers accept explicit null comparisons, reject missing/NaN, and preserve strategy/manual evidence
+  ---
+  duration_ms: 19.863334
+  ...
+# Subtest: 解析最小合法契約並保留 operation 原始片段
+ok 106 - 解析最小合法契約並保留 operation 原始片段
+  ---
+  duration_ms: 2.281958
+  ...
+# Subtest: 缺少必要結構時 fail closed
+ok 107 - 缺少必要結構時 fail closed
+  ---
+  duration_ms: 0.173375
+  ...
+# Subtest: 金融 27 路與觀測 1 路分開解析，union 精確為 28 個 method/path
+ok 108 - 金融 27 路與觀測 1 路分開解析，union 精確為 28 個 method/path
+  ---
+  duration_ms: 10.160083
+  ...
+# Subtest: 切換 OpenAPI 文件會先清除舊契約並忽略較晚返回的舊請求
+ok 109 - 切換 OpenAPI 文件會先清除舊契約並忽略較晚返回的舊請求
+  ---
+  duration_ms: 0.279417
+  ...
+# Subtest: 文件選擇器使用既有金融契約與唯讀觀測契約的獨立 BFF 路由
+ok 110 - 文件選擇器使用既有金融契約與唯讀觀測契約的獨立 BFF 路由
+  ---
+  duration_ms: 0.333875
+  ...
+# Subtest: 管理者在 local 或 hybrid 且 llm 可用時使用設定提供的名稱
+ok 111 - 管理者在 local 或 hybrid 且 llm 可用時使用設定提供的名稱
+  ---
+  duration_ms: 0.339666
+  ...
+# Subtest: 管理者在 llm 不可用時明確提示檢查設定
+ok 112 - 管理者在 llm 不可用時明確提示檢查設定
+  ---
+  duration_ms: 0.049583
+  ...
+# Subtest: 一般使用者只被引導洽系統管理者
+ok 113 - 一般使用者只被引導洽系統管理者
+  ---
+  duration_ms: 0.097
+  ...
+# Subtest: 已選 llm 時不顯示切換至 llm 的 CTA
+ok 114 - 已選 llm 時不顯示切換至 llm 的 CTA
+  ---
+  duration_ms: 0.086291
+  ...
+# Subtest: 固定說明保留模板免責、分攤規則與分析限制
+ok 115 - 固定說明保留模板免責、分攤規則與分析限制
+  ---
+  duration_ms: 0.895
+  ...
+# Subtest: sortRealizedGainRecords：以完整 ISO 日期跨年升冪排序，且同日維持原順序
+ok 116 - sortRealizedGainRecords：以完整 ISO 日期跨年升冪排序，且同日維持原順序
+  ---
+  duration_ms: 6.441041
+  ...
+# Subtest: sortRealizedGainRecords：降冪只反轉日期比較方向，同日仍維持原順序
+ok 117 - sortRealizedGainRecords：降冪只反轉日期比較方向，同日仍維持原順序
+  ---
+  duration_ms: 0.309833
+  ...
+# Subtest: sortRealizedGainRecords：排序時不修改輸入，未排序狀態也回傳新陣列
+ok 118 - sortRealizedGainRecords：排序時不修改輸入，未排序狀態也回傳新陣列
+  ---
+  duration_ms: 0.5395
+  ...
+# Subtest: resolveRealizedGainDateSortOrder：active caret 回報 null 時保留方向，兩個 caret 都可切換
+ok 119 - resolveRealizedGainDateSortOrder：active caret 回報 null 時保留方向，兩個 caret 都可切換
+  ---
+  duration_ms: 0.187792
+  ...
+# Subtest: 已實現損益股票選項：依代號與市場去重、繁中排序，跨市場同代號保留為不同項目
+ok 120 - 已實現損益股票選項：依代號與市場去重、繁中排序，跨市場同代號保留為不同項目
+  ---
+  duration_ms: 0.39975
+  ...
+# Subtest: 已實現損益股票篩選：空選取顯示全部，多選為聯集，空白代號列恆常保留
+ok 121 - 已實現損益股票篩選：空選取顯示全部，多選為聯集，空白代號列恆常保留
+  ---
+  duration_ms: 0.183292
+  ...
+# Subtest: 已實現損益股票篩選：範圍資料變更時只移除失效 key，保留有效選取
+ok 122 - 已實現損益股票篩選：範圍資料變更時只移除失效 key，保留有效選取
+  ---
+  duration_ms: 0.12175
+  ...
+# Subtest: 已實現損益頁將交易日期欄接線到自訂雙向排序
+ok 123 - 已實現損益頁將交易日期欄接線到自訂雙向排序
+  ---
+  duration_ms: 0.63225
+  ...
+# Subtest: 兩個在途款項表皆顯示唯讀更新方式，AUTO 列不可編輯或刪除
+ok 124 - 兩個在途款項表皆顯示唯讀更新方式，AUTO 列不可編輯或刪除
+  ---
+  duration_ms: 0.490042
+  ...
+# Subtest: 新增在途列預設手動，updateMode 只讀回且不進 submit payload
+ok 125 - 新增在途列預設手動，updateMode 只讀回且不進 submit payload
+  ---
+  duration_ms: 0.179084
+  ...
+# Subtest: 處理日以 server 原值鎖定 AUTO，並在跨快照複製時移除舊列 id
+ok 126 - 處理日以 server 原值鎖定 AUTO，並在跨快照複製時移除舊列 id
+  ---
+  duration_ms: 0.652708
+  ...
+# Subtest: 更新後讀回 server canonical 快照，避免到期列與 MANUAL id 留在舊草稿
+ok 127 - 更新後讀回 server canonical 快照，避免到期列與 MANUAL id 留在舊草稿
+  ---
+  duration_ms: 0.4455
+  ...
+# Subtest: 草稿 dirty 比對忽略物件鍵順序，並偵測 nested weights 修改
+ok 128 - 草稿 dirty 比對忽略物件鍵順序，並偵測 nested weights 修改
+  ---
+  duration_ms: 0.376334
+  ...
+# Subtest: 只有同一草稿 revision/config 的成功 run 可供發布
+ok 129 - 只有同一草稿 revision/config 的成功 run 可供發布
+  ---
+  duration_ms: 0.064708
+  ...
+# Subtest: 發布按鈕需同時滿足管理者、BFF 權限、乾淨草稿及 server publishEligible
+ok 130 - 發布按鈕需同時滿足管理者、BFF 權限、乾淨草稿及 server publishEligible
+  ---
+  duration_ms: 0.104917
+  ...
+# Subtest: quote-detail contract reads server totals directly, lazily loads, and guards stale requests
+ok 131 - quote-detail contract reads server totals directly, lazily loads, and guards stale requests
+  ---
+  duration_ms: 3.260458
+  ...
+# Subtest: chart controls merge into a single no-wrap row at dialog width and degrade by horizontal row scrolling when squeezed
+ok 132 - chart controls merge into a single no-wrap row at dialog width and degrade by horizontal row scrolling when squeezed
+  ---
+  duration_ms: 0.476875
+  ...
+# Subtest: K branches use only BFF daily or weekly frames with frame-local close state
+ok 133 - K branches use only BFF daily or weekly frames with frame-local close state
+  ---
+  duration_ms: 0.321458
+  ...
+# Subtest: line retains its own close state while intraday consumes the server session object
+ok 134 - line retains its own close state while intraday consumes the server session object
+  ---
+  duration_ms: 0.537583
+  ...
+# Subtest: etf holdings tab lazy-fetches the existing API into a pie chart and keeps weight as-is
+ok 135 - etf holdings tab lazy-fetches the existing API into a pie chart and keeps weight as-is
+  ---
+  duration_ms: 0.468958
+  ...
+# Subtest: etf holdings pie maps BFF-provided top10+others as-is and colors the others slice gray
+ok 136 - etf holdings pie maps BFF-provided top10+others as-is and colors the others slice gray
+  ---
+  duration_ms: 0.0835
+  ...
+# Subtest: 逐年 cache 來回切換時 availability 不互相污染
+ok 137 - 逐年 cache 來回切換時 availability 不互相污染
+  ---
+  duration_ms: 0.524583
+  ...
+# Subtest: unknown 市場不會被畫成三市同交易或全市場休市
+ok 138 - unknown 市場不會被畫成三市同交易或全市場休市
+  ---
+  duration_ms: 0.105084
+  ...
+# Subtest: 月份移動在三年硬邊界內，程式呼叫也不能越界
+ok 139 - 月份移動在三年硬邊界內，程式呼叫也不能越界
+  ---
+  duration_ms: 0.071583
+  ...
+# Subtest: 今天與匯出年度使用台北時間及 BFF 年份窗口
+ok 140 - 今天與匯出年度使用台北時間及 BFF 年份窗口
+  ---
+  duration_ms: 9.098083
+  ...
+# Subtest: authority 失敗使用後端原因且不誤報成功或磁碟權限
+ok 141 - authority 失敗使用後端原因且不誤報成功或磁碟權限
+  ---
+  duration_ms: 0.252666
+  ...
+# Subtest: 雙年度匯出與逾時預算固定在頁面專屬鏈路
+ok 142 - 雙年度匯出與逾時預算固定在頁面專屬鏈路
+  ---
+  duration_ms: 0.203917
+  ...
+# Subtest: 未選擇持有期仍保留三軌，並提供不合成提示
+ok 143 - 未選擇持有期仍保留三軌，並提供不合成提示
+  ---
+  duration_ms: 0.6605
+  ...
+# Subtest: SHORT 精確對應自己的候選與實際動作欄位
+ok 144 - SHORT 精確對應自己的候選與實際動作欄位
+  ---
+  duration_ms: 0.054208
+  ...
+# Subtest: SWING 精確對應自己的候選與實際動作欄位
+ok 145 - SWING 精確對應自己的候選與實際動作欄位
+  ---
+  duration_ms: 0.078708
+  ...
+# Subtest: MEDIUM 精確對應自己的候選與實際動作欄位
+ok 146 - MEDIUM 精確對應自己的候選與實際動作欄位
+  ---
+  duration_ms: 0.03775
+  ...
+# Subtest: 候選或實際動作缺值不跨軌補值，三軌仍全數呈現
+ok 147 - 候選或實際動作缺值不跨軌補值，三軌仍全數呈現
+  ---
+  duration_ms: 0.133334
+  ...
+# Subtest: 完成日 K 文案只採 dailyCandle.asOfDate，與盤中 quote 日期無關
+ok 148 - 完成日 K 文案只採 dailyCandle.asOfDate，與盤中 quote 日期無關
+  ---
+  duration_ms: 0.045667
+  ...
+# Subtest: Task408 detail 呈現 D/W profile、field provenance 與 legacy null，不在 UI 重算技術指標
+ok 149 - Task408 detail 呈現 D/W profile、field provenance 與 legacy null，不在 UI 重算技術指標
+  ---
+  duration_ms: 0.194416
+  ...
+# Subtest: Task475 明細分別呈現官方 SMA20 核對與完成日價格參考，不把入庫資料當成加分或委託價格
+ok 150 - Task475 明細分別呈現官方 SMA20 核對與完成日價格參考，不把入庫資料當成加分或委託價格
+  ---
+  duration_ms: 0.157666
+  ...
+# Subtest: Trading Radar detail 將設定頁等價分類與 strict radar profile 分開顯示，且只排除台股 0000
+ok 151 - Trading Radar detail 將設定頁等價分類與 strict radar profile 分開顯示，且只排除台股 0000
+  ---
+  duration_ms: 0.340208
+  ...
+# Subtest: Task451 首屏平行讀獨立 panel，展開讀完整 tuple，SSE 只按 mapping patch 同列行情欄位
+ok 152 - Task451 首屏平行讀獨立 panel，展開讀完整 tuple，SSE 只按 mapping patch 同列行情欄位
+  ---
+  duration_ms: 0.850334
+  ...
+# Subtest: Task427 reactive 明細 state 讀回 proxy，current success 可完成且 stale replacement 不被舊 state 寫入
+ok 153 - Task427 reactive 明細 state 讀回 proxy，current success 可完成且 stale replacement 不被舊 state 寫入
+  ---
+  duration_ms: 0.63325
+  ...
+# Subtest: Task451 明細 request state 必從 reactive map 寫回後讀取，禁止 raw assignment-expression identity
+ok 154 - Task451 明細 request state 必從 reactive map 寫回後讀取，禁止 raw assignment-expression identity
+  ---
+  duration_ms: 0.254083
+  ...
+# Subtest: Task426 accepted same-date LIVE atomically patches price, change, status and freshness only
+ok 155 - Task426 accepted same-date LIVE atomically patches price, change, status and freshness only
+  ---
+  duration_ms: 0.610834
+  ...
+# Subtest: Task426 missing status, off-date LIVE, and terminal downgrade leave the row untouched
+ok 156 - Task426 missing status, off-date LIVE, and terminal downgrade leave the row untouched
+  ---
+  duration_ms: 0.491083
+  ...
+# Subtest: Task426 canonical changePercent wins; changePct is only used when canonical is absent
+ok 157 - Task426 canonical changePercent wins; changePct is only used when canonical is absent
+  ---
+  duration_ms: 1.353791
+  ...
+# Subtest: Task426 invalid price tuple never advances quote status or freshness
+ok 158 - Task426 invalid price tuple never advances quote status or freshness
+  ---
+  duration_ms: 0.472833
+  ...
+# Subtest: unchanged category is omitted; auto clears only on explicit change; cancel discards draft
+ok 159 - unchanged category is omitted; auto clears only on explicit change; cancel discards draft
+  ---
+  duration_ms: 0.655292
+  ...
+# Subtest: identity change clears unsaved selection and delayed old response cannot overwrite current identity
+ok 160 - identity change clears unsaved selection and delayed old response cannot overwrite current identity
+  ---
+  duration_ms: 0.083833
+  ...
+# Subtest: unknown target and lookup error never emit an override or silently drop explicit changes
+ok 161 - unknown target and lookup error never emit an override or silently drop explicit changes
+  ---
+  duration_ms: 0.175666
+  ...
+# Subtest: a late name lookup preserves the user selection for an already assignable identity
+ok 162 - a late name lookup preserves the user selection for an already assignable identity
+  ---
+  duration_ms: 0.710417
+  ...
+# Subtest: a newly resolved master can refresh an unavailable target without discarding a dirty choice
+ok 163 - a newly resolved master can refresh an unavailable target without discarding a dirty choice
+  ---
+  duration_ms: 0.11675
+  ...
+# Subtest: filterByYearAndMarket：selectedYear 為 null 時展開所有年度的 records
+ok 164 - filterByYearAndMarket：selectedYear 為 null 時展開所有年度的 records
+  ---
+  duration_ms: 1.038875
+  ...
+# Subtest: filterByYearAndMarket：指定 selectedYear 只取該年度的 records
+ok 165 - filterByYearAndMarket：指定 selectedYear 只取該年度的 records
+  ---
+  duration_ms: 0.176667
+  ...
+# Subtest: filterByYearAndMarket：selectedYear 不存在時回空陣列
+ok 166 - filterByYearAndMarket：selectedYear 不存在時回空陣列
+  ---
+  duration_ms: 0.095291
+  ...
+# Subtest: filterByYearAndMarket：marketFilter 非空時疊加市場過濾
+ok 167 - filterByYearAndMarket：marketFilter 非空時疊加市場過濾
+  ---
+  duration_ms: 0.059583
+  ...
+# Subtest: filterByYearAndMarket：marketFilter 為空字串時不過濾市場
+ok 168 - filterByYearAndMarket：marketFilter 為空字串時不過濾市場
+  ---
+  duration_ms: 0.049042
+  ...
+# Subtest: buildStockOptions：只收集股票類型且有代號的列，依中文排序，同 key 去重
+ok 169 - buildStockOptions：只收集股票類型且有代號的列，依中文排序，同 key 去重
+  ---
+  duration_ms: 5.60425
+  ...
+# Subtest: buildStockOptions：空陣列回傳空陣列
+ok 170 - buildStockOptions：空陣列回傳空陣列
+  ---
+  duration_ms: 0.110916
+  ...
+# Subtest: buildStockOptions：沒有任何股票列（只有基金）時回傳空陣列
+ok 171 - buildStockOptions：沒有任何股票列（只有基金）時回傳空陣列
+  ---
+  duration_ms: 0.044292
+  ...
+# Subtest: filterByStock：預設 stockFilter=[] 時回傳與輸入完全相同的陣列內容（股票＋基金列皆在）
+ok 172 - filterByStock：預設 stockFilter=[] 時回傳與輸入完全相同的陣列內容（股票＋基金列皆在）
+  ---
+  duration_ms: 0.267
+  ...
+# Subtest: filterByStock：帶單一 key 時，只剩該股票列＋基金列
+ok 173 - filterByStock：帶單一 key 時，只剩該股票列＋基金列
+  ---
+  duration_ms: 0.270958
+  ...
+# Subtest: filterByStock：帶兩個 key 時為聯集（兩檔股票列＋基金列皆在）
+ok 174 - filterByStock：帶兩個 key 時為聯集（兩檔股票列＋基金列皆在）
+  ---
+  duration_ms: 0.125625
+  ...
+# Subtest: filterByTransactionType：空值代表全部並回傳原陣列參照
+ok 175 - filterByTransactionType：空值代表全部並回傳原陣列參照
+  ---
+  duration_ms: 0.054084
+  ...
+# Subtest: filterByTransactionType：買與賣精確篩選股票及基金列
+ok 176 - filterByTransactionType：買與賣精確篩選股票及基金列
+  ---
+  duration_ms: 0.0465
+  ...
+# Subtest: 年度、市場、股票與交易類型依序取交集，股票選項仍來自未套用交易類型的範圍
+ok 177 - 年度、市場、股票與交易類型依序取交集，股票選項仍來自未套用交易類型的範圍
+  ---
+  duration_ms: 0.061667
+  ...
+# Subtest: filterByTransactionType：保留來源順序、列物件與原資料
+ok 178 - filterByTransactionType：保留來源順序、列物件與原資料
+  ---
+  duration_ms: 0.048667
+  ...
+# Subtest: pruneInvalidStockFilter：移除失效項、保留有效項
+ok 179 - pruneInvalidStockFilter：移除失效項、保留有效項
+  ---
+  duration_ms: 0.041583
+  ...
+# Subtest: pruneInvalidStockFilter：全部仍有效時回傳原陣列參照（供呼叫端判斷是否需要寫回）
+ok 180 - pruneInvalidStockFilter：全部仍有效時回傳原陣列參照（供呼叫端判斷是否需要寫回）
+  ---
+  duration_ms: 0.030958
+  ...
+# Subtest: pruneInvalidStockFilter：全部失效時回空陣列
+ok 181 - pruneInvalidStockFilter：全部失效時回空陣列
+  ---
+  duration_ms: 0.022708
+  ...
+# Subtest: three valuation components keep their own provider, dates, URLs, status and reason
+ok 182 - three valuation components keep their own provider, dates, URLs, status and reason
+  ---
+  duration_ms: 0.917958
+  ...
+# Subtest: PE loss keeps the loss observation provenance and never inherits generic provenance
+ok 183 - PE loss keeps the loss observation provenance and never inherits generic provenance
+  ---
+  duration_ms: 0.0825
+  ...
+# Subtest: not-applicable valuation still projects three named backend components outside coverage
+ok 184 - not-applicable valuation still projects three named backend components outside coverage
+  ---
+  duration_ms: 0.130083
+  ...
+# Subtest: legacy snapshot is explicit and never turns missing values into zero or AVAILABLE
+ok 185 - legacy snapshot is explicit and never turns missing values into zero or AVAILABLE
+  ---
+  duration_ms: 0.52575
+  ...
+# Subtest: SEC_DERIVED 的推導標記以純文字揭露，不得混進可點擊的來源連結
+ok 186 - SEC_DERIVED 的推導標記以純文字揭露，不得混進可點擊的來源連結
+  ---
+  duration_ms: 0.237667
+  ...
+1..186
+# tests 186
+# suites 0
+# pass 186
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 544.212

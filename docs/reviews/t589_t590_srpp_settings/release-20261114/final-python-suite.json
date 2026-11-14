@@ -1,0 +1,27 @@
+{
+  "settings": {
+    "tests": 41,
+    "status": "PASS",
+    "logSha256": "e6c4eb39fdfd6049d3f78cb45885a256b736c86313b8397d26dd4ead6498a6f7"
+  },
+  "cashflow": {
+    "tests": 27,
+    "status": "PASS",
+    "logSha256": "6e67cc8eb15341718fff66247d9b1a5a7cfcd2bb4afd560806180f7f597d53f3"
+  },
+  "tax": {
+    "tests": 13,
+    "status": "PASS",
+    "logSha256": "c248edf2081020305fc7b28e1af2256191c6e626c86e8c3a0f596cbe67d31ae6"
+  },
+  "bear": {
+    "tests": 9,
+    "status": "PASS",
+    "logSha256": "eab4281419f49474c6773f172eab4705e82da9e9196e5418e92a366609bcb99e"
+  },
+  "routing": {
+    "tests": 27,
+    "status": "PASS",
+    "logSha256": "a970274c2867bbefbf99df0fe70810bcab5a2ae5fa4a54e75fbbbbc82f0927c8"
+  }
+}

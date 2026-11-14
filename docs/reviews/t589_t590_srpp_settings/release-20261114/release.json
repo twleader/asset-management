@@ -1,0 +1,47 @@
+{
+  "status": "RELEASED_WITH_EXPLICIT_ACCEPTANCE_LIMITS",
+  "date": "2026-11-14",
+  "assetCodeMain": "5c19bf5dc0d7b03ba40031fd8917f1a55d0825b7",
+  "srppMain": "9c0a199e9cfdc656533c239cd8ebab7ecde2088d",
+  "decision": "D-219",
+  "policyVersion": "2.67.0",
+  "modelVersion": "3.23.0",
+  "policyBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "modelSha256": "48c87397b59b5594f623e993363083b5585ba9c2eebfa100551815f068468484",
+  "swaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+  "tests": {
+    "backend": 307,
+    "bff": 9,
+    "python": 117,
+    "frontend": 186,
+    "total": 619,
+    "status": "PASS"
+  },
+  "reviews": {
+    "spec": "cf55cc2903c3",
+    "architecture": "d98120bdd399",
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "deployedServices": [
+    "srpp-simulator",
+    "business-services",
+    "bff",
+    "frontend"
+  ],
+  "realAiApiCall": "NOT_EXECUTED_THIS_RELEASE",
+  "googleOidcBrowserE2e": "NOT_EXECUTED",
+  "actualPortfolioLocalSimulation": "NOT_EXECUTED_ZERO_VENDOR_GUARD",
+  "deployedWorkerSynthetic1000Paths": "PASS_EXACT_MATCH_WITH_ISOLATED_RESULT",
+  "formalReportAdoption": "NOT_YET_EXECUTED",
+  "exactHashBusinessDiagnostic": {
+    "httpStatus": 409,
+    "code": "NON_TRADING_DAY",
+    "businessPackageAccepted": false
+  },
+  "trades": false,
+  "mailSent": false,
+  "formalDraftsPublished": false,
+  "documentationOnlyFollowup": true
+}

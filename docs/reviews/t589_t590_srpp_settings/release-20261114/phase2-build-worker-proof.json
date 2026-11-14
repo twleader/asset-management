@@ -1,0 +1,105 @@
+{
+  "createdAt": "2026-11-14T09:48:43.373843+00:00",
+  "scope": "Offline independent images and network-none synthetic worker only. No SQL or production recreation.",
+  "assetSourceHead": "344e77d62b534fc2752ecfecd23b40b5641dfd88",
+  "srppSourceHead": "19b25d404a01dc377a0856430f04e3e4792e350d",
+  "baseBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "images": {
+    "srpp-simulator": {
+      "tag": "asset-management-srpp-simulator:srpp-bond-tax-acceptance",
+      "id": "sha256:bda2ac9ca867e755c44a353b7ffcc5cdc65228430835cb481642d215d0e2da4e"
+    },
+    "business-services": {
+      "tag": "asset-management-business-services:srpp-bond-tax-acceptance",
+      "id": "sha256:be4cdfa91f5d50b57541bd3188faf0c99dc3235218678288a832f292f35daee8"
+    },
+    "bff": {
+      "tag": "asset-management-bff:srpp-bond-tax-acceptance",
+      "id": "sha256:137603993d2049246ff44c1ec51f5b429600ff4bfc057057f345324970658ab9"
+    }
+  },
+  "buildLogs": {
+    "srpp-simulator": {
+      "path": "/tmp/srpp-bond-tax-review/phase2-simulator-build.log",
+      "exitCode": 0,
+      "sha256": "9e9e66fd06f707916b569e46e5b88d6c01e1065e8f075fd37251ed37261dfc94"
+    },
+    "business-services": {
+      "path": "/tmp/srpp-bond-tax-review/phase2-business-build.log",
+      "exitCode": 0,
+      "sha256": "2fcba7c56aaaa646b2e49d50a83537aa907ef579d20c1cf9ad17d018d8efa97e"
+    },
+    "bff": {
+      "path": "/tmp/srpp-bond-tax-review/phase2-bff-build.log",
+      "exitCode": 0,
+      "sha256": "dd023a70d0d3a2ec844484a6d7b07f71f716244aa49c3856b9aaa53272945b9d"
+    }
+  },
+  "runtimeManifestFileCount": 21,
+  "runtimeManifestSha256": "81ae9057dfee93ac99ab972f8d0b33fb497c23114466e3423d128b568b929b0b",
+  "jarAuthorityProof": "/tmp/srpp-bond-tax-review/phase2-jar-authority-proof.json",
+  "workerContainerId": "f89d87a099194c0e5e4db09caaff978b2589681d6b8492c5c228d57cf680934e",
+  "workerNetworkNone": true,
+  "workerReadOnly": true,
+  "workerNonRoot": true,
+  "workerNoPortsOrMounts": true,
+  "versions": {
+    "python": "3.12.16",
+    "numpy": "2.2.6"
+  },
+  "health": "UP",
+  "allowedBondSymbols": [
+    "00679B",
+    "00697B",
+    "00719B",
+    "00751B",
+    "00865B"
+  ],
+  "defaultBondSymbols": [
+    "00679B",
+    "00751B",
+    "00697B"
+  ],
+  "bearLadder": [
+    {
+      "drawdown": 0.15,
+      "share_of_window_budget": 0.08
+    },
+    {
+      "drawdown": 0.2,
+      "share_of_window_budget": 0.12
+    },
+    {
+      "drawdown": 0.25,
+      "share_of_window_budget": 0.2
+    },
+    {
+      "drawdown": 0.3,
+      "share_of_window_budget": 0.25
+    },
+    {
+      "drawdown": 0.35,
+      "share_of_window_budget": 0.35
+    }
+  ],
+  "engineVersion": "SRPP_SCENARIO_CASHFLOW_V3",
+  "simulations": 1000,
+  "seed": 7,
+  "sameSeedResponseExactBytes": true,
+  "responseSha256": "ca3eecd893e1fd8d6819cf7abe5a11133bfce0849571b7783678ef59adb11f77",
+  "annualIncomeTaxScope": "SALARY_ONLY_SINGLE_RESIDENT_PLANNING",
+  "annualIncomeTaxBracketsPresent": true,
+  "taxMoneyStringAssertions": 116,
+  "taxRateNumberAssertions": 28,
+  "scenarioBearEnabled": true,
+  "badHashProbe": {
+    "httpStatus": 409,
+    "code": "CONFIG_HASH_MISMATCH",
+    "inputCanonicalHashMatched": true
+  },
+  "formalContainerCount": 10,
+  "formalContainersUnchanged": true,
+  "failures": [],
+  "runtimeTotalFilesIncludingReceipt": 22,
+  "temporaryWorkerRemovedAfterAcceptance": true
+}
