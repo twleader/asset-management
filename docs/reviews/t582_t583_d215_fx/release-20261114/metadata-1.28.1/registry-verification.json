@@ -1,0 +1,24 @@
+{
+  "checkedAtUtc": "2026-11-14T04:10:28.913146+00:00",
+  "assetMainCommit": "0fd7b0109d2b31899c21d16e8aeeb321f26f6d09",
+  "srppMainCommit": "e8b4c964e63c1be0200f23db678e7c9d0102506f",
+  "policyBundleSha256": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f",
+  "formulaVersion": "ASSET_MGMT_SRPP_V2",
+  "trackedSqlSha256": "9270e2696c42bfa504fb73a3954ec49cf1de65b20d13a32154c538219ec04fd8",
+  "sqlMatchesOriginalGeneratorBytes": true,
+  "sqlExecutedInSingleTransaction": true,
+  "existingIdenticalRowReused": false,
+  "rowsBefore": 49,
+  "rowsAfter": 50,
+  "allImmediatelyPreviousRowsUnchanged": true,
+  "allPreflightRowsUnchanged": true,
+  "preflightHistoricalRowCount": 49,
+  "fourFieldsFullTextExact": true,
+  "policyDocumentSha256": "e75f43a0c020acb5af6f97b6bf5c87eb7b36500d3e2b0c69d1e079ba10c3ffbc",
+  "formulaManifestSha256": "0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86",
+  "addedHashes": [
+    "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f"
+  ],
+  "noUpdateOrDelete": true,
+  "deploymentNotStarted": true
+}

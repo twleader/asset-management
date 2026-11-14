@@ -1,0 +1,14 @@
+{
+  "status": "PASS",
+  "allApiComponentsIdentical": true,
+  "allOther27OperationContractsIdentical": true,
+  "usdTwdOperationChangesOnly": [
+    "summary",
+    "description",
+    "syntheticExample"
+  ],
+  "modelBytesUnchanged": true,
+  "backendAndExternalFinancialJavaUnchanged": true,
+  "bffOnlySameLineJavadocChange": true,
+  "all111and15GoldenFinancialOutputsUnchanged": true
+}

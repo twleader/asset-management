@@ -1,0 +1,18 @@
+{
+  "requestedAt": "2026-11-14T04:12:05.419430+00:00",
+  "path": "/api/public/srpp/us-report-calculations?consumer=Codex&market=US&sessionDate=2026-11-13&reportSlot=US_OPEN_0945&policyBundleSha256=8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f&swaggerSha256=5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+  "http": 409,
+  "body": {
+    "type": "about:blank",
+    "title": "SRPP report calculations OUTSIDE_REPORT_WINDOW",
+    "status": 409,
+    "detail": "目前不在美股報告採用時窗。",
+    "instance": "/api/public/srpp/us-report-calculations",
+    "code": "OUTSIDE_REPORT_WINDOW",
+    "retryable": false
+  },
+  "policyBundleSha256": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f",
+  "swaggerSha256": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683",
+  "executedFromActualSrppHostEnvironment": true,
+  "formalScheduledAdoption": "NOT_YET_EXECUTED"
+}

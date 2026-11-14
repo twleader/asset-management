@@ -17,3 +17,5 @@ registry新增第49筆，既有48筆全文指紋不變；容器僅重建business
 路由5原摘要、說明及合成範例仍顯示一年，現已與既有兩年API行為對齊。沒有改金融數值、資料欄位、來源價格、排程或交易閘門；BFF例外類別只改同一行Javadoc，編譯前後class bytes相同。最終文件契約1.28.1，規則包 `8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f`，Swagger `5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683`；model bytes未變。111+15golden金融輸出與calculator hashes逐值不變。
 
 首輪registry／495筆來源回補／491筆原文獨立驗收收據完整保留。文件勘誤的新身分採兩專案落地、insert-only登錄及僅business-services更新的同一發布流程，不重複回補，也不重建已部署BFF／external。新身分與後續驗收見 `metadata-1.28.1/`。
+
+1.28.1最終驗收完成：兩專案新main／remote精確refs見metadata目錄git-delivery.json；registry新增第50筆且既有49筆完整指紋不變。只重建／recreate business-services，另外8個容器與image保持不變；1762個business class與首輪已驗收版本逐位元相同，新JAR的5份authority資源與合併來源完全相同。實際新JAR分類載入26／15通過。新FX GET仍為533公開列／491已核實完成原生列，與根agent逐筆稽核的序列完全相同；維護3個GET均PASS，精確新8c5＋5704身分的美股業務GET仍回409 OUTSIDE_REPORT_WINDOW。沒有重複回補；正式合法時窗採用保持NOT_YET_EXECUTED。

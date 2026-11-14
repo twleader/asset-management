@@ -1,0 +1,27 @@
+{
+  "identity": {
+    "bundle": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f",
+    "swagger": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683"
+  },
+  "asset": {
+    "featureCommit": "e6e2c6dbeb01523d9daa614f4b342e34b9dd8479",
+    "mainBefore": "584644beef937b65c5ddd16684b01461e06c721f",
+    "mainMergeCommit": "0fd7b0109d2b31899c21d16e8aeeb321f26f6d09",
+    "remoteMain": "0fd7b0109d2b31899c21d16e8aeeb321f26f6d09",
+    "remoteFeature": "e6e2c6dbeb01523d9daa614f4b342e34b9dd8479"
+  },
+  "srpp": {
+    "featureCommit": "62d49ab0b1f501b3eb6c9af7d84c609fb82c4148",
+    "mainBefore": "df2b10dea56c787cf2bddc214d42c5bfa858210e",
+    "mainMergeCommit": "e8b4c964e63c1be0200f23db678e7c9d0102506f",
+    "remoteMain": "e8b4c964e63c1be0200f23db678e7c9d0102506f",
+    "remoteFeature": "62d49ab0b1f501b3eb6c9af7d84c609fb82c4148"
+  },
+  "actualSrpp": {
+    "head": "e8b4c964e63c1be0200f23db678e7c9d0102506f",
+    "preservedUntrackedFiles": 142,
+    "observedIgnoredInputBeforeAfterSha256": "8ba476c48a7874c0747b301f1b55aa0a4ab1d303829cc292d73718a5d1efa012",
+    "ffOnly": true
+  },
+  "checkedAtUtc": "2026-11-14T04:10:05.771989+00:00"
+}
